@@ -522,20 +522,27 @@ function AccountRow({
     });
     if (!ok) return;
 
-    const earliest = transactions.reduce(
+    /**
+     * Dated with the ledger's first entry, not the day before it.
+     *
+     * The day before sounds more correct and is worse in every way that
+     * shows. On a ledger starting 1 January it lands on 31 December of the
+     * previous year, which puts the money outside the year every report
+     * filters by, so a PHP 5,000.00 starting balance counted towards
+     * nothing, and left it the last of 442 rows sorted newest first, nine
+     * pages down. It looked like it had not saved at all.
+     *
+     * Sharing the first day is also simply true: this is what the account
+     * held when the record begins, and the record begins that day.
+     */
+    const startsOn = transactions.reduce(
       (soonest, t) => (t.date < soonest ? t.date : soonest),
       today(),
     );
-    const dayBefore = new Date(earliest);
-    dayBefore.setDate(dayBefore.getDate() - 1);
 
     const nextNumber = Math.max(0, ...transactions.map((t) => t.recordNumber)) + 1;
     onAddTransactions(
-      openingRows(
-        [{ account: account.name, amount: startAmount }],
-        dayBefore.toISOString().slice(0, 10),
-        nextNumber,
-      ),
+      openingRows([{ account: account.name, amount: startAmount }], startsOn, nextNumber),
     );
 
     setOpening(false);
@@ -634,7 +641,29 @@ function AccountRow({
           )}
         </td>
         <td className="fms-td-right">
-          <Money value={balance} size="s" tone={balance === 0 ? "var(--ink-3)" : undefined} />
+          {/*
+            The offer lives on the balance, not in the action column.
+
+            As a third button it squeezed into the 96px every action gets,
+            and left rows that had it out of line with rows that did not,
+            since only accounts with no history are offered one. Here it
+            replaces the zero it would be correcting, which is where you
+            would look for it anyway, and the actions stay two wide on every
+            row.
+
+            `canSetOpening` refuses once the account has any history or
+            already has a starting balance, so it cannot be set twice or set
+            on top of real transactions. That is what makes remembering a
+            missed entry later harmless: the missed entry is an ordinary
+            transaction on its own date.
+          */}
+          {canSetOpening(account.name, transactions).ok ? (
+            <Button size="sm" variant="ghost" onClick={() => setOpening(true)}>
+              Set starting balance
+            </Button>
+          ) : (
+            <Money value={balance} size="s" tone={balance === 0 ? "var(--ink-3)" : undefined} />
+          )}
         </td>
         <td>
           <Select
@@ -645,23 +674,6 @@ function AccountRow({
         </td>
         <td>
           <span className="fms-rowactions">
-            {/*
-              Offered only while it is still true, which is the whole design.
-
-              A starting balance is what this account already held when you
-              began recording. `canSetOpening` refuses it once the account has
-              any history or already has one, so it cannot be added twice and
-              cannot be added on top of real transactions. That is the answer
-              to "what if I remember a missed entry later": the missed entry is
-              an ordinary transaction on its own date, and it moves the balance
-              from that date on, which is correct. Only a second starting
-              balance would invent money, and there cannot be one.
-            */}
-            {canSetOpening(account.name, transactions).ok && (
-              <Button size="sm" variant="secondary" onClick={() => setOpening(true)}>
-                Starting balance
-              </Button>
-            )}
             <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>Rename</Button>
             <Button size="sm" variant="danger" onClick={() => void deactivate()}>Deactivate</Button>
           </span>
