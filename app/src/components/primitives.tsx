@@ -487,7 +487,8 @@ export function Alert({
       style={{
         display: "flex",
         gap: "var(--space-3)",
-        padding: "var(--space-3)",
+        // 12px was tight for two lines of prose next to a glyph.
+        padding: "var(--space-4)",
         borderRadius: "var(--radius-md)",
         background: `var(--${status}-bg)`,
         border: `1px solid color-mix(in srgb, var(--${status}) 28%, transparent)`,
@@ -516,10 +517,13 @@ export function Alert({
             {title}
           </div>
         )}
-        <div className="t-caption" style={{ color: "var(--ink-2)" }}>
+        <div
+          className="t-caption"
+          style={{ color: "var(--ink-2)", marginTop: title ? "var(--space-1)" : 0 }}
+        >
           {children}
         </div>
-        {action && <div style={{ marginTop: "var(--space-2)" }}>{action}</div>}
+        {action && <div style={{ marginTop: "var(--space-3)" }}>{action}</div>}
       </div>
     </div>
   );

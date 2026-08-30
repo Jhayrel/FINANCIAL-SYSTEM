@@ -227,7 +227,7 @@ export function Dashboard({
                 <button
                   onClick={onReview}
                   className="t-caption fms-linkbutton"
-                  style={{ color: `var(--${a.level})` }}
+                  style={{ color: `var(--${a.level})`, marginTop: "var(--space-2)" }}
                 >
                   Review in the database
                 </button>

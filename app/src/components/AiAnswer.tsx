@@ -9,6 +9,7 @@
  */
 
 import type { AiAnswer } from "../data/aiClient";
+import { modelLabel } from "../domain/modelName";
 
 export function AiAnswerView({ answer }: { answer: AiAnswer }) {
   const fromModel = answer.source === "model";
@@ -43,7 +44,7 @@ export function AiAnswerView({ answer }: { answer: AiAnswer }) {
         </span>
         <span>
           {fromModel
-            ? `Written by ${answer.model ?? "the provider"} from figures this app calculated.`
+            ? `Written by ${modelLabel(answer.model ?? "") || "the provider"} from figures this app calculated.`
             : `Written here from the same figures. ${answer.reason ?? ""}`}
         </span>
       </p>

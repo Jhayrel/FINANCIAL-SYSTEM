@@ -143,6 +143,25 @@
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
+/*
+ * The alert stack had no rule at all, so five boxes sat edge to edge and read
+ * as one striped block rather than five separate things needing attention.
+ * The gap is smaller than the one between cards on purpose: these belong
+ * together, they are just not the same item.
+ */
+.fms-alerts {
+  display: grid;
+  gap: var(--space-3);
+}
+
+/*
+ * Alert bodies are two lines of prose, and the caption line height set for
+ * table cells is too tight to read them comfortably.
+ */
+.fms-alerts .t-caption {
+  line-height: 1.5;
+}
+
 .fms-kpifoot {
   display: flex;
   align-items: center;
