@@ -66,7 +66,17 @@ export function Database({
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterId>(initialFilter);
-  const [sortKey, setSortKey] = useState("date");
+  /**
+   * Newest entry first, by record number rather than by date.
+   *
+   * The two agree for anything logged as it happens, and disagree for
+   * exactly the case that matters: an entry with an older date, added now.
+   * A starting balance is dated the day the ledger begins, so under a date
+   * sort it went straight to the last page and looked like it had not
+   * saved. Record order is also the order the Excel's DATABASE sheet kept,
+   * where rows are appended and referred to by number.
+   */
+  const [sortKey, setSortKey] = useState("record");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [limit, setLimit] = useState(PAGE);
 
@@ -250,7 +260,7 @@ export function Database({
           key: "actions",
           header: "",
           align: "right" as const,
-          width: "132px",
+          width: "150px",
           render: (t: Transaction) => (
             /*
              * Not `.fms-rowactions`: that reserves 200px and gives every
@@ -272,7 +282,7 @@ export function Database({
               {onDelete && (
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="danger"
                   ariaLabel={`Delete record ${t.recordNumber}`}
                   onClick={() => onDelete(t.id)}
                 >
