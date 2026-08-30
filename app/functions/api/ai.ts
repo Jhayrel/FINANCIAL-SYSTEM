@@ -286,6 +286,17 @@ interface TaskSpec {
   readonly maxTokens?: number;
   /** Tone shapes a summary; it would ruin a five word description. */
   readonly toned?: boolean;
+  /**
+   * Whether a plain prose reply is still an answer.
+   *
+   * True for the narrative tasks, where the shape was only ever a wrapper:
+   * a model that ignores it and writes the paragraph anyway has done the
+   * job, and discarding that to ask again would spend a call to get the
+   * same words back. False for the structured tasks, where a sentence is
+   * not a category and guessing which word it meant is how a made-up
+   * category reaches the totals.
+   */
+  readonly proseIsFine?: boolean;
 }
 
 interface Answer {
@@ -341,18 +352,21 @@ const TASKS: Record<string, TaskSpec> = {
     shape: '{"summary": "your answer as plain sentences"}',
     parse: narrative,
     toned: true,
+    proseIsFine: true,
   },
   alerts: {
     instruction: TASK_INSTRUCTIONS["alerts"] ?? "",
     shape: '{"summary": "your answer as plain sentences"}',
     parse: narrative,
     toned: true,
+    proseIsFine: true,
   },
   patterns: {
     instruction: TASK_INSTRUCTIONS["patterns"] ?? "",
     shape: '{"summary": "your answer as plain sentences"}',
     parse: narrative,
     toned: true,
+    proseIsFine: true,
   },
   describe: {
     instruction: TASK_INSTRUCTIONS["describe"] ?? "",
@@ -618,6 +632,18 @@ function readAnswer(raw: string, spec: TaskSpec): Answer | null {
     const answer = spec.parse(value as Record<string, unknown>);
     if (answer) return answer;
   }
+
+  /**
+   * No usable JSON. For a narrative task the prose itself is the answer,
+   * so long as it is prose and not a fragment of a broken object.
+   */
+  if (spec.proseIsFine) {
+    const text = raw.trim();
+    if (text.length > 20 && !text.startsWith("{") && !text.startsWith("[")) {
+      return { text };
+    }
+  }
+
   return null;
 }
 
@@ -636,11 +662,46 @@ function jsonCandidates(raw: string): string[] {
   return out;
 }
 
+/**
+ * One request to one model.
+ *
+ * ── Why `response_format` is attempted rather than assumed ────────────────
+ *
+ * Asking the provider to guarantee JSON is the cheapest reliability there is,
+ * and most OpenAI-compatible endpoints accept it. Some do not, and they differ
+ * on what they do about it: the polite ones ignore the field, and the strict
+ * ones reject the whole request with a 400.
+ *
+ * Treating that 400 as "this model is broken" would be wrong, and dangerous
+ * here: the chain is discovered at runtime, so a provider tightening its
+ * validation could reject every candidate at once and take the feature down
+ * with no way to tell from the app why. So a 400 is retried once without the
+ * field, and only a second failure counts. `readAnswer` was always going to
+ * have to cope with a plain-text reply, which is what makes this safe.
+ */
 async function callProvider(
   c: Candidate,
   env: Env,
   prompt: string,
   maxTokens: number,
+): Promise<string> {
+  try {
+    return await send(c, env, prompt, maxTokens, true);
+  } catch (e) {
+    const status = e instanceof Error ? e.message : "";
+    // Only a rejected request is worth reinterpreting. A rate limit or an
+    // outage means the same thing with or without the field.
+    if (status !== "400" && status !== "422") throw e;
+    return send(c, env, prompt, maxTokens, false);
+  }
+}
+
+async function send(
+  c: Candidate,
+  env: Env,
+  prompt: string,
+  maxTokens: number,
+  askForJson: boolean,
 ): Promise<string> {
   const isGroq = c.provider === "groq";
   const key = isGroq ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
@@ -670,17 +731,12 @@ async function callProvider(
           { role: "user", content: prompt },
         ],
         /**
-         * Low, because every task here is structured. Variety is not a
-         * virtue when the job is putting fixed figures into a fixed shape.
+         * Low, because every task here is structured. Variety is not a virtue
+         * when the job is putting fixed figures into a fixed shape.
          */
         temperature: 0.1,
         max_tokens: maxTokens,
-        /**
-         * Asks the provider to guarantee valid JSON. Models that do not
-         * support it ignore the field rather than failing, which is why
-         * `readAnswer` still has to do the work.
-         */
-        response_format: { type: "json_object" },
+        ...(askForJson ? { response_format: { type: "json_object" } } : {}),
       }),
     });
 
