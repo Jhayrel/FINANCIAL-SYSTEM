@@ -1210,7 +1210,7 @@ function SpendingTypes({
       title: `Remove \u201c${name}\u201d?`,
       body:
         n > 0
-          ? `${n} transaction${n === 1 ? "" : "s"} still carry this type. They keep it and still count \u2014 you just cannot pick it for new entries. Rename it instead if you want those rows moved.`
+          ? `${n} transaction${n === 1 ? "" : "s"} still carry this type. They keep it and still count. You just cannot pick it for new entries. Rename it instead if you want those rows moved.`
           : "Nothing uses it. It disappears from the picker.",
       confirmLabel: "Remove",
       tone: "danger",
@@ -1252,7 +1252,7 @@ function SpendingTypes({
                       : "Nothing uses this type yet."}
                   </td>
                   <td className="fms-td-right">
-                    <span className="t-num-s" style={{ color: "var(--ink-3)" }}>{rows || "—"}</span>
+                    <span className="t-num-s" style={{ color: "var(--ink-3)" }}>{rows || "0"}</span>
                   </td>
                   <td>
                     <span className="fms-rowactions">
@@ -1279,7 +1279,7 @@ function SpendingTypes({
                   />
                 </td>
                 <td className="fms-td-right">
-                  <span className="t-num-s" style={{ color: "var(--ink-3)" }}>{rows || "\u2014"}</span>
+                  <span className="t-num-s" style={{ color: "var(--ink-3)" }}>{rows || "0"}</span>
                 </td>
                 <td>
                   <span className="fms-rowactions">

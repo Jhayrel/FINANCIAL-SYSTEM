@@ -187,7 +187,7 @@ export function StyleGuide() {
 
         {/* Charts. Time series get the width they need. */}
         <div style={{ display: "grid", gap: "var(--space-4)", gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))" }}>
-          <Card title="Revenue and spending" subtitle="January – August 2026" action={<SegmentedControl options={[{ id: "y", label: "Year" }, { id: "m", label: "Month" }]} value="y" onChange={() => {}} />}>
+          <Card title="Revenue and spending" subtitle="January to August 2026" action={<SegmentedControl options={[{ id: "y", label: "Year" }, { id: "m", label: "Month" }]} value="y" onChange={() => {}} />}>
             <AreaChart
               labels={MONTHS}
               series={[
@@ -249,7 +249,7 @@ export function StyleGuide() {
             rowTone={(r) => (r.flagged ? "warn" : undefined)}
             footer={
               <>
-                <span className="t-caption" style={{ color: "var(--ink-3)" }}>Showing 1–6 of 440</span>
+                <span className="t-caption" style={{ color: "var(--ink-3)" }}>Showing 1 to 6 of 440</span>
                 <span style={{ display: "flex", gap: "var(--space-2)" }}>
                   <Button size="sm" disabled>Previous</Button>
                   <Button size="sm">Next</Button>

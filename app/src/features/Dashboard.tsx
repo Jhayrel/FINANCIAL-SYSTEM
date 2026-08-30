@@ -221,17 +221,26 @@ export function Dashboard({
       {alerts.length > 0 && (
         <div className="fms-alerts">
           {alerts.map((a) => (
-            <Alert key={a.id} status={a.level} title={a.title}>
-              <div className="t-caption" style={{ color: "var(--ink-2)" }}>{a.detail}</div>
-              {a.area === "review" && (
-                <button
-                  onClick={onReview}
-                  className="t-caption fms-linkbutton"
-                  style={{ color: `var(--${a.level})`, marginTop: "var(--space-2)" }}
-                >
-                  Review in the database
-                </button>
-              )}
+            <Alert
+              key={a.id}
+              status={a.level}
+              title={a.title}
+              /*
+               * The real Button, through the slot Alert already has for it.
+               * This was a bare <button> on a class that existed nowhere in
+               * the stylesheet, so it rendered with the browser's own chrome:
+               * a grey slab with coloured text, in the middle of a themed
+               * panel, and below the 44px touch target D10 requires.
+               */
+              action={
+                a.area === "review" ? (
+                  <Button size="sm" onClick={onReview}>
+                    Review in the database
+                  </Button>
+                ) : undefined
+              }
+            >
+              {a.detail}
             </Alert>
           ))}
         </div>
@@ -239,7 +248,7 @@ export function Dashboard({
 
       {/* Charts */}
       <div className="fms-charts">
-        <Card title="Revenue and spending" subtitle={`January – ${monthName(month)} ${year}`}>
+        <Card title="Revenue and spending" subtitle={`January to ${monthName(month)} ${year}`}>
           <AreaChart
             labels={MONTHS_SHORT.slice(0, upTo)}
             series={[

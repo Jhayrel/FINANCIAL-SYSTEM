@@ -76,17 +76,17 @@ export function Statements({
       width: "160px",
       render: (r) => {
         const t = r.transaction;
-        const path = t.fromWallet && t.toWallet ? `${t.fromWallet} → ${t.toWallet}` : t.toWallet ? `→ ${t.toWallet}` : t.fromWallet || "—";
+        const path = t.fromWallet && t.toWallet ? `${t.fromWallet} → ${t.toWallet}` : t.toWallet ? `→ ${t.toWallet}` : t.fromWallet;
         return <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }} title={path}>{path}</span>;
       },
     },
-    { key: "item", header: "Item", width: "140px", render: (r) => <span className="t-body-strong fms-truncate" title={r.transaction.item}>{r.transaction.item || "—"}</span> },
+    { key: "item", header: "Item", width: "140px", render: (r) => <span className="t-body-strong fms-truncate" title={r.transaction.item}>{r.transaction.item}</span> },
     {
       key: "desc",
       header: "Description",
       render: (r) => (
         <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }} title={r.transaction.description}>
-          {r.transaction.description || "—"}
+          {r.transaction.description}
         </span>
       ),
     },
@@ -184,7 +184,7 @@ export function Statements({
                     <div style={{ minWidth: 0 }}>
                       <span className="t-body-strong fms-truncate">{r.transaction.item || "Uncategorised"}</span>
                       <div className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>
-                        {r.transaction.description || "—"}
+                        {r.transaction.description}
                       </div>
                       <div className="t-micro" style={{ color: "var(--ink-3)" }}>
                         {formatShort(r.transaction.date)} · {r.transaction.type}

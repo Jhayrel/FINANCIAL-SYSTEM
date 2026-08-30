@@ -117,7 +117,7 @@ export interface GoalProgress {
   readonly saved: Centavos;
   readonly target: Centavos;
   readonly remaining: Centavos;
-  /** 0–1+. Can exceed 1; overshooting is fine (rule G7). */
+  /** 0 to 1 and beyond. Overshooting is fine (rule G7). */
   readonly progress: number;
   readonly status: GoalStatus;
   readonly daysLeft?: number | undefined;

@@ -405,7 +405,7 @@ export function KpiTile({
 export function ProgressBar({
   value,
   max,
-  /** 0–1 through the period; draws the pace tick. */
+  /** 0 to 1 through the period; draws the pace tick. */
   pace,
   height = 8,
 }: {
@@ -467,7 +467,7 @@ const ALERT_GLYPH: Record<Status, string> = {
   over: "!",
   warn: "!",
   info: "i",
-  none: "–",
+  none: "·",
 };
 
 export function Alert({

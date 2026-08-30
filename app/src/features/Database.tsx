@@ -162,7 +162,7 @@ export function Database({
       sortable: true,
       render: (t) => (
         <span className="t-body-strong fms-truncate" title={t.item}>
-          {t.item || "—"}
+          {t.item}
         </span>
       ),
     },
@@ -171,7 +171,7 @@ export function Database({
       header: "Description",
       render: (t) => (
         <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }} title={t.description}>
-          {t.description || "—"}
+          {t.description}
         </span>
       ),
     },
@@ -184,7 +184,7 @@ export function Database({
         t.fee ? (
           <Money value={t.fee} size="s" tone="var(--warn)" />
         ) : (
-          <span className="t-num-s" style={{ color: "var(--ink-3)" }}>—</span>
+          <span className="t-num-s" style={{ color: "var(--ink-3)" }} />
         ),
     },
     {
@@ -342,11 +342,11 @@ export function Database({
   );
 }
 
-/** "Gcash → Maya", "Maya", "→ Maya": never a bare em dash on one side. */
+/** "Gcash → Maya", "Maya", "→ Maya". Empty when the row names no wallet. */
 function walletPath(t: Transaction): string {
   if (t.fromWallet && t.toWallet) return `${t.fromWallet} → ${t.toWallet}`;
   if (t.toWallet) return `→ ${t.toWallet}`;
-  return t.fromWallet || "—";
+  return t.fromWallet;
 }
 
 const fmtShort = (c: number): string =>

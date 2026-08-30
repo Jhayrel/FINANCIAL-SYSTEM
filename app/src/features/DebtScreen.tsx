@@ -221,7 +221,7 @@ function DebtHistory({
       header: "Description",
       render: (r) => (
         <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }} title={r.transaction.description}>
-          {r.transaction.description || "—"}
+          {r.transaction.description}
         </span>
       ),
     },
@@ -251,7 +251,7 @@ function DebtHistory({
                   <div style={{ minWidth: 0 }}>
                     <span className="t-body-strong">{r.transaction.debtEffect}</span>
                     <div className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>
-                      {r.transaction.description || "—"}
+                      {r.transaction.description}
                     </div>
                     <div className="t-micro" style={{ color: "var(--ink-3)" }}>
                       {formatShort(r.transaction.date)}

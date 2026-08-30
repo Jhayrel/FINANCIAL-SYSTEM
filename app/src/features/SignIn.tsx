@@ -38,6 +38,27 @@ export function SignIn({
     }
   };
 
+  /**
+   * Restoring a session is not the same as having no session.
+   *
+   * Firebase takes a moment to tell us whether someone is already signed in,
+   * and until now that moment rendered the whole sign-in card. Refreshing while
+   * perfectly signed in flashed "Sign in with the Google account that owns it"
+   * every single time, which reads as being logged out.
+   *
+   * So a quiet placeholder holds the space instead. No heading, no button,
+   * nothing to react to, because in the common case it is about to disappear.
+   */
+  if (auth.status === "loading") {
+    return (
+      <div className="fms-gate">
+        <p className="t-body" style={{ color: "var(--ink-3)" }} role="status">
+          Checking your sign-in
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="fms-gate">
       <Card>
@@ -65,7 +86,7 @@ export function SignIn({
               variant="primary"
               size="lg"
               fullWidth
-              loading={busy || auth.status === "loading"}
+              loading={busy}
               onClick={() => void go()}
             >
               Continue with Google

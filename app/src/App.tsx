@@ -554,6 +554,20 @@ export default function App() {
   }
 
   const title = NAV.find((n) => n.id === screen)?.label ?? "";
+  /**
+   * The scrolling region, so a screen change can start at the top.
+   *
+   * The shell never scrolls; this element does. Switching screens left its
+   * scrollTop where the previous screen had put it, so arriving at a shorter
+   * screen from a scrolled position on a longer one showed a band of empty
+   * space with the content already above the fold.
+   */
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [screen]);
+
   const go = (id: Screen): void => {
     setScreen(id);
     setMoreOpen(false);
@@ -620,7 +634,7 @@ export default function App() {
           </p>
         </header>
 
-        <main className={`fms-main${screen === "settings" ? " fms-main--fixed" : ""}`}>
+        <main ref={mainRef} className={`fms-main${screen === "settings" ? " fms-main--fixed" : ""}`}>
           {syncError && (
             <div style={{ marginBottom: "var(--space-4)" }}>
               <Alert status="over" title="Not saving to Firebase">

@@ -183,7 +183,7 @@ export function runningBalance(
   return { wallet, before, after, goesNegative: after < 0 };
 }
 
-// ── Validation, spec 5.11, rules D1–D3 ────────────────────────────────────
+// ── Validation, spec 5.11, rules D1 to D3 ────────────────────────────────────
 
 export interface EntryIssue {
   readonly field: FieldName | "flow";

@@ -11,7 +11,7 @@
  *   draw         ▲          ▲         NO         no
  *   repay        ▼          ▼         no         NO
  *   interest     ▼          flat      no        YES
- *   writeoff     –          ▼        yes¹        no
+ *   writeoff     no         ▼        yes¹        no
  *
  * ¹ booked as Debt/writeoff, never Revenue, so it cannot contaminate the
  *   income trend.
