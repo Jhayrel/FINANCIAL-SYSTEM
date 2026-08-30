@@ -6,7 +6,7 @@
  * rather than pretending to be a general login.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Alert, Button, Card } from "../components/primitives";
 import type { AuthState } from "../data/auth";
@@ -39,43 +39,31 @@ export function SignIn({
   };
 
   /**
-   * Restoring a session is not the same as having no session.
+   * One render path, and it always has a button on it.
    *
-   * Firebase takes a moment to say whether someone is already signed in, and
-   * that moment used to render the whole sign-in card, so refreshing while
-   * perfectly signed in flashed "Sign in with the Google account that owns it"
-   * every single time, which reads as being logged out.
+   * ── Why there is no longer a loading branch ───────────────────────────────
    *
-   * ── Why this waits rather than just hiding the card ───────────────────────
+   * There was, twice. Refreshing while signed in briefly showed the whole
+   * sign-in card, which reads as being logged out, so the card was replaced
+   * with a quiet "Checking your sign-in" while Firebase decided. That is fine
+   * for the 200ms it normally takes and a total lockout when it does not
+   * finish: no heading, no button, nothing to press. It did not finish.
    *
-   * The first version of this returned the placeholder for as long as the
-   * status said loading, with nothing else on the page. That is fine while the
-   * check takes 200ms and a lockout if it never finishes: no heading, no
-   * button, no way to sign in, and nothing saying why. It happened.
+   * The second attempt kept the placeholder but gave it a 1.5 second deadline.
+   * That is a better shape and still the wrong one, because it leaves a window
+   * where the only escape is a timer firing correctly, and it locked the owner
+   * out again.
    *
-   * `onAuthStateChanged` normally fires within a moment, but it can hang: a
-   * blocked third-party request, an offline start, or a misconfigured project
-   * all leave it silent rather than failing. So the quiet placeholder is only
-   * borrowed for a second and a half. After that the real card comes back,
-   * because a card you can press beats a truthful status you cannot.
+   * `onAuthStateChanged` usually answers immediately but can stay silent
+   * rather than fail: blocked storage, a blocked request, an unauthorised
+   * domain. None of those throw, so nothing downstream ever learns.
+   *
+   * So the card renders unconditionally now. Only the wording changes while
+   * the check runs, which fixes the flash the first attempt was chasing at no
+   * risk at all. A cosmetic flash was never worth a state the owner cannot get
+   * out of, and this has no such state left to get into.
    */
-  const [waited, setWaited] = useState(false);
-
-  useEffect(() => {
-    if (auth.status !== "loading") return;
-    const timer = setTimeout(() => setWaited(true), 1500);
-    return () => clearTimeout(timer);
-  }, [auth.status]);
-
-  if (auth.status === "loading" && !waited) {
-    return (
-      <div className="fms-gate">
-        <p className="t-body" style={{ color: "var(--ink-3)" }} role="status">
-          Checking your sign-in
-        </p>
-      </div>
-    );
-  }
+  const checking = auth.status === "loading";
 
   return (
     <div className="fms-gate">
@@ -84,7 +72,15 @@ export function SignIn({
           <div>
             <h1 className="t-display-l" style={{ margin: 0 }}>Finances</h1>
             <p className="t-body" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-2)" }}>
-              Your ledger is in Firebase. Sign in with the Google account that owns it.
+              {/*
+                The only thing the loading state changes. Saying "sign in" to
+                someone who is already signed in and merely being checked is
+                what read as being logged out; saying this does not, and it
+                costs no branch and no timer.
+              */}
+              {checking
+                ? "Checking whether you are already signed in."
+                : "Your ledger is in Firebase. Sign in with the Google account that owns it."}
             </p>
           </div>
 
@@ -98,14 +94,14 @@ export function SignIn({
           {error && <Alert status="over" title="Could not sign in">{error}</Alert>}
 
           {/*
-            Still loading after the wait. Something is wrong rather than slow,
-            so say what and let the button be pressed anyway: signing in
-            resolves the state, so the way out is the thing already on screen.
+            The check can stay silent rather than fail, so this never claims
+            anything is wrong. It says what is happening and points at the
+            button, which works either way: signing in resolves the state.
           */}
-          {auth.status === "loading" && (
-            <Alert status="warn" title="Still checking who is signed in">
-              Firebase has not answered yet. That usually means the connection is blocked or the
-              page opened offline. Signing in below works regardless.
+          {checking && (
+            <Alert status="info" title="This usually takes a moment">
+              If it stays like this, the check has been blocked rather than answered. Signing in
+              below works regardless.
             </Alert>
           )}
 
