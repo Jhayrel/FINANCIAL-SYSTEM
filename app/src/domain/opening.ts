@@ -123,6 +123,31 @@ export interface OpeningCheck {
  * the mistake this whole module exists to prevent, so it is refused rather
  * than warned about.
  */
+/** How many entries make a ledger no longer new. */
+const SETUP_GRACE = 0;
+
+/**
+ * Whether a starting balance can be set for this account.
+ *
+ * ── The rule, and why the first version of it was wrong ──────────────────
+ *
+ * A starting balance is only meaningful while you are setting the system up.
+ * It says what an account already held on the day the record begins, which is
+ * a statement about the past, and the only moment that statement can be made
+ * honestly is before there is a past to contradict it.
+ *
+ * The first version offered it whenever an account's balance was zero. That
+ * looked reasonable and produced a lie: an account sitting at zero in August
+ * was offered a starting balance, took it, and the row was dated back to
+ * January, so the ledger then claimed the money had been there all year. It
+ * had not. It arrived in August.
+ *
+ * Money reaching an account partway through is not a starting balance. It is
+ * a Transfer if it came from somewhere else you track, or Revenue if it came
+ * from outside, and either way it belongs on the day it happened. Both of
+ * those already exist on the Add screen, which is why the option disappears
+ * rather than being replaced by anything.
+ */
 export function canSetOpening(
   account: string,
   transactions: readonly Transaction[],
@@ -142,9 +167,49 @@ export function canSetOpening(
     };
   }
 
+  // Anything that is not itself a starting balance counts as history.
+  const recorded = transactions.filter((t) => t.category !== OPENING_CATEGORY).length;
+  if (recorded > SETUP_GRACE) {
+    return {
+      ok: false,
+      reason:
+        `The ledger already has ${recorded.toLocaleString()} entries, so there is no "before" left to describe. ` +
+        `Money arriving in ${account} now is a Transfer if it came from another account, or Revenue if it came from outside, ` +
+        "dated the day it actually arrived.",
+    };
+  }
+
   return { ok: true };
 }
 
+/**
+ * Starting balances that claim to predate entries recorded before them.
+ *
+ * These cannot be created any more, but rows written under the old rule exist
+ * and are quietly wrong: they date money back to the beginning of the ledger
+ * when it actually arrived partway through, so every balance and every report
+ * before that day is overstated.
+ *
+ * Reported, never corrected. The right answer depends on where the money came
+ * from, which only the owner knows: a Transfer from another account, or
+ * Revenue from outside. Guessing would replace one wrong row with another.
+ */
+export function suspectOpenings(
+  transactions: readonly Transaction[],
+): Transaction[] {
+  return transactions.filter((t) => {
+    if (t.category !== OPENING_CATEGORY) return false;
+
+    // Something that is not a starting balance, recorded before this claims
+    // to have existed, means the account was already being tracked.
+    return transactions.some(
+      (other) =>
+        other.category !== OPENING_CATEGORY &&
+        other.recordNumber < t.recordNumber &&
+        other.date <= t.date,
+    );
+  });
+}
 /**
  * Rows still using the Excel's revenue workaround.
  *

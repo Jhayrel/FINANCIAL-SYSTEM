@@ -174,7 +174,7 @@ export function Database({
     {
       key: "record",
       header: "Record",
-      width: "76px",
+      width: "72px",
       sortable: true,
       render: (t) => (
         <span className="t-num-s" style={{ color: "var(--ink-3)" }}>
@@ -185,15 +185,15 @@ export function Database({
     {
       key: "date",
       header: "Date",
-      width: "96px",
+      width: "92px",
       sortable: true,
       render: (t) => <span className="t-num-s">{formatShort(t.date)}</span>,
     },
-    { key: "flow", header: "Type", width: "104px", render: (t) => <FlowBadge flow={TONE[t.type]} /> },
+    { key: "flow", header: "Type", width: "96px", render: (t) => <FlowBadge flow={TONE[t.type]} /> },
     {
       key: "wallet",
       header: "Wallet",
-      width: "132px",
+      width: "18%",
       render: (t) => (
         <span
           className="t-caption fms-truncate"
@@ -207,7 +207,7 @@ export function Database({
     {
       key: "item",
       header: "Item",
-      width: "150px",
+      width: "14%",
       sortable: true,
       render: (t) => (
         <span className="t-body-strong fms-truncate" title={t.item}>
@@ -228,7 +228,7 @@ export function Database({
       key: "fee",
       header: "Fee",
       align: "right",
-      width: "84px",
+      width: "76px",
       render: (t) =>
         t.fee ? (
           <Money value={t.fee} size="s" tone="var(--warn)" />
@@ -240,14 +240,14 @@ export function Database({
       key: "amount",
       header: "Total",
       align: "right",
-      width: "110px",
+      width: "112px",
       sortable: true,
       render: (t) => <Money value={t.total} />,
     },
     {
       key: "status",
       header: "Status",
-      width: "100px",
+      width: "84px",
       render: (t) =>
         t.status ? (
           <StatusPill status={t.status === "Paid" || t.status === "Withdrawn" ? "over" : "ok"}>
@@ -260,7 +260,7 @@ export function Database({
           key: "actions",
           header: "",
           align: "right" as const,
-          width: "150px",
+          width: "132px",
           render: (t: Transaction) => (
             /*
              * Not `.fms-rowactions`: that reserves 200px and gives every
@@ -412,10 +412,18 @@ export function Database({
 }
 
 /** "Gcash → Maya", "Maya", "→ Maya". Empty when the row names no wallet. */
+/**
+ * The wallets a row touches.
+ *
+ * An arrow only appears when there are two of them, because that is the only
+ * case where it says anything. A lone "→ Maya" was repeating what the Type
+ * badge in the previous column already says, and it cost fourteen pixels of
+ * the one column that runs out: "Maya Bank (Personal savings)" is a real
+ * account name and it has to fit.
+ */
 function walletPath(t: Transaction): string {
   if (t.fromWallet && t.toWallet) return `${t.fromWallet} → ${t.toWallet}`;
-  if (t.toWallet) return `→ ${t.toWallet}`;
-  return t.fromWallet;
+  return t.toWallet || t.fromWallet;
 }
 
 const fmtShort = (c: number): string =>

@@ -16,6 +16,7 @@ import {
   hasOpeningBalances,
   legacyCarryForwardRows,
   ledgerStart,
+  suspectOpenings,
   misdatedOpenings,
   OPENING_ITEM,
   openingRows,
@@ -320,5 +321,131 @@ describe("ledgerStart and misdatedOpenings agree", () => {
   it("ignores the row being placed when asked to", () => {
     const ledger = [open({ id: "stray", date: "2020-01-01" }), row({ id: "first" })];
     expect(ledgerStart(ledger, "stray")).toBe("2026-01-04");
+  });
+});
+
+describe("a starting balance is only for setting up", () => {
+  const row = (over: Partial<Transaction>): Transaction => ({
+    id: "s1",
+    recordNumber: 1,
+    date: "2026-01-01",
+    type: "Revenue",
+    category: "Revenue",
+    item: "Salary",
+    description: "",
+    amount: 10000,
+    fee: 0,
+    total: 10000,
+    fromWallet: "Maya",
+    toWallet: "",
+    status: "Done",
+    ...over,
+  });
+
+  const open = (over: Partial<Transaction>): Transaction =>
+    row({
+      category: OPENING_CATEGORY as Transaction["category"],
+      item: OPENING_ITEM,
+      fromWallet: "",
+      toWallet: "Reserved Fund",
+      ...over,
+    });
+
+  it("is offered on an empty ledger, which is the only honest moment", () => {
+    expect(canSetOpening("Reserved Fund", []).ok).toBe(true);
+  });
+
+  it("is refused once anything at all has been recorded", () => {
+    /**
+     * The exact failure. Reserved Fund sat at zero in August, so the old rule
+     * offered a starting balance, and the row was dated back to January. The
+     * ledger then claimed the money had been there all year. It arrived in
+     * August.
+     */
+    const check = canSetOpening("Reserved Fund", [row({ date: "2026-08-30" })]);
+
+    expect(check.ok).toBe(false);
+    expect(check.reason).toContain("Transfer");
+    expect(check.reason).toContain("Revenue");
+  });
+
+  it("is still refused when the account itself has no history", () => {
+    // The account is empty; the ledger is not. That is the case that lied.
+    const ledger = [row({ toWallet: "Maya", date: "2026-08-30" })];
+    expect(canSetOpening("Reserved Fund", ledger).ok).toBe(false);
+  });
+
+  it("is refused on an account that already has money, as before", () => {
+    const ledger = [open({ id: "o", amount: 50000, total: 50000 })];
+    expect(canSetOpening("Reserved Fund", ledger).ok).toBe(false);
+  });
+
+  it("does not count other starting balances as history", () => {
+    // Setting up several accounts in one sitting has to keep working.
+    const ledger = [open({ id: "o1", toWallet: "Maya", amount: 100, total: 100 })];
+    expect(canSetOpening("Reserved Fund", ledger).ok).toBe(true);
+  });
+});
+
+describe("suspectOpenings", () => {
+  const row = (over: Partial<Transaction>): Transaction => ({
+    id: "x1",
+    recordNumber: 1,
+    date: "2026-01-01",
+    type: "Revenue",
+    category: "Revenue",
+    item: "Salary",
+    description: "",
+    amount: 10000,
+    fee: 0,
+    total: 10000,
+    fromWallet: "Maya",
+    toWallet: "",
+    status: "Done",
+    ...over,
+  });
+
+  const open = (over: Partial<Transaction>): Transaction =>
+    row({
+      category: OPENING_CATEGORY as Transaction["category"],
+      item: OPENING_ITEM,
+      fromWallet: "",
+      toWallet: "Reserved Fund",
+      ...over,
+    });
+
+  it("flags one written after the ledger was already running", () => {
+    // Record 442, dated 1 January, on a ledger whose record 1 is also
+    // 1 January. The money cannot have been there before the record began.
+    const found = suspectOpenings([
+      row({ id: "first", recordNumber: 1, date: "2026-01-01" }),
+      open({ id: "late", recordNumber: 442, date: "2026-01-01", amount: 500000, total: 500000 }),
+    ]);
+
+    expect(found).toHaveLength(1);
+    expect(found[0]?.id).toBe("late");
+  });
+
+  it("leaves a genuine setup row alone", () => {
+    const found = suspectOpenings([
+      open({ id: "setup", recordNumber: 1, date: "2026-01-01" }),
+      row({ id: "later", recordNumber: 2, date: "2026-01-04" }),
+    ]);
+
+    expect(found).toEqual([]);
+  });
+
+  it("says nothing about a ledger with no starting balances", () => {
+    expect(suspectOpenings([row({ id: "a" }), row({ id: "b", recordNumber: 2 })])).toEqual([]);
+  });
+
+  it("never rewrites anything, only reports", () => {
+    const ledger = [
+      row({ id: "first", recordNumber: 1 }),
+      open({ id: "late", recordNumber: 9, amount: 500000, total: 500000 }),
+    ];
+    const before = JSON.stringify(ledger);
+    suspectOpenings(ledger);
+    expect(JSON.stringify(ledger)).toBe(before);
   });
 });
