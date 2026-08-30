@@ -160,5 +160,106 @@ export function legacyCarryForwardRows(
   );
 }
 
+/**
+ * Starting balances that were filed before the ledger begins.
+ *
+ * ── Why this exists ───────────────────────────────────────────────────────
+ *
+ * The first version of the starting balance dated its row the day before the
+ * ledger's earliest entry, which sounded more correct than sharing that day
+ * and was wrong in every way that shows. On a ledger starting 1 January it
+ * lands on 31 December of the year before: outside the year every report
+ * filters by, so the money counts towards no annual figure, and last in a list
+ * sorted newest first, where the owner could not find it and reasonably
+ * concluded it had not saved.
+ *
+ * The balance was always right. Only the date was wrong, and only on rows this
+ * app wrote itself, so this is a repair of its own mistake rather than a
+ * judgement about the owner's data. It moves nothing else and changes no
+ * amount.
+ *
+ * ── Why it corrects rather than reports ───────────────────────────────────
+ *
+ * Integrity checks in this app report and never auto-correct, because they are
+ * looking at entries a person made and cannot know what was meant. This is the
+ * other case: the row was generated, the intended date is known exactly, and
+ * there is nothing for a person to decide. `year.ts` corrects on the same
+ * grounds.
+ */
+/**
+ * The day the ledger begins, for the purpose of placing a starting balance.
+ *
+ * `except` is the row being judged or placed, so a starting balance is never
+ * compared against itself. Without that the two callers disagreed: one asked
+ * where the ledger starts including opening rows and got 1 January, the other
+ * asked excluding them and got the 4th, so a balance written on the 1st was
+ * immediately "repaired" onto the 4th. One definition, one answer.
+ */
+export function ledgerStart(
+  transactions: readonly Transaction[],
+  except?: string,
+): string | null {
+  return transactions
+    .filter((t) => t.id !== except)
+    .reduce<string | null>(
+      (soonest, t) => (soonest === null || t.date < soonest ? t.date : soonest),
+      null,
+    );
+}
+
+/**
+ * Starting balances filed before the ledger begins.
+ *
+ * ── Why this exists ───────────────────────────────────────────────────────
+ *
+ * The first version of the starting balance dated its row the day before the
+ * ledger's earliest entry, which sounded more correct than sharing that day
+ * and was wrong in every way that shows. On a ledger starting 1 January it
+ * lands on 31 December of the year before: outside the year every report
+ * filters by, so the money counts towards no annual figure, and last in a list
+ * sorted newest first, where the owner could not find it and reasonably
+ * concluded it had never saved.
+ *
+ * The balance was always right. Only the date was wrong, and only on rows this
+ * app generated itself, so this repairs its own mistake rather than judging
+ * anything the owner entered. It moves nothing else and changes no amount.
+ *
+ * ── Why it corrects rather than reports ───────────────────────────────────
+ *
+ * Integrity checks here report and never auto-correct, because they look at
+ * entries a person made and cannot know what was meant. This is the other
+ * case: the row was generated, the intended date is known exactly, and there
+ * is nothing for a person to decide. `year.ts` corrects on the same grounds.
+ */
+export function misdatedOpenings(
+  transactions: readonly Transaction[],
+): Transaction[] {
+  const out: Transaction[] = [];
+
+  for (const t of transactions) {
+    if (t.category !== OPENING_CATEGORY) continue;
+
+    // Everything except this row. A starting balance that is itself the
+    // oldest entry is not misplaced: it is where the record begins.
+    const begins = ledgerStart(transactions, t.id);
+    if (begins === null) continue;
+
+    /**
+     * Only a different year counts as misplaced.
+     *
+     * Sitting a few days before the first transaction is exactly what a
+     * starting balance is for, so earlier is not by itself wrong. What was
+     * wrong is landing in the year before: every report filters by year, so
+     * the money then counts towards nothing, and it sorts to the very bottom
+     * of a list ordered newest first. That is the harm, and it is the only
+     * thing worth moving a saved row for.
+     */
+    if (t.date.slice(0, 4) >= begins.slice(0, 4)) continue;
+
+    out.push({ ...t, date: begins });
+  }
+
+  return out;
+}
 const slug = (s: string): string =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");

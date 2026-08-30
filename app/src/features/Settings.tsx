@@ -37,7 +37,7 @@ import { describeClose, planGoalClose } from "../domain/goalClose";
 import { validateBackup, type Backup, type RestoreMode, type Validation } from "../domain/backup";
 import { formatBytes, measureStorage } from "../domain/storage";
 import { cleanSettings } from "../domain/settingsCleanup";
-import { canSetOpening, openingRows } from "../domain/opening";
+import { canSetOpening, ledgerStart, openingRows } from "../domain/opening";
 import { recoverAccounts } from "../domain/recovery";
 import { AiAnswerView } from "../components/AiAnswer";
 import { useAi } from "./useAi";
@@ -535,10 +535,9 @@ function AccountRow({
      * Sharing the first day is also simply true: this is what the account
      * held when the record begins, and the record begins that day.
      */
-    const startsOn = transactions.reduce(
-      (soonest, t) => (t.date < soonest ? t.date : soonest),
-      today(),
-    );
+    // The same definition the repair uses, so the two cannot disagree about
+    // where the ledger begins and undo each other. See domain/opening.ts.
+    const startsOn = ledgerStart(transactions) ?? today();
 
     const nextNumber = Math.max(0, ...transactions.map((t) => t.recordNumber)) + 1;
     onAddTransactions(
@@ -700,7 +699,7 @@ function AccountRow({
                 Cancel
               </Button>
               <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                Recorded once, dated before your first entry. It is not income and never counts as
+                Recorded once, dated with your first entry. It is not income and never counts as
                 revenue.
               </span>
             </div>

@@ -29,7 +29,7 @@ import { Alert, Card, EmptyState, Money, Toast } from "./components/primitives";
 import { loadLocalLedger } from "./data/localSource";
 import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
-import { OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
+import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
 import { netWorth, positionsOf } from "./domain/debt";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
@@ -417,6 +417,36 @@ export default function App() {
     setEditing(null);
     flash(`Updated record #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}.`);
   };
+
+  /**
+   * Pull a starting balance back inside the ledger, once.
+   *
+   * An early version dated these the day before the first entry, which put
+   * the money in the previous year: counted towards no annual figure, and
+   * last in a list sorted newest first, where it looked like it had never
+   * saved at all. See `domain/opening.ts`.
+   *
+   * This runs against whatever is on screen, so it repairs rows that came
+   * back from Firestore as well as ones in the fixture, and it writes the
+   * correction through so it does not have to run again. It cannot loop: a
+   * repaired row is no longer misdated, so the next pass finds nothing.
+   */
+  useEffect(() => {
+    const wrong = misdatedOpenings(transactions);
+    if (wrong.length === 0) return;
+
+    const byId = new Map(wrong.map((r) => [r.id, r]));
+    setTransactions((prev) => prev.map((t) => byId.get(t.id) ?? t));
+    push((l) => l.saveMany(wrong));
+    flash(
+      wrong.length === 1
+        ? `Moved a starting balance to ${wrong[0]?.date}, where the ledger begins.`
+        : `Moved ${wrong.length} starting balances to where the ledger begins.`,
+    );
+    // `push` and `flash` are stable for this purpose; keying on the rows
+    // themselves is what makes this run once per genuine finding.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions]);
 
   const startEditing = (row: Transaction): void => {
     setEditing(row);

@@ -15,6 +15,9 @@ import {
   canSetOpening,
   hasOpeningBalances,
   legacyCarryForwardRows,
+  ledgerStart,
+  misdatedOpenings,
+  OPENING_ITEM,
   openingRows,
   OPENING_CATEGORY,
 } from "./opening";
@@ -155,5 +158,167 @@ describe("the Excel's revenue workaround", () => {
     for (const w of ["Maya", "Cash", "Gcash", "Extra Cash", "Maya Bank (Personal savings)"]) {
       expect(walletBalance(migrated, w)).toBe(walletBalance(fixture.transactions, w));
     }
+  });
+});
+
+describe("misdatedOpenings", () => {
+  const row = (over: Partial<Transaction>): Transaction => ({
+    id: "m1",
+    recordNumber: 1,
+    date: "2026-01-01",
+    type: "Revenue",
+    category: "Revenue",
+    item: "Salary",
+    description: "",
+    amount: 10000,
+    fee: 0,
+    total: 10000,
+    fromWallet: "Maya",
+    toWallet: "",
+    status: "Done",
+    ...over,
+  });
+
+  const opening = (over: Partial<Transaction> = {}): Transaction =>
+    row({
+      id: "open-1",
+      category: OPENING_CATEGORY as Transaction["category"],
+      item: OPENING_ITEM,
+      fromWallet: "",
+      toWallet: "Reserved Fund",
+      amount: 500000,
+      total: 500000,
+      ...over,
+    });
+
+  it("pulls a starting balance filed before the ledger onto its first day", () => {
+    // The exact shape of the bug: PHP 5,000.00 dated 31 December 2025 on a
+    // ledger that begins 1 January 2026.
+    const fixed = misdatedOpenings([
+      row({ date: "2026-01-01" }),
+      opening({ date: "2025-12-31" }),
+    ]);
+
+    expect(fixed).toHaveLength(1);
+    expect(fixed[0]?.date).toBe("2026-01-01");
+    // Nothing else moves.
+    expect(fixed[0]?.amount).toBe(500000);
+    expect(fixed[0]?.toWallet).toBe("Reserved Fund");
+    expect(fixed[0]?.id).toBe("open-1");
+  });
+
+  it("leaves a starting balance already inside the ledger alone", () => {
+    expect(
+      misdatedOpenings([row({ date: "2026-01-01" }), opening({ date: "2026-01-01" })]),
+    ).toEqual([]);
+  });
+
+  it("leaves one dated later alone, since that is a deliberate choice", () => {
+    expect(
+      misdatedOpenings([row({ date: "2026-01-01" }), opening({ date: "2026-03-01" })]),
+    ).toEqual([]);
+  });
+
+  it("does nothing on a ledger of nothing but starting balances", () => {
+    // A first run. Whatever date they carry is the one that was chosen.
+    expect(misdatedOpenings([opening({ date: "2020-01-01" })])).toEqual([]);
+  });
+
+  it("never touches an ordinary row, however old", () => {
+    const fixed = misdatedOpenings([
+      row({ id: "old", date: "2020-01-01" }),
+      row({ date: "2026-01-01" }),
+    ]);
+    expect(fixed).toEqual([]);
+  });
+
+  it("is idempotent: running it on its own output finds nothing", () => {
+    const before = [row({ date: "2026-01-01" }), opening({ date: "2025-12-31" })];
+    const fixed = misdatedOpenings(before);
+    const after = before.map((t) => fixed.find((f) => f.id === t.id) ?? t);
+
+    expect(misdatedOpenings(after)).toEqual([]);
+  });
+
+  it("changes no balance, which is the invariant that matters", () => {
+    const before = [row({ date: "2026-01-01" }), opening({ date: "2025-12-31" })];
+    const fixed = misdatedOpenings(before);
+    const after = before.map((t) => fixed.find((f) => f.id === t.id) ?? t);
+
+    expect(walletBalance(after, "Reserved Fund")).toBe(
+      walletBalance(before, "Reserved Fund"),
+    );
+  });
+});
+
+describe("ledgerStart and misdatedOpenings agree", () => {
+  const row = (over: Partial<Transaction>): Transaction => ({
+    id: "a1",
+    recordNumber: 1,
+    date: "2026-01-04",
+    type: "Revenue",
+    category: "Revenue",
+    item: "Salary",
+    description: "",
+    amount: 10000,
+    fee: 0,
+    total: 10000,
+    fromWallet: "Maya",
+    toWallet: "",
+    status: "Done",
+    ...over,
+  });
+
+  const open = (over: Partial<Transaction>): Transaction =>
+    row({
+      category: OPENING_CATEGORY as Transaction["category"],
+      item: OPENING_ITEM,
+      fromWallet: "",
+      toWallet: "Reserved Fund",
+      ...over,
+    });
+
+  /**
+   * The bug this pins. One caller asked where the ledger starts counting
+   * opening rows and got 1 January; the other asked ignoring them and got the
+   * 4th. A balance written on the 1st was then immediately moved to the 4th.
+   */
+  it("places a new balance where the repair will leave it", () => {
+    const ledger = [
+      open({ id: "carry-1", date: "2026-01-01", toWallet: "Maya" }),
+      row({ id: "first", date: "2026-01-04" }),
+    ];
+
+    const placedOn = ledgerStart(ledger) ?? "";
+    expect(placedOn).toBe("2026-01-01");
+
+    const added = [...ledger, open({ id: "new", date: placedOn })];
+    // The repair must have nothing to say about a row it just agreed with.
+    expect(misdatedOpenings(added)).toEqual([]);
+  });
+
+  it("still pulls back one filed before everything else", () => {
+    const fixed = misdatedOpenings([
+      open({ id: "carry-1", date: "2026-01-01", toWallet: "Maya" }),
+      row({ id: "first", date: "2026-01-04" }),
+      open({ id: "stray", date: "2025-12-31" }),
+    ]);
+
+    expect(fixed).toHaveLength(1);
+    expect(fixed[0]?.id).toBe("stray");
+    expect(fixed[0]?.date).toBe("2026-01-01");
+  });
+
+  it("leaves the oldest opening row alone, since it is where the record begins", () => {
+    const ledger = [
+      open({ id: "oldest", date: "2026-01-01" }),
+      row({ id: "first", date: "2026-01-04" }),
+    ];
+    expect(misdatedOpenings(ledger)).toEqual([]);
+  });
+
+  it("ignores the row being placed when asked to", () => {
+    const ledger = [open({ id: "stray", date: "2020-01-01" }), row({ id: "first" })];
+    expect(ledgerStart(ledger, "stray")).toBe("2026-01-04");
   });
 });
