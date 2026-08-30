@@ -2,14 +2,18 @@
  * Insights: spec 7.6.
  *
  * A month calendar with spend intensity, the two-track budget, bills due, and
- * the smart daily allocation. The AI layer will sit on top of these figures
- * later: never instead of them.
+ * the smart daily allocation.
+ *
+ * The AI sits on top of these figures, never instead of them: it is handed the
+ * numbers this screen already computed and asked to put them into a sentence.
+ * Nothing on this screen depends on a model answering.
  */
 
 import { useMemo, useState } from "react";
 
 import {
   Alert,
+  Button,
   Card,
   CountChip,
   EmptyState,
@@ -18,6 +22,9 @@ import {
   SegmentedControl,
   StatusPill,
 } from "../components/primitives";
+import { AiAnswerView } from "../components/AiAnswer";
+import { useAi } from "./useAi";
+import type { AppSettings } from "../domain/settings";
 import { RankBars } from "../components/charts";
 import { learnPatterns, planDay, REASON_LABEL } from "../domain/allocation";
 import { billStatuses, overdue, paidThisMonth, upcoming } from "../domain/bills";
@@ -47,15 +54,31 @@ export function Insights({
   budgets,
   debts,
   asOf,
+  settings,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
   budgets: Budgets;
   debts: readonly Debt[];
   asOf: string;
+  settings: AppSettings;
 }) {
   const year = getYear(asOf);
   const [month, setMonth] = useState(getMonth(asOf));
+
+  /**
+   * The summary follows the month picker, not the clock. Looking at March and
+   * reading a description of August would be wrong in a way that is very hard
+   * to spot, because every figure in it would be real.
+   */
+  const viewing = month === getMonth(asOf) ? asOf : makeDate(year, month, 1);
+  const ai = useAi({
+    settings,
+    transactions,
+    budgets,
+    feature: "insightSummary",
+    asOf: viewing,
+  });
 
   const v = useMemo(() => {
     const totals = monthTotals(transactions, year, month);
@@ -106,6 +129,27 @@ export function Insights({
         />
         <CountChip>{monthName(month)} {year}</CountChip>
       </div>
+
+      <Card
+        title={`${monthName(month)} in a sentence`}
+        subtitle={ai.disabled ? "Written on this device" : "Ask the model to describe the month"}
+      >
+        {ai.answer ? (
+          <AiAnswerView answer={ai.answer} />
+        ) : (
+          <p className="t-body" style={{ margin: 0, color: "var(--ink-3)" }}>
+            Nothing asked yet. The figures below are already correct; this only puts them into
+            words.
+          </p>
+        )}
+
+        <div className="fms-addrow" style={{ marginTop: "var(--space-3)" }}>
+          <Button variant="primary" loading={ai.loading} onClick={() => void ai.run("summary")}>
+            {ai.answer ? "Ask again" : "Describe this month"}
+          </Button>
+          <Button onClick={() => void ai.run("patterns")}>Look for a pattern</Button>
+        </div>
+      </Card>
 
       {late.length > 0 && (
         <Alert status="over" title={`${late.length} bill${late.length === 1 ? "" : "s"} overdue`}>

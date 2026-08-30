@@ -38,6 +38,8 @@ import { validateBackup, type Backup, type RestoreMode, type Validation } from "
 import { formatBytes, measureStorage } from "../domain/storage";
 import { cleanSettings } from "../domain/settingsCleanup";
 import { recoverAccounts } from "../domain/recovery";
+import { AiAnswerView } from "../components/AiAnswer";
+import { useAi } from "./useAi";
 import {
   clearConfig,
   parseConfig,
@@ -68,7 +70,7 @@ import {
 } from "../domain/settings";
 import { formatAmount, formatMoney, type Centavos } from "../domain/money";
 import { setPreference as setThemePreference } from "../theme";
-import type { SpendingType, Transaction } from "../domain/types";
+import type { Budgets, SpendingType, Transaction } from "../domain/types";
 
 type Tab =
   | "accounts"
@@ -220,7 +222,14 @@ export function Settings({
 
         {tab === "alerts" && <AlertsSection settings={settings} patch={patch} />}
 
-        {tab === "ai" && <AiSection settings={settings} patch={patch} />}
+        {tab === "ai" && (
+          <AiSection
+            settings={settings}
+            patch={patch}
+            transactions={transactions}
+            budgets={budgets as Budgets}
+          />
+        )}
 
         {tab === "appearance" && <AppearanceSection settings={settings} patch={patch} />}
 
@@ -1687,10 +1696,15 @@ const MAX_MODEL_LENGTH = 80;
 function AiSection({
   settings,
   patch,
+  transactions,
+  budgets,
 }: {
   settings: AppSettings;
   patch: (part: Partial<AppSettings>) => void;
+  transactions: readonly Transaction[];
+  budgets: Budgets;
 }) {
+  const tryOut = useAi({ settings, transactions, budgets, feature: "insightSummary" });
   const ai = settings.ai;
   const setAi = (part: Partial<AiSettings>): void => patch({ ai: { ...ai, ...part } });
   const off = !ai.enabled;
@@ -1820,11 +1834,39 @@ function AiSection({
         </table>
       </Group>
 
+      <Group title="Try it" hint="Runs a real call against your own figures" wide>
+        <p className="t-body" style={{ margin: "0 0 var(--space-3)", color: "var(--ink-2)" }}>
+          This sends the same summary every other screen sends, so whatever comes back tells you
+          exactly what the AI can and cannot see.
+        </p>
+
+        <div className="fms-addrow">
+          <Button variant="primary" loading={tryOut.loading} onClick={() => void tryOut.run("summary")}>
+            Summarise this month
+          </Button>
+          <Button onClick={() => void tryOut.run("patterns")}>Look for a pattern</Button>
+          {tryOut.answer && <Button onClick={tryOut.clear}>Clear</Button>}
+        </div>
+
+        {tryOut.answer && (
+          <div style={{ marginTop: "var(--space-3)" }}>
+            <AiAnswerView answer={tryOut.answer} />
+          </div>
+        )}
+      </Group>
+
       <Group title="API key" hint="Not stored here, on purpose">
         <Alert status="info" title="The key goes in Cloudflare, not in this app">
           A browser app has to hand the key to the browser, which puts it in devtools and in every
-          export. Set <code>AI_API_KEY</code> under Cloudflare → Pages → Settings → Environment
-          variables; the app calls it through a server function.
+          export. Set <code>GROQ_API_KEY</code> or <code>OPENROUTER_API_KEY</code> under Cloudflare
+          → Pages → Settings → Environment variables, then redeploy. The app calls them through a
+          server function and never sees the value.
+        </Alert>
+
+        <Alert status="info" title="It still works with no key at all">
+          With no key, or when every free model is rate limited, the wording is written on this
+          device from the same figures. Answers say which of the two you are reading, so you are
+          never guessing.
         </Alert>
       </Group>
     </>

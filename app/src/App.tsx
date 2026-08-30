@@ -651,6 +651,7 @@ export default function App() {
               budgets={budgets}
               debts={settings.credits}
               asOf={AS_OF}
+              settings={settings}
             />
           )}
           {screen === "budget" && (

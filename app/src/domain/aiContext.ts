@@ -243,9 +243,20 @@ function recentMonths(
  * Separate from `buildContext` so the object can be shown to the owner in the
  * app and the exact string can be shown too. Nothing is hidden between the two.
  */
+/**
+ * Render one of this module's peso figures.
+ *
+ * Exported so `aiOffline.ts` renders identically. The figures in `AiContext`
+ * are pesos, not centavos, so the app's `formatMoney` is the wrong tool here
+ * and silently rejects them; having one spelling in one place is what stops
+ * the offline answer and the model's prompt disagreeing about the same number.
+ */
+export const phpFigure = (n: number): string =>
+  `PHP ${n.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 export function contextToText(c: AiContext): string {
   const lines: string[] = [];
-  const php = (n: number): string => `PHP ${n.toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
+  const php = phpFigure;
 
   lines.push(`Date: ${c.asOf}. Currency: Philippine Peso.`);
   lines.push("");
