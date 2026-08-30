@@ -6,7 +6,7 @@
  * rather than pretending to be a general login.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Alert, Button, Card } from "../components/primitives";
 import type { AuthState } from "../data/auth";
@@ -41,15 +41,33 @@ export function SignIn({
   /**
    * Restoring a session is not the same as having no session.
    *
-   * Firebase takes a moment to tell us whether someone is already signed in,
-   * and until now that moment rendered the whole sign-in card. Refreshing while
+   * Firebase takes a moment to say whether someone is already signed in, and
+   * that moment used to render the whole sign-in card, so refreshing while
    * perfectly signed in flashed "Sign in with the Google account that owns it"
    * every single time, which reads as being logged out.
    *
-   * So a quiet placeholder holds the space instead. No heading, no button,
-   * nothing to react to, because in the common case it is about to disappear.
+   * ── Why this waits rather than just hiding the card ───────────────────────
+   *
+   * The first version of this returned the placeholder for as long as the
+   * status said loading, with nothing else on the page. That is fine while the
+   * check takes 200ms and a lockout if it never finishes: no heading, no
+   * button, no way to sign in, and nothing saying why. It happened.
+   *
+   * `onAuthStateChanged` normally fires within a moment, but it can hang: a
+   * blocked third-party request, an offline start, or a misconfigured project
+   * all leave it silent rather than failing. So the quiet placeholder is only
+   * borrowed for a second and a half. After that the real card comes back,
+   * because a card you can press beats a truthful status you cannot.
    */
-  if (auth.status === "loading") {
+  const [waited, setWaited] = useState(false);
+
+  useEffect(() => {
+    if (auth.status !== "loading") return;
+    const timer = setTimeout(() => setWaited(true), 1500);
+    return () => clearTimeout(timer);
+  }, [auth.status]);
+
+  if (auth.status === "loading" && !waited) {
     return (
       <div className="fms-gate">
         <p className="t-body" style={{ color: "var(--ink-3)" }} role="status">
@@ -78,6 +96,18 @@ export function SignIn({
           )}
 
           {error && <Alert status="over" title="Could not sign in">{error}</Alert>}
+
+          {/*
+            Still loading after the wait. Something is wrong rather than slow,
+            so say what and let the button be pressed anyway: signing in
+            resolves the state, so the way out is the thing already on screen.
+          */}
+          {auth.status === "loading" && (
+            <Alert status="warn" title="Still checking who is signed in">
+              Firebase has not answered yet. That usually means the connection is blocked or the
+              page opened offline. Signing in below works regardless.
+            </Alert>
+          )}
 
           {auth.status === "wrong-account" ? (
             <Button variant="primary" onClick={() => void onSignOut()}>Sign out</Button>
