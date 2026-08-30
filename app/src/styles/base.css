@@ -17,6 +17,21 @@ html,
 body {
   height: 100%;
   margin: 0;
+  /*
+   * The page itself never scrolls. `.fms-main` is the one scrolling region,
+   * and the shell is exactly one viewport tall.
+   *
+   * Without this the document could scroll too, and the two together produced
+   * the state the owner kept hitting: the shell scrolled off the top and the
+   * page background filled the bottom half of the screen, so the app looked
+   * like it ended halfway down. Anything tall enough to escape the shell,
+   * a portalled menu or a dialog, was enough to start it.
+   *
+   * `overscroll-behavior` stops the rubber-band at the end of an inner scroll
+   * from being handed to the document underneath.
+   */
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {

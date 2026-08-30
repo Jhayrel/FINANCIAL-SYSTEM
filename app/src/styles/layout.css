@@ -573,9 +573,7 @@
   gap: var(--space-4);
   height: 100%;
   min-height: 0;
-  /* Matches `.fms-db`: the two widest screens should agree on where the
-     content stops, or switching tabs shifts everything sideways. */
-  max-width: 1600px;
+  max-width: 1280px;
   width: 100%;
 }
 
@@ -632,28 +630,21 @@
    leaves a gulf between it and its value. */
 
 /*
- * One column by default, two once there is genuinely room.
+ * One column, always.
  *
- * The single column left roughly 380px of dead screen to the right of the
- * scrollbar on a 1920px display. Simply widening it would have been worse:
- * a toggle row stretched to 1600px puts its label and its switch at opposite
- * ends of the screen, which is the gulf the note above warns about.
+ * A two column version shipped briefly to use the width a 1920px display
+ * leaves spare. The owner rejected it on sight, and they were right: a
+ * settings screen is a list you read top to bottom, and splitting it into
+ * columns means every section is half as wide as its own table wants while
+ * your eye has to track back up the page to find what comes next.
  *
- * So the width buys a second column instead of longer rows. Groups already
- * marked `wide` span both, which is what that flag was for: until now the
- * grid had one column and the flag did nothing.
+ * The spare width is not a problem to solve. Do not reintroduce this.
  */
 .fms-settings-inner {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   align-items: start;
-}
-
-@media (min-width: 1400px) {
-  .fms-settings-inner {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 .fms-card {
@@ -721,12 +712,30 @@
 .fms-rowactions > button { min-width: 96px; }
 
 /* A named block inside the panel. */
+/*
+ * A settings section spaces its own children.
+ *
+ * The header carried a bottom margin and everything after it carried nothing,
+ * so a section with two stacked notices had 16px of card padding around a pair
+ * of boxes sitting 2px apart. The API key section showed this worst: the two
+ * blue panels read as one panel with a line through it.
+ *
+ * One gap on the container is the fix, rather than a margin on each thing that
+ * might follow another thing.
+ */
+.fms-setgroup {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
 .fms-setgroup > header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-3);
-  margin-bottom: var(--space-3);
+  /* The container's gap now does this, and both together doubled it. */
+  margin-bottom: 0;
 }
 
 /* The add-row under each table. */

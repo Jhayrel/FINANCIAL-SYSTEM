@@ -123,25 +123,74 @@ export function incomeVelocity(
     const age = daysBetween(deposit.date, asOf);
     if (age < 0 || age > lookback) continue;
 
-    const spentWithin = transactions
-      .filter((t) => {
-        const gap = daysBetween(deposit.date, t.date);
-        return gap >= 0 && gap <= windowDays;
-      })
-      .reduce((sum, t) => sum + outflow(t), 0);
+    const inWindow = (t: Transaction): boolean => {
+      const gap = daysBetween(deposit.date, t.date);
+      return gap >= 0 && gap <= windowDays;
+    };
 
+    const spentWithin = transactions.filter(inWindow).reduce((sum, t) => sum + outflow(t), 0);
     if (spentWithin === 0) continue;
+
+    /**
+     * Every deposit in the window, not just this one.
+     *
+     * The first version divided the window's whole outflow by a single
+     * deposit and reported the result as a percentage of it, which produced
+     * "200% of the PHP 997.34 that arrived went back out". That is not a
+     * strong finding, it is an impossible one: money cannot leave a deposit
+     * twice. It happened because two deposits landed in the same window and
+     * only one was counted, and because spending can also draw on a balance
+     * that was already there.
+     *
+     * Dividing by everything that arrived makes the ratio mean what it says.
+     * It can still exceed one, which is a real and different fact worth
+     * reporting: more went out than came in, so the difference came from
+     * money already held. `patternFindings` words that case separately
+     * rather than printing a percentage above a hundred.
+     */
+    const arrived = transactions
+      .filter((t) => {
+        if (t.type !== "Revenue" || t.category === "Opening") return false;
+        /**
+         * Symmetric, unlike the spending window.
+         *
+         * Spending is only counted after the deposit, because money cannot be
+         * spent before it arrives. Income is counted on both sides, because a
+         * deposit the day before is just as available to fund this window's
+         * spending, and ignoring it is what made a burst look like it came
+         * from a single smaller deposit.
+         */
+        const gap = daysBetween(deposit.date, t.date);
+        return gap >= -windowDays && gap <= windowDays;
+      })
+      .reduce((sum, t) => sum + t.total, 0);
+
+    if (arrived <= 0) continue;
 
     out.push({
       date: deposit.date,
-      amount: deposit.total,
+      amount: arrived,
       spentWithin,
-      share: spentWithin / deposit.total,
+      share: spentWithin / arrived,
       windowDays,
     });
   }
 
-  return out.sort((a, b) => b.share - a.share);
+  /**
+   * One finding per window, not one per deposit.
+   *
+   * Two deposits a day apart share almost the same window and would otherwise
+   * produce two near-identical sentences about the same money.
+   */
+  const seen = new Set<string>();
+  return out
+    .sort((a, b) => b.share - a.share)
+    .filter((e) => {
+      const key = `${e.spentWithin}:${e.amount}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 // ── Migration ──────────────────────────────────────────────────────────────
@@ -374,13 +423,20 @@ export function patternFindings({ transactions, asOf, wallets }: PatternInput): 
   const spikes = incomeVelocity(transactions, asOf);
   const worst = spikes[0];
   if (worst && worst.share >= 0.4) {
-    const percent = Math.round(worst.share * 100);
-    out.push({
-      id: `velocity-${worst.date}`,
-      kind: "velocity",
-      detail: `${percent}% of the ${php(worst.amount)} that arrived on ${worst.date} went back out within ${worst.windowDays} days: ${php(worst.spentWithin)}.`,
-      weight: 90,
-    });
+    const days = `${worst.windowDays} days`;
+
+    /**
+     * Above a hundred percent the sentence has to change, not the number.
+     * More went out than came in, so the rest came from money already held,
+     * and saying "140%" of a deposit would be describing something that
+     * cannot happen.
+     */
+    const detail =
+      worst.share > 1
+        ? `${php(worst.spentWithin)} went out within ${days} of the ${php(worst.amount)} that arrived on ${worst.date}. That is ${php(worst.spentWithin - worst.amount)} more than arrived, so the difference came from what was already there.`
+        : `${Math.round(worst.share * 100)}% of the ${php(worst.amount)} that arrived on ${worst.date} went back out within ${days}: ${php(worst.spentWithin)}.`;
+
+    out.push({ id: `velocity-${worst.date}`, kind: "velocity", detail, weight: 90 });
   }
 
   const moved = categoryMigration(transactions, asOf);

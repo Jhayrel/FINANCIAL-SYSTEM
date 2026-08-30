@@ -117,6 +117,35 @@ describe("incomeVelocity", () => {
     expect(events).toHaveLength(0);
   });
 
+  it("counts every deposit in the window, not just one of them", () => {
+    // Two deposits land a day apart. Dividing the window's whole outflow by
+    // one of them is what produced "200% of the PHP 997.34 that arrived".
+    const events = incomeVelocity(
+      [
+        row({ date: "2026-08-10", type: "Revenue", amount: 100000, total: 100000, category: "Salary" }),
+        row({ date: "2026-08-11", type: "Revenue", amount: 100000, total: 100000, category: "Salary" }),
+        row({ date: "2026-08-11", total: 150000, amount: 150000 }),
+      ],
+      "2026-08-15",
+    );
+
+    expect(events[0]?.amount).toBe(200000);
+    expect(events[0]?.share).toBeCloseTo(0.75, 5);
+  });
+
+  it("reports one finding per window, not one per deposit", () => {
+    const events = incomeVelocity(
+      [
+        row({ date: "2026-08-10", type: "Revenue", amount: 100000, total: 100000, category: "Salary" }),
+        row({ date: "2026-08-11", type: "Revenue", amount: 100000, total: 100000, category: "Salary" }),
+        row({ date: "2026-08-11", total: 150000, amount: 150000 }),
+      ],
+      "2026-08-15",
+    );
+
+    expect(events).toHaveLength(1);
+  });
+
   it("runs over the real ledger and produces sane shares", () => {
     const events = incomeVelocity(fixture.transactions, fixture.expected.asOf, {
       lookbackDays: 400,
@@ -315,6 +344,40 @@ describe("patternFindings", () => {
     expect(findings[0]?.kind).toBe("velocity");
     expect(findings[0]?.detail).toContain("80%");
     expect(findings[0]?.detail).toContain("PHP 4,000.00");
+  });
+
+  it("never claims more than all of a deposit left it", () => {
+    // This shipped: "200% of the PHP 997.34 that arrived went back out".
+    // Money cannot leave a deposit twice, and a reader who spots one
+    // impossible figure has no reason to believe the rest of the panel.
+    const findings = patternFindings({
+      transactions: [
+        row({ date: "2026-08-10", type: "Revenue", amount: 99734, total: 99734, category: "Salary" }),
+        row({ date: "2026-08-11", total: 199100, amount: 199100, category: "Treat" }),
+      ],
+      asOf: "2026-08-15",
+      wallets: ["Maya"],
+    });
+
+    const velocity = findings.find((f) => f.kind === "velocity");
+    expect(velocity).toBeDefined();
+    expect(velocity!.detail).not.toMatch(/\b(1\d\d|[2-9]\d\d)%/);
+    // It says the true and more useful thing instead.
+    expect(velocity!.detail).toContain("more than arrived");
+    expect(velocity!.detail).toContain("PHP 1,991.00");
+  });
+
+  it("never prints a percentage above one hundred, on any ledger", () => {
+    const findings = patternFindings({
+      transactions: fixture.transactions,
+      asOf: fixture.expected.asOf,
+      wallets: fixture.reference.wallets,
+    });
+
+    for (const f of findings) {
+      const percentages = [...f.detail.matchAll(/(\d+)%/g)].map((m) => Number(m[1]));
+      for (const p of percentages) expect(p).toBeLessThanOrEqual(100);
+    }
   });
 
   it("quantifies and never judges", () => {
