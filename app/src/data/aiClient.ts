@@ -23,6 +23,7 @@
 
 import { contextToText, type AiContext } from "../domain/aiContext";
 import { offlineAnswer, type AiTask } from "../domain/aiOffline";
+import { idToken } from "./auth";
 
 export type { AiTask };
 
@@ -43,6 +44,8 @@ export interface AskOptions {
   /** Overridable so tests do not touch the network. */
   readonly fetcher?: typeof fetch;
   readonly timeoutMs?: number;
+  /** Overridable so tests do not need a Firebase session. */
+  readonly token?: () => Promise<string | null>;
 }
 
 const ENDPOINT = "/api/ai";
@@ -64,6 +67,16 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
     reason,
   });
 
+  /**
+   * The endpoint spends the owner's provider quota, so it will not answer
+   * without proof of who is calling. No session means no model, which is the
+   * normal state in local development and is not an error.
+   */
+  const auth = await (options.token ?? idToken)();
+  if (!auth) {
+    return fallback("Not signed in, so the figures were not sent anywhere.");
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
@@ -71,7 +84,10 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
     const response = await doFetch(ENDPOINT, {
       method: "POST",
       signal: controller.signal,
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${auth}`,
+      },
       body: JSON.stringify({ context: contextToText(context), task, tone }),
     });
 

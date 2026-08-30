@@ -37,12 +37,62 @@
  *     keeps this file small enough to audit.
  */
 
+import { verifyOwner, type OwnerCheck } from "./_owner";
+
 interface Env {
   /** Set in Cloudflare, Pages, Settings, Environment variables. Never in the repo. */
   readonly GROQ_API_KEY?: string;
   readonly OPENROUTER_API_KEY?: string;
   /** Optional comma-separated override, so a retired model can be swapped without a deploy. */
   readonly AI_MODELS?: string;
+  /**
+   * Who is allowed to call this. Both are public identifiers, not secrets:
+   * the project id is in the bundle and the uid is in `firestore.rules`.
+   * They are read from the environment anyway so this file works unchanged
+   * for a different deployment.
+   */
+  readonly FIREBASE_PROJECT_ID?: string;
+  readonly OWNER_UID?: string;
+}
+
+/**
+ * Defaults, so protecting this endpoint does not depend on someone
+ * remembering to set two variables. Adding a check that silently does nothing
+ * until it is configured is barely better than no check.
+ *
+ * Neither is a secret. The project id ships in the JavaScript bundle and the
+ * uid is in `firestore.rules`, which is committed: they identify the account,
+ * they do not grant access to it. Google's signature check is what makes the
+ * token real, and these only say which project and which person it has to be
+ * for. The environment still overrides both, so a fork can point elsewhere
+ * without editing this file.
+ */
+const DEFAULT_PROJECT_ID = "financial-system-c2997";
+const DEFAULT_OWNER_UID = "RJD4Ads5gKMcbmVqaU3JnhvDe6G2";
+
+/**
+ * Every route here refuses anyone who cannot prove they are the owner.
+ *
+ * This endpoint spends money. Left open on a public URL it is a free LLM
+ * proxy that the owner pays for, and the first symptom would be the AI
+ * quietly failing because the quota had been drained by strangers.
+ */
+async function refuseStranger(request: Request, env: Env): Promise<Response | null> {
+  const projectId = env.FIREBASE_PROJECT_ID ?? DEFAULT_PROJECT_ID;
+  const owner = env.OWNER_UID ?? DEFAULT_OWNER_UID;
+
+  const header = request.headers.get("authorization") ?? "";
+  const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  if (!token) return json({ error: "Sign in first." }, 401);
+
+  let check: OwnerCheck;
+  try {
+    check = await verifyOwner(token, projectId, owner);
+  } catch {
+    return json({ error: "Could not check who you are. Try again." }, 503);
+  }
+
+  return check.ok ? null : json({ error: check.reason ?? "Not allowed." }, 403);
 }
 
 interface AskBody {
@@ -241,8 +291,14 @@ const SYSTEM = [
  * rather than from whatever was true when the file was written. Ids only. No
  * key, no account detail, and nothing about the owner.
  */
-export const onRequestGet = async (ctx: { env: Env }): Promise<Response> => {
-  const { env } = ctx;
+export const onRequestGet = async (ctx: {
+  request: Request;
+  env: Env;
+}): Promise<Response> => {
+  const { request, env } = ctx;
+
+  const refused = await refuseStranger(request, env);
+  if (refused) return refused;
 
   const list = async (provider: Provider): Promise<string[]> => {
     const key = provider === "groq" ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
@@ -280,6 +336,9 @@ export const onRequestPost = async (ctx: {
   env: Env;
 }): Promise<Response> => {
   const { request, env } = ctx;
+
+  const refused = await refuseStranger(request, env);
+  if (refused) return refused;
 
   let body: AskBody;
   try {

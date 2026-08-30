@@ -40,7 +40,14 @@ const respond = (
     })) as unknown as typeof fetch;
 
 const ask = (fetcher: typeof fetch) =>
-  askAi({ context, task: "summary", tone: "brief", fetcher, timeoutMs: 500 });
+  askAi({
+    context,
+    task: "summary",
+    tone: "brief",
+    fetcher,
+    timeoutMs: 500,
+    token: async () => "test-token",
+  });
 
 describe("askAi", () => {
   it("returns the model's text when a provider answers", async () => {
@@ -105,6 +112,39 @@ describe("askAi", () => {
       expect(a.text.length).toBeGreaterThan(20);
       expect(a.text).toContain("PHP");
     }
+  });
+
+  it("does not send anything at all when there is no session", async () => {
+    let called = false;
+    const spy = (async () => {
+      called = true;
+      return new Response("{}", { headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const answer = await askAi({
+      context,
+      task: "summary",
+      tone: "brief",
+      fetcher: spy,
+      token: async () => null,
+    });
+
+    expect(called).toBe(false);
+    expect(answer.source).toBe("offline");
+    expect(answer.reason).toContain("Not signed in");
+  });
+
+  it("proves who is calling, so the endpoint is not an open proxy", async () => {
+    let auth: string | null = null;
+    const spy = (async (_url: string, init: RequestInit) => {
+      auth = new Headers(init.headers).get("authorization");
+      return new Response(JSON.stringify({ text: "ok" }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    await ask(spy);
+    expect(auth).toBe("Bearer test-token");
   });
 
   it("sends figures and never sends a raw transaction description", async () => {

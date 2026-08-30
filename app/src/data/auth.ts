@@ -60,3 +60,22 @@ export async function signIn(): Promise<void> {
 export async function signOutOwner(): Promise<void> {
   await signOut(authClient());
 }
+
+/**
+ * A short-lived token proving who is calling, for the AI endpoint.
+ *
+ * The endpoint spends the owner's provider quota, so it verifies this rather
+ * than taking the caller's word. Firebase refreshes the token on its own; this
+ * only reads the current one.
+ *
+ * Null when signed out, or when Firebase is not configured at all, which is
+ * the case in local development. Callers treat that as "no model available"
+ * and fall back, rather than as an error.
+ */
+export async function idToken(): Promise<string | null> {
+  try {
+    return (await authClient().currentUser?.getIdToken()) ?? null;
+  } catch {
+    return null;
+  }
+}
