@@ -555,9 +555,7 @@ export const onRequestPost = async (ctx: {
     context,
   ]
     .filter(Boolean)
-    .join("
-
-");
+    .join("\n\n");
 
   const maxTokens = spec.maxTokens ?? DEFAULT_MAX_TOKENS;
   const attempts: { model: string; reason: string }[] = [];
@@ -590,9 +588,7 @@ export const onRequestPost = async (ctx: {
           `That reply could not be read. Return only this JSON: ${spec.shape}`,
           "Your reply was:",
           raw.slice(0, 600),
-        ].join("
-
-"),
+        ].join("\n\n"),
         maxTokens,
       );
 

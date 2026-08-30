@@ -1,0 +1,36 @@
+{
+  /*
+   * The Cloudflare Pages Functions.
+   *
+   * These were checked by nothing. `tsconfig.app.json` includes only `src`,
+   * so every clean typecheck this project reported was silent about the one
+   * directory that runs on the server, and a syntax error in `api/ai.ts`
+   * shipped three times before anyone noticed: the local build passed, and
+   * only the Cloudflare deploy failed, quietly, leaving the site on an old
+   * bundle with no error anywhere the owner would look.
+   *
+   * A Worker is not the browser and not node. It has fetch, crypto and the
+   * standard web globals, and no DOM, so the lib list says exactly that.
+   */
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": [],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+
+    "isolatedModules": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.functions.tsbuildinfo"
+  },
+  "include": ["functions"]
+}
