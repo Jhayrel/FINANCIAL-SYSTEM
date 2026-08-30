@@ -1,0 +1,115 @@
+/**
+ * base.css: reset, type scale, shared utilities.
+ * No hex literals (rule T1). Everything references tokens.css.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 20px;
+  font-feature-settings: "cv05" 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior-y: none;
+}
+
+#root {
+  min-height: 100%;
+}
+
+/* ── Type scale ─────────────────────────────────────────────────────────── */
+
+.t-display-xl { font-size: 36px; line-height: 40px; font-weight: 700; letter-spacing: -0.025em; }
+.t-display-l  { font-size: 24px; line-height: 30px; font-weight: 700; letter-spacing: -0.02em; }
+.t-display-m  { font-size: 18px; line-height: 24px; font-weight: 600; letter-spacing: -0.015em; }
+.t-body       { font-size: 14px; line-height: 20px; font-weight: 400; }
+.t-body-strong{ font-size: 14px; line-height: 20px; font-weight: 600; }
+.t-caption    { font-size: 13px; line-height: 18px; font-weight: 400; }
+.t-label      { font-size: 12px; line-height: 16px; font-weight: 500; }
+.t-micro      { font-size: 11px; line-height: 14px; font-weight: 500; }
+
+/* Table column headers are the ONLY uppercase text in the app. */
+.t-th {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Numbers, tabular everywhere, no monospace ─────────────────────────── */
+
+.t-num-xl, .t-num-l, .t-num, .t-num-s {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  white-space: nowrap;
+}
+.t-num-xl { font-size: 32px; line-height: 38px; font-weight: 700; letter-spacing: -0.03em; }
+.t-num-l  { font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.02em; }
+.t-num    { font-size: 14px; line-height: 20px; font-weight: 500; }
+.t-num-s  { font-size: 13px; line-height: 18px; font-weight: 500; }
+
+/* The peso sign sits muted and slightly apart. */
+.peso {
+  color: var(--ink-3);
+  font-weight: 500;
+  margin-right: 0.15em;
+}
+
+/* ── Focus ──────────────────────────────────────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ── Forms ──────────────────────────────────────────────────────────────── */
+
+input, select, textarea, button { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+/* ── Utilities ──────────────────────────────────────────────────────────── */
+
+.safe-b { padding-bottom: env(safe-area-inset-bottom, 0); }
+.safe-t { padding-top: env(safe-area-inset-top, 0); }
+
+.scroll-slim::-webkit-scrollbar { height: 8px; width: 8px; }
+.scroll-slim::-webkit-scrollbar-thumb { background: var(--hairline-strong); border-radius: var(--radius-full); }
+.scroll-slim::-webkit-scrollbar-track { background: transparent; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ── Motion ─────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes fms-spin { to { transform: rotate(360deg); } }
+@keyframes fms-draw { from { opacity: 0; } to { opacity: 1; } }

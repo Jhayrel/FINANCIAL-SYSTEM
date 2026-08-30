@@ -1,0 +1,47 @@
+# ── Dependencies ───────────────────────────────────────────────
+node_modules/
+
+# ── Build output ───────────────────────────────────────────────
+dist/
+.vite/
+*.tsbuildinfo
+
+# ── Private data — NEVER commit ────────────────────────────────
+# "MY THINGS" holds the original workbook, which contains BOTH live API keys
+# (CATEGORIES!U7:U16) and a full personal financial history. It must never
+# reach GitHub. The folder stays on disk and in OneDrive — this only keeps it
+# out of git. Do not remove these lines.
+MY THINGS/
+*.xlsm
+*.xlsx
+
+# Extracted fixtures contain real transaction data too.
+app/src/fixtures/*.json
+tools/out/
+
+# ── Secrets — never commit ─────────────────────────────────────
+# API keys live in Cloudflare environment secrets, never in the tree.
+.env
+.env.*
+!.env.example
+*.key
+serviceAccount*.json
+firebase-adminsdk*.json
+
+# ── Local tooling ──────────────────────────────────────────────
+.firebase/
+.wrangler/
+coverage/
+
+# ── OS / editor ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ── OneDrive / Excel debris ────────────────────────────────────
+~$*
+*.tmp

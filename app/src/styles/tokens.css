@@ -1,0 +1,206 @@
+/**
+ * tokens.css: THE ONLY FILE WHERE A HEX LITERAL MAY APPEAR.
+ *
+ * Direction: clean, light SaaS dashboard. White cards on a soft canvas,
+ * hairline borders, shallow shadows, generous whitespace, green as an accent.
+ *
+ * Supersedes spec Part 6 (2px ink rules, square corners, monospace money),
+ * which was built, reviewed and rejected on 29 Aug 2026.
+ * docs/04-STYLE-GUIDE.md is the binding contract.
+ *
+ * Dark theme lives in ONE block, `.theme-dark`, applied by src/theme.ts.
+ * No duplicated media-query block, so the two can never drift.
+ */
+
+:root {
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  --paper: #f4f6f4;
+  --surface: #ffffff;
+  --surface-sunk: #f2f4f2;
+  --surface-hover: #f8faf8;
+  --hairline: #e5e8e4;
+  --hairline-strong: #d0d6ce;
+
+  /* ── Ink ──────────────────────────────────────────────────────────────── */
+  --ink: #141a15;
+  --ink-2: #4c554c;
+  --ink-3: #697269;
+
+  /* ── Brand, the workbook green, used as an accent ────────────────────── */
+  --brand-900: #16300f;
+  --brand-800: #1f4415;
+  --brand-700: #2f6b21;
+  --brand-600: #3a7c27;
+  --brand-500: #55982f;
+  --brand-300: #9bcd77;
+  --brand-100: #dff0d0;
+  --brand-50: #f0f8ea;
+  --on-brand: #ffffff;
+  --brand-hover: #285c1c;
+  --brand-active: #1f4415;
+
+  /* ── FLOW, semantic. Direction of money, never decoration. ───────────── */
+  --flow-revenue: #1e7a3c;
+  --flow-revenue-text: #14532d;
+  --flow-revenue-bg: #e7f5ec;
+
+  --flow-spending: #b3261e;
+  --flow-spending-text: #8c1d18;
+  --flow-spending-bg: #fceae9;
+
+  /* Grey on purpose: a transfer is neither gain nor loss. */
+  --flow-transfer: #66705f;
+  --flow-transfer-text: #434c3e;
+  --flow-transfer-bg: #eef1ec;
+
+  /* Amber, not red: a liability is not an expense. */
+  --flow-debt: #9a5b12;
+  --flow-debt-text: #7a4409;
+  --flow-debt-bg: #fbf0e2;
+
+  /* ── Status ───────────────────────────────────────────────────────────── */
+  --ok: #1e7a3c;
+  --ok-bg: #e7f5ec;
+  --over: #b3261e;
+  --over-bg: #fceae9;
+  --warn: #8a5a00;
+  --warn-bg: #fdf3d8;
+  --info: #1f5f8b;
+  --info-bg: #e8f1f8;
+  --none: #5e675e;
+  --none-bg: #eff1ee;
+
+  /* ── Chart palette, fixed by annual rank so colours never shuffle ────── */
+  --cat-1: #1f4415;
+  --cat-2: #2f6b21;
+  --cat-3: #3f7a22;
+  --cat-4: #55982f;
+  --cat-5: #6faa45;
+  --cat-6: #8abe62;
+  --cat-7: #a6cf83;
+  --cat-8: #9a5b12;
+  --cat-9: #b8791f;
+  --cat-10: #c99a4e;
+  --cat-11: #66705f;
+  --cat-12: #8a9682;
+  --cat-13: #a8b29f;
+  --cat-14: #c2c9bc;
+  --cat-15: #d5dacf;
+  --cat-16: #e4e8e0;
+  --cat-17: #eff2ed;
+
+  /* ── Type ─────────────────────────────────────────────────────────────── */
+  --font-ui: "Inter Variable", Inter, system-ui, -apple-system, sans-serif;
+
+  /* ── Spacing, 4px base ───────────────────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* ── Radius ───────────────────────────────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* ── Elevation, three levels, all shallow ────────────────────────────── */
+  --shadow-card: 0 1px 2px rgba(16, 24, 16, 0.05);
+  --shadow-raised: 0 2px 8px rgba(16, 24, 16, 0.08);
+  --shadow-overlay: 0 12px 32px rgba(16, 24, 16, 0.16);
+
+  /* ── Structure ────────────────────────────────────────────────────────── */
+  --hairline-weight: 1px;
+  --focus-ring: #3a7c27;
+
+  /* ── Motion ───────────────────────────────────────────────────────────── */
+  --motion-hover: 120ms;
+  --motion-sheet: 220ms;
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+
+  color-scheme: light;
+}
+
+/**
+ * Dark theme: a tuned palette, not an inversion.
+ * SINGLE BLOCK. Do not add a second one.
+ */
+.theme-dark {
+  --paper: #0f120f;
+  --surface: #171b17;
+  --surface-sunk: #1f241f;
+  --surface-hover: #212721;
+  --hairline: #2a312a;
+  --hairline-strong: #3a433a;
+
+  --ink: #e8ede8;
+  --ink-2: #a9b3a9;
+  --ink-3: #949e94;
+
+  --brand-700: #56a83a;
+  --brand-600: #63b845;
+  --brand-500: #7dc95c;
+  --brand-100: #223019;
+  --brand-50: #1a2116;
+  --on-brand: #0f120f;
+  --brand-hover: #63b845;
+  --brand-active: #7dc95c;
+
+  --flow-revenue: #5fc97f;
+  --flow-revenue-text: #8fdca6;
+  --flow-revenue-bg: #14301c;
+
+  --flow-spending: #f0857a;
+  --flow-spending-text: #f5a59c;
+  --flow-spending-bg: #351d19;
+
+  --flow-transfer: #97a58e;
+  --flow-transfer-text: #b6c2ae;
+  --flow-transfer-bg: #232c1e;
+
+  --flow-debt: #e0a45c;
+  --flow-debt-text: #e9bd85;
+  --flow-debt-bg: #302514;
+
+  --ok: #7dc95c;
+  --ok-bg: #172d13;
+  --over: #f08b7f;
+  --over-bg: #351d19;
+  --warn: #e0b155;
+  --warn-bg: #322813;
+  --info: #7db8e0;
+  --info-bg: #152631;
+  --none: #949e94;
+  --none-bg: #1f251f;
+
+  --cat-1: #2f6b21;
+  --cat-2: #3f7a22;
+  --cat-3: #55982f;
+  --cat-4: #6faa45;
+  --cat-5: #8abe62;
+  --cat-6: #a6cf83;
+  --cat-7: #c2e2a9;
+  --cat-8: #b8791f;
+  --cat-9: #c99a4e;
+  --cat-10: #dbb87e;
+  --cat-11: #97a58e;
+  --cat-12: #a8b29f;
+  --cat-13: #bcc4b4;
+  --cat-14: #6d7a66;
+  --cat-15: #55604f;
+  --cat-16: #3d4639;
+  --cat-17: #2c3326;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-raised: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-overlay: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+  --focus-ring: #7dc95c;
+
+  color-scheme: dark;
+}

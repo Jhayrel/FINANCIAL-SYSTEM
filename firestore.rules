@@ -1,0 +1,182 @@
+rules_version = '2';
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Firestore security rules: Financial Management System
+//
+//  This database holds one person's entire financial history. The rules are a
+//  deny-by-default whitelist: nothing is readable or writable unless a rule
+//  below explicitly allows it.
+//
+//  Four things enforced here, because the client cannot be trusted to:
+//
+//   1. ONE OWNER.       Signed in is not enough. The uid must equal OWNER_UID.
+//   2. NO HARD DELETE.  `delete` is denied on every money collection. Removing
+//                       a transaction means setting `deletedAt`, which moves it
+//                       to the Bin and keeps it restorable (CLAUDE.md §4).
+//   3. INTEGER MONEY.   A float amount is rejected at the database. Centavos
+//                       end to end, never a rounding error at rest.
+//   4. NO SECRETS.      A document carrying an apiKey-shaped field is rejected.
+//                       The AI key lives in a Cloudflare env secret (§2, AI4).
+//
+//  Deploy:  firebase deploy --only firestore:rules
+//  Test:    firebase emulators:start --only firestore
+// ═══════════════════════════════════════════════════════════════════════════
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Who ────────────────────────────────────────────────────────────────
+
+    // The owner's uid, from Firebase console → Authentication → Users.
+    // Until it is replaced, every rule below denies. An unset owner must fail
+    // closed; a placeholder that happened to allow access would be worse than
+    // no rules at all.
+    function ownerUid() {
+      return 'RJD4Ads5gKMcbmVqaU3JnhvDe6G2';
+    }
+
+    function isOwner(uid) {
+      return request.auth != null
+          && request.auth.uid == uid
+          && request.auth.uid == ownerUid();
+    }
+
+    // ── Shape helpers ──────────────────────────────────────────────────────
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // Money is integer centavos. A float means someone did arithmetic in
+    // pesos: the exact bug class this app is built to avoid. ±₱1,000,000,000
+    // is far past any real figure here and still well inside a safe integer.
+    function isCentavos(v) {
+      return v is int && v > -100000000000 && v < 100000000000;
+    }
+
+    // Key names that have no business in this database. The UI refuses to save
+    // a key; this is the layer that holds when the UI is bypassed.
+    function noSecretKeys(keys) {
+      return !keys.hasAny(['apiKey', 'api_key', 'apikey', 'key', 'token',
+                           'secret', 'authorization', 'bearer']);
+    }
+
+    // ── Transactions ───────────────────────────────────────────────────────
+    //
+    // The ledger. One document per row. A binned row stays right here with
+    // `deletedAt` set: there is no second collection to drift out of sync,
+    // and no code path that removes a money record.
+
+    function validTransaction() {
+      let d = incoming();
+      return d.keys().hasAll([
+               'recordNumber', 'date', 'type', 'fromWallet', 'toWallet',
+               'category', 'item', 'description', 'amount', 'fee', 'total',
+               'notes', 'status'
+             ])
+          && d.recordNumber is int && d.recordNumber > 0
+          && d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && d.type in ['Revenue', 'Spending', 'Transfer', 'Debt']
+          && d.category in ['Revenue', 'Spending', 'Bills', 'Subscriptions',
+                            'Transfer', 'Opening', '']
+          && d.fromWallet is string && d.fromWallet.size() <= 80
+          && d.toWallet is string && d.toWallet.size() <= 80
+          && d.item is string && d.item.size() <= 80
+          && d.description is string && d.description.size() <= 500
+          && d.notes is string && d.notes.size() <= 1000
+          && d.status is string && d.status.size() <= 40
+          && isCentavos(d.amount)
+          && isCentavos(d.fee)
+          && isCentavos(d.total)
+          // The invariant the whole ledger rests on. Enforced here so no
+          // client can write a row whose parts do not add up.
+          && d.total == d.amount + d.fee
+          // A Debt row without its debt cannot be reconciled later (rule D1).
+          && (d.type != 'Debt' || (
+                d.debtId is string && d.debtId.size() > 0
+             && d.debtEffect in ['draw', 'repay', 'interest', 'fee',
+                                 'writeoff', 'lend', 'collect']
+             ))
+          // Present means binned; absent means live. Nothing else.
+          && (!('deletedAt' in d) || d.deletedAt is string)
+          && noSecretKeys(d.keys());
+    }
+
+    match /users/{uid}/transactions/{txId} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid) && validTransaction();
+
+      // Never. Deleting is `deletedAt`, and restoring clears it. There is no
+      // gesture anywhere in the app that should reach this line.
+      allow delete: if false;
+    }
+
+    // ── Settings ───────────────────────────────────────────────────────────
+    //
+    // Accounts, goals, categories, spending types, credit lines, AI
+    // preferences, theme. One document, rewritten whole on every edit.
+
+    function validSettings() {
+      let d = incoming();
+      return d.version is int
+          && d.accounts is list && d.accounts.size() <= 200
+          && d.bills is list && d.bills.size() <= 100
+          && d.subscriptions is list && d.subscriptions.size() <= 100
+          && d.revenueCategories is list && d.revenueCategories.size() <= 100
+          && d.spendingTypes is list && d.spendingTypes.size() <= 100
+          && d.credits is list && d.credits.size() <= 100
+          && isCentavos(d.lowBalanceThreshold)
+          && d.theme in ['light', 'dark', 'system']
+          && d.ai is map
+          && d.ai.enabled is bool
+          && d.ai.provider in ['groq', 'openrouter', 'openai', 'anthropic']
+          && d.ai.model is string && d.ai.model.size() <= 80
+          && d.ai.tone in ['brief', 'plain', 'detailed']
+          // There is no API key field in the app, and none may be introduced
+          // by writing one straight into the console. Rule AI4.
+          && noSecretKeys(d.keys())
+          && noSecretKeys(d.ai.keys());
+    }
+
+    match /users/{uid}/meta/settings {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid) && validSettings();
+      allow delete: if false;
+    }
+
+    // ── Budgets ────────────────────────────────────────────────────────────
+    //
+    // One document per year, id "2026". Twelve amounts per track, index 0 =
+    // January, matching the Excel's BUDGETING sheet.
+
+    match /users/{uid}/budgets/{year} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+                            && year.matches('^[0-9]{4}$')
+                            && incoming().spending is list
+                            && incoming().spending.size() == 12
+                            && incoming().billsSubs is list
+                            && incoming().billsSubs.size() == 12;
+      allow delete: if false;
+    }
+
+    // ── No debts collection ────────────────────────────────────────────────
+    //
+    // Credit lines and loans live inside the settings document, as
+    // `settings.credits`, because they are a short list the app always reads
+    // whole. There is no `users/{uid}/debts` collection, so there is no rule
+    // for one: a rule guarding a collection nothing writes reads like a
+    // feature and is really just a place for a future mistake to hide.
+    //
+    // The movements themselves are ordinary transactions carrying `debtId`.
+
+    // ── Everything else ────────────────────────────────────────────────────
+    //
+    // Explicit, so a collection added by hand in the console later is not
+    // silently world-readable.
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

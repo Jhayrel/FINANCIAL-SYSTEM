@@ -1,0 +1,1063 @@
+/**
+ * layout.css: app shell and screen layouts.
+ * No hex literals (rule T1); everything references tokens.css.
+ */
+
+/* ══ App shell ══════════════════════════════════════════════════════════════
+   The sidebar is fixed. Only .fms-content scrolls. */
+
+.fms-app {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.fms-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--hairline);
+  padding: var(--space-5) var(--space-3);
+  overflow: hidden;
+}
+
+.fms-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2) var(--space-5);
+}
+
+.fms-mark {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm);
+  background: var(--brand-700);
+  display: grid;
+  place-items: center;
+}
+
+.fms-nav {
+  display: grid;
+  gap: 2px;
+}
+
+.fms-navitem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: background var(--motion-hover) var(--ease-out);
+}
+
+.fms-navitem:hover {
+  background: var(--surface-hover);
+}
+
+/* Fixed-width icon column so every label starts at the same x. */
+.fms-navicon {
+  width: 18px;
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+.fms-networth {
+  margin-top: auto;
+  padding: var(--space-3);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-md);
+}
+
+.fms-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fms-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
+  padding: var(--space-3) var(--space-5);
+}
+
+.fms-main {
+  flex: 1;
+  padding: var(--space-5);
+  min-width: 0;
+}
+
+.fms-bottomnav {
+  display: none;
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 20;
+  background: var(--surface);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-bnitem {
+  flex: 1;
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: none;
+  background: transparent;
+}
+
+.fms-toastwrap {
+  position: fixed;
+  bottom: var(--space-6);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+}
+
+/* ══ Dashboard ══════════════════════════════════════════════════════════════ */
+
+.fms-dash {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 1280px;
+}
+
+.fms-kpis {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.fms-kpifoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.fms-charts {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+}
+
+/* Label left, figure right: a real two-column grid, so the numbers stay in
+   a column even when a label wraps. */
+.fms-qrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-qrow:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.fms-walletgrid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.fms-walletcard {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-3);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-md);
+}
+
+.fms-wname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ══ Database ═══════════════════════════════════════════════════════════════ */
+
+.fms-db {
+  max-width: 1600px;
+}
+
+.fms-dbtools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-truncate {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.fms-dblist {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fms-dbrow {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-dbrow-main {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* ══ Entry screen: one page, no scrolling on desktop ═══════════════════════ */
+
+.fms-entry {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 240px);
+  align-items: start;
+  max-width: 1100px;
+}
+
+.fms-panel {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4);
+}
+
+.fms-flowgrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.fms-flowtile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  min-height: 52px;
+  padding: var(--space-2) var(--space-3);
+  border-style: solid;
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: background var(--motion-hover) var(--ease-out);
+}
+
+.fms-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--space-3) var(--space-5);
+}
+
+.fms-row-span {
+  grid-column: 1 / -1;
+}
+
+/* Desktop: label beside the control, Excel style. The label column is a fixed
+   width so every control lines up at the same offset in both columns. */
+.fms-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+}
+
+.fms-rowlabel {
+  color: var(--ink-2);
+  text-align: right;
+}
+
+.fms-control {
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--space-3);
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+}
+
+.fms-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
+}
+
+/* Two real columns, so amounts align even when a wallet name wraps. */
+.fms-balrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 5px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-balrow:last-child {
+  border-bottom: 0;
+}
+
+/* ══ Responsive ═════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1023px) {
+  .fms-app {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fms-sidebar {
+    display: none;
+  }
+  .fms-bottomnav {
+    display: flex;
+  }
+  .fms-main {
+    padding: var(--space-4);
+    padding-bottom: 88px;
+  }
+  .fms-toastwrap {
+    bottom: 76px;
+  }
+
+  /* The side panel stacks BELOW the form: on a small screen you came here to
+     type, so the form must be first under your thumb. */
+  .fms-entry {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fms-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* A table never scrolls sideways on a phone: stack it into rows. */
+  .fms-tablewrap {
+    display: none;
+  }
+  .fms-dblist {
+    display: block;
+  }
+}
+
+@media (max-width: 719px) {
+  .fms-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+
+  .fms-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: var(--space-1);
+    min-height: 0;
+  }
+
+  .fms-rowlabel {
+    text-align: left;
+  }
+
+  .fms-flowgrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .fms-panel {
+    padding: var(--space-3);
+  }
+  .fms-actions > button {
+    flex: 1;
+  }
+  .fms-dbtools {
+    padding: var(--space-3);
+  }
+}
+
+/* ── Sidebar count badge ────────────────────────────────────────────────── */
+
+.fms-navcount {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+}
+
+/* ── Insights calendar ──────────────────────────────────────────────────── */
+
+.fms-cal {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.fms-calhead {
+  text-align: center;
+  color: var(--ink-3);
+  padding-bottom: var(--space-1);
+}
+
+.fms-calday {
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Statements toolbar ─────────────────────────────────────────────────── */
+
+.fms-stmttools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-stmtfield {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 160px;
+  flex: 1 1 160px;
+  max-width: 240px;
+}
+
+.fms-stmtsummary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  background: var(--surface-sunk);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* ── Phone "More" sheet ─────────────────────────────────────────────────── */
+
+.fms-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: rgba(16, 24, 16, 0.4);
+}
+
+.fms-sheet {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 26;
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3) 72px;
+  background: var(--surface);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  animation: fms-sheet-in var(--motion-sheet) var(--ease-sheet);
+}
+
+.fms-sheethandle {
+  width: 36px;
+  height: 4px;
+  margin: var(--space-2) auto var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--hairline-strong);
+}
+
+@keyframes fms-sheet-in {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* ══ Fixed-height screens ═══════════════════════════════════════════════════
+   The shell never scrolls. Normally the content column does; a "fixed" screen
+   takes that over and scrolls its own inner panel instead. */
+
+.fms-app { height: 100vh; overflow: hidden; }
+.fms-content { min-height: 0; }
+.fms-main { overflow-y: auto; }
+.fms-main--fixed { overflow: hidden; display: flex; flex-direction: column; }
+
+/* ══ Settings ═══════════════════════════════════════════════════════════════ */
+
+.fms-settings {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--space-4);
+  height: 100%;
+  min-height: 0;
+  max-width: 1280px;
+  width: 100%;
+}
+
+.fms-tabs {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 719px) {
+  .fms-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .fms-tabs::-webkit-scrollbar { display: none; }
+  .fms-tab { flex: 0 0 auto; padding: 0 var(--space-3); }
+}
+
+.fms-tab {
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  transition: background var(--motion-hover) var(--ease-out);
+}
+.fms-tab:hover { background: var(--surface-hover); }
+
+.fms-tab[aria-selected="true"] {
+  background: var(--brand-700);
+  border-color: transparent;
+  color: var(--on-brand);
+  font-weight: 600;
+}
+
+/* The one scrolling region on the screen. */
+.fms-panel-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px var(--space-2) var(--space-6) 2px;
+}
+
+@media (max-width: 719px) {
+  .fms-panel-scroll { padding: var(--space-3); }
+}
+
+/* ══ Settings tables ════════════════════════════════════════════════════════
+   Columns, headers and hairlines, a settings list is a table, so it should
+   look like one. Capped in width because a name stretched across 1300px
+   leaves a gulf between it and its value. */
+
+.fms-settings-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.fms-card {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  min-width: 0;
+}
+
+/* A section whose table has more than two columns needs the whole row. */
+.fms-card--wide { grid-column: 1 / -1; }
+
+
+
+.fms-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.fms-table th {
+  padding: var(--space-2);
+  text-align: left;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+
+.fms-table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: middle;
+}
+
+.fms-table tbody tr:last-child td { border-bottom: 0; }
+.fms-table tbody tr:hover { background: var(--surface-hover); }
+
+ /* The one column that yields when the card is narrow. */
+.fms-table td.fms-cell-flex { max-width: 0; }
+
+ /* A column that should be exactly as wide as its content, no wider.
+    width:1% with nowrap is the table-layout idiom for it. */
+.fms-table th.fms-shrink,
+.fms-table td.fms-shrink { width: 1%; white-space: nowrap; }
+
+.fms-table th.fms-th-right,
+.fms-table td.fms-td-right { text-align: right; }
+
+/* Actions sit in one column, right-aligned, so they form a clean edge. */
+.fms-rowactions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: var(--space-2);
+  justify-content: end;
+  white-space: nowrap;
+}
+
+.fms-rowactions > button { min-width: 96px; }
+
+/* A named block inside the panel. */
+.fms-setgroup > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+/* The add-row under each table. */
+.fms-addrow {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--hairline-strong);
+}
+
+.fms-addrow > .fms-grow { flex: 1 1 220px; min-width: 0; }
+
+/* A two-column definition list for the AI / data section. */
+.fms-deflist {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.fms-deflist > * {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+.fms-deflist > *:nth-child(even) {
+  padding-left: var(--space-3);
+  text-align: right;
+}
+.fms-deflist > *:nth-last-child(-n + 2) { border-bottom: 0; }
+
+@media (max-width: 719px) {
+  /* A settings table stacks into rows, like every other table in the app. */
+  .fms-table thead { display: none; }
+  .fms-table, .fms-table tbody, .fms-table tr, .fms-table td { display: block; width: 100%; }
+  .fms-table tr {
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .fms-table td { border-bottom: 0; padding: 2px 0; }
+  .fms-table td.fms-td-right { text-align: left; }
+  .fms-rowactions { justify-content: flex-start; margin-top: var(--space-2); }
+}
+
+/* ══ Buttons ════════════════════════════════════════════════════════════════
+   The palette lives in primitives.tsx as inline style; hover, active and focus
+   cannot be expressed inline, so they live here. Without them a button gives
+   no feedback at all and reads as text. */
+
+.fms-btn {
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  box-shadow: var(--shadow-card);
+}
+.fms-btn:disabled { cursor: default; box-shadow: none; }
+
+.fms-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.fms-btn--primary:hover:not(:disabled) { background: var(--brand-hover); }
+.fms-btn--primary:active:not(:disabled) { background: var(--brand-active); }
+
+.fms-btn--secondary { box-shadow: none; }
+.fms-btn--secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--hairline-strong);
+}
+.fms-btn--secondary:active:not(:disabled) { background: var(--hairline); }
+
+/* Ghost carries no chrome at rest, so it must gain some on hover to read as a
+   control rather than a label. */
+.fms-btn--ghost { box-shadow: none; }
+.fms-btn--ghost:hover:not(:disabled) {
+  background: var(--surface-sunk);
+  border-color: var(--hairline-strong);
+}
+.fms-btn--ghost:active:not(:disabled) { background: var(--hairline); }
+
+.fms-btn--danger { box-shadow: none; }
+.fms-btn--danger:hover:not(:disabled) { border-color: var(--over); }
+.fms-btn--danger:active:not(:disabled) { filter: brightness(0.96); }
+
+
+/* ══ Scrollbars ═════════════════════════════════════════════════════════════
+   The platform default is a wide grey slab that fights the hairlines. Thin,
+   on-palette, and only visible against the surface it scrolls. */
+
+.fms-scroll,
+.fms-panel-scroll,
+.fms-main,
+.fms-tablewrap {
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline-strong) transparent;
+}
+
+.fms-scroll::-webkit-scrollbar,
+.fms-panel-scroll::-webkit-scrollbar,
+.fms-main::-webkit-scrollbar,
+.fms-tablewrap::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.fms-scroll::-webkit-scrollbar-track,
+.fms-panel-scroll::-webkit-scrollbar-track,
+.fms-main::-webkit-scrollbar-track,
+.fms-tablewrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.fms-scroll::-webkit-scrollbar-thumb,
+.fms-panel-scroll::-webkit-scrollbar-thumb,
+.fms-main::-webkit-scrollbar-thumb,
+.fms-tablewrap::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: var(--radius-full);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.fms-scroll::-webkit-scrollbar-thumb:hover,
+.fms-panel-scroll::-webkit-scrollbar-thumb:hover,
+.fms-main::-webkit-scrollbar-thumb:hover,
+.fms-tablewrap::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
+  background-clip: content-box;
+}
+
+/* ══ Segmented control ══════════════════════════════════════════════════════
+   Three mutually exclusive choices, shown at once. A dropdown would hide two
+   of the three behind a click for no gain. */
+
+.fms-segmented {
+  display: inline-flex;
+  padding: 3px;
+  gap: 3px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+}
+
+.fms-seg {
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--ease-out);
+}
+.fms-seg:hover { background: var(--surface-hover); }
+.fms-seg:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+.fms-seg[aria-checked="true"] {
+  background: var(--surface);
+  border-color: var(--hairline-strong);
+  color: var(--ink);
+  box-shadow: var(--shadow-card);
+}
+
+/* ══ Dialog ═════════════════════════════════════════════════════════════════ */
+
+.fms-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: rgba(16, 24, 16, 0.45);
+}
+
+.fms-dialog {
+  width: min(440px, 100%);
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+
+.fms-dialog-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fms-dialog { animation: fms-dialog-in var(--motion-sheet) var(--ease-sheet); }
+}
+
+@keyframes fms-dialog-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ══ Grouped table ══════════════════════════════════════════════════════════
+   One table with labelled bands beats three tables whose columns do not line
+   up with each other. */
+
+.fms-grouphead th {
+  padding-top: var(--space-5);
+  border-bottom: 1px solid var(--hairline-strong);
+}
+.fms-table tbody tr.fms-grouphead:first-child th { padding-top: var(--space-2); }
+.fms-table tbody tr.fms-grouphead:hover { background: transparent; }
+
+.fms-groupname {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ══ Sign-in gate ═══════════════════════════════════════════════════════════ */
+
+.fms-gate {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: var(--paper);
+}
+
+/* ══ Select ═════════════════════════════════════════════════════════════════
+   A listbox, not a native select. The trigger centres its value because that
+   is what was asked for; the menu is left-aligned because a centred menu drifts
+   off the box edge and reads as misaligned. */
+
+.fms-select {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  /* Room on the right for the chevron, so the value never runs under it. */
+  padding: 0 var(--space-8) 0 var(--space-3);
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--motion-hover) var(--ease-out);
+}
+.fms-select:hover:not(:disabled) { border-color: var(--ink-3); }
+.fms-select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.fms-select[aria-expanded="true"] { border-color: var(--brand-700); }
+.fms-select:disabled {
+  background: var(--surface-sunk);
+  color: var(--ink-3);
+  cursor: default;
+}
+.fms-select--invalid { border-color: var(--over); }
+
+.fms-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.fms-select-placeholder { color: var(--ink-3); }
+
+.fms-select-chevron {
+  position: absolute;
+  right: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-2);
+  pointer-events: none;
+  line-height: 0;
+}
+.fms-select:disabled .fms-select-chevron { color: var(--ink-3); }
+
+/* The menu is portalled to the body, so it needs its own stacking level and
+   cannot inherit the panel's colours. */
+.fms-menu {
+  z-index: 60;
+  /* Grows to its longest option, between the min and max the anchor sets. */
+  width: max-content;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-overlay);
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline-strong) transparent;
+}
+.fms-menu::-webkit-scrollbar { width: 10px; }
+.fms-menu::-webkit-scrollbar-track { background: transparent; }
+.fms-menu::-webkit-scrollbar-thumb {
+  background: var(--hairline-strong);
+  border-radius: var(--radius-full);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.fms-menu-item {
+  display: flex;
+  white-space: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.fms-menu-item[data-active="true"] { background: var(--surface-sunk); }
+.fms-menu-item[aria-selected="true"] { font-weight: 600; }
+.fms-menu-item + .fms-menu-item { border-top: 1px solid var(--hairline); }
+
+.fms-menu-tick { color: var(--brand-700); line-height: 0; flex: 0 0 auto; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .fms-menu { animation: fms-menu-in 120ms var(--ease-out); }
+}
+@keyframes fms-menu-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ══ Storage ════════════════════════════════════════════════════════════════
+   A segmented bar over a legend, the way a phone reports its own storage. The
+   bar is scaled to the quota, not to the used total, so a nearly empty ledger
+   looks nearly empty rather than full of colour. */
+
+.fms-storage-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.fms-storage-bar {
+  display: flex;
+  height: 12px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: var(--surface-sunk);
+  border: 1px solid var(--hairline);
+  margin-bottom: var(--space-4);
+}
+
+.fms-storage-bar > span {
+  /* A section too small to see is still worth a sliver, so the legend and the
+     bar never disagree about whether something is there. */
+  min-width: 3px;
+  border-right: 1px solid var(--surface);
+}
+.fms-storage-bar > span:last-child { border-right: 0; }
+
+.fms-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+}
+
+/* A field that shows what the app worked out, rather than asking. */
+.fms-derived {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  min-height: 44px;
+}
+
+/* Pasting a config block. Monospace, because it is code. */
+.fms-paste {
+  width: 100%;
+  padding: var(--space-3);
+  background: var(--surface-sunk);
+  color: var(--ink);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  line-height: 1.5;
+}
+.fms-paste:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* A uid is meant to be copied, so make it selectable and legible. */
+.fms-uid {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-sunk);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  user-select: all;
+  word-break: break-all;
+}
