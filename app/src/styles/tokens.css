@@ -20,6 +20,17 @@
   --surface-hover: #f8faf8;
   --hairline: #e5e8e4;
   --hairline-strong: #d0d6ce;
+  /*
+   * The assistant's halo.
+   *
+   * Eight digit hex rather than rgba, because rule D1 says colour lives here
+   * as hex and nowhere else. The last two digits are the alpha: it has to be
+   * faint, since it is decoration sitting outside a panel and never the
+   * reason anything is readable.
+   */
+  --ai-glow-ring: #3a7c2759;
+  --ai-glow-halo: #3a7c2726;
+  --ai-glow-halo-active: #3a7c2747;
 
   /* ── Ink ──────────────────────────────────────────────────────────────── */
   --ink: #141a15;
@@ -137,6 +148,10 @@
   --surface-hover: #212721;
   --hairline: #2a312a;
   --hairline-strong: #3a433a;
+  /* Lifted for the dark surface, same faintness to the eye. */
+  --ai-glow-ring: #7dc95c4d;
+  --ai-glow-halo: #7dc95c24;
+  --ai-glow-halo-active: #7dc95c42;
 
   --ink: #e8ede8;
   --ink-2: #a9b3a9;

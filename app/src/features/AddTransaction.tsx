@@ -36,11 +36,12 @@ import {
   type Draft,
   type Flow,
 } from "../domain/entry";
-import type { AiSettings } from "../domain/settings";
+import type { AiSettings, AppSettings } from "../domain/settings";
 import { describeDraft, suggestCategory } from "../data/aiClient";
+import { AskPanel } from "./AskPanel";
 import type { CategoryResult } from "../data/aiClient";
 import { billsToLog, predictAmount, reasons, type DueBill } from "../domain/predict";
-import type { ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
+import type { Budgets, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
 /**
  * The four things that can happen to money.
@@ -91,6 +92,9 @@ export function AddTransaction({
   editing,
   onCancelEdit,
   ai,
+  settings,
+  budgets,
+  asOf,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -102,6 +106,10 @@ export function AddTransaction({
   editing: Transaction | null;
   onCancelEdit: () => void;
   ai: AiSettings;
+  /** For the assistant beside the form, which reads figures and nothing else. */
+  settings: AppSettings;
+  budgets: Budgets;
+  asOf: string;
 }) {
   /** Chosen "Someone else" as the destination, rather than left it empty. */
   const [sentOut, setSentOut] = useState(false);
@@ -743,6 +751,14 @@ export function AddTransaction({
           </>
         )}
       </aside>
+
+      <AskPanel
+        settings={settings}
+        transactions={transactions}
+        budgets={budgets}
+        reference={reference}
+        asOf={asOf}
+      />
     </div>
   );
 }

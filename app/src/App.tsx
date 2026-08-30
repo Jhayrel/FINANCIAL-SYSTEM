@@ -56,7 +56,7 @@ import {
 } from "./data/firestoreLedger";
 import { useCloud } from "./data/useCloud";
 import { SignIn } from "./features/SignIn";
-import { migrateAccounts, renameAccount, renameItem } from "./domain/accounts";
+import { migrateAccounts, renameAccount, renameItem, type Account } from "./domain/accounts";
 import { defaultSettings, isBlankSettings, type AppSettings } from "./domain/settings";
 import type { Centavos } from "./domain/money";
 import type { Budgets, DeletedTransaction, ReferenceLists, Transaction } from "./domain/types";
@@ -348,20 +348,33 @@ export default function App() {
   /**
    * Reference lists are derived from settings, so every screen keeps working
    * against the shape it already knows while Settings edits the richer model.
+   *
+   * Names are made unique on the way through. A balance is keyed by name, so
+   * two accounts called "Cash" are one wallet as far as money is concerned,
+   * and listing both showed the same balance twice on every panel and offered
+   * the same choice twice in every picker. New accounts cannot collide,
+   * `validateAccount` refuses that, but a pair already in the settings
+   * document predates the check and has to render sensibly anyway.
    */
-  const reference: ReferenceLists = useMemo(
-    () => ({
-      wallets: settings.accounts.filter((a) => a.kind === "spending" && !a.archived).map((a) => a.name),
-      savings: settings.accounts
-        .filter((a) => (a.kind === "savings" || a.kind === "goal" || a.kind === "reserve") && !a.archived)
-        .map((a) => a.name),
+  const reference: ReferenceLists = useMemo(() => {
+    const namesOf = (kinds: readonly Account["kind"][]): string[] => [
+      ...new Set(
+        settings.accounts
+          .filter((a) => kinds.includes(a.kind) && !a.archived)
+          .map((a) => a.name.trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    return {
+      wallets: namesOf(["spending"]),
+      savings: namesOf(["savings", "goal", "reserve"]),
       bills: settings.bills,
       subscriptions: settings.subscriptions,
       revenueCategories: settings.revenueCategories,
       spendingTypes: settings.spendingTypes,
-    }),
-    [settings],
-  );
+    };
+  }, [settings]);
 
   const view = useMemo(() => {
     const positions = positionsOf(settings.credits, transactions, AS_OF);
@@ -747,6 +760,9 @@ export default function App() {
               editing={editing}
               onCancelEdit={() => setEditing(null)}
               ai={settings.ai}
+              settings={settings}
+              budgets={budgets}
+              asOf={AS_OF}
             />
           )}
           {screen === "database" && (

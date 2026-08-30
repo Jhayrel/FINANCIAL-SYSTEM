@@ -1340,3 +1340,78 @@
   z-index: 2;
   background: var(--surface-sunk);
 }
+
+/* ══ Add screen: form, wallets, assistant ══════════════════════════════════
+   Three columns, widest first. The form is where the work happens, the
+   balances are what you check against while doing it, and the assistant
+   answers questions about the month you are typing into. */
+
+.fms-entry {
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 230px) minmax(210px, 260px);
+  max-width: 1320px;
+}
+
+.fms-ask {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.fms-askbody {
+  min-height: 96px;
+}
+
+.fms-askactions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/*
+ * A halo rather than a badge.
+ *
+ * It says which panel is the AI one without a label or an icon, and it sits
+ * outside the box, so nothing inside changes contrast (rule D7). It holds
+ * still except while a request is in flight.
+ */
+.fms-ask {
+  box-shadow:
+    0 0 0 1px var(--ai-glow-ring),
+    0 0 10px 1px var(--ai-glow-halo);
+  transition: box-shadow var(--motion-hover) var(--ease-out);
+}
+
+.fms-ask:focus-within {
+  box-shadow:
+    0 0 0 1px var(--ai-glow-ring),
+    0 0 16px 3px var(--ai-glow-halo-active);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fms-ask[data-thinking="true"] {
+    animation: fms-breathe 2.4s var(--ease-out) infinite;
+  }
+}
+
+@keyframes fms-breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px var(--ai-glow-ring),
+      0 0 10px 1px var(--ai-glow-halo);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px var(--ai-glow-ring),
+      0 0 18px 4px var(--ai-glow-halo-active);
+  }
+}
+
+/* The assistant drops below the form before the balances do. */
+@media (max-width: 1279px) {
+  .fms-entry {
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 230px);
+  }
+  .fms-ask {
+    grid-column: 1 / -1;
+  }
+}
