@@ -19,6 +19,8 @@ import {
   type Flow as FlowTone,
 } from "../components/primitives";
 import { SearchInput } from "../components/forms";
+import { useConfirm } from "../components/Confirm";
+import { formatAmount } from "../domain/money";
 import { DataTable, type Column } from "../components/DataTable";
 import { formatShort } from "../domain/dates";
 import { checkIntegrity, type Issue } from "../domain/integrity";
@@ -79,6 +81,34 @@ export function Database({
   const [sortKey, setSortKey] = useState("record");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [limit, setLimit] = useState(PAGE);
+  const { confirm, dialog } = useConfirm();
+
+  /**
+   * Deleting asks first, and says what it is about to remove.
+   *
+   * Delete sits next to Edit on every one of four hundred rows, at the end
+   * of a line your eye is already travelling along, so hitting it by
+   * accident is a matter of time.
+   *
+   * The dialog names the record, the item and the amount, because "are you
+   * sure" on its own does not help: what makes this safe to answer is
+   * seeing which row it means. It also says where the row goes, since a
+   * delete here is a move to the bin and nothing is actually destroyed.
+   * That is the difference between a warning worth reading and one that
+   * gets clicked through.
+   */
+  const askDelete = async (t: Transaction): Promise<void> => {
+    if (!onDelete) return;
+
+    const ok = await confirm({
+      title: `Delete record #${String(t.recordNumber).padStart(4, "0")}?`,
+      body: `${t.item || "This entry"}, ${t.description || "no description"}, ₱${formatAmount(t.total)} on ${formatShort(t.date)}. It moves to the bin, where you can restore it. Balances and totals update straight away.`,
+      confirmLabel: "Move to bin",
+      tone: "danger",
+    });
+
+    if (ok) onDelete(t.id);
+  };
 
   /** Issues indexed by transaction id so a row can show its own flags. */
   const issuesById = useMemo(() => {
@@ -284,7 +314,7 @@ export function Database({
                   size="sm"
                   variant="danger"
                   ariaLabel={`Delete record ${t.recordNumber}`}
-                  onClick={() => onDelete(t.id)}
+                  onClick={() => void askDelete(t)}
                 >
                   Delete
                 </Button>
@@ -297,6 +327,7 @@ export function Database({
 
   return (
     <div className="fms-db">
+      {dialog}
       <Card
         title="Database"
         subtitle="Every transaction, searchable"
