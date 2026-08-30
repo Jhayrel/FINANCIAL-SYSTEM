@@ -36,6 +36,7 @@ import { daysInMonth, getMonth, getYear } from "./dates";
 import { actionableIssues, checkIntegrity } from "./integrity";
 import { monthTotals } from "./totals";
 import { overdueGoals } from "./goalClose";
+import { patternFindings, type Finding } from "./patterns";
 import type { Account } from "./accounts";
 import type { Centavos } from "./money";
 import type { Budgets, IsoDate, Transaction } from "./types";
@@ -49,6 +50,8 @@ export type AlertArea =
   | "bills"
   | "debt"
   | "goals"
+  /** How the money moved, rather than what it came to. */
+  | "pattern"
   | "review";
 
 export interface Alert {
@@ -61,6 +64,18 @@ export interface Alert {
   /** Sorted on this, highest first. */
   readonly weight: number;
 }
+
+/**
+ * Plain headings. The detail carries the figures, so the title only has to
+ * say which kind of thing this is.
+ */
+const PATTERN_TITLE: Record<Finding["kind"], string> = {
+  velocity: "Money left quickly after it arrived",
+  migration: "Spending moved rather than stopped",
+  repetition: "This has happened before",
+  streak: "A long gap ended",
+  uncategorised: "Rows with no category",
+};
 
 export interface AlertInput {
   readonly transactions: readonly Transaction[];
@@ -183,15 +198,77 @@ export function financeAlerts(input: AlertInput): Alert[] {
     });
   }
 
-  const soon = upcoming(bills, 7);
+  /**
+   * Due today and due tomorrow, split out and weighted above everything.
+   *
+   * This is the VBA's own priority order, and it was right: `msgDueToday`
+   * and `msgDueTomorrow` outranked the budget line, the balance line and
+   * the shortfall warning, because they are the only ones with a deadline
+   * you can still act on. Folding them into one "due within a week" line
+   * at the bottom of the list buried the one thing that was actually due.
+   *
+   * The amount comes too. The VBA listed names only, which meant reaching
+   * for the phone to find out what it would cost.
+   */
+  const dated = (b: BillStatus): number => b.daysToDue ?? Number.POSITIVE_INFINITY;
+
+  const dueToday = bills.filter((b) => !b.paidThisMonth && dated(b) === 0);
+  if (dueToday.length > 0) {
+    out.push({
+      id: "bills-today",
+      level: "warn",
+      area: "bills",
+      title: `Due today: ${dueToday.map((b) => b.item).join(", ")}`,
+      detail: `${money(sumOf(dueToday))} expected, going by what each cost last time.`,
+      weight: 88,
+    });
+  }
+
+  const dueTomorrow = bills.filter((b) => !b.paidThisMonth && dated(b) === 1);
+  if (dueTomorrow.length > 0) {
+    out.push({
+      id: "bills-tomorrow",
+      level: "info",
+      area: "bills",
+      title: `Due tomorrow: ${dueTomorrow.map((b) => b.item).join(", ")}`,
+      detail: `${money(sumOf(dueTomorrow))} expected, going by what each cost last time.`,
+      weight: 75,
+    });
+  }
+
+  // The rest of the week, which is information rather than a deadline.
+  const soon = upcoming(bills, 7).filter((b) => dated(b) > 1);
   if (soon.length > 0) {
     out.push({
       id: "bills-soon",
       level: "info",
       area: "bills",
-      title: `${soon.length} bill${soon.length === 1 ? "" : "s"} due within a week`,
-      detail: `${soon.map((b) => b.item).join(", ")}.`,
+      title: `${soon.length} more bill${soon.length === 1 ? "" : "s"} due this week`,
+      detail: `${soon.map((b) => b.item).join(", ")}. ${money(sumOf(soon))} in total.`,
       weight: 40,
+    });
+  }
+
+  /**
+   * Patterns, which is the part a total cannot say.
+   *
+   * Everything above this point reports a number that is already on screen
+   * somewhere. These report how the numbers got there, which is the only
+   * kind of finding that can change the next decision rather than describe
+   * the last one. See `domain/patterns.ts`.
+   */
+  for (const finding of patternFindings({
+    transactions,
+    asOf,
+    wallets: accounts.filter((a) => a.kind === "spending" && !a.archived).map((a) => a.name),
+  })) {
+    out.push({
+      id: finding.id,
+      level: finding.weight >= 80 ? "warn" : "info",
+      area: "pattern",
+      title: PATTERN_TITLE[finding.kind],
+      detail: finding.detail,
+      weight: finding.weight,
     });
   }
 
@@ -245,6 +322,10 @@ export function worstLevel(alerts: readonly Alert[]): AlertLevel | null {
   if (alerts.length > 0) return "info";
   return null;
 }
+
+/** What a set of predicted bills is expected to cost, using each one's last. */
+const sumOf = (bills: readonly BillStatus[]): Centavos =>
+  bills.reduce((total, b) => total + (b.lastAmount || b.averageAmount), 0);
 
 const money = (c: Centavos): string =>
   `₱${(Math.abs(c) / 100).toLocaleString("en-PH", {
