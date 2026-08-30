@@ -23,6 +23,13 @@
 
 import { contextToText, type AiContext } from "../domain/aiContext";
 import { cleanDescription, describePlan } from "../domain/describe";
+import {
+  acceptCategory,
+  categoryPlan,
+  UNSURE,
+  type CategoryAnswer,
+} from "../domain/categorise";
+import type { ReferenceLists } from "../domain/types";
 import type { Draft } from "../domain/entry";
 import type { Transaction } from "../domain/types";
 import { offlineAnswer, type AiTask } from "../domain/aiOffline";
@@ -39,6 +46,14 @@ export interface AiAnswer {
   readonly model?: string;
   /** Why the model was not used. Present only when source is "offline". */
   readonly reason?: string;
+  /**
+   * When this answer was produced, if it came back from the cache.
+   *
+   * Shown to the reader, because a sentence about figures from last week
+   * looks identical to one about this morning, and only the timestamp
+   * separates them.
+   */
+  readonly at?: number;
 }
 
 export interface AskOptions {
@@ -212,6 +227,96 @@ export async function describeDraft(
      * toast for an optional convenience is worse than silence.
      */
     return { text: "", source: "none" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
+export interface CategoryResult {
+  readonly category: string;
+  readonly confidence: CategoryAnswer["confidence"];
+  /** Where it came from, so the UI can say and the owner can judge. */
+  readonly source: "history" | "model" | "none";
+  /** How many past entries agreed, when history answered. */
+  readonly seen?: number;
+}
+
+/**
+ * Propose a category for a half-filled entry.
+ *
+ * `categoryPlan` decides whether anything is sent. When the item has been
+ * filed the same way twice, the ledger answers and no request is made: that
+ * is instant, private, and more likely to be right than a model reading a
+ * list, because it is what the owner actually did.
+ */
+export async function suggestCategory(
+  draft: Draft,
+  transactions: readonly Transaction[],
+  reference: ReferenceLists,
+  options: {
+    readonly allowModel?: boolean;
+    readonly fetcher?: typeof fetch;
+    readonly token?: () => Promise<string | null>;
+    readonly timeoutMs?: number;
+  } = {},
+): Promise<CategoryResult> {
+  const nothing: CategoryResult = { category: "", confidence: "low", source: "none" };
+
+  const plan = categoryPlan(draft, transactions, reference);
+  if (plan.kind === "not-yet") return nothing;
+  if (plan.kind === "known") {
+    return {
+      category: plan.category,
+      // The owner's own repeated filing is the strongest evidence there is.
+      confidence: "high",
+      source: "history",
+      seen: plan.seen,
+    };
+  }
+
+  if (options.allowModel === false) return nothing;
+
+  const doFetch = options.fetcher ?? fetch;
+  const auth = await (options.token ?? idToken)();
+  if (!auth) return nothing;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 12_000);
+
+  try {
+    const response = await doFetch(ENDPOINT, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "content-type": "application/json", authorization: `Bearer ${auth}` },
+      body: JSON.stringify({
+        context: [
+          plan.request.fields,
+          "",
+          `Allowed categories: ${plan.request.allowed.join(", ")}`,
+        ].join(String.fromCharCode(10)),
+        task: "categorise",
+        tone: "brief",
+      }),
+    });
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!response.ok || !contentType.includes("application/json")) return nothing;
+
+    const payload = (await response.json()) as { category?: unknown; confidence?: unknown };
+    const answer = acceptCategory(
+      typeof payload.category === "string" ? payload.category : "",
+      typeof payload.confidence === "string" ? payload.confidence : "",
+      plan.request.allowed,
+    );
+
+    // Unsure is not an answer worth showing; it is the absence of one.
+    if (answer.category === UNSURE) return nothing;
+
+    return { category: answer.category, confidence: answer.confidence, source: "model" };
+  } catch {
+    // A failed suggestion is not an error worth raising: the picker works.
+    return nothing;
   } finally {
     clearTimeout(timer);
   }

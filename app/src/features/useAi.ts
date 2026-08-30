@@ -15,10 +15,11 @@
  *     walks 441 rows.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { askAi, type AiAnswer, type AiTask } from "../data/aiClient";
-import { buildContext } from "../domain/aiContext";
+import { buildContext, contextToText } from "../domain/aiContext";
+import { cacheKey, readCache, writeCache } from "../domain/aiCache";
 import { offlineAnswer } from "../domain/aiOffline";
 import { today } from "../domain/dates";
 import type { AppSettings } from "../domain/settings";
@@ -85,6 +86,39 @@ export function useAi({
     [transactions, budgets, settings, reference, asOf],
   );
 
+  /**
+   * The key for this exact question.
+   *
+   * A hash of the text that would be sent, plus the task and tone, so a new
+   * transaction invalidates it and opening the screen again does not.
+   */
+  const keyFor = useCallback(
+    (task: AiTask): string => cacheKey(task, ai.tone, contextToText(context)),
+    [context, ai.tone],
+  );
+
+  /**
+   * Show the last answer for these exact figures, if there is one.
+   *
+   * Without this a reload showed an empty panel and the only way back was to
+   * spend another call on a question already answered. Clearing it when the
+   * figures change is automatic, since the figures are in the key.
+   */
+  useEffect(() => {
+    const cached = readCache(keyFor("summary"));
+    setAnswer(
+      cached
+        ? {
+            text: cached.text,
+            source: cached.source,
+            ...(cached.model ? { model: cached.model } : {}),
+            ...(cached.reason ? { reason: cached.reason } : {}),
+            at: cached.at,
+          }
+        : null,
+    );
+  }, [keyFor]);
+
   const run = useCallback(
     async (task: AiTask): Promise<void> => {
       // Switched off means nothing is sent, not that nothing is shown.
@@ -101,12 +135,25 @@ export function useAi({
 
       setLoading(true);
       try {
-        setAnswer(await askAi({ context, task, tone: ai.tone }));
+        const fresh = await askAi({ context, task, tone: ai.tone });
+        setAnswer(fresh);
+
+        /**
+         * Only a real answer is worth keeping. An offline one is written
+         * here anyway rather than recomputed, because it took the same
+         * figures and would say the same thing.
+         */
+        writeCache(keyFor(task), {
+          text: fresh.text,
+          source: fresh.source,
+          model: fresh.model,
+          reason: fresh.reason,
+        });
       } finally {
         setLoading(false);
       }
     },
-    [context, disabled, ai.enabled, ai.tone],
+    [context, disabled, ai.enabled, ai.tone, keyFor],
   );
 
   const clear = useCallback(() => setAnswer(null), []);

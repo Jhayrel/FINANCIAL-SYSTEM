@@ -9,9 +9,10 @@
 import { describe, expect, it } from "vitest";
 
 import { loadFixture } from "../fixtures/load";
+import { allowedCategories } from "../domain/categorise";
 import { buildContext } from "../domain/aiContext";
 import { migrateAccounts } from "../domain/accounts";
-import { askAi, describeDraft } from "./aiClient";
+import { askAi, describeDraft, suggestCategory } from "./aiClient";
 
 const fixture = loadFixture();
 const context = buildContext({
@@ -303,5 +304,129 @@ describe("describeDraft", () => {
     expect(body.context).not.toContain("SECRET-TYPED");
     expect(body.context).not.toContain("SECRET-NOTE");
     expect(body.context).toContain("Item: Zzz Never Bought This Before");
+  });
+});
+
+describe("suggestCategory", () => {
+  const draft = {
+    flow: "Spending" as const,
+    date: "2026-08-30",
+    fromWallet: "Maya",
+    toWallet: "",
+    category: "",
+    item: "Zzz Never Filed This",
+    description: "",
+    amount: 15000,
+    fee: 0,
+    notes: "",
+    status: "Paid",
+  };
+
+  const never = (() => {
+    throw new Error("should not have called the network");
+  }) as unknown as typeof fetch;
+
+  it("answers from history without asking, when the ledger already agrees", async () => {
+    // The category has to be one the picker actually offers, or the plan
+    // is right to refuse it.
+    const allowed = new Set(allowedCategories("Spending", fixture.reference));
+    const filed = fixture.transactions.filter(
+      (t) => t.type === "Spending" && t.item.trim() && allowed.has(t.category.trim()),
+    );
+    const repeated = filed.find(
+      (t) => filed.filter((o) => o.item === t.item && o.category === t.category).length >= 2,
+    );
+    expect(repeated).toBeDefined();
+
+    const result = await suggestCategory(
+      { ...draft, item: repeated!.item },
+      fixture.transactions,
+      fixture.reference,
+      { fetcher: never, token: async () => "t" },
+    );
+
+    expect(result.source).toBe("history");
+    expect(result.category).toBe(repeated!.category);
+    expect(result.confidence).toBe("high");
+  });
+
+  it("does not call the model when the toggle is off", async () => {
+    const result = await suggestCategory(draft, fixture.transactions, fixture.reference, {
+      allowModel: false,
+      fetcher: never,
+      token: async () => "t",
+    });
+
+    expect(result.source).toBe("none");
+  });
+
+  it("accepts a category from the allowed list", async () => {
+    const fetcher = (async () =>
+      new Response(JSON.stringify({ category: "Food", confidence: "high" }), {
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
+
+    const result = await suggestCategory(draft, fixture.transactions, fixture.reference, {
+      allowModel: true,
+      fetcher,
+      token: async () => "t",
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.category).toBe("Food");
+    expect(result.confidence).toBe("high");
+  });
+
+  it("refuses a category the model invented", async () => {
+    const fetcher = (async () =>
+      new Response(JSON.stringify({ category: "Snacks And Treats", confidence: "high" }), {
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
+
+    const result = await suggestCategory(draft, fixture.transactions, fixture.reference, {
+      allowModel: true,
+      fetcher,
+      token: async () => "t",
+    });
+
+    // Better to offer nothing than to put a category into the totals that
+    // exists on exactly one row.
+    expect(result.source).toBe("none");
+    expect(result.category).toBe("");
+  });
+
+  it("sends the allowed list and the owner's own past labels", async () => {
+    let sent = "";
+    const fetcher = (async (_u: string, init: RequestInit) => {
+      sent = String(init.body);
+      return new Response(JSON.stringify({ category: "Food", confidence: "high" }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    await suggestCategory(draft, fixture.transactions, fixture.reference, {
+      allowModel: true,
+      fetcher,
+      token: async () => "t",
+    });
+
+    const body = JSON.parse(sent) as { context: string; task: string };
+    expect(body.task).toBe("categorise");
+    expect(body.context).toContain("Allowed categories:");
+    expect(body.context).toContain("Item: Zzz Never Filed This");
+  });
+
+  it("stays quiet rather than erroring when the model fails", async () => {
+    const fetcher = (async () => {
+      throw new Error("offline");
+    }) as unknown as typeof fetch;
+
+    const result = await suggestCategory(draft, fixture.transactions, fixture.reference, {
+      allowModel: true,
+      fetcher,
+      token: async () => "t",
+    });
+
+    expect(result.source).toBe("none");
   });
 });

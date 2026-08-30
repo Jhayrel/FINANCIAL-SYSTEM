@@ -256,7 +256,61 @@ async function chainFrom(env: Env): Promise<Candidate[]> {
  * server-side means the only thing the app controls is which of these fixed
  * jobs to run.
  */
-const TASKS: Record<string, string> = {
+/**
+ * Every task states the shape it must answer in, and is checked against it.
+ *
+ * Free models are markedly less consistent than paid ones at returning a
+ * shape on request. Asking nicely works most of the time, which is another
+ * way of saying it fails, and a finance panel that silently renders half an
+ * answer is worse than one that says it could not load.
+ *
+ * So there are three layers, and all three are needed:
+ *
+ *   1. The prompt names the shape.
+ *   2. `response_format` asks the API to enforce it, where the model
+ *      supports it. Not all do, and the ones that do not simply ignore it.
+ *   3. This validates what actually arrived. A model can return perfectly
+ *      valid JSON with a renamed field or a missing one, and only step
+ *      three catches that.
+ *
+ * Narrative tasks return their prose inside a field rather than as a bare
+ * string, so one contract covers every task and there is no second path to
+ * keep working.
+ */
+interface TaskSpec {
+  readonly instruction: string;
+  /** Shown to the model verbatim. Keep it small: large schemas degrade smaller models. */
+  readonly shape: string;
+  /** Returns the answer, or null when the payload is unusable. */
+  readonly parse: (value: Record<string, unknown>) => Answer | null;
+  readonly maxTokens?: number;
+  /** Tone shapes a summary; it would ruin a five word description. */
+  readonly toned?: boolean;
+}
+
+interface Answer {
+  readonly text: string;
+  /** Present only where the task defines it. */
+  readonly confidence?: string;
+  readonly category?: string;
+}
+
+const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+
+const CONFIDENCE = new Set(["high", "medium", "low"]);
+
+/**
+ * Narrative tasks all answer the same way, so they share a parser.
+ *
+ * `summary` is the field name because it is the one word every model
+ * reaches for unprompted, which measurably reduces renamed-field failures.
+ */
+const narrative = (value: Record<string, unknown>): Answer | null => {
+  const text = str(value["summary"]) || str(value["text"]) || str(value["answer"]);
+  return text ? { text } : null;
+};
+
+const TASK_INSTRUCTIONS: Record<string, string> = {
   summary:
     "Summarise this month's finances in three sentences or fewer. Lead with the single most important number. Do not give advice unless something is genuinely wrong.",
   alerts:
@@ -268,7 +322,66 @@ const TASKS: Record<string, string> = {
    * beyond the words themselves is noise the client has to strip back off.
    */
   describe:
-    "Write a description for this transaction in five words or fewer. Output only the description itself: no preamble, no quotes, no explanation, no full stop. Use the wording a person would write in their own ledger.",
+    "Write a description for this transaction in five words or fewer, in the wording a person would write in their own ledger.",
+  categorise:
+    "Choose the one category that fits this transaction, copied exactly from the allowed list. Prefer the pattern in the past examples, which are this person's own labels. If nothing fits well, choose the last category in the list rather than inventing one.",
+};
+
+/**
+ * Shapes.
+ *
+ * `reasoning` comes first on purpose. Models generate left to right, so a
+ * field placed first is decided first, and making the model give its reason
+ * before it commits measurably improves what it commits to. Nothing renders
+ * it: it exists to make the next field better.
+ */
+const TASKS: Record<string, TaskSpec> = {
+  summary: {
+    instruction: TASK_INSTRUCTIONS["summary"] ?? "",
+    shape: '{"summary": "your answer as plain sentences"}',
+    parse: narrative,
+    toned: true,
+  },
+  alerts: {
+    instruction: TASK_INSTRUCTIONS["alerts"] ?? "",
+    shape: '{"summary": "your answer as plain sentences"}',
+    parse: narrative,
+    toned: true,
+  },
+  patterns: {
+    instruction: TASK_INSTRUCTIONS["patterns"] ?? "",
+    shape: '{"summary": "your answer as plain sentences"}',
+    parse: narrative,
+    toned: true,
+  },
+  describe: {
+    instruction: TASK_INSTRUCTIONS["describe"] ?? "",
+    shape: '{"reasoning": "one short sentence", "description": "five words or fewer"}',
+    parse: (v) => {
+      const text = str(v["description"]);
+      return text ? { text } : null;
+    },
+    maxTokens: 300,
+  },
+  categorise: {
+    instruction: TASK_INSTRUCTIONS["categorise"] ?? "",
+    shape:
+      '{"reasoning": "one short sentence", "category": "one value copied exactly from the allowed list", "confidence": "high or medium or low"}',
+    parse: (v) => {
+      const category = str(v["category"]);
+      if (!category) return null;
+      const confidence = str(v["confidence"]).toLowerCase();
+      return {
+        text: category,
+        category,
+        // An unrecognised confidence is treated as the weakest, never dropped:
+        // the caller decides what to do with a shaky answer, and cannot if it
+        // does not know the answer was shaky.
+        confidence: CONFIDENCE.has(confidence) ? confidence : "low",
+      };
+    },
+    maxTokens: 400,
+  },
 };
 
 /**
@@ -284,7 +397,6 @@ const TASKS: Record<string, string> = {
  * in the middle of a number. So the ceiling is generous and the length is
  * controlled by the prompt, which is where it belongs.
  */
-const MAX_TOKENS: Record<string, number> = { describe: 300 };
 const DEFAULT_MAX_TOKENS = 1500;
 
 const TONES: Record<string, string> = {
@@ -400,7 +512,8 @@ export const onRequestPost = async (ctx: {
   const tone = typeof body.tone === "string" ? body.tone : "brief";
   const context = typeof body.context === "string" ? body.context : "";
 
-  if (!TASKS[task]) return json({ error: "Unknown task." }, 400);
+  const spec = TASKS[task];
+  if (!spec) return json({ error: "Unknown task." }, 400);
   if (!context.trim()) return json({ error: "No context supplied." }, 400);
 
   const size = new TextEncoder().encode(context).length;
@@ -420,23 +533,59 @@ export const onRequestPost = async (ctx: {
     );
   }
 
-  /**
-   * Tone shapes a summary. It has no meaning for a five word description,
-   * and "explain the reasoning" would actively ruin one.
-   */
-  const prompt =
-    task === "describe"
-      ? `${TASKS[task]}\n\n---\n\n${context}`
-      : `${TASKS[task]}\n\n${TONES[tone] ?? TONES.brief}\n\n---\n\n${context}`;
+  const prompt = [
+    spec.instruction,
+    spec.toned ? (TONES[tone] ?? TONES.brief) : "",
+    `Reply with only this JSON and nothing else: ${spec.shape}`,
+    "---",
+    context,
+  ]
+    .filter(Boolean)
+    .join("
+
+");
+
+  const maxTokens = spec.maxTokens ?? DEFAULT_MAX_TOKENS;
   const attempts: { model: string; reason: string }[] = [];
 
   for (const candidate of chain) {
+    const label = `${candidate.provider}:${candidate.model}`;
+
     try {
-      const text = await callProvider(candidate, env, prompt, MAX_TOKENS[task] ?? DEFAULT_MAX_TOKENS);
-      if (text) {
-        return json({ text, model: `${candidate.provider}:${candidate.model}`, attempts });
+      const raw = await callProvider(candidate, env, prompt, maxTokens);
+      if (!raw) {
+        attempts.push({ model: candidate.model, reason: "empty response" });
+        continue;
       }
-      attempts.push({ model: candidate.model, reason: "empty response" });
+
+      const first = readAnswer(raw, spec);
+      if (first) return json({ ...first, model: label, attempts });
+
+      /**
+       * One retry, showing the model its own broken output.
+       *
+       * Models are good at correcting a mistake they can see, and most of
+       * these are a stray sentence wrapped around otherwise fine JSON.
+       * Retrying once, on the same model, stops a bad shape from costing the
+       * whole chain; a second failure moves on rather than trying again.
+       */
+      const repaired = await callProvider(
+        candidate,
+        env,
+        [
+          `That reply could not be read. Return only this JSON: ${spec.shape}`,
+          "Your reply was:",
+          raw.slice(0, 600),
+        ].join("
+
+"),
+        maxTokens,
+      );
+
+      const second = repaired ? readAnswer(repaired, spec) : null;
+      if (second) return json({ ...second, model: label, attempts, repaired: true });
+
+      attempts.push({ model: candidate.model, reason: "unreadable shape" });
     } catch (e) {
       // A retired model, a rate limit, a blip. Try the next one; only an
       // exhausted chain is worth telling the owner about.
@@ -446,6 +595,46 @@ export const onRequestPost = async (ctx: {
 
   return json({ error: "Every model in the chain failed.", attempts }, 502);
 };
+
+/**
+ * Get the answer out of whatever came back.
+ *
+ * Models wrap JSON in prose, in code fences, or in an apology, whatever the
+ * prompt asked for, so the object is located rather than assumed to be the
+ * whole reply. Only once it parses does the task's own validator decide
+ * whether the fields are actually usable: valid JSON with a renamed field is
+ * the failure that JSON mode alone does not catch.
+ */
+function readAnswer(raw: string, spec: TaskSpec): Answer | null {
+  for (const candidate of jsonCandidates(raw)) {
+    let value: unknown;
+    try {
+      value = JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+
+    const answer = spec.parse(value as Record<string, unknown>);
+    if (answer) return answer;
+  }
+  return null;
+}
+
+function jsonCandidates(raw: string): string[] {
+  const trimmed = raw.trim();
+  const out: string[] = [trimmed];
+
+  const fenced = /```(?:json)?s*([sS]*?)```/i.exec(trimmed);
+  if (fenced?.[1]) out.push(fenced[1].trim());
+
+  // The outermost braces, for a reply with commentary either side.
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start !== -1 && end > start) out.push(trimmed.slice(start, end + 1));
+
+  return out;
+}
 
 async function callProvider(
   c: Candidate,
@@ -480,8 +669,18 @@ async function callProvider(
           { role: "system", content: SYSTEM },
           { role: "user", content: prompt },
         ],
-        temperature: 0.2,
+        /**
+         * Low, because every task here is structured. Variety is not a
+         * virtue when the job is putting fixed figures into a fixed shape.
+         */
+        temperature: 0.1,
         max_tokens: maxTokens,
+        /**
+         * Asks the provider to guarantee valid JSON. Models that do not
+         * support it ignore the field rather than failing, which is why
+         * `readAnswer` still has to do the work.
+         */
+        response_format: { type: "json_object" },
       }),
     });
 

@@ -10,6 +10,7 @@
 
 import type { AiAnswer } from "../data/aiClient";
 import { modelLabel } from "../domain/modelName";
+import { describeAge } from "../domain/aiCache";
 
 export function AiAnswerView({ answer }: { answer: AiAnswer }) {
   const fromModel = answer.source === "model";
@@ -42,6 +43,9 @@ export function AiAnswerView({ answer }: { answer: AiAnswer }) {
         >
           {fromModel ? "Model" : "This device"}
         </span>
+        {answer.at !== undefined && (
+          <span title="Kept until the figures change">Answered {describeAge(answer.at)}</span>
+        )}
         <span>
           {fromModel
             ? `Written by ${modelLabel(answer.model ?? "") || "the provider"} from figures this app calculated.`

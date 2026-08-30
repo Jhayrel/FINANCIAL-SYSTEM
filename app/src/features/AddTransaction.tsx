@@ -36,7 +36,8 @@ import {
   type Flow,
 } from "../domain/entry";
 import type { AiSettings } from "../domain/settings";
-import { describeDraft } from "../data/aiClient";
+import { describeDraft, suggestCategory } from "../data/aiClient";
+import type { CategoryResult } from "../data/aiClient";
 import { billsToLog, predictAmount, reasons, type DueBill } from "../domain/predict";
 import type { ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
@@ -94,6 +95,8 @@ export function AddTransaction({
    * the button is pressed.
    */
   const [describing, setDescribing] = useState(false);
+  const [categorising, setCategorising] = useState(false);
+  const [categoryHint, setCategoryHint] = useState<CategoryResult | null>(null);
 
   const proposeDescription = async (): Promise<void> => {
     setDescribing(true);
@@ -112,6 +115,28 @@ export function AddTransaction({
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
     setDraft((d) => ({ ...d, [key]: value }));
+
+  /**
+   * Filled only when the answer is confident, and only from the allowed
+   * list. Anything less is shown beside the picker and left alone, because
+   * a wrong category does not look like an error once saved: it looks like
+   * a fact, and it moves a figure in every report that groups by category.
+   */
+  const proposeCategory = async (): Promise<void> => {
+    setCategorising(true);
+    try {
+      const result = await suggestCategory(draft, transactions, reference, {
+        allowModel: ai.enabled && ai.features.descriptions,
+      });
+
+      setCategoryHint(result.category ? result : null);
+      if (result.source === "history" || result.confidence === "high") {
+        setDraft((d) => ({ ...d, category: result.category as TransactionCategory, item: d.item }));
+      }
+    } finally {
+      setCategorising(false);
+    }
+  };
 
   const check = useMemo(
     () => checkDraft(draft, transactions, reference, debts),
@@ -353,13 +378,37 @@ export function AddTransaction({
               )}
 
               {needs(draft.flow, "category") && categories.length > 1 && (
-                <Row label="Category" required>
-                  <Select
-                    value={draft.category}
-                    onChange={(v) => setDraft((d) => ({ ...d, category: v as TransactionCategory, item: "" }))}
-                    options={categories}
-                    placeholder={ghost.category ? `${ghost.category} (suggested)` : "Pick a category"}
-                  />
+                <Row
+                  label="Category"
+                  required
+                  hint={
+                    categoryHint
+                      ? categoryHint.source === "history"
+                        ? `Filed this way ${categoryHint.seen ?? 0} times before`
+                        : `Suggested: ${categoryHint.category} (${categoryHint.confidence} confidence)`
+                      : undefined
+                  }
+                >
+                  <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "stretch" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Select
+                        value={draft.category}
+                        onChange={(v) => {
+                          setCategoryHint(null);
+                          setDraft((d) => ({ ...d, category: v as TransactionCategory, item: "" }));
+                        }}
+                        options={categories}
+                        placeholder={ghost.category ? `${ghost.category} (suggested)` : "Pick a category"}
+                      />
+                    </div>
+                    <Button
+                      loading={categorising}
+                      disabled={!draft.item.trim()}
+                      onClick={() => void proposeCategory()}
+                    >
+                      Suggest
+                    </Button>
+                  </div>
                 </Row>
               )}
 
