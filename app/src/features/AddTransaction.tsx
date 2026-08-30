@@ -41,14 +41,33 @@ import type { CategoryResult } from "../data/aiClient";
 import { billsToLog, predictAmount, reasons, type DueBill } from "../domain/predict";
 import type { ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
+/**
+ * The four things that can happen to money.
+ *
+ * ── Why "Opening" is not here any more ────────────────────────────────────
+ *
+ * A starting balance is not something that happens on a Tuesday. It is what an
+ * account already held on the day you began recording, which makes it a
+ * property of the account rather than an entry you add. Offering it beside
+ * Spending invited it to be used later, and adding one halfway through a month
+ * silently invents money.
+ *
+ * It lives on the account now, in Settings, where it is set once. See
+ * `AccountsSection`.
+ *
+ * ── Why Transfer no longer says "between wallets" ─────────────────────────
+ *
+ * Because it does more than that, and saying so hid the feature completely.
+ * Sending money to a person has always worked here: pick a destination that is
+ * not one of your accounts and the whole amount counts as spending. But it was
+ * the last entry in a list of wallets, under a heading that told you it was
+ * only for moving money between your own, so it was never found.
+ */
 const FLOWS: { id: Flow; tone: FlowTone; glyph: string; hint: string }[] = [
-  { id: "Revenue", tone: "revenue", glyph: "↓", hint: "Money in" },
   { id: "Spending", tone: "spending", glyph: "↑", hint: "Money out" },
-  { id: "Transfer", tone: "transfer", glyph: "⇄", hint: "Between wallets" },
+  { id: "Revenue", tone: "revenue", glyph: "↓", hint: "Money in" },
+  { id: "Transfer", tone: "transfer", glyph: "⇄", hint: "Move or send" },
   { id: "Debt", tone: "debt", glyph: "◑", hint: "Borrow or repay" },
-  // Money you already had. Not income, and the reason the Excel needed a
-  // "Transfer of balance" revenue category it should never have had.
-  { id: "Opening", tone: "transfer", glyph: "◉", hint: "What you already had" },
 ];
 
 const EFFECTS: DebtEffect[] = ["draw", "repay", "interest", "writeoff"];
@@ -60,9 +79,6 @@ const EFFECT_LABEL: Record<string, string> = {
 };
 
 const STATUSES = ["Paid", "Done", "Received", "Transferred", "Withdrawn"];
-
-/** Destination option meaning the money leaves your accounts entirely. */
-const SOMEONE_ELSE = "Someone else";
 
 export function AddTransaction({
   transactions,
@@ -81,7 +97,15 @@ export function AddTransaction({
 }) {
   /** Chosen "Someone else" as the destination, rather than left it empty. */
   const [sentOut, setSentOut] = useState(false);
-  const [draft, setDraft] = useState<Draft>(() => emptyDraft());
+  /**
+   * Opens on Spending, rather than on nothing.
+   *
+   * The screen used to render an empty panel and a line telling you to pick a
+   * type first. That is a click and a blank page before you can type anything,
+   * every single time, for the one screen used most. Spending is the large
+   * majority of entries, so it is the right thing to be ready for.
+   */
+  const [draft, setDraft] = useState<Draft>(() => ({ ...emptyDraft(), flow: "Spending" }));
   const [submitted, setSubmitted] = useState(false);
 
   /**
@@ -228,8 +252,16 @@ export function AddTransaction({
           </div>
         )}
 
-        {/* Flow tiles */}
-        <div className="fms-flowgrid">
+        {/*
+          Four choices on one row, not five tiles on two.
+
+          The tiles took a quarter of the form's height to ask a question with
+          four answers, and the form below them was empty until one was picked,
+          so the screen opened saying nothing and offering nothing to type. The
+          flow now starts on Spending, which is most entries, and the fields
+          are there from the first frame.
+        */}
+        <div className="fms-flowrow">
           {FLOWS.map((f) => {
             const active = draft.flow === f.id;
             return (
@@ -322,26 +354,61 @@ export function AddTransaction({
                   required={draft.flow !== "Debt"}
                   error={errorFor("toWallet")}
                 >
-                  <Select
-                    value={draft.toWallet === "" && sentOut ? SOMEONE_ELSE : draft.toWallet}
-                    onChange={(v) => {
-                      // "Someone else" is a real choice, not a blank field. The
-                      // row is stored with no destination, which is what makes
-                      // it spending, so picking it has to be deliberate.
-                      if (v === SOMEONE_ELSE) {
-                        setSentOut(true);
-                        set("toWallet", "");
-                      } else {
-                        setSentOut(false);
-                        set("toWallet", v);
-                      }
-                    }}
-                    options={
-                      draft.flow === "Transfer" ? [...allWallets, SOMEONE_ELSE] : allWallets
-                    }
-                    placeholder={ghost.toWallet ? `${ghost.toWallet} (suggested)` : "Pick a wallet"}
-                    invalid={Boolean(errorFor("toWallet"))}
-                  />
+                  {/*
+                    Two questions, asked in the order a person thinks them.
+
+                    "Am I moving this or sending it away" comes first, because
+                    it is the one that changes what the entry means. It used to
+                    be the last item in a list of wallet names, which is how
+                    sending money to someone ended up looking impossible: you
+                    had to already know it was there to find it.
+                  */}
+                  {draft.flow === "Transfer" ? (
+                    <div style={{ display: "grid", gap: "var(--space-2)" }}>
+                      <div className="fms-choicerow" role="radiogroup" aria-label="Where the money goes">
+                        {[
+                          { out: false, label: "To my own account" },
+                          { out: true, label: "To someone else" },
+                        ].map((option) => (
+                          <button
+                            key={option.label}
+                            type="button"
+                            role="radio"
+                            aria-checked={sentOut === option.out}
+                            className={sentOut === option.out ? "fms-choice t-body-strong" : "fms-choice t-body"}
+                            onClick={() => {
+                              setSentOut(option.out);
+                              set("toWallet", "");
+                            }}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {sentOut ? (
+                        <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+                          It leaves your accounts, so the whole amount counts as spending.
+                        </p>
+                      ) : (
+                        <Select
+                          value={draft.toWallet}
+                          onChange={(v) => set("toWallet", v)}
+                          options={allWallets}
+                          placeholder={ghost.toWallet ? `${ghost.toWallet} (suggested)` : "Pick a wallet"}
+                          invalid={Boolean(errorFor("toWallet"))}
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <Select
+                      value={draft.toWallet}
+                      onChange={(v) => set("toWallet", v)}
+                      options={allWallets}
+                      placeholder={ghost.toWallet ? `${ghost.toWallet} (suggested)` : "Pick a wallet"}
+                      invalid={Boolean(errorFor("toWallet"))}
+                    />
+                  )}
                 </Row>
               )}
 
