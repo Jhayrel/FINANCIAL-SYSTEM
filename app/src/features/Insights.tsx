@@ -274,7 +274,7 @@ export function Insights({
         </Card>
 
         {/* Bills */}
-        <Card title="Bills and subscriptions" subtitle="Predicted one month after the last payment">
+        <Card title="Bills coming up" subtitle="Predicted one month after the last payment">
           <div style={{ display: "grid", gap: "var(--space-4)" }}>
             <section>
               <div className="t-label" style={{ color: "var(--ink-2)", marginBottom: "var(--space-2)" }}>
@@ -320,10 +320,10 @@ export function Insights({
 
       <div className="fms-charts">
         <Card title="Top spending" subtitle={`${monthName(month)} ${year}`}>
-          {ranking.length === 0 ? <EmptyState message="No spending recorded this month." /> : <RankBars rows={ranking} />}
+          {ranking.length === 0 ? <EmptyState message="No spending recorded this month. Pick another month above, or add an entry." /> : <RankBars rows={ranking} />}
         </Card>
-        <Card title="Bills and subscriptions" subtitle={`${monthName(month)} ${year}`}>
-          {billsRanking.length === 0 ? <EmptyState message="No bills paid this month." /> : <RankBars rows={billsRanking} />}
+        <Card title="Bills paid this month" subtitle={`What each one cost in ${monthName(month)}`}>
+          {billsRanking.length === 0 ? <EmptyState message="No bills paid this month. Ones you have paid before are predicted under Bills coming up." /> : <RankBars rows={billsRanking} />}
         </Card>
       </div>
 

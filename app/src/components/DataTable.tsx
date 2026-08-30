@@ -82,16 +82,28 @@ export function DataTable<T>({
                     aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
                   >
                     {c.sortable && onSort ? (
+                      /*
+                       * The whole cell sorts, not just the word in it.
+                       *
+                       * As an inline button this was 14px tall: hard to hit
+                       * with a mouse and impossible with a thumb, in the one
+                       * place a mis-click costs you your place in 400 rows.
+                       * Filling the cell also means the target matches what
+                       * looks clickable, which is the header.
+                       */
                       <button
                         onClick={() => onSort(c.key)}
                         className="t-th"
                         style={{
                           background: "none",
                           border: "none",
-                          padding: 0,
+                          margin: "calc(var(--space-3) * -1) calc(var(--space-4) * -1)",
+                          padding: "var(--space-3) var(--space-4)",
+                          width: "calc(100% + var(--space-4) * 2)",
                           color: "inherit",
                           display: "inline-flex",
                           alignItems: "center",
+                          justifyContent: c.align === "right" ? "flex-end" : "flex-start",
                           gap: 4,
                         }}
                       >

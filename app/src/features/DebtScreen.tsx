@@ -238,7 +238,7 @@ function DebtHistory({
   return (
     <Card title={`${position.debt.name} history`} subtitle="Running outstanding after each row" padded={false}>
       {statement.rows.length === 0 ? (
-        <EmptyState message="No transactions on this debt yet." />
+        <EmptyState message="Nothing recorded against this debt yet. Draws, repayments and interest appear here as you add them on the Add screen." />
       ) : (
         <>
           <div className="fms-tablewrap">
