@@ -65,39 +65,138 @@ interface Candidate {
 }
 
 /**
- * Tried in order.
+ * ── Why there is no hardcoded model list any more ─────────────────────────
  *
- * Model ids drift constantly, especially free tiers. Treat this as a starting
- * point rather than a fact: set `AI_MODELS` in Cloudflare to override without
- * touching the code. The format is `provider:model`, comma separated.
+ * There was one. On 2026-08-30 every id in it returned 404 from both
+ * providers: Groq had retired the whole Llama 3.x line and the free OpenRouter
+ * ids had rotated. Nothing was broken except the names, and the feature was
+ * completely dead.
+ *
+ * A list of model names is a cache of someone else's decisions, and it goes
+ * stale silently. So the chain is built from what the provider says it has
+ * right now, ranked by preference. A retirement stops being an outage and
+ * becomes a reordering.
  */
-const DEFAULT_CHAIN: Candidate[] = [
-  { provider: "groq", model: "llama-3.3-70b-versatile" },
-  { provider: "groq", model: "llama-3.1-8b-instant" },
-  { provider: "openrouter", model: "meta-llama/llama-3.3-70b-instruct:free" },
-  { provider: "openrouter", model: "google/gemini-2.0-flash-exp:free" },
-  { provider: "openrouter", model: "deepseek/deepseek-chat-v3-0324:free" },
-  { provider: "openrouter", model: "qwen/qwen-2.5-72b-instruct:free" },
+
+/**
+ * Not everything a provider lists can hold a conversation.
+ *
+ * Both catalogues mix speech recognition, text to speech, safety classifiers
+ * and embeddings in with the chat models. Sending a prompt to Whisper returns
+ * an error that looks exactly like a rate limit, so they are excluded by name
+ * before anything is tried.
+ */
+const NOT_CHAT =
+  /whisper|orpheus|tts|audio|embed|rerank|prompt-guard|guard-|safety|moderation|content-safety|-vision-ocr/i;
+
+/**
+ * Ordered by how well suited each family is to writing two accurate sentences
+ * about a number. Bigger is not automatically better here: the task is
+ * summarising, not reasoning, and a smaller model that answers every time
+ * beats a larger one that is busy.
+ *
+ * Anything unmatched still gets used, just last. That is what keeps this
+ * working when a family appears that this comment has never heard of.
+ */
+const PREFERENCE: RegExp[] = [
+  /gpt-oss-120b/i,
+  /glm-|minimax-m3/i,
+  /gemma-4-\d+b-it/i,
+  /qwen3\.\d+-\d+b/i,
+  /gpt-oss-20b/i,
+  /nemotron-3-super/i,
+  /compound(?!-mini)/i,
 ];
 
-function chainFrom(env: Env): Candidate[] {
-  const configured = env.AI_MODELS?.trim();
-  const chain = configured
-    ? configured
-        .split(",")
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-        .map((entry) => {
-          const [provider, ...rest] = entry.split(":");
-          return { provider: provider as Provider, model: rest.join(":") };
-        })
-        .filter((c) => (c.provider === "groq" || c.provider === "openrouter") && c.model)
-    : DEFAULT_CHAIN;
+function score(id: string): number {
+  const index = PREFERENCE.findIndex((p) => p.test(id));
+  return index === -1 ? PREFERENCE.length : index;
+}
 
-  // Skip anything there is no key for, rather than failing on it later.
-  return chain.filter((c) =>
-    c.provider === "groq" ? Boolean(env.GROQ_API_KEY) : Boolean(env.OPENROUTER_API_KEY),
-  );
+interface Cached {
+  readonly at: number;
+  readonly models: string[];
+}
+
+/**
+ * Per-isolate, one hour. Cloudflare recycles isolates freely, so this is a
+ * courtesy rather than a guarantee: worst case it costs one extra request.
+ */
+const CACHE = new Map<Provider, Cached>();
+const CACHE_MS = 60 * 60 * 1000;
+
+async function modelsOf(provider: Provider, env: Env): Promise<string[]> {
+  const key = provider === "groq" ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
+  if (!key) return [];
+
+  const hit = CACHE.get(provider);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.models;
+
+  const url =
+    provider === "groq"
+      ? "https://api.groq.com/openai/v1/models"
+      : "https://openrouter.ai/api/v1/models";
+
+  const response = await fetch(url, { headers: { authorization: `Bearer ${key}` } });
+  if (!response.ok) return [];
+
+  const data = (await response.json()) as { data?: { id?: string }[] };
+
+  const models = (data.data ?? [])
+    .map((m) => m.id)
+    .filter((id): id is string => Boolean(id))
+    // Paying per token by accident is not a failure mode worth having.
+    .filter((id) => (provider === "openrouter" ? id.endsWith(":free") : true))
+    .filter((id) => !NOT_CHAT.test(id))
+    .sort((a, b) => score(a) - score(b));
+
+  CACHE.set(provider, { at: Date.now(), models });
+  return models;
+}
+
+/** Bounded, so an exhausted chain fails in seconds rather than minutes. */
+const PER_PROVIDER = 3;
+
+function parseOverride(configured: string): Candidate[] {
+  return configured
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [provider, ...rest] = entry.split(":");
+      return { provider: provider as Provider, model: rest.join(":") };
+    })
+    .filter((c) => (c.provider === "groq" || c.provider === "openrouter") && c.model);
+}
+
+async function chainFrom(env: Env): Promise<Candidate[]> {
+  // An explicit override wins outright: it exists to pin a model when
+  // discovery picks badly, and second-guessing it would defeat the point.
+  const configured = env.AI_MODELS?.trim();
+  if (configured) {
+    return parseOverride(configured).filter((c) =>
+      c.provider === "groq" ? Boolean(env.GROQ_API_KEY) : Boolean(env.OPENROUTER_API_KEY),
+    );
+  }
+
+  const [groq, openrouter] = await Promise.all([
+    modelsOf("groq", env),
+    modelsOf("openrouter", env),
+  ]);
+
+  /**
+   * Groq first because it is fast and its limits are generous, but the two are
+   * interleaved rather than concatenated: a Groq outage should cost one slow
+   * attempt, not three.
+   */
+  const chain: Candidate[] = [];
+  for (let i = 0; i < PER_PROVIDER; i++) {
+    const g = groq[i];
+    const o = openrouter[i];
+    if (g) chain.push({ provider: "groq", model: g });
+    if (o) chain.push({ provider: "openrouter", model: o });
+  }
+  return chain;
 }
 
 /**
@@ -134,7 +233,7 @@ const SYSTEM = [
 /**
  * What the providers actually offer, right now.
  *
- * A hardcoded model list rots. Every id in `DEFAULT_CHAIN` returned 404 from
+ * A hardcoded model list rots. Every id in the old fixed chain returned 404 from
  * both providers on 2026-08-30, which is what retirement looks like from the
  * outside: the key is fine, the endpoint is fine, the name is gone.
  *
@@ -172,7 +271,7 @@ export const onRequestGet = async (ctx: { env: Env }): Promise<Response> => {
     groq,
     // Free ids only: the paid catalogue is thousands long and unusable here.
     openrouter: openrouter.filter((id) => id.endsWith(":free")),
-    chain: chainFrom(env).map((c) => `${c.provider}:${c.model}`),
+    chain: (await chainFrom(env)).map((c) => `${c.provider}:${c.model}`),
   });
 };
 
@@ -201,12 +300,13 @@ export const onRequestPost = async (ctx: {
     return json({ error: `Context is ${size} bytes, over the ${MAX_CONTEXT_BYTES} limit.` }, 413);
   }
 
-  const chain = chainFrom(env);
+  const chain = await chainFrom(env);
   if (chain.length === 0) {
     return json(
       {
-        error:
-          "No provider key is configured. Set GROQ_API_KEY or OPENROUTER_API_KEY in Cloudflare, Pages, Settings, Environment variables.",
+        error: hasKey(env)
+          ? "The providers offered no usable chat model. Check the key is still valid, or pin one with AI_MODELS."
+          : "No provider key is configured. Set GROQ_API_KEY or OPENROUTER_API_KEY in Cloudflare, Pages, Settings, Environment variables.",
       },
       503,
     );
@@ -287,6 +387,9 @@ function shortReason(e: unknown): string {
   if (message.includes("abort")) return "timed out";
   return "unavailable";
 }
+
+const hasKey = (env: Env): boolean =>
+  Boolean(env.GROQ_API_KEY) || Boolean(env.OPENROUTER_API_KEY);
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
