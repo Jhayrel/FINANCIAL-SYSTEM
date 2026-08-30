@@ -393,14 +393,59 @@
   transition: background var(--motion-hover) var(--ease-out);
 }
 
+/*
+ * One field per line, like the INPUT PAGE this replaces.
+ *
+ * Two columns looked tidier and read worse. The eye has to decide where to go
+ * after every field, the tab order and the visual order disagree, and related
+ * fields end up side by side rather than in sequence: "From wallet" sat beside
+ * "Date" and above "Item", which is not the order anyone fills them in.
+ *
+ * A single column has one path through it, top to bottom, which is what a form
+ * you fill several times a day should have.
+ */
 .fms-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: var(--space-3) var(--space-5);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  /* A field stretched across the whole panel is harder to scan, not easier. */
+  max-width: 560px;
 }
 
 .fms-row-span {
   grid-column: 1 / -1;
+}
+
+/*
+ * A field the app filled in, not you.
+ *
+ * The Excel wrote its proposals into the cell in grey italic and turned them
+ * black once you accepted them, which meant you could always see at a glance
+ * which answers were yours. This is that, in a form: a tint and a left edge,
+ * cleared the moment the field is edited.
+ *
+ * Deliberately quiet. It marks provenance, it does not ask for attention, and
+ * flow colour is reserved for direction of money (rule D3).
+ */
+/*
+ * The marker sits on a wrapper, not on the control.
+ *
+ * `forms.tsx` styles its inputs inline, so a class on them would lose to the
+ * style attribute anyway. A rule on the wrapper is both simpler and the reason
+ * those components did not need a new className prop.
+ */
+.fms-suggested {
+  border-left: 2px solid var(--brand-700);
+  padding-left: var(--space-2);
+  margin-left: -10px;
+}
+
+/* A value the form shows but nothing can type into. */
+.fms-readonly {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  color: var(--ink-2);
 }
 
 /* Desktop: label beside the control, Excel style. The label column is a fixed

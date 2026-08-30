@@ -9,7 +9,7 @@
  * rules live in `domain/entry.ts`; this file renders and decides nothing.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Alert,
@@ -108,59 +108,100 @@ export function AddTransaction({
   const [draft, setDraft] = useState<Draft>(() => ({ ...emptyDraft(), flow: "Spending" }));
   const [submitted, setSubmitted] = useState(false);
 
-  /**
-   * Asked for, never automatic.
-   *
-   * The VBA filled the description on its own as you tabbed through. That is
-   * fine when it reuses your own past wording, and wrong when it invents
-   * something: a description you did not write, silently placed in a field you
-   * were about to fill, is how a ledger gets entries nobody recognises later.
-   * So the ghost hint still appears from history, and the model only runs when
-   * the button is pressed.
-   */
-  const [describing, setDescribing] = useState(false);
-  const [categorising, setCategorising] = useState(false);
   const [categoryHint, setCategoryHint] = useState<CategoryResult | null>(null);
 
-  const proposeDescription = async (): Promise<void> => {
-    setDescribing(true);
-    try {
-      const result = await describeDraft(draft, transactions, {
-        // Both switches have to be on. Off means the model is not called,
-        // not that the button stops working: history still answers.
-        allowModel: ai.enabled && ai.features.descriptions,
-        tone: ai.tone,
-      });
-      if (result.text) set("description", result.text);
-    } finally {
-      setDescribing(false);
-    }
-  };
+  /**
+   * Suggestions arrive on their own, the way the VBA did it.
+   *
+   * Module8 ran `DoAutofill` from the sheet's change event, wrote each
+   * proposal into the field in grey, never overwrote anything typed in
+   * black, and accepted the grey after fifteen seconds. There was no button
+   * anywhere, and that is the part that made it feel quick.
+   *
+   * The two rules that matter are carried over exactly:
+   *
+   *   1. It only ever fills a field that is still empty. Anything typed is
+   *      yours and is never touched, which is what made the Excel safe to
+   *      leave running on every keystroke.
+   *   2. Changing something upstream clears what was proposed downstream,
+   *      so a suggestion never survives the answer it was based on.
+   *
+   * The delay is a debounce rather than an accept timer. Excel needed the
+   * timer because grey text was not yet a real value; here the proposal is
+   * the field's value from the moment it appears, so there is nothing to
+   * accept. What the pause is for is not asking a model about an item that
+   * is still being typed.
+   */
+  const AUTOFILL_DELAY_MS = 700;
+
+  /** Fields filled by a suggestion, so they can be styled and cleared. */
+  const [suggested, setSuggested] = useState<Set<string>>(new Set());
+
+  const markSuggested = (field: string): void =>
+    setSuggested((current) => new Set(current).add(field));
+
+  const unmark = (field: string): void =>
+    setSuggested((current) => {
+      if (!current.has(field)) return current;
+      const next = new Set(current);
+      next.delete(field);
+      return next;
+    });
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
     setDraft((d) => ({ ...d, [key]: value }));
 
   /**
-   * Filled only when the answer is confident, and only from the allowed
-   * list. Anything less is shown beside the picker and left alone, because
-   * a wrong category does not look like an error once saved: it looks like
-   * a fact, and it moves a figure in every report that groups by category.
+   * The autofill pass. Runs itself, fills only what is empty.
+   *
+   * A category is filled only when the answer is confident, because a wrong
+   * one does not look like an error once saved: it looks like a fact, and it
+   * moves a figure in every report that groups by category. Anything less
+   * confident is offered under the field and left alone.
    */
-  const proposeCategory = async (): Promise<void> => {
-    setCategorising(true);
-    try {
-      const result = await suggestCategory(draft, transactions, reference, {
-        allowModel: ai.enabled && ai.features.descriptions,
-      });
+  const latest = useRef(0);
 
-      setCategoryHint(result.category ? result : null);
-      if (result.source === "history" || result.confidence === "high") {
-        setDraft((d) => ({ ...d, category: result.category as TransactionCategory, item: d.item }));
-      }
-    } finally {
-      setCategorising(false);
-    }
-  };
+  useEffect(() => {
+    if (!draft.flow || !draft.item.trim()) return;
+
+    const run = ++latest.current;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const allowModel = ai.enabled && ai.features.descriptions;
+
+        if (!draft.category) {
+          const result = await suggestCategory(draft, transactions, reference, { allowModel });
+          // A slower earlier request must never land on a newer draft.
+          if (latest.current !== run) return;
+
+          setCategoryHint(result.category ? result : null);
+          if (result.category && (result.source === "history" || result.confidence === "high")) {
+            setDraft((d) => (d.category ? d : { ...d, category: result.category as TransactionCategory }));
+            markSuggested("category");
+          }
+        }
+
+        if (!draft.description) {
+          const result = await describeDraft(draft, transactions, { allowModel, tone: ai.tone });
+          if (latest.current !== run || !result.text) return;
+
+          setDraft((d) => (d.description ? d : { ...d, description: result.text }));
+          markSuggested("description");
+        }
+      })();
+    }, AUTOFILL_DELAY_MS);
+
+    return () => clearTimeout(timer);
+    // Deliberately keyed on the answers a suggestion depends on, not on the
+    // whole draft: including `description` here would retrigger the pass
+    // with every character typed into it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.flow, draft.item, draft.category, draft.fromWallet, draft.toWallet, draft.description, transactions, reference, ai]);
+
+  const nextRecordNumber = useMemo(
+    () => Math.max(0, ...transactions.map((t) => t.recordNumber)) + 1,
+    [transactions],
+  );
 
   const check = useMemo(
     () => checkDraft(draft, transactions, reference, debts),
@@ -299,6 +340,18 @@ export function AddTransaction({
         ) : (
           <>
             <div className="fms-fields">
+              {/*
+                The number this entry will get, shown before it is saved.
+
+                The Excel put it at the top of the input page and it was worth
+                having: it is how a row is referred to when checking something
+                against the database, and seeing it in advance tells you the
+                form is on a new entry rather than an edit.
+              */}
+              <Row label="Record number">
+                <span className="t-num-s fms-readonly">{nextRecordNumber}</span>
+              </Row>
+
               <Row label="Date" required error={errorFor("date")}>
                 <input
                   type="date"
@@ -456,25 +509,18 @@ export function AddTransaction({
                       : undefined
                   }
                 >
-                  <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "stretch" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <Select
-                        value={draft.category}
-                        onChange={(v) => {
-                          setCategoryHint(null);
-                          setDraft((d) => ({ ...d, category: v as TransactionCategory, item: "" }));
-                        }}
-                        options={categories}
-                        placeholder={ghost.category ? `${ghost.category} (suggested)` : "Pick a category"}
-                      />
-                    </div>
-                    <Button
-                      loading={categorising}
-                      disabled={!draft.item.trim()}
-                      onClick={() => void proposeCategory()}
-                    >
-                      Suggest
-                    </Button>
+                  <div className={suggested.has("category") ? "fms-suggested" : undefined}>
+                  <Select
+                    value={draft.category}
+                    onChange={(v) => {
+                      setCategoryHint(null);
+                      // Choosing it makes it yours, so autofill leaves it alone.
+                      unmark("category");
+                      setDraft((d) => ({ ...d, category: v as TransactionCategory, item: "" }));
+                    }}
+                    options={categories}
+                    placeholder={ghost.category ? `${ghost.category} (suggested)` : "Pick a category"}
+                  />
                   </div>
                 </Row>
               )}
@@ -532,21 +578,15 @@ export function AddTransaction({
 
               {needs(draft.flow, "description") && (
                 <Row label="Description" span hint={ghost.description && !draft.description ? `Last time: ${ghost.description}` : undefined}>
-                  <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "stretch" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <TextInput
-                        value={draft.description}
-                        onChange={(v) => set("description", v)}
-                        placeholder="What was it for?"
-                      />
-                    </div>
-                    <Button
-                      loading={describing}
-                      disabled={!draft.flow || !draft.item.trim()}
-                      onClick={() => void proposeDescription()}
-                    >
-                      Suggest
-                    </Button>
+                  <div className={suggested.has("description") ? "fms-suggested" : undefined}>
+                  <TextInput
+                    value={draft.description}
+                    onChange={(v) => {
+                      unmark("description");
+                      set("description", v);
+                    }}
+                    placeholder="What was it for?"
+                  />
                   </div>
                 </Row>
               )}
