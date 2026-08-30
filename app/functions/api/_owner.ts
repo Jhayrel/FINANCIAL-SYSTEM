@@ -23,30 +23,66 @@
  * this app.
  *
  * There is no Admin SDK here. Workers have WebCrypto, which is all RS256
- * needs.
+ * needs, given the keys in a form it accepts. See `JWK_URL` below for why the
+ * form matters more than it sounds like it should.
  */
 
-/** Google's signing certificates for Firebase ID tokens. Rotated regularly. */
-const CERT_URL =
-  "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com";
+/**
+ * Google's signing keys for Firebase ID tokens, as JWK.
+ *
+ * There is an X.509 endpoint too, and using it was a mistake worth recording:
+ * WebCrypto imports keys, not certificates, so a certificate has to be taken
+ * apart to find the SubjectPublicKeyInfo inside it. Doing that by scanning for
+ * the RSA algorithm identifier and slicing to the end of the buffer produces
+ * something that is not a valid SPKI, because the certificate's own signature
+ * trails the key. Every one of Google's four certificates failed to import.
+ *
+ * That failure would have rejected every genuine token while still looking
+ * like a working security check, which is the worst way for this to be wrong.
+ * The JWK endpoint publishes the same keys in the form WebCrypto already
+ * accepts, so there is no parsing to get wrong.
+ */
+const JWK_URL =
+  "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
 
-interface CertCache {
-  readonly at: number;
-  readonly keys: Record<string, string>;
+interface Jwk {
+  readonly kid?: string;
+  readonly alg?: string;
 }
 
-let certs: CertCache | null = null;
+interface KeyCache {
+  readonly at: number;
+  readonly keys: Map<string, CryptoKey>;
+}
+
+let cache: KeyCache | null = null;
 /** Google rotates daily; an hour keeps this cheap without going stale. */
-const CERT_TTL_MS = 60 * 60 * 1000;
+const CACHE_TTL_MS = 60 * 60 * 1000;
 
-async function signingCerts(): Promise<Record<string, string>> {
-  if (certs && Date.now() - certs.at < CERT_TTL_MS) return certs.keys;
+async function signingKeys(): Promise<Map<string, CryptoKey>> {
+  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.keys;
 
-  const response = await fetch(CERT_URL);
-  if (!response.ok) throw new Error("cert fetch failed");
+  const response = await fetch(JWK_URL);
+  if (!response.ok) throw new Error("key fetch failed");
 
-  const keys = (await response.json()) as Record<string, string>;
-  certs = { at: Date.now(), keys };
+  const { keys: published } = (await response.json()) as { keys?: Jwk[] };
+  const keys = new Map<string, CryptoKey>();
+
+  for (const jwk of published ?? []) {
+    if (!jwk.kid || jwk.alg !== "RS256") continue;
+    keys.set(
+      jwk.kid,
+      await crypto.subtle.importKey(
+        "jwk",
+        jwk as JsonWebKey,
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        false,
+        ["verify"],
+      ),
+    );
+  }
+
+  cache = { at: Date.now(), keys };
   return keys;
 }
 
@@ -58,45 +94,6 @@ const decode = (segment: string): Uint8Array => {
 
 const decodeJson = (segment: string): Record<string, unknown> =>
   JSON.parse(new TextDecoder().decode(decode(segment))) as Record<string, unknown>;
-
-/** Turn a PEM certificate into the public key inside it. */
-async function publicKeyOf(pem: string): Promise<CryptoKey> {
-  const body = pem
-    .replace(/-----BEGIN CERTIFICATE-----/, "")
-    .replace(/-----END CERTIFICATE-----/, "")
-    .replace(/\s+/g, "");
-
-  const der = Uint8Array.from(atob(body), (ch) => ch.charCodeAt(0));
-
-  /**
-   * WebCrypto imports keys, not certificates, so the SubjectPublicKeyInfo has
-   * to be located inside the X.509 structure. Rather than write an ASN.1
-   * parser, this finds the RSA algorithm identifier, which is the sequence
-   * immediately preceding the key in every certificate of this kind.
-   */
-  const marker = [0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01];
-  let start = -1;
-  for (let i = 0; i + marker.length <= der.length; i++) {
-    if (marker.every((byte, j) => der[i + j] === byte)) {
-      start = i;
-      break;
-    }
-  }
-  if (start === -1) throw new Error("no public key in certificate");
-
-  // Step back over the SEQUENCE header that wraps algorithm and key together.
-  let spkiStart = start - 4;
-  if (der[spkiStart] !== 0x30) spkiStart = start - 3;
-  if (der[spkiStart] !== 0x30) throw new Error("unexpected certificate layout");
-
-  return crypto.subtle.importKey(
-    "spki",
-    der.slice(spkiStart).buffer as ArrayBuffer,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["verify"],
-  );
-}
 
 export interface OwnerCheck {
   readonly ok: boolean;
@@ -131,12 +128,12 @@ export async function verifyOwner(
   if (header.alg !== "RS256") return { ok: false, reason: "Unexpected token algorithm." };
 
   const kid = typeof header.kid === "string" ? header.kid : "";
-  const pem = (await signingCerts())[kid];
-  if (!pem) return { ok: false, reason: "Token was not signed by a key Google publishes." };
+  const key = (await signingKeys()).get(kid);
+  if (!key) return { ok: false, reason: "Token was not signed by a key Google publishes." };
 
   const valid = await crypto.subtle.verify(
     "RSASSA-PKCS1-v1_5",
-    await publicKeyOf(pem),
+    key,
     decode(signaturePart).buffer as ArrayBuffer,
     new TextEncoder().encode(`${headerPart}.${payloadPart}`),
   );
