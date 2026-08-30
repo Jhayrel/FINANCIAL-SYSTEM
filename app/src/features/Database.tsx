@@ -48,10 +48,13 @@ export function Database({
   transactions,
   initialFilter = "all",
   onDelete,
+  onEdit,
 }: {
   transactions: readonly Transaction[];
   initialFilter?: FilterId;
   onDelete?: (id: string) => void;
+  /** Loads the row back into the Add form, the way the Excel arrows did. */
+  onEdit?: (row: Transaction) => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterId>(initialFilter);
@@ -206,21 +209,35 @@ export function Database({
           </StatusPill>
         ) : null,
     },
-    ...(onDelete
+    ...(onDelete || onEdit
       ? [{
           key: "actions",
           header: "",
           align: "right" as const,
-          width: "88px",
+          width: "168px",
           render: (t: Transaction) => (
-            <Button
-              size="sm"
-              variant="ghost"
-              ariaLabel={`Delete record ${t.recordNumber}`}
-              onClick={() => onDelete(t.id)}
-            >
-              Delete
-            </Button>
+            <span className="fms-rowactions">
+              {onEdit && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  ariaLabel={`Edit record ${t.recordNumber}`}
+                  onClick={() => onEdit(t)}
+                >
+                  Edit
+                </Button>
+              )}
+              {onDelete && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  ariaLabel={`Delete record ${t.recordNumber}`}
+                  onClick={() => onDelete(t.id)}
+                >
+                  Delete
+                </Button>
+              )}
+            </span>
           ),
         }]
       : []),

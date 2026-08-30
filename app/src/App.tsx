@@ -91,6 +91,14 @@ export default function App() {
   const cloud = useCloud();
   const [screen, setScreen] = useState<Screen>("dashboard");
   const [dbFilter, setDbFilter] = useState<"all" | "flagged">("all");
+  /**
+   * The row the Add screen is editing, if any.
+   *
+   * Held here rather than in `AddTransaction` because it is set from the
+   * Database, on a different screen. Cleared on save and on cancel, so the
+   * form goes back to being a new entry.
+   */
+  const [editing, setEditing] = useState<Transaction | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -385,6 +393,36 @@ export default function App() {
     );
   };
 
+  /**
+   * Replace a row that already exists.
+   *
+   * Keyed on id, and the record number is carried over rather than reissued:
+   * an edit is the same entry corrected, and renumbering it would break every
+   * reference to it, including the one in the toast that just told you what
+   * it was.
+   *
+   * Written through to Firestore by the same `saveMany` an insert uses, which
+   * writes by id, so an update overwrites rather than duplicating.
+   */
+  const handleUpdate = (rows: Transaction[]): void => {
+    setTransactions((prev) => {
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      const replaced = prev.map((t) => byId.get(t.id) ?? t);
+      // A split repayment can turn one row into two, so anything the edit
+      // produced that was not already there still has to be inserted.
+      const added = rows.filter((r) => !prev.some((t) => t.id === r.id));
+      return added.length ? insertChronologically(replaced, added) : replaced;
+    });
+    push((l) => l.saveMany(rows));
+    setEditing(null);
+    flash(`Updated record #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}.`);
+  };
+
+  const startEditing = (row: Transaction): void => {
+    setEditing(row);
+    go("add");
+  };
+
   /** Soft delete: the row moves to the bin, never out of existence. */
   const handleDelete = (id: string): void => {
     const row = transactions.find((t) => t.id === id);
@@ -675,6 +713,9 @@ export default function App() {
               debts={settings.credits}
               balances={view.rows}
               onSave={handleSave}
+              onUpdate={handleUpdate}
+              editing={editing}
+              onCancelEdit={() => setEditing(null)}
               ai={settings.ai}
             />
           )}
@@ -684,6 +725,7 @@ export default function App() {
               transactions={transactions}
               initialFilter={dbFilter}
               onDelete={handleDelete}
+              onEdit={startEditing}
             />
           )}
           {screen === "debt" && (

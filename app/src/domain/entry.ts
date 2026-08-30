@@ -63,6 +63,41 @@ export function emptyDraft(date: IsoDate = today()): Draft {
   };
 }
 
+/**
+ * Load a saved row back into the form.
+ *
+ * The Excel's input page did this with the up and down arrows: the form was
+ * both the entry screen and the record browser, and `AddOrUpdateRecord` wrote
+ * an insert or an update depending on whether the number already existed.
+ * That is why correcting a mistake there took a moment and here took deleting
+ * the row and typing it again.
+ *
+ * The flow is read back from the stored `type`, with one exception. An
+ * `Opening` row is stored as Revenue so the balance rules credit its
+ * destination, so the category is what identifies it, not the type.
+ */
+export function transactionToDraft(t: Transaction): Draft {
+  const flow: Flow =
+    t.category === "Opening" ? "Opening" : (t.type as Flow);
+
+  return {
+    id: t.id,
+    flow,
+    date: t.date,
+    fromWallet: t.fromWallet,
+    toWallet: t.toWallet,
+    category: t.category,
+    item: t.item,
+    description: t.description,
+    amount: t.amount,
+    fee: t.fee,
+    notes: t.notes,
+    status: t.status,
+    ...(t.debtId ? { debtId: t.debtId } : {}),
+    ...(t.debtEffect ? { debtEffect: t.debtEffect } : {}),
+  };
+}
+
 // ── Which fields the flow needs, style guide §3.3 ─────────────────────────
 
 export type FieldName =

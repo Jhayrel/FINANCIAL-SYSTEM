@@ -658,7 +658,7 @@ function AccountRow({
             transaction on its own date.
           */}
           {canSetOpening(account.name, transactions).ok ? (
-            <Button size="sm" variant="ghost" onClick={() => setOpening(true)}>
+            <Button size="sm" variant="secondary" onClick={() => setOpening(true)}>
               Set starting balance
             </Button>
           ) : (

@@ -32,6 +32,7 @@ import {
   itemsFor,
   needs,
   runningBalance,
+  transactionToDraft,
   type Draft,
   type Flow,
 } from "../domain/entry";
@@ -86,6 +87,9 @@ export function AddTransaction({
   debts,
   balances,
   onSave,
+  onUpdate,
+  editing,
+  onCancelEdit,
   ai,
 }: {
   transactions: readonly Transaction[];
@@ -93,6 +97,10 @@ export function AddTransaction({
   debts: readonly Debt[];
   balances: readonly WalletBalance[];
   onSave: (rows: Transaction[]) => void;
+  onUpdate: (rows: Transaction[]) => void;
+  /** A saved row being corrected, rather than a new entry. */
+  editing: Transaction | null;
+  onCancelEdit: () => void;
   ai: AiSettings;
 }) {
   /** Chosen "Someone else" as the destination, rather than left it empty. */
@@ -147,6 +155,21 @@ export function AddTransaction({
       next.delete(field);
       return next;
     });
+
+  /**
+   * The form is both the entry screen and the editor, as the Excel's was.
+   *
+   * Keyed on the row's id so switching from one row to another reloads,
+   * while typing into the loaded row does not throw the edits away.
+   */
+  useEffect(() => {
+    if (!editing) return;
+    setDraft(transactionToDraft(editing));
+    setSentOut(editing.type === "Transfer" && editing.toWallet.trim() === "");
+    setSuggested(new Set());
+    setSubmitted(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing?.id]);
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
     setDraft((d) => ({ ...d, [key]: value }));
@@ -250,9 +273,29 @@ export function AddTransaction({
     setSubmitted(true);
     if (!check.ok) return;
 
-    const nextNumber = Math.max(0, ...transactions.map((t) => t.recordNumber)) + 1;
-    onSave(draftToTransactions(draft, nextNumber, `t-${Date.now()}`, check.repaymentSplit));
-    setDraft(emptyDraft(draft.date));
+    if (editing) {
+      /**
+       * Same id, same record number. An edit is the entry corrected, not a
+       * new one, and reissuing either would break every reference to it.
+       */
+      onUpdate(
+        draftToTransactions(draft, editing.recordNumber, editing.id, check.repaymentSplit),
+      );
+    } else {
+      onSave(
+        draftToTransactions(draft, nextRecordNumber, `t-${Date.now()}`, check.repaymentSplit),
+      );
+    }
+
+    setDraft({ ...emptyDraft(draft.date), flow: "Spending" });
+    setSuggested(new Set());
+    setSubmitted(false);
+  };
+
+  const cancelEdit = (): void => {
+    onCancelEdit();
+    setDraft({ ...emptyDraft(draft.date), flow: "Spending" });
+    setSuggested(new Set());
     setSubmitted(false);
   };
 
@@ -348,8 +391,10 @@ export function AddTransaction({
                 against the database, and seeing it in advance tells you the
                 form is on a new entry rather than an edit.
               */}
-              <Row label="Record number">
-                <span className="t-num-s fms-readonly">{nextRecordNumber}</span>
+              <Row label="Record number" hint={editing ? "Editing a saved entry" : undefined}>
+                <span className="t-num-s fms-readonly">
+                  {String(editing ? editing.recordNumber : nextRecordNumber).padStart(4, "0")}
+                </span>
               </Row>
 
               <Row label="Date" required error={errorFor("date")}>
@@ -631,8 +676,16 @@ export function AddTransaction({
             <div className="fms-actions">
               {tone && <FlowBadge flow={tone} />}
               <span style={{ flex: 1 }} />
-              <Button onClick={() => setDraft(emptyDraft(draft.date))}>Clear</Button>
-              <Button variant="primary" onClick={save}>Save transaction</Button>
+              {editing ? (
+                <Button onClick={cancelEdit}>Cancel</Button>
+              ) : (
+                <Button onClick={() => setDraft({ ...emptyDraft(draft.date), flow: "Spending" })}>
+                  Clear
+                </Button>
+              )}
+              <Button variant="primary" onClick={save}>
+                {editing ? "Save changes" : "Save transaction"}
+              </Button>
             </div>
           </>
         )}
