@@ -159,6 +159,27 @@ const KEY_PATTERNS = [
   /\bsk-ant-[A-Za-z0-9_-]{16,}/, // Anthropic
 ];
 
+/**
+ * True when a loaded document carries no user content at all.
+ *
+ * Used to tell "first run, nothing saved yet" from "saved, and one list
+ * happens to be empty". The distinction matters because the caller keeps its
+ * own defaults for the first case and must not for the second: judging it on
+ * `accounts` alone threw away saved bills, subscriptions, categories and
+ * credit lines whenever the account list was empty, which is precisely the
+ * state a damaged document is in.
+ */
+export function isBlankSettings(s: AppSettings): boolean {
+  return (
+    s.accounts.length === 0 &&
+    s.bills.length === 0 &&
+    s.subscriptions.length === 0 &&
+    s.revenueCategories.length === 0 &&
+    s.spendingTypes.length === 0 &&
+    s.credits.length === 0
+  );
+}
+
 export function containsSecret(value: unknown): boolean {
   const text = typeof value === "string" ? value : JSON.stringify(value ?? "");
   return KEY_PATTERNS.some((p) => p.test(text));

@@ -227,6 +227,33 @@ export function firestoreSettingsStore(uid: string): SettingsStore {
       // Belt and braces: the UI has no key field, this refuses one anyway, and
       // the security rules refuse it a third time.
       assertNoSecrets(settings);
+
+      /**
+       * Refuse to erase the account list.
+       *
+       * Accounts are the spine of the ledger: every balance, ranking and
+       * report is grouped by their names. Writing an empty list over a
+       * populated one destroys all of that while leaving the transactions
+       * intact, which looks like the data is gone even though it is not.
+       *
+       * This exists because it happened. A store swap raced ahead of its own
+       * load and wrote defaults over the real document. That race is fixed in
+       * `App.tsx`, but the fix is one `useEffect` dependency away from
+       * regressing, and the cost of being wrong here is someone's ledger.
+       *
+       * A genuine "delete every account" is not a thing the app offers, so
+       * there is no legitimate write this blocks.
+       */
+      if (settings.accounts.length === 0) {
+        const existing = await getDoc(settingsDoc(db, uid));
+        const stored = existing.exists() ? normaliseSettings(existing.data()) : null;
+        if (stored && stored.accounts.length > 0) {
+          throw new Error(
+            `Refusing to save: this would erase ${stored.accounts.length} accounts and leave the ledger without them. Reload before changing anything.`,
+          );
+        }
+      }
+
       await setDoc(settingsDoc(db, uid), settings as DocumentData);
     },
 

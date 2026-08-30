@@ -344,10 +344,10 @@ export function renameItem(
 // ── Migration from the old flat lists ──────────────────────────────────────
 
 /** Names that read as a set-aside stash rather than a spending wallet. */
-const RESERVE_PATTERN = /\(reserve\)|reserved|hidden/i;
+export const RESERVE_PATTERN = /\(reserve\)|reserved|hidden/i;
 
 /** "Maya Bank (Drone)": a parent name with a qualifier in brackets. */
-const GOAL_PATTERN = /^(.+?)\s*\((.+)\)$/;
+export const GOAL_PATTERN = /^(.+?)\s*\((.+)\)$/;
 
 /**
  * Build the account list from the old wallet/savings lists plus whatever the

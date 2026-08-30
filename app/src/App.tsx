@@ -36,7 +36,7 @@ import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domai
 import { insertChronologically } from "./domain/entry";
 import { formatMedium, getYear } from "./domain/dates";
 import { systemToCsv } from "./domain/csv";
-import { browserSettingsStore } from "./data/settingsStore";
+import { browserSettingsStore, type SettingsStore } from "./data/settingsStore";
 import {
   checksum,
   createBackup,
@@ -57,7 +57,7 @@ import {
 import { useCloud } from "./data/useCloud";
 import { SignIn } from "./features/SignIn";
 import { migrateAccounts, renameAccount, renameItem } from "./domain/accounts";
-import { defaultSettings, type AppSettings } from "./domain/settings";
+import { defaultSettings, isBlankSettings, type AppSettings } from "./domain/settings";
 import type { Centavos } from "./domain/money";
 import type { Budgets, DeletedTransaction, ReferenceLists, Transaction } from "./domain/types";
 
@@ -171,10 +171,24 @@ export default function App() {
     // visible on the Debt screen from the first render.
     credits: seed.debts,
   }));
-  const [loadedFromStore, setLoadedFromStore] = useState(false);
+  /**
+   * Which store has actually been read.
+   *
+   * A boolean is not enough. The store swaps from the browser to Firestore the
+   * moment auth resolves, and a boolean stays true across that swap, so the
+   * save effect fired against the NEW store carrying settings read from the
+   * OLD one. On a fresh domain that meant writing empty accounts over the real
+   * ones in Firestore before the Firestore read had even returned.
+   *
+   * Holding the store itself means "have I read THIS store", which is the
+   * question that actually matters.
+   */
+  const [loadedStore, setLoadedStore] = useState<SettingsStore | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    // A new store has not been read yet, whatever the previous one told us.
+    setLoadedStore(null);
     void store.load().then((stored) => {
       /**
        * Clean on every load, not just on the first build.
@@ -183,18 +197,20 @@ export default function App() {
        * once settings have been saved, so an obsolete entry like "Transfer of
        * balance" survives every reload. See `domain/settingsCleanup.ts`.
        */
-      // An empty store means first run: keep the migrated defaults.
-      if (!cancelled && stored.accounts.length > 0) setSettings(cleanedSettings(stored));
-      if (!cancelled) setLoadedFromStore(true);
+      // A store with nothing in it means first run: keep the migrated
+      // defaults. Anything else is saved data and wins, even if one of its
+      // lists is empty.
+      if (!cancelled && !isBlankSettings(stored)) setSettings(cleanedSettings(stored));
+      if (!cancelled) setLoadedStore(store);
     });
     return () => { cancelled = true; };
   }, [store]);
 
   useEffect(() => {
-    // Never overwrite the store with defaults before the first load lands.
-    if (!loadedFromStore) return;
+    // Never write to a store that has not been read yet.
+    if (loadedStore !== store) return;
     void store.save(settings);
-  }, [store, settings, loadedFromStore]);
+  }, [store, settings, loadedStore]);
 
   /**
    * Settings changed somewhere else.
@@ -208,7 +224,7 @@ export default function App() {
    * saving does not feed back into loading.
    */
   useEffect(() => {
-    if (!loadedFromStore || !store.subscribe) return;
+    if (loadedStore !== store || !store.subscribe) return;
     return store.subscribe((incoming) => {
       const next = cleanedSettings(incoming);
       setSettings((current) => {
@@ -227,7 +243,7 @@ export default function App() {
         return checksum(current) === checksum(next) ? current : next;
       });
     });
-  }, [store, loadedFromStore]);
+  }, [store, loadedStore]);
 
   const [syncError, setSyncError] = useState<string | null>(null);
   /**

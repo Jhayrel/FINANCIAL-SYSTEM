@@ -37,6 +37,7 @@ import { describeClose, planGoalClose } from "../domain/goalClose";
 import { validateBackup, type Backup, type RestoreMode, type Validation } from "../domain/backup";
 import { formatBytes, measureStorage } from "../domain/storage";
 import { cleanSettings } from "../domain/settingsCleanup";
+import { recoverAccounts } from "../domain/recovery";
 import {
   clearConfig,
   parseConfig,
@@ -1929,6 +1930,35 @@ function DataSection({
     [transactions, deleted, budgets, settings, quota],
   );
 
+  /**
+   * Offered only in the state that actually needs it: rows exist, accounts do
+   * not. Showing a "rebuild" button next to a healthy list would invite
+   * someone to press it and find out what it does.
+   */
+  const recovery = useMemo(() => {
+    if (settings.accounts.length > 0 || transactions.length === 0) return null;
+    const report = recoverAccounts(transactions, settings.accounts);
+    return report.recovered > 0 ? report : null;
+  }, [transactions, settings.accounts]);
+
+  const runRecovery = async (): Promise<void> => {
+    if (!recovery) return;
+
+    const preview = recovery.accounts
+      .slice(0, 6)
+      .map((a) => a.name)
+      .join(", ");
+
+    const ok = await confirm({
+      title: `Rebuild ${recovery.recovered.toLocaleString()} accounts?`,
+      body: `Names come straight from your ${transactions.length.toLocaleString()} transactions: ${preview}${recovery.recovered > 6 ? `, and ${(recovery.recovered - 6).toLocaleString()} more` : ""}. No transaction is touched and no amount changes. Goal targets and deadlines are not restored this way.`,
+      confirmLabel: "Rebuild accounts",
+    });
+    if (!ok) return;
+
+    onChangeSettings({ ...settings, accounts: [...recovery.accounts] });
+  };
+
   const read = async (f: File): Promise<void> => {
     setReading(true);
     try {
@@ -1968,6 +1998,42 @@ function DataSection({
       {dialog}
 
       <ConnectFirebase signedInUid={signedInUid} />
+
+      {recovery && (
+        <Group title="Rebuild accounts" hint="Your account list is empty" wide>
+          <Alert status="warn" title="The ledger has accounts but the settings do not">
+            {transactions.length.toLocaleString()} transactions name{" "}
+            {recovery.recovered.toLocaleString()} accounts between them, but the account list is
+            empty, so every balance reads zero. The transactions are intact. Rebuilding reads the
+            names back out of them.
+          </Alert>
+
+          <dl className="fms-deflist" style={{ marginTop: "var(--space-3)" }}>
+            <dt className="t-body">Recovered exactly</dt>
+            <dd className="t-body" style={{ margin: 0 }}>
+              Every account name, and so every balance
+            </dd>
+            <dt className="t-body">Worked out from the name</dt>
+            <dd className="t-body" style={{ margin: 0 }}>
+              Whether each one is spending, savings or a goal
+            </dd>
+            <dt className="t-body">Cannot be recovered</dt>
+            <dd className="t-body" style={{ margin: 0 }}>
+              Goal targets, deadlines, and which accounts were archived. Restore a backup for those.
+            </dd>
+          </dl>
+
+          <div className="fms-addrow">
+            <Button variant="primary" onClick={() => void runRecovery()}>
+              Rebuild {recovery.recovered.toLocaleString()} accounts
+            </Button>
+            <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+              Adds nothing to the ledger and changes no amount. It only names the accounts the
+              transactions already refer to.
+            </span>
+          </div>
+        </Group>
+      )}
 
       {onUpload && (
         <Group
