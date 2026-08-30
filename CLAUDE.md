@@ -87,6 +87,7 @@ desktop and phone.
 3. `docs/SYSTEM-ANALYSIS.md`, the verified reverse-engineered Excel rules.
 4. `docs/07-WRITING-RULES.md`: binding rules for every word that ships.
 5. `docs/08-YEARS-AND-BACKUP.md`: the ledger is continuous and a backup is the whole system.
+6. `docs/09-AUTO-PUSH.md`: push without being asked, and the checks that make that safe.
 
 **Read both before writing or changing any calculation or any UI.** Do not re-derive
 rules from scratch. Do not "improve" a formula because it looks wrong, several are
@@ -225,8 +226,15 @@ If a design decision is not covered by the spec, propose it and wait. Do not def
 - New code in `app/`, tooling in `tools/`, docs in `docs/`. **Never inside `MY THINGS/`.**
 - This folder is in **OneDrive**. Keep `node_modules/` out of git and preferably out of
   OneDrive sync; expect lock weirdness on Windows.
-- **Do not commit or push unless asked.** Never `git add -A` from the root without
-  checking `git status` first, one careless stage puts the ledger on GitHub permanently.
+- **Push automatically. Do not wait to be asked.** Superseded the old "do not
+  commit or push unless asked" on 2026-08-30 at the owner's instruction. See
+  `docs/09-AUTO-PUSH.md`, which is binding.
+- **Check `git status` before every push anyway.** The repository is public and
+  pushing is irreversible. Never `git add -f`: the only reason to force-add is
+  to defeat `.gitignore`, and every line in it names something that must not be
+  published.
+- **Every push to `main` deploys to production.** Cloudflare Pages builds it
+  automatically, so `tsc`, `vitest` and `vite build` must all pass first.
 - No custom domain, analytics, telemetry, or third-party scripts.
 - Ask before adding any dependency handling money, dates, or auth.
 - Conventional Commits. Feature branches.
