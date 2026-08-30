@@ -76,6 +76,7 @@ export function Insights({
     settings,
     transactions,
     budgets,
+    reference,
     feature: "insightSummary",
     asOf: viewing,
   });

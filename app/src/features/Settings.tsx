@@ -70,7 +70,7 @@ import {
 } from "../domain/settings";
 import { formatAmount, formatMoney, type Centavos } from "../domain/money";
 import { setPreference as setThemePreference } from "../theme";
-import type { Budgets, SpendingType, Transaction } from "../domain/types";
+import type { Budgets, ReferenceLists, SpendingType, Transaction } from "../domain/types";
 
 type Tab =
   | "accounts"
@@ -99,6 +99,7 @@ const GROUPS: AccountKind[] = ["spending", "reserve", "savings"];
 export function Settings({
   settings,
   transactions,
+  reference,
   deleted,
   budgets,
   storeName,
@@ -117,6 +118,8 @@ export function Settings({
 }: {
   settings: AppSettings;
   transactions: readonly Transaction[];
+  /** Derived from settings in App, passed in so it is derived exactly once. */
+  reference: ReferenceLists;
   deleted: readonly Transaction[];
   budgets: Readonly<Record<string, unknown>>;
   storeName: string;
@@ -228,6 +231,7 @@ export function Settings({
             patch={patch}
             transactions={transactions}
             budgets={budgets as Budgets}
+            reference={reference}
           />
         )}
 
@@ -1702,13 +1706,15 @@ function AiSection({
   patch,
   transactions,
   budgets,
+  reference,
 }: {
   settings: AppSettings;
   patch: (part: Partial<AppSettings>) => void;
   transactions: readonly Transaction[];
   budgets: Budgets;
+  reference: ReferenceLists;
 }) {
-  const tryOut = useAi({ settings, transactions, budgets, feature: "insightSummary" });
+  const tryOut = useAi({ settings, transactions, budgets, reference, feature: "insightSummary" });
   const ai = settings.ai;
   const setAi = (part: Partial<AiSettings>): void => patch({ ai: { ...ai, ...part } });
   const off = !ai.enabled;

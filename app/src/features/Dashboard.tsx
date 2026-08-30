@@ -87,7 +87,7 @@ export function Dashboard({
       }),
     [transactions, accounts, budgets, debts, reference, lowBalanceThreshold, asOf],
   );
-  const ai = useAi({ settings, transactions, budgets, feature: "alerts", asOf });
+  const ai = useAi({ settings, transactions, budgets, reference, feature: "alerts", asOf });
 
   const year = getYear(asOf);
   const month = getMonth(asOf);

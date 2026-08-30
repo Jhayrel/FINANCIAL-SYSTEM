@@ -145,6 +145,13 @@ export default function App() {
 
   const [settings, setSettings] = useState<AppSettings>(() => ({
     ...defaultSettings(),
+    /**
+     * Seeded from what this device is already showing.
+     *
+     * `defaultSettings()` says "system", and starting from that would push
+     * "system" over a real choice the moment anything else was edited.
+     */
+    theme: getPreference(),
     accounts: base.loaded
       ? migrateAccounts(base.reference.wallets, base.reference.savings, base.transactions)
       : [],
@@ -200,7 +207,17 @@ export default function App() {
       // A store with nothing in it means first run: keep the migrated
       // defaults. Anything else is saved data and wins, even if one of its
       // lists is empty.
-      if (!cancelled && !isBlankSettings(stored)) setSettings(cleanedSettings(stored));
+      if (!cancelled && !isBlankSettings(stored)) {
+        setSettings(cleanedSettings(stored));
+        /**
+         * The theme is the one setting with an effect outside React state:
+         * a class on <html>, set from its own localStorage key so the page
+         * does not flash on load. Storing it in settings without applying it
+         * here meant it never actually synced, so signing in on a second
+         * device showed the wrong theme with the right value saved.
+         */
+        setPreference(stored.theme);
+      }
       if (!cancelled) setLoadedStore(store);
     });
     return () => { cancelled = true; };
@@ -240,7 +257,14 @@ export default function App() {
          *
          * Comparing content rather than identity stops the echo dead.
          */
-        return checksum(current) === checksum(next) ? current : next;
+        if (checksum(current) === checksum(next)) return current;
+
+        // Same reason as the load path: the theme has an effect outside
+        // React state, so a change made on another device has to be applied
+        // rather than merely stored.
+        if (next.theme !== current.theme) setPreference(next.theme);
+
+        return next;
       });
     });
   }, [store, loadedStore]);
@@ -680,6 +704,7 @@ export default function App() {
             <Settings
               settings={settings}
               transactions={transactions}
+              reference={reference}
               deleted={deleted}
               budgets={budgets}
               storeName={store.name}

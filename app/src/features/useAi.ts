@@ -22,12 +22,20 @@ import { buildContext } from "../domain/aiContext";
 import { offlineAnswer } from "../domain/aiOffline";
 import { today } from "../domain/dates";
 import type { AppSettings } from "../domain/settings";
-import type { Budgets, Transaction } from "../domain/types";
+import type { Budgets, ReferenceLists, Transaction } from "../domain/types";
 
 export interface UseAiInput {
   readonly settings: AppSettings;
   readonly transactions: readonly Transaction[];
   readonly budgets: Budgets;
+  /**
+   * The app's own reference lists, passed in rather than rebuilt here.
+   *
+   * Deriving them a second time drifted immediately: this module's first
+   * version forgot the archived filter, so the AI would have described
+   * accounts every other screen hides.
+   */
+  readonly reference: ReferenceLists;
   /** Which toggle in Settings governs this surface. */
   readonly feature: keyof AppSettings["ai"]["features"];
   /**
@@ -49,7 +57,14 @@ export interface UseAi {
   readonly clear: () => void;
 }
 
-export function useAi({ settings, transactions, budgets, feature, asOf }: UseAiInput): UseAi {
+export function useAi({
+  settings,
+  transactions,
+  budgets,
+  reference,
+  feature,
+  asOf,
+}: UseAiInput): UseAi {
   const [answer, setAnswer] = useState<AiAnswer | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -63,18 +78,11 @@ export function useAi({ settings, transactions, budgets, feature, asOf }: UseAiI
         accounts: settings.accounts,
         budgets,
         credits: settings.credits,
-        reference: {
-          wallets: settings.accounts.filter((a) => a.kind === "spending").map((a) => a.name),
-          savings: settings.accounts.filter((a) => a.kind !== "spending").map((a) => a.name),
-          bills: settings.bills,
-          subscriptions: settings.subscriptions,
-          revenueCategories: settings.revenueCategories,
-          spendingTypes: settings.spendingTypes,
-        },
+        reference,
         lowBalanceThreshold: settings.lowBalanceThreshold,
         asOf: asOf ?? today(),
       }),
-    [transactions, budgets, settings, asOf],
+    [transactions, budgets, settings, reference, asOf],
   );
 
   const run = useCallback(
