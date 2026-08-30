@@ -37,6 +37,7 @@ import { describeClose, planGoalClose } from "../domain/goalClose";
 import { validateBackup, type Backup, type RestoreMode, type Validation } from "../domain/backup";
 import { formatBytes, measureStorage } from "../domain/storage";
 import { cleanSettings } from "../domain/settingsCleanup";
+import { canSetOpening, openingRows } from "../domain/opening";
 import { recoverAccounts } from "../domain/recovery";
 import { AiAnswerView } from "../components/AiAnswer";
 import { useAi } from "./useAi";
@@ -192,6 +193,7 @@ export function Settings({
             transactions={transactions}
             onChange={(accounts) => patch({ accounts })}
             onRename={onRenameAccount}
+            onAddTransactions={onAddTransactions}
           />
         )}
 
@@ -300,11 +302,13 @@ function AccountsSection({
   transactions,
   onChange,
   onRename,
+  onAddTransactions,
 }: {
   accounts: readonly Account[];
   transactions: readonly Transaction[];
   onChange: (accounts: Account[]) => void;
   onRename: (from: string, to: string) => void;
+  onAddTransactions: (rows: Transaction[]) => void;
 }) {
   const [adding, setAdding] = useState("");
   const [kind, setKind] = useState<AccountKind>("spending");
@@ -384,6 +388,7 @@ function AccountsSection({
                         confirm={confirm}
                         onUpdate={(part) => update(a.id, part)}
                         onRename={onRename}
+                        onAddTransactions={onAddTransactions}
                       />
                     ))),
               ];
@@ -477,6 +482,7 @@ function AccountRow({
   confirm,
   onUpdate,
   onRename,
+  onAddTransactions,
 }: {
   account: Account;
   accounts: readonly Account[];
@@ -484,10 +490,57 @@ function AccountRow({
   confirm: (req: ConfirmRequest) => Promise<boolean>;
   onUpdate: (part: Partial<Account>) => void;
   onRename: (from: string, to: string) => void;
+  onAddTransactions: (rows: Transaction[]) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(account.name);
   const [blocked, setBlocked] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [startAmount, setStartAmount] = useState<Centavos | null>(null);
+
+  /**
+   * Dated before everything else, so it is the position you started from.
+   *
+   * Putting it on today would make the balance right and the history wrong:
+   * every report before today would show the account empty, and the day you
+   * set it up would look like the day the money appeared.
+   */
+  const commitOpening = async (): Promise<void> => {
+    if (startAmount === null || startAmount === 0) return;
+
+    const check = canSetOpening(account.name, transactions);
+    if (!check.ok) {
+      setBlocked(check.reason ?? "That cannot be set now.");
+      setOpening(false);
+      return;
+    }
+
+    const ok = await confirm({
+      title: `Start ${account.name} at ₱${formatAmount(startAmount)}?`,
+      body: `This records what the account already held before your first entry. It is not income, so it never appears in a revenue figure, and it can only be set once: from here on the balance moves only when you add a transaction.`,
+      confirmLabel: "Set starting balance",
+    });
+    if (!ok) return;
+
+    const earliest = transactions.reduce(
+      (soonest, t) => (t.date < soonest ? t.date : soonest),
+      today(),
+    );
+    const dayBefore = new Date(earliest);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+
+    const nextNumber = Math.max(0, ...transactions.map((t) => t.recordNumber)) + 1;
+    onAddTransactions(
+      openingRows(
+        [{ account: account.name, amount: startAmount }],
+        dayBefore.toISOString().slice(0, 10),
+        nextNumber,
+      ),
+    );
+
+    setOpening(false);
+    setStartAmount(null);
+  };
 
   const balance = walletBalance(transactions, account.name);
   const impact = renameImpact(transactions, account.name);
@@ -592,11 +645,56 @@ function AccountRow({
         </td>
         <td>
           <span className="fms-rowactions">
+            {/*
+              Offered only while it is still true, which is the whole design.
+
+              A starting balance is what this account already held when you
+              began recording. `canSetOpening` refuses it once the account has
+              any history or already has one, so it cannot be added twice and
+              cannot be added on top of real transactions. That is the answer
+              to "what if I remember a missed entry later": the missed entry is
+              an ordinary transaction on its own date, and it moves the balance
+              from that date on, which is correct. Only a second starting
+              balance would invent money, and there cannot be one.
+            */}
+            {canSetOpening(account.name, transactions).ok && (
+              <Button size="sm" variant="secondary" onClick={() => setOpening(true)}>
+                Starting balance
+              </Button>
+            )}
             <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>Rename</Button>
             <Button size="sm" variant="danger" onClick={() => void deactivate()}>Deactivate</Button>
           </span>
         </td>
       </tr>
+
+      {opening && (
+        <tr>
+          <td colSpan={4}>
+            <div className="fms-addrow">
+              <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                What {account.name} held on the day you started recording
+              </span>
+              <AmountInput value={startAmount} onChange={setStartAmount} />
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={startAmount === null || startAmount === 0}
+                onClick={() => void commitOpening()}
+              >
+                Set it
+              </Button>
+              <Button size="sm" onClick={() => { setOpening(false); setStartAmount(null); }}>
+                Cancel
+              </Button>
+              <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                Recorded once, dated before your first entry. It is not income and never counts as
+                revenue.
+              </span>
+            </div>
+          </td>
+        </tr>
+      )}
 
       {blocked && (
         <tr>
