@@ -1271,3 +1271,23 @@
   user-select: all;
   word-break: break-all;
 }
+
+/*
+ * Row actions inside a data table.
+ *
+ * Distinct from `.fms-rowactions`, which reserves a fixed width so the Settings
+ * tables agree with one another. A ledger table has one action column and
+ * hundreds of rows, so it wants the opposite: as little width as the buttons
+ * need, because everything it takes comes off the description.
+ */
+.fms-tableactions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+
+.fms-tableactions > button {
+  min-width: 0;
+  padding: 0 var(--space-2);
+}

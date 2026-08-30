@@ -48,7 +48,20 @@ export function DataTable<T>({
   return (
     <div>
       <div className="scroll-slim" style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        {/*
+         * Fixed layout, so the declared widths are the widths.
+         *
+         * With automatic layout a cell's content sets a floor the column
+         * cannot go below, so a long description held the table wider than
+         * its container and the last column was cut off at the right edge.
+         * Truncation could not help, because the cell had already won the
+         * argument about how wide it needed to be.
+         *
+         * Fixed layout hands each column the width it asked for and gives the
+         * rest to the one that did not ask, which is what makes the ellipsis
+         * in `.fms-truncate` actually do something.
+         */}
+        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
           <thead>
             <tr style={{ background: "var(--surface-sunk)" }}>
               {selectable && <th style={{ width: 44 }} />}

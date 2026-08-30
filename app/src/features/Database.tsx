@@ -76,6 +76,32 @@ export function Database({
     return map;
   }, [transactions]);
 
+  /**
+   * Search by what it cost, which is how anyone looks for a transaction.
+   *
+   * Typing 5000 to find a PHP 5,000.00 row returned nothing, because the
+   * search covered every field except the one people actually remember. It
+   * now matches the amount, the fee and the total, written the way they are
+   * shown and the way they would be typed: 5000, 5,000, and 5000.00 all find
+   * the same row.
+   */
+  const matchesAmount = (t: Transaction, q: string): boolean => {
+    // A query with no digits cannot be an amount, and testing it would make
+    // every text search do this work for nothing.
+    if (!/\d/.test(q)) return false;
+
+    const wanted = q.replace(/[^\d.]/g, "");
+    if (!wanted) return false;
+
+    return [t.amount, t.fee, t.total].some((cents) => {
+      const exact = (cents / 100).toFixed(2);
+      // "5000" should find 5000.00, so a whole-peso query matches the
+      // pesos alone as well as the full two decimal places.
+      const whole = String(Math.trunc(cents / 100));
+      return exact.includes(wanted) || whole === wanted;
+    });
+  };
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
 
@@ -91,7 +117,9 @@ export function Database({
         t.category.toLowerCase().includes(q) ||
         t.notes.toLowerCase().includes(q) ||
         t.status.toLowerCase().includes(q) ||
-        String(t.recordNumber).padStart(4, "0").includes(q)
+        String(t.recordNumber).padStart(4, "0").includes(q) ||
+        matchesAmount(t, q) ||
+        t.date.includes(q)
       );
     });
 
@@ -214,9 +242,15 @@ export function Database({
           key: "actions",
           header: "",
           align: "right" as const,
-          width: "168px",
+          width: "132px",
           render: (t: Transaction) => (
-            <span className="fms-rowactions">
+            /*
+             * Not `.fms-rowactions`: that reserves 200px and gives every
+             * button a 96px minimum so the Settings tables line up with each
+             * other. Applied to 442 ledger rows it pushed the table past its
+             * container, and Delete was cut off at the right edge.
+             */
+            <span className="fms-tableactions">
               {onEdit && (
                 <Button
                   size="sm"
@@ -252,7 +286,7 @@ export function Database({
         action={<CountChip>{transactions.length.toLocaleString()} records</CountChip>}
       >
         <div className="fms-dbtools">
-          <SearchInput value={query} onChange={(v) => { setQuery(v); setLimit(PAGE); }} placeholder="Search item, description, wallet, status, record #…" />
+          <SearchInput value={query} onChange={(v) => { setQuery(v); setLimit(PAGE); }} placeholder="Search item, description, wallet, amount, date, record #…" />
           <SegmentedControl
             options={FILTERS.map((f) => ({
               id: f.id,
