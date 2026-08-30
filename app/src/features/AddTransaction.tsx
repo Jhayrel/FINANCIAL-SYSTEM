@@ -37,6 +37,7 @@ import {
 } from "../domain/entry";
 import type { AiSettings } from "../domain/settings";
 import { describeDraft } from "../data/aiClient";
+import { billsToLog, predictAmount, reasons, type DueBill } from "../domain/predict";
 import type { ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
 const FLOWS: { id: Flow; tone: FlowTone; glyph: string; hint: string }[] = [
@@ -119,6 +120,35 @@ export function AddTransaction({
   const ghost = useMemo(() => suggest(draft, transactions), [draft, transactions]);
   const balance = runningBalance(draft, transactions, draft.id);
 
+  /**
+   * VBA rule 5a, which was written and never wired up.
+   *
+   * A bill due today outranks whatever you buy most often. If Globe was paid
+   * on the 30th for a year then on the 30th the item is almost certainly
+   * Globe, and proposing "Food" because food is more frequent overall is
+   * confidently wrong. One tap fills the whole row from last month's.
+   */
+  const due = useMemo(() => billsToLog(transactions, draft.date), [transactions, draft.date]);
+
+  const guess = useMemo(() => predictAmount(transactions, draft), [transactions, draft]);
+  const why = useMemo(() => reasons(draft, transactions), [draft, transactions]);
+  const reasonFor = (field: string): string | undefined =>
+    why.find((r) => r.field === field)?.why;
+
+  const logBill = (bill: DueBill): void => {
+    setDraft((d) => ({
+      ...d,
+      flow: "Spending",
+      category: bill.category,
+      item: bill.item,
+      // The amount is filled here because the whole point is one tap, and it
+      // is visible in the field for checking before anything is saved.
+      amount: bill.expected,
+      fromWallet: bill.wallet || d.fromWallet,
+      status: "Paid",
+    }));
+  };
+
   const allWallets = [...reference.wallets, ...reference.savings];
   const items = itemsFor(draft.flow, draft.category, reference);
   const categories = categoriesFor(draft.flow);
@@ -142,6 +172,37 @@ export function AddTransaction({
     <div className="fms-entry">
       {/* ── Left: the form ─────────────────────────────────────────────── */}
       <section className="fms-panel">
+        {due.length > 0 && (
+          <div className="fms-duestrip">
+            <div className="t-caption" style={{ color: "var(--ink-3)" }}>
+              Due around now, going by last month. One tap fills the row.
+            </div>
+            <div className="fms-duechips">
+              {due.map((bill) => (
+                <button
+                  key={bill.item}
+                  type="button"
+                  className="fms-duechip"
+                  onClick={() => logBill(bill)}
+                  style={{
+                    borderColor:
+                      bill.daysAway < 0 ? "var(--over)" : "var(--hairline-strong)",
+                  }}
+                >
+                  <span className="t-body-strong">{bill.item}</span>
+                  <span className="t-num-s">{formatMoney(bill.expected)}</span>
+                  <span
+                    className="t-micro"
+                    style={{ color: bill.daysAway < 0 ? "var(--over)" : "var(--ink-3)" }}
+                  >
+                    {bill.why}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Flow tiles */}
         <div className="fms-flowgrid">
           {FLOWS.map((f) => {
@@ -214,7 +275,12 @@ export function AddTransaction({
               )}
 
               {needs(draft.flow, "fromWallet") && (
-                <Row label="From wallet" required={draft.flow !== "Debt"} error={errorFor("fromWallet")}>
+                <Row
+                  label="From wallet"
+                  required={draft.flow !== "Debt"}
+                  error={errorFor("fromWallet")}
+                  hint={reasonFor("fromWallet")}
+                >
                   <Select
                     value={draft.fromWallet}
                     onChange={(v) => set("fromWallet", v)}
@@ -298,7 +364,14 @@ export function AddTransaction({
               )}
 
               {needs(draft.flow, "item") && (
-                <Row label="Item" hint={ghost.item && !draft.item ? `Suggested: ${ghost.item}` : undefined}>
+                <Row
+                  label="Item"
+                  hint={
+                    ghost.item && !draft.item
+                      ? `Suggested: ${ghost.item}`
+                      : reasonFor("item")
+                  }
+                >
                   <Select
                     value={draft.item}
                     onChange={(v) => set("item", v)}
@@ -308,12 +381,31 @@ export function AddTransaction({
                 </Row>
               )}
 
-              <Row label="Amount" required error={errorFor("amount")}>
-                <AmountInput
-                  value={draft.amount}
-                  onChange={(v) => set("amount", v)}
-                  invalid={Boolean(errorFor("amount"))}
-                />
+              <Row
+                label="Amount"
+                required
+                error={errorFor("amount")}
+                hint={guess && draft.amount === null ? guess.why : undefined}
+              >
+                <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "stretch" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <AmountInput
+                      value={draft.amount}
+                      onChange={(v) => set("amount", v)}
+                      invalid={Boolean(errorFor("amount"))}
+                    />
+                  </div>
+                  {/*
+                    Offered, never filled. An amount that is silently almost
+                    right is the one mistake here that quietly corrupts a
+                    balance, so this takes a deliberate tap.
+                  */}
+                  {guess && draft.amount === null && (
+                    <Button onClick={() => set("amount", guess.amount)}>
+                      {formatMoney(guess.amount)}
+                    </Button>
+                  )}
+                </div>
               </Row>
 
               {needs(draft.flow, "fee") && (
