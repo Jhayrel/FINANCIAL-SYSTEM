@@ -267,12 +267,20 @@
 
 /* ══ Entry screen: one page, no scrolling on desktop ═══════════════════════ */
 
+/*
+ * Narrow enough that the card fits the form inside it.
+ *
+ * At 1100px the field column was around 840px while the fields themselves
+ * stop at a readable width, which left a hand's width of empty card to the
+ * right of every single row. A panel that is mostly blank reads as unfinished
+ * however tidy the fields are.
+ */
 .fms-entry {
   display: grid;
   gap: var(--space-4);
   grid-template-columns: minmax(0, 1fr) minmax(200px, 240px);
   align-items: start;
-  max-width: 1100px;
+  max-width: 900px;
 }
 
 .fms-panel {
@@ -408,8 +416,6 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
-  /* A field stretched across the whole panel is harder to scan, not easier. */
-  max-width: 560px;
 }
 
 .fms-row-span {
@@ -819,6 +825,16 @@
 }
 
 .fms-rowactions > button { min-width: 96px; }
+
+/*
+ * Every action column starts at the same x, whatever it holds.
+ *
+ * Tables with one action ended 104px to the right of tables with two, so
+ * scanning down the Categories tab the buttons stepped sideways at every
+ * section break. Reserving the width of the widest set (two buttons and the
+ * gap between them) lines them all up without changing any button.
+ */
+.fms-rowactions { min-width: 200px; }
 
 /* A named block inside the panel. */
 /*
