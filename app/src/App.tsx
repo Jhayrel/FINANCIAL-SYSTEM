@@ -713,7 +713,7 @@ export default function App() {
           </p>
         </header>
 
-        <main ref={mainRef} className={`fms-main${screen === "settings" ? " fms-main--fixed" : ""}`}>
+        <main ref={mainRef} className={`fms-main${screen === "settings" || screen === "database" ? " fms-main--fixed" : ""}`}>
           {syncError && (
             <div style={{ marginBottom: "var(--space-4)" }}>
               <Alert status="over" title="Not saving to Firebase">

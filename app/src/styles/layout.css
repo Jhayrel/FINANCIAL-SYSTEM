@@ -1291,3 +1291,52 @@
   min-width: 0;
   padding: 0 var(--space-2);
 }
+
+/* ══ Database: only the rows move ═══════════════════════════════════════════
+   The screen is exactly one viewport tall. The title, the search box, the
+   filters, the column headers and the footer all stay put, and the rows
+   scroll underneath them. Scrolling the whole page to reach a filter you can
+   no longer see is the thing this replaces. */
+
+.fms-db,
+.fms-db > section,
+.fms-db > section > div:last-child,
+.fms-db .fms-tablewrap,
+.fms-db .fms-tablewrap > div {
+  display: flex;
+  flex-direction: column;
+  /* Without this a flex child refuses to shrink below its content, which is
+     what makes an inner scroll region silently grow the page instead. */
+  min-height: 0;
+}
+
+.fms-db {
+  height: 100%;
+}
+
+.fms-db > section,
+.fms-db > section > div:last-child,
+.fms-db .fms-tablewrap,
+.fms-db .fms-tablewrap > div {
+  flex: 1 1 auto;
+}
+
+/* The one scrolling region on the screen. */
+.fms-db .scroll-slim {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/*
+ * Column headers stay while the rows move.
+ *
+ * They are also the sort controls, so losing them after twenty rows meant
+ * scrolling back up to change the sort and back down to see the effect.
+ */
+.fms-db thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-sunk);
+}

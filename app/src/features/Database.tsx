@@ -42,7 +42,15 @@ const TONE: Record<TransactionType, FlowTone> = {
   Debt: "debt",
 };
 
-const PAGE = 50;
+/**
+ * How many rows arrive before you ask for more.
+ *
+ * Fifty filled several screens of a page that then scrolled as a whole. Now
+ * that only the rows move and the footer stays visible, a smaller first page
+ * loads faster and puts the count and the button where they can be seen
+ * without scrolling to find them.
+ */
+const PAGE = 25;
 
 export function Database({
   transactions,
@@ -156,7 +164,7 @@ export function Database({
     {
       key: "record",
       header: "Record",
-      width: "84px",
+      width: "76px",
       sortable: true,
       render: (t) => (
         <span className="t-num-s" style={{ color: "var(--ink-3)" }}>
@@ -167,15 +175,15 @@ export function Database({
     {
       key: "date",
       header: "Date",
-      width: "104px",
+      width: "96px",
       sortable: true,
       render: (t) => <span className="t-num-s">{formatShort(t.date)}</span>,
     },
-    { key: "flow", header: "Type", width: "116px", render: (t) => <FlowBadge flow={TONE[t.type]} /> },
+    { key: "flow", header: "Type", width: "104px", render: (t) => <FlowBadge flow={TONE[t.type]} /> },
     {
       key: "wallet",
       header: "Wallet",
-      width: "170px",
+      width: "132px",
       render: (t) => (
         <span
           className="t-caption fms-truncate"
@@ -210,7 +218,7 @@ export function Database({
       key: "fee",
       header: "Fee",
       align: "right",
-      width: "92px",
+      width: "84px",
       render: (t) =>
         t.fee ? (
           <Money value={t.fee} size="s" tone="var(--warn)" />
@@ -222,14 +230,14 @@ export function Database({
       key: "amount",
       header: "Total",
       align: "right",
-      width: "124px",
+      width: "110px",
       sortable: true,
       render: (t) => <Money value={t.total} />,
     },
     {
       key: "status",
       header: "Status",
-      width: "116px",
+      width: "100px",
       render: (t) =>
         t.status ? (
           <StatusPill status={t.status === "Paid" || t.status === "Withdrawn" ? "over" : "ok"}>
