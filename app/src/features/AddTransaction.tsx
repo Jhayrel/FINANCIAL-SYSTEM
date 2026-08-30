@@ -35,6 +35,8 @@ import {
   type Draft,
   type Flow,
 } from "../domain/entry";
+import type { AiSettings } from "../domain/settings";
+import { describeDraft } from "../data/aiClient";
 import type { ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
 const FLOWS: { id: Flow; tone: FlowTone; glyph: string; hint: string }[] = [
@@ -66,17 +68,46 @@ export function AddTransaction({
   debts,
   balances,
   onSave,
+  ai,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
   debts: readonly Debt[];
   balances: readonly WalletBalance[];
   onSave: (rows: Transaction[]) => void;
+  ai: AiSettings;
 }) {
   /** Chosen "Someone else" as the destination, rather than left it empty. */
   const [sentOut, setSentOut] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft());
   const [submitted, setSubmitted] = useState(false);
+
+  /**
+   * Asked for, never automatic.
+   *
+   * The VBA filled the description on its own as you tabbed through. That is
+   * fine when it reuses your own past wording, and wrong when it invents
+   * something: a description you did not write, silently placed in a field you
+   * were about to fill, is how a ledger gets entries nobody recognises later.
+   * So the ghost hint still appears from history, and the model only runs when
+   * the button is pressed.
+   */
+  const [describing, setDescribing] = useState(false);
+
+  const proposeDescription = async (): Promise<void> => {
+    setDescribing(true);
+    try {
+      const result = await describeDraft(draft, transactions, {
+        // Both switches have to be on. Off means the model is not called,
+        // not that the button stops working: history still answers.
+        allowModel: ai.enabled && ai.features.descriptions,
+        tone: ai.tone,
+      });
+      if (result.text) set("description", result.text);
+    } finally {
+      setDescribing(false);
+    }
+  };
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
     setDraft((d) => ({ ...d, [key]: value }));
@@ -293,11 +324,22 @@ export function AddTransaction({
 
               {needs(draft.flow, "description") && (
                 <Row label="Description" span hint={ghost.description && !draft.description ? `Last time: ${ghost.description}` : undefined}>
-                  <TextInput
-                    value={draft.description}
-                    onChange={(v) => set("description", v)}
-                    placeholder="What was it for?"
-                  />
+                  <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "stretch" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <TextInput
+                        value={draft.description}
+                        onChange={(v) => set("description", v)}
+                        placeholder="What was it for?"
+                      />
+                    </div>
+                    <Button
+                      loading={describing}
+                      disabled={!draft.flow || !draft.item.trim()}
+                      onClick={() => void proposeDescription()}
+                    >
+                      Suggest
+                    </Button>
+                  </div>
                 </Row>
               )}
 

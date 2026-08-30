@@ -616,6 +616,7 @@ export default function App() {
               lowBalanceThreshold={settings.lowBalanceThreshold}
               asOf={AS_OF}
               onReview={() => { setDbFilter("flagged"); go("database"); }}
+              settings={settings}
             />
           )}
           {screen === "add" && (
@@ -625,6 +626,7 @@ export default function App() {
               debts={settings.credits}
               balances={view.rows}
               onSave={handleSave}
+              ai={settings.ai}
             />
           )}
           {screen === "database" && (

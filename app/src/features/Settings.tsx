@@ -1685,9 +1685,13 @@ const clampLow = (v: Centavos | null): Centavos =>
 // ── AI ───────────────────────────────────────────────────
 
 const AI_FEATURES: { key: keyof AiSettings["features"]; label: string; what: string }[] = [
-  { key: "alerts", label: "Finance alerts", what: "Turns a flagged figure into a sentence" },
+  { key: "alerts", label: "Finance alerts", what: "Sums up the flagged items on the Dashboard" },
   { key: "insightSummary", label: "Insight summary", what: "Describes the month on the Insights screen" },
-  { key: "descriptions", label: "Transaction descriptions", what: "Suggests a note while you type an entry" },
+  {
+    key: "descriptions",
+    label: "Transaction descriptions",
+    what: "Fills the Suggest button on the Add screen, for items with no history",
+  },
 ];
 
 /** Model ids are short; anything longer is a paste accident. */

@@ -11,6 +11,7 @@ import { useMemo } from "react";
 
 import {
   Alert,
+  Button,
   Card,
   CountChip,
   FlowBadge,
@@ -19,6 +20,9 @@ import {
   ProgressBar,
   StatusPill,
 } from "../components/primitives";
+import { AiAnswerView } from "../components/AiAnswer";
+import { useAi } from "./useAi";
+import type { AppSettings } from "../domain/settings";
 import { AreaChart, BarChart, RankBars } from "../components/charts";
 import { assessMonthFor, budgetSummary, dailyPacing } from "../domain/budget";
 import type { Debt } from "../domain/debt";
@@ -50,6 +54,7 @@ export function Dashboard({
   lowBalanceThreshold,
   asOf,
   onReview,
+  settings,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -60,6 +65,7 @@ export function Dashboard({
   lowBalanceThreshold: Centavos;
   asOf: string;
   onReview: () => void;
+  settings: AppSettings;
 }) {
   /**
    * Everything worth saying, worst first.
@@ -81,6 +87,8 @@ export function Dashboard({
       }),
     [transactions, accounts, budgets, debts, reference, lowBalanceThreshold, asOf],
   );
+  const ai = useAi({ settings, transactions, budgets, feature: "alerts", asOf });
+
   const year = getYear(asOf);
   const month = getMonth(asOf);
 
@@ -182,6 +190,32 @@ export function Dashboard({
           />
         ))}
       </div>
+
+      {/**
+        * The alerts in one paragraph.
+        *
+        * The VBA refreshed a rotating alert line every thirty seconds and
+        * spent an API call each time. This asks once, when asked. The list
+        * below is the real content and is always there; this only reads it
+        * back as prose, which is easier to take in at a glance than six
+        * separate boxes.
+        */}
+      {alerts.length > 0 && (
+        <Card title="What needs attention" subtitle={`${alerts.length} flagged`}>
+          {ai.answer ? (
+            <AiAnswerView answer={ai.answer} />
+          ) : (
+            <p className="t-body" style={{ margin: 0, color: "var(--ink-3)" }}>
+              {alerts.length} item{alerts.length === 1 ? "" : "s"} below, worst first.
+            </p>
+          )}
+          <div className="fms-addrow" style={{ marginTop: "var(--space-3)" }}>
+            <Button loading={ai.loading} onClick={() => void ai.run("alerts")}>
+              {ai.answer ? "Say it again" : "Sum it up"}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {/* Every finding, worst first. Reporting only: nothing here edits a row. */}
       {alerts.length > 0 && (

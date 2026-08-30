@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { loadFixture } from "../fixtures/load";
 import { buildContext } from "../domain/aiContext";
 import { migrateAccounts } from "../domain/accounts";
-import { askAi } from "./aiClient";
+import { askAi, describeDraft } from "./aiClient";
 
 const fixture = loadFixture();
 const context = buildContext({
@@ -114,6 +114,21 @@ describe("askAi", () => {
     }
   });
 
+  it("strips the Markdown a model adds, whatever the prompt asked", async () => {
+    const answer = await ask(
+      respond({
+        text: "### August: you spent **PHP 1,000.00**, net worth is *PHP 5,000.00*",
+      }),
+    );
+
+    expect(answer.source).toBe("model");
+    expect(answer.text).not.toContain("*");
+    expect(answer.text).not.toContain("#");
+    // The figures survive untouched: only the formatting goes.
+    expect(answer.text).toContain("PHP 1,000.00");
+    expect(answer.text).toContain("PHP 5,000.00");
+  });
+
   it("does not send anything at all when there is no session", async () => {
     let called = false;
     const spy = (async () => {
@@ -190,5 +205,103 @@ describe("askAi", () => {
     for (const d of freeText) {
       expect(body.context).not.toContain(d);
     }
+  });
+});
+
+describe("describeDraft", () => {
+  const draft = {
+    flow: "Spending" as const,
+    date: "2026-08-30",
+    fromWallet: "Maya",
+    toWallet: "",
+    category: "Food",
+    item: "Zzz Never Bought This Before",
+    description: "",
+    amount: 15000,
+    fee: 0,
+    notes: "",
+    status: "Paid",
+  };
+
+  const never = (() => {
+    throw new Error("should not have called the network");
+  }) as unknown as typeof fetch;
+
+  it("answers from history without touching the network", async () => {
+    const seen = fixture.transactions.find(
+      (t) => t.type === "Spending" && t.item && t.description.trim(),
+    );
+
+    const result = await describeDraft(
+      { ...draft, item: seen!.item, category: seen!.category },
+      fixture.transactions,
+      { fetcher: never, token: async () => "t" },
+    );
+
+    expect(result.source).toBe("history");
+    expect(result.text.length).toBeGreaterThan(0);
+  });
+
+  it("does not call the model when descriptions are switched off", async () => {
+    const result = await describeDraft(draft, fixture.transactions, {
+      allowModel: false,
+      fetcher: never,
+      token: async () => "t",
+    });
+
+    expect(result.source).toBe("none");
+    expect(result.text).toBe("");
+  });
+
+  it("cleans what the model returns before it reaches the field", async () => {
+    const fetcher = (async () =>
+      new Response(JSON.stringify({ text: 'Here is a description: "**Lunch at Jollibee**."' }), {
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
+
+    const result = await describeDraft(draft, fixture.transactions, {
+      allowModel: true,
+      fetcher,
+      token: async () => "t",
+    });
+
+    expect(result.source).toBe("model");
+    expect(result.text).toBe("Lunch at Jollibee");
+  });
+
+  it("stays quiet rather than showing an error when the model fails", async () => {
+    const fetcher = (async () => {
+      throw new Error("offline");
+    }) as unknown as typeof fetch;
+
+    const result = await describeDraft(draft, fixture.transactions, {
+      allowModel: true,
+      fetcher,
+      token: async () => "t",
+    });
+
+    expect(result).toEqual({ text: "", source: "none" });
+  });
+
+  it("sends only the structured fields, never a description", async () => {
+    let sent = "";
+    const fetcher = (async (_u: string, init: RequestInit) => {
+      sent = String(init.body);
+      return new Response(JSON.stringify({ text: "Lunch" }), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    await describeDraft(
+      { ...draft, description: "SECRET-TYPED", notes: "SECRET-NOTE" },
+      fixture.transactions,
+      { allowModel: true, fetcher, token: async () => "t" },
+    );
+
+    const body = JSON.parse(sent) as { context: string; task: string };
+    expect(body.task).toBe("describe");
+    expect(body.context).not.toContain("SECRET-TYPED");
+    expect(body.context).not.toContain("SECRET-NOTE");
+    expect(body.context).toContain("Item: Zzz Never Bought This Before");
   });
 });

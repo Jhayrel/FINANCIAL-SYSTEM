@@ -22,7 +22,11 @@
  */
 
 import { contextToText, type AiContext } from "../domain/aiContext";
+import { cleanDescription, describePlan } from "../domain/describe";
+import type { Draft } from "../domain/entry";
+import type { Transaction } from "../domain/types";
 import { offlineAnswer, type AiTask } from "../domain/aiOffline";
+import { plainText } from "../domain/aiText";
 import { idToken } from "./auth";
 
 export type { AiTask };
@@ -112,7 +116,12 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
       return fallback(message);
     }
 
-    const text = typeof payload.text === "string" ? payload.text.trim() : "";
+    /**
+     * Stripped here rather than trusted from the prompt. Models bold figures
+     * and open with headings whatever they are told, and this app renders
+     * text, not Markdown, so those marks would reach the screen literally.
+     */
+    const text = typeof payload.text === "string" ? plainText(payload.text) : "";
     if (!text) return fallback("The model returned nothing.");
 
     return {
@@ -127,6 +136,82 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
         ? "The model took too long to answer."
         : "Could not reach the AI endpoint. You may be offline.",
     );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface DescribeResult {
+  readonly text: string;
+  /** Where the wording came from, so the UI can say. */
+  readonly source: "history" | "model" | "none";
+}
+
+/**
+ * Propose a description for a half-filled entry.
+ *
+ * Separate from `askAi` because it is a different shape of question: it sends
+ * a draft rather than a snapshot of the month, and its answer goes into a
+ * field rather than onto a panel. Sharing a function would have meant one that
+ * does neither job well.
+ *
+ * `describePlan` decides whether anything is sent at all. When the item has
+ * been entered before, the owner's own past wording wins and no request is
+ * made: it is instant, private, and better than an invention.
+ */
+export async function describeDraft(
+  draft: Draft,
+  transactions: readonly Transaction[],
+  options: {
+    /**
+     * False when AI is off, or when descriptions are off in Settings. The
+     * history path still runs: it is local, and switching the model off is
+     * not a request to stop reusing your own past wording.
+     */
+    readonly allowModel?: boolean;
+    readonly tone?: string;
+    readonly fetcher?: typeof fetch;
+    readonly token?: () => Promise<string | null>;
+    readonly timeoutMs?: number;
+  } = {},
+): Promise<DescribeResult> {
+  const plan = describePlan(draft, transactions);
+  if (plan.kind === "not-yet") return { text: "", source: "none" };
+  if (plan.kind === "history") return { text: plan.text, source: "history" };
+  if (options.allowModel === false) return { text: "", source: "none" };
+
+  const doFetch = options.fetcher ?? fetch;
+  const auth = await (options.token ?? idToken)();
+  if (!auth) return { text: "", source: "none" };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 12_000);
+
+  try {
+    const response = await doFetch(ENDPOINT, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "content-type": "application/json", authorization: `Bearer ${auth}` },
+      body: JSON.stringify({ context: plan.fields, task: "describe", tone: options.tone ?? "brief" }),
+    });
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!response.ok || !contentType.includes("application/json")) {
+      return { text: "", source: "none" };
+    }
+
+    const payload = (await response.json()) as { text?: unknown };
+    const raw = typeof payload.text === "string" ? payload.text : "";
+    const text = cleanDescription(plainText(raw));
+
+    return text ? { text, source: "model" } : { text: "", source: "none" };
+  } catch {
+    /**
+     * A failed suggestion is not an error worth showing. The field is already
+     * usable, the owner was going to type something anyway, and an error
+     * toast for an optional convenience is worse than silence.
+     */
+    return { text: "", source: "none" };
   } finally {
     clearTimeout(timer);
   }
