@@ -538,6 +538,31 @@ export default function App() {
     flash("Exported the whole system as CSV.");
   };
 
+  /**
+   * The scrolling region, so a screen change can start at the top.
+   *
+   * The shell never scrolls; this element does. Switching screens left its
+   * scrollTop where the previous screen had put it, so arriving at a shorter
+   * screen from a scrolled position on a longer one showed a band of empty
+   * space with the content already above the fold.
+   *
+   * ── Why this sits above the sign-in return ──────────────────────────────
+   *
+   * It did not, and that crashed the app the moment anyone signed in. Hooks
+   * have to run in the same order on every render, and these were below the
+   * early return: signed out they never ran, signed in they suddenly did,
+   * so React counted two extra hooks and threw error 310. The sign-in popup
+   * succeeded and the page went white.
+   *
+   * Every hook belongs above that return. There is nothing special about
+   * these two.
+   */
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [screen]);
+
   // With Firebase configured, nothing renders until the owner is signed in,
   // the rules would deny every read anyway, so a half-rendered app would only
   // show empty screens and permission errors.
@@ -554,20 +579,6 @@ export default function App() {
   }
 
   const title = NAV.find((n) => n.id === screen)?.label ?? "";
-  /**
-   * The scrolling region, so a screen change can start at the top.
-   *
-   * The shell never scrolls; this element does. Switching screens left its
-   * scrollTop where the previous screen had put it, so arriving at a shorter
-   * screen from a scrolled position on a longer one showed a band of empty
-   * space with the content already above the fold.
-   */
-  const mainRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    mainRef.current?.scrollTo({ top: 0 });
-  }, [screen]);
-
   const go = (id: Screen): void => {
     setScreen(id);
     setMoreOpen(false);
