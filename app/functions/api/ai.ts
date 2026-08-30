@@ -271,8 +271,21 @@ const TASKS: Record<string, string> = {
     "Write a description for this transaction in five words or fewer. Output only the description itself: no preamble, no quotes, no explanation, no full stop. Use the wording a person would write in their own ledger.",
 };
 
-/** Short answers need few tokens, and capping them keeps a rambling model cheap. */
-const MAX_TOKENS: Record<string, number> = { describe: 40 };
+/**
+ * Room to answer, with reasoning models in mind.
+ *
+ * The first limit was 400, which produced answers cut off mid figure:
+ * "your balances are low (Gcash PHP 155.71, Cash PHP". The cause is that
+ * `gpt-oss` and the other current models think before they write, and those
+ * reasoning tokens are spent against the same budget. A cap sized for the
+ * visible answer leaves nothing to say it with.
+ *
+ * A truncated financial summary is worse than a missing one, because it stops
+ * in the middle of a number. So the ceiling is generous and the length is
+ * controlled by the prompt, which is where it belongs.
+ */
+const MAX_TOKENS: Record<string, number> = { describe: 300 };
+const DEFAULT_MAX_TOKENS = 1500;
 
 const TONES: Record<string, string> = {
   brief: "One line where possible. Numbers first, no preamble.",
@@ -402,7 +415,7 @@ export const onRequestPost = async (ctx: {
 
   for (const candidate of chain) {
     try {
-      const text = await callProvider(candidate, env, prompt, MAX_TOKENS[task] ?? 400);
+      const text = await callProvider(candidate, env, prompt, MAX_TOKENS[task] ?? DEFAULT_MAX_TOKENS);
       if (text) {
         return json({ text, model: `${candidate.provider}:${candidate.model}`, attempts });
       }
