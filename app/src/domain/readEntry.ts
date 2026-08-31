@@ -549,3 +549,45 @@ function feeIn(text: string): { fee: number; rest: string } {
 
   return { fee: 0, rest: text };
 }
+
+/**
+ * One message, several entries.
+ *
+ * ── The sentence this exists for ──────────────────────────────────────────
+ *
+ *   "Transfer 1000 to my firend maya payment for things I bought and also
+ *    add spending treat food 1000 paid gcash and also I paid my spotify and
+ *    globe at home for next month"
+ *
+ * Four things happened. One row was created. Splitting only ever looked at
+ * line breaks, so a message typed as one paragraph was one entry however
+ * many times it said "and also".
+ *
+ * ── Why splitting liberally is safe here ──────────────────────────────────
+ *
+ * It is not this function's job to decide whether a split was right. It
+ * offers the pieces, and the caller keeps them only when each piece reads as
+ * an entry on its own. So "I paid 250 for gas and food" splits, fails that
+ * test, and goes back to being one message: the cost of a wrong split is a
+ * discarded guess, not a wrong row.
+ *
+ * `and` alone is deliberately not a separator. It joins two halves of one
+ * thought far more often than it joins two entries, and "gas and food" is
+ * the ordinary case.
+ */
+const JOINS =
+  /(?:\band also\b|\bthen also\b|\band then\b|\bthen\b|\balso add\b|\balso i\b|\bplus i\b|;)/i;
+
+export function splitEntries(text: string): string[] {
+  const lines = text
+    .split(String.fromCharCode(10))
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  return lines.flatMap((line) =>
+    line
+      .split(JOINS)
+      .map((part) => part.trim().replace(/^(?:and|also|plus)\s+/i, ""))
+      .filter((part) => part.length > 2),
+  );
+}

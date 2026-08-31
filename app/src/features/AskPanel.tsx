@@ -69,7 +69,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "../components/primitives";
 import { amend, applyReply, matchItem, nextQuestion, type Blank } from "../domain/capture";
-import { readEntry } from "../domain/readEntry";
+import { readEntry, splitEntries } from "../domain/readEntry";
 import { readRich } from "../domain/richText";
 import {
   detectRecall,
@@ -1454,10 +1454,20 @@ export function AskPanel({
        * line that happens to wrap, or a question with a line break in it,
        * stays one message and goes down the ordinary path.
        */
-      const lines = note
-        .split(String.fromCharCode(10))
-        .map((l) => l.trim())
-        .filter(Boolean);
+      /**
+       * Line breaks, and the words that do the same job in a paragraph.
+       *
+       * "Transfer 1000 to my firend maya payment for things I bought and also
+       * add spending treat food 1000 paid gcash and also I paid my spotify
+       * and globe at home for next month" is four things, typed as one line,
+       * and it made one row. Splitting only ever looked at line breaks.
+       *
+       * Splitting liberally is safe because of the test below: a piece is
+       * kept only when it reads as an entry on its own, so "I paid 250 for
+       * gas and food" splits, fails, and goes back to being one message. The
+       * cost of a wrong split is a discarded guess, not a wrong row.
+       */
+      const lines = splitEntries(note);
 
       if (files.length === 0 && lines.length > 1) {
         const each = lines.map((line) => readEntry(line, transactions, reference, asOf));
