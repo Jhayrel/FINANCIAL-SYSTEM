@@ -37,6 +37,15 @@ export interface Proposal {
   readonly confidence: Confidence;
   /** Which image or line this came from, so a shaky row is easy to check. */
   readonly sourceRef: string;
+  /**
+   * The sentence that produced this, when there was one.
+   *
+   * The key a correction is learned under. Correcting a card teaches
+   * something about the words that produced it, not about the field value it
+   * happened to guess: keying on the guess taught "gas is Food" after one
+   * correction, which would have turned every future Gas entry into Food.
+   */
+  readonly said?: string;
   /** What this module changed to make it fit, in the owner's words. */
   readonly adjustments: readonly string[];
 }

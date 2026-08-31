@@ -73,6 +73,8 @@ import {
 } from "../domain/settings";
 import { formatAmount, formatMoney, type Centavos } from "../domain/money";
 import { chatStore } from "../data/chatStore";
+import { aiLogStore } from "../data/aiLogStore";
+import { correctionsFrom, type AiEvent } from "../domain/aiLog";
 import type { ChatMessage } from "../domain/chat";
 import { setPreference as setThemePreference } from "../theme";
 import type { Budgets, ReferenceLists, SpendingType, Transaction } from "../domain/types";
@@ -2042,6 +2044,8 @@ function AiSection({
         )}
       </Group>
 
+      <AiLearningGroup uid={signedInUid} />
+
       <AiHistoryGroup uid={signedInUid} />
 
       <Group title="API key" hint="Not stored here, on purpose">
@@ -2811,6 +2815,131 @@ function AiHistoryGroup({ uid }: { uid: string | null }) {
           own database, where it can be added to and never changed.
         </p>
       )}
+    </Group>
+  );
+}
+
+/**
+ * What the assistant has been told, and what it did.
+ *
+ * ── The difference from the activity trail ────────────────────────────────
+ *
+ * The Activity screen records what happened to the money. This records what
+ * happened to the assistant: what was asked, what it proposed, what you
+ * accepted, corrected or threw away, and which photo produced which row.
+ *
+ * ── What it learns, and what it does not ──────────────────────────────────
+ *
+ * A correction is a pair, and those pairs are the whole of the learning. Told
+ * once that a word means Food, it uses Food from then on: no model is
+ * retrained and nothing is uploaded, it is a table of your own corrections
+ * read back on the next sentence.
+ *
+ * ── Photos are here as descriptions ───────────────────────────────────────
+ *
+ * The name, what it turned out to be, its size and what was read out of it.
+ * Never the picture: a photo is a megabyte and a document is capped at one,
+ * so an image would be the least useful byte in the database.
+ */
+function AiLearningGroup({ uid }: { uid: string | null }) {
+  const [events, setEvents] = useState<AiEvent[] | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    aiLogStore(uid)
+      .recent()
+      .then((found) => {
+        if (live) setEvents(found);
+      })
+      .catch(() => {
+        if (live) setEvents([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [uid]);
+
+  const all = events ?? [];
+  const learned = correctionsFrom(all, "item");
+  const count = (action: string): number => all.filter((e) => e.action === action).length;
+
+  return (
+    <Group title="What it has learned" hint="Corrections, and what happened to each suggestion" wide>
+      {events === null ? (
+        <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+          Loading.
+        </p>
+      ) : all.length === 0 ? (
+        <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+          Nothing yet. Correct a suggestion once and it will use your correction from then on.
+        </p>
+      ) : (
+        <>
+          <div className="fms-tallies">
+            {[
+              ["Suggested", count("proposed")],
+              ["Added", count("accepted")],
+              ["Corrected", count("edited")],
+              ["Thrown away", count("rejected")],
+              ["Photos read", count("uploaded")],
+            ].map(([label, n]) => (
+              <div key={String(label)} className="fms-tally">
+                <div className="t-num">{n}</div>
+                <div className="t-micro" style={{ color: "var(--ink-3)" }}>
+                  {label}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {learned.size > 0 && (
+            <>
+              <div className="t-label" style={{ color: "var(--ink-2)", margin: "var(--space-4) 0 var(--space-2)" }}>
+                It now knows
+              </div>
+              <ul className="fms-learned">
+                {[...learned.entries()].map(([from, to]) => (
+                  <li key={from} className="t-caption">
+                    <span style={{ color: "var(--ink-3)" }}>{from}</span> is <strong>{to}</strong>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          <div className="t-label" style={{ color: "var(--ink-2)", margin: "var(--space-4) 0 var(--space-2)" }}>
+            Recently
+          </div>
+          <ol className="fms-acts">
+            {all.slice(0, 40).map((e) => (
+              <li key={e.id} className="fms-act">
+                <div className="fms-acthead">
+                  <span className="t-caption">
+                    {e.action === "edited" && e.field
+                      ? `Corrected the ${e.field}: ${e.proposed} became ${e.corrected}`
+                      : e.action === "uploaded"
+                        ? (e.files ?? [])
+                            .map((f) => `${f.name} (${f.kind}): ${f.details}`)
+                            .join(" · ")
+                        : (e.text ?? e.entry ?? e.action)}
+                  </span>
+                  <span className="t-micro fms-actwhen">{new Date(e.at).toLocaleString("en-PH")}</span>
+                </div>
+                <div className="fms-actmeta t-micro">
+                  <span className="fms-actor">{e.action}</span>
+                  <span>{e.where}</span>
+                  {e.model && <span>{e.model}</span>}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+
+      <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-3)" }}>
+        Pictures are never stored, only described: the filename, what it turned out to be, its size,
+        and what was read out of it. This record cannot be edited or deleted.
+      </p>
     </Group>
   );
 }

@@ -284,3 +284,37 @@ describe("matchItem tidies a genuinely new item", () => {
     expect(matchItem("outing", "Spending", "Spending", withRemarks).item).toBe("Fun");
   });
 });
+
+describe("matchItem learns from what you corrected", () => {
+  const withRemarks: ReferenceLists = {
+    ...reference,
+    spendingTypes: [
+      { name: "Fun", remark: "Outings, parties, leisure" },
+      { name: "Food", remark: "Meals, snacks, drinks" },
+    ],
+  };
+
+  /** Told once that Jollibee is Food, it does not ask again. */
+  it("uses a correction you already made", () => {
+    const learned = new Map([["jolibee", "Food"]]);
+    expect(matchItem("Jolibee", "Spending", "Spending", withRemarks, learned)).toEqual({
+      item: "Food",
+      matched: true,
+    });
+  });
+
+  it("without the correction it is a new item, as before", () => {
+    expect(matchItem("Jolibee", "Spending", "Spending", withRemarks).matched).toBe(false);
+  });
+
+  it("a correction outranks the note, because it is what you actually said", () => {
+    // "outing" would otherwise find Fun through its note.
+    const learned = new Map([["outing", "Food"]]);
+    expect(matchItem("outing", "Spending", "Spending", withRemarks, learned).item).toBe("Food");
+  });
+
+  it("ignores a correction naming a type that no longer exists", () => {
+    const learned = new Map([["jolibee", "Deleted Type"]]);
+    expect(matchItem("Jolibee", "Spending", "Spending", withRemarks, learned).matched).toBe(false);
+  });
+});

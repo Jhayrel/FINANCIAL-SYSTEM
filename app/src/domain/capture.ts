@@ -337,11 +337,25 @@ export function matchItem(
   flow: Flow,
   category: Draft["category"],
   reference: ReferenceLists,
+  /**
+   * What you have already corrected, from `domain/aiLog.ts`.
+   *
+   * This is the learning. Told once that "Jollibee" is Food, it is Food from
+   * then on, without a model and without asking again. Consulted before
+   * every other rule, because your own correction outranks any guess this
+   * file could make.
+   */
+  learned: ReadonlyMap<string, string> = new Map(),
 ): { readonly item: string; readonly matched: boolean } {
   const said = text.trim();
   if (!said) return { item: "", matched: false };
 
   const known = itemsFor(flow, category, reference);
+
+  const remembered = learned.get(said.toLowerCase());
+  if (remembered && known.includes(remembered)) {
+    return { item: remembered, matched: true };
+  }
 
   // 1. The same words, however they were capitalised.
   const exact = matchExact(said, known);

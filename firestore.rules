@@ -255,6 +255,59 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── What the assistant did, and what you did about it ──────────────────
+    //
+    // Not the activity trail. That records what happened to the money; this
+    // records what happened to the assistant: a question asked, a photo read,
+    // a card accepted, corrected or thrown away. Nothing here touches the
+    // ledger, and nothing here is money.
+    //
+    // NO PICTURES. A photo is a megabyte and a document is capped at one, so
+    // an image would be the least useful byte in this database. What is
+    // written is a description of the file: its name, what it turned out to
+    // be, its size, and what was read out of it. `noImageData` refuses a
+    // data URL outright, because the one thing this collection must never
+    // become is a photo album.
+    //
+    // A correction is a pair, `proposed` and `corrected`, and those pairs are
+    // what the assistant learns from: told once that Jollibee is Food, it
+    // does not ask again. Append only, so the record of being wrong cannot be
+    // tidied away later.
+
+    function noImageData(d) {
+      return (!('text' in d) || !d.text.matches('(?s).*data:image.*'))
+          && (!('entry' in d) || !d.entry.matches('(?s).*data:image.*'));
+    }
+
+    function validAiEvent() {
+      let d = incoming();
+      return d.keys().hasAll(['at', 'action', 'where'])
+          && d.at is string && d.at.size() <= 40
+          && d.action in ['asked', 'answered', 'uploaded', 'proposed',
+                          'accepted', 'edited', 'rejected', 'cleared']
+          && d.where in ['add', 'dashboard', 'insights', 'budget',
+                         'statements', 'database', 'debt', 'settings']
+          && (!('text' in d) || (d.text is string && d.text.size() <= 2000))
+          && (!('entry' in d) || (d.entry is string && d.entry.size() <= 300))
+          && (!('field' in d) || (d.field is string && d.field.size() <= 40))
+          && (!('proposed' in d) || (d.proposed is string && d.proposed.size() <= 80))
+          && (!('corrected' in d) || (d.corrected is string && d.corrected.size() <= 80))
+          && (!('model' in d) || (d.model is string && d.model.size() <= 120))
+          // Descriptions of files, never files. Five is what one message may carry.
+          && (!('files' in d) || (d.files is list && d.files.size() <= 5))
+          && noImageData(d)
+          && noSecretKeys(d.keys());
+    }
+
+    match /users/{uid}/ai/{eventId} {
+      allow read:   if isOwner(uid);
+      allow create: if isOwner(uid) && validAiEvent();
+
+      // Append only. A record of being wrong that can be edited teaches
+      // nothing, and this is the collection the assistant learns from.
+      allow update, delete: if false;
+    }
+
     // ── Budgets ────────────────────────────────────────────────────────────
     //
     // One document per year, id "2026". Twelve amounts per track, index 0 =

@@ -32,6 +32,17 @@
   --ai-glow-halo: #3a7c2726;
   --ai-glow-halo-active: #3a7c2747;
 
+  /*
+   * Looking at a picture full size.
+   *
+   * The same in both themes on purpose: a photo is judged against a dark
+   * ground whatever the app is wearing, and a light scrim would wash out the
+   * receipt it exists to show. The caption sits on that scrim, so it takes
+   * its own colour rather than the page ink, which would vanish into it.
+   */
+  --scrim: #0c0f0cb8;
+  --on-scrim: #f4f7f4;
+
   /* ── Ink ──────────────────────────────────────────────────────────────── */
   --ink: #141a15;
   --ink-2: #4c554c;
@@ -152,6 +163,10 @@
   --ai-glow-ring: #7dc95c4d;
   --ai-glow-halo: #7dc95c24;
   --ai-glow-halo-active: #7dc95c42;
+
+  /* Unchanged: a picture is judged against a dark ground in either theme. */
+  --scrim: #0c0f0cd1;
+  --on-scrim: #f4f7f4;
 
   --ink: #e8ede8;
   --ink-2: #a9b3a9;

@@ -80,6 +80,8 @@ import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
 import { classifyItem, extractProposals } from "../data/aiClient";
 import { chatStore } from "../data/chatStore";
+import { aiLogStore } from "../data/aiLogStore";
+import { aiEvent, correctionsFrom, type AiEvent, type AttachmentNote } from "../domain/aiLog";
 import { said } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
@@ -233,6 +235,37 @@ export function AskPanel({
   } | null>(null);
   /** A file is over the panel right now. */
   const [dragging, setDragging] = useState(false);
+  /** An attachment being looked at full size. Session only, never stored. */
+  const [previewing, setPreviewing] = useState<Attachment | null>(null);
+  /** What has been corrected before, so the same guess is not made twice. */
+  const [learnedItems, setLearnedItems] = useState<ReadonlyMap<string, string>>(new Map());
+
+  /**
+   * Everything the assistant did, and what was done about it.
+   *
+   * Separate from the activity trail, which records what happened to the
+   * money. This records what happened to the assistant, including the
+   * corrections it learns from. Never awaited and never able to fail a turn:
+   * the answer is already on screen.
+   */
+  const log = (event: AiEvent): void => {
+    void aiLogStore(uid).record(event).catch(() => {});
+  };
+
+  // What was corrected before, read once, so a guess already put right is
+  // not made a second time.
+  useEffect(() => {
+    let live = true;
+    aiLogStore(uid)
+      .recent()
+      .then((events) => {
+        if (live) setLearnedItems(correctionsFrom(events, "item"));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [uid]);
   const threadRef = useRef<HTMLDivElement>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
 
@@ -259,6 +292,21 @@ export function AskPanel({
       ),
     );
   }, [lastSaved]);
+
+  /**
+   * Escape closes the picture.
+   *
+   * A dialog you can only leave with the mouse is a dialog someone gets stuck
+   * in, and this one covers the whole screen.
+   */
+  useEffect(() => {
+    if (!previewing) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setPreviewing(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [previewing]);
 
   // A new message is only useful if you can see it.
   useEffect(() => {
@@ -460,7 +508,7 @@ export function AskPanel({
     if (
       ready.draft.item.trim() &&
       (itemFlow === "Spending" || itemFlow === "Revenue") &&
-      !matchItem(ready.draft.item, itemFlow, ready.draft.category, reference).matched
+      !matchItem(ready.draft.item, itemFlow, ready.draft.category, reference, learnedItems).matched
     ) {
       ready = {
         ...ready,
@@ -475,6 +523,12 @@ export function AskPanel({
 
     if (!asked) {
       say({ kind: "proposal", proposal: ready, state: "open" });
+      log(
+        aiEvent("proposed", "add", {
+          entry: `${ready.draft.date} ${ready.draft.flow} ${ready.draft.item} ${formatMoney(ready.draft.amount ?? 0)}`,
+          model: ready.sourceRef,
+        }),
+      );
       return;
     }
     setPending({ draft: ready.draft, blank: asked.blank, settled });
@@ -525,7 +579,7 @@ export function AskPanel({
      * every field before anything is saved.
      */
     if (pending.blank === "item" && complete.flow) {
-      const local = matchItem(reply, complete.flow, complete.category, reference);
+      const local = matchItem(reply, complete.flow, complete.category, reference, learnedItems);
       if (!local.matched && !ai.disabled) {
         const known = itemsFor(complete.flow, complete.category, reference);
         const withNotes = known.map((name) => ({
@@ -550,7 +604,9 @@ export function AskPanel({
        */
       const replyFlow = complete.flow;
       const settledItem =
-        replyFlow === "" ? null : matchItem(complete.item, replyFlow, complete.category, reference);
+        replyFlow === ""
+          ? null
+          : matchItem(complete.item, replyFlow, complete.category, reference, learnedItems);
       if (settledItem && !settledItem.matched) {
         because.push(
           `"${complete.item}" is not one of your spending types. Saving this adds it as a new one.`,
@@ -563,6 +619,7 @@ export function AskPanel({
         draft: complete,
         confidence: "high",
         sourceRef: "what you told me",
+        said: reply,
         adjustments: because,
       },
       state: "open",
@@ -583,6 +640,36 @@ export function AskPanel({
     }
 
     const result = await extractProposals({ note, attachments: sent, reference, asOf });
+
+    /**
+     * The photo, as a description of itself.
+     *
+     * Never the bytes: a picture is a megabyte and a document is capped at
+     * one. What is worth keeping is which file produced which rows, so the
+     * name, what it turned out to be and what was read out of it go in, and
+     * the image stays in this session and nowhere else.
+     */
+    if (sent.length > 0) {
+      const found = result.proposals;
+      const notes: AttachmentNote[] = sent.map((f) => ({
+        name: f.name,
+        kind:
+          f.kind === "text"
+            ? "file"
+            : found.length > 0
+              ? "receipt"
+              : "photo",
+        bytes: f.bytes,
+        details:
+          found.length === 0
+            ? "nothing readable"
+            : found
+                .slice(0, 3)
+                .map((p) => `${p.draft.item || p.draft.flow}, ${formatMoney(p.draft.amount ?? 0)}`)
+                .join("; "),
+      }));
+      log(aiEvent("uploaded", "add", { text: note, files: notes, model: result.model ?? "" }));
+    }
 
     if (result.source === "offline") {
       // A picture that could not be sent is worth saying so about. A sentence
@@ -647,20 +734,26 @@ export function AskPanel({
 
     const answer = await ai.ask("chat", { question, history });
 
-    say({
-      kind: "assistant",
-      text: answer.text,
-      from:
-        answer.source === "model"
-          ? modelLabel(answer.model ?? "") || "the provider"
-          : "this device",
-    });
+    const from =
+      answer.source === "model" ? modelLabel(answer.model ?? "") || "the provider" : "this device";
+    say({ kind: "assistant", text: answer.text, from });
+    log(aiEvent("answered", "add", { text: answer.text, model: from }));
   };
 
   const send = async (typed?: string, as?: Intent): Promise<void> => {
     const note = (typed ?? draft).trim();
     if (busy) return;
     if (!note && files.length === 0) return;
+
+    /**
+     * Every message, whatever it turns out to be.
+     *
+     * Logged here rather than down each branch, because a question, an entry,
+     * a correction and an instruction to delete something all start as a
+     * typed line, and a record with only the questions in it would say
+     * nothing about the times this got it wrong.
+     */
+    if (note) log(aiEvent("asked", "add", { text: note }));
 
     // A starter button is always a question, whatever the box happens to say.
     /**
@@ -764,6 +857,56 @@ export function AskPanel({
            *
            *   what you said, then the entry as it now stands.
            */
+          /**
+           * The training signal.
+           *
+           * What was proposed and what it became, as a pair. Read back by
+           * `correctionsFrom`, so telling it once that a word means Food is
+           * enough: it does not ask a second time. This is the whole of what
+           * "learning" means here, and it is a table of your own corrections
+           * in your own database.
+           */
+          const was = card.turn.proposal.draft;
+          const now = change.draft;
+
+          /**
+           * Learned under the words that produced the card, not the value it
+           * guessed.
+           *
+           * Keying on the guess taught "gas is Food" after one correction,
+           * and applying that would have turned every future Gas entry into
+           * Food. What the correction actually says is that the sentence
+           * meant Food, so the sentence is the key, and a phrase that is
+           * itself one of the owner's item names is never learned from.
+           */
+          const phrase = (card.turn.proposal.said ?? "").trim();
+          const teaches =
+            phrase.length > 0 &&
+            phrase.length <= 80 &&
+            !matchItem(phrase, now.flow || "Spending", now.category, reference).matched;
+
+          for (const field of ["item", "fromWallet", "toWallet"] as const) {
+            if (was[field] === now[field] || !now[field]) continue;
+            if (field === "item" && !teaches) continue;
+            log(
+              aiEvent("edited", "add", {
+                field,
+                proposed: field === "item" ? phrase : was[field],
+                corrected: now[field],
+                entry: `${now.date} ${now.flow} ${now.item}`,
+              }),
+            );
+          }
+          if (was.amount !== now.amount || was.date !== now.date) {
+            log(
+              aiEvent("edited", "add", {
+                field: was.amount !== now.amount ? "amount" : "date",
+                proposed: was.amount !== now.amount ? formatMoney(was.amount ?? 0) : was.date,
+                corrected: was.amount !== now.amount ? formatMoney(now.amount ?? 0) : now.date,
+              }),
+            );
+          }
+
           setTurns((prev) => [
             ...prev.filter((_, i) => i !== card.index),
             { kind: "you", text: note },
@@ -838,6 +981,7 @@ export function AskPanel({
                 draft: r.draft,
                 confidence: "high",
                 sourceRef: `line ${i + 1}: ${lines[i] ?? ""}`,
+                said: lines[i] ?? "",
                 adjustments: r.because,
               },
               lines[i] ?? "",
@@ -886,6 +1030,7 @@ export function AskPanel({
               draft: local.draft,
               confidence: "high",
               sourceRef: "what you told me",
+              said: note,
               adjustments: local.because,
             },
             note,
@@ -1061,6 +1206,11 @@ export function AskPanel({
               onChange={(draft) => replaceProposal(i, { ...turn.proposal, draft })}
               onChangeAll={(draft) => applyToAll(draft)}
               onAdd={() => {
+                log(
+                  aiEvent("accepted", "add", {
+                    entry: `${turn.proposal.draft.date} ${turn.proposal.draft.flow} ${turn.proposal.draft.item} ${formatMoney(turn.proposal.draft.amount ?? 0)}`,
+                  }),
+                );
                 sink.add(turn.proposal.draft, {
                   actor: "ai",
                   // A picture and a sentence are different enough to tell
@@ -1075,7 +1225,14 @@ export function AskPanel({
                 sink.use(turn.proposal.draft);
                 settle(i, "used");
               }}
-              onDiscard={() => settle(i, "discarded")}
+              onDiscard={() => {
+                log(
+                  aiEvent("rejected", "add", {
+                    entry: `${turn.proposal.draft.date} ${turn.proposal.draft.flow} ${turn.proposal.draft.item} ${formatMoney(turn.proposal.draft.amount ?? 0)}`,
+                  }),
+                );
+                settle(i, "discarded");
+              }}
             />
           ) : (
             <div key={i} className={turn.kind === "you" ? "fms-turn fms-turn--you" : "fms-turn"}>
@@ -1096,24 +1253,50 @@ export function AskPanel({
         )}
 
         {busy && (
-          <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }} role="status">
-            {intent === "log" ? "Reading" : "Thinking"}
-          </p>
+          <div className="fms-working" role="status" aria-live="polite">
+            {/*
+              Three dots rather than a word that sits still.
+
+              "Thinking" with nothing moving reads as a message, not as work
+              in progress, and a receipt can take fifteen seconds. Motion is
+              minimal and stops entirely under reduced motion (rule D9),
+              where the words alone still say what is happening.
+            */}
+            <span className="fms-dots" aria-hidden>
+              <i />
+              <i />
+              <i />
+            </span>
+            <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+              {attached ? "Reading the picture" : intent === "log" ? "Reading" : "Thinking"}
+            </span>
+          </div>
         )}
       </div>
 
       {attached && (
         <div className="fms-askfiles">
           {files.map((f) => (
-            <span key={f.id} className="fms-filechip t-micro">
-              {f.kind === "image" && f.dataUrl && (
-                <img src={f.dataUrl} alt="" className="fms-filethumb" />
+            <span key={f.id} className="fms-thumb">
+              {f.kind === "image" && f.dataUrl ? (
+                <button
+                  type="button"
+                  className="fms-thumbopen"
+                  title={`${f.name}, ${formatBytes(f.bytes)}`}
+                  aria-label={`Look at ${f.name}`}
+                  onClick={() => setPreviewing(f)}
+                >
+                  <img src={f.dataUrl} alt="" />
+                </button>
+              ) : (
+                <span className="fms-thumbfile t-micro" title={f.name}>
+                  {f.name.split(".").pop()?.toUpperCase().slice(0, 4) ?? "FILE"}
+                </span>
               )}
-              <span className="fms-filename">{f.name}</span>
               <button
                 type="button"
                 aria-label={`Remove ${f.name}`}
-                className="fms-fileclose"
+                className="fms-thumbclose"
                 onClick={() => setFiles((prev) => prev.filter((x) => x.id !== f.id))}
               >
                 ×
@@ -1123,6 +1306,40 @@ export function AskPanel({
           <span className="t-micro" style={{ color: "var(--ink-3)" }}>
             {files.length} of {limits.maxCount}, {formatBytes(weight)}
           </span>
+        </div>
+      )}
+
+      {/*
+        Full size, over everything, with a way out.
+
+        Only for this session: the picture lives in memory and is never
+        written anywhere, which is the whole point of describing photos
+        rather than storing them.
+      */}
+      {previewing?.dataUrl && (
+        <div
+          className="fms-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label={previewing.name}
+          onClick={() => setPreviewing(null)}
+        >
+          <button
+            type="button"
+            className="fms-lightboxclose"
+            aria-label="Close"
+            onClick={() => setPreviewing(null)}
+          >
+            ×
+          </button>
+          <img
+            src={previewing.dataUrl}
+            alt={previewing.name}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <p className="t-micro fms-lightboxname">
+            {previewing.name}, {formatBytes(previewing.bytes)}. This picture is not saved anywhere.
+          </p>
         </div>
       )}
 
@@ -1214,7 +1431,14 @@ export function AskPanel({
       </form>
 
       {turns.length > 0 && (
-        <button type="button" className="t-micro fms-linkish" onClick={() => setTurns([])}>
+        <button
+          type="button"
+          className="t-micro fms-linkish"
+          onClick={() => {
+            log(aiEvent("cleared", "add"));
+            setTurns([]);
+          }}
+        >
           {/*
             Clears the screen, not the record. The collection is append only
             at the database, so there is no gesture here that could delete
