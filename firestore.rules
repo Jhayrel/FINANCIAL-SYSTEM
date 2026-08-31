@@ -338,6 +338,49 @@ service cloud.firestore {
     //
     // The movements themselves are ordinary transactions carrying `debtId`.
 
+    // ── Reading the whole database at once ─────────────────────────────────
+    //
+    // The `?coderview` screen prints every collection as plain text, so the
+    // assistant's own record of what it proposed and what you corrected can
+    // be read while fixing the thing it describes. It reads and never writes.
+    //
+    // ── Why two more rules are needed, and why they are safe ───────────────
+    //
+    // Every document in this database is already readable by the owner. What
+    // was missing is permission to ask for them *together*:
+    //
+    //   1. `users/{uid}` itself matched no rule at all, so it fell through to
+    //      the deny-everything block below. Nothing writes that document and
+    //      it should not exist, but a dump that claims to hold everything has
+    //      to have looked, and a denial there is indistinguishable from a
+    //      document that is not there.
+    //
+    //   2. Listing `meta` was denied. The rule above names one document by
+    //      its literal id, and a literal name cannot answer a query over the
+    //      collection: Firestore refuses a list whose results it cannot prove
+    //      are all allowed, so it denied the query rather than filtering it.
+    //
+    // Neither rule widens anything. Both are `read`, both are owner-only, and
+    // both cover documents this owner could already fetch one at a time. The
+    // strength of these rules is `isOwner`, and `isOwner` is unchanged: an
+    // attacker who could satisfy it could already read the ledger, which is
+    // the part worth having.
+    //
+    // Deliberately no `allow write` line, not even `if false`. Rules are
+    // OR-ed: a denial in one block cannot override a grant in another, so
+    // writing `allow write: if false` here would read like a restriction
+    // while enforcing nothing. Writes to `meta/settings` stay governed by
+    // `validSettings()` above, which is the only rule that grants them, and
+    // no rule anywhere grants a write to `users/{uid}`.
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+    }
+
+    match /users/{uid}/meta/{docId} {
+      allow read: if isOwner(uid);
+    }
+
     // ── Everything else ────────────────────────────────────────────────────
     //
     // Explicit, so a collection added by hand in the console later is not

@@ -783,7 +783,12 @@ export default function App() {
    * safe to leave in.
    */
   if (typeof window !== "undefined" && window.location.search.includes("coderview")) {
-    return <CoderView uid={cloud.uid ?? null} />;
+    return (
+      <CoderView
+        uid={cloud.uid ?? null}
+        local={{ transactions, deleted, budgets, settings }}
+      />
+    );
   }
 
   if (!base.loaded && !cloud.uid) {

@@ -44,6 +44,9 @@ import { useEffect, useState } from "react";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 
 import { firestore } from "../data/firebase";
+import { activityStore } from "../data/activityStore";
+import { chatStore } from "../data/chatStore";
+import { aiLogStore } from "../data/aiLogStore";
 import { Button } from "../components/primitives";
 
 /**
@@ -86,17 +89,38 @@ const scrub = (text: string): string =>
 interface Dumped {
   readonly name: string;
   readonly docs: readonly { readonly id: string; readonly data: Record<string, unknown> }[];
+  /** Why this one is missing, when it is. */
+  readonly failed?: string;
 }
 
-/** Read one collection whole. No limit, no ordering: this is a dump. */
+/**
+ * Read one collection whole. No limit, no ordering: this is a dump.
+ *
+ * Each collection carries its own failure rather than throwing, because the
+ * commonest failure by far is one collection being denied while the rest are
+ * fine: `activity`, `chat` and `ai` need rules that may not be deployed yet.
+ * One throw would lose the five that worked, and the file would say nothing
+ * about why. A named denial is a diagnosis; an empty file is a mystery.
+ */
 async function readAll(uid: string, name: string): Promise<Dumped> {
   const db = firestore();
-  if (!db) return { name, docs: [] };
-  const snapshot = await getDocs(collection(db, `users/${uid}/${name}`));
-  return {
-    name,
-    docs: snapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> })),
-  };
+  if (!db) return { name, docs: [], failed: "Firebase is not configured in this build." };
+  try {
+    const snapshot = await getDocs(collection(db, `users/${uid}/${name}`));
+    return {
+      name,
+      docs: snapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> })),
+    };
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    return {
+      name,
+      docs: [],
+      failed: /permission|insufficient/i.test(why)
+        ? `Denied. The rules for this collection are not deployed: npx firebase deploy --only firestore:rules`
+        : why,
+    };
+  }
 }
 
 /**
@@ -179,16 +203,40 @@ function render(uid: string, dumps: readonly Dumped[]): string {
     "",
     "── Contents ────────────────────────────────────────────────────────────",
     "",
-    ...dumps.map((d) => `  ${d.name.padEnd(14)} ${d.docs.length} documents`),
+    ...dumps.map(
+      (d) => `  ${d.name.padEnd(14)} ${d.failed ? "COULD NOT READ" : `${d.docs.length} documents`}`,
+    ),
     "",
-    ...(ai ? scoreAi(ai.docs) : []),
+    ...(dumps.some((d) => d.failed)
+      ? [
+          "  Some collections could not be read, so this dump is incomplete.",
+          "  Each one says why in its own section below.",
+          "",
+        ]
+      : []),
+    ...(ai?.failed
+      ? [
+          "── How the assistant is doing ──────────────────────────────────────────",
+          "",
+          `  Cannot say: ${ai.failed}`,
+          "",
+        ]
+      : ai
+        ? scoreAi(ai.docs)
+        : []),
   ];
 
   for (const dump of dumps) {
     lines.push(
-      `── ${dump.name} (${dump.docs.length}) ${"─".repeat(Math.max(0, 60 - dump.name.length))}`,
+      `── ${dump.name} (${dump.failed ? "unreadable" : dump.docs.length}) ${"─".repeat(
+        Math.max(0, 60 - dump.name.length),
+      )}`,
       "",
     );
+    if (dump.failed) {
+      lines.push(`  ${dump.failed}`, "");
+      continue;
+    }
     if (dump.docs.length === 0) {
       lines.push("  (empty)", "");
       continue;
@@ -202,7 +250,61 @@ function render(uid: string, dumps: readonly Dumped[]): string {
   return scrub(lines.join(nl));
 }
 
-export function CoderView({ uid }: { uid: string | null }) {
+/**
+ * Whatever this build is actually holding, when there is no database.
+ *
+ * The app runs two ways. Signed into Firebase it reads Firestore; with no
+ * Firebase configured it runs the same screens against the Excel fixture in
+ * React state, and that build has real data in it too. Saying "not signed
+ * in" there was wrong twice over: there is nothing to sign into, and there
+ * was plenty to dump.
+ *
+ * The three logs come from the same stores the app uses, called with a null
+ * uid, which is how they return their in-memory copies.
+ */
+async function dumpLocal(local: LocalData): Promise<Dumped[]> {
+  const [activity, chat, ai] = await Promise.all([
+    activityStore(null).recent(),
+    chatStore(null).recent(),
+    aiLogStore(null).recent(),
+  ]);
+
+  const rows = (name: string, list: readonly unknown[], key: (v: unknown) => string): Dumped => ({
+    name,
+    docs: list.map((v) => ({ id: key(v), data: v as Record<string, unknown> })),
+  });
+
+  const id = (v: unknown): string => {
+    const record = v as { id?: unknown };
+    return typeof record.id === "string" ? record.id : "(no id)";
+  };
+
+  return [
+    rows("transactions", local.transactions, id),
+    rows("deleted (the bin)", local.deleted, id),
+    { name: "meta", docs: [{ id: "settings", data: local.settings as Record<string, unknown> }] },
+    rows("activity", activity, id),
+    rows("chat", chat, id),
+    rows("ai", ai, id),
+    {
+      name: "budgets",
+      docs: Object.entries(local.budgets).map(([year, budget]) => ({
+        id: year,
+        data: budget as unknown as Record<string, unknown>,
+      })),
+    },
+  ];
+}
+
+/** What the app is holding, handed in so this screen reads nothing twice. */
+export interface LocalData {
+  readonly transactions: readonly unknown[];
+  readonly deleted: readonly unknown[];
+  readonly budgets: Readonly<Record<string, unknown>>;
+  readonly settings: unknown;
+}
+
+export function CoderView({ uid, local }: { uid: string | null; local: LocalData }) {
   const [text, setText] = useState("Reading…");
   const [saved, setSaved] = useState("");
 
@@ -210,11 +312,25 @@ export function CoderView({ uid }: { uid: string | null }) {
     let alive = true;
 
     void (async () => {
+      scrubbed = 0;
+
       if (!uid) {
-        setText("Not signed in. Sign in first: the database is only readable as its owner.");
+        const dumps = await dumpLocal(local);
+        if (!alive) return;
+        setText(
+          [
+            render("this browser, no database", dumps),
+            "",
+            "This build has no Firebase configured, so the above is everything it holds:",
+            "the ledger in memory and the logs this session recorded. Your real data is in",
+            "Firestore. Open the Firebase build and sign in, then come back to ?coderview",
+            "there. Sign-in is not a formality: the rules allow exactly one account, and",
+            "without a session Firestore returns nothing to anybody, which is the only",
+            "reason your financial history is not public.",
+          ].join(String.fromCharCode(10)),
+        );
         return;
       }
-      scrubbed = 0;
       try {
         const dumps = await Promise.all(COLLECTIONS.map((name) => readAll(uid, name)));
 
