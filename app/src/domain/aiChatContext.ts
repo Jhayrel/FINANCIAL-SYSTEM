@@ -45,6 +45,7 @@
 import { contextToText, phpFigure, type AiContext } from "./aiContext";
 import { redact } from "./aiRedact";
 import { toPesos } from "./money";
+import { costOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 
 /**
@@ -102,19 +103,38 @@ const live = (t: Transaction): boolean =>
   !(t as Transaction & { deletedAt?: string }).deletedAt;
 
 /**
- * What counts as spending, kept in step with the rest of the app.
+ * What counts as spending: the app's own definition, not a third one.
  *
- * A Transfer with a named destination is money moving between the owner's own
- * pockets, so only its fee is spending. See CLAUDE.md, "Transfers are derived".
+ * ── The copy this replaces, and why it was wrong twice ────────────────────
+ *
+ * This file kept its own version, and it disagreed with `costOf` in both
+ * directions at once. It counted a Spending row whose category is blank,
+ * which the app ignores, and it ignored debt interest and fees, which the
+ * app counts. On three rows the app totals PHP 288.79 and the copy totalled
+ * PHP 1,099.00.
+ *
+ * It looked correct because the Excel fixture exercises neither case: it has
+ * no blank-category Spending rows, and its Debt rows are created by a
+ * migration that runs in the app rather than in the fixture. So every test
+ * passed while the figures the model was given disagreed with every screen
+ * the owner could see.
+ *
+ * This is the same mistake `charts.ts` made, and the same PHP 13,128.00
+ * over-count, in a third file. One definition, imported, is the only way it
+ * stops happening.
  */
-const spendingOf = (t: Transaction): number => {
-  if (t.type === "Spending") return t.amount + t.fee;
-  if (t.type === "Transfer") return t.toWallet.trim() ? t.fee : t.amount + t.fee;
-  return 0;
-};
+const spendingOf = costOf;
 
+/**
+ * Money in, matching `totalsFor` rather than `totalRevenue`.
+ *
+ * The two differ: `totalRevenue` reproduces the workbook's SUMMARY!D5 and
+ * sums `amount`, while `totalsFor` sums `total` and is what the Dashboard
+ * and Insights show. The model should quote what the owner can see on
+ * screen, so it follows `totalsFor`.
+ */
 const revenueOf = (t: Transaction): number =>
-  t.type === "Revenue" && t.category !== "Opening" ? t.amount : 0;
+  t.type === "Revenue" && t.category !== "Opening" ? t.total : 0;
 
 interface Group {
   amount: number;
