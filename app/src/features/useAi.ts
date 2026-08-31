@@ -82,7 +82,15 @@ export function useAi({
   const [loading, setLoading] = useState(false);
 
   const ai = settings.ai;
-  const disabled = !ai.enabled || !ai.features[feature];
+  /**
+   * Off means off, but a feature nobody has an opinion about is on.
+   *
+   * `chat` and `capture` were added after these settings shipped, so a
+   * document written before them has neither key. Reading `undefined` as
+   * "off" switched the conversation off for anyone who had ever saved
+   * settings, which is everyone.
+   */
+  const disabled = !ai.enabled || ai.features[feature] === false;
 
   const context = useMemo(
     () =>

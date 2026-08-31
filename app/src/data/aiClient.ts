@@ -88,10 +88,54 @@ export interface AskOptions {
   readonly timeoutMs?: number;
   /** Overridable so tests do not need a Firebase session. */
   readonly token?: () => Promise<string | null>;
+  /** Which pass this is. Set by the retry, never by a caller. */
+  readonly attempt?: number;
 }
 
 const ENDPOINT = "/api/ai";
 const DEFAULT_TIMEOUT_MS = 25_000;
+
+/**
+ * How many times to try before giving up.
+ *
+ * "Every model in the chain failed" was reported after a single pass, and on
+ * free models that is usually not true: they are rate limited per minute, so
+ * the same request a few seconds later goes through. Three passes with a
+ * growing pause turns most of those failures into an answer, and the ones it
+ * cannot fix are reported with the provider's own reasons rather than as a
+ * flat statement that everything is broken.
+ */
+const TRIES = 3;
+const PAUSE_MS = [0, 1200, 3500];
+
+const wait = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * True when trying again could plausibly work.
+ *
+ * A rate limit clears, a busy provider frees up, a chain that was exhausted a
+ * moment ago is not exhausted a moment later. A refused request, a missing
+ * key or a bad task will fail identically every time, and retrying those
+ * wastes the owner's time to reach the same message.
+ */
+function worthRetrying(status: number, message: string): boolean {
+  if (status === 429 || status === 502 || status === 503 || status === 504) return true;
+  return /rate.?limit|timed out|temporarily|try again|overloaded|busy/i.test(message);
+}
+
+/** The provider's own reasons, so "it failed" says what failed. */
+function reasonFrom(payload: { error?: unknown; attempts?: unknown }): string {
+  const said = typeof payload.error === "string" ? payload.error : "The request failed.";
+  const attempts = Array.isArray(payload.attempts) ? payload.attempts : [];
+
+  const reasons = attempts
+    .map((a) => (a && typeof a === "object" ? (a as { model?: string; reason?: string }) : null))
+    .filter((a): a is { model?: string; reason?: string } => Boolean(a?.reason))
+    .map((a) => `${a.model ?? "a model"} ${a.reason}`);
+
+  return reasons.length > 0 ? `${said} Tried: ${reasons.slice(0, 4).join(", ")}.` : said;
+}
 
 interface OkPayload {
   readonly text?: unknown;
@@ -102,6 +146,7 @@ interface OkPayload {
 export async function askAi(options: AskOptions): Promise<AiAnswer> {
   const { context, task, tone } = options;
   const doFetch = options.fetcher ?? fetch;
+  const attempt = options.attempt ?? 0;
 
   const fallback = (reason: string): AiAnswer => ({
     text: offlineAnswer(context, task),
@@ -162,7 +207,18 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
     const payload = (await response.json()) as OkPayload;
 
     if (!response.ok) {
-      const message = typeof payload.error === "string" ? payload.error : `Request failed (${response.status}).`;
+      const message = reasonFrom(payload);
+      /**
+       * Try again rather than declaring everything broken.
+       *
+       * Free models are rate limited per minute, so an exhausted chain is
+       * usually exhausted for the next few seconds and not for the next few
+       * minutes. `attempt` counts the passes; the caller sets it.
+       */
+      if (attempt + 1 < TRIES && worthRetrying(response.status, message)) {
+        await wait(PAUSE_MS[attempt + 1] ?? 2000);
+        return askAi({ ...options, attempt: attempt + 1 });
+      }
       return fallback(message);
     }
 
@@ -392,6 +448,8 @@ export interface ExtractOptions {
   readonly fetcher?: typeof fetch;
   readonly timeoutMs?: number;
   readonly token?: () => Promise<string | null>;
+  /** Which pass this is. Set by the retry, never by a caller. */
+  readonly attempt?: number;
 }
 
 export interface ExtractResult {
@@ -450,6 +508,7 @@ function extractContext(options: ExtractOptions): string {
  */
 export async function extractProposals(options: ExtractOptions): Promise<ExtractResult> {
   const doFetch = options.fetcher ?? fetch;
+  const attempt = options.attempt ?? 0;
   const empty = (reason: string): ExtractResult => ({
     proposals: [],
     refused: [],
@@ -491,12 +550,25 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
       );
     }
 
-    const payload = (await response.json()) as { data?: unknown; model?: unknown; error?: unknown };
+    const payload = (await response.json()) as {
+      data?: unknown;
+      model?: unknown;
+      error?: unknown;
+      attempts?: unknown;
+    };
 
     if (!response.ok) {
-      return empty(
-        typeof payload.error === "string" ? payload.error : `Request failed (${response.status}).`,
-      );
+      const message = reasonFrom(payload);
+      /**
+       * Reading a picture is the request most worth retrying: it is the
+       * slowest, the one with the fewest free models that can do it, and the
+       * one where giving up means the owner types the whole receipt by hand.
+       */
+      if (attempt + 1 < TRIES && worthRetrying(response.status, message)) {
+        await wait(PAUSE_MS[attempt + 1] ?? 2000);
+        return extractProposals({ ...options, attempt: attempt + 1 });
+      }
+      return empty(message);
     }
 
     const read = readProposals(payload.data, options.reference, options.asOf);

@@ -2326,3 +2326,23 @@ textarea.fms-askinput {
 .fms-learned li {
   overflow-wrap: anywhere;
 }
+
+/*
+ * The pictures inside a message.
+ *
+ * The same squares as the composer, so a photo looks the same before and
+ * after it is sent, and still opens full size. A row of filenames was the
+ * same information in the less useful form.
+ */
+.fms-saidfiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.fms-saidfiles .fms-thumbopen,
+.fms-saidfiles .fms-thumbfile {
+  width: 52px;
+  height: 52px;
+}

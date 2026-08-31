@@ -133,6 +133,14 @@ interface Said {
   readonly text: string;
   /** Assistant turns: which model, or that this device wrote it. */
   readonly from?: string;
+  /**
+   * The pictures that went with it, for this session only.
+   *
+   * A row of filenames tells you what you sent; the pictures show you, which
+   * is the point of having sent them. Kept in memory and never written: the
+   * database gets a description (`domain/aiLog.ts`), not the bytes.
+   */
+  readonly shown?: readonly Attachment[];
 }
 
 /**
@@ -215,7 +223,15 @@ export function AskPanel({
    */
   lastSaved: { draft: Draft; at: number } | null;
 }) {
-  const ai = useAi({ settings, transactions, budgets, reference, feature: "insightSummary", asOf });
+  /**
+   * Gated on its own setting, not on the Insights panel's.
+   *
+   * It was reading `insightSummary`, so switching off the summary on the
+   * Insights screen silently switched off the conversation here: every
+   * follow-up came back with "I cannot read your question without the
+   * model" while the model was perfectly available.
+   */
+  const ai = useAi({ settings, transactions, budgets, reference, feature: "chat", asOf });
 
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState("");
@@ -635,7 +651,10 @@ export function AskPanel({
     if (sent.length > 0 || note) {
       say({
         kind: "you",
-        text: [note, sent.map((f) => f.name).join(", ")].filter(Boolean).join(" · "),
+        // The pictures speak for themselves; a list of filenames beside them
+        // is the same information twice, in the less useful form.
+        text: note,
+        ...(sent.length > 0 ? { shown: sent } : {}),
       });
     }
 
@@ -1239,9 +1258,35 @@ export function AskPanel({
               {turn.kind === "assistant" ? (
                 <Rich text={turn.text} />
               ) : (
-                <p className="t-caption" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                  {turn.text}
-                </p>
+                <>
+                  {turn.shown && turn.shown.length > 0 && (
+                    <div className="fms-saidfiles">
+                      {turn.shown.map((f) =>
+                        f.kind === "image" && f.dataUrl ? (
+                          <button
+                            key={f.id}
+                            type="button"
+                            className="fms-thumbopen"
+                            title={`${f.name}, ${formatBytes(f.bytes)}`}
+                            aria-label={`Look at ${f.name}`}
+                            onClick={() => setPreviewing(f)}
+                          >
+                            <img src={f.dataUrl} alt="" />
+                          </button>
+                        ) : (
+                          <span key={f.id} className="fms-thumbfile t-micro" title={f.name}>
+                            {f.name.split(".").pop()?.toUpperCase().slice(0, 4) ?? "FILE"}
+                          </span>
+                        ),
+                      )}
+                    </div>
+                  )}
+                  {turn.text && (
+                    <p className="t-caption" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                      {turn.text}
+                    </p>
+                  )}
+                </>
               )}
               {turn.from && (
                 <p className="t-micro" style={{ margin: "var(--space-1) 0 0", color: "var(--ink-3)" }}>
