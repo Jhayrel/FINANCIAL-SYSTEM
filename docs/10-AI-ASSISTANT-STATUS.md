@@ -71,9 +71,9 @@ back into them.
   own reasons
 
 ### Storage and records
-- `users/{uid}/chat` — the conversation, append only, redacted before write
-- `users/{uid}/activity` — what happened to the money, append only
-- `users/{uid}/ai` — what happened to the assistant, append only.
+- `users/{uid}/chat`: the conversation, append only, redacted before write
+- `users/{uid}/activity`: what happened to the money, append only
+- `users/{uid}/ai`: what happened to the assistant, append only.
   **Photos are described, never stored:** filename, kind, size, and what was
   read out of it. The rule rejects a `data:` URL outright
 - `entrySource` on every transaction
