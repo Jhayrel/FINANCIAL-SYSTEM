@@ -8,7 +8,7 @@
  * field for an API key: see the AI section, and rule AI4.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Alert,
@@ -72,6 +72,8 @@ import {
   type ThemePreference,
 } from "../domain/settings";
 import { formatAmount, formatMoney, type Centavos } from "../domain/money";
+import { chatStore } from "../data/chatStore";
+import type { ChatMessage } from "../domain/chat";
 import { setPreference as setThemePreference } from "../theme";
 import type { Budgets, ReferenceLists, SpendingType, Transaction } from "../domain/types";
 
@@ -236,6 +238,7 @@ export function Settings({
             transactions={transactions}
             budgets={budgets as Budgets}
             reference={reference}
+            signedInUid={signedInUid ?? null}
           />
         )}
 
@@ -1828,9 +1831,12 @@ function AiSection({
   transactions,
   budgets,
   reference,
+  signedInUid,
 }: {
   settings: AppSettings;
   patch: (part: Partial<AppSettings>) => void;
+  /** Where the conversation is stored. Null in local mode. */
+  signedInUid: string | null;
   transactions: readonly Transaction[];
   budgets: Budgets;
   reference: ReferenceLists;
@@ -2035,6 +2041,8 @@ function AiSection({
           </div>
         )}
       </Group>
+
+      <AiHistoryGroup uid={signedInUid} />
 
       <Group title="API key" hint="Not stored here, on purpose">
         <Alert status="info" title="The key goes in Cloudflare, not in this app">
@@ -2706,6 +2714,103 @@ function Tidy({
           Lists only. No transaction and no balance changes.
         </span>
       </div>
+    </Group>
+  );
+}
+
+/**
+ * Everything asked and answered, from the database.
+ *
+ * ── Why the record lives here and not only in the panel ───────────────────
+ *
+ * The conversation is written to `users/{uid}/chat` as it happens, append
+ * only at the database, so "clear this view" clears the screen and not the
+ * record. This is where the whole of it can be read back.
+ *
+ * ── What "learning" actually means here ───────────────────────────────────
+ *
+ * Not this. The assistant gets better from the ledger, not from the
+ * transcript: every row saved changes what `domain/infer.ts` knows about
+ * which wallet pays for what, what the usual amount is, and what an item is
+ * called. Correcting a card and saving it is the training signal, and it
+ * takes effect on the next sentence with no model retrained and nothing
+ * uploaded anywhere.
+ *
+ * This screen is the record of what was said, which is a different and also
+ * useful thing: it is how you check what left the device.
+ */
+function AiHistoryGroup({ uid }: { uid: string | null }) {
+  const [messages, setMessages] = useState<ChatMessage[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    chatStore(uid)
+      .recent()
+      .then((found) => {
+        if (live) setMessages(found);
+      })
+      .catch((e: Error) => {
+        if (live) {
+          setMessages([]);
+          setFailed(e.message);
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [uid]);
+
+  const yours = (messages ?? []).filter((m) => m.role === "you").length;
+
+  return (
+    <Group title="History" hint="Everything asked, and what came back" wide>
+      {messages === null ? (
+        <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+          Loading.
+        </p>
+      ) : failed ? (
+        <p className="t-caption" style={{ margin: 0, color: "var(--over)" }}>
+          The history could not be read: {failed}. If this says permissions, your database has not
+          been given its rules yet. Run: firebase deploy --only firestore:rules
+        </p>
+      ) : messages.length === 0 ? (
+        <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+          Nothing yet. Everything you type into Ask, and every answer, is recorded here.
+        </p>
+      ) : (
+        <>
+          <p className="t-caption" style={{ margin: "0 0 var(--space-3)", color: "var(--ink-3)" }}>
+            {messages.length} messages, {yours} of them yours. This record cannot be edited or
+            deleted. Keys are removed before anything is written.
+          </p>
+          <ol className="fms-acts">
+            {[...messages].reverse().map((m) => (
+              <li key={m.id} className="fms-act">
+                <div className="fms-acthead">
+                  <span className="t-caption" style={{ whiteSpace: "pre-wrap" }}>
+                    {m.text}
+                  </span>
+                  <span className="t-micro fms-actwhen">{new Date(m.at).toLocaleString("en-PH")}</span>
+                </div>
+                <div className="fms-actmeta t-micro">
+                  <span className={m.role === "you" ? "fms-actor" : "fms-actor fms-actor--ai"}>
+                    {m.role === "you" ? "you" : "assistant"}
+                  </span>
+                  {m.from && <span>{m.from}</span>}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
+
+      {!uid && messages !== null && (
+        <p className="t-caption" style={{ marginTop: "var(--space-3)", color: "var(--ink-3)" }}>
+          You are not signed in, so this is only for this session. Signed in, it is written to your
+          own database, where it can be added to and never changed.
+        </p>
+      )}
     </Group>
   );
 }
