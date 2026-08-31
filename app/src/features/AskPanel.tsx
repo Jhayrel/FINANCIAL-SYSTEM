@@ -71,7 +71,14 @@ import { Button } from "../components/primitives";
 import { amend, applyReply, matchItem, nextQuestion, type Blank } from "../domain/capture";
 import { readEntry } from "../domain/readEntry";
 import { readRich } from "../domain/richText";
-import { detectRecall, findRows, type Candidate, type RecallAction } from "../domain/recall";
+import {
+  detectRecall,
+  detectSweep,
+  findRows,
+  sweepRows,
+  type Candidate,
+  type RecallAction,
+} from "../domain/recall";
 import { buildChart, chartLabel, isChartFollowUp, wantsChart, type Chart } from "../domain/charts";
 import { inferFromHistory } from "../domain/infer";
 import { debtWalletDirection, itemsFor, withDebtEffect } from "../domain/entry";
@@ -125,6 +132,14 @@ export interface ProposalSink {
    * deleting acceptable at all.
    */
   readonly bin: (id: string) => void;
+  /**
+   * Several at once, as one move with one record of it.
+   *
+   * Not a loop over `bin`. Forty rows through that is forty state updates and
+   * forty toasts where the last one wins, which is how "delete all data
+   * entered by ai" would report itself as having removed one row.
+   */
+  readonly binMany: (ids: readonly string[]) => void;
   readonly restore: (id: string) => void;
   /** The number this entry would take, shown before it is saved. */
   readonly nextRecordNumber: number;
@@ -175,6 +190,8 @@ interface Found {
    */
   readonly action: RecallAction | "edit";
   readonly candidates: readonly Candidate[];
+  /** A whole named set, so the card offers one button for all of them. */
+  readonly sweep?: boolean;
   /** Ids already acted on, so a button does not offer the same row twice. */
   readonly done: readonly string[];
 }
@@ -457,10 +474,10 @@ export function AskPanel({
   };
 
   /** Mark one found row as dealt with, so its button does not offer twice. */
-  const settleFound = (index: number, id: string): void =>
+  const settleFound = (index: number, ...ids: readonly string[]): void =>
     setTurns((prev) =>
       prev.map((t, i) =>
-        i === index && isFound(t) ? { ...t, done: [...t.done, id] } : t,
+        i === index && isFound(t) ? { ...t, done: [...t.done, ...ids] } : t,
       ),
     );
 
@@ -985,6 +1002,51 @@ export function AskPanel({
       const pool = recall.action === "restore" ? deleted : transactions;
 
       /**
+       * A whole set named at once: "delete all data entered by ai".
+       *
+       * Asked three times in three minutes and answered "no entry matches
+       * that" each time, because the finder below is built to pick one row
+       * out of many and this names all of them. `entrySource` is written on
+       * every row when it is saved, so the answer is already in the data.
+       *
+       * Offered, never done. It is the largest delete in the app and it
+       * still goes through the same buttons as every other one: the rows are
+       * listed with what they add up to, and nothing moves until it is
+       * pressed.
+       */
+      const sweep = recall.action === "bin" ? detectSweep(recall.phrase) : null;
+      if (sweep) {
+        const found = sweepRows(sweep, pool);
+        setDraft("");
+        say({ kind: "you", text: note });
+
+        if (found.length === 0) {
+          say({
+            kind: "assistant",
+            text: "Nothing in the ledger is marked as entered by me, so there is nothing to remove. Rows saved before I existed carry no source, and I leave those alone.",
+            from: "this device",
+          });
+          return;
+        }
+
+        say({
+          kind: "assistant",
+          text: `${found.length} ${found.length === 1 ? "row is" : "rows are"} marked ${
+            sweep.label
+          }, totalling ${formatMoney(found.reduce((sum, r) => sum + r.total, 0))}. They are listed below. Nothing moves until you press the button, and everything goes to the bin, where it can be restored.`,
+          from: "this device",
+        });
+        say({
+          kind: "found",
+          action: "bin",
+          candidates: found.map((row) => ({ row, score: 100, why: [sweep.label] })),
+          done: [],
+          sweep: true,
+        });
+        return;
+      }
+
+      /**
        * "the last one" means the most recent, not a word to search for.
        *
        * "Delete that last" came back with "No entry matches that", because
@@ -1465,6 +1527,23 @@ export function AskPanel({
                   sink.restore(id);
                 }
                 settleFound(i, id);
+              }}
+              onActAll={(ids) => {
+                /**
+                 * One move, one record of it.
+                 *
+                 * `binMany` is the Database screen's own bulk handler, so a
+                 * set removed from the chat behaves exactly like a set
+                 * removed from the table: one toast, one audit batch, and
+                 * every row restorable together from the Bin.
+                 */
+                sink.binMany(ids);
+                log(
+                  aiEvent("accepted", "add", {
+                    entry: `Moved ${ids.length} rows to the bin`,
+                  }),
+                );
+                settleFound(i, ...ids);
               }}
             />
           ) : isOffer(turn) ? (
@@ -2107,9 +2186,29 @@ function Field({
  * without being pressed: a sentence is evidence about which row was meant,
  * not permission to remove it.
  */
-function FoundList({ found, onAct }: { found: Found; onAct: (id: string) => void }) {
-  const { action, candidates, done } = found;
+function FoundList({
+  found,
+  onAct,
+  onActAll,
+}: {
+  found: Found;
+  onAct: (id: string) => void;
+  onActAll: (ids: readonly string[]) => void;
+}) {
+  const { action, candidates, done, sweep } = found;
   const verb = action === "edit" ? "Edit this" : action === "bin" ? "Move to bin" : "Restore";
+
+  /**
+   * A named set gets one button, and a shortened list.
+   *
+   * Forty rows with a button each is not an offer, it is a chore, and the
+   * point of asking for all of them was not to press forty things. Enough
+   * rows are shown to recognise what is about to go, and the total is in the
+   * sentence above the card.
+   */
+  const settledAll = candidates.length > 0 && candidates.every((c) => done.includes(c.row.id));
+  const shown = sweep ? candidates.slice(0, 6) : candidates;
+  const hidden = candidates.length - shown.length;
 
   return (
     <div className="fms-proposal">
@@ -2118,15 +2217,42 @@ function FoundList({ found, onAct }: { found: Found; onAct: (id: string) => void
           {candidates.length === 1 ? "One entry matches" : `${candidates.length} entries match`}
         </span>
         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-          {action === "edit"
-            ? "nothing is changed yet"
-            : action === "bin"
-              ? "nothing is deleted yet"
-              : "from the bin"}
+          {/* Past tense once it has happened: "nothing is deleted yet" stayed
+              on screen after the rows had gone, which is a card contradicting
+              itself about money. */}
+          {settledAll
+            ? action === "edit"
+              ? "loaded into the form"
+              : action === "bin"
+                ? "moved to the bin"
+                : "restored"
+            : action === "edit"
+              ? "nothing is changed yet"
+              : action === "bin"
+                ? "nothing is deleted yet"
+                : "from the bin"}
         </span>
       </div>
 
-      {candidates.map(({ row, why }) => {
+      {sweep && action === "bin" && (
+        <div className="fms-proposalactions">
+          {settledAll ? (
+            <p className="t-micro fms-proposalfrom" style={{ margin: 0 }}>
+              All {candidates.length} moved to the bin. They are restorable from the Bin screen.
+            </p>
+          ) : (
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => onActAll(candidates.map((c) => c.row.id))}
+            >
+              Move all {candidates.length} to bin
+            </Button>
+          )}
+        </div>
+      )}
+
+      {shown.map(({ row, why }) => {
         const settled = done.includes(row.id);
         return (
           <div key={row.id} className="fms-foundrow">
@@ -2143,7 +2269,7 @@ function FoundList({ found, onAct }: { found: Found; onAct: (id: string) => void
                     ? "Moved to the bin. It is restorable from the Bin screen."
                     : "Restored. It is back in the Database."}
               </p>
-            ) : (
+            ) : sweep ? null : (
               <Button size="sm" onClick={() => onAct(row.id)}>
                 {verb}
               </Button>
@@ -2151,6 +2277,12 @@ function FoundList({ found, onAct }: { found: Found; onAct: (id: string) => void
           </div>
         );
       })}
+
+      {hidden > 0 && (
+        <p className="t-micro fms-proposalnote">
+          and {hidden} more, all of them {candidates[0]?.why[0] ?? "in this set"}.
+        </p>
+      )}
 
       <p className="t-micro fms-proposalfrom">
         {action === "edit"

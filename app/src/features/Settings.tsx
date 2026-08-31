@@ -73,7 +73,7 @@ import {
 } from "../domain/settings";
 import { formatAmount, formatMoney, type Centavos } from "../domain/money";
 import { chatStore } from "../data/chatStore";
-import { aiLogStore } from "../data/aiLogStore";
+import { aiLogHealth, aiLogStore } from "../data/aiLogStore";
 import { correctionsFrom, type AiEvent } from "../domain/aiLog";
 import type { ChatMessage } from "../domain/chat";
 import { setPreference as setThemePreference } from "../theme";
@@ -2871,8 +2871,33 @@ function AiLearningGroup({ uid }: { uid: string | null }) {
   const learned = correctionsFrom(all, "item");
   const count = (action: string): number => all.filter((e) => e.action === action).length;
 
+  /**
+   * Whether any of this is actually reaching the database.
+   *
+   * Every caller writes this log as `record(event).catch(() => {})`, which is
+   * right: an audit entry that failed must not make a saved transaction look
+   * unsaved. But swallowed and never mentioned, "is the assistant saving
+   * properly?" had no answer from inside the app. A denied write and a
+   * successful one looked identical, and this very panel reads the same store,
+   * so it showed the same numbers either way.
+   *
+   * Read on render rather than watched. It only changes when something is
+   * written, and arriving on this screen is when anyone wants to know.
+   */
+  const health = aiLogHealth(uid);
+
   return (
     <Group title="What it has learned" hint="Corrections, and what happened to each suggestion" wide>
+      {health.lastFailure ? (
+        <Alert status="over" title="Not saving to the database">
+          {health.failures} of {health.writes + health.failures} writes failed. {health.lastFailure}
+        </Alert>
+      ) : health.target === "this browser only" ? (
+        <Alert status="ok" title="Kept in this browser only">
+          No database is configured in this build, so what the assistant learns lasts until you
+          close the tab. Sign in to the Firebase build to keep it.
+        </Alert>
+      ) : null}
       {events === null ? (
         <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
           Loading.

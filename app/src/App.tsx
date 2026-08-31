@@ -898,6 +898,7 @@ export default function App() {
               uid={cloud.uid ?? null}
               onSave={handleSave}
               onBin={handleDelete}
+              onBinMany={handleDeleteMany}
               onRestoreRow={handleRestore}
               deleted={deleted}
               onUpdate={handleUpdate}

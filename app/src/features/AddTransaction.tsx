@@ -93,6 +93,7 @@ export function AddTransaction({
   onSave,
   onUpdate,
   onBin,
+  onBinMany,
   onRestoreRow,
   deleted,
   editing,
@@ -111,6 +112,8 @@ export function AddTransaction({
   onUpdate: (rows: Transaction[], by?: Provenance) => void;
   /** Soft delete and its undo, so the assistant can find a row to bin. */
   onBin: (id: string) => void;
+  /** Several at once, for a whole set named in the chat. */
+  onBinMany: (ids: readonly string[]) => void;
   onRestoreRow: (id: string) => void;
   deleted: readonly DeletedTransaction[];
   /** A saved row being corrected, rather than a new entry. */
@@ -389,6 +392,7 @@ export function AddTransaction({
         setSubmitted(false);
       },
       bin: onBin,
+      binMany: onBinMany,
       restore: onRestoreRow,
       add: (d, by) => {
         const c = checkDraft(d, transactions, reference, debts);

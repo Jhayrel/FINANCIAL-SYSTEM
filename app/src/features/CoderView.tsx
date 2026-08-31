@@ -1,6 +1,17 @@
 /**
  * Coderview: the whole database as plain text, for debugging.
  *
+ * ╔═══════════════════════════════════════════════════════════════════════╗
+ * ║  TEMPORARY. DELETE THIS FILE WHEN THE SYSTEM IS DONE.                 ║
+ * ║                                                                       ║
+ * ║  Added 2026-08-31 to read the assistant's own record while fixing     ║
+ * ║  the assistant. It is a debugging tool, not a feature, and it should  ║
+ * ║  not outlive the debugging.                                           ║
+ * ║                                                                       ║
+ * ║  The removal is six steps and cannot break a screen:                  ║
+ * ║  docs/11-CODERVIEW-IS-TEMPORARY.md                                    ║
+ * ╚═══════════════════════════════════════════════════════════════════════╝
+ *
  * ── What this is for ──────────────────────────────────────────────────────
  *
  * The assistant keeps a record of everything it proposed and everything you

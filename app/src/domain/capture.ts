@@ -405,8 +405,72 @@ export function matchItem(
     }
   }
 
-  // 4. Genuinely new. Kept, tidied, and flagged.
+  /**
+   * 4. The app's own vocabulary is never an item.
+   *
+   * ── The entry this exists to stop ─────────────────────────────────────
+   *
+   * A card was saved reading "2026-08-29 Revenue **Revenue** PHP 100,000,000".
+   * The item was the word Revenue, because the reply to "what was it for" was
+   * "revenue", nothing matched it, and rule 5 below keeps whatever is left as
+   * a new type. So the owner's list of revenue categories gained an entry
+   * called "Revenue", sitting beside Allowance and Framelink and meaning
+   * nothing.
+   *
+   * Flow names, category names, status words and account names are all the
+   * values of *other fields*. None of them can name a thing bought or earned,
+   * and a list of items containing "Revenue", "Paid" or "Gcash" is a list
+   * that has stopped being about items at all. Anything already in the
+   * owner's own list matched at rule 1 and never reaches here, so this cannot
+   * refuse a name they actually use.
+   */
+  if (isStructural(said, reference)) return { item: "", matched: false };
+
+  // 5. Genuinely new. Kept, tidied, and flagged.
   return { item: tidy(said), matched: false };
+}
+
+/** The flows, categories and statuses, which are field values and not things. */
+const STRUCTURAL = new Set([
+  "revenue",
+  "spending",
+  "spend",
+  "transfer",
+  "debt",
+  "bills",
+  "bill",
+  "subscriptions",
+  "subscription",
+  "opening",
+  "paid",
+  "received",
+  "transferred",
+  "withdrawn",
+  "done",
+  "pending",
+  "income",
+  "expense",
+  "expenses",
+  "amount",
+  "wallet",
+  "account",
+  "category",
+  "item",
+]);
+
+/**
+ * True when the words name a field rather than a thing.
+ *
+ * Accounts are included because "gcash" answers "which wallet", not "what
+ * for", and an item called Gcash would then compete with the wallet of the
+ * same name in every ranking that groups by item.
+ */
+function isStructural(said: string, reference: ReferenceLists): boolean {
+  const lower = said.trim().toLowerCase();
+  if (STRUCTURAL.has(lower)) return true;
+  return [...reference.wallets, ...reference.savings].some(
+    (account) => account.trim().toLowerCase() === lower,
+  );
 }
 
 /**

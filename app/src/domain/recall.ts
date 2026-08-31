@@ -102,6 +102,64 @@ function numberIn(phrase: string): number | null {
   return hash?.[1] ? Number(hash[1]) : null;
 }
 
+/**
+ * A whole set named at once, rather than one row described.
+ *
+ * ── Why this is separate from `findRows` ──────────────────────────────────
+ *
+ * "delete all data entered by ai in financial dataabse" was asked three times
+ * in three minutes and did nothing each time. `findRows` strips instruction
+ * words and then matches on what is left, keeping only words longer than two
+ * letters, so the phrase came down to "entered financial dataabse" and "ai",
+ * the only word that mattered, was dropped for being two characters long.
+ *
+ * The deeper problem is that it is not a description of a row. Every rule in
+ * `findRows` asks "which one did you mean", and the answer here is "all of
+ * them, and you already know which because you wrote it on each one". Rows
+ * carry `entrySource`, which is exactly this question answered at write time.
+ *
+ * So a sweep is its own thing: a named set, returned whole and uncapped,
+ * because five of forty is not a useful answer to "delete all of them".
+ */
+export interface Sweep {
+  readonly what: "ai";
+  /** How to say it back, so the confirmation names the set and not a count. */
+  readonly label: string;
+}
+
+/**
+ * Naming the assistant's own entries.
+ *
+ * Both halves are required. "delete the ai suggestion" is about the card on
+ * screen and must not sweep the ledger, so a quantifier has to be present:
+ * nothing here fires without "all", "every" or "everything".
+ */
+const EVERYTHING = /\b(all|every|everything|entire|whole)\b/i;
+const BY_THE_AI =
+  /\b(ai|a\.i\.|assistant|bot|chatbot|robot|chat)\b/i;
+
+/** A set the phrase names, or null when it names none. */
+export function detectSweep(phrase: string): Sweep | null {
+  if (!EVERYTHING.test(phrase) || !BY_THE_AI.test(phrase)) return null;
+  return { what: "ai", label: "entered by the assistant" };
+}
+
+/**
+ * Every row in the set. Not capped, and not scored.
+ *
+ * `entrySource` is written at the moment a row is saved and says which of the
+ * two put it there, so this is a fact being read back rather than a guess
+ * being made. Rows saved before the assistant existed have no `entrySource`
+ * and are correctly left alone: absent is not "ai".
+ */
+export function sweepRows(
+  sweep: Sweep,
+  rows: readonly Transaction[],
+): Transaction[] {
+  if (sweep.what !== "ai") return [];
+  return rows.filter((row) => row.entrySource === "ai");
+}
+
 export interface Candidate {
   readonly row: Transaction;
   /** Higher is a better match. Only for ordering. */

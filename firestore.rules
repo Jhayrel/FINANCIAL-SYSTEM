@@ -338,7 +338,12 @@ service cloud.firestore {
     //
     // The movements themselves are ordinary transactions carrying `debtId`.
 
-    // ── Reading the whole database at once ─────────────────────────────────
+    // ── Reading the whole database at once ─────────────────────────
+    //
+    //  TEMPORARY. DELETE THIS BLOCK AND REDEPLOY WHEN THE SYSTEM IS DONE.
+    //  These two rules exist for one debugging screen and nothing else.
+    //  Rules that outlive their reason are how a permissions file stops
+    //  being readable. See docs/11-CODERVIEW-IS-TEMPORARY.md
     //
     // The `?coderview` screen prints every collection as plain text, so the
     // assistant's own record of what it proposed and what you corrected can
