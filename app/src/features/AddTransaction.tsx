@@ -315,6 +315,7 @@ export function AddTransaction({
    */
   const sink: ProposalSink = useMemo(
     () => ({
+      nextRecordNumber,
       check: (d) => {
         const c = checkDraft(d, transactions, reference, debts);
         return {

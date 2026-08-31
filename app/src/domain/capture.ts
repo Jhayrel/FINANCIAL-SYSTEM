@@ -23,7 +23,7 @@
  * The model reads pictures and sentences. Filling in one blank is not that.
  */
 
-import { needs, type Draft, type Flow } from "./entry";
+import { itemsFor, needs, type Draft, type Flow } from "./entry";
 import { matchExact, readMoney } from "./proposal";
 import type { ReferenceLists } from "./types";
 
@@ -125,8 +125,22 @@ export function applyReply(
       const wallet = matchExact(text, accounts) || walletInside(text, accounts);
       return wallet ? { ...draft, toWallet: wallet } : null;
     }
-    case "item":
-      return { ...draft, item: text.slice(0, 80) };
+    case "item": {
+      /**
+       * Typed "food", stored "Food".
+       *
+       * The ledger already has an item called Food, and writing a second one
+       * that differs only in case splits every total and every ranking that
+       * groups by item. So a reply is matched against the owner's own list
+       * and the list's spelling wins.
+       *
+       * An item that genuinely is new is kept as typed: that is how a new one
+       * gets added, and refusing it would mean the assistant could only ever
+       * record things that had happened before.
+       */
+      const known = itemsFor(draft.flow as Flow, draft.category, reference);
+      return { ...draft, item: matchExact(text, known) || text.slice(0, 80) };
+    }
   }
 }
 
@@ -161,4 +175,56 @@ function walletInside(text: string, accounts: readonly string[]): string {
     if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return account;
   }
   return "";
+}
+
+// ── Changing your mind about a card already on screen ──────────────────────
+
+export interface Amendment {
+  readonly draft: Draft;
+  /** What changed, for the line that confirms it. */
+  readonly what: string;
+}
+
+/**
+ * Read a correction to a proposal that is already showing.
+ *
+ * "make it 300" used to be answered with a summary of the month, because it
+ * was read as a new question. It is not a question: there is a card on the
+ * screen with an amount on it, and that is what "it" means.
+ *
+ * Deliberately narrow. It amends the four fields a person actually corrects,
+ * and returns null for anything else, which sends the message back down the
+ * ordinary path. A wrong amendment is worse than no amendment: it changes a
+ * figure on a card you are about to approve.
+ */
+export function amend(
+  draft: Draft,
+  text: string,
+  reference: ReferenceLists,
+): Amendment | null {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 60) return null;
+
+  const accounts = [...reference.wallets, ...reference.savings];
+
+  // A wallet named on its own, or with a correcting phrase around it.
+  const wallet = matchExact(trimmed, accounts) || walletInside(trimmed, accounts);
+  if (wallet) {
+    return draft.flow === "Revenue"
+      ? { draft: { ...draft, toWallet: wallet }, what: `Into ${wallet} instead.` }
+      : { draft: { ...draft, fromWallet: wallet }, what: `From ${wallet} instead.` };
+  }
+
+  // A figure, with or without "make it" in front of it.
+  const amount = readMoney(trimmed) ?? firstAmountIn(trimmed);
+  if (amount !== null && amount > 0 && /\d/.test(trimmed)) {
+    return { draft: { ...draft, amount }, what: "Amount changed." };
+  }
+
+  // An item the owner already has.
+  const known = itemsFor(draft.flow as Flow, draft.category, reference);
+  const item = matchExact(trimmed, known);
+  if (item) return { draft: { ...draft, item }, what: `${item} instead.` };
+
+  return null;
 }

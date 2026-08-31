@@ -17,6 +17,16 @@
  * mcdonalds i spent 500" came back as "the data does not contain a record of
  * a PHP 500 food purchase", which is true, unhelpful, and precisely backwards.
  *
+ * ── Reading the ledger before asking anything ─────────────────────────────
+ *
+ * "I spent 100 today buying load using maya" was answered with "What was it
+ * for?", which the ledger could already answer: there are rows for load, they
+ * have an item, a usual category, a usual wallet and a usual status.
+ *
+ * So `domain/infer.ts` runs first and fills what history can fill, counted,
+ * with the reason shown on the card. Only what the ledger genuinely does not
+ * know gets asked about.
+ *
  * ── Asking rather than giving up ──────────────────────────────────────────
  *
  * "I have paid my load today" is an entry with one detail missing. It used to
@@ -55,10 +65,12 @@
  * treats every call as its own.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "../components/primitives";
-import { applyReply, nextQuestion, type Blank } from "../domain/capture";
+import { amend, applyReply, nextQuestion, type Blank } from "../domain/capture";
+import { readEntry } from "../domain/readEntry";
+import { inferFromHistory } from "../domain/infer";
 import { detectIntent, type Intent } from "../domain/intent";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
@@ -94,6 +106,8 @@ export interface ProposalSink {
    * than a permission to do it.
    */
   readonly add: (draft: Draft, by?: Provenance) => void;
+  /** The number this entry would take, shown before it is saved. */
+  readonly nextRecordNumber: number;
 }
 
 interface Said {
@@ -106,6 +120,12 @@ interface Said {
 interface Offered {
   readonly kind: "proposal";
   readonly proposal: Proposal;
+  /**
+   * `used` keeps the card. Sending it to the form used to replace it with one
+   * line of text, so the thing you had just asked to look at disappeared at
+   * the moment you asked to look at it. It stays, marked, with its buttons
+   * gone.
+   */
   readonly state: "open" | "added" | "used" | "discarded";
 }
 
@@ -152,6 +172,8 @@ export function AskPanel({
    * one, which is why the intent chip hides and the placeholder changes.
    */
   const [pending, setPending] = useState<{ draft: Draft; blank: Blank } | null>(null);
+  /** A file is over the panel right now. */
+  const [dragging, setDragging] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
 
@@ -168,9 +190,42 @@ export function AskPanel({
       prev.map((t, i) => (i === index && isOffer(t) ? { ...t, state } : t)),
     );
 
-  const attach = async (picked: FileList | null): Promise<void> => {
+  /** The card a correction would apply to: the last one still open. */
+  const openCard = (): { index: number; turn: Offered } | null => {
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const turn = turns[i];
+      if (turn && isOffer(turn) && turn.state === "open") return { index: i, turn };
+    }
+    return null;
+  };
+
+  const replaceProposal = (index: number, proposal: Proposal): void =>
+    setTurns((prev) =>
+      prev.map((t, i) => (i === index && isOffer(t) ? { ...t, proposal } : t)),
+    );
+
+  /**
+   * Put one wallet on every open card that is missing one.
+   *
+   * A statement screenshot is one account, so picking the wallet eight times
+   * is eight taps to say the same thing once.
+   */
+  const applyToAll = (source: Draft): void =>
+    setTurns((prev) =>
+      prev.map((t) => {
+        if (!isOffer(t) || t.state !== "open") return t;
+        const draft = t.proposal.draft;
+        const wants = draft.flow === "Revenue" ? "toWallet" : "fromWallet";
+        if (draft[wants]) return t;
+        const value = source[wants];
+        if (!value) return t;
+        return { ...t, proposal: { ...t.proposal, draft: { ...draft, [wants]: value } } };
+      }),
+    );
+
+  const attach = async (picked: ArrayLike<File> | null): Promise<void> => {
     if (!picked || picked.length === 0) return;
-    const { attachments, rejected } = await readFiles([...picked], files.length);
+    const { attachments, rejected } = await readFiles(Array.from(picked), files.length);
     if (attachments.length > 0) setFiles((prev) => [...prev, ...attachments]);
     for (const r of rejected) {
       say({ kind: "assistant", text: `${r.name}: ${r.reason}`, from: "this device" });
@@ -183,13 +238,40 @@ export function AskPanel({
    * One question at a time: a card with three blanks on it is a form, and a
    * form is what the assistant exists to avoid.
    */
-  const offer = (proposal: Proposal): void => {
-    const asked = nextQuestion(proposal.draft, reference);
+  const offer = (
+    proposal: Proposal,
+    hint: string,
+    useHistory = true,
+    batch = false,
+  ): void => {
+    // History first. Asking a question the ledger already answers is the
+    // assistant failing to read its own data. `readEntry` has already done
+    // this pass, so it says so rather than having it run twice.
+    const { draft, because } = useHistory
+      ? inferFromHistory(proposal.draft, transactions, reference, hint)
+      : { draft: proposal.draft, because: [] as string[] };
+    const filled: Proposal = {
+      ...proposal,
+      draft,
+      adjustments: [...proposal.adjustments, ...because],
+    };
+
+    /**
+     * One entry gets a question. A batch gets cards.
+     *
+     * A screenshot of a statement produced eight rows, four of them missing a
+     * wallet, and each one set the same pending question and overwrote the
+     * last: four identical "which one did it come out of" with no way to tell
+     * which row any of them meant. A conversation cannot hold four questions
+     * at once, and it should not try. The cards carry their own blanks, in
+     * red, with a picker on each one.
+     */
+    const asked = batch ? null : nextQuestion(draft, reference);
     if (!asked) {
-      say({ kind: "proposal", proposal, state: "open" });
+      say({ kind: "proposal", proposal: filled, state: "open" });
       return;
     }
-    setPending({ draft: proposal.draft, blank: asked.blank });
+    setPending({ draft, blank: asked.blank });
     say({ kind: "assistant", text: asked.question, from: "this device" });
   };
 
@@ -221,9 +303,17 @@ export function AskPanel({
     }
 
     setPending(null);
+    // One more pass: an answered blank often unlocks the rest. Telling it the
+    // item is Load is enough to know the wallet and the status too.
+    const { draft: complete, because } = inferFromHistory(filled, transactions, reference, reply);
     say({
       kind: "proposal",
-      proposal: { draft: filled, confidence: "high", sourceRef: "what you told me", adjustments: [] },
+      proposal: {
+        draft: complete,
+        confidence: "high",
+        sourceRef: "what you told me",
+        adjustments: because,
+      },
       state: "open",
     });
   };
@@ -275,7 +365,20 @@ export function AskPanel({
       });
     }
 
-    for (const proposal of result.proposals) offer(proposal);
+    const batch = result.proposals.length > 1;
+    for (const proposal of result.proposals) offer(proposal, note, true, batch);
+    if (batch) {
+      const blanks = result.proposals.filter(
+        (p) => nextQuestion(p.draft, reference) !== null,
+      ).length;
+      if (blanks > 0) {
+        say({
+          kind: "assistant",
+          text: `${blanks} of them need a wallet picked. Choose it on the card, or set one for all of them.`,
+          from: "this device",
+        });
+      }
+    }
     for (const refused of result.refused) {
       say({ kind: "assistant", text: refused.reason, from: "this device" });
     }
@@ -319,6 +422,30 @@ export function AskPanel({
       answerPending(note);
       return;
     }
+
+    /**
+     * A correction to the card already showing.
+     *
+     * "make it 300" was being read as a new question and answered with a
+     * summary of the month. There is a card on screen with an amount on it,
+     * and that is what "it" refers to.
+     */
+    if (files.length === 0 && !as) {
+      const card = openCard();
+      if (card) {
+        const change = amend(card.turn.proposal.draft, note, reference);
+        if (change) {
+          setDraft("");
+          say({ kind: "you", text: note });
+          replaceProposal(card.index, {
+            ...card.turn.proposal,
+            draft: change.draft,
+            adjustments: [...card.turn.proposal.adjustments, change.what],
+          });
+          return;
+        }
+      }
+    }
     if (files.length > 0) setPending(null);
 
     const job = as ?? (files.length > 0 ? "log" : detectIntent(note));
@@ -332,13 +459,39 @@ export function AskPanel({
       }
 
       /**
+       * This device first.
+       *
+       * `readEntry` reads the sentence against the owner's own ledger, which
+       * is instant, free, works with the model off or rate limited, and is
+       * better than a free model at this particular job because it is reading
+       * data rather than guessing at English. The model is called only when
+       * this finds too little, which is mostly photos.
+       */
+      if (files.length === 0) {
+        const local = readEntry(note, transactions, reference, asOf);
+        if (local.worthOffering) {
+          say({ kind: "you", text: note });
+          offer(
+            {
+              draft: local.draft,
+              confidence: "high",
+              sourceRef: "what you told me",
+              adjustments: local.because,
+            },
+            note,
+            false,
+          );
+          return;
+        }
+      }
+
+      /**
        * Read it as an entry, and answer it as a question if there was no
        * entry in it after all.
        *
-       * This is what replaced the chip. "I paid Maya 500" and "I paid too
-       * much for Maya" are one word apart, and a guess that costs a wrong
-       * answer is worse than one that quietly tries the other job. It only
-       * runs for typed text: an attachment was unambiguous.
+       * "I paid Maya 500" and "I paid too much for Maya" are one word apart,
+       * and a guess that costs a wrong answer is worse than one that quietly
+       * tries the other job.
        */
       const found = await readAttached(note);
       if (!found && files.length === 0 && note) await askQuestion(note, false);
@@ -361,7 +514,40 @@ export function AskPanel({
   const intent: Intent = attached ? "log" : detectIntent(draft);
 
   return (
-    <aside className="fms-panel fms-ask" data-thinking={busy ? "true" : undefined}>
+    /**
+     * Dropping and pasting, as well as the button.
+     *
+     * A screenshot is almost always already on the clipboard, and dragging one
+     * from a folder is how anyone would try first. Both end up in the same
+     * `readFiles`, so the size caps, the compression and the rejection
+     * messages are identical however the file arrived.
+     */
+    <aside
+      className={dragging ? "fms-panel fms-ask fms-ask--drop" : "fms-panel fms-ask"}
+      data-thinking={busy ? "true" : undefined}
+      onDragOver={(e) => {
+        if (![...e.dataTransfer.types].includes("Files")) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        // Only when the pointer has actually left the panel, not a child.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (e.dataTransfer.files.length === 0) return;
+        e.preventDefault();
+        setDragging(false);
+        void attach(e.dataTransfer.files);
+      }}
+      onPaste={(e) => {
+        const pasted = [...e.clipboardData.files];
+        if (pasted.length === 0) return;
+        // Let a pasted screenshot in without also pasting its filename.
+        e.preventDefault();
+        void attach(pasted);
+      }}
+    >
       <div className="fms-askhead">
         <div className="t-label" style={{ color: "var(--ink-2)" }}>
           Ask
@@ -393,6 +579,9 @@ export function AskPanel({
               key={i}
               offered={turn}
               sink={sink}
+              reference={reference}
+              onChange={(draft) => replaceProposal(i, { ...turn.proposal, draft })}
+              onChangeAll={(draft) => applyToAll(draft)}
               onAdd={() => {
                 sink.add(turn.proposal.draft, {
                   actor: "ai",
@@ -538,20 +727,43 @@ export function AskPanel({
 }
 
 /**
- * One proposed row, with everything that would stop it being saved.
+ * One proposed row, as the form it is.
  *
- * The check is the form's own, run on every render, so the Add button reflects
- * the ledger as it stands rather than as it stood when the model answered.
+ * ── Why every field is shown, including the empty ones ────────────────────
+ *
+ * This is an entry about to go into a ledger of real money, and a card that
+ * shows four of its eleven fields is asking to be trusted about the other
+ * seven. So it shows the row: the number it will take, its type, both
+ * wallets, the category, the item, the amount, the fee, the status. A field
+ * that is empty says so, in the colour that means "this stops it saving",
+ * because knowing what is missing is the point of looking.
+ *
+ * ── Why it fits any width ─────────────────────────────────────────────────
+ *
+ * It is a two column grid that becomes one column when there is no room, and
+ * every value can break inside its own cell. The panel it sits in is a fixed
+ * frame that scrolls, so a card can be as tall as it likes and nothing else
+ * on the page moves.
+ *
+ * The check is the form's own, run on every render, so the Add button
+ * reflects the ledger as it stands rather than as it stood when the model
+ * answered.
  */
 function ProposalCard({
   offered,
   sink,
+  reference,
+  onChange,
+  onChangeAll,
   onAdd,
   onUse,
   onDiscard,
 }: {
   offered: Offered;
   sink: ProposalSink;
+  reference: ReferenceLists;
+  onChange: (draft: Draft) => void;
+  onChangeAll: (draft: Draft) => void;
   onAdd: () => void;
   onUse: () => void;
   onDiscard: () => void;
@@ -559,100 +771,204 @@ function ProposalCard({
   const { proposal, state } = offered;
   const { draft } = proposal;
   const check = sink.check(draft);
+  // Stable and unique per card, so the label points at its own select.
+  const pickerId = useId();
 
-  if (state !== "open") {
+  /**
+   * A discarded card goes. A settled one stays.
+   *
+   * Sending a card to the form used to replace it with one line of text, so
+   * the entry you had just asked to look at vanished at the moment you asked
+   * to look at it. It stays now, showing the same fields, with the buttons
+   * replaced by what happened to it.
+   */
+  if (state === "discarded") {
     return (
       <div className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
-        {state === "added"
-          ? `Added: ${draft.item || draft.description || "entry"}, ${formatMoney(draft.amount ?? 0)}.`
-          : state === "used"
-            ? "Put in the form. Check it and press Save transaction."
-            : "Discarded."}
+        Discarded.
       </div>
     );
   }
 
+  const settled = state !== "open";
+  const flow = draft.flow || "Spending";
+
+  /**
+   * The wallet, pickable on the card.
+   *
+   * Eight rows off one screenshot cannot be resolved by a conversation that
+   * holds one question at a time. Each card carries its own, and "for all of
+   * them" exists because a statement screenshot is one account and saying so
+   * eight times is seven taps too many.
+   */
+  const accounts = [...reference.wallets, ...reference.savings];
+  /**
+   * Which end of this row the owner picks.
+   *
+   * Spending has one wallet, Revenue has one, and a Transfer has two but only
+   * ever one blank at a time by the time a card is shown. The row stays on an
+   * open card even once it is filled, so a wrong wallet can be corrected and
+   * so "same for all" is still reachable.
+   */
+  const walletField: "fromWallet" | "toWallet" = flow === "Revenue" ? "toWallet" : "fromWallet";
+  const walletLabel = flow === "Revenue" ? "Which wallet received it" : "Which wallet paid";
+  const confidence =
+    proposal.confidence === "high"
+      ? "clear"
+      : proposal.confidence === "medium"
+        ? "fairly clear"
+        : "hard to read";
+
   return (
-    <div className="fms-proposal">
+    <div className={settled ? "fms-proposal fms-proposal--settled" : "fms-proposal"}>
       <div className="fms-proposalhead">
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
-          {draft.flow}
+          {state === "added" ? "Added" : state === "used" ? "In the form" : "New entry"}
         </span>
         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-          {proposal.confidence === "high" ? "clear" : proposal.confidence === "medium" ? "fairly clear" : "hard to read"}
+          {settled ? "" : confidence}
         </span>
       </div>
 
+      {/*
+        The same fields, in the same order, under the same names the form and
+        the database use. An earlier version called `description` "Note",
+        which is a different column: the ledger has both, and a card that
+        renames one of them is teaching the wrong thing about the data.
+      */}
       <dl className="fms-proposalfields">
-        <Field label="Date" value={draft.date} />
-        {draft.fromWallet !== "" || draft.flow !== "Revenue" ? (
-          <Field label="From" value={draft.fromWallet} missing={!draft.fromWallet} />
-        ) : null}
-        {draft.flow !== "Spending" && (
-          <Field label="To" value={draft.toWallet} missing={!draft.toWallet} />
+        <Field label="Record number" value={String(sink.nextRecordNumber).padStart(4, "0")} mono />
+        <Field label="Type" value={flow} />
+        <Field label="Date" value={draft.date} mono />
+        {flow !== "Revenue" && <Field label="From wallet" value={draft.fromWallet} required />}
+        {flow !== "Spending" && (
+          <Field label="To wallet" value={draft.toWallet} required={flow === "Transfer"} />
         )}
-        <Field label="Item" value={draft.item} missing={!draft.item} />
-        <Field label="Amount" value={formatMoney(draft.amount ?? 0)} mono />
-        {draft.fee > 0 && <Field label="Fee" value={formatMoney(draft.fee)} mono />}
-        {draft.description && <Field label="Note" value={draft.description} />}
+        <Field label="Category" value={draft.category} />
+        {(flow === "Spending" || flow === "Revenue") && (
+          <Field label="Item" value={draft.item} required />
+        )}
+        <Field
+          label="Amount"
+          value={draft.amount === null ? "" : formatMoney(draft.amount)}
+          required
+          mono
+        />
+        <Field label="Fee" value={formatMoney(draft.fee)} mono />
+        <Field label="Description" value={draft.description} />
+        {draft.notes && <Field label="Notes" value={draft.notes} />}
+        <Field label="Status" value={draft.status} />
       </dl>
 
-      {proposal.adjustments.map((a) => (
-        <p key={a} className="t-micro fms-proposalnote">
-          {a}
-        </p>
-      ))}
+      {!settled && (
+        <div className="fms-proposalpick">
+          <label className="t-micro fms-pfieldlabel" htmlFor={pickerId}>
+            {walletLabel}
+          </label>
+          <select
+            id={pickerId}
+            className="t-caption fms-proposalselect"
+            value={draft[walletField]}
+            onChange={(e) => onChange({ ...draft, [walletField]: e.target.value })}
+          >
+            <option value="">Pick one</option>
+            {accounts.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+          {draft[walletField] && (
+            <button
+              type="button"
+              className="t-micro fms-linkish"
+              onClick={() => onChangeAll(draft)}
+              title="Put this wallet on every other card that still needs one"
+            >
+              Same for all
+            </button>
+          )}
+        </div>
+      )}
+
+      {proposal.adjustments.length > 0 && (
+        <div className="fms-proposalnotes">
+          {proposal.adjustments.map((a) => (
+            <p key={a} className="t-micro fms-proposalnote">
+              {a}
+            </p>
+          ))}
+        </div>
+      )}
+
       {check.problems.map((p) => (
         <p key={p} className="t-micro fms-proposalnote fms-proposalnote--stop">
           {p}
         </p>
       ))}
       {check.warnings.map((w) => (
-        <p key={w} className="t-micro fms-proposalnote">
+        <p key={w} className="t-micro fms-proposalnote fms-proposalnote--warn">
           {w}
         </p>
       ))}
 
-      <div className="fms-proposalactions">
-        <Button size="sm" variant="primary" disabled={!check.ok} onClick={onAdd}>
-          Add
-        </Button>
-        <Button size="sm" onClick={onUse}>
-          Edit first
-        </Button>
-        <Button size="sm" onClick={onDiscard}>
-          Discard
-        </Button>
-      </div>
-      <p className="t-micro" style={{ margin: 0, color: "var(--ink-3)" }}>
-        From {proposal.sourceRef}
-      </p>
+      {settled ? (
+        <p className="t-micro fms-proposalfrom">
+          {state === "added"
+            ? "Saved to the ledger. It is in the Database and in the activity trail."
+            : "Loaded into the form beside this. Check it and press Save transaction."}
+        </p>
+      ) : (
+        <>
+          <div className="fms-proposalactions">
+            <Button size="sm" variant="primary" disabled={!check.ok} onClick={onAdd}>
+              Add to ledger
+            </Button>
+            <Button size="sm" onClick={onUse}>
+              Edit first
+            </Button>
+            <Button size="sm" onClick={onDiscard}>
+              Discard
+            </Button>
+          </div>
+          <p className="t-micro fms-proposalfrom">From {proposal.sourceRef}</p>
+        </>
+      )}
     </div>
   );
 }
 
+/**
+ * One labelled value.
+ *
+ * A required field left empty is shown in the "stops it saving" colour with
+ * the words that say what to do, rather than as an empty cell you have to
+ * notice.
+ */
 function Field({
   label,
   value,
-  missing,
+  required,
   mono,
 }: {
   label: string;
   value: string;
-  missing?: boolean;
+  required?: boolean;
   mono?: boolean;
 }) {
+  const missing = !value.trim();
   return (
-    <>
-      <dt className="t-micro" style={{ color: "var(--ink-3)" }}>
-        {label}
-      </dt>
+    <div className="fms-pfield">
+      <dt className="t-micro fms-pfieldlabel">{label}</dt>
       <dd
-        className={mono ? "t-micro fms-proposalmoney" : "t-micro"}
-        style={{ margin: 0, color: missing ? "var(--over)" : "var(--ink)" }}
+        className={mono && !missing ? "t-caption fms-proposalmoney" : "t-caption"}
+        style={{
+          margin: 0,
+          color: missing ? (required ? "var(--over)" : "var(--ink-3)") : "var(--ink)",
+        }}
       >
-        {value || "you pick"}
+        {value.trim() || (required ? "you pick" : "none")}
       </dd>
-    </>
+    </div>
   );
 }

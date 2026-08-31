@@ -1691,17 +1691,19 @@
 /* ── A proposed row ──────────────────────────────────────────────────────── */
 
 /*
+ * A proposed entry, as the form it is.
+ *
  * Framed rather than tinted. Flow colour means direction of money in this app
- * (rule D3), so it cannot also mean "this one is a suggestion". The border and
+ * (rule D3), so it cannot also mean "this one is a suggestion". The frame and
  * the buttons say that instead.
  */
 .fms-proposal {
   display: grid;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-width: 0;
   padding: var(--space-3);
-  background: var(--surface-sunk);
-  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  border: 1px solid var(--brand-600);
   border-radius: var(--radius-md);
 }
 
@@ -1710,28 +1712,55 @@
   justify-content: space-between;
   align-items: baseline;
   gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--hairline);
 }
 
+/*
+ * Two columns where there is room, one where there is not.
+ *
+ * `auto-fit` with a minimum rather than a fixed count, so the card fits the
+ * 280px assistant column, the full width it takes when the layout stacks, and
+ * a phone, without a breakpoint for any of them.
+ */
 .fms-proposalfields {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: var(--space-2) var(--space-3);
   margin: 0;
 }
 
-.fms-proposalfields dd {
+/* Label above value: a label beside it needs a column width that a 280px
+   panel cannot spare without wrapping every figure. */
+.fms-pfield {
+  min-width: 0;
+}
+
+.fms-pfieldlabel {
+  color: var(--ink-3);
+}
+
+.fms-pfield dd {
   overflow-wrap: anywhere;
 }
 
 /*
  * Tabular, not monospace. The style guide supersedes the spec's monospace
- * money rule (see base.css), so the figures line up by numeral width rather
- * than by changing typeface mid-sentence.
+ * money rule (see base.css), so figures line up by numeral width rather than
+ * by changing typeface mid-card.
  */
 .fms-proposalmoney {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   white-space: nowrap;
+}
+
+/* Why it chose what it chose, kept together and quiet. */
+.fms-proposalnotes {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
 }
 
 .fms-proposalnote {
@@ -1740,15 +1769,25 @@
   overflow-wrap: anywhere;
 }
 
-/* What stops it being saved, as opposed to what merely changed. */
+/* What stops it saving, as opposed to what merely changed. */
 .fms-proposalnote--stop {
   color: var(--over);
+}
+
+.fms-proposalnote--warn {
+  color: var(--ink-2);
 }
 
 .fms-proposalactions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+.fms-proposalfrom {
+  margin: 0;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
 }
 
 .fms-askinput {
@@ -1904,4 +1943,50 @@
 .fms-actdiff dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+/*
+ * A card that has been dealt with.
+ *
+ * It stays on screen, because the entry you just asked to look at should not
+ * vanish at the moment you ask. The frame drops back to a hairline so the
+ * open one is still the one your eye goes to.
+ */
+.fms-proposal--settled {
+  border-color: var(--hairline);
+  background: var(--surface-sunk);
+}
+
+/* The wallet, pickable on the card itself. A statement screenshot is one
+   account, so "same for all" saves saying it once per row. */
+.fms-proposalpick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-proposalselect {
+  flex: 1 1 120px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+}
+
+@media (max-width: 1023px) {
+  .fms-proposalselect {
+    min-height: 44px;
+  }
+}
+
+/* A file is over the panel: say so without moving anything. */
+.fms-ask--drop {
+  outline: 2px dashed var(--brand-600);
+  outline-offset: -4px;
 }
