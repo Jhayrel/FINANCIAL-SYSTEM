@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AddTransaction } from "./features/AddTransaction";
 import { Bin } from "./features/Bin";
+import { CoderView } from "./features/CoderView";
 import { Budget } from "./features/Budget";
 import { Dashboard } from "./features/Dashboard";
 import { Database } from "./features/Database";
@@ -770,6 +771,19 @@ export default function App() {
   // show empty screens and permission errors.
   if (cloud.configured && cloud.auth.status !== "ready") {
     return <SignIn auth={cloud.auth} onSignIn={cloud.signIn} onSignOut={cloud.signOut} />;
+  }
+
+  /**
+   * `?coderview`: the whole database as text, for debugging.
+   *
+   * After the sign-in gate and before everything else, because it is not a
+   * screen of the app: it has no nav item, no state of its own, and it reads
+   * straight from Firestore rather than from what the app happens to have
+   * loaded. See `features/CoderView.tsx` for why it exists and what makes it
+   * safe to leave in.
+   */
+  if (typeof window !== "undefined" && window.location.search.includes("coderview")) {
+    return <CoderView uid={cloud.uid ?? null} />;
   }
 
   if (!base.loaded && !cloud.uid) {

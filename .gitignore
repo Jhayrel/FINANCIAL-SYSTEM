@@ -19,6 +19,18 @@ MY THINGS/
 app/src/fixtures/*.json
 tools/out/
 
+# Coderview dumps are the entire database in one text file: every transaction,
+# every message to the assistant, every correction. The screen that makes them
+# suggests saving into MY THINGS/CODERVIEW/, which is already excluded above,
+# but a dump saved anywhere else in the tree must not be committable either.
+# Extensions only, never a bare prefix: git ignores case-insensitively on
+# Windows, so `coderview*` would also swallow the screen's own source file
+# and its test, and they would go missing from the repository silently.
+coderview*.txt
+coderview*.json
+coderview*.md
+CODERVIEW/
+
 # ── Secrets — never commit ─────────────────────────────────────
 # API keys live in Cloudflare environment secrets, never in the tree.
 .env

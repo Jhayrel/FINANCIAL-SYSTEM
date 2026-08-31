@@ -60,8 +60,16 @@ const SPENT =
 const GOT =
   /\b(received|receive|got|earned|earn|collected|refunded|allowance|salary|paid me|sent me|gave me)\b/i;
 
-/** Money moved, or sent away. */
-const MOVED = /\b(transferred|transfer|moved|sent|send|cashed out|withdrew|withdraw|deposited)\b/i;
+/**
+ * Money moved, or sent away.
+ *
+ * `gave` and `padala` are here because giving money away is a transfer out,
+ * not a purchase: there is no item and no category, and the destination is
+ * what decides whether it counts as spending. Income is tested first, so
+ * "gave me 500" is still read as income.
+ */
+const MOVED =
+  /\b(transferred|transfer|moved|sent|send|gave|give|giving|padala|pinadala|cashed out|withdrew|withdraw|deposited)\b/i;
 
 /**
  * Borrowing and repaying, which this file refuses to guess at.
@@ -75,14 +83,40 @@ const DEBT =
 /**
  * Someone else, rather than another of your own pockets.
  *
- * "to my friend", "to my mom", "to his gcash account". The destination is a
- * person, so the money has left your accounts however it travelled.
+ * ── Why this is read from the destination clause and nothing else ─────────
+ *
+ * It used to be tested against the whole sentence, so "I moved 500 from cash
+ * to gcash for the store" looked like money given away because the word
+ * "store" appeared somewhere in it. Whose pocket the money landed in is
+ * decided by the words after "to". Nothing else in the sentence has an
+ * opinion about it.
  */
 const SOMEONE_ELSE =
-  /\b(friend|mother|mom|nanay|father|dad|tatay|sister|ate|brother|kuya|cousin|tita|tito|lola|lolo|classmate|landlord|seller|shop|store|him|her|them|his|their|someone|somebody)\b/i;
+  /\b(friend|friends|kaibigan|barkada|mother|mom|mama|nanay|father|dad|papa|tatay|sister|ate|brother|kuya|cousin|pinsan|tita|tito|aunt|auntie|uncle|lola|lolo|grandma|grandpa|classmate|schoolmate|officemate|roommate|neighbou?r|landlord|landlady|teacher|driver|boss|seller|shop|store|vendor|rider|courier|girlfriend|boyfriend|wife|husband|someone|somebody|him|her|them|his|hers|their|theirs)\b/i;
 
-/** A destination was named, whatever it turned out to be. */
-const SAID_TO = /\bto\s+\S/i;
+/**
+ * A possessive that is not yours: "mama's gcash", "Jhayrel's maya".
+ *
+ * The apostrophe carries the whole meaning. "to gcash" is your Gcash and "to
+ * mama's gcash" is not, and those are opposite entries: one is money moved
+ * between your own pockets, where only the fee counts as spending, and the
+ * other is money given away, where all of it does.
+ */
+const THEIR_POSSESSIVE = /\b(?!my\b|our\b)[\w-]+['’]s\b/i;
+
+/** Explicitly one of yours: "my gcash", "my own savings". */
+const MINE = /\b(my|mine|our|ours|own)\b/i;
+
+/**
+ * "to buy food" is not a destination.
+ *
+ * A transfer sentence often ends in its reason, and a reason starts with
+ * "to" as well. Read as a recipient, "I withdrew 5000 to buy food" became
+ * money that had left your accounts, which books the whole 5,000 as spending
+ * on the day you took it out of the bank and loses the cash you are holding.
+ */
+const PURPOSE =
+  /^(?:buy|buying|pay|paying|get|cover|spend|purchase|order|reload|load|top\s*up|withdraw|send|settle|fund|save|use|treat)\b/i;
 
 /**
  * Which way the money went.
@@ -188,24 +222,53 @@ function walletIn(text: string, accounts: readonly string[]): string {
  */
 function walletAfter(text: string, words: readonly string[], accounts: readonly string[]): string {
   for (const word of words) {
-    const match = new RegExp(`\\b${word}\\s+(.{0,40})`, "i").exec(text);
-    if (!match?.[1]) continue;
-    /**
-     * Stop at the next direction word.
-     *
-     * Without this the window after "from" in "from cash to gcash" is the
-     * whole rest of the sentence, and `walletIn` tries longest first, so it
-     * found Gcash and made the destination the source.
-     */
-    const clause = match[1].split(BOUNDARY)[0] ?? match[1];
+    const clause = clauseAfter(text, word);
     const found = walletIn(clause, accounts);
     if (found) return found;
   }
   return "";
 }
 
-/** Where one clause ends and the next begins. */
-const BOUNDARY = /\b(?:to|into|from|using|via|thru|through|out of)\b/i;
+/**
+ * The words that follow a direction word, up to the next one.
+ *
+ * Split out from `walletAfter` because the clause says more than which
+ * account it names. "my mom's gcash" and "gcash" name the same account and
+ * mean opposite things, and the difference is in the words around the name.
+ */
+function clauseAfter(text: string, word: string): string {
+  const match = new RegExp(`\\b${word}\\s+(.{0,40})`, "i").exec(text);
+  if (!match?.[1]) return "";
+  /**
+   * Stop at the next direction word.
+   *
+   * Without this the window after "from" in "from cash to gcash" is the
+   * whole rest of the sentence, and `walletIn` tries longest first, so it
+   * found Gcash and made the destination the source.
+   */
+  return (match[1].split(BOUNDARY)[0] ?? match[1]).trim();
+}
+
+/** The first non-empty clause after any of these words. */
+const firstClause = (text: string, words: readonly string[]): string => {
+  for (const word of words) {
+    const clause = clauseAfter(text, word);
+    if (clause) return clause;
+  }
+  return "";
+};
+
+/**
+ * Where one clause ends and the next begins.
+ *
+ * The reason words are here as well as the direction words, because a reason
+ * is where a sentence stops talking about the money and starts talking about
+ * why. "to gcash for the store" moved money into your own Gcash; without a
+ * stop at "for", the destination clause swallowed "the store" and the row
+ * came back as money handed to a shop.
+ */
+const BOUNDARY =
+  /\b(?:to|into|from|using|via|thru|through|out of|for|because|since|para)\b/i;
 
 /** Words that mark where money came from, and where it went. */
 const FROM_WORDS = ["from", "using", "used", "thru", "through", "via", "with", "out of"];
@@ -297,18 +360,57 @@ export function readEntry(
    * is which; a purchase usually names one, and either reading finds it.
    */
   const stated = walletAfter(text, FROM_WORDS, accounts);
-  const destination = walletAfter(text, TO_WORDS, accounts);
+
+  /**
+   * Whose pocket the money landed in, which is the whole question.
+   *
+   * CLAUDE.md's transfer rule turns on one thing: a named destination is
+   * still your money and only the fee is spending, a blank one means it left
+   * your accounts and the whole amount is. So reading the destination wrong
+   * does not misfile a row, it misstates what you spent.
+   *
+   * Three signals, in this order, all read from the words after "to":
+   *
+   *   theirs   a person, or a possessive that is not yours. "to my mom's
+   *            gcash" names Gcash and is not your Gcash, so the account it
+   *            names is thrown away rather than trusted.
+   *   mine     "my", "our", "own". Yours even when the name is one this app
+   *            does not hold, like "to my savings".
+   *   neither  a destination was named and nothing says whose it is. That
+   *            is a question, not a guess, so nothing is settled and the
+   *            assistant asks.
+   */
+  const toClause = firstClause(text, TO_WORDS);
+  const theirs = SOMEONE_ELSE.test(toClause) || THEIR_POSSESSIVE.test(toClause);
+  const mine = !theirs && MINE.test(toClause);
+  const destination = theirs ? "" : walletAfter(text, TO_WORDS, accounts);
+
   const loose = walletIn(text, accounts);
   const source = stated || (destination ? "" : loose);
 
   const because: string[] = [];
   if (said && date !== asOf) because.push(`Dated ${date}, from what you said.`);
 
-  const leftYourAccounts = flow === "Transfer" && !destination && (SAID_TO.test(text) || SOMEONE_ELSE.test(text));
+  /**
+   * Said outright, rather than assumed from a bare "to".
+   *
+   * The old rule fired on any "to" followed by anything, so a sentence that
+   * merely explained itself ("withdrew 5000 to buy food") counted the whole
+   * amount as gone. It has to be a recipient: a person, or a name that is
+   * not one of your accounts and not one of your own possessives.
+   */
+  const wentSomewhereElse =
+    theirs || (!destination && !mine && toClause !== "" && !PURPOSE.test(toClause));
+
+  const leftYourAccounts = flow === "Transfer" && wentSomewhereElse;
 
   const settled: Blank[] = leftYourAccounts ? ["toWallet"] : [];
   if (leftYourAccounts) {
-    because.push("It left your accounts, so the whole amount counts as spending.");
+    because.push(
+      theirs
+        ? "That account is somebody else's, so it left your accounts and the whole amount counts as spending."
+        : "It left your accounts, so the whole amount counts as spending.",
+    );
   }
 
   const base: Draft = {
