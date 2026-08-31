@@ -2115,3 +2115,62 @@ textarea.fms-askinput {
 .fms-foundrow > .t-caption {
   overflow-wrap: anywhere;
 }
+
+/* ── A chart, as bars ─────────────────────────────────────────────────────
+   One ink, because flow colour means direction of money (rule D3) and cannot
+   also mean "this bar rather than that one". Length carries the comparison,
+   and every bar prints its own figure, so the chart is readable without
+   comparing any two lengths at all. */
+
+.fms-chartrows {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/*
+ * Label, bar, figure. The bar is the only part that gives, so a long item
+ * name and a long figure both stay whole.
+ */
+.fms-chartrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(40px, 2fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-chartlabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.fms-charttrack {
+  min-width: 0;
+  height: 10px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--hairline);
+}
+
+.fms-chartbar {
+  height: 100%;
+  background: var(--brand-600);
+}
+
+.fms-chartvalue {
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+/* Stacked, the label goes above so the bar keeps its width. */
+@media (max-width: 1023px) {
+  .fms-chartrow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .fms-chartlabel {
+    grid-column: 1 / -1;
+  }
+}

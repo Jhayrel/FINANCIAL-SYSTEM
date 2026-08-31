@@ -119,6 +119,38 @@ export function totalsFor(transactions: readonly Transaction[]): MonthTotals {
   };
 }
 
+/**
+ * What one row contributes to a spending total.
+ *
+ * ── Why this exists beside `totalsFor` and not inside it ──────────────────
+ *
+ * `totalsFor` splits a month into its five buckets, which is what the panels
+ * need. A breakdown by item or by wallet needs the same figure per row, and
+ * writing that sum a second time is how two screens end up disagreeing about
+ * the year: a chart built on its own definition over-counted 2026 by
+ * PHP 13,128.00, by including Spending rows whose category is blank.
+ *
+ * So this is the one definition, and `costOf.test.ts` asserts that summing it
+ * over the whole ledger equals `totalsFor(...).total` exactly. The two cannot
+ * drift without that test failing.
+ */
+export function costOf(t: Transaction): Centavos {
+  if (t.type === "Spending") {
+    return t.category === "Spending" || t.category === "Bills" || t.category === "Subscriptions"
+      ? t.total
+      : 0;
+  }
+
+  // Left your accounts: the whole amount. Moved between your own: the fee.
+  // Either way it is what the transfer cost, which `transferCost` decides.
+  if (t.type === "Transfer") return transferCost(t);
+
+  // Interest and fees are expense; repaying principal is not (rule 5.2).
+  if (t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee")) return t.total;
+
+  return 0;
+}
+
 export function monthTotals(
   transactions: readonly Transaction[],
   year: number,

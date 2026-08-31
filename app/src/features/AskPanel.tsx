@@ -72,6 +72,7 @@ import { amend, applyReply, matchItem, nextQuestion, type Blank } from "../domai
 import { readEntry } from "../domain/readEntry";
 import { readRich } from "../domain/richText";
 import { detectRecall, findRows, type Candidate, type RecallAction } from "../domain/recall";
+import { buildChart, chartLabel, wantsChart, type Chart } from "../domain/charts";
 import { inferFromHistory } from "../domain/infer";
 import { itemsFor } from "../domain/entry";
 import { detectIntent, isQuestion, type Intent } from "../domain/intent";
@@ -147,6 +148,12 @@ interface Found {
   readonly done: readonly string[];
 }
 
+/** A chart the owner asked to see. */
+interface Drawn {
+  readonly kind: "chart";
+  readonly chart: Chart;
+}
+
 interface Offered {
   readonly kind: "proposal";
   readonly proposal: Proposal;
@@ -159,10 +166,11 @@ interface Offered {
   readonly state: "open" | "added" | "used" | "discarded";
 }
 
-type Turn = Said | Offered | Found;
+type Turn = Said | Offered | Found | Drawn;
 
 const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
 const isFound = (t: Turn): t is Found => t.kind === "found";
+const isChart = (t: Turn): t is Drawn => t.kind === "chart";
 
 /**
  * How much of the thread goes back with each question.
@@ -273,7 +281,7 @@ export function AskPanel({
     setTurns((prev) => [...prev, turn]);
     // Only what was said is kept. A card and a found list are decisions in
     // progress, and the entry or the bin already holds their outcome.
-    if (isOffer(turn) || isFound(turn)) return;
+    if (isOffer(turn) || isFound(turn) || isChart(turn)) return;
     void chatStore(uid)
       .record(said(turn.kind, turn.text, turn.from))
       .catch(() => {});
@@ -672,6 +680,27 @@ export function AskPanel({
     }
 
     /**
+     * "show me a chart of this month".
+     *
+     * Drawn here, from figures added up in TypeScript. A chart is a claim
+     * about money, and a wrong bar is a wrong figure drawn large, so no model
+     * is involved in the arithmetic or in choosing what to draw.
+     */
+    if (files.length === 0 && !as && wantsChart(note)) {
+      const chart = buildChart(note, transactions, asOf);
+      setDraft("");
+      say({ kind: "you", text: note });
+      if (chart) say({ kind: "chart", chart });
+      else
+        say({
+          kind: "assistant",
+          text: "There is no spending in that period to draw. Try a month with entries in it, or ask for the year.",
+          from: "this device",
+        });
+      return;
+    }
+
+    /**
      * "delete the data I created yesterday about the groceries".
      *
      * Finds and shows; it never bins anything by itself. A sentence that
@@ -1011,7 +1040,9 @@ export function AskPanel({
         )}
 
         {turns.map((turn, i) =>
-          isFound(turn) ? (
+          isChart(turn) ? (
+            <ChartView key={i} chart={turn.chart} />
+          ) : isFound(turn) ? (
             <FoundList
               key={i}
               found={turn}
@@ -1571,6 +1602,57 @@ function FoundList({ found, onAct }: { found: Found; onAct: (id: string) => void
         {action === "bin"
           ? "A deleted entry moves to the Bin and can be brought back. Nothing is ever removed."
           : "Restoring puts it back where it was, with its own record number."}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * A chart, as bars.
+ *
+ * ── Why not a pie ─────────────────────────────────────────────────────────
+ *
+ * This column is 280px. A pie of a month's spending is a dozen slices, most
+ * of them a few degrees across, and reading one needs a legend, which in that
+ * space is a list of labels beside a circle nobody can read. These are the
+ * same figures sorted, each with its own number printed next to it.
+ *
+ * ── Why one colour ───────────────────────────────────────────────────────
+ *
+ * Flow colour means direction of money in this app (rule D3), so a chart may
+ * not spend colour telling one bar from another. Length carries the
+ * comparison, which is what a bar chart is for, and it stays readable to
+ * anyone who cannot separate the hues a legend would have needed.
+ */
+function ChartView({ chart }: { chart: Chart }) {
+  return (
+    <div className="fms-proposal">
+      <div className="fms-proposalhead">
+        <span className="t-label" style={{ color: "var(--ink-2)" }}>
+          {chart.title}
+        </span>
+        <span className="t-micro fms-proposalmoney" style={{ color: "var(--ink-3)" }}>
+          {chartLabel(chart.total)}
+        </span>
+      </div>
+
+      <div className="fms-chartrows">
+        {chart.rows.map((r) => (
+          <div key={r.label} className="fms-chartrow">
+            <div className="fms-chartlabel t-micro">{r.label}</div>
+            <div className="fms-charttrack">
+              {/* Width is the only thing carrying the comparison. */}
+              <div className="fms-chartbar" style={{ width: `${Math.max(r.share * 100, 1.5)}%` }} />
+            </div>
+            <div className="t-micro fms-chartvalue fms-proposalmoney">{chartLabel(r.value)}</div>
+          </div>
+        ))}
+      </div>
+
+      <p className="t-micro fms-proposalfrom">
+        {chart.othersCount > 0
+          ? `The ${chart.rows.length} largest, with ${chart.othersCount} smaller left off. Totals worked out on this device.`
+          : "Totals worked out on this device, from your entries."}
       </p>
     </div>
   );
