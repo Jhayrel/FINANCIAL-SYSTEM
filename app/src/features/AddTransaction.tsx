@@ -95,6 +95,7 @@ export function AddTransaction({
   editing,
   onCancelEdit,
   ai,
+  uid,
   settings,
   budgets,
   asOf,
@@ -109,6 +110,8 @@ export function AddTransaction({
   editing: Transaction | null;
   onCancelEdit: () => void;
   ai: AiSettings;
+  /** Signed in, so the conversation has somewhere to live. */
+  uid: string | null;
   /** For the assistant beside the form, which reads figures and nothing else. */
   settings: AppSettings;
   budgets: Budgets;
@@ -821,6 +824,7 @@ export function AddTransaction({
       <AskPanel
         sink={sink}
         lastSaved={lastSaved}
+        uid={uid}
         settings={settings}
         transactions={transactions}
         budgets={budgets}

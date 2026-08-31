@@ -72,3 +72,23 @@ describe("totalBytes", () => {
     ).toBe(150);
   });
 });
+
+describe("checkFile honours the limits from Settings", () => {
+  it("uses a smaller count when one is set", () => {
+    expect(checkFile(file(), 2, { maxCount: 3 }).ok).toBe(true);
+    const refused = checkFile(file(), 3, { maxCount: 3 });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.reason).toContain("3 files");
+  });
+
+  it("uses a smaller size when one is set, and names it", () => {
+    const refused = checkFile(file({ size: 2_500_000 }), 0, { maxSizeMB: 2 });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.reason).toContain("2.0 MB");
+  });
+
+  it("falls back to the defaults when Settings says nothing", () => {
+    expect(checkFile(file({ size: 3_000_000 }), 0, {}).ok).toBe(true);
+    expect(checkFile(file({ size: 5_000_000 }), 0, {}).ok).toBe(false);
+  });
+});

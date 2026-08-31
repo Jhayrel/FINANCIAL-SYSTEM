@@ -808,6 +808,7 @@ export default function App() {
               reference={reference}
               debts={settings.credits}
               balances={view.rows}
+              uid={cloud.uid ?? null}
               onSave={handleSave}
               onUpdate={handleUpdate}
               editing={editing}

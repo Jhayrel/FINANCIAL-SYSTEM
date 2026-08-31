@@ -85,11 +85,16 @@ export function formatBytes(bytes: number): string {
 export function checkFile(
   file: { readonly name: string; readonly type: string; readonly size: number },
   alreadyAttached: number,
+  /** From Settings. Absent means the defaults above. */
+  limits: { readonly maxCount?: number; readonly maxSizeMB?: number } = {},
 ): { readonly ok: true } | { readonly ok: false; readonly reason: string } {
-  if (alreadyAttached >= LIMITS.maxCount) {
+  const maxCount = limits.maxCount ?? LIMITS.maxCount;
+  const maxBytes = (limits.maxSizeMB ?? LIMITS.maxBytes / (1024 * 1024)) * 1024 * 1024;
+
+  if (alreadyAttached >= maxCount) {
     return {
       ok: false,
-      reason: `${LIMITS.maxCount} files is the most that can go in one message. Send these, then attach the rest.`,
+      reason: `${maxCount} files is the most that can go in one message. Send these, then attach the rest.`,
     };
   }
 
@@ -103,10 +108,10 @@ export function checkFile(
     };
   }
 
-  if (file.size > LIMITS.maxBytes) {
+  if (file.size > maxBytes) {
     return {
       ok: false,
-      reason: `It is ${formatBytes(file.size)} and the limit is ${formatBytes(LIMITS.maxBytes)}. It was not sent. Try a smaller photo.`,
+      reason: `It is ${formatBytes(file.size)} and the limit is ${formatBytes(maxBytes)}. It was not sent. Try a smaller photo.`,
     };
   }
 
@@ -176,12 +181,13 @@ let counter = 0;
 export async function readFiles(
   files: readonly File[],
   alreadyAttached = 0,
+  limits: { readonly maxCount?: number; readonly maxSizeMB?: number } = {},
 ): Promise<ReadResult> {
   const attachments: Attachment[] = [];
   const rejected: Rejection[] = [];
 
   for (const file of files) {
-    const check = checkFile(file, alreadyAttached + attachments.length);
+    const check = checkFile(file, alreadyAttached + attachments.length, limits);
     if (!check.ok) {
       rejected.push({ name: file.name, reason: check.reason });
       continue;

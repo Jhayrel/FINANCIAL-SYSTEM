@@ -222,6 +222,39 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── Chat ───────────────────────────────────────────────────────────────
+    //
+    // What was said to the assistant and what it answered. One document per
+    // message, append only, for the same reason the activity trail is: a
+    // conversation that can be quietly rewritten is not a record of anything,
+    // and this one carries the questions asked about real money.
+    //
+    // Only the said turns are here. A proposal card is a decision in
+    // progress; once decided, the entry is in `transactions` and the fact
+    // that the assistant read it is in `activity`.
+    //
+    // The text is redacted client side before the write (`domain/chat.ts`),
+    // because these rules can check the names of fields and not their values,
+    // and a key pasted into the box is a value.
+
+    function validChatMessage() {
+      let d = incoming();
+      return d.keys().hasAll(['at', 'role', 'text'])
+          && d.at is string && d.at.size() <= 40
+          && d.role in ['you', 'assistant']
+          && d.text is string && d.text.size() <= 4000
+          && (!('from' in d) || (d.from is string && d.from.size() <= 80))
+          && noSecretKeys(d.keys());
+    }
+
+    match /users/{uid}/chat/{messageId} {
+      allow read:   if isOwner(uid);
+      allow create: if isOwner(uid) && validChatMessage();
+
+      // Append only. "Clear conversation" clears the screen, not the record.
+      allow update, delete: if false;
+    }
+
     // ── Budgets ────────────────────────────────────────────────────────────
     //
     // One document per year, id "2026". Twelve amounts per track, index 0 =

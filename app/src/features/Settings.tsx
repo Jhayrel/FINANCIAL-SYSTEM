@@ -63,6 +63,8 @@ import {
   AI_DEFAULT_MODEL,
   AI_PROVIDER_LABEL,
   AI_TONE_HINT,
+  IMAGE_BOUNDS,
+  imageLimits,
   type AiProvider,
   type AiSettings,
   type AiTone,
@@ -1837,6 +1839,7 @@ function AiSection({
   const ai = settings.ai;
   const setAi = (part: Partial<AiSettings>): void => patch({ ai: { ...ai, ...part } });
   const off = !ai.enabled;
+  const limits = imageLimits(ai);
   const { confirm, dialog } = useConfirm();
 
   /** Every switch and picker here asks first. */
@@ -1961,6 +1964,55 @@ function AiSection({
             ))}
           </tbody>
         </table>
+      </Group>
+
+      {/*
+        What a message may carry.
+
+        The client refuses an oversized file by name with its size, which is
+        the version worth reading. The endpoint keeps its own ceiling
+        regardless: a limit set here is a preference, never a control.
+      */}
+      <Group title="Photos and files" hint="What one message may carry">
+        <div className="fms-addrow">
+          <label className="t-caption" style={{ color: "var(--ink-2)" }}>
+            Most files in one message
+            <input
+              className="t-body fms-input"
+              type="number"
+              inputMode="numeric"
+              min={IMAGE_BOUNDS.maxCount.min}
+              max={IMAGE_BOUNDS.maxCount.max}
+              value={limits.maxCount}
+              disabled={off}
+              onChange={(e) =>
+                setAi({ image: { ...ai.image, maxCount: Number(e.target.value) } })
+              }
+              style={{ display: "block", marginTop: 4, width: 90 }}
+            />
+          </label>
+          <label className="t-caption" style={{ color: "var(--ink-2)" }}>
+            Largest file, in MB
+            <input
+              className="t-body fms-input"
+              type="number"
+              inputMode="numeric"
+              min={IMAGE_BOUNDS.maxSizeMB.min}
+              max={IMAGE_BOUNDS.maxSizeMB.max}
+              value={limits.maxSizeMB}
+              disabled={off}
+              onChange={(e) =>
+                setAi({ image: { ...ai.image, maxSizeMB: Number(e.target.value) } })
+              }
+              style={{ display: "block", marginTop: 4, width: 90 }}
+            />
+          </label>
+        </div>
+        <p className="t-caption" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-3)" }}>
+          Pictures are downscaled and re-encoded on this device before anything is sent, so a phone
+          photo usually arrives well under the limit. Five is what the free vision models accept in
+          one request.
+        </p>
       </Group>
 
       <Group title="Try it" hint="Runs a real call against your own figures" wide>

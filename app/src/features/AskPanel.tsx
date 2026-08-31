@@ -77,12 +77,14 @@ import { detectIntent, isQuestion, type Intent } from "../domain/intent";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
 import { classifyItem, extractProposals } from "../data/aiClient";
-import { formatBytes, readFiles, totalBytes, LIMITS, type Attachment } from "../data/attachments";
+import { chatStore } from "../data/chatStore";
+import { said } from "../domain/chat";
+import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
 import type { Provenance } from "../domain/activity";
-import type { AppSettings } from "../domain/settings";
+import { imageLimits, type AppSettings } from "../domain/settings";
 import type { Budgets, ReferenceLists, Transaction } from "../domain/types";
 
 /**
@@ -154,6 +156,7 @@ export function AskPanel({
   asOf,
   sink,
   lastSaved,
+  uid,
 }: {
   settings: AppSettings;
   transactions: readonly Transaction[];
@@ -161,6 +164,8 @@ export function AskPanel({
   reference: ReferenceLists;
   asOf: string;
   sink: ProposalSink;
+  /** Signed in, so the conversation has somewhere to live. Null in local mode. */
+  uid: string | null;
   /**
    * The last row the form saved.
    *
@@ -223,7 +228,53 @@ export function AskPanel({
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns, busy]);
 
-  const say = (turn: Turn): void => setTurns((prev) => [...prev, turn]);
+  /**
+   * Say it, and keep it.
+   *
+   * Only the said turns are stored. A proposal card is a decision in
+   * progress: once it is decided the entry is in the ledger and the fact that
+   * the assistant read it is in the activity trail, and a card that came back
+   * tomorrow would be offering to add a row that already exists.
+   *
+   * The write is not awaited and cannot fail the turn. The answer is on
+   * screen; a failed record of it is not the reader's problem.
+   */
+  const say = (turn: Turn): void => {
+    setTurns((prev) => [...prev, turn]);
+    if (isOffer(turn)) return;
+    void chatStore(uid)
+      .record(said(turn.kind, turn.text, turn.from))
+      .catch(() => {});
+  };
+
+  /**
+   * What was said last time.
+   *
+   * Loaded once, and only into an empty thread, so a reload picks up where
+   * you left off without a conversation already in progress being pushed
+   * down by its own history.
+   */
+  useEffect(() => {
+    let live = true;
+    chatStore(uid)
+      .recent()
+      .then((history) => {
+        if (!live || history.length === 0) return;
+        setTurns((prev) =>
+          prev.length > 0
+            ? prev
+            : history.map((m) => ({
+                kind: m.role,
+                text: m.text,
+                ...(m.from ? { from: m.from } : {}),
+              })),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [uid]);
 
   const settle = (index: number, state: Offered["state"]): void =>
     setTurns((prev) =>
@@ -263,9 +314,12 @@ export function AskPanel({
       }),
     );
 
+  /** From Settings, clamped there, so a typo cannot ask for a hundred. */
+  const limits = imageLimits(settings.ai);
+
   const attach = async (picked: ArrayLike<File> | null): Promise<void> => {
     if (!picked || picked.length === 0) return;
-    const { attachments, rejected } = await readFiles(Array.from(picked), files.length);
+    const { attachments, rejected } = await readFiles(Array.from(picked), files.length, limits);
     if (attachments.length > 0) setFiles((prev) => [...prev, ...attachments]);
     for (const r of rejected) {
       say({ kind: "assistant", text: `${r.name}: ${r.reason}`, from: "this device" });
@@ -954,7 +1008,7 @@ export function AskPanel({
             </span>
           ))}
           <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-            {files.length} of {LIMITS.maxCount}, {formatBytes(weight)}
+            {files.length} of {limits.maxCount}, {formatBytes(weight)}
           </span>
         </div>
       )}
@@ -1001,7 +1055,7 @@ export function AskPanel({
           className="fms-attach"
           aria-label="Attach a photo or a file"
           title="Attach a photo or a file"
-          disabled={busy || files.length >= LIMITS.maxCount}
+          disabled={busy || files.length >= limits.maxCount}
           onClick={() => pickerRef.current?.click()}
         >
           +
@@ -1048,7 +1102,13 @@ export function AskPanel({
 
       {turns.length > 0 && (
         <button type="button" className="t-micro fms-linkish" onClick={() => setTurns([])}>
-          Clear conversation
+          {/*
+            Clears the screen, not the record. The collection is append only
+            at the database, so there is no gesture here that could delete
+            what was said, and pretending otherwise would be a lie about
+            where your data is.
+          */}
+          Clear this view
         </button>
       )}
     </aside>

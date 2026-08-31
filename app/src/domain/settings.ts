@@ -57,6 +57,40 @@ export interface AiSettings {
     /** Reading photos and files into proposed rows. */
     readonly capture?: boolean;
   };
+  /**
+   * What a message may carry.
+   *
+   * Absent means the defaults below, which is every document written before
+   * these existed. The client enforces them with the helpful message; the
+   * endpoint enforces its own ceiling regardless, because a client-side limit
+   * is a courtesy and never a control.
+   */
+  readonly image?: {
+    readonly maxCount?: number;
+    readonly maxSizeMB?: number;
+  };
+}
+
+/** What a message may carry, when settings say nothing. */
+export const DEFAULT_IMAGE = { maxCount: 5, maxSizeMB: 4 } as const;
+
+/** Bounds, so a typo cannot ask for a hundred images of a hundred megabytes. */
+export const IMAGE_BOUNDS = {
+  maxCount: { min: 1, max: 5 },
+  maxSizeMB: { min: 1, max: 8 },
+} as const;
+
+/** Read the limits, clamped, whatever the document happens to hold. */
+export function imageLimits(ai: AiSettings): { maxCount: number; maxSizeMB: number } {
+  const clamp = (v: number | undefined, fallback: number, bounds: { min: number; max: number }): number =>
+    typeof v === "number" && Number.isFinite(v)
+      ? Math.min(Math.max(Math.round(v), bounds.min), bounds.max)
+      : fallback;
+
+  return {
+    maxCount: clamp(ai.image?.maxCount, DEFAULT_IMAGE.maxCount, IMAGE_BOUNDS.maxCount),
+    maxSizeMB: clamp(ai.image?.maxSizeMB, DEFAULT_IMAGE.maxSizeMB, IMAGE_BOUNDS.maxSizeMB),
+  };
 }
 
 export const DEFAULT_AI: AiSettings = {
