@@ -58,11 +58,14 @@ export function Database({
   transactions,
   initialFilter = "all",
   onDelete,
+  onDeleteMany,
   onEdit,
 }: {
   transactions: readonly Transaction[];
   initialFilter?: FilterId;
   onDelete?: (id: string) => void;
+  /** Several at once, as one move with one record of it. */
+  onDeleteMany?: ((ids: readonly string[]) => void) | undefined;
   /** Loads the row back into the Add form, the way the Excel arrows did. */
   onEdit?: (row: Transaction) => void;
 }) {
@@ -81,7 +84,16 @@ export function Database({
   const [sortKey, setSortKey] = useState("record");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [limit, setLimit] = useState(PAGE);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
   const { confirm, dialog } = useConfirm();
+
+  const toggleRow = (id: string): void =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   /**
    * Deleting asks first, and says what it is about to remove.
@@ -108,6 +120,31 @@ export function Database({
     });
 
     if (ok) onDelete(t.id);
+  };
+
+  /**
+   * The same question for several rows, with the figure that makes it real.
+   *
+   * A count on its own is not enough to answer safely: "delete 12 records"
+   * could be twelve coffees or twelve months of rent. The total is what tells
+   * you which, so it is in the sentence, and so is the fact that the bin
+   * still has them afterwards.
+   */
+  const askDeleteMany = async (rows: readonly Transaction[]): Promise<void> => {
+    if (!onDeleteMany || rows.length === 0) return;
+    const total = rows.reduce((sum, t) => sum + t.total, 0);
+
+    const ok = await confirm({
+      title: `Delete ${rows.length} records?`,
+      body: `${rows.length} rows totalling ₱${formatAmount(total)}. They move to the bin, where you can restore them together. Balances and totals update straight away.`,
+      confirmLabel: `Move ${rows.length} to bin`,
+      tone: "danger",
+    });
+
+    if (ok) {
+      onDeleteMany(rows.map((t) => t.id));
+      setPicked(new Set());
+    }
   };
 
   /** Issues indexed by transaction id so a row can show its own flags. */
@@ -190,6 +227,20 @@ export function Database({
 
   const shown = rows.slice(0, limit);
   const flaggedCount = issuesById.size;
+
+  /**
+   * What is picked, in the order the table shows it.
+   *
+   * Taken from `rows` rather than from the set, so a row that a filter or a
+   * search has since hidden cannot be swept into a delete you can no longer
+   * see. Narrowing the search is not a way to lose rows.
+   */
+  const chosen = rows.filter((t) => picked.has(t.id));
+  const chosenTotal = chosen.reduce((sum, t) => sum + t.total, 0);
+  const allShownPicked = shown.length > 0 && shown.every((t) => picked.has(t.id));
+
+  const toggleAll = (): void =>
+    setPicked(allShownPicked ? new Set() : new Set(shown.map((t) => t.id)));
 
   const onSort = (key: string): void => {
     if (key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -346,6 +397,33 @@ export function Database({
           />
         </div>
 
+        {onDeleteMany && chosen.length > 0 && (
+          /*
+           * Sits under the search rather than floating over the rows.
+           *
+           * A bar that hovers covers the very rows you are deciding about,
+           * on a phone especially, where it would sit on top of the last two
+           * of them.
+           */
+          <div className="fms-bulkbar">
+            <span className="t-body-strong">
+              {chosen.length} selected
+              <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                {" "}
+                · ₱{formatAmount(chosenTotal)}
+              </span>
+            </span>
+            <span className="fms-bulkbar-actions">
+              <Button size="sm" onClick={() => setPicked(new Set())}>
+                Clear
+              </Button>
+              <Button size="sm" variant="danger" onClick={() => void askDeleteMany(chosen)}>
+                Move to bin
+              </Button>
+            </span>
+          </div>
+        )}
+
         {shown.length === 0 ? (
           <EmptyState
             message={
@@ -367,6 +445,9 @@ export function Database({
                 columns={columns}
                 rows={shown}
                 getKey={(t) => t.id}
+                {...(onDeleteMany
+                  ? { selectedKeys: picked, onToggleRow: toggleRow, onToggleAll: toggleAll }
+                  : {})}
                 sortKey={sortKey}
                 sortDir={sortDir}
                 onSort={onSort}
@@ -398,6 +479,16 @@ export function Database({
                     style={issues ? { background: "var(--warn-bg)", borderLeft: "3px solid var(--warn)" } : undefined}
                   >
                     <div className="fms-dbrow-main">
+                      {onDeleteMany && (
+                        <label className="fms-dbpick">
+                          <input
+                            type="checkbox"
+                            checked={picked.has(t.id)}
+                            onChange={() => toggleRow(t.id)}
+                            aria-label={`Select record ${t.recordNumber}`}
+                          />
+                        </label>
+                      )}
                       <div style={{ minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
                           <span className="t-body-strong fms-truncate">{t.item || "Uncategorised"}</span>
@@ -424,6 +515,35 @@ export function Database({
                         ⚠ {i.message}
                       </p>
                     ))}
+                    {/*
+                      Edit and Delete on the phone too.
+                      They existed only in the desktop table, so on the
+                      primary target (rule D10) the only way to fix a typo in
+                      a saved row was to find a wider screen.
+                    */}
+                    {(onEdit || onDelete) && (
+                      <div className="fms-dbrow-actions">
+                        {onEdit && (
+                          <Button
+                            size="sm"
+                            ariaLabel={`Edit record ${t.recordNumber}`}
+                            onClick={() => onEdit(t)}
+                          >
+                            Edit
+                          </Button>
+                        )}
+                        {onDelete && (
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            ariaLabel={`Delete record ${t.recordNumber}`}
+                            onClick={() => void askDelete(t)}
+                          >
+                            Delete
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </li>
                 );
               })}

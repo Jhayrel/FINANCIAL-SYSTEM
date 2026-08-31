@@ -11,6 +11,7 @@ import { useState } from "react";
 import { Alert, Button, Card, EmptyState, FlowBadge, Money } from "../components/primitives";
 import { TextInput } from "../components/forms";
 import { formatShort } from "../domain/dates";
+import { formatMoney } from "../domain/money";
 import type { DeletedTransaction, TransactionType } from "../domain/types";
 import type { Flow as FlowTone } from "../components/primitives";
 
@@ -24,15 +25,31 @@ const TONE: Record<TransactionType, FlowTone> = {
 export function Bin({
   deleted,
   onRestore,
+  onRestoreMany,
   onPurge,
 }: {
   deleted: readonly DeletedTransaction[];
   onRestore: (id: string) => void;
+  /** Several at once, as one move with one record of it. */
+  onRestoreMany?: ((ids: readonly string[]) => void) | undefined;
   /** Absent when the ledger is in Firestore, where nothing can be destroyed. */
   onPurge?: ((id: string) => void) | undefined;
 }) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+
+  const toggle = (id: string): void =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const chosen = deleted.filter((t) => picked.has(t.id));
+  const chosenTotal = chosen.reduce((sum, t) => sum + t.total, 0);
+  const allPicked = deleted.length > 0 && chosen.length === deleted.length;
 
   const target = deleted.find((d) => d.id === confirming);
   const expected = target ? String(target.recordNumber).padStart(4, "0") : "";
@@ -44,13 +61,75 @@ export function Bin({
         subtitle="Deleted transactions stay here until you clear them"
         padded={false}
       >
+        {onRestoreMany && deleted.length > 0 && (
+          /*
+           * Restoring in bulk needs no confirmation.
+           *
+           * It puts money records back where they were, which is the
+           * direction of this screen that cannot lose anything. Deleting
+           * forever still asks, one row at a time, and still wants the
+           * record number typed.
+           */
+          <div className="fms-bulkbar">
+            <label className="fms-dbpick t-caption">
+              <input
+                type="checkbox"
+                checked={allPicked}
+                ref={(el) => {
+                  if (el) el.indeterminate = chosen.length > 0 && !allPicked;
+                }}
+                onChange={() => setPicked(allPicked ? new Set() : new Set(deleted.map((t) => t.id)))}
+                aria-label={allPicked ? "Clear selection" : "Select everything in the bin"}
+              />
+              {chosen.length > 0 ? (
+                <span className="t-body-strong">
+                  {chosen.length} selected
+                  <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                    {" "}
+                    · {formatMoney(chosenTotal)}
+                  </span>
+                </span>
+              ) : (
+                <span style={{ color: "var(--ink-2)" }}>Select all</span>
+              )}
+            </label>
+            {chosen.length > 0 && (
+              <span className="fms-bulkbar-actions">
+                <Button size="sm" onClick={() => setPicked(new Set())}>
+                  Clear
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => {
+                    onRestoreMany(chosen.map((t) => t.id));
+                    setPicked(new Set());
+                  }}
+                >
+                  Restore {chosen.length}
+                </Button>
+              </span>
+            )}
+          </div>
+        )}
+
         {deleted.length === 0 ? (
           <EmptyState message="Nothing deleted. Deleted transactions stay here until you clear them." />
         ) : (
-          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          <ul className="fms-binlist" style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {deleted.map((t) => (
               <li key={t.id} className="fms-dbrow">
                 <div className="fms-dbrow-main">
+                  {onRestoreMany && (
+                    <label className="fms-dbpick">
+                      <input
+                        type="checkbox"
+                        checked={picked.has(t.id)}
+                        onChange={() => toggle(t.id)}
+                        aria-label={`Select record ${t.recordNumber}`}
+                      />
+                    </label>
+                  )}
                   <div style={{ minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
                       <span className="t-body-strong fms-truncate">{t.item || "Uncategorised"}</span>
@@ -65,7 +144,7 @@ export function Bin({
                     </div>
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flex: "0 0 auto" }}>
+                  <div className="fms-binactions">
                     <Money value={t.total} />
                     <Button size="sm" variant="primary" onClick={() => onRestore(t.id)}>Restore</Button>
                     {onPurge && (

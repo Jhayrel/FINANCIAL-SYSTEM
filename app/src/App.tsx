@@ -548,6 +548,35 @@ export default function App() {
     flash(`Moved record #${String(row.recordNumber).padStart(4, "0")} to the bin.`);
   };
 
+  /**
+   * Several rows to the bin in one move.
+   *
+   * Not a loop over `handleDelete`. Twelve rows through that is twelve state
+   * updates, twelve audit writes announced one at a time, and twelve toasts
+   * where the last one wins: what the owner would see is "moved record #0412
+   * to the bin" after selecting a dozen. One move, one sentence, one record
+   * of it, and the ledger writes go out together so a failure halfway is one
+   * message rather than six.
+   */
+  const handleDeleteMany = (ids: readonly string[]): void => {
+    const rows = transactions.filter((t) => ids.includes(t.id));
+    if (rows.length === 0) return;
+    const at = new Date().toISOString();
+    const gone = new Set(rows.map((t) => t.id));
+
+    setTransactions((prev) => prev.filter((t) => !gone.has(t.id)));
+    setDeleted((prev) => [...rows.map((t) => ({ ...t, deletedAt: at })), ...prev]);
+    push(async (l) => {
+      for (const t of rows) await l.bin(t.id, at);
+    });
+    record(...rows.map((t) => binnedEvent(t)));
+    flash(
+      rows.length === 1
+        ? `Moved record #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")} to the bin.`
+        : `Moved ${rows.length} records to the bin. They are restorable.`,
+    );
+  };
+
   const handleRestore = (id: string): void => {
     const row = deleted.find((t) => t.id === id);
     if (!row) return;
@@ -557,6 +586,26 @@ export default function App() {
     push((l) => l.restore(id));
     record(restoredEvent(restored));
     flash(`Restored record #${String(row.recordNumber).padStart(4, "0")}.`);
+  };
+
+  /** The same move backwards: several rows out of the bin at once. */
+  const handleRestoreMany = (ids: readonly string[]): void => {
+    const rows = deleted.filter((t) => ids.includes(t.id));
+    if (rows.length === 0) return;
+    const back = new Set(rows.map((t) => t.id));
+
+    setDeleted((prev) => prev.filter((t) => !back.has(t.id)));
+    const restored = rows.map(({ deletedAt: _ignored, ...rest }) => rest);
+    setTransactions((prev) => insertChronologically(prev, restored));
+    push(async (l) => {
+      for (const t of rows) await l.restore(t.id);
+    });
+    record(...restored.map((t) => restoredEvent(t)));
+    flash(
+      rows.length === 1
+        ? `Restored record #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}.`
+        : `Restored ${rows.length} records.`,
+    );
   };
 
   /**
@@ -847,6 +896,7 @@ export default function App() {
               transactions={transactions}
               initialFilter={dbFilter}
               onDelete={handleDelete}
+              onDeleteMany={handleDeleteMany}
               onEdit={startEditing}
             />
           )}
@@ -887,7 +937,12 @@ export default function App() {
             />
           )}
           {screen === "bin" && (
-            <Bin deleted={deleted} onRestore={handleRestore} onPurge={handlePurge} />
+            <Bin
+              deleted={deleted}
+              onRestore={handleRestore}
+              onRestoreMany={handleRestoreMany}
+              onPurge={handlePurge}
+            />
           )}
           {screen === "activity" && (
             <Activity uid={cloud.uid ?? null} reloadKey={activityKey} />

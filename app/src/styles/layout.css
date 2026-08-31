@@ -265,6 +265,113 @@
   gap: var(--space-3);
 }
 
+/*
+ * Picking rows, and what to do with the ones picked.
+ *
+ * The bar sits in the flow above the rows rather than floating over them: on
+ * a phone a hovering bar covers the last two rows, which are the ones you are
+ * deciding about.
+ */
+.fms-bulkbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-sunk);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-bulkbar-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* 44px of target around an 18px box: rule D10, on a row you must not mis-hit. */
+.fms-dbpick {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  min-width: 44px;
+  margin: calc(var(--space-2) * -1) 0;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+/*
+ * The row's text keeps the free space, not the gap between it and the money.
+ *
+ * `.fms-dbrow-main` spreads its children apart, which reads correctly with
+ * two of them. Adding a checkbox in front made three, and the text block
+ * ended up floating in the middle of the row with a hand's width of nothing
+ * either side of it.
+ */
+.fms-dbpick + div {
+  flex: 1 1 auto;
+}
+
+.fms-dbpick input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--brand-700);
+}
+
+.fms-dbrow-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.fms-binactions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 0 0 auto;
+}
+
+/*
+ * A bin row is four things wide, and a phone is not.
+ *
+ * The amount, Restore and Delete forever sat on the same line as the item, in
+ * a row that refused to wrap: at 375px the buttons ran off the right of the
+ * card and the amount landed on top of the record number. So on a phone the
+ * row stacks, and the actions take a line of their own.
+ */
+@media (max-width: 719px) {
+  .fms-binlist .fms-dbrow-main {
+    flex-wrap: wrap;
+  }
+
+  .fms-binactions {
+    width: 100%;
+    justify-content: space-between;
+    margin-top: var(--space-3);
+  }
+
+  .fms-binlist .fms-dbpick + div {
+    flex: 1 1 60%;
+  }
+
+  /*
+   * Rule D10: 44px, on the buttons that move money records about.
+   *
+   * A small button is 32px, which is right beside a row of text on a desktop
+   * and is not a thumb target. Edit, Restore and Delete forever all sit at
+   * the end of a row your thumb is already travelling along, so on a phone
+   * they get the height the rule asks for. Set here rather than by passing a
+   * larger size, so the desktop table keeps its compact row.
+   */
+  .fms-dbrow-actions button,
+  .fms-binactions button,
+  .fms-bulkbar button {
+    min-height: 44px;
+  }
+}
+
 /* ══ Entry screen: one page, no scrolling on desktop ═══════════════════════ */
 
 /*
@@ -1303,49 +1410,60 @@
    The screen is exactly one viewport tall. The title, the search box, the
    filters, the column headers and the footer all stay put, and the rows
    scroll underneath them. Scrolling the whole page to reach a filter you can
-   no longer see is the thing this replaces. */
+   no longer see is the thing this replaces.
 
-.fms-db,
-.fms-db > section,
-.fms-db > section > div:last-child,
-.fms-db .fms-tablewrap,
-.fms-db .fms-tablewrap > div {
-  display: flex;
-  flex-direction: column;
-  /* Without this a flex child refuses to shrink below its content, which is
-     what makes an inner scroll region silently grow the page instead. */
-  min-height: 0;
-}
+   All of it behind min-width, and this is load-bearing rather than tidy.
+   `.fms-db .fms-tablewrap` is two classes; the rule that hides the table on a
+   phone is one, and a media query adds no specificity of its own. So this
+   block used to win at every width, the desktop table rendered on top of the
+   stacked phone list, and "Showing 25 of 441" sat across the first row.
 
-.fms-db {
-  height: 100%;
-}
+   A phone also does not want this layout. The page scrolls as a page there,
+   which is what a thumb expects. */
 
-.fms-db > section,
-.fms-db > section > div:last-child,
-.fms-db .fms-tablewrap,
-.fms-db .fms-tablewrap > div {
-  flex: 1 1 auto;
-}
+@media (min-width: 1024px) {
+  .fms-db,
+  .fms-db > section,
+  .fms-db > section > div:last-child,
+  .fms-db .fms-tablewrap,
+  .fms-db .fms-tablewrap > div {
+    display: flex;
+    flex-direction: column;
+    /* Without this a flex child refuses to shrink below its content, which is
+       what makes an inner scroll region silently grow the page instead. */
+    min-height: 0;
+  }
 
-/* The one scrolling region on the screen. */
-.fms-db .scroll-slim {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-}
+  .fms-db {
+    height: 100%;
+  }
 
-/*
- * Column headers stay while the rows move.
- *
- * They are also the sort controls, so losing them after twenty rows meant
- * scrolling back up to change the sort and back down to see the effect.
- */
-.fms-db thead th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--surface-sunk);
+  .fms-db > section,
+  .fms-db > section > div:last-child,
+  .fms-db .fms-tablewrap,
+  .fms-db .fms-tablewrap > div {
+    flex: 1 1 auto;
+  }
+
+  /* The one scrolling region on the screen. */
+  .fms-db .scroll-slim {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  /*
+   * Column headers stay while the rows move.
+   *
+   * They are also the sort controls, so losing them after twenty rows meant
+   * scrolling back up to change the sort and back down to see the effect.
+   */
+  .fms-db thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface-sunk);
+  }
 }
 
 /* ══ Add screen: form, wallets, assistant ══════════════════════════════════

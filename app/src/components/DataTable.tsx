@@ -26,6 +26,7 @@ export function DataTable<T>({
   onSort,
   selectedKeys,
   onToggleRow,
+  onToggleAll,
   rowTone,
   onRowClick,
   footer,
@@ -38,12 +39,16 @@ export function DataTable<T>({
   onSort?: (key: string) => void;
   selectedKeys?: ReadonlySet<string>;
   onToggleRow?: (key: string) => void;
+  /** Select or clear every row currently on screen, from the header cell. */
+  onToggleAll?: (() => void) | undefined;
   /** Status token name to tint a row, e.g. "warn" for a flagged record. */
   rowTone?: (row: T) => "warn" | "over" | undefined;
   onRowClick?: (row: T) => void;
   footer?: ReactNode;
 }) {
   const selectable = Boolean(onToggleRow);
+  const selectedHere = selectedKeys ? rows.filter((r) => selectedKeys.has(getKey(r))).length : 0;
+  const allHere = rows.length > 0 && selectedHere === rows.length;
 
   return (
     <div>
@@ -64,7 +69,30 @@ export function DataTable<T>({
         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
           <thead>
             <tr style={{ background: "var(--surface-sunk)" }}>
-              {selectable && <th style={{ width: 44 }} />}
+              {selectable && (
+                <th style={{ width: 44, padding: "var(--space-3) 0 var(--space-3) var(--space-3)" }}>
+                  {onToggleAll && (
+                    /*
+                     * Selects what is on screen, not what matches the filter.
+                     *
+                     * The table pages: 25 rows arrive, then 25 more. A tick
+                     * that quietly took in four hundred rows you had not
+                     * looked at, in the one place the next button moves them
+                     * all to the bin, is not a convenience.
+                     */
+                    <input
+                      type="checkbox"
+                      checked={allHere}
+                      ref={(el) => {
+                        if (el) el.indeterminate = selectedHere > 0 && !allHere;
+                      }}
+                      onChange={onToggleAll}
+                      aria-label={allHere ? "Clear selection" : "Select the rows on screen"}
+                      style={{ width: 18, height: 18, accentColor: "var(--brand-700)", margin: 0 }}
+                    />
+                  )}
+                </th>
+              )}
               {columns.map((c) => {
                 const active = sortKey === c.key;
                 return (
@@ -130,13 +158,30 @@ export function DataTable<T>({
                 <tr
                   key={key}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  /*
+                   * A selected row is sunk, not tinted green.
+                   *
+                   * It used to take `--brand-100`, which in the dark theme is
+                   * within a shade of `--flow-revenue-bg`: on the one screen
+                   * where every row already carries a flow colour, selecting
+                   * a Spending row made it look like income. Rule D3 spends
+                   * colour on the direction of money and nothing else, so
+                   * selection is a neutral sink plus the ticked box.
+                   *
+                   * A flag outranks a selection, because the flag is the part
+                   * you did not already know.
+                   */
                   style={{
-                    background: selected
-                      ? "var(--brand-100)"
-                      : tone
-                        ? `var(--${tone}-bg)`
+                    background: tone
+                      ? `var(--${tone}-bg)`
+                      : selected
+                        ? "var(--surface-sunk)"
                         : "var(--surface)",
-                    borderLeft: tone ? `3px solid var(--${tone})` : "3px solid transparent",
+                    borderLeft: tone
+                      ? `3px solid var(--${tone})`
+                      : selected
+                        ? "3px solid var(--ink-3)"
+                        : "3px solid transparent",
                     cursor: onRowClick ? "pointer" : undefined,
                   }}
                 >
