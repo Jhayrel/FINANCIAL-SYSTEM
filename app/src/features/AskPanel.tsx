@@ -68,7 +68,14 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "../components/primitives";
-import { amend, applyReply, matchItem, nextQuestion, type Blank } from "../domain/capture";
+import {
+  amend,
+  applyReply,
+  detectAlsoIn,
+  matchItem,
+  nextQuestion,
+  type Blank,
+} from "../domain/capture";
 import { readEntry, splitEntries } from "../domain/readEntry";
 import { readRich } from "../domain/richText";
 import {
@@ -983,6 +990,63 @@ export function AskPanel({
      * card has not been added to anything, so throwing one away is the
      * cheapest action in the app, and the sentence has already said so.
      */
+    /**
+     * "also in gcash 100000000 too": that again, somewhere else.
+     *
+     * Typed at 12:14:41 and 12:15:01, straight after an entry was added, and
+     * both did nothing. Each was read as a fresh sentence, found nothing to
+     * work with, and produced no card at all.
+     *
+     * Answered from the last entry actually added, not from the last card on
+     * screen: "that again" means the thing that happened, and a card that was
+     * rejected or is still open did not happen.
+     *
+     * The wallet goes on the side the flow uses, so income lands in it and
+     * spending comes out of it. A new figure replaces the old one; without
+     * one, the previous amount carries over, which is what "also in cash"
+     * means when nothing else is said.
+     */
+    if (files.length === 0 && !as) {
+      const also = detectAlsoIn(note, reference);
+      const previous = [...turns]
+        .reverse()
+        .find((t): t is Offered => isOffer(t) && t.state === "added");
+
+      if (also && previous) {
+        const was = previous.proposal.draft;
+        const into = was.flow === "Revenue" ? "toWallet" : "fromWallet";
+        const repeated: Draft = {
+          ...was,
+          id: undefined,
+          [into]: also.wallet,
+          ...(also.amount === null ? {} : { amount: also.amount }),
+        };
+
+        setDraft("");
+        say({ kind: "you", text: note });
+        say({
+          kind: "assistant",
+          text: `The same again, ${
+            was.flow === "Revenue" ? "into" : "out of"
+          } ${also.wallet}${also.amount === null ? ` for ${formatMoney(was.amount ?? 0)}` : ""}.`,
+          from: "this device",
+          ephemeral: true,
+        });
+        say({
+          kind: "proposal",
+          proposal: {
+            draft: repeated,
+            confidence: "high",
+            adjustments: [`Copied from the ${was.item || was.flow} entry above.`],
+            sourceRef: "the entry before this one",
+            said: note,
+          },
+          state: "open",
+        });
+        return;
+      }
+    }
+
     const openCards = turns.filter((t) => isOffer(t) && t.state === "open");
     if (openCards.length > 0 && files.length === 0 && !as && wantsDiscardAll(note)) {
       setDraft("");

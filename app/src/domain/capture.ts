@@ -645,3 +645,45 @@ function usualAmountFor(draft: Draft, transactions: readonly Transaction[]): num
 
   return amount > 0 && seen >= 2 ? amount : null;
 }
+
+/**
+ * "also in gcash 100000000 too": the same kind of entry, somewhere else.
+ *
+ * ── The three that did nothing ────────────────────────────────────────────
+ *
+ *   12:14:41  "also in gcash 100000000 too"
+ *   12:15:01  "also in cahs"
+ *   09:18:58  "also in this month"
+ *
+ * Typed straight after an entry was added, each one means the same thing:
+ * that again, in this wallet, for this much. Every one of them was read as a
+ * fresh sentence, found nothing to work with, and produced nothing at all.
+ *
+ * It is deliberately narrow. A short message, opening with a word that
+ * refers back, naming a wallet. Anything longer is a new sentence that
+ * happens to start with "also", and reading that as a repeat would copy a
+ * figure from an unrelated entry into a row about something else.
+ *
+ * The period case ("also in this month") is not here: that is a chart
+ * follow-up and `isChartFollowUp` already has it.
+ */
+export interface AlsoIn {
+  readonly wallet: string;
+  /** The new figure, when one was given. Null keeps the previous one. */
+  readonly amount: number | null;
+}
+
+const REFERS_BACK = /^(?:and\s+)?(?:also|same|too|another|again|plus)\b/i;
+
+export function detectAlsoIn(text: string, reference: ReferenceLists): AlsoIn | null {
+  const said = text.trim();
+  if (!said || said.length > 40) return null;
+  if (!REFERS_BACK.test(said)) return null;
+
+  const accounts = [...reference.wallets, ...reference.savings];
+  const wallet = matchExact(said, accounts) || walletInside(said, accounts);
+  if (!wallet) return null;
+
+  const amount = firstAmountIn(said);
+  return { wallet, amount: amount !== null && amount > 0 ? amount : null };
+}

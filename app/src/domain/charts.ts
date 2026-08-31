@@ -138,6 +138,44 @@ function windowOf(
 ): { readonly from: IsoDate; readonly to: IsoDate; readonly name: string } {
   const year = asOf.slice(0, 4);
 
+  /**
+   * "this past 3 months", which used to draw one month.
+   *
+   * "chart about treats this past 3 months" came back as August alone, with
+   * every item in it. The period was read by nothing, so it fell through to
+   * the default at the bottom of this function, which is the current month.
+   *
+   * Counted back from the month it is now, inclusive, so three months in
+   * August is June, July and August rather than May to July.
+   */
+  const back = /\b(?:past|last|previous|recent)\s+(\d{1,2})\s*(month|months|week|weeks)\b/i.exec(
+    question,
+  );
+  if (back?.[1]) {
+    const n = Math.max(1, Math.min(36, Number(back[1])));
+    if (/week/i.test(back[2] ?? "")) {
+      const to = asOf;
+      const from = new Date(`${asOf}T00:00:00Z`);
+      from.setUTCDate(from.getUTCDate() - n * 7);
+      return {
+        from: from.toISOString().slice(0, 10),
+        to,
+        name: `the last ${n} ${n === 1 ? "week" : "weeks"}`,
+      };
+    }
+    const start = new Date(`${asOf.slice(0, 7)}-01T00:00:00Z`);
+    start.setUTCMonth(start.getUTCMonth() - (n - 1));
+    const from = `${start.toISOString().slice(0, 7)}-01`;
+    return {
+      from,
+      to: `${asOf.slice(0, 7)}-31`,
+      name:
+        n === 1
+          ? monthName(asOf.slice(0, 7))
+          : `${monthName(from.slice(0, 7))} to ${monthName(asOf.slice(0, 7))}`,
+    };
+  }
+
   const named = MONTHS.findIndex((m) => new RegExp(`\\b${m}\\b`, "i").test(question));
   if (named >= 0) {
     const y = /\b(20\d{2})\b/.exec(question)?.[1] ?? year;
@@ -207,15 +245,54 @@ export const wantsReport = (question: string): boolean =>
  * An empty window returns null rather than an empty chart: a chart of nothing
  * is a picture that says nothing while looking like it says something.
  */
+/**
+ * One item, when the question names one of the owner's own.
+ *
+ * "chart about treats this past 3 months" is a question about Treat, and it
+ * came back as every item in the ledger. The item was read by nothing at all:
+ * `dimensionOf` decides how to group and `windowOf` decides when, and neither
+ * had any way to express "only this one".
+ *
+ * Matched against the items actually in the ledger rather than a list passed
+ * in, so it needs no new argument and cannot drift from the data. Longest
+ * first, so "Online Buy" beats "Buy", and a trailing "s" is allowed because
+ * people pluralise: "treats" is Treat.
+ */
+function focusOf(question: string, transactions: readonly Transaction[]): string {
+  const items = [...new Set(transactions.map((t) => t.item.trim()).filter(Boolean))].sort(
+    (a, b) => b.length - a.length,
+  );
+  const asked = question.toLowerCase();
+
+  for (const item of items) {
+    const escaped = item.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\b${escaped}s?\\b`).test(asked)) return item;
+  }
+  return "";
+}
+
 export function buildChart(
   question: string,
   transactions: readonly Transaction[],
   asOf: IsoDate,
 ): Chart | null {
-  const by = dimensionOf(question);
+  const focus = focusOf(question, transactions);
+  /**
+   * One item over time, because one item by item is a single bar.
+   *
+   * Asking about Treat and being shown one bar labelled Treat says nothing
+   * you did not already type. Across months it says whether it is growing,
+   * which is the only question worth drawing about a single item.
+   */
+  const by = focus && dimensionOf(question) === "item" ? "month" : dimensionOf(question);
   const period = windowOf(question, asOf);
 
-  const inWindow = transactions.filter((t) => t.date >= period.from && t.date <= period.to);
+  const inWindow = transactions.filter(
+    (t) =>
+      t.date >= period.from &&
+      t.date <= period.to &&
+      (!focus || t.item.trim().toLowerCase() === focus.toLowerCase()),
+  );
 
   const key = (t: Transaction): string => {
     switch (by) {
@@ -252,8 +329,15 @@ export function buildChart(
   const largest = Math.max(...kept.map(([, g]) => g.value), 1);
 
   return {
-    title:
-      by === "month"
+    /**
+     * The title says what was filtered, or the chart is a lie by omission.
+     *
+     * A chart of Treat alone, headed "Spending by month", reads as the whole
+     * month's spending and is wrong by everything it left out.
+     */
+    title: focus
+      ? `${focus} by ${by}, ${period.name}`
+      : by === "month"
         ? `Spending by month, ${period.name}`
         : `Spending by ${by}, ${period.name}`,
     by,
