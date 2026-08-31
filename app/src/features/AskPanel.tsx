@@ -1293,17 +1293,46 @@ export function AskPanel({
      * that reaches this line is something to record. The local rules only
      * decide when no model could be reached.
      */
+    /**
+     * An entry the model called a question is still an entry.
+     *
+     * "I withdraw also 5000 and the fee is 18 maya to cash" at 09:36:57
+     * produced no card. Nor did "maya to cash" ten seconds later, nor "I
+     * withdraw" eight seconds after that. What came back at 09:38:17 was a
+     * paragraph about a different withdrawal from two weeks earlier. Three
+     * attempts, twenty seconds, no entry.
+     *
+     * That sentence is money that moved, said in the past tense, with an
+     * amount and both wallets in it. `worthOffering` is the conservative
+     * test for exactly that, and it is not satisfied by a question: it wants
+     * a flow verb and a figure, and `isQuestion` vetoes it besides.
+     *
+     * So the model's `question` is overruled here in the same narrow way as
+     * the chart and delete overrides above: only when it chose prose, and
+     * only when a strict local rule disagrees. Being shown a card that can
+     * be discarded is a smaller failure than being told about the wrong
+     * withdrawal three times.
+     */
+    const readsAsEntry =
+      modelGaveUp &&
+      files.length === 0 &&
+      !as &&
+      !isQuestion(note) &&
+      readEntry(note, transactions, reference, asOf).worthOffering;
+
     const job =
       as ??
       (files.length > 0
         ? "log"
-        : routed
-          ? routed.intent === "question" || routed.intent === "chat"
-            ? "ask"
-            : "log"
-          : !isQuestion(note)
-            ? "log"
-            : detectIntent(note));
+        : readsAsEntry
+          ? "log"
+          : routed
+            ? routed.intent === "question" || routed.intent === "chat"
+              ? "ask"
+              : "log"
+            : !isQuestion(note)
+              ? "log"
+              : detectIntent(note));
 
     setDraft("");
     setBusy(true);
