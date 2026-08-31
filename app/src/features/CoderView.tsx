@@ -58,7 +58,7 @@ import { firestore } from "../data/firebase";
 import { activityStore } from "../data/activityStore";
 import { chatStore } from "../data/chatStore";
 import { aiLogStore } from "../data/aiLogStore";
-import { Button } from "../components/primitives";
+import { Alert, Button } from "../components/primitives";
 
 /**
  * Every path the app writes to.
@@ -318,6 +318,8 @@ export interface LocalData {
 export function CoderView({ uid, local }: { uid: string | null; local: LocalData }) {
   const [text, setText] = useState("Reading…");
   const [saved, setSaved] = useState("");
+  /** Shown as a banner, because a line of text in the dump was missed. */
+  const [wrongBuild, setWrongBuild] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -328,31 +330,60 @@ export function CoderView({ uid, local }: { uid: string | null; local: LocalData
       if (!uid) {
         const dumps = await dumpLocal(local);
         if (!alive) return;
+        /**
+         * The warning goes first.
+         *
+         * It used to be appended after the dump, which on a 441 row ledger
+         * put it several thousand lines below the fold. So the screen read as
+         * "activity 0, chat 0, ai 0" with the explanation nowhere in sight,
+         * and the obvious conclusion was that the database was broken.
+         */
         setText(
           [
-            render("this browser, no database", dumps),
+            "WRONG BUILD. This one has no database.",
             "",
-            "This build has no Firebase configured, so the above is everything it holds:",
-            "the ledger in memory and the logs this session recorded. Your real data is in",
-            "Firestore. Open the Firebase build and sign in, then come back to ?coderview",
-            "there. Sign-in is not a formality: the rules allow exactly one account, and",
-            "without a session Firestore returns nothing to anybody, which is the only",
+            "There is no Firebase configured here, so what follows is only what this",
+            "browser is holding: the Excel fixture in memory, and any logs made in this",
+            "session. Your real data is in Firestore, and it is not readable from here.",
+            "",
+            "Open the app that is signed in, and put ?coderview on the end of its address.",
+            "",
+            "Signing in is not a formality. The rules allow exactly one account, and",
+            "without a session Firestore returns nothing to anybody. That is the only",
             "reason your financial history is not public.",
+            "",
+            render("this browser, no database", dumps),
           ].join(String.fromCharCode(10)),
         );
+        setWrongBuild(true);
         return;
       }
-      try {
-        const dumps = await Promise.all(COLLECTIONS.map((name) => readAll(uid, name)));
+      const dumps = await Promise.all(COLLECTIONS.map((name) => readAll(uid, name)));
 
-        // `users/{uid}` itself, in case anything was ever written there.
+      /**
+       * `users/{uid}` itself, in its own try, and this is load-bearing.
+       *
+       * Nothing writes that document, and until the rules are redeployed no
+       * rule matches it, so reading it is denied. It used to sit in the same
+       * try as everything else, so one denial on a document that does not
+       * exist threw away five collections that had already been read
+       * successfully, and the whole screen said "Missing or insufficient
+       * permissions" as though the database were unreadable.
+       *
+       * The optional extra must never be able to lose the main answer.
+       */
+      let root = "";
+      try {
         const db = firestore();
-        let root = "";
         if (db) {
           const snapshot = await getDoc(doc(db, `users/${uid}`));
           root = snapshot.exists() ? JSON.stringify(snapshot.data()) : "";
         }
+      } catch {
+        // Denied, or not there. Either way it holds nothing worth reporting.
+      }
 
+      try {
         if (!alive) return;
         const body = render(uid, dumps);
         setText(
@@ -445,6 +476,14 @@ export function CoderView({ uid, local }: { uid: string | null; local: LocalData
           </Button>
         </span>
       </div>
+
+      {wrongBuild && (
+        <Alert status="over" title="This build has no database">
+          You are looking at the fixture build, so activity, chat and ai are empty because
+          nothing here writes them. Open the app you are signed into and add{" "}
+          <code>?coderview</code> to the end of its address.
+        </Alert>
+      )}
 
       <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
         This is your whole financial history in one file. Save it under{" "}
