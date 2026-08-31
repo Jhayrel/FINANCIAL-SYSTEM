@@ -91,6 +91,42 @@ const monthName = (ym: string): string =>
 const spendingOf = costOf;
 
 /**
+ * Money in, using the app's own definition of it.
+ *
+ * `totalsFor` counts a Revenue row unless its category is Opening: an opening
+ * row is money you already had on the day you started counting, it credits
+ * the wallet, and it is not income. The Excel had no such category and booked
+ * PHP 953.89 of carried balance as 2026 earnings.
+ *
+ * Copied in shape, not in code, for the same reason `spendingOf` is `costOf`:
+ * a chart that disagrees with the Insights screen about the year is worse
+ * than no chart. `chartAccuracy.test.ts` asserts the two agree.
+ */
+const revenueOf = (t: Transaction): number =>
+  t.type === "Revenue" && t.category !== "Opening" ? t.total : 0;
+
+/**
+ * Which direction of money the question is about.
+ *
+ * ── The chart that answered backwards ─────────────────────────────────────
+ *
+ * "chart my income this year" drew "Spending by item", and so did "chart my
+ * revenue per month" and "show me earnings by month". Every chart in this
+ * file counted spending, because nothing ever asked which direction was
+ * wanted, and the answer was not merely imprecise: it was the other one.
+ *
+ * Spending stays the default. It is what almost every question is about, and
+ * a chart of income is asked for in words that say so.
+ */
+function directionOf(question: string): "spending" | "revenue" {
+  return /\b(income|revenue|earned|earnings|earning|salary|allowance|received|receipts|money in|inflow|coming in)\b/i.test(
+    question,
+  )
+    ? "revenue"
+    : "spending";
+}
+
+/**
  * Which drawing the question asked for, and whether it suits the data.
  *
  * A pie of twelve months is meaningless: the months are a series, not slices
@@ -174,6 +210,54 @@ function windowOf(
           ? monthName(asOf.slice(0, 7))
           : `${monthName(from.slice(0, 7))} to ${monthName(asOf.slice(0, 7))}`,
     };
+  }
+
+  /**
+   * The short periods, which all drew the whole month.
+   *
+   *   "chart last month"  drew August, the month it already is
+   *   "chart this week"   drew August
+   *   "chart yesterday"   drew August
+   *
+   * None of them was read, so each fell through to the default at the end of
+   * this function. "Last month" being off by a whole month is the worst of
+   * the three, because the answer looks entirely reasonable.
+   *
+   * A week is the last seven days rather than a calendar week, matching how
+   * the rest of the app answers "this week": the ledger has no week column,
+   * and inventing one that starts on a Monday would disagree with itself.
+   */
+  const day = (from: IsoDate, days: number): IsoDate => {
+    const at = new Date(`${from}T00:00:00Z`);
+    at.setUTCDate(at.getUTCDate() + days);
+    return at.toISOString().slice(0, 10);
+  };
+
+  if (/\blast month\b/i.test(question)) {
+    const start = new Date(`${asOf.slice(0, 7)}-01T00:00:00Z`);
+    start.setUTCMonth(start.getUTCMonth() - 1);
+    const ym = start.toISOString().slice(0, 7);
+    return { from: `${ym}-01`, to: `${ym}-31`, name: monthName(ym) };
+  }
+
+  if (/\b(this month|current month)\b/i.test(question)) {
+    const ym = monthOf(asOf);
+    return { from: `${ym}-01`, to: `${ym}-31`, name: monthName(ym) };
+  }
+
+  if (/\byesterday\b/i.test(question)) {
+    const d = day(asOf, -1);
+    // Named the way it was asked for. A raw ISO date in a title reads as a
+    // field value rather than as an answer to the question.
+    return { from: d, to: d, name: "yesterday" };
+  }
+
+  if (/\btoday\b/i.test(question)) {
+    return { from: asOf, to: asOf, name: "today" };
+  }
+
+  if (/\b(this week|the week|past week|last week|last 7 days)\b/i.test(question)) {
+    return { from: day(asOf, -6), to: asOf, name: "the last 7 days" };
   }
 
   const named = MONTHS.findIndex((m) => new RegExp(`\\b${m}\\b`, "i").test(question));
@@ -277,6 +361,9 @@ export function buildChart(
   asOf: IsoDate,
 ): Chart | null {
   const focus = focusOf(question, transactions);
+  const direction = directionOf(question);
+  const valueOf = direction === "revenue" ? revenueOf : spendingOf;
+  const word = direction === "revenue" ? "Income" : "Spending";
   /**
    * One item over time, because one item by item is a single bar.
    *
@@ -309,7 +396,7 @@ export function buildChart(
 
   const groups = new Map<string, { value: number; count: number }>();
   for (const row of inWindow) {
-    const spent = spendingOf(row);
+    const spent = valueOf(row);
     if (spent <= 0) continue;
     const name = key(row);
     const found = groups.get(name) ?? { value: 0, count: 0 };
@@ -337,9 +424,7 @@ export function buildChart(
      */
     title: focus
       ? `${focus} by ${by}, ${period.name}`
-      : by === "month"
-        ? `Spending by month, ${period.name}`
-        : `Spending by ${by}, ${period.name}`,
+      : `${word} by ${by}, ${period.name}`,
     by,
     kind: kindOf(question, by),
     rows: kept.map(([label, g]) => ({

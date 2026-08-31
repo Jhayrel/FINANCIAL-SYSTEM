@@ -143,3 +143,113 @@ describe("the item filter on its own", () => {
     expect(buildChart("chart treats in January", ledger, ASOF)).toBeNull();
   });
 });
+
+describe("asking for income and being shown spending", () => {
+  /**
+   * "chart my income this year" drew "Spending by item", and so did "chart
+   * my revenue per month" and "show me earnings by month". Every chart in
+   * this file counted spending, because nothing ever asked which direction
+   * was wanted. The answer was not imprecise, it was the other one.
+   */
+  const both: Transaction[] = [
+    row({ item: "Food", date: "2026-07-02", amount: 30000, total: 30000 }),
+    row({
+      type: "Revenue",
+      category: "Revenue",
+      item: "Framelink",
+      fromWallet: "",
+      toWallet: "Maya",
+      date: "2026-07-05",
+      amount: 500000,
+      total: 500000,
+      status: "Received",
+    }),
+    row({
+      type: "Revenue",
+      category: "Revenue",
+      item: "Allowance",
+      fromWallet: "",
+      toWallet: "Gcash",
+      date: "2026-08-05",
+      amount: 200000,
+      total: 200000,
+      status: "Received",
+    }),
+  ];
+
+  it("counts money in when money in was asked for", () => {
+    const chart = buildChart("chart my income this year", both, ASOF);
+    expect(chart?.total).toBe(700000);
+    expect(chart?.title).toContain("Income");
+  });
+
+  it("reads the other words for it", () => {
+    for (const q of [
+      "chart my revenue per month",
+      "show me earnings by month",
+      "graph what I received this year",
+      "chart my salary this year",
+    ]) {
+      expect(buildChart(q, both, ASOF)?.title, q).toContain("Income");
+    }
+  });
+
+  it("leaves spending as the default", () => {
+    const chart = buildChart("chart this year", both, ASOF);
+    expect(chart?.title).toContain("Spending");
+    expect(chart?.total).toBe(30000);
+  });
+
+  /**
+   * An opening balance is money you already had on the day you started
+   * counting. `totalsFor` excludes it and so must this: the Excel had no
+   * such category and booked PHP 953.89 of carried balance as 2026 earnings.
+   */
+  it("leaves an opening balance out of income, as the app does", () => {
+    const withOpening: Transaction[] = [
+      ...both,
+      row({
+        type: "Revenue",
+        category: "Opening",
+        item: "Opening balance",
+        fromWallet: "",
+        toWallet: "Cash",
+        date: "2026-01-01",
+        amount: 95389,
+        total: 95389,
+      }),
+    ];
+    expect(buildChart("chart my income this year", withOpening, ASOF)?.total).toBe(700000);
+  });
+});
+
+describe("the short periods, which all drew the whole month", () => {
+  const spread: Transaction[] = [
+    row({ item: "Food", date: "2026-07-15", amount: 70000, total: 70000 }),
+    row({ item: "Food", date: "2026-08-02", amount: 20000, total: 20000 }),
+    row({ item: "Gas", date: "2026-08-28", amount: 30000, total: 30000 }),
+  ];
+
+  /** Off by a whole month, and the answer looked entirely reasonable. */
+  it("reads last month as the month before this one", () => {
+    const chart = buildChart("chart last month", spread, ASOF);
+    expect(chart?.title).toContain("July 2026");
+    expect(chart?.total).toBe(70000);
+  });
+
+  it("still reads this month as this month", () => {
+    expect(buildChart("chart this month", spread, ASOF)?.total).toBe(50000);
+  });
+
+  it("reads yesterday as one day", () => {
+    const chart = buildChart("chart yesterday", spread, ASOF);
+    expect(chart?.title).toContain("yesterday");
+    expect(chart?.total).toBe(30000);
+  });
+
+  it("reads a week as the last seven days", () => {
+    const chart = buildChart("chart this week", spread, ASOF);
+    expect(chart?.title).toContain("the last 7 days");
+    expect(chart?.total).toBe(30000);
+  });
+});
