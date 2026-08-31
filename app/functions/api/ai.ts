@@ -111,8 +111,17 @@ interface AskBody {
   readonly images?: unknown;
 }
 
-/** Bounded, so a bug upstream cannot post a megabyte of ledger. */
+/**
+ * Bounded, so a bug upstream cannot post a megabyte of ledger.
+ *
+ * The summary tasks describe a month and need figures, so 24 KB is generous
+ * for them. The chat is a different job: it is asked to count, to list, and
+ * to say what happened in May, and none of that is answerable from totals.
+ * It gets the rows, which for this ledger is about 30 KB, and a ceiling with
+ * room to grow rather than one that would start silently truncating.
+ */
 const MAX_CONTEXT_BYTES = 24_000;
+const MAX_CHAT_CONTEXT_BYTES = 120_000;
 
 /**
  * Image bounds, repeated from the client on purpose.
@@ -447,8 +456,28 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
    * as well, because a model asked to add a transaction should answer that
    * it cannot rather than pretending it did.
    */
+  /**
+   * Not every message is a question about money.
+   *
+   * The first version answered "hatdog" with "the request does not match any
+   * financial figure in the provided data", and "you are ugly" with a request
+   * for a specific monetary amount. Both are the accuracy rules working
+   * exactly as written and producing something no person would say. So the
+   * instruction now names the case: when the message is not about the
+   * finances, answer it like a person and stop, without mentioning data.
+   */
+  /**
+   * The conversation, and the two things that used to ruin it.
+   *
+   * It was capped at three sentences, so "more detailed" returned the same
+   * answer again. And it was handed totals only, so it answered almost
+   * everything with "the data does not include a category breakdown for May".
+   * It has the entries now (`domain/aiChatContext.ts`), so the instruction
+   * says what to do with them: count them, list them, compare them, and go on
+   * as long as the question deserves.
+   */
   chat:
-    "Answer the question about these figures in two or three sentences. Repeat any figure exactly as given and never work one out. If the answer is not in the figures, say which figure you would need instead of estimating. You cannot add, change or delete anything: if asked to, say the entry has to be typed into the form beside you.",
+    "Answer properly. Give the question as much room as it deserves: a sentence for a simple one, and up to about two hundred words for one that needs working through, going deeper each time you are asked to. You have the entries as well as the totals, so you can count them, list the individual ones, name their dates and items, and compare one period with another. Every total you might need has already been worked out for you: use those figures exactly and never add anything up yourself, and never mention a figure that is not in front of you. When a breakdown helps, put each part on its own line as plain words, never as a bulleted or numbered list. Say what produced a figure, not just what it is. If something genuinely is not in the entries, say so in one short sentence and answer what you can. If the message is not about their finances at all, whether it is small talk, a joke, or nothing in particular, reply in one short friendly sentence like a person would and do not mention data, figures, or what you would need. You cannot add, change or delete anything: if asked to, say it has to go through the form beside you.",
   /**
    * Reading a receipt, a bank screenshot, or a sentence, into rows.
    *
@@ -458,7 +487,7 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
    * blanks an unknown name anyway, so a guess only costs a correction.
    */
   extract:
-    "Read every distinct transaction in what you are given and output one proposal for each. Copy amounts exactly as printed, digit for digit. Use only the wallet names, categories and items from the allowed lists you are given: if the right one is not there, leave that field empty rather than inventing or substituting one. Leave any field you cannot read empty rather than guessing it. Use the date printed on the transaction, and today's date only when none is printed. Set confidence to low for anything you had to strain to read. In sourceRef, say which image and which line each one came from. If you cannot find a transaction at all, return an empty list.",
+    "Read every distinct transaction in what you are given and output one proposal for each. Put the amount twice: in amountText exactly as it is written, character for character including any comma or currency sign, and in amountPesos as a plain number. These two must agree. Use only the wallet names, categories and items from the allowed lists you are given: if the right one is not there, leave that field empty rather than inventing or substituting one. Leave any field you cannot read empty rather than guessing it. Use the date printed on the transaction, and today's date only when none is printed. Set confidence to low for anything you had to strain to read. In sourceRef, say which image and which line each one came from, or say which words you used when there is no image. If you cannot find a transaction at all, return an empty list.",
   categorise:
     "Choose the one category that fits this transaction, copied exactly from the allowed list. Prefer the pattern in the past examples, which are this person's own labels. If nothing fits well, choose the last category in the list rather than inventing one.",
 };
@@ -490,8 +519,17 @@ const TASKS: Record<string, TaskSpec> = {
     instruction: TASK_INSTRUCTIONS["chat"] ?? "",
     shape: '{"summary": "your answer as plain sentences"}',
     parse: narrative,
-    toned: true,
+    /**
+     * Not toned, unlike every other narrative task.
+     *
+     * Tone is a setting for the panels, and its default is "brief", which
+     * says "one line where possible, numbers first, no preamble". Appended to
+     * this instruction that was the louder of the two, so asking for more
+     * detail returned the same sentence again. A conversation decides its own
+     * length from the question, which is what the instruction now does.
+     */
     proseIsFine: true,
+    maxTokens: 2000,
   },
   patterns: {
     instruction: TASK_INSTRUCTIONS["patterns"] ?? "",
@@ -520,7 +558,7 @@ const TASKS: Record<string, TaskSpec> = {
   extract: {
     instruction: TASK_INSTRUCTIONS["extract"] ?? "",
     shape:
-      '{"proposals": [{"reasoning": "one short sentence", "flow": "Spending or Revenue or Transfer", "date": "YYYY-MM-DD", "fromWallet": "", "toWallet": "", "category": "", "item": "", "description": "", "amountPesos": 0, "feePesos": 0, "status": "", "confidence": "high or medium or low", "sourceRef": ""}]}',
+      '{"proposals": [{"reasoning": "one short sentence", "flow": "Spending or Revenue or Transfer", "date": "YYYY-MM-DD", "fromWallet": "", "toWallet": "", "category": "", "item": "", "description": "", "amountText": "exactly as written", "amountPesos": 0, "feePesos": 0, "status": "", "confidence": "high or medium or low", "sourceRef": ""}]}',
     parse: (v) => {
       const list = v["proposals"];
       // An empty list is a real answer: it means nothing was found in the
@@ -574,7 +612,7 @@ const TONES: Record<string, string> = {
 
 const SYSTEM = [
   "You are summarising a single person's own financial figures, which they have already calculated.",
-  "Every number you are given is correct. Repeat figures exactly; never recalculate, round, or estimate.",
+  "Every number you are given is correct. Repeat figures exactly; never round or estimate, and never redo a total that has already been worked out for you.",
   "If a figure is not in the data, say you do not have it rather than inferring one.",
   "The currency is Philippine Pesos, written PHP.",
   "You are not a financial adviser. Describe what the numbers say. Do not recommend products, investments, or borrowing.",
@@ -683,9 +721,10 @@ export const onRequestPost = async (ctx: {
   if (!spec) return json({ error: "Unknown task." }, 400);
   if (!context.trim()) return json({ error: "No context supplied." }, 400);
 
+  const cap = task === "chat" ? MAX_CHAT_CONTEXT_BYTES : MAX_CONTEXT_BYTES;
   const size = new TextEncoder().encode(context).length;
-  if (size > MAX_CONTEXT_BYTES) {
-    return json({ error: `Context is ${size} bytes, over the ${MAX_CONTEXT_BYTES} limit.` }, 413);
+  if (size > cap) {
+    return json({ error: `Context is ${size} bytes, over the ${cap} limit.` }, 413);
   }
 
   /**

@@ -1533,10 +1533,60 @@
   overflow-wrap: anywhere;
 }
 
+ /*
+  * Your side of it, on your side of the panel.
+  *
+  * An earlier version drew this as an outlined box the full width, which put
+  * a rounded rectangle with text in it directly above the composer and read
+  * as a second input field rather than as something already said. Alignment
+  * is what tells the two apart in every chat anyone has used, and it costs no
+  * colour, which flow colour has already spent (rule D3).
+  */
 .fms-turn--you {
-  background: transparent;
+  justify-self: end;
+  max-width: 85%;
+  background: var(--brand-50);
   border: 1px solid var(--hairline);
-  color: var(--ink-2);
+  color: var(--ink);
+}
+
+.fms-turn:not(.fms-turn--you) {
+  justify-self: start;
+  max-width: 92%;
+}
+
+/* ── What Send will do ───────────────────────────────────────────────────── */
+
+/*
+ * Shown only once there is something to act on, so an empty panel is not
+ * carrying a control for a decision nobody has made yet.
+ */
+.fms-intent {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.fms-intentpick {
+  padding: 2px var(--space-2);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.fms-intentpick:hover {
+  color: var(--ink);
+}
+
+/* The one that will happen, rather than the one you are hovering. */
+.fms-intentpick[aria-pressed="true"] {
+  background: var(--brand-50);
+  border-color: var(--brand-600);
+  color: var(--ink);
 }
 
 .fms-askform {

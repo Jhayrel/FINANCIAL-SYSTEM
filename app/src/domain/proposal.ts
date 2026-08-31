@@ -85,13 +85,17 @@ const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
  * half the time, so the word is removed here, before the boundary. Only a
  * leading currency word: nothing that could be part of a figure is touched.
  */
-function readMoney(value: unknown): ReturnType<typeof parseAmount> {
+export function readMoney(value: unknown): ReturnType<typeof parseAmount> {
   if (typeof value === "number") return parseAmount(value);
   if (typeof value !== "string") return null;
   return parseAmount(value.trim().replace(/^php\s*/i, ""));
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Only for saying which two figures disagreed. Display, not arithmetic. */
+const pesos = (centavos: number): string =>
+  `PHP ${(centavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /**
  * Exact, then case-insensitive. Never closer than that.
@@ -100,7 +104,7 @@ const ISO = /^\d{4}-\d{2}-\d{2}$/;
  * "Cash Card" should not find "Cash", because those are two accounts and only
  * the owner knows which one they meant.
  */
-function matchExact(candidate: string, allowed: readonly string[]): string {
+export function matchExact(candidate: string, allowed: readonly string[]): string {
   const want = candidate.trim();
   if (!want) return "";
   const exact = allowed.find((a) => a === want);
@@ -145,17 +149,61 @@ function readOne(
   const rawFlow = str(value["flow"]);
   const flow = readFlow(rawFlow);
   if (!flow) {
+    /**
+     * A model that has understood nothing copies the shape back verbatim,
+     * placeholders and all, which produced the memorable refusal `Not a kind
+     * of transaction this ledger has: "Spending or Revenue or Transfer"`.
+     * That is not a row with a bad field, it is no row at all, and quoting
+     * this app's own prompt back at the owner explains nothing.
+     */
+    if (/ or /i.test(rawFlow) || !rawFlow) {
+      return { sourceRef, reason: "Nothing in that looked like a transaction." };
+    }
     return {
       sourceRef,
       reason: /debt|loan|credit/i.test(rawFlow)
-        ? "Reads as debt. A debt row needs the credit line and whether it is a draw, a repayment, interest or a write-off, so type this one into the form."
-        : `Not a kind of transaction this ledger has: "${rawFlow || "none given"}".`,
+        ? "That reads as debt. A debt row needs the credit line and whether it is a draw, a repayment, interest or a write-off, so it has to be typed into the form."
+        : `That was not spending, income or a transfer, so there is nowhere to put it.`,
     };
   }
 
-  const amount = readMoney(value["amountPesos"]);
-  if (amount === null || amount <= 0) {
-    return { sourceRef, reason: "No amount could be read from this one." };
+  /**
+   * The amount, checked against itself.
+   *
+   * The model is asked for two things: the figure as a number, and the
+   * characters it actually read off the picture. A model that transcribes
+   * "1,234.56" and then writes 123.456 has made the one mistake that matters
+   * most here, and it is invisible unless the two are compared.
+   *
+   * When they disagree the printed characters win, because they are closer to
+   * the source than the model's arithmetic, and the row drops to low
+   * confidence with both figures named so the owner can look at the picture
+   * and settle it.
+   */
+  let amount = readMoney(value["amountPesos"]);
+  const printed = readMoney(value["amountText"]);
+  let confidenceCap: Confidence | null = null;
+
+  if (printed !== null && printed > 0 && amount !== null && printed !== amount) {
+    adjustments.push(
+      `It typed ${pesos(amount)} but read "${str(value["amountText"])}" off the page. Using ${pesos(printed)}. Check the picture.`,
+    );
+    amount = printed;
+    confidenceCap = "low";
+  }
+  if (amount === null && printed !== null) amount = printed;
+
+  /**
+   * A missing amount used to end here.
+   *
+   * It should not: "I paid my load today" is a real entry with one detail
+   * left out, and refusing it wastes everything the model did read. It comes
+   * through with a null amount instead, and `domain/capture.ts` turns that
+   * into a question. The Add button stays disabled either way, because
+   * `checkDraft` requires an amount over zero.
+   */
+  if (amount !== null && amount <= 0) {
+    return { sourceRef, reason: "That one came through with an amount of zero." };
   }
 
   const fee = readMoney(value["feePesos"]) ?? 0;
@@ -213,7 +261,7 @@ function readOne(
     category,
     item,
     description: str(value["description"]),
-    amount,
+    amount: amount ?? null,
     fee,
     notes: "",
     status,
@@ -221,7 +269,7 @@ function readOne(
 
   return {
     draft,
-    confidence: readConfidence(str(value["confidence"])),
+    confidence: confidenceCap ?? readConfidence(str(value["confidence"])),
     sourceRef,
     adjustments,
   };

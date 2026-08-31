@@ -73,6 +73,15 @@ export interface AskOptions {
    */
   readonly question?: string;
   readonly history?: readonly { readonly role: "you" | "assistant"; readonly text: string }[];
+  /**
+   * A context built somewhere other than `contextToText`.
+   *
+   * The chat needs the ledger, not just the month's figures, and building
+   * that needs the question, which `buildContext` never sees. So the caller
+   * builds it (`domain/aiChatContext.ts`) and passes it in. Everything else
+   * still gets the plain snapshot.
+   */
+  readonly contextText?: string;
   readonly tone: string;
   /** Overridable so tests do not touch the network. */
   readonly fetcher?: typeof fetch;
@@ -123,7 +132,7 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
       },
       body: JSON.stringify({
         context: [
-          contextToText(context),
+          options.contextText ?? contextToText(context),
           options.history?.length
             ? ["", "Earlier in this conversation:", ...options.history.map((h) => `${h.role}: ${h.text}`)].join(String.fromCharCode(10))
             : "",

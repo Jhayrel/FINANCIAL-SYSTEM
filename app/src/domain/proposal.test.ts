@@ -106,21 +106,61 @@ describe("readProposals refuses rather than guesses", () => {
     expect(refused[0]?.reason).toContain("debt");
   });
 
-  it("refuses a row with no readable amount", () => {
+  /**
+   * An unreadable amount is a question, not a refusal.
+   *
+   * "I paid my load today" is a real entry with one detail missing, and
+   * throwing it away wastes everything that was read. It comes through with a
+   * null amount and `domain/capture.ts` asks for it. `checkDraft` still
+   * refuses to save it, which is the part that matters.
+   */
+  it("lets a row with no readable amount through, for the question to be asked", () => {
     const { proposals, refused } = one({ amountPesos: "unclear" });
-    expect(proposals).toHaveLength(0);
-    expect(refused[0]?.reason).toContain("amount");
+    expect(refused).toHaveLength(0);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.draft.amount).toBeNull();
+    expect(checkDraft(proposals[0]!.draft, [], reference, []).ok).toBe(false);
   });
 
-  it("refuses a zero and a negative amount", () => {
+  it("still refuses zero and negative, which are answers rather than blanks", () => {
     expect(one({ amountPesos: 0 }).proposals).toHaveLength(0);
     expect(one({ amountPesos: -50 }).proposals).toHaveLength(0);
   });
 
-  it("refuses a flow it does not recognise", () => {
+  it("refuses a flow it does not recognise, without quoting the model at you", () => {
     const { proposals, refused } = one({ flow: "Investment" });
     expect(proposals).toHaveLength(0);
-    expect(refused[0]?.reason).toContain("Investment");
+    expect(refused[0]?.reason).toContain("nowhere to put it");
+  });
+
+  /**
+   * A model that understood nothing copies the shape back, placeholders and
+   * all. Quoting this app's own prompt at the owner explains nothing.
+   */
+  it("does not read back the schema placeholder as a failed field", () => {
+    const { refused } = one({ flow: "Spending or Revenue or Transfer" });
+    expect(refused[0]?.reason).toBe("Nothing in that looked like a transaction.");
+  });
+});
+
+describe("readProposals checks the amount against itself", () => {
+  it("prefers the printed characters when the two disagree, and says so", () => {
+    const { proposals } = one({ amountPesos: 123.456, amountText: "1,234.56" });
+    expect(proposals[0]?.draft.amount).toBe(123456);
+    expect(proposals[0]?.confidence).toBe("low");
+    expect(proposals[0]?.adjustments.join(" ")).toContain("Check the picture");
+  });
+
+  it("leaves a matching pair alone, and keeps the stated confidence", () => {
+    const { proposals } = one({ amountPesos: 100, amountText: "100.00", confidence: "high" });
+    expect(proposals[0]?.draft.amount).toBe(10000);
+    expect(proposals[0]?.confidence).toBe("high");
+    expect(proposals[0]?.adjustments).toHaveLength(0);
+  });
+
+  it("falls back to the printed characters when only they are readable", () => {
+    const { proposals } = one({ amountPesos: "n/a", amountText: "PHP 75.50" });
+    expect(proposals[0]?.draft.amount).toBe(7550);
   });
 });
 

@@ -1,12 +1,30 @@
 /**
  * The assistant, beside the entry form.
  *
- * ── Two jobs, told apart by whether anything is attached ──────────────────
+ * ── Two jobs, and how it works out which one you meant ────────────────────
  *
- * With nothing attached, Send asks a question and gets sentences back. With a
- * photo or a file attached, Send reads it and proposes rows. One button, and
- * which job it does is visible before it is pressed, because the label says
- * so and the files are sitting there above it.
+ * "How much did I spend on food" wants sentences. "I spent 500 at McDonalds"
+ * wants a row. Both are typed into the same box, so the difference has to be
+ * worked out rather than declared, and `domain/intent.ts` does it locally,
+ * from the words, before anything is sent. Attaching a photo settles it
+ * outright: a picture is always something to read.
+ *
+ * The guess is shown on a chip above the box, and one tap changes it. A
+ * visible wrong guess you can correct beats an invisible right one, and it
+ * means the wrong answer costs a tap instead of a round trip.
+ *
+ * This is the bug that made the feature useless: "I buy food ealier at
+ * mcdonalds i spent 500" came back as "the data does not contain a record of
+ * a PHP 500 food purchase", which is true, unhelpful, and precisely backwards.
+ *
+ * ── Asking rather than giving up ──────────────────────────────────────────
+ *
+ * "I have paid my load today" is an entry with one detail missing. It used to
+ * come back as "the data does not include a figure for the load payment you
+ * made today". Now it asks how much, holds what it already read, and puts the
+ * card up when you answer. The answers are parsed on this device by
+ * `domain/capture.ts`: reading "500" as five hundred pesos does not need a
+ * model, and a round trip to be told so is a round trip wasted.
  *
  * ── The one thing it will never do ────────────────────────────────────────
  *
@@ -40,6 +58,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../components/primitives";
+import { applyReply, nextQuestion, type Blank } from "../domain/capture";
+import { detectIntent, type Intent } from "../domain/intent";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
 import { extractProposals } from "../data/aiClient";
@@ -118,6 +138,13 @@ export function AskPanel({
   const [draft, setDraft] = useState("");
   const [files, setFiles] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
+  /**
+   * A half-read entry and the blank being asked about.
+   *
+   * While this is set the box is answering a question, not starting a new
+   * one, which is why the intent chip hides and the placeholder changes.
+   */
+  const [pending, setPending] = useState<{ draft: Draft; blank: Blank } | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
 
@@ -143,51 +170,114 @@ export function AskPanel({
     }
   };
 
-  /** Read the attached files into proposals. */
-  const readAttached = async (note: string): Promise<void> => {
-    const sent = files;
-    setFiles([]);
-    say({
-      kind: "you",
-      text: [note, sent.map((f) => f.name).join(", ")].filter(Boolean).join(" · "),
-    });
-
-    const result = await extractProposals({ note, attachments: sent, reference, asOf });
-
-    if (result.source === "offline") {
-      say({ kind: "assistant", text: result.reason ?? "Nothing came back.", from: "this device" });
+  /**
+   * Put a read row in front of the owner, or ask for what is missing from it.
+   *
+   * One question at a time: a card with three blanks on it is a form, and a
+   * form is what the assistant exists to avoid.
+   */
+  const offer = (proposal: Proposal): void => {
+    const asked = nextQuestion(proposal.draft, reference);
+    if (!asked) {
+      say({ kind: "proposal", proposal, state: "open" });
       return;
     }
+    setPending({ draft: proposal.draft, blank: asked.blank });
+    say({ kind: "assistant", text: asked.question, from: "this device" });
+  };
 
-    if (result.proposals.length === 0 && result.refused.length === 0) {
+  /** An answer to the question the assistant just asked. */
+  const answerPending = (reply: string): void => {
+    if (!pending) return;
+    say({ kind: "you", text: reply });
+
+    const filled = applyReply(pending.draft, pending.blank, reply, reference);
+    if (!filled) {
       say({
         kind: "assistant",
-        text: "No transaction was readable in that. A clearer photo of the amount and the date usually works.",
-        from: modelLabel(result.model ?? "") || "the provider",
+        text:
+          pending.blank === "amount"
+            ? "I could not find a figure in that. How much was it, in pesos?"
+            : pending.blank === "item"
+              ? "What was it for?"
+              : `That is not one of your accounts. ${[...reference.wallets, ...reference.savings].join(", ")}`,
+        from: "this device",
       });
       return;
     }
 
-    say({
-      kind: "assistant",
-      text:
-        result.proposals.length === 1
-          ? "One entry read. Check it, then add it."
-          : `${result.proposals.length} entries read. Check each one, then add it.`,
-      from: modelLabel(result.model ?? "") || "the provider",
-    });
-
-    for (const proposal of result.proposals) {
-      say({ kind: "proposal", proposal, state: "open" });
+    const asked = nextQuestion(filled, reference);
+    if (asked) {
+      setPending({ draft: filled, blank: asked.blank });
+      say({ kind: "assistant", text: asked.question, from: "this device" });
+      return;
     }
+
+    setPending(null);
+    say({
+      kind: "proposal",
+      proposal: { draft: filled, confidence: "high", sourceRef: "what you told me", adjustments: [] },
+      state: "open",
+    });
+  };
+
+  /** Read the attached files into proposals. Returns false when there were none. */
+  const readAttached = async (note: string): Promise<boolean> => {
+    const sent = files;
+    setFiles([]);
+    // Only once: if this falls through to the question path, that path must
+    // not echo the same message a second time.
+    if (sent.length > 0 || note) {
+      say({
+        kind: "you",
+        text: [note, sent.map((f) => f.name).join(", ")].filter(Boolean).join(" · "),
+      });
+    }
+
+    const result = await extractProposals({ note, attachments: sent, reference, asOf });
+
+    if (result.source === "offline") {
+      // A picture that could not be sent is worth saying so about. A sentence
+      // that could not be sent is better answered by the question path, which
+      // has its own offline reply, so this stays quiet and lets it try.
+      if (sent.length > 0) {
+        say({ kind: "assistant", text: result.reason ?? "Nothing came back.", from: "this device" });
+      }
+      return false;
+    }
+
+    if (result.proposals.length === 0 && result.refused.length === 0) {
+      if (sent.length > 0) {
+        say({
+          kind: "assistant",
+          text: "No transaction was readable in that. A clearer photo of the amount and the date usually works.",
+          from: modelLabel(result.model ?? "") || "the provider",
+        });
+      }
+      return false;
+    }
+
+    if (result.proposals.length > 0) {
+      say({
+        kind: "assistant",
+        text:
+          result.proposals.length === 1
+            ? "One entry. Check it, then add it."
+            : `${result.proposals.length} entries. Check each one, then add it.`,
+        from: modelLabel(result.model ?? "") || "the provider",
+      });
+    }
+
+    for (const proposal of result.proposals) offer(proposal);
     for (const refused of result.refused) {
       say({ kind: "assistant", text: refused.reason, from: "this device" });
     }
+    return result.proposals.length > 0;
   };
 
   /** Ask a question about the figures. */
-  const askQuestion = async (question: string): Promise<void> => {
-    say({ kind: "you", text: question });
+  const askQuestion = async (question: string, echo = true): Promise<void> => {
+    if (echo) say({ kind: "you", text: question });
 
     const history = turns
       .filter((t): t is Said => !isOffer(t))
@@ -206,16 +296,45 @@ export function AskPanel({
     });
   };
 
-  const send = async (typed?: string): Promise<void> => {
+  const send = async (typed?: string, as?: Intent): Promise<void> => {
     const note = (typed ?? draft).trim();
     if (busy) return;
     if (!note && files.length === 0) return;
 
+    // A starter button is always a question, whatever the box happens to say.
+    /**
+     * While a question is outstanding, what you type is the answer to it. An
+     * attachment overrides that: a picture is a new thing to read, not a
+     * reply, so the half-finished row is dropped rather than confused with it.
+     */
+    if (pending && files.length === 0 && !as) {
+      setDraft("");
+      answerPending(note);
+      return;
+    }
+    if (files.length > 0) setPending(null);
+
+    const job = as ?? (files.length > 0 ? "log" : detectIntent(note));
+
     setDraft("");
     setBusy(true);
     try {
-      if (files.length > 0) await readAttached(note);
-      else await askQuestion(note);
+      if (job === "ask") {
+        await askQuestion(note);
+        return;
+      }
+
+      /**
+       * Read it as an entry, and answer it as a question if there was no
+       * entry in it after all.
+       *
+       * This is what replaced the chip. "I paid Maya 500" and "I paid too
+       * much for Maya" are one word apart, and a guess that costs a wrong
+       * answer is worse than one that quietly tries the other job. It only
+       * runs for typed text: an attachment was unambiguous.
+       */
+      const found = await readAttached(note);
+      if (!found && files.length === 0 && note) await askQuestion(note, false);
     } finally {
       setBusy(false);
     }
@@ -223,6 +342,16 @@ export function AskPanel({
 
   const attached = files.length > 0;
   const weight = totalBytes(files);
+
+  /**
+   * A picture is always something to read. Otherwise the words decide.
+   *
+   * There used to be a chip here offering to change it. It appeared and
+   * vanished as you typed, it was tiny, and it asked you to make a decision
+   * the app can make on its own. So it decides, and when it decides wrong it
+   * corrects itself: see the fallback in `send`.
+   */
+  const intent: Intent = attached ? "log" : detectIntent(draft);
 
   return (
     <aside className="fms-panel fms-ask" data-thinking={busy ? "true" : undefined}>
@@ -241,10 +370,10 @@ export function AskPanel({
             <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
               {ai.disabled
                 ? "The model is off in Settings, so answers come from this device."
-                : "Ask about the month, or attach a receipt."}
+                : "Ask about the month, type an entry, or attach a receipt."}
             </p>
             {STARTERS.map((q) => (
-              <Button key={q} size="sm" onClick={() => void send(q)}>
+              <Button key={q} size="sm" onClick={() => void send(q, "ask")}>
                 {q}
               </Button>
             ))}
@@ -283,7 +412,7 @@ export function AskPanel({
 
         {busy && (
           <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }} role="status">
-            {attached ? "Reading" : "Thinking"}
+            {intent === "log" ? "Reading" : "Thinking"}
           </p>
         )}
       </div>
@@ -309,6 +438,24 @@ export function AskPanel({
           <span className="t-micro" style={{ color: "var(--ink-3)" }}>
             {files.length} of {LIMITS.maxCount}, {formatBytes(weight)}
           </span>
+        </div>
+      )}
+
+      {pending && (
+        <div className="fms-intent">
+          <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+            Finishing an entry
+          </span>
+          <button
+            type="button"
+            className="fms-intentpick t-micro"
+            onClick={() => {
+              setPending(null);
+              say({ kind: "assistant", text: "Dropped it.", from: "this device" });
+            }}
+          >
+            never mind
+          </button>
         </div>
       )}
 
@@ -345,8 +492,16 @@ export function AskPanel({
           className="t-caption fms-askinput"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder={attached ? "Anything to add about these?" : "Ask a question"}
-          aria-label={attached ? "A note about the attached files" : "Ask the assistant a question"}
+          placeholder={
+            pending
+              ? pending.blank === "amount"
+                ? "How much?"
+                : "Your answer"
+              : attached
+                ? "Anything to add about these?"
+                : "Ask, or type an entry"
+          }
+          aria-label={attached ? "A note about the attached files" : "Ask a question, or type an entry"}
           disabled={busy}
         />
         <Button
@@ -355,7 +510,7 @@ export function AskPanel({
           type="submit"
           disabled={busy || (!draft.trim() && !attached)}
         >
-          {attached ? "Read" : "Send"}
+          {attached ? "Read" : pending ? "Answer" : intent === "log" ? "Log" : "Send"}
         </Button>
       </form>
 

@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { askAi, type AiAnswer, type AiTask } from "../data/aiClient";
 import { buildContext, contextToText } from "../domain/aiContext";
+import { buildChatContext } from "../domain/aiChatContext";
 import { cacheKey, readCache, writeCache } from "../domain/aiCache";
 import { offlineAnswer } from "../domain/aiOffline";
 import { today } from "../domain/dates";
@@ -183,15 +184,35 @@ export function useAi({
         };
       }
 
+      /**
+       * The chat gets the ledger, everything else gets the snapshot.
+       *
+       * A conversation runs aground on figures-only context almost at once:
+       * "how many times did I spend" and "what happened in May" are both
+       * unanswerable from totals, and the model correctly says so, which
+       * reads as the model being useless. `buildChatContext` sends the rows
+       * and pre-computes every total, so it can answer without doing sums.
+       */
+      const chatText =
+        task === "chat"
+          ? buildChatContext({
+              snapshot: context,
+              transactions,
+              asOf: asOf ?? today(),
+              question: options.question ?? "",
+            }).text
+          : undefined;
+
       return askAi({
         context,
         task,
         tone: ai.tone,
+        ...(chatText ? { contextText: chatText } : {}),
         ...(options.question ? { question: options.question } : {}),
         ...(options.history ? { history: options.history } : {}),
       });
     },
-    [context, disabled, ai.enabled, ai.tone],
+    [context, disabled, ai.enabled, ai.tone, transactions, asOf],
   );
 
   const clear = useCallback(() => setAnswer(null), []);

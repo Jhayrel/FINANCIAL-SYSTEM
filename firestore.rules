@@ -17,6 +17,34 @@ rules_version = '2';
 //                       end to end, never a rounding error at rest.
 //   4. NO SECRETS.      A document carrying an apiKey-shaped field is rejected.
 //                       The AI key lives in a Cloudflare env secret (§2, AI4).
+//   5. AUDIT IS FINAL.  The activity log takes creates and refuses updates and
+//                       deletes, so the record of what happened cannot be
+//                       edited after the fact, by anything, including this app.
+//
+//  ── What these rules can and cannot say about the assistant ───────────────
+//
+//  They cannot grant or deny the AI anything, and no rule below pretends to.
+//  The assistant is a text endpoint: it reads a prompt and returns JSON. It
+//  holds no Firestore handle, has no Firebase identity, and never connects to
+//  this database. Every write still comes from the browser, signed in as the
+//  owner, so `request.auth.uid` is the owner's uid whether a row was typed or
+//  read off a receipt. There is no second principal for a rule to match on.
+//
+//  What the rules can do, and now do:
+//
+//   - Record which it was. `entrySource` is written on every transaction and
+//     validated here, so provenance is in the data rather than in a memory.
+//   - Keep that record honest. The activity log is append only at the
+//     database, so an event cannot be revised into saying something else.
+//   - Keep settings out of it. There is no code path from the assistant to
+//     the settings document: `AskPanel` is handed three functions, all of
+//     which go through `checkDraft` and the transactions collection. Settings
+//     stay owner-and-form-only because nothing else can reach them, which is
+//     a stronger guarantee than a rule that cannot tell who is asking.
+//
+//  The gate that actually protects the ledger is not here. It is the Add
+//  button: a proposal is a filled-in form that has not been submitted, and
+//  `checkDraft` runs on it exactly as it runs on a typed one.
 //
 //  Deploy:  firebase deploy --only firestore:rules
 //  Test:    firebase emulators:start --only firestore
@@ -99,6 +127,10 @@ service cloud.firestore {
              ))
           // Present means binned; absent means live. Nothing else.
           && (!('deletedAt' in d) || d.deletedAt is string)
+          // Who filled this row in. Optional, because every row written before
+          // the assistant existed has no opinion on the matter, and rejecting
+          // those would make the whole history unwritable.
+          && (!('entrySource' in d) || d.entrySource in ['manual', 'ai'])
           && noSecretKeys(d.keys());
     }
 
@@ -138,10 +170,56 @@ service cloud.firestore {
           && noSecretKeys(d.ai.keys());
     }
 
+    //
+    // Nothing the assistant produces reaches this document. It proposes
+    // transactions and only transactions, through `checkDraft` and the Add
+    // button, so accounts, credit lines, categories and AI preferences are
+    // reachable only from the Settings screen. That is a property of the code
+    // rather than of this rule: a rule cannot tell the two apart, because both
+    // arrive as the same signed-in owner.
+
     match /users/{uid}/meta/settings {
       allow read: if isOwner(uid);
       allow create, update: if isOwner(uid) && validSettings();
       allow delete: if false;
+    }
+
+    // ── Activity ───────────────────────────────────────────────────────────
+    //
+    // What happened, when, and who did it. One document per event, and the
+    // only collection in this database that is append only at the database
+    // rather than by convention: `update` and `delete` are both denied, so an
+    // event cannot be revised after the fact by this app, by the console, or
+    // by anything holding the owner's credentials.
+    //
+    // `actor` is the field that answers "did the AI do this". It is written by
+    // the client, and a client can write either value, so it is a record and
+    // not a control. The control is that the assistant has no writer at all.
+
+    function validActivity() {
+      let d = incoming();
+      return d.keys().hasAll(['at', 'actor', 'via', 'action', 'summary'])
+          && d.at is string && d.at.size() <= 40
+          && d.actor in ['owner', 'ai']
+          && d.via in ['manual', 'ai_chat', 'ai_image', 'csv_import',
+                       'migration', 'restore', 'system']
+          && d.action is string && d.action.size() <= 60
+          && d.summary is string && d.summary.size() <= 300
+          && (!('targetId' in d) || (d.targetId is string && d.targetId.size() <= 80))
+          && (!('recordNumber' in d) || d.recordNumber is int)
+          && (!('model' in d) || (d.model is string && d.model.size() <= 120))
+          && (!('amount' in d) || isCentavos(d.amount))
+          && (!('before' in d) || (d.before is string && d.before.size() <= 600))
+          && (!('after' in d) || (d.after is string && d.after.size() <= 600))
+          && noSecretKeys(d.keys());
+    }
+
+    match /users/{uid}/activity/{eventId} {
+      allow read:   if isOwner(uid);
+      allow create: if isOwner(uid) && validActivity();
+
+      // Append only. An audit trail that can be edited is not one.
+      allow update, delete: if false;
     }
 
     // ── Budgets ────────────────────────────────────────────────────────────
