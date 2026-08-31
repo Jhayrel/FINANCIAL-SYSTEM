@@ -1,6 +1,6 @@
 # The assistant: what it does, and what is left
 
-**Status at commit `03461e3`.** 935 tests, typecheck and build clean.
+**Status at commit `580e455`.** 957 tests, typecheck and build clean.
 
 This is the handover for the AI work. It is written so someone picking this
 up cold, including a fresh agent session, can tell what is finished, what is
@@ -66,6 +66,9 @@ back into them.
   everything. Every total pinned to `totalsFor` by `costOf.test.ts`
 - Delete and restore by describing a row, with candidates shown and a button
   each. Never acts by itself
+- Debt finished in the chat: the credit line and the effect are offered as a
+  choice rather than guessed at, and picking the effect moves the wallet to
+  the side that effect implies. `debtChat.test.ts`
 - Stop button, which actually aborts the request
 - Three retries with a growing pause before giving up, then the providers'
   own reasons
@@ -85,54 +88,54 @@ back into them.
 - Attachments are 44px squares, click for full screen, Escape closes
 - A half-typed entry survives navigation and reload (`sessionStorage`)
 - "Clear this view" marks a point rather than deleting the record
+- Rows select on the Database screen and in the bin, and go to the bin or come
+  back together, as one move with one record of it. A round trip through the
+  bin is asserted byte-identical in `bulkBin.test.ts`
+- Edit and Delete exist on the phone rows, at 44px
 - Three moving dots while working, stopped under `prefers-reduced-motion`
 
 ---
 
 ## 3. Not done
 
-In the order I would do them.
+Everything that was on this list has since been built. What follows is what
+is deliberately left, and the one thing that needs the owner rather than a
+decision from whoever picks this up.
 
-### 3.1 Chart types
-Only horizontal bars exist. Asked for repeatedly: **pie, donut, line, trend**.
-
-The reason bars came first is real and worth keeping in mind: the panel is
-280px, and a pie with twelve slices needs a legend that does not fit. A pie is
-right for four or five slices, so it should be offered when the data suits it
-rather than always. Flow colour means direction of money (rule D3), so slices
-cannot be told apart by hue: use one hue at varying lightness.
-
-`domain/charts.ts` already produces `rows` with `share`, which is all a pie or
-a line needs. The work is a renderer and a way to choose.
-
-### 3.2 Editing a saved entry from chat
-`route` returns `editEntry` and it currently lands on the delete/restore
-finder. It should find the row, show it, and load it into the form for
-editing, reusing `sink.use`.
-
-### 3.3 Deletion and archiving from the Database screen
-The Database screen has delete with confirmation. There is no archive, and no
-bulk selection. `handleDelete` and `handleRestore` in `App.tsx` are the seams.
-
-### 3.4 Debt
-The chat refuses to guess at debt and opens the Debt form with the amount,
-wallet and date filled in. That is deliberate and correct: the credit line and
-the effect (draw, repay, interest, write-off) are not in a sentence, and
-reading either wrong misfiles borrowing as income. What is missing is the
-assistant offering the *choice* of credit line and effect as buttons, so the
-whole thing can be finished without leaving the chat.
-
-### 3.5 The AI settings page
-"What it has learned" and "History" both grow without bound. They need capping
-and collapsing before they become unreadable.
-
-### 3.6 Learning is conservative
+### 3.1 Learning is conservative, on purpose
 A correction is keyed on the whole sentence that produced it, so it fires on
 repeated phrasings rather than single novel words. Keying it on one word
 requires knowing *which* word was the item, and getting that wrong writes bad
-data. Left deliberately narrow.
+data into the thing that decides future entries. Left narrow deliberately.
 
----
+### 3.2 Archiving a transaction needs a decision, not code
+The Database screen can now bin a selection and the bin can restore one, but
+there is still no *archive*. That is not an oversight. A transaction has no
+archived state in the data model, and adding one asks a question only the
+owner can answer: does an archived row still count towards the month, the
+year, and the balances?
+
+Both answers are defensible and they are different features. If it still
+counts, archive is a view filter and costs almost nothing. If it does not, it
+is a second kind of soft delete, and every total in the app needs to say which
+one it means. Rule: propose, do not default. So it is proposed here.
+
+Accounts and credit lines already archive (`archived` on `Debt`), and there
+the answer is settled: an archived account is still yours, and its money still
+counts. That is the precedent, and it points at the first answer.
+
+### 3.3 Done since this document was written
+Kept as a list because the reasoning behind each is in the commit, and
+because a handover that only says what is left reads as though nothing
+happened.
+
+| Was | Commit |
+|---|---|
+| Only bar charts existed. Pie, donut, line and trend asked for repeatedly | `00411c2` |
+| `editEntry` landed on the delete finder instead of editing | `bc45ef6` |
+| The AI settings lists grew without bound | `99e2177` |
+| Debt could not be finished in the chat | `95dfcf6` |
+| No bulk selection, no bulk bin, no bulk restore | `580e455` |
 
 ## 4. Mistakes already made, so they are not made twice
 
@@ -150,6 +153,9 @@ coming back.
 | Chat died when Insights was switched off | It read the wrong feature flag | |
 | `phpFigure` given centavos | Printed PHP 550,000.00 for five and a half thousand | `aiChatContext.test.ts` |
 | Eight rows, eight identical questions | A batch queued one pending question per row | |
+| The phone Database screen drew the desktop table on top of the phone list | `.fms-db .fms-tablewrap` is two classes, the rule hiding it is one, and a media query adds no specificity | |
+| A selected row looked like income | Selection took `--brand-100`, a shade off `--flow-revenue-bg` in the dark theme | |
+| A debt card's chosen effect was brand green | Same mistake, on a card about borrowing. It is amber now, rule D3 | |
 
 ### Two traps in the tooling
 

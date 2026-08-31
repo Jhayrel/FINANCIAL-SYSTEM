@@ -2498,16 +2498,32 @@ function DebtCard({
 
       <div className="fms-debteffects">
         <span className="t-micro fms-pfieldlabel">What it does</span>
-        <div className="fms-proposalactions">
+        {/*
+          The form's own choice control, in the debt colour.
+
+          It was four buttons with the chosen one filled in brand green,
+          which is the colour this app spends on income (rule D3): a green
+          "Paid it down" on a card about borrowing is the same confusion the
+          selected-row tint had. Amber is what a liability is written in
+          here, and this is a radio group, so it says so to a screen reader
+          as well as to the eye.
+        */}
+        <div className="fms-choicerow" role="radiogroup" aria-label="What this debt movement does">
           {DEBT_EFFECTS.map((e) => (
-            <Button
+            <button
               key={e.value}
-              size="sm"
-              variant={draft.debtEffect === e.value ? "primary" : "secondary"}
+              type="button"
+              role="radio"
+              aria-checked={draft.debtEffect === e.value}
+              className={
+                draft.debtEffect === e.value
+                  ? "fms-choice fms-choice--debt t-body-strong"
+                  : "fms-choice fms-choice--debt t-body"
+              }
               onClick={() => onChange(withDebtEffect(draft, e.value))}
             >
               {e.label}
-            </Button>
+            </button>
           ))}
         </div>
       </div>

@@ -494,6 +494,19 @@
   color: var(--flow-transfer-text);
 }
 
+/*
+ * The same control, in the colour of the thing it is choosing about.
+ *
+ * The plain `.fms-choice` is grey because it lives in the Transfer form, and
+ * grey is what a transfer is: neither gain nor loss. A debt movement is
+ * amber, because a liability is not an expense. Rule D3 either way.
+ */
+.fms-choice--debt[aria-checked="true"] {
+  background: var(--flow-debt-bg);
+  border-color: var(--flow-debt);
+  color: var(--flow-debt-text);
+}
+
 .fms-flowtile {
   display: flex;
   flex-direction: column;
