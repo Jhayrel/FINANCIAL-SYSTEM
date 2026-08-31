@@ -488,6 +488,21 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
    */
   extract:
     "Read every distinct transaction in what you are given and output one proposal for each. Put the amount twice: in amountText exactly as it is written, character for character including any comma or currency sign, and in amountPesos as a plain number. These two must agree. Use only the wallet names, categories and items from the allowed lists you are given: if the right one is not there, leave that field empty rather than inventing or substituting one. Leave any field you cannot read empty rather than guessing it. Use the date printed on the transaction, and today's date only when none is printed. Set confidence to low for anything you had to strain to read. In sourceRef, say which image and which line each one came from, or say which words you used when there is no image. If you cannot find a transaction at all, return an empty list.",
+  /**
+   * What a thing is, in the owner's own words for it.
+   *
+   * "I paid 300 Jollibee today" put a new spending type called Jolibee in the
+   * ledger, because nothing in the ledger and nothing in the owner's notes
+   * mentioned it. This is the one place a model's general knowledge is worth
+   * more than the ledger: it knows Jollibee is a restaurant, and the owner's
+   * note on Food says "Meals, snacks, drinks".
+   *
+   * Constrained to the list, hard. It picks one of the owner's own types or
+   * it picks nothing, so the widest this can go wrong is a wrong row on a
+   * card that shows every field before anything is saved.
+   */
+  classify:
+    "You are given something a person bought and a list of the spending types they keep, each with their own note saying what counts as it. Say which one it belongs to. Use ordinary knowledge about what shops, restaurants, brands and products are: if the words name a fast food chain, that is a meal; if they name a petrol station, that is fuel. Copy the type name exactly from the list. If nothing on the list genuinely fits, return an empty string rather than the nearest one: a wrong type is worse than none.",
   categorise:
     "Choose the one category that fits this transaction, copied exactly from the allowed list. Prefer the pattern in the past examples, which are this person's own labels. If nothing fits well, choose the last category in the list rather than inventing one.",
 };
@@ -567,6 +582,22 @@ const TASKS: Record<string, TaskSpec> = {
       return { text: `${list.length} found`, data: list };
     },
     maxTokens: 2000,
+  },
+  classify: {
+    instruction: TASK_INSTRUCTIONS["classify"] ?? "",
+    shape:
+      '{"reasoning": "one short sentence", "item": "one name copied exactly from the list, or an empty string", "confidence": "high or medium or low"}',
+    parse: (v) => {
+      // An empty item is a real answer: nothing on the list fitted.
+      const item = str(v["item"]);
+      const confidence = str(v["confidence"]).toLowerCase();
+      return {
+        text: item,
+        category: item,
+        confidence: CONFIDENCE.has(confidence) ? confidence : "low",
+      };
+    },
+    maxTokens: 400,
   },
   categorise: {
     instruction: TASK_INSTRUCTIONS["categorise"] ?? "",

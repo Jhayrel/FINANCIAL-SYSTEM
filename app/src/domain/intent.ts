@@ -83,3 +83,21 @@ export function detectIntent(text: string): Intent {
   // Otherwise it takes both: a figure, and a verb that moves it.
   return AMOUNT.test(trimmed) && MOVING.test(trimmed) ? "log" : "ask";
 }
+
+/**
+ * Is this phrased as a question, whatever else is in it.
+ *
+ * Narrower than `detectIntent`, and used for a different decision. Reading a
+ * sentence against the ledger is cheap and offline, so the caller tries it on
+ * anything that is not obviously a question, rather than only on what this
+ * file could recognise from the words alone.
+ *
+ * That is what "I gas today usual ammount cash" needed. It has no verb, so
+ * `detectIntent` called it a question and it never reached the reader, which
+ * would have recognised Gas and Cash immediately.
+ */
+export function isQuestion(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  return trimmed.endsWith("?") || ASKING.test(trimmed);
+}

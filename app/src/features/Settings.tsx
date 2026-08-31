@@ -1805,6 +1805,16 @@ const AI_FEATURES: { key: keyof AiSettings["features"]; label: string; what: str
     label: "Transaction descriptions",
     what: "Fills the Suggest button on the Add screen, for items with no history",
   },
+  {
+    key: "chat",
+    label: "Ask",
+    what: "The conversation beside the Add form. Reads your figures and your entries; it can only propose",
+  },
+  {
+    key: "capture",
+    label: "Reading photos and files",
+    what: "Turns a receipt or a statement into rows you check and add. Sends the picture to the provider",
+  },
 ];
 
 /** Model ids are short; anything longer is a paste accident. */
@@ -1930,7 +1940,7 @@ function AiSection({
                 </td>
                 <td className="fms-td-right" style={{ width: 60 }}>
                   <Switch
-                    checked={ai.features[f.key]}
+                    checked={ai.features[f.key] !== false}
                     label={f.label}
                     onChange={(v) =>
                       void ask(

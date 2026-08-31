@@ -429,9 +429,19 @@ export default function App() {
   };
 
   const handleSave = (rows: Transaction[], by: Provenance = BY_OWNER): void => {
-    setTransactions((prev) => insertChronologically(prev, rows));
-    push((l) => l.saveMany(rows));
-    record(...rows.map((r) => createdEvent(r, by)));
+    /**
+     * Stamped here, at the one place provenance is known.
+     *
+     * `draftToTransactions` builds a row from a draft and has no idea who
+     * asked for it, so marking it there would mean threading provenance
+     * through the whole domain layer for one field. Every writer comes
+     * through here.
+     */
+    const stamped = rows.map((r) => ({ ...r, entrySource: by.actor }) as Transaction);
+
+    setTransactions((prev) => insertChronologically(prev, stamped));
+    push((l) => l.saveMany(stamped));
+    record(...stamped.map((r) => createdEvent(r, by)));
     flash(
       rows.length > 1
         ? `Saved. ${rows.length} rows added.`

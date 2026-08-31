@@ -135,6 +135,16 @@ export function AddTransaction({
    */
   const sentOut = draft.flow === "Transfer" && draft.sentOut === true;
 
+  /**
+   * The last row this form saved, so the card that supplied it can say so.
+   *
+   * Pressing "Edit first" puts a proposal in the form, and pressing Save
+   * there saved it while the card still read "In the form" for the rest of
+   * the session. Both are the same entry and should agree about what happened
+   * to it.
+   */
+  const [lastSaved, setLastSaved] = useState<{ draft: Draft; at: number } | null>(null);
+
   const [categoryHint, setCategoryHint] = useState<CategoryResult | null>(null);
 
   /**
@@ -307,6 +317,8 @@ export function AddTransaction({
       );
     }
 
+    // The card that supplied this row can now say it was saved.
+    setLastSaved({ draft, at: Date.now() });
     setDraft({ ...emptyDraft(draft.date), flow: "Spending" });
     setSuggested(new Set());
     setSubmitted(false);
@@ -808,6 +820,7 @@ export function AddTransaction({
 
       <AskPanel
         sink={sink}
+        lastSaved={lastSaved}
         settings={settings}
         transactions={transactions}
         budgets={budgets}

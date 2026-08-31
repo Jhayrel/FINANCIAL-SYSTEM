@@ -110,6 +110,15 @@ export interface Transaction {
   readonly debtEffect?: DebtEffect | undefined;
   /** Cleared through the integrity review queue. */
   readonly reviewed?: boolean | undefined;
+  /**
+   * Who filled this row in.
+   *
+   * Absent on every row written before the assistant existed, and on every
+   * row imported from the Excel, so absent reads as "typed". `firestore.rules`
+   * validates it when present, and the activity trail holds the fuller story;
+   * this is here so the Database screen can mark a row without a lookup.
+   */
+  readonly entrySource?: "manual" | "ai" | undefined;
 }
 
 /** A transaction in the recycle bin. Soft delete, never hard-delete money records. */

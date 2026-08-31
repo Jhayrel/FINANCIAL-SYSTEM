@@ -207,3 +207,74 @@ describe("inferFromHistory fills the blanks and says why", () => {
     expect(filled.status).toBe("Received");
   });
 });
+
+describe("the usual amount, from your own rows", () => {
+  const twoHundred = [
+    row({ item: "Gas", amount: 20000, total: 20000, fromWallet: "Cash" }),
+    row({ item: "Gas", amount: 20000, total: 20000, fromWallet: "Cash" }),
+    row({ item: "Gas", amount: 35000, total: 35000, fromWallet: "Cash" }),
+  ];
+
+  /** "I gas today usual ammount cash" is complete if you know the usual one. */
+  it("fills the amount when the message says it was the usual", () => {
+    const { draft, because } = inferFromHistory(
+      spend(),
+      twoHundred,
+      reference,
+      "I gas today usual ammount cash",
+    );
+    expect(draft.item).toBe("Gas");
+    expect(draft.amount).toBe(20000);
+    expect(because.join(" ")).toContain("usual Gas");
+  });
+
+  it("never overrules an amount you stated", () => {
+    const { draft } = inferFromHistory(
+      spend({ amount: 50000 }),
+      twoHundred,
+      reference,
+      "gas usual cash",
+    );
+    expect(draft.amount).toBe(50000);
+  });
+
+  it("says nothing about a usual amount when there is no pattern", () => {
+    const once = [row({ item: "Gas", amount: 20000, total: 20000 })];
+    expect(inferFromHistory(spend(), once, reference, "gas usual").draft.amount).toBeNull();
+  });
+
+  it("leaves the amount alone when the message did not say usual", () => {
+    expect(inferFromHistory(spend(), twoHundred, reference, "gas today").draft.amount).toBeNull();
+  });
+});
+
+describe("the note beside a spending type", () => {
+  const withRemarks: ReferenceLists = {
+    ...reference,
+    spendingTypes: [
+      { name: "Fun", remark: "Outings, parties, leisure" },
+      { name: "Gas", remark: "Fuel for vehicle" },
+    ],
+  };
+
+  /** "I paid 300 in outing maya" created an item called "outing fun". */
+  it('reads "outing" as Fun, because that is what the note says', () => {
+    const { draft, because } = inferFromHistory(
+      spend({ amount: 30000 }),
+      [],
+      withRemarks,
+      "I paid 300 in outing maya",
+    );
+    expect(draft.item).toBe("Fun");
+    expect(because.join(" ")).toContain("your note on it describes");
+  });
+
+  it("prefers what the ledger actually did over the note", () => {
+    const ledger = [row({ item: "Gas" }), row({ item: "Gas" })];
+    expect(inferFromHistory(spend(), ledger, withRemarks, "gas today").draft.item).toBe("Gas");
+  });
+
+  it("invents nothing when no note covers it", () => {
+    expect(inferFromHistory(spend(), [], withRemarks, "scuba lessons").draft.item).toBe("");
+  });
+});

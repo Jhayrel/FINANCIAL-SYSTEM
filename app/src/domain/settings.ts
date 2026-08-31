@@ -52,6 +52,10 @@ export interface AiSettings {
     readonly alerts: boolean;
     readonly insightSummary: boolean;
     readonly descriptions: boolean;
+    /** The conversation beside the Add form. */
+    readonly chat?: boolean;
+    /** Reading photos and files into proposed rows. */
+    readonly capture?: boolean;
   };
 }
 
@@ -60,7 +64,19 @@ export const DEFAULT_AI: AiSettings = {
   provider: "groq",
   model: AI_DEFAULT_MODEL.groq,
   tone: "brief",
-  features: { alerts: true, insightSummary: true, descriptions: false },
+  /**
+   * Chat on, capture on. Both are read-only until you press Add, and both
+   * were the point of building this, so defaulting them off would mean the
+   * feature ships switched off. `enabled` above is the master switch and is
+   * still false until the owner turns it on.
+   */
+  features: {
+    alerts: true,
+    insightSummary: true,
+    descriptions: false,
+    chat: true,
+    capture: true,
+  },
 };
 
 export type ThemePreference = "light" | "dark" | "system";

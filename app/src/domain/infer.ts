@@ -41,6 +41,10 @@
 import type { Draft, Flow } from "./entry";
 import type { ReferenceLists, Transaction, TransactionCategory, TransactionStatus } from "./types";
 
+/** Only for saying which figure was used. Display, not arithmetic. */
+const pesos = (centavos: number): string =>
+  `PHP ${(centavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 export interface Inferred {
   readonly draft: Draft;
   /** Why each field was filled, in the owner's own numbers. */
@@ -187,6 +191,20 @@ export function inferFromHistory(
           ? `Booked as ${match.item}, which you have used ${match.seen} ${match.seen === 1 ? "time" : "times"}.`
           : `Booked as ${match.item}: that is what you called it the last few times you wrote this.`,
       );
+    } else {
+      /**
+       * The note beside each spending type, which says what counts as it.
+       *
+       * "I paid 300 in outing maya" has no item in the ledger called outing,
+       * but Fun's note reads "Outings, parties, leisure". The owner wrote
+       * that line for exactly this purpose, so it is read rather than
+       * ignored, and reading it beats creating a new type by accident.
+       */
+      const byRemark = remarkMatch(hint, flow, reference);
+      if (byRemark) {
+        next = { ...next, item: byRemark };
+        because.push(`Booked as ${byRemark}, which is what your note on it describes.`);
+      }
     }
   }
 
@@ -228,6 +246,34 @@ export function inferFromHistory(
     }
   }
 
+  // ── The amount, when you said it was the usual one ───────────────────────
+  //
+  // "I gas today usual ammount cash" is a complete instruction if you know
+  // what the usual amount is, and the ledger does. Only ever fills a blank:
+  // an amount you stated is never overruled, because being wrong about a
+  // figure is the one mistake here that costs money directly.
+  if ((next.amount === null || next.amount <= 0) && USUAL.test(hint)) {
+    const counts = new Map<number, number>();
+    for (const row of past) counts.set(row.amount, (counts.get(row.amount) ?? 0) + 1);
+
+    let amount = 0;
+    let seen = 0;
+    for (const [value, n] of counts) {
+      if (n > seen) {
+        amount = value;
+        seen = n;
+      }
+    }
+
+    // Twice is a usual amount. Once is just the last time.
+    if (amount > 0 && seen >= 2) {
+      next = { ...next, amount };
+      because.push(
+        `The usual ${item} is ${pesos(amount)}, which is what ${seen} of them came to.`,
+      );
+    }
+  }
+
   // ── The status ───────────────────────────────────────────────────────────
   const { value: status } = commonest(past, (t) => t.status as TransactionStatus);
   if (status && status !== next.status) {
@@ -236,4 +282,39 @@ export function inferFromHistory(
   }
 
   return { draft: next, because };
+}
+
+/**
+ * "The usual", however it gets typed.
+ *
+ * Deliberately narrow. "same" alone would match "the same day", so it only
+ * counts beside a word about the amount.
+ */
+const USUAL = /\b(usual|usually|the same|same as usual|normal|regular|as always|like always)\b/i;
+
+/**
+ * A spending type whose note covers these words.
+ *
+ * The note is the owner's own definition of what counts as that type, so it
+ * is the right thing to read before inventing anything. Only for Spending:
+ * revenue categories have no note.
+ */
+function remarkMatch(hint: string, flow: Flow, reference: ReferenceLists): string {
+  if (flow !== "Spending") return "";
+
+  const said = hint
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && !NOISE.has(w));
+  if (said.length === 0) return "";
+
+  for (const type of reference.spendingTypes) {
+    const remark = type.remark.toLowerCase();
+    if (!remark) continue;
+    if (said.some((w) => remark.includes(w) || remark.includes(w.replace(/s$/, "")))) {
+      return type.name;
+    }
+  }
+  return "";
 }

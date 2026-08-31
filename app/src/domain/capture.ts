@@ -143,19 +143,15 @@ export function applyReply(
     }
     case "item": {
       /**
-       * Typed "food", stored "Food".
+       * Typed "outing fun", stored "Fun".
        *
-       * The ledger already has an item called Food, and writing a second one
-       * that differs only in case splits every total and every ranking that
-       * groups by item. So a reply is matched against the owner's own list
-       * and the list's spelling wins.
-       *
-       * An item that genuinely is new is kept as typed: that is how a new one
-       * gets added, and refusing it would mean the assistant could only ever
-       * record things that had happened before.
+       * The owner's own lists decide the spelling, because a second item that
+       * differs only in wording splits every total and every ranking that
+       * groups by item. `matchItem` reads those lists, including the note
+       * beside each type, which is there to say what counts as it.
        */
-      const known = itemsFor(draft.flow as Flow, draft.category, reference);
-      return { ...draft, item: matchExact(text, known) || text.slice(0, 80) };
+      const { item } = matchItem(text, draft.flow as Flow, draft.category, reference);
+      return { ...draft, item };
     }
   }
 }
@@ -292,4 +288,84 @@ function dateFrom(text: string, current: IsoDate, asOf: IsoDate): IsoDate | null
   }
 
   return null;
+}
+
+// ── Matching what you said against what you already have ───────────────────
+
+/**
+ * The item the owner meant, from the lists they already keep.
+ *
+ * ── The bug this fixes ────────────────────────────────────────────────────
+ *
+ * Asked "What was it for?" the owner answered "outing fun". The ledger has a
+ * spending type called Fun, whose note reads "Outings, parties, leisure", and
+ * the reply was stored verbatim as a brand new item called "outing fun". A
+ * new type created by a typo splits every ranking and every total that groups
+ * by item, quietly, forever.
+ *
+ * So the reply is matched against the owner's own lists first, in order of
+ * how sure each step is, and only a reply that matches nothing at all is kept
+ * as typed. That last case is real, it is how a genuinely new item gets
+ * added, and the caller says so out loud when it happens.
+ */
+export function matchItem(
+  text: string,
+  flow: Flow,
+  category: Draft["category"],
+  reference: ReferenceLists,
+): { readonly item: string; readonly matched: boolean } {
+  const said = text.trim();
+  if (!said) return { item: "", matched: false };
+
+  const known = itemsFor(flow, category, reference);
+
+  // 1. The same words, however they were capitalised.
+  const exact = matchExact(said, known);
+  if (exact) return { item: exact, matched: true };
+
+  // 2. A known item named inside the reply. Longest first, so "Cellphone
+  //    Load" wins over "Load" when the reply holds both.
+  const inside = [...known]
+    .sort((a, b) => b.length - a.length)
+    .find((name) => wholeWord(said, name));
+  if (inside) return { item: inside, matched: true };
+
+  /**
+   * 3. What the owner wrote in the note beside the type.
+   *
+   * "Outings, parties, leisure" is the note on Fun, and it is there precisely
+   * to say what counts as it. Matching against it is reading the owner's own
+   * definition rather than guessing.
+   */
+  const words = said
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 3);
+
+  if (words.length > 0 && flow === "Spending") {
+    for (const type of reference.spendingTypes) {
+      if (!known.includes(type.name)) continue;
+      const remark = type.remark.toLowerCase();
+      // Stemmed loosely: "outing" should find "outings".
+      if (words.some((w) => remark.includes(w) || remark.includes(w.replace(/s$/, "")))) {
+        return { item: type.name, matched: true };
+      }
+    }
+  }
+
+  // 4. Genuinely new. Kept, and flagged.
+  return { item: said.slice(0, 80), matched: false };
+}
+
+/** Word-boundary containment, so "Fun" does not match "funeral". */
+function wholeWord(text: string, name: string): boolean {
+  const lower = text.toLowerCase();
+  const needle = name.trim().toLowerCase();
+  if (!needle) return false;
+  const at = lower.indexOf(needle);
+  if (at === -1) return false;
+  const before = at === 0 ? " " : (lower[at - 1] ?? " ");
+  const after = lower[at + needle.length] ?? " ";
+  return !/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after);
 }

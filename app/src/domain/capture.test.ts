@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { amend, applyReply, blanksIn, nextQuestion } from "./capture";
+import { amend, applyReply, blanksIn, matchItem, nextQuestion } from "./capture";
 import { checkDraft, emptyDraft, type Draft } from "./entry";
 import type { ReferenceLists } from "./types";
 
@@ -201,5 +201,56 @@ describe("amend: correcting a card already on screen", () => {
 
   it("ignores a message too long to be a correction", () => {
     expect(amend(card, "x".repeat(80) + " gcash", reference, ASOF)).toBeNull();
+  });
+});
+
+describe("matchItem: sticking to the lists you already keep", () => {
+  const withRemarks: ReferenceLists = {
+    ...reference,
+    spendingTypes: [
+      { name: "Fun", remark: "Outings, parties, leisure" },
+      { name: "Food", remark: "Meals, snacks, drinks" },
+      { name: "Gas", remark: "Fuel for vehicle" },
+    ],
+  };
+
+  /**
+   * The reply that created a new spending type by typo. The ledger has Fun,
+   * whose note reads "Outings, parties, leisure".
+   */
+  it('reads "outing fun" as Fun rather than inventing an item', () => {
+    const found = matchItem("outing fun", "Spending", "Spending", withRemarks);
+    expect(found).toEqual({ item: "Fun", matched: true });
+  });
+
+  it("matches on the note beside the type, which says what counts as it", () => {
+    expect(matchItem("parties", "Spending", "Spending", withRemarks).item).toBe("Fun");
+    expect(matchItem("snacks", "Spending", "Spending", withRemarks).item).toBe("Food");
+    expect(matchItem("fuel", "Spending", "Spending", withRemarks).item).toBe("Gas");
+  });
+
+  it("matches the name however it was capitalised", () => {
+    expect(matchItem("food", "Spending", "Spending", withRemarks).item).toBe("Food");
+    expect(matchItem("  GAS  ", "Spending", "Spending", withRemarks).item).toBe("Gas");
+  });
+
+  it("does not match a name buried in a longer word", () => {
+    // "funeral" contains "fun" but is not it.
+    const found = matchItem("funeral", "Spending", "Spending", withRemarks);
+    expect(found.matched).toBe(false);
+    expect(found.item).toBe("funeral");
+  });
+
+  it("keeps a genuinely new item, and says it is new", () => {
+    const found = matchItem("Scuba lessons", "Spending", "Spending", withRemarks);
+    expect(found).toEqual({ item: "Scuba lessons", matched: false });
+  });
+
+  it("uses the bills list when the category is Bills", () => {
+    expect(matchItem("electricity", "Spending", "Bills", withRemarks).item).toBe("Electricity");
+  });
+
+  it("caps a long reply so it fits the column", () => {
+    expect(matchItem("z".repeat(200), "Spending", "Spending", withRemarks).item.length).toBe(80);
   });
 });

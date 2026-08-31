@@ -28,7 +28,7 @@
 
 import { emptyDraft, type Draft, type Flow } from "./entry";
 import type { Blank } from "./capture";
-import { inferFromHistory } from "./infer";
+import { inferFromHistory, itemFromHistory } from "./infer";
 import { readMoney } from "./proposal";
 import type { IsoDate, ReferenceLists, Transaction, TransactionStatus } from "./types";
 
@@ -212,7 +212,25 @@ export function readEntry(
   asOf: IsoDate,
 ): ReadEntry {
   const readsAsDebt = DEBT.test(text);
-  const flow = readsAsDebt ? null : flowOf(text);
+
+  /**
+   * A sentence with no verb in it.
+   *
+   * "I gas today usual ammount cash" names an item and a wallet and nothing
+   * else, and it was answered with a summary of the month because none of the
+   * verb lists matched. Once the ledger recognises the item, the sentence is
+   * about spending on that item: that is the only thing it could be, and the
+   * card shows every field for checking before anything is saved.
+   *
+   * The item has to be one the ledger already knows. Falling back to Spending
+   * on any unrecognised sentence would turn "hatdog" into an entry.
+   */
+  const verbless =
+    !readsAsDebt &&
+    flowOf(text) === null &&
+    itemFromHistory(text, transactions.filter((t) => t.type === "Spending")) !== null;
+
+  const flow = readsAsDebt ? null : (flowOf(text) ?? (verbless ? "Spending" : null));
   if (!flow) {
     /**
      * A debt sentence still gives up its date, amount and wallet.

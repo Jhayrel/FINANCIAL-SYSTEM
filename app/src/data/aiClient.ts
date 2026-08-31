@@ -518,3 +518,87 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
     clearTimeout(timer);
   }
 }
+
+// ── What a thing is, when the ledger has never seen it ─────────────────────
+
+/**
+ * Ask the model which of the owner's spending types something belongs to.
+ *
+ * ── Why this exists ───────────────────────────────────────────────────────
+ *
+ * "I paid 300 Jollibee today" created a new spending type called Jolibee.
+ * Nothing in the ledger mentioned it and neither did any of the owner's notes,
+ * so every local rule correctly found nothing. This is the one job where a
+ * model's general knowledge beats the ledger: it knows Jollibee is a
+ * restaurant, and the owner's note on Food says "Meals, snacks, drinks".
+ *
+ * ── Why this is not a web search ──────────────────────────────────────────
+ *
+ * It does not need one. The question is "what kind of thing is this", which
+ * is exactly what a language model already holds, and the answer is
+ * constrained to a list of at most a few dozen names the owner wrote
+ * themselves. A search API would add a key, a bill, and a second source of
+ * wrong answers, to learn something the model already knows.
+ *
+ * ── What it cannot do ─────────────────────────────────────────────────────
+ *
+ * Return anything that is not on the list. The reply is checked against the
+ * list here, so a model that invents a type gets ignored rather than obeyed.
+ */
+export async function classifyItem(
+  text: string,
+  allowed: readonly { readonly name: string; readonly remark: string }[],
+  options: {
+    readonly fetcher?: typeof fetch;
+    readonly token?: () => Promise<string | null>;
+    readonly timeoutMs?: number;
+  } = {},
+): Promise<{ readonly item: string; readonly confidence: string } | null> {
+  const said = text.trim();
+  if (!said || allowed.length === 0) return null;
+
+  const auth = await (options.token ?? idToken)();
+  if (!auth) return null;
+
+  const nl = String.fromCharCode(10);
+  const context = [
+    `They bought: ${redact(said)}`,
+    "",
+    "Their spending types, and what each one covers:",
+    ...allowed.map((a) => (a.remark ? `${a.name}: ${a.remark}` : a.name)),
+  ].join(nl);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 12_000);
+
+  try {
+    const response = await (options.fetcher ?? fetch)(ENDPOINT, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "content-type": "application/json", authorization: `Bearer ${auth}` },
+      body: JSON.stringify({ task: "classify", tone: "brief", context }),
+    });
+
+    if (!response.ok || !(response.headers.get("content-type") ?? "").includes("application/json")) {
+      return null;
+    }
+
+    const payload = (await response.json()) as { category?: unknown; confidence?: unknown };
+    const answer = typeof payload.category === "string" ? payload.category.trim() : "";
+    if (!answer) return null;
+
+    // Checked against the list, so an invented type is ignored rather than saved.
+    const match = allowed.find((a) => a.name.toLowerCase() === answer.toLowerCase());
+    if (!match) return null;
+
+    return {
+      item: match.name,
+      confidence: typeof payload.confidence === "string" ? payload.confidence : "low",
+    };
+  } catch {
+    // A failed classification is not an error: the field stays as typed.
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

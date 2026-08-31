@@ -68,14 +68,15 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "../components/primitives";
-import { amend, applyReply, nextQuestion, type Blank } from "../domain/capture";
+import { amend, applyReply, matchItem, nextQuestion, type Blank } from "../domain/capture";
 import { readEntry } from "../domain/readEntry";
 import { readRich } from "../domain/richText";
 import { inferFromHistory } from "../domain/infer";
-import { detectIntent, type Intent } from "../domain/intent";
+import { itemsFor } from "../domain/entry";
+import { detectIntent, isQuestion, type Intent } from "../domain/intent";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
-import { extractProposals } from "../data/aiClient";
+import { classifyItem, extractProposals } from "../data/aiClient";
 import { formatBytes, readFiles, totalBytes, LIMITS, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
 import type { Draft } from "../domain/entry";
@@ -127,7 +128,7 @@ interface Offered {
    * the moment you asked to look at it. It stays, marked, with its buttons
    * gone.
    */
-  readonly state: "open" | "added" | "used" | "discarded";
+  readonly state: "open" | "added" | "used" | "discarded" | "replaced";
 }
 
 type Turn = Said | Offered;
@@ -152,6 +153,7 @@ export function AskPanel({
   reference,
   asOf,
   sink,
+  lastSaved,
 }: {
   settings: AppSettings;
   transactions: readonly Transaction[];
@@ -159,6 +161,14 @@ export function AskPanel({
   reference: ReferenceLists;
   asOf: string;
   sink: ProposalSink;
+  /**
+   * The last row the form saved.
+   *
+   * A card sent to the form with "Edit first" stayed reading "In the form"
+   * even after you pressed Save there, so the two halves of one entry
+   * disagreed about what had happened to it.
+   */
+  lastSaved: { draft: Draft; at: number } | null;
 }) {
   const ai = useAi({ settings, transactions, budgets, reference, feature: "insightSummary", asOf });
 
@@ -182,6 +192,30 @@ export function AskPanel({
   const [dragging, setDragging] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Mark a card added once the form saves the row it supplied.
+   *
+   * Matched on the fields that identify an entry rather than on a token: the
+   * draft may have been corrected in the form before saving, and it is still
+   * the same card. The date, the amount and the item agreeing is enough, and
+   * a wrong match here costs a label, never a row.
+   */
+  useEffect(() => {
+    if (!lastSaved) return;
+    const saved = lastSaved.draft;
+    setTurns((prev) =>
+      prev.map((t) =>
+        isOffer(t) &&
+        t.state === "used" &&
+        t.proposal.draft.date === saved.date &&
+        t.proposal.draft.amount === saved.amount &&
+        t.proposal.draft.item.trim().toLowerCase() === saved.item.trim().toLowerCase()
+          ? { ...t, state: "added" }
+          : t,
+      ),
+    );
+  }, [lastSaved]);
 
   // A new message is only useful if you can see it.
   useEffect(() => {
@@ -244,13 +278,13 @@ export function AskPanel({
    * One question at a time: a card with three blanks on it is a form, and a
    * form is what the assistant exists to avoid.
    */
-  const offer = (
+  const offer = async (
     proposal: Proposal,
     hint: string,
     useHistory = true,
     batch = false,
     settled: readonly Blank[] = [],
-  ): void => {
+  ): Promise<void> => {
     // History first. Asking a question the ledger already answers is the
     // assistant failing to read its own data. `readEntry` has already done
     // this pass, so it says so rather than having it run twice.
@@ -273,17 +307,60 @@ export function AskPanel({
      * at once, and it should not try. The cards carry their own blanks, in
      * red, with a picker on each one.
      */
-    const asked = batch ? null : nextQuestion(draft, reference, settled);
+    /**
+     * About to ask what it was for, when a model could say.
+     *
+     * "I paid 300 Jollibee today at Sevilla" names the thing plainly; nothing
+     * local recognises it because the ledger has never seen it and no note
+     * mentions it. Asking what kind of thing it is, from the owner's own
+     * list, beats asking the owner a question they already answered.
+     */
+    let ready = filled;
+
+    /**
+     * Whatever else is missing, work out what the thing was.
+     *
+     * Tried whenever the item is blank rather than only when the item is the
+     * next question. "I paid 300 Jollibee today at Sevilla" names no wallet,
+     * so the wallet is asked about first, and waiting until after that to
+     * wonder what Jollibee is means asking two questions where the ledger and
+     * a model between them can answer one.
+     */
+    const wantsItem =
+      (ready.draft.flow === "Spending" || ready.draft.flow === "Revenue") &&
+      !ready.draft.item.trim();
+
+    if (wantsItem && ready.draft.flow && !ai.disabled) {
+      const known = itemsFor(ready.draft.flow, ready.draft.category, reference);
+      const withNotes = known.map((name) => ({
+        name,
+        remark: reference.spendingTypes.find((t) => t.name === name)?.remark ?? "",
+      }));
+      const guessed = await classifyItem(hint, withNotes);
+      if (guessed) {
+        ready = {
+          ...ready,
+          draft: { ...ready.draft, item: guessed.item },
+          adjustments: [
+            ...ready.adjustments,
+            `Booked as ${guessed.item}, going by what it is.`,
+          ],
+        };
+      }
+    }
+
+    const asked = batch ? null : nextQuestion(ready.draft, reference, settled);
+
     if (!asked) {
-      say({ kind: "proposal", proposal: filled, state: "open" });
+      say({ kind: "proposal", proposal: ready, state: "open" });
       return;
     }
-    setPending({ draft, blank: asked.blank, settled });
+    setPending({ draft: ready.draft, blank: asked.blank, settled });
     say({ kind: "assistant", text: asked.question, from: "this device" });
   };
 
   /** An answer to the question the assistant just asked. */
-  const answerPending = (reply: string): void => {
+  const answerPending = async (reply: string): Promise<void> => {
     if (!pending) return;
     say({ kind: "you", text: reply });
 
@@ -312,7 +389,40 @@ export function AskPanel({
     setPending(null);
     // One more pass: an answered blank often unlocks the rest. Telling it the
     // item is Load is enough to know the wallet and the status too.
-    const { draft: complete, because } = inferFromHistory(filled, transactions, reference, reply);
+    const read = inferFromHistory(filled, transactions, reference, reply);
+    let complete = read.draft;
+    const because = [...read.because];
+
+    /**
+     * Nothing local recognised it. Ask what kind of thing it is.
+     *
+     * "Jolibee" went into the ledger as a brand new spending type, because
+     * neither the ledger nor the owner's notes mention it. A model knows what
+     * Jollibee is, and is given nothing but the owner's own list to choose
+     * from, so the worst it can do is put a wrong type on a card that shows
+     * every field before anything is saved.
+     */
+    if (pending.blank === "item" && complete.flow) {
+      const local = matchItem(reply, complete.flow, complete.category, reference);
+      if (!local.matched && !ai.disabled) {
+        const known = itemsFor(complete.flow, complete.category, reference);
+        const withNotes = known.map((name) => ({
+          name,
+          remark: reference.spendingTypes.find((t) => t.name === name)?.remark ?? "",
+        }));
+        const guessed = await classifyItem(reply, withNotes);
+        if (guessed) {
+          complete = { ...complete, item: guessed.item };
+          because.push(`"${reply.trim()}" reads as ${guessed.item}, going by what it is.`);
+        }
+      }
+
+      if (complete.item.trim().toLowerCase() === reply.trim().toLowerCase() && !local.matched) {
+        because.push(
+          `"${complete.item}" is not one of your spending types. Saving this adds it as a new one.`,
+        );
+      }
+    }
     say({
       kind: "proposal",
       proposal: {
@@ -373,7 +483,7 @@ export function AskPanel({
     }
 
     const batch = result.proposals.length > 1;
-    for (const proposal of result.proposals) offer(proposal, note, true, batch);
+    for (const proposal of result.proposals) await offer(proposal, note, true, batch);
     if (batch) {
       const blanks = result.proposals.filter(
         (p) => nextQuestion(p.draft, reference) !== null,
@@ -426,7 +536,12 @@ export function AskPanel({
      */
     if (pending && files.length === 0 && !as) {
       setDraft("");
-      answerPending(note);
+      setBusy(true);
+      try {
+        await answerPending(note);
+      } finally {
+        setBusy(false);
+      }
       return;
     }
 
@@ -450,19 +565,44 @@ export function AskPanel({
         const change = amend(card.turn.proposal.draft, note, reference, asOf);
         if (change) {
           setDraft("");
-          say({ kind: "you", text: note });
-          replaceProposal(card.index, {
-            ...card.turn.proposal,
-            draft: change.draft,
-            adjustments: [...card.turn.proposal.adjustments, change.what],
-          });
+          /**
+           * Collapse the old card, then show the new one below.
+           *
+           * Changing the card in place worked and looked like nothing had
+           * happened: the card sits above the message that changed it, so
+           * the one field that moved was off screen. Now the old version
+           * folds to a line and the current one appears at the bottom, next
+           * to the box, where you were already looking.
+           */
+          setTurns((prev) => [
+            ...prev.map((t, i) => (i === card.index && isOffer(t) ? { ...t, state: "replaced" as const } : t)),
+            { kind: "you", text: note },
+            {
+              kind: "proposal",
+              proposal: {
+                ...card.turn.proposal,
+                draft: change.draft,
+                adjustments: [...card.turn.proposal.adjustments, change.what],
+              },
+              state: "open",
+            },
+          ]);
           return;
         }
       }
     }
     if (files.length > 0) setPending(null);
 
-    const job = as ?? (files.length > 0 ? "log" : detectIntent(note));
+    /**
+     * Try reading it as an entry unless it is plainly a question.
+     *
+     * `detectIntent` decides from the words alone, so it called "I gas today
+     * usual ammount cash" a question: no verb in it. The reader has the
+     * ledger and recognises Gas and Cash at once, and running it costs
+     * nothing, so anything that is not phrased as a question gets offered to
+     * it first and falls through to the conversation if it finds nothing.
+     */
+    const job = as ?? (files.length > 0 || !isQuestion(note) ? "log" : detectIntent(note));
 
     setDraft("");
     setBusy(true);
@@ -502,8 +642,8 @@ export function AskPanel({
         const each = lines.map((line) => readEntry(line, transactions, reference, asOf));
         if (each.every((r) => r.worthOffering)) {
           say({ kind: "you", text: note });
-          each.forEach((r, i) =>
-            offer(
+          for (const [i, r] of each.entries()) {
+            await offer(
               {
                 draft: r.draft,
                 confidence: "high",
@@ -514,8 +654,8 @@ export function AskPanel({
               false,
               true,
               r.settled,
-            ),
-          );
+            );
+          }
           return;
         }
       }
@@ -551,7 +691,7 @@ export function AskPanel({
 
         if (local.worthOffering) {
           say({ kind: "you", text: note });
-          offer(
+          await offer(
             {
               draft: local.draft,
               confidence: "high",
@@ -982,10 +1122,12 @@ function ProposalCard({
    * to look at it. It stays now, showing the same fields, with the buttons
    * replaced by what happened to it.
    */
-  if (state === "discarded") {
+  if (state === "discarded" || state === "replaced") {
     return (
       <div className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
-        Discarded.
+        {state === "discarded"
+          ? "Discarded."
+          : `Changed: ${draft.item || draft.description || draft.flow || "entry"}, ${formatMoney(draft.amount ?? 0)} on ${draft.date}.`}
       </div>
     );
   }
