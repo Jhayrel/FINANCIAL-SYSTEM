@@ -112,3 +112,50 @@ describe("the amendment is worked out per card, not copied", () => {
     expect(amend(card({}), "not a correction at all thank you", reference, ASOF)).toBeNull();
   });
 });
+
+describe("fixing a typo you can see on the card", () => {
+  /**
+   * "new laptop not lkaptop", typed at 12:11:30 straight after a card
+   * described as "new lkaptop". Nothing happened. It is the most natural
+   * correction there is, and the only one where both halves have already
+   * been said: what it reads now, and what it should read.
+   */
+  const typo: Draft = {
+    ...emptyDraft("2026-08-29"),
+    flow: "Spending",
+    category: "Spending",
+    item: "Online Buy",
+    description: "new lkaptop",
+    amount: 20000000,
+    fromWallet: "Maya",
+  };
+
+  it("corrects the word on the card", () => {
+    expect(amend(typo, "new laptop not lkaptop", reference, ASOF)?.draft.description).toBe(
+      "new laptop",
+    );
+  });
+
+  it("leaves everything else alone", () => {
+    const fixed = amend(typo, "new laptop not lkaptop", reference, ASOF)?.draft;
+    expect(fixed?.amount).toBe(20000000);
+    expect(fixed?.fromWallet).toBe("Maya");
+    expect(fixed?.item).toBe("Online Buy");
+  });
+
+  /**
+   * Anchored on the wrong half actually being there.
+   *
+   * Without it, "food not gas" on an unrelated entry would rewrite a
+   * description that never held either word.
+   */
+  it("does nothing when the card does not say the wrong word", () => {
+    const other = { ...typo, description: "coffee at the mall" };
+    expect(amend(other, "food not gas", reference, ASOF)?.draft.description).not.toBe("food");
+  });
+
+  it("does nothing when there is no description to correct", () => {
+    const blank = { ...typo, description: "" };
+    expect(amend(blank, "new laptop not lkaptop", reference, ASOF)).toBeNull();
+  });
+});

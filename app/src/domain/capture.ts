@@ -303,6 +303,35 @@ export function amend(
   }
 
   /**
+   * "new laptop not lkaptop": fixing a typo you can see on the card.
+   *
+   * Typed at 12:11:30, straight after a card described as "new lkaptop", and
+   * nothing happened. It is the most natural correction there is, and the
+   * only one where both halves have already been said: what it reads now,
+   * and what it should read.
+   *
+   * Anchored on the wrong half actually being on the card. Without that,
+   * "food not gas" on an unrelated entry would rewrite a description that
+   * never held either word.
+   */
+  const instead = /^(.{2,60}?)\s+not\s+(.{2,60})$/i.exec(trimmed);
+  if (instead?.[1] && instead[2]) {
+    const right = instead[1].trim();
+    const wrong = instead[2].trim();
+    if (wrong && draft.description.toLowerCase().includes(wrong.toLowerCase())) {
+      /**
+       * The right half replaces the whole description, not the wrong word.
+       *
+       * "new laptop not lkaptop" against "new lkaptop" means the description
+       * is "new laptop". Substituting one word for the phrase gives "new new
+       * laptop": people restate the whole thing, not the broken part of it.
+       */
+      const description = right.slice(0, 500);
+      return { draft: { ...draft, description }, what: `Description: ${description}` };
+    }
+  }
+
+  /**
    * A description, said as one.
    *
    * Only when the message asks for it by name. Treating any unrecognised
