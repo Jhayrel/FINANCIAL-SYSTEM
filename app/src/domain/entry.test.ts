@@ -373,3 +373,30 @@ describe("Money Send: a transfer that left your accounts", () => {
     expect(transactionToDraft(rows[0]!).sentOut).toBeUndefined();
   });
 });
+
+describe("an edit is an edit however the row arrived", () => {
+  /**
+   * A row loaded into the form from the chat carries its id in the draft. The
+   * save path used to key on a prop that only the Database screen sets, so
+   * one loaded from the chat would have been saved as a new entry with a new
+   * record number, quietly duplicating it.
+   */
+  it("a draft carrying an id names the row it came from", () => {
+    const original = fx.transactions[10];
+    expect(original).toBeDefined();
+    if (!original) return;
+
+    const draft = transactionToDraft(original);
+    expect(draft.id).toBe(original.id);
+
+    // Saved against its own id and number, which is what an edit means.
+    const rows = draftToTransactions({ ...draft, amount: 12345 }, original.recordNumber, original.id);
+    expect(rows[0]?.id).toBe(original.id);
+    expect(rows[0]?.recordNumber).toBe(original.recordNumber);
+    expect(rows[0]?.amount).toBe(12345);
+  });
+
+  it("a fresh draft carries no id, so it can only be a new row", () => {
+    expect(emptyDraft("2026-08-31").id).toBeUndefined();
+  });
+});

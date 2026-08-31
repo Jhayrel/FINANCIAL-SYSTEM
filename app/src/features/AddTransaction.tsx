@@ -329,13 +329,24 @@ export function AddTransaction({
     setSubmitted(true);
     if (!check.ok) return;
 
-    if (editing) {
+    /**
+     * An edit is an edit however the row got here.
+     *
+     * This used to key on the `editing` prop alone, which is only set by the
+     * Database screen. A row loaded from the chat carries its id in the draft
+     * and would have been saved as a brand new entry with a new record
+     * number, quietly duplicating it. The id is the fact; the prop is one way
+     * of arriving at it.
+     */
+    const target = editing ?? (draft.id ? transactions.find((t) => t.id === draft.id) : undefined);
+
+    if (target) {
       /**
        * Same id, same record number. An edit is the entry corrected, not a
        * new one, and reissuing either would break every reference to it.
        */
       onUpdate(
-        draftToTransactions(draft, editing.recordNumber, editing.id, check.repaymentSplit),
+        draftToTransactions(draft, target.recordNumber, target.id, check.repaymentSplit),
       );
     } else {
       onSave(

@@ -85,6 +85,7 @@ import { aiEvent, correctionsFrom, type AiEvent, type AttachmentNote } from "../
 import { said } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
+import { transactionToDraft } from "../domain/entry";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
 import type { Provenance } from "../domain/activity";
@@ -164,7 +165,14 @@ interface Said {
  */
 interface Found {
   readonly kind: "found";
-  readonly action: RecallAction;
+  /**
+   * `edit` loads the row into the form rather than binning it.
+   *
+   * The routing already recognised "edit the last one" and then handed it to
+   * the finder, which only knew how to bin and restore, so the button said
+   * "Move to bin" for a request to change something.
+   */
+  readonly action: RecallAction | "edit";
   readonly candidates: readonly Candidate[];
   /** Ids already acted on, so a button does not offer the same row twice. */
   readonly done: readonly string[];
@@ -929,9 +937,12 @@ export function AskPanel({
         ? null
         : saysRecall
           ? {
-              action: (routed?.intent === "restore" ? "restore" : "bin") as RecallAction,
+              action: (routed?.intent === "restore"
+                ? "restore"
+                : routed?.intent === "editEntry"
+                  ? "edit"
+                  : "bin") as RecallAction | "edit",
               phrase: routed?.target || note,
-              editing: routed?.intent === "editEntry",
             }
           : routed === null
             ? detectRecall(note)
@@ -1392,8 +1403,14 @@ export function AskPanel({
               key={i}
               found={turn}
               onAct={(id) => {
-                if (turn.action === "bin") sink.bin(id);
-                else sink.restore(id);
+                if (turn.action === "edit") {
+                  const row = transactions.find((t) => t.id === id);
+                  if (row) sink.use(transactionToDraft(row));
+                } else if (turn.action === "bin") {
+                  sink.bin(id);
+                } else {
+                  sink.restore(id);
+                }
                 settleFound(i, id);
               }}
             />
@@ -2039,7 +2056,7 @@ function Field({
  */
 function FoundList({ found, onAct }: { found: Found; onAct: (id: string) => void }) {
   const { action, candidates, done } = found;
-  const verb = action === "bin" ? "Move to bin" : "Restore";
+  const verb = action === "edit" ? "Edit this" : action === "bin" ? "Move to bin" : "Restore";
 
   return (
     <div className="fms-proposal">
@@ -2048,7 +2065,11 @@ function FoundList({ found, onAct }: { found: Found; onAct: (id: string) => void
           {candidates.length === 1 ? "One entry matches" : `${candidates.length} entries match`}
         </span>
         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-          {action === "bin" ? "nothing is deleted yet" : "from the bin"}
+          {action === "edit"
+            ? "nothing is changed yet"
+            : action === "bin"
+              ? "nothing is deleted yet"
+              : "from the bin"}
         </span>
       </div>
 
@@ -2063,9 +2084,11 @@ function FoundList({ found, onAct }: { found: Found; onAct: (id: string) => void
             <p className="t-micro fms-proposalnote">Matched on {why.join(", ")}.</p>
             {settled ? (
               <p className="t-micro fms-proposalfrom">
-                {action === "bin"
-                  ? "Moved to the bin. It is restorable from the Bin screen."
-                  : "Restored. It is back in the Database."}
+                {action === "edit"
+                  ? "Loaded into the form beside this. Change it and press Save transaction."
+                  : action === "bin"
+                    ? "Moved to the bin. It is restorable from the Bin screen."
+                    : "Restored. It is back in the Database."}
               </p>
             ) : (
               <Button size="sm" onClick={() => onAct(row.id)}>
@@ -2077,9 +2100,11 @@ function FoundList({ found, onAct }: { found: Found; onAct: (id: string) => void
       })}
 
       <p className="t-micro fms-proposalfrom">
-        {action === "bin"
-          ? "A deleted entry moves to the Bin and can be brought back. Nothing is ever removed."
-          : "Restoring puts it back where it was, with its own record number."}
+        {action === "edit"
+          ? "Editing keeps the same record number: it is the entry corrected, not a new one."
+          : action === "bin"
+            ? "A deleted entry moves to the Bin and can be brought back. Nothing is ever removed."
+            : "Restoring puts it back where it was, with its own record number."}
       </p>
     </div>
   );
