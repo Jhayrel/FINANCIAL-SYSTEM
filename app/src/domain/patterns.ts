@@ -46,7 +46,7 @@
 
 import { getMonth, getYear } from "./dates";
 import type { Centavos } from "./money";
-import { transferCost } from "./transfers";
+import { costOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 
 export interface Finding {
@@ -66,12 +66,23 @@ const daysBetween = (a: IsoDate, b: IsoDate): number =>
 const php = (c: Centavos): string =>
   `PHP ${(c / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-/** What a row actually cost, with transfers handled the way the ledger does. */
-function outflow(t: Transaction): Centavos {
-  if (t.type === "Transfer") return transferCost(t);
-  if (t.type === "Spending") return t.total;
-  return 0;
-}
+/**
+ * What a row cost: the app's own definition, not a fourth one.
+ *
+ * This was the last private copy. It differed from `costOf` in the same two
+ * places every private copy has: it counted a Spending row whose category is
+ * blank, which the app ignores, and it ignored debt interest and fees, which
+ * the app counts.
+ *
+ * The figures here are shown to the owner, in the patterns panel and in what
+ * the model is told about their habits, so "you are spending faster than
+ * usual" was being worked out from a different total than the one on screen.
+ * Same reason `charts.ts` and `aiChatContext.ts` gave theirs up.
+ *
+ * If a genuine "money that left the wallet" measure is ever wanted, which is
+ * not the same question, it should be written as that and named that.
+ */
+const outflow = costOf;
 
 /**
  * Categories chosen freely rather than owed to someone.
@@ -80,6 +91,28 @@ function outflow(t: Transaction): Centavos {
  * migration check is that the names move around. A hardcoded list would go
  * stale the moment a new one was invented, which is exactly when it matters.
  */
+/**
+ * What the owner calls this kind of spending.
+ *
+ * ── The field this file was reading, and why it found nothing ─────────────
+ *
+ * Every detector here grouped by `t.category`. In this ledger that field
+ * holds the structure, not the subject: it is only ever Spending, Bills,
+ * Subscriptions, Transfer, Revenue or Opening. `isDiscretionary` then throws
+ * out all but two of those, so "a category that fell while another rose"
+ * was comparing one group against itself and could never fire, and a streak
+ * reported "40 days without a Spending entry", which says nothing.
+ *
+ * What a person means by a category is Treat, Food, Gas: that is `item`.
+ * The tests hid this by putting item names in the category field, so they
+ * described a shape the real data has never had.
+ *
+ * `category` still decides eligibility, because that is genuinely what it is
+ * for: it is how Bills and Subscriptions are told apart from discretionary
+ * spending. It just cannot be the label.
+ */
+const subjectOf = (t: Transaction): string => t.item.trim() || t.category.trim();
+
 export function isDiscretionary(category: string): boolean {
   const c = category.trim().toLowerCase();
   if (!c) return false;
@@ -216,7 +249,8 @@ function discretionaryByCategory(
     const cost = outflow(t);
     if (cost === 0) continue;
 
-    const key = t.category.trim();
+    const key = subjectOf(t);
+    if (!key) continue;
     out.set(key, (out.get(key) ?? 0) + cost);
   }
 
@@ -350,7 +384,8 @@ export function brokenStreaks(
 
   for (const t of transactions) {
     if (!isDiscretionary(t.category) || outflow(t) === 0) continue;
-    const key = t.category.trim();
+    const key = subjectOf(t);
+    if (!key) continue;
     const list = byCategory.get(key);
     if (list) list.push(t);
     else byCategory.set(key, [t]);

@@ -30,7 +30,7 @@ const row = (over: Partial<Transaction>): Transaction => {
     recordNumber: seq,
     date: "2026-08-01",
     type: "Spending",
-    category: "Food",
+    category: "Spending",
     item: "Lunch",
     description: "",
     amount: 10000,
@@ -68,7 +68,7 @@ describe("incomeVelocity", () => {
   it("measures how much of a deposit went straight back out", () => {
     const events = incomeVelocity(
       [
-        row({ date: "2026-08-10", type: "Revenue", amount: 100000, total: 100000, fromWallet: "Maya", category: "Salary" }),
+        row({ date: "2026-08-10", type: "Revenue", amount: 100000, total: 100000, fromWallet: "Maya", category: "Revenue", item: "Salary" }),
         row({ date: "2026-08-11", total: 60000, amount: 60000 }),
       ],
       "2026-08-15",
@@ -83,7 +83,7 @@ describe("incomeVelocity", () => {
   it("ignores spending outside the window, which is the whole point", () => {
     const events = incomeVelocity(
       [
-        row({ date: "2026-08-10", type: "Revenue", amount: 100000, total: 100000, category: "Salary" }),
+        row({ date: "2026-08-10", type: "Revenue", amount: 100000, total: 100000, category: "Revenue", item: "Salary" }),
         row({ date: "2026-08-20", total: 60000, amount: 60000 }),
       ],
       "2026-08-25",
@@ -96,7 +96,7 @@ describe("incomeVelocity", () => {
     // PHP 0.02 in, PHP 500 out is not a 2,500,000% event. It is two rows.
     const events = incomeVelocity(
       [
-        row({ date: "2026-08-10", type: "Revenue", amount: 2, total: 2, category: "Interest" }),
+        row({ date: "2026-08-10", type: "Revenue", amount: 2, total: 2, category: "Revenue", item: "Interest" }),
         row({ date: "2026-08-10", total: 50000, amount: 50000 }),
       ],
       "2026-08-12",
@@ -122,8 +122,8 @@ describe("incomeVelocity", () => {
     // one of them is what produced "200% of the PHP 997.34 that arrived".
     const events = incomeVelocity(
       [
-        row({ date: "2026-08-10", type: "Revenue", amount: 100000, total: 100000, category: "Salary" }),
-        row({ date: "2026-08-11", type: "Revenue", amount: 100000, total: 100000, category: "Salary" }),
+        row({ date: "2026-08-10", type: "Revenue", amount: 100000, total: 100000, category: "Revenue", item: "Salary" }),
+        row({ date: "2026-08-11", type: "Revenue", amount: 100000, total: 100000, category: "Revenue", item: "Salary" }),
         row({ date: "2026-08-11", total: 150000, amount: 150000 }),
       ],
       "2026-08-15",
@@ -136,8 +136,8 @@ describe("incomeVelocity", () => {
   it("reports one finding per window, not one per deposit", () => {
     const events = incomeVelocity(
       [
-        row({ date: "2026-08-10", type: "Revenue", amount: 100000, total: 100000, category: "Salary" }),
-        row({ date: "2026-08-11", type: "Revenue", amount: 100000, total: 100000, category: "Salary" }),
+        row({ date: "2026-08-10", type: "Revenue", amount: 100000, total: 100000, category: "Revenue", item: "Salary" }),
+        row({ date: "2026-08-11", type: "Revenue", amount: 100000, total: 100000, category: "Revenue", item: "Salary" }),
         row({ date: "2026-08-11", total: 150000, amount: 150000 }),
       ],
       "2026-08-15",
@@ -164,9 +164,9 @@ describe("incomeVelocity", () => {
 describe("categoryMigration", () => {
   const twoMonths = [
     // July: heavy on Treat.
-    row({ date: "2026-07-05", category: "Treat", total: 200000, amount: 200000 }),
+    row({ date: "2026-07-05", item: "Treat", total: 200000, amount: 200000 }),
     // August: Treat gone, Travel appears at nearly the same size.
-    row({ date: "2026-08-05", category: "Travel", total: 190000, amount: 190000 }),
+    row({ date: "2026-08-05", item: "Travel", total: 190000, amount: 190000 }),
   ];
 
   it("catches a category that moved rather than shrank", () => {
@@ -181,8 +181,8 @@ describe("categoryMigration", () => {
   it("stays quiet when a fall was not replaced, because that is good news", () => {
     const moved = categoryMigration(
       [
-        row({ date: "2026-07-05", category: "Treat", total: 200000, amount: 200000 }),
-        row({ date: "2026-08-05", category: "Travel", total: 10000, amount: 10000 }),
+        row({ date: "2026-07-05", item: "Treat", total: 200000, amount: 200000 }),
+        row({ date: "2026-08-05", item: "Travel", total: 10000, amount: 10000 }),
       ],
       "2026-08-30",
     );
@@ -193,8 +193,8 @@ describe("categoryMigration", () => {
   it("stays quiet on small movements", () => {
     const moved = categoryMigration(
       [
-        row({ date: "2026-07-05", category: "Treat", total: 5000, amount: 5000 }),
-        row({ date: "2026-08-05", category: "Travel", total: 5000, amount: 5000 }),
+        row({ date: "2026-07-05", item: "Treat", total: 5000, amount: 5000 }),
+        row({ date: "2026-08-05", item: "Travel", total: 5000, amount: 5000 }),
       ],
       "2026-08-30",
     );
@@ -211,8 +211,8 @@ describe("categoryMigration", () => {
   it("crosses a year boundary correctly", () => {
     const moved = categoryMigration(
       [
-        row({ date: "2025-12-05", category: "Treat", total: 200000, amount: 200000 }),
-        row({ date: "2026-01-05", category: "Travel", total: 190000, amount: 190000 }),
+        row({ date: "2025-12-05", item: "Treat", total: 200000, amount: 200000 }),
+        row({ date: "2026-01-05", item: "Travel", total: 190000, amount: 190000 }),
       ],
       "2026-01-30",
     );
@@ -236,9 +236,9 @@ describe("categoryMigration", () => {
 describe("zeroBalanceCount", () => {
   it("counts a wallet emptying, using the same balance rule as the app", () => {
     const rows = [
-      row({ date: "2026-08-01", type: "Revenue", fromWallet: "Cash", amount: 50000, total: 50000, category: "Salary" }),
+      row({ date: "2026-08-01", type: "Revenue", fromWallet: "Cash", amount: 50000, total: 50000, category: "Revenue", item: "Salary" }),
       row({ date: "2026-08-02", fromWallet: "Cash", amount: 50000, total: 50000 }),
-      row({ date: "2026-08-03", type: "Revenue", fromWallet: "Cash", amount: 50000, total: 50000, category: "Salary" }),
+      row({ date: "2026-08-03", type: "Revenue", fromWallet: "Cash", amount: 50000, total: 50000, category: "Revenue", item: "Salary" }),
       row({ date: "2026-08-04", fromWallet: "Cash", amount: 50000, total: 50000 }),
     ];
 
@@ -249,7 +249,7 @@ describe("zeroBalanceCount", () => {
 
   it("does not count a wallet that merely stays low", () => {
     const rows = [
-      row({ date: "2026-08-01", type: "Revenue", fromWallet: "Cash", amount: 50000, total: 50000, category: "Salary" }),
+      row({ date: "2026-08-01", type: "Revenue", fromWallet: "Cash", amount: 50000, total: 50000, category: "Revenue", item: "Salary" }),
       row({ date: "2026-08-02", fromWallet: "Cash", amount: 100, total: 100 }),
     ];
 
@@ -258,7 +258,7 @@ describe("zeroBalanceCount", () => {
 
   it("only counts inside the window", () => {
     const rows = [
-      row({ date: "2026-01-01", type: "Revenue", fromWallet: "Cash", amount: 50000, total: 50000, category: "Salary" }),
+      row({ date: "2026-01-01", type: "Revenue", fromWallet: "Cash", amount: 50000, total: 50000, category: "Revenue", item: "Salary" }),
       row({ date: "2026-01-02", fromWallet: "Cash", amount: 50000, total: 50000 }),
     ];
 
@@ -270,8 +270,8 @@ describe("brokenStreaks", () => {
   it("names a long gap that has just ended", () => {
     const streaks = brokenStreaks(
       [
-        row({ date: "2026-06-01", category: "Treat" }),
-        row({ date: "2026-08-25", category: "Treat", total: 30000, amount: 30000 }),
+        row({ date: "2026-06-01", item: "Treat" }),
+        row({ date: "2026-08-25", item: "Treat", total: 30000, amount: 30000 }),
       ],
       "2026-08-27",
     );
@@ -284,8 +284,8 @@ describe("brokenStreaks", () => {
   it("says nothing about a streak that broke long ago", () => {
     const streaks = brokenStreaks(
       [
-        row({ date: "2026-01-01", category: "Treat" }),
-        row({ date: "2026-03-01", category: "Treat" }),
+        row({ date: "2026-01-01", item: "Treat" }),
+        row({ date: "2026-03-01", item: "Treat" }),
       ],
       "2026-08-27",
     );
@@ -296,8 +296,8 @@ describe("brokenStreaks", () => {
   it("says nothing about an ordinary few days between entries", () => {
     const streaks = brokenStreaks(
       [
-        row({ date: "2026-08-20", category: "Treat" }),
-        row({ date: "2026-08-25", category: "Treat" }),
+        row({ date: "2026-08-20", item: "Treat" }),
+        row({ date: "2026-08-25", item: "Treat" }),
       ],
       "2026-08-27",
     );
@@ -311,7 +311,7 @@ describe("uncategorisedCount", () => {
     const rows = [
       row({ date: "2026-08-28", category: "" }),
       row({ date: "2026-08-27", category: "Unknown" }),
-      row({ date: "2026-08-26", category: "Food" }),
+      row({ date: "2026-08-26", item: "Food" }),
       row({ date: "2026-01-01", category: "" }),
     ];
 
@@ -322,8 +322,8 @@ describe("uncategorisedCount", () => {
 describe("patternFindings", () => {
   it("says nothing at all about an ordinary month", () => {
     const quiet = [
-      row({ date: "2026-08-01", category: "Food", total: 20000, amount: 20000 }),
-      row({ date: "2026-08-10", category: "Food", total: 22000, amount: 22000 }),
+      row({ date: "2026-08-01", item: "Food", total: 20000, amount: 20000 }),
+      row({ date: "2026-08-10", item: "Food", total: 22000, amount: 22000 }),
     ];
 
     expect(patternFindings({ transactions: quiet, asOf: "2026-08-30", wallets: ["Maya"] })).toEqual(
@@ -334,8 +334,8 @@ describe("patternFindings", () => {
   it("leads with velocity, the strongest signal", () => {
     const findings = patternFindings({
       transactions: [
-        row({ date: "2026-08-10", type: "Revenue", amount: 500000, total: 500000, category: "Salary" }),
-        row({ date: "2026-08-11", total: 400000, amount: 400000, category: "Treat" }),
+        row({ date: "2026-08-10", type: "Revenue", amount: 500000, total: 500000, category: "Revenue", item: "Salary" }),
+        row({ date: "2026-08-11", total: 400000, amount: 400000, item: "Treat" }),
       ],
       asOf: "2026-08-15",
       wallets: ["Maya"],
@@ -352,8 +352,8 @@ describe("patternFindings", () => {
     // impossible figure has no reason to believe the rest of the panel.
     const findings = patternFindings({
       transactions: [
-        row({ date: "2026-08-10", type: "Revenue", amount: 99734, total: 99734, category: "Salary" }),
-        row({ date: "2026-08-11", total: 199100, amount: 199100, category: "Treat" }),
+        row({ date: "2026-08-10", type: "Revenue", amount: 99734, total: 99734, category: "Revenue", item: "Salary" }),
+        row({ date: "2026-08-11", total: 199100, amount: 199100, item: "Treat" }),
       ],
       asOf: "2026-08-15",
       wallets: ["Maya"],
@@ -383,8 +383,8 @@ describe("patternFindings", () => {
   it("quantifies and never judges", () => {
     const findings = patternFindings({
       transactions: [
-        row({ date: "2026-08-10", type: "Revenue", amount: 500000, total: 500000, category: "Salary" }),
-        row({ date: "2026-08-11", total: 400000, amount: 400000, category: "Treat" }),
+        row({ date: "2026-08-10", type: "Revenue", amount: 500000, total: 500000, category: "Revenue", item: "Salary" }),
+        row({ date: "2026-08-11", total: 400000, amount: 400000, item: "Treat" }),
       ],
       asOf: "2026-08-15",
       wallets: ["Maya"],
@@ -424,5 +424,71 @@ describe("patternFindings", () => {
     };
 
     expect(patternFindings(input)).toEqual(patternFindings(input));
+  });
+});
+
+describe("the field the detectors group by", () => {
+  /**
+   * ── What this file used to describe ─────────────────────────────────────
+   *
+   * Every detector grouped by `t.category`. In this ledger that field holds
+   * the structure, not the subject: it is only ever Spending, Bills,
+   * Subscriptions, Transfer, Revenue or Opening, and `isDiscretionary`
+   * throws out all but two of those.
+   *
+   * So on real data the migration detector compared one group against
+   * itself and could never fire, and a streak reported "40 days without a
+   * Spending entry", which says nothing at all.
+   *
+   * The tests hid it by putting item names in the category field, so they
+   * described a shape the real ledger has never had. These use the real
+   * shape: `category` is Spending, `item` is what the owner calls it.
+   */
+  const real = (over: Partial<Transaction>): Transaction =>
+    row({ category: "Spending", ...over });
+
+  it("groups a streak by what the owner calls it, not by Spending", () => {
+    const rows = [
+      real({ date: "2026-06-01", item: "Treat", amount: 30000, total: 30000 }),
+      real({ date: "2026-08-25", item: "Treat", amount: 30000, total: 30000 }),
+      real({ date: "2026-06-02", item: "Gas", amount: 30000, total: 30000 }),
+      real({ date: "2026-08-26", item: "Gas", amount: 30000, total: 30000 }),
+    ];
+    const names = brokenStreaks(rows, "2026-08-29").map((s) => s.category);
+    expect(names).toContain("Treat");
+    expect(names).toContain("Gas");
+    expect(names).not.toContain("Spending");
+  });
+
+  it("sees a migration between two of the owner's own categories", () => {
+    const rows = [
+      real({ date: "2026-07-05", item: "Treat", amount: 200000, total: 200000 }),
+      real({ date: "2026-08-05", item: "Travel", amount: 190000, total: 190000 }),
+    ];
+    const moved = categoryMigration(rows, "2026-08-29");
+    expect(moved?.fell.category).toBe("Treat");
+    expect(moved?.rose.category).toBe("Travel");
+  });
+
+  /**
+   * `category` still decides eligibility, because that is what it is for:
+   * telling Bills and Subscriptions apart from discretionary spending. It
+   * just cannot be the label.
+   */
+  it("still excludes bills and subscriptions from a migration", () => {
+    const rows = [
+      row({ date: "2026-07-05", category: "Bills", item: "Globe at Home Wifi", amount: 200000, total: 200000 }),
+      row({ date: "2026-08-05", category: "Bills", item: "Dito Prepaid", amount: 10000, total: 10000 }),
+    ];
+    expect(categoryMigration(rows, "2026-08-29")).toBeNull();
+  });
+
+  /** A row with no item at all falls back to its category rather than vanishing. */
+  it("falls back to the category when there is no item", () => {
+    const rows = [
+      real({ date: "2026-08-25", item: "", amount: 30000, total: 30000 }),
+      real({ date: "2026-06-01", item: "", amount: 30000, total: 30000 }),
+    ];
+    expect(brokenStreaks(rows, "2026-08-29").map((s) => s.category)).toContain("Spending");
   });
 });
