@@ -41,11 +41,26 @@ const ORDER: readonly Blank[] = ["amount", "fromWallet", "toWallet", "item"];
  * assistant that interrogates you about a fee you did not pay is worse than
  * one that leaves the field blank.
  */
-export function blanksIn(draft: Draft, accounts: readonly string[]): Blank[] {
+export function blanksIn(
+  draft: Draft,
+  accounts: readonly string[],
+  /**
+   * Blanks that are blank on purpose.
+   *
+   * A transfer to someone else's bank has no destination wallet, and that is
+   * the whole meaning of it: CLAUDE.md's transfer rule says a blank
+   * destination books the full amount as spending. Asking "which one did it
+   * go into" about money that left your accounts is asking an unanswerable
+   * question, and the app did exactly that: it offered the five account names
+   * and then refused the answer, because the friend's bank is not one of them.
+   */
+  settled: readonly Blank[] = [],
+): Blank[] {
   if (!draft.flow) return [];
   const flow = draft.flow as Flow;
 
   return ORDER.filter((blank) => {
+    if (settled.includes(blank)) return false;
     switch (blank) {
       case "amount":
         return draft.amount === null || draft.amount <= 0;
@@ -63,9 +78,10 @@ export function blanksIn(draft: Draft, accounts: readonly string[]): Blank[] {
 export function nextQuestion(
   draft: Draft,
   reference: ReferenceLists,
+  settled: readonly Blank[] = [],
 ): { readonly blank: Blank; readonly question: string } | null {
   const accounts = [...reference.wallets, ...reference.savings];
-  const blank = blanksIn(draft, accounts)[0];
+  const blank = blanksIn(draft, accounts, settled)[0];
   if (!blank) return null;
 
   // Named, so the answer can be one word. A list of your own wallet names is

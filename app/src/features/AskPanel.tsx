@@ -171,7 +171,12 @@ export function AskPanel({
    * While this is set the box is answering a question, not starting a new
    * one, which is why the intent chip hides and the placeholder changes.
    */
-  const [pending, setPending] = useState<{ draft: Draft; blank: Blank } | null>(null);
+  const [pending, setPending] = useState<{
+    draft: Draft;
+    blank: Blank;
+    /** Blanks that are blank on purpose, carried so they stay unasked. */
+    settled: readonly Blank[];
+  } | null>(null);
   /** A file is over the panel right now. */
   const [dragging, setDragging] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -243,6 +248,7 @@ export function AskPanel({
     hint: string,
     useHistory = true,
     batch = false,
+    settled: readonly Blank[] = [],
   ): void => {
     // History first. Asking a question the ledger already answers is the
     // assistant failing to read its own data. `readEntry` has already done
@@ -266,12 +272,12 @@ export function AskPanel({
      * at once, and it should not try. The cards carry their own blanks, in
      * red, with a picker on each one.
      */
-    const asked = batch ? null : nextQuestion(draft, reference);
+    const asked = batch ? null : nextQuestion(draft, reference, settled);
     if (!asked) {
       say({ kind: "proposal", proposal: filled, state: "open" });
       return;
     }
-    setPending({ draft, blank: asked.blank });
+    setPending({ draft, blank: asked.blank, settled });
     say({ kind: "assistant", text: asked.question, from: "this device" });
   };
 
@@ -295,9 +301,9 @@ export function AskPanel({
       return;
     }
 
-    const asked = nextQuestion(filled, reference);
+    const asked = nextQuestion(filled, reference, pending.settled);
     if (asked) {
-      setPending({ draft: filled, blank: asked.blank });
+      setPending({ draft: filled, blank: asked.blank, settled: pending.settled });
       say({ kind: "assistant", text: asked.question, from: "this device" });
       return;
     }
@@ -429,8 +435,15 @@ export function AskPanel({
      * "make it 300" was being read as a new question and answered with a
      * summary of the month. There is a card on screen with an amount on it,
      * and that is what "it" refers to.
+     *
+     * Only for a message that is not itself an entry. "I paid my debt
+     * yesterday 2950 using maya" mentions a wallet, and without this guard it
+     * silently changed the wallet on an unrelated card instead of being read
+     * as the new entry it is. A correction is "gcash", "food", "make it 300":
+     * no verb, nothing that happened, which is exactly what `detectIntent`
+     * already calls a question.
      */
-    if (files.length === 0 && !as) {
+    if (files.length === 0 && !as && detectIntent(note) === "ask") {
       const card = openCard();
       if (card) {
         const change = amend(card.turn.proposal.draft, note, reference);
@@ -467,8 +480,74 @@ export function AskPanel({
        * data rather than guessing at English. The model is called only when
        * this finds too little, which is mostly photos.
        */
+      /**
+       * Several lines, several entries.
+       *
+       * Shift plus Enter makes a message like:
+       *
+       *   I pay 100
+       *   I paid gas 200
+       *
+       * Each line is its own row. Only when every line reads as one: a single
+       * line that happens to wrap, or a question with a line break in it,
+       * stays one message and goes down the ordinary path.
+       */
+      const lines = note
+        .split(String.fromCharCode(10))
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      if (files.length === 0 && lines.length > 1) {
+        const each = lines.map((line) => readEntry(line, transactions, reference, asOf));
+        if (each.every((r) => r.worthOffering)) {
+          say({ kind: "you", text: note });
+          each.forEach((r, i) =>
+            offer(
+              {
+                draft: r.draft,
+                confidence: "high",
+                sourceRef: `line ${i + 1}: ${lines[i] ?? ""}`,
+                adjustments: r.because,
+              },
+              lines[i] ?? "",
+              false,
+              true,
+              r.settled,
+            ),
+          );
+          return;
+        }
+      }
+
       if (files.length === 0) {
         const local = readEntry(note, transactions, reference, asOf);
+
+        /**
+         * Borrowing and repaying go to the form, always.
+         *
+         * A debt row needs the credit line and whether it is a draw, a
+         * repayment, interest or a write-off. Neither is in a sentence, and
+         * reading either wrong misfiles borrowing as income, which is the
+         * mistake this whole app was built to stop.
+         */
+        if (local.readsAsDebt) {
+          say({ kind: "you", text: note });
+          // Open the form on Debt with what the sentence did give up, so the
+          // only things left are the two nobody should guess.
+          sink.use(local.draft);
+          const knows = [
+            local.draft.amount !== null ? "the amount" : "",
+            local.draft.fromWallet ? `the wallet (${local.draft.fromWallet})` : "",
+            "the date",
+          ].filter(Boolean);
+          say({
+            kind: "assistant",
+            text: `That reads as debt, so it goes through the form: which credit line it belongs to, and whether it is a draw, a repayment, interest or a write-off, are not things to guess at with borrowed money. I have opened Debt beside this with ${knows.join(", ")} filled in. Pick the debt and the effect, then save.`,
+            from: "this device",
+          });
+          return;
+        }
+
         if (local.worthOffering) {
           say({ kind: "you", text: note });
           offer(
@@ -480,6 +559,8 @@ export function AskPanel({
             },
             note,
             false,
+            false,
+            local.settled,
           );
           return;
         }
@@ -499,6 +580,38 @@ export function AskPanel({
       setBusy(false);
     }
   };
+
+  /** Cards still waiting on a decision, and how many of those could save. */
+  const open = turns.filter((t): t is Offered => isOffer(t) && t.state === "open");
+  const openCount = open.length;
+  const readyCount = open.filter((t) => sink.check(t.proposal.draft).ok).length;
+
+  /**
+   * Add every card that would save, and leave the rest showing.
+   *
+   * One pass over the list rather than one setState per card, so eight rows
+   * are one render and one batch of writes rather than eight of each.
+   */
+  const addReady = (): void => {
+    const added: number[] = [];
+    turns.forEach((t, i) => {
+      if (isOffer(t) && t.state === "open" && sink.check(t.proposal.draft).ok) {
+        sink.add(t.proposal.draft, {
+          actor: "ai",
+          via: t.proposal.sourceRef.toLowerCase().includes("image") ? "ai_image" : "ai_chat",
+        });
+        added.push(i);
+      }
+    });
+    setTurns((prev) =>
+      prev.map((t, i) => (added.includes(i) && isOffer(t) ? { ...t, state: "added" } : t)),
+    );
+  };
+
+  const discardOpen = (): void =>
+    setTurns((prev) =>
+      prev.map((t) => (isOffer(t) && t.state === "open" ? { ...t, state: "discarded" } : t)),
+    );
 
   const attached = files.length > 0;
   const weight = totalBytes(files);
@@ -556,6 +669,28 @@ export function AskPanel({
           Reads your figures and your receipts. It proposes; you save.
         </p>
       </div>
+
+      {/*
+        A batch gets one bar rather than eight decisions.
+
+        Eight cards off two screenshots is a lot of scrolling to find out how
+        many are ready, and "add the ready ones" is the thing you actually
+        want to press. It sits above the thread so it stays put while the
+        cards scroll under it.
+      */}
+      {openCount > 1 && (
+        <div className="fms-batchbar">
+          <span className="t-micro">
+            {openCount} suggested, {readyCount} ready
+          </span>
+          <Button size="sm" variant="primary" disabled={readyCount === 0 || busy} onClick={addReady}>
+            Add {readyCount === openCount ? "all" : `the ${readyCount} ready`}
+          </Button>
+          <button type="button" className="t-micro fms-linkish" onClick={discardOpen}>
+            Discard the rest
+          </button>
+        </div>
+      )}
 
       <div className="fms-thread" ref={threadRef}>
         {turns.length === 0 && !busy && (
@@ -691,9 +826,23 @@ export function AskPanel({
         >
           +
         </button>
-        <input
+        {/*
+          A textarea, so several entries fit in one message.
+
+          Enter sends and Shift plus Enter starts a line, which is what every
+          chat does and therefore what the fingers already expect. It grows to
+          a few lines and then scrolls, so a long paste cannot push the
+          composer over the conversation.
+        */}
+        <textarea
           className="t-caption fms-askinput"
+          rows={1}
           value={draft}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || e.shiftKey) return;
+            e.preventDefault();
+            void send();
+          }}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={
             pending
@@ -812,6 +961,8 @@ function ProposalCard({
    */
   const walletField: "fromWallet" | "toWallet" = flow === "Revenue" ? "toWallet" : "fromWallet";
   const walletLabel = flow === "Revenue" ? "Which wallet received it" : "Which wallet paid";
+  /** A transfer that left the accounts has no destination to show or ask for. */
+  const moneySend = flow === "Transfer" && draft.sentOut === true;
   const confidence =
     proposal.confidence === "high"
       ? "clear"
@@ -841,9 +992,14 @@ function ProposalCard({
         <Field label="Type" value={flow} />
         <Field label="Date" value={draft.date} mono />
         {flow !== "Revenue" && <Field label="From wallet" value={draft.fromWallet} required />}
-        {flow !== "Spending" && (
-          <Field label="To wallet" value={draft.toWallet} required={flow === "Transfer"} />
-        )}
+        {flow !== "Spending" &&
+          (moneySend ? (
+            // Blank on purpose: the money left the accounts, so there is no
+            // destination to pick and marking it required reads as an error.
+            <Field label="To wallet" value="Someone else" />
+          ) : (
+            <Field label="To wallet" value={draft.toWallet} required={flow === "Transfer"} />
+          ))}
         <Field label="Category" value={draft.category} />
         {(flow === "Spending" || flow === "Revenue") && (
           <Field label="Item" value={draft.item} required />

@@ -1990,3 +1990,60 @@
   outline: 2px dashed var(--brand-600);
   outline-offset: -4px;
 }
+
+/*
+ * The bar for a batch.
+ *
+ * Above the thread rather than inside it, so it holds still while eight cards
+ * scroll under it: the count and the button are what you came back to, and
+ * hunting for them among the cards is the mess this replaces.
+ */
+.fms-batchbar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--brand-50);
+  border: 1px solid var(--brand-600);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+}
+
+/*
+ * The composer, as a textarea.
+ *
+ * Grows to a few lines then scrolls, so pasting a statement cannot push the
+ * composer up over the conversation. `field-sizing` does it natively where it
+ * exists; the max-height is what holds everywhere else.
+ */
+textarea.fms-askinput {
+  field-sizing: content;
+  min-height: 32px;
+  max-height: 96px;
+  padding: 6px var(--space-2);
+  resize: none;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+@media (max-width: 1023px) {
+  textarea.fms-askinput {
+    min-height: 44px;
+  }
+}
+
+/*
+ * The composer glows, like the panel does.
+ *
+ * Same tokens as the panel halo, so it reads as the same feature rather than
+ * as a second decoration. It sits outside the box, so nothing inside changes
+ * contrast (rule D7).
+ */
+.fms-askform:focus-within .fms-askinput {
+  border-color: var(--brand-600);
+  box-shadow:
+    0 0 0 1px var(--ai-glow-ring),
+    0 0 10px 1px var(--ai-glow-halo-active);
+}

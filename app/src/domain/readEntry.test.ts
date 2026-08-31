@@ -214,3 +214,57 @@ describe("it never produces debt", () => {
     expect(read("borrowed 500 from maya credit").worthOffering).toBe(false);
   });
 });
+
+describe("money that leaves your accounts", () => {
+  /**
+   * The transfer that broke. It became Gcash to Gcash, was refused as needing
+   * two different wallets, and then asked which of five accounts a friend's
+   * bank was.
+   */
+  it("reads sending to a friend as a transfer out, with no destination to ask about", () => {
+    const { draft, settled, because } = read(
+      "I sent money to my friend gotyme 1000 using my gcash",
+    );
+    expect(draft.flow).toBe("Transfer");
+    expect(draft.fromWallet).toBe("Gcash");
+    expect(draft.toWallet).toBe("");
+    expect(draft.amount).toBe(100000);
+    expect(settled).toContain("toWallet");
+    expect(because.join(" ")).toContain("left your accounts");
+    // Nothing left to ask: the blank destination is the answer.
+    expect(nextQuestion(draft, reference, settled)).toBeNull();
+  });
+
+  it("still asks for the destination when the transfer is between your own", () => {
+    const { draft, settled } = read("moved 500 from cash");
+    expect(settled).toHaveLength(0);
+    expect(nextQuestion(draft, reference, settled)?.blank).toBe("toWallet");
+  });
+
+  it("keeps a named account as the destination rather than treating it as sent out", () => {
+    const { draft, settled } = read("transferred 1000 from cash to gcash");
+    expect(draft.toWallet).toBe("Gcash");
+    expect(settled).toHaveLength(0);
+  });
+});
+
+describe("debt is never guessed at", () => {
+  it("refuses every shape of borrowing and repaying", () => {
+    for (const text of [
+      "borrowed 500 from maya credit",
+      "I paid my credit card 2000",
+      "repaid 1500 to maya",
+      "paid off my loan",
+      "I owe 300 to my friend",
+    ]) {
+      const result = read(text);
+      expect(result.readsAsDebt, text).toBe(true);
+      expect(result.worthOffering, text).toBe(false);
+    }
+  });
+
+  it("does not mistake ordinary spending for debt", () => {
+    expect(read("I paid 200 for food").readsAsDebt).toBe(false);
+    expect(read("bought load 100").readsAsDebt).toBe(false);
+  });
+});

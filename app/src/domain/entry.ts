@@ -45,6 +45,21 @@ export interface Draft {
   status: TransactionStatus;
   debtId?: string | undefined;
   debtEffect?: DebtEffect | undefined;
+  /**
+   * Transfer only: the money left your accounts.
+   *
+   * A transfer with no destination is Money Send, which is a documented,
+   * saveable row (CLAUDE.md, "Transfers are derived"): a blank destination
+   * books the whole amount as spending, a named one books only the fee.
+   *
+   * It lives on the draft because `checkDraft` has to be able to tell it
+   * apart from a destination you have not chosen yet, and those look
+   * identical in every other field. It used to be component state in
+   * `AddTransaction`, invisible from here, so every Money Send failed
+   * validation with "Pick the wallet the money lands in" and the Save button
+   * silently did nothing.
+   */
+  sentOut?: boolean | undefined;
 }
 
 export function emptyDraft(date: IsoDate = today()): Draft {
@@ -76,6 +91,12 @@ export function emptyDraft(date: IsoDate = today()): Draft {
  * `Opening` row is stored as Revenue so the balance rules credit its
  * destination, so the category is what identifies it, not the type.
  */
+/**
+ * A saved row, back into the form.
+ *
+ * A Transfer with no destination is read back as Money Send, so editing one
+ * does not silently turn into "you forgot to pick a wallet".
+ */
 export function transactionToDraft(t: Transaction): Draft {
   const flow: Flow =
     t.category === "Opening" ? "Opening" : (t.type as Flow);
@@ -95,6 +116,7 @@ export function transactionToDraft(t: Transaction): Draft {
     status: t.status,
     ...(t.debtId ? { debtId: t.debtId } : {}),
     ...(t.debtEffect ? { debtEffect: t.debtEffect } : {}),
+    ...(flow === "Transfer" && !t.toWallet.trim() ? { sentOut: true } : {}),
   };
 }
 
@@ -260,7 +282,12 @@ export function checkDraft(
   if (needs(draft.flow, "fromWallet") && !draft.fromWallet) {
     errors.push({ field: "fromWallet", message: "Pick the wallet the money leaves." });
   }
-  if (needs(draft.flow, "toWallet") && !draft.toWallet && draft.flow !== "Debt") {
+  /**
+   * A transfer that left your accounts has no destination, and that is the
+   * answer rather than a gap. Anything else with a `toWallet` field needs one.
+   */
+  const moneySend = draft.flow === "Transfer" && draft.sentOut === true;
+  if (needs(draft.flow, "toWallet") && !draft.toWallet && draft.flow !== "Debt" && !moneySend) {
     errors.push({ field: "toWallet", message: "Pick the wallet the money lands in." });
   }
 

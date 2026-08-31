@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { loadFixture } from "../fixtures/load";
+import type { ReferenceLists } from "./types";
 import { walletBalance } from "./balances";
 import { frequentItems, predictFee, suggest } from "./autofill";
 import type { Debt } from "./debt";
@@ -14,6 +15,7 @@ import {
   insertChronologically,
   itemsFor,
   runningBalance,
+  transactionToDraft,
   type Draft,
 } from "./entry";
 
@@ -311,5 +313,63 @@ describe("autofill", () => {
     const items = frequentItems(fx.transactions, "Spending", "Spending");
     expect(items.length).toBeGreaterThan(0);
     expect(items).toContain("Food");
+  });
+});
+
+describe("Money Send: a transfer that left your accounts", () => {
+  /**
+   * This never saved. `sentOut` was component state in `AddTransaction`, so
+   * `checkDraft` could not see it, and every Money Send failed with "Pick the
+   * wallet the money lands in" while the Save button did nothing at all.
+   */
+  const sending = (over: Partial<Draft> = {}): Draft => ({
+    ...emptyDraft("2026-08-31"),
+    flow: "Transfer",
+    category: "Transfer",
+    fromWallet: "Gcash",
+    toWallet: "",
+    amount: 100000,
+    status: "Transferred",
+    ...over,
+  });
+
+  const reference: ReferenceLists = {
+    wallets: ["Cash", "Gcash", "Maya"],
+    savings: [],
+    bills: [],
+    subscriptions: [],
+    revenueCategories: [],
+    spendingTypes: [],
+  };
+
+  it("saves when the destination is deliberately blank", () => {
+    const check = checkDraft(sending({ sentOut: true }), [], reference, []);
+    expect(check.ok).toBe(true);
+    expect(check.errors).toHaveLength(0);
+  });
+
+  it("still asks for a destination when one was simply not chosen", () => {
+    const check = checkDraft(sending(), [], reference, []);
+    expect(check.ok).toBe(false);
+    expect(check.errors.map((e) => e.field)).toContain("toWallet");
+  });
+
+  it("books the whole amount as spending, per the transfer rule", () => {
+    const rows = draftToTransactions(sending({ sentOut: true }), 442, "t-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.toWallet).toBe("");
+    expect(rows[0]?.total).toBe(100000);
+  });
+
+  it("reads a saved one back as Money Send rather than as a missing field", () => {
+    const rows = draftToTransactions(sending({ sentOut: true }), 442, "t-1");
+    const back = transactionToDraft(rows[0]!);
+    expect(back.sentOut).toBe(true);
+    expect(checkDraft(back, [], reference, []).ok).toBe(true);
+  });
+
+  it("does not mark an ordinary transfer between your own wallets as sent out", () => {
+    const rows = draftToTransactions(sending({ toWallet: "Maya" }), 442, "t-1");
+    expect(transactionToDraft(rows[0]!).sentOut).toBeUndefined();
   });
 });

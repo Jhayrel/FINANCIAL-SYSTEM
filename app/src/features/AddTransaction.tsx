@@ -114,8 +114,6 @@ export function AddTransaction({
   budgets: Budgets;
   asOf: string;
 }) {
-  /** Chosen "Someone else" as the destination, rather than left it empty. */
-  const [sentOut, setSentOut] = useState(false);
   /**
    * Opens on Spending, rather than on nothing.
    *
@@ -126,6 +124,16 @@ export function AddTransaction({
    */
   const [draft, setDraft] = useState<Draft>(() => ({ ...emptyDraft(), flow: "Spending" }));
   const [submitted, setSubmitted] = useState(false);
+
+  /**
+   * Chosen "Someone else" as the destination, rather than left it empty.
+   *
+   * Read off the draft rather than held beside it. As component state
+   * `checkDraft` could not see it, so every Money Send failed validation with
+   * "Pick the wallet the money lands in" and the Save button quietly did
+   * nothing. See `Draft.sentOut`.
+   */
+  const sentOut = draft.flow === "Transfer" && draft.sentOut === true;
 
   const [categoryHint, setCategoryHint] = useState<CategoryResult | null>(null);
 
@@ -175,8 +183,9 @@ export function AddTransaction({
    */
   useEffect(() => {
     if (!editing) return;
+    // `transactionToDraft` reads a blank destination back as Money Send, so
+    // there is nothing to set separately any more.
     setDraft(transactionToDraft(editing));
-    setSentOut(editing.type === "Transfer" && editing.toWallet.trim() === "");
     setSuggested(new Set());
     setSubmitted(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -528,10 +537,9 @@ export function AddTransaction({
                             role="radio"
                             aria-checked={sentOut === option.out}
                             className={sentOut === option.out ? "fms-choice t-body-strong" : "fms-choice t-body"}
-                            onClick={() => {
-                              setSentOut(option.out);
-                              set("toWallet", "");
-                            }}
+                            onClick={() =>
+                              setDraft((d) => ({ ...d, sentOut: option.out, toWallet: "" }))
+                            }
                           >
                             {option.label}
                           </button>

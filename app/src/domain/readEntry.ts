@@ -27,6 +27,7 @@
  */
 
 import { emptyDraft, type Draft, type Flow } from "./entry";
+import type { Blank } from "./capture";
 import { inferFromHistory } from "./infer";
 import { readMoney } from "./proposal";
 import type { IsoDate, ReferenceLists, Transaction, TransactionStatus } from "./types";
@@ -37,6 +38,18 @@ export interface ReadEntry {
   readonly because: readonly string[];
   /** True when enough was found to be worth showing at all. */
   readonly worthOffering: boolean;
+  /** Blanks that are blank on purpose, so nothing asks about them. */
+  readonly settled: readonly Blank[];
+  /**
+   * The sentence is about borrowing or repaying.
+   *
+   * Never turned into a row: a debt movement needs the credit line and
+   * whether it is a draw, a repayment, interest or a write-off, and reading
+   * either wrong misfiles borrowing as spending. That is the exact mistake
+   * that put PHP 5,450 of borrowed money into the income line for eight
+   * months. The caller says so and points at the form.
+   */
+  readonly readsAsDebt: boolean;
 }
 
 /** Money out. */
@@ -49,6 +62,27 @@ const GOT =
 
 /** Money moved, or sent away. */
 const MOVED = /\b(transferred|transfer|moved|sent|send|cashed out|withdrew|withdraw|deposited)\b/i;
+
+/**
+ * Borrowing and repaying, which this file refuses to guess at.
+ *
+ * Tested before everything else, so "I paid my credit card" is recognised as
+ * debt rather than read as ordinary spending by the word "paid".
+ */
+const DEBT =
+  /\b(debt|debts|dept|borrowed|borrow|loan|loaned|utang|credit card|credit line|installment|repaid|repay|repayment|interest|paid off|pay off|owe|owed|owing)\b/i;
+
+/**
+ * Someone else, rather than another of your own pockets.
+ *
+ * "to my friend", "to my mom", "to his gcash account". The destination is a
+ * person, so the money has left your accounts however it travelled.
+ */
+const SOMEONE_ELSE =
+  /\b(friend|mother|mom|nanay|father|dad|tatay|sister|ate|brother|kuya|cousin|tita|tito|lola|lolo|classmate|landlord|seller|shop|store|him|her|them|his|their|someone|somebody)\b/i;
+
+/** A destination was named, whatever it turned out to be. */
+const SAID_TO = /\bto\s+\S/i;
 
 /**
  * Which way the money went.
@@ -177,9 +211,34 @@ export function readEntry(
   reference: ReferenceLists,
   asOf: IsoDate,
 ): ReadEntry {
-  const flow = flowOf(text);
+  const readsAsDebt = DEBT.test(text);
+  const flow = readsAsDebt ? null : flowOf(text);
   if (!flow) {
-    return { draft: emptyDraft(asOf), because: [], worthOffering: false };
+    /**
+     * A debt sentence still gives up its date, amount and wallet.
+     *
+     * They are not enough to make a row (the credit line and the effect are
+     * the two that matter and neither is in a sentence), but they are enough
+     * to open the form on Debt with three fields already filled, which is the
+     * useful half of what was asked for.
+     */
+    const accounts = readsAsDebt ? [...reference.wallets, ...reference.savings] : [];
+    const partial: Draft = readsAsDebt
+      ? {
+          ...emptyDraft(dateIn(text, asOf).date),
+          flow: "Debt",
+          amount: amountIn(text),
+          fromWallet: walletIn(text, accounts),
+        }
+      : emptyDraft(asOf);
+
+    return {
+      draft: partial,
+      because: [],
+      worthOffering: false,
+      settled: [],
+      readsAsDebt,
+    };
   }
 
   const accounts = [...reference.wallets, ...reference.savings];
@@ -199,6 +258,13 @@ export function readEntry(
   const because: string[] = [];
   if (said && date !== asOf) because.push(`Dated ${date}, from what you said.`);
 
+  const leftYourAccounts = flow === "Transfer" && !destination && (SAID_TO.test(text) || SOMEONE_ELSE.test(text));
+
+  const settled: Blank[] = leftYourAccounts ? ["toWallet"] : [];
+  if (leftYourAccounts) {
+    because.push("It left your accounts, so the whole amount counts as spending.");
+  }
+
   const base: Draft = {
     ...emptyDraft(date),
     flow,
@@ -212,8 +278,23 @@ export function readEntry(
           : "",
     amount,
     status: STATUS_FOR[flow] ?? "",
+    // Tells `checkDraft` the blank destination is the answer rather than a
+    // field nobody filled in yet. See `Draft.sentOut`.
+    ...(leftYourAccounts ? { sentOut: true } : {}),
   };
 
+  /**
+   * A transfer whose destination is not one of your accounts.
+   *
+   * "I sent money to my friend gotyme 1000 using my gcash" became a transfer
+   * from Gcash to Gcash, was refused as needing two different wallets, and
+   * then asked which account it went into: it offered the five names and
+   * refused the answer, because a friend's bank is not one of them.
+   *
+   * A blank destination is the answer, not a gap. CLAUDE.md's transfer rule:
+   * a named destination is still your money and only the fee is spending; a
+   * blank one means it left your accounts and the whole amount is.
+   */
   const { draft, because: fromHistory } = inferFromHistory(base, transactions, reference, text);
 
   /**
@@ -224,5 +305,11 @@ export function readEntry(
    */
   const worthOffering = amount !== null || Boolean(draft.item.trim());
 
-  return { draft, because: [...because, ...fromHistory], worthOffering };
+  return {
+    draft,
+    because: [...because, ...fromHistory],
+    worthOffering,
+    settled,
+    readsAsDebt: false,
+  };
 }
