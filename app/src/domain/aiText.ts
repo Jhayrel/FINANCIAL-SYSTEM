@@ -36,7 +36,26 @@ const LINK = /\[([^\]]+)\]\([^)]*\)/g;
 /** Leading list markers, quote marks and heading hashes, per line. */
 const LINE_PREFIX = /^[ \t]*(?:[>#]+[ \t]*|[-*+][ \t]+|\d+[.)][ \t]+)/;
 
-export function plainText(raw: string): string {
+/**
+ * Options, for the one surface that renders structure.
+ *
+ * The chat parses emphasis and bullets and renders them as real elements
+ * (`domain/richText.ts`), so stripping them there would delete the structure
+ * rather than protect anyone from it. The rule was never "structure is bad",
+ * it was "raw markup on screen is bad", and that still holds: nothing that
+ * keeps the marks here renders the string directly.
+ *
+ * Every other surface strips, as before. A five word description has no use
+ * for a bullet, and a panel that renders one string into one element could
+ * not show one anyway.
+ */
+export interface PlainTextOptions {
+  /** Leave `**` and list markers for a renderer that understands them. */
+  readonly keepStructure?: boolean;
+}
+
+export function plainText(raw: string, options: PlainTextOptions = {}): string {
+  const keep = options.keepStructure === true;
   let s = raw;
 
   // Fenced blocks first: their content is kept, the fence is not.
@@ -46,18 +65,24 @@ export function plainText(raw: string): string {
   s = s.replace(LINK, "$1");
 
   // Twice, so ***both*** unwraps fully rather than leaving one layer behind.
-  s = s.replace(EMPHASIS, "$2").replace(EMPHASIS, "$2");
+  if (!keep) s = s.replace(EMPHASIS, "$2").replace(EMPHASIS, "$2");
 
   /**
    * Whatever emphasis marks survive were unbalanced, which is the common case
    * when a model is cut off mid-sentence by a token limit. A lone asterisk is
    * never meaningful in this app's prose, so it goes.
    */
-  s = s.replace(/\*+/g, "");
+  if (!keep) s = s.replace(/\*+/g, "");
 
+  /**
+   * Headings and quote marks always go: they are decoration, and nothing here
+   * renders them. Bullets and numbers stay when a renderer is going to turn
+   * them into real list items, and go otherwise.
+   */
+  const prefix = keep ? /^[ \t]*[>#]+[ \t]*/ : LINE_PREFIX;
   s = s
     .split("\n")
-    .map((line) => line.replace(LINE_PREFIX, ""))
+    .map((line) => line.replace(prefix, ""))
     .join("\n");
 
   /**

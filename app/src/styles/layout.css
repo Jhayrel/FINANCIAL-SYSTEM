@@ -2047,3 +2047,52 @@ textarea.fms-askinput {
     0 0 0 1px var(--ai-glow-ring),
     0 0 10px 1px var(--ai-glow-halo-active);
 }
+
+/* ── A structured answer ──────────────────────────────────────────────────── */
+
+.fms-rich {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-rich p {
+  overflow-wrap: anywhere;
+}
+
+/*
+ * A list, marked by indent rather than by a glyph.
+ *
+ * A bullet character in a 280px column costs a whole indent step for
+ * decoration. The hanging indent is what makes it read as a list.
+ */
+.fms-richlist {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0 0 0 var(--space-3);
+  list-style: none;
+}
+
+.fms-richlist li {
+  position: relative;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fms-richlist li::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--space-3) * -1 + 2px);
+  top: 0.6em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+
+/* Bold is a weight, never a colour: flow colour means direction of money. */
+.fms-rich strong {
+  font-weight: 650;
+  color: var(--ink);
+}

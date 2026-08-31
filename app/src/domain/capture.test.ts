@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyReply, blanksIn, nextQuestion } from "./capture";
+import { amend, applyReply, blanksIn, nextQuestion } from "./capture";
 import { checkDraft, emptyDraft, type Draft } from "./entry";
 import type { ReferenceLists } from "./types";
 
@@ -146,5 +146,60 @@ describe("the whole loop", () => {
       amount: 50000,
       fromWallet: "Gcash",
     });
+  });
+});
+
+describe("amend: correcting a card already on screen", () => {
+  const card = spend({ amount: 34000, fromWallet: "Cash", item: "Food", date: "2022-10-07" });
+  const ASOF = "2026-08-31";
+
+  it("changes the amount", () => {
+    const change = amend(card, "make it 300", reference, ASOF);
+    expect(change?.draft.amount).toBe(30000);
+  });
+
+  it("changes the wallet", () => {
+    expect(amend(card, "gcash", reference, ASOF)?.draft.fromWallet).toBe("Gcash");
+  });
+
+  it("changes the item, using the list's own spelling", () => {
+    // The reference calls it "Food"; the reply says "food".
+    const withItem = { ...card, item: "" };
+    expect(amend(withItem, "food", reference, ASOF)?.draft.item).toBe("Food");
+  });
+
+  /**
+   * A receipt read as 2022 when it was 2026. The model answered "I cannot
+   * change entries here", and a four digit year would otherwise have been
+   * read as an amount of PHP 2,026.00.
+   */
+  it("changes the year without reading it as an amount", () => {
+    const change = amend(card, "2026 change the date", reference, ASOF);
+    expect(change?.draft.date).toBe("2026-10-07");
+    expect(change?.draft.amount).toBe(34000);
+  });
+
+  it("takes a whole date, written either way", () => {
+    expect(amend(card, "2026-08-12", reference, ASOF)?.draft.date).toBe("2026-08-12");
+    expect(amend(card, "8/12/2026", reference, ASOF)?.draft.date).toBe("2026-08-12");
+  });
+
+  it("takes a relative day", () => {
+    expect(amend(card, "yesterday", reference, ASOF)?.draft.date).toBe("2026-08-30");
+    expect(amend(card, "today", reference, ASOF)?.draft.date).toBe(ASOF);
+  });
+
+  it("does not treat a bare year as a date without being told it is one", () => {
+    // Ambiguous with an amount, so this reads as PHP 2,026.00.
+    expect(amend(card, "2026", reference, ASOF)?.draft.date).toBe("2022-10-07");
+  });
+
+  it("returns nothing for a message that corrects nothing", () => {
+    expect(amend(card, "thanks", reference, ASOF)).toBeNull();
+    expect(amend(card, "", reference, ASOF)).toBeNull();
+  });
+
+  it("ignores a message too long to be a correction", () => {
+    expect(amend(card, "x".repeat(80) + " gcash", reference, ASOF)).toBeNull();
   });
 });

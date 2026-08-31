@@ -25,7 +25,7 @@
 
 import { itemsFor, needs, type Draft, type Flow } from "./entry";
 import { matchExact, readMoney } from "./proposal";
-import type { ReferenceLists } from "./types";
+import type { IsoDate, ReferenceLists } from "./types";
 
 /** The blanks worth stopping for, in the order they are worth asking about. */
 export type Blank = "amount" | "fromWallet" | "toWallet" | "item";
@@ -217,11 +217,23 @@ export function amend(
   draft: Draft,
   text: string,
   reference: ReferenceLists,
+  asOf: IsoDate,
 ): Amendment | null {
   const trimmed = text.trim();
   if (!trimmed || trimmed.length > 60) return null;
 
   const accounts = [...reference.wallets, ...reference.savings];
+
+  /**
+   * The date, first.
+   *
+   * "2026 change the date" holds a four digit number, and reading it as an
+   * amount would quietly make the entry PHP 2,026.00. A receipt read as 2022
+   * when it was 2026 is a real correction and there was no way to make it:
+   * the model answered "I cannot change entries here".
+   */
+  const date = dateFrom(trimmed, draft.date, asOf);
+  if (date) return { draft: { ...draft, date }, what: `Dated ${date}.` };
 
   // A wallet named on its own, or with a correcting phrase around it.
   const wallet = matchExact(trimmed, accounts) || walletInside(trimmed, accounts);
@@ -241,6 +253,43 @@ export function amend(
   const known = itemsFor(draft.flow as Flow, draft.category, reference);
   const item = matchExact(trimmed, known);
   if (item) return { draft: { ...draft, item }, what: `${item} instead.` };
+
+  return null;
+}
+
+/**
+ * A date correction, in the forms people type.
+ *
+ * A whole date, a relative day, or a bare year, which replaces the year in
+ * what is already there: "2026" against 2022-10-07 gives 2026-10-07. A bare
+ * year alone is not enough, because "2026" on its own is ambiguous with an
+ * amount; something has to say it is about the date.
+ */
+function dateFrom(text: string, current: IsoDate, asOf: IsoDate): IsoDate | null {
+  const iso = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(text);
+  if (iso?.[1]) return iso[1];
+
+  const slashed = /\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/.exec(text);
+  if (slashed) {
+    const [, m, d, y] = slashed;
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  const shift = (days: number): IsoDate => {
+    const at = new Date(`${asOf}T00:00:00Z`);
+    at.setUTCDate(at.getUTCDate() + days);
+    return at.toISOString().slice(0, 10);
+  };
+
+  if (/\bday before yesterday\b/i.test(text)) return shift(-2);
+  if (/\byesterday\b/i.test(text)) return shift(-1);
+  if (/\btoday\b/i.test(text)) return asOf;
+
+  // A bare year, but only when the message says it is about the date.
+  const year = /\b(20\d{2})\b/.exec(text);
+  if (year?.[1] && /\b(date|dat|year|dated)\b/i.test(text) && /^\d{4}-/.test(current)) {
+    return `${year[1]}${current.slice(4)}`;
+  }
 
   return null;
 }

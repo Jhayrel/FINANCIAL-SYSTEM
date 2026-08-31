@@ -171,7 +171,18 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
      * and open with headings whatever they are told, and this app renders
      * text, not Markdown, so those marks would reach the screen literally.
      */
-    const text = typeof payload.text === "string" ? plainText(payload.text) : "";
+    /**
+     * Cleaned either way, rendered differently.
+     *
+     * Every surface but the chat renders one string into one element, so the
+     * marks are stripped for those. The chat parses them into real emphasis
+     * and real list items (`domain/richText.ts`), which is what the rule was
+     * protecting: no asterisk reaches the screen in either case.
+     */
+    const text =
+      typeof payload.text === "string"
+        ? plainText(payload.text, { keepStructure: task === "chat" })
+        : "";
     if (!text) return fallback("The model returned nothing.");
 
     return {

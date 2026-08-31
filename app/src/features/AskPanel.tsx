@@ -70,6 +70,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "../components/primitives";
 import { amend, applyReply, nextQuestion, type Blank } from "../domain/capture";
 import { readEntry } from "../domain/readEntry";
+import { readRich } from "../domain/richText";
 import { inferFromHistory } from "../domain/infer";
 import { detectIntent, type Intent } from "../domain/intent";
 import { modelLabel } from "../domain/modelName";
@@ -446,7 +447,7 @@ export function AskPanel({
     if (files.length === 0 && !as && detectIntent(note) === "ask") {
       const card = openCard();
       if (card) {
-        const change = amend(card.turn.proposal.draft, note, reference);
+        const change = amend(card.turn.proposal.draft, note, reference, asOf);
         if (change) {
           setDraft("");
           say({ kind: "you", text: note });
@@ -736,9 +737,13 @@ export function AskPanel({
             />
           ) : (
             <div key={i} className={turn.kind === "you" ? "fms-turn fms-turn--you" : "fms-turn"}>
-              <p className="t-caption" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                {turn.text}
-              </p>
+              {turn.kind === "assistant" ? (
+                <Rich text={turn.text} />
+              ) : (
+                <p className="t-caption" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                  {turn.text}
+                </p>
+              )}
               {turn.from && (
                 <p className="t-micro" style={{ margin: "var(--space-1) 0 0", color: "var(--ink-3)" }}>
                   {turn.from}
@@ -872,6 +877,52 @@ export function AskPanel({
         </button>
       )}
     </aside>
+  );
+}
+
+/**
+ * An answer, with the structure it was written with.
+ *
+ * Parsed rather than stripped, then rendered as real elements: no asterisk
+ * reaches the screen, which is what the no-Markdown rule was protecting, and
+ * a four month comparison gets a line per month instead of one long sentence.
+ * Nothing here builds HTML from the model's text: `readRich` returns data and
+ * this turns it into React elements.
+ */
+function Rich({ text }: { text: string }) {
+  const blocks = readRich(text);
+
+  // Nothing parsed: show it exactly as it came, rather than nothing at all.
+  if (blocks.length === 0) {
+    return (
+      <p className="t-caption" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+        {text}
+      </p>
+    );
+  }
+
+  return (
+    <div className="fms-rich">
+      {blocks.map((block, i) =>
+        block.kind === "list" ? (
+          <ul key={i} className="fms-richlist">
+            {block.items.map((item, j) => (
+              <li key={j} className="t-caption">
+                {item.map((span, k) =>
+                  span.bold ? <strong key={k}>{span.text}</strong> : <span key={k}>{span.text}</span>,
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p key={i} className="t-caption" style={{ margin: 0 }}>
+            {block.spans.map((span, k) =>
+              span.bold ? <strong key={k}>{span.text}</strong> : <span key={k}>{span.text}</span>,
+            )}
+          </p>
+        ),
+      )}
+    </div>
   );
 }
 
@@ -1069,11 +1120,34 @@ function ProposalCard({
       ))}
 
       {settled ? (
-        <p className="t-micro fms-proposalfrom">
-          {state === "added"
-            ? "Saved to the ledger. It is in the Database and in the activity trail."
-            : "Loaded into the form beside this. Check it and press Save transaction."}
-        </p>
+        <>
+          <p className="t-micro fms-proposalfrom">
+            {state === "added"
+              ? "Saved to the ledger. It is in the Database and in the activity trail."
+              : "Loaded into the form beside this. Check it and press Save transaction."}
+          </p>
+          {/*
+            A way back.
+
+            Pressing Edit first and then Clear on the form emptied the form
+            and left this card with no buttons: the entry was on screen and
+            there was no way to get it back. The card keeps what it read, so
+            it can always load it again.
+          */}
+          {state === "used" && (
+            <div className="fms-proposalactions">
+              <Button size="sm" onClick={onUse}>
+                Put back in the form
+              </Button>
+              <Button size="sm" variant="primary" disabled={!check.ok} onClick={onAdd}>
+                Add to ledger
+              </Button>
+              <Button size="sm" onClick={onDiscard}>
+                Discard
+              </Button>
+            </div>
+          )}
+        </>
       ) : (
         <>
           <div className="fms-proposalactions">
