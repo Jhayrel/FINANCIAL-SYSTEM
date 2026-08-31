@@ -236,6 +236,36 @@ const isChart = (t: Turn): t is Drawn => t.kind === "chart";
 const isDebt = (t: Turn): t is DebtChoice => t.kind === "debt";
 
 /**
+ * A turn that is actually words, said by one of us.
+ *
+ * ── The bug this replaces ─────────────────────────────────────────────────
+ *
+ * The conversation sent to the model was built by *subtracting*: everything
+ * that is not a proposal, or not a proposal and not a chart. Written that way
+ * it is wrong the moment a new kind of turn is added, and it was: cards,
+ * charts, found lists and debt cards all carry no `text`, so they arrived as
+ *
+ *     found: undefined
+ *     chart: undefined
+ *
+ * with a role the model has never been told about. That is what "it does not
+ * read the chat" was. It was reading it, and half of what it read was noise
+ * from this function.
+ *
+ * Positive, not negative. A turn is history when it is words, and a kind of
+ * turn added later has to opt in rather than leak in.
+ */
+const isSaid = (t: Turn): t is Said => t.kind === "you" || t.kind === "assistant";
+
+/** The conversation, as the model should see it: words, in order, no gaps. */
+const spokenHistory = (turns: readonly Turn[], most: number) =>
+  turns
+    .filter(isSaid)
+    .filter((t) => t.text.trim() !== "")
+    .slice(-most)
+    .map((t) => ({ role: t.kind, text: t.text }));
+
+/**
  * How much of the thread goes back with each question.
  *
  * Enough to follow a pronoun, not so much that a long session quietly grows
@@ -850,10 +880,7 @@ export function AskPanel({
   const askQuestion = async (question: string, echo = true): Promise<void> => {
     if (echo) say({ kind: "you", text: question });
 
-    const history = turns
-      .filter((t): t is Said => !isOffer(t))
-      .slice(-HISTORY_TURNS)
-      .map((t) => ({ role: t.kind as "you" | "assistant", text: t.text }));
+    const history = spokenHistory(turns, HISTORY_TURNS);
 
     const answer = await ai.ask("chat", { question, history });
 
@@ -889,9 +916,7 @@ export function AskPanel({
       try {
         routed = await routeMessage({
           text: note,
-          history: turns
-            .filter((t): t is Said => !isOffer(t) && !isFound(t) && !isChart(t))
-            .map((t) => ({ role: t.kind, text: t.text })),
+          history: spokenHistory(turns, HISTORY_TURNS),
           onScreen: {
             openCard: turns.some((t) => isOffer(t) && t.state === "open"),
             chart: turns.some(isChart),
