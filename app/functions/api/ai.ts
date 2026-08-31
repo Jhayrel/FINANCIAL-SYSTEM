@@ -503,7 +503,34 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "If nothing on their list genuinely fits, leave item empty rather than choosing the nearest one. An empty field is one they fill in a second; a wrong one is a wrong figure filed under the wrong heading.",
     "Wallets: use only their names. Money to a person, or to an account that is not theirs, is a Transfer with toWallet left empty, which is what means it left their accounts.",
     "Put the amount twice: amountText exactly as written, character for character including any comma or currency sign, and amountPesos as a plain number. The two must agree. If no amount is stated, leave both empty and they will be asked for it.",
+    "Always write a description. It is what the entry will read as in six months, so make it the specific thing: what was bought, or who it was for, or where it was, in their own words from the message or the receipt. Never leave it empty, and never restate the item: the item already says Food, so the description says what the food was.",
     "Use the date stated, and today only when none is. Set confidence to low for anything you had to strain to read. In sourceRef, say which image and which line, or which words you used. If there is no transaction in it at all, return an empty list.",
+  ].join(" "),
+  /**
+   * What does this message want.
+   *
+   * Every branch in the chat used to be a regular expression: is this a
+   * question, is it an entry, is it a correction, is it about deleting
+   * something. They got it wrong constantly, because "Delete that last" and
+   * "how about this week" and "edit the last one" are not patterns, they are
+   * sentences that only mean anything next to what was said before them.
+   *
+   * So the model decides, and it is given the last few turns and what is
+   * currently on screen, because half of these are only answerable with that.
+   * The local rules remain as a fallback for when no model can be reached.
+   */
+  route: [
+    "Decide what the person wants from this one message. You are given the recent conversation and what is currently on their screen.",
+    "entry: they are telling you about money that moved, so it can be recorded. Past tense, or an amount with something bought.",
+    "question: they want to be told something about their figures.",
+    "chart: they want to see figures drawn. Also when they name a period on its own straight after a chart, which means the same chart over that period.",
+    "correction: they are changing something on the entry card already on screen. A fragment, a different amount, a different wallet, a date.",
+    "answer: the assistant asked them a question and this is the reply to it.",
+    "delete: they want an entry removed. restore: they want one brought back.",
+    "editEntry: they want to change an entry already saved in the ledger.",
+    "chat: none of the above, including small talk.",
+    "In target, put which entry they mean when they name one: the exact words, or the word last when they mean the most recent. In period, put the window when they name one, in their own words. Leave both empty when they name none.",
+    "Prefer correction and answer over entry when something is on screen waiting: someone who has just been asked how much is telling you how much, not starting a new entry.",
   ].join(" "),
   categorise:
     "Choose the one category that fits this transaction, copied exactly from the allowed list. Prefer the pattern in the past examples, which are this person's own labels. If nothing fits well, choose the last category in the list rather than inventing one.",
@@ -584,6 +611,22 @@ const TASKS: Record<string, TaskSpec> = {
       return { text: `${list.length} found`, data: list };
     },
     maxTokens: 2000,
+  },
+  route: {
+    instruction: TASK_INSTRUCTIONS["route"] ?? "",
+    shape:
+      '{"reasoning": "one short sentence", "intent": "entry or question or chart or correction or answer or delete or restore or editEntry or chat", "target": "", "period": ""}',
+    parse: (v) => {
+      const intent = str(v["intent"]);
+      if (!intent) return null;
+      return {
+        text: intent,
+        category: intent,
+        confidence: str(v["target"]),
+        data: { intent, target: str(v["target"]), period: str(v["period"]) },
+      };
+    },
+    maxTokens: 500,
   },
   classify: {
     instruction: TASK_INSTRUCTIONS["classify"] ?? "",

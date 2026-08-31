@@ -450,6 +450,13 @@ export interface ExtractOptions {
   readonly token?: () => Promise<string | null>;
   /** Which pass this is. Set by the retry, never by a caller. */
   readonly attempt?: number;
+  /**
+   * Called off by the Stop button.
+   *
+   * Separate from the timeout's own controller: both should be able to end
+   * the request, and only one of them is a decision the owner made.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface ExtractResult {
@@ -537,6 +544,9 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? EXTRACT_TIMEOUT_MS);
+  // Stopping is the owner's decision and ends the request the same way a
+  // timeout does, so it hangs off the same controller.
+  options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
 
   try {
     const response = await doFetch(ENDPOINT, {
@@ -679,6 +689,130 @@ export async function classifyItem(
     };
   } catch {
     // A failed classification is not an error: the field stays as typed.
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ── What a message wants ───────────────────────────────────────────────────
+
+export type Intent =
+  | "entry"
+  | "question"
+  | "chart"
+  | "correction"
+  | "answer"
+  | "delete"
+  | "restore"
+  | "editEntry"
+  | "chat";
+
+export interface Routed {
+  readonly intent: Intent;
+  /** Which entry they meant, in their words, or "last". */
+  readonly target: string;
+  /** The window they named, in their words. */
+  readonly period: string;
+}
+
+const INTENTS: readonly Intent[] = [
+  "entry",
+  "question",
+  "chart",
+  "correction",
+  "answer",
+  "delete",
+  "restore",
+  "editEntry",
+  "chat",
+];
+
+/**
+ * Ask the model what this message wants.
+ *
+ * ── Why this is not a regular expression ──────────────────────────────────
+ *
+ * It was, and every branch of it got things wrong. "Delete that last" found
+ * nothing because "last" was stripped as a filler word. "how about this week"
+ * was answered in prose because the pattern for a chart follow-up did not
+ * know about weeks. "edit the last one" was answered with "I cannot change
+ * anything here". None of those are patterns: they are sentences that mean
+ * something only next to what came before them, which is exactly what a
+ * language model is for and exactly what a regular expression is not.
+ *
+ * ── Why it is worth a round trip ──────────────────────────────────────────
+ *
+ * It is small: a few hundred tokens and a one-word answer. The alternative is
+ * sending the message down the wrong branch entirely, which costs a wrong
+ * answer, a wasted call, and the owner's trust.
+ *
+ * Returns null when there is no model or it could not answer. The caller then
+ * falls back to the local rules, which are wrong sometimes rather than absent.
+ */
+export async function routeMessage(options: {
+  readonly text: string;
+  readonly history: readonly { readonly role: "you" | "assistant"; readonly text: string }[];
+  readonly onScreen: {
+    readonly openCard: boolean;
+    readonly chart: boolean;
+    readonly awaitingAnswer: string;
+  };
+  readonly fetcher?: typeof fetch;
+  readonly token?: () => Promise<string | null>;
+  readonly timeoutMs?: number;
+}): Promise<Routed | null> {
+  const said = options.text.trim();
+  if (!said) return null;
+
+  const auth = await (options.token ?? idToken)();
+  if (!auth) return null;
+
+  const nl = String.fromCharCode(10);
+  const context = [
+    "On their screen right now:",
+    options.onScreen.awaitingAnswer
+      ? `The assistant asked them for the ${options.onScreen.awaitingAnswer} and is waiting for the reply.`
+      : "Nothing is waiting for a reply.",
+    options.onScreen.openCard ? "An entry card is showing, not yet added." : "No entry card.",
+    options.onScreen.chart ? "A chart is showing." : "No chart.",
+    "",
+    "Recently said:",
+    ...options.history.slice(-6).map((h) => `${h.role}: ${redact(h.text).slice(0, 200)}`),
+    "",
+    `Their message: ${redact(said)}`,
+  ].join(nl);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 12_000);
+
+  try {
+    const response = await (options.fetcher ?? fetch)(ENDPOINT, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "content-type": "application/json", authorization: `Bearer ${auth}` },
+      body: JSON.stringify({ task: "route", tone: "brief", context }),
+    });
+
+    if (!response.ok || !(response.headers.get("content-type") ?? "").includes("application/json")) {
+      return null;
+    }
+
+    const payload = (await response.json()) as { data?: unknown };
+    const data = payload.data as { intent?: unknown; target?: unknown; period?: unknown } | undefined;
+    const intent = typeof data?.intent === "string" ? data.intent : "";
+
+    // Checked against the list, so an invented intent is ignored rather than
+    // dispatched to a branch that does not exist.
+    if (!INTENTS.includes(intent as Intent)) return null;
+
+    return {
+      intent: intent as Intent,
+      target: typeof data?.target === "string" ? data.target.slice(0, 120) : "",
+      period: typeof data?.period === "string" ? data.period.slice(0, 60) : "",
+    };
+  } catch {
+    // A failed routing is not an error worth showing: the local rules answer.
     return null;
   } finally {
     clearTimeout(timer);

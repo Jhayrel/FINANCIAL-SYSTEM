@@ -280,3 +280,47 @@ describe("nothing is saveable without the fields that matter", () => {
     expect(draft.item).not.toBe("Gas");
   });
 });
+
+describe("the sentence that came back wrong in every field", () => {
+  /**
+   * "I earnd 100k today framelink in my job i got it in maya" was read as
+   * Spending, Cash, Food, PHP 100.00. Four fields, four mistakes, and the
+   * amount out by a factor of a thousand: the row looks perfectly ordinary
+   * and the balance is wrong by the whole amount.
+   */
+  const said = "I earnd 100k today framelink in my job i got it in maya";
+
+  it("reads it as income", () => {
+    expect(read(said).draft.flow).toBe("Revenue");
+  });
+
+  it("reads a hundred thousand, not a hundred", () => {
+    expect(read(said).draft.amount).toBe(10_000_000);
+  });
+
+  it("puts it in the wallet the sentence named", () => {
+    expect(read(said).draft.toWallet).toBe("Maya");
+  });
+
+  it("books it under the revenue category the sentence named", () => {
+    expect(read(said).draft.item).toBe("Framelink");
+  });
+});
+
+describe("amounts written the way people write them", () => {
+  it("reads k and m as thousands and millions", () => {
+    expect(read("i got 100k allowance").draft.amount).toBe(10_000_000);
+    expect(read("i got 2.5k allowance").draft.amount).toBe(250_000);
+    expect(read("i got 1m allowance").draft.amount).toBe(100_000_000);
+  });
+
+  /** A number and a stray letter is not a suffix, and the zeroes are not ours to invent. */
+  it("does not read a detached letter as a suffix", () => {
+    expect(read("i got 100 k allowance").draft.amount).toBe(10000);
+  });
+
+  it("still reads the ordinary forms", () => {
+    expect(read("i got 5,000 allowance").draft.amount).toBe(500000);
+    expect(read("i got 99.50 allowance").draft.amount).toBe(9950);
+  });
+});

@@ -38,6 +38,7 @@
  * not overrule you.
  */
 
+import { itemsFor } from "./entry";
 import type { Draft, Flow } from "./entry";
 import type { ReferenceLists, Transaction, TransactionCategory, TransactionStatus } from "./types";
 
@@ -237,6 +238,19 @@ export function inferFromHistory(
           ? `Booked as ${match.item}, which you have used ${match.seen} ${match.seen === 1 ? "time" : "times"}.`
           : `Booked as ${match.item}: that is what you called it the last few times you wrote this.`,
       );
+    } else if (namedInLists(hint, flow, next.category, reference)) {
+      /**
+       * Named outright, whether or not it has ever been used.
+       *
+       * "I earnd 100k today framelink" left the item empty, because Framelink
+       * is a revenue category the owner has set up and had no past rows to
+       * find it by. A name they keep in Settings is a name they meant, and
+       * waiting for it to have a history before recognising it means a new
+       * category never gets recognised at all.
+       */
+      const named = namedInLists(hint, flow, next.category, reference);
+      next = { ...next, item: named };
+      because.push(`Booked as ${named}, which you named.`);
     } else {
       /**
        * The note beside each spending type, which says what counts as it.
@@ -363,4 +377,34 @@ function remarkMatch(hint: string, flow: Flow, reference: ReferenceLists): strin
     }
   }
   return "";
+}
+
+/**
+ * An item from the owner's own lists, named in the sentence.
+ *
+ * Independent of history: a category set up in Settings and never used is
+ * still one they chose, and "framelink" should find Framelink the first time
+ * as readily as the tenth.
+ *
+ * Longest first, so a two-word name beats the one word inside it, and
+ * whole-word only, so "Gas" is not found inside "Gasoline station discount".
+ */
+function namedInLists(
+  hint: string,
+  flow: Flow,
+  category: TransactionCategory,
+  reference: ReferenceLists,
+): string {
+  const allowed = [
+    ...itemsFor(flow, category, reference),
+    // Bills and subscriptions are only offered under their own category, and
+    // the category is often not decided yet when this runs.
+    ...(flow === "Spending" ? [...reference.bills, ...reference.subscriptions] : []),
+  ];
+
+  return (
+    [...new Set(allowed)]
+      .sort((a, b) => b.length - a.length)
+      .find((name) => namesIt(hint, name)) ?? ""
+  );
 }

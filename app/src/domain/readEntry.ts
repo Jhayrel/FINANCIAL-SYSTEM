@@ -102,9 +102,27 @@ function flowOf(text: string): Flow | null {
  *
  * Skips a figure that is part of a date, so "paid 500 on 8/31" reads 500 and
  * not 8. Two or more digits, or a decimal, so a stray "1" is not an amount.
+ *
+ * ── Why k and m are read ──────────────────────────────────────────────────
+ *
+ * "I earnd 100k today" was read as one hundred pesos. People write amounts
+ * that way constantly, and being out by a factor of a thousand is the worst
+ * single mistake this file can make: the row looks perfectly ordinary and the
+ * balance is wrong by the whole amount.
+ *
+ * Only when the letter is attached to the digits. "100 k" is not an amount
+ * followed by a suffix, it is a number and a stray letter, and reading it as
+ * a hundred thousand would be inventing the zeroes.
  */
 function amountIn(text: string): number | null {
   const withoutDates = text.replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
+
+  const scaled = /(?:₱|php\s*)?(\d+(?:\.\d+)?)([km])\b/i.exec(withoutDates);
+  if (scaled?.[1] && scaled[2]) {
+    const pesos = Number(scaled[1]) * (scaled[2].toLowerCase() === "k" ? 1_000 : 1_000_000);
+    return Number.isFinite(pesos) ? Math.round(pesos * 100) : null;
+  }
+
   const match = /(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d{1,2}|\d{2,})/i.exec(
     withoutDates,
   );

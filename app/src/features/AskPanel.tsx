@@ -78,7 +78,7 @@ import { itemsFor } from "../domain/entry";
 import { detectIntent, isQuestion, type Intent } from "../domain/intent";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
-import { classifyItem, extractProposals } from "../data/aiClient";
+import { classifyItem, extractProposals, routeMessage, type Intent as Routed } from "../data/aiClient";
 import { chatStore } from "../data/chatStore";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, type AiEvent, type AttachmentNote } from "../domain/aiLog";
@@ -263,6 +263,27 @@ export function AskPanel({
   } | null>(null);
   /** A file is over the panel right now. */
   const [dragging, setDragging] = useState(false);
+  /**
+   * Set while a request is in flight, so it can be called off.
+   *
+   * A free model can sit there for the better part of a minute, and watching
+   * three dots with no way to stop is the app holding you hostage to a
+   * provider's queue.
+   */
+  const stopper = useRef<AbortController | null>(null);
+
+  /** Abandon whatever is in flight and hand the box back. */
+  const stop = (): void => {
+    stopper.current?.abort();
+    stopper.current = null;
+    setBusy(false);
+    say({
+      kind: "assistant",
+      ephemeral: true,
+      text: "Stopped. Nothing was saved.",
+      from: "this device",
+    });
+  };
   /** An attachment being looked at full size. Session only, never stored. */
   const [previewing, setPreviewing] = useState<Attachment | null>(null);
   /** What has been corrected before, so the same guess is not made twice. */
@@ -672,7 +693,16 @@ export function AskPanel({
       });
     }
 
-    const result = await extractProposals({ note, attachments: sent, reference, asOf });
+    const control = new AbortController();
+    stopper.current = control;
+    const result = await extractProposals({
+      note,
+      attachments: sent,
+      reference,
+      asOf,
+      signal: control.signal,
+    });
+    stopper.current = null;
 
     /**
      * The photo, as a description of itself.
@@ -781,6 +811,41 @@ export function AskPanel({
     if (!note && files.length === 0) return;
 
     /**
+     * What does this message want.
+     *
+     * The model decides. Every branch below used to be a regular expression
+     * and every one of them got things wrong: "Delete that last" found
+     * nothing because "last" was stripped as filler, "how about this week"
+     * was answered in prose because the chart follow-up pattern knew nothing
+     * about weeks, and "edit the last one" was told the assistant cannot
+     * change anything. Those are not patterns, they are sentences that mean
+     * something only next to what came before them.
+     *
+     * `routed` is null when there is no model or it could not answer, and
+     * then the local rules run exactly as they did. Wrong sometimes beats
+     * absent.
+     */
+    let routed: { intent: Routed; target: string; period: string } | null = null;
+    if (files.length === 0 && !as && !ai.disabled) {
+      setBusy(true);
+      try {
+        routed = await routeMessage({
+          text: note,
+          history: turns
+            .filter((t): t is Said => !isOffer(t) && !isFound(t) && !isChart(t))
+            .map((t) => ({ role: t.kind, text: t.text })),
+          onScreen: {
+            openCard: turns.some((t) => isOffer(t) && t.state === "open"),
+            chart: turns.some(isChart),
+            awaitingAnswer: pending?.blank ?? "",
+          },
+        });
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    /**
      * Every message, whatever it turns out to be.
      *
      * Logged here rather than down each branch, because a question, an entry,
@@ -796,7 +861,10 @@ export function AskPanel({
      * attachment overrides that: a picture is a new thing to read, not a
      * reply, so the half-finished row is dropped rather than confused with it.
      */
-    if (pending && files.length === 0 && !as) {
+    const saysAnswer = routed?.intent === "answer";
+    const saysCorrection = routed?.intent === "correction";
+
+    if (pending && files.length === 0 && !as && (routed === null || saysAnswer || saysCorrection)) {
       setDraft("");
       setBusy(true);
       try {
@@ -823,8 +891,17 @@ export function AskPanel({
      * that chart again.
      */
     const followUp = isChartFollowUp(note, turns.some(isChart));
-    if (files.length === 0 && !as && (wantsChart(note) || followUp)) {
-      const chart = buildChart(note, transactions, asOf);
+    const saysChart = routed?.intent === "chart";
+    if (files.length === 0 && !as && (saysChart || (routed === null && (wantsChart(note) || followUp)))) {
+      /**
+       * The period the model read out of it, if it read one.
+       *
+       * "how about this week" was answered in prose because no pattern here
+       * knew about weeks. The model names the window in the owner's own
+       * words and `buildChart` reads that, so the vocabulary is theirs and
+       * not a list somebody remembered to write down.
+       */
+      const chart = buildChart(routed?.period ? `${note} ${routed.period}` : note, transactions, asOf);
       setDraft("");
       say({ kind: "you", text: note });
       if (chart) say({ kind: "chart", chart });
@@ -845,10 +922,40 @@ export function AskPanel({
      * with a button beside each, and a sentence that matches nothing says so
      * rather than offering the ledger sorted arbitrarily.
      */
-    const recall = files.length > 0 || as ? null : detectRecall(note);
+    const saysRecall =
+      routed?.intent === "delete" || routed?.intent === "restore" || routed?.intent === "editEntry";
+    const recall =
+      files.length > 0 || as
+        ? null
+        : saysRecall
+          ? {
+              action: (routed?.intent === "restore" ? "restore" : "bin") as RecallAction,
+              phrase: routed?.target || note,
+              editing: routed?.intent === "editEntry",
+            }
+          : routed === null
+            ? detectRecall(note)
+            : null;
+
     if (recall) {
       const pool = recall.action === "restore" ? deleted : transactions;
-      const candidates = findRows(recall.phrase, pool, asOf);
+
+      /**
+       * "the last one" means the most recent, not a word to search for.
+       *
+       * "Delete that last" came back with "No entry matches that", because
+       * "last" was stripped as a filler word and the search was left with
+       * nothing to look for. It is not filler: it is the whole instruction.
+       */
+      const wantsLatest = /^(last|the last|that last|latest|most recent|it)$/i.test(
+        recall.phrase.trim(),
+      );
+      const candidates = wantsLatest
+        ? [...pool]
+            .sort((a, b) => b.recordNumber - a.recordNumber)
+            .slice(0, 1)
+            .map((row) => ({ row, score: 100, why: ["the most recent one"] }))
+        : findRows(recall.phrase, pool, asOf);
 
       setDraft("");
       say({ kind: "you", text: note });
@@ -979,7 +1086,24 @@ export function AskPanel({
      * nothing, so anything that is not phrased as a question gets offered to
      * it first and falls through to the conversation if it finds nothing.
      */
-    const job = as ?? (files.length > 0 || !isQuestion(note) ? "log" : detectIntent(note));
+    /**
+     * Entry or question, decided by the model when there is one.
+     *
+     * `chat` and `question` both mean answer it in words; everything else
+     * that reaches this line is something to record. The local rules only
+     * decide when no model could be reached.
+     */
+    const job =
+      as ??
+      (files.length > 0
+        ? "log"
+        : routed
+          ? routed.intent === "question" || routed.intent === "chat"
+            ? "ask"
+            : "log"
+          : !isQuestion(note)
+            ? "log"
+            : detectIntent(note));
 
     setDraft("");
     setBusy(true);
@@ -1522,14 +1646,28 @@ export function AskPanel({
           aria-label={attached ? "A note about the attached files" : "Ask a question, or type an entry"}
           disabled={busy}
         />
-        <Button
-          size="sm"
-          variant="primary"
-          type="submit"
-          disabled={busy || (!draft.trim() && !attached)}
-        >
-          {attached ? "Read" : pending ? "Answer" : intent === "log" ? "Log" : "Send"}
-        </Button>
+        {busy ? (
+          /*
+            A way out of the queue.
+
+            A free model can sit there for the better part of a minute, and
+            three dots with no way to stop is the app holding you to a
+            provider's queue. Stopping abandons the request; nothing was
+            going to be saved by it either way.
+          */
+          <Button size="sm" onClick={stop}>
+            Stop
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="primary"
+            type="submit"
+            disabled={!draft.trim() && !attached}
+          >
+            {attached ? "Read" : pending ? "Answer" : intent === "log" ? "Log" : "Send"}
+          </Button>
+        )}
       </form>
 
       {turns.length > 0 && (
