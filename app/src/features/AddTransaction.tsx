@@ -733,9 +733,25 @@ export function AddTransaction({
                 </div>
               </Row>
 
+              {/*
+                The fee shows its own errors, and this is not cosmetic.
+
+                It was the one money field with no `error` prop, so a fee
+                `checkDraft` refuses left Save disabled with nothing on screen
+                saying why: a dead button and no explanation, which is a worse
+                failure than the bad value it was refusing.
+              */}
               {needs(draft.flow, "fee") && (
-                <Row label="Fee" hint={ghost.fee ? `Usually ${formatMoney(ghost.fee)}` : undefined}>
-                  <AmountInput value={draft.fee} onChange={(v) => set("fee", v ?? 0)} />
+                <Row
+                  label="Fee"
+                  error={errorFor("fee")}
+                  hint={ghost.fee ? `Usually ${formatMoney(ghost.fee)}` : undefined}
+                >
+                  <AmountInput
+                    value={draft.fee}
+                    onChange={(v) => set("fee", v ?? 0)}
+                    invalid={Boolean(errorFor("fee"))}
+                  />
                 </Row>
               )}
 
