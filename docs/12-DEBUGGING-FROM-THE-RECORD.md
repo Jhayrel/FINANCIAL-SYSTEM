@@ -1,7 +1,7 @@
 # Debugging from the record
 
-**2026-08-31. From `285ad3f` to `10903de`.**
-1090 tests, typecheck and build clean.
+**2026-08-31 to 2026-09-01. From `285ad3f` to `7b44938`.**
+1107 tests, typecheck and build clean.
 
 Every fault below was found in the assistant's own record of what it did, in
 `users/{uid}/ai`, or by sweeping the 492 rows in the ledger. None of them came
@@ -159,6 +159,43 @@ Still not handled, and now known: "compare july and august" draws July
 alone. Two windows in one chart is a different shape and needs more than a
 window function.
 
+### Four private definitions of "what counts as spending"
+
+`charts.ts`, `aiChatContext.ts` and `patterns.ts` each kept their own copy,
+and every one of them eventually disagreed with `totals.ts`. All three were
+wrong in the same two places: they counted a Spending row with a blank
+category, which the app ignores, and dropped debt interest, which the app
+counts.
+
+The figures handed to the model were the worst of it. On four rows the app
+totals PHP 303.79 and the chat's copy totalled PHP 1,114.00, so the
+assistant answered from one set of figures while every screen showed
+another.
+
+All three looked correct for a long time, because the Excel fixture contains
+neither kind of row: it has no blank-category Spending rows, and its Debt
+rows are created by a migration that runs in the app rather than in the
+fixture. A passing suite proved nothing. `oneDefinition.test.ts` supplies
+those rows deliberately and asserts that everything reporting a figure
+reports the same one.
+
+There are no private copies left.
+
+### The patterns panel read the wrong field entirely
+
+Every detector grouped by `t.category`, which in this ledger is only ever
+Spending, Bills, Subscriptions, Transfer, Revenue or Opening. So the
+migration detector compared one group against itself and could never fire,
+and a broken streak reported "40 days without a Spending entry".
+
+What a person means by a category is Treat, Food, Gas: that is `item`. On
+the real ledger the streak detector goes from one meaningless group to 23
+real ones.
+
+The tests hid it completely, by putting item names in the category field.
+They described a shape the data has never had and passed while the feature
+was structurally incapable of finding anything.
+
 ### Debt could not be finished in the chat
 
 The credit line and the effect are offered as buttons. Picking the effect
@@ -221,7 +258,7 @@ python -c "import io,glob; print([p for p in glob.glob('src/**/*.ts',recursive=T
 Every fix above has a test named after the fault, so the reasoning survives
 the fix:
 
-`chartAccuracy.test.ts` · `transferSide.test.ts` · `askingNotEntering.test.ts` · `splitEntries.test.ts` ·
+`chartAccuracy.test.ts` · `oneDefinition.test.ts` · `transferSide.test.ts` · `askingNotEntering.test.ts` · `splitEntries.test.ts` ·
 `sweep.test.ts` · `discardAll.test.ts` · `everyCard.test.ts` ·
 `spokenHistory.test.ts` · `chartMemory.test.ts` · `fromHistory.test.ts` ·
 `debtChat.test.ts` · `bulkBin.test.ts` · `manualEntry.test.ts` ·
