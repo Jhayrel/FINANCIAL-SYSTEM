@@ -162,7 +162,23 @@ function dimensionOf(question: string): ChartBy {
   ) {
     return "month";
   }
-  if (/\b(wallet|wallets|account|accounts|gcash|maya|cash)\b/i.test(question)) return "wallet";
+  /**
+   * "by wallet", not "in maya".
+   *
+   * This used to match a bare `gcash|maya|cash`, so "chart my maya spending
+   * this year" grouped by wallet and drew all three of them, total included.
+   * Naming one account is a filter, not a grouping, and it is handled by
+   * `focusOf` now. The account names were also hardcoded here, so "chart my
+   * reserved fund" matched nothing at all.
+   */
+  if (
+    /\b(?:by|per|across|each|every|between|which)\s+(?:wallet|wallets|account|accounts)\b/i.test(
+      question,
+    ) ||
+    /\bwallets\b/i.test(question)
+  ) {
+    return "wallet";
+  }
   if (/\b(category|categories|bills|subscriptions)\b/i.test(question)) return "category";
   return "item";
 }
@@ -342,17 +358,45 @@ export const wantsReport = (question: string): boolean =>
  * first, so "Online Buy" beats "Buy", and a trailing "s" is allowed because
  * people pluralise: "treats" is Treat.
  */
-function focusOf(question: string, transactions: readonly Transaction[]): string {
-  const items = [...new Set(transactions.map((t) => t.item.trim()).filter(Boolean))].sort(
+interface Focus {
+  readonly item: string;
+  readonly wallet: string;
+}
+
+/** The first name in `names` that the question uses, longest first. */
+function named(question: string, names: readonly string[]): string {
+  const asked = question.toLowerCase();
+  const byLength = [...new Set(names.map((n) => n.trim()).filter(Boolean))].sort(
     (a, b) => b.length - a.length,
   );
-  const asked = question.toLowerCase();
 
-  for (const item of items) {
-    const escaped = item.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`\\b${escaped}s?\\b`).test(asked)) return item;
+  for (const name of byLength) {
+    const escaped = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\b${escaped}s?\\b`).test(asked)) return name;
   }
   return "";
+}
+
+function focusOf(question: string, transactions: readonly Transaction[]): Focus {
+  return {
+    item: named(question, transactions.map((t) => t.item)),
+    /**
+     * Naming one account is a filter, not a grouping.
+     *
+     * "chart my maya spending this year" drew all three wallets with the
+     * whole year's total, because a bare account name made `dimensionOf`
+     * group by wallet. Grouping by the thing you just narrowed to gives one
+     * bar, which is the same mistake a single item had.
+     *
+     * Read from the ledger rather than a hardcoded list, so an account added
+     * or renamed later is recognised without touching this file: "chart my
+     * reserved fund" matched nothing at all before.
+     */
+    wallet: named(
+      question,
+      transactions.flatMap((t) => [t.fromWallet, t.toWallet]),
+    ),
+  };
 }
 
 export function buildChart(
@@ -365,20 +409,47 @@ export function buildChart(
   const valueOf = direction === "revenue" ? revenueOf : spendingOf;
   const word = direction === "revenue" ? "Income" : "Spending";
   /**
-   * One item over time, because one item by item is a single bar.
+   * Never group by the thing you just narrowed to.
    *
-   * Asking about Treat and being shown one bar labelled Treat says nothing
-   * you did not already type. Across months it says whether it is growing,
-   * which is the only question worth drawing about a single item.
+   * One item grouped by item is a single bar labelled with the word you
+   * typed. One wallet grouped by wallet is the same. So a filtered chart
+   * moves to the next useful question: an item goes across months, which
+   * says whether it is growing, and a wallet goes across items, which says
+   * what it was spent on.
    */
-  const by = focus && dimensionOf(question) === "item" ? "month" : dimensionOf(question);
+  const asked = dimensionOf(question);
+  const by: ChartBy =
+    focus.item && asked === "item"
+      ? "month"
+      : focus.wallet && asked === "wallet"
+        ? "item"
+        : asked;
+
   const period = windowOf(question, asOf);
+
+  /**
+   * The side the money actually moved through.
+   *
+   * Spending leaves `fromWallet`; income lands in `toWallet`. `walletUsage`
+   * attributes every cost to the from side and nothing to the to side, and a
+   * chart that disagrees with it is the `costOf` mistake again.
+   *
+   * Matching either side was tried first and double-counted: a transfer fee
+   * is borne by the account the money left, so charting Maya and Cash
+   * separately added the same PHP 458.00 of fees to both.
+   */
+  const sideOf = (t: Transaction): string =>
+    direction === "revenue" ? t.toWallet.trim() : t.fromWallet.trim();
+
+  const matchesWallet = (t: Transaction): boolean =>
+    !focus.wallet || sideOf(t).toLowerCase() === focus.wallet.toLowerCase();
 
   const inWindow = transactions.filter(
     (t) =>
       t.date >= period.from &&
       t.date <= period.to &&
-      (!focus || t.item.trim().toLowerCase() === focus.toLowerCase()),
+      (!focus.item || t.item.trim().toLowerCase() === focus.item.toLowerCase()) &&
+      matchesWallet(t),
   );
 
   const key = (t: Transaction): string => {
@@ -386,7 +457,10 @@ export function buildChart(
       case "month":
         return monthOf(t.date);
       case "wallet":
-        return t.fromWallet.trim() || "(none)";
+        // The side the money moved through, so an income chart grouped by
+        // wallet does not put every row under "(none)": a Revenue row has no
+        // source, and reading one was how that happened.
+        return sideOf(t) || "(none)";
       case "category":
         return t.category.trim() || "(none)";
       case "item":
@@ -422,9 +496,16 @@ export function buildChart(
      * A chart of Treat alone, headed "Spending by month", reads as the whole
      * month's spending and is wrong by everything it left out.
      */
-    title: focus
-      ? `${focus} by ${by}, ${period.name}`
-      : `${word} by ${by}, ${period.name}`,
+    /**
+     * The title carries every filter, or the chart is a lie by omission.
+     *
+     * A chart of Treat alone headed "Spending by month" reads as the whole
+     * month's spending and is wrong by everything it left out. The same goes
+     * for one wallet.
+     */
+    title: `${focus.item || word}${focus.wallet ? ` from ${focus.wallet}` : ""} by ${by}, ${
+      period.name
+    }`,
     by,
     kind: kindOf(question, by),
     rows: kept.map(([label, g]) => ({

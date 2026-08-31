@@ -253,3 +253,91 @@ describe("the short periods, which all drew the whole month", () => {
     expect(chart?.total).toBe(30000);
   });
 });
+
+describe("naming one account", () => {
+  /**
+   * "chart my maya spending this year" drew all three wallets, with the whole
+   * year's total under them. A bare account name made `dimensionOf` group by
+   * wallet, and grouping by the thing you just narrowed to is the same
+   * mistake a single item had: one bar labelled with the word you typed.
+   *
+   * The account names were also hardcoded, so "chart my reserved fund"
+   * matched nothing at all.
+   */
+  const spread: Transaction[] = [
+    row({ item: "Food", fromWallet: "Maya", date: "2026-07-02", amount: 30000, total: 30000 }),
+    row({ item: "Gas", fromWallet: "Gcash", date: "2026-07-09", amount: 20000, total: 20000 }),
+    row({ item: "Food", fromWallet: "Cash", date: "2026-08-04", amount: 10000, total: 10000 }),
+    row({
+      type: "Transfer",
+      category: "Transfer",
+      item: "",
+      fromWallet: "Maya",
+      toWallet: "Cash",
+      date: "2026-08-06",
+      amount: 100000,
+      fee: 1800,
+      total: 101800,
+    }),
+  ];
+
+  it("filters to the account instead of grouping by it", () => {
+    const chart = buildChart("chart my maya spending this year", spread, ASOF);
+    expect(chart?.title).toContain("from Maya");
+    // Food 300 plus the transfer's PHP 18.00 fee. Nothing from Gcash or Cash.
+    expect(chart?.total).toBe(31800);
+  });
+
+  it("does not group by the thing it just narrowed to", () => {
+    expect(buildChart("chart my maya spending this year", spread, ASOF)?.by).toBe("item");
+  });
+
+  /**
+   * The partition property, which is what makes these figures trustworthy.
+   *
+   * Matching either side was tried first and double-counted: a transfer fee
+   * is borne by the account the money left, so charting two wallets
+   * separately added the same fee to both. Attributed to one side, the
+   * per-wallet charts add up to the whole.
+   */
+  it("splits the total between accounts without overlap", () => {
+    const each = ["Maya", "Gcash", "Cash"].map(
+      (w) => buildChart(`chart my ${w} spending this year`, spread, ASOF)?.total ?? 0,
+    );
+    expect(each.reduce((a, b) => a + b, 0)).toBe(
+      buildChart("chart this year", spread, ASOF)?.total,
+    );
+  });
+
+  it("still groups by wallet when that is what was asked", () => {
+    expect(buildChart("chart by wallet this year", spread, ASOF)?.by).toBe("wallet");
+  });
+
+  /** Read from the ledger, so an account added later needs no code change. */
+  it("recognises an account this file never heard of", () => {
+    const odd = [...spread, row({ fromWallet: "Reserved Fund", date: "2026-08-08", amount: 5000, total: 5000 })];
+    expect(buildChart("chart my reserved fund this year", odd, ASOF)?.total).toBe(5000);
+  });
+
+  /**
+   * Income lands in `toWallet`, and grouping by wallet read the source, so
+   * every income row fell under "(none)": a Revenue row has no source.
+   */
+  it("groups income by the account it landed in", () => {
+    const earned: Transaction[] = [
+      row({
+        type: "Revenue",
+        category: "Revenue",
+        item: "Framelink",
+        fromWallet: "",
+        toWallet: "Maya",
+        amount: 500000,
+        total: 500000,
+        status: "Received",
+      }),
+    ];
+    const chart = buildChart("chart my income by wallet this year", earned, ASOF);
+    expect(chart?.rows.map((r) => r.label)).toEqual(["Maya"]);
+    expect(chart?.rows.map((r) => r.label)).not.toContain("(none)");
+  });
+});
