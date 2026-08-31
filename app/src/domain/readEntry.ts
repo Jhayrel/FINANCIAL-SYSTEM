@@ -104,6 +104,20 @@ const SOMEONE_ELSE =
  */
 const THEIR_POSSESSIVE = /\b(?!my\b|our\b)[\w-]+['’]s\b/i;
 
+/**
+ * Handing money to a person: "paid my friend", "gave her", "sent my mom".
+ *
+ * People only. A landlord, a seller, a shop or a driver is somebody you buy
+ * from, and that is spending with a real item behind it. A friend or a
+ * relative is not selling you anything, so there is no item to find and no
+ * point looking for one.
+ *
+ * The person has to follow the verb closely, so "I paid Globe today, my
+ * friend told me about the promo" stays a bill.
+ */
+const PAID_A_PERSON =
+  /\b(?:paid|pay|paying|repaid|reimbursed|sent|send|gave|give|giving)\s+(?:back\s+)?(?:to\s+)?(?:my|his|her|their|our|the|a)?\s*(?:friend|friends|kaibigan|barkada|mother|mom|mama|nanay|father|dad|papa|tatay|sister|brother|kuya|cousin|pinsan|tita|tito|aunt|auntie|uncle|lola|lolo|grandma|grandpa|classmate|schoolmate|girlfriend|boyfriend|wife|husband|someone|somebody|him|her|them)\b/i;
+
 /** Explicitly one of yours: "my gcash", "my own savings". */
 const MINE = /\b(my|mine|our|ours|own)\b/i;
 
@@ -126,6 +140,25 @@ const PURPOSE =
  */
 function flowOf(text: string): Flow | null {
   if (GOT.test(text)) return "Revenue";
+  /**
+   * Paying a person is money leaving, not a category of purchase.
+   *
+   * "I paid my friend yesterday 600 cash because I buy clubshirt" came back
+   * as Gas, and "I paid my friend 1000 but using gcash and cash" as Food.
+   * Both were rejected, seconds apart, and both were the same mistake:
+   * "paid" put the sentence on the spending path, and the spending path has
+   * to name a thing, so it went looking for one and found a coincidence.
+   *
+   * There is no thing. The money went to somebody, which is a transfer with
+   * nobody on the other end, and this ledger already has a name for that:
+   * Money Send, derived from the blank destination rather than typed. The
+   * totals are identical either way, because a transfer that left your
+   * accounts counts in full. What changes is that nothing has to be invented.
+   *
+   * Deliberately only people, not roles. Paying a shop, a seller or a driver
+   * is buying something, and that is spending with a real item behind it.
+   */
+  if (PAID_A_PERSON.test(text)) return "Transfer";
   if (SPENT.test(text)) return "Spending";
   if (MOVED.test(text)) return "Transfer";
   return null;
@@ -400,7 +433,16 @@ export function readEntry(
    * not one of your accounts and not one of your own possessives.
    */
   const wentSomewhereElse =
-    theirs || (!destination && !mine && toClause !== "" && !PURPOSE.test(toClause));
+    theirs ||
+    /**
+     * "I paid my friend 1000 using gcash" names no destination at all.
+     *
+     * The person is the object of the verb rather than the end of a "to"
+     * clause, so there is nothing after "to" to read. It still left your
+     * accounts, and that is the whole reason this sentence is a transfer.
+     */
+    (PAID_A_PERSON.test(text) && !destination) ||
+    (!destination && !mine && toClause !== "" && !PURPOSE.test(toClause));
 
   const leftYourAccounts = flow === "Transfer" && wentSomewhereElse;
 

@@ -201,3 +201,65 @@ describe("the fee still reads correctly on both sides", () => {
     expect(spending("sent 1000 from cash to gcash, fee 15")).toBe(1500);
   });
 });
+
+describe("paying a person is money leaving, not a purchase", () => {
+  /**
+   * Both of these were proposed and both were rejected, seconds apart, on
+   * 2026-08-31. The first came back as Gas and the second as Food, and
+   * neither sentence has anything to do with fuel or meals.
+   *
+   * "paid" put them on the spending path, and the spending path has to name
+   * a thing, so it went looking and found a coincidence. There is no thing:
+   * the money went to somebody.
+   */
+  it("does not look for an item that is not there", () => {
+    for (const said of [
+      "I paid my friend yesterday 600 cash because I buy clubshirt",
+      "I paid my friend 1000 but using gcash and cash can you add it",
+      "I sent my mom 500 using gcash",
+      "gave her 200 in cash",
+    ]) {
+      expect(read(said).draft.flow, said).toBe("Transfer");
+    }
+  });
+
+  it("books it as money that left, so all of it counts", () => {
+    const { draft } = read("I paid my friend 1000 but using gcash and cash can you add it");
+    expect(draft.fromWallet).toBe("Gcash");
+    expect(draft.toWallet).toBe("");
+    expect(draft.sentOut).toBe(true);
+    expect(spending("I paid my friend 1000 using gcash")).toBe(100000);
+  });
+
+  /**
+   * People, not roles. Somebody you buy from is selling you something, and
+   * that is spending with a real item behind it.
+   */
+  it("leaves buying from a shop or a seller as spending", () => {
+    for (const said of [
+      "I paid the seller 300 for food using cash",
+      "paid the driver 150 cash",
+      "I paid the store 500 using gcash",
+    ]) {
+      expect(read(said).draft.flow, said).toBe("Spending");
+    }
+  });
+
+  /** A bill is a bill, whoever else the sentence mentions afterwards. */
+  it("does not catch a person named later in the sentence", () => {
+    const withBills = { ...reference, bills: ["Globe at Home Wifi"] };
+    const { draft } = readEntry(
+      "I paid globe at home wifi 999 maya, my friend told me about the promo",
+      ledger,
+      withBills,
+      ASOF,
+    );
+    expect(draft.flow).toBe("Spending");
+    expect(draft.item).toBe("Globe at Home Wifi");
+  });
+
+  /** Debt still wins: it is tested before any of this. */
+  it("still sends a debt sentence to the debt path", () => {
+    expect(read("I paid my friend back the 500 I borrowed").readsAsDebt).toBe(true);
+  });
+});
