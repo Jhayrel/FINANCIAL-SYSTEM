@@ -235,10 +235,10 @@ describe("matchItem: sticking to the lists you already keep", () => {
   });
 
   it("does not match a name buried in a longer word", () => {
-    // "funeral" contains "fun" but is not it.
+    // "funeral" contains "fun" but is not it. Kept as a new item, tidied.
     const found = matchItem("funeral", "Spending", "Spending", withRemarks);
     expect(found.matched).toBe(false);
-    expect(found.item).toBe("funeral");
+    expect(found.item).toBe("Funeral");
   });
 
   it("keeps a genuinely new item, and says it is new", () => {
@@ -252,5 +252,35 @@ describe("matchItem: sticking to the lists you already keep", () => {
 
   it("caps a long reply so it fits the column", () => {
     expect(matchItem("z".repeat(200), "Spending", "Spending", withRemarks).item.length).toBe(80);
+  });
+});
+
+describe("matchItem tidies a genuinely new item", () => {
+  const withRemarks: ReferenceLists = {
+    ...reference,
+    spendingTypes: [{ name: "Fun", remark: "Outings, parties, leisure" }],
+  };
+
+  /**
+   * Answering "dog" stored an item called "dog" beside Food, Gas and Online
+   * Buy. Case is the only thing separating it from a second "Dog" typed later.
+   */
+  it("capitalises it, the way the existing ones are written", () => {
+    expect(matchItem("dog", "Spending", "Spending", withRemarks).item).toBe("Dog");
+    expect(matchItem("  scuba lessons ", "Spending", "Spending", withRemarks).item).toBe(
+      "Scuba lessons",
+    );
+  });
+
+  it("collapses runs of spaces", () => {
+    expect(matchItem("dog    food", "Spending", "Spending", withRemarks).item).toBe("Dog food");
+  });
+
+  it("still says it is new", () => {
+    expect(matchItem("dog", "Spending", "Spending", withRemarks).matched).toBe(false);
+  });
+
+  it("leaves a matched name exactly as the list spells it", () => {
+    expect(matchItem("outing", "Spending", "Spending", withRemarks).item).toBe("Fun");
   });
 });

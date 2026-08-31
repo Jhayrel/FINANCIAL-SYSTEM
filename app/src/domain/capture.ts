@@ -354,8 +354,25 @@ export function matchItem(
     }
   }
 
-  // 4. Genuinely new. Kept, and flagged.
-  return { item: said.slice(0, 80), matched: false };
+  // 4. Genuinely new. Kept, tidied, and flagged.
+  return { item: tidy(said), matched: false };
+}
+
+/**
+ * A new item, written the way the existing ones are.
+ *
+ * Answering "dog" stored an item called "dog" beside Food, Gas and Online
+ * Buy. Case is the only thing separating it from a second, identical type
+ * later typed as "Dog", and two spellings of one item split every ranking
+ * that groups by item.
+ *
+ * Only the first letter. The owner's own list is mixed ("Online Buy" beside
+ * "Random necessities"), so title-casing every word would impose a
+ * convention they do not use, and this is the one change that is never wrong.
+ */
+function tidy(said: string): string {
+  const trimmed = said.trim().replace(/\s+/g, " ").slice(0, 80);
+  return trimmed ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1) : trimmed;
 }
 
 /** Word-boundary containment, so "Fun" does not match "funeral". */

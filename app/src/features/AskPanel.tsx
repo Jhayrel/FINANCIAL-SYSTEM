@@ -128,7 +128,7 @@ interface Offered {
    * the moment you asked to look at it. It stays, marked, with its buttons
    * gone.
    */
-  readonly state: "open" | "added" | "used" | "discarded" | "replaced";
+  readonly state: "open" | "added" | "used" | "discarded";
 }
 
 type Turn = Said | Offered;
@@ -349,6 +349,26 @@ export function AskPanel({
       }
     }
 
+    /**
+     * A new spending type is worth seeing before it is saved, however the
+     * entry got here: a second type that differs only in wording splits every
+     * ranking that groups by item.
+     */
+    const itemFlow = ready.draft.flow;
+    if (
+      ready.draft.item.trim() &&
+      (itemFlow === "Spending" || itemFlow === "Revenue") &&
+      !matchItem(ready.draft.item, itemFlow, ready.draft.category, reference).matched
+    ) {
+      ready = {
+        ...ready,
+        adjustments: [
+          ...ready.adjustments,
+          `"${ready.draft.item}" is not one of your spending types. Saving this adds it as a new one.`,
+        ],
+      };
+    }
+
     const asked = batch ? null : nextQuestion(ready.draft, reference, settled);
 
     if (!asked) {
@@ -417,7 +437,19 @@ export function AskPanel({
         }
       }
 
-      if (complete.item.trim().toLowerCase() === reply.trim().toLowerCase() && !local.matched) {
+      /**
+       * Decided from the item that will actually be saved.
+       *
+       * An earlier version compared the item against the raw reply, so a
+       * reply that only had its casing tidied ("dog" into "Dog") no longer
+       * matched and the warning was skipped. What matters is whether the
+       * final item is one of the owner's types, which is the question
+       * `matchItem` answers.
+       */
+      const replyFlow = complete.flow;
+      const settledItem =
+        replyFlow === "" ? null : matchItem(complete.item, replyFlow, complete.category, reference);
+      if (settledItem && !settledItem.matched) {
         because.push(
           `"${complete.item}" is not one of your spending types. Saving this adds it as a new one.`,
         );
@@ -566,16 +598,19 @@ export function AskPanel({
         if (change) {
           setDraft("");
           /**
-           * Collapse the old card, then show the new one below.
+           * The old card goes, and the corrected one arrives at the bottom.
            *
            * Changing the card in place worked and looked like nothing had
            * happened: the card sits above the message that changed it, so
-           * the one field that moved was off screen. Now the old version
-           * folds to a line and the current one appears at the bottom, next
-           * to the box, where you were already looking.
+           * the one field that moved was off screen. Leaving a collapsed
+           * stub behind was not much better, because two versions of one
+           * entry on screen is one more than there are. So the order reads
+           * as the conversation did:
+           *
+           *   what you said, then the entry as it now stands.
            */
           setTurns((prev) => [
-            ...prev.map((t, i) => (i === card.index && isOffer(t) ? { ...t, state: "replaced" as const } : t)),
+            ...prev.filter((_, i) => i !== card.index),
             { kind: "you", text: note },
             {
               kind: "proposal",
@@ -1122,12 +1157,10 @@ function ProposalCard({
    * to look at it. It stays now, showing the same fields, with the buttons
    * replaced by what happened to it.
    */
-  if (state === "discarded" || state === "replaced") {
+  if (state === "discarded") {
     return (
       <div className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
-        {state === "discarded"
-          ? "Discarded."
-          : `Changed: ${draft.item || draft.description || draft.flow || "entry"}, ${formatMoney(draft.amount ?? 0)} on ${draft.date}.`}
+        Discarded.
       </div>
     );
   }
