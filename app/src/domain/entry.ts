@@ -270,6 +270,15 @@ export function runningBalance(
 
 // ── Validation, spec 5.11, rules D1 to D3 ────────────────────────────────────
 
+/**
+ * The largest figure this ledger stores, in centavos.
+ *
+ * Kept in step with `firestore.rules`, which bounds money at the same value.
+ * The rule is the one that actually holds; this exists so the refusal can be
+ * a sentence next to the field rather than a permissions error at the write.
+ */
+export const MOST_MONEY = 100_000_000_000;
+
 export interface EntryIssue {
   readonly field: FieldName | "flow";
   readonly message: string;
@@ -303,6 +312,35 @@ export function checkDraft(
   if (draft.amount === null || draft.amount <= 0) {
     errors.push({ field: "amount", message: "Amount must be more than ₱0.00." });
   }
+
+  /**
+   * A negative fee, which nothing checked.
+   *
+   * The amount is guarded and the fee was not, and `total = amount + fee`, so
+   * a fee of minus fifty turned a hundred peso row into a fifty peso one. The
+   * database agrees with the arithmetic and stores it, because the rule
+   * checks that the parts add up rather than which way they point. Every
+   * total in the app then quietly understates by the difference.
+   */
+  if (draft.fee < 0) {
+    errors.push({ field: "fee", message: "A fee cannot be negative." });
+  }
+
+  /**
+   * Bigger than the database will take.
+   *
+   * `firestore.rules` bounds money at ±₱1,000,000,000, so a larger figure is
+   * refused at the write with "Missing or insufficient permissions": true,
+   * unhelpful, and indistinguishable from the rules not being deployed. The
+   * limit belongs where it can be explained, next to the field it applies to.
+   */
+  const total = (draft.amount ?? 0) + draft.fee;
+  if (total >= MOST_MONEY) {
+    errors.push({
+      field: "amount",
+      message: `That is over ${money(MOST_MONEY)}, which is more than this ledger stores. Check the figure.`,
+    });
+  }
   if (!draft.date) {
     errors.push({ field: "date", message: "Pick a date." });
   }
@@ -332,6 +370,31 @@ export function checkDraft(
   }
 
   // ── Warnings ─────────────────────────────────────────────────────────────
+
+  /**
+   * A Spending or Revenue row with no item.
+   *
+   * Record #442 is in the ledger as Spending, PHP 371.00, with the item field
+   * empty. It is real money and it is invisible to every report that groups
+   * by item: the monthly split, the rankings, the year by category. It is not
+   * wrong, it is unfindable, which is worse, because nothing flags it.
+   *
+   * A warning and not an error, deliberately. `fieldsFor` has always allowed a
+   * blank item and there are rows in the imported history without one, so
+   * refusing to save would make part of the owner's own past unwritable. This
+   * says it out loud at the moment it would happen and lets them decide.
+   *
+   * Transfer and Debt are excluded: neither names a thing bought, and their
+   * items are derived rather than typed.
+   */
+  if ((draft.flow === "Spending" || draft.flow === "Revenue") && !draft.item.trim()) {
+    warnings.push({
+      field: "item",
+      message:
+        "No item, so this will not appear in any breakdown by item. Save it without one?",
+    });
+  }
+
   const balance = runningBalance(draft, transactions, draft.id);
 
   if (balance?.goesNegative) {
