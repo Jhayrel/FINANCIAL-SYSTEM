@@ -182,7 +182,26 @@ function flowOf(text: string): Flow | null {
  * a hundred thousand would be inventing the zeroes.
  */
 function amountIn(text: string): number | null {
-  const withoutDates = text.replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
+  let withoutDates = text.replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
+
+  /**
+   * A year beside a month is a date, not two thousand pesos.
+   *
+   * "give me insights oif all transaction under treat this may to august
+   * 2026" produced a card proposing a PHP 2,026.00 transfer, built entirely
+   * out of the year at the end of the date range. Five messages of
+   * bewilderment followed, then a rejection.
+   *
+   * Only when a month is named and nothing marks the figure as money, so
+   * "2026" on its own is still an amount if that is what somebody typed, and
+   * "PHP 2,026" always is. A year written next to August is not.
+   */
+  const NAMES_A_MONTH =
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b/i;
+  const MARKS_MONEY = /₱|\bphp\b|\bpesos?\b/i;
+  if (NAMES_A_MONTH.test(withoutDates) && !MARKS_MONEY.test(withoutDates)) {
+    withoutDates = withoutDates.replace(/\b(19|20)\d{2}\b/g, " ");
+  }
 
   const scaled = /(?:₱|php\s*)?(\d+(?:\.\d+)?)([km])\b/i.exec(withoutDates);
   if (scaled?.[1] && scaled[2]) {

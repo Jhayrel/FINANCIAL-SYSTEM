@@ -96,8 +96,36 @@ export function detectIntent(text: string): Intent {
  * `detectIntent` called it a question and it never reached the reader, which
  * would have recognised Gas and Cash immediately.
  */
+/**
+ * Asking for something, anywhere in the sentence.
+ *
+ * ── The entry that should never have existed ──────────────────────────────
+ *
+ *   14:48:04  "give me insights oif all transaction under treat this may to
+ *              august 2026"
+ *   14:48:18  "all, under treat"
+ *   14:48:27  "I said all"
+ *   14:48:37  "ok maya"
+ *   14:48:53  "what is this???"
+ *   14:49:04  rejected: 2026-08-29 Transfer PHP 2,026.00
+ *
+ * A request for insights became a card proposing a two thousand peso
+ * transfer, built out of the year in the date range. Five messages of
+ * increasing bewilderment, then a rejection.
+ *
+ * `ASKING` is anchored at the start of the sentence, and none of these begin
+ * with one of its words. "give me insights" opens with a verb; "I want to
+ * know how much" opens with a pronoun. Both are plainly requests, and both
+ * were read as things that had happened.
+ *
+ * Phrases, not bare words, and this matters: "give me" is a request and "I
+ * give 1000 to my friend" is an entry, and they share a verb.
+ */
+const REQUESTING =
+  /\b(?:give me|show me|tell me|make me|draw me|send me a|i want to know|i want insight|i want an? insight|i want summary|i want a summary|i need to know|how much|how many|insights? (?:of|on|about|for)|review the|summar(?:y|ise|ize))\b/i;
+
 export function isQuestion(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return true;
-  return trimmed.endsWith("?") || ASKING.test(trimmed);
+  return trimmed.endsWith("?") || ASKING.test(trimmed) || REQUESTING.test(trimmed);
 }
