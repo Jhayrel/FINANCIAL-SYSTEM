@@ -39,6 +39,7 @@ import {
 import type { AiSettings, AppSettings } from "../domain/settings";
 import { describeDraft, suggestCategory } from "../data/aiClient";
 import { AskPanel, type ProposalSink } from "./AskPanel";
+import type { Provenance } from "../domain/activity";
 import type { CategoryResult } from "../data/aiClient";
 import { billsToLog, predictAmount, reasons, type DueBill } from "../domain/predict";
 import type { Budgets, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
@@ -102,8 +103,8 @@ export function AddTransaction({
   reference: ReferenceLists;
   debts: readonly Debt[];
   balances: readonly WalletBalance[];
-  onSave: (rows: Transaction[]) => void;
-  onUpdate: (rows: Transaction[]) => void;
+  onSave: (rows: Transaction[], by?: Provenance) => void;
+  onUpdate: (rows: Transaction[], by?: Provenance) => void;
   /** A saved row being corrected, rather than a new entry. */
   editing: Transaction | null;
   onCancelEdit: () => void;
@@ -327,13 +328,17 @@ export function AddTransaction({
         setSuggested(new Set());
         setSubmitted(false);
       },
-      add: (d) => {
+      add: (d, by) => {
         const c = checkDraft(d, transactions, reference, debts);
         // Belt and braces: the button is already disabled when this fails.
         if (!c.ok) return;
         proposed += 1;
         onSave(
           draftToTransactions(d, nextRecordNumber, `t-${Date.now()}-${proposed}`, c.repaymentSplit),
+          // Recorded as the assistant's, because it was: the owner approved
+          // it, but they did not type it, and six months from now that is the
+          // difference worth being able to look up.
+          by ?? { actor: "ai", via: "ai_chat" },
         );
       },
     }),

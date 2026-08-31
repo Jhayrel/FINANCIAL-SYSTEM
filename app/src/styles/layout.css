@@ -1773,3 +1773,135 @@
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* ══ Activity ══════════════════════════════════════════════════════════════
+   The trail of what happened. Read only by construction: the collection is
+   append only at the database, so there is no control here that could exist
+   even if one were wanted. */
+
+.fms-actbar {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.fms-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.fms-chip {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-chip:hover {
+  color: var(--ink);
+}
+
+.fms-chip[aria-pressed="true"] {
+  background: var(--brand-50);
+  border-color: var(--brand-600);
+  color: var(--ink);
+}
+
+/* Rule D10: a real target on a phone. */
+@media (max-width: 1023px) {
+  .fms-chip {
+    min-height: 44px;
+  }
+}
+
+.fms-acts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * Hairline separated, square. Rule D2: no card per row, no shadow. A list of
+ * two hundred events with a border-radius on each one reads as two hundred
+ * things to deal with rather than one thing to scan.
+ */
+.fms-act {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-act:first-child {
+  border-top: none;
+}
+
+.fms-acthead {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-acthead > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fms-actwhen {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fms-actmeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--ink-3);
+}
+
+/*
+ * Who did it, as a word rather than a colour.
+ *
+ * Flow colour means direction of money (rule D3), so it cannot also mean
+ * provenance. The assistant's marker is a ring in the AI accent, which is the
+ * one colour in this palette that already means "the model was involved".
+ */
+.fms-actor {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+}
+
+.fms-actor--ai {
+  border-color: var(--ai-glow-ring);
+  color: var(--ink-2);
+}
+
+.fms-actdiff {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px var(--space-2);
+  margin: var(--space-1) 0 0;
+  color: var(--ink-3);
+}
+
+.fms-actdiff dt {
+  white-space: nowrap;
+}
+
+.fms-actdiff dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

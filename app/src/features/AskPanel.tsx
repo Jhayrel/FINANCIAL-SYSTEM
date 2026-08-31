@@ -67,6 +67,7 @@ import { formatBytes, readFiles, totalBytes, LIMITS, type Attachment } from "../
 import { useAi } from "./useAi";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
+import type { Provenance } from "../domain/activity";
 import type { AppSettings } from "../domain/settings";
 import type { Budgets, ReferenceLists, Transaction } from "../domain/types";
 
@@ -85,8 +86,14 @@ export interface ProposalSink {
   };
   /** Put it in the form, for a correction before saving. */
   readonly use: (draft: Draft) => void;
-  /** Save it, through the same path a typed entry takes. */
-  readonly add: (draft: Draft) => void;
+  /**
+   * Save it, through the same path a typed entry takes.
+   *
+   * `by` records where it came from. It defaults to the assistant, because
+   * that is what this panel is, and it is a record of what happened rather
+   * than a permission to do it.
+   */
+  readonly add: (draft: Draft, by?: Provenance) => void;
 }
 
 interface Said {
@@ -387,7 +394,14 @@ export function AskPanel({
               offered={turn}
               sink={sink}
               onAdd={() => {
-                sink.add(turn.proposal.draft);
+                sink.add(turn.proposal.draft, {
+                  actor: "ai",
+                  // A picture and a sentence are different enough to tell
+                  // apart when reading the trail back.
+                  via: turn.proposal.sourceRef.toLowerCase().includes("image")
+                    ? "ai_image"
+                    : "ai_chat",
+                });
                 settle(i, "added");
               }}
               onUse={() => {

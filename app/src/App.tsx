@@ -58,6 +58,17 @@ import { useCloud } from "./data/useCloud";
 import { SignIn } from "./features/SignIn";
 import { migrateAccounts, renameAccount, renameItem, type Account } from "./domain/accounts";
 import { defaultSettings, isBlankSettings, type AppSettings } from "./domain/settings";
+import { Activity } from "./features/Activity";
+import { activityStore } from "./data/activityStore";
+import {
+  binned as binnedEvent,
+  created as createdEvent,
+  restored as restoredEvent,
+  updated as updatedEvent,
+  BY_OWNER,
+  type ActivityEvent,
+  type Provenance,
+} from "./domain/activity";
 import type { Centavos } from "./domain/money";
 import type { Budgets, DeletedTransaction, ReferenceLists, Transaction } from "./domain/types";
 
@@ -70,6 +81,7 @@ type Screen =
   | "budget"
   | "statements"
   | "bin"
+  | "activity"
   | "settings";
 
 const NAV: { id: Screen; label: string; icon: string; primary?: boolean }[] = [
@@ -81,6 +93,7 @@ const NAV: { id: Screen; label: string; icon: string; primary?: boolean }[] = [
   { id: "budget", label: "Budget", icon: "▤" },
   { id: "statements", label: "Statements", icon: "▦" },
   { id: "bin", label: "Bin", icon: "⌫" },
+  { id: "activity", label: "Activity", icon: "◷" },
   { id: "settings", label: "Settings", icon: "⚙" },
 ];
 
@@ -100,6 +113,8 @@ export default function App() {
    */
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  /** Bumped on every recorded event, so the Activity screen refetches. */
+  const [activityKey, setActivityKey] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
 
   const base = loadLocalLedger();
@@ -346,6 +361,23 @@ export default function App() {
   };
 
   /**
+   * Write the audit event beside the data write.
+   *
+   * Deliberately not awaited and deliberately not able to fail the caller. A
+   * ledger write that succeeded must not report an error because its audit
+   * entry did not: the owner would be told their money did not save when it
+   * did. So a failed event surfaces in the sync banner and nowhere else, and
+   * the direction this fails in is the one where the ledger is right.
+   */
+  const record = (...events: readonly ActivityEvent[]): void => {
+    const store = activityStore(cloud.uid ?? null);
+    for (const event of events) {
+      store.record(event).catch((e: Error) => setSyncError(`Activity not recorded: ${e.message}`));
+    }
+    setActivityKey((n) => n + 1);
+  };
+
+  /**
    * Reference lists are derived from settings, so every screen keeps working
    * against the shape it already knows while Settings edits the richer model.
    *
@@ -396,9 +428,10 @@ export default function App() {
     window.setTimeout(() => setToast(null), 6000);
   };
 
-  const handleSave = (rows: Transaction[]): void => {
+  const handleSave = (rows: Transaction[], by: Provenance = BY_OWNER): void => {
     setTransactions((prev) => insertChronologically(prev, rows));
     push((l) => l.saveMany(rows));
+    record(...rows.map((r) => createdEvent(r, by)));
     flash(
       rows.length > 1
         ? `Saved. ${rows.length} rows added.`
@@ -417,7 +450,15 @@ export default function App() {
    * Written through to Firestore by the same `saveMany` an insert uses, which
    * writes by id, so an update overwrites rather than duplicating.
    */
-  const handleUpdate = (rows: Transaction[]): void => {
+  const handleUpdate = (rows: Transaction[], by: Provenance = BY_OWNER): void => {
+    // Read before the state changes, so the event carries what it replaced.
+    const previous = new Map(transactions.map((t) => [t.id, t]));
+    record(
+      ...rows.map((r) => {
+        const was = previous.get(r.id);
+        return was ? updatedEvent(was, r, by) : createdEvent(r, by);
+      }),
+    );
     setTransactions((prev) => {
       const byId = new Map(rows.map((r) => [r.id, r]));
       const replaced = prev.map((t) => byId.get(t.id) ?? t);
@@ -474,6 +515,7 @@ export default function App() {
     setTransactions((prev) => prev.filter((t) => t.id !== id));
     setDeleted((prev) => [{ ...row, deletedAt: at }, ...prev]);
     push((l) => l.bin(id, at));
+    record(binnedEvent(row));
     flash(`Moved record #${String(row.recordNumber).padStart(4, "0")} to the bin.`);
   };
 
@@ -484,6 +526,7 @@ export default function App() {
     const { deletedAt: _ignored, ...restored } = row;
     setTransactions((prev) => insertChronologically(prev, [restored]));
     push((l) => l.restore(id));
+    record(restoredEvent(restored));
     flash(`Restored record #${String(row.recordNumber).padStart(4, "0")}.`);
   };
 
@@ -812,6 +855,9 @@ export default function App() {
           )}
           {screen === "bin" && (
             <Bin deleted={deleted} onRestore={handleRestore} onPurge={handlePurge} />
+          )}
+          {screen === "activity" && (
+            <Activity uid={cloud.uid ?? null} reloadKey={activityKey} />
           )}
           {screen === "settings" && (
             <Settings
