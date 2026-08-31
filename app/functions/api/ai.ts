@@ -486,23 +486,25 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
    * looks right. Told not to invent a wallet for the same reason: the client
    * blanks an unknown name anyway, so a guess only costs a correction.
    */
-  extract:
-    "Read every distinct transaction in what you are given and output one proposal for each. Put the amount twice: in amountText exactly as it is written, character for character including any comma or currency sign, and in amountPesos as a plain number. These two must agree. Use only the wallet names, categories and items from the allowed lists you are given: if the right one is not there, leave that field empty rather than inventing or substituting one. Leave any field you cannot read empty rather than guessing it. Use the date printed on the transaction, and today's date only when none is printed. Set confidence to low for anything you had to strain to read. In sourceRef, say which image and which line each one came from, or say which words you used when there is no image. If you cannot find a transaction at all, return an empty list.",
   /**
-   * What a thing is, in the owner's own words for it.
+   * Reading a sentence, a receipt or a statement into rows.
    *
-   * "I paid 300 Jollibee today" put a new spending type called Jolibee in the
-   * ledger, because nothing in the ledger and nothing in the owner's notes
-   * mentioned it. This is the one place a model's general knowledge is worth
-   * more than the ledger: it knows Jollibee is a restaurant, and the owner's
-   * note on Food says "Meals, snacks, drinks".
-   *
-   * Constrained to the list, hard. It picks one of the owner's own types or
-   * it picks nothing, so the widest this can go wrong is a wrong row on a
-   * card that shows every field before anything is saved.
+   * The instruction is long because the mistakes are specific. Thinking
+   * first, in `reasoning`, is not decoration: models generate left to right,
+   * so a field placed after a line of reasoning is decided after it, and the
+   * reasoning is where "Globe at Home is on their Bills list, so this is a
+   * bill" happens instead of a guess.
    */
-  classify:
-    "You are given something a person bought and a list of the spending types they keep, each with their own note saying what counts as it. Say which one it belongs to. Use ordinary knowledge about what shops, restaurants, brands and products are: if the words name a fast food chain, that is a meal; if they name a petrol station, that is fuel. Copy the type name exactly from the list. If nothing on the list genuinely fits, return an empty string rather than the nearest one: a wrong type is worse than none.",
+  extract: [
+    "Read every distinct transaction in what you are given and output one proposal for each.",
+    "Work it out before you fill anything in. In reasoning, say in one sentence what was bought or received, which of their lists that belongs to, and which wallet it moved through. Then fill the fields to match what you just said.",
+    "The item and the category go together. You are given their items grouped under the category each one belongs to: an item from the Bills group means the category is Bills, from the Subscriptions group means Subscriptions, from the Spending group means Spending. Never file a bill under Spending because it looked like an expense. The note in brackets after a spending type is their own description of what counts as it, so read it.",
+    "Use ordinary knowledge about what things are. A fast food chain is a meal, a petrol station is fuel, a streaming service is a subscription, a telco is a bill. Match that to their list.",
+    "If nothing on their list genuinely fits, leave item empty rather than choosing the nearest one. An empty field is one they fill in a second; a wrong one is a wrong figure filed under the wrong heading.",
+    "Wallets: use only their names. Money to a person, or to an account that is not theirs, is a Transfer with toWallet left empty, which is what means it left their accounts.",
+    "Put the amount twice: amountText exactly as written, character for character including any comma or currency sign, and amountPesos as a plain number. The two must agree. If no amount is stated, leave both empty and they will be asked for it.",
+    "Use the date stated, and today only when none is. Set confidence to low for anything you had to strain to read. In sourceRef, say which image and which line, or which words you used. If there is no transaction in it at all, return an empty list.",
+  ].join(" "),
   categorise:
     "Choose the one category that fits this transaction, copied exactly from the allowed list. Prefer the pattern in the past examples, which are this person's own labels. If nothing fits well, choose the last category in the list rather than inventing one.",
 };
@@ -573,7 +575,7 @@ const TASKS: Record<string, TaskSpec> = {
   extract: {
     instruction: TASK_INSTRUCTIONS["extract"] ?? "",
     shape:
-      '{"proposals": [{"reasoning": "one short sentence", "flow": "Spending or Revenue or Transfer", "date": "YYYY-MM-DD", "fromWallet": "", "toWallet": "", "category": "", "item": "", "description": "", "amountText": "exactly as written", "amountPesos": 0, "feePesos": 0, "status": "", "confidence": "high or medium or low", "sourceRef": ""}]}',
+      '{"proposals": [{"reasoning": "what it was, which list it belongs to, which wallet", "flow": "Spending or Revenue or Transfer", "date": "YYYY-MM-DD", "fromWallet": "", "toWallet": "", "category": "Spending or Bills or Subscriptions or Revenue or Transfer", "item": "one name copied exactly from their lists, or empty", "description": "", "amountText": "exactly as written", "amountPesos": 0, "feePesos": 0, "status": "", "confidence": "high or medium or low", "sourceRef": ""}]}',
     parse: (v) => {
       const list = v["proposals"];
       // An empty list is a real answer: it means nothing was found in the

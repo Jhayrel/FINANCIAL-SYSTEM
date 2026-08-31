@@ -72,7 +72,7 @@ import { amend, applyReply, matchItem, nextQuestion, type Blank } from "../domai
 import { readEntry } from "../domain/readEntry";
 import { readRich } from "../domain/richText";
 import { detectRecall, findRows, type Candidate, type RecallAction } from "../domain/recall";
-import { buildChart, chartLabel, wantsChart, type Chart } from "../domain/charts";
+import { buildChart, chartLabel, isChartFollowUp, wantsChart, type Chart } from "../domain/charts";
 import { inferFromHistory } from "../domain/infer";
 import { itemsFor } from "../domain/entry";
 import { detectIntent, isQuestion, type Intent } from "../domain/intent";
@@ -360,9 +360,11 @@ export function AskPanel({
    */
   useEffect(() => {
     let live = true;
+    const since = clearedAt();
     chatStore(uid)
       .recent()
-      .then((history) => {
+      .then((all) => {
+        const history = since ? all.filter((m) => m.at > since) : all;
         if (!live || history.length === 0) return;
         setTurns((prev) =>
           prev.length > 0
@@ -798,7 +800,16 @@ export function AskPanel({
      * about money, and a wrong bar is a wrong figure drawn large, so no model
      * is involved in the arithmetic or in choosing what to draw.
      */
-    if (files.length === 0 && !as && wantsChart(note)) {
+    /**
+     * A chart, or the same chart over a different window.
+     *
+     * "How about this month?" straight after a chart was answered in prose,
+     * which is reading the words and ignoring the conversation. A short
+     * message naming a period, with a chart already on screen, is asking for
+     * that chart again.
+     */
+    const followUp = isChartFollowUp(note, turns.some(isChart));
+    if (files.length === 0 && !as && (wantsChart(note) || followUp)) {
       const chart = buildChart(note, transactions, asOf);
       setDraft("");
       say({ kind: "you", text: note });
@@ -1042,13 +1053,15 @@ export function AskPanel({
           return;
         }
 
-        if (local.worthOffering) {
+        // With the model switched off there is nothing else to try, so the
+        // rules answer directly. Otherwise the model gets it first, below.
+        if (ai.disabled && local.worthOffering) {
           say({ kind: "you", text: note });
           await offer(
             {
               draft: local.draft,
               confidence: "high",
-              sourceRef: "what you told me",
+              sourceRef: "read on this device",
               said: note,
               adjustments: local.because,
             },
@@ -1070,7 +1083,37 @@ export function AskPanel({
        * tries the other job.
        */
       const found = await readAttached(note);
-      if (!found && files.length === 0 && note) await askQuestion(note, false);
+      if (found || files.length > 0 || !note) return;
+
+      /**
+       * The model could not be reached. Try the rules rather than give up.
+       *
+       * Only now, and only for a sentence: with no key, or every provider
+       * rate limited, a rough reading of "I paid 300 for gas" beats telling
+       * someone their entry cannot be recorded because a provider is busy.
+       */
+      const offline = readEntry(note, transactions, reference, asOf);
+      if (offline.worthOffering) {
+        await offer(
+          {
+            draft: offline.draft,
+            confidence: "low",
+            sourceRef: "read on this device, without the model",
+            said: note,
+            adjustments: [
+              ...offline.because,
+              "The model could not be reached, so this was read here. Check it more carefully than usual.",
+            ],
+          },
+          note,
+          false,
+          false,
+          offline.settled,
+        );
+        return;
+      }
+
+      await askQuestion(note, false);
     } finally {
       setBusy(false);
     }
@@ -1481,6 +1524,20 @@ export function AskPanel({
           className="t-micro fms-linkish"
           onClick={() => {
             log(aiEvent("cleared", "add"));
+            /**
+             * Cleared here, kept there.
+             *
+             * The record is append only and nothing in this app can remove
+             * it, so clearing marks where you cleared rather than deleting
+             * anything: what comes back next time is what was said after
+             * that mark. Without it, clearing looked like it worked and then
+             * the whole conversation reappeared on the next visit.
+             *
+             * The mark is per device on purpose. It is a view preference,
+             * not a fact about the money, so it has no business in the
+             * database.
+             */
+            markCleared();
             setTurns([]);
           }}
         >
@@ -1925,4 +1982,34 @@ function ChartView({ chart }: { chart: Chart }) {
       </p>
     </div>
   );
+}
+
+/**
+ * Where the conversation was last cleared, on this device.
+ *
+ * The record itself is append only and nothing in the app can remove it, so
+ * "Clear this view" marks a point rather than deleting anything: the panel
+ * shows what was said after the mark, and Settings still shows all of it.
+ *
+ * Per device, and in the browser rather than the database, because it is a
+ * view preference and not a fact about the money. Storage can throw in a
+ * private window, and a cleared view that quietly comes back is a smaller
+ * problem than a screen that will not render.
+ */
+const CLEARED_KEY = "fms.chat.clearedAt";
+
+function clearedAt(): string | null {
+  try {
+    return window.localStorage.getItem(CLEARED_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function markCleared(): void {
+  try {
+    window.localStorage.setItem(CLEARED_KEY, new Date().toISOString());
+  } catch {
+    // A view preference is not worth a broken screen.
+  }
 }

@@ -21,6 +21,7 @@
  */
 
 import { toPesos } from "./money";
+import { costOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 
 export type ChartBy = "item" | "month" | "wallet" | "category";
@@ -65,16 +66,15 @@ const monthName = (ym: string): string =>
   `${MONTHS[Number(ym.slice(5, 7)) - 1] ?? ym} ${ym.slice(0, 4)}`;
 
 /**
- * What counts as spending, kept in step with the rest of the app.
+ * What counts as spending: the app's own definition, not a second one.
  *
- * A Transfer with a named destination is money moving between the owner's own
- * pockets, so only its fee is spending. CLAUDE.md, "Transfers are derived".
+ * This file had its own, and it over-counted 2026 by PHP 13,128.00 by
+ * counting Spending rows whose category is blank and ignoring debt interest.
+ * A chart that disagrees with the Insights screen about the year is worse
+ * than no chart, so there is one definition and `charts.test.ts` asserts that
+ * every chart's total equals `totalsFor(...).total` for the same window.
  */
-const spendingOf = (t: Transaction): number => {
-  if (t.type === "Spending") return t.amount + t.fee;
-  if (t.type === "Transfer") return t.toWallet.trim() ? t.fee : t.amount + t.fee;
-  return 0;
-};
+const spendingOf = costOf;
 
 /** Which grouping the question asked for. Item is the useful default. */
 function dimensionOf(question: string): ChartBy {
@@ -130,6 +130,38 @@ function windowOf(
 
 /** True when the message is asking to see a chart at all. */
 export const wantsChart = (question: string): boolean => WANTS_CHART.test(question);
+
+/**
+ * A period named on its own, with a chart already on screen.
+ *
+ * "How about this month?" straight after a chart is asking for the same
+ * chart over a different window, and answering it in prose was reading the
+ * words and ignoring the conversation. It only counts as a follow-up when
+ * the message is short and names a period and nothing else: anything longer
+ * is a new question that happens to mention a month.
+ */
+export function isChartFollowUp(question: string, chartOnScreen: boolean): boolean {
+  if (!chartOnScreen) return false;
+  const trimmed = question.trim();
+  if (!trimmed || trimmed.length > 48) return false;
+  if (WANTS_CHART.test(trimmed)) return false;
+
+  const namesPeriod =
+    // Doubled on purpose: inside a template literal `\b` is the backspace
+    // escape, so a single one builds a regex that matches a control
+    // character and never a word boundary.
+    MONTHS.some((m) => new RegExp(`\\b${m}\\b`, "i").test(trimmed)) ||
+    /\b(this month|last month|this year|last year|the year|ytd|all|everything|per month|monthly|by wallet|by category|by item)\b/i.test(
+      trimmed,
+    );
+  if (!namesPeriod) return false;
+
+  // "how much did I spend in May" is a question about a figure, not a
+  // request to redraw. A follow-up is a fragment, not a sentence.
+  return !/\b(how much|how many|what|why|when|who|which|did|do|does|is|are|was|were)\b/i.test(
+    trimmed,
+  );
+}
 
 /** True when the message is asking for the written version. */
 export const wantsReport = (question: string): boolean =>

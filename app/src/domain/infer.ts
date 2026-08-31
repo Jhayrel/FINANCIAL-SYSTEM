@@ -116,6 +116,17 @@ export interface ItemMatch {
 export function itemFromHistory(
   hint: string,
   transactions: readonly Transaction[],
+  /**
+   * Words that say nothing about what was bought.
+   *
+   * Wallet names, mostly. "I paid my friend yesterday 600 cash because I buy
+   * clubshirt" was booked as Gas, because "cash" appears in the description
+   * of several Gas rows and nothing else in the sentence matched anything.
+   * The wallet was already read out of that sentence by the time this runs,
+   * so letting it vote a second time on what the thing was is the same fact
+   * being counted twice, in a place where it means nothing.
+   */
+  ignore: readonly string[] = [],
 ): ItemMatch | null {
   const spending = transactions.filter((t) => t.item.trim());
   if (spending.length === 0) return null;
@@ -134,17 +145,48 @@ export function itemFromHistory(
   if (named) return { item: named, seen: seen.get(named) ?? 0, how: "named" };
 
   // Pass 2: these words have gone with an item before, in descriptions.
-  const hintWords = new Set(words(hint));
+  const skip = new Set(
+    ignore.flatMap((name) =>
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter(Boolean),
+    ),
+  );
+  const hintWords = new Set(words(hint).filter((w) => !skip.has(w)));
   if (hintWords.size === 0) return null;
 
   const votes = new Map<string, number>();
+  /**
+   * A word only votes if it means something.
+   *
+   * "I paid my friend yesterday 600 cash because I buy clubshirt" was booked
+   * as Gas, because "cash" appears in the descriptions of several Gas rows
+   * and nothing else in the sentence matched anything at all. Counting rows
+   * made it worse: twenty Gas rows saying "cash" was twenty votes off one
+   * meaningless word.
+   *
+   * What separates "cash" from "restaurant" is not how often it appears but
+   * how widely: a word used across several different items describes none of
+   * them. So each word is weighed first, and one that turns up under three or
+   * more items is structural noise and votes for nothing.
+   */
+  const itemsPerWord = new Map<string, Set<string>>();
   for (const row of spending) {
-    const text = words(row.description);
-    if (text.length === 0) continue;
-    const overlap = text.filter((w) => hintWords.has(w)).length;
-    if (overlap === 0) continue;
     const item = row.item.trim();
-    votes.set(item, (votes.get(item) ?? 0) + overlap);
+    for (const w of words(row.description)) {
+      if (!hintWords.has(w)) continue;
+      const found = itemsPerWord.get(w) ?? new Set<string>();
+      found.add(item);
+      itemsPerWord.set(w, found);
+    }
+  }
+
+  const SPREAD = 3;
+  for (const [, items] of itemsPerWord) {
+    if (items.size >= SPREAD) continue;
+    for (const item of items) votes.set(item, (votes.get(item) ?? 0) + 1);
   }
 
   let best: string | null = null;
@@ -156,8 +198,9 @@ export function itemFromHistory(
     }
   }
 
-  // One row is a coincidence. Two is a pattern.
-  if (!best || score < 2) return null;
+  // A word that describes one or two items, and matches, is enough. A word
+  // that describes everything was already thrown out above.
+  if (!best || score < 1) return null;
   return { item: best, seen: seen.get(best) ?? 0, how: "pattern" };
 }
 
@@ -183,7 +226,10 @@ export function inferFromHistory(
   // ── The item ─────────────────────────────────────────────────────────────
   if (!next.item.trim() && (flow === "Spending" || flow === "Revenue")) {
     const sameFlow = transactions.filter((t) => t.type === flow);
-    const match = itemFromHistory(hint, sameFlow);
+    const match = itemFromHistory(hint, sameFlow, [
+      ...reference.wallets,
+      ...reference.savings,
+    ]);
     if (match) {
       next = { ...next, item: match.item };
       because.push(

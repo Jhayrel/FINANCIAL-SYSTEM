@@ -84,9 +84,34 @@ describe("itemFromHistory: the words have gone with it before", () => {
     expect(match?.how).toBe("pattern");
   });
 
-  it("will not decide off a single row, which is a coincidence", () => {
+  it("takes a distinctive word from a single row, because it is distinctive", () => {
+    // "load" describes one item and nothing else, so one row saying it is
+    // evidence. What matters is how widely a word is used, not how often.
     const once = [row({ item: "Online buy", description: "load" }), row({ item: "Food" })];
-    expect(itemFromHistory("buying load", once)).toBeNull();
+    expect(itemFromHistory("buying load", once)?.item).toBe("Online buy");
+  });
+
+  /**
+   * The sentence that came back as Gas: "I paid my friend yesterday 600 cash
+   * because I buy clubshirt". "cash" appears in the descriptions of several
+   * different items, so it describes none of them.
+   */
+  it("ignores a word that turns up under several different items", () => {
+    const spread = [
+      row({ item: "Gas", description: "paid cash" }),
+      row({ item: "Gas", description: "cash at the station" }),
+      row({ item: "Food", description: "cash lunch" }),
+      row({ item: "Treat", description: "cash for a treat" }),
+    ];
+    expect(itemFromHistory("I paid 600 cash because I buy clubshirt", spread)).toBeNull();
+  });
+
+  it("still ignores it when the wallet name is passed in explicitly", () => {
+    const spread = [
+      row({ item: "Gas", description: "paid cash" }),
+      row({ item: "Gas", description: "cash again" }),
+    ];
+    expect(itemFromHistory("600 cash clubshirt", spread, ["Cash", "Gcash"])).toBeNull();
   });
 
   it("ignores the words that carry no meaning", () => {

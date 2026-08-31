@@ -63,9 +63,19 @@ function read(): Ledger {
   return {
     // Surrogate ids until Firestore supplies real ones.
     transactions: raw.transactions.map((t) => ({ ...t, id: `x${t.recordNumber}` })),
-    deleted: raw.deleted.map((t) => ({
+    /**
+     * A binned row keeps its old record number, and numbers get reused, so
+     * two of them can carry the same one. Deriving the id from the number
+     * alone gave two rows the id `d120`, which React reported as a duplicate
+     * key and which made one of them impossible to restore: `handleRestore`
+     * finds a row by id and always found the first.
+     *
+     * The index disambiguates and nothing else changes: the id is unique per
+     * row and stable for a given fixture.
+     */
+    deleted: raw.deleted.map((t, i) => ({
       ...t,
-      id: `d${t.recordNumber}`,
+      id: `d${t.recordNumber}-${i}`,
       deletedAt: "",
     })),
     budgets: raw.budgets,

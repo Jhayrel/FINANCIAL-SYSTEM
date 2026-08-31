@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildChart, chartLabel, wantsChart, wantsReport } from "./charts";
+import { buildChart, chartLabel, isChartFollowUp, wantsChart, wantsReport } from "./charts";
+import { totalsFor } from "./totals";
 import type { Transaction } from "./types";
 
 let n = 0;
@@ -159,5 +160,97 @@ describe("chartLabel", () => {
   it("writes centavos as pesos", () => {
     expect(chartLabel(100000)).toBe("PHP 1,000.00");
     expect(chartLabel(1)).toBe("PHP 0.01");
+  });
+});
+
+describe("a chart never invents its own arithmetic", () => {
+  /**
+   * The bug these exist to stop.
+   *
+   * This file had its own definition of spending, and it over-counted 2026 by
+   * PHP 13,128.00 by counting Spending rows whose category is blank and
+   * ignoring debt interest. Every test above passed throughout, because they
+   * all used rows the two definitions happened to agree on. A chart that
+   * disagrees with the Insights screen about the year is worse than no chart.
+   */
+  const awkward: Transaction[] = [
+    row({ item: "Food", category: "Spending", amount: 10000, total: 10000 }),
+    // Counted by the old definition, ignored by the app's: no category.
+    row({ item: "Mystery", category: "", amount: 99900, total: 99900 }),
+    // Ignored by the old definition, counted by the app's: debt interest.
+    row({
+      type: "Debt",
+      category: "",
+      item: "",
+      debtId: "d1",
+      debtEffect: "interest",
+      amount: 18879,
+      total: 18879,
+    }),
+    // Between the owner's own wallets: the fee, not the thousand.
+    row({
+      type: "Transfer",
+      category: "Transfer",
+      item: "",
+      fromWallet: "Cash",
+      toWallet: "Gcash",
+      amount: 100000,
+      fee: 1500,
+      total: 101500,
+    }),
+  ];
+
+  it("agrees with totalsFor for the window it drew", () => {
+    const chart = buildChart("chart", awkward, ASOF);
+    expect(chart?.total).toBe(totalsFor(awkward).total);
+  });
+
+  it("leaves out a Spending row with no category, as the app does", () => {
+    const chart = buildChart("chart", awkward, ASOF);
+    expect(chart?.rows.map((r) => r.label)).not.toContain("Mystery");
+  });
+
+  it("counts debt interest, as the app does", () => {
+    // 100.00 food + 188.79 interest + 15.00 fee
+    expect(buildChart("chart", awkward, ASOF)?.total).toBe(10000 + 18879 + 1500);
+  });
+
+  it("agrees with totalsFor for every grouping of the same window", () => {
+    for (const q of ["chart", "chart by wallet", "chart by category", "chart per month"]) {
+      const chart = buildChart(q, awkward, ASOF);
+      expect(chart?.total, q).toBe(totalsFor(awkward).total);
+    }
+  });
+});
+
+describe("isChartFollowUp", () => {
+  /** "How about this month?" straight after a chart, answered in prose. */
+  it("reads a bare period as another chart when one is on screen", () => {
+    expect(isChartFollowUp("How about this month?", true)).toBe(true);
+    expect(isChartFollowUp("May", true)).toBe(true);
+    expect(isChartFollowUp("per month", true)).toBe(true);
+    expect(isChartFollowUp("by wallet", true)).toBe(true);
+  });
+
+  it("is nothing without a chart to follow", () => {
+    expect(isChartFollowUp("How about this month?", false)).toBe(false);
+  });
+
+  it("leaves a real question alone", () => {
+    expect(isChartFollowUp("how much did I spend in May", true)).toBe(false);
+    expect(isChartFollowUp("what happened in May", true)).toBe(false);
+  });
+
+  it("leaves a sentence alone, however it mentions a month", () => {
+    expect(isChartFollowUp("I spent 500 in May on food and it was too much", true)).toBe(false);
+  });
+
+  it("does not match a month name inside a longer word", () => {
+    expect(isChartFollowUp("maybe", true)).toBe(false);
+  });
+
+  it("is nothing for a message naming no period", () => {
+    expect(isChartFollowUp("thanks", true)).toBe(false);
+    expect(isChartFollowUp("", true)).toBe(false);
   });
 });

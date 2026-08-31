@@ -473,12 +473,18 @@ function extractContext(options: ExtractOptions): string {
   const { reference, asOf, note, attachments } = options;
   const nl = String.fromCharCode(10);
 
-  const items = [
-    ...reference.spendingTypes.map((s) => s.name),
-    ...reference.bills,
-    ...reference.subscriptions,
-    ...reference.revenueCategories,
-  ];
+  /**
+   * The lists, grouped and annotated, rather than one flat pile of names.
+   *
+   * A flat list gave the model no way to tell a spending type from a bill
+   * from a subscription, so it picked the category by guessing and put Globe
+   * at Home under Spending. Grouping them says which category each name
+   * belongs to, and the owner's own note beside each spending type says what
+   * counts as it, which is the thing worth reading before choosing.
+   */
+  const spendingTypes = reference.spendingTypes.map((t) =>
+    t.remark ? `${t.name} (${t.remark})` : t.name,
+  );
 
   const files = attachments
     .filter((a) => a.kind === "text" && a.text)
@@ -486,9 +492,13 @@ function extractContext(options: ExtractOptions): string {
 
   const lines = [
     `Today is ${asOf}.`,
-    `Allowed wallets: ${[...reference.wallets, ...reference.savings].join(", ") || "none set up yet"}`,
-    "Allowed categories: Spending, Bills, Subscriptions, Revenue, Transfer",
-    `Allowed items: ${items.join(", ") || "none set up yet"}`,
+    `Their wallets: ${[...reference.wallets, ...reference.savings].join(", ") || "none set up yet"}`,
+    "",
+    "The only items allowed, and which category each one belongs to:",
+    `Category "Spending": ${spendingTypes.join(", ") || "none"}`,
+    `Category "Bills": ${reference.bills.join(", ") || "none"}`,
+    `Category "Subscriptions": ${reference.subscriptions.join(", ") || "none"}`,
+    `Category "Revenue" (income only): ${reference.revenueCategories.join(", ") || "none"}`,
     "",
     // Redacted even though the endpoint never logs: a key pasted here would
     // otherwise reach the provider, which is a place this app cannot reach.
