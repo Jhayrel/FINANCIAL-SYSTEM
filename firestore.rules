@@ -7,7 +7,7 @@ rules_version = '2';
 //  deny-by-default whitelist: nothing is readable or writable unless a rule
 //  below explicitly allows it.
 //
-//  Four things enforced here, because the client cannot be trusted to:
+//  Six things enforced here, because the client cannot be trusted to:
 //
 //   1. ONE OWNER.       Signed in is not enough. The uid must equal OWNER_UID.
 //   2. NO HARD DELETE.  `delete` is denied on every money collection. Removing
@@ -17,9 +17,13 @@ rules_version = '2';
 //                       end to end, never a rounding error at rest.
 //   4. NO SECRETS.      A document carrying an apiKey-shaped field is rejected.
 //                       The AI key lives in a Cloudflare env secret (§2, AI4).
-//   5. AUDIT IS FINAL.  The activity log takes creates and refuses updates and
-//                       deletes, so the record of what happened cannot be
-//                       edited after the fact, by anything, including this app.
+//   5. AUDIT IS FINAL.  The activity, chat and AI logs take creates and refuse
+//                       updates and deletes, so the record of what happened
+//                       cannot be edited after the fact, by anything at all,
+//                       including this app.
+//   6. NO PICTURES.     The AI log is a description of a photo, never a photo.
+//                       A data URL is rejected outright: a document is capped
+//                       at 1 MB and an image is the least useful byte in it.
 //
 //  ── What these rules can and cannot say about the assistant ───────────────
 //
