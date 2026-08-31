@@ -2765,6 +2765,7 @@ function AiHistoryGroup({ uid }: { uid: string | null }) {
     };
   }, [uid]);
 
+  const [showAll, setShowAll] = useState(false);
   const yours = (messages ?? []).filter((m) => m.role === "you").length;
 
   return (
@@ -2789,7 +2790,7 @@ function AiHistoryGroup({ uid }: { uid: string | null }) {
             deleted. Keys are removed before anything is written.
           </p>
           <ol className="fms-acts">
-            {[...messages].reverse().map((m) => (
+            {[...messages].reverse().slice(0, showAll ? 200 : 8).map((m) => (
               <li key={m.id} className="fms-act">
                 <div className="fms-acthead">
                   <span className="t-caption" style={{ whiteSpace: "pre-wrap" }}>
@@ -2806,6 +2807,12 @@ function AiHistoryGroup({ uid }: { uid: string | null }) {
               </li>
             ))}
           </ol>
+
+          {messages.length > 8 && (
+            <Button size="sm" onClick={() => setShowAll(!showAll)}>
+              {showAll ? "Show fewer" : `Show all ${messages.length}`}
+            </Button>
+          )}
         </>
       )}
 
@@ -2859,6 +2866,7 @@ function AiLearningGroup({ uid }: { uid: string | null }) {
     };
   }, [uid]);
 
+  const [showAll, setShowAll] = useState(false);
   const all = events ?? [];
   const learned = correctionsFrom(all, "item");
   const count = (action: string): number => all.filter((e) => e.action === action).length;
@@ -2911,7 +2919,7 @@ function AiLearningGroup({ uid }: { uid: string | null }) {
             Recently
           </div>
           <ol className="fms-acts">
-            {all.slice(0, 40).map((e) => (
+            {all.slice(0, showAll ? 200 : 8).map((e) => (
               <li key={e.id} className="fms-act">
                 <div className="fms-acthead">
                   <span className="t-caption">
@@ -2933,6 +2941,19 @@ function AiLearningGroup({ uid }: { uid: string | null }) {
               </li>
             ))}
           </ol>
+
+          {/*
+            Eight, then the rest on request.
+
+            This grows by several rows every time the assistant is used, and a
+            page that becomes a wall after a fortnight is a page nobody opens.
+            The counts above are the part worth seeing every time.
+          */}
+          {all.length > 8 && (
+            <Button size="sm" onClick={() => setShowAll(!showAll)}>
+              {showAll ? "Show fewer" : `Show all ${all.length}`}
+            </Button>
+          )}
         </>
       )}
 
