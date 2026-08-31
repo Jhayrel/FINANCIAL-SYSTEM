@@ -115,6 +115,8 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   /** Bumped on every recorded event, so the Activity screen refetches. */
   const [activityKey, setActivityKey] = useState(0);
+  /** So a missing rules deploy is reported once, not once per row saved. */
+  const activityWarned = useRef(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
   const base = loadLocalLedger();
@@ -372,7 +374,24 @@ export default function App() {
   const record = (...events: readonly ActivityEvent[]): void => {
     const store = activityStore(cloud.uid ?? null);
     for (const event of events) {
-      store.record(event).catch((e: Error) => setSyncError(`Activity not recorded: ${e.message}`));
+      store.record(event).catch((e: Error) => {
+        /**
+         * Said once, not once per row.
+         *
+         * The commonest cause by far is the rules for this collection not
+         * being deployed yet, which is one fact about the project rather than
+         * a problem with this row. Eight rows off one screenshot would
+         * otherwise raise the same banner eight times, and a permission
+         * message repeated eight times reads like eight failures.
+         */
+        if (activityWarned.current) return;
+        activityWarned.current = true;
+        setSyncError(
+          /permission|insufficient/i.test(e.message)
+            ? "The activity trail is not recording: your database has not been given its rules yet. Your entries are saving normally. Run: firebase deploy --only firestore:rules"
+            : `The activity trail is not recording: ${e.message}. Your entries are saving normally.`,
+        );
+      });
     }
     setActivityKey((n) => n + 1);
   };
@@ -810,6 +829,9 @@ export default function App() {
               balances={view.rows}
               uid={cloud.uid ?? null}
               onSave={handleSave}
+              onBin={handleDelete}
+              onRestoreRow={handleRestore}
+              deleted={deleted}
               onUpdate={handleUpdate}
               editing={editing}
               onCancelEdit={() => setEditing(null)}

@@ -71,6 +71,7 @@ import { Button } from "../components/primitives";
 import { amend, applyReply, matchItem, nextQuestion, type Blank } from "../domain/capture";
 import { readEntry } from "../domain/readEntry";
 import { readRich } from "../domain/richText";
+import { detectRecall, findRows, type Candidate, type RecallAction } from "../domain/recall";
 import { inferFromHistory } from "../domain/infer";
 import { itemsFor } from "../domain/entry";
 import { detectIntent, isQuestion, type Intent } from "../domain/intent";
@@ -85,7 +86,7 @@ import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
 import type { Provenance } from "../domain/activity";
 import { imageLimits, type AppSettings } from "../domain/settings";
-import type { Budgets, ReferenceLists, Transaction } from "../domain/types";
+import type { Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
 
 /**
  * What the panel is allowed to do with a proposal.
@@ -110,6 +111,16 @@ export interface ProposalSink {
    * than a permission to do it.
    */
   readonly add: (draft: Draft, by?: Provenance) => void;
+  /**
+   * Move a row to the bin, and bring one back.
+   *
+   * Both are the app own handlers. A delete here is the same soft delete the
+   * Database screen does: the row moves to the Bin with deletedAt set and
+   * nothing is ever removed, which is what makes acting on a sentence about
+   * deleting acceptable at all.
+   */
+  readonly bin: (id: string) => void;
+  readonly restore: (id: string) => void;
   /** The number this entry would take, shown before it is saved. */
   readonly nextRecordNumber: number;
 }
@@ -119,6 +130,21 @@ interface Said {
   readonly text: string;
   /** Assistant turns: which model, or that this device wrote it. */
   readonly from?: string;
+}
+
+/**
+ * Rows found by a sentence about deleting or restoring one.
+ *
+ * Never acted on by itself. It is a list to look at with a button beside each
+ * one, because a sentence that matches three rows must not pick one, and
+ * binning the wrong entry is a quiet loss even when it is recoverable.
+ */
+interface Found {
+  readonly kind: "found";
+  readonly action: RecallAction;
+  readonly candidates: readonly Candidate[];
+  /** Ids already acted on, so a button does not offer the same row twice. */
+  readonly done: readonly string[];
 }
 
 interface Offered {
@@ -133,9 +159,10 @@ interface Offered {
   readonly state: "open" | "added" | "used" | "discarded";
 }
 
-type Turn = Said | Offered;
+type Turn = Said | Offered | Found;
 
 const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
+const isFound = (t: Turn): t is Found => t.kind === "found";
 
 /**
  * How much of the thread goes back with each question.
@@ -157,6 +184,7 @@ export function AskPanel({
   sink,
   lastSaved,
   uid,
+  deleted,
 }: {
   settings: AppSettings;
   transactions: readonly Transaction[];
@@ -166,6 +194,8 @@ export function AskPanel({
   sink: ProposalSink;
   /** Signed in, so the conversation has somewhere to live. Null in local mode. */
   uid: string | null;
+  /** The bin, so "bring back the groceries" has somewhere to look. */
+  deleted: readonly DeletedTransaction[];
   /**
    * The last row the form saved.
    *
@@ -241,7 +271,9 @@ export function AskPanel({
    */
   const say = (turn: Turn): void => {
     setTurns((prev) => [...prev, turn]);
-    if (isOffer(turn)) return;
+    // Only what was said is kept. A card and a found list are decisions in
+    // progress, and the entry or the bin already holds their outcome.
+    if (isOffer(turn) || isFound(turn)) return;
     void chatStore(uid)
       .record(said(turn.kind, turn.text, turn.from))
       .catch(() => {});
@@ -289,6 +321,14 @@ export function AskPanel({
     }
     return null;
   };
+
+  /** Mark one found row as dealt with, so its button does not offer twice. */
+  const settleFound = (index: number, id: string): void =>
+    setTurns((prev) =>
+      prev.map((t, i) =>
+        i === index && isFound(t) ? { ...t, done: [...t.done, id] } : t,
+      ),
+    );
 
   const replaceProposal = (index: number, proposal: Proposal): void =>
     setTurns((prev) =>
@@ -632,6 +672,38 @@ export function AskPanel({
     }
 
     /**
+     * "delete the data I created yesterday about the groceries".
+     *
+     * Finds and shows; it never bins anything by itself. A sentence that
+     * matches three rows must not pick one, so the rows come back as a list
+     * with a button beside each, and a sentence that matches nothing says so
+     * rather than offering the ledger sorted arbitrarily.
+     */
+    const recall = files.length > 0 || as ? null : detectRecall(note);
+    if (recall) {
+      const pool = recall.action === "restore" ? deleted : transactions;
+      const candidates = findRows(recall.phrase, pool, asOf);
+
+      setDraft("");
+      say({ kind: "you", text: note });
+
+      if (candidates.length === 0) {
+        say({
+          kind: "assistant",
+          text:
+            recall.action === "restore"
+              ? `Nothing in the bin matches that. There ${deleted.length === 1 ? "is 1 entry" : `are ${deleted.length} entries`} in it.`
+              : "No entry matches that. Naming the day, the item or the amount is usually enough, or give the record number.",
+          from: "this device",
+        });
+        return;
+      }
+
+      say({ kind: "found", action: recall.action, candidates, done: [] });
+      return;
+    }
+
+    /**
      * A correction to the card already showing.
      *
      * "make it 300" was being read as a new question and answered with a
@@ -939,7 +1011,17 @@ export function AskPanel({
         )}
 
         {turns.map((turn, i) =>
-          isOffer(turn) ? (
+          isFound(turn) ? (
+            <FoundList
+              key={i}
+              found={turn}
+              onAct={(id) => {
+                if (turn.action === "bin") sink.bin(id);
+                else sink.restore(id);
+                settleFound(i, id);
+              }}
+            />
+          ) : isOffer(turn) ? (
             <ProposalCard
               key={i}
               offered={turn}
@@ -1434,6 +1516,62 @@ function Field({
       >
         {value.trim() || (required ? "you pick" : "none")}
       </dd>
+    </div>
+  );
+}
+
+/**
+ * The rows a sentence about deleting or restoring turned up.
+ *
+ * Every one is shown whole, with what matched, and every one has its own
+ * button. Nothing here acts on more than one at a time and nothing acts
+ * without being pressed: a sentence is evidence about which row was meant,
+ * not permission to remove it.
+ */
+function FoundList({ found, onAct }: { found: Found; onAct: (id: string) => void }) {
+  const { action, candidates, done } = found;
+  const verb = action === "bin" ? "Move to bin" : "Restore";
+
+  return (
+    <div className="fms-proposal">
+      <div className="fms-proposalhead">
+        <span className="t-label" style={{ color: "var(--ink-2)" }}>
+          {candidates.length === 1 ? "One entry matches" : `${candidates.length} entries match`}
+        </span>
+        <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+          {action === "bin" ? "nothing is deleted yet" : "from the bin"}
+        </span>
+      </div>
+
+      {candidates.map(({ row, why }) => {
+        const settled = done.includes(row.id);
+        return (
+          <div key={row.id} className="fms-foundrow">
+            <div className="t-caption">
+              #{String(row.recordNumber).padStart(4, "0")} · {row.date} · {row.type} ·{" "}
+              {row.item || row.description || "no item"} · {formatMoney(row.total)}
+            </div>
+            <p className="t-micro fms-proposalnote">Matched on {why.join(", ")}.</p>
+            {settled ? (
+              <p className="t-micro fms-proposalfrom">
+                {action === "bin"
+                  ? "Moved to the bin. It is restorable from the Bin screen."
+                  : "Restored. It is back in the Database."}
+              </p>
+            ) : (
+              <Button size="sm" onClick={() => onAct(row.id)}>
+                {verb}
+              </Button>
+            )}
+          </div>
+        );
+      })}
+
+      <p className="t-micro fms-proposalfrom">
+        {action === "bin"
+          ? "A deleted entry moves to the Bin and can be brought back. Nothing is ever removed."
+          : "Restoring puts it back where it was, with its own record number."}
+      </p>
     </div>
   );
 }

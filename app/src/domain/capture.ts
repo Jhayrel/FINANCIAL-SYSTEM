@@ -239,10 +239,34 @@ export function amend(
       : { draft: { ...draft, fromWallet: wallet }, what: `From ${wallet} instead.` };
   }
 
+  /**
+   * A fee, before the amount.
+   *
+   * "15 fee" holds a figure, and without this it would be read as the amount
+   * and quietly turn a thousand peso transfer into a fifteen peso one.
+   */
+  const named = feeNamed(trimmed);
+  if (named !== null) {
+    return { draft: { ...draft, fee: named }, what: `Fee set to ${plainPesos(named)}.` };
+  }
+
   // A figure, with or without "make it" in front of it.
   const amount = readMoney(trimmed) ?? firstAmountIn(trimmed);
   if (amount !== null && amount > 0 && /\d/.test(trimmed)) {
     return { draft: { ...draft, amount }, what: "Amount changed." };
+  }
+
+  /**
+   * A description, said as one.
+   *
+   * Only when the message asks for it by name. Treating any unrecognised
+   * message as a description would put "thanks" and "what about May" into
+   * the note field of an entry about to be saved.
+   */
+  const note = DESCRIBED.exec(trimmed);
+  if (note?.[1]?.trim()) {
+    const description = note[1].trim().slice(0, 500);
+    return { draft: { ...draft, description }, what: `Description: ${description}` };
   }
 
   // An item the owner already has.
@@ -386,3 +410,25 @@ function wholeWord(text: string, name: string): boolean {
   const after = lower[at + needle.length] ?? " ";
   return !/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after);
 }
+
+/** "it was for two tickets", "note: paid at the counter", "description X". */
+const DESCRIBED =
+  /^(?:(?:the\s+)?(?:note|description|desc|memo)\s*[:\-]?\s*|(?:it\s+)?(?:was|is)\s+for\s+|for\s+)(.+)$/i;
+
+/** A fee named in a correction, or null when none was. */
+function feeNamed(text: string): number | null {
+  const patterns = [
+    /(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)\s*(?:pesos?\s*)?(?:fee|charge)\b/i,
+    /\b(?:fee|charge)\s*(?:of|is|:)?\s*(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    const fee = match?.[1] ? readMoney(match[1]) : null;
+    if (fee !== null && fee >= 0) return fee;
+  }
+  return null;
+}
+
+/** For saying which figure was set. Display, not arithmetic. */
+const plainPesos = (centavos: number): string =>
+  `PHP ${(centavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

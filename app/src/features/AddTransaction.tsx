@@ -42,7 +42,7 @@ import { AskPanel, type ProposalSink } from "./AskPanel";
 import type { Provenance } from "../domain/activity";
 import type { CategoryResult } from "../data/aiClient";
 import { billsToLog, predictAmount, reasons, type DueBill } from "../domain/predict";
-import type { Budgets, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
+import type { Budgets, DeletedTransaction, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
 /**
  * The four things that can happen to money.
@@ -92,6 +92,9 @@ export function AddTransaction({
   balances,
   onSave,
   onUpdate,
+  onBin,
+  onRestoreRow,
+  deleted,
   editing,
   onCancelEdit,
   ai,
@@ -106,6 +109,10 @@ export function AddTransaction({
   balances: readonly WalletBalance[];
   onSave: (rows: Transaction[], by?: Provenance) => void;
   onUpdate: (rows: Transaction[], by?: Provenance) => void;
+  /** Soft delete and its undo, so the assistant can find a row to bin. */
+  onBin: (id: string) => void;
+  onRestoreRow: (id: string) => void;
+  deleted: readonly DeletedTransaction[];
   /** A saved row being corrected, rather than a new entry. */
   editing: Transaction | null;
   onCancelEdit: () => void;
@@ -353,6 +360,8 @@ export function AddTransaction({
         setSuggested(new Set());
         setSubmitted(false);
       },
+      bin: onBin,
+      restore: onRestoreRow,
       add: (d, by) => {
         const c = checkDraft(d, transactions, reference, debts);
         // Belt and braces: the button is already disabled when this fails.
@@ -823,6 +832,7 @@ export function AddTransaction({
 
       <AskPanel
         sink={sink}
+        deleted={deleted}
         lastSaved={lastSaved}
         uid={uid}
         settings={settings}

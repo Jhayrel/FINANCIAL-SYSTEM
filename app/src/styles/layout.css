@@ -2096,3 +2096,22 @@ textarea.fms-askinput {
   font-weight: 650;
   color: var(--ink);
 }
+
+/* One row a sentence turned up, with its own button. Hairline separated,
+   because a card per row would read as a stack of things to deal with. */
+.fms-foundrow {
+  display: grid;
+  gap: var(--space-1);
+  justify-items: start;
+  min-width: 0;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-foundrow:first-of-type {
+  border-top: none;
+}
+
+.fms-foundrow > .t-caption {
+  overflow-wrap: anywhere;
+}

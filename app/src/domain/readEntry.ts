@@ -261,7 +261,17 @@ export function readEntry(
 
   const accounts = [...reference.wallets, ...reference.savings];
   const { date, said } = dateIn(text, asOf);
-  const amount = amountIn(text);
+
+  /**
+   * The fee, before the amount.
+   *
+   * A transfer usually names both ("sent 1000 to gcash, 15 fee"), and the
+   * ledger holds PHP 458.00 of them. Read first, and its digits removed
+   * before the amount is looked for, so the fee is not mistaken for the
+   * amount in "fee 15" and the amount is not mistaken for the fee.
+   */
+  const { fee, rest } = feeIn(text);
+  const amount = amountIn(rest);
 
   /**
    * Both ends, read from the prepositions first and only then from the
@@ -295,6 +305,7 @@ export function readEntry(
           ? (destination !== source ? destination : "")
           : "",
     amount,
+    fee,
     status: STATUS_FOR[flow] ?? "",
     // Tells `checkDraft` the blank destination is the answer rather than a
     // field nobody filled in yet. See `Draft.sentOut`.
@@ -330,4 +341,30 @@ export function readEntry(
     settled,
     readsAsDebt: false,
   };
+}
+
+/**
+ * A fee named in the sentence, and what is left once it is taken out.
+ *
+ * "sent 1000 to gcash with 15 fee" and "fee 15" both say the same thing, and
+ * both would otherwise have their fee read as the amount. Removing the words
+ * that named it is what keeps the two figures apart.
+ */
+function feeIn(text: string): { fee: number; rest: string } {
+  const patterns = [
+    // "15 fee", "15 pesos fee", "15 charge"
+    /(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)\s*(?:pesos?\s*)?(?:fee|charge|convenience fee|service fee)\b/i,
+    // "fee 15", "fee of 15", "charge: 15"
+    /\b(?:fee|charge|convenience fee|service fee)\s*(?:of|is|:)?\s*(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (!match?.[1]) continue;
+    const fee = readMoney(match[1]);
+    if (fee === null || fee <= 0) continue;
+    return { fee, rest: text.replace(match[0], " ") };
+  }
+
+  return { fee: 0, rest: text };
 }
