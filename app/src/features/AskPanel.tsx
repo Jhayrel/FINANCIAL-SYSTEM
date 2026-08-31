@@ -76,6 +76,7 @@ import {
   detectSweep,
   findRows,
   sweepRows,
+  wantsDiscardAll,
   type Candidate,
   type RecallAction,
 } from "../domain/recall";
@@ -938,12 +939,71 @@ export function AskPanel({
      */
     if (note) log(aiEvent("asked", "add", { text: note }));
 
+    /**
+     * "discard all", before anything else looks at the sentence.
+     *
+     * Eleven cards came back off a screenshot of a statement and none of them
+     * were wanted. Typing it did nothing, so they went one at a time: eleven
+     * clicks between 09:31:27 and 09:31:48.
+     *
+     * First, because every branch below is about making or finding something
+     * and this is about wanting none of it. Nothing is confirmed either: a
+     * card has not been added to anything, so throwing one away is the
+     * cheapest action in the app, and the sentence has already said so.
+     */
+    const openCards = turns.filter((t) => isOffer(t) && t.state === "open");
+    if (openCards.length > 0 && files.length === 0 && !as && wantsDiscardAll(note)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      for (const card of openCards) {
+        if (isOffer(card)) {
+          log(
+            aiEvent("rejected", "add", {
+              entry: `${card.proposal.draft.date} ${card.proposal.draft.flow} ${card.proposal.draft.item}`,
+            }),
+          );
+        }
+      }
+      setTurns((prev) =>
+        prev.map((t) => (isOffer(t) && t.state === "open" ? { ...t, state: "discarded" } : t)),
+      );
+      say({
+        kind: "assistant",
+        text: `Thrown away, all ${openCards.length} of them. Nothing was added to the ledger, so there is nothing to undo.`,
+        from: "this device",
+        ephemeral: true,
+      });
+      return;
+    }
+
     // A starter button is always a question, whatever the box happens to say.
     /**
      * While a question is outstanding, what you type is the answer to it. An
      * attachment overrides that: a picture is a new thing to read, not a
      * reply, so the half-finished row is dropped rather than confused with it.
      */
+    /**
+     * Two places the model is reliably wrong, and the local rule is not.
+     *
+     * The instruction says to prefer these, and it still picks `question`
+     * and `chat` for them, so it is overruled here rather than argued with.
+     * Both overrides are narrow enough to be safe: they only fire when the
+     * model chose the one intent that ends the conversation in prose, and
+     * only when a precise local rule fires as well.
+     *
+     * 1. "Delete that last", then "edit the last cata", were answered with
+     *    "I cannot add, change or delete anything here." That is not a
+     *    misreading, it is the assistant denying something it can do: both
+     *    those sentences have buttons waiting behind them.
+     *
+     * 2. "how about this month", "also in this month", "i want pie", each
+     *    straight after a chart, were answered in prose. `isChartFollowUp`
+     *    is deliberately strict: a short fragment, naming a period, with no
+     *    question word in it, and a chart already on screen.
+     */
+    const modelGaveUp = routed?.intent === "question" || routed?.intent === "chat";
+    const localRecall = modelGaveUp && files.length === 0 && !as ? detectRecall(note) : null;
+
     const saysAnswer = routed?.intent === "answer";
     const saysCorrection = routed?.intent === "correction";
 
@@ -975,7 +1035,16 @@ export function AskPanel({
      */
     const followUp = isChartFollowUp(note, turns.some(isChart));
     const saysChart = routed?.intent === "chart";
-    if (files.length === 0 && !as && (saysChart || (routed === null && (wantsChart(note) || followUp)))) {
+    if (
+      files.length === 0 &&
+      !as &&
+      (saysChart ||
+        (routed === null && (wantsChart(note) || followUp)) ||
+        // The model said prose; a chart is on screen and this names a period.
+        (modelGaveUp && followUp) ||
+        // "i want pie", "pie chart": asking to see it, however it was routed.
+        (modelGaveUp && wantsChart(note)))
+    ) {
       /**
        * The period the model read out of it, if it read one.
        *
@@ -1021,7 +1090,7 @@ export function AskPanel({
             }
           : routed === null
             ? detectRecall(note)
-            : null;
+            : localRecall;
 
     if (recall) {
       const pool = recall.action === "restore" ? deleted : transactions;

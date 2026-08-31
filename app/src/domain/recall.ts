@@ -160,6 +160,32 @@ export function sweepRows(
   return rows.filter((row) => row.entrySource === "ai");
 }
 
+/**
+ * "discard all": throwing away every card on screen at once.
+ *
+ * Read a screenshot of a statement, got eleven cards back, and wanted none of
+ * them. Typing "discard all" did nothing, so they were rejected one at a
+ * time: eleven clicks in thirty seconds, at 09:31:27 through 09:31:48.
+ *
+ * This is not `detectSweep`. That names rows already in the ledger; this
+ * names cards that have not been added to anything, so it is the cheapest,
+ * most reversible action in the app. There is nothing to confirm: the cards
+ * were never money.
+ */
+export function wantsDiscardAll(text: string): boolean {
+  const said = text.trim();
+  if (!said || said.length > 40) return false;
+  if (!EVERYTHING.test(said)) return false;
+  /**
+   * `throw` bare, not "throw away".
+   *
+   * "throw them all away" puts two words between the halves, and a phrase
+   * match wanted them adjacent. The quantifier and the length cap are what
+   * make this safe, not the precision of the verb.
+   */
+  return /\b(discard|reject|throw|clear|cancel|delete|remove|no|nope|scrap|forget)\b/i.test(said);
+}
+
 export interface Candidate {
   readonly row: Transaction;
   /** Higher is a better match. Only for ordering. */
