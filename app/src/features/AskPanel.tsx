@@ -80,17 +80,25 @@ import {
   type Candidate,
   type RecallAction,
 } from "../domain/recall";
-import { buildChart, chartLabel, isChartFollowUp, wantsChart, type Chart } from "../domain/charts";
+import {
+  buildChart,
+  chartInWords,
+  chartLabel,
+  isChartFollowUp,
+  wantsChart,
+  type Chart,
+} from "../domain/charts";
 import { inferFromHistory } from "../domain/infer";
 import { debtWalletDirection, itemsFor, withDebtEffect } from "../domain/entry";
 import { detectIntent, isQuestion, type Intent } from "../domain/intent";
+import { addressesEveryCard } from "../domain/capture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
 import { classifyItem, extractProposals, routeMessage, type Intent as Routed } from "../data/aiClient";
 import { chatStore } from "../data/chatStore";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, type AiEvent, type AttachmentNote } from "../domain/aiLog";
-import { said } from "../domain/chat";
+import { drawn, drew, said } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
 import { transactionToDraft } from "../domain/entry";
@@ -453,7 +461,26 @@ export function AskPanel({
     setTurns((prev) => [...prev, turn]);
     // Only what was said is kept. A card and a found list are decisions in
     // progress, and the entry or the bin already holds their outcome.
-    if (isOffer(turn) || isFound(turn) || isChart(turn) || isDebt(turn) || turn.ephemeral) return;
+    /**
+     * A chart is kept. A card is not.
+     *
+     * A card is a decision in progress, and storing one means it comes back
+     * tomorrow offering to add a row that was already added. A chart is not a
+     * decision, it is an answer, and asking to see the year by item only to
+     * find the picture gone on the next visit loses the half of the
+     * conversation that was hardest to ask for.
+     *
+     * The figures are stored, never an image: at most eight rows of label and
+     * centavos, redrawn by the same renderer. Photos stay the one thing never
+     * kept, described in the AI log with the bytes thrown away.
+     */
+    if (isChart(turn)) {
+      void chatStore(uid)
+        .record(drew(turn.chart, turn.chart.title, chartInWords(turn.chart)))
+        .catch(() => {});
+      return;
+    }
+    if (isOffer(turn) || isFound(turn) || isDebt(turn) || turn.ephemeral) return;
     void chatStore(uid)
       .record(said(turn.kind, turn.text, turn.from))
       .catch(() => {});
@@ -477,11 +504,16 @@ export function AskPanel({
         setTurns((prev) =>
           prev.length > 0
             ? prev
-            : history.map((m) => ({
-                kind: m.role,
-                text: m.text,
-                ...(m.from ? { from: m.from } : {}),
-              })),
+            : history.map((m): Turn => {
+                const chart = drawn(m) as Chart | null;
+                return chart
+                  ? { kind: "chart", chart }
+                  : {
+                      kind: m.role,
+                      text: m.text,
+                      ...(m.from ? { from: m.from } : {}),
+                    };
+              }),
         );
       })
       .catch(() => {});
@@ -1191,6 +1223,65 @@ export function AskPanel({
      * already calls a question.
      */
     if (files.length === 0 && !as && detectIntent(note) === "ask") {
+      /**
+       * "edit them 2026 and make also I use maya to all".
+       *
+       * A screenshot of a statement makes one card per line, all from the
+       * same account and often all needing the same year, and both of the
+       * sentences above say so plainly. Each changed exactly one card: the
+       * record holds a single correction for that whole session, against
+       * eleven cards on screen.
+       *
+       * The amendment is worked out per card rather than copied, because
+       * "2026" means a different date on each one: the year changes and the
+       * day does not. A card the sentence does not apply to is left alone,
+       * so a wallet correction never touches a card that already has one.
+       */
+      const everyCard = turns.flatMap((t, index) =>
+        isOffer(t) && t.state === "open" ? [{ index, turn: t }] : [],
+      );
+      if (everyCard.length > 1 && addressesEveryCard(note)) {
+        const changed = everyCard.flatMap((c) => {
+          const change = amend(c.turn.proposal.draft, note, reference, asOf);
+          return change ? [{ ...c, change }] : [];
+        });
+
+        if (changed.length > 0) {
+          setDraft("");
+          const touched = new Set(changed.map((c) => c.index));
+          for (const c of changed) {
+            log(
+              aiEvent("edited", "add", {
+                field: "several",
+                proposed: `${c.turn.proposal.draft.date} ${c.turn.proposal.draft.fromWallet}`,
+                corrected: `${c.change.draft.date} ${c.change.draft.fromWallet}`,
+                entry: `${c.change.draft.date} ${c.change.draft.flow} ${c.change.draft.item}`,
+              }),
+            );
+          }
+          setTurns((prev) => [
+            ...prev.filter((_, i) => !touched.has(i)),
+            { kind: "you", text: note },
+            {
+              kind: "assistant",
+              text: `Changed on all ${changed.length}: ${changed[0]?.change.what ?? ""}`,
+              from: "this device",
+              ephemeral: true,
+            },
+            ...changed.map((c) => ({
+              kind: "proposal" as const,
+              proposal: {
+                ...c.turn.proposal,
+                draft: c.change.draft,
+                adjustments: [...c.turn.proposal.adjustments, c.change.what],
+              },
+              state: "open" as const,
+            })),
+          ]);
+          return;
+        }
+      }
+
       const card = openCard();
       if (card) {
         const change = amend(card.turn.proposal.draft, note, reference, asOf);

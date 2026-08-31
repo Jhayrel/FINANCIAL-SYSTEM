@@ -275,3 +275,21 @@ export const chartLabel = (centavos: number): string =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+
+/**
+ * What the chart says, in a sentence.
+ *
+ * A stored chart carries this as its message text, for two reasons. A reader
+ * that knows nothing about charts sees an answer rather than a blank line.
+ * And when the turn goes back to the model as history, "Spending by item,
+ * August 2026: School PHP 52,432.00, Online Buy PHP 42,529.74" is something
+ * it can answer a follow-up from, where a picture is not.
+ */
+export function chartInWords(chart: Chart): string {
+  const top = chart.rows
+    .slice(0, 5)
+    .map((r) => `${r.label} ${chartLabel(r.value)}`)
+    .join(", ");
+  const rest = chart.othersCount > 0 ? `, and ${chart.othersCount} more` : "";
+  return `${top}${rest}. Total ${chartLabel(chart.total)}.`;
+}

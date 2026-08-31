@@ -248,6 +248,11 @@ service cloud.firestore {
           && d.role in ['you', 'assistant']
           && d.text is string && d.text.size() <= 4000
           && (!('from' in d) || (d.from is string && d.from.size() <= 80))
+          // A chart, as the figures it drew: at most eight rows of label and
+          // centavos, encoded as JSON. Never an image. Bounded here as well
+          // as in the client, because a document is capped at 1 MB and this
+          // is the one field on a message whose size the owner does not type.
+          && (!('chart' in d) || (d.chart is string && d.chart.size() <= 4000))
           && noSecretKeys(d.keys());
     }
 

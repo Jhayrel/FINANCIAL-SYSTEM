@@ -189,9 +189,36 @@ describe("amend: correcting a card already on screen", () => {
     expect(amend(card, "today", reference, ASOF)?.draft.date).toBe(ASOF);
   });
 
-  it("does not treat a bare year as a date without being told it is one", () => {
-    // Ambiguous with an amount, so this reads as PHP 2,026.00.
-    expect(amend(card, "2026", reference, ASOF)?.draft.date).toBe("2022-10-07");
+  /**
+   * A bare year, and where the line now sits.
+   *
+   * This used to read as PHP 2,026.00, on the grounds that a four digit
+   * number is ambiguous. It is, but the ambiguity does not fall evenly: the
+   * owner typed "edit them 2026" and "make this all 2026" in one session,
+   * both times meaning the year on a receipt read as 2022, and both times
+   * got an amount.
+   *
+   * So a bare year wins when it is the only figure in the message, nothing
+   * marks it as money, and it differs from the year already on the card.
+   * Anything that looks like money is still money.
+   */
+  it("reads a bare year as the year when nothing marks it as money", () => {
+    expect(amend(card, "2026", reference, ASOF)?.draft.date).toBe("2026-10-07");
+    expect(amend(card, "edit them 2026", reference, ASOF)?.draft.date).toBe("2026-10-07");
+  });
+
+  it("still reads a figure that looks like money as money", () => {
+    expect(amend(card, "2,026", reference, ASOF)?.draft.amount).toBe(202600);
+    expect(amend(card, "php 2026", reference, ASOF)?.draft.amount).toBe(202600);
+    expect(amend(card, "2026 pesos", reference, ASOF)?.draft.amount).toBe(202600);
+    // Two figures: the year is not the only thing being said.
+    expect(amend(card, "1000 in 2026", reference, ASOF)?.draft.amount).toBe(100000);
+  });
+
+  /** Correcting a date to the one it already has is not what anybody meant. */
+  it("reads the card's own year as an amount, not a no-op date", () => {
+    const already = { ...card, date: "2026-10-07" };
+    expect(amend(already, "2026", reference, ASOF)?.draft.amount).toBe(202600);
   });
 
   it("returns nothing for a message that corrects nothing", () => {

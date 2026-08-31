@@ -222,6 +222,39 @@ export interface Amendment {
  * ordinary path. A wrong amendment is worse than no amendment: it changes a
  * figure on a card you are about to approve.
  */
+/**
+ * A correction aimed at every card, not the one on top.
+ *
+ * ── The sentences this was written for ────────────────────────────────────
+ *
+ *   09:04:44  "make this all 2026 and just populate them to the missing
+ *              I used maya"
+ *   09:31:03  "edit them 2026 and make also I use maya to all"
+ *
+ * A screenshot of a statement produces one card per line, all from the same
+ * account and often all needing the same year. Both sentences say so
+ * plainly, and both changed exactly one card: the assistant's record holds a
+ * single correction for that whole session, `fromWallet: Cash to Maya`,
+ * against eleven cards.
+ *
+ * The quantifier is the entire signal, and it has to be there. "make it 300"
+ * is one card; "make them all 300" is all of them, and reading the first as
+ * the second would silently rewrite ten amounts you never looked at.
+ */
+export function addressesEveryCard(text: string): boolean {
+  const said = text.trim();
+  /**
+   * 60, matching `amend`'s own cap.
+   *
+   * A longer message can never produce an amendment anyway, so anything
+   * above it here would only be a chance to misread an ordinary sentence:
+   * "I paid for all of the groceries and then walked home" says "all" and
+   * means nothing of the kind.
+   */
+  if (!said || said.length > 60) return false;
+  return /\b(all|them all|to all|for all|every|everything|each|both|them|these|those)\b/i.test(said);
+}
+
 export function amend(
   draft: Draft,
   text: string,
@@ -318,10 +351,36 @@ function dateFrom(text: string, current: IsoDate, asOf: IsoDate): IsoDate | null
   if (/\byesterday\b/i.test(text)) return shift(-1);
   if (/\btoday\b/i.test(text)) return asOf;
 
-  // A bare year, but only when the message says it is about the date.
+  /**
+   * A bare year.
+   *
+   * ── What this used to do, and what it cost ────────────────────────────
+   *
+   * It only counted as a date when the message also said "date" or "year".
+   * "edit them 2026" says neither, so it fell through to the amount branch
+   * and set the card to PHP 2,026.00. The owner typed that phrasing twice in
+   * one session, both times meaning the year on a receipt read as 2022.
+   *
+   * Silently changing an amount is the worst outcome this file has, so the
+   * widening is fenced on three things at once:
+   *
+   *   - it is the only figure in the message, so "1000 in 2026" is an amount
+   *   - nothing marks it as money: no currency, no comma, no decimal point
+   *   - it differs from the year already on the card, because correcting a
+   *     date to the date it already has is not what anybody meant
+   *
+   * A real amount of exactly 2026 pesos, written bare, is the one case this
+   * reads wrong, and the card still shows the change before anything saves.
+   */
   const year = /\b(20\d{2})\b/.exec(text);
-  if (year?.[1] && /\b(date|dat|year|dated)\b/i.test(text) && /^\d{4}-/.test(current)) {
-    return `${year[1]}${current.slice(4)}`;
+  if (year?.[1] && /^\d{4}-/.test(current)) {
+    const saysSo = /\b(date|dat|year|dated)\b/i.test(text);
+    const onlyFigure = (text.match(/\d+/g) ?? []).length === 1;
+    const notMoney = !/[₱.,]|php|peso/i.test(text);
+    const differs = current.slice(0, 4) !== year[1];
+    if (saysSo || (onlyFigure && notMoney && differs)) {
+      return `${year[1]}${current.slice(4)}`;
+    }
   }
 
   return null;

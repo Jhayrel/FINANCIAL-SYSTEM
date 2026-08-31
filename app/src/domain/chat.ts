@@ -34,6 +34,24 @@ export interface ChatMessage {
   readonly text: string;
   /** Assistant only: which model, or that this device wrote it. */
   readonly from?: string;
+  /**
+   * A chart, as the figures it drew.
+   *
+   * ── Why a chart is kept and a card is not ─────────────────────────────
+   *
+   * A card is a decision in progress: storing one means it reappears
+   * tomorrow offering to add a row that was already added. A chart is not a
+   * decision, it is an answer. Asking to see the year by item and finding
+   * the picture gone on the next visit is losing half the conversation,
+   * and the half that was hardest to ask for.
+   *
+   * The figures are stored, not an image. A chart here is at most eight
+   * rows of label and centavos, which is smaller than the sentence next to
+   * it, and it redraws from the same renderer rather than being a picture
+   * of one. Photos remain the one thing never kept: those are described in
+   * the AI log and the bytes are thrown away.
+   */
+  readonly chart?: string;
 }
 
 /** A message is a sentence, not a document. */
@@ -66,6 +84,39 @@ export function said(
     text: redact(text).slice(0, MAX_TEXT),
     ...(from ? { from: from.slice(0, 80) } : {}),
   };
+}
+
+/**
+ * A chart, as a message.
+ *
+ * The `text` is what the chart says in words, so a reader that knows nothing
+ * about charts still sees an answer rather than a blank line, and so the
+ * model gets something meaningful when this turn goes back as history.
+ *
+ * Refuses anything too big to store rather than truncating it: half a chart
+ * is a picture that lies, and the sentence still carries the answer.
+ */
+export function drew(chart: unknown, title: string, summary: string): ChatMessage {
+  const at = new Date().toISOString();
+  const encoded = JSON.stringify(chart);
+  return {
+    id: messageId(at),
+    at,
+    role: "assistant",
+    text: redact(`${title}${summary ? `. ${summary}` : ""}`).slice(0, MAX_TEXT),
+    from: "this device",
+    ...(encoded.length <= MAX_TEXT ? { chart: encoded } : {}),
+  };
+}
+
+/** The figures back out, or null when the message is not a chart. */
+export function drawn(message: ChatMessage): unknown | null {
+  if (!message.chart) return null;
+  try {
+    return JSON.parse(message.chart) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 /** Oldest first, which is the only order a conversation reads in. */
