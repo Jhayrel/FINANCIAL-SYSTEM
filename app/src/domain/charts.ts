@@ -26,6 +26,19 @@ import type { IsoDate, Transaction } from "./types";
 
 export type ChartBy = "item" | "month" | "wallet" | "category";
 
+/**
+ * How to draw it.
+ *
+ * `bars` is the default because it is the one that always works: it stays
+ * legible at 280px, at any number of rows, and without colour. The others are
+ * offered when they are asked for and when the data suits them.
+ *
+ * `pie` is a share of a whole, so it is only honest for a grouping that adds
+ * up to something: spending by item does, spending across months does not.
+ * `line` is a series over time, so it only means anything grouped by month.
+ */
+export type ChartKind = "bars" | "pie" | "line";
+
 export interface ChartRow {
   readonly label: string;
   /** Integer centavos. */
@@ -38,6 +51,7 @@ export interface ChartRow {
 export interface Chart {
   readonly title: string;
   readonly by: ChartBy;
+  readonly kind: ChartKind;
   readonly rows: readonly ChartRow[];
   /** Integer centavos. */
   readonly total: number;
@@ -75,6 +89,26 @@ const monthName = (ym: string): string =>
  * every chart's total equals `totalsFor(...).total` for the same window.
  */
 const spendingOf = costOf;
+
+/**
+ * Which drawing the question asked for, and whether it suits the data.
+ *
+ * A pie of twelve months is meaningless: the months are a series, not slices
+ * of one thing, and drawing them as a circle says they add up to a year in a
+ * way nobody reads. A line of spending by item is worse: it draws a trend
+ * across categories that have no order. So a request that does not suit the
+ * grouping falls back to bars rather than drawing something wrong prettily.
+ */
+function kindOf(question: string, by: ChartBy): ChartKind {
+  if (/\b(pie|donut|doughnut|circle)\b/i.test(question)) {
+    return by === "month" ? "bars" : "pie";
+  }
+  if (/\b(line|trend|over time|curve|movement|progression)\b/i.test(question)) {
+    return by === "month" ? "line" : "bars";
+  }
+  // A question about months is a series whether or not it says so.
+  return by === "month" ? "line" : "bars";
+}
 
 /** Which grouping the question asked for. Item is the useful default. */
 function dimensionOf(question: string): ChartBy {
@@ -223,6 +257,7 @@ export function buildChart(
         ? `Spending by month, ${period.name}`
         : `Spending by ${by}, ${period.name}`,
     by,
+    kind: kindOf(question, by),
     rows: kept.map(([label, g]) => ({
       label: by === "month" ? monthName(label) : label,
       value: g.value,

@@ -2346,3 +2346,111 @@ textarea.fms-askinput {
   width: 52px;
   height: 52px;
 }
+
+/* ── A donut, and a line ──────────────────────────────────────────────────
+   One hue at varying lightness, because flow colour means direction of money
+   (rule D3) and cannot also mean "this slice rather than that one". Every
+   slice and every point is labelled with its own figure, so the drawing
+   summarises the list rather than replacing it. */
+
+.fms-pie {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: center;
+  min-width: 0;
+}
+
+.fms-piesvg {
+  width: 132px;
+  height: 132px;
+  flex: 0 0 auto;
+}
+
+/* The total goes in the hole: in a narrow column that saves the line of text
+   a pie would need under it. */
+.fms-pietotal {
+  fill: var(--ink);
+  font-size: 15px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.fms-pieunit {
+  fill: var(--ink-3);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+}
+
+.fms-pielegend,
+.fms-linelegend {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-pielegend li,
+.fms-linelegend li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-linelegend li {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.fms-pieswatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--brand-600);
+}
+
+.fms-pielabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.fms-piefigure {
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.fms-line {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fms-linesvg {
+  width: 100%;
+  height: auto;
+}
+
+/* The fill is what makes a thin line read as a quantity rather than a wire. */
+.fms-linefill {
+  fill: var(--brand-600);
+  fill-opacity: 0.16;
+}
+
+.fms-linestroke {
+  fill: none;
+  stroke: var(--brand-600);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* A month with one entry should be visible as a point, not only as a bend. */
+.fms-linedot {
+  fill: var(--brand-600);
+}

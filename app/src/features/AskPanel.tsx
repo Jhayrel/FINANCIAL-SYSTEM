@@ -2114,6 +2114,11 @@ function ChartView({ chart }: { chart: Chart }) {
         </span>
       </div>
 
+      {chart.kind === "pie" ? (
+        <PieView chart={chart} />
+      ) : chart.kind === "line" ? (
+        <LineView chart={chart} />
+      ) : (
       <div className="fms-chartrows">
         {chart.rows.map((r) => (
           <div key={r.label} className="fms-chartrow">
@@ -2126,6 +2131,7 @@ function ChartView({ chart }: { chart: Chart }) {
           </div>
         ))}
       </div>
+      )}
 
       <p className="t-micro fms-proposalfrom">
         {chart.othersCount > 0
@@ -2164,4 +2170,153 @@ function markCleared(): void {
   } catch {
     // A view preference is not worth a broken screen.
   }
+}
+
+/**
+ * Shares of a whole, as a donut.
+ *
+ * ── Why a donut and not a pie ─────────────────────────────────────────────
+ *
+ * The hole is where the total goes. In a 280px column that saves the line of
+ * text a pie would need underneath it, and the figure everyone looks at first
+ * ends up in the middle rather than off to one side.
+ *
+ * ── Why one hue ──────────────────────────────────────────────────────────
+ *
+ * Flow colour means direction of money in this app (rule D3), so slices may
+ * not be told apart by hue: a red slice would read as spending and a grey one
+ * as a transfer. They are told apart by lightness, in order, largest first,
+ * which also means the chart survives being printed or read by someone who
+ * cannot separate the hues a legend would have needed.
+ *
+ * Every slice is labelled underneath with its own figure, so the drawing is a
+ * summary of the list rather than the only way to read it.
+ */
+function PieView({ chart }: { chart: Chart }) {
+  const size = 132;
+  const radius = 52;
+  const centre = size / 2;
+  const circumference = 2 * Math.PI * radius;
+
+  let offset = 0;
+  const slices = chart.rows.map((r, i) => {
+    const fraction = chart.total > 0 ? r.value / chart.total : 0;
+    const slice = {
+      label: r.label,
+      value: r.value,
+      dash: fraction * circumference,
+      offset,
+      // Largest darkest, then stepping lighter. Never below 0.28, where the
+      // ring stops being distinguishable from the surface behind it.
+      opacity: Math.max(0.28, 1 - i * (0.72 / Math.max(chart.rows.length - 1, 1))),
+      percent: Math.round(fraction * 100),
+    };
+    offset += fraction * circumference;
+    return slice;
+  });
+
+  return (
+    <div className="fms-pie">
+      <svg viewBox={`0 0 ${size} ${size}`} className="fms-piesvg" role="img" aria-label={chart.title}>
+        {/* Rotated so the first slice starts at the top, where reading starts. */}
+        <g transform={`rotate(-90 ${centre} ${centre})`}>
+          {slices.map((s) => (
+            <circle
+              key={s.label}
+              cx={centre}
+              cy={centre}
+              r={radius}
+              fill="none"
+              stroke="var(--brand-600)"
+              strokeOpacity={s.opacity}
+              strokeWidth={22}
+              strokeDasharray={`${s.dash} ${circumference - s.dash}`}
+              strokeDashoffset={-s.offset}
+            />
+          ))}
+        </g>
+        <text x={centre} y={centre - 2} className="fms-pietotal" textAnchor="middle">
+          {chartLabel(chart.total).replace("PHP ", "")}
+        </text>
+        <text x={centre} y={centre + 14} className="fms-pieunit" textAnchor="middle">
+          PHP in total
+        </text>
+      </svg>
+
+      <ul className="fms-pielegend">
+        {slices.map((s) => (
+          <li key={s.label} className="t-micro">
+            <span
+              className="fms-pieswatch"
+              style={{ opacity: s.opacity }}
+              aria-hidden
+            />
+            <span className="fms-pielabel">{s.label}</span>
+            <span className="fms-piefigure fms-proposalmoney">
+              {s.percent}% · {chartLabel(s.value)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * A series over time, as a line.
+ *
+ * Only ever months, because a line says "this followed that" and items have
+ * no order for it to say that about. Points are drawn as well as the line, so
+ * a month with one entry is still a thing you can see and not just a bend.
+ *
+ * The axis starts at zero. A line chart of money that starts at the lowest
+ * value makes a quiet month look like a collapse, which is a lie told with
+ * geometry rather than with a figure.
+ */
+function LineView({ chart }: { chart: Chart }) {
+  const width = 260;
+  const height = 96;
+  const pad = 6;
+  const top = pad;
+  const bottom = height - pad;
+
+  const highest = Math.max(...chart.rows.map((r) => r.value), 1);
+  const step = chart.rows.length > 1 ? (width - pad * 2) / (chart.rows.length - 1) : 0;
+
+  const points = chart.rows.map((r, i) => ({
+    label: r.label,
+    value: r.value,
+    x: pad + i * step,
+    y: bottom - (r.value / highest) * (bottom - top),
+  }));
+
+  const line = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const area = `${pad},${bottom} ${line} ${(pad + (chart.rows.length - 1) * step).toFixed(1)},${bottom}`;
+
+  return (
+    <div className="fms-line">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="fms-linesvg"
+        role="img"
+        aria-label={chart.title}
+      >
+        <polygon points={area} className="fms-linefill" />
+        <polyline points={line} className="fms-linestroke" />
+        {points.map((p) => (
+          <circle key={p.label} cx={p.x} cy={p.y} r={2.5} className="fms-linedot" />
+        ))}
+      </svg>
+
+      {/* The figures, because a line says the shape and not the numbers. */}
+      <ul className="fms-linelegend">
+        {points.map((p) => (
+          <li key={p.label} className="t-micro">
+            <span className="fms-pielabel">{p.label}</span>
+            <span className="fms-piefigure fms-proposalmoney">{chartLabel(p.value)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
