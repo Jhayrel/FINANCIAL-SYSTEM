@@ -528,6 +528,13 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  /* Stacked, the assistant is the one box that still states a height: nothing
+     beside it to match, and a conversation that would otherwise run the page
+     long. */
+  .fms-ask {
+    height: 420px;
+  }
+
   .fms-charts {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1346,24 +1353,62 @@
    balances are what you check against while doing it, and the assistant
    answers questions about the month you are typing into. */
 
-.fms-entry {
-  grid-template-columns: minmax(0, 1fr) minmax(190px, 230px) minmax(210px, 260px);
-  max-width: 1320px;
+/*
+ * One box, filling the space the page gives it.
+ *
+ * Height used to come from whatever was inside, so picking Revenue shrank the
+ * row and picking Transfer grew it, and the two panels beside the form jumped
+ * every time. The row is a frame now: it takes the full height of the main
+ * area and the form scrolls inside its own box, so the size holds still while
+ * you work and changes only when you resize the window.
+ *
+ * grid-template-rows names the row explicitly. Left implicit, the assistant
+ * would land in a second auto row and take its height from the conversation
+ * while the form was squeezed into what was left.
+ *
+ * No max-width: an earlier 1340px cap left a band of empty page down the
+ * right on a wide screen.
+ *
+ * All of it is behind min-width so it cannot reach the narrower layouts,
+ * where the columns stack and a fixed height would only cut the form off.
+ */
+@media (min-width: 1280px) {
+  .fms-entry {
+    height: 100%;
+    min-height: 560px;
+    max-width: none;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 260px) minmax(260px, 360px);
+    align-items: stretch;
+  }
+
+  .fms-entry > * {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* Tabs and buttons hold still, only the fields scroll. */
+  .fms-entryform > .fms-fields {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    /* Keeps a field off the scrollbar when one appears. */
+    padding-right: var(--space-2);
+  }
+
+  /* A short list in a tall box, so it starts at the top. */
+  .fms-side {
+    overflow-y: auto;
+    align-content: start;
+  }
 }
 
-.fms-ask {
-  display: grid;
-  gap: var(--space-3);
-  align-content: start;
-}
-
-.fms-askbody {
-  min-height: 96px;
-}
-
-.fms-askactions {
-  display: grid;
-  gap: var(--space-2);
+/* The column the fields scroll inside. Harmless at any width: the same
+   children in the same order, with the buttons last. */
+.fms-entryform {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /*
@@ -1407,11 +1452,274 @@
 }
 
 /* The assistant drops below the form before the balances do. */
-@media (max-width: 1279px) {
+@media (min-width: 1024px) and (max-width: 1279px) {
   .fms-entry {
-    grid-template-columns: minmax(0, 1fr) minmax(190px, 230px);
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr) minmax(190px, 240px);
   }
   .fms-ask {
     grid-column: 1 / -1;
+    height: 420px;
   }
+}
+
+/* == The assistant panel ==================================================
+   A frame of a fixed size with the conversation scrolling inside it. An
+   earlier version grew to fit its answer, which turned a narrow column into
+   a wall of text taller than the form beside it. A long answer should change
+   what is in the box, never the shape of the page.
+
+   The size is fixed but not written down: the panel stretches to the height
+   of its row, which the form sets, so it stays level with the form on a wide
+   screen and adapts when the window or the form changes. Only the stacked
+   layout, where there is no taller sibling to match, names a number. */
+
+.fms-ask {
+  /*
+   * Flex, not grid.
+   *
+   * The blocks in here come and go: the file strip appears only when
+   * something is attached, and the clear link only once there is something to
+   * clear. Named grid rows would shift under that, putting the composer in
+   * the row sized for the conversation. In a flex column the thread is simply
+   * the one that grows and everything else is its own height.
+   */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  /* A long word must not push the column wider. */
+  min-width: 0;
+}
+
+.fms-askhead {
+  flex: 0 0 auto;
+}
+
+.fms-thread {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  padding-right: var(--space-1);
+}
+
+.fms-askempty {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+/*
+ * The two sides of the conversation, told apart by weight rather than colour.
+ * Flow colour means direction of money in this app (rule D3), so it cannot
+ * mean "who said this" as well.
+ */
+.fms-turn {
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-md);
+  color: var(--ink-1);
+  /*
+   * A grid item will not shrink below its own content, which is how a bubble
+   * ended up wider than the panel holding it and spilled past the right edge.
+   * Both lines are needed: one lets the box shrink, the other lets the
+   * sentence inside it break.
+   */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fms-turn--you {
+  background: transparent;
+  border: 1px solid var(--hairline);
+  color: var(--ink-2);
+}
+
+.fms-askform {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* ── Attachments ─────────────────────────────────────────────────────────── */
+
+/*
+ * Attaching is one tap, and the tap target is 44px on a phone (rule D10).
+ * A plus rather than a paperclip: at this size a glyph reads and an icon
+ * becomes a smudge.
+ */
+.fms-attach {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  line-height: 1;
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-attach:hover:not(:disabled) {
+  border-color: var(--brand-600);
+  color: var(--ink);
+}
+
+.fms-attach:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1023px) {
+  .fms-attach {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+.fms-askfiles {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.fms-filechip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  padding: 2px var(--space-1) 2px 2px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  color: var(--ink-2);
+}
+
+.fms-filethumb {
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 2px;
+}
+
+/* The name is the part that gives, so a long filename cannot widen the panel. */
+.fms-filename {
+  min-width: 0;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fms-fileclose {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.fms-fileclose:hover {
+  color: var(--over);
+}
+
+/* ── A proposed row ──────────────────────────────────────────────────────── */
+
+/*
+ * Framed rather than tinted. Flow colour means direction of money in this app
+ * (rule D3), so it cannot also mean "this one is a suggestion". The border and
+ * the buttons say that instead.
+ */
+.fms-proposal {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  background: var(--surface-sunk);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+}
+
+.fms-proposalhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.fms-proposalfields {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px var(--space-2);
+  margin: 0;
+}
+
+.fms-proposalfields dd {
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Tabular, not monospace. The style guide supersedes the spec's monospace
+ * money rule (see base.css), so the figures line up by numeral width rather
+ * than by changing typeface mid-sentence.
+ */
+.fms-proposalmoney {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  white-space: nowrap;
+}
+
+.fms-proposalnote {
+  margin: 0;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+/* What stops it being saved, as opposed to what merely changed. */
+.fms-proposalnote--stop {
+  color: var(--over);
+}
+
+.fms-proposalactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.fms-askinput {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+}
+
+.fms-linkish {
+  flex: 0 0 auto;
+  align-self: start;
+  justify-self: start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ink-3);
+  cursor: pointer;
+  text-decoration: underline;
 }

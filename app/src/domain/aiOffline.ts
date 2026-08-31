@@ -27,7 +27,7 @@
 
 import { phpFigure, type AiContext } from "./aiContext";
 
-export type AiTask = "summary" | "alerts" | "patterns";
+export type AiTask = "summary" | "alerts" | "patterns" | "chat";
 
 /**
  * The figures in `AiContext` are pesos, not centavos, so this borrows that
@@ -39,6 +39,15 @@ const php = phpFigure;
 export function offlineAnswer(c: AiContext, task: AiTask): string {
   if (task === "alerts") return offlineAlerts(c);
   if (task === "patterns") return offlinePatterns(c);
+  /**
+   * A chat question with no model gets the summary, prefixed with the
+   * reason. Answering an arbitrary question from a fixed snapshot is not
+   * something this can do honestly, so it says what it can tell you rather
+   * than guessing at what was asked.
+   */
+  if (task === "chat") {
+    return `I cannot read your question without the model, so here is where the month stands. ${offlineSummary(c)}`;
+  }
   return offlineSummary(c);
 }
 

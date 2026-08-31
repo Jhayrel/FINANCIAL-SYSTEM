@@ -55,6 +55,17 @@ export interface UseAi {
   /** True when the model is switched off for this surface, so the UI can say so. */
   readonly disabled: boolean;
   readonly run: (task: AiTask) => Promise<void>;
+  /**
+   * Ask and get the answer back, rather than storing it in the hook.
+   *
+   * `run` owns a single current answer, which is right for a panel that
+   * shows one summary. A conversation keeps its own thread, so it needs the
+   * answer returned to it instead.
+   */
+  readonly ask: (
+    task: AiTask,
+    options?: { question?: string; history?: readonly { role: "you" | "assistant"; text: string }[] },
+  ) => Promise<AiAnswer>;
   readonly clear: () => void;
 }
 
@@ -156,7 +167,34 @@ export function useAi({
     [context, disabled, ai.enabled, ai.tone, keyFor],
   );
 
+  const ask = useCallback(
+    async (
+      task: AiTask,
+      options: { question?: string; history?: readonly { role: "you" | "assistant"; text: string }[] } = {},
+    ): Promise<AiAnswer> => {
+      // Switched off means nothing is sent, not that nothing comes back.
+      if (disabled) {
+        return {
+          text: offlineAnswer(context, task),
+          source: "offline",
+          reason: ai.enabled
+            ? "This surface is switched off in Settings, so the figures were not sent."
+            : "AI is switched off, so nothing was sent anywhere.",
+        };
+      }
+
+      return askAi({
+        context,
+        task,
+        tone: ai.tone,
+        ...(options.question ? { question: options.question } : {}),
+        ...(options.history ? { history: options.history } : {}),
+      });
+    },
+    [context, disabled, ai.enabled, ai.tone],
+  );
+
   const clear = useCallback(() => setAnswer(null), []);
 
-  return { answer, loading, disabled, run, clear };
+  return { answer, loading, disabled, run, ask, clear };
 }

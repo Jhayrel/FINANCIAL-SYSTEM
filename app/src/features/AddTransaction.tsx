@@ -38,7 +38,7 @@ import {
 } from "../domain/entry";
 import type { AiSettings, AppSettings } from "../domain/settings";
 import { describeDraft, suggestCategory } from "../data/aiClient";
-import { AskPanel } from "./AskPanel";
+import { AskPanel, type ProposalSink } from "./AskPanel";
 import type { CategoryResult } from "../data/aiClient";
 import { billsToLog, predictAmount, reasons, type DueBill } from "../domain/predict";
 import type { Budgets, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
@@ -81,6 +81,8 @@ const EFFECT_LABEL: Record<string, string> = {
 };
 
 const STATUSES = ["Paid", "Done", "Received", "Transferred", "Withdrawn"];
+
+let proposed = 0;
 
 export function AddTransaction({
   transactions,
@@ -300,6 +302,44 @@ export function AddTransaction({
     setSubmitted(false);
   };
 
+  /**
+   * What the assistant is allowed to do with a row it read off a receipt.
+   *
+   * Every one of these three is the form's own machinery. `check` is the same
+   * `checkDraft` the Save button obeys, `use` fills the fields exactly as a
+   * tap on a due bill does, and `add` goes through `draftToTransactions` and
+   * `onSave`, which is the single writer in this app. There is no second path
+   * and nothing here that skips validation, so an AI row is a typed row that
+   * someone else did the typing for.
+   */
+  const sink: ProposalSink = useMemo(
+    () => ({
+      check: (d) => {
+        const c = checkDraft(d, transactions, reference, debts);
+        return {
+          ok: c.ok,
+          problems: c.errors.map((e) => e.message),
+          warnings: c.warnings.map((w) => w.message),
+        };
+      },
+      use: (d) => {
+        setDraft(d);
+        setSuggested(new Set());
+        setSubmitted(false);
+      },
+      add: (d) => {
+        const c = checkDraft(d, transactions, reference, debts);
+        // Belt and braces: the button is already disabled when this fails.
+        if (!c.ok) return;
+        proposed += 1;
+        onSave(
+          draftToTransactions(d, nextRecordNumber, `t-${Date.now()}-${proposed}`, c.repaymentSplit),
+        );
+      },
+    }),
+    [transactions, reference, debts, nextRecordNumber, onSave],
+  );
+
   const cancelEdit = (): void => {
     onCancelEdit();
     setDraft({ ...emptyDraft(draft.date), flow: "Spending" });
@@ -312,7 +352,7 @@ export function AddTransaction({
   return (
     <div className="fms-entry">
       {/* ── Left: the form ─────────────────────────────────────────────── */}
-      <section className="fms-panel">
+      <section className="fms-panel fms-entryform">
         {due.length > 0 && (
           <div className="fms-duestrip">
             <div className="t-caption" style={{ color: "var(--ink-3)" }}>
@@ -753,6 +793,7 @@ export function AddTransaction({
       </aside>
 
       <AskPanel
+        sink={sink}
         settings={settings}
         transactions={transactions}
         budgets={budgets}

@@ -101,10 +101,28 @@ interface AskBody {
   /** Which fixed job to do. Not free text from the user. */
   readonly task?: unknown;
   readonly tone?: unknown;
+  /**
+   * Data URLs, already downscaled and compressed by the browser.
+   *
+   * Present only for `extract`. The client caps count and size before
+   * sending; the guard below repeats both, because a client-side limit is a
+   * courtesy to the user and never a control.
+   */
+  readonly images?: unknown;
 }
 
 /** Bounded, so a bug upstream cannot post a megabyte of ledger. */
 const MAX_CONTEXT_BYTES = 24_000;
+
+/**
+ * Image bounds, repeated from the client on purpose.
+ *
+ * `data/attachments.ts` already refuses an oversized file, which is the
+ * version the owner sees and the one with the helpful message. This is the
+ * version that holds when the request does not come from that code.
+ */
+const MAX_IMAGES = 5;
+const MAX_IMAGE_CHARS = 6_000_000;
 const TIMEOUT_MS = 20_000;
 
 type Provider = "groq" | "openrouter";
@@ -250,6 +268,85 @@ async function chainFrom(env: Env): Promise<Candidate[]> {
 }
 
 /**
+ * Which of the discovered models can look at a picture.
+ *
+ * The same lesson as the text chain, one step further: free vision model ids
+ * churn even faster than free text ones, so nothing is pinned. But a
+ * catalogue listing does not say "this one has eyes" in any way both
+ * providers agree on, so the two are filtered differently.
+ *
+ * OpenRouter answers the question directly, in `architecture.input_modalities`,
+ * so that is read rather than guessed at. Groq does not, so its ids are
+ * matched against the families that currently have vision. A name filter goes
+ * stale, which is exactly what this file exists to avoid, so it fails safe:
+ * an unmatched catalogue produces an empty vision chain and the owner is told
+ * no model can read pictures right now, rather than a text model being sent an
+ * image and returning something confident and invented.
+ */
+const GROQ_VISION = /vision|-vl-|llava|scout|maverick|pixtral|internvl|omni|gemma-3/i;
+
+/**
+ * OpenRouter's own router. Not suffixed `:free`, so the ordinary filter drops
+ * it, but it selects a free model that matches the request's needs including
+ * image input, which is the most durable vision option there is.
+ */
+const OPENROUTER_ROUTER = "openrouter/free";
+
+const VISION_CACHE = new Map<Provider, Cached>();
+
+async function visionModelsOf(provider: Provider, env: Env): Promise<string[]> {
+  const key = provider === "groq" ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
+  if (!key) return [];
+
+  const hit = VISION_CACHE.get(provider);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.models;
+
+  const url =
+    provider === "groq"
+      ? "https://api.groq.com/openai/v1/models"
+      : "https://openrouter.ai/api/v1/models";
+
+  const response = await fetch(url, { headers: { authorization: `Bearer ${key}` } });
+  if (!response.ok) return [];
+
+  const data = (await response.json()) as {
+    data?: { id?: string; architecture?: { input_modalities?: string[] } }[];
+  };
+
+  const models = (data.data ?? [])
+    .filter((m) => {
+      const id = m.id;
+      if (!id || NOT_CHAT.test(id)) return false;
+      if (provider === "groq") return GROQ_VISION.test(id);
+      if (!id.endsWith(":free")) return false;
+      return (m.architecture?.input_modalities ?? []).includes("image");
+    })
+    .map((m) => m.id as string)
+    .sort((a, b) => score(a) - score(b));
+
+  if (provider === "openrouter") models.unshift(OPENROUTER_ROUTER);
+
+  VISION_CACHE.set(provider, { at: Date.now(), models });
+  return models;
+}
+
+async function visionChainFrom(env: Env): Promise<Candidate[]> {
+  const [groq, openrouter] = await Promise.all([
+    visionModelsOf("groq", env),
+    visionModelsOf("openrouter", env),
+  ]);
+
+  const chain: Candidate[] = [];
+  for (let i = 0; i < PER_PROVIDER; i++) {
+    const g = groq[i];
+    const o = openrouter[i];
+    if (g) chain.push({ provider: "groq", model: g });
+    if (o) chain.push({ provider: "openrouter", model: o });
+  }
+  return chain;
+}
+
+/**
  * The instructions. Fixed here, never sent from the browser.
  *
  * A prompt assembled client-side is a prompt anyone can rewrite. Keeping it
@@ -304,6 +401,14 @@ interface Answer {
   /** Present only where the task defines it. */
   readonly confidence?: string;
   readonly category?: string;
+  /**
+   * The parsed object, for a task whose answer is not a sentence.
+   *
+   * `extract` returns rows, and rendering them means reading fields, not a
+   * paragraph. Passing the object through saves the client parsing a string
+   * that was already parsed here to validate it.
+   */
+  readonly data?: unknown;
 }
 
 const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
@@ -334,6 +439,26 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
    */
   describe:
     "Write a description for this transaction in five words or fewer, in the wording a person would write in their own ledger.",
+  /**
+   * The assistant beside the entry form.
+   *
+   * Read only by construction: it is handed figures and returns sentences,
+   * and there is no path from here to the database. The instruction says so
+   * as well, because a model asked to add a transaction should answer that
+   * it cannot rather than pretending it did.
+   */
+  chat:
+    "Answer the question about these figures in two or three sentences. Repeat any figure exactly as given and never work one out. If the answer is not in the figures, say which figure you would need instead of estimating. You cannot add, change or delete anything: if asked to, say the entry has to be typed into the form beside you.",
+  /**
+   * Reading a receipt, a bank screenshot, or a sentence, into rows.
+   *
+   * Told to leave a field empty rather than guess, because an empty field is
+   * one the owner fills in a second and a guessed one is a wrong figure that
+   * looks right. Told not to invent a wallet for the same reason: the client
+   * blanks an unknown name anyway, so a guess only costs a correction.
+   */
+  extract:
+    "Read every distinct transaction in what you are given and output one proposal for each. Copy amounts exactly as printed, digit for digit. Use only the wallet names, categories and items from the allowed lists you are given: if the right one is not there, leave that field empty rather than inventing or substituting one. Leave any field you cannot read empty rather than guessing it. Use the date printed on the transaction, and today's date only when none is printed. Set confidence to low for anything you had to strain to read. In sourceRef, say which image and which line each one came from. If you cannot find a transaction at all, return an empty list.",
   categorise:
     "Choose the one category that fits this transaction, copied exactly from the allowed list. Prefer the pattern in the past examples, which are this person's own labels. If nothing fits well, choose the last category in the list rather than inventing one.",
 };
@@ -361,6 +486,13 @@ const TASKS: Record<string, TaskSpec> = {
     toned: true,
     proseIsFine: true,
   },
+  chat: {
+    instruction: TASK_INSTRUCTIONS["chat"] ?? "",
+    shape: '{"summary": "your answer as plain sentences"}',
+    parse: narrative,
+    toned: true,
+    proseIsFine: true,
+  },
   patterns: {
     instruction: TASK_INSTRUCTIONS["patterns"] ?? "",
     shape: '{"summary": "your answer as plain sentences"}',
@@ -376,6 +508,27 @@ const TASKS: Record<string, TaskSpec> = {
       return text ? { text } : null;
     },
     maxTokens: 300,
+  },
+  /**
+   * The only task that returns rows rather than a sentence.
+   *
+   * Validated here for shape and again on the client for meaning: this checks
+   * that a list of objects arrived, `domain/proposal.ts` checks that the
+   * wallet exists and the amount is money, and `checkDraft` checks the same
+   * things it checks for a typed entry. Nothing is saved by any of them.
+   */
+  extract: {
+    instruction: TASK_INSTRUCTIONS["extract"] ?? "",
+    shape:
+      '{"proposals": [{"reasoning": "one short sentence", "flow": "Spending or Revenue or Transfer", "date": "YYYY-MM-DD", "fromWallet": "", "toWallet": "", "category": "", "item": "", "description": "", "amountPesos": 0, "feePesos": 0, "status": "", "confidence": "high or medium or low", "sourceRef": ""}]}',
+    parse: (v) => {
+      const list = v["proposals"];
+      // An empty list is a real answer: it means nothing was found in the
+      // picture. Only a missing or non-list field is a broken shape.
+      if (!Array.isArray(list)) return null;
+      return { text: `${list.length} found`, data: list };
+    },
+    maxTokens: 2000,
   },
   categorise: {
     instruction: TASK_INSTRUCTIONS["categorise"] ?? "",
@@ -535,13 +688,39 @@ export const onRequestPost = async (ctx: {
     return json({ error: `Context is ${size} bytes, over the ${MAX_CONTEXT_BYTES} limit.` }, 413);
   }
 
-  const chain = await chainFrom(env);
+  /**
+   * Pictures, if any. Only `extract` is allowed them: every other task is
+   * handed figures it must not recalculate, and an image is a way to put
+   * different ones in front of it.
+   */
+  const images = (Array.isArray(body.images) ? body.images : []).filter(
+    (i): i is string => typeof i === "string" && i.startsWith("data:image/"),
+  );
+
+  if (images.length > 0 && task !== "extract") {
+    return json({ error: "Only the extract task can be given images." }, 400);
+  }
+  if (images.length > MAX_IMAGES) {
+    return json({ error: `${images.length} images, over the limit of ${MAX_IMAGES}.` }, 413);
+  }
+  if (images.reduce((sum, i) => sum + i.length, 0) > MAX_IMAGE_CHARS) {
+    return json({ error: "The pictures are too large. Send fewer, or smaller ones." }, 413);
+  }
+
+  /**
+   * A model that cannot see is no use for a picture, and sending it one
+   * anyway is worse than failing: it answers from the text alone and invents
+   * the rest, confidently.
+   */
+  const chain = images.length > 0 ? await visionChainFrom(env) : await chainFrom(env);
   if (chain.length === 0) {
     return json(
       {
-        error: hasKey(env)
-          ? "The providers offered no usable chat model. Check the key is still valid, or pin one with AI_MODELS."
-          : "No provider key is configured. Set GROQ_API_KEY or OPENROUTER_API_KEY in Cloudflare, Pages, Settings, Environment variables.",
+        error: !hasKey(env)
+          ? "No provider key is configured. Set GROQ_API_KEY or OPENROUTER_API_KEY in Cloudflare, Pages, Settings, Environment variables."
+          : images.length > 0
+            ? "Neither provider is offering a free model that can read pictures right now. Type this one into the form, or try again later."
+            : "The providers offered no usable chat model. Check the key is still valid, or pin one with AI_MODELS.",
       },
       503,
     );
@@ -564,7 +743,7 @@ export const onRequestPost = async (ctx: {
     const label = `${candidate.provider}:${candidate.model}`;
 
     try {
-      const raw = await callProvider(candidate, env, prompt, maxTokens);
+      const raw = await callProvider(candidate, env, prompt, maxTokens, images);
       if (!raw) {
         attempts.push({ model: candidate.model, reason: "empty response" });
         continue;
@@ -590,6 +769,7 @@ export const onRequestPost = async (ctx: {
           raw.slice(0, 600),
         ].join("\n\n"),
         maxTokens,
+        [],
       );
 
       const second = repaired ? readAnswer(repaired, spec) : null;
@@ -647,7 +827,11 @@ function jsonCandidates(raw: string): string[] {
   const trimmed = raw.trim();
   const out: string[] = [trimmed];
 
-  const fenced = /```(?:json)?s*([sS]*?)```/i.exec(trimmed);
+  // The backslashes here are load-bearing and were once lost in transit,
+  // leaving `s*` and `[sS]`, which match the letter s. That silently turned
+  // the fenced-code case into a no-op for months: it only ever worked because
+  // the brace scan below happened to cover the same replies.
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
   if (fenced?.[1]) out.push(fenced[1].trim());
 
   // The outermost braces, for a reply with commentary either side.
@@ -680,15 +864,16 @@ async function callProvider(
   env: Env,
   prompt: string,
   maxTokens: number,
+  images: readonly string[] = [],
 ): Promise<string> {
   try {
-    return await send(c, env, prompt, maxTokens, true);
+    return await send(c, env, prompt, maxTokens, true, images);
   } catch (e) {
     const status = e instanceof Error ? e.message : "";
     // Only a rejected request is worth reinterpreting. A rate limit or an
     // outage means the same thing with or without the field.
     if (status !== "400" && status !== "422") throw e;
-    return send(c, env, prompt, maxTokens, false);
+    return send(c, env, prompt, maxTokens, false, images);
   }
 }
 
@@ -698,6 +883,7 @@ async function send(
   prompt: string,
   maxTokens: number,
   askForJson: boolean,
+  images: readonly string[] = [],
 ): Promise<string> {
   const isGroq = c.provider === "groq";
   const key = isGroq ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
@@ -724,7 +910,23 @@ async function send(
         model: c.model,
         messages: [
           { role: "system", content: SYSTEM },
-          { role: "user", content: prompt },
+          {
+            role: "user",
+            /**
+             * A plain string when there are no pictures, because that is what
+             * all of these endpoints have always accepted and the array form
+             * is the newer path. With pictures it has to be the array, text
+             * first, so the instructions are read before the images they
+             * apply to.
+             */
+            content:
+              images.length === 0
+                ? prompt
+                : [
+                    { type: "text", text: prompt },
+                    ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+                  ],
+          },
         ],
         /**
          * Low, because every task here is structured. Variety is not a virtue
