@@ -131,6 +131,18 @@ export interface ProposalSink {
 interface Said {
   readonly kind: "you" | "assistant";
   readonly text: string;
+  /**
+   * True for a line that only makes sense beside something transient.
+   *
+   * "One entry. Check it, then add it." and "Which one did it come out of?"
+   * both refer to a card or a question that lives only in this session. The
+   * lines were being stored and the cards were not, so a reload brought back
+   * a conversation full of instructions pointing at nothing.
+   *
+   * They are still said, still read back to the model as history, and simply
+   * never written down.
+   */
+  readonly ephemeral?: boolean;
   /** Assistant turns: which model, or that this device wrote it. */
   readonly from?: string;
   /**
@@ -345,7 +357,7 @@ export function AskPanel({
     setTurns((prev) => [...prev, turn]);
     // Only what was said is kept. A card and a found list are decisions in
     // progress, and the entry or the bin already holds their outcome.
-    if (isOffer(turn) || isFound(turn) || isChart(turn)) return;
+    if (isOffer(turn) || isFound(turn) || isChart(turn) || turn.ephemeral) return;
     void chatStore(uid)
       .record(said(turn.kind, turn.text, turn.from))
       .catch(() => {});
@@ -550,7 +562,7 @@ export function AskPanel({
       return;
     }
     setPending({ draft: ready.draft, blank: asked.blank, settled });
-    say({ kind: "assistant", text: asked.question, from: "this device" });
+    say({ kind: "assistant", ephemeral: true, text: asked.question, from: "this device" });
   };
 
   /** An answer to the question the assistant just asked. */
@@ -558,7 +570,7 @@ export function AskPanel({
     if (!pending) return;
     say({ kind: "you", text: reply });
 
-    const filled = applyReply(pending.draft, pending.blank, reply, reference);
+    const filled = applyReply(pending.draft, pending.blank, reply, reference, transactions);
     if (!filled) {
       say({
         kind: "assistant",
@@ -576,7 +588,7 @@ export function AskPanel({
     const asked = nextQuestion(filled, reference, pending.settled);
     if (asked) {
       setPending({ draft: filled, blank: asked.blank, settled: pending.settled });
-      say({ kind: "assistant", text: asked.question, from: "this device" });
+      say({ kind: "assistant", ephemeral: true, text: asked.question, from: "this device" });
       return;
     }
 
@@ -716,6 +728,7 @@ export function AskPanel({
     if (result.proposals.length > 0) {
       say({
         kind: "assistant",
+        ephemeral: true,
         text:
           result.proposals.length === 1
             ? "One entry. Check it, then add it."
@@ -733,6 +746,7 @@ export function AskPanel({
       if (blanks > 0) {
         say({
           kind: "assistant",
+          ephemeral: true,
           text: `${blanks} of them need a wallet picked. Choose it on the card, or set one for all of them.`,
           from: "this device",
         });

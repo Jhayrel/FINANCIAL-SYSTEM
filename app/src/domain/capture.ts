@@ -25,7 +25,7 @@
 
 import { itemsFor, needs, type Draft, type Flow } from "./entry";
 import { matchExact, readMoney } from "./proposal";
-import type { IsoDate, ReferenceLists } from "./types";
+import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 /** The blanks worth stopping for, in the order they are worth asking about. */
 export type Blank = "amount" | "fromWallet" | "toWallet" | "item";
@@ -122,6 +122,14 @@ export function applyReply(
   blank: Blank,
   reply: string,
   reference: ReferenceLists,
+  /**
+   * The ledger, for the answers that are a lookup rather than a figure.
+   *
+   * "the usual" is a perfectly good answer to "how much was it", and it was
+   * met with "I could not find a figure in that". The figure is in the rows:
+   * it is whatever this item most often came to.
+   */
+  transactions: readonly Transaction[] = [],
 ): Draft | null {
   const text = reply.trim();
   if (!text) return null;
@@ -131,7 +139,12 @@ export function applyReply(
   switch (blank) {
     case "amount": {
       const amount = readMoney(text) ?? firstAmountIn(text);
-      return amount !== null && amount > 0 ? { ...draft, amount } : null;
+      if (amount !== null && amount > 0) return { ...draft, amount };
+
+      // No figure in it. If they said it was the usual one, look it up.
+      if (!USUAL_REPLY.test(text)) return null;
+      const usual = usualAmountFor(draft, transactions);
+      return usual === null ? null : { ...draft, amount: usual };
     }
     case "fromWallet": {
       const wallet = matchExact(text, accounts) || walletInside(text, accounts);
@@ -446,3 +459,37 @@ function feeNamed(text: string): number | null {
 /** For saying which figure was set. Display, not arithmetic. */
 const plainPesos = (centavos: number): string =>
   `PHP ${(centavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** "the usual", "same as always", "normal". */
+const USUAL_REPLY = /\b(usual|usually|same|normal|regular|always|like before|as before)\b/i;
+
+/**
+ * What this item most often came to.
+ *
+ * The commonest amount rather than the average: an average of 200, 200 and
+ * 5,000 is 1,800, which is a figure that never happened. Twice is a usual
+ * amount; once is just the last time, and guessing from one row is how a
+ * wrong figure gets saved because someone answered "the usual".
+ */
+function usualAmountFor(draft: Draft, transactions: readonly Transaction[]): number | null {
+  const item = draft.item.trim().toLowerCase();
+  if (!item || !draft.flow) return null;
+
+  const past = transactions.filter(
+    (t) => t.type === draft.flow && t.item.trim().toLowerCase() === item,
+  );
+
+  const counts = new Map<number, number>();
+  for (const row of past) counts.set(row.amount, (counts.get(row.amount) ?? 0) + 1);
+
+  let amount = 0;
+  let seen = 0;
+  for (const [value, n] of counts) {
+    if (n > seen) {
+      amount = value;
+      seen = n;
+    }
+  }
+
+  return amount > 0 && seen >= 2 ? amount : null;
+}

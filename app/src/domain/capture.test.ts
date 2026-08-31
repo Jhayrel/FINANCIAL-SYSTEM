@@ -318,3 +318,59 @@ describe("matchItem learns from what you corrected", () => {
     expect(matchItem("Jolibee", "Spending", "Spending", withRemarks, learned).matched).toBe(false);
   });
 });
+
+describe('answering "the usual"', () => {
+  const gas = (amount: number) =>
+    ({
+      id: `t-${amount}`,
+      recordNumber: 1,
+      date: "2026-07-01",
+      type: "Spending" as const,
+      fromWallet: "Cash",
+      toWallet: "",
+      category: "Spending" as const,
+      item: "Gas",
+      description: "",
+      amount,
+      fee: 0,
+      total: amount,
+      notes: "",
+      status: "Paid" as const,
+    });
+
+  const ledger = [gas(20000), { ...gas(20000), id: "b" }, { ...gas(50000), id: "c" }];
+  const asked = spend({ item: "Gas" });
+
+  /** "I could not find a figure in that" was the answer to a real one. */
+  it("finds the figure in the rows", () => {
+    expect(applyReply(asked, "amount", "the usual", reference, ledger)?.amount).toBe(20000);
+    expect(applyReply(asked, "amount", "same as always", reference, ledger)?.amount).toBe(20000);
+    expect(applyReply(asked, "amount", "normal", reference, ledger)?.amount).toBe(20000);
+  });
+
+  /**
+   * The commonest, not the average. An average of 200, 200 and 500 is 300,
+   * which is a figure that never happened.
+   */
+  it("takes the commonest amount, not the mean", () => {
+    expect(applyReply(asked, "amount", "the usual", reference, ledger)?.amount).toBe(20000);
+  });
+
+  it("refuses when there is no pattern to read", () => {
+    expect(applyReply(asked, "amount", "the usual", reference, [gas(20000)])).toBeNull();
+    expect(applyReply(asked, "amount", "the usual", reference, [])).toBeNull();
+  });
+
+  it("refuses when the item is not known yet", () => {
+    expect(applyReply(spend(), "amount", "the usual", reference, ledger)).toBeNull();
+  });
+
+  it("still prefers a figure that was actually stated", () => {
+    expect(applyReply(asked, "amount", "the usual 350", reference, ledger)?.amount).toBe(35000);
+  });
+
+  it("only looks at rows of the same flow", () => {
+    const income = ledger.map((r) => ({ ...r, type: "Revenue" as const }));
+    expect(applyReply(asked, "amount", "the usual", reference, income)).toBeNull();
+  });
+});

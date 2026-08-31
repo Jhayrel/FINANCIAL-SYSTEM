@@ -132,7 +132,23 @@ export function AddTransaction({
    * every single time, for the one screen used most. Spending is the large
    * majority of entries, so it is the right thing to be ready for.
    */
-  const [draft, setDraft] = useState<Draft>(() => ({ ...emptyDraft(), flow: "Spending" }));
+  const [draft, setDraft] = useState<Draft>(() => restoreDraft() ?? { ...emptyDraft(), flow: "Spending" });
+
+  /**
+   * A half-typed entry survives leaving the screen.
+   *
+   * Clicking Database and coming back, or reloading, threw away whatever was
+   * in the form: the component unmounts and its state goes with it. Half an
+   * entry is work, and losing it silently is the kind of thing that makes
+   * someone stop trusting a form.
+   *
+   * `sessionStorage`, not local: it should survive a reload and a walk
+   * through the app, and it should not still be sitting there tomorrow
+   * pretending to be today's entry. Cleared the moment a row is saved.
+   */
+  useEffect(() => {
+    keepDraft(draft);
+  }, [draft]);
   const [submitted, setSubmitted] = useState(false);
 
   /**
@@ -329,6 +345,7 @@ export function AddTransaction({
 
     // The card that supplied this row can now say it was saved.
     setLastSaved({ draft, at: Date.now() });
+    forgetDraft();
     setDraft({ ...emptyDraft(draft.date), flow: "Spending" });
     setSuggested(new Set());
     setSubmitted(false);
@@ -895,4 +912,58 @@ function Row({
       </div>
     </div>
   );
+}
+
+/**
+ * Keeping a half-typed entry across a navigation or a reload.
+ *
+ * `sessionStorage` is the right scope: it survives moving around the app and
+ * refreshing the page, and it is gone when the tab closes, so yesterday's
+ * abandoned draft is not waiting to be mistaken for today's entry.
+ *
+ * Every read and write is guarded. Storage throws in a private window and in
+ * a few embedded browsers, and a form that refuses to render because it could
+ * not save a draft is a worse outcome than a draft that was not saved.
+ */
+const DRAFT_KEY = "fms.add.draft";
+
+function keepDraft(draft: Draft): void {
+  try {
+    // Nothing worth keeping, and nothing worth restoring into an empty form.
+    const empty =
+      draft.amount === null &&
+      !draft.item.trim() &&
+      !draft.description.trim() &&
+      !draft.notes.trim() &&
+      !draft.fromWallet &&
+      !draft.toWallet;
+    if (empty) {
+      window.sessionStorage.removeItem(DRAFT_KEY);
+      return;
+    }
+    window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // A convenience is not worth a broken screen.
+  }
+}
+
+function restoreDraft(): Draft | null {
+  try {
+    const raw = window.sessionStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Draft>;
+    // Shaped, not trusted: a stored draft is still input.
+    if (!parsed || typeof parsed !== "object" || typeof parsed.date !== "string") return null;
+    return { ...emptyDraft(), ...parsed } as Draft;
+  } catch {
+    return null;
+  }
+}
+
+function forgetDraft(): void {
+  try {
+    window.sessionStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // Nothing to do, and nothing worth telling anyone about.
+  }
 }
