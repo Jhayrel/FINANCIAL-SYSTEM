@@ -202,6 +202,34 @@ export function debtWalletDirection(effect: DebtEffect | undefined): "in" | "out
   }
 }
 
+/**
+ * Set a debt effect, and put the wallet on the side that effect implies.
+ *
+ * A sentence names one wallet and says nothing about direction: "I paid my
+ * debt 2950 using maya" and "borrowed 2950 into maya" both give up Maya and
+ * nothing else, so the reader parks it in `fromWallet` and waits for the
+ * effect to say which way the money went.
+ *
+ * Once it is known, the wallet has to move. Borrowing puts money **into** an
+ * account; left on the from side, the same row would take the amount out
+ * instead, and the wallet would be wrong by twice the draw in the wrong
+ * direction. `runningBalance` reads the side, not the effect, so this is the
+ * function that keeps the two agreeing.
+ *
+ * A write-off moves no money at all: it is a line being forgiven, not a
+ * payment, so it clears both sides rather than guessing at one.
+ */
+export function withDebtEffect(draft: Draft, effect: DebtEffect): Draft {
+  const named = draft.fromWallet || draft.toWallet;
+  const side = debtWalletDirection(effect);
+  return {
+    ...draft,
+    debtEffect: effect,
+    fromWallet: side === "out" ? named : "",
+    toWallet: side === "in" ? named : "",
+  };
+}
+
 // ── Running balance, style guide §3.3 ─────────────────────────────────────
 
 export interface RunningBalance {

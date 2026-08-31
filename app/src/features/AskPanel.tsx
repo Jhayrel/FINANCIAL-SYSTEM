@@ -74,7 +74,7 @@ import { readRich } from "../domain/richText";
 import { detectRecall, findRows, type Candidate, type RecallAction } from "../domain/recall";
 import { buildChart, chartLabel, isChartFollowUp, wantsChart, type Chart } from "../domain/charts";
 import { inferFromHistory } from "../domain/infer";
-import { itemsFor } from "../domain/entry";
+import { debtWalletDirection, itemsFor, withDebtEffect } from "../domain/entry";
 import { detectIntent, isQuestion, type Intent } from "../domain/intent";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
@@ -88,6 +88,7 @@ import { useAi } from "./useAi";
 import { transactionToDraft } from "../domain/entry";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
+import type { Debt, DebtEffect } from "../domain/debt";
 import type { Provenance } from "../domain/activity";
 import { imageLimits, type AppSettings } from "../domain/settings";
 import type { Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
@@ -184,6 +185,20 @@ interface Drawn {
   readonly chart: Chart;
 }
 
+/**
+ * A debt movement, waiting on the two things nobody may guess.
+ *
+ * The credit line and the effect are not in a sentence, and reading either
+ * wrong misfiles borrowing as income: that mistake put PHP 5,450 of borrowed
+ * money into the income line for eight months. So they are chosen, not
+ * inferred, and they are chosen here rather than by sending you to the form.
+ */
+interface DebtChoice {
+  readonly kind: "debt";
+  readonly draft: Draft;
+  readonly state: "open" | "settled";
+}
+
 interface Offered {
   readonly kind: "proposal";
   readonly proposal: Proposal;
@@ -196,11 +211,12 @@ interface Offered {
   readonly state: "open" | "added" | "used" | "discarded";
 }
 
-type Turn = Said | Offered | Found | Drawn;
+type Turn = Said | Offered | Found | Drawn | DebtChoice;
 
 const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
 const isFound = (t: Turn): t is Found => t.kind === "found";
 const isChart = (t: Turn): t is Drawn => t.kind === "chart";
+const isDebt = (t: Turn): t is DebtChoice => t.kind === "debt";
 
 /**
  * How much of the thread goes back with each question.
@@ -223,6 +239,7 @@ export function AskPanel({
   lastSaved,
   uid,
   deleted,
+  debts,
 }: {
   settings: AppSettings;
   transactions: readonly Transaction[];
@@ -234,6 +251,8 @@ export function AskPanel({
   uid: string | null;
   /** The bin, so "bring back the groceries" has somewhere to look. */
   deleted: readonly DeletedTransaction[];
+  /** The credit lines, so a debt movement can be finished in the chat. */
+  debts: readonly Debt[];
   /**
    * The last row the form saved.
    *
@@ -386,7 +405,7 @@ export function AskPanel({
     setTurns((prev) => [...prev, turn]);
     // Only what was said is kept. A card and a found list are decisions in
     // progress, and the entry or the bin already holds their outcome.
-    if (isOffer(turn) || isFound(turn) || isChart(turn) || turn.ephemeral) return;
+    if (isOffer(turn) || isFound(turn) || isChart(turn) || isDebt(turn) || turn.ephemeral) return;
     void chatStore(uid)
       .record(said(turn.kind, turn.text, turn.from))
       .catch(() => {});
@@ -505,6 +524,20 @@ export function AskPanel({
       draft,
       adjustments: [...proposal.adjustments, ...because],
     };
+
+    /**
+     * Debt gets its own card, whoever read it.
+     *
+     * An ordinary card would show a debt row with Add greyed out and no way
+     * to un-grey it, because the two things it is missing are not fields the
+     * card has. This is the same branch the local reader takes, so a model
+     * reading "borrowed 500 from maya credit" and the rules reading it end up
+     * in the same place.
+     */
+    if (filled.draft.flow === "Debt") {
+      say({ kind: "debt", draft: filled.draft, state: "open" });
+      return;
+    }
 
     /**
      * One entry gets a question. A batch gets cards.
@@ -1186,19 +1219,24 @@ export function AskPanel({
          */
         if (local.readsAsDebt) {
           say({ kind: "you", text: note });
-          // Open the form on Debt with what the sentence did give up, so the
-          // only things left are the two nobody should guess.
-          sink.use(local.draft);
-          const knows = [
-            local.draft.amount !== null ? "the amount" : "",
-            local.draft.fromWallet ? `the wallet (${local.draft.fromWallet})` : "",
-            "the date",
-          ].filter(Boolean);
+          /**
+           * Finished here, not by being sent to the form.
+           *
+           * The two things missing are the credit line and the effect, and
+           * neither is in a sentence: reading either wrong misfiles borrowing
+           * as income. They are the one part of an entry that has to be
+           * chosen rather than inferred, so they are offered as buttons and
+           * the rest of the row is already filled in.
+           */
           say({
             kind: "assistant",
-            text: `That reads as debt, so it goes through the form: which credit line it belongs to, and whether it is a draw, a repayment, interest or a write-off, are not things to guess at with borrowed money. I have opened Debt beside this with ${knows.join(", ")} filled in. Pick the debt and the effect, then save.`,
+            text: `That reads as debt. I have filled in ${
+              local.draft.amount !== null ? "the amount" : "what the sentence gave"
+            }, the wallet and the date. Pick which credit line it belongs to and what it does, then add it: those two are not in a sentence, and reading either wrong turns borrowing into income.`,
             from: "this device",
+            ephemeral: true,
           });
+          say({ kind: "debt", draft: local.draft, state: "open" });
           return;
         }
 
@@ -1396,7 +1434,22 @@ export function AskPanel({
         )}
 
         {turns.map((turn, i) =>
-          isChart(turn) ? (
+          isDebt(turn) ? (
+            <DebtCard
+              key={i}
+              turn={turn}
+              debts={debts}
+              sink={sink}
+              onSettle={() =>
+                setTurns((prev) =>
+                  prev.map((t, j) => (j === i && isDebt(t) ? { ...t, state: "settled" } : t)),
+                )
+              }
+              onChange={(draft) =>
+                setTurns((prev) => prev.map((t, j) => (j === i && isDebt(t) ? { ...t, draft } : t)))
+              }
+            />
+          ) : isChart(turn) ? (
             <ChartView key={i} chart={turn.chart} />
           ) : isFound(turn) ? (
             <FoundList
@@ -2342,6 +2395,158 @@ function LineView({ chart }: { chart: Chart }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/** The four things a debt movement can do, in the words the form uses. */
+const DEBT_EFFECTS: readonly { readonly value: DebtEffect; readonly label: string }[] = [
+  { value: "draw", label: "Borrowed more" },
+  { value: "repay", label: "Paid it down" },
+  { value: "interest", label: "Interest or fee" },
+  { value: "writeoff", label: "Written off" },
+];
+
+/**
+ * A debt movement, finished in the chat.
+ *
+ * ── Why these two are chosen and never inferred ───────────────────────────
+ *
+ * Which credit line, and what the movement does to it. Neither is in a
+ * sentence: "I paid my debt 2950" says nothing about whether that was
+ * principal, interest, or a line being written off, and reading it wrong
+ * misfiles borrowing as income. That is the mistake that put PHP 5,450 of
+ * borrowed money into this ledger's income line for eight months.
+ *
+ * So they are buttons. Everything else the sentence gave up is already
+ * filled in, and `checkDraft` still decides whether Add may be pressed:
+ * rule D1 refuses a debt row without both of these anyway, so the card
+ * cannot be saved half-answered even if this component let it.
+ */
+function DebtCard({
+  turn,
+  debts,
+  sink,
+  onSettle,
+  onChange,
+}: {
+  turn: DebtChoice;
+  debts: readonly Debt[];
+  sink: ProposalSink;
+  onSettle: () => void;
+  onChange: (draft: Draft) => void;
+}) {
+  const { draft, state } = turn;
+  const check = sink.check(draft);
+  const live = debts.filter((d) => !d.archived);
+  const named = draft.fromWallet || draft.toWallet;
+  const direction = debtWalletDirection(draft.debtEffect);
+
+
+  if (state === "settled") {
+    return (
+      <div className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
+        Added: {draft.item || "debt movement"}, {formatMoney(draft.amount ?? 0)}. It is in the
+        Database and in the activity trail.
+      </div>
+    );
+  }
+
+  return (
+    <div className="fms-proposal">
+      <div className="fms-proposalhead">
+        <span className="t-label" style={{ color: "var(--ink-2)" }}>
+          Debt movement
+        </span>
+        <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+          two things to pick
+        </span>
+      </div>
+
+      <dl className="fms-proposalfields">
+        <Field label="Date" value={draft.date} mono />
+        <Field
+          label="Amount"
+          value={draft.amount === null ? "" : formatMoney(draft.amount)}
+          required
+          mono
+        />
+        <Field
+          label={direction === "in" ? "Lands in" : direction === "out" ? "Paid from" : "Wallet"}
+          value={named}
+        />
+      </dl>
+
+      <div className="fms-debtpick">
+        <label className="t-micro fms-pfieldlabel" htmlFor="debt-line">
+          Which credit line
+        </label>
+        <select
+          id="debt-line"
+          className="t-caption fms-proposalselect"
+          value={draft.debtId ?? ""}
+          onChange={(e) => onChange({ ...draft, debtId: e.target.value })}
+        >
+          <option value="">Pick one</option>
+          {live.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="fms-debteffects">
+        <span className="t-micro fms-pfieldlabel">What it does</span>
+        <div className="fms-proposalactions">
+          {DEBT_EFFECTS.map((e) => (
+            <Button
+              key={e.value}
+              size="sm"
+              variant={draft.debtEffect === e.value ? "primary" : "secondary"}
+              onClick={() => onChange(withDebtEffect(draft, e.value))}
+            >
+              {e.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {check.problems.map((p) => (
+        <p key={p} className="t-micro fms-proposalnote fms-proposalnote--stop">
+          {p}
+        </p>
+      ))}
+      {check.warnings.map((w) => (
+        <p key={w} className="t-micro fms-proposalnote fms-proposalnote--warn">
+          {w}
+        </p>
+      ))}
+
+      <div className="fms-proposalactions">
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={!check.ok}
+          onClick={() => {
+            sink.add(draft, { actor: "ai", via: "ai_chat" });
+            onSettle();
+          }}
+        >
+          Add to ledger
+        </Button>
+        <Button size="sm" onClick={() => sink.use(draft)}>
+          Open in the form
+        </Button>
+        <Button size="sm" onClick={onSettle}>
+          Discard
+        </Button>
+      </div>
+
+      <p className="t-micro fms-proposalfrom">
+        Which line and what it does are the two things nobody should guess at with borrowed money,
+        so they are picked rather than read out of the sentence.
+      </p>
     </div>
   );
 }

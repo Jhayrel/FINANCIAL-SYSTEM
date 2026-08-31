@@ -861,6 +861,7 @@ export function AddTransaction({
       <AskPanel
         sink={sink}
         deleted={deleted}
+        debts={debts}
         lastSaved={lastSaved}
         uid={uid}
         settings={settings}
