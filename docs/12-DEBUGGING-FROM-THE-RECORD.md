@@ -1,7 +1,7 @@
 # Debugging from the record
 
-**2026-08-31. From `285ad3f` to `6c5aa35`, plus the manual-input pass.**
-1068 tests, typecheck and build clean.
+**2026-08-31. From `285ad3f` to `10903de`.**
+1090 tests, typecheck and build clean.
 
 Every fault below was found in the assistant's own record of what it did, in
 `users/{uid}/ai`, or by sweeping the 492 rows in the ledger. None of them came
@@ -136,6 +136,29 @@ Now stored as the figures they drew and redrawn by the same renderer. The
 message text carries what the chart says in words, so the model can answer a
 follow-up from it. Photos remain the one thing never kept.
 
+### Charts answered a different question than the one asked
+
+Asked "chart about treats this past 3 months", drawn "Spending by item,
+August 2026" with every item in the ledger. Both halves ignored. Probing
+every phrasing against the real ledger found four more:
+
+| Asked | Drawn |
+|---|---|
+| "chart my income this year" | Spending by item |
+| "chart my revenue per month" | Spending by month |
+| "chart last month" | August, the month it already is |
+| "chart this week" / "chart yesterday" | the whole of August |
+
+The income ones are the worst: not imprecise, the opposite. Every chart
+counted spending because nothing ever asked which direction was wanted.
+
+A chart is a claim about money, and one that quietly answers a different
+question is worse than no chart, because it looks like an answer.
+
+Still not handled, and now known: "compare july and august" draws July
+alone. Two windows in one chart is a different shape and needs more than a
+window function.
+
 ### Debt could not be finished in the chat
 
 The credit line and the effect are offered as buttons. Picking the effect
@@ -155,8 +178,6 @@ survived. Each saves cleanly and each is wrong in a way no screen mentioned.
 | **A negative fee was never checked** | `total = amount + fee`, so a fee of minus fifty turned a hundred peso row into a fifty peso one. The database stores it: its rule checks the parts add up, not which way they point. |
 | **No upper bound** | `firestore.rules` stops at ±₱1,000,000,000, so a larger figure was refused at the write with "Missing or insufficient permissions": true, unhelpful, and indistinguishable from the rules not being deployed. |
 | **A row with no item** | Record #442 is Spending, ₱371.00, item blank. Real money, invisible to every report that groups by item. A warning rather than an error, because some imported history has none and refusing would make the owner's own past unwritable. |
-
----
 
 ## 4. Two mistakes made during this work
 
@@ -200,7 +221,7 @@ python -c "import io,glob; print([p for p in glob.glob('src/**/*.ts',recursive=T
 Every fix above has a test named after the fault, so the reasoning survives
 the fix:
 
-`transferSide.test.ts` · `askingNotEntering.test.ts` · `splitEntries.test.ts` ·
+`chartAccuracy.test.ts` · `transferSide.test.ts` · `askingNotEntering.test.ts` · `splitEntries.test.ts` ·
 `sweep.test.ts` · `discardAll.test.ts` · `everyCard.test.ts` ·
 `spokenHistory.test.ts` · `chartMemory.test.ts` · `fromHistory.test.ts` ·
 `debtChat.test.ts` · `bulkBin.test.ts` · `manualEntry.test.ts` ·
