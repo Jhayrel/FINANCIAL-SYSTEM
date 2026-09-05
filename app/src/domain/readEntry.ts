@@ -435,7 +435,24 @@ export function readEntry(
   reference: ReferenceLists,
   asOf: IsoDate,
 ): ReadEntry {
-  const readsAsDebt = DEBT.test(text);
+  /**
+   * A named credit line makes the sentence about debt, whatever verb it uses.
+   *
+   * "I recived it in maya and the credit is from maya credit" produced a
+   * Transfer from Maya to Maya: the same wallet on both sides, PHP 5,000, and
+   * the error "A transfer needs two different wallets". The reader had never
+   * heard of Maya Credit, found the account "Maya" inside those words, and
+   * used it for the source and the destination both.
+   *
+   * A credit line is where borrowed money comes from and is never one of the
+   * owner's accounts. Naming one is naming debt, and debt is the one thing
+   * this file refuses to turn into a row.
+   */
+  const creditNamed = (reference.credits ?? []).find(
+    (name) => name.trim() !== "" && namesCredit(text, name),
+  );
+
+  const readsAsDebt = DEBT.test(text) || creditNamed !== undefined;
 
   /**
    * A sentence with no verb in it.
@@ -792,6 +809,17 @@ export function splitEntries(text: string): string[] {
   return withVerb.map((part, i) =>
     i < withVerb.length - 1 && !FROM_WORD.test(part) ? `${part} ${source}` : part,
   );
+}
+
+/**
+ * A credit line named in a sentence, punctuation and all.
+ *
+ * Matched on whole words with the punctuation flattened, the same way an
+ * account is, so "Maya Credit", "maya credit" and "maya-credit" are one name.
+ */
+function namesCredit(text: string, name: string): boolean {
+  const flat = (v: string): string => ` ${v.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  return flat(text).includes(flat(name));
 }
 
 /** A source clause sitting at the very end of a message. */

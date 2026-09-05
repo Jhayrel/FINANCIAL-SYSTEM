@@ -453,6 +453,15 @@ export default function App() {
       subscriptions: settings.subscriptions,
       revenueCategories: settings.revenueCategories,
       spendingTypes: settings.spendingTypes,
+      /**
+       * The credit lines, so the reader knows they are not accounts.
+       *
+       * Without this, "the credit is from maya credit" found the account
+       * "Maya" inside those words and produced a transfer from Maya to Maya.
+       * A credit line is where borrowed money comes from; naming one is
+       * naming debt.
+       */
+      credits: settings.credits.filter((c) => !c.archived).map((c) => c.name),
     };
   }, [settings]);
 

@@ -87,16 +87,14 @@ const agree = (a: string | undefined, b: string | undefined): boolean => {
 };
 
 /**
- * The wallet this row moved money through, whichever end it used.
+ * Two wallet names that are the same, counting two blanks as the same.
  *
- * Spending names the payer, Revenue names the receiver, and a Transfer names
- * both. Comparing "the wallet" rather than the two columns separately keeps a
- * Spending card matched against a Spending row without four cases.
+ * A Spending row has no destination on either side, and that agreement is
+ * real: neither of them went anywhere. `agree` deliberately refuses two
+ * blanks, because it is used where a blank means "not stated", and here a
+ * blank means "there is no such end to this movement".
  */
-const walletsOf = (row: {
-  readonly fromWallet: string;
-  readonly toWallet: string;
-}): readonly string[] => [row.fromWallet, row.toWallet].map(clean).filter((w) => w !== "");
+const same = (a: string, b: string): boolean => clean(a) === clean(b);
 
 /**
  * A binned row is not part of the ledger.
@@ -109,22 +107,6 @@ const walletsOf = (row: {
  */
 const live = (t: Transaction): boolean =>
   !(t as Transaction & { deletedAt?: string }).deletedAt;
-
-const sharedWallet = (a: readonly string[], b: readonly string[]): string | null => {
-  for (const wallet of a) if (b.includes(wallet)) return wallet;
-  return null;
-};
-
-/**
- * Which of the two wallet names to print, given one that agrees.
- *
- * `walletsOf` lower-cases for comparison, and a warning that says "both out of
- * maya" when the ledger says "Maya" reads as a different system talking.
- */
-const asWritten = (
-  row: { readonly fromWallet: string; readonly toWallet: string },
-  lowered: string,
-): string => (clean(row.fromWallet) === lowered ? row.fromWallet : row.toWallet);
 
 /**
  * Rows that look like this draft is already in the ledger.
@@ -147,7 +129,6 @@ export function duplicatesOf(
   if (amount === null || amount === 0) return [];
 
   const flow = draft.flow;
-  const drafted = walletsOf(draft);
   const found: Duplicate[] = [];
 
   for (const row of transactions) {
@@ -187,9 +168,34 @@ export function duplicatesOf(
       score += 2;
     }
 
-    const wallet = sharedWallet(drafted, walletsOf(row));
-    if (wallet) {
-      evidence.push(`Both through ${asWritten(row, wallet)}.`);
+    /**
+     * ── Both ends, not one ─────────────────────────────────────────────
+     *
+     * Sharing a single wallet used to be enough, and for a transfer that is
+     * almost no evidence at all. A PHP 5,000 movement out of Maya today was
+     * reported as a duplicate of two other PHP 5,000 movements out of Maya
+     * today, on the strength of: same amount, same date, "both through
+     * Maya". One of them went to Cash and the other did not, which is the
+     * only thing that distinguishes a transfer from another transfer, and it
+     * was not being compared.
+     *
+     * Transfers have no item either, so the item test could not save it. The
+     * owner put it plainly: it was calling things duplicates off the amount
+     * alone.
+     *
+     * So both ends have to agree. Two blanks agree with each other, which is
+     * what makes this work for Spending, where the destination is always
+     * blank on both sides.
+     */
+    const sameFrom = same(draft.fromWallet, row.fromWallet);
+    const sameTo = same(draft.toWallet, row.toWallet);
+    const sameWallets = sameFrom && sameTo;
+
+    if (sameWallets) {
+      const named = [draft.fromWallet.trim() && `out of ${row.fromWallet}`, draft.toWallet.trim() && `into ${row.toWallet}`]
+        .filter(Boolean)
+        .join(", ");
+      if (named) evidence.push(`Both ${named}.`);
       score += 2;
     }
 
@@ -201,14 +207,15 @@ export function duplicatesOf(
     /**
      * The amount agreeing on its own is a coincidence, not a duplicate.
      *
-     * A ledger of 513 rows has plenty of PHP 100.00 in it. Something about
-     * the row itself has to agree as well, or every card about a round figure
-     * would carry a warning and the warning would stop being read.
+     * A ledger of 567 rows has plenty of PHP 100.00 in it, and plenty of
+     * PHP 5,000.00 moved out of Maya. Something that identifies the movement
+     * has to agree as well, or every card about a round figure carries a
+     * warning and the warning stops being read.
      */
-    if (!sameDescription && !sameItem && !wallet) continue;
+    if (!sameDescription && !sameItem && !sameWallets) continue;
 
     const certainty: Certainty =
-      apart === 0 && (sameDescription || sameItem) && (wallet !== null || sameDescription)
+      apart === 0 && sameWallets && (sameDescription || sameItem)
         ? "same"
         : "close";
 

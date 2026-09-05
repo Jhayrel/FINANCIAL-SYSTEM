@@ -59,12 +59,12 @@ describe("the receipt already added", () => {
     expect(match?.evidence[0]).toBe("Both ₱1,160.00.");
     expect(match?.evidence.join(" ")).toContain("Both dated");
     expect(match?.evidence.join(" ")).toContain("Both Online Buy.");
-    expect(match?.evidence.join(" ")).toContain("Both through Maya.");
+    expect(match?.evidence.join(" ")).toContain("Both out of Maya.");
   });
 
   it("prints the wallet as the ledger spells it, not lower-cased", () => {
     const [match] = duplicatesOf(draft({ fromWallet: "maya" }), [row({})]);
-    expect(match?.evidence.join(" ")).toContain("Both through Maya.");
+    expect(match?.evidence.join(" ")).toContain("Both out of Maya.");
   });
 });
 
@@ -167,5 +167,74 @@ describe("the same photo attached three times", () => {
   it("does not pair two blank cards with each other", () => {
     const blanks = [emptyDraft("2026-09-04"), emptyDraft("2026-09-04")];
     expect(repeatsWithin(blanks).size).toBe(0);
+  });
+});
+
+/**
+ * Two transfers of the same size on the same day are two transfers.
+ *
+ * A PHP 5,000 movement out of Maya was reported as a duplicate of two other
+ * PHP 5,000 movements out of Maya, on the strength of: same amount, same
+ * date, "both through Maya". One went to Cash and the other did not, which is
+ * the only thing that distinguishes a transfer from another transfer, and it
+ * was not being compared. Transfers carry no item either, so nothing else
+ * could catch it. The owner said it was calling things duplicates off the
+ * amount alone, and they were right.
+ */
+describe("a transfer is identified by both of its ends", () => {
+  const move = (over: Partial<Draft>): Draft => ({
+    ...emptyDraft("2026-09-05"),
+    flow: "Transfer",
+    category: "Transfer",
+    fromWallet: "Maya",
+    toWallet: "Cash",
+    amount: 500000,
+    status: "Transferred",
+    ...over,
+  });
+
+  const moved = (over: Partial<Transaction>): Transaction =>
+    row({
+      recordNumber: 451,
+      date: "2026-09-05",
+      type: "Transfer",
+      category: "Transfer",
+      fromWallet: "Maya",
+      toWallet: "Cash",
+      item: "",
+      description: "",
+      amount: 500000,
+      total: 500000,
+      status: "Transferred",
+      ...over,
+    });
+
+  it("does not call two different destinations the same movement", () => {
+    const toMaya = move({ toWallet: "Maya", description: "Credited 5000 to Maya" });
+    expect(duplicatesOf(toMaya, [moved({})])).toEqual([]);
+  });
+
+  it("does not call two different sources the same movement", () => {
+    expect(duplicatesOf(move({ fromWallet: "Gcash" }), [moved({})])).toEqual([]);
+  });
+
+  it("still catches a transfer that really does repeat", () => {
+    const found = duplicatesOf(move({}), [moved({})]);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.evidence.join(" ")).toContain("out of Maya, into Cash");
+  });
+
+  /**
+   * Spending has no destination on either side. Two blanks agreeing is real
+   * agreement: neither of them went anywhere.
+   */
+  it("still treats two blank destinations as agreeing", () => {
+    const found = duplicatesOf(draft({}), [row({})]);
+    expect(found).toHaveLength(1);
+  });
+
+  it("does not call a Money Send the same as a transfer to your own wallet", () => {
+    const away = move({ toWallet: "", sentOut: true });
+    expect(duplicatesOf(away, [moved({})])).toEqual([]);
   });
 });

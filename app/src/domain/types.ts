@@ -165,6 +165,22 @@ export interface ReferenceLists {
   readonly subscriptions: readonly string[];
   readonly revenueCategories: readonly string[];
   readonly spendingTypes: readonly SpendingType[];
+  /**
+   * The credit lines, by name. Optional, because most callers have no
+   * opinion about debt and every existing fixture predates this field.
+   *
+   * ── Why the reader has to know these exist ────────────────────────────
+   *
+   * "the credit is from maya credit" produced a Transfer from Maya to Maya:
+   * same wallet on both sides, PHP 5,000, and the error "A transfer needs two
+   * different wallets". Maya Credit is a credit line, not an account, and
+   * nothing in this list said so, so the reader found the wallet "Maya"
+   * inside the words "maya credit" and used it twice.
+   *
+   * A credit line is where borrowed money comes from. It is never a wallet
+   * and a sentence naming one is about debt.
+   */
+  readonly credits?: readonly string[];
 }
 
 // ── Budgets (BUDGETING sheet) ──────────────────────────────────────────────
