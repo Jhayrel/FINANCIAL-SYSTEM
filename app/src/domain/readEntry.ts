@@ -86,7 +86,7 @@ const GOT =
  * "gave me 500" is still read as income.
  */
 const MOVED =
-  /\b(transferred|transfer|moved|sent|send|gave|give|giving|padala|pinadala|nagpadala|magpadala|binigay|ibinigay|nagbigay|naglipat|inilipat|nag-withdraw|nagwithdraw|kinuha|cashed out|withdrew|withdraw|deposited|instapay|instapaid)\b/i;
+  /\b(transferred|transfer|moved|move|sent|send|gave|give|giving|padala|pinadala|nagpadala|magpadala|binigay|ibinigay|nagbigay|naglipat|inilipat|nag-withdraw|nagwithdraw|kinuha|cashed out|withdrew|withdraw|deposited|instapay|instapaid|took back|take back|took|brought back|put back|returned)\b/i;
 
 /**
  * Borrowing and repaying, which this file refuses to guess at.
@@ -715,7 +715,7 @@ function feeIn(text: string): { fee: number; rest: string } {
  * the ordinary case.
  */
 const JOINS =
-  /(?:\band also\b|\bthen also\b|\band then\b|\bthen\b|\balso add\b|\balso i\b|\bplus i\b|;)/i;
+  /(?:\band also\b|\bthen also\b|\band then\b|\bthen\b|\balso add\b|\balso i\b|\bplus i\b|;|\band\b(?=\s*(?:₱|php\s*)?\d))/i;
 
 /**
  * The verb at the front of the first clause, if it is short enough to lend.
@@ -767,9 +767,35 @@ export function splitEntries(text: string): string[] {
    * a row that was not borrowing.
    */
   const lead = parts.length > 1 ? leadingVerb(parts[0] ?? "") : "";
-  if (!lead) return parts;
 
-  return parts.map((part, i) =>
-    i > 0 && startsWithFigure(part) ? `${lead} ${part}` : part,
+  const withVerb = lead
+    ? parts.map((part, i) => (i > 0 && startsWithFigure(part) ? `${lead} ${part}` : part))
+    : parts;
+
+  /**
+   * ── A wallet named once, at the end, belongs to all of them ────────────
+   *
+   * "I sent 500 to my mom's gcash and 500 to my own gcash, same day, from
+   * maya" says where the money came from exactly once, in the last clause,
+   * because saying it twice is how nobody talks. Split naively, the first
+   * half has no source at all and the card has to ask for something the
+   * sentence already answered.
+   *
+   * This is the same borrowing as the verb above, from the other end. Only
+   * into parts that name no source of their own, so a sentence that does say
+   * it twice, and says two different things, keeps both.
+   */
+  const tail = FROM_TAIL.exec(withVerb[withVerb.length - 1] ?? "");
+  const source = tail?.[0]?.trim().replace(/^,\s*/, "");
+  if (!source || withVerb.length < 2) return withVerb;
+
+  return withVerb.map((part, i) =>
+    i < withVerb.length - 1 && !FROM_WORD.test(part) ? `${part} ${source}` : part,
   );
 }
+
+/** A source clause sitting at the very end of a message. */
+const FROM_TAIL = /\b(?:from|out of|using|via|thru|through)\s+[a-z0-9 ()'-]{2,40}$/i;
+
+/** Any mention of where money came from, so an inherited one is not doubled. */
+const FROM_WORD = /\b(?:from|out of|using|used|via|thru|through|with)\b/i;
