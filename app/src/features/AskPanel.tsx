@@ -167,6 +167,15 @@ interface Said {
   readonly kind: "you" | "assistant";
   readonly text: string;
   /**
+   * What any attached photos turned out to be, one line each.
+   *
+   * The photo itself lives in `shown` and only for this session: an image is
+   * never stored. On a refresh `shown` is gone and the message read as
+   * somebody saying nothing about nothing, so these are what comes back in
+   * its place, and they are what is written to the database.
+   */
+  readonly described?: readonly string[];
+  /**
    * True for a line that only makes sense beside something transient.
    *
    * "One entry. Check it, then add it." and "Which one did it come out of?"
@@ -510,7 +519,7 @@ export function AskPanel({
     }
     if (isOffer(turn) || isFound(turn) || isDebt(turn) || turn.ephemeral) return;
     void chatStore(uid)
-      .record(said(turn.kind, turn.text, turn.from))
+      .record(said(turn.kind, turn.text, turn.from, turn.described))
       .catch(() => {});
   };
 
@@ -540,6 +549,7 @@ export function AskPanel({
                       kind: m.role,
                       text: m.text,
                       ...(m.from ? { from: m.from } : {}),
+                      ...(m.files && m.files.length > 0 ? { described: m.files } : {}),
                     };
               }),
         );
@@ -918,6 +928,33 @@ export function AskPanel({
                 .join("; "),
       }));
       log(aiEvent("uploaded", "add", { text: note, files: notes, model: result.model ?? "" }));
+
+      /**
+       * The same description, onto the message, so it survives a refresh.
+       *
+       * The picture is in `shown` and lives only in this session. Written
+       * beside the message it becomes the thing that comes back:
+       *
+       *   IMG_123.png, a receipt: Food, PHP 300.00
+       *
+       * One line per file, which is what the owner asked for when several
+       * are sent at once.
+       */
+      const described = notes.map(
+        (f) => `${f.name}, a ${f.kind}: ${f.details}`,
+      );
+      setTurns((prev) => {
+        let at = -1;
+        for (let i = prev.length - 1; i >= 0; i -= 1) {
+          const turn = prev[i];
+          if (turn && isSaid(turn) && turn.kind === "you") {
+            at = i;
+            break;
+          }
+        }
+        if (at < 0) return prev;
+        return prev.map((t, i) => (i === at && isSaid(t) ? { ...t, described } : t));
+      });
     }
 
     if (result.source === "offline") {
@@ -2120,6 +2157,26 @@ export function AskPanel({
                           </span>
                         ),
                       )}
+                    </div>
+                  )}
+                  {/*
+                    What the photo said, once the photo is gone.
+
+                    The picture above lives only in this session: an image is
+                    never stored. After a refresh these lines are what comes
+                    back in its place, one per file, so a message that was a
+                    receipt still says which receipt and what was on it.
+
+                    Only when the picture is not showing, so the same thing is
+                    never said twice in one message.
+                  */}
+                  {turn.described && turn.described.length > 0 && !turn.shown && (
+                    <div className="fms-described">
+                      {turn.described.map((line) => (
+                        <p key={line} className="t-micro fms-describedline">
+                          {line}
+                        </p>
+                      ))}
                     </div>
                   )}
                   {turn.text && (

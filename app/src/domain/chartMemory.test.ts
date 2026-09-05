@@ -97,3 +97,44 @@ describe("a chart survives a reload", () => {
     expect(drawn({ ...said("assistant", "x"), chart: "{not json" })).toBeNull();
   });
 });
+
+describe("what a photo said, once the photo is gone", () => {
+  /**
+   * A picture is never stored: a megabyte against a 1 MB document cap, and
+   * the least useful byte in a financial database. So after a refresh the
+   * photo was simply gone and the message above it read as somebody saying
+   * nothing about nothing.
+   *
+   * A line each takes its place, naming the file and what was read out of
+   * it, which is the only question anybody asks of a receipt afterwards.
+   */
+  it("keeps a line for each file", () => {
+    const message = said("you", "here is my receipt", undefined, [
+      "IMG_123.png, a receipt: Food, PHP 300.00",
+      "IMG_124.png, a receipt: Gas, PHP 250.00",
+    ]);
+    expect(message.files).toHaveLength(2);
+    expect(message.files?.[0]).toContain("IMG_123.png");
+    expect(message.files?.[0]).toContain("PHP 300.00");
+  });
+
+  it("says nothing when no photo was sent", () => {
+    expect(said("you", "I paid 250 for gas").files).toBeUndefined();
+  });
+
+  /** Five is what one message may carry, and the rules agree. */
+  it("keeps at most five", () => {
+    const many = Array.from({ length: 9 }, (_, i) => `IMG_${i}.png, a photo: nothing readable`);
+    expect(said("you", "lots", undefined, many).files).toHaveLength(5);
+  });
+
+  it("drops an empty line rather than storing a blank", () => {
+    expect(said("you", "x", undefined, ["", "  ", "IMG.png, a receipt: Food"]).files).toHaveLength(1);
+  });
+
+  /** The text is still the message. The lines are what the picture said. */
+  it("leaves the typed message alone", () => {
+    const message = said("you", "add this please", undefined, ["IMG.png, a receipt: Food"]);
+    expect(message.text).toBe("add this please");
+  });
+});

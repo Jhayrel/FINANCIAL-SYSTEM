@@ -2629,3 +2629,32 @@ textarea.fms-askinput {
   display: grid;
   gap: var(--space-2);
 }
+
+/*
+ * What a photo said, once the photo is gone.
+ *
+ * An image is never stored, so after a refresh the picture is not there and
+ * the message above it read as somebody saying nothing about nothing. These
+ * lines take its place: one per file, naming the file and what was read out
+ * of it.
+ *
+ * A container rather than loose text, because it is quoting something that
+ * used to be a picture and should not be mistaken for what was typed. The
+ * left rule is the same one the app uses elsewhere for a field it filled in
+ * rather than you, so the meaning is already learned: this came from the
+ * app, not from your keyboard.
+ */
+.fms-described {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-left: 2px solid var(--hairline-strong);
+  background: var(--surface-sunk);
+}
+
+.fms-describedline {
+  margin: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}

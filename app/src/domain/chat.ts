@@ -35,6 +35,25 @@ export interface ChatMessage {
   /** Assistant only: which model, or that this device wrote it. */
   readonly from?: string;
   /**
+   * What a photo said, kept in place of the photo.
+   *
+   * ── Why the picture goes and the words stay ───────────────────────────
+   *
+   * Photos are never stored: a picture is a megabyte, a document is capped
+   * at one, and an image is the least useful byte in a financial database.
+   * So on a refresh the picture was simply gone, and the message above it
+   * read as a person saying nothing about nothing.
+   *
+   * A line each instead, in the owner's own words:
+   *
+   *   IMG_123.png, a receipt: Food, PHP 300.00
+   *
+   * That is the part worth keeping. It says which file produced which rows,
+   * which is the only question anybody asks of a receipt afterwards, and it
+   * is a few dozen bytes rather than a megabyte.
+   */
+  readonly files?: readonly string[];
+  /**
    * A chart, as the figures it drew.
    *
    * ── Why a chart is kept and a card is not ─────────────────────────────
@@ -75,14 +94,29 @@ export function said(
   role: ChatMessage["role"],
   text: string,
   from?: string,
+  /**
+   * What any attached photos turned out to be, one line each.
+   *
+   * Capped and redacted like everything else. Five, matching what one
+   * message may carry, and never the bytes.
+   */
+  files?: readonly string[],
 ): ChatMessage {
   const at = new Date().toISOString();
+  const described = (files ?? [])
+    // Trimmed before the filter: `Boolean` keeps a line of spaces, which
+    // then renders as an empty row in the container.
+    .map((line) => redact(line).trim().slice(0, 300))
+    .filter((line) => line.length > 0)
+    .slice(0, 5);
+
   return {
     id: messageId(at),
     at,
     role,
     text: redact(text).slice(0, MAX_TEXT),
     ...(from ? { from: from.slice(0, 80) } : {}),
+    ...(described.length > 0 ? { files: described } : {}),
   };
 }
 

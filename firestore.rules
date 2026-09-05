@@ -253,6 +253,20 @@ service cloud.firestore {
           // as in the client, because a document is capped at 1 MB and this
           // is the one field on a message whose size the owner does not type.
           && (!('chart' in d) || (d.chart is string && d.chart.size() <= 4000))
+          // What a photo said, in place of the photo. A picture is never
+          // stored: a megabyte against a 1 MB document cap, and the least
+          // useful byte in a financial database. What is kept is a line per
+          // file naming it and what was read out of it, so a message that
+          // was a receipt still says which receipt after a refresh.
+          //
+          // Five, matching what one message may carry, and each one bounded.
+          // A data URL is refused outright, because the one thing this field
+          // must never become is a way to smuggle the picture back in.
+          && (!('files' in d) || (
+                d.files is list
+             && d.files.size() <= 5
+             && !d.text.matches('(?s).*data:image.*')
+             ))
           && noSecretKeys(d.keys());
     }
 
