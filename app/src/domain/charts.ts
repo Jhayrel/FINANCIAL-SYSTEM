@@ -160,7 +160,43 @@ function kindOf(question: string, by: ChartBy): ChartKind {
 }
 
 /** Which grouping the question asked for. Item is the useful default. */
+/**
+ * Two months named, and a word that puts them side by side.
+ *
+ * ── The chart this fixes ──────────────────────────────────────────────────
+ *
+ * "how did august compare with july" drew "Spending by item, July 2026".
+ * One month, the wrong one, broken down by item: not a comparison at all.
+ *
+ * Two things went wrong together. The range rule needs a word between the
+ * months, and its list was "to, through, until, till, and, thru", none of
+ * which is how anybody phrases a comparison. So the range was missed, and
+ * the fallback below takes the first month it finds in calendar order, which
+ * for August and July is July.
+ *
+ * A comparison is a chart with one bar per month, so it has to decide the
+ * grouping as well as the window. Nothing further down can work that out: by
+ * the time the window is chosen the question has become two dates.
+ */
+const COMPARING =
+  /\b(compare|compared|comparing|comparison|versus|vs|against|difference|differ|better|worse|more than|less than)\b/i;
+
+/** A question putting two named months side by side. */
+export function comparesMonths(question: string): boolean {
+  if (!COMPARING.test(question)) return false;
+  const found = MONTHS.filter((m) => new RegExp(`\\b${m}\\b`, "i").test(question));
+  return found.length > 1;
+}
+
 function dimensionOf(question: string): ChartBy {
+  /**
+   * A comparison of two months is one bar per month.
+   *
+   * Checked first, because such a question also names two months, and
+   * grouping by item inside a two month window answers something else.
+   */
+  if (comparesMonths(question)) return "month";
+
   /**
    * "per month", not "this month".
    *
@@ -305,7 +341,10 @@ function windowOf(
     index: i,
   })).filter((m) => m.at >= 0);
 
-  if (spanned.length > 1 && /\b(to|through|until|till|and|thru|until)\b/i.test(question)) {
+  if (
+    spanned.length > 1 &&
+    (/\b(to|through|until|till|and|thru|until)\b/i.test(question) || COMPARING.test(question))
+  ) {
     const y = /\b(20\d{2})\b/.exec(question)?.[1] ?? year;
     const months = [...spanned].sort((a, b) => a.index - b.index);
     const first = months[0];

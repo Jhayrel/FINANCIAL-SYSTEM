@@ -74,9 +74,17 @@ export interface ReadEntry {
 const SPENT =
   /\b(spent|spend|spending|paid|pay|paying|bought|buy|buying|purchased|purchase|ordered|renewed|topped up|top up|loaded|reloaded|bayad|nagbayad|binayaran|magbayad|bumili|bumuli|binili|bibili|umorder|gumastos|gastos|nagastos|nag-load|nagload)\b/i;
 
-/** Money in, in either language. */
+/**
+ * Money in, in either language.
+ *
+ * "credited to" is here and bare "credited" is not. Money credited *to* an
+ * account is arriving, which is what a bank statement means by the word and
+ * how "bank interest credited to maya 4.02" reads. "I credited 5000" is the
+ * owner drawing on a credit line, which is borrowing, and that is matched
+ * separately below.
+ */
 const GOT =
-  /\b(received|receive|got|earned|earn|collected|refunded|allowance|salary|paid me|sent me|gave me|natanggap|nakatanggap|tinanggap|nakuha|kumita|sahod|binigyan ako|pinadalhan ako)\b/i;
+  /\b(received|receive|got|earned|earn|collected|refunded|allowance|salary|paid me|sent me|gave me|credited to|natanggap|nakatanggap|tinanggap|nakuha|kumita|sahod|binigyan ako|pinadalhan ako)\b/i;
 
 /**
  * Money moved, or sent away.
@@ -97,6 +105,19 @@ const MOVED =
  */
 const DEBT =
   /\b(debt|debts|dept|borrowed|borrow|borrowing|loan|loans|loaned|loaning|utang|nangutang|umutang|inutang|hulog|hulugan|credit card|credit line|installment|instalment|repaid|repay|repayment|interest|paid off|pay off|owe|owes|owed|owing)\b/i;
+
+/**
+ * Drawing on credit, said as "I credited".
+ *
+ * "i credited 5000 today and recieved it in maya" produced nothing at all:
+ * no verb in it moves money, so there was no flow, no amount and no card.
+ *
+ * Deliberately narrow. A bare "credited" is the ordinary banking word for
+ * money arriving, and "bank interest credited to maya" is income rather than
+ * borrowing. It is only debt when the owner is the one doing the crediting,
+ * which is what "I credited" says and what "credited to" does not.
+ */
+const CREDITED_MYSELF = /\b(?:i|we)\s+(?:just\s+)?credited\b/i;
 
 /**
  * Someone else, rather than another of your own pockets.
@@ -470,7 +491,22 @@ export function readEntry(
     (name) => name.trim() !== "" && namesCredit(text, name),
   );
 
-  const readsAsDebt = DEBT.test(text) || creditNamed !== undefined;
+  /**
+   * "Bank interest" is income, and it contains a debt word.
+   *
+   * `DEBT` matches "interest", correctly, because interest on a credit line
+   * is a debt movement. But Bank interest is one of the owner's own revenue
+   * categories, and "bank interest credited to maya 4.02" was being read as
+   * borrowing on the strength of that one word. Their ledger has ten of those
+   * rows, all of them income.
+   *
+   * Taken out before the test rather than excepted after it, so "I paid the
+   * interest on maya credit" is still debt: only the exact phrase goes.
+   */
+  const withoutIncome = text.replace(/\bbank interest\b/gi, " ");
+
+  const readsAsDebt =
+    DEBT.test(withoutIncome) || creditNamed !== undefined || CREDITED_MYSELF.test(text);
 
   /**
    * A sentence with no verb in it.
