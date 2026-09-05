@@ -191,3 +191,62 @@ export function correctionsFrom(
 /** Newest first, which is the only order this is read in. */
 export const byNewest = (a: AiEvent, b: AiEvent): number =>
   a.at < b.at ? 1 : a.at > b.at ? -1 : b.id.localeCompare(a.id);
+
+/**
+ * A manual correction to a row the assistant entered.
+ *
+ * ── Why this exists ───────────────────────────────────────────────────────
+ *
+ * The learning reads `correctionsFrom(events, "item")` and applies whatever
+ * it finds. After 310 recorded events there were exactly two corrections in
+ * the whole database, and neither was an item, so it had learned nothing at
+ * all: `correctionsFrom` returned an empty map every time.
+ *
+ * The reason is where corrections were recorded. Only the chat's own amend
+ * path wrote one, so correcting a card by typing "gcash" was remembered and
+ * correcting the same field in the form beside it was not. Almost every
+ * correction happens in the form.
+ *
+ * So a saved edit to a row the assistant proposed is a correction, and it is
+ * recorded as one. Only for rows it entered: fixing your own typo teaches
+ * nothing about its guessing, and would fill the record with noise.
+ *
+ * `proposed` is what it put there and `corrected` is what you changed it to,
+ * which is the pair `correctionsFrom` reads.
+ */
+export function manualCorrections(
+  before: {
+    readonly item: string;
+    readonly fromWallet: string;
+    readonly toWallet: string;
+    readonly category: string;
+    readonly entrySource?: string | undefined;
+  },
+  after: {
+    readonly item: string;
+    readonly fromWallet: string;
+    readonly toWallet: string;
+    readonly category: string;
+    readonly date: string;
+    readonly recordNumber: number;
+  },
+  where: AiWhere,
+): AiEvent[] {
+  if (before.entrySource !== "ai") return [];
+
+  const fields = ["item", "fromWallet", "toWallet", "category"] as const;
+
+  return fields.flatMap((field) => {
+    const was = before[field].trim();
+    const now = after[field].trim();
+    if (!was || !now || was === now) return [];
+    return [
+      aiEvent("edited", where, {
+        field,
+        proposed: was,
+        corrected: now,
+        entry: `#${after.recordNumber} ${after.date} ${after.item}`,
+      }),
+    ];
+  });
+}

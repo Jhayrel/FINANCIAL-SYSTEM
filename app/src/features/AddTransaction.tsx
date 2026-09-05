@@ -388,7 +388,34 @@ export function AddTransaction({
       },
       use: (d) => {
         setDraft(d);
-        setSuggested(new Set());
+        /**
+         * Mark what arrived, so you can see what landed.
+         *
+         * The fields did update the moment a card was sent over, but they
+         * updated silently, and on a wide screen the panel sits beside the
+         * form: half a dozen fields change at once, several rows apart, and
+         * nothing says which of them moved.
+         *
+         * `fms-suggested` is the marker the form already uses for a field
+         * the app filled in rather than you, and it clears itself the moment
+         * you edit the field. That is exactly this: it came from the card,
+         * it is yours to change, and once you change it the mark goes.
+         *
+         * Only the fields the card actually carried. Marking a blank one
+         * would claim something was filled in when nothing was.
+         */
+        const carried: [string, string][] = [
+          ["fromWallet", d.fromWallet],
+          ["toWallet", d.toWallet],
+          ["category", d.category],
+          ["item", d.item],
+          ["description", d.description],
+          ["notes", d.notes],
+          ["status", d.status],
+        ];
+        const filled = carried.filter(([, value]) => value.trim() !== "").map(([field]) => field);
+        if (d.amount !== null) filled.push("amount");
+        setSuggested(new Set(filled));
         setSubmitted(false);
       },
       bin: onBin,

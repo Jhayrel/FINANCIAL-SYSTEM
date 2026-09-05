@@ -61,6 +61,8 @@ import { migrateAccounts, renameAccount, renameItem, type Account } from "./doma
 import { defaultSettings, isBlankSettings, type AppSettings } from "./domain/settings";
 import { Activity } from "./features/Activity";
 import { activityStore } from "./data/activityStore";
+import { aiLogStore } from "./data/aiLogStore";
+import { manualCorrections } from "./domain/aiLog";
 import {
   binned as binnedEvent,
   created as createdEvent,
@@ -514,6 +516,29 @@ export default function App() {
         return was ? updatedEvent(was, r, by) : createdEvent(r, by);
       }),
     );
+
+    /**
+     * Correcting a row the assistant entered is how it learns.
+     *
+     * The learning reads its own record and applies what it finds, and after
+     * 310 events that record held two corrections, neither of them an item.
+     * It had learned nothing, because only the chat's own amend path ever
+     * wrote one: correcting a card by typing "gcash" was remembered, and
+     * correcting the same field in the form beside it was not. Almost every
+     * correction happens in the form.
+     *
+     * Only rows it entered. Fixing your own typo teaches nothing about its
+     * guessing and would fill the record with noise.
+     */
+    for (const r of rows) {
+      const was = previous.get(r.id);
+      if (!was) continue;
+      for (const event of manualCorrections(was, r, "add")) {
+        void aiLogStore(cloud.uid ?? null)
+          .record(event)
+          .catch(() => {});
+      }
+    }
     setTransactions((prev) => {
       const byId = new Map(rows.map((r) => [r.id, r]));
       const replaced = prev.map((t) => byId.get(t.id) ?? t);

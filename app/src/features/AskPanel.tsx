@@ -1189,13 +1189,34 @@ export function AskPanel({
       const chart = buildChart(routed?.period ? `${note} ${routed.period}` : note, transactions, asOf);
       setDraft("");
       say({ kind: "you", text: note });
-      if (chart) say({ kind: "chart", chart });
-      else
+      /**
+       * Both outcomes are recorded, and that is the point of recording it.
+       *
+       * `asked` caught the question and nothing caught the answer, so the
+       * record could not say whether a chart request had produced a chart or
+       * fallen through to prose. That gap is most of what made the follow-up
+       * faults hard to find: the failures looked identical to the successes.
+       */
+      if (chart) {
+        say({ kind: "chart", chart });
+        log(
+          aiEvent("answered", "add", {
+            text: `Drew ${chart.title}. ${chartInWords(chart)}`,
+            entry: chart.title,
+          }),
+        );
+      } else {
         say({
           kind: "assistant",
           text: "There is no spending in that period to draw. Try a month with entries in it, or ask for the year.",
           from: "this device",
         });
+        log(
+          aiEvent("answered", "add", {
+            text: `No chart drawn: nothing in that period. Asked: ${note}`,
+          }),
+        );
+      }
       return;
     }
 

@@ -1525,6 +1525,35 @@
     overflow-y: auto;
     /* Keeps a field off the scrollbar when one appears. */
     padding-right: var(--space-2);
+
+    /*
+     * Rows size to what is in them, and the box scrolls.
+     *
+     * ── The overlap this fixes ──────────────────────────────────────────
+     *
+     * The moment a field showed an error, the red line under it landed on
+     * top of the next field's label. "Pick the wallet the money leaves."
+     * sat across "Where to", on every flow, which is the state this form is
+     * in every single time you press Save with something missing.
+     *
+     * The cause is track sizing, not the error markup. `flex: 1` gives this
+     * grid a definite height, so its automatic rows are sized against that
+     * height rather than against their contents, and each row's floor is
+     * whatever its `min-height` says. `.fms-row` sets 44px for the touch
+     * target rule D10 asks for, so every track clamped to 44px and the
+     * error text, which lives below the 44px control, spilled out of it.
+     *
+     * `min-content` sizes each track to the row's own content instead. The
+     * 44px minimum still applies, so a row with nothing under its control
+     * is still 44px tall and still a full touch target; a row with an error
+     * or a hint grows to hold it, and the box scrolls, which is what the
+     * overflow rule above was already there for.
+     *
+     * `start` keeps spare space at the bottom rather than stretching the
+     * rows to fill it, which matters on the shorter flows.
+     */
+    grid-auto-rows: min-content;
+    align-content: start;
   }
 
   /* A short list in a tall box, so it starts at the top. */
