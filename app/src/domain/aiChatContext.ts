@@ -47,6 +47,7 @@ import { addDays, dayOfWeek, formatMedium } from "./dates";
 import { redact } from "./aiRedact";
 import { toPesos } from "./money";
 import { costOf } from "./totals";
+import { positionsOf, rowsFor, type Debt } from "./debt";
 import type { IsoDate, Transaction } from "./types";
 
 /**
@@ -200,6 +201,13 @@ export interface ChatContextInput {
   /** Used only to decide which months and rows are worth sending first. */
   readonly question: string;
   readonly maxRowBytes?: number;
+  /**
+   * The credit lines, so debt can be answered rather than quoted.
+   *
+   * Optional, because the fixture path and several tests build a context
+   * without them and a missing list is a missing section, not an error.
+   */
+  readonly credits?: readonly Debt[];
 }
 
 export interface ChatContext {
@@ -353,6 +361,75 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     out.push(`## ${year}, spending by wallet`);
     for (const [name, g] of tally(thisYear, (t) => t.fromWallet)) {
       out.push(`${name}: ${php(g.amount)} over ${g.count} entries`);
+    }
+  }
+
+  /**
+   * ── The debt, as its movements and not just its total ──────────────────
+   *
+   * The owner asked their Maya Credit to be checked draw by draw and got
+   * nowhere, and said plainly that debt in the assistant does not work. It
+   * did not. The whole of what it knew was one line:
+   *
+   *   Maya Credit (I owe): PHP 2,950.00
+   *
+   * That figure cannot answer why it is that figure. "Check every draw and
+   * repayment", "how much have I actually borrowed", "does this balance" all
+   * need the movements, and the movements were never sent. Nothing was broken
+   * in the reading: there was nothing to read.
+   *
+   * The arithmetic is printed alongside, because it is the part people get
+   * wrong about credit and the part this ledger is opinionated about:
+   * interest is an expense and never reduces the principal, so a PHP 2,688.79
+   * payment against a PHP 2,500.00 draw clears PHP 2,500.00 and books
+   * PHP 188.79 as interest. Spelling that out stops the model reconstructing
+   * a different rule from the totals.
+   */
+  const credits = input.credits ?? [];
+  if (credits.length > 0) {
+    const positions = positionsOf(credits, rows, asOf);
+    out.push("");
+    out.push("## Debt, every movement");
+    out.push(
+      "outstanding = drawn - repaid - written off. Interest is spending and never reduces what is owed.",
+    );
+
+    for (const p of positions) {
+      out.push("");
+      out.push(
+        `### ${p.debt.name} (${p.debt.kind === "payable" ? "I owe this" : "owed to me"})`,
+      );
+      out.push(
+        `Drawn ${php(p.drawn)}, repaid ${php(p.repaid)}, interest paid ${php(
+          p.interestPaid,
+        )}, written off ${php(p.writtenOff)}.`,
+      );
+      out.push(
+        `Outstanding ${php(p.outstanding)} = ${php(p.drawn)} - ${php(p.repaid)} - ${php(
+          p.writtenOff,
+        )}. ${p.transactionCount} movements, ${p.repaymentCount} of them repayments.`,
+      );
+      if (p.daysToDue !== undefined && p.daysToDue !== null) {
+        out.push(
+          p.daysToDue < 0
+            ? `Overdue by ${Math.abs(p.daysToDue)} days.`
+            : `Due in ${p.daysToDue} days.`,
+        );
+      }
+
+      const movements = rowsFor(rows, p.debt.id);
+      if (movements.length > 0) {
+        out.push("Every movement, oldest first: date | what it does | amount | wallet");
+        for (const m of movements) {
+          out.push(
+            `${m.date} | ${m.debtEffect ?? "unspecified"} | ${php(m.amount)} | ${
+              m.fromWallet || m.toWallet || "no wallet"
+            }${m.description ? ` | ${m.description}` : ""}`,
+          );
+        }
+      } else {
+        out.push("No movements are filed against it, so the figure above comes from nothing.");
+      }
     }
   }
 

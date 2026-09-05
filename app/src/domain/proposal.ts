@@ -27,6 +27,7 @@
 import { parseAmount } from "./money";
 import type { Draft, Flow } from "./entry";
 import { itemsFor } from "./entry";
+import { nearestName } from "./nearly";
 import type { IsoDate, ReferenceLists, TransactionCategory, TransactionStatus } from "./types";
 
 export type Confidence = "high" | "medium" | "low";
@@ -314,7 +315,17 @@ function readOne(
   const known = itemsFor(flow, category, reference);
   const item = matchExact(rawItem, known) || rawItem;
   if (rawItem && !matchExact(rawItem, known)) {
-    adjustments.push(`"${rawItem}" is not on your list yet.`);
+    /**
+     * Nearly right is worse than plainly wrong.
+     *
+     * "This is not on your list yet" is correct and useless when the name is
+     * "Foood": it reads as an invitation to add a second item, and then every
+     * food total is split between two spellings and neither is right. So when
+     * it is one letter from something already on the list, the note says
+     * which one and why it matters.
+     */
+    const near = nearestName(rawItem, known);
+    adjustments.push(near ? near.note : `"${rawItem}" is not on your list yet.`);
   }
 
   const status =

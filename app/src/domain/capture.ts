@@ -67,6 +67,16 @@ export function blanksIn(
       case "fromWallet":
         return needs(flow, "fromWallet") && !matchExact(draft.fromWallet, accounts);
       case "toWallet":
+        /**
+         * `sentOut` is an answer, not a blank.
+         *
+         * Money that left the accounts has no destination wallet, and that is
+         * the whole meaning of it. Without this the question was asked, the
+         * answer "someone else" was accepted and set the flag, and then the
+         * same question was asked again, because nothing here read the flag.
+         * The owner could answer correctly and be asked forever.
+         */
+        if (draft.sentOut === true) return false;
         return flow === "Transfer" && !matchExact(draft.toWallet, accounts);
       case "item":
         return (flow === "Spending" || flow === "Revenue") && !draft.item.trim();
@@ -99,9 +109,23 @@ export function nextQuestion(
           : "Which wallet did it come out of?",
       };
     case "toWallet":
+      /**
+       * "Someone else" is an answer, and it was not offered.
+       *
+       * "I sent 130 via instapay from maya" is money leaving the accounts
+       * entirely, which this ledger books as a Money Send: the whole amount
+       * counts as spending rather than only the fee. The question listed the
+       * owner's eight accounts and nothing else, so the true answer was not
+       * among the options, and answering it honestly got "that is not one of
+       * your wallets".
+       *
+       * The form has always had this choice. The conversation never did.
+       */
       return {
         blank,
-        question: list ? `And which one did it go into? ${list}` : "Which wallet did it go into?",
+        question: list
+          ? `And which one did it go into? ${list}. Say "someone else" if it left your accounts.`
+          : 'Which wallet did it go into? Say "someone else" if it left your accounts.',
       };
     case "item":
       return { blank, question: "What was it for?" };
@@ -151,8 +175,17 @@ export function applyReply(
       return wallet ? { ...draft, fromWallet: wallet } : null;
     }
     case "toWallet": {
+      /**
+       * Out of the accounts entirely, which is a real destination.
+       *
+       * Checked before the account list, because "someone else" contains no
+       * wallet name and would otherwise fall through to "not one of yours".
+       * `sentOut` is the flag the ledger reads: a blank destination with it
+       * set books the whole amount as spending.
+       */
+      if (SENT_AWAY.test(text)) return { ...draft, toWallet: "", sentOut: true };
       const wallet = matchExact(text, accounts) || walletInside(text, accounts);
-      return wallet ? { ...draft, toWallet: wallet } : null;
+      return wallet ? { ...draft, toWallet: wallet, sentOut: false } : null;
     }
     case "item": {
       /**
@@ -614,6 +647,20 @@ const plainPesos = (centavos: number): string =>
 
 /** "the usual", "same as always", "normal". */
 const USUAL_REPLY = /\b(usual|usually|same|normal|regular|always|like before|as before)\b/i;
+
+/**
+ * The money left the accounts, which is a destination and not a wallet.
+ *
+ * "someone else", "my mom", "a friend", "out", "nobody": all of these mean
+ * the same thing to the ledger, that this is a Money Send and the whole
+ * amount counts as spending rather than only the fee.
+ *
+ * Deliberately broad, because it is only ever consulted when the question
+ * being answered is "which wallet did it go into", and an answer that is not
+ * one of the owner's own accounts is, by elimination, not one of them.
+ */
+const SENT_AWAY =
+  /\b(someone else|somebody else|another person|a friend|my (?:mom|mum|dad|friend|brother|sister|cousin|kuya|ate)|other person|outside|not (?:mine|my|one of)|nobody|no one|left my accounts?|sent it out|gave it away)\b/i;
 
 /**
  * What this item most often came to.

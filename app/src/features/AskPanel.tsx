@@ -333,6 +333,16 @@ const spokenHistory = (turns: readonly Turn[], most: number) =>
  * Spending Food PHP 500.00" is a fact about the ledger, where "New entry"
  * would be a fact about a form nobody can see any more.
  */
+/**
+ * The destination that is not an account.
+ *
+ * Money sent to another person leaves the accounts, which this ledger books
+ * as a Money Send: the whole amount counts as spending rather than just the
+ * fee. It is a choice about the row, not a wallet, so it is a label here and
+ * never a value that could be mistaken for one of the owner's accounts.
+ */
+const SOMEONE_ELSE = "Someone else";
+
 const CARD_WORD: Record<string, string> = {
   open: "New entry",
   added: "Added",
@@ -3301,6 +3311,7 @@ function ProposalCard({
   // Stable and unique per card, so each label points at its own select.
   const pickerId = useId();
   const itemPickerId = useId();
+  const toPickerId = useId();
 
   /**
    * A discarded card goes. A settled one stays.
@@ -3352,6 +3363,29 @@ function ProposalCard({
   const itemChoices =
     flow === "Spending" || flow === "Revenue" ? itemsFor(flow, draft.category, reference) : [];
   const needsItem = itemChoices.length > 0 && draft.item.trim() === "";
+
+  /**
+   * Where a transfer went, which the card could not ask.
+   *
+   * ── The row that could not be saved ────────────────────────────────────
+   *
+   * "Sent money via InstaPay, PHP 130.00" came off a statement as a Transfer
+   * from Maya with no destination. The card asked which wallet *paid*, which
+   * was already filled in, and printed "Pick the wallet the money lands in"
+   * in the colour that means this stops it saving. There was no control for
+   * that field anywhere on the card. The only exit was Discard.
+   *
+   * Worse, the answer was usually not an account at all. Money sent to
+   * another person leaves the accounts entirely, which this ledger calls a
+   * Money Send: a blank destination books the whole amount as spending, a
+   * named one books only the fee. The form has always offered that choice.
+   * The card never did, so a card could not express the commonest kind of
+   * transfer there is.
+   *
+   * `SOMEONE_ELSE` is a label, never a wallet name. Choosing it sets the flag
+   * the ledger actually reads and leaves the destination blank.
+   */
+  const needsDestination = flow === "Transfer" && !moneySend && draft.toWallet.trim() === "";
   const confidence =
     proposal.confidence === "high"
       ? "clear"
@@ -3449,6 +3483,37 @@ function ProposalCard({
         all: a Transfer has none, and a card that already read one correctly
         does not need a picker for it.
       */}
+      {!settled && (needsDestination || moneySend) && (
+        <div className="fms-proposalpick">
+          <label className="t-micro fms-pfieldlabel" htmlFor={toPickerId}>
+            Where it went
+          </label>
+          <select
+            id={toPickerId}
+            className="t-caption fms-proposalselect"
+            value={moneySend ? SOMEONE_ELSE : draft.toWallet}
+            onChange={(e) => {
+              const picked = e.target.value;
+              onChange(
+                picked === SOMEONE_ELSE
+                  ? { ...draft, toWallet: "", sentOut: true }
+                  : { ...draft, toWallet: picked, sentOut: false },
+              );
+            }}
+          >
+            <option value="">Pick one</option>
+            {accounts
+              .filter((a) => a !== draft.fromWallet)
+              .map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            <option value={SOMEONE_ELSE}>{SOMEONE_ELSE}</option>
+          </select>
+        </div>
+      )}
+
       {!settled && needsItem && (
         <div className="fms-proposalpick">
           <label className="t-micro fms-pfieldlabel" htmlFor={itemPickerId}>

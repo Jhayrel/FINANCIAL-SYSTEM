@@ -208,6 +208,10 @@ export function useAi({
               transactions,
               asOf: asOf ?? today(),
               question: options.question ?? "",
+              // Without these the assistant knows what is owed and nothing
+              // about how it got there, which is every question anyone asks
+              // about a credit line.
+              credits: settings.credits,
             }).text
           : undefined;
 
