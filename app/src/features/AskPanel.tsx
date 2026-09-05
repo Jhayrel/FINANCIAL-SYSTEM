@@ -104,6 +104,7 @@ import { addressesEveryCard } from "../domain/capture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
 import { describeFile, summariseFile } from "../domain/photoNote";
+import { readAgainst, statementAccount } from "../domain/statement";
 import {
   duplicateHeadline,
   duplicatesOf,
@@ -1434,8 +1435,62 @@ export function AskPanel({
       });
     }
 
-    const batch = result.proposals.length > 1;
-    for (const proposal of result.proposals) await offer(proposal, note, true, batch);
+    /**
+     * ── One statement is one account, all the way down ─────────────────
+     *
+     * A Maya statement holding eight rows came back with Maya on the first
+     * two cards and Gcash on the rest. Nothing about the picture changed
+     * halfway down: the model drifted, which is what a small model does over
+     * eight repetitive rows, and every drifted row is money booked against
+     * the wrong wallet. That is the exact failure this reading layer exists
+     * to prevent.
+     *
+     * The phone named the file `Screenshot_20260905_132223_Maya.jpg`. That
+     * is not a guess about the contents, it is a fact the device recorded
+     * when the picture was taken. Failing a name, the rows vote.
+     *
+     * Blanks get filled, which is what "same for all" was a button for.
+     * Disagreements are flagged and left alone, because this cannot tell a
+     * drift from a genuine transfer into another pocket and the owner can.
+     */
+    const fromOneFile = sent.length === 1 ? sent[0] : undefined;
+    const account = fromOneFile
+      ? statementAccount(
+          fromOneFile.name,
+          result.proposals.map((p) => p.draft),
+          [...reference.wallets, ...reference.savings],
+        )
+      : "";
+
+    const readings = readAgainst(
+      account,
+      result.proposals.map((p) => p.draft),
+    );
+
+    const checked = result.proposals.map((proposal, i) => {
+      const reading = readings[i];
+      if (!reading) return proposal;
+      return {
+        ...proposal,
+        draft: reading.draft,
+        adjustments: reading.note
+          ? [...proposal.adjustments, reading.note]
+          : proposal.adjustments,
+      };
+    });
+
+    const odd = readings.filter((r) => r.note.includes("but reads as")).length;
+    if (odd > 0) {
+      say({
+        kind: "assistant",
+        ephemeral: true,
+        text: `${odd} of these name a different account than the ${account} statement they came off. They are marked, and nothing was changed for you.`,
+        from: "this device",
+      });
+    }
+
+    const batch = checked.length > 1;
+    for (const proposal of checked) await offer(proposal, note, true, batch);
     if (batch) {
       const blanks = result.proposals.filter(
         (p) => nextQuestion(p.draft, reference) !== null,
