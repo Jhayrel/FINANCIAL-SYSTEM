@@ -50,6 +50,21 @@ const INSTRUCTION =
   /\b(delete|remove|erase|bin|cancel|undo|scrap|discard|restore|bring|back|undelete|recover|put|unbin|retrieve|the|a|an|my|me|i|data|entry|entries|row|rows|record|records|transaction|transactions|that|this|about|for|from|with|of|created|made|added|wrote|logged|please|can|you|it|one|last|paid|pay|spent|spend|bought|buy|sent|send|gave|give|used|use|did|was|were|is|are|on|at|in|to)\b/gi;
 
 /**
+ * The app's own vocabulary, which describes no particular row.
+ *
+ * "delete my latest spending thats wrong" came back with five rows from
+ * August, every one of them matched on the word "spending". Every spending
+ * row in the ledger answers to that word, so it separates nothing: it is the
+ * name of a flow, like Paid is the name of a status and Gcash is the name of
+ * a wallet, and none of those say which entry was meant.
+ *
+ * `capture.ts` already refuses these as item names for the same reason. A
+ * search is the other half of the same idea.
+ */
+const OUR_OWN_WORDS =
+  /\b(spending|spend|revenue|income|transfer|transfers|debt|opening|paid|done|received|transferred|withdrawn|wrong|mistake|error|wallet|wallets|account|accounts|amount|total|item|items|category|categories)\b/gi;
+
+/**
  * Day words, once the day has been read out of them.
  *
  * "yesterday" is not a description of a row, it is the date, and `dayIn` has
@@ -304,6 +319,7 @@ export function findRows(
 
   const words = withoutNumber
     .toLowerCase()
+    .replace(OUR_OWN_WORDS, " ")
     .replace(DAY_WORDS, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)

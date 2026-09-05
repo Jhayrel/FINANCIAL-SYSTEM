@@ -1859,7 +1859,28 @@ export function AskPanel({
      *    question word in it, and a chart already on screen.
      */
     const modelGaveUp = routed?.intent === "question" || routed?.intent === "chat";
-    const localRecall = modelGaveUp && files.length === 0 && !as ? detectRecall(note) : null;
+    /**
+     * A delete is read here, whatever the router said.
+     *
+     * ── The three messages this closes ──────────────────────────────────
+     *
+     *   delete my latest spending thats wrong
+     *   delete it
+     *   I said delete it now show me more data to delete
+     *
+     * All three produced nothing at all. Not because the finder failed:
+     * `detectRecall` reads the first one correctly and `findRows` finds the
+     * row. They never reached it. This was only consulted when the router had
+     * given up and answered "question" or "chat", and the router had instead
+     * answered "entry", so a message whose first word is "delete" was on its
+     * way to becoming a new row.
+     *
+     * A sentence carrying a delete verb and a target is not ambiguous, and
+     * the local rule is exact where the router is guessing. The one thing
+     * that outranks it is the sentence reading as an entry on its own, which
+     * is checked at the point of use below.
+     */
+    const localRecall = files.length === 0 && !as ? detectRecall(note) : null;
 
     const saysAnswer = routed?.intent === "answer";
     const saysCorrection = routed?.intent === "correction";
@@ -2071,7 +2092,17 @@ export function AskPanel({
             }
           : routed === null
             ? detectRecall(note)
-            : localRecall;
+            : /**
+               * The local reading wins unless the sentence is an entry.
+               *
+               * "I paid 500 for food from gcash" carries no delete verb and
+               * never reaches here. "cancel my netflix" carries one and does,
+               * which is why an entry outranks it: a sentence that reads as a
+               * complete row is a row.
+               */
+              localRecall && !readEntry(note, transactions, reference, asOf).worthOffering
+              ? localRecall
+              : null;
 
     if (recall) {
       const pool = recall.action === "restore" ? deleted : transactions;
@@ -2128,9 +2159,17 @@ export function AskPanel({
        * "last" was stripped as a filler word and the search was left with
        * nothing to look for. It is not filler: it is the whole instruction.
        */
-      const wantsLatest = /^(last|the last|that last|latest|most recent|it)$/i.test(
-        recall.phrase.trim(),
-      );
+      /**
+       * "latest" anywhere in the phrase, not only as the whole of it.
+       *
+       * "delete my latest spending thats wrong" came back with five rows
+       * from August, matched on the word "spending". The phrase was not
+       * exactly "latest", so recency was never used, and "spending" is the
+       * name of a flow rather than a description of a row: every spending row
+       * in the ledger answers to it.
+       */
+      const wantsLatest =
+        /\b(last|latest|most recent|newest|recent|kanina lang|huli)\b/i.test(recall.phrase);
       const candidates = wantsLatest
         ? [...pool]
             .sort((a, b) => b.recordNumber - a.recordNumber)
@@ -2150,9 +2189,31 @@ export function AskPanel({
               : "No entry matches that. Naming the day, the item or the amount is usually enough, or give the record number.",
           from: "this device",
         });
+        /**
+         * Recorded, because looking and finding nothing is an answer.
+         *
+         * Coderview lists a message with no card and no answer under "Said,
+         * and nothing happened", which is meant to be the list of real
+         * failures. Every correct refusal landed in it, because this reply
+         * was never logged, and the list filled with searches that had worked
+         * exactly as intended. Deliberately finding nothing is not the same
+         * as doing nothing.
+         */
+        log(
+          aiEvent("answered", "add", {
+            text: `Searched and found nothing for "${recall.phrase}".`,
+            model: "this device",
+          }),
+        );
         return;
       }
 
+      log(
+        aiEvent("answered", "add", {
+          text: `Found ${candidates.length} row${candidates.length === 1 ? "" : "s"} to ${recall.action === "restore" ? "restore" : "bin"}.`,
+          model: "this device",
+        }),
+      );
       say({ kind: "found", action: recall.action, candidates, done: [] });
       return;
     }
