@@ -135,16 +135,30 @@ async function readAll(uid: string, name: string): Promise<Dumped> {
 }
 
 /**
- * What the assistant got wrong, counted.
+ * The training view: what it has learned, and what it is still getting wrong.
  *
- * The reason this screen exists. `accepted` against `edited` and `rejected`
- * is the hit rate, and the per-field breakdown says which reading is weak:
- * a pile of corrections to `toWallet` means the transfer question is what
- * needs work, not the amount parser.
+ * ── Why this is the point of the whole screen ─────────────────────────────
+ *
+ * Counting how often it was right says whether to worry. It does not say what
+ * to change. This section is the material you would actually train on:
+ *
+ *   LEARNED     the lookups it has built from your corrections, which is the
+ *               entire memory it carries between sessions
+ *   CORRECTED   every pair, so a wrong lesson can be spotted
+ *   REJECTED    cards it produced that you threw away, with the sentence that
+ *               produced them. These are the failures nobody corrected, so
+ *               they teach it nothing and repeat forever
+ *   SILENT      messages that produced no card and no answer at all. The
+ *               worst kind, because they look like nothing happened
+ *
+ * The last two are the ones that matter. A correction is a fault already
+ * being fixed; a rejection and a silence are faults still running.
  */
 function scoreAi(docs: readonly { readonly data: Record<string, unknown> }[]): string[] {
   const str = (v: unknown): string => (typeof v === "string" ? v : "");
-  const events = docs.map((d) => d.data);
+  const events = [...docs.map((d) => d.data)].sort((a, b) =>
+    str(a["at"]) < str(b["at"]) ? -1 : 1,
+  );
 
   const count = (action: string): number =>
     events.filter((e) => str(e["action"]) === action).length;
@@ -153,23 +167,84 @@ function scoreAi(docs: readonly { readonly data: Record<string, unknown> }[]): s
   const accepted = count("accepted");
   const edited = count("edited");
   const rejected = count("rejected");
-  const cleared = count("cleared");
   const decided = accepted + edited + rejected;
+  const rate = decided > 0 ? `${Math.round((accepted / decided) * 100)}%` : "n/a";
 
-  const byField = new Map<string, number>();
+  /**
+   * What it carries between sessions.
+   *
+   * The same shape `correctionsFrom` builds, worked out here so the file can
+   * be read on its own without running the app. Later corrections replace
+   * earlier ones, and a mapping onto itself teaches nothing and is dropped.
+   */
+  const learned = new Map<string, string>();
   const pairs: string[] = [];
+  const byField = new Map<string, number>();
+
   for (const e of events) {
     if (str(e["action"]) !== "edited") continue;
     const field = str(e["field"]) || "(unnamed)";
     byField.set(field, (byField.get(field) ?? 0) + 1);
+    const from = str(e["proposed"]).trim();
+    const to = str(e["corrected"]).trim();
     pairs.push(
-      `    ${field}: proposed ${str(e["proposed"]) || "(blank)"} -> corrected to ${
-        str(e["corrected"]) || "(blank)"
-      }${str(e["text"]) ? `   [said: ${str(e["text"]).slice(0, 120)}]` : ""}`,
+      `    ${str(e["at"]).slice(0, 16).replace("T", " ")}  ${field}: ${from || "(blank)"} -> ${
+        to || "(blank)"
+      }`,
+    );
+    if (field === "item" && from && to && from.toLowerCase() !== to.toLowerCase()) {
+      learned.set(from.toLowerCase(), to);
+    }
+  }
+
+  /**
+   * Cards you threw away, and the sentence behind each one.
+   *
+   * A rejection is the assistant being wrong and nobody telling it what the
+   * right answer was, so it will make the same guess again tomorrow. Paired
+   * with what was said just before it, they are the clearest list of what to
+   * fix next.
+   */
+  const thrownAway: string[] = [];
+  for (let i = 0; i < events.length; i += 1) {
+    const e = events[i];
+    if (!e || str(e["action"]) !== "rejected") continue;
+    let said = "";
+    for (let j = i - 1; j >= 0 && j > i - 12; j -= 1) {
+      const earlier = events[j];
+      if (earlier && str(earlier["action"]) === "asked" && str(earlier["text"])) {
+        said = str(earlier["text"]);
+        break;
+      }
+    }
+    thrownAway.push(
+      `    ${str(e["entry"]) || "(no entry)"}${said ? `   [said: ${said.slice(0, 90)}]` : ""}`,
     );
   }
 
-  const rate = decided > 0 ? `${Math.round((accepted / decided) * 100)}%` : "n/a";
+  /**
+   * Messages that produced nothing at all.
+   *
+   * No card, no answer, no chart. From the outside it looks like the app
+   * ignored you, and it is the failure least likely to be reported, because
+   * there is nothing on screen to point at.
+   */
+  const silent: string[] = [];
+  for (let i = 0; i < events.length; i += 1) {
+    const e = events[i];
+    if (!e || str(e["action"]) !== "asked" || !str(e["text"])) continue;
+    let answered = false;
+    for (let j = i + 1; j < events.length && j < i + 4; j += 1) {
+      const later = events[j];
+      const a = later ? str(later["action"]) : "";
+      if (a === "answered" || a === "proposed") answered = true;
+      if (a === "asked") break;
+    }
+    if (!answered) silent.push(`    ${str(e["at"]).slice(5, 16).replace("T", " ")}  ${str(e["text"]).slice(0, 92)}`);
+  }
+
+  const last = (list: string[], n: number): string[] =>
+    list.length <= n ? list : [`    ... ${list.length - n} earlier, newest ${n} shown`, ...list.slice(-n)];
 
   return [
     "── How the assistant is doing ──────────────────────────────────────────",
@@ -181,19 +256,41 @@ function scoreAi(docs: readonly { readonly data: Record<string, unknown> }[]): s
     `  accepted   ${accepted}`,
     `  edited     ${edited}      <- corrections`,
     `  rejected   ${rejected}`,
-    `  cleared    ${cleared}`,
+    `  cleared    ${count("cleared")}`,
     "",
     `  Accepted as proposed: ${rate} of ${decided} decided cards.`,
+    "",
+    "── What it has learned ─────────────────────────────────────────────────",
+    "",
+    "  The lookups it carries between sessions. Empty means it has learned",
+    "  nothing, whatever the correction count says: only item corrections",
+    "  build this, and only when they map one phrase onto a different item.",
+    "",
+    ...(learned.size === 0
+      ? ["    nothing yet"]
+      : [...learned.entries()].map(([from, to]) => `    "${from}" means ${to}`)),
     "",
     "  Corrections by field, worst first:",
     ...(byField.size === 0
       ? ["    none recorded"]
-      : [...byField.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .map(([field, n]) => `    ${field.padEnd(14)} ${n}`)),
+      : [...byField.entries()].sort((a, b) => b[1] - a[1]).map(([f, n]) => `    ${f.padEnd(14)} ${n}`)),
     "",
     "  Every correction, in full:",
-    ...(pairs.length === 0 ? ["    none recorded"] : pairs),
+    ...(pairs.length === 0 ? ["    none recorded"] : last(pairs, 40)),
+    "",
+    "── Thrown away, and never corrected ────────────────────────────────────",
+    "",
+    "  It was wrong and nobody told it the right answer, so it will guess the",
+    "  same thing again. This is the list to fix next.",
+    "",
+    ...(thrownAway.length === 0 ? ["    none"] : last(thrownAway, 30)),
+    "",
+    "── Said, and nothing happened ──────────────────────────────────────────",
+    "",
+    "  No card, no answer, no chart. The failure least likely to get reported,",
+    "  because there is nothing on screen to point at.",
+    "",
+    ...(silent.length === 0 ? ["    none"] : last(silent, 40)),
     "",
   ];
 }
@@ -443,6 +540,27 @@ export function CoderView({ uid, local }: { uid: string | null; local: LocalData
         return;
       } catch {
         // Cancelled, or the browser refused. Fall through to a download.
+      }
+    }
+
+    /**
+     * On localhost, straight into the repo, with no dialog.
+     *
+     * The dev server writes it to a gitignored folder, so the file is on
+     * disk and readable by whoever is debugging without anyone choosing a
+     * folder or repeating a path. `apply: "serve"` means this route does not
+     * exist in production, so the fallback below is what ships.
+     */
+    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+      try {
+        const response = await fetch("/__coderview", { method: "POST", body: text });
+        if (response.ok) {
+          const { file } = (await response.json()) as { file?: string };
+          setSaved(`Written to ${file ?? "CODERVIEW/"}`);
+          return;
+        }
+      } catch {
+        // The dev server is not listening for it. Fall through to a download.
       }
     }
 

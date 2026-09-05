@@ -2,8 +2,11 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+// Dev only, and removed with Coderview. See tools/coderviewSink.ts.
+import { coderviewSink } from "./tools/coderviewSink";
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), coderviewSink()],
 
   build: {
     rollupOptions: {
