@@ -132,7 +132,26 @@ const MAX_CHAT_CONTEXT_BYTES = 120_000;
  */
 const MAX_IMAGES = 5;
 const MAX_IMAGE_CHARS = 6_000_000;
+/**
+ * How long to wait on a provider, which is not one number.
+ *
+ * ── The mismatch this replaces ────────────────────────────────────────────
+ *
+ * Twenty seconds for everything. The browser waits forty five for a picture,
+ * so the server always gave up first, returned an error, and the app reported
+ * "Could not reach the AI endpoint. You may be offline." The endpoint had
+ * been reached perfectly well: a free vision model reading an eight row
+ * statement is simply slower than twenty seconds, and the owner saw it
+ * happen three times in a row on one screenshot before it finally landed.
+ *
+ * Reading a picture gets forty seconds, which stays under the browser's own
+ * limit so the server fails first and its message is the one that survives.
+ * Everything else keeps twenty: a summary that takes that long is a model
+ * that has stopped answering, and the next one in the chain will be quicker
+ * than waiting.
+ */
 const TIMEOUT_MS = 20_000;
+const VISION_TIMEOUT_MS = 40_000;
 
 type Provider = "groq" | "openrouter";
 
@@ -1073,7 +1092,10 @@ async function send(
     : "https://openrouter.ai/api/v1/chat/completions";
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(
+    () => controller.abort(),
+    images.length > 0 ? VISION_TIMEOUT_MS : TIMEOUT_MS,
+  );
 
   try {
     const response = await fetch(url, {

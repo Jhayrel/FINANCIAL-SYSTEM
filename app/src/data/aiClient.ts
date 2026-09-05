@@ -601,11 +601,24 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    return empty(
-      message.toLowerCase().includes("abort")
-        ? "Reading that took too long. A smaller or clearer picture usually works."
-        : "Could not reach the AI endpoint. You may be offline.",
-    );
+
+    /**
+     * Say which thing went wrong, because they need different answers.
+     *
+     * "You may be offline" was printed for every failure that was not a
+     * timeout, including the case where the endpoint answered promptly and
+     * said the model had been too slow. The owner saw it on a picture that
+     * read perfectly well on the next try, so the message sent them looking
+     * at their connection when nothing was wrong with it.
+     */
+    const lower = message.toLowerCase();
+    if (lower.includes("abort")) {
+      return empty("Reading that took too long. A smaller or clearer picture usually works.");
+    }
+    if (/failed to fetch|networkerror|load failed/.test(lower)) {
+      return empty("Could not reach the AI endpoint. You may be offline.");
+    }
+    return empty(`The picture could not be read: ${message.slice(0, 120)}`);
   } finally {
     clearTimeout(timer);
   }

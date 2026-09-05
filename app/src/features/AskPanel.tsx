@@ -863,21 +863,33 @@ export function AskPanel({
     };
   }, [uid]);
 
-  const settle = (index: number, state: Offered["state"], recordNumber?: number): void =>
-    setTurns((prev) =>
-      prev.map((t, i) => {
-        if (i !== index || !isOffer(t)) return t;
-        const next: Offered = {
-          ...t,
-          state,
-          ...(recordNumber === undefined ? {} : { recordNumber }),
-        };
-        // What became of it goes into the record too, or a refresh would
-        // bring an added card back offering to add the row a second time.
-        recordCard(next);
-        return next;
-      }),
-    );
+  /**
+   * What became of a card, on screen and in the record.
+   *
+   * ── Why the write is out here and not inside the updater ───────────────
+   *
+   * A state updater must be pure. React calls it more than once in
+   * development, and may re-invoke it under concurrent rendering, so a
+   * database write inside one is a write that happens an unpredictable
+   * number of times. The same mistake made the card replay drop every card
+   * earlier today, which is how I know what it looks like when it bites.
+   *
+   * The turn is read from `turns` instead, which is the same value the
+   * updater would have seen: nothing else settles a card, so there is no
+   * newer state to miss.
+   */
+  const settle = (index: number, state: Offered["state"], recordNumber?: number): void => {
+    const change = (t: Offered): Offered => ({
+      ...t,
+      state,
+      ...(recordNumber === undefined ? {} : { recordNumber }),
+    });
+
+    const was = turns[index];
+    if (was && isOffer(was)) recordCard(change(was));
+
+    setTurns((prev) => prev.map((t, i) => (i === index && isOffer(t) ? change(t) : t)));
+  };
 
   /** The card a correction would apply to: the last one still open. */
   const openCard = (): { index: number; turn: Offered } | null => {
@@ -2780,15 +2792,13 @@ export function AskPanel({
               hostRef={(el) => keepCard(i, el)}
               onSettle={() => {
                 hold(i);
+                // Recorded here, outside the updater, because an updater must
+                // be pure and React may run it more than once.
+                recordCard({ ...turn, state: "settled" });
                 setTurns((prev) =>
-                  prev.map((t, j) => {
-                    if (j !== i || !isDebt(t)) return t;
-                    const next: DebtChoice = { ...t, state: "settled" };
-                    // Same as an ordinary card: what became of it is recorded,
-                    // so a refresh does not bring it back still asking.
-                    recordCard(next);
-                    return next;
-                  }),
+                  prev.map((t, j) =>
+                    j === i && isDebt(t) ? { ...t, state: "settled" } : t,
+                  ),
                 );
               }}
               onChange={(draft) =>
