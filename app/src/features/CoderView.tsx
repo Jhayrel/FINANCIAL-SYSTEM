@@ -331,6 +331,48 @@ function scoreAi(docs: readonly { readonly data: Record<string, unknown> }[]): s
 }
 
 /**
+ * Did a photo leave anything behind.
+ *
+ * ── Why this deserves its own line ────────────────────────────────────────
+ *
+ * A picture is never stored, deliberately, so the description written beside
+ * the message is the only thing that can come back after a refresh. The owner
+ * reported three times that it did not, and there was no way to tell from the
+ * outside whether the code was wrong, the database rule was refusing the
+ * field, or the browser was running an older bundle.
+ *
+ * Counting the messages that actually carry one answers it in a line. Zero
+ * carrying it while photos were uploaded means the write is being lost, and
+ * the build stamp above says which code was doing the losing.
+ */
+function photoLines(dumps: readonly Dumped[]): string[] {
+  const chat = dumps.find((d) => d.name === "chat");
+  const ai = dumps.find((d) => d.name === "ai");
+  if (!chat || chat.failed) return [];
+
+  const withFiles = chat.docs.filter((d) => Array.isArray(d.data["files"])).length;
+  const blank = chat.docs.filter(
+    (d) => d.data["role"] === "you" && d.data["text"] === "" && !Array.isArray(d.data["files"]),
+  ).length;
+  const uploads =
+    ai && !ai.failed ? ai.docs.filter((d) => d.data["action"] === "uploaded").length : 0;
+
+  return [
+    "  Photos, which are described and never stored:",
+    `    ${uploads} upload${uploads === 1 ? "" : "s"}, ${withFiles} message${
+      withFiles === 1 ? "" : "s"
+    } carrying a description, ${blank} that came back blank`,
+    ...(uploads > 0 && withFiles === 0
+      ? [
+          "    Nothing carries one. Either the build above predates the fix,",
+          "    or the database rule is refusing the `files` field.",
+        ]
+      : []),
+    "",
+  ];
+}
+
+/**
  * What this bundle is, without assuming the build defined it.
  *
  * Vite replaces these at build time. A test importing this module has no such
@@ -377,6 +419,7 @@ function render(uid: string, dumps: readonly Dumped[]): string {
           "",
         ]
       : []),
+    ...photoLines(dumps),
     ...(ai?.failed
       ? [
           "── How the assistant is doing ──────────────────────────────────────────",

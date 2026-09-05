@@ -1121,16 +1121,32 @@ export function AskPanel({
       });
 
       /**
-       * Now write it, complete.
+       * Now write it, complete, and make sure something lands either way.
        *
        * `say` deliberately skipped this message when it went up, because at
        * that moment nobody knew what the photos were and the chat collection
        * takes creates and refuses updates. This is the first point at which
        * the message is whole, so this is where it is written.
+       *
+       * ── Why there is a second attempt ───────────────────────────────────
+       *
+       * Skipping the first write made this the only one, so anything that
+       * rejects it loses the message rather than just its descriptions. The
+       * `files` field is the part a database rule can refuse: it is the
+       * newest thing on a chat message, and rules are deployed by hand and by
+       * a separate command from the app.
+       *
+       * So a refusal is retried without it. The owner gets a message that
+       * says a picture was sent, rather than a blank bubble or nothing at
+       * all, and the descriptions are the only thing lost.
        */
       void chatStore(uid)
         .record(said("you", note, undefined, described))
-        .catch(() => {});
+        .catch(() => {
+          void chatStore(uid)
+            .record(said("you", note || `${described.length} attached, not kept.`))
+            .catch(() => {});
+        });
     }
 
     if (result.source === "offline") {
@@ -1336,6 +1352,19 @@ export function AskPanel({
         from: "this device",
         ephemeral: true,
       });
+      /**
+       * Recorded as answered, because it was.
+       *
+       * Coderview lists a message with no card and no answer under "Said, and
+       * nothing happened", which is the list of failures worth chasing. Every
+       * note the owner wrote while testing landed in it, because the reply is
+       * ephemeral and nothing else was logged. Forty of the last forty lines
+       * in that list were notes, so the list stopped being readable and the
+       * real silences hid inside it.
+       *
+       * Deliberately not acting is not the same as doing nothing.
+       */
+      log(aiEvent("answered", "add", { text: "Noted, not acted on.", model: "this device" }));
       return;
     }
 
@@ -2646,6 +2675,25 @@ export function AskPanel({
                       {turn.text}
                     </p>
                   )}
+                  {/*
+                    Never an empty bubble.
+
+                    A photo sent with no words is a message whose entire
+                    content is the picture, and the picture is never stored.
+                    If its description did not come back either, this rendered
+                    as a small blank pill: something was clearly there and
+                    there was no way to tell what. The owner circled it.
+
+                    This is the floor. It says what the bubble is even when
+                    everything that made it interesting is gone.
+                  */}
+                  {!turn.text &&
+                    !(turn.shown && turn.shown.length > 0) &&
+                    !(turn.described && turn.described.length > 0) && (
+                      <p className="t-micro" style={{ margin: 0, color: "var(--ink-3)" }}>
+                        A picture, which is not kept.
+                      </p>
+                    )}
                 </>
               )}
               {turn.from && (

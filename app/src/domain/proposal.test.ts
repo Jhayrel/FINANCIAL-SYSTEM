@@ -122,9 +122,33 @@ describe("readProposals refuses rather than guesses", () => {
     expect(checkDraft(proposals[0]!.draft, [], reference, []).ok).toBe(false);
   });
 
-  it("still refuses zero and negative, which are answers rather than blanks", () => {
-    expect(one({ amountPesos: 0 }).proposals).toHaveLength(0);
-    expect(one({ amountPesos: -50 }).proposals).toHaveLength(0);
+  /**
+   * Zero is not an answer, it is the model shrugging.
+   *
+   * This used to refuse both, on the reasoning that a figure is a figure. It
+   * cost the owner the case this app is best at: "I paid my spotify from
+   * gcash" names no amount, the model returns a zero, and the whole proposal
+   * was thrown away, item and wallet and date with it. They asked three times
+   * across two sessions, and there are nine Spotify rows at PHP 85.00 sitting
+   * in the ledger, one a month, which `inferFromHistory` fills from. It never
+   * ran, because the refusal came first.
+   *
+   * No transaction is worth zero pesos and none is worth a negative one, so
+   * neither is ever a reading of a receipt. Both now mean the same as a blank,
+   * and `checkDraft` still refuses to save one, which is the part that
+   * protects the ledger.
+   */
+  it("treats zero and negative as no amount read, keeping the rest of the row", () => {
+    for (const amountPesos of [0, -50]) {
+      const { proposals, refused } = one({ amountPesos });
+      expect(refused).toHaveLength(0);
+      expect(proposals).toHaveLength(1);
+      expect(proposals[0]?.draft.amount).toBeNull();
+      // Everything else the model read survives.
+      expect(proposals[0]?.draft.flow).toBe("Spending");
+      // And it still cannot be saved until someone supplies one.
+      expect(checkDraft(proposals[0]!.draft, [], reference, []).ok).toBe(false);
+    }
   });
 
   it("refuses a flow it does not recognise, without quoting the model at you", () => {

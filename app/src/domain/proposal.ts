@@ -210,9 +210,24 @@ function readOne(
    * through with a null amount instead, and `domain/capture.ts` turns that
    * into a question. The Add button stays disabled either way, because
    * `checkDraft` requires an amount over zero.
+   *
+   * ── Zero is the same thing said differently ─────────────────────────────
+   *
+   * A zero still ended here, and that threw away the case this app is best
+   * at. "I paid my spotify from gcash" names no figure, so the model sends
+   * back a zero, and the whole proposal was refused: item, wallet, flow and
+   * date discarded along with it. The owner asked three times across two
+   * sessions and wrote "it should now the amount access the database". It
+   * should, and it can: there are nine Spotify rows at PHP 85.00, one a
+   * month, and `inferFromHistory` fills exactly this case. It never got the
+   * chance, because the refusal happened first.
+   *
+   * No transaction is worth zero pesos, so a zero is never a reading. It is
+   * the model saying it does not know, which is what null already means.
    */
   if (amount !== null && amount <= 0) {
-    return { sourceRef, reason: "That one came through with an amount of zero." };
+    amount = null;
+    adjustments.push("No amount was in that, so it is filled from your own entries or left for you.");
   }
 
   const fee = readMoney(value["feePesos"]) ?? 0;
