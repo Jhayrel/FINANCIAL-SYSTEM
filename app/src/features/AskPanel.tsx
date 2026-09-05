@@ -146,7 +146,7 @@ export interface ProposalSink {
    * that is what this panel is, and it is a record of what happened rather
    * than a permission to do it.
    */
-  readonly add: (draft: Draft, by?: Provenance) => void;
+  readonly add: (draft: Draft, by?: Provenance) => number | null;
   /**
    * Move a row to the bin, and bring one back.
    *
@@ -259,6 +259,15 @@ interface Offered {
    * gone.
    */
   readonly state: "open" | "added" | "used" | "discarded";
+  /**
+   * The number this card's row was actually given, once it has one.
+   *
+   * Absent while the card is open, because it does not have one yet: what is
+   * shown then is a prediction, worked out from where the card sits in the
+   * stack. Fixed the moment it saves, so a settled card stops following a
+   * figure that has moved on to the next entry.
+   */
+  readonly recordNumber?: number;
 }
 
 type Turn = Said | Offered | Found | Drawn | DebtChoice;
@@ -597,6 +606,28 @@ export function AskPanel({
       return;
     }
     if (isOffer(turn) || isFound(turn) || isDebt(turn) || turn.ephemeral) return;
+
+    /**
+     * A message carrying photos waits until it knows what they were.
+     *
+     * ── Why the descriptions kept vanishing on a refresh ────────────────
+     *
+     * The photo is read after the message is on screen, which is right: the
+     * owner sees what they sent immediately and the answer follows. But the
+     * write happened here, at the moment it was said, and the descriptions
+     * were attached to the turn a second or two later. So the stored message
+     * had no `files` on it, and this collection is append only at the
+     * database, deliberately, so the later update had nowhere to go.
+     *
+     * Nothing was broken about the writing or the rules. The message was
+     * simply written a moment too early, every time.
+     *
+     * So a message with photos on it is not written here. `describeUpload`
+     * writes it once the descriptions exist, which is the first moment the
+     * message is complete.
+     */
+    if (isSaid(turn) && turn.shown && turn.shown.length > 0) return;
+
     void chatStore(uid)
       .record(said(turn.kind, turn.text, turn.from, turn.described))
       .catch(() => {});
@@ -639,9 +670,13 @@ export function AskPanel({
     };
   }, [uid]);
 
-  const settle = (index: number, state: Offered["state"]): void =>
+  const settle = (index: number, state: Offered["state"], recordNumber?: number): void =>
     setTurns((prev) =>
-      prev.map((t, i) => (i === index && isOffer(t) ? { ...t, state } : t)),
+      prev.map((t, i) =>
+        i === index && isOffer(t)
+          ? { ...t, state, ...(recordNumber === undefined ? {} : { recordNumber }) }
+          : t,
+      ),
     );
 
   /** The card a correction would apply to: the last one still open. */
@@ -688,12 +723,44 @@ export function AskPanel({
   /** From Settings, clamped there, so a typo cannot ask for a hundred. */
   const limits = imageLimits(settings.ai);
 
+  /**
+   * Pictures already sent in this session, by fingerprint.
+   *
+   * ── Why the message-level check was not enough ────────────────────────
+   *
+   * `readFiles` refuses the same file twice in one message, which is the
+   * case where three identical copies go up together. The owner hit the other
+   * one: send a receipt, read the card, and send the same receipt again a few
+   * minutes later in a new message. Nothing compared them, because by then
+   * the first message's attachments were gone.
+   *
+   * Said, not refused. Re-sending a photo is often deliberate: the first read
+   * came back "nothing readable" and the owner is trying again, and refusing
+   * that would break the retry. What is wrong is doing it without noticing,
+   * so this notices out loud and leaves the decision alone.
+   */
+  const sentBefore = useRef(new Map<string, string>());
+
   const attach = async (picked: ArrayLike<File> | null): Promise<void> => {
     if (!picked || picked.length === 0) return;
     const { attachments, rejected } = await readFiles(Array.from(picked), files, limits);
+
+    const seenAgain = attachments.filter(
+      (a) => a.digest !== undefined && sentBefore.current.has(a.digest),
+    );
+
     if (attachments.length > 0) setFiles((prev) => [...prev, ...attachments]);
     for (const r of rejected) {
       say({ kind: "assistant", text: `${r.name}: ${r.reason}`, from: "this device" });
+    }
+
+    for (const a of seenAgain) {
+      const when = a.digest ? sentBefore.current.get(a.digest) : undefined;
+      say({
+        kind: "assistant",
+        text: `${a.name} is the same picture you sent at ${when}. Send it again if that is what you meant: anything it reads that is already in the ledger will say so on the card.`,
+        from: "this device",
+      });
     }
   };
 
@@ -970,6 +1037,10 @@ export function AskPanel({
   const readAttached = async (note: string): Promise<boolean> => {
     const sent = files;
     setFiles([]);
+
+    // Remembered on the way out, so the next message can recognise them.
+    const clock = new Date().toTimeString().slice(0, 5);
+    for (const f of sent) if (f.digest) sentBefore.current.set(f.digest, clock);
     // Only once: if this falls through to the question path, that path must
     // not echo the same message a second time.
     if (sent.length > 0 || note) {
@@ -1048,6 +1119,18 @@ export function AskPanel({
         if (at < 0) return prev;
         return prev.map((t, i) => (i === at && isSaid(t) ? { ...t, described } : t));
       });
+
+      /**
+       * Now write it, complete.
+       *
+       * `say` deliberately skipped this message when it went up, because at
+       * that moment nobody knew what the photos were and the chat collection
+       * takes creates and refuses updates. This is the first point at which
+       * the message is whole, so this is where it is written.
+       */
+      void chatStore(uid)
+        .record(said("you", note, undefined, described))
+        .catch(() => {});
     }
 
     if (result.source === "offline") {
@@ -1069,6 +1152,71 @@ export function AskPanel({
         });
       }
       return false;
+    }
+
+    /**
+     * ── The model may not return fewer entries than the sentence holds ──
+     *
+     * "I borrowed 2000 on maya credit into gcash, then paid 500 for food from
+     * gcash, then gave 300 to my mom" is three movements of three different
+     * kinds, and it came back as one debt card. The other two were dropped
+     * without a word. The owner hit this six times across four sessions, and
+     * every fix so far has been to a path the model was not taking.
+     *
+     * The rules can already see there are three, because the sentence says
+     * "then" twice and each clause reads on its own. So when the local reader
+     * finds strictly more parts than the model returned, the model lost
+     * something and the split is used instead.
+     *
+     * Only for a typed sentence. A photo's contents are not in the message,
+     * so there is nothing for the rules to count and nothing to compare.
+     *
+     * The reverse is never done: the model returning more than the rules
+     * found is the model reading better, which is what it is for.
+     */
+    const parts =
+      sent.length === 0 && note
+        ? splitEntries(note).map((line) => ({
+            line,
+            read: readEntry(line, transactions, reference, asOf),
+          }))
+        : [];
+    const usable = parts.filter((p) => p.read.readsAsDebt || p.read.worthOffering);
+
+    if (usable.length > result.proposals.length && usable.length > 1) {
+      say({
+        kind: "assistant",
+        ephemeral: true,
+        text: `${usable.length} entries. Check each one, then add it.`,
+        from: "this device",
+      });
+
+      for (const { line, read } of usable) {
+        if (read.readsAsDebt) {
+          log(
+            aiEvent("proposed", "add", {
+              entry: `${read.draft.date} Debt ${formatMoney(read.draft.amount ?? 0)}`,
+              text: line,
+            }),
+          );
+          say({ kind: "debt", draft: read.draft, state: "open" });
+          continue;
+        }
+        await offer(
+          {
+            draft: read.draft,
+            confidence: "high",
+            sourceRef: `part of what you said: ${line}`,
+            said: line,
+            adjustments: read.because,
+          },
+          line,
+          false,
+          true,
+          read.settled,
+        );
+      }
+      return true;
     }
 
     if (result.proposals.length > 0) {
@@ -2167,6 +2315,25 @@ export function AskPanel({
    * the code and another way on screen. The entry itself cannot be
    * miscounted, and it is evidence rather than a reference.
    */
+  /**
+   * The number each open card would get, counting the ones above it.
+   *
+   * Three cards in a batch all printed the same figure, and a card that had
+   * already saved went on printing whatever was next rather than what it got.
+   * Both came from reading `sink.nextRecordNumber` at render time, which is a
+   * live value about the future and not a fact about the card.
+   */
+  const predictedNumber = useMemo(() => {
+    const byTurn = new Map<number, number>();
+    let ahead = 0;
+    turns.forEach((t, i) => {
+      if (!isOffer(t) || t.state !== "open") return;
+      byTurn.set(i, sink.nextRecordNumber + ahead);
+      ahead += 1;
+    });
+    return byTurn;
+  }, [turns, sink.nextRecordNumber]);
+
   const repeatOfCard = useMemo(() => {
     const indexes: number[] = [];
     turns.forEach((t, i) => {
@@ -2189,18 +2356,30 @@ export function AskPanel({
    * are one render and one batch of writes rather than eight of each.
    */
   const addReady = (): void => {
-    const added: number[] = [];
+    // Each card keeps the number its own row was given. Reading the next one
+    // afterwards showed every card in the batch the same figure.
+    const given = new Map<number, number | null>();
     turns.forEach((t, i) => {
       if (isOffer(t) && t.state === "open" && sink.check(t.proposal.draft).ok) {
-        sink.add(t.proposal.draft, {
-          actor: "ai",
-          via: t.proposal.sourceRef.toLowerCase().includes("image") ? "ai_image" : "ai_chat",
-        });
-        added.push(i);
+        given.set(
+          i,
+          sink.add(t.proposal.draft, {
+            actor: "ai",
+            via: t.proposal.sourceRef.toLowerCase().includes("image") ? "ai_image" : "ai_chat",
+          }),
+        );
       }
     });
     setTurns((prev) =>
-      prev.map((t, i) => (added.includes(i) && isOffer(t) ? { ...t, state: "added" } : t)),
+      prev.map((t, i) => {
+        if (!given.has(i) || !isOffer(t)) return t;
+        const number = given.get(i);
+        return {
+          ...t,
+          state: "added" as const,
+          ...(number === null || number === undefined ? {} : { recordNumber: number }),
+        };
+      }),
     );
   };
 
@@ -2366,6 +2545,9 @@ export function AskPanel({
               hostRef={(el) => keepCard(i, el)}
               alreadyInLedger={alreadyInLedger.get(i) ?? []}
               repeatOfCard={repeatOfCard.get(i)}
+              recordNumber={
+                turn.recordNumber ?? predictedNumber.get(i) ?? sink.nextRecordNumber
+              }
               onChange={(draft) => replaceProposal(i, { ...turn.proposal, draft })}
               onChangeAll={(draft) => applyToAll(draft)}
               onAdd={() => {
@@ -2386,7 +2568,7 @@ export function AskPanel({
                       : {}),
                   }),
                 );
-                sink.add(turn.proposal.draft, {
+                const given = sink.add(turn.proposal.draft, {
                   actor: "ai",
                   // A picture and a sentence are different enough to tell
                   // apart when reading the trail back.
@@ -2394,7 +2576,7 @@ export function AskPanel({
                     ? "ai_image"
                     : "ai_chat",
                 });
-                settle(i, "added");
+                settle(i, "added", given ?? undefined);
               }}
               onUse={() => {
                 hold(i);
@@ -2779,6 +2961,7 @@ function ProposalCard({
   hostRef,
   alreadyInLedger,
   repeatOfCard,
+  recordNumber,
   onChange,
   onChangeAll,
   onAdd,
@@ -2792,6 +2975,15 @@ function ProposalCard({
   hostRef: (el: HTMLDivElement | null) => void;
   /** Rows in the ledger this card looks like it repeats. Usually empty. */
   alreadyInLedger: readonly Duplicate[];
+  /**
+   * The number to print.
+   *
+   * An open card shows the number it would get, counting the cards above it
+   * that are also waiting. A settled one shows the number it actually got.
+   * Reading `sink.nextRecordNumber` directly showed every card in a batch the
+   * same figure, and went on changing it after the row was saved.
+   */
+  recordNumber: number;
   /** The entry an earlier card already holds, when this one repeats it. */
   repeatOfCard?: Draft | undefined;
   onChange: (draft: Draft) => void;
@@ -2803,8 +2995,9 @@ function ProposalCard({
   const { proposal, state } = offered;
   const { draft } = proposal;
   const check = sink.check(draft);
-  // Stable and unique per card, so the label points at its own select.
+  // Stable and unique per card, so each label points at its own select.
   const pickerId = useId();
+  const itemPickerId = useId();
 
   /**
    * A discarded card goes. A settled one stays.
@@ -2846,6 +3039,16 @@ function ProposalCard({
   const walletLabel = flow === "Revenue" ? "Which wallet received it" : "Which wallet paid";
   /** A transfer that left the accounts has no destination to show or ask for. */
   const moneySend = flow === "Transfer" && draft.sentOut === true;
+
+  /**
+   * The item, when the card is missing one and the flow has the field.
+   *
+   * Spending and Revenue both classify by item and neither total works
+   * without it. Transfer and Debt do not have one, so nothing is asked.
+   */
+  const itemChoices =
+    flow === "Spending" || flow === "Revenue" ? itemsFor(flow, draft.category, reference) : [];
+  const needsItem = itemChoices.length > 0 && draft.item.trim() === "";
   const confidence =
     proposal.confidence === "high"
       ? "clear"
@@ -2871,7 +3074,7 @@ function ProposalCard({
         renames one of them is teaching the wrong thing about the data.
       */}
       <dl className="fms-proposalfields">
-        <Field label="Record number" value={String(sink.nextRecordNumber).padStart(4, "0")} mono />
+        <Field label="Record number" value={String(recordNumber).padStart(4, "0")} mono />
         <Field label="Type" value={flow} />
         <Field label="Date" value={draft.date} mono />
         {flow !== "Revenue" && <Field label="From wallet" value={draft.fromWallet} required />}
@@ -2927,6 +3130,40 @@ function ProposalCard({
               Same for all
             </button>
           )}
+        </div>
+      )}
+
+      {/*
+        A card that needs an item has to offer one.
+        
+        The card marked Item as "you pick" in the red that means this stops it
+        saving, and then the only control on it was a wallet picker. The owner
+        wrote it down: "error in entry like its say item but in which wallet it
+        say wallet instead of item". There was no way to answer the question
+        being asked, so the card was unsaveable and the only exit was Discard.
+        
+        Shown only when it is missing, and only where an item is a field at
+        all: a Transfer has none, and a card that already read one correctly
+        does not need a picker for it.
+      */}
+      {!settled && needsItem && (
+        <div className="fms-proposalpick">
+          <label className="t-micro fms-pfieldlabel" htmlFor={itemPickerId}>
+            {flow === "Revenue" ? "Where it came from" : "What it was for"}
+          </label>
+          <select
+            id={itemPickerId}
+            className="t-caption fms-proposalselect"
+            value={draft.item}
+            onChange={(e) => onChange({ ...draft, item: e.target.value })}
+          >
+            <option value="">Pick one</option>
+            {itemChoices.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
         </div>
       )}
 

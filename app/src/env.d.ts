@@ -23,3 +23,16 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/**
+ * Which commit this bundle was built from, and when.
+ *
+ * Replaced at build time by Vite (`define` in vite.config.ts), so it is a
+ * fact about the running bundle rather than something read at runtime and
+ * possibly stale. Coderview prints both, so an export answers "is the fix
+ * actually deployed" without guessing.
+ *
+ * "unknown" when the build had neither a Pages commit nor a git checkout.
+ */
+declare const __BUILD_COMMIT__: string;
+declare const __BUILD_AT__: string;

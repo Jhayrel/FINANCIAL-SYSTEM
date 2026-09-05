@@ -330,6 +330,17 @@ function scoreAi(docs: readonly { readonly data: Record<string, unknown> }[]): s
   ];
 }
 
+/**
+ * What this bundle is, without assuming the build defined it.
+ *
+ * Vite replaces these at build time. A test importing this module has no such
+ * replacement, so both are read defensively rather than referenced directly.
+ */
+const buildCommit = (): string =>
+  typeof __BUILD_COMMIT__ === "string" ? __BUILD_COMMIT__ : "unknown";
+
+const buildAt = (): string => (typeof __BUILD_AT__ === "string" ? __BUILD_AT__ : "unknown");
+
 /** The whole thing as one text file. */
 function render(uid: string, dumps: readonly Dumped[]): string {
   const nl = String.fromCharCode(10);
@@ -339,6 +350,15 @@ function render(uid: string, dumps: readonly Dumped[]): string {
     "CODERVIEW",
     `Taken ${new Date().toISOString()}`,
     `Account ${uid}`,
+    /**
+     * Which bundle produced this.
+     *
+     * A fix was pushed, the tests passed, and the same sentence failed again
+     * on the phone. There was no way to tell from the outside whether the fix
+     * was wrong or whether the browser was running an older bundle, and those
+     * are two completely different problems. This makes it one line.
+     */
+    `Build ${buildCommit()}, built ${buildAt()}`,
     "",
     "Every collection this app writes to, whole and unpaged. Nothing is",
     "summarised away. This file holds a complete financial history: keep it",

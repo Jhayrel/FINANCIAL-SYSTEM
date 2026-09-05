@@ -47,7 +47,17 @@ const RESTORE = /\b(restore|bring back|undelete|recover|put back|unbin|retrieve)
  * which every row would answer to.
  */
 const INSTRUCTION =
-  /\b(delete|remove|erase|bin|cancel|undo|scrap|discard|restore|bring|back|undelete|recover|put|unbin|retrieve|the|a|an|my|me|i|data|entry|entries|row|rows|record|records|transaction|transactions|that|this|about|for|from|with|of|created|made|added|wrote|logged|please|can|you|it|one|last)\b/gi;
+  /\b(delete|remove|erase|bin|cancel|undo|scrap|discard|restore|bring|back|undelete|recover|put|unbin|retrieve|the|a|an|my|me|i|data|entry|entries|row|rows|record|records|transaction|transactions|that|this|about|for|from|with|of|created|made|added|wrote|logged|please|can|you|it|one|last|paid|pay|spent|spend|bought|buy|sent|send|gave|give|used|use|did|was|were|is|are|on|at|in|to)\b/gi;
+
+/**
+ * Day words, once the day has been read out of them.
+ *
+ * "yesterday" is not a description of a row, it is the date, and `dayIn` has
+ * already turned it into one. Left in the word list it matches nothing and
+ * dilutes nothing, but it can appear in the "what matched" line, which then
+ * claims a row matched on a word the row does not contain.
+ */
+const DAY_WORDS = /\b(yesterday|today|tonight|morning|afternoon|evening|day|days|ago)\b/gi;
 
 export function detectRecall(text: string): Recall | null {
   const trimmed = text.trim();
@@ -71,21 +81,31 @@ const shift = (asOf: IsoDate, days: number): IsoDate => {
   return at.toISOString().slice(0, 10);
 };
 
-/** A day named in the phrase, or null when none was. */
-function dayIn(phrase: string, asOf: IsoDate): IsoDate | null {
-  const iso = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(phrase);
-  if (iso?.[1]) return iso[1];
+/**
+ * A day named in the phrase, and the phrase with that day taken out.
+ *
+ * The rest matters as much as the day. "2026-08-20" is a date, and the digits
+ * in it are not an amount: leaving them in the phrase had `amountIn` read
+ * PHP 2,026.00 out of the year, which then filtered away the very row the
+ * date was naming. Whatever is consumed here cannot be read as anything else.
+ */
+function dayIn(phrase: string, asOf: IsoDate): { day: IsoDate | null; rest: string } {
+  const iso = /\b20\d{2}-\d{2}-\d{2}\b/.exec(phrase);
+  if (iso?.[0]) return { day: iso[0], rest: phrase.replace(iso[0], " ") };
 
   const slashed = /\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/.exec(phrase);
   if (slashed) {
     const [, m, d, y] = slashed;
-    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    return {
+      day: `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`,
+      rest: phrase.replace(slashed[0], " "),
+    };
   }
 
-  if (/\bday before yesterday\b/i.test(phrase)) return shift(asOf, -2);
-  if (/\byesterday\b/i.test(phrase)) return shift(asOf, -1);
-  if (/\btoday\b/i.test(phrase)) return asOf;
-  return null;
+  if (/\bday before yesterday\b/i.test(phrase)) return { day: shift(asOf, -2), rest: phrase };
+  if (/\byesterday\b/i.test(phrase)) return { day: shift(asOf, -1), rest: phrase };
+  if (/\btoday\b/i.test(phrase)) return { day: asOf, rest: phrase };
+  return { day: null, rest: phrase };
 }
 
 /** A figure in the phrase, two digits or more so a stray "2" is not one. */
@@ -276,42 +296,91 @@ export function findRows(
   rows: readonly Transaction[],
   asOf: IsoDate,
 ): Candidate[] {
-  const day = dayIn(phrase, asOf);
-  const amount = amountIn(phrase);
-  const number = numberIn(phrase);
+  const { day, rest } = dayIn(phrase, asOf);
+  const number = numberIn(rest);
+  // A record number is digits too, and it is not a peso figure either.
+  const withoutNumber = number === null ? rest : rest.replace(/#\s*\d{1,5}\b/, " ");
+  const amount = amountIn(withoutNumber);
 
-  const words = phrase
+  const words = withoutNumber
     .toLowerCase()
+    .replace(DAY_WORDS, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
     .filter((w) => w.length > 2 && !/^\d+$/.test(w));
 
   if (!day && amount === null && number === null && words.length === 0) return [];
 
+  /**
+   * A word the row actually contains, not a run of letters inside another one.
+   *
+   * `includes` matched "paid" against the description "paid by the card" and
+   * "the" against "the usual", and both of those rows were then offered for
+   * binning off the sentence "discard the food I paid yesterday". Boundaries
+   * make a word match a word.
+   */
+  const holds = (haystack: string, word: string): boolean => {
+    const at = haystack.indexOf(word);
+    if (at < 0) return false;
+    const before = at === 0 ? " " : haystack[at - 1] ?? " ";
+    const after = haystack[at + word.length] ?? " ";
+    return !/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after);
+  };
+
   const scored: Candidate[] = [];
 
   for (const row of rows) {
+    // A record number is unambiguous and answers the question by itself.
+    if (number !== null) {
+      if (row.recordNumber === number) {
+        scored.push({
+          row,
+          score: 100,
+          why: [`record #${String(row.recordNumber).padStart(4, "0")}`],
+        });
+      }
+      continue;
+    }
+
+    /**
+     * ── Everything the phrase names has to agree ────────────────────────
+     *
+     * This used to add the signals up, so a row that matched on nothing but
+     * the date outranked nothing and was still offered. "discard the food I
+     * paid yesterday" came back with five rows: two from yesterday that were
+     * not food, and two that were months old. Four of the five were wrong,
+     * and every one of them had a button on it that moves real money records
+     * out of the ledger.
+     *
+     * A person naming a day and a thing means both, not either. So each
+     * signal is now a filter and the score only breaks ties. Finding nothing
+     * is a fine outcome and this file already says so: "Being unable to find
+     * a row is a fine outcome; offering the wrong one to be deleted is not."
+     */
+    if (day && row.date !== day) continue;
+    if (amount !== null && row.amount !== amount) continue;
+
     let score = 0;
     const why: string[] = [];
 
-    // A record number is unambiguous, and outranks everything else.
-    if (number !== null && row.recordNumber === number) {
-      score += 100;
-      why.push(`record #${String(row.recordNumber).padStart(4, "0")}`);
-    }
-
-    if (day && row.date === day) {
+    if (day) {
       score += 10;
       why.push(row.date);
     }
 
-    if (amount !== null && row.amount === amount) {
+    if (amount !== null) {
       score += 8;
       why.push("the amount");
     }
 
-    const haystack = `${row.item} ${row.description} ${row.category} ${row.fromWallet} ${row.toWallet}`.toLowerCase();
-    const hits = words.filter((w) => haystack.includes(w));
+    const haystack =
+      `${row.item} ${row.description} ${row.category} ${row.fromWallet} ${row.toWallet}`.toLowerCase();
+    const hits = words.filter((w) => holds(haystack, w));
+
+    // Words were named and none of them is here. Whatever this row is, it is
+    // not the one being described.
+    if (words.length > 0 && hits.length === 0) continue;
+
     if (hits.length > 0) {
       score += hits.length * 5;
       why.push(hits.join(", "));

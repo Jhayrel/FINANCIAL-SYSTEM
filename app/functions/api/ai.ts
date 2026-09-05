@@ -725,7 +725,17 @@ const SYSTEM = [
   "Write plain sentences. No Markdown of any kind, unless the instruction for this particular job says otherwise, in which case that instruction wins.",
   "Never use backticks, hash marks, headings, tables, links or code blocks.",
   "Never use an em dash. Use a comma, a colon, or a full stop.",
-  "Do not bold or emphasise anything, especially not the figures.",
+  /**
+   * Qualified, because unqualified it cancelled the chat instruction.
+   *
+   * The chat asks for the figure that matters to be bolded, and this line
+   * said never to bold anything at all. Two instructions that contradict each
+   * other produce a model that follows neither, and this one came last, so it
+   * won: nothing was ever emphasised and the chat's own instruction was dead
+   * text. The precedence is stated here as well as above, so the model does
+   * not have to work out which of two flat rules to believe.
+   */
+  "Do not bold or emphasise anything, especially not the figures, unless the instruction for this particular job asks for it, in which case that instruction wins.",
 ].join(" ");
 
 /**

@@ -300,6 +300,15 @@ export function AddTransaction({
     [transactions],
   );
 
+  /**
+   * How many numbers have been handed out since `transactions` last moved.
+   *
+   * A ref rather than state: it is read and written inside one event handler
+   * and must not cause a render of its own, or a batch of saves would render
+   * between each one and the offset would be pointless.
+   */
+  const taken = useRef(0);
+
   const check = useMemo(
     () => checkDraft(draft, transactions, reference, debts),
     [draft, transactions, reference, debts],
@@ -436,22 +445,54 @@ export function AddTransaction({
       bin: onBin,
       binMany: onBinMany,
       restore: onRestoreRow,
+      /**
+       * Save it, and say which number it got.
+       *
+       * ── Two faults, one cause ───────────────────────────────────────────
+       *
+       * `nextRecordNumber` is worked out from `transactions` and captured in
+       * this closure, so it does not move until React has re-rendered with
+       * the saved row in it. That is fine for one save and wrong for two in
+       * the same tick, which is exactly what "Add the 7 ready" does: seven
+       * rows off one statement all took the same record number.
+       *
+       * The owner saw the display half of it first, every card in a batch
+       * showing 0505. The rows underneath were worse.
+       *
+       * `taken` counts the ones handed out since the last render, so numbers
+       * advance within a batch, and the number is returned so the card can
+       * show what it actually got rather than what is next.
+       */
       add: (d, by) => {
         const c = checkDraft(d, transactions, reference, debts);
         // Belt and braces: the button is already disabled when this fails.
-        if (!c.ok) return;
+        if (!c.ok) return null;
         proposed += 1;
+        const number = nextRecordNumber + taken.current;
+        taken.current += 1;
         onSave(
-          draftToTransactions(d, nextRecordNumber, `t-${Date.now()}-${proposed}`, c.repaymentSplit),
+          draftToTransactions(d, number, `t-${Date.now()}-${proposed}`, c.repaymentSplit),
           // Recorded as the assistant's, because it was: the owner approved
           // it, but they did not type it, and six months from now that is the
           // difference worth being able to look up.
           by ?? { actor: "ai", via: "ai_chat" },
         );
+        return number;
       },
     }),
     [transactions, reference, debts, nextRecordNumber, onSave],
   );
+
+  /**
+   * Reset the within-batch offset once the saved rows are actually here.
+   *
+   * `nextRecordNumber` has moved past everything handed out by then, so the
+   * offset has done its job and starting it again from zero is what keeps the
+   * next batch from skipping numbers.
+   */
+  useEffect(() => {
+    taken.current = 0;
+  }, [nextRecordNumber]);
 
   const cancelEdit = (): void => {
     onCancelEdit();
