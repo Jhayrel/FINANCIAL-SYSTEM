@@ -26,7 +26,8 @@
  * borrowing as spending.
  */
 
-import { emptyDraft, type Draft, type Flow } from "./entry";
+import { daysBackIn, itemHintIn } from "./filipino";
+import { emptyDraft, itemsFor, type Draft, type Flow } from "./entry";
 import type { Blank } from "./capture";
 import { inferFromHistory, itemFromHistory } from "./infer";
 import { readMoney } from "./proposal";
@@ -52,13 +53,29 @@ export interface ReadEntry {
   readonly readsAsDebt: boolean;
 }
 
-/** Money out. */
+/**
+ * Money out, in either language.
+ *
+ * ── Why Tagalog is here and not treated as a separate mode ────────────────
+ *
+ * The owner types both, often in one sentence: "nag bayad ako ng tricycle 500
+ * kanina cash gamit ko". Neither of those messages produced anything at all,
+ * because not one word in them was a verb this file knew. From the outside
+ * that reads as the app ignoring you, which is the failure hardest to report
+ * and easiest to give up on.
+ *
+ * Filipino verbs carry their tense in a prefix rather than an ending, so the
+ * stem is what matters: `bayad` covers nagbayad, binayaran and magbayad, and
+ * `bili` covers bumili, binili and bibili. `bumuli` is here as its own word
+ * because it is how the owner actually spells it, and a reader that only
+ * accepts the dictionary spelling is a reader that fails on real typing.
+ */
 const SPENT =
-  /\b(spent|spend|spending|paid|pay|paying|bought|buy|buying|purchased|purchase|ordered|renewed|topped up|top up|loaded|reloaded)\b/i;
+  /\b(spent|spend|spending|paid|pay|paying|bought|buy|buying|purchased|purchase|ordered|renewed|topped up|top up|loaded|reloaded|bayad|nagbayad|binayaran|magbayad|bumili|bumuli|binili|bibili|umorder|gumastos|gastos|nagastos|nag-load|nagload)\b/i;
 
-/** Money in. */
+/** Money in, in either language. */
 const GOT =
-  /\b(received|receive|got|earned|earn|collected|refunded|allowance|salary|paid me|sent me|gave me)\b/i;
+  /\b(received|receive|got|earned|earn|collected|refunded|allowance|salary|paid me|sent me|gave me|natanggap|nakatanggap|tinanggap|nakuha|kumita|sahod|binigyan ako|pinadalhan ako)\b/i;
 
 /**
  * Money moved, or sent away.
@@ -69,7 +86,7 @@ const GOT =
  * "gave me 500" is still read as income.
  */
 const MOVED =
-  /\b(transferred|transfer|moved|sent|send|gave|give|giving|padala|pinadala|cashed out|withdrew|withdraw|deposited)\b/i;
+  /\b(transferred|transfer|moved|sent|send|gave|give|giving|padala|pinadala|nagpadala|magpadala|binigay|ibinigay|nagbigay|naglipat|inilipat|nag-withdraw|nagwithdraw|kinuha|cashed out|withdrew|withdraw|deposited|instapay|instapaid)\b/i;
 
 /**
  * Borrowing and repaying, which this file refuses to guess at.
@@ -78,7 +95,7 @@ const MOVED =
  * debt rather than read as ordinary spending by the word "paid".
  */
 const DEBT =
-  /\b(debt|debts|dept|borrowed|borrow|loan|loaned|utang|credit card|credit line|installment|repaid|repay|repayment|interest|paid off|pay off|owe|owed|owing)\b/i;
+  /\b(debt|debts|dept|borrowed|borrow|borrowing|loan|loans|loaned|loaning|utang|nangutang|umutang|inutang|hulog|hulugan|credit card|credit line|installment|instalment|repaid|repay|repayment|interest|paid off|pay off|owe|owes|owed|owing)\b/i;
 
 /**
  * Someone else, rather than another of your own pockets.
@@ -255,6 +272,16 @@ function dateIn(text: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
   if (/\bday before yesterday\b/i.test(text)) return { date: shift(asOf, -2), said: true };
   if (/\byesterday\b/i.test(text)) return { date: shift(asOf, -1), said: true };
   if (/\btoday\b|\bjust now\b|\bearlier\b/i.test(text)) return { date: asOf, said: true };
+
+  /**
+   * The same words in Filipino, which is half of how the owner writes.
+   *
+   * "kanina" means earlier today and appears in most of these sentences.
+   * Getting a date wrong by a day is the kind of error that survives into a
+   * monthly total without anybody noticing.
+   */
+  const back = daysBackIn(text);
+  if (back !== null) return { date: shift(asOf, back), said: true };
 
   return { date: asOf, said: false };
 }
@@ -517,6 +544,16 @@ export function readEntry(
     );
   }
 
+  const hint = itemHintIn(text);
+  const filipinoItem =
+    hint && (flow === "Spending" || flow === "Revenue")
+      ? (itemsFor(flow, flow === "Revenue" ? "Revenue" : "Spending", reference).find(
+          (name) => name.toLowerCase() === hint,
+        ) ??
+        reference.spendingTypes.find((t) => t.remark.toLowerCase().includes(hint))?.name ??
+        "")
+      : "";
+
   const base: Draft = {
     ...emptyDraft(date),
     flow,
@@ -531,6 +568,16 @@ export function readEntry(
     amount,
     fee,
     status: STATUS_FOR[flow] ?? "",
+    /**
+     * The thing bought, when it was named in Filipino.
+     *
+     * Every other route to an item reads English or looks the phrase up in
+     * past rows, so "bumuli ako ng pagkain" had no item and no history to
+     * find one in. The hint is matched against the owner's own list, so this
+     * can only ever choose an item they already have: a word with no match
+     * leaves the field blank exactly as before.
+     */
+    ...(filipinoItem ? { item: filipinoItem } : {}),
     // Tells `checkDraft` the blank destination is the answer rather than a
     // field nobody filled in yet. See `Draft.sentOut`.
     ...(leftYourAccounts ? { sentOut: true } : {}),

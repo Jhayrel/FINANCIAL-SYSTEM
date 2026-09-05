@@ -24,6 +24,7 @@
  */
 
 import { itemsFor, needs, type Draft, type Flow } from "./entry";
+import { itemHintIn } from "./filipino";
 import { matchExact, readMoney } from "./proposal";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -522,6 +523,30 @@ export function matchItem(
       // Stemmed loosely: "outing" should find "outings".
       if (words.some((w) => remark.includes(w) || remark.includes(w.replace(/s$/, "")))) {
         return { item: type.name, matched: true };
+      }
+    }
+  }
+
+  /**
+   * 3b. The same match, made in Filipino.
+   *
+   * "bumuli ako ng pagkain 200 gcash" is an ordinary Food entry, and every
+   * rule above missed it because not one word in it is English. The hint is
+   * matched against the owner's own list and their own notes, exactly as an
+   * English word would be, so this can only ever find an item they already
+   * have. A word with no match falls through unchanged.
+   */
+  const hint = itemHintIn(said);
+  if (hint) {
+    const named = matchExact(hint, known) || known.find((name) => wholeWord(hint, name));
+    if (named) return { item: named, matched: true };
+
+    if (flow === "Spending") {
+      for (const type of reference.spendingTypes) {
+        if (!known.includes(type.name)) continue;
+        if (type.remark.toLowerCase().includes(hint)) {
+          return { item: type.name, matched: true };
+        }
       }
     }
   }

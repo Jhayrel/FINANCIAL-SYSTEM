@@ -1717,6 +1717,38 @@ export function AskPanel({
      * open it falls through and "discard" means the ledger again, which is
      * the only reading left.
      */
+    /**
+     * "discard" cancels a question in progress, not only a card.
+     *
+     * ── The trap this closes ────────────────────────────────────────────
+     *
+     * A half-read entry lives in `pending`, not as a card, so with a question
+     * outstanding there are no open cards and the gate below never fired.
+     * "discard" and "nevermind" fell through to the answering path and were
+     * read as answers to the question:
+     *
+     *   13:00:59  discard    "I could not find a figure in that. How much
+     *                         was it, in pesos?"
+     *   13:01:07  nevermind   the same reply, word for word
+     *
+     * There is no way out of that loop from the box. The escape has to work
+     * wherever it is typed, so it is checked before the answering path and
+     * regardless of whether a card exists.
+     */
+    if (pending && files.length === 0 && !as && wantsDiscardOpen(note)) {
+      setPending(null);
+      setDraft("");
+      say({ kind: "you", text: note });
+      say({
+        kind: "assistant",
+        text: "Dropped it. Nothing was added, so there is nothing to undo.",
+        from: "this device",
+        ephemeral: true,
+      });
+      log(aiEvent("cleared", "add", { text: note }));
+      return;
+    }
+
     if (openCards.length > 0 && files.length === 0 && !as && wantsDiscardOpen(note)) {
       setDraft("");
       say({ kind: "you", text: note });
@@ -1800,7 +1832,37 @@ export function AskPanel({
     const saysAnswer = routed?.intent === "answer";
     const saysCorrection = routed?.intent === "correction";
 
-    if (pending && files.length === 0 && !as && (routed === null || saysAnswer || saysCorrection)) {
+    /**
+     * A whole entry is a new entry, not an answer to "how much was it".
+     *
+     * The answering path takes over whenever the router could not be reached,
+     * which is often, and then everything typed goes into the half-finished
+     * row. "I transferred 2000 from maya to gcash" was answered with "That is
+     * not one of your accounts. Gcash, Maya, Cash, ..." because the whole
+     * sentence had been offered as a wallet name. Both of those wallets are
+     * of course accounts, which is what makes that reply so baffling to read.
+     *
+     * A reply to a question is short and partial: "500", "gcash", "the usual".
+     * A sentence that reads as a complete entry on its own, with its flow, its
+     * figure and its wallet, is not a reply to anything. It starts a new row
+     * and the half-finished one is dropped.
+     */
+    const startsAfresh =
+      pending !== null &&
+      files.length === 0 &&
+      !as &&
+      note.trim().split(/\s+/).length >= 4 &&
+      readEntry(note, transactions, reference, asOf).worthOffering;
+
+    if (startsAfresh) setPending(null);
+
+    if (
+      pending &&
+      !startsAfresh &&
+      files.length === 0 &&
+      !as &&
+      (routed === null || saysAnswer || saysCorrection)
+    ) {
       setDraft("");
       setBusy(true);
       try {

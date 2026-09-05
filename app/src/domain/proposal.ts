@@ -187,6 +187,28 @@ function readOne(
     );
   }
 
+  /**
+   * Money sent through a transfer service is a transfer, not a purchase.
+   *
+   * "I sent 130 via instapay from maya" came back as Spending, and the owner
+   * wrote "wrong this should be transfer not spending transer to someone
+   * else". They are right twice over: InstaPay and PESONet move money between
+   * accounts, and this ledger cares about the difference, because a transfer
+   * out books the whole amount as spending only when it left the accounts,
+   * while a purchase books it always and against an item that does not exist
+   * here.
+   *
+   * Named services only. "Sent" on its own is far too broad: paying a shop is
+   * sending money to them and is an ordinary purchase.
+   */
+  const sentThrough = /\b(instapay|pesonet|remittance|padala|send money|money send|wire transfer)\b/i;
+  if (flow === "Spending" && sentThrough.test(named)) {
+    flow = "Transfer";
+    adjustments.push(
+      "Sent through a transfer service, so this is a transfer rather than a purchase.",
+    );
+  }
+
   if (!flow) {
     /**
      * A model that has understood nothing copies the shape back verbatim,
