@@ -4212,7 +4212,15 @@ function DebtCard({
           Debt movement
         </span>
         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-          two things to pick
+          {/*
+            Counted, not asserted.
+
+            The card said "two things to pick" whatever was already on it. Now
+            that a named credit line is filled in from the sentence, saying
+            two when one is left reads as the card not having looked at
+            itself.
+          */}
+          {draft.debtId ? "one thing to pick" : "two things to pick"}
         </span>
       </div>
 

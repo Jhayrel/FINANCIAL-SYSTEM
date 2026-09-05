@@ -84,3 +84,68 @@ describe("a sentence that names a credit line", () => {
     expect(r.draft.fromWallet).toBe("Maya");
   });
 });
+
+/**
+ * The status the Excel used, which is not decoration.
+ *
+ * The owner asked for it plainly: "fix the status too like if its withdrawn
+ * or something". A transfer that says Transferred when the money came out as
+ * cash reads wrong to the person who wrote the original ledger, where cash
+ * out of an account has always been Withdrawn.
+ */
+describe("the status of a movement", () => {
+  it("calls a withdrawal Withdrawn", () => {
+    expect(read("I withdrew 5000 from maya to cash").draft.status).toBe("Withdrawn");
+    expect(read("I cashed out 2000 from maya").draft.status).toBe("Withdrawn");
+  });
+
+  it("keeps Transferred for an ordinary move between wallets", () => {
+    expect(read("I transferred 2000 from maya to gcash").draft.status).toBe("Transferred");
+  });
+
+  it("keeps Paid for spending and Received for income", () => {
+    expect(read("I paid 500 for food from gcash").draft.status).toBe("Paid");
+    expect(read("I received 5000 allowance in maya").draft.status).toBe("Received");
+  });
+
+  it("counts a withdrawal with a fee the same way", () => {
+    const r = read("I withdrew 3000 from maya to cash with 18 fee");
+    expect(r.draft.status).toBe("Withdrawn");
+    expect(r.draft.fee).toBe(1800);
+  });
+});
+
+/**
+ * The debt card asked which credit line even when the sentence said which.
+ *
+ * Two things are genuinely not in a sentence: which line, and what the
+ * movement does to it. The second is true. The first often is stated in so
+ * many words, and asking anyway made the card look like it had not read the
+ * message at all.
+ */
+describe("the credit line the sentence named", () => {
+  it("is filled in on the card", () => {
+    expect(read("I borrowed 2000 on maya credit into gcash").draft.debtId).toBe("maya-credit");
+  });
+
+  it("is filled in however the sentence phrases it", () => {
+    expect(
+      read("I recived it in maya and the credit is from maya credit").draft.debtId,
+    ).toBe("maya-credit");
+  });
+
+  it("says why it was filled in", () => {
+    expect(read("I borrowed 2000 on maya credit into gcash").because.join(" ")).toContain(
+      "Maya Credit",
+    );
+  });
+
+  /** What it does is never guessed. That one really is not in a sentence. */
+  it("never guesses what the movement does", () => {
+    expect(read("I borrowed 2000 on maya credit into gcash").draft.debtEffect).toBeUndefined();
+  });
+
+  it("leaves it blank when no line was named", () => {
+    expect(read("I borrowed 2000 into gcash").draft.debtId).toBeUndefined();
+  });
+});

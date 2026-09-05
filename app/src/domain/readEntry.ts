@@ -29,6 +29,7 @@
 import { daysBackIn, itemHintIn } from "./filipino";
 import { emptyDraft, itemsFor, type Draft, type Flow } from "./entry";
 import type { Blank } from "./capture";
+import { makeDebtId } from "./debt";
 import { inferFromHistory, itemFromHistory } from "./infer";
 import { readMoney } from "./proposal";
 import type { IsoDate, ReferenceLists, Transaction, TransactionStatus } from "./types";
@@ -424,6 +425,23 @@ const STATUS_FOR: Partial<Record<Flow, TransactionStatus>> = {
 };
 
 /**
+ * Taking money out is Withdrawn, not Transferred.
+ *
+ * The owner asked for this in as many words: "fix the status too like if its
+ * withdrawn or something". The ledger has five statuses and they are not
+ * decoration: the Excel used Withdrawn for cash out of an account, and a
+ * transfer that says Transferred when the money came out as cash reads wrong
+ * to the person who wrote the original.
+ *
+ * Only the verb decides. Where the money went is a separate question, and a
+ * withdrawal into Cash and a withdrawal into a wallet are both withdrawals.
+ */
+const WITHDRAWING = /\b(withdrew|withdraw|withdrawn|withdrawal|cashed out|cash out|nag-withdraw|nagwithdraw|kinuha)\b/i;
+
+/** Money arriving from outside, which the Excel booked as Done. */
+const DEPOSITING = /\b(deposited|deposit|credited|credit to)\b/i;
+
+/**
  * Read what the sentence says, then let the ledger fill the rest.
  *
  * The two halves are deliberately separate: this one reads English, and
@@ -488,12 +506,25 @@ export function readEntry(
           flow: "Debt",
           amount: amountIn(text),
           fromWallet: walletIn(text, accounts),
+          /**
+           * The credit line, when the sentence named one.
+           *
+           * The debt card asks two things nobody should guess at: which line,
+           * and what the movement does. The second genuinely is not in a
+           * sentence. The first often is, in so many words, and asking for it
+           * anyway made the card look like it had not read the message.
+           *
+           * Only from an exact name on the owner's own list, so this cannot
+           * invent a line or pick the wrong one of two. What the movement
+           * does is a separate field and is still always chosen.
+           */
+          ...(creditNamed ? { debtId: makeDebtId(creditNamed) } : {}),
         }
       : emptyDraft(asOf);
 
     return {
       draft: partial,
-      because: [],
+      because: creditNamed ? [`Filed against ${creditNamed}, which the message named.`] : [],
       worthOffering: false,
       settled: [],
       readsAsDebt,
@@ -633,7 +664,12 @@ export function readEntry(
           : "",
     amount,
     fee,
-    status: STATUS_FOR[flow] ?? "",
+    status:
+      flow === "Transfer" && WITHDRAWING.test(text)
+        ? "Withdrawn"
+        : flow === "Transfer" && DEPOSITING.test(text)
+          ? "Done"
+          : (STATUS_FOR[flow] ?? ""),
     /**
      * The thing bought, when it was named in Filipino.
      *
@@ -644,6 +680,19 @@ export function readEntry(
      * leaves the field blank exactly as before.
      */
     ...(filipinoItem ? { item: filipinoItem } : {}),
+    /**
+     * The credit line, when the sentence named one.
+     *
+     * The debt card asks two things nobody should guess at: which line, and
+     * what the movement does. The second genuinely is not in a sentence. The
+     * first often is, in so many words, and asking for it anyway made the
+     * card feel like it had not read the message at all.
+     *
+     * Only ever filled from an exact name on the owner's own list, so this
+     * cannot invent a credit line or pick the wrong one of two. What it does
+     * is a separate field and is still always chosen.
+     */
+    ...(creditNamed ? { debtId: makeDebtId(creditNamed) } : {}),
     // Tells `checkDraft` the blank destination is the answer rather than a
     // field nobody filled in yet. See `Draft.sentOut`.
     ...(leftYourAccounts ? { sentOut: true } : {}),
