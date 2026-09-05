@@ -35,7 +35,7 @@ import { cleanedSettings } from "./domain/settingsCleanup";
 import { netWorth, positionsOf } from "./domain/debt";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { insertChronologically } from "./domain/entry";
-import { formatMedium, getYear } from "./domain/dates";
+import { formatMedium, getYear, today } from "./domain/dates";
 import { systemToCsv } from "./domain/csv";
 import { browserSettingsStore, type SettingsStore } from "./data/settingsStore";
 import {
@@ -98,8 +98,12 @@ const NAV: { id: Screen; label: string; icon: string; primary?: boolean }[] = [
   { id: "settings", label: "Settings", icon: "⚙" },
 ];
 
-/** The fixture is a snapshot ending 2026-08-28; anchor "today" to it. */
-const AS_OF = "2026-08-29";
+/**
+ * The fixture is a snapshot ending 2026-08-28, so running against it anchors
+ * "today" there: a demo ledger with no rows for the current month reports an
+ * empty month, which is true and useless.
+ */
+const FIXTURE_AS_OF = "2026-08-29";
 
 export default function App() {
   const cloud = useCloud();
@@ -119,6 +123,27 @@ export default function App() {
   /** So a missing rules deploy is reported once, not once per row saved. */
   const activityWarned = useRef(false);
   const [moreOpen, setMoreOpen] = useState(false);
+
+  /**
+   * "Today", which was frozen at 2026-08-29 for everybody.
+   *
+   * ── What it cost ────────────────────────────────────────────────────────
+   *
+   * On 2026-09-02 the owner typed "I transfer 1000 to cash 15 fee then use
+   * that 1000 to pay my food today" and got two rows dated 2026-08-29, four
+   * days earlier. Their reply was "you give wrong entry fix this".
+   *
+   * It was not only the assistant. The anchor is the whole app's idea of now,
+   * so on live data the Dashboard read August 29, "this month" meant August
+   * while September was running, and every budget, alert and insight
+   * described a month that had already ended.
+   *
+   * The anchor exists for the fixture, and only the fixture: a demo ledger
+   * ending in August has nothing in September, and reporting an empty month
+   * would be true and useless. Signed into Firebase the rows are real and
+   * current, so today is today.
+   */
+  const asOf = cloud.uid ? today() : FIXTURE_AS_OF;
 
   const base = loadLocalLedger();
 
@@ -429,7 +454,7 @@ export default function App() {
   }, [settings]);
 
   const view = useMemo(() => {
-    const positions = positionsOf(settings.credits, transactions, AS_OF);
+    const positions = positionsOf(settings.credits, transactions, asOf);
     const wallets = totalWalletBalance(transactions, reference.wallets);
     const savings = totalSavingsBalance(transactions, reference.savings);
     return {
@@ -734,7 +759,7 @@ export default function App() {
     // Every part, not just the ledger. The old export wrote one account
     // statement, so opening it showed the database and nothing else.
     download(
-      `financial-management-system-${AS_OF}.csv`,
+      `financial-management-system-${asOf}.csv`,
       systemToCsv(systemState(), new Date().toISOString()),
       "text/csv;charset=utf-8",
     );
@@ -817,7 +842,7 @@ export default function App() {
           </span>
           <div style={{ minWidth: 0 }}>
             <div className="t-body-strong">Finances</div>
-            <div className="t-caption" style={{ color: "var(--ink-3)" }}>{formatMedium(AS_OF)}</div>
+            <div className="t-caption" style={{ color: "var(--ink-3)" }}>{formatMedium(asOf)}</div>
           </div>
         </div>
 
@@ -884,7 +909,7 @@ export default function App() {
               balances={view.rows}
               accounts={settings.accounts}
               lowBalanceThreshold={settings.lowBalanceThreshold}
-              asOf={AS_OF}
+              asOf={asOf}
               onReview={() => { setDbFilter("flagged"); go("database"); }}
               settings={settings}
             />
@@ -907,7 +932,7 @@ export default function App() {
               ai={settings.ai}
               settings={settings}
               budgets={budgets}
-              asOf={AS_OF}
+              asOf={asOf}
             />
           )}
           {screen === "database" && (
@@ -925,7 +950,7 @@ export default function App() {
               transactions={transactions}
               debts={settings.credits}
               reference={reference}
-              asOf={AS_OF}
+              asOf={asOf}
               onAdd={() => go("add")}
             />
           )}
@@ -935,7 +960,7 @@ export default function App() {
               reference={reference}
               budgets={budgets}
               debts={settings.credits}
-              asOf={AS_OF}
+              asOf={asOf}
               settings={settings}
             />
           )}
@@ -944,7 +969,7 @@ export default function App() {
               transactions={transactions}
               budgets={budgets}
               debts={settings.credits}
-              asOf={AS_OF}
+              asOf={asOf}
               onChangeBudget={handleBudgetChange}
             />
           )}
@@ -953,7 +978,7 @@ export default function App() {
               transactions={transactions}
               reference={reference}
               debts={settings.credits}
-              year={getYear(AS_OF)}
+              year={getYear(asOf)}
             />
           )}
           {screen === "bin" && (

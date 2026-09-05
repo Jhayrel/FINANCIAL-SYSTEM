@@ -600,16 +600,53 @@ export function AskPanel({
     batch = false,
     settled: readonly Blank[] = [],
   ): Promise<void> => {
-    // History first. Asking a question the ledger already answers is the
-    // assistant failing to read its own data. `readEntry` has already done
-    // this pass, so it says so rather than having it run twice.
+    /**
+     * ── Step 2 of 4: what you have already corrected ────────────────────
+     *
+     * Every card goes through the same four steps, in this order:
+     *
+     *   1. ANALYSE  the model reads the sentence, or the rules do when it
+     *               cannot be reached. That happens before this function.
+     *   2. LEARN    your own corrections, applied here.
+     *   3. GROUND   the ledger fills the blanks and Settings constrains the
+     *               item, just below.
+     *   4. RESULT   a card, with every field visible before anything saves.
+     *
+     * Step 2 was missing. `learnedItems` was consulted when you answered
+     * "what was it for?" and nowhere else, so telling it once that a phrase
+     * means Food did nothing at all when the model or the reader guessed the
+     * item directly, which is almost every time. The whole point of keeping
+     * corrections is that they outrank the next guess, and they were not.
+     *
+     * Only when the taught item is one the flow actually offers, so a
+     * correction made against a Spending card cannot put a spending type on
+     * a Revenue row.
+     */
+    const said = (proposal.said ?? hint).trim().toLowerCase();
+    const taught = said ? learnedItems.get(said) : undefined;
+    const flow = proposal.draft.flow;
+    const teachable =
+      taught && flow && itemsFor(flow, proposal.draft.category, reference).includes(taught);
+
+    const start = teachable ? { ...proposal.draft, item: taught } : proposal.draft;
+    const learned = teachable
+      ? [`Booked as ${taught}, which is what you corrected this to last time.`]
+      : [];
+
+    /**
+     * ── Step 3 of 4: the ledger, then Settings ─────────────────────────
+     *
+     * Asking a question the ledger already answers is the assistant failing
+     * to read its own data. `readEntry` has already done this pass on the
+     * offline path, so it says so rather than having it run twice.
+     */
     const { draft, because } = useHistory
-      ? inferFromHistory(proposal.draft, transactions, reference, hint)
-      : { draft: proposal.draft, because: [] as string[] };
+      ? inferFromHistory(start, transactions, reference, hint)
+      : { draft: start, because: learned };
     const filled: Proposal = {
       ...proposal,
       draft,
-      adjustments: [...proposal.adjustments, ...because],
+      adjustments: [...proposal.adjustments, ...(useHistory ? [...learned, ...because] : because)],
     };
 
     /**
@@ -1531,31 +1568,6 @@ export function AskPanel({
        * gas and food" splits, fails, and goes back to being one message. The
        * cost of a wrong split is a discarded guess, not a wrong row.
        */
-      const lines = splitEntries(note);
-
-      if (files.length === 0 && lines.length > 1) {
-        const each = lines.map((line) => readEntry(line, transactions, reference, asOf));
-        if (each.every((r) => r.worthOffering)) {
-          say({ kind: "you", text: note });
-          for (const [i, r] of each.entries()) {
-            await offer(
-              {
-                draft: r.draft,
-                confidence: "high",
-                sourceRef: `line ${i + 1}: ${lines[i] ?? ""}`,
-                said: lines[i] ?? "",
-                adjustments: r.because,
-              },
-              lines[i] ?? "",
-              false,
-              true,
-              r.settled,
-            );
-          }
-          return;
-        }
-      }
-
       if (files.length === 0) {
         const local = readEntry(note, transactions, reference, asOf);
 
@@ -1590,8 +1602,24 @@ export function AskPanel({
           return;
         }
 
-        // With the model switched off there is nothing else to try, so the
-        // rules answer directly. Otherwise the model gets it first, below.
+        /**
+         * ── Step 1 of 4: the model reads it, unless it cannot ──────────────
+         *
+         * The rules used to go first for anything with more than one part in
+         * it, and the model was never asked at all. So "I transfer 1000 to
+         * cash 15 fee then use that 1000 to pay my food today" was split by
+         * pattern rather than read for meaning, and the reply was "you give
+         * wrong entry fix this".
+         *
+         * The order is now the one that was asked for: analyse, then apply
+         * what was learned, then ground it in the ledger and Settings, then
+         * show the result. The rules are the floor underneath, for a model
+         * that is switched off or rate limited, not the first opinion.
+         *
+         * Debt is the one exception and it is above this line: it never
+         * reaches a model, because the credit line and the effect are not in
+         * a sentence and reading either wrong turns borrowing into income.
+         */
         if (ai.disabled && local.worthOffering) {
           say({ kind: "you", text: note });
           await offer(
@@ -1629,6 +1657,38 @@ export function AskPanel({
        * rate limited, a rough reading of "I paid 300 for gas" beats telling
        * someone their entry cannot be recorded because a provider is busy.
        */
+      /**
+       * The model could not be reached, so the rules take over, and only
+       * here. Several parts in one sentence are split by pattern at this
+       * point, which the model does for itself when it is available.
+       */
+      const lines = splitEntries(note);
+
+      if (files.length === 0 && lines.length > 1) {
+        const each = lines.map((line) => readEntry(line, transactions, reference, asOf));
+        if (each.every((r) => r.worthOffering)) {
+          // No echo: `readAttached` above already put the message on screen
+          // before it tried the model. Saying it again here printed it twice.
+          for (const [i, r] of each.entries()) {
+            await offer(
+              {
+                draft: r.draft,
+                confidence: "high",
+                sourceRef: `line ${i + 1}: ${lines[i] ?? ""}`,
+                said: lines[i] ?? "",
+                adjustments: r.because,
+              },
+              lines[i] ?? "",
+              false,
+              true,
+              r.settled,
+            );
+          }
+          return;
+        }
+      }
+
+
       const offline = readEntry(note, transactions, reference, asOf);
       if (offline.worthOffering) {
         await offer(

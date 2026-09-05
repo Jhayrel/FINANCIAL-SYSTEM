@@ -59,3 +59,27 @@ describe("the assistant is not told to deny what the app does", () => {
     expect(chatInstruction.toLowerCase()).toContain("pdf");
   });
 });
+
+describe("it advises on their money, and only theirs", () => {
+  it("is told to answer what they should do", () => {
+    expect(chatInstruction.toLowerCase()).toContain("what they should do");
+  });
+
+  it("is told to show the arithmetic behind the advice", () => {
+    expect(chatInstruction.toLowerCase()).toContain("arithmetic");
+  });
+
+  /**
+   * The firm limit. Advising on their own spending, budget and debt is
+   * reading a ledger they can check. Telling somebody what to invest in is
+   * a different thing entirely and not something to do without a licence.
+   */
+  it("refuses investment advice and names who can give it", () => {
+    expect(chatInstruction.toLowerCase()).toContain("not licensed to advise on investments");
+    expect(chatInstruction.toLowerCase()).toContain("licensed adviser");
+  });
+
+  it("still refuses to invent a figure", () => {
+    expect(chatInstruction.toLowerCase()).toContain("never invent a figure");
+  });
+});
