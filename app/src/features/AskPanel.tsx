@@ -104,6 +104,7 @@ import { addressesEveryCard } from "../domain/capture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
 import { describeFile, summariseFile } from "../domain/photoNote";
+import { reconcile } from "../domain/reconcile";
 import { readAgainst, statementAccount } from "../domain/statement";
 import {
   duplicateHeadline,
@@ -1489,16 +1490,47 @@ export function AskPanel({
       result.proposals.map((p) => p.draft),
     );
 
+    /**
+     * ── The device's reading corrects the model's ──────────────────────
+     *
+     * Every sentence is read twice, here and by a model, and the device
+     * reading was only ever used when the model could not be reached. In
+     * ordinary use it was therefore never used at all, and every improvement
+     * made to it was dead the moment a provider answered.
+     *
+     * The record shows the cost. "nag bayad ako ng tricycle 500 kanina cash
+     * gamit ko" came back as a Transfer from Maya; the device reads it as
+     * Spending on Travel from Cash. "bumuli ako ng pagkain 200 gcash" came
+     * back as a Transfer from Maya to Gcash; the device reads Food from
+     * Gcash. Both were corrected by hand, and the owner wrote "wrong it
+     * recognize it as transfer" and then "same again".
+     *
+     * Only for a single typed sentence. A batch off a photo is several rows
+     * against one message and there is nothing to compare them with.
+     */
+    const oneSentence =
+      sent.length === 0 && note && result.proposals.length === 1
+        ? readEntry(note, transactions, reference, asOf)
+        : null;
+
     const checked = result.proposals.map((proposal, i) => {
       const reading = readings[i];
-      if (!reading) return proposal;
-      return {
-        ...proposal,
-        draft: reading.draft,
-        adjustments: reading.note
-          ? [...proposal.adjustments, reading.note]
-          : proposal.adjustments,
-      };
+      const base = reading
+        ? {
+            ...proposal,
+            draft: reading.draft,
+            adjustments: reading.note
+              ? [...proposal.adjustments, reading.note]
+              : proposal.adjustments,
+          }
+        : proposal;
+
+      if (!oneSentence) return base;
+
+      const agreed = reconcile(base.draft, oneSentence);
+      return agreed.notes.length === 0
+        ? base
+        : { ...base, draft: agreed.draft, adjustments: [...base.adjustments, ...agreed.notes] };
     });
 
     const odd = readings.filter((r) => r.note.includes("but reads as")).length;
@@ -1919,9 +1951,28 @@ export function AskPanel({
 
     const followUp = isChartFollowUp(note, turns.some(isChart));
     const saysChart = routed?.intent === "chart";
+
+    /**
+     * A question about a credit line is never a chart.
+     *
+     * "check my maya credit draw by draw" was routed to a chart and answered
+     * with "There is no spending in that period to draw". It is a request to
+     * go through a debt movement by movement, which is prose, and the ledger
+     * now sends every one of those movements along with the question.
+     *
+     * The model routed it, so the model is overruled here rather than argued
+     * with, the same way it is for a delete and for a chart follow-up.
+     */
+    const flat = ` ${note.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+    const aboutADebt = (reference.credits ?? []).some((line) => {
+      const name = line.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      return name !== "" && flat.includes(` ${name} `);
+    });
+
     if (
       files.length === 0 &&
       !as &&
+      !aboutADebt &&
       (saysChart ||
         (routed === null && (wantsChart(note) || followUp)) ||
         // The model said prose; a chart is on screen and this names a period.
