@@ -176,6 +176,23 @@ export function wantsDiscardAll(text: string): boolean {
   const said = text.trim();
   if (!said || said.length > 40) return false;
   if (!EVERYTHING.test(said)) return false;
+
+  /**
+   * Naming a target means you meant those, not the cards on screen.
+   *
+   * "Delete every entry I made on 2026-08-29" matched: it has "every" and
+   * "delete" and it is under forty characters. It is not a request to clear
+   * the cards, it is a request to find rows in the ledger, and answering it
+   * by throwing away unrelated cards is the wrong action on the wrong things.
+   *
+   * A discard-all is a bare instruction. The moment it carries a date, a
+   * figure, a record number or a name, it is about something specific and
+   * belongs to the finder instead.
+   */
+  if (/\d/.test(said)) return false;
+  if (/\b(on|from|dated|about|for|called|named|entry|entries|record|row|rows)\b/i.test(said)) {
+    return false;
+  }
   /**
    * `throw` bare, not "throw away".
    *

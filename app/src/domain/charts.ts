@@ -276,6 +276,38 @@ function windowOf(
     return { from: day(asOf, -6), to: asOf, name: "the last 7 days" };
   }
 
+  /**
+   * "from may to august" is a range, and it drew May alone.
+   *
+   * The rule below takes the first month it recognises and treats the whole
+   * question as that one month, so a range lost everything after its first
+   * word. Two months named with a range word between them is one of the most
+   * ordinary ways to ask for a period.
+   *
+   * Both endpoints are inclusive, and they are sorted, so "august to may"
+   * means the same window rather than nothing at all.
+   */
+  const spanned = MONTHS.map((m, i) => ({
+    at: question.search(new RegExp(`\\b${m}\\b`, "i")),
+    index: i,
+  })).filter((m) => m.at >= 0);
+
+  if (spanned.length > 1 && /\b(to|through|until|till|and|thru|until)\b/i.test(question)) {
+    const y = /\b(20\d{2})\b/.exec(question)?.[1] ?? year;
+    const months = [...spanned].sort((a, b) => a.index - b.index);
+    const first = months[0];
+    const last = months[months.length - 1];
+    if (first && last) {
+      const from = `${y}-${String(first.index + 1).padStart(2, "0")}`;
+      const to = `${y}-${String(last.index + 1).padStart(2, "0")}`;
+      return {
+        from: `${from}-01`,
+        to: `${to}-31`,
+        name: `${monthName(from)} to ${monthName(to)}`,
+      };
+    }
+  }
+
   const named = MONTHS.findIndex((m) => new RegExp(`\\b${m}\\b`, "i").test(question));
   if (named >= 0) {
     const y = /\b(20\d{2})\b/.exec(question)?.[1] ?? year;

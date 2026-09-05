@@ -199,8 +199,23 @@ function amountIn(text: string): number | null {
   const NAMES_A_MONTH =
     /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b/i;
   const MARKS_MONEY = /₱|\bphp\b|\bpesos?\b/i;
-  if (NAMES_A_MONTH.test(withoutDates) && !MARKS_MONEY.test(withoutDates)) {
-    withoutDates = withoutDates.replace(/\b(19|20)\d{2}\b/g, " ");
+
+  /**
+   * "in 2027" is a year, whether or not a month is named.
+   *
+   * "How much did I spend on food in 2027?" read PHP 2,027.00. The earlier
+   * rule only stripped a year when a month name sat beside it, and a bare
+   * year with a preposition in front of it is just as plainly a date: "in",
+   * "during", "for" and "back in" are not how anybody writes a price.
+   */
+  if (!MARKS_MONEY.test(withoutDates)) {
+    if (NAMES_A_MONTH.test(withoutDates)) {
+      withoutDates = withoutDates.replace(/\b(19|20)\d{2}\b/g, " ");
+    }
+    withoutDates = withoutDates.replace(
+      /\b(?:in|during|for|of|back in|since|until|till)\s+((?:19|20)\d{2})\b/gi,
+      " ",
+    );
   }
 
   const scaled = /(?:₱|php\s*)?(\d+(?:\.\d+)?)([km])\b/i.exec(withoutDates);
@@ -404,7 +419,35 @@ export function readEntry(
    * amount in "fee 15" and the amount is not mistaken for the fee.
    */
   const { fee, rest } = feeIn(text);
-  const amount = amountIn(rest);
+
+  /**
+   * A figure inside the name of a thing is not an amount.
+   *
+   * "I paid my spotify and my google drive and my microsoft office 365 from
+   * gcash" came back as PHP 365.00. The 365 is part of the subscription's
+   * name, and reading it as the price is the kind of wrong that looks
+   * entirely reasonable on the card.
+   *
+   * Every name the owner keeps that has a digit in it is removed before the
+   * figure is looked for. Longest first, so "Microsoft Office 365" goes
+   * before anything shorter sitting inside it.
+   */
+  const numbered = [
+    ...reference.bills,
+    ...reference.subscriptions,
+    ...reference.revenueCategories,
+    ...reference.spendingTypes.map((t) => t.name),
+  ]
+    .filter((name) => /\d/.test(name))
+    .sort((a, b) => b.length - a.length);
+
+  let withoutNames = rest;
+  for (const name of numbered) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    withoutNames = withoutNames.replace(new RegExp(escaped, "gi"), " ");
+  }
+
+  const amount = amountIn(withoutNames);
 
   /**
    * Both ends, read from the prepositions first and only then from the
