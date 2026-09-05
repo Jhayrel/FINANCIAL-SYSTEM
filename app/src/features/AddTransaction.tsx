@@ -31,7 +31,9 @@ import {
   emptyDraft,
   itemsFor,
   needs,
+  debtWalletDirection,
   runningBalance,
+  withDebtEffect,
   transactionToDraft,
   type Draft,
   type Flow,
@@ -163,6 +165,19 @@ export function AddTransaction({
    * nothing. See `Draft.sentOut`.
    */
   const sentOut = draft.flow === "Transfer" && draft.sentOut === true;
+
+  /**
+   * Which wallet a debt movement actually touches.
+   *
+   * Borrowing 5,000 into Gcash was refused with "Pick the wallet the money
+   * leaves". There is no such wallet: the money comes from the credit line,
+   * which is why the field above asks which line rather than which account.
+   *
+   * So the form shows the one side the effect implies and hides the other.
+   * A draw lands somewhere; a repayment is paid from somewhere; a write-off
+   * moves nothing and needs neither.
+   */
+  const debtSide = draft.flow === "Debt" ? debtWalletDirection(draft.debtEffect) : null;
 
   /**
    * The last row this form saved, so the card that supplied it can say so.
@@ -554,19 +569,48 @@ export function AddTransaction({
 
               {needs(draft.flow, "debt") && (
                 <>
+                  {/*
+                    Names on screen, ids in the row.
+
+                    `Select` is plain strings in and out, so listing names and
+                    storing what came back put the credit line's *name* in
+                    `debtId`. Every lookup keys on the id, so the debt could
+                    not be found again, and the box showed the raw id back
+                    because it was matching a name list against one.
+                  */}
                   <Row label="Debt" required error={errorFor("debt")}>
                     <Select
-                      value={draft.debtId ?? ""}
-                      onChange={(v) => set("debtId", v || undefined)}
+                      value={debts.find((d) => d.id === draft.debtId)?.name ?? ""}
+                      onChange={(name) =>
+                        set("debtId", debts.find((d) => d.name === name)?.id)
+                      }
                       options={debts.map((d) => d.name)}
                       placeholder="Pick a debt"
                       invalid={Boolean(errorFor("debt"))}
                     />
                   </Row>
+                  {/*
+                    The same confusion, and this one made the row unsaveable.
+
+                    The options are labels like "Draw: borrow more", and what
+                    came back was written straight into `debtEffect`. So the
+                    stored effect was the label, `debtWalletDirection` read it
+                    as nothing, the debt arithmetic could not classify it, and
+                    `firestore.rules` refused the write outright because it
+                    checks the effect against the four real values.
+
+                    Picking one also moves the wallet to the side that effect
+                    implies, exactly as the chat card does: borrowing puts
+                    money in, repaying takes it out, and leaving it on the
+                    wrong side moves the balance by twice the amount.
+                  */}
                   <Row label="Effect" required error={errorFor("debtEffect")}>
                     <Select
-                      value={draft.debtEffect ?? ""}
-                      onChange={(v) => set("debtEffect", (v || undefined) as DebtEffect | undefined)}
+                      value={draft.debtEffect ? (EFFECT_LABEL[draft.debtEffect] ?? draft.debtEffect) : ""}
+                      onChange={(label) => {
+                        const picked = EFFECTS.find((e) => (EFFECT_LABEL[e] ?? e) === label);
+                        setDraft((d) => (picked ? withDebtEffect(d, picked) : { ...d, debtEffect: undefined }));
+                      }}
                       options={EFFECTS.map((e) => EFFECT_LABEL[e] ?? e)}
                       placeholder="What does this do?"
                       invalid={Boolean(errorFor("debtEffect"))}
@@ -575,10 +619,10 @@ export function AddTransaction({
                 </>
               )}
 
-              {needs(draft.flow, "fromWallet") && (
+              {needs(draft.flow, "fromWallet") && debtSide !== "in" && (
                 <Row
-                  label="From wallet"
-                  required={draft.flow !== "Debt"}
+                  label={draft.flow === "Debt" ? "Paid from" : "From wallet"}
+                  required={draft.flow !== "Debt" || debtSide === "out"}
                   error={errorFor("fromWallet")}
                   hint={reasonFor("fromWallet")}
                 >
@@ -592,10 +636,16 @@ export function AddTransaction({
                 </Row>
               )}
 
-              {needs(draft.flow, "toWallet") && (
+              {needs(draft.flow, "toWallet") && debtSide !== "out" && (
                 <Row
-                  label={draft.flow === "Transfer" ? "Where to" : "To wallet"}
-                  required={draft.flow !== "Debt"}
+                  label={
+                    draft.flow === "Transfer"
+                      ? "Where to"
+                      : draft.flow === "Debt"
+                        ? "Lands in"
+                        : "To wallet"
+                  }
+                  required={draft.flow !== "Debt" || debtSide === "in"}
                   error={errorFor("toWallet")}
                 >
                   {/*

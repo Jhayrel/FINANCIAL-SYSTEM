@@ -345,7 +345,38 @@ export function checkDraft(
     errors.push({ field: "date", message: "Pick a date." });
   }
 
-  if (needs(draft.flow, "fromWallet") && !draft.fromWallet) {
+  /**
+   * A debt movement has one wallet, and which one depends on the effect.
+   *
+   * ── The refusal this fixes ────────────────────────────────────────────
+   *
+   * Borrowing 5,000 on Maya Credit into Gcash was refused with "Pick the
+   * wallet the money leaves". There is no such wallet. The money comes from
+   * the credit line, which is the whole meaning of a draw: that is why the
+   * card asks which credit line rather than which account.
+   *
+   * So the required side follows the direction, exactly as
+   * `debtWalletDirection` and `runningBalance` already read it:
+   *
+   *   draw, collect      money arrives, so it needs somewhere to land
+   *   repay, interest,
+   *   fee, lend          money leaves, so it needs somewhere to leave from
+   *   write-off          nothing moves, so neither is required
+   *
+   * The other side stays optional rather than forbidden. A repayment made
+   * straight from a wallet into the line has no destination account, and a
+   * draw has no source account, and saying so with a blank is correct.
+   */
+  const debtSide = draft.flow === "Debt" ? debtWalletDirection(draft.debtEffect) : null;
+
+  if (debtSide) {
+    if (debtSide === "out" && !draft.fromWallet) {
+      errors.push({ field: "fromWallet", message: "Pick the wallet the money leaves." });
+    }
+    if (debtSide === "in" && !draft.toWallet) {
+      errors.push({ field: "toWallet", message: "Pick the wallet the money lands in." });
+    }
+  } else if (needs(draft.flow, "fromWallet") && !draft.fromWallet) {
     errors.push({ field: "fromWallet", message: "Pick the wallet the money leaves." });
   }
   /**

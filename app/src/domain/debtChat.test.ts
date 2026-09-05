@@ -144,3 +144,79 @@ describe("the effect decides which side the wallet is on", () => {
     expect(draft.flow).toBe("Debt");
   });
 });
+
+describe("a draw comes from the credit line, not from a wallet", () => {
+  /**
+   * ── The refusal this fixes ──────────────────────────────────────────────
+   *
+   * Borrowing PHP 5,000 on Maya Credit into Gcash was refused with "Pick the
+   * wallet the money leaves". There is no such wallet. The money comes from
+   * the credit line, which is the whole meaning of a draw, and is why the
+   * card asks which line rather than which account.
+   */
+  const drawn = (): Draft => ({
+    ...emptyDraft("2026-09-05"),
+    flow: "Debt",
+    debtId: "d1",
+    debtEffect: "draw",
+    toWallet: "Gcash",
+    amount: 500_000,
+  });
+
+  it("saves a draw with only a destination", () => {
+    const check = checkDraft(drawn(), ledger, reference, debts);
+    expect(check.ok).toBe(true);
+  });
+
+  it("no longer asks where the money left from", () => {
+    const messages = checkDraft(drawn(), ledger, reference, debts)
+      .errors.map((e) => e.message)
+      .join(" ");
+    expect(messages).not.toContain("money leaves");
+  });
+
+  it("still needs somewhere for a draw to land", () => {
+    const nowhere = { ...drawn(), toWallet: "" };
+    const check = checkDraft(nowhere, ledger, reference, debts);
+    expect(check.ok).toBe(false);
+    expect(check.errors.map((e) => e.message).join(" ")).toContain("money lands in");
+  });
+
+  /** The other direction is unchanged: a repayment leaves an account. */
+  it("a repayment still needs the wallet it was paid from", () => {
+    const repaid: Draft = {
+      ...emptyDraft("2026-09-05"),
+      flow: "Debt",
+      debtId: "d1",
+      debtEffect: "repay",
+      amount: 295_000,
+    };
+    const check = checkDraft(repaid, ledger, reference, debts);
+    expect(check.ok).toBe(false);
+    expect(check.errors.map((e) => e.message).join(" ")).toContain("money leaves");
+  });
+
+  it("a repayment saves with only a source", () => {
+    const repaid: Draft = {
+      ...emptyDraft("2026-09-05"),
+      flow: "Debt",
+      debtId: "d1",
+      debtEffect: "repay",
+      fromWallet: "Maya",
+      amount: 295_000,
+    };
+    expect(checkDraft(repaid, ledger, reference, debts).ok).toBe(true);
+  });
+
+  /** A line being forgiven moves no money, so it needs neither wallet. */
+  it("a write-off needs no wallet at all", () => {
+    const forgiven: Draft = {
+      ...emptyDraft("2026-09-05"),
+      flow: "Debt",
+      debtId: "d1",
+      debtEffect: "writeoff",
+      amount: 100_000,
+    };
+    expect(checkDraft(forgiven, ledger, reference, debts).ok).toBe(true);
+  });
+});
