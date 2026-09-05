@@ -477,7 +477,7 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
    * as long as the question deserves.
    */
   chat:
-    "Answer properly. Give the question as much room as it deserves: a sentence for a simple one, and up to about two hundred words for one that needs working through, going deeper each time you are asked to. You have the entries as well as the totals, so you can count them, list the individual ones, name their dates and items, and compare one period with another. Every total you might need has already been worked out for you: use those figures exactly and never add anything up yourself, and never mention a figure that is not in front of you. When a breakdown helps, put each part on its own line starting with a hyphen, and bold the figure that matters most with double asterisks. Use those two sparingly: a wall of bold is the same as no bold. Say what produced a figure, not just what it is. If something genuinely is not in the entries, say so in one short sentence and answer what you can. If the message is not about their finances at all, whether it is small talk, a joke, or nothing in particular, reply in one short friendly sentence like a person would and do not mention data, figures, or what you would need. You are one part of an app, not a chatbot on its own, and the app around you does things you do not. It draws charts and trends from figures it works out itself. It turns a sentence into an entry, shows it as a card, and adds it when the owner presses the button. It finds a row and offers to bin it or bring it back. So never say you cannot make a chart, cannot add an entry, or cannot delete anything: say what will happen instead, in one short sentence, and let the app do it. The one thing genuinely absent is files: you cannot produce a PDF, a spreadsheet or an image, and you should say so plainly if asked. When they ask what they should do, answer it. Say what you would do and why, using their own figures: which item to cut and how much that saves a month, whether a purchase fits what is left, how long a balance lasts at the rate they are going, what the debt costs to carry. Name the trade-off rather than hiding behind a caveat, and give the arithmetic that produced the advice so they can disagree with it. Three limits on that, and they are firm. Advise on their own money only: their spending, their budget, their debt, their savings, all of it visible in the entries you were given. You are not licensed to advise on investments, so if they ask what to buy, which stock or coin, or how to invest, say plainly that it is not something you can advise on and point them to a licensed adviser. Never invent a figure to support a recommendation: if the entries do not show what you need, say which figure is missing and answer what you can. And say it like a person who knows them, not a pamphlet. No lectures, no scolding, no generic advice that would fit anybody: everything you say should be something only somebody looking at their ledger could say.",
+    "Answer properly. Give the question as much room as it deserves: a sentence for a simple one, and up to about two hundred words for one that needs working through, going deeper each time you are asked to. You have the entries as well as the totals, so you can count them, list the individual ones, name their dates and items, and compare one period with another. Every total you might need has already been worked out for you: use those figures exactly and never add anything up yourself, and never mention a figure that is not in front of you. When you name more than two entries, months or items, put each on its own line starting with a hyphen: it renders as a real list and is far easier to read than the same figures buried in a sentence. Put double asterisks around the two or three figures the answer actually turns on, and they render as real bold: the figure being asked about, one that is over budget, one that is surprising. Not every figure, or bold stops meaning anything. Say what produced a figure, not just what it is. If something genuinely is not in the entries, say so in one short sentence and answer what you can. If the message is not about their finances at all, whether it is small talk, a joke, or nothing in particular, reply in one short friendly sentence like a person would and do not mention data, figures, or what you would need. You are one part of an app, not a chatbot on its own, and the app around you does things you do not. It draws charts and trends from figures it works out itself. It turns a sentence into an entry, shows it as a card, and adds it when the owner presses the button. It finds a row and offers to bin it or bring it back. So never say you cannot make a chart, cannot add an entry, or cannot delete anything: say what will happen instead, in one short sentence, and let the app do it. The one thing genuinely absent is files: you cannot produce a PDF, a spreadsheet or an image, and you should say so plainly if asked. When they ask what they should do, answer it. Say what you would do and why, using their own figures: which item to cut and how much that saves a month, whether a purchase fits what is left, how long a balance lasts at the rate they are going, what the debt costs to carry. Name the trade-off rather than hiding behind a caveat, and give the arithmetic that produced the advice so they can disagree with it. Three limits on that, and they are firm. Advise on their own money only: their spending, their budget, their debt, their savings, all of it visible in the entries you were given. You are not licensed to advise on investments, so if they ask what to buy, which stock or coin, or how to invest, say plainly that it is not something you can advise on and point them to a licensed adviser. Never invent a figure to support a recommendation: if the entries do not show what you need, say which figure is missing and answer what you can. And say it like a person who knows them, not a pamphlet. No lectures, no scolding, no generic advice that would fit anybody: everything you say should be something only somebody looking at their ledger could say.",
   /**
    * Reading a receipt, a bank screenshot, or a sentence, into rows.
    *
@@ -686,7 +686,7 @@ const TONES: Record<string, string> = {
   detailed: "Explain the reasoning, still under 150 words.",
 };
 
-const SYSTEM = [
+const SYSTEM_BASE = [
   "You are summarising a single person's own financial figures, which they have already calculated.",
   "Every number you are given is correct. Repeat figures exactly; never round or estimate, and never redo a total that has already been worked out for you.",
   "If a figure is not in the data, say you do not have it rather than inferring one.",
@@ -722,21 +722,56 @@ const SYSTEM = [
    * each other produce a model that follows neither, so the precedence is
    * stated rather than left to be worked out.
    */
-  "Write plain sentences. No Markdown of any kind, unless the instruction for this particular job says otherwise, in which case that instruction wins.",
-  "Never use backticks, hash marks, headings, tables, links or code blocks.",
   "Never use an em dash. Use a comma, a colon, or a full stop.",
-  /**
-   * Qualified, because unqualified it cancelled the chat instruction.
-   *
-   * The chat asks for the figure that matters to be bolded, and this line
-   * said never to bold anything at all. Two instructions that contradict each
-   * other produce a model that follows neither, and this one came last, so it
-   * won: nothing was ever emphasised and the chat's own instruction was dead
-   * text. The precedence is stated here as well as above, so the model does
-   * not have to work out which of two flat rules to believe.
-   */
-  "Do not bold or emphasise anything, especially not the figures, unless the instruction for this particular job asks for it, in which case that instruction wins.",
 ].join(" ");
+
+/**
+ * ── Formatting, which is not the same rule for every job ──────────────────
+ *
+ * This used to be one flat block appended to every task, and it said never to
+ * use Markdown and never to bold anything. The chat instruction asks for the
+ * opposite: a hyphen per line for a breakdown, and the figure that matters in
+ * bold. Qualifying the prohibition was not enough, and the record proves it:
+ * across four hundred and fifty six stored replies, not one contains a single
+ * pair of asterisks, while the hyphens in the very same sentence of the very
+ * same instruction were obeyed every time.
+ *
+ * A model given a firm rule in its system message and a hedged exception
+ * buried in a long user prompt follows the firm rule. That is not the model
+ * being wrong, it is the prompt being contradictory, and the fix is to stop
+ * contradicting it: the job that renders structure is told to use it, and
+ * every job that cannot render it is told not to. Neither one has to work out
+ * which of two rules wins, because each is only ever given one.
+ */
+const PLAIN_FORMATTING = [
+  "Write plain sentences. No Markdown of any kind.",
+  "Never use backticks, hash marks, headings, tables, links or code blocks.",
+  "Do not bold or emphasise anything, especially not the figures.",
+].join(" ");
+
+/**
+ * The chat, which renders structure into real elements.
+ *
+ * `domain/richText.ts` parses these two and only these two, into real list
+ * items and real emphasis. Nothing else is rendered, so nothing else is
+ * invited: a heading or a table would reach the screen as its own punctuation
+ * and look like the app is broken.
+ */
+const RICH_FORMATTING = [
+  "Two pieces of formatting are available to you and you should use them.",
+  "Put **double asterisks** around the few words or figures that matter most, and they will be shown in bold. Bold the single figure the answer turns on, and any figure that is surprising, over budget, or the reason for what you are saying. Two or three in an answer is right. Everything bold is the same as nothing bold.",
+  "When you list several things, start each one on its own line with a hyphen and a space, and it will be shown as a proper list. Use a list whenever you are naming more than two entries, months, or items, because a list of figures is far easier to read than the same figures inside a sentence.",
+  "Those two are the whole of what is available. Never use backticks, hash marks, headings, tables, links or code blocks: they are not rendered and would reach the screen as punctuation.",
+].join(" ");
+
+/**
+ * The system message for one job.
+ *
+ * The chat is the only surface that renders structure, so it is the only one
+ * invited to produce it.
+ */
+const systemFor = (task: string): string =>
+  `${SYSTEM_BASE} ${task === "chat" ? RICH_FORMATTING : PLAIN_FORMATTING}`;
 
 /**
  * What the providers actually offer, right now.
@@ -874,7 +909,7 @@ export const onRequestPost = async (ctx: {
     const label = `${candidate.provider}:${candidate.model}`;
 
     try {
-      const raw = await callProvider(candidate, env, prompt, maxTokens, images);
+      const raw = await callProvider(candidate, env, prompt, maxTokens, images, task);
       if (!raw) {
         attempts.push({ model: candidate.model, reason: "empty response" });
         continue;
@@ -901,6 +936,10 @@ export const onRequestPost = async (ctx: {
         ].join("\n\n"),
         maxTokens,
         [],
+        // The same job, so the same formatting rules. A repaired reply that
+        // came back plain when the first one was allowed structure would look
+        // like the formatting switching itself off at random.
+        task,
       );
 
       const second = repaired ? readAnswer(repaired, spec) : null;
@@ -996,15 +1035,16 @@ async function callProvider(
   prompt: string,
   maxTokens: number,
   images: readonly string[] = [],
+  task = "",
 ): Promise<string> {
   try {
-    return await send(c, env, prompt, maxTokens, true, images);
+    return await send(c, env, prompt, maxTokens, true, images, task);
   } catch (e) {
     const status = e instanceof Error ? e.message : "";
     // Only a rejected request is worth reinterpreting. A rate limit or an
     // outage means the same thing with or without the field.
     if (status !== "400" && status !== "422") throw e;
-    return send(c, env, prompt, maxTokens, false, images);
+    return send(c, env, prompt, maxTokens, false, images, task);
   }
 }
 
@@ -1015,6 +1055,14 @@ async function send(
   maxTokens: number,
   askForJson: boolean,
   images: readonly string[] = [],
+  /**
+   * Which job this is, because the formatting rules differ by job.
+   *
+   * The chat renders bold and bullets into real elements; nothing else does.
+   * Threaded rather than read from a module constant so there is exactly one
+   * answer per request and no chance of a stale one.
+   */
+  task = "",
 ): Promise<string> {
   const isGroq = c.provider === "groq";
   const key = isGroq ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
@@ -1040,7 +1088,7 @@ async function send(
       body: JSON.stringify({
         model: c.model,
         messages: [
-          { role: "system", content: SYSTEM },
+          { role: "system", content: systemFor(task) },
           {
             role: "user",
             /**

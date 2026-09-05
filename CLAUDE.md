@@ -248,7 +248,15 @@ If a design decision is not covered by the spec, propose it and wait. Do not def
   nothing fetched. Report the commit hash, so "pushed" is a checkable claim
   rather than a reassurance. If it says NOT PUSHED, push, then run it again.
 - **Every push to `main` deploys to production.** Cloudflare Pages builds it
-  automatically, so `tsc`, `vitest` and `vite build` must all pass first.
+  automatically, so the typecheck, `vitest` and `vite build` must all pass
+  first.
+- **Typecheck with `npx tsc -b`, never `npx tsc --noEmit`.** This repo is a
+  project-references build: `tsconfig.json` has no files of its own and points
+  at `tsconfig.app.json`, `tsconfig.node.json` and `tsconfig.functions.json`.
+  `--noEmit` checks the app and **silently skips `functions/`**, which is where
+  the Pages Function lives. A change there that could not compile passed a
+  clean `--noEmit` on 2026-09-05 and would have thrown `ReferenceError` on
+  every AI request in production. `tsc -b` caught it immediately.
 - No custom domain, analytics, telemetry, or third-party scripts.
 - Ask before adding any dependency handling money, dates, or auth.
 - Conventional Commits. Feature branches.
