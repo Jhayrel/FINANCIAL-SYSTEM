@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { checkFile, formatBytes, LIMITS, totalBytes } from "./attachments";
+import { checkFile, digestOf, formatBytes, LIMITS, totalBytes } from "./attachments";
 
 const file = (over: Partial<{ name: string; type: string; size: number }> = {}) => ({
   name: "receipt.jpg",
@@ -90,5 +90,38 @@ describe("checkFile honours the limits from Settings", () => {
   it("falls back to the defaults when Settings says nothing", () => {
     expect(checkFile(file({ size: 3_000_000 }), 0, {}).ok).toBe(true);
     expect(checkFile(file({ size: 5_000_000 }), 0, {}).ok).toBe(false);
+  });
+});
+
+/**
+ * The same picture, attached twice.
+ *
+ * The owner's history has one message carrying three byte-identical copies of
+ * the same screenshot, every one of them read separately and turned into an
+ * identical card. Names cannot tell them apart: all three were `image.png`,
+ * and so was a fourth that was a different picture entirely.
+ */
+describe("digestOf", () => {
+  it("gives the same fingerprint to the same content", () => {
+    expect(digestOf("data:image/png;base64,AAAB")).toBe(digestOf("data:image/png;base64,AAAB"));
+  });
+
+  it("gives a different one to different content of the same length", () => {
+    expect(digestOf("data:image/png;base64,AAAB")).not.toBe(
+      digestOf("data:image/png;base64,AAAC"),
+    );
+  });
+
+  it("separates content that differs only at the far end", () => {
+    const long = "x".repeat(50_000);
+    expect(digestOf(`${long}a`)).not.toBe(digestOf(`${long}b`));
+  });
+
+  it("separates content that differs only in length", () => {
+    expect(digestOf("abc")).not.toBe(digestOf("abcabc"));
+  });
+
+  it("has nothing to say about an empty file beyond it being empty", () => {
+    expect(digestOf("")).toBe(digestOf(""));
   });
 });

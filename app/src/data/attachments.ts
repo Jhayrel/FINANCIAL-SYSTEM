@@ -51,6 +51,16 @@ export interface Attachment {
   readonly dataUrl?: string;
   /** Text files only: the redacted contents. */
   readonly text?: string;
+  /**
+   * A short fingerprint of the file as it arrived, before any shrinking.
+   *
+   * Two attachments with the same digest are the same picture, whatever they
+   * are called. Names are worthless for this: the recorded history has one
+   * message carrying three files all called `image.png`, all 32,562 bytes,
+   * all the same screenshot, and a fourth `image.png` at 34,184 bytes that
+   * was a different one. Only the content can tell those apart.
+   */
+  readonly digest?: string;
 }
 
 export interface Rejection {
@@ -123,14 +133,41 @@ export function checkFile(
 }
 
 /**
+ * A short fingerprint of a file's contents.
+ *
+ * Two passes with different constants, printed together. One 32-bit hash over
+ * a two-megabyte data URL collides often enough to matter when the answer is
+ * "you have already attached this"; two independent ones and the length do
+ * not, and the whole thing is still a single walk of the string.
+ *
+ * Not a security hash and never used as one. It answers "is this the same
+ * file I already have", nothing else.
+ */
+export function digestOf(content: string): string {
+  let a = 0x811c9dc5;
+  let b = 5381;
+
+  for (let i = 0; i < content.length; i++) {
+    const code = content.charCodeAt(i);
+    a = Math.imul(a ^ code, 0x01000193);
+    b = Math.imul(b, 33) ^ code;
+  }
+
+  const hex = (n: number): string => (n >>> 0).toString(16).padStart(8, "0");
+  return `${hex(a)}${hex(b)}-${content.length.toString(16)}`;
+}
+
+/**
  * Downscale and re-encode, stepping the quality down until it fits.
  *
  * A screenshot that is already small keeps its original bytes: re-encoding a
  * crisp PNG of text as JPEG makes it blurrier and no smaller.
+ *
+ * The caller has already read the file, so the data URL is passed in rather
+ * than read a second time: a phone photo is megabytes and reading it twice is
+ * twice the wait for no gain.
  */
-async function shrink(file: File): Promise<{ dataUrl: string; bytes: number }> {
-  const original = await asDataUrl(file);
-
+async function shrink(file: File, original: string): Promise<{ dataUrl: string; bytes: number }> {
   if (file.size <= LIMITS.targetBytes && file.type === "image/png") {
     return { dataUrl: original, bytes: file.size };
   }
@@ -177,14 +214,32 @@ const load = (src: string): Promise<HTMLImageElement> =>
 
 let counter = 0;
 
-/** Read a picked set of files, keeping what can be sent and saying why for the rest. */
+/**
+ * Read a picked set of files, keeping what can be sent and saying why for the rest.
+ *
+ * `already` is what is on the message now, so the same picture picked twice is
+ * refused by name the second time instead of being sent twice, read twice, and
+ * turned into two identical cards. That is not hypothetical: the owner's
+ * history has one message carrying three byte-identical copies of the same
+ * screenshot, which produced three identical PHP 1,447.90 cards and no word
+ * anywhere about them being the same picture.
+ *
+ * Refused, not silently dropped. A file that vanishes without a line looks
+ * like the upload failing.
+ */
 export async function readFiles(
   files: readonly File[],
-  alreadyAttached = 0,
+  already: readonly Attachment[] | number = [],
   limits: { readonly maxCount?: number; readonly maxSizeMB?: number } = {},
 ): Promise<ReadResult> {
   const attachments: Attachment[] = [];
   const rejected: Rejection[] = [];
+
+  // A count is still accepted, for callers that hold no list.
+  const existing = typeof already === "number" ? [] : already;
+  const alreadyAttached = typeof already === "number" ? already : already.length;
+  const seen = new Map<string, string>();
+  for (const a of existing) if (a.digest) seen.set(a.digest, a.name);
 
   for (const file of files) {
     const check = checkFile(file, alreadyAttached + attachments.length, limits);
@@ -197,18 +252,35 @@ export async function readFiles(
     const id = `a-${Date.now()}-${counter}`;
 
     try {
-      if (isImageType(file.type)) {
-        const { dataUrl, bytes } = await shrink(file);
-        attachments.push({ id, name: file.name, kind: "image", bytes, dataUrl });
+      const image = isImageType(file.type);
+      const content = image ? await asDataUrl(file) : redact(await file.text());
+      const digest = digestOf(content);
+
+      const twin = seen.get(digest);
+      if (twin !== undefined) {
+        rejected.push({
+          name: file.name,
+          reason:
+            twin === file.name
+              ? "It is the same file as the one already attached, so it was not added twice."
+              : `It is the same file as ${twin}, already attached, so it was not added twice.`,
+        });
+        continue;
+      }
+      seen.set(digest, file.name);
+
+      if (image) {
+        const { dataUrl, bytes } = await shrink(file, content);
+        attachments.push({ id, name: file.name, kind: "image", bytes, dataUrl, digest });
       } else {
-        const raw = await file.text();
-        const text = redact(raw).slice(0, LIMITS.maxTextChars);
+        const text = content.slice(0, LIMITS.maxTextChars);
         attachments.push({
           id,
           name: file.name,
           kind: "text",
           bytes: text.length,
           text,
+          digest,
         });
       }
     } catch {

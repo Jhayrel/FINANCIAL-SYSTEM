@@ -621,16 +621,59 @@ function feeIn(text: string): { fee: number; rest: string } {
 const JOINS =
   /(?:\band also\b|\bthen also\b|\band then\b|\bthen\b|\balso add\b|\balso i\b|\bplus i\b|;)/i;
 
+/**
+ * The verb at the front of the first clause, if it is short enough to lend.
+ *
+ * "I paid", "paid", "I spent", "I sent". Everything before the first figure,
+ * capped at four words: past that it is not a verb phrase, it is the start of
+ * a description, and prefixing later clauses with a description would invent
+ * words the owner did not write.
+ */
+function leadingVerb(part: string): string {
+  const match = /^([a-z' ]{2,40}?)\s*(?=(?:₱|php\s*)?\d)/i.exec(part.trim());
+  const lead = match?.[1]?.trim();
+  if (!lead) return "";
+  const words = lead.split(/\s+/);
+  return words.length <= 4 ? lead : "";
+}
+
+/** Starts with a figure, so it has no verb of its own to read. */
+const startsWithFigure = (part: string): boolean => /^(?:₱|php\s*)?\d/i.test(part.trim());
+
 export function splitEntries(text: string): string[] {
   const lines = text
     .split(String.fromCharCode(10))
     .map((l) => l.trim())
     .filter(Boolean);
 
-  return lines.flatMap((line) =>
+  const parts = lines.flatMap((line) =>
     line
       .split(JOINS)
       .map((part) => part.trim().replace(/^(?:and|also|plus)\s+/i, ""))
       .filter((part) => part.length > 2),
+  );
+
+  /**
+   * ── A clause borrows the verb of the one before it ──────────────────────
+   *
+   * "I paid 500 for food from gcash, then 300 for gas from cash, then 250 for
+   * fun from maya" is three payments in English and was one card in this app.
+   * The split was right; the pieces were not readable. `readEntry` needs a
+   * verb to decide whether money came in, went out or moved, and the second
+   * and third clauses have none: English lets them borrow the first one's,
+   * and the reader could not. So "300 for gas from cash" read as no flow, no
+   * amount, no wallet, nothing at all, and the caller dropped it for not
+   * being an entry. Two of the three payments vanished without a word.
+   *
+   * Only clauses that open with a figure borrow, and only from the first
+   * clause. "then paid 500 for food" and "then gave 300 to my mom" have their
+   * own verbs and keep them, which is what keeps a borrowed "I borrowed" off
+   * a row that was not borrowing.
+   */
+  const lead = parts.length > 1 ? leadingVerb(parts[0] ?? "") : "";
+  if (!lead) return parts;
+
+  return parts.map((part, i) =>
+    i > 0 && startsWithFigure(part) ? `${lead} ${part}` : part,
   );
 }

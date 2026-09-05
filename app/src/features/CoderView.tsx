@@ -148,11 +148,14 @@ async function readAll(uid: string, name: string): Promise<Dumped> {
  *   REJECTED    cards it produced that you threw away, with the sentence that
  *               produced them. These are the failures nobody corrected, so
  *               they teach it nothing and repeat forever
+ *   OVERRIDDEN  cards it warned were duplicates and you added anyway. A
+ *               warning overridden every time is a warning that is wrong
  *   SILENT      messages that produced no card and no answer at all. The
  *               worst kind, because they look like nothing happened
  *
- * The last two are the ones that matter. A correction is a fault already
- * being fixed; a rejection and a silence are faults still running.
+ * Rejections and silences are the ones that matter most. A correction is a
+ * fault already being fixed; a rejection and a silence are faults still
+ * running.
  */
 function scoreAi(docs: readonly { readonly data: Record<string, unknown> }[]): string[] {
   const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -223,6 +226,29 @@ function scoreAi(docs: readonly { readonly data: Record<string, unknown> }[]): s
   }
 
   /**
+   * Duplicate warnings, and what was done about them.
+   *
+   * A card can now say "this is already in the ledger as #0493" with the
+   * fields that agree. That warning is only worth having if it is right, and
+   * the only way to know is to count how often it was overridden: one the
+   * owner adds anyway every single time is a warning that is wrong about
+   * something, and it should be tightened rather than left to be ignored.
+   *
+   * Recorded on the accepted event, so this reads what actually happened
+   * rather than what was shown.
+   */
+  const overridden: string[] = [];
+  for (const e of events) {
+    if (!e || str(e["action"]) !== "accepted") continue;
+    const note = str(e["text"]);
+    if (!note.startsWith("Added over a duplicate warning")) continue;
+    overridden.push(
+      `    ${str(e["at"]).slice(0, 16).replace("T", " ")}  ${str(e["entry"])}`,
+    );
+    overridden.push(`      ${note.replace("Added over a duplicate warning: ", "")}`);
+  }
+
+  /**
    * Messages that produced nothing at all.
    *
    * No card, no answer, no chart. From the outside it looks like the app
@@ -284,6 +310,15 @@ function scoreAi(docs: readonly { readonly data: Record<string, unknown> }[]): s
     "  same thing again. This is the list to fix next.",
     "",
     ...(thrownAway.length === 0 ? ["    none"] : last(thrownAway, 30)),
+    "",
+    "── Added over a duplicate warning ──────────────────────────────────────",
+    "",
+    "  The card said this row was already in the ledger, and it was added",
+    "  anyway. Sometimes that is right: people do buy the same lunch twice.",
+    "  A warning overridden every time is a warning that is wrong, and the",
+    "  rule behind it should be tightened rather than left to be ignored.",
+    "",
+    ...(overridden.length === 0 ? ["    none"] : last(overridden, 30)),
     "",
     "── Said, and nothing happened ──────────────────────────────────────────",
     "",

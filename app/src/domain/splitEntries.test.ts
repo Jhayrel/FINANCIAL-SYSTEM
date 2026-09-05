@@ -95,3 +95,63 @@ describe("what it leaves alone", () => {
     }
   });
 });
+
+/**
+ * A clause borrows the verb of the one before it.
+ *
+ * "I paid 500 for food from gcash, then 300 for gas from cash, then 250 for
+ * fun from maya" is three payments in English. The split was already right;
+ * the pieces were not readable, because `readEntry` needs a verb to decide
+ * which way the money went and the second and third clauses have none. Two of
+ * the three payments were dropped for not looking like entries.
+ */
+describe("splitEntries lends the first verb to a clause that has none", () => {
+  it("puts the verb on a clause that opens with a figure", () => {
+    expect(
+      splitEntries("I paid 500 for food from gcash, then 300 for gas from cash"),
+    ).toEqual(["I paid 500 for food from gcash,", "I paid 300 for gas from cash"]);
+  });
+
+  it("does it for every later clause, not just the second", () => {
+    const parts = splitEntries(
+      "I paid 500 for food from gcash, then 300 for gas from cash, then 250 for fun from maya",
+    );
+    expect(parts).toHaveLength(3);
+    for (const part of parts) expect(part.startsWith("I paid")).toBe(true);
+  });
+
+  /**
+   * The safety property. Lending "I borrowed" to a clause that says "gave"
+   * would turn a gift into a loan, which is a wrong row rather than a
+   * discarded guess.
+   */
+  it("leaves a clause that has its own verb alone", () => {
+    expect(
+      splitEntries(
+        "I borrowed 2000 on maya credit into gcash, then paid 500 for food, then gave 300 to my mom",
+      ),
+    ).toEqual([
+      "I borrowed 2000 on maya credit into gcash,",
+      "paid 500 for food,",
+      "gave 300 to my mom",
+    ]);
+  });
+
+  it("lends nothing when the lead-in is a sentence rather than a verb", () => {
+    const long = "on the way home from school yesterday afternoon I paid 500 for food, then 300 for gas";
+    expect(splitEntries(long)[1]).toBe("300 for gas");
+  });
+
+  it("lends nothing when there is only one clause", () => {
+    expect(splitEntries("I paid 500 for food from gcash")).toEqual([
+      "I paid 500 for food from gcash",
+    ]);
+  });
+
+  it("handles a peso sign on the borrowed clause", () => {
+    expect(splitEntries("I paid ₱500 for food, then ₱300 for gas")).toEqual([
+      "I paid ₱500 for food,",
+      "I paid ₱300 for gas",
+    ]);
+  });
+});

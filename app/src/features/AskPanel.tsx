@@ -65,7 +65,7 @@
  * treats every call as its own.
  */
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "../components/primitives";
 import {
@@ -103,6 +103,12 @@ import { detectIntent, isQuestion, type Intent } from "../domain/intent";
 import { addressesEveryCard } from "../domain/capture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
+import {
+  duplicateHeadline,
+  duplicatesOf,
+  repeatsWithin,
+  type Duplicate,
+} from "../domain/duplicates";
 import { classifyItem, extractProposals, routeMessage, type Intent as Routed } from "../data/aiClient";
 import { chatStore } from "../data/chatStore";
 import { aiLogStore } from "../data/aiLogStore";
@@ -473,14 +479,87 @@ export function AskPanel({
    * follow you. Scrolled up means you are reading something, and the page
    * should hold still. Sixty pixels of tolerance, so a line arriving while
    * you sit at the end still counts as being at the end.
+   *
+   * ── Why that was not enough ─────────────────────────────────────────────
+   *
+   * It fixed the case where you had scrolled away, and missed the one where
+   * you had not. The owner described it exactly: three cards stacked, add the
+   * first, and the view lands on the third. Add the second, and the view
+   * lands on the third again.
+   *
+   * Nothing scrolled. A card that is added loses its buttons and a card that
+   * is discarded collapses to one line, so the content above the fold got
+   * shorter, and a browser whose `scrollTop` is now past the end of a shorter
+   * document clamps it to the new end. The view moved because the page
+   * shrank underneath it, which no amount of tolerance can detect after the
+   * fact: by the time the effect runs, the clamp has already happened and it
+   * reads as being at the bottom.
+   *
+   * So the position is taken before the change instead. `hold` remembers
+   * where on screen the card you pressed was sitting, and the layout effect
+   * puts it back there before the browser paints. Press Add on the first of
+   * three and it stays exactly where it is, saying it saved, with the second
+   * card following it up the screen. Nothing jumps, and the next thing to
+   * decide arrives where you are already looking.
    */
   const NEAR_BOTTOM = 60;
 
-  useEffect(() => {
-    const el = threadRef.current;
-    if (!el) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distance <= NEAR_BOTTOM) el.scrollTop = el.scrollHeight;
+  /** The live card elements, by their index in `turns`. */
+  const cardElements = useRef(new Map<number, HTMLDivElement>());
+  /** Where the card being acted on sat, measured before the state changed. */
+  const held = useRef<{ readonly index: number; readonly offset: number } | null>(null);
+
+  /**
+   * How far below the top of the thread this element starts.
+   *
+   * Measured off the rectangles rather than `offsetTop`, so it does not
+   * depend on which ancestor happens to be positioned.
+   */
+  const topWithin = (el: HTMLElement, thread: HTMLElement): number =>
+    el.getBoundingClientRect().top - thread.getBoundingClientRect().top;
+
+  /**
+   * Remember where a card is, so pressing a button on it does not move it.
+   *
+   * Called from the button, before the state update. React has not touched
+   * the DOM yet at that point, so this measures what the owner can still see.
+   */
+  const hold = (index: number): void => {
+    const thread = threadRef.current;
+    const el = cardElements.current.get(index);
+    if (!thread || !el) return;
+    held.current = { index, offset: topWithin(el, thread) };
+  };
+
+  /**
+   * A card, registering itself so it can be measured.
+   *
+   * Indexes are stable: a settled card keeps its place in `turns` rather than
+   * being removed, which is what lets the anchor survive the very update it
+   * is anchoring against.
+   */
+  const keepCard = (index: number, el: HTMLDivElement | null): void => {
+    if (el) cardElements.current.set(index, el);
+    else cardElements.current.delete(index);
+  };
+
+  useLayoutEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) return;
+
+    const anchor = held.current;
+    held.current = null;
+
+    if (anchor) {
+      const el = cardElements.current.get(anchor.index);
+      if (el) {
+        thread.scrollTop = Math.max(0, thread.scrollTop + topWithin(el, thread) - anchor.offset);
+        return;
+      }
+    }
+
+    const distance = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+    if (distance <= NEAR_BOTTOM) thread.scrollTop = thread.scrollHeight;
   }, [turns, busy]);
 
   /**
@@ -611,7 +690,7 @@ export function AskPanel({
 
   const attach = async (picked: ArrayLike<File> | null): Promise<void> => {
     if (!picked || picked.length === 0) return;
-    const { attachments, rejected } = await readFiles(Array.from(picked), files.length, limits);
+    const { attachments, rejected } = await readFiles(Array.from(picked), files, limits);
     if (attachments.length > 0) setFiles((prev) => [...prev, ...attachments]);
     for (const r of rejected) {
       say({ kind: "assistant", text: `${r.name}: ${r.reason}`, from: "this device" });
@@ -1861,7 +1940,22 @@ export function AskPanel({
          * reaches a model, because the credit line and the effect are not in
          * a sentence and reading either wrong turns borrowing into income.
          */
-        if (ai.disabled && local.worthOffering) {
+        /**
+         * One sentence, one card, even when it was three payments.
+         *
+         * This shortcut existed so a switched-off model still records an
+         * entry, and it returned before the splitter below ever ran. So with
+         * the model off, "I paid 500 for food from gcash, then 300 for gas
+         * from cash, then 250 for fun from maya" produced a single PHP 500
+         * card and the other two payments were dropped in silence: the same
+         * class of failure as the debt sentence above, from the same cause,
+         * a gate that matched the whole message when the message was several.
+         *
+         * `severalParts` is already worked out above for the debt gate, so
+         * both gates now stand down for the same reason and the splitter gets
+         * what it was written for.
+         */
+        if (ai.disabled && local.worthOffering && !severalParts) {
           say({ kind: "you", text: note });
           await offer(
             {
@@ -2028,6 +2122,67 @@ export function AskPanel({
   const readyCount = open.filter((t) => sink.check(t.proposal.draft).ok).length;
 
   /**
+   * Have I got this one already.
+   *
+   * ── The failure this answers ────────────────────────────────────────────
+   *
+   * The owner uploads a receipt, reads the card, and later uploads the same
+   * receipt again. The record has it three times over: one message carrying
+   * three byte-identical copies of the same screenshot, another carrying two,
+   * every one of them read separately into an identical PHP 1,447.90 card,
+   * and nothing anywhere saying they were the same picture. The only thing
+   * standing between the ledger and three identical rows was the owner
+   * noticing.
+   *
+   * Two different checks, because there are two ways to end up with the same
+   * row twice:
+   *
+   *   `alreadyInLedger`  it is already saved, from an earlier upload.
+   *   `repeatOfCard`     it is not saved yet, but the card above says it too.
+   *
+   * Neither one blocks anything. A duplicate warning that refused to save
+   * would be wrong the first time the owner genuinely bought the same lunch
+   * twice, and CLAUDE.md is explicit that an integrity check reports and
+   * never corrects. So both of these carry their evidence and leave the
+   * decision alone.
+   *
+   * Recomputed only when the cards or the ledger move, since it is a pass
+   * over every transaction per open card.
+   */
+  const alreadyInLedger = useMemo(() => {
+    const found = new Map<number, readonly Duplicate[]>();
+    turns.forEach((t, i) => {
+      if (!isOffer(t) || t.state !== "open") return;
+      const matches = duplicatesOf(t.proposal.draft, transactions);
+      if (matches.length > 0) found.set(i, matches);
+    });
+    return found;
+  }, [turns, transactions]);
+
+  /**
+   * The earlier card a card repeats, as the entry it holds.
+   *
+   * Its position was the obvious thing to carry, and it was the wrong thing:
+   * settled cards stay in the thread, so "the second card" counts one way in
+   * the code and another way on screen. The entry itself cannot be
+   * miscounted, and it is evidence rather than a reference.
+   */
+  const repeatOfCard = useMemo(() => {
+    const indexes: number[] = [];
+    turns.forEach((t, i) => {
+      if (isOffer(t) && t.state === "open") indexes.push(i);
+    });
+    const drafts = indexes.map((i) => (turns[i] as Offered).proposal.draft);
+    const byTurn = new Map<number, Draft>();
+    for (const [later, earlier] of repeatsWithin(drafts)) {
+      const at = indexes[later];
+      const twin = drafts[earlier];
+      if (at !== undefined && twin) byTurn.set(at, twin);
+    }
+    return byTurn;
+  }, [turns]);
+
+  /**
    * Add every card that would save, and leave the rest showing.
    *
    * One pass over the list rather than one setState per card, so eight rows
@@ -2156,11 +2311,13 @@ export function AskPanel({
               turn={turn}
               debts={debts}
               sink={sink}
-              onSettle={() =>
+              hostRef={(el) => keepCard(i, el)}
+              onSettle={() => {
+                hold(i);
                 setTurns((prev) =>
                   prev.map((t, j) => (j === i && isDebt(t) ? { ...t, state: "settled" } : t)),
-                )
-              }
+                );
+              }}
               onChange={(draft) =>
                 setTurns((prev) => prev.map((t, j) => (j === i && isDebt(t) ? { ...t, draft } : t)))
               }
@@ -2206,12 +2363,27 @@ export function AskPanel({
               offered={turn}
               sink={sink}
               reference={reference}
+              hostRef={(el) => keepCard(i, el)}
+              alreadyInLedger={alreadyInLedger.get(i) ?? []}
+              repeatOfCard={repeatOfCard.get(i)}
               onChange={(draft) => replaceProposal(i, { ...turn.proposal, draft })}
               onChangeAll={(draft) => applyToAll(draft)}
               onAdd={() => {
+                hold(i);
                 log(
                   aiEvent("accepted", "add", {
                     entry: `${turn.proposal.draft.date} ${turn.proposal.draft.flow} ${turn.proposal.draft.item} ${formatMoney(turn.proposal.draft.amount ?? 0)}`,
+                    /**
+                     * Added anyway, over a duplicate warning.
+                     *
+                     * Worth recording on its own: a warning the owner
+                     * overrides every time is a warning that is wrong, and
+                     * without this the record cannot tell the difference
+                     * between a warning that worked and one nobody heeded.
+                     */
+                    ...(alreadyInLedger.get(i)?.length
+                      ? { text: `Added over a duplicate warning: ${duplicateHeadline(alreadyInLedger.get(i)![0]!)}` }
+                      : {}),
                   }),
                 );
                 sink.add(turn.proposal.draft, {
@@ -2225,10 +2397,12 @@ export function AskPanel({
                 settle(i, "added");
               }}
               onUse={() => {
+                hold(i);
                 sink.use(turn.proposal.draft);
                 settle(i, "used");
               }}
               onDiscard={() => {
+                hold(i);
                 log(
                   aiEvent("rejected", "add", {
                     entry: `${turn.proposal.draft.date} ${turn.proposal.draft.flow} ${turn.proposal.draft.item} ${formatMoney(turn.proposal.draft.amount ?? 0)}`,
@@ -2602,6 +2776,9 @@ function ProposalCard({
   offered,
   sink,
   reference,
+  hostRef,
+  alreadyInLedger,
+  repeatOfCard,
   onChange,
   onChangeAll,
   onAdd,
@@ -2611,6 +2788,12 @@ function ProposalCard({
   offered: Offered;
   sink: ProposalSink;
   reference: ReferenceLists;
+  /** So the panel can measure this card and hold it still when it changes. */
+  hostRef: (el: HTMLDivElement | null) => void;
+  /** Rows in the ledger this card looks like it repeats. Usually empty. */
+  alreadyInLedger: readonly Duplicate[];
+  /** The entry an earlier card already holds, when this one repeats it. */
+  repeatOfCard?: Draft | undefined;
   onChange: (draft: Draft) => void;
   onChangeAll: (draft: Draft) => void;
   onAdd: () => void;
@@ -2633,7 +2816,7 @@ function ProposalCard({
    */
   if (state === "discarded") {
     return (
-      <div className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
+      <div ref={hostRef} className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
         Discarded.
       </div>
     );
@@ -2671,7 +2854,7 @@ function ProposalCard({
         : "hard to read";
 
   return (
-    <div className={settled ? "fms-proposal fms-proposal--settled" : "fms-proposal"}>
+    <div ref={hostRef} className={settled ? "fms-proposal fms-proposal--settled" : "fms-proposal"}>
       <div className="fms-proposalhead">
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
           {state === "added" ? "Added" : state === "used" ? "In the form" : "New entry"}
@@ -2767,6 +2950,57 @@ function ProposalCard({
           {w}
         </p>
       ))}
+
+      {/*
+        Already got this one.
+
+        Shown on an open card only. Once a card is decided the warning has
+        done its work, and a saved row carrying "this might be a duplicate"
+        for the rest of the session is an alarm about a settled question.
+
+        It sits directly above the buttons because that is the last thing
+        read before pressing one. Nothing is disabled: the evidence is here so
+        the owner can tell in two seconds whether it is a repeat or a genuine
+        second purchase, and only the owner knows which.
+      */}
+      {!settled && repeatOfCard !== undefined && (
+        <div className="fms-dupe">
+          <p className="t-micro fms-dupehead">A card above already says this.</p>
+          <p className="t-micro fms-dupeline">
+            {repeatOfCard.date} {repeatOfCard.item || repeatOfCard.flow || "entry"},{" "}
+            {formatMoney(repeatOfCard.amount ?? 0)}
+            {repeatOfCard.fromWallet ? ` out of ${repeatOfCard.fromWallet}` : ""}
+            {repeatOfCard.toWallet ? ` into ${repeatOfCard.toWallet}` : ""}.
+          </p>
+          <p className="t-micro fms-dupeline">
+            Same date, same amount, same thing. If the receipt went up twice, discard this one.
+          </p>
+        </div>
+      )}
+
+      {!settled && repeatOfCard === undefined && alreadyInLedger.length > 0 && (
+        <div className="fms-dupe">
+          {alreadyInLedger.map((match) => (
+            <div key={match.row.id}>
+              <p className="t-micro fms-dupehead">{duplicateHeadline(match)}</p>
+              <p className="t-micro fms-dupeline">
+                {match.row.date} {match.row.item || match.row.type}
+                {match.row.description ? `, ${match.row.description}` : ""}
+              </p>
+              <ul className="fms-dupewhy">
+                {match.evidence.map((line) => (
+                  <li key={line} className="t-micro fms-dupeline">
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <p className="t-micro fms-dupeline">
+            Add it anyway if you really paid twice. Nothing here is blocked.
+          </p>
+        </div>
+      )}
 
       {settled ? (
         <>
@@ -3233,12 +3467,15 @@ function DebtCard({
   turn,
   debts,
   sink,
+  hostRef,
   onSettle,
   onChange,
 }: {
   turn: DebtChoice;
   debts: readonly Debt[];
   sink: ProposalSink;
+  /** So the panel can measure this card and hold it still when it changes. */
+  hostRef: (el: HTMLDivElement | null) => void;
   onSettle: () => void;
   onChange: (draft: Draft) => void;
 }) {
@@ -3251,7 +3488,7 @@ function DebtCard({
 
   if (state === "settled") {
     return (
-      <div className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
+      <div ref={hostRef} className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
         Added: {draft.item || "debt movement"}, {formatMoney(draft.amount ?? 0)}. It is in the
         Database and in the activity trail.
       </div>
@@ -3259,7 +3496,7 @@ function DebtCard({
   }
 
   return (
-    <div className="fms-proposal">
+    <div ref={hostRef} className="fms-proposal">
       <div className="fms-proposalhead">
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
           Debt movement

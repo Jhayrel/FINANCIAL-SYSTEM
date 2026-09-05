@@ -70,6 +70,33 @@ describe("status colours clear 4.5:1 on their own background", () => {
   }
 });
 
+/**
+ * The duplicate warning reads on its own tint.
+ *
+ * `.fms-dupe` is the one block in the app that puts body ink on a status
+ * background rather than on a surface: the headline is `--warn` on
+ * `--warn-bg`, already covered above, but the evidence lines underneath are
+ * `--ink-2`, and rule D7 is that every colour clears 4.5:1 on its own
+ * background in both themes. Verified, not assumed.
+ */
+describe("the duplicate warning reads on the warn tint", () => {
+  for (const [name, tokens] of themes) {
+    it(`${name}: --ink-2 on --warn-bg`, () => {
+      const fg = resolve(tokens, "--ink-2");
+      const bg = resolve(tokens, "--warn-bg");
+      const r = ratio(fg, bg);
+      expect(r, `${fg} on ${bg} = ${r}:1`).toBeGreaterThanOrEqual(AA);
+    });
+
+    it(`${name}: --hairline is visible on --warn-bg`, () => {
+      const fg = resolve(tokens, "--hairline");
+      const bg = resolve(tokens, "--warn-bg");
+      const r = ratio(fg, bg);
+      expect(r, `${fg} on ${bg} = ${r}:1`).toBeGreaterThan(1.05);
+    });
+  }
+});
+
 describe("ink clears its documented floors", () => {
   for (const [name, tokens] of themes) {
     const surface = resolve(tokens, "--surface");

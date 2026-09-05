@@ -1907,6 +1907,60 @@
   overflow-wrap: anywhere;
 }
 
+/*
+ * Already got this one.
+ *
+ * ── Why this one is tinted when the rest of the card is not ───────────────
+ *
+ * Everything else on a proposal card is a field or a note about a field, and
+ * those are framed rather than filled, because flow colour means direction of
+ * money (rule D3) and a tint that could be read as a flow would be lying. The
+ * warn pair is not a flow colour: it is the same one the budget rail and the
+ * integrity queue already use for "look at this before you commit to it", and
+ * a duplicate is exactly that. It clears 4.5:1 on its own background in both
+ * themes, asserted in contrast.test.ts.
+ *
+ * Square, like every other block on a ledger surface (rule D2). The left rule
+ * is 2px of ink, which is how separation is done here.
+ */
+.fms-dupe {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  background: var(--warn-bg);
+  border-left: 2px solid var(--warn);
+}
+
+.fms-dupehead {
+  margin: 0;
+  color: var(--warn);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.fms-dupeline {
+  margin: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The evidence, as a list.
+ *
+ * Indented off a hairline rather than bulleted: these are four short
+ * statements of fact about one row, and four dots down the side of a 280px
+ * panel is more furniture than the content deserves.
+ */
+.fms-dupewhy {
+  display: grid;
+  gap: 2px;
+  margin: var(--space-1) 0 0;
+  padding: 0 0 0 var(--space-2);
+  list-style: none;
+  border-left: 1px solid var(--hairline);
+}
+
 .fms-askinput {
   flex: 1;
   min-width: 0;
