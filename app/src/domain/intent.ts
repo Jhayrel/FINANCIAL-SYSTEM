@@ -124,8 +124,36 @@ export function detectIntent(text: string): Intent {
 const REQUESTING =
   /\b(?:give me|show me|tell me|make me|draw me|send me a|i want to know|i want insight|i want an? insight|i want summary|i want a summary|i need to know|how much|how many|insights? (?:of|on|about|for)|review the|summar(?:y|ise|ize))\b/i;
 
+/**
+ * Asking for advice, which does not have to start the sentence.
+ *
+ * ── The two rows this exists to stop ──────────────────────────────────────
+ *
+ * "I have 20000 saved and tuition is 18000 next month, what should I do"
+ * became two ledger entries:
+ *
+ *   2026-09-05 Spending School    PHP 20,000.00
+ *   2026-09-05 Spending Parking   PHP 20,000.00
+ *
+ * Neither of those happened. It is a question about a decision, and the whole
+ * point of the assistant being an adviser is that it answers rather than
+ * files. `ASKING` is anchored to the start of the sentence, and this one
+ * opens with "I have", so nothing recognised it as a question at all.
+ *
+ * Advice is asked for in the middle and at the end far more often than at the
+ * beginning, because the figures come first and the question follows them.
+ * So these are matched anywhere.
+ */
+const ADVICE =
+  /\b(what should i|should i|shall i|what would you|what do you think|do you think i|any advice|advise me|is it (?:good|bad|wise|smart|ok|okay|worth|better)|is that (?:good|bad|wise|worth|better)|worth it|help me decide|ano ang dapat|dapat ba)\b/i;
+
 export function isQuestion(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return true;
-  return trimmed.endsWith("?") || ASKING.test(trimmed) || REQUESTING.test(trimmed);
+  return (
+    trimmed.endsWith("?") ||
+    ASKING.test(trimmed) ||
+    REQUESTING.test(trimmed) ||
+    ADVICE.test(trimmed)
+  );
 }

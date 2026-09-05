@@ -72,7 +72,7 @@ describe("the four steps are named, and in order", () => {
    * sentence, and reading either wrong turns borrowing into income.
    */
   it("decides debt before the model is asked anything", () => {
-    expect(at("if (local.readsAsDebt && !severalParts)")).toBeLessThan(
+    expect(at("if (local.readsAsDebt && !severalParts && !isQuestion(note))")).toBeLessThan(
       at("const found = await readAttached(note);"),
     );
   });
@@ -87,7 +87,20 @@ describe("the four steps are named, and in order", () => {
    */
   it("lets a sentence with several parts past the debt gate", () => {
     expect(source).toContain("const severalParts =");
-    expect(source).toContain("if (local.readsAsDebt && !severalParts)");
+    expect(source).toContain("if (local.readsAsDebt && !severalParts");
+  });
+
+  /**
+   * A question about borrowing is a question.
+   *
+   * "if I loan 1 billion for treat is it good??" contains "loan", so the gate
+   * matched and put a debt card on screen asking which credit line a
+   * hypothetical billion pesos belonged to. Nobody borrowed anything: they
+   * asked whether they should, which is the advice this assistant exists to
+   * give.
+   */
+  it("does not open a debt card for a question about borrowing", () => {
+    expect(source).toContain("if (local.readsAsDebt && !severalParts && !isQuestion(note))");
   });
 
   /** The message is echoed once, by the analyse step, and not again below. */

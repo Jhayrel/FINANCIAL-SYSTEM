@@ -176,8 +176,27 @@ function flowOf(text: string): Flow | null {
    * is buying something, and that is spending with a real item behind it.
    */
   if (PAID_A_PERSON.test(text)) return "Transfer";
-  if (SPENT.test(text)) return "Spending";
-  if (MOVED.test(text)) return "Transfer";
+
+  /**
+   * The first verb is the sentence's verb.
+   *
+   * Spending used to be tested first outright, so any sentence containing a
+   * spending word became spending however it opened. "I withdrew 5000 from
+   * maya to cash, spent 1200 of it on school, and the rest is still in my
+   * wallet" was read as PHP 5,000 of Spending out of Maya: the withdrawal
+   * became a purchase, the school spending vanished, and the cash the owner
+   * is holding was never recorded as arriving anywhere.
+   *
+   * What a sentence is about is what it opens with. A later verb belongs to
+   * a later clause, and if that clause is a separate entry the splitter will
+   * find it, which is its job rather than this one's.
+   */
+  const spentAt = text.search(SPENT);
+  const movedAt = text.search(MOVED);
+
+  if (spentAt >= 0 && movedAt >= 0) return movedAt < spentAt ? "Transfer" : "Spending";
+  if (spentAt >= 0) return "Spending";
+  if (movedAt >= 0) return "Transfer";
   return null;
 }
 
@@ -294,15 +313,45 @@ function dateIn(text: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
  */
 function walletIn(text: string, accounts: readonly string[]): string {
   const lower = text.toLowerCase();
+
+  /**
+   * The same name with its punctuation ignored.
+   *
+   * The owner's savings account is called "Maya Bank (Personal savings)" and
+   * nobody types the brackets. Written out longhand it was not found, and
+   * "Maya" was found inside it instead, so "I transferred 5000 from maya to
+   * maya bank personal savings" came back as Maya to Maya: the destination
+   * collapsed into the source, the row became a transfer with nowhere to go,
+   * and PHP 5,000 moved between two of the owner's own accounts would have
+   * been booked as PHP 5,000 given away.
+   *
+   * Only punctuation is ignored, never words.
+   */
+  const bare = (v: string): string => v.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const flat = ` ${bare(text)} `;
+
+  /**
+   * Both spellings of each name, longest name first.
+   *
+   * One pass rather than two, because two passes let a short name spelled
+   * exactly beat a long name spelled without its brackets, which is precisely
+   * how "Maya" won against "Maya Bank (Personal savings)".
+   */
   for (const account of [...accounts].sort((a, b) => b.length - a.length)) {
     const name = account.trim().toLowerCase();
     if (!name) continue;
+
     const at = lower.indexOf(name);
-    if (at === -1) continue;
-    const before = at === 0 ? " " : (lower[at - 1] ?? " ");
-    const after = lower[at + name.length] ?? " ";
-    if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return account;
+    if (at !== -1) {
+      const before = at === 0 ? " " : (lower[at - 1] ?? " ");
+      const after = lower[at + name.length] ?? " ";
+      if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return account;
+    }
+
+    const flattened = bare(account);
+    if (flattened && flat.includes(` ${flattened} `)) return account;
   }
+
   return "";
 }
 

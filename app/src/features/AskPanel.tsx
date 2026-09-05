@@ -2320,12 +2320,32 @@ export function AskPanel({
         ? "log"
         : readsAsEntry
           ? "log"
-          : routed
-            ? routed.intent === "question" || routed.intent === "chat"
-              ? "ask"
-              : "log"
-            : !isQuestion(note)
-              ? "log"
+          : /**
+             * ── A question is never filed, whatever the router says ───────
+             *
+             * "I have 20000 saved and tuition is 18000 next month, what
+             * should I do" became two ledger entries, Spending School PHP
+             * 20,000.00 and Spending Parking PHP 20,000.00. Neither happened.
+             * It is a question about a decision, and being asked for advice
+             * is a feature rather than a thing to file.
+             *
+             * The router is a model and it answered "entry", and its answer
+             * won outright: `isQuestion` sat in the branch below and was
+             * never reached, because that branch only runs when the router
+             * could not be reached at all.
+             *
+             * So a plain question is decided here, above the router. It is
+             * narrow on purpose: the local reader has already been asked and
+             * did not see an entry, which is what `readsAsEntry` above means.
+             * A sentence that reads as both, "I paid 500 for food, which
+             * wallet should I use", is an entry and never reaches this line.
+             */
+            isQuestion(note)
+            ? "ask"
+            : routed
+              ? routed.intent === "question" || routed.intent === "chat"
+                ? "ask"
+                : "log"
               : detectIntent(note));
 
     setDraft("");
@@ -2402,7 +2422,20 @@ export function AskPanel({
           parts.length > 1 &&
           parts.filter((r) => r.readsAsDebt || r.worthOffering).length > 1;
 
-        if (local.readsAsDebt && !severalParts) {
+        /**
+         * A question about borrowing is a question, not a borrowing.
+         *
+         * "if I loan 1 billion for treat is it good??" contains "loan", so
+         * this gate matched and put a debt card on screen asking which credit
+         * line a hypothetical billion pesos belongs to. Nobody borrowed
+         * anything. They asked whether they should, which is advice, which is
+         * the thing the assistant is meant to be good at.
+         *
+         * Checked here as well as in the routing below, because this gate
+         * runs first and returns: by the time the router's answer is looked
+         * at, the card is already up.
+         */
+        if (local.readsAsDebt && !severalParts && !isQuestion(note)) {
           say({ kind: "you", text: note });
           /**
            * Finished here, not by being sent to the form.
