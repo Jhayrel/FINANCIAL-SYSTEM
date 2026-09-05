@@ -56,6 +56,21 @@ describe("measureStorage", () => {
     credits: [],
     budgets: fixture.budgets,
     categories: fixture.reference.spendingTypes,
+    /**
+     * The three the panel was not measuring at all.
+     *
+     * It said "measured from what is actually stored in firebase" and left
+     * out the activity trail, the conversation and the assistant's own
+     * record. On the real database that is 604 documents against 451
+     * transactions: more rows than the ledger it claimed to be measuring.
+     *
+     * Required rather than optional on purpose. A default of empty would let
+     * the next caller forget them and quietly under-report again, which is
+     * the whole fault.
+     */
+    activity: [{ at: "2026-09-05", action: "created" }],
+    chat: [{ at: "2026-09-05", role: "you", text: "hello" }],
+    ai: [{ at: "2026-09-05", action: "asked", where: "add" }],
     quota: BROWSER_QUOTA,
   });
 
@@ -88,6 +103,9 @@ describe("measureStorage", () => {
       credits: [],
       budgets: {},
       categories: [],
+      activity: [],
+      chat: [],
+      ai: [],
       quota: 1000,
     });
     expect(tight.fraction).toBe(1);

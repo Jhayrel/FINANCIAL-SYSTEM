@@ -61,6 +61,7 @@ import { migrateAccounts, renameAccount, renameItem, type Account } from "./doma
 import { defaultSettings, isBlankSettings, type AppSettings } from "./domain/settings";
 import { Activity } from "./features/Activity";
 import { activityStore } from "./data/activityStore";
+import { chatStore } from "./data/chatStore";
 import { aiLogStore } from "./data/aiLogStore";
 import { manualCorrections } from "./domain/aiLog";
 import {
@@ -722,14 +723,41 @@ export default function App() {
     migrations: { debt: true, opening: true },
   });
 
-  const handleBackup = (): void => {
-    const backup = createBackup(systemState(), new Date().toISOString());
+  /**
+   * The whole system, including the three records it used to leave out.
+   *
+   * The button calls this "the whole system in one file" and it exported the
+   * ledger, the bin, the budgets and the settings and nothing else. The
+   * activity trail, the conversation and the assistant's own record were 604
+   * documents against 451 transactions on this database, so more rows were
+   * being dropped from the backup than kept in it.
+   *
+   * Read at the moment of the click rather than held in state, because they
+   * are written by three separate stores and anything cached here would be
+   * one message out of date the moment it was cached.
+   */
+  const handleBackup = async (): Promise<void> => {
+    const uid = cloud.uid ?? null;
+    const [activity, chat, ai] = await Promise.all([
+      activityStore(uid).recent().catch(() => []),
+      chatStore(uid).recent().catch(() => []),
+      aiLogStore(uid).recent().catch(() => []),
+    ]);
+
+    const backup = createBackup(
+      { ...systemState(), logs: { activity, chat, ai } },
+      new Date().toISOString(),
+    );
     download(
       `fms-backup-${new Date().toISOString().slice(0, 10)}.json`,
       JSON.stringify(backup, null, 2),
       "application/json",
     );
-    flash(`Backed up ${transactions.length.toLocaleString()} transactions and every setting.`);
+    flash(
+      `Backed up ${transactions.length.toLocaleString()} transactions, every setting, and ${(
+        activity.length + chat.length + ai.length
+      ).toLocaleString()} records of what happened.`,
+    );
   };
 
   const handleRestoreBackup = (backup: Backup, mode: RestoreMode): void => {

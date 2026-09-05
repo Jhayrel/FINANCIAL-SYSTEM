@@ -74,6 +74,7 @@ import {
 import { formatAmount, formatMoney, type Centavos } from "../domain/money";
 import { chatStore } from "../data/chatStore";
 import { aiLogHealth, aiLogStore } from "../data/aiLogStore";
+import { activityStore } from "../data/activityStore";
 import { correctionsFrom, type AiEvent } from "../domain/aiLog";
 import type { ChatMessage } from "../domain/chat";
 import { setPreference as setThemePreference } from "../theme";
@@ -2146,6 +2147,41 @@ function DataSection({
   const [reading, setReading] = useState(false);
   const file = useRef<HTMLInputElement>(null);
 
+  /**
+   * The three records nothing was measuring.
+   *
+   * The panel says it measures what is actually stored, and left out the
+   * activity trail, the conversation and the assistant's own record. On this
+   * database that is 604 documents against 451 transactions: more rows than
+   * the ledger it claimed to be measuring.
+   *
+   * Read here rather than passed in, so the figure cannot drift from the
+   * collections it describes, and so it is right whether the caller
+   * remembered to thread them through or not.
+   */
+  const [logs, setLogs] = useState<{
+    activity: readonly unknown[];
+    chat: readonly unknown[];
+    ai: readonly unknown[];
+  }>({ activity: [], chat: [], ai: [] });
+
+  useEffect(() => {
+    let live = true;
+    const uid = signedInUid ?? null;
+    void Promise.all([
+      activityStore(uid).recent(),
+      chatStore(uid).recent(),
+      aiLogStore(uid).recent(),
+    ])
+      .then(([activity, chat, ai]) => {
+        if (live) setLogs({ activity, chat, ai });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [signedInUid]);
+
   const report = useMemo(
     () =>
       measureStorage({
@@ -2154,6 +2190,9 @@ function DataSection({
         accounts: settings.accounts,
         credits: settings.credits,
         budgets,
+        activity: logs.activity,
+        chat: logs.chat,
+        ai: logs.ai,
         categories: [
           ...settings.bills,
           ...settings.subscriptions,

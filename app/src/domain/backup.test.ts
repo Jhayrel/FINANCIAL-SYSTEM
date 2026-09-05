@@ -46,7 +46,38 @@ describe("a backup holds the whole system", () => {
       "Revenue categories",
       "Spending types",
       "Budget years",
+      /**
+       * The three append-only records, added because the file called itself
+       * "the whole system" and left them out. On the real database that was
+       * 604 documents against 451 transactions, so more rows were being
+       * dropped from the backup than kept in it.
+       *
+       * They are exported and never restored: an audit trail says what
+       * happened, and writing one back from a file would make it say what a
+       * file claims happened.
+       */
+      "Activity trail",
+      "Conversation",
+      "What the assistant did",
     ]);
+  });
+
+  it("counts the logs when they are there, and zero when they are not", () => {
+    expect(good.manifest.find((m) => m.part === "Conversation")?.count).toBe(0);
+
+    const withLogs = createBackup(
+      { ...input, logs: { activity: [{}, {}], chat: [{}], ai: [{}, {}, {}] } },
+      "2026-08-30T00:00:00.000Z",
+    );
+    expect(withLogs.manifest.find((m) => m.part === "Activity trail")?.count).toBe(2);
+    expect(withLogs.manifest.find((m) => m.part === "Conversation")?.count).toBe(1);
+    expect(withLogs.manifest.find((m) => m.part === "What the assistant did")?.count).toBe(3);
+  });
+
+  /** A file written before this has none, and must still restore. */
+  it("reads a file that has no logs at all", () => {
+    expect(good.data.logs).toBeUndefined();
+    expect(validateBackup(good).ok).toBe(true);
   });
 
   it("carries the theme, which lives outside the settings document", () => {

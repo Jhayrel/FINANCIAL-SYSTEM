@@ -70,6 +70,23 @@ export interface StorageInput {
   readonly budgets: Readonly<Record<string, unknown>>;
   /** Everything in settings that is not accounts or credits. */
   readonly categories: readonly unknown[];
+  /**
+   * The three append-only records, which were measured by nothing.
+   *
+   * ── What the figure was missing ─────────────────────────────────────────
+   *
+   * The panel says "measured from what is actually stored in firebase" and
+   * left out `activity`, `chat` and `ai` entirely. On this database that is
+   * 604 documents against 451 transactions: more rows than the ledger it
+   * claimed to be measuring, and every one of them growing on its own with
+   * every message sent.
+   *
+   * They are also the three that grow without anybody deciding to add
+   * anything, which makes them exactly the ones worth watching.
+   */
+  readonly activity: readonly unknown[];
+  readonly chat: readonly unknown[];
+  readonly ai: readonly unknown[];
   readonly quota: number;
 }
 
@@ -87,6 +104,9 @@ export function measureStorage(input: StorageInput): StorageReport {
     section("categories", "Categories", "var(--cat-6)", input.categories),
     section("credits", "Credit and loans", "var(--cat-9)", input.credits),
     section("budgets", "Budgets", "var(--cat-3)", Object.values(input.budgets)),
+    section("activity", "Activity trail", "var(--cat-7)", input.activity),
+    section("chat", "Conversation", "var(--cat-8)", input.chat),
+    section("ai", "What the assistant did", "var(--cat-10)", input.ai),
   ];
 
   const sections = raw.sort((a, b) => b.bytes - a.bytes);

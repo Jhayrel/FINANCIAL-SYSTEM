@@ -71,6 +71,30 @@ export interface BackupData {
   readonly settings: AppSettings;
   readonly preferences: Preferences;
   readonly migrations: Migrations;
+  /**
+   * The three append-only records, so nothing is left behind.
+   *
+   * ── What the file was missing ─────────────────────────────────────────
+   *
+   * The panel calls this "the whole system in one file" and it left out the
+   * activity trail, the conversation and the assistant's own record. On this
+   * database that is 604 documents against 451 transactions, so more rows
+   * were being dropped from the backup than kept in it.
+   *
+   * They are exported and never restored, and that asymmetry is deliberate.
+   * An audit trail says what happened; writing one back from a file would
+   * make it say what a file claims happened, which is a different thing and
+   * a worse one. `firestore.rules` refuses to update or delete them for the
+   * same reason. So the export is complete and the restore stays honest.
+   *
+   * Optional, because a version 2 file written before this has none, and
+   * refusing to read those would make the owner's own history unrestorable.
+   */
+  readonly logs?: {
+    readonly activity: readonly unknown[];
+    readonly chat: readonly unknown[];
+    readonly ai: readonly unknown[];
+  };
 }
 
 /** One line of the manifest, so a restore can say what it is about to do. */
@@ -139,6 +163,9 @@ function manifestOf(d: BackupData): ManifestEntry[] {
     { part: "Revenue categories", count: d.settings.revenueCategories.length },
     { part: "Spending types", count: d.settings.spendingTypes.length },
     { part: "Budget years", count: Object.keys(d.budgets).length },
+    { part: "Activity trail", count: d.logs?.activity.length ?? 0 },
+    { part: "Conversation", count: d.logs?.chat.length ?? 0 },
+    { part: "What the assistant did", count: d.logs?.ai.length ?? 0 },
   ];
 }
 
@@ -150,6 +177,7 @@ export function createBackup(input: BackupInput, now: string): Backup {
     settings: input.settings,
     preferences: input.preferences,
     migrations: input.migrations,
+    ...(input.logs ? { logs: input.logs } : {}),
   };
 
   return {
