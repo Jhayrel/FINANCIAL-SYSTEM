@@ -233,6 +233,20 @@ If a design decision is not covered by the spec, propose it and wait. Do not def
   pushing is irreversible. Never `git add -f`: the only reason to force-add is
   to defeat `.gitignore`, and every line in it names something that must not be
   published.
+- **Say whether the work is pushed, every time, and prove it before saying so.**
+  End any reply that changed a file with the push state. Never say "pushed"
+  from memory of having run `git push`: a push can fail, a commit can be left
+  behind, and a file can sit unstaged. Run the check below and report what it
+  actually printed.
+
+  ```bash
+  git fetch -q origin; LOCAL=$(git rev-parse HEAD); REMOTE=$(git rev-parse origin/main); DIRTY=$(git status --porcelain | wc -l); if [ "$DIRTY" -ne 0 ]; then echo "NOT PUSHED: $DIRTY uncommitted file(s)"; git status --short; elif [ "$LOCAL" != "$REMOTE" ]; then echo "NOT PUSHED: ahead of origin/main"; git log --oneline origin/main..HEAD; else echo "PUSHED: origin/main == HEAD == ${LOCAL:0:7}"; fi
+  ```
+
+  It answers all three ways work goes missing: **uncommitted** files, commits
+  **ahead** of the remote, and a local branch that only *looks* current because
+  nothing fetched. Report the commit hash, so "pushed" is a checkable claim
+  rather than a reassurance. If it says NOT PUSHED, push, then run it again.
 - **Every push to `main` deploys to production.** Cloudflare Pages builds it
   automatically, so `tsc`, `vitest` and `vite build` must all pass first.
 - No custom domain, analytics, telemetry, or third-party scripts.
