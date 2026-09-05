@@ -43,6 +43,7 @@
  */
 
 import { contextToText, phpFigure, type AiContext } from "./aiContext";
+import { addDays, dayOfWeek, formatMedium } from "./dates";
 import { redact } from "./aiRedact";
 import { toPesos } from "./money";
 import { costOf } from "./totals";
@@ -251,6 +252,74 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
         `${monthName(key)}: spent ${php(m.spent)}, received ${php(m.revenue)}, ${m.count} entries`,
       );
     }
+  }
+
+  /**
+   * ── Days and weeks, because months were the smallest thing it had ──────
+   *
+   * Asked how the week was going, it answered: "This week is not separated
+   * out in the entries, so I do not have a clean cut for it." That reads as
+   * the ledger being incomplete, and it is not: every row has a date. What
+   * was missing was this section.
+   *
+   * It could not work the window out for itself either, and should not try.
+   * The prompt tells it to use the totals given and never to add anything up,
+   * because arithmetic over five hundred rows is exactly what a small model
+   * gets wrong, and a wrong figure in a financial answer is worse than no
+   * answer. So the windows are counted here, in integer centavos, like every
+   * other total in this file.
+   *
+   * The week runs Monday to Sunday, which is what "this week" means to
+   * someone looking at a calendar, and the rolling windows are there for
+   * "the last few days", which means something different again.
+   */
+  const since = (from: IsoDate, to: IsoDate = asOf) =>
+    rows.filter((t) => t.date >= from && t.date <= to);
+
+  const windowLine = (label: string, from: IsoDate, to: IsoDate = asOf): string => {
+    const inWindow = since(from, to);
+    const spent = inWindow.reduce((sum, t) => sum + spendingOf(t), 0);
+    const got = inWindow.reduce((sum, t) => sum + revenueOf(t), 0);
+    const when = from === to ? formatMedium(from) : `${from} to ${to}`;
+    return `${label} (${when}): spent ${php(spent)}, received ${php(got)}, ${inWindow.length} entries`;
+  };
+
+  // Monday as the first day. `dayOfWeek` returns 0 for Sunday.
+  const weekday = dayOfWeek(asOf);
+  const monday = addDays(asOf, -((weekday + 6) % 7));
+  const lastMonday = addDays(monday, -7);
+
+  out.push("");
+  out.push("## Recent windows, already worked out");
+  out.push("Use these exactly. They are the answer to anything about a day or a week.");
+  out.push(windowLine("Today", asOf));
+  out.push(windowLine("Yesterday", addDays(asOf, -1), addDays(asOf, -1)));
+  out.push(windowLine("This week, Monday to now", monday));
+  out.push(windowLine("Last week, Monday to Sunday", lastMonday, addDays(monday, -1)));
+  out.push(windowLine("The last 7 days", addDays(asOf, -6)));
+  out.push(windowLine("The last 30 days", addDays(asOf, -29)));
+
+  /**
+   * The fortnight, day by day.
+   *
+   * "Which day did I spend the most" and "what happened on Tuesday" are
+   * ordinary questions that a month total cannot answer and that the rows
+   * can, but only if the model counts, which it must not. Fourteen lines is
+   * a fortnight, which covers every way somebody says "recently".
+   */
+  const daily: string[] = [];
+  for (let back = 0; back < 14; back += 1) {
+    const day = addDays(asOf, -back);
+    const onDay = rows.filter((t) => t.date === day);
+    if (onDay.length === 0) continue;
+    const spent = onDay.reduce((sum, t) => sum + spendingOf(t), 0);
+    const got = onDay.reduce((sum, t) => sum + revenueOf(t), 0);
+    daily.push(`${day}: spent ${php(spent)}, received ${php(got)}, ${onDay.length} entries`);
+  }
+  if (daily.length > 0) {
+    out.push("");
+    out.push("## The last fortnight, day by day");
+    out.push(...daily);
   }
 
   // ── Breakdowns for the months that matter ────────────────────────────────

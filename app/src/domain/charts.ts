@@ -59,9 +59,22 @@ export interface Chart {
   readonly othersCount: number;
 }
 
-/** Asking to see something rather than be told it. */
+/**
+ * Asking to see something rather than be told it.
+ *
+ * "trend" and "over time" were missing, and the cost of that was not a
+ * missing chart. It was the assistant denying it could draw one at all:
+ * "Charts do not exist in the data I have", and later "I cannot make charts
+ * or graphs here, only plain text". The owner replied that it had come out
+ * wrong, and they were right. This app draws charts perfectly well; the
+ * request never reached the part that draws them, so it went to a model that
+ * can only write sentences and answered honestly about itself.
+ *
+ * A word here is worth more than a line of prompt telling a model not to say
+ * something true about itself.
+ */
 const WANTS_CHART =
-  /\b(chart|graph|pie|bar|bars|breakdown|break down|visuali[sz]e|plot|show me|diagram)\b/i;
+  /\b(chart|graph|pie|bar|bars|breakdown|break down|visuali[sz]e|plot|show me|diagram|trend|trends|trending|over time|shape of)\b/i;
 
 /** Asking for the written version. */
 const WANTS_REPORT = /\b(report|summary|summarise|summarize|overview|statement)\b/i;
