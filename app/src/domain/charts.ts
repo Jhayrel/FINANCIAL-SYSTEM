@@ -609,3 +609,39 @@ const WANTS_A_FILE =
 export const wantsStatement = (question: string): boolean =>
   WANTS_A_FILE.test(question) ||
   (WANTS_REPORT.test(question) && /\b(month|monthly|this month|financial status|position)\b/i.test(question));
+
+/**
+ * The same question with the file part taken out.
+ *
+ * ── Why the answer arrived twice ──────────────────────────────────────────
+ *
+ * Asking for a PDF gets two replies. The app says it cannot make a file and
+ * points at Statements, which is right, and then passes the question on so
+ * the figures still arrive. But the question still says "give me pdf", and
+ * the model is told plainly that it cannot produce files, so it says so too:
+ *
+ *   I cannot make a file here. The Statements screen is the printable
+ *   month, so open that and print it to PDF from your browser.
+ *   I cannot produce a PDF, spreadsheet, or image of that report.
+ *
+ * Two refusals in a row, the second longer and less useful than the first.
+ * The owner asked twice and got the pair both times.
+ *
+ * The app has already answered the file half. What is left for the model is
+ * the half about money, so that is what it is asked.
+ */
+export function withoutTheFilePart(question: string): string {
+  const left = question
+    .replace(WANTS_A_FILE, " ")
+    .replace(/\b(give me|make me|send me|generate|create|produce|i want to|i want|can you|please)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[,.;:\s]+|[,.;:\s]+$/g, "");
+
+  /**
+   * What is left has to still be a question about money. "give me a pdf"
+   * leaves nothing, and asking a model to answer an empty string produces
+   * whatever it feels like.
+   */
+  return left.length >= 8 ? left : "How is this month going?";
+}

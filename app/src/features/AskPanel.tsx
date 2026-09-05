@@ -95,6 +95,7 @@ import {
   isChartFollowUp,
   wantsChart,
   wantsStatement,
+  withoutTheFilePart,
   type Chart,
 } from "../domain/charts";
 import { inferFromHistory } from "../domain/infer";
@@ -1963,7 +1964,9 @@ export function AskPanel({
       setDraft("");
       setBusy(true);
       try {
-        await askQuestion(note, false);
+        // The file half has just been answered. What goes to the model is
+        // the half about money, or it refuses the file a second time.
+        await askQuestion(withoutTheFilePart(note), false);
       } finally {
         setBusy(false);
       }
@@ -2168,8 +2171,18 @@ export function AskPanel({
        * name of a flow rather than a description of a row: every spending row
        * in the ledger answers to it.
        */
+      /**
+       * Tested against what was typed, not against what survived stripping.
+       *
+       * `recall.phrase` is the message with the instruction words taken out,
+       * and "last" is one of those words. So the phrase could never contain
+       * it and this could never fire, however it was written: "delete that
+       * last" and "undelete the last one" strip to nothing at all and both
+       * came back with "no entry matches that". The instruction lives in the
+       * original message, so that is what is read.
+       */
       const wantsLatest =
-        /\b(last|latest|most recent|newest|recent|kanina lang|huli)\b/i.test(recall.phrase);
+        /\b(last|latest|most recent|newest|recent|huli)\b/i.test(note);
       const candidates = wantsLatest
         ? [...pool]
             .sort((a, b) => b.recordNumber - a.recordNumber)

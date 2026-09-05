@@ -47,7 +47,7 @@ const RESTORE = /\b(restore|bring back|undelete|recover|put back|unbin|retrieve)
  * which every row would answer to.
  */
 const INSTRUCTION =
-  /\b(delete|remove|erase|bin|cancel|undo|scrap|discard|restore|bring|back|undelete|recover|put|unbin|retrieve|the|a|an|my|me|i|data|entry|entries|row|rows|record|records|transaction|transactions|that|this|about|for|from|with|of|created|made|added|wrote|logged|please|can|you|it|one|last|paid|pay|spent|spend|bought|buy|sent|send|gave|give|used|use|did|was|were|is|are|on|at|in|to)\b/gi;
+  /\b(delete|deleted|deleting|remove|removed|erase|erased|bin|binned|cancel|cancelled|undo|scrap|discard|discarded|restore|restored|bring|back|undelete|recover|recovered|put|unbin|retrieve|the|a|an|my|me|i|data|entry|entries|row|rows|record|records|transaction|transactions|that|this|about|for|from|with|of|created|made|added|wrote|logged|please|can|you|it|one|last|paid|pay|spent|spend|bought|buy|sent|send|gave|give|used|use|did|was|were|is|are|on|at|in|to)\b/gi;
 
 /**
  * The app's own vocabulary, which describes no particular row.
