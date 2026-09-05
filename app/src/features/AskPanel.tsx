@@ -93,6 +93,7 @@ import {
   chartLabel,
   isChartFollowUp,
   wantsChart,
+  wantsStatement,
   type Chart,
 } from "../domain/charts";
 import { inferFromHistory } from "../domain/infer";
@@ -1166,6 +1167,35 @@ export function AskPanel({
      * message naming a period, with a chart already on screen, is asking for
      * that chart again.
      */
+    /**
+     * "give me a pdf of my financial status this month".
+     *
+     * It cannot produce a file and says so correctly. What it did not do was
+     * say where one lives: Statements is the printable view of a month, and
+     * a flat no is a worse answer than a pointer.
+     *
+     * Said first, then the question is answered normally, so the figures
+     * still arrive rather than being replaced by a signpost.
+     */
+    if (files.length === 0 && !as && wantsStatement(note)) {
+      say({ kind: "you", text: note });
+      say({
+        kind: "assistant",
+        text: "I cannot make a file here. The Statements screen is the printable month, so open that and print it to PDF from your browser. Here is what it would say:",
+        from: "this device",
+        ephemeral: true,
+      });
+      log(aiEvent("answered", "statements", { text: `Pointed at Statements for: ${note}` }));
+      setDraft("");
+      setBusy(true);
+      try {
+        await askQuestion(note, false);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     const followUp = isChartFollowUp(note, turns.some(isChart));
     const saysChart = routed?.intent === "chart";
     if (

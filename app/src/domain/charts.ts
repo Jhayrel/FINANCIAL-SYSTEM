@@ -543,3 +543,24 @@ export function chartInWords(chart: Chart): string {
   const rest = chart.othersCount > 0 ? `, and ${chart.othersCount} more` : "";
   return `${top}${rest}. Total ${chartLabel(chart.total)}.`;
 }
+
+/**
+ * Asking for something to keep, print or send.
+ *
+ * ── Why this is separate from `wantsReport` ───────────────────────────────
+ *
+ * "summarise the month" wants words on screen. "give me a pdf of my
+ * financial status this month" wants a file, and those are different
+ * answers: one the assistant can give and one it cannot.
+ *
+ * It has never been able to produce a file, and it says so correctly. What
+ * it did not do was say where one lives. The Statements screen is the
+ * printable view of a month, so a request for a report is pointed at it
+ * rather than answered with a flat no.
+ */
+const WANTS_A_FILE =
+  /\b(pdf|download|print|printable|export|excel|spreadsheet|csv|file|copy of|send me|statement|statements)\b/i;
+
+export const wantsStatement = (question: string): boolean =>
+  WANTS_A_FILE.test(question) ||
+  (WANTS_REPORT.test(question) && /\b(month|monthly|this month|financial status|position)\b/i.test(question));

@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildChart } from "./charts";
+import { buildChart, wantsStatement } from "./charts";
 import { totalsFor } from "./totals";
 import type { Transaction } from "./types";
 
@@ -339,5 +339,40 @@ describe("naming one account", () => {
     const chart = buildChart("chart my income by wallet this year", earned, ASOF);
     expect(chart?.rows.map((r) => r.label)).toEqual(["Maya"]);
     expect(chart?.rows.map((r) => r.label)).not.toContain("(none)");
+  });
+});
+
+describe("asking for something to keep", () => {
+  /**
+   * It cannot produce a file and says so correctly. What it did not do was
+   * say where one lives, and a flat no is a worse answer than a pointer:
+   * Statements is the printable view of a month.
+   */
+  it("recognises a request for a file", () => {
+    for (const q of [
+      "give me a pdf of my financial status this month",
+      "can I download this month",
+      "export my spending",
+      "print my statement",
+      "send me a copy of august",
+    ]) {
+      expect(wantsStatement(q), q).toBe(true);
+    }
+  });
+
+  it("recognises a monthly report even without the word file", () => {
+    expect(wantsStatement("give me a report of my financial status this month")).toBe(true);
+  });
+
+  /** An ordinary question must not be diverted to a screen. */
+  it("leaves a plain question alone", () => {
+    for (const q of [
+      "how much did I spend on food",
+      "chart my spending this year",
+      "what needs attention",
+      "I paid 250 for gas using cash",
+    ]) {
+      expect(wantsStatement(q), q).toBe(false);
+    }
   });
 });
