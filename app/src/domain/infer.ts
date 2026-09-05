@@ -50,6 +50,25 @@ export interface Inferred {
   readonly draft: Draft;
   /** Why each field was filled, in the owner's own numbers. */
   readonly because: readonly string[];
+  /**
+   * Fields that were guessed rather than read out of the sentence.
+   *
+   * ── Why a card needs this ─────────────────────────────────────────────
+   *
+   * The record holds 24 rejected cards against 2 corrections. Rejecting is
+   * one tap and correcting is several, so almost every time the assistant
+   * was wrong the whole card went in the bin, and a rejection teaches it
+   * nothing: it will make the same guess again tomorrow.
+   *
+   * Usually only one field was wrong. "I paid my friend 600 cash because I
+   * buy clubshirt" had the date, the wallet and the amount right and the
+   * item wrong, and it was thrown away whole.
+   *
+   * So the card says which field it is least sure of. Correcting the one
+   * weak field is then the obvious action rather than the expensive one,
+   * and a correction is the only thing that teaches.
+   */
+  readonly unsure: readonly string[];
 }
 
 /**
@@ -218,10 +237,18 @@ export function inferFromHistory(
   reference: ReferenceLists,
   hint: string,
 ): Inferred {
-  if (!draft.flow || draft.flow === "Debt") return { draft, because: [] };
+  if (!draft.flow || draft.flow === "Debt") return { draft, because: [], unsure: [] };
 
   const flow = draft.flow as Flow;
   const because: string[] = [];
+  /**
+   * Every field this function fills was guessed, by definition.
+   *
+   * The sentence did not say it: that is why it was still blank when this
+   * ran. The card uses the list to point at the one worth checking, so
+   * correcting one field is easier than throwing the whole card away.
+   */
+  const unsure: string[] = [];
   let next = draft;
 
   // ── The item ─────────────────────────────────────────────────────────────
@@ -233,6 +260,7 @@ export function inferFromHistory(
     ]);
     if (match) {
       next = { ...next, item: match.item };
+      unsure.push("item");
       because.push(
         match.how === "named"
           ? `Booked as ${match.item}, which you have used ${match.seen} ${match.seen === 1 ? "time" : "times"}.`
@@ -250,6 +278,7 @@ export function inferFromHistory(
        */
       const named = namedInLists(hint, flow, next.category, reference);
       next = { ...next, item: named };
+      unsure.push("item");
       because.push(`Booked as ${named}, which you named.`);
     } else {
       /**
@@ -263,6 +292,7 @@ export function inferFromHistory(
       const byRemark = remarkMatch(hint, flow, reference);
       if (byRemark) {
         next = { ...next, item: byRemark };
+        unsure.push("item");
         because.push(`Booked as ${byRemark}, which is what your note on it describes.`);
       }
     }
@@ -271,12 +301,12 @@ export function inferFromHistory(
   // Everything below leans on the item, so there is nothing more to do
   // without one.
   const item = next.item.trim();
-  if (!item) return { draft: next, because };
+  if (!item) return { draft: next, because, unsure };
 
   const past = transactions.filter(
     (t) => t.type === flow && t.item.trim().toLowerCase() === item.toLowerCase(),
   );
-  if (past.length === 0) return { draft: next, because };
+  if (past.length === 0) return { draft: next, because, unsure };
 
   // ── The category ─────────────────────────────────────────────────────────
   // Only for Spending: Revenue and Transfer each have exactly one.
@@ -284,6 +314,7 @@ export function inferFromHistory(
     const { value, count } = commonest(past, (t) => t.category as TransactionCategory);
     if (value && value !== next.category && count > 0) {
       next = { ...next, category: value };
+      unsure.push("category");
       because.push(`Filed under ${value}, where your other ${item} entries are.`);
     }
   }
@@ -295,6 +326,7 @@ export function inferFromHistory(
     const { value, count } = commonest(past, (t) => t.fromWallet);
     if (value && accounts.includes(value)) {
       next = { ...next, fromWallet: value };
+      unsure.push("fromWallet");
       because.push(`Paid from ${value}, which is where ${count} of these came from.`);
     }
   }
@@ -302,6 +334,7 @@ export function inferFromHistory(
     const { value, count } = commonest(past, (t) => t.toWallet);
     if (value && accounts.includes(value)) {
       next = { ...next, toWallet: value };
+      unsure.push("toWallet");
       because.push(`Into ${value}, which is where ${count} of these landed.`);
     }
   }
@@ -328,6 +361,7 @@ export function inferFromHistory(
     // Twice is a usual amount. Once is just the last time.
     if (amount > 0 && seen >= 2) {
       next = { ...next, amount };
+      unsure.push("amount");
       because.push(
         `The usual ${item} is ${pesos(amount)}, which is what ${seen} of them came to.`,
       );
@@ -338,10 +372,11 @@ export function inferFromHistory(
   const { value: status } = commonest(past, (t) => t.status as TransactionStatus);
   if (status && status !== next.status) {
     next = { ...next, status };
+    unsure.push("status");
     because.push(`Marked ${status}, like the rest of them.`);
   }
 
-  return { draft: next, because };
+  return { draft: next, because, unsure };
 }
 
 /**

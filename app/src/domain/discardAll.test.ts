@@ -13,7 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { wantsDiscardAll } from "./recall";
+import { wantsDiscardAll, wantsDiscardOpen } from "./recall";
 
 describe("throwing away every card at once", () => {
   it("recognises the sentence that did nothing", () => {
@@ -77,5 +77,65 @@ describe("throwing away every card at once", () => {
   it("is nothing for an empty message", () => {
     expect(wantsDiscardAll("")).toBe(false);
     expect(wantsDiscardAll("   ")).toBe(false);
+  });
+});
+
+describe("discarding the card in front of you", () => {
+  /**
+   * ── The dangerous one ───────────────────────────────────────────────────
+   *
+   * The owner wrote this while testing:
+   *
+   *   "now I said the word discard then it show data from database and it
+   *    moved to bin"
+   *
+   * `discard` is in the delete list, so a bare "discard" was read as an
+   * instruction to find rows in the ledger. They meant the card on screen.
+   * One is throwing away a guess; the other is moving real money records out
+   * of the ledger, and they were the same word.
+   */
+  it("recognises the four ways it was actually typed", () => {
+    for (const said of [
+      "discard it",
+      "I said discard it mean you should discard it",
+      "discard",
+      "//discard",
+    ]) {
+      expect(wantsDiscardOpen(said), said).toBe(true);
+    }
+  });
+
+  it("recognises the other ways of saying it", () => {
+    for (const said of ["reject it", "scrap it", "nevermind", "never mind", "discard this"]) {
+      expect(wantsDiscardOpen(said), said).toBe(true);
+    }
+  });
+
+  /**
+   * Naming a target means the ledger. A card is a guess that has not become
+   * anything, so throwing one away costs a retype; a row is money.
+   */
+  it("leaves anything that names a row to the finder", () => {
+    for (const said of [
+      "delete the entry from august",
+      "remove record 442",
+      "cancel my google drive",
+      "delete all dataabse",
+      "discard the transaction I made yesterday",
+    ]) {
+      expect(wantsDiscardOpen(said), said).toBe(false);
+    }
+  });
+
+  it("is not a question", () => {
+    expect(wantsDiscardOpen("should I discard it?")).toBe(false);
+  });
+
+  it("is nothing for a long sentence that merely mentions it", () => {
+    expect(
+      wantsDiscardOpen(
+        "I was going to discard that but then I changed my mind about the whole thing entirely",
+      ),
+    ).toBe(false);
   });
 });

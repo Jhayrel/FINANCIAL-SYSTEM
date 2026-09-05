@@ -172,6 +172,56 @@ export function sweepRows(
  * most reversible action in the app. There is nothing to confirm: the cards
  * were never money.
  */
+/**
+ * "discard", meaning the card in front of you.
+ *
+ * ── The dangerous one ─────────────────────────────────────────────────────
+ *
+ * The owner wrote this in their own notes while testing:
+ *
+ *   "now I said the word discard then it show data from database and it
+ *    moved to bin. this is..."
+ *
+ * `discard` is in the BIN list, so a bare "discard" was read as an
+ * instruction to find rows in the ledger and offer them for binning. They
+ * meant the card on screen. One is throwing away a guess; the other is
+ * moving real money records out of the ledger, and they were the same word.
+ *
+ * They asked four times across two sessions, in four different ways, and
+ * every one of them either did nothing or went to the ledger:
+ *
+ *   "discard it"
+ *   "I said discard it mean you should discard it"
+ *   "discard"
+ *   "//discard"
+ *
+ * ── What keeps it from firing on a real delete ────────────────────────────
+ *
+ * A card is a guess that has not become anything, so throwing one away costs
+ * a retype. Naming a target means the ledger: a figure, a date, a record, or
+ * a possessive like "cancel my google drive". Those all go to the finder.
+ *
+ * Leading slashes are stripped because the owner writes "//" in front of a
+ * note to themselves, and "//discard" is still "discard".
+ */
+export function wantsDiscardOpen(text: string): boolean {
+  const said = text.trim().replace(/^\/+\s*/, "").trim();
+  if (!said || said.length > 60) return false;
+  if (said.endsWith("?")) return false;
+
+  // A figure, a date or a named thing means a row, not a card.
+  if (/\d/.test(said)) return false;
+  if (
+    /\b(my|the|on|from|dated|about|entry|entries|record|records|row|rows|data|database|dataabse|transaction|transactions|everything|all)\b/i.test(
+      said,
+    )
+  ) {
+    return false;
+  }
+
+  return /\b(discard|reject|scrap|nevermind|never mind)\b/i.test(said);
+}
+
 export function wantsDiscardAll(text: string): boolean {
   const said = text.trim();
   if (!said || said.length > 40) return false;

@@ -84,6 +84,7 @@ import {
   findRows,
   sweepRows,
   wantsDiscardAll,
+  wantsDiscardOpen,
   type Candidate,
   type RecallAction,
 } from "../domain/recall";
@@ -448,10 +449,29 @@ export function AskPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [previewing]);
 
-  // A new message is only useful if you can see it.
+  /**
+   * Follow the conversation, unless you have scrolled up to read something.
+   *
+   * ── What this used to do ────────────────────────────────────────────────
+   *
+   * It jumped to the bottom on every change, including the ones you caused
+   * while reading. The owner wrote it down: "why if I scroll up then click
+   * discard and it just scroll back again in the bottom fix it". Pressing a
+   * button on a card you had scrolled up to look at threw you back to the
+   * end, so the result of the thing you just did was off screen.
+   *
+   * Near the bottom means you are following along and a new line should
+   * follow you. Scrolled up means you are reading something, and the page
+   * should hold still. Sixty pixels of tolerance, so a line arriving while
+   * you sit at the end still counts as being at the end.
+   */
+  const NEAR_BOTTOM = 60;
+
   useEffect(() => {
     const el = threadRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distance <= NEAR_BOTTOM) el.scrollTop = el.scrollHeight;
   }, [turns, busy]);
 
   /**
@@ -1086,6 +1106,48 @@ export function AskPanel({
     }
 
     const openCards = turns.filter((t) => isOffer(t) && t.state === "open");
+
+    /**
+     * "discard", meaning the card in front of you.
+     *
+     * The word is in the delete list, so a bare "discard" searched the ledger
+     * and offered real rows for binning. The owner wrote it down while
+     * testing: "I said the word discard then it show data from database and
+     * it moved to bin". One is throwing away a guess; the other is moving
+     * money records out of the ledger.
+     *
+     * Above the finder, so the card wins whenever there is one. With no card
+     * open it falls through and "discard" means the ledger again, which is
+     * the only reading left.
+     */
+    if (openCards.length > 0 && files.length === 0 && !as && wantsDiscardOpen(note)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      for (const card of openCards) {
+        if (isOffer(card)) {
+          log(
+            aiEvent("rejected", "add", {
+              entry: `${card.proposal.draft.date} ${card.proposal.draft.flow} ${card.proposal.draft.item}`,
+              text: note,
+            }),
+          );
+        }
+      }
+      setTurns((prev) =>
+        prev.map((t) => (isOffer(t) && t.state === "open" ? { ...t, state: "discarded" } : t)),
+      );
+      say({
+        kind: "assistant",
+        text:
+          openCards.length === 1
+            ? "Thrown away. Nothing was added to the ledger, so there is nothing to undo."
+            : `Thrown away, all ${openCards.length}. Nothing reached the ledger.`,
+        from: "this device",
+        ephemeral: true,
+      });
+      return;
+    }
+
     if (openCards.length > 0 && files.length === 0 && !as && wantsDiscardAll(note)) {
       setDraft("");
       say({ kind: "you", text: note });
