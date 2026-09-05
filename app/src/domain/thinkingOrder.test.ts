@@ -72,9 +72,22 @@ describe("the four steps are named, and in order", () => {
    * sentence, and reading either wrong turns borrowing into income.
    */
   it("decides debt before the model is asked anything", () => {
-    expect(at("if (local.readsAsDebt)")).toBeLessThan(
+    expect(at("if (local.readsAsDebt && !severalParts)")).toBeLessThan(
       at("const found = await readAttached(note);"),
     );
+  });
+
+  /**
+   * The gate matches one movement, not any sentence containing the word.
+   *
+   * "I acquire a debt at maya credit 5000... then I transferred 2000 of it
+   * to gcash with 15 fee" contains "debt", so the gate matched, showed one
+   * debt card and returned, dropping the transfer without a word. The owner
+   * hit it five times across three sessions.
+   */
+  it("lets a sentence with several parts past the debt gate", () => {
+    expect(source).toContain("const severalParts =");
+    expect(source).toContain("if (local.readsAsDebt && !severalParts)");
   });
 
   /** The message is echoed once, by the analyse step, and not again below. */

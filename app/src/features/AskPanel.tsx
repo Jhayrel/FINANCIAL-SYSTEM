@@ -690,6 +690,20 @@ export function AskPanel({
      * in the same place.
      */
     if (filled.draft.flow === "Debt") {
+      /**
+       * A debt card is a proposal, and it was recorded as nothing.
+       *
+       * Five sentences about borrowing looked completely silent in the
+       * record: no card, no answer, no chart. They were not silent, they
+       * produced a debt card, and nothing wrote it down. That gap sent me
+       * looking for a fault in the reader that was not there.
+       */
+      log(
+        aiEvent("proposed", "add", {
+          entry: `${filled.draft.date} Debt ${formatMoney(filled.draft.amount ?? 0)}`,
+          text: hint,
+        }),
+      );
       say({ kind: "debt", draft: filled.draft, state: "open" });
       return;
     }
@@ -1779,7 +1793,28 @@ export function AskPanel({
          * reading either wrong misfiles borrowing as income, which is the
          * mistake this whole app was built to stop.
          */
-        if (local.readsAsDebt) {
+        /**
+         * Only when the whole sentence is the debt movement.
+         *
+         * "I acquire a debt at maya credit 5000 to be paid soon, I received
+         * that in maya, then I transferred 2000 of it to gcash with 15 fee"
+         * contains the word debt, so this gate matched, showed one debt card
+         * and returned. The transfer at the end was dropped without a word.
+         * The owner hit it five times across three sessions.
+         *
+         * A sentence that splits into two usable parts is not one movement,
+         * whatever words it contains, so it goes to the splitter below and
+         * each part gets what it needs: a debt card for the borrowing, an
+         * ordinary card for the transfer.
+         */
+        const parts = splitEntries(note).map((line) =>
+          readEntry(line, transactions, reference, asOf),
+        );
+        const severalParts =
+          parts.length > 1 &&
+          parts.filter((r) => r.readsAsDebt || r.worthOffering).length > 1;
+
+        if (local.readsAsDebt && !severalParts) {
           say({ kind: "you", text: note });
           /**
            * Finished here, not by being sent to the form.
@@ -1798,6 +1833,12 @@ export function AskPanel({
             from: "this device",
             ephemeral: true,
           });
+          log(
+            aiEvent("proposed", "add", {
+              entry: `${local.draft.date} Debt ${formatMoney(local.draft.amount ?? 0)}`,
+              text: note,
+            }),
+          );
           say({ kind: "debt", draft: local.draft, state: "open" });
           return;
         }
@@ -1866,6 +1907,71 @@ export function AskPanel({
 
       if (files.length === 0 && lines.length > 1) {
         const each = lines.map((line) => readEntry(line, transactions, reference, asOf));
+
+        /**
+         * A sentence can be part debt and part not, and it was all or nothing.
+         *
+         * "I acquire a debt at maya credit 5000 to be paid soon, I received
+         * that in maya, then I transferred 2000 of it to gcash with 15 fee"
+         * splits into a debt clause, a fragment, and a transfer. The debt
+         * clause cannot be offered as an ordinary card, `every` was therefore
+         * false, and the whole split was thrown away: the transfer went with
+         * it and the owner got one card instead of two. They hit this five
+         * times across three sessions.
+         *
+         * A part is usable when it is a debt movement or reads as an entry.
+         * Two usable parts is a real split; one is a sentence that happens to
+         * contain the word "then". Fragments in between are skipped and said
+         * out loud, rather than taking the rest down with them.
+         */
+        const usable = each.filter((r) => r.readsAsDebt || r.worthOffering);
+
+        if (usable.length > 1) {
+          const skipped = lines.filter((_, i) => {
+            const r = each[i];
+            return r ? !r.readsAsDebt && !r.worthOffering : true;
+          });
+
+          for (const [i, r] of each.entries()) {
+            if (r.readsAsDebt) {
+              log(
+                aiEvent("proposed", "add", {
+                  entry: `${r.draft.date} Debt ${formatMoney(r.draft.amount ?? 0)}`,
+                  text: lines[i] ?? "",
+                }),
+              );
+              say({ kind: "debt", draft: r.draft, state: "open" });
+              continue;
+            }
+            if (!r.worthOffering) continue;
+            await offer(
+              {
+                draft: r.draft,
+                confidence: "high",
+                sourceRef: `part ${i + 1}: ${lines[i] ?? ""}`,
+                said: lines[i] ?? "",
+                adjustments: r.because,
+              },
+              lines[i] ?? "",
+              false,
+              true,
+              r.settled,
+            );
+          }
+
+          if (skipped.length > 0) {
+            say({
+              kind: "assistant",
+              text: `I could not make an entry out of ${skipped
+                .map((line) => `"${line}"`)
+                .join(" or ")}. Say it again on its own if it was one.`,
+              from: "this device",
+              ephemeral: true,
+            });
+          }
+          return;
+        }
+
         if (each.every((r) => r.worthOffering)) {
           // No echo: `readAttached` above already put the message on screen
           // before it tried the model. Saying it again here printed it twice.
