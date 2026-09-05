@@ -253,6 +253,22 @@ service cloud.firestore {
           // as in the client, because a document is capped at 1 MB and this
           // is the one field on a message whose size the owner does not type.
           && (!('chart' in d) || (d.chart is string && d.chart.size() <= 4000))
+          // A proposal card, as the entry it is offering: a dozen short
+          // fields as JSON. Cards used not to be stored at all, on the
+          // reasoning that a decision in progress should not come back
+          // tomorrow. It cost the owner eight cards read off a statement
+          // every time a refresh happened, which is lost work rather than a
+          // stale decision, and a card whose row is already in the ledger now
+          // says so on its own face.
+          //
+          // The state is replayed, not updated: settling writes a second
+          // message carrying the same card id, so this collection stays
+          // append only. Bounded like the chart, and never a picture.
+          && (!('card' in d) || (
+                d.card is string
+             && d.card.size() <= 4000
+             && !d.card.matches('(?s).*data:image.*')
+             ))
           // What a photo said, in place of the photo. A picture is never
           // stored: a megabyte against a 1 MB document cap, and the least
           // useful byte in a financial database. What is kept is a line per

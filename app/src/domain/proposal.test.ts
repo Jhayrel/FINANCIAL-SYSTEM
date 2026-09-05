@@ -292,3 +292,55 @@ describe("redact", () => {
     expect(hasSecret(text)).toBe(true);
   });
 });
+
+/**
+ * A subscription is not a transfer, whatever the model said.
+ *
+ * "I paid my spotify from gcash" came back as a Transfer carrying Spotify as
+ * its item. Everything else on that card followed from the one wrong word:
+ * it asked which wallet the money landed in, refused to save without one, and
+ * could not fill the amount either, because the fixed-cost lookup only runs
+ * for Bills and Subscriptions.
+ */
+describe("a thing you pay is never a wallet you pay into", () => {
+  it("reads a named subscription as spending", () => {
+    const { proposals } = one({ flow: "Transfer", item: "Spotify", toWallet: "" });
+    expect(proposals[0]?.draft.flow).toBe("Spending");
+  });
+
+  it("files it under Subscriptions, which is what fills the amount", () => {
+    const { proposals } = one({ flow: "Transfer", item: "Spotify" });
+    expect(proposals[0]?.draft.category).toBe("Subscriptions");
+  });
+
+  it("files a named bill under Bills", () => {
+    const { proposals } = one({ flow: "Transfer", item: "Electricity" });
+    expect(proposals[0]?.draft.category).toBe("Bills");
+  });
+
+  it("says what it changed rather than changing it quietly", () => {
+    const { proposals } = one({ flow: "Transfer", item: "Spotify" });
+    expect(proposals[0]?.adjustments.join(" ")).toContain("subscriptions or bills");
+  });
+
+  it("recognises the name in the description when the item is blank", () => {
+    const { proposals } = one({
+      flow: "Transfer",
+      item: "",
+      description: "Spotify subscription payment",
+    });
+    expect(proposals[0]?.draft.flow).toBe("Spending");
+  });
+
+  /** A real transfer must stay a transfer. This only fires on a named thing. */
+  it("leaves an ordinary transfer alone", () => {
+    const { proposals } = one({ flow: "Transfer", item: "", description: "Maya to Gcash" });
+    expect(proposals[0]?.draft.flow).toBe("Transfer");
+  });
+
+  it("does not touch a subscription that was already read as spending", () => {
+    const { proposals } = one({ flow: "Spending", item: "Spotify", category: "Subscriptions" });
+    expect(proposals[0]?.draft.flow).toBe("Spending");
+    expect(proposals[0]?.adjustments.join(" ")).not.toContain("rather than a transfer");
+  });
+});

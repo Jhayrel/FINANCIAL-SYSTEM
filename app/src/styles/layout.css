@@ -2707,8 +2707,28 @@ textarea.fms-askinput {
   background: var(--surface-sunk);
 }
 
+/*
+ * What a photo said, once the photo is gone.
+ *
+ * `pre-wrap` because the description is written as a small block now, a
+ * header line and then a line per entry it produced, and collapsing that into
+ * one paragraph loses the only structure it has. Long lines still wrap, so a
+ * narrow assistant column is not made to scroll sideways.
+ */
 .fms-describedline {
   margin: 0;
   color: var(--ink-2);
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/*
+ * The first line of each description is its file name.
+ *
+ * One weight above the rows underneath, so several files in one message read
+ * as several things rather than one long list. A weight, never a colour:
+ * colour means direction of money here (rule D3).
+ */
+.fms-describedline:first-line {
+  font-weight: 650;
 }

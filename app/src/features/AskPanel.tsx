@@ -103,6 +103,7 @@ import { detectIntent, isQuestion, type Intent } from "../domain/intent";
 import { addressesEveryCard } from "../domain/capture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
+import { describeFile, summariseFile } from "../domain/photoNote";
 import {
   duplicateHeadline,
   duplicatesOf,
@@ -113,7 +114,7 @@ import { classifyItem, extractProposals, routeMessage, type Intent as Routed } f
 import { chatStore } from "../data/chatStore";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, type AiEvent, type AttachmentNote } from "../domain/aiLog";
-import { drawn, drew, said } from "../domain/chat";
+import { carded, cardsIn, drawn, drew, proposed, said, type StoredCard } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
 import { transactionToDraft } from "../domain/entry";
@@ -247,6 +248,14 @@ interface DebtChoice {
   readonly kind: "debt";
   readonly draft: Draft;
   readonly state: "open" | "settled";
+  /**
+   * Stable across a refresh, so the record can say what became of this card.
+   *
+   * The array index cannot do this job: it identifies a card within one
+   * render and means nothing to the next session. Every state change writes
+   * a message carrying this id, and the last one wins on load.
+   */
+  readonly cardId: string;
 }
 
 interface Offered {
@@ -268,6 +277,8 @@ interface Offered {
    * figure that has moved on to the next entry.
    */
   readonly recordNumber?: number;
+  /** Stable across a refresh. See `DebtChoice.cardId`. */
+  readonly cardId: string;
 }
 
 type Turn = Said | Offered | Found | Drawn | DebtChoice;
@@ -313,6 +324,75 @@ const spokenHistory = (turns: readonly Turn[], most: number) =>
  * Enough to follow a pronoun, not so much that a long session quietly grows
  * every request until it hits the token limit.
  */
+/**
+ * What a stored card's message says it is.
+ *
+ * The encoded half is for rebuilding the card. This half is for a reader, and
+ * for the model when the turn goes back as history: "Added: 2026-09-05
+ * Spending Food PHP 500.00" is a fact about the ledger, where "New entry"
+ * would be a fact about a form nobody can see any more.
+ */
+const CARD_WORD: Record<string, string> = {
+  open: "New entry",
+  added: "Added",
+  used: "Sent to the form",
+  discarded: "Discarded",
+  settled: "Added",
+};
+
+/**
+ * A card id, stable across a refresh.
+ *
+ * The clock plus a counter, like message ids: two cards off one statement
+ * land in the same millisecond, and a collision would merge two entries into
+ * one on the next load.
+ */
+let cards = 0;
+const newCardId = (): string => {
+  cards += 1;
+  return `c-${Date.now()}-${cards.toString(36)}`;
+};
+
+/**
+ * A stored card, back into a turn on screen.
+ *
+ * Defensive about what comes out of the database: this is JSON written by an
+ * older build of the app, and a field that used to exist may not any more.
+ * Everything missing falls back to something safe rather than throwing, since
+ * one bad card must not take the whole conversation down with it.
+ */
+function turnFromCard(card: StoredCard): Turn {
+  const draft = card.draft as unknown as Draft;
+
+  if (card.kind === "debt") {
+    return {
+      kind: "debt",
+      draft,
+      state: card.state === "open" ? "open" : "settled",
+      cardId: card.id,
+    };
+  }
+
+  const state: Offered["state"] =
+    card.state === "added" || card.state === "used" || card.state === "discarded"
+      ? card.state
+      : "open";
+
+  return {
+    kind: "proposal",
+    proposal: {
+      draft,
+      confidence: (card.confidence as Proposal["confidence"]) ?? "medium",
+      sourceRef: card.sourceRef ?? "an earlier session",
+      adjustments: card.adjustments ?? [],
+      ...(card.said ? { said: card.said } : {}),
+    },
+    state,
+    cardId: card.id,
+    ...(card.recordNumber === undefined ? {} : { recordNumber: card.recordNumber }),
+  };
+}
+
 const HISTORY_TURNS = 6;
 
 /** Openers, because a blank box invites nothing. */
@@ -582,6 +662,44 @@ export function AskPanel({
    * The write is not awaited and cannot fail the turn. The answer is on
    * screen; a failed record of it is not the reader's problem.
    */
+  /**
+   * A card into the record, in whatever state it is in.
+   *
+   * Called when a card appears and again every time it changes, because the
+   * chat collection takes creates and refuses updates: the state is replayed
+   * on load rather than edited in place, and the last message carrying a
+   * given card id is the truth about that card.
+   */
+  const recordCard = (turn: Offered | DebtChoice): void => {
+    const card = isOffer(turn)
+      ? {
+          id: turn.cardId,
+          kind: "proposal" as const,
+          state: turn.state,
+          draft: turn.proposal.draft as unknown as Record<string, unknown>,
+          sourceRef: turn.proposal.sourceRef,
+          confidence: turn.proposal.confidence,
+          adjustments: turn.proposal.adjustments,
+          ...(turn.proposal.said ? { said: turn.proposal.said } : {}),
+          ...(turn.recordNumber === undefined ? {} : { recordNumber: turn.recordNumber }),
+        }
+      : {
+          id: turn.cardId,
+          kind: "debt" as const,
+          state: turn.state,
+          draft: turn.draft as unknown as Record<string, unknown>,
+        };
+
+    const d = isOffer(turn) ? turn.proposal.draft : turn.draft;
+    const what = isOffer(turn)
+      ? `${d.date} ${d.flow} ${d.item} ${formatMoney(d.amount ?? 0)}`
+      : `${d.date} Debt ${formatMoney(d.amount ?? 0)}`;
+
+    void chatStore(uid)
+      .record(proposed(card, `${CARD_WORD[card.state]}: ${what}`))
+      .catch(() => {});
+  };
+
   const say = (turn: Turn): void => {
     setTurns((prev) => [...prev, turn]);
     // Only what was said is kept. A card and a found list are decisions in
@@ -605,7 +723,33 @@ export function AskPanel({
         .catch(() => {});
       return;
     }
-    if (isOffer(turn) || isFound(turn) || isDebt(turn) || turn.ephemeral) return;
+    /**
+     * A card is kept too, now, and every change to it.
+     *
+     * ── What changed, and why the old reasoning stopped holding ─────────
+     *
+     * Cards were not stored because a card is a decision in progress, and one
+     * that came back tomorrow would offer to add a row already added. That
+     * was right when nothing could tell the difference. It is not right now:
+     * `duplicatesOf` puts a warning on any card whose row is already in the
+     * ledger, naming the record and the fields that agree.
+     *
+     * Meanwhile the cost of not storing them was landing on the owner. Eight
+     * cards read off a statement, one interruption, and a refresh threw all
+     * eight away. That is lost work, not a stale decision, and they asked for
+     * it to stop.
+     *
+     * The state is replayed rather than updated, because this collection
+     * takes creates and refuses updates: settling writes a second message
+     * carrying the same card id, and the last one wins. Append only is what
+     * makes it a record, so it stays append only.
+     */
+    if (isOffer(turn) || isDebt(turn)) {
+      recordCard(turn);
+      return;
+    }
+
+    if (isFound(turn) || turn.ephemeral) return;
 
     /**
      * A message carrying photos waits until it knows what they were.
@@ -648,21 +792,59 @@ export function AskPanel({
       .then((all) => {
         const history = since ? all.filter((m) => m.at > since) : all;
         if (!live || history.length === 0) return;
-        setTurns((prev) =>
-          prev.length > 0
-            ? prev
-            : history.map((m): Turn => {
-                const chart = drawn(m) as Chart | null;
-                return chart
-                  ? { kind: "chart", chart }
-                  : {
-                      kind: m.role,
-                      text: m.text,
-                      ...(m.from ? { from: m.from } : {}),
-                      ...(m.files && m.files.length > 0 ? { described: m.files } : {}),
-                    };
-              }),
-        );
+
+        /**
+         * Cards come back where they were, in the state they ended in.
+         *
+         * A card that changed wrote a second message with the same id, so
+         * the final state is worked out first and the card is then emitted
+         * once, at its first appearance. Without that, a card added after
+         * three corrections would come back four times.
+         */
+        const final = cardsIn(history);
+
+        setTurns((prev) => {
+          if (prev.length > 0) return prev;
+          const rebuilt: Turn[] = [];
+          /**
+           * Inside the updater, not outside it.
+           *
+           * React calls a state updater more than once in development, and it
+           * must be pure. Held outside, this set was already full on the
+           * second call, so every card hit the "already emitted" branch and
+           * the rebuilt thread came back with none of them: the conversation
+           * loaded, the cards silently did not.
+           */
+          const done = new Set<string>();
+
+          for (const m of history) {
+            const chart = drawn(m) as Chart | null;
+            if (chart) {
+              rebuilt.push({ kind: "chart", chart });
+              continue;
+            }
+
+            // `carded` rather than JSON.parse: a malformed card must lose
+            // that one card, not the whole conversation.
+            const here = carded(m);
+            const stored = here ? final.get(here.id) : undefined;
+            if (stored) {
+              if (done.has(stored.id)) continue;
+              done.add(stored.id);
+              rebuilt.push(turnFromCard(stored));
+              continue;
+            }
+
+            rebuilt.push({
+              kind: m.role,
+              text: m.text,
+              ...(m.from ? { from: m.from } : {}),
+              ...(m.files && m.files.length > 0 ? { described: m.files } : {}),
+            });
+          }
+
+          return rebuilt;
+        });
       })
       .catch(() => {});
     return () => {
@@ -672,11 +854,18 @@ export function AskPanel({
 
   const settle = (index: number, state: Offered["state"], recordNumber?: number): void =>
     setTurns((prev) =>
-      prev.map((t, i) =>
-        i === index && isOffer(t)
-          ? { ...t, state, ...(recordNumber === undefined ? {} : { recordNumber }) }
-          : t,
-      ),
+      prev.map((t, i) => {
+        if (i !== index || !isOffer(t)) return t;
+        const next: Offered = {
+          ...t,
+          state,
+          ...(recordNumber === undefined ? {} : { recordNumber }),
+        };
+        // What became of it goes into the record too, or a refresh would
+        // bring an added card back offering to add the row a second time.
+        recordCard(next);
+        return next;
+      }),
     );
 
   /** The card a correction would apply to: the last one still open. */
@@ -850,7 +1039,7 @@ export function AskPanel({
           text: hint,
         }),
       );
-      say({ kind: "debt", draft: filled.draft, state: "open" });
+      say({ kind: "debt", draft: filled.draft, state: "open", cardId: newCardId() });
       return;
     }
 
@@ -929,7 +1118,7 @@ export function AskPanel({
     const asked = batch ? null : nextQuestion(ready.draft, reference, settled);
 
     if (!asked) {
-      say({ kind: "proposal", proposal: ready, state: "open" });
+      say({ kind: "proposal", proposal: ready, state: "open", cardId: newCardId() });
       log(
         aiEvent("proposed", "add", {
           entry: `${ready.draft.date} ${ready.draft.flow} ${ready.draft.item} ${formatMoney(ready.draft.amount ?? 0)}`,
@@ -1030,6 +1219,7 @@ export function AskPanel({
         adjustments: because,
       },
       state: "open",
+      cardId: newCardId(),
     });
   };
 
@@ -1074,22 +1264,12 @@ export function AskPanel({
      */
     if (sent.length > 0) {
       const found = result.proposals;
+      const drafts = found.map((p) => p.draft);
       const notes: AttachmentNote[] = sent.map((f) => ({
         name: f.name,
-        kind:
-          f.kind === "text"
-            ? "file"
-            : found.length > 0
-              ? "receipt"
-              : "photo",
+        kind: f.kind === "text" ? "file" : found.length > 0 ? "receipt" : "photo",
         bytes: f.bytes,
-        details:
-          found.length === 0
-            ? "nothing readable"
-            : found
-                .slice(0, 3)
-                .map((p) => `${p.draft.item || p.draft.flow}, ${formatMoney(p.draft.amount ?? 0)}`)
-                .join("; "),
+        details: summariseFile(drafts),
       }));
       log(aiEvent("uploaded", "add", { text: note, files: notes, model: result.model ?? "" }));
 
@@ -1104,9 +1284,16 @@ export function AskPanel({
        * One line per file, which is what the owner asked for when several
        * are sent at once.
        */
-      const described = notes.map(
-        (f) => `${f.name}, a ${f.kind}: ${f.details}`,
-      );
+      /**
+       * Written out in full, because this is what replaces the picture.
+       *
+       * Every row it produced, with its date, its kind, its item, its figure
+       * and its wallets, plus the total and the file's own size. A few
+       * hundred bytes against the megabyte the photo would have cost, and it
+       * answers "which receipt was that" a month later, which the old
+       * three-item summary could not.
+       */
+      const described = sent.map((f) => describeFile(f, drafts, asOf));
       setTurns((prev) => {
         let at = -1;
         for (let i = prev.length - 1; i >= 0; i -= 1) {
@@ -1215,7 +1402,7 @@ export function AskPanel({
               text: line,
             }),
           );
-          say({ kind: "debt", draft: read.draft, state: "open" });
+          say({ kind: "debt", draft: read.draft, state: "open", cardId: newCardId() });
           continue;
         }
         await offer(
@@ -1432,6 +1619,7 @@ export function AskPanel({
             said: note,
           },
           state: "open",
+          cardId: newCardId(),
         });
         return;
       }
@@ -1839,6 +2027,8 @@ export function AskPanel({
               from: "this device",
               ephemeral: true,
             },
+            // The same cards, corrected. They keep their ids, so the record
+            // shows one card that changed rather than a second card.
             ...changed.map((c) => ({
               kind: "proposal" as const,
               proposal: {
@@ -1847,6 +2037,7 @@ export function AskPanel({
                 adjustments: [...c.turn.proposal.adjustments, c.change.what],
               },
               state: "open" as const,
+              cardId: c.turn.cardId,
             })),
           ]);
           return;
@@ -1931,6 +2122,8 @@ export function AskPanel({
                 adjustments: [...card.turn.proposal.adjustments, change.what],
               },
               state: "open",
+              // The same card, corrected, so it keeps its id.
+              cardId: card.turn.cardId,
             },
           ]);
           return;
@@ -2095,7 +2288,7 @@ export function AskPanel({
               text: note,
             }),
           );
-          say({ kind: "debt", draft: local.draft, state: "open" });
+          say({ kind: "debt", draft: local.draft, state: "open", cardId: newCardId() });
           return;
         }
 
@@ -2211,7 +2404,7 @@ export function AskPanel({
                   text: lines[i] ?? "",
                 }),
               );
-              say({ kind: "debt", draft: r.draft, state: "open" });
+              say({ kind: "debt", draft: r.draft, state: "open", cardId: newCardId() });
               continue;
             }
             if (!r.worthOffering) continue;
@@ -2523,7 +2716,14 @@ export function AskPanel({
               onSettle={() => {
                 hold(i);
                 setTurns((prev) =>
-                  prev.map((t, j) => (j === i && isDebt(t) ? { ...t, state: "settled" } : t)),
+                  prev.map((t, j) => {
+                    if (j !== i || !isDebt(t)) return t;
+                    const next: DebtChoice = { ...t, state: "settled" };
+                    // Same as an ordinary card: what became of it is recorded,
+                    // so a refresh does not bring it back still asking.
+                    recordCard(next);
+                    return next;
+                  }),
                 );
               }}
               onChange={(draft) =>

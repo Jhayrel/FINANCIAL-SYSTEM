@@ -156,7 +156,36 @@ function readOne(
   const adjustments: string[] = [];
 
   const rawFlow = str(value["flow"]);
-  const flow = readFlow(rawFlow);
+  let flow = readFlow(rawFlow);
+
+  /**
+   * A subscription is not a transfer, whatever the model said.
+   *
+   * "I paid my spotify from gcash" came back as a Transfer with Spotify as
+   * its item and no destination, so the card asked which wallet the money
+   * landed in, refused to save without one, and could not fill the amount
+   * either: `inferFromHistory` only fills a fixed cost for Bills and
+   * Subscriptions, and this was neither.
+   *
+   * Every one of those is downstream of one wrong word. Spotify is on the
+   * owner's own subscription list, and a name on that list is a thing you
+   * pay, never a wallet you move money into. Their Netflix, Google Drive,
+   * Microsoft Office 365, Globe at Home Wifi and Dito Prepaid are the same.
+   *
+   * Corrected, and said out loud, because a silent reclassification is how
+   * a wrong rule survives.
+   */
+  const named = str(value["item"]) || str(value["description"]);
+  const paidThing = [...reference.subscriptions, ...reference.bills].find(
+    (name) => name.trim() !== "" && named.toLowerCase().includes(name.toLowerCase()),
+  );
+  if (flow === "Transfer" && paidThing) {
+    flow = "Spending";
+    adjustments.push(
+      `${paidThing} is one of your subscriptions or bills, so this is spending rather than a transfer.`,
+    );
+  }
+
   if (!flow) {
     /**
      * A model that has understood nothing copies the shape back verbatim,
@@ -257,7 +286,22 @@ function readOne(
     );
   }
 
-  const category = readCategory(flow, str(value["category"]));
+  /**
+   * A named subscription or bill files itself.
+   *
+   * The category is what unlocks the fixed-cost lookup: `inferFromHistory`
+   * fills an amount from the last three payments for Bills and Subscriptions
+   * and for nothing else. So reading Spotify as plain Spending leaves the
+   * amount blank even though nine identical rows are sitting in the ledger.
+   */
+  const filed: TransactionCategory | null =
+    flow === "Spending" && paidThing
+      ? reference.subscriptions.includes(paidThing)
+        ? "Subscriptions"
+        : "Bills"
+      : null;
+
+  const category = filed ?? readCategory(flow, str(value["category"]));
 
   /**
    * An item that is not on the list is kept, not dropped.
