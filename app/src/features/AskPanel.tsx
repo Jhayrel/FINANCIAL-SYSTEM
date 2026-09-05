@@ -1037,6 +1037,31 @@ export function AskPanel({
     if (note) log(aiEvent("asked", "add", { text: note }));
 
     /**
+     * A line starting with "//" is a note, not an instruction.
+     *
+     * The owner writes them constantly while testing: "// fix this it didnt
+     * know what wallet it came from", "// it should now the amount access the
+     * database". One of them was read as a chart request, because it happened
+     * to contain the word "shows", and answered with "No chart drawn: nothing
+     * in that period", which is a reply to a question nobody asked.
+     *
+     * They are still recorded, and they should be: they are the clearest
+     * account of what went wrong and when, written at the moment it happened.
+     * They are just not commands.
+     */
+    if (files.length === 0 && !as && /^\s*\/\//.test(note)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      say({
+        kind: "assistant",
+        text: "Noted, and kept in the record rather than acted on.",
+        from: "this device",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    /**
      * "discard all", before anything else looks at the sentence.
      *
      * Eleven cards came back off a screenshot of a statement and none of them
@@ -1278,7 +1303,32 @@ export function AskPanel({
        * words and `buildChart` reads that, so the vocabulary is theirs and
        * not a list somebody remembered to write down.
        */
-      const chart = buildChart(routed?.period ? `${note} ${routed.period}` : note, transactions, asOf);
+      /**
+       * A follow-up narrows the chart on screen, it does not replace it.
+       *
+       * "chart my treats from may to august" then "treat only" drew Treat
+       * across September, because the second message named no period and
+       * fell back to this month. The window was on screen a second earlier
+       * and the follow-up threw it away.
+       *
+       * So the previous chart's own title is carried into the question. It
+       * already holds the period in words ("May 2026 to August 2026"), which
+       * is exactly what `windowOf` reads, so the window survives and only
+       * what the new message says changes.
+       */
+      const shown = [...turns].reverse().find(isChart)?.chart;
+      const carried =
+        shown && !/\b(20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|month|year|week|today|yesterday|all|everything)\b/i.test(
+          note,
+        )
+          ? `${note} ${shown.title}`
+          : note;
+
+      const chart = buildChart(
+        routed?.period ? `${carried} ${routed.period}` : carried,
+        transactions,
+        asOf,
+      );
       setDraft("");
       say({ kind: "you", text: note });
       /**

@@ -368,6 +368,50 @@ export function inferFromHistory(
     }
   }
 
+  /**
+   * A bill or a subscription costs what it always costs.
+   *
+   * ── What the owner asked for ────────────────────────────────────────────
+   *
+   * "I paid my microsoft office 365 today from maya" left the amount blank,
+   * and they wrote: "it should now the amount access the database". They are
+   * right, and it is a narrower claim than it looks. Spotify is the same
+   * figure every month. That is not a guess about this payment, it is a fact
+   * about that subscription, and it is already in the ledger.
+   *
+   * ── Why this does not break the amount rule ─────────────────────────────
+   *
+   * CLAUDE.md says an amount is never inferred, because being wrong about a
+   * figure is the one mistake that costs money directly. This keeps that
+   * rule where it bites and narrows it where it does not:
+   *
+   *   - Bills and Subscriptions only. A Food row is a different figure every
+   *     time and always will be, so it is still never filled.
+   *   - The last three payments have to agree exactly. One differing figure
+   *     and nothing is filled, because then it is not a fixed cost.
+   *   - It only ever fills a blank. An amount you typed is never overruled.
+   *   - It is marked unsure, so the card points at it before anything saves.
+   */
+  if (
+    (next.amount === null || next.amount <= 0) &&
+    (next.category === "Bills" || next.category === "Subscriptions") &&
+    past.length >= 3
+  ) {
+    const recent = [...past]
+      .sort((a, b) => (a.date < b.date ? 1 : -1))
+      .slice(0, 3)
+      .map((t) => t.total);
+    const first = recent[0];
+
+    if (first !== undefined && first > 0 && recent.every((v) => v === first)) {
+      next = { ...next, amount: first };
+      unsure.push("amount");
+      because.push(
+        `${item} has been ${pesos(first)} the last three times, so that is what is filled in.`,
+      );
+    }
+  }
+
   // ── The status ───────────────────────────────────────────────────────────
   const { value: status } = commonest(past, (t) => t.status as TransactionStatus);
   if (status && status !== next.status) {
