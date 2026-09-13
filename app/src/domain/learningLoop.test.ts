@@ -97,11 +97,22 @@ describe("the loop closes: recorded, then read back", () => {
     expect(learned.get("gas")).toBe("Food");
   });
 
+  /**
+   * The second correction is dated after the first by construction.
+   *
+   * It used to be pinned to "2026-09-06" while the first took the real clock,
+   * which made "second" newer only until the calendar passed that date. On
+   * 2026-09-14 it had, the order flipped, and the test failed with no change
+   * to any code. A time is now given to both, so the order cannot drift.
+   */
   it("keeps the newest correction when the same guess is fixed twice", () => {
     const first = manualCorrections(row(), row({ item: "Food" }), "add");
     const second = manualCorrections(row(), row({ item: "Treat" }), "add");
     const learned = correctionsFrom(
-      [...first, ...second.map((e) => ({ ...e, at: "2026-09-06T00:00:00.000Z" }))],
+      [
+        ...first.map((e) => ({ ...e, at: "2026-01-01T00:00:00.000Z" })),
+        ...second.map((e) => ({ ...e, at: "2026-01-02T00:00:00.000Z" })),
+      ],
       "item",
     );
     expect(learned.get("gas")).toBe("Treat");

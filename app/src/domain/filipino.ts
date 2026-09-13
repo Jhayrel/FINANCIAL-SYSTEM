@@ -28,6 +28,8 @@
  * existed rather than a worse one.
  */
 
+import { merchantHintIn } from "./merchants";
+
 /**
  * A thing bought, in Filipino, and the English word it answers to.
  *
@@ -58,6 +60,16 @@ const THINGS: readonly (readonly [RegExp, string])[] = [
  * the owner does not have.
  */
 export function itemHintIn(text: string): string {
+  /**
+   * A named shop first, then a Filipino word for the thing.
+   *
+   * The shop is the stronger evidence: "bumili sa jollibee" says where, and
+   * where settles what. Both hints are resolved against the owner's own list
+   * by the caller, so neither can invent an item.
+   */
+  const shop = merchantHintIn(text);
+  if (shop) return shop;
+
   for (const [pattern, english] of THINGS) {
     if (pattern.test(text)) return english;
   }

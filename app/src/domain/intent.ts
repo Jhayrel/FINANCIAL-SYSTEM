@@ -32,7 +32,7 @@ export type Intent = "ask" | "log";
  * the mark alone is not enough to go on.
  */
 const ASKING =
-  /^(how|what|whats|what's|why|when|where|who|which|whose|did|do|does|is|are|was|were|can|could|should|shall|will|would|am|have|has|had|any|show|tell|list|compare|explain)\b/i;
+  /^(how|what|whats|what's|wat|wht|why|when|where|who|which|wich|whcih|whose|did|do|does|is|are|was|were|can|could|should|shall|will|would|am|have|has|had|any|show|tell|list|compare|explain|expalin|explian)\b/i;
 
 /**
  * Verbs that move money.
@@ -147,8 +147,37 @@ const REQUESTING =
 const ADVICE =
   /\b(what should i|should i|shall i|what would you|what do you think|do you think i|any advice|advise me|is it (?:good|bad|wise|smart|ok|okay|worth|better)|is that (?:good|bad|wise|worth|better)|worth it|help me decide|ano ang dapat|dapat ba)\b/i;
 
+/**
+ * Asking what to do, which outranks everything a sentence also contains.
+ *
+ * ── Why this is separate from `isQuestion` ────────────────────────────────
+ *
+ * The scoreboard found three more sentences of the kind that once filed
+ * "what should I do" as two PHP 20,000 rows:
+ *
+ *   should I go to mcdonalds today spend 30k?
+ *   is it worth it to buy a 5000 phone now
+ *   if i spend today 1000 is it good? I can adjust my budget
+ *
+ * Each is recognised as a question, and each also reads as a complete entry,
+ * because it has a verb, a figure and something bought. The app checks for an
+ * entry first, so all three would have been filed. An ordinary question mark
+ * does not settle that, since people put one on an entry they are unsure of.
+ * Asking whether to do something does settle it: nobody asks "should I" about
+ * money that has already moved.
+ */
+export const isAdvice = (text: string): boolean => ADVICE.test(text.trim());
+
 export function isQuestion(text: string): boolean {
-  const trimmed = text.trim();
+  /**
+   * Leading punctuation is not part of the question.
+   *
+   * ". how is this week going" was typed for real and read as nothing,
+   * because `ASKING` is anchored to the start of the sentence and the start
+   * was a full stop. A stray character before the first word changes nothing
+   * about what was asked.
+   */
+  const trimmed = text.trim().replace(/^[^a-z0-9]+/i, "");
   if (!trimmed) return true;
   return (
     trimmed.endsWith("?") ||

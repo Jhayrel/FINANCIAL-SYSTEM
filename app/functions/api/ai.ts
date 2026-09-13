@@ -524,6 +524,25 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "Put the amount twice: amountText exactly as written, character for character including any comma or currency sign, and amountPesos as a plain number. The two must agree. If no amount is stated, leave both empty and they will be asked for it.",
     "Always write a description. It is what the entry will read as in six months, so make it the specific thing: what was bought, or who it was for, or where it was, in their own words from the message or the receipt. Never leave it empty, and never restate the item: the item already says Food, so the description says what the food was.",
     "Use the date stated, and today only when none is. Set confidence to low for anything you had to strain to read. In sourceRef, say which image and which line, or which words you used. If there is no transaction in it at all, return an empty list.",
+    /**
+     * Worked examples, for the cases the record shows going wrong.
+     *
+     * Every one of these was misread in the owner's own history: a gift read
+     * as a move between their own wallets, a withdrawal read as spending, a
+     * credit line read as the wallet Maya, a Tagalog payment read as a
+     * transfer, and a request for advice filed as two ledger rows. Rules told
+     * a model what to do; examples show it, and a small model follows a shown
+     * pattern far more reliably than a described one. All invented, never the
+     * owner's real entries.
+     */
+    "Worked examples of the cases that go wrong most often.",
+    "Money to a person leaves their accounts. I gave 500 to my mom from gcash: flow Transfer, fromWallet Gcash, toWallet empty.",
+    "Money to their own account stays theirs. I sent 500 to my own gcash from maya: flow Transfer, fromWallet Maya, toWallet Gcash. When one sentence says both, output two proposals.",
+    "A withdrawal is a transfer, not spending. I withdrew 5000 from maya to cash: flow Transfer, status Withdrawn, fromWallet Maya, toWallet Cash, amountPesos 5000.",
+    "A credit line is never a wallet. I borrowed 2000 on maya credit into gcash is borrowing, not a transfer from Maya: return an empty list, because borrowing is recorded on its own card.",
+    "Tagalog is ordinary input. nagbayad ako ng tricycle 500 kanina cash: flow Spending, travel, amountPesos 500, fromWallet Cash, today. bumili ako ng pagkain 200 gcash: flow Spending, food, amountPesos 200, fromWallet Gcash.",
+    "A shop name says what was bought. I paid 285 at jollibee using gcash: flow Spending, food. I paid 950 at petron using cash: flow Spending, gas.",
+    "A question is not a transaction. I have 20000 saved and tuition is 18000 next month, what should I do: return an empty list.",
   ].join(" "),
   /**
    * What does this message want.
@@ -550,6 +569,22 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "chat: none of the above, including small talk.",
     "In target, put which entry they mean when they name one: the exact words, or the word last when they mean the most recent. In period, put the window when they name one, in their own words. Leave both empty when they name none.",
     "Prefer correction and answer over entry when something is on screen waiting: someone who has just been asked how much is telling you how much, not starting a new entry.",
+    /**
+     * Worked examples, from the misroutings in the owner's record.
+     *
+     * An advice question routed as entry became two PHP 20,000 rows. A debt
+     * question routed as chart drew nothing. "delete my latest spending"
+     * routed as entry did nothing at all. Each is shown here with its right
+     * answer. All invented.
+     */
+    "Examples.",
+    "I have 20000 saved and tuition is 18000 next month, what should I do: question. It asks what to do, so it is never entry, whatever figures it contains.",
+    "should I spend 30k at mcdonalds today: question.",
+    "check my maya credit draw by draw: question, never chart.",
+    "delete my latest spending thats wrong: delete, target last.",
+    "restore my deleted entry yesterday: restore, period yesterday.",
+    "how did august compare with july: chart, period july to august.",
+    "nagbayad ako ng tricycle 500 kanina cash: entry.",
   ].join(" "),
   categorise:
     "Choose the one category that fits this transaction, copied exactly from the allowed list. Prefer the pattern in the past examples, which are this person's own labels. If nothing fits well, choose the last category in the list rather than inventing one.",

@@ -72,7 +72,7 @@ export interface ReadEntry {
  * accepts the dictionary spelling is a reader that fails on real typing.
  */
 const SPENT =
-  /\b(spent|spend|spending|paid|pay|paying|bought|buy|buying|purchased|purchase|ordered|renewed|topped up|top up|loaded|reloaded|bayad|nagbayad|binayaran|magbayad|bumili|bumuli|binili|bibili|umorder|gumastos|gastos|nagastos|nag-load|nagload)\b/i;
+  /\b(spent|spend|spending|paid|pay|paying|bought|buy|buying|purchased|purchase|ordered|renewed|topped up|top up|loaded|reloaded|treated|payed|apid|piad|spnt|add|bayad|nagbayad|binayaran|magbayad|bumili|bumuli|binili|bibili|umorder|gumastos|gastos|nagastos|nag-load|nagload)\b/i;
 
 /**
  * Money in, in either language.
@@ -84,7 +84,7 @@ const SPENT =
  * separately below.
  */
 const GOT =
-  /\b(received|receive|got|earned|earn|collected|refunded|allowance|salary|paid me|sent me|gave me|credited to|natanggap|nakatanggap|tinanggap|nakuha|kumita|sahod|binigyan ako|pinadalhan ako)\b/i;
+  /\b(received|receive|recieved|recieve|recived|recive|got|earned|earn|earnd|easrn|earnt|collected|refunded|allowance|salary|paid me|sent me|gave me|credited to|natanggap|nakatanggap|tinanggap|nakuha|kumita|sahod|binigyan ako|pinadalhan ako)\b/i;
 
 /**
  * Money moved, or sent away.
@@ -95,7 +95,7 @@ const GOT =
  * "gave me 500" is still read as income.
  */
 const MOVED =
-  /\b(transferred|transfer|moved|move|sent|send|gave|give|giving|padala|pinadala|nagpadala|magpadala|binigay|ibinigay|nagbigay|naglipat|inilipat|nag-withdraw|nagwithdraw|kinuha|cashed out|withdrew|withdraw|deposited|instapay|instapaid|took back|take back|took|brought back|put back|returned)\b/i;
+  /\b(transferred|transfer|transfered|trasfer|tranfer|trasferred|moved|move|sent|send|gave|give|giving|padala|pinadala|nagpadala|magpadala|binigay|ibinigay|nagbigay|naglipat|inilipat|nag-withdraw|nagwithdraw|kinuha|cashed out|withdrew|withdraw|wihdraw|withraw|withdrawl|withdrawed|deposited|instapay|instapaid|took back|take back|took|brought back|put back|returned)\b/i;
 
 /**
  * Borrowing and repaying, which this file refuses to guess at.
@@ -155,7 +155,7 @@ const THEIR_POSSESSIVE = /\b(?!my\b|our\b)[\w-]+['’]s\b/i;
  * friend told me about the promo" stays a bill.
  */
 const PAID_A_PERSON =
-  /\b(?:paid|pay|paying|repaid|reimbursed|sent|send|gave|give|giving)\s+(?:back\s+)?(?:to\s+)?(?:my|his|her|their|our|the|a)?\s*(?:friend|friends|kaibigan|barkada|mother|mom|mama|nanay|father|dad|papa|tatay|sister|brother|kuya|cousin|pinsan|tita|tito|aunt|auntie|uncle|lola|lolo|grandma|grandpa|classmate|schoolmate|girlfriend|boyfriend|wife|husband|someone|somebody|him|her|them)\b/i;
+  /\b(?:paid|pay|paying|repaid|reimbursed|sent|send|gave|give|giving)\s+(?:back\s+)?(?:to\s+)?(?:my|his|her|their|our|the|a)?\s*(?:friend|friends|kaibigan|barkada|mother|mom|mama|nanay|father|dad|papa|tatay|sister|brother|kuya|cousin|pinsan|tita|tito|aunt|auntie|uncle|lola|lolo|grandma|grandpa|classmate|schoolmate|girlfriend|boyfriend|wife|husband|someone|somebody|him|her|them)\b|\b(?:nagpadala|pinadala|padala|nagbigay|binigay|ibinigay)\b[^.]*?\bsa\s+(?:aking\s+|ang\s+|kay\s+)?(?:nanay|tatay|mama|papa|kuya|ate|pinsan|tita|tito|lola|lolo|kaibigan|barkada)\b/i;
 
 /** Explicitly one of yours: "my gcash", "my own savings". */
 const MINE = /\b(my|mine|our|ours|own)\b/i;
@@ -436,7 +436,11 @@ const BOUNDARY =
   /\b(?:to|into|from|using|via|thru|through|out of|for|because|since|para)\b/i;
 
 /** Words that mark where money came from, and where it went. */
-const FROM_WORDS = ["from", "using", "used", "thru", "through", "via", "with", "out of"];
+/**
+ * "galing" is Filipino for "from". "nagpadala ako 300 sa nanay ko galing
+ * gcash" names its source that way, and without it the source was blank.
+ */
+const FROM_WORDS = ["from", "using", "used", "thru", "through", "via", "with", "out of", "galing"];
 const TO_WORDS = ["to", "into"];
 
 const STATUS_FOR: Partial<Record<Flow, TransactionStatus>> = {
@@ -457,7 +461,8 @@ const STATUS_FOR: Partial<Record<Flow, TransactionStatus>> = {
  * Only the verb decides. Where the money went is a separate question, and a
  * withdrawal into Cash and a withdrawal into a wallet are both withdrawals.
  */
-const WITHDRAWING = /\b(withdrew|withdraw|withdrawn|withdrawal|cashed out|cash out|nag-withdraw|nagwithdraw|kinuha)\b/i;
+const WITHDRAWING =
+  /\b(withdrew|withdraw|withdrawn|withdrawal|wihdraw|withraw|withdrawl|withdrawed|cashed out|cash out|nag-withdraw|nagwithdraw|kinuha)\b/i;
 
 /** Money arriving from outside, which the Excel booked as Done. */
 const DEPOSITING = /\b(deposited|deposit|credited|credit to)\b/i;
@@ -677,7 +682,19 @@ export function readEntry(
     );
   }
 
-  const hint = itemHintIn(text);
+  /**
+   * An item the sentence named outright beats any hint.
+   *
+   * "I paid 500 for food at shell" is Food. Shell sells fuel, but the owner
+   * said what they bought, and a shop's name is only evidence when the
+   * sentence is otherwise silent about it.
+   */
+  const itemsHere =
+    flow === "Spending" || flow === "Revenue"
+      ? itemsFor(flow, flow === "Revenue" ? "Revenue" : "Spending", reference)
+      : [];
+  const statesAnItem = itemsHere.some((name) => namesCredit(text, name));
+  const hint = statesAnItem ? "" : itemHintIn(text);
   const filipinoItem =
     hint && (flow === "Spending" || flow === "Revenue")
       ? (itemsFor(flow, flow === "Revenue" ? "Revenue" : "Spending", reference).find(

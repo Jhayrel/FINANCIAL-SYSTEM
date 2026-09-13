@@ -74,7 +74,7 @@ export interface Chart {
  * something true about itself.
  */
 const WANTS_CHART =
-  /\b(chart|graph|pie|bar|bars|breakdown|break down|visuali[sz]e|plot|show me|diagram|trend|trends|trending|over time|shape of)\b/i;
+  /\b(chart|graph|pie|bar|bars|breakdown|break down|visual|visuals|visuali[sz]e|plot|show me|diagram|trend|trends|trending|over time|shape of)\b/i;
 
 /** Asking for the written version. */
 const WANTS_REPORT = /\b(report|summary|summarise|summarize|overview|statement)\b/i;

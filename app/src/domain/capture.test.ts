@@ -330,8 +330,34 @@ describe("matchItem learns from what you corrected", () => {
     });
   });
 
+  /**
+   * A shop nothing knows about becomes a new item.
+   *
+   * This used "Jolibee", the owner's own spelling, as its unknown shop. That
+   * stopped being true on 2026-09-14, when `merchants.ts` learned what
+   * Jollibee sells, so the fixture moved to a name no list contains.
+   */
   it("without the correction it is a new item, as before", () => {
-    expect(matchItem("Jolibee", "Spending", "Spending", withRemarks).matched).toBe(false);
+    expect(matchItem("Aling Nenas", "Spending", "Spending", withRemarks).matched).toBe(false);
+  });
+
+  /** A known shop needs no correction at all, misspelled as the owner types it. */
+  it("knows what a well-known shop sells without being told", () => {
+    expect(matchItem("Jolibee", "Spending", "Spending", withRemarks)).toEqual({
+      item: "Food",
+      matched: true,
+    });
+  });
+
+  /**
+   * What the owner taught outranks what the app knows.
+   *
+   * The whole point of a correction is that it is the owner's word. If they
+   * file Jollibee under Fun, Fun it is, whatever a list of shops says.
+   */
+  it("lets a correction beat shop knowledge", () => {
+    const learned = new Map([["jolibee", "Fun"]]);
+    expect(matchItem("Jolibee", "Spending", "Spending", withRemarks, learned).item).toBe("Fun");
   });
 
   it("a correction outranks the note, because it is what you actually said", () => {
@@ -341,8 +367,11 @@ describe("matchItem learns from what you corrected", () => {
   });
 
   it("ignores a correction naming a type that no longer exists", () => {
-    const learned = new Map([["jolibee", "Deleted Type"]]);
-    expect(matchItem("Jolibee", "Spending", "Spending", withRemarks, learned).matched).toBe(false);
+    // An unknown shop, so only the stale correction is under test.
+    const learned = new Map([["aling nenas", "Deleted Type"]]);
+    expect(matchItem("Aling Nenas", "Spending", "Spending", withRemarks, learned).matched).toBe(
+      false,
+    );
   });
 });
 

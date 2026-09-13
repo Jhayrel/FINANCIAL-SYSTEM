@@ -100,7 +100,7 @@ import {
 } from "../domain/charts";
 import { inferFromHistory } from "../domain/infer";
 import { debtWalletDirection, itemsFor, withDebtEffect } from "../domain/entry";
-import { detectIntent, isQuestion, type Intent } from "../domain/intent";
+import { detectIntent, isAdvice, isQuestion, type Intent } from "../domain/intent";
 import { addressesEveryCard } from "../domain/capture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
@@ -2443,7 +2443,17 @@ export function AskPanel({
       as ??
       (files.length > 0
         ? "log"
-        : readsAsEntry
+        : /**
+           * Advice outranks a sentence that also reads as an entry.
+           *
+           * "should I go to mcdonalds today spend 30k?" has a verb, a figure
+           * and something bought, so it reads as a PHP 30,000 entry, and this
+           * check used to come first. Nobody asks "should I" about money that
+           * has already moved. The scoreboard in `domain/eval` found three of
+           * these, the same class of fault that once filed a question about
+           * tuition as two PHP 20,000 rows.
+           */
+          readsAsEntry && !isAdvice(note)
           ? "log"
           : /**
              * ── A question is never filed, whatever the router says ───────
@@ -2622,7 +2632,7 @@ export function AskPanel({
          * both gates now stand down for the same reason and the splitter gets
          * what it was written for.
          */
-        if (ai.disabled && local.worthOffering && !severalParts) {
+        if (ai.disabled && local.worthOffering && !severalParts && !isAdvice(note)) {
           say({ kind: "you", text: note });
           await offer(
             {
