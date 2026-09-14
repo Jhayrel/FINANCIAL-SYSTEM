@@ -9,7 +9,7 @@
  * rules live in `domain/entry.ts`; this file renders and decides nothing.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Alert,
@@ -40,7 +40,9 @@ import {
 } from "../domain/entry";
 import type { AiSettings, AppSettings } from "../domain/settings";
 import { describeDraft, suggestCategory } from "../data/aiClient";
-import { AskPanel, type ProposalSink } from "./AskPanel";
+import { AskPanel } from "./AskPanel";
+import { useProposalSink } from "./useProposalSink";
+import { useConfirm } from "../components/Confirm";
 import type { Provenance } from "../domain/activity";
 import type { CategoryResult } from "../data/aiClient";
 import { billsToLog, predictAmount, reasons, type DueBill } from "../domain/predict";
@@ -85,8 +87,6 @@ const EFFECT_LABEL: Record<string, string> = {
 
 const STATUSES = ["Paid", "Done", "Received", "Transferred", "Withdrawn"];
 
-let proposed = 0;
-
 export function AddTransaction({
   transactions,
   reference,
@@ -105,6 +105,10 @@ export function AddTransaction({
   settings,
   budgets,
   asOf,
+  showChat,
+  incoming,
+  lastSaved,
+  onSaved,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -128,6 +132,18 @@ export function AddTransaction({
   settings: AppSettings;
   budgets: Budgets;
   asOf: string;
+  /**
+   * Whether the assistant sits beside the form.
+   *
+   * Only on a computer, and only while AI and its chat are on. A phone has the
+   * assistant on a tab of its own, so the form there is just the form.
+   */
+  showChat: boolean;
+  /** A card the assistant sent to the form from elsewhere ("Edit first"). */
+  incoming: { draft: Draft; at: number } | null;
+  /** The last row this form saved, shared so a card anywhere can say so. */
+  lastSaved: { draft: Draft; at: number } | null;
+  onSaved: (saved: { draft: Draft; at: number }) => void;
 }) {
   /**
    * Opens on Spending, rather than on nothing.
@@ -155,6 +171,7 @@ export function AddTransaction({
     keepDraft(draft);
   }, [draft]);
   const [submitted, setSubmitted] = useState(false);
+  const { confirm, dialog } = useConfirm();
 
   /**
    * Chosen "Someone else" as the destination, rather than left it empty.
@@ -187,7 +204,8 @@ export function AddTransaction({
    * the session. Both are the same entry and should agree about what happened
    * to it.
    */
-  const [lastSaved, setLastSaved] = useState<{ draft: Draft; at: number } | null>(null);
+  // Held by the app now (`lastSaved` in the props), because the card that
+  // supplied a row may be in the floating chat or on the phone's AI tab.
 
   const [categoryHint, setCategoryHint] = useState<CategoryResult | null>(null);
 
@@ -295,19 +313,65 @@ export function AddTransaction({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.flow, draft.item, draft.category, draft.fromWallet, draft.toWallet, draft.description, transactions, reference, ai]);
 
-  const nextRecordNumber = useMemo(
-    () => Math.max(0, ...transactions.map((t) => t.recordNumber)) + 1,
-    [transactions],
-  );
+  /**
+   * Fill the form from a draft the assistant read, and mark what arrived.
+   *
+   * The fields did update the moment a card was sent over, but they updated
+   * silently, and on a wide screen the panel sits beside the form: half a
+   * dozen fields change at once, several rows apart, and nothing says which of
+   * them moved.
+   *
+   * `fms-suggested` is the marker the form already uses for a field the app
+   * filled in rather than you, and it clears itself the moment you edit the
+   * field. That is exactly this: it came from the card, it is yours to change,
+   * and once you change it the mark goes.
+   *
+   * Only the fields the card actually carried. Marking a blank one would claim
+   * something was filled in when nothing was.
+   */
+  const applyDraft = useCallback((d: Draft): void => {
+    setDraft(d);
+    const carried: [string, string][] = [
+      ["fromWallet", d.fromWallet],
+      ["toWallet", d.toWallet],
+      ["category", d.category],
+      ["item", d.item],
+      ["description", d.description],
+      ["notes", d.notes],
+      ["status", d.status],
+    ];
+    const filled = carried.filter(([, value]) => value.trim() !== "").map(([field]) => field);
+    if (d.amount !== null) filled.push("amount");
+    setSuggested(new Set(filled));
+    setSubmitted(false);
+  }, []);
 
   /**
-   * How many numbers have been handed out since `transactions` last moved.
-   *
-   * A ref rather than state: it is read and written inside one event handler
-   * and must not cause a render of its own, or a batch of saves would render
-   * between each one and the offset would be pointless.
+   * What the assistant beside this form may do: the same actions, through
+   * the same checks, as the floating chat and the phone's AI tab
+   * (features/useProposalSink.ts). "Edit first" fills this form.
    */
-  const taken = useRef(0);
+  const sink = useProposalSink({
+    transactions,
+    reference,
+    debts,
+    onSave,
+    onBin,
+    onBinMany,
+    onRestore: onRestoreRow,
+    onUse: applyDraft,
+  });
+  const nextRecordNumber = sink.nextRecordNumber;
+
+  /**
+   * A card sent here from outside this screen: "Edit first" in the floating
+   * chat or on the phone's AI tab. Keyed on when it was sent, so sending the
+   * same card twice fills the form twice.
+   */
+  useEffect(() => {
+    if (incoming) applyDraft(incoming.draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incoming?.at]);
 
   const check = useMemo(
     () => checkDraft(draft, transactions, reference, debts),
@@ -382,117 +446,12 @@ export function AddTransaction({
     }
 
     // The card that supplied this row can now say it was saved.
-    setLastSaved({ draft, at: Date.now() });
+    onSaved({ draft, at: Date.now() });
     forgetDraft();
     setDraft({ ...emptyDraft(draft.date), flow: "Spending" });
     setSuggested(new Set());
     setSubmitted(false);
   };
-
-  /**
-   * What the assistant is allowed to do with a row it read off a receipt.
-   *
-   * Every one of these three is the form's own machinery. `check` is the same
-   * `checkDraft` the Save button obeys, `use` fills the fields exactly as a
-   * tap on a due bill does, and `add` goes through `draftToTransactions` and
-   * `onSave`, which is the single writer in this app. There is no second path
-   * and nothing here that skips validation, so an AI row is a typed row that
-   * someone else did the typing for.
-   */
-  const sink: ProposalSink = useMemo(
-    () => ({
-      nextRecordNumber,
-      check: (d) => {
-        const c = checkDraft(d, transactions, reference, debts);
-        return {
-          ok: c.ok,
-          problems: c.errors.map((e) => e.message),
-          warnings: c.warnings.map((w) => w.message),
-        };
-      },
-      use: (d) => {
-        setDraft(d);
-        /**
-         * Mark what arrived, so you can see what landed.
-         *
-         * The fields did update the moment a card was sent over, but they
-         * updated silently, and on a wide screen the panel sits beside the
-         * form: half a dozen fields change at once, several rows apart, and
-         * nothing says which of them moved.
-         *
-         * `fms-suggested` is the marker the form already uses for a field
-         * the app filled in rather than you, and it clears itself the moment
-         * you edit the field. That is exactly this: it came from the card,
-         * it is yours to change, and once you change it the mark goes.
-         *
-         * Only the fields the card actually carried. Marking a blank one
-         * would claim something was filled in when nothing was.
-         */
-        const carried: [string, string][] = [
-          ["fromWallet", d.fromWallet],
-          ["toWallet", d.toWallet],
-          ["category", d.category],
-          ["item", d.item],
-          ["description", d.description],
-          ["notes", d.notes],
-          ["status", d.status],
-        ];
-        const filled = carried.filter(([, value]) => value.trim() !== "").map(([field]) => field);
-        if (d.amount !== null) filled.push("amount");
-        setSuggested(new Set(filled));
-        setSubmitted(false);
-      },
-      bin: onBin,
-      binMany: onBinMany,
-      restore: onRestoreRow,
-      /**
-       * Save it, and say which number it got.
-       *
-       * ── Two faults, one cause ───────────────────────────────────────────
-       *
-       * `nextRecordNumber` is worked out from `transactions` and captured in
-       * this closure, so it does not move until React has re-rendered with
-       * the saved row in it. That is fine for one save and wrong for two in
-       * the same tick, which is exactly what "Add the 7 ready" does: seven
-       * rows off one statement all took the same record number.
-       *
-       * The owner saw the display half of it first, every card in a batch
-       * showing 0505. The rows underneath were worse.
-       *
-       * `taken` counts the ones handed out since the last render, so numbers
-       * advance within a batch, and the number is returned so the card can
-       * show what it actually got rather than what is next.
-       */
-      add: (d, by) => {
-        const c = checkDraft(d, transactions, reference, debts);
-        // Belt and braces: the button is already disabled when this fails.
-        if (!c.ok) return null;
-        proposed += 1;
-        const number = nextRecordNumber + taken.current;
-        taken.current += 1;
-        onSave(
-          draftToTransactions(d, number, `t-${Date.now()}-${proposed}`, c.repaymentSplit),
-          // Recorded as the assistant's, because it was: the owner approved
-          // it, but they did not type it, and six months from now that is the
-          // difference worth being able to look up.
-          by ?? { actor: "ai", via: "ai_chat" },
-        );
-        return number;
-      },
-    }),
-    [transactions, reference, debts, nextRecordNumber, onSave],
-  );
-
-  /**
-   * Reset the within-batch offset once the saved rows are actually here.
-   *
-   * `nextRecordNumber` has moved past everything handed out by then, so the
-   * offset has done its job and starting it again from zero is what keeps the
-   * next batch from skipping numbers.
-   */
-  useEffect(() => {
-    taken.current = 0;
-  }, [nextRecordNumber]);
 
   const cancelEdit = (): void => {
     onCancelEdit();
@@ -501,10 +460,58 @@ export function AddTransaction({
     setSubmitted(false);
   };
 
+  /**
+   * Clearing asks first when there is something to lose.
+   *
+   * The workbook's ClearForm asked "Do you want to clear the form?" every
+   * time. Clear here threw a half-typed entry away on one tap, beside the
+   * Save button, which is exactly where a thumb slips. An empty form clears
+   * without a question, because there is nothing to protect.
+   */
+  const clearForm = async (): Promise<void> => {
+    if (!isBlankDraft(draft)) {
+      const ok = await confirm({
+        title: "Clear the form?",
+        body: "What you have typed is removed. Nothing has been saved yet, so nothing else changes.",
+        confirmLabel: "Clear the form",
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
+    setDraft({ ...emptyDraft(draft.date), flow: "Spending" });
+    setSuggested(new Set());
+    setSubmitted(false);
+  };
+
+  /**
+   * Changing the type keeps what you typed that still means the same thing.
+   *
+   * It emptied the whole form, so typing an amount and then noticing it was a
+   * Transfer, not Spending, threw the amount away. The date, the amount, and a
+   * description or notes you wrote yourself carry over when the new type has
+   * those fields. Wallets, items and categories do not: they belong to the
+   * type being left, and carrying them would file money under the wrong one.
+   */
+  const switchFlow = (flow: Flow): void => {
+    if (flow === draft.flow) return;
+    setDraft((d) => ({
+      ...emptyDraft(d.date),
+      flow,
+      amount: d.amount,
+      description:
+        needs(flow, "description") && !suggested.has("description") ? d.description : "",
+      notes: needs(flow, "notes") ? d.notes : "",
+    }));
+    setSuggested((s) => (s.has("amount") ? new Set(["amount"]) : new Set()));
+    setCategoryHint(null);
+    setSubmitted(false);
+  };
+
   const tone = FLOWS.find((f) => f.id === draft.flow)?.tone;
 
   return (
-    <div className="fms-entry">
+    <div className={showChat ? "fms-entry" : "fms-entry fms-entry--nochat"}>
+      {dialog}
       {/* ── Left: the form ─────────────────────────────────────────────── */}
       <section className="fms-panel fms-entryform">
         {due.length > 0 && (
@@ -553,7 +560,7 @@ export function AddTransaction({
             return (
               <button
                 key={f.id}
-                onClick={() => setDraft({ ...emptyDraft(draft.date), flow: f.id })}
+                onClick={() => switchFlow(f.id)}
                 aria-pressed={active}
                 className="fms-flowtile"
                 style={{
@@ -873,6 +880,21 @@ export function AddTransaction({
                 </Row>
               )}
 
+              {/*
+                The total, as the workbook showed it under the fee (E17, the
+                amount plus the fee), and read only, as E17 was protected. It
+                is what the row will carry as its total, so a fee typed into
+                the wrong box shows here before saving rather than in a
+                balance afterwards.
+              */}
+              {needs(draft.flow, "fee") && (
+                <Row label="Total">
+                  <span className="fms-readonly">
+                    <Money value={(draft.amount ?? 0) + draft.fee} />
+                  </span>
+                </Row>
+              )}
+
               {needs(draft.flow, "description") && (
                 <Row label="Description" span hint={ghost.description && !draft.description ? `Last time: ${ghost.description}` : undefined}>
                   <div className={suggested.has("description") ? "fms-suggested" : undefined}>
@@ -931,7 +953,7 @@ export function AddTransaction({
               {editing ? (
                 <Button onClick={cancelEdit}>Cancel</Button>
               ) : (
-                <Button onClick={() => setDraft({ ...emptyDraft(draft.date), flow: "Spending" })}>
+                <Button onClick={() => void clearForm()}>
                   Clear
                 </Button>
               )}
@@ -996,18 +1018,20 @@ export function AddTransaction({
         )}
       </aside>
 
-      <AskPanel
-        sink={sink}
-        deleted={deleted}
-        debts={debts}
-        lastSaved={lastSaved}
-        uid={uid}
-        settings={settings}
-        transactions={transactions}
-        budgets={budgets}
-        reference={reference}
-        asOf={asOf}
-      />
+      {showChat && (
+        <AskPanel
+          sink={sink}
+          deleted={deleted}
+          debts={debts}
+          lastSaved={lastSaved}
+          uid={uid}
+          settings={settings}
+          transactions={transactions}
+          budgets={budgets}
+          reference={reference}
+          asOf={asOf}
+        />
+      )}
     </div>
   );
 }
@@ -1077,17 +1101,22 @@ function Row({
  */
 const DRAFT_KEY = "fms.add.draft";
 
+/** Nothing typed that clearing the form or leaving it would lose. */
+function isBlankDraft(draft: Draft): boolean {
+  return (
+    draft.amount === null &&
+    !draft.item.trim() &&
+    !draft.description.trim() &&
+    !draft.notes.trim() &&
+    !draft.fromWallet &&
+    !draft.toWallet
+  );
+}
+
 function keepDraft(draft: Draft): void {
   try {
     // Nothing worth keeping, and nothing worth restoring into an empty form.
-    const empty =
-      draft.amount === null &&
-      !draft.item.trim() &&
-      !draft.description.trim() &&
-      !draft.notes.trim() &&
-      !draft.fromWallet &&
-      !draft.toWallet;
-    if (empty) {
+    if (isBlankDraft(draft)) {
       window.sessionStorage.removeItem(DRAFT_KEY);
       return;
     }

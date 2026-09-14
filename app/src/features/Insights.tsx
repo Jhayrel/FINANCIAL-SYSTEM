@@ -25,6 +25,7 @@ import {
 import { AiAnswerView } from "../components/AiAnswer";
 import { useAi } from "./useAi";
 import type { AppSettings } from "../domain/settings";
+import { aiSurfaceOn } from "../domain/aiSurface";
 import { RankBars } from "../components/charts";
 import { learnPatterns, planDay, REASON_LABEL } from "../domain/allocation";
 import { billStatuses, overdue, paidThisMonth, upcoming } from "../domain/bills";
@@ -137,6 +138,8 @@ export function Insights({
         <CountChip>{monthName(month)} {year}</CountChip>
       </div>
 
+      {/* Only while AI and this surface are on: off means gone (domain/aiSurface.ts). */}
+      {aiSurfaceOn(settings.ai, "insightSummary") && (
       <Card
         title={`${monthName(month)} in a sentence`}
         subtitle={ai.disabled ? "Written on this device" : "Ask the model to describe the month"}
@@ -157,6 +160,7 @@ export function Insights({
           <Button onClick={() => void ai.run("patterns")}>Look for a pattern</Button>
         </div>
       </Card>
+      )}
 
       {late.length > 0 && (
         <Alert status="over" title={`${late.length} bill${late.length === 1 ? "" : "s"} overdue`}>

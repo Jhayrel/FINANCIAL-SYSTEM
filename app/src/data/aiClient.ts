@@ -16,9 +16,18 @@
  * a content type of text/html. The last one is the nastiest, because it looks
  * like success until JSON parsing fails on a doctype.
  *
- * So every one of those collapses to the same outcome: `source: "offline"` with
- * text from `domain/aiOffline.ts` and a reason worth showing. The caller never
- * has to handle a null, and the feature never simply stops working.
+ * So every one of those collapses to the same outcome: `source: "offline"`,
+ * the sentence in `MODEL_DOWN`, and a reason worth showing. The caller never
+ * has to handle a null.
+ *
+ * ── Why a failure no longer writes a summary instead ──────────────────────
+ *
+ * It used to answer from `domain/aiOffline.ts` whenever the model could not,
+ * so a failure still produced a paragraph about the month. The owner found
+ * that confusing: a question came back answered with a different question's
+ * answer, and nothing said the AI had failed. On 2026-09-15 they asked for a
+ * plain sentence instead, and that is what every AI surface shows now, with
+ * the reason underneath.
  */
 
 import { contextToText, type AiContext } from "../domain/aiContext";
@@ -32,7 +41,7 @@ import {
 import type { ReferenceLists } from "../domain/types";
 import type { Draft } from "../domain/entry";
 import type { Transaction } from "../domain/types";
-import { offlineAnswer, type AiTask } from "../domain/aiOffline";
+import type { AiTask } from "../domain/aiOffline";
 import { plainText } from "../domain/aiText";
 import { idToken } from "./auth";
 import { redact } from "../domain/aiRedact";
@@ -41,6 +50,9 @@ import type { Attachment } from "./attachments";
 import type { IsoDate } from "../domain/types";
 
 export type { AiTask };
+
+/** What every AI surface says when the model could not answer. The owner's words. */
+export const MODEL_DOWN = "The AI model is not working. Please try again.";
 
 export interface AiAnswer {
   readonly text: string;
@@ -149,7 +161,7 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
   const attempt = options.attempt ?? 0;
 
   const fallback = (reason: string): AiAnswer => ({
-    text: offlineAnswer(context, task),
+    text: MODEL_DOWN,
     source: "offline",
     reason,
   });

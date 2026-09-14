@@ -12,7 +12,7 @@ import { loadFixture } from "../fixtures/load";
 import { allowedCategories } from "../domain/categorise";
 import { buildContext } from "../domain/aiContext";
 import { migrateAccounts } from "../domain/accounts";
-import { askAi, describeDraft, suggestCategory } from "./aiClient";
+import { askAi, describeDraft, MODEL_DOWN, suggestCategory } from "./aiClient";
 
 const fixture = loadFixture();
 const context = buildContext({
@@ -102,7 +102,10 @@ describe("askAi", () => {
     expect(answer.reason).toContain("offline");
   });
 
-  it("always produces usable text, whatever went wrong", async () => {
+  it("says the model is not working, with the reason, whatever went wrong", async () => {
+    // The owner's wording since 2026-09-15. A failure used to answer with a
+    // summary of the month instead, which read as an answer to a different
+    // question and never said the AI had failed.
     const answers = await Promise.all([
       ask(respond("<html></html>", { type: "text/html" })),
       ask(respond({ error: "nope" }, { status: 500 })),
@@ -110,8 +113,9 @@ describe("askAi", () => {
     ]);
 
     for (const a of answers) {
-      expect(a.text.length).toBeGreaterThan(20);
-      expect(a.text).toContain("PHP");
+      expect(a.source).toBe("offline");
+      expect(a.text).toBe(MODEL_DOWN);
+      expect(a.reason?.length ?? 0).toBeGreaterThan(0);
     }
   });
 

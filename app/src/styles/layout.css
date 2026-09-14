@@ -138,9 +138,37 @@
 .fms-topbar {
   flex: 0 0 auto;
   z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
   background: var(--surface);
   border-bottom: 1px solid var(--hairline);
   padding: var(--space-3) var(--space-8);
+}
+
+.fms-topbar-titles {
+  min-width: 0;
+}
+
+/* The gear that opens Settings on a phone, which has no Settings tab. */
+.fms-topbar-action {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-right: calc(var(--space-2) * -1);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.fms-topbar-action:hover,
+.fms-topbar-action[aria-current="page"] {
+  background: var(--surface-sunk);
+  color: var(--brand-700);
 }
 
 /*
@@ -238,7 +266,8 @@
  */
 .fms-toastwrap {
   position: fixed;
-  right: var(--space-6);
+  /* Beside the floating AI button, not over it. */
+  right: calc(var(--space-6) + 56px + var(--space-3));
   bottom: var(--space-6);
   z-index: 30;
   display: flex;
@@ -2125,6 +2154,16 @@
     align-items: stretch;
   }
 
+  /*
+   * No assistant beside the form: the form and the balances, and no wider
+   * than a form reads well. Stretched across a 1920px screen, a label sat a
+   * hand's width from its field.
+   */
+  .fms-entry--nochat {
+    grid-template-columns: minmax(400px, 1fr) minmax(220px, 300px);
+    max-width: 1180px;
+  }
+
   .fms-entry > * {
     min-width: 0;
     min-height: 0;
@@ -2239,6 +2278,124 @@
   .fms-ask {
     grid-column: 1 / -1;
     height: 480px;
+  }
+}
+
+/* ══ The assistant outside the Add screen ═══════════════════════════════════ */
+
+/*
+ * A phone's AI tab: the whole screen is the conversation, with the composer
+ * at the bottom above the navigation.
+ */
+.fms-aiscreen {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.fms-aiscreen > .fms-ask {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+/*
+ * The floating button on a computer. Brand green because it is an action,
+ * round because it floats: nothing else on the page is either.
+ */
+.fms-chatfab {
+  position: fixed;
+  right: var(--space-6);
+  bottom: var(--space-6);
+  z-index: 41;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--brand-700);
+  color: var(--on-brand);
+  box-shadow: var(--shadow-raised);
+  transition: background var(--motion-hover) var(--ease-out);
+}
+
+.fms-chatfab:hover {
+  background: var(--brand-hover);
+}
+
+.fms-chatfab:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+/*
+ * Room under the page for the button while it is showing, so it never sits
+ * on the last row or on a footer button. The Database's "Show 25 more" was
+ * underneath it.
+ */
+.fms-app--fab .fms-main {
+  --main-pad-b: calc(var(--space-6) + 56px + var(--space-3));
+}
+
+/*
+ * The chat it opens, above the button: never taller than the window leaves
+ * room for, never wider than the screen.
+ */
+.fms-chatpop {
+  position: fixed;
+  right: var(--space-6);
+  bottom: calc(var(--space-6) + 56px + var(--space-3));
+  z-index: 40;
+  display: flex;
+  width: min(420px, calc(100vw - var(--space-12)));
+  height: min(640px, calc(100dvh - 120px));
+}
+
+/* A class that sets display beats the browser's own [hidden] rule, so say it. */
+.fms-chatpop[hidden] {
+  display: none;
+}
+
+.fms-chatpop > .fms-ask {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  box-shadow:
+    var(--shadow-overlay),
+    0 0 0 1px var(--ai-glow-ring);
+}
+
+/* The heading keeps clear of the close button in its corner. */
+.fms-chatpop .fms-askhead {
+  padding-right: 44px;
+}
+
+.fms-chatpop-close {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.fms-chatpop-close:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+@media (max-width: 1023px) {
+  .fms-chatfab,
+  .fms-chatpop {
+    display: none;
   }
 }
 

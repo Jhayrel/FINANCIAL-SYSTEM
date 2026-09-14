@@ -23,6 +23,7 @@ import {
 import { AiAnswerView } from "../components/AiAnswer";
 import { useAi } from "./useAi";
 import type { AppSettings } from "../domain/settings";
+import { aiSurfaceOn } from "../domain/aiSurface";
 import { AreaChart, BarChart, RankBars } from "../components/charts";
 import { assessMonthFor, budgetSummary, dailyPacing } from "../domain/budget";
 import type { Debt } from "../domain/debt";
@@ -200,7 +201,8 @@ export function Dashboard({
         * back as prose, which is easier to take in at a glance than six
         * separate boxes.
         */}
-      {alerts.length > 0 && (
+      {/* Only while AI and this surface are on: off means gone (domain/aiSurface.ts). */}
+      {alerts.length > 0 && aiSurfaceOn(settings.ai, "alerts") && (
         <Card title="What needs attention" subtitle={`${alerts.length} flagged`}>
           {ai.answer ? (
             <AiAnswerView answer={ai.answer} />

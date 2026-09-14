@@ -24,6 +24,7 @@ import { useConfirm } from "../components/Confirm";
 import { formatAmount } from "../domain/money";
 import { DataTable, type Column } from "../components/DataTable";
 import { formatShort } from "../domain/dates";
+import { inPeriod, matchesSearch, parseSearch, PERIODS, type Period } from "../domain/search";
 import { checkIntegrity, type Issue } from "../domain/integrity";
 import type { Transaction, TransactionType } from "../domain/types";
 
@@ -61,6 +62,7 @@ export function Database({
   onDelete,
   onDeleteMany,
   onEdit,
+  asOf,
 }: {
   transactions: readonly Transaction[];
   initialFilter?: FilterId;
@@ -69,9 +71,12 @@ export function Database({
   onDeleteMany?: ((ids: readonly string[]) => void) | undefined;
   /** Loads the row back into the Add form, the way the Excel arrows did. */
   onEdit?: (row: Transaction) => void;
+  /** Today, for the Today, Yesterday, Last 7 days and This month shortcuts. */
+  asOf: string;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterId>(initialFilter);
+  const [period, setPeriod] = useState<Period>("all");
   /**
    * Newest entry first, by record number rather than by date.
    *
@@ -163,50 +168,21 @@ export function Database({
   }, [transactions]);
 
   /**
-   * Search by what it cost, which is how anyone looks for a transaction.
+   * Search, read the way the workbook's Smart Search read it.
    *
-   * Typing 5000 to find a PHP 5,000.00 row returned nothing, because the
-   * search covered every field except the one people actually remember. It
-   * now matches the amount, the fee and the total, written the way they are
-   * shown and the way they would be typed: 5000, 5,000, and 5000.00 all find
-   * the same row.
+   * Every word must match, ">1000" and "<100" are amounts over and under,
+   * "P500" is that exact amount, "#442" is a record, and a plain number still
+   * finds an amount written the way it is shown: 5000, 5,000 and 5000.00 all
+   * find PHP 5,000.00. The rules and their tests are in domain/search.ts.
    */
-  const matchesAmount = (t: Transaction, q: string): boolean => {
-    // A query with no digits cannot be an amount, and testing it would make
-    // every text search do this work for nothing.
-    if (!/\d/.test(q)) return false;
-
-    const wanted = q.replace(/[^\d.]/g, "");
-    if (!wanted) return false;
-
-    return [t.amount, t.fee, t.total].some((cents) => {
-      const exact = (cents / 100).toFixed(2);
-      // "5000" should find 5000.00, so a whole-peso query matches the
-      // pesos alone as well as the full two decimal places.
-      const whole = String(Math.trunc(cents / 100));
-      return exact.includes(wanted) || whole === wanted;
-    });
-  };
-
   const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const terms = parseSearch(query);
 
     const filtered = transactions.filter((t) => {
       if (filter === "flagged" && !issuesById.has(t.id)) return false;
       if (filter !== "all" && filter !== "flagged" && t.type !== filter) return false;
-      if (!q) return true;
-      return (
-        t.item.toLowerCase().includes(q) ||
-        t.description.toLowerCase().includes(q) ||
-        t.fromWallet.toLowerCase().includes(q) ||
-        t.toWallet.toLowerCase().includes(q) ||
-        t.category.toLowerCase().includes(q) ||
-        t.notes.toLowerCase().includes(q) ||
-        t.status.toLowerCase().includes(q) ||
-        String(t.recordNumber).padStart(4, "0").includes(q) ||
-        matchesAmount(t, q) ||
-        t.date.includes(q)
-      );
+      if (!inPeriod(t.date, period, asOf)) return false;
+      return matchesSearch(t, terms);
     });
 
     const dir = sortDir === "asc" ? 1 : -1;
@@ -224,7 +200,7 @@ export function Database({
           );
       }
     });
-  }, [transactions, query, filter, issuesById, sortKey, sortDir]);
+  }, [transactions, query, filter, period, asOf, issuesById, sortKey, sortDir]);
 
   const shown = rows.slice(0, limit);
   const flaggedCount = issuesById.size;
@@ -268,7 +244,7 @@ export function Database({
     {
       key: "record",
       header: "Record",
-      width: "96px",
+      width: "104px",
       sortable: true,
       hideBelow: "md",
       render: (t) => (
@@ -426,14 +402,28 @@ export function Database({
         action={<CountChip>{transactions.length.toLocaleString()} records</CountChip>}
       >
         <div className="fms-dbtools">
-          <SearchInput value={query} onChange={(v) => { setQuery(v); setLimit(PAGE); }} placeholder="Search item, description, wallet, amount, date, record #…" />
+          <SearchInput
+            value={query}
+            onChange={(v) => { setQuery(v); setLimit(PAGE); }}
+            placeholder="Search words, #0442, >1000, <100, P500"
+          />
           <SegmentedControl
+            label="Type"
+            scroll
             options={FILTERS.map((f) => ({
               id: f.id,
               label: f.id === "flagged" && flaggedCount > 0 ? `${f.label} (${flaggedCount})` : f.label,
             }))}
             value={filter}
             onChange={(id) => { setFilter(id); setLimit(PAGE); }}
+          />
+          {/* The workbook's one-tap searches: today, yesterday, the last 7 days, this month. */}
+          <SegmentedControl
+            label="Date"
+            scroll
+            options={PERIODS}
+            value={period}
+            onChange={(id) => { setPeriod(id); setLimit(PAGE); }}
           />
         </div>
 
@@ -472,8 +462,10 @@ export function Database({
                 : "Nothing matches these filters."
             }
             action={
-              (query || filter !== "all") && (
-                <Button onClick={() => { setQuery(""); setFilter("all"); }}>Clear filters</Button>
+              (query || filter !== "all" || period !== "all") && (
+                <Button onClick={() => { setQuery(""); setFilter("all"); setPeriod("all"); }}>
+                  Clear filters
+                </Button>
               )
             }
           />

@@ -28,6 +28,11 @@ import { Settings } from "./features/Settings";
 import { Statements } from "./features/Statements";
 import { Alert, Card, EmptyState, Money, Toast } from "./components/primitives";
 import { Icon, type IconName } from "./components/Icon";
+import { AskPanel } from "./features/AskPanel";
+import { useProposalSink } from "./features/useProposalSink";
+import { useMediaQuery } from "./features/useMediaQuery";
+import { aiSurfaceOn } from "./domain/aiSurface";
+import type { Draft } from "./domain/entry";
 import { loadLocalLedger } from "./data/localSource";
 import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
@@ -87,7 +92,9 @@ type Screen =
   | "statements"
   | "bin"
   | "activity"
-  | "settings";
+  | "settings"
+  /** The assistant on a tab of its own: a phone's version of the floating chat. */
+  | "ai";
 
 /**
  * Every screen, in sidebar order.
@@ -109,8 +116,20 @@ const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean }[] = 
   { id: "settings", label: "Settings", icon: "settings" },
 ];
 
-/** The phone bar, left to right. Add is drawn in the middle, raised. */
-const BOTTOM: readonly Screen[] = ["dashboard", "database", "add", "debt"];
+/**
+ * What a phone shows, and nothing else.
+ *
+ * The owner's list on 2026-09-15: adding, the dashboard, the database, the
+ * budget, and the assistant on a tab of its own. Debt, Insights, Statements,
+ * the Bin and Activity stay on the computer, where there is room for them.
+ * Settings stays reachable from the gear in the top bar, because the AI switch
+ * and the accounts live there and a phone still needs both.
+ */
+const PHONE_SCREENS: readonly Screen[] = ["dashboard", "database", "add", "budget", "ai", "settings"];
+
+/** The phone bar, left to right. Add is drawn raised; with the AI tab it is dead centre. */
+const BAR: readonly Screen[] = ["dashboard", "database", "add", "budget"];
+const BAR_WITH_AI: readonly Screen[] = ["dashboard", "database", "add", "budget", "ai"];
 
 /**
  * The fixture is a snapshot ending 2026-08-28, so running against it anchors
@@ -136,7 +155,18 @@ export default function App() {
   const [activityKey, setActivityKey] = useState(0);
   /** So a missing rules deploy is reported once, not once per row saved. */
   const activityWarned = useRef(false);
-  const [moreOpen, setMoreOpen] = useState(false);
+  /** The floating chat on a computer: open now, and mounted since it was first opened. */
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMounted, setChatMounted] = useState(false);
+  /**
+   * A card the assistant sent to the form from outside the Add screen, and the
+   * last row the form saved. Held here because the assistant can be in three
+   * places and the form is in one.
+   */
+  const [incoming, setIncoming] = useState<{ draft: Draft; at: number } | null>(null);
+  const [lastSaved, setLastSaved] = useState<{ draft: Draft; at: number } | null>(null);
+  /** Phone and tablet: the bottom bar, and the phone's shorter list of screens. */
+  const compact = useMediaQuery("(max-width: 1023px)");
 
   /**
    * "Today", which was frozen at 2026-08-29 for everybody.
@@ -864,18 +894,63 @@ export default function App() {
     mainRef.current?.scrollTo({ top: 0 });
   }, [screen]);
 
+  /** Every AI surface goes when AI or its chat is off (domain/aiSurface.ts). */
+  const chatOn = aiSurfaceOn(settings.ai, "chat");
+
   /**
-   * Escape closes the More sheet, as it closes every other overlay here.
-   * Above the sign-in return for the same reason as the two hooks above.
+   * Keep the screen one this device actually offers.
+   *
+   * A phone has no Insights, a computer has no AI tab, and turning AI off
+   * removes the AI tab everywhere. Resizing a window, or switching AI off,
+   * could otherwise leave the app on a screen with no way back to it. The
+   * computer's version of the AI tab is the floating chat, so arriving there
+   * opens it. Above the sign-in return, like every hook here.
    */
   useEffect(() => {
-    if (!moreOpen) return;
+    if (screen === "ai" && (!chatOn || !compact)) {
+      setScreen("dashboard");
+      if (chatOn) {
+        setChatMounted(true);
+        setChatOpen(true);
+      }
+      return;
+    }
+    if (compact && !PHONE_SCREENS.includes(screen)) setScreen("dashboard");
+  }, [screen, compact, chatOn]);
+
+  /** Escape closes the floating chat, unless a picture or a dialog is open over it. */
+  useEffect(() => {
+    if (!chatOpen) return;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") setMoreOpen(false);
+      if (e.key !== "Escape") return;
+      if (document.querySelector(".fms-lightbox, .fms-backdrop")) return;
+      setChatOpen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [moreOpen]);
+  }, [chatOpen]);
+
+  /**
+   * The assistant's actions for the chat outside the Add screen.
+   *
+   * The same path the Add screen's own chat uses (features/useProposalSink.ts).
+   * "Edit first" cannot fill a form that is not on screen, so it opens the Add
+   * screen with the card already in it.
+   */
+  const sink = useProposalSink({
+    transactions,
+    reference,
+    debts: settings.credits,
+    onSave: handleSave,
+    onBin: handleDelete,
+    onBinMany: handleDeleteMany,
+    onRestore: handleRestore,
+    onUse: (draft) => {
+      setIncoming({ draft, at: Date.now() });
+      setChatOpen(false);
+      setScreen("add");
+    },
+  });
 
   // With Firebase configured, nothing renders until the owner is signed in,
   // the rules would deny every read anyway, so a half-rendered app would only
@@ -910,14 +985,14 @@ export default function App() {
     );
   }
 
-  const title = NAV.find((n) => n.id === screen)?.label ?? "";
+  const title = screen === "ai" ? "AI assistant" : (NAV.find((n) => n.id === screen)?.label ?? "");
   const go = (id: Screen): void => {
     setScreen(id);
-    setMoreOpen(false);
+    setChatOpen(false);
   };
 
   return (
-    <div className="fms-app">
+    <div className={!compact && chatOn && screen !== "add" ? "fms-app fms-app--fab" : "fms-app"}>
       {/* Fixed sidebar. Never scrolls with the content. */}
       <aside className="fms-sidebar">
         <div className="fms-brand">
@@ -966,11 +1041,25 @@ export default function App() {
       {/* Scrolling content column */}
       <div className="fms-content">
         <header className="fms-topbar safe-t">
-          <h1 className="t-display-m" style={{ margin: 0 }}>{title}</h1>
-          <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-            {transactions.length.toLocaleString()} records · net worth{" "}
-            <Money value={view.worth.total} size="s" />
-          </p>
+          <div className="fms-topbar-titles">
+            <h1 className="t-display-m" style={{ margin: 0 }}>{title}</h1>
+            <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+              {transactions.length.toLocaleString()} records · net worth{" "}
+              <Money value={view.worth.total} size="s" />
+            </p>
+          </div>
+          {/* Settings on a phone: the bar has no room for it, and the AI switch lives there. */}
+          {compact && (
+            <button
+              type="button"
+              className="fms-topbar-action"
+              aria-label="Settings"
+              aria-current={screen === "settings" ? "page" : undefined}
+              onClick={() => go("settings")}
+            >
+              <Icon name="settings" size={22} />
+            </button>
+          )}
         </header>
 
         {/*
@@ -981,7 +1070,11 @@ export default function App() {
         <main
           ref={mainRef}
           className={`fms-main${
-            screen === "settings" ? " fms-main--fixed" : screen === "database" ? " fms-main--fixed-lg" : ""
+            screen === "settings" || screen === "ai"
+              ? " fms-main--fixed"
+              : screen === "database"
+                ? " fms-main--fixed-lg"
+                : ""
           }`}
         >
           {syncError && (
@@ -1025,7 +1118,27 @@ export default function App() {
               settings={settings}
               budgets={budgets}
               asOf={asOf}
+              showChat={chatOn && !compact}
+              incoming={incoming}
+              lastSaved={lastSaved}
+              onSaved={setLastSaved}
             />
+          )}
+          {screen === "ai" && chatOn && (
+            <div className="fms-aiscreen">
+              <AskPanel
+                sink={sink}
+                deleted={deleted}
+                debts={settings.credits}
+                lastSaved={lastSaved}
+                uid={cloud.uid ?? null}
+                settings={settings}
+                transactions={transactions}
+                budgets={budgets}
+                reference={reference}
+                asOf={asOf}
+              />
+            </div>
           )}
           {screen === "database" && (
             <Database
@@ -1035,6 +1148,7 @@ export default function App() {
               onDelete={handleDelete}
               onDeleteMany={handleDeleteMany}
               onEdit={startEditing}
+              asOf={asOf}
             />
           )}
           {screen === "debt" && (
@@ -1112,16 +1226,16 @@ export default function App() {
       </div>
 
       {/*
-        Phone navigation: Dashboard, Database, Add, Debt and More.
+        Phone navigation: Dashboard, Database, Add, Budget, and the assistant.
 
-        Add sits in the middle, raised and round, per style guide §3.8. It is
-        the action this app exists for, and the middle of the bar is where a
-        thumb lands without looking.
+        Add sits raised and round, per style guide §3.8: it is the action this
+        app exists for. The AI tab is there only while AI is on.
       */}
       <nav className="fms-bottomnav safe-b" aria-label="Screens">
-        {BOTTOM.map((id) => {
+        {(chatOn ? BAR_WITH_AI : BAR).map((id) => {
           const n = NAV.find((x) => x.id === id);
-          if (!n) return null;
+          const label = id === "ai" ? "AI" : (n?.label ?? "");
+          const icon: IconName = id === "ai" ? "ai" : (n?.icon ?? "dashboard");
           const active = screen === id;
 
           if (id === "add") {
@@ -1149,47 +1263,59 @@ export default function App() {
               aria-current={active ? "page" : undefined}
               className={`t-micro fms-bnitem${active ? " fms-bnitem--on" : ""}`}
             >
-              <Icon name={n.icon} size={24} />
-              <span className="fms-bnlabel">{n.label}</span>
+              <Icon name={icon} size={24} />
+              <span className="fms-bnlabel">{label}</span>
             </button>
           );
         })}
-        <button
-          type="button"
-          onClick={() => setMoreOpen((o) => !o)}
-          aria-expanded={moreOpen}
-          className={`t-micro fms-bnitem${
-            moreOpen || !NAV.find((n) => n.id === screen)?.primary ? " fms-bnitem--on" : ""
-          }`}
-        >
-          <Icon name="more" size={24} />
-          <span className="fms-bnlabel">More</span>
-        </button>
       </nav>
 
-      {moreOpen && (
+      {/*
+        The assistant on a computer, on every screen but Add.
+
+        A round button at the bottom right opens it. The Add screen keeps its
+        chat beside the form instead, so the two are never on screen together
+        writing to one conversation. Once opened it stays mounted while you move
+        between screens, so an answer on its way is not lost by closing it.
+      */}
+      {!compact && chatOn && screen !== "add" && (
         <>
-          <div className="fms-scrim" onClick={() => setMoreOpen(false)} />
-          <div className="fms-sheet" role="dialog" aria-label="More screens">
-            <div className="fms-sheethandle" aria-hidden />
-            {NAV.filter((n) => !n.primary).map((n) => (
+          {chatMounted && (
+            <div className="fms-chatpop" role="dialog" aria-label="AI assistant" hidden={!chatOpen}>
               <button
-                key={n.id}
                 type="button"
-                onClick={() => go(n.id)}
-                aria-current={screen === n.id ? "page" : undefined}
-                className="fms-navitem"
+                className="fms-chatpop-close"
+                aria-label="Close the AI assistant"
+                onClick={() => setChatOpen(false)}
               >
-                <span aria-hidden className="fms-navicon">
-                  <Icon name={n.icon} />
-                </span>
-                <span className="fms-navlabel">{n.label}</span>
-                {n.id === "bin" && deleted.length > 0 && (
-                  <span className="t-micro fms-navcount">{deleted.length}</span>
-                )}
+                <Icon name="close" size={20} />
               </button>
-            ))}
-          </div>
+              <AskPanel
+                sink={sink}
+                deleted={deleted}
+                debts={settings.credits}
+                lastSaved={lastSaved}
+                uid={cloud.uid ?? null}
+                settings={settings}
+                transactions={transactions}
+                budgets={budgets}
+                reference={reference}
+                asOf={asOf}
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            className="fms-chatfab"
+            aria-label={chatOpen ? "Close the AI assistant" : "Open the AI assistant"}
+            aria-expanded={chatOpen}
+            onClick={() => {
+              setChatMounted(true);
+              setChatOpen((open) => !open);
+            }}
+          >
+            <Icon name={chatOpen ? "close" : "ai"} size={26} />
+          </button>
         </>
       )}
 

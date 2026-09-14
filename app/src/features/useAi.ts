@@ -127,7 +127,8 @@ export function useAi({
   useEffect(() => {
     const cached = readCache(keyFor("summary"));
     setAnswer(
-      cached
+      // A stored failure from before failures stopped being stored is not shown.
+      cached && cached.source === "model"
         ? {
             text: cached.text,
             source: cached.source,
@@ -159,16 +160,20 @@ export function useAi({
         setAnswer(fresh);
 
         /**
-         * Only a real answer is worth keeping. An offline one is written
-         * here anyway rather than recomputed, because it took the same
-         * figures and would say the same thing.
+         * Only a real answer is worth keeping.
+         *
+         * A failure used to be cached with the rest, so a model that was
+         * busy for one minute would go on saying it was not working every
+         * time the screen opened, until the figures changed.
          */
-        writeCache(keyFor(task), {
-          text: fresh.text,
-          source: fresh.source,
-          model: fresh.model,
-          reason: fresh.reason,
-        });
+        if (fresh.source === "model") {
+          writeCache(keyFor(task), {
+            text: fresh.text,
+            source: fresh.source,
+            model: fresh.model,
+            reason: fresh.reason,
+          });
+        }
       } finally {
         setLoading(false);
       }

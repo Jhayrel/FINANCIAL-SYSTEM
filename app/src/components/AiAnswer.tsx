@@ -41,15 +41,16 @@ export function AiAnswerView({ answer }: { answer: AiAnswer }) {
             color: fromModel ? "var(--ink-2)" : "var(--ink-3)",
           }}
         >
-          {fromModel ? "Model" : "This device"}
+          {fromModel ? "Model" : "Not answered"}
         </span>
         {answer.at !== undefined && (
           <span title="Kept until the figures change">Answered {describeAge(answer.at)}</span>
         )}
         <span>
+          {/* When the model could not answer, the text says so and this says why. */}
           {fromModel
             ? `Written by ${modelLabel(answer.model ?? "") || "the provider"} from figures this app calculated.`
-            : `Written here from the same figures. ${answer.reason ?? ""}`}
+            : (answer.reason ?? "")}
         </span>
       </p>
     </div>

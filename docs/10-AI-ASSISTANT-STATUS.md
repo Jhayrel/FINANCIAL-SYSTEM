@@ -11,8 +11,39 @@ again.
 
 ## 1. The shape of it
 
-The assistant lives in the panel beside the Add form
-([`AskPanel.tsx`](../app/src/features/AskPanel.tsx)). It does five jobs:
+### Where it lives (since 2026-09-15)
+
+One panel, [`AskPanel.tsx`](../app/src/features/AskPanel.tsx), shown in one of
+three places and never two at once:
+
+| Device | Where |
+|---|---|
+| Computer, Add screen | Beside the form, as before |
+| Computer, any other screen | A round AI button at the bottom right opens it as a floating chat |
+| Phone or tablet | Its own AI tab in the bottom bar. The Add form has no chat beside it |
+
+All three save through [`useProposalSink.ts`](../app/src/features/useProposalSink.ts),
+so a row added from the floating chat passes exactly the checks one added
+beside the form does. "Edit first" from outside the Add screen opens the Add
+screen with the card in it.
+
+**Off means gone.** [`aiSurface.ts`](../app/src/domain/aiSurface.ts) decides
+whether an AI surface exists. With AI switched off in Settings there is no
+chat, no floating button, no AI tab and no AI card on the Dashboard or
+Insights, and the Settings AI tab shows only the switch. The owner asked for
+this: surfaces that stayed on screen answering from the device read as the AI
+still being on.
+
+**A failure says so.** When the model cannot answer, every surface shows
+`MODEL_DOWN` in [`aiClient.ts`](../app/src/data/aiClient.ts), "The AI model is
+not working. Please try again.", with the reason underneath. It used to write
+a summary of the month from `domain/aiOffline.ts` instead, which answered a
+different question and never said the AI had failed. Failures are no longer
+cached, so a busy minute does not keep reporting itself.
+
+### What it does
+
+It does five jobs:
 
 | Job | Where |
 |---|---|

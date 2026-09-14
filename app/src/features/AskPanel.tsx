@@ -113,7 +113,13 @@ import {
   repeatsWithin,
   type Duplicate,
 } from "../domain/duplicates";
-import { classifyItem, extractProposals, routeMessage, type Intent as Routed } from "../data/aiClient";
+import {
+  classifyItem,
+  extractProposals,
+  MODEL_DOWN,
+  routeMessage,
+  type Intent as Routed,
+} from "../data/aiClient";
 import { chatStore } from "../data/chatStore";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, type AiEvent, type AttachmentNote } from "../domain/aiLog";
@@ -1366,7 +1372,7 @@ export function AskPanel({
       // that could not be sent is better answered by the question path, which
       // has its own offline reply, so this stays quiet and lets it try.
       if (sent.length > 0) {
-        say({ kind: "assistant", text: result.reason ?? "Nothing came back.", from: "this device" });
+        say({ kind: "assistant", text: MODEL_DOWN, from: result.reason ?? "this device" });
       }
       return false;
     }
@@ -1573,10 +1579,18 @@ export function AskPanel({
 
     const answer = await ai.ask("chat", { question, history });
 
-    const from =
+    /**
+     * A failed answer says so, and says why underneath.
+     *
+     * The text is `MODEL_DOWN` when no model answered, and the reason (busy,
+     * unreachable, too slow) goes on the line that would otherwise name the
+     * model, which is the line read to see who answered.
+     */
+    const model =
       answer.source === "model" ? modelLabel(answer.model ?? "") || "the provider" : "this device";
+    const from = answer.source === "model" ? model : (answer.reason ?? model);
     say({ kind: "assistant", text: answer.text, from });
-    log(aiEvent("answered", "add", { text: answer.text, model: from }));
+    log(aiEvent("answered", "add", { text: answer.text, model }));
   };
 
   const send = async (typed?: string, as?: Intent): Promise<void> => {

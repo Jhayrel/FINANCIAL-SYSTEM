@@ -698,11 +698,18 @@
   accent-color: var(--brand-700);
 }
 
-/* The sort button fills its header cell, padding included. */
+/*
+ * The sort button fills its header cell, padding included.
+ *
+ * max-width: none because it is deliberately wider than its cell's content
+ * box, and the global rule that keeps controls inside their box capped it,
+ * so its own padding ate the label: "RECORD" and "ITEM" read "R..." and "IT...".
+ */
 .fms-dt-sort {
   display: flex;
   align-items: center;
   gap: 4px;
+  max-width: none;
   width: calc(100% + var(--space-4) * 2);
   margin: calc(var(--space-3) * -1) calc(var(--space-4) * -1);
   padding: var(--space-3) var(--space-4);

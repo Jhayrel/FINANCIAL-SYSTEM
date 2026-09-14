@@ -34,7 +34,8 @@ export type IconName =
   | "more"
   | "edit"
   | "close"
-  | "search";
+  | "search"
+  | "ai";
 
 const SHAPES: Record<IconName, ReactNode> = {
   dashboard: (
@@ -112,6 +113,14 @@ const SHAPES: Record<IconName, ReactNode> = {
     <>
       <circle cx="10.75" cy="10.75" r="6" />
       <path d="M15.25 15.25l4.5 4.5" />
+    </>
+  ),
+  // The assistant: a spark, the mark most apps now use for AI, drawn as one
+  // outline like the rest of the set.
+  ai: (
+    <>
+      <path d="M11 4.5c.6 3.6 1.6 5.5 3.2 6.5 1 .6 2.4 1 4.3 1.25-1.9.25-3.3.65-4.3 1.25-1.6 1-2.6 2.9-3.2 6.5-.6-3.6-1.6-5.5-3.2-6.5-1-.6-2.4-1-4.3-1.25 1.9-.25 3.3-.65 4.3-1.25C9.4 10 10.4 8.1 11 4.5z" />
+      <path d="M18.5 3.5v3M17 5h3" />
     </>
   ),
 };

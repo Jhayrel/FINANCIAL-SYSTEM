@@ -1879,7 +1879,7 @@ function AiSection({
                 enabled ? "Turn AI on?" : "Turn AI off?",
                 enabled
                   ? "The app may send figures it has already calculated to the provider below. Nothing leaves this device until you turn this on."
-                  : "Nothing will be sent anywhere. Every screen keeps working; the wording just stops being rewritten.",
+                  : "Every AI chat and AI card disappears, on the phone and on the computer, and nothing is sent anywhere. Your ledger and every figure stay exactly as they are.",
                 enabled ? "Turn it on" : "Turn it off",
                 { enabled },
                 enabled ? "normal" : "danger",
@@ -1893,12 +1893,19 @@ function AiSection({
           Every number it repeats was calculated here first.
         </p>
         {off && (
-          <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-3)" }}>
-            Off. The rest of this tab is inactive.
+          <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+            Off. The assistant, its chat and its cards are hidden everywhere until you turn this on.
           </p>
         )}
       </Group>
 
+      {/*
+        Off means gone, here as everywhere else. The settings for a switched
+        off feature used to sit greyed out under it, which read as a broken
+        screen rather than a switched off one.
+      */}
+      {!off && (
+      <>
       <Group title="Model" hint="Which service answers">
         <div style={{ display: "grid", gap: "var(--space-3)" }}>
           <Field label="Provider" help="Sets a sensible default model when you switch.">
@@ -2057,12 +2064,14 @@ function AiSection({
           server function and never sees the value.
         </Alert>
 
-        <Alert status="info" title="It still works with no key at all">
-          With no key, or when every free model is rate limited, the wording is written on this
-          device from the same figures. Answers say which of the two you are reading, so you are
-          never guessing.
+        <Alert status="info" title="When the model cannot answer">
+          With no key, or when every free model is busy, the assistant says &quot;The AI model is not
+          working. Please try again.&quot; and shows the reason underneath. It never guesses an
+          answer.
         </Alert>
       </Group>
+      </>
+      )}
     </>
   );
 }
