@@ -123,10 +123,16 @@ export function Insights({
   return (
     <div className="fms-dash">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
+        {/*
+          One line that scrolls, not three rows of pills: twelve months wrapped
+          three deep on a phone and pushed the month's figures below the fold.
+        */}
         <SegmentedControl
           options={MONTH_NAMES.slice(0, 12).map((m, i) => ({ id: String(i + 1), label: m.slice(0, 3) }))}
           value={String(month)}
           onChange={(id) => setMonth(Number(id))}
+          scroll
+          label="Month"
         />
         <CountChip>{monthName(month)} {year}</CountChip>
       </div>

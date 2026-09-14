@@ -3,35 +3,19 @@
  *
  * Field anatomy: label → help → control → error.
  * Labels are always visible; a placeholder shows format, never the label.
+ *
+ * ── Styled by class ───────────────────────────────────────────────────────
+ *
+ * These were styled inline, and the inline style set `outline: none` on every
+ * field. That removed the only sign of which field had focus, and an inline
+ * style cannot express hover, disabled, or the 16px a touch screen needs to
+ * stop the page zooming in. `.fms-input` in layout.css carries all of it.
  */
 
-import { useId, useState, type CSSProperties, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 import { formatAmount, parseAmount, type Centavos } from "../domain/money";
-
-const CONTROL_HEIGHT = 44;
-
-function controlStyle(opts: {
-  invalid?: boolean | undefined;
-  disabled?: boolean | undefined;
-  align?: "left" | "right";
-  paddingLeft?: number;
-}): CSSProperties {
-  return {
-    width: "100%",
-    height: CONTROL_HEIGHT,
-    paddingTop: 0,
-    paddingBottom: 0,
-    paddingLeft: opts.paddingLeft ?? "var(--space-3)",
-    paddingRight: "var(--space-3)",
-    textAlign: opts.align ?? "left",
-    background: opts.disabled ? "var(--surface-sunk)" : "var(--surface)",
-    color: opts.disabled ? "var(--ink-3)" : "var(--ink)",
-    border: `1px solid ${opts.invalid ? "var(--over)" : "var(--hairline-strong)"}`,
-    borderRadius: "var(--radius-md)",
-    outline: "none",
-  };
-}
+import { Icon } from "./Icon";
 
 // ── Field wrapper ──────────────────────────────────────────────────────────
 
@@ -53,12 +37,8 @@ export function Field({
   htmlFor?: string | undefined;
 }) {
   return (
-    <div>
-      <label
-        htmlFor={htmlFor}
-        className="t-label"
-        style={{ display: "block", color: "var(--ink-2)", marginBottom: "var(--space-2)" }}
-      >
+    <div className="fms-field">
+      <label htmlFor={htmlFor} className="t-label fms-field-label">
         {label}
         {required && <span style={{ color: "var(--over)" }}> *</span>}
         {optional && <span style={{ color: "var(--ink-3)" }}> (optional)</span>}
@@ -66,8 +46,8 @@ export function Field({
       {children}
       {(error || help) && (
         <p
-          className="t-caption"
-          style={{ margin: "var(--space-2) 0 0", color: error ? "var(--over)" : "var(--ink-3)" }}
+          className="t-caption fms-field-note"
+          style={{ color: error ? "var(--over)" : "var(--ink-3)" }}
         >
           {error || help}
         </p>
@@ -86,6 +66,7 @@ export function TextInput({
   disabled,
   id,
   describedBy,
+  ariaLabel,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -94,6 +75,7 @@ export function TextInput({
   disabled?: boolean | undefined;
   id?: string | undefined;
   describedBy?: string | undefined;
+  ariaLabel?: string | undefined;
 }) {
   return (
     <input
@@ -104,8 +86,8 @@ export function TextInput({
       disabled={disabled}
       aria-invalid={invalid || undefined}
       aria-describedby={describedBy}
-      className="t-body"
-      style={controlStyle({ ...(invalid !== undefined ? { invalid } : {}), ...(disabled !== undefined ? { disabled } : {}) })}
+      aria-label={ariaLabel}
+      className="t-body fms-input"
     />
   );
 }
@@ -116,6 +98,10 @@ export function TextInput({
  * Money field. Accepts "1,234.56" / "1234.56" / "₱1234", parses to integer
  * centavos on blur and reformats to 2dp. Numeric keypad on phone.
  * No spinner: a stepper makes no sense for arbitrary amounts.
+ *
+ * The figure is right-aligned and the ₱ sits on the left, so a long amount
+ * grows towards the sign. The field reserves the sign's width on that side,
+ * otherwise ₱1,234,567.89 was typed straight over the top of it.
  */
 export function AmountInput({
   value,
@@ -124,6 +110,7 @@ export function AmountInput({
   disabled,
   id,
   placeholder = "0.00",
+  ariaLabel,
 }: {
   value: Centavos | null;
   onChange: (v: Centavos | null) => void;
@@ -131,6 +118,7 @@ export function AmountInput({
   disabled?: boolean | undefined;
   id?: string | undefined;
   placeholder?: string | undefined;
+  ariaLabel?: string | undefined;
 }) {
   const [text, setText] = useState(() => (value === null ? "" : formatAmount(value)));
   const [focused, setFocused] = useState(false);
@@ -148,19 +136,8 @@ export function AmountInput({
   if (!focused && text !== committed) setText(committed);
 
   return (
-    <div style={{ position: "relative" }}>
-      <span
-        aria-hidden
-        className="t-num"
-        style={{
-          position: "absolute",
-          left: "var(--space-3)",
-          top: "50%",
-          transform: "translateY(-50%)",
-          color: "var(--ink-3)",
-          pointerEvents: "none",
-        }}
-      >
+    <div className="fms-amount">
+      <span aria-hidden className="t-num fms-amount-peso">
         ₱
       </span>
       <input
@@ -168,8 +145,10 @@ export function AmountInput({
         value={text}
         inputMode="decimal"
         autoComplete="off"
+        enterKeyHint="done"
         disabled={disabled}
         aria-invalid={invalid || undefined}
+        aria-label={ariaLabel}
         placeholder={placeholder}
         onFocus={() => setFocused(true)}
         onChange={(e) => {
@@ -184,12 +163,7 @@ export function AmountInput({
           // re-sync above puts the committed value back on the next render.
           setText(parsed === null ? "" : formatAmount(parsed));
         }}
-        className="t-num"
-        style={controlStyle({
-          ...(invalid !== undefined ? { invalid } : {}),
-          ...(disabled !== undefined ? { disabled } : {}),
-          align: "right",
-        })}
+        className="t-num fms-input fms-input--amount"
       />
     </div>
   );
@@ -211,22 +185,9 @@ export function SearchInput({
   placeholder?: string | undefined;
 }) {
   return (
-    <div style={{ position: "relative", flex: 1, minWidth: 180 }}>
-      <span
-        aria-hidden
-        style={{
-          position: "absolute",
-          left: "var(--space-3)",
-          top: "50%",
-          transform: "translateY(-50%)",
-          color: "var(--ink-3)",
-          lineHeight: 0,
-        }}
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M10.5 10.5 14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
+    <div className="fms-search">
+      <span aria-hidden className="fms-search-icon">
+        <Icon name="search" size={16} />
       </span>
       <input
         value={value}
@@ -234,26 +195,18 @@ export function SearchInput({
         onKeyDown={(e) => e.key === "Escape" && onChange("")}
         placeholder={placeholder}
         aria-label={placeholder}
-        className="t-body"
-        style={{ ...controlStyle({}), height: 40, paddingLeft: 36 }}
+        enterKeyHint="search"
+        autoComplete="off"
+        className="t-body fms-input fms-search-input"
       />
       {value && (
         <button
+          type="button"
           onClick={() => onChange("")}
           aria-label="Clear search"
-          className="t-caption"
-          style={{
-            position: "absolute",
-            right: "var(--space-2)",
-            top: "50%",
-            transform: "translateY(-50%)",
-            background: "none",
-            border: "none",
-            color: "var(--ink-3)",
-            padding: "var(--space-1)",
-          }}
+          className="fms-search-clear"
         >
-          ✕
+          <Icon name="close" size={16} />
         </button>
       )}
     </div>
@@ -275,14 +228,13 @@ export function Checkbox({
 }) {
   const id = useId();
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)" }}>
+    <span className="fms-check">
       <input
         id={id}
         type="checkbox"
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        style={{ width: 18, height: 18, accentColor: "var(--brand-700)", margin: 0 }}
       />
       {label && (
         <label htmlFor={id} className="t-body" style={{ color: "var(--ink)" }}>
@@ -304,32 +256,14 @@ export function Switch({
 }) {
   return (
     <button
+      type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
-      style={{
-        width: 44,
-        height: 24,
-        borderRadius: "var(--radius-full)",
-        border: "none",
-        padding: 2,
-        background: checked ? "var(--brand-700)" : "var(--hairline-strong)",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: checked ? "flex-end" : "flex-start",
-        transition: "background var(--motion-hover) var(--ease-out)",
-      }}
+      className="fms-switch"
     >
-      <span
-        style={{
-          width: 20,
-          height: 20,
-          borderRadius: "var(--radius-full)",
-          background: "var(--surface)",
-          boxShadow: "var(--shadow-card)",
-        }}
-      />
+      <span aria-hidden className="fms-switch-knob" />
     </button>
   );
 }

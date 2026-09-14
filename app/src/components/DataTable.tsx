@@ -4,6 +4,18 @@
  * Desktop: a real table, sticky header, hairline row dividers, no zebra.
  * Phone: the caller renders stacked rows instead, a table never scrolls
  * horizontally on a phone.
+ *
+ * ── Columns that step aside ───────────────────────────────────────────────
+ *
+ * The ledger has ten columns and a 1024px screen has room for about six of
+ * them. With every column declaring a fixed width, the one that did not
+ * declare one was handed whatever was left, and at 1024px that was nothing:
+ * Description rendered zero pixels wide, and Total and Status spilled into
+ * their neighbours.
+ *
+ * A column can now say `hideBelow`. The wrapper is a size container, so the
+ * decision is made against the width of the table itself rather than the
+ * window, and the columns that remain always have the room they asked for.
  */
 
 import type { ReactNode } from "react";
@@ -15,7 +27,19 @@ export interface Column<T> {
   width?: string;
   render: (row: T) => ReactNode;
   sortable?: boolean;
+  /**
+   * Leave this column out when the table is narrower than this.
+   *
+   * `md` goes below 880px of table, `lg` below 1200px. Anything that must
+   * stay visible when its column is gone should be shown inside another
+   * column at the same width (the ledger's description sits under the item).
+   */
+  hideBelow?: "md" | "lg";
 }
+
+/** The class that hides a column, shared so a cell can opt in by itself. */
+export const hideClass = (below: "md" | "lg" | undefined): string =>
+  below ? `fms-dt-hide-${below}` : "";
 
 export function DataTable<T>({
   columns,
@@ -51,8 +75,8 @@ export function DataTable<T>({
   const allHere = rows.length > 0 && selectedHere === rows.length;
 
   return (
-    <div>
-      <div className="scroll-slim" style={{ overflowX: "auto" }}>
+    <div className="fms-dt">
+      <div className="scroll-slim fms-dt-scroll">
         {/*
          * Fixed layout, so the declared widths are the widths.
          *
@@ -63,14 +87,14 @@ export function DataTable<T>({
          * argument about how wide it needed to be.
          *
          * Fixed layout hands each column the width it asked for and gives the
-         * rest to the one that did not ask, which is what makes the ellipsis
+         * rest to the ones that did not ask, which is what makes the ellipsis
          * in `.fms-truncate` actually do something.
          */}
-        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+        <table className="fms-dt-table">
           <thead>
-            <tr style={{ background: "var(--surface-sunk)" }}>
+            <tr>
               {selectable && (
-                <th style={{ width: 44, padding: "var(--space-3) 0 var(--space-3) var(--space-3)" }}>
+                <th className="fms-dt-th fms-dt-pick">
                   {onToggleAll && (
                     /*
                      * Selects what is on screen, not what matches the filter.
@@ -88,7 +112,6 @@ export function DataTable<T>({
                       }}
                       onChange={onToggleAll}
                       aria-label={allHere ? "Clear selection" : "Select the rows on screen"}
-                      style={{ width: 18, height: 18, accentColor: "var(--brand-700)", margin: 0 }}
                     />
                   )}
                 </th>
@@ -98,14 +121,11 @@ export function DataTable<T>({
                 return (
                   <th
                     key={c.key}
-                    className="t-th"
+                    className={`t-th fms-dt-th ${hideClass(c.hideBelow)}`}
                     style={{
                       textAlign: c.align ?? "left",
                       width: c.width,
-                      padding: "var(--space-3) var(--space-4)",
                       color: active ? "var(--ink)" : "var(--ink-2)",
-                      whiteSpace: "nowrap",
-                      borderBottom: "1px solid var(--hairline)",
                     }}
                     aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
                   >
@@ -120,22 +140,12 @@ export function DataTable<T>({
                        * looks clickable, which is the header.
                        */
                       <button
+                        type="button"
                         onClick={() => onSort(c.key)}
-                        className="t-th"
-                        style={{
-                          background: "none",
-                          border: "none",
-                          margin: "calc(var(--space-3) * -1) calc(var(--space-4) * -1)",
-                          padding: "var(--space-3) var(--space-4)",
-                          width: "calc(100% + var(--space-4) * 2)",
-                          color: "inherit",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: c.align === "right" ? "flex-end" : "flex-start",
-                          gap: 4,
-                        }}
+                        className="t-th fms-dt-sort"
+                        style={{ justifyContent: c.align === "right" ? "flex-end" : "flex-start" }}
                       >
-                        {c.header}
+                        <span className="fms-dt-sortlabel">{c.header}</span>
                         <span aria-hidden style={{ color: active ? "var(--ink)" : "var(--ink-3)" }}>
                           {active ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
                         </span>
@@ -170,6 +180,11 @@ export function DataTable<T>({
                    *
                    * A flag outranks a selection, because the flag is the part
                    * you did not already know.
+                   *
+                   * The edge is an inset shadow rather than a border. A 3px
+                   * border on the row widened the first cell by 3px on flagged
+                   * rows only, so their checkboxes sat out of line with every
+                   * other row's.
                    */
                   style={{
                     background: tone
@@ -177,36 +192,30 @@ export function DataTable<T>({
                       : selected
                         ? "var(--surface-sunk)"
                         : "var(--surface)",
-                    borderLeft: tone
-                      ? `3px solid var(--${tone})`
+                    boxShadow: tone
+                      ? `inset 3px 0 0 var(--${tone})`
                       : selected
-                        ? "3px solid var(--ink-3)"
-                        : "3px solid transparent",
+                        ? "inset 3px 0 0 var(--ink-3)"
+                        : undefined,
                     cursor: onRowClick ? "pointer" : undefined,
                   }}
                 >
                   {selectable && (
-                    <td style={{ padding: "var(--space-3) 0 var(--space-3) var(--space-3)" }}>
+                    <td className="fms-dt-td fms-dt-pick">
                       <input
                         type="checkbox"
                         checked={selected ?? false}
                         onChange={() => onToggleRow?.(key)}
                         onClick={(e) => e.stopPropagation()}
                         aria-label={`Select row ${key}`}
-                        style={{ width: 18, height: 18, accentColor: "var(--brand-700)", margin: 0 }}
                       />
                     </td>
                   )}
                   {columns.map((c) => (
                     <td
                       key={c.key}
-                      style={{
-                        textAlign: c.align ?? "left",
-                        padding: "var(--space-3) var(--space-4)",
-                        borderBottom: "1px solid var(--hairline)",
-                        verticalAlign: "middle",
-                        maxWidth: c.width ?? 260,
-                      }}
+                      className={`fms-dt-td ${hideClass(c.hideBelow)}`}
+                      style={{ textAlign: c.align ?? "left" }}
                     >
                       {c.render(row)}
                     </td>
@@ -217,20 +226,7 @@ export function DataTable<T>({
           </tbody>
         </table>
       </div>
-      {footer && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "var(--space-4)",
-            padding: "var(--space-3) var(--space-4)",
-            borderTop: "1px solid var(--hairline)",
-          }}
-        >
-          {footer}
-        </div>
-      )}
+      {footer && <div className="fms-dt-foot">{footer}</div>}
     </div>
   );
 }

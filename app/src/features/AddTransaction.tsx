@@ -830,8 +830,8 @@ export function AddTransaction({
                 error={errorFor("amount")}
                 hint={guess && draft.amount === null ? guess.why : undefined}
               >
-                <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "stretch" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="fms-amountrow">
+                  <div>
                     <AmountInput
                       value={draft.amount}
                       onChange={(v) => set("amount", v)}
@@ -927,7 +927,7 @@ export function AddTransaction({
 
             <div className="fms-actions">
               {tone && <FlowBadge flow={tone} />}
-              <span style={{ flex: 1 }} />
+              <span className="fms-actions-spacer" />
               {editing ? (
                 <Button onClick={cancelEdit}>Cancel</Button>
               ) : (
@@ -955,7 +955,7 @@ export function AddTransaction({
             }}
           >
             <div className="t-label" style={{ color: "var(--ink-2)" }}>{balance.wallet} after this</div>
-            <div style={{ display: "flex", alignItems: "baseline", gap: "var(--space-2)", marginTop: 2 }}>
+            <div className="fms-afterbal">
               <Money value={balance.before} size="s" tone="var(--ink-3)" />
               <span aria-hidden style={{ color: "var(--ink-3)" }}>→</span>
               <Money value={balance.after} size="l" tone={balance.goesNegative ? "var(--over)" : "var(--ink)"} />

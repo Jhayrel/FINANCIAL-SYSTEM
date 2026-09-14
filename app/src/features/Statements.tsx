@@ -57,15 +57,32 @@ export function Statements({
     URL.revokeObjectURL(url);
   };
 
+  /*
+   * Record, Type and Description step aside on a narrow table (see
+   * `hideBelow` in DataTable), and the description moves under the item. The
+   * fixed widths added up to more than a 1024px screen has, so the table
+   * scrolled sideways there and Description had no width at all.
+   */
   const columns: Column<StatementRow>[] = [
-    { key: "record", header: "Record", width: "84px", render: (r) => <span className="t-num-s" style={{ color: "var(--ink-3)" }}>{String(r.transaction.recordNumber).padStart(4, "0")}</span> },
-    { key: "date", header: "Date", width: "104px", render: (r) => <span className="t-num-s">{formatShort(r.transaction.date)}</span> },
+    {
+      key: "record",
+      header: "Record",
+      width: "88px",
+      hideBelow: "md",
+      render: (r) => (
+        <span className="t-num-s" style={{ color: "var(--ink-3)" }}>
+          {String(r.transaction.recordNumber).padStart(4, "0")}
+        </span>
+      ),
+    },
+    { key: "date", header: "Date", width: "116px", render: (r) => <span className="t-num-s">{formatShort(r.transaction.date)}</span> },
     {
       key: "type",
       header: "Type",
-      width: "120px",
+      width: "132px",
+      hideBelow: "md",
       render: (r) => (
-        <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+        <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>
           {r.transaction.debtEffect ? `Debt / ${r.transaction.debtEffect}` : r.transaction.type}
         </span>
       ),
@@ -73,30 +90,45 @@ export function Statements({
     {
       key: "wallet",
       header: "Wallet",
-      width: "160px",
       render: (r) => {
         const t = r.transaction;
         const path = t.fromWallet && t.toWallet ? `${t.fromWallet} → ${t.toWallet}` : t.toWallet ? `→ ${t.toWallet}` : t.fromWallet;
         return <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }} title={path}>{path}</span>;
       },
     },
-    { key: "item", header: "Item", width: "140px", render: (r) => <span className="t-body-strong fms-truncate" title={r.transaction.item}>{r.transaction.item}</span> },
+    {
+      key: "item",
+      header: "Item",
+      render: (r) => (
+        <>
+          <span className="t-body-strong fms-truncate" title={r.transaction.item}>{r.transaction.item}</span>
+          {r.transaction.description && (
+            <span className="fms-dt-sub fms-dt-only-narrow">
+              <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }} title={r.transaction.description}>
+                {r.transaction.description}
+              </span>
+            </span>
+          )}
+        </>
+      ),
+    },
     {
       key: "desc",
       header: "Description",
+      hideBelow: "lg",
       render: (r) => (
         <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }} title={r.transaction.description}>
           {r.transaction.description}
         </span>
       ),
     },
-    { key: "total", header: "Total", align: "right", width: "124px", render: (r) => <Money value={r.transaction.total} /> },
+    { key: "total", header: "Total", align: "right", width: "144px", render: (r) => <Money value={r.transaction.total} /> },
     ...(type === "debt"
       ? [{
           key: "running",
           header: "Outstanding",
           align: "right" as const,
-          width: "132px",
+          width: "144px",
           render: (r: StatementRow) => <Money value={r.runningBalance ?? 0} tone="var(--flow-debt-text)" />,
         }]
       : []),
@@ -147,7 +179,7 @@ export function Statements({
             </label>
           )}
 
-          <div style={{ marginLeft: "auto", alignSelf: "flex-end" }}>
+          <div className="fms-stmtexport">
             <Button variant="primary" onClick={download} disabled={statement.rows.length === 0}>
               Export CSV
             </Button>
@@ -156,7 +188,7 @@ export function Statements({
 
         <div className="fms-stmtsummary">
           <span className="t-caption" style={{ color: "var(--ink-3)" }}>{STATEMENT_HINT[type]}</span>
-          <span style={{ display: "flex", gap: "var(--space-4)", flexWrap: "wrap" }}>
+          <span style={{ display: "flex", gap: "var(--space-2) var(--space-4)", flexWrap: "wrap", alignItems: "center" }}>
             <span className="t-caption" style={{ color: "var(--ink-2)" }}>
               In <Money value={statement.totalIn} size="s" tone="var(--flow-revenue-text)" />
             </span>
@@ -181,7 +213,7 @@ export function Statements({
               {statement.rows.map((r) => (
                 <li key={r.transaction.id} className="fms-dbrow">
                   <div className="fms-dbrow-main">
-                    <div style={{ minWidth: 0 }}>
+                    <div className="fms-dbrow-text">
                       <span className="t-body-strong fms-truncate">{r.transaction.item || "Uncategorised"}</span>
                       <div className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>
                         {r.transaction.description}
@@ -190,7 +222,9 @@ export function Statements({
                         {formatShort(r.transaction.date)} · {r.transaction.type}
                       </div>
                     </div>
-                    <Money value={r.transaction.total} />
+                    <div className="fms-dbrow-figure">
+                      <Money value={r.transaction.total} />
+                    </div>
                   </div>
                 </li>
               ))}

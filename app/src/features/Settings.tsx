@@ -1344,7 +1344,7 @@ function SpendingTypes({
     >
       {dialog}
 
-      <table className="fms-table">
+      <table className="fms-table fms-table--wide">
         <thead>
           <tr>
             <th style={{ width: 190 }}>Type</th>
@@ -1539,7 +1539,7 @@ function CreditLines({
       {rows.length === 0 ? (
         <EmptyState message={`Nothing here. Add one below if you have ${title.toLowerCase()}.`} />
       ) : (
-        <table className="fms-table">
+        <table className="fms-table fms-table--wide">
           <thead>
             <tr>
               <th>Name</th>

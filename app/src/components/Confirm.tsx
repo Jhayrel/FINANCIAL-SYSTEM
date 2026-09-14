@@ -16,9 +16,17 @@
  *
  * The promise resolves false on cancel, Escape, or a click on the backdrop,
  * every escape hatch means "no".
+ *
+ * ── Rendered on the body, wherever `dialog` is placed ─────────────────────
+ *
+ * Call sites put `{dialog}` wherever was convenient, which is often inside a
+ * card. A card clips what overflows it and measures its own width, and either
+ * one can trap a fixed overlay inside the card instead of over the screen. A
+ * portal puts the dialog where it belongs however it was placed.
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import { Button } from "./primitives";
 
@@ -75,6 +83,8 @@ function ConfirmDialog({
   // Escape always cancels. Tab is kept inside the panel so a keyboard user
   // cannot end up operating the page behind the dialog.
   useEffect(() => {
+    const returnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -101,10 +111,14 @@ function ConfirmDialog({
 
     document.addEventListener("keydown", onKey);
     confirmButton.current?.querySelector("button")?.focus();
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      // Style guide §3.11: focus goes back to whatever opened the dialog.
+      returnTo?.focus();
+    };
   }, [onSettle]);
 
-  return (
+  return createPortal(
     <div
       className="fms-backdrop"
       onClick={(e) => {
@@ -130,7 +144,7 @@ function ConfirmDialog({
 
         <div className="fms-dialog-actions">
           <Button onClick={() => onSettle(false)}>{request.cancelLabel ?? "Cancel"}</Button>
-          <span ref={confirmButton}>
+          <span ref={confirmButton} className="fms-dialog-confirm">
             <Button
               variant={request.tone === "danger" ? "danger" : "primary"}
               onClick={() => onSettle(true)}
@@ -140,6 +154,7 @@ function ConfirmDialog({
           </span>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

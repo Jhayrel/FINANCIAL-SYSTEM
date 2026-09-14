@@ -27,6 +27,7 @@ import { Insights } from "./features/Insights";
 import { Settings } from "./features/Settings";
 import { Statements } from "./features/Statements";
 import { Alert, Card, EmptyState, Money, Toast } from "./components/primitives";
+import { Icon, type IconName } from "./components/Icon";
 import { loadLocalLedger } from "./data/localSource";
 import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
@@ -88,18 +89,28 @@ type Screen =
   | "activity"
   | "settings";
 
-const NAV: { id: Screen; label: string; icon: string; primary?: boolean }[] = [
-  { id: "dashboard", label: "Dashboard", icon: "◧", primary: true },
-  { id: "add", label: "Add", icon: "＋", primary: true },
-  { id: "database", label: "Database", icon: "☰", primary: true },
-  { id: "debt", label: "Debt", icon: "◑", primary: true },
-  { id: "insights", label: "Insights", icon: "◈" },
-  { id: "budget", label: "Budget", icon: "▤" },
-  { id: "statements", label: "Statements", icon: "▦" },
-  { id: "bin", label: "Bin", icon: "⌫" },
-  { id: "activity", label: "Activity", icon: "◷" },
-  { id: "settings", label: "Settings", icon: "⚙" },
+/**
+ * Every screen, in sidebar order.
+ *
+ * The icons are drawn shapes from components/Icon.tsx. They were text
+ * characters, which each device draws from whichever font it has, so they
+ * came out at mismatched sizes and, on some phones, as colour emoji.
+ */
+const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean }[] = [
+  { id: "dashboard", label: "Dashboard", icon: "dashboard", primary: true },
+  { id: "add", label: "Add", icon: "add", primary: true },
+  { id: "database", label: "Database", icon: "ledger", primary: true },
+  { id: "debt", label: "Debt", icon: "debt", primary: true },
+  { id: "insights", label: "Insights", icon: "insights" },
+  { id: "budget", label: "Budget", icon: "budget" },
+  { id: "statements", label: "Statements", icon: "statements" },
+  { id: "bin", label: "Bin", icon: "bin" },
+  { id: "activity", label: "Activity", icon: "activity" },
+  { id: "settings", label: "Settings", icon: "settings" },
 ];
+
+/** The phone bar, left to right. Add is drawn in the middle, raised. */
+const BOTTOM: readonly Screen[] = ["dashboard", "database", "add", "debt"];
 
 /**
  * The fixture is a snapshot ending 2026-08-28, so running against it anchors
@@ -853,6 +864,19 @@ export default function App() {
     mainRef.current?.scrollTo({ top: 0 });
   }, [screen]);
 
+  /**
+   * Escape closes the More sheet, as it closes every other overlay here.
+   * Above the sign-in return for the same reason as the two hooks above.
+   */
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setMoreOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [moreOpen]);
+
   // With Firebase configured, nothing renders until the owner is signed in,
   // the rules would deny every read anyway, so a half-rendered app would only
   // show empty screens and permission errors.
@@ -908,28 +932,24 @@ export default function App() {
           </div>
         </div>
 
-        <nav className="fms-nav">
-          {NAV.map((n) => {
-            const active = screen === n.id;
-            return (
-              <button
-                key={n.id}
-                onClick={() => go(n.id)}
-                aria-current={active ? "page" : undefined}
-                className={`fms-navitem ${active ? "t-body-strong" : "t-body"}`}
-                style={{
-                  background: active ? "var(--brand-100)" : "transparent",
-                  color: active ? "var(--brand-700)" : "var(--ink-2)",
-                }}
-              >
-                <span aria-hidden className="fms-navicon">{n.icon}</span>
-                {n.label}
-                {n.id === "bin" && deleted.length > 0 && (
-                  <span className="t-micro fms-navcount">{deleted.length}</span>
-                )}
-              </button>
-            );
-          })}
+        <nav className="fms-nav" aria-label="Screens">
+          {NAV.map((n) => (
+            <button
+              key={n.id}
+              type="button"
+              onClick={() => go(n.id)}
+              aria-current={screen === n.id ? "page" : undefined}
+              className="fms-navitem"
+            >
+              <span aria-hidden className="fms-navicon">
+                <Icon name={n.icon} />
+              </span>
+              <span className="fms-navlabel">{n.label}</span>
+              {n.id === "bin" && deleted.length > 0 && (
+                <span className="t-micro fms-navcount">{deleted.length}</span>
+              )}
+            </button>
+          ))}
         </nav>
 
         <div className="fms-networth">
@@ -953,7 +973,17 @@ export default function App() {
           </p>
         </header>
 
-        <main ref={mainRef} className={`fms-main${screen === "settings" || screen === "database" ? " fms-main--fixed" : ""}`}>
+        {/*
+          Settings scrolls its own panel at every width. The Database only
+          does on a desktop: below that its rows are a plain list and the page
+          has to scroll, which the fixed layout was switching off.
+        */}
+        <main
+          ref={mainRef}
+          className={`fms-main${
+            screen === "settings" ? " fms-main--fixed" : screen === "database" ? " fms-main--fixed-lg" : ""
+          }`}
+        >
           {syncError && (
             <div style={{ marginBottom: "var(--space-4)" }}>
               <Alert status="over" title="Not saving to Firebase">
@@ -1081,48 +1111,79 @@ export default function App() {
         </main>
       </div>
 
-      {/* Phone bottom nav: four primary screens plus More */}
-      <nav className="fms-bottomnav safe-b">
-        {NAV.filter((n) => n.primary).map((n) => {
-          const active = screen === n.id;
+      {/*
+        Phone navigation: Dashboard, Database, Add, Debt and More.
+
+        Add sits in the middle, raised and round, per style guide §3.8. It is
+        the action this app exists for, and the middle of the bar is where a
+        thumb lands without looking.
+      */}
+      <nav className="fms-bottomnav safe-b" aria-label="Screens">
+        {BOTTOM.map((id) => {
+          const n = NAV.find((x) => x.id === id);
+          if (!n) return null;
+          const active = screen === id;
+
+          if (id === "add") {
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => go(id)}
+                aria-current={active ? "page" : undefined}
+                aria-label="Add a transaction"
+                className={`t-micro fms-bnitem fms-bnitem--add${active ? " fms-bnitem--on" : ""}`}
+              >
+                <span aria-hidden className="fms-bnadd">
+                  <Icon name="add" size={26} />
+                </span>
+              </button>
+            );
+          }
+
           return (
             <button
-              key={n.id}
-              onClick={() => go(n.id)}
+              key={id}
+              type="button"
+              onClick={() => go(id)}
               aria-current={active ? "page" : undefined}
-              className="t-micro fms-bnitem"
-              style={{
-                color: active ? "var(--brand-700)" : "var(--ink-3)",
-                fontWeight: active ? 600 : 500,
-              }}
+              className={`t-micro fms-bnitem${active ? " fms-bnitem--on" : ""}`}
             >
-              <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>{n.icon}</span>
-              {n.label}
+              <Icon name={n.icon} size={24} />
+              <span className="fms-bnlabel">{n.label}</span>
             </button>
           );
         })}
         <button
+          type="button"
           onClick={() => setMoreOpen((o) => !o)}
           aria-expanded={moreOpen}
-          className="t-micro fms-bnitem"
-          style={{
-            color: moreOpen || !NAV.find((n) => n.id === screen)?.primary ? "var(--brand-700)" : "var(--ink-3)",
-          }}
+          className={`t-micro fms-bnitem${
+            moreOpen || !NAV.find((n) => n.id === screen)?.primary ? " fms-bnitem--on" : ""
+          }`}
         >
-          <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>⋯</span>
-          More
+          <Icon name="more" size={24} />
+          <span className="fms-bnlabel">More</span>
         </button>
       </nav>
 
       {moreOpen && (
         <>
           <div className="fms-scrim" onClick={() => setMoreOpen(false)} />
-          <div className="fms-sheet safe-b" role="dialog" aria-label="More screens">
+          <div className="fms-sheet" role="dialog" aria-label="More screens">
             <div className="fms-sheethandle" aria-hidden />
             {NAV.filter((n) => !n.primary).map((n) => (
-              <button key={n.id} onClick={() => go(n.id)} className="fms-navitem t-body" style={{ color: "var(--ink)" }}>
-                <span aria-hidden className="fms-navicon">{n.icon}</span>
-                {n.label}
+              <button
+                key={n.id}
+                type="button"
+                onClick={() => go(n.id)}
+                aria-current={screen === n.id ? "page" : undefined}
+                className="fms-navitem"
+              >
+                <span aria-hidden className="fms-navicon">
+                  <Icon name={n.icon} />
+                </span>
+                <span className="fms-navlabel">{n.label}</span>
                 {n.id === "bin" && deleted.length > 0 && (
                   <span className="t-micro fms-navcount">{deleted.length}</span>
                 )}

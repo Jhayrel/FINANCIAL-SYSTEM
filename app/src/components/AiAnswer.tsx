@@ -19,7 +19,7 @@ export function AiAnswerView({ answer }: { answer: AiAnswer }) {
     <div>
       <p
         className="t-body"
-        style={{ margin: 0, whiteSpace: "pre-wrap", color: "var(--ink-1)" }}
+        style={{ margin: 0, whiteSpace: "pre-wrap", color: "var(--ink)" }}
       >
         {answer.text}
       </p>
@@ -36,7 +36,7 @@ export function AiAnswerView({ answer }: { answer: AiAnswer }) {
       >
         <span
           style={{
-            border: "1px solid var(--rule)",
+            border: "1px solid var(--hairline-strong)",
             padding: "0 var(--space-1)",
             color: fromModel ? "var(--ink-2)" : "var(--ink-3)",
           }}

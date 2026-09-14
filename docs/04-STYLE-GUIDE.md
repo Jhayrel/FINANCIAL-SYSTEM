@@ -196,6 +196,22 @@ Borders are `1px solid var(--hairline)`. Every card has one.
 
 Single set, outline, 1.5px stroke, 20px default (16px in dense tables, 24px in nav). Icons never appear alone on a control unless the control also has an `aria-label`. **No emoji in the UI.**
 
+Implemented in `src/components/Icon.tsx` as drawn SVG. Text glyphs (◧ ☰ ⚙) are not a set: each device draws them from whichever font it has, and some phones draw ⚙ as a colour emoji.
+
+### 2.7 Fitting any screen
+
+Every screen holds up at 360, 768, 1024, 1280 and 1920px, with a long account name, a seven figure amount and an error message showing. Three rules do that. A screen relies on them rather than fixing its own overflow.
+
+| # | Rule | How |
+|---|---|---|
+| **F1** | **A card measures itself.** Anything inside a card that changes shape (a table stacking into rows, a toolbar wrapping, a form moving its labels above its fields) asks the card how wide it is, not the window. | `.fms-section`, `.fms-card` and `.fms-dt` are size containers, and the Add form is the `entry` container. Inside them, use `@container`, not `@media`. |
+| **F2** | **Text wraps, figures never do.** A figure with no room moves to a line of its own or shrinks to fit. It is never cut, never abbreviated and never split across two lines. | `.fms-qrow`, `.fms-balrow` and `.fms-dbrow-main` put the figure under its label when they must. `Money` at `xl` and `l` shrinks to fit its box. Table money columns hold ₱999,999.99 with their padding. |
+| **F3** | **Every child that holds text can shrink.** A long word never forces its row wider than the screen. | `min-width: 0` on flex and grid children, `minmax(0, 1fr)` tracks, and `min(100%, 240px)` style minimums in every `auto-fit` grid. |
+
+A data table leaves out the columns it cannot fit (`hideBelow` on the column) and shows what they said inside the cell beside them. It never scrolls sideways.
+
+On a touch screen every field is 16px, so iOS does not zoom the page, and the phone navigation steps aside while a field has focus.
+
 ---
 
 ## 3. Components
@@ -475,7 +491,7 @@ Both: focus trapped, `Esc` closes, focus returns to the trigger, body scroll loc
 
 ## 7. Definition of done, every component
 
-- [ ] Renders correctly at 360px and 1440px
+- [ ] Renders correctly at 360, 768, 1024, 1280 and 1920px, with a long name, a ₱1,234,567.89 figure and its error state showing (§2.7)
 - [ ] Both themes verified; contrast test passing
 - [ ] Keyboard reachable, visible focus ring, logical tab order
 - [ ] `prefers-reduced-motion` respected

@@ -3,9 +3,18 @@
  *
  * Rules honoured: no hex literals (T1), colour only for flow and status,
  * 44px touch targets, three elevation levels, sentence-case labels.
+ *
+ * ── Classes for structure, inline only for what varies ────────────────────
+ *
+ * Every primitive used to carry its whole look as an inline style. An inline
+ * style cannot hold a hover, a focus ring, a media query or a container
+ * query, and it outranks any class, so the hover rules written for buttons in
+ * layout.css never once applied: the inline background beat them. Structure
+ * lives in layout.css now. The only values set inline are the ones picked per
+ * call, a flow's colour or a status's colour, which is what inline is for.
  */
 
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
 
 import { formatAmount, type Centavos } from "../domain/money";
 
@@ -37,8 +46,72 @@ const NUM_CLASS: Record<NumSize, string> = {
 };
 
 /**
+ * Shrink a figure to fit its box, and never grow it.
+ *
+ * A hero figure is set at 32px, which is right for ₱4,690.03 in a tile a third
+ * of the screen wide and wrong for ₱1,234,567.89 in a tile a quarter wide: the
+ * last digits ran out past the edge of the card. Truncating money is banned
+ * (style guide §2.2) and abbreviating it would hide the centavos this app
+ * exists to keep, so the figure gets smaller instead, only by as much as it
+ * has to, and only when it has to.
+ *
+ * Measured rather than estimated from the number of characters, because a
+ * comma is narrower than a digit and the font can still be loading on the
+ * first paint.
+ */
+function useFitText<T extends HTMLElement>(enabled: boolean, content: unknown) {
+  const ref = useRef<T>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const box = el?.parentElement;
+    if (!enabled || !el || !box) return;
+
+    const fit = (): void => {
+      el.style.fontSize = "";
+      const pad = getComputedStyle(box);
+      const room =
+        box.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight) - 1;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const needed = range.getBoundingClientRect().width;
+      if (room <= 0 || needed <= room) return;
+
+      const base = parseFloat(getComputedStyle(el).fontSize);
+      // Past a little over half its size a hero figure stops reading as one.
+      const scaled = Math.floor(((base * room) / needed) * 10) / 10;
+      el.style.fontSize = `${Math.max(base * 0.55, scaled)}px`;
+    };
+
+    fit();
+
+    let width = box.clientWidth;
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            // Height changes when the figure shrinks; only a new width matters.
+            if (box.clientWidth === width) return;
+            width = box.clientWidth;
+            fit();
+          });
+    observer?.observe(box);
+    // The typeface arriving changes every width, so measure once it has.
+    void document.fonts?.ready.then(fit);
+
+    return () => observer?.disconnect();
+  }, [enabled, content]);
+
+  return ref;
+}
+
+/**
  * Money. Tabular figures, 2dp always, ₱ muted, real minus sign, never blank.
  * Style guide §2.2.
+ *
+ * Hero and card sizes fit themselves to their box. Table sizes never shrink:
+ * a column of figures only lines up when every one is the same size, and the
+ * table makes room for them instead.
  */
 export function Money({
   value,
@@ -47,6 +120,7 @@ export function Money({
   tone,
   className = "",
   style,
+  fit,
 }: {
   value: Centavos;
   size?: NumSize | undefined;
@@ -54,12 +128,15 @@ export function Money({
   tone?: string | undefined;
   className?: string | undefined;
   style?: CSSProperties | undefined;
+  /** Shrink to fit the box. Defaults to on for `xl` and `l`. */
+  fit?: boolean | undefined;
 }) {
   const negative = value < 0;
   const colour = tone ?? (negative ? "var(--over)" : "var(--ink)");
+  const ref = useFitText<HTMLSpanElement>(fit ?? (size === "xl" || size === "l"), value);
 
   return (
-    <span className={`${NUM_CLASS[size]} ${className}`} style={{ color: colour, ...style }}>
+    <span ref={ref} className={`${NUM_CLASS[size]} ${className}`} style={{ color: colour, ...style }}>
       {negative ? MINUS : signed && value > 0 ? "+" : ""}
       <span className="peso">₱</span>
       {formatAmount(Math.abs(value))}
@@ -72,12 +149,6 @@ export function Money({
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md" | "lg";
 
-const BTN_SIZE: Record<ButtonSize, { height: number; padding: string; font: string }> = {
-  sm: { height: 32, padding: "0 12px", font: "t-caption" },
-  md: { height: 40, padding: "0 16px", font: "t-body-strong" },
-  lg: { height: 48, padding: "0 20px", font: "t-body-strong" },
-};
-
 export function Button({
   children,
   onClick,
@@ -89,6 +160,8 @@ export function Button({
   iconLeft,
   type = "button",
   ariaLabel,
+  title,
+  tone,
 }: {
   children?: ReactNode;
   onClick?: () => void;
@@ -100,31 +173,15 @@ export function Button({
   iconLeft?: ReactNode;
   type?: "button" | "submit";
   ariaLabel?: string;
+  title?: string;
+  /** A quiet button whose action removes something: it turns red on hover. */
+  tone?: "danger";
 }) {
-  const s = BTN_SIZE[size];
-
-  const palette: Record<ButtonVariant, CSSProperties> = {
-    primary: {
-      background: "var(--brand-700)",
-      color: "var(--on-brand)",
-      border: "1px solid transparent",
-    },
-    secondary: {
-      background: "var(--surface-sunk)",
-      color: "var(--ink)",
-      border: "1px solid var(--hairline)",
-    },
-    ghost: {
-      background: "transparent",
-      color: "var(--ink-2)",
-      border: "1px solid transparent",
-    },
-    danger: {
-      background: "var(--over-bg)",
-      color: "var(--over)",
-      border: "1px solid transparent",
-    },
-  };
+  const classes = ["fms-btn", `fms-btn--${variant}`, `fms-btn--${size}`];
+  if (fullWidth) classes.push("fms-btn--full");
+  if (tone === "danger") classes.push("fms-btn--tone-danger");
+  // An icon with no words is a square, so it lines up with the row it sits in.
+  if (iconLeft && (children === undefined || children === null)) classes.push("fms-btn--icon");
 
   return (
     <button
@@ -133,21 +190,8 @@ export function Button({
       disabled={disabled || loading}
       aria-label={ariaLabel}
       aria-busy={loading || undefined}
-      className={`${s.font} fms-btn fms-btn--${variant}`}
-      style={{
-        height: s.height,
-        padding: s.padding,
-        width: fullWidth ? "100%" : undefined,
-        borderRadius: "var(--radius-md)",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: "var(--space-2)",
-        opacity: disabled ? 0.45 : 1,
-        pointerEvents: disabled || loading ? "none" : undefined,
-        transition: "background var(--motion-hover) var(--ease-out)",
-        ...palette[variant],
-      }}
+      title={title}
+      className={classes.join(" ")}
     >
       {loading ? <Spinner /> : iconLeft}
       {children}
@@ -162,6 +206,7 @@ function Spinner() {
       style={{
         width: 14,
         height: 14,
+        flex: "0 0 auto",
         borderRadius: "var(--radius-full)",
         border: "2px solid currentColor",
         borderTopColor: "transparent",
@@ -178,27 +223,10 @@ function Spinner() {
 export function FlowBadge({ flow }: { flow: Flow }) {
   return (
     <span
-      className="t-micro"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "var(--space-2)",
-        height: 22,
-        padding: "0 var(--space-2)",
-        borderRadius: "var(--radius-full)",
-        background: `var(--flow-${flow}-bg)`,
-        color: `var(--flow-${flow}-text)`,
-      }}
+      className="t-micro fms-badge"
+      style={{ background: `var(--flow-${flow}-bg)`, color: `var(--flow-${flow}-text)` }}
     >
-      <span
-        aria-hidden
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: "var(--radius-full)",
-          background: `var(--flow-${flow})`,
-        }}
-      />
+      <span aria-hidden className="fms-badge-dot" style={{ background: `var(--flow-${flow})` }} />
       {FLOW_LABEL[flow]}
     </span>
   );
@@ -207,16 +235,8 @@ export function FlowBadge({ flow }: { flow: Flow }) {
 export function StatusPill({ status, children }: { status: Status; children: ReactNode }) {
   return (
     <span
-      className="t-micro"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        height: 22,
-        padding: "0 var(--space-2)",
-        borderRadius: "var(--radius-full)",
-        background: `var(--${status}-bg)`,
-        color: `var(--${status})`,
-      }}
+      className="t-micro fms-badge"
+      style={{ background: `var(--${status}-bg)`, color: `var(--${status})` }}
     >
       {children}
     </span>
@@ -224,22 +244,7 @@ export function StatusPill({ status, children }: { status: Status; children: Rea
 }
 
 export function CountChip({ children }: { children: ReactNode }) {
-  return (
-    <span
-      className="t-micro"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        height: 22,
-        padding: "0 var(--space-2)",
-        borderRadius: "var(--radius-full)",
-        background: "var(--surface-sunk)",
-        color: "var(--ink-2)",
-      }}
-    >
-      {children}
-    </span>
-  );
+  return <span className="t-micro fms-badge fms-badge--count">{children}</span>;
 }
 
 /** Delta chip for KPI tiles: ▲ 3.5% / ▼ 2.1%. */
@@ -247,14 +252,8 @@ export function DeltaChip({ pct }: { pct: number }) {
   const up = pct >= 0;
   return (
     <span
-      className="t-micro"
+      className="t-micro fms-badge"
       style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 2,
-        height: 20,
-        padding: "0 6px",
-        borderRadius: "var(--radius-full)",
         background: up ? "var(--ok-bg)" : "var(--over-bg)",
         color: up ? "var(--ok)" : "var(--over)",
         fontVariantNumeric: "tabular-nums",
@@ -267,6 +266,15 @@ export function DeltaChip({ pct }: { pct: number }) {
 
 // ── Card, §3.5 ────────────────────────────────────────────────────────────
 
+/**
+ * A card measures itself.
+ *
+ * `.fms-section` is a size container, so what sits inside it (a table that
+ * stacks into rows, a toolbar that wraps) answers to the width of the card and
+ * not to the width of the window. The same card is half a 1440px screen on the
+ * Dashboard and all of a 375px one on a phone, and a rule keyed to the window
+ * gets one of those two wrong.
+ */
 export function Card({
   title,
   subtitle,
@@ -284,27 +292,10 @@ export function Card({
   style?: CSSProperties;
 }) {
   return (
-    <section
-      style={{
-        background: "var(--surface)",
-        border: "1px solid var(--hairline)",
-        borderRadius: "var(--radius-lg)",
-        boxShadow: "var(--shadow-card)",
-        overflow: "hidden",
-        ...style,
-      }}
-    >
+    <section className="fms-section" style={style}>
       {(title || action) && (
-        <header
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-            gap: "var(--space-4)",
-            padding: "var(--space-5) var(--space-5) 0",
-          }}
-        >
-          <div>
+        <header className="fms-section-head">
+          <div className="fms-section-titles">
             {title && (
               <h2 className="t-display-m" style={{ margin: 0 }}>
                 {title}
@@ -316,10 +307,10 @@ export function Card({
               </p>
             )}
           </div>
-          {action}
+          {action && <div className="fms-section-action">{action}</div>}
         </header>
       )}
-      <div style={padded ? { padding: "var(--space-5)" } : undefined}>{children}</div>
+      <div className={padded ? "fms-section-body" : "fms-section-flush"}>{children}</div>
     </section>
   );
 }
@@ -348,54 +339,29 @@ export function KpiTile({
   tone?: string | undefined;
 }) {
   return (
-    <div
-      style={{
-        background: "var(--surface)",
-        border: "1px solid var(--hairline)",
-        borderRadius: "var(--radius-lg)",
-        boxShadow: "var(--shadow-card)",
-        padding: "var(--space-5)",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "var(--space-2)",
-        }}
-      >
+    <div className="fms-kpi">
+      <div className="fms-kpihead">
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
           {label}
         </span>
         {delta !== undefined && <DeltaChip pct={delta} />}
       </div>
 
-      <div style={{ marginTop: "var(--space-2)" }}>
+      <div className="fms-kpivalue">
         <Money value={value} size="xl" {...(tone ? { tone } : {})} />
       </div>
 
       {components && components.length > 0 && (
-        <div
-          className="t-caption"
-          style={{
-            marginTop: "var(--space-2)",
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "var(--space-1) var(--space-3)",
-            color: "var(--ink-3)",
-          }}
-        >
+        <div className="t-caption fms-kpiparts">
           {components.map((c) => (
             <span key={c.label}>
-              {c.label}{" "}
-              <Money value={c.value} size="s" {...(c.tone ? { tone: c.tone } : {})} />
+              {c.label} <Money value={c.value} size="s" {...(c.tone ? { tone: c.tone } : {})} />
             </span>
           ))}
         </div>
       )}
 
-      {footer && <div style={{ marginTop: "var(--space-3)" }}>{footer}</div>}
+      {footer && <div className="fms-kpifootslot">{footer}</div>}
     </div>
   );
 }
@@ -484,46 +450,28 @@ export function Alert({
   return (
     <div
       role={status === "over" ? "alert" : "status"}
+      className="fms-alert"
       style={{
-        display: "flex",
-        gap: "var(--space-3)",
-        // 12px was tight for two lines of prose next to a glyph.
-        padding: "var(--space-4)",
-        borderRadius: "var(--radius-md)",
         background: `var(--${status}-bg)`,
-        border: `1px solid color-mix(in srgb, var(--${status}) 28%, transparent)`,
+        borderColor: `color-mix(in srgb, var(--${status}) 28%, transparent)`,
       }}
     >
-      <span
-        aria-hidden
-        className="t-micro"
-        style={{
-          flex: "0 0 auto",
-          width: 18,
-          height: 18,
-          borderRadius: "var(--radius-full)",
-          background: `var(--${status})`,
-          color: "var(--surface)",
-          display: "grid",
-          placeItems: "center",
-          fontWeight: 700,
-        }}
-      >
+      <span aria-hidden className="t-micro fms-alert-glyph" style={{ background: `var(--${status})` }}>
         {ALERT_GLYPH[status]}
       </span>
-      <div style={{ minWidth: 0, flex: 1 }}>
+      <div className="fms-alert-body">
         {title && (
           <div className="t-body-strong" style={{ color: `var(--${status})` }}>
             {title}
           </div>
         )}
         <div
-          className="t-caption"
-          style={{ color: "var(--ink-2)", marginTop: title ? "var(--space-1)" : 0 }}
+          className="t-caption fms-alert-text"
+          style={{ marginTop: title ? "var(--space-1)" : 0 }}
         >
           {children}
         </div>
-        {action && <div style={{ marginTop: "var(--space-3)" }}>{action}</div>}
+        {action && <div className="fms-alert-action">{action}</div>}
       </div>
     </div>
   );
@@ -538,20 +486,8 @@ export function Toast({
   action?: ReactNode;
 }) {
   return (
-    <div
-      role="status"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "var(--space-4)",
-        padding: "var(--space-3) var(--space-4)",
-        borderRadius: "var(--radius-md)",
-        background: "var(--surface)",
-        border: "1px solid var(--hairline)",
-        boxShadow: "var(--shadow-overlay)",
-      }}
-    >
-      <span className="t-body">{children}</span>
+    <div role="status" className="fms-toast">
+      <span className="t-body fms-toast-text">{children}</span>
       {action}
     </div>
   );
@@ -569,30 +505,17 @@ export function Tabs<T extends string>({
   onChange: (id: T) => void;
 }) {
   return (
-    <div
-      role="tablist"
-      style={{ display: "flex", gap: "var(--space-4)", borderBottom: "1px solid var(--hairline)" }}
-    >
+    <div role="tablist" className="fms-linetabs">
       {tabs.map((t) => {
         const active = t.id === value;
         return (
           <button
             key={t.id}
+            type="button"
             role="tab"
             aria-selected={active}
             onClick={() => onChange(t.id)}
-            className={active ? "t-body-strong" : "t-body"}
-            style={{
-              background: "none",
-              border: "none",
-              padding: "var(--space-3) 0",
-              color: active ? "var(--ink)" : "var(--ink-2)",
-              borderBottom: `2px solid ${active ? "var(--brand-700)" : "transparent"}`,
-              marginBottom: -1,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "var(--space-2)",
-            }}
+            className={`fms-linetab ${active ? "t-body-strong" : "t-body"}`}
           >
             {t.label}
             {t.count !== undefined && <CountChip>{t.count}</CountChip>}
@@ -603,35 +526,53 @@ export function Tabs<T extends string>({
   );
 }
 
+/**
+ * Filter pills, §3.6 and §3.8.
+ *
+ * They wrap onto a second line by default. `scroll` keeps them on one line
+ * that scrolls sideways instead, for a set that would otherwise stack three
+ * rows deep on a phone (twelve months), and brings the chosen one into view.
+ */
 export function SegmentedControl<T extends string>({
   options,
   value,
   onChange,
+  scroll = false,
+  label,
 }: {
   options: readonly { id: T; label: string }[];
   value: T;
   onChange: (id: T) => void;
+  scroll?: boolean;
+  label?: string;
 }) {
+  const strip = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = strip.current;
+    const on = el?.querySelector<HTMLElement>('[aria-pressed="true"]');
+    if (!scroll || !el || !on) return;
+    // The strip scrolls, never the page. `scrollIntoView` would also move the
+    // main column, which is the scroll position you were reading from.
+    el.scrollTo({ left: Math.max(0, on.offsetLeft - (el.clientWidth - on.offsetWidth) / 2) });
+  }, [scroll, value]);
+
   return (
-    <div style={{ display: "inline-flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
+    <div
+      ref={strip}
+      role="group"
+      aria-label={label}
+      className={scroll ? "fms-pills fms-pills--scroll" : "fms-pills"}
+    >
       {options.map((o) => {
         const active = o.id === value;
         return (
           <button
             key={o.id}
+            type="button"
             aria-pressed={active}
             onClick={() => onChange(o.id)}
-            className="t-caption"
-            style={{
-              height: 32,
-              padding: "0 var(--space-3)",
-              borderRadius: "var(--radius-full)",
-              border: `1px solid ${active ? "transparent" : "var(--hairline-strong)"}`,
-              background: active ? "var(--brand-700)" : "var(--surface)",
-              color: active ? "var(--on-brand)" : "var(--ink-2)",
-              fontWeight: active ? 600 : 400,
-              transition: "background var(--motion-hover) var(--ease-out)",
-            }}
+            className={active ? "t-caption fms-pill fms-pill--on" : "t-caption fms-pill"}
           >
             {o.label}
           </button>
@@ -645,7 +586,7 @@ export function SegmentedControl<T extends string>({
 
 export function EmptyState({ message, action }: { message: string; action?: ReactNode }) {
   return (
-    <div style={{ padding: "var(--space-12) var(--space-4)", textAlign: "center" }}>
+    <div className="fms-empty">
       <p className="t-body" style={{ margin: 0, color: "var(--ink-2)" }}>
         {message}
       </p>

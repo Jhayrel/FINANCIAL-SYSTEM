@@ -67,6 +67,8 @@ export function SignIn({
 
   return (
     <div className="fms-gate">
+      {/* A card sizes itself from its container, so the gate gives it a width. */}
+      <div className="fms-gatecard">
       <Card>
         <div style={{ display: "grid", gap: "var(--space-4)", maxWidth: 380 }}>
           <div>
@@ -125,6 +127,7 @@ export function SignIn({
           </p>
         </div>
       </Card>
+      </div>
     </div>
   );
 }

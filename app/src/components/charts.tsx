@@ -7,9 +7,19 @@
  * Shared rules: horizontal gridlines only, no axis lines, abbreviated money on
  * axes only, a visually-hidden data table on every chart, single mount
  * animation that reduced-motion disables.
+ *
+ * ── Drawn at the width they are shown ─────────────────────────────────────
+ *
+ * The line and bar charts were drawn on a fixed 640 unit canvas and stretched
+ * to fit. On a phone that canvas is squeezed to about half, and everything on
+ * it went with it: the 11px axis labels came out at 5px, and the area chart,
+ * which stretched without keeping its proportions, drew its month names
+ * squashed flat. Each chart now measures its box and draws at that size, so a
+ * label is 11px on every screen and the number of month labels follows the
+ * room there is for them.
  */
 
-import { useId, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import { formatAmount, toPesos, type Centavos } from "../domain/money";
 
@@ -20,6 +30,39 @@ export function abbreviate(c: Centavos): string {
   if (p >= 1_000_000) return `${sign}${(p / 1_000_000).toFixed(p >= 10_000_000 ? 0 : 1)}m`;
   if (p >= 1_000) return `${sign}${(p / 1_000).toFixed(p >= 10_000 ? 0 : 1)}k`;
   return `${sign}${p.toFixed(0)}`;
+}
+
+/** Style guide §3.9: 200px on a phone, 260px everywhere else. */
+const heightFor = (width: number): number => (width < 480 ? 200 : 260);
+
+/** Room one axis label needs before the next is skipped rather than overlapped. */
+const LABEL_ROOM = 44;
+
+/**
+ * The width of a box, kept current.
+ *
+ * Read in a layout effect, so the first paint already has the real width and
+ * the chart never flashes at a default size before settling.
+ */
+function useWidth<T extends Element>(): [RefObject<T | null>, number] {
+  const ref = useRef<T | null>(null);
+  const [width, setWidth] = useState(0);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = (): void => {
+      const next = Math.floor(el.getBoundingClientRect().width);
+      setWidth((prev) => (prev === next ? prev : next));
+    };
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, width];
 }
 
 function HiddenTable({
@@ -128,96 +171,85 @@ export interface Series {
 export function AreaChart({
   labels,
   series,
-  height = 220,
+  height,
 }: {
   labels: readonly string[];
   series: readonly Series[];
   height?: number;
 }) {
   const gid = useId();
-  const padL = 44;
+  const [box, width] = useWidth<HTMLDivElement>();
+
+  const W = Math.max(width, 1);
+  const H = height ?? heightFor(width);
+  const padL = 40;
+  const padR = 8;
   const padB = 24;
   const padT = 8;
-  const W = 640;
-  const innerW = W - padL - 8;
-  const innerH = height - padB - padT;
+  const innerW = Math.max(1, W - padL - padR);
+  const innerH = H - padB - padT;
 
   const all = series.flatMap((s) => s.values);
   const max = Math.max(1, ...all);
   const step = labels.length > 1 ? innerW / (labels.length - 1) : innerW;
+  const every = Math.max(1, Math.ceil(labels.length / Math.max(1, Math.floor(innerW / LABEL_ROOM))));
 
   const y = (v: number) => padT + innerH - (v / max) * innerH;
   const x = (i: number) => padL + i * step;
 
   return (
-    <div>
-      <ChartFrame height={height} empty={all.length === 0}>
-        <svg
-          viewBox={`0 0 ${W} ${height}`}
-          width="100%"
-          height={height}
-          role="img"
-          aria-label={`${series.map((s) => s.name).join(" and ")} over ${labels.length} periods`}
-          preserveAspectRatio="none"
-        >
-          {/* Horizontal gridlines only. No vertical grid, no axis lines. */}
-          {ticks(max).map((t) => (
-            <g key={t}>
-              <line
-                x1={padL}
-                x2={W - 8}
-                y1={y(t)}
-                y2={y(t)}
-                stroke="var(--hairline)"
-                strokeWidth="1"
-              />
-              <text
-                x={padL - 8}
-                y={y(t) + 4}
-                textAnchor="end"
-                fill="var(--ink-3)"
-                style={{ fontSize: 11 }}
-              >
-                {abbreviate(t)}
-              </text>
-            </g>
-          ))}
-
-          {series.map((s, si) => {
-            const pts = s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
-            const area = `${padL},${y(0)} ${pts} ${x(s.values.length - 1)},${y(0)}`;
-            return (
-              <g key={s.name}>
-                <polygon points={area} fill={s.colour} opacity="0.12" />
-                <polyline
-                  points={pts}
-                  fill="none"
-                  stroke={s.colour}
-                  strokeWidth="2"
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                  style={{ animation: `fms-draw 400ms var(--ease-out) ${si * 60}ms both` }}
-                />
+    <div ref={box} style={{ minWidth: 0 }}>
+      <ChartFrame height={H} empty={all.length === 0}>
+        {width === 0 ? (
+          <div style={{ height: H }} />
+        ) : (
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            width={W}
+            height={H}
+            role="img"
+            aria-label={`${series.map((s) => s.name).join(" and ")} over ${labels.length} periods`}
+            style={{ display: "block" }}
+          >
+            {/* Horizontal gridlines only. No vertical grid, no axis lines. */}
+            {ticks(max).map((t) => (
+              <g key={t}>
+                <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--hairline)" strokeWidth="1" />
+                <text x={padL - 8} y={y(t) + 4} textAnchor="end" fill="var(--ink-3)" style={{ fontSize: 11 }}>
+                  {abbreviate(t)}
+                </text>
               </g>
-            );
-          })}
+            ))}
 
-          {labels.map((l, i) =>
-            // Skip labels rather than rotating them.
-            i % Math.ceil(labels.length / 6) === 0 ? (
-              <text
-                key={l}
-                x={x(i)}
-                y={height - 6}
-                textAnchor="middle"
-                fill="var(--ink-3)"
-                style={{ fontSize: 11 }}
-              >
-                {l}
-              </text>
-            ) : null,
-          )}
-        </svg>
+            {series.map((s, si) => {
+              const pts = s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+              const area = `${padL},${y(0)} ${pts} ${x(s.values.length - 1)},${y(0)}`;
+              return (
+                <g key={s.name}>
+                  <polygon points={area} fill={s.colour} opacity="0.12" />
+                  <polyline
+                    points={pts}
+                    fill="none"
+                    stroke={s.colour}
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    style={{ animation: `fms-draw 400ms var(--ease-out) ${si * 60}ms both` }}
+                  />
+                </g>
+              );
+            })}
+
+            {labels.map((l, i) =>
+              // Skip labels rather than rotating them.
+              i % every === 0 ? (
+                <text key={l} x={x(i)} y={H - 6} textAnchor="middle" fill="var(--ink-3)" style={{ fontSize: 11 }}>
+                  {l}
+                </text>
+              ) : null,
+            )}
+          </svg>
+        )}
       </ChartFrame>
 
       <Legend items={series.map((s) => ({ label: s.name, colour: s.colour }))} />
@@ -238,75 +270,87 @@ export function BarChart({
   labels,
   budget,
   actual,
-  height = 220,
+  height,
 }: {
   labels: readonly string[];
   budget: readonly Centavos[];
   actual: readonly Centavos[];
   height?: number;
 }) {
-  const padL = 44;
+  const [box, width] = useWidth<HTMLDivElement>();
+
+  const W = Math.max(width, 1);
+  const H = height ?? heightFor(width);
+  const padL = 40;
+  const padR = 8;
   const padB = 24;
   const padT = 8;
-  const W = 640;
-  const innerW = W - padL - 8;
-  const innerH = height - padB - padT;
+  const innerW = Math.max(1, W - padL - padR);
+  const innerH = H - padB - padT;
 
   const max = Math.max(1, ...budget, ...actual);
-  const slot = innerW / labels.length;
-  const barW = Math.min(18, slot * 0.34);
+  const slot = innerW / Math.max(1, labels.length);
+  const barW = Math.max(2, Math.min(18, slot * 0.34));
+  const every = Math.max(1, Math.ceil(labels.length / Math.max(1, Math.floor(innerW / LABEL_ROOM))));
 
   const y = (v: number) => padT + innerH - (v / max) * innerH;
 
   return (
-    <div>
-      <ChartFrame height={height} empty={labels.length === 0}>
-        <svg
-          viewBox={`0 0 ${W} ${height}`}
-          width="100%"
-          height={height}
-          role="img"
-          aria-label="Budget versus actual spending by month"
-        >
-          {ticks(max).map((t) => (
-            <g key={t}>
-              <line x1={padL} x2={W - 8} y1={y(t)} y2={y(t)} stroke="var(--hairline)" strokeWidth="1" />
-              <text x={padL - 8} y={y(t) + 4} textAnchor="end" fill="var(--ink-3)" style={{ fontSize: 11 }}>
-                {abbreviate(t)}
-              </text>
-            </g>
-          ))}
-
-          {labels.map((l, i) => {
-            const cx = padL + slot * i + slot / 2;
-            const b = budget[i] ?? 0;
-            const a = actual[i] ?? 0;
-            const over = a > b && b > 0;
-            return (
-              <g key={l}>
-                <rect
-                  x={cx - barW - 2}
-                  y={y(b)}
-                  width={barW}
-                  height={Math.max(0, y(0) - y(b))}
-                  fill="var(--hairline)"
-                  rx="3"
-                />
-                <rect
-                  x={cx + 2}
-                  y={y(a)}
-                  width={barW}
-                  height={Math.max(0, y(0) - y(a))}
-                  fill={over ? "var(--over)" : "var(--brand-700)"}
-                  rx="3"
-                />
-                <text x={cx} y={height - 6} textAnchor="middle" fill="var(--ink-3)" style={{ fontSize: 11 }}>
-                  {l}
+    <div ref={box} style={{ minWidth: 0 }}>
+      <ChartFrame height={H} empty={labels.length === 0}>
+        {width === 0 ? (
+          <div style={{ height: H }} />
+        ) : (
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            width={W}
+            height={H}
+            role="img"
+            aria-label="Budget versus actual spending by month"
+            style={{ display: "block" }}
+          >
+            {ticks(max).map((t) => (
+              <g key={t}>
+                <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--hairline)" strokeWidth="1" />
+                <text x={padL - 8} y={y(t) + 4} textAnchor="end" fill="var(--ink-3)" style={{ fontSize: 11 }}>
+                  {abbreviate(t)}
                 </text>
               </g>
-            );
-          })}
-        </svg>
+            ))}
+
+            {labels.map((l, i) => {
+              const cx = padL + slot * i + slot / 2;
+              const b = budget[i] ?? 0;
+              const a = actual[i] ?? 0;
+              const over = a > b && b > 0;
+              return (
+                <g key={l}>
+                  <rect
+                    x={cx - barW - 2}
+                    y={y(b)}
+                    width={barW}
+                    height={Math.max(0, y(0) - y(b))}
+                    fill="var(--hairline)"
+                    rx="3"
+                  />
+                  <rect
+                    x={cx + 2}
+                    y={y(a)}
+                    width={barW}
+                    height={Math.max(0, y(0) - y(a))}
+                    fill={over ? "var(--over)" : "var(--brand-700)"}
+                    rx="3"
+                  />
+                  {i % every === 0 && (
+                    <text x={cx} y={H - 6} textAnchor="middle" fill="var(--ink-3)" style={{ fontSize: 11 }}>
+                      {l}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+        )}
       </ChartFrame>
 
       <Legend
@@ -345,20 +389,11 @@ export function RankBars({
   const max = explicitMax ?? Math.max(1, ...rows.map(rowValue));
 
   return (
-    <div style={{ display: "grid", gap: "var(--space-3)" }}>
+    <div style={{ display: "grid", gap: "var(--space-3)", minWidth: 0 }}>
       {rows.map((r, i) => (
-        <div key={r.name}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: "var(--space-3)",
-              marginBottom: 6,
-            }}
-          >
-            <span className="t-body" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {r.name}
-            </span>
+        <div key={r.name} style={{ minWidth: 0 }}>
+          <div className="fms-rankhead">
+            <span className="t-body fms-rankname">{r.name}</span>
             <span className="t-num-s" style={{ color: "var(--ink-2)" }}>
               <span className="peso">₱</span>
               {formatAmount(rowValue(r))}
@@ -400,7 +435,7 @@ export function DonutChart({
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "var(--space-5)", flexWrap: "wrap" }}>
       <ChartFrame height={size} empty={total === 0}>
-        <svg width={size} height={size} role="img" aria-label="Spending composition">
+        <svg width={size} height={size} role="img" aria-label="Spending composition" style={{ maxWidth: "100%" }}>
           <g transform={`rotate(-90 ${c} ${c})`}>
             {slices.map((s, i) => {
               const frac = rowValue(s) / total;
@@ -467,11 +502,12 @@ function Legend({
         display: "flex",
         flexDirection: vertical ? "column" : "row",
         flexWrap: "wrap",
-        gap: vertical ? "var(--space-2)" : "var(--space-4)",
+        gap: vertical ? "var(--space-2)" : "var(--space-2) var(--space-4)",
+        minWidth: 0,
       }}
     >
       {items.map((i) => (
-        <li key={i.label} className="t-caption" style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", color: "var(--ink-2)" }}>
+        <li key={i.label} className="t-caption" style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", color: "var(--ink-2)", minWidth: 0 }}>
           <span
             aria-hidden
             style={{ width: 8, height: 8, borderRadius: "var(--radius-full)", background: i.colour, flex: "0 0 auto" }}

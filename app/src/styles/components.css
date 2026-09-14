@@ -1,0 +1,923 @@
+/**
+ * components.css: the shared controls in components/*.
+ * No hex literals (rule T1); everything references tokens.css.
+ *
+ * layout.css arranges screens; this file is what a button, a field, a card or
+ * a table is, wherever it appears. They lived as inline styles in the
+ * components until an inline style turned out to be why hover states never
+ * showed, why fields had no focus ring, and why nothing could respond to the
+ * width of the box it was in.
+ *
+ * ── How things fit, in one place ──────────────────────────────────────────
+ *
+ * Three rules do most of the work, and each screen relies on them rather than
+ * fixing its own overflow:
+ *
+ *   1. A card is a size container. Anything inside it that changes shape
+ *      (a table stacking into rows, a toolbar wrapping) asks the card how
+ *      wide it is, not the window.
+ *   2. Text wraps, figures do not. A figure that has no room moves to a line
+ *      of its own or shrinks to fit (see Money), and is never cut or split.
+ *   3. Every flex or grid child that holds text can shrink (min-width: 0),
+ *      so a long word never forces its row wider than the screen.
+ */
+
+/* ══ Buttons, §3.1 ══════════════════════════════════════════════════════════ */
+
+.fms-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  user-select: none;
+  text-align: center;
+  line-height: 1.25;
+  /*
+   * A label wraps before it overflows.
+   *
+   * Buttons were nowrap, so a long label ("The bank shows something
+   * different") in a dialog on a phone ran straight out of the side of it. In
+   * a row with room nothing changes: a button only wraps its label when it is
+   * wider than the whole line it sits on.
+   */
+  white-space: normal;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+  transition:
+    background var(--motion-hover) var(--ease-out),
+    border-color var(--motion-hover) var(--ease-out),
+    color var(--motion-hover) var(--ease-out);
+}
+
+.fms-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* §3.1: pressed is a 1px step down, never a scale. */
+.fms-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.fms-btn:disabled {
+  cursor: default;
+  pointer-events: none;
+}
+
+/* A loading button keeps full strength; only a disabled one fades. */
+.fms-btn:disabled:not([aria-busy="true"]) {
+  opacity: 0.45;
+}
+
+.fms-btn--sm { min-height: 32px; padding: 4px 12px; font-size: 13px; font-weight: 500; }
+.fms-btn--md { min-height: 40px; padding: 6px 16px; font-size: 14px; font-weight: 600; }
+.fms-btn--lg { min-height: 48px; padding: 8px 20px; font-size: 15px; font-weight: 600; }
+
+.fms-btn--full {
+  width: 100%;
+}
+
+/* An icon on its own is a square, so it sits level with the row beside it. */
+.fms-btn--icon { padding: 0; }
+.fms-btn--icon.fms-btn--sm { width: 32px; }
+.fms-btn--icon.fms-btn--md { width: 40px; }
+.fms-btn--icon.fms-btn--lg { width: 48px; }
+
+/* Rule D10: 44px of target on a touch screen, whatever size the button is drawn. */
+@media (pointer: coarse) {
+  .fms-btn--sm,
+  .fms-btn--md {
+    min-height: 44px;
+  }
+  .fms-btn--icon.fms-btn--sm,
+  .fms-btn--icon.fms-btn--md {
+    width: 44px;
+  }
+}
+
+.fms-btn--primary {
+  background: var(--brand-700);
+  color: var(--on-brand);
+  box-shadow: var(--shadow-card);
+}
+.fms-btn--primary:hover:not(:disabled) { background: var(--brand-hover); }
+.fms-btn--primary:active:not(:disabled) { background: var(--brand-active); }
+
+.fms-btn--secondary {
+  background: var(--surface);
+  color: var(--ink);
+  border-color: var(--hairline-strong);
+}
+.fms-btn--secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--ink-3);
+}
+.fms-btn--secondary:active:not(:disabled) { background: var(--surface-sunk); }
+
+/* Ghost carries no chrome at rest, so it gains some on hover to read as a
+   control rather than a label. */
+.fms-btn--ghost {
+  background: transparent;
+  color: var(--ink-2);
+}
+.fms-btn--ghost:hover:not(:disabled) {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+.fms-btn--ghost:active:not(:disabled) { background: var(--hairline); }
+
+/*
+ * Danger is outlined, never filled (§3.1).
+ *
+ * A destructive action should not be the loudest thing on the screen. It was
+ * drawn as a solid red wash, which on a row with Edit beside it made Delete
+ * the button the eye went to first.
+ */
+.fms-btn--danger {
+  background: var(--surface);
+  color: var(--over);
+  border-color: var(--over);
+}
+.fms-btn--danger:hover:not(:disabled) { background: var(--over-bg); }
+.fms-btn--danger:active:not(:disabled) { filter: brightness(0.96); }
+
+/* A quiet button whose action removes something turns red when you reach for it. */
+.fms-btn--tone-danger:hover:not(:disabled) { color: var(--over); }
+
+/* ══ Fields, §3.2 ═══════════════════════════════════════════════════════════ */
+
+.fms-field {
+  min-width: 0;
+}
+
+.fms-field-label {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--ink-2);
+}
+
+.fms-field-note {
+  margin: var(--space-2) 0 0;
+}
+
+/*
+ * The one field style, for components and for the few bare inputs a screen
+ * draws itself (the date fields carry .fms-control).
+ */
+.fms-input,
+.fms-control {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  padding: 0 var(--space-3);
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  transition: border-color var(--motion-hover) var(--ease-out);
+}
+
+.fms-input::placeholder,
+.fms-control::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
+}
+
+.fms-input:hover:not(:disabled):not(:focus),
+.fms-control:hover:not(:disabled):not(:focus) {
+  border-color: var(--ink-3);
+}
+
+/*
+ * A field always shows that it has focus.
+ *
+ * :focus rather than :focus-visible: a text field shows where the caret is
+ * however it was reached. The inline style this replaces set outline: none,
+ * so a field with the caret in it looked exactly like one without.
+ */
+.fms-input:focus,
+.fms-control:focus {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.fms-input[aria-invalid="true"],
+.fms-control[aria-invalid="true"] {
+  border-color: var(--over);
+}
+
+.fms-input:disabled,
+.fms-control:disabled {
+  background: var(--surface-sunk);
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+
+/* ── Amount ─────────────────────────────────────────────────────────────── */
+
+.fms-amount {
+  position: relative;
+  min-width: 0;
+}
+
+.fms-amount-peso {
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-3);
+  pointer-events: none;
+}
+
+/*
+ * The figure is right-aligned and the sign sits on the left, so a long amount
+ * grows towards the sign. The field keeps the sign's width clear on that side.
+ * Measured in em, so it still clears it at the 16px a touch screen uses.
+ */
+.fms-input--amount {
+  padding-left: calc(var(--space-3) + 1.25em);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Search ─────────────────────────────────────────────────────────────── */
+
+.fms-search {
+  position: relative;
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.fms-search-icon {
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-3);
+  pointer-events: none;
+}
+
+/* Room on both sides: the icon on the left, the clear button on the right, so
+   typed text never runs underneath either. */
+.fms-search-input {
+  height: 40px;
+  padding-left: 36px;
+  padding-right: 40px;
+}
+
+.fms-search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-3);
+}
+
+.fms-search-clear:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+@media (pointer: coarse) {
+  .fms-search-input {
+    height: 44px;
+  }
+  .fms-search-clear {
+    width: 40px;
+    height: 40px;
+    right: 2px;
+  }
+}
+
+/* ── Checkbox and switch ────────────────────────────────────────────────── */
+
+.fms-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-check input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--brand-700);
+}
+
+.fms-switch {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 44px;
+  height: 24px;
+  padding: 2px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--hairline-strong);
+  transition: background var(--motion-hover) var(--ease-out);
+}
+
+.fms-switch[aria-checked="true"] {
+  justify-content: flex-end;
+  background: var(--brand-700);
+}
+
+.fms-switch-knob {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+/* 24px tall is not a thumb target, so the hit area reaches past the drawing. */
+@media (pointer: coarse) {
+  .fms-switch::after {
+    content: "";
+    position: absolute;
+    inset: -10px -2px;
+  }
+}
+
+/* ══ Badges, §3.6 ═══════════════════════════════════════════════════════════ */
+
+.fms-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 22px;
+  max-width: 100%;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.fms-badge-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+}
+
+.fms-badge--count {
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+}
+
+/* ══ Cards, §3.5 ════════════════════════════════════════════════════════════ */
+
+.fms-section {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.fms-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-5) var(--space-5) 0;
+}
+
+/*
+ * The title keeps the room and the action moves under it.
+ *
+ * Title and action used to share one line that could not wrap, so a count
+ * chip beside a long title squeezed the title into three lines on a phone,
+ * and a long chip pushed past the edge of the card.
+ */
+.fms-section-titles {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.fms-section-action {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.fms-section-body {
+  padding: var(--space-5);
+}
+
+/* §2.3: 16px of card padding on a phone-sized card, 20px on anything wider. */
+@container (max-width: 520px) {
+  .fms-section-head {
+    padding: var(--space-4) var(--space-4) 0;
+  }
+  .fms-section-body {
+    padding: var(--space-4);
+  }
+}
+
+/* ── KPI tile ───────────────────────────────────────────────────────────── */
+
+.fms-kpi {
+  min-width: 0;
+  padding: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.fms-kpihead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+/* The figure's box: Money measures this to decide whether it has to shrink. */
+.fms-kpivalue {
+  min-width: 0;
+  margin-top: var(--space-2);
+}
+
+.fms-kpiparts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin-top: var(--space-2);
+  color: var(--ink-3);
+}
+
+.fms-kpifootslot {
+  margin-top: var(--space-3);
+}
+
+@media (max-width: 639px) {
+  .fms-kpi {
+    padding: var(--space-4);
+  }
+}
+
+/* ══ Alerts and toasts, §3.7 ════════════════════════════════════════════════ */
+
+.fms-alert {
+  display: flex;
+  gap: var(--space-3);
+  min-width: 0;
+  /* 12px was tight for two lines of prose next to a glyph. */
+  padding: var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+
+.fms-alert-glyph {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  color: var(--surface);
+  font-weight: 700;
+}
+
+/* An error message can quote a path or an id with no spaces in it. */
+.fms-alert-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fms-alert-text {
+  color: var(--ink-2);
+}
+
+.fms-alert-action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.fms-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  max-width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-overlay);
+}
+
+.fms-toast-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ══ Filter pills and tabs, §3.8 ════════════════════════════════════════════ */
+
+.fms-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+/*
+ * One line that scrolls, for a set too long to wrap gracefully.
+ *
+ * Padding inside the strip, because a scrolling box clips whatever reaches
+ * past its edge and the focus ring sits 2px outside each pill.
+ */
+.fms-pills--scroll {
+  position: relative;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding: 3px;
+  margin: -3px;
+}
+
+.fms-pills--scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.fms-pill {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  white-space: nowrap;
+  transition: background var(--motion-hover) var(--ease-out);
+}
+
+.fms-pill:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.fms-pill--on,
+.fms-pill--on:hover {
+  background: var(--brand-700);
+  border-color: transparent;
+  color: var(--on-brand);
+  font-weight: 600;
+}
+
+@media (pointer: coarse) {
+  .fms-pill {
+    min-height: 44px;
+  }
+}
+
+.fms-linetabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-4);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-linetab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  margin-bottom: -1px;
+  padding: 0;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.fms-linetab[aria-selected="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--brand-700);
+}
+
+/* ══ Empty state, §3.10 ═════════════════════════════════════════════════════ */
+
+.fms-empty {
+  padding: var(--space-12) var(--space-4);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+@container (max-width: 520px) {
+  .fms-empty {
+    padding: var(--space-8) var(--space-3);
+  }
+}
+
+/* ══ Data table, §3.4 ═══════════════════════════════════════════════════════ */
+
+/*
+ * A size container, so columns leave by the width of the table itself.
+ */
+.fms-dt {
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.fms-dt-scroll {
+  overflow-x: auto;
+}
+
+.fms-dt-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.fms-dt-th {
+  height: 40px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-sunk);
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.fms-dt-td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: middle;
+}
+
+/* A narrow table gives its cells 12px of padding instead of 16px: across six
+   columns that is 48px handed back to the text. */
+@container (max-width: 879px) {
+  .fms-dt-th,
+  .fms-dt-td {
+    padding-left: var(--space-3);
+    padding-right: var(--space-3);
+  }
+}
+
+.fms-dt-pick {
+  width: 44px;
+  padding-right: 0;
+}
+
+.fms-dt-pick input {
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--brand-700);
+}
+
+/* The sort button fills its header cell, padding included. */
+.fms-dt-sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: calc(100% + var(--space-4) * 2);
+  margin: calc(var(--space-3) * -1) calc(var(--space-4) * -1);
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+@container (max-width: 879px) {
+  .fms-dt-sort {
+    width: calc(100% + var(--space-3) * 2);
+    margin: calc(var(--space-3) * -1);
+    padding: var(--space-3);
+  }
+}
+
+.fms-dt-sortlabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fms-dt-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+/*
+ * A second line inside a cell, for what a hidden column would have shown.
+ */
+.fms-dt-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-top: 2px;
+}
+
+.fms-dt-sub > .fms-truncate {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fms-dt-sub > .fms-badge {
+  flex: 0 0 auto;
+}
+
+/* Columns that leave, and the stand-ins that arrive in their place. These
+   come last so they win over the display values set above. */
+@container (max-width: 879px) {
+  .fms-dt-hide-md { display: none; }
+}
+
+@container (max-width: 1199px) {
+  .fms-dt-hide-lg { display: none; }
+}
+
+@container (min-width: 880px) {
+  .fms-dt-only-md { display: none; }
+}
+
+@container (min-width: 1200px) {
+  .fms-dt-only-narrow { display: none; }
+}
+
+/* ══ Responsive table ═══════════════════════════════════════════════════════
+   A table on a card that is wide enough for it, a list of labelled rows on
+   one that is not. Each cell names its column in data-label, and the stacked
+   row prints that name beside the value, so nothing needs a second copy of
+   the markup for a phone. */
+
+.fms-rtable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.fms-rtable th {
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-sunk);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--ink-2);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.fms-rtable td {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: middle;
+}
+
+.fms-rtable .fms-rnum {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.fms-rtable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.fms-rtable .fms-rtotal td {
+  background: var(--surface-sunk);
+}
+
+/* A budget figure being edited in place keeps enough width to be typed into. */
+.fms-rtable .fms-amount {
+  min-width: 8rem;
+}
+
+/*
+ * The last line of defence, not the layout.
+ *
+ * A card clips what overflows it, so a table that somehow outgrew its card
+ * would lose its right-hand column without a trace. Inside this it scrolls
+ * instead. The stacking below is what is meant to keep that from happening.
+ */
+.fms-rtable-wrap {
+  overflow-x: auto;
+}
+
+@container (max-width: 600px) {
+  .fms-rtable thead {
+    display: none;
+  }
+
+  .fms-rtable,
+  .fms-rtable tbody,
+  .fms-rtable tr,
+  .fms-rtable td {
+    display: block;
+    width: 100%;
+  }
+
+  .fms-rtable tr {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .fms-rtable tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .fms-rtable td,
+  .fms-rtable .fms-rnum {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0 var(--space-3);
+    padding: 2px 0;
+    border-bottom: 0;
+    text-align: right;
+    white-space: normal;
+  }
+
+  .fms-rtable td::before {
+    content: attr(data-label);
+    color: var(--ink-3);
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 400;
+    text-align: left;
+  }
+
+  /* The row's own name (the month) heads it and needs no label. */
+  .fms-rtable td.fms-rhead {
+    padding-bottom: var(--space-1);
+  }
+
+  .fms-rtable td.fms-rhead::before {
+    content: none;
+  }
+
+  .fms-rtable td:empty {
+    display: none;
+  }
+
+  .fms-rtable .fms-rtotal {
+    background: var(--surface-sunk);
+  }
+
+  .fms-rtable .fms-rtotal td {
+    background: none;
+  }
+
+  .fms-rtable .fms-amount {
+    flex: 0 1 11rem;
+    min-width: 0;
+  }
+}
+
+/* ══ Ranking bars, §3.9 ═════════════════════════════════════════════════════ */
+
+.fms-rankhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+  margin-bottom: 6px;
+}
+
+.fms-rankname {
+  flex: 1 1 8rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fms-rankhead > .t-num-s {
+  margin-left: auto;
+}

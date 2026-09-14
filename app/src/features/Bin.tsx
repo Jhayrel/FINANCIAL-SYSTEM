@@ -130,8 +130,8 @@ export function Bin({
                       />
                     </label>
                   )}
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                  <div className="fms-dbrow-text">
+                    <div className="fms-dbrow-title">
                       <span className="t-body-strong fms-truncate">{t.item || "Uncategorised"}</span>
                       <FlowBadge flow={TONE[t.type]} />
                     </div>
@@ -166,8 +166,15 @@ export function Bin({
                   <div style={{ marginTop: "var(--space-3)" }}>
                     <Alert status="over" title={`Permanently delete record #${expected}?`}>
                       This cannot be undone. Type <strong>{expected}</strong> to confirm.
-                      <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-3)", maxWidth: 380 }}>
-                        <TextInput value={typed} onChange={setTyped} placeholder={expected} />
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginTop: "var(--space-3)", maxWidth: 420 }}>
+                        <span style={{ flex: "1 1 8rem", minWidth: 0 }}>
+                          <TextInput
+                            value={typed}
+                            onChange={setTyped}
+                            placeholder={expected}
+                            ariaLabel={`Type ${expected} to confirm`}
+                          />
+                        </span>
                         <Button
                           variant="danger"
                           disabled={typed.trim() !== expected}

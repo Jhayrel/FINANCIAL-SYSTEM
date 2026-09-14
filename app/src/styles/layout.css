@@ -4,21 +4,28 @@
  */
 
 /* ══ App shell ══════════════════════════════════════════════════════════════
-   The sidebar is fixed. Only .fms-content scrolls. */
+   The sidebar is fixed. Only .fms-main scrolls. */
 
 .fms-app {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
-  min-height: 100vh;
+  /*
+   * The dynamic viewport height, not the static one.
+   *
+   * 100vh on a phone is the height with the browser's toolbars hidden, so
+   * while they were showing the shell was taller than the screen and its
+   * bottom edge, where the last rows and the Save button live, sat underneath
+   * them. dvh follows the toolbars. The vh line is for a browser without dvh.
+   */
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .fms-sidebar {
-  position: sticky;
-  top: 0;
-  align-self: start;
-  height: 100vh;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   background: var(--surface);
   border-right: 1px solid var(--hairline);
   padding: var(--space-5) var(--space-3);
@@ -29,6 +36,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex: 0 0 auto;
   padding: 0 var(--space-2) var(--space-5);
 }
 
@@ -42,9 +50,26 @@
   place-items: center;
 }
 
+/*
+ * The list scrolls when the window is short; the net worth stays put.
+ *
+ * Ten 44px items, the brand and the net worth block need about 660px, and a
+ * laptop with its toolbars showing often has less. The sidebar hid whatever
+ * did not fit, so on those screens the net worth block sat over the last
+ * items and Settings could not be reached.
+ */
 .fms-nav {
   display: grid;
+  align-content: start;
   gap: 2px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.fms-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .fms-navitem {
@@ -53,38 +78,51 @@
   gap: var(--space-3);
   width: 100%;
   /* 44px, the touch target D10 asks for, and easier to hit with a mouse too. */
-  height: 44px;
+  min-height: 44px;
   padding: 0 var(--space-3);
   border: none;
   border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-2);
   text-align: left;
   /* The sidebar is the one place a slightly larger label reads better: it is
      scanned at a glance rather than read, and 14px was small for that. */
   font-size: 15px;
+  line-height: 20px;
+  font-weight: 400;
   transition: background var(--motion-hover) var(--ease-out);
 }
 
 .fms-navitem:hover {
   background: var(--surface-hover);
+  color: var(--ink);
 }
 
-/*
- * Fixed-width icon column so every label starts at the same x.
- *
- * These are text glyphs, not an icon font, so they inherit the label's size
- * and came out noticeably smaller than the word beside them. Sized explicitly,
- * and given a line height that stops the taller glyphs shifting their row.
- */
+/* Style guide §3.8: the current screen is a brand wash with brand ink. */
+.fms-navitem[aria-current="page"] {
+  background: var(--brand-100);
+  color: var(--brand-700);
+  font-weight: 600;
+}
+
+/* Fixed-width icon column so every label starts at the same x. */
 .fms-navicon {
+  display: grid;
+  place-items: center;
   width: 22px;
   flex: 0 0 auto;
-  text-align: center;
-  font-size: 18px;
-  line-height: 1;
+}
+
+.fms-navlabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fms-networth {
-  margin-top: auto;
+  flex: 0 0 auto;
+  margin-top: var(--space-3);
   padding: var(--space-3);
   background: var(--surface-sunk);
   border-radius: var(--radius-md);
@@ -94,65 +132,146 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .fms-topbar {
-  position: sticky;
-  top: 0;
+  flex: 0 0 auto;
   z-index: 5;
   background: var(--surface);
   border-bottom: 1px solid var(--hairline);
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--space-8);
 }
 
+/*
+ * The one scrolling region.
+ *
+ * Style guide §2.3: 32px of screen padding on a desktop, 20px on a tablet and
+ * 16px on a phone. It was 20px on a desktop and 16px everywhere else.
+ */
 .fms-main {
-  flex: 1;
-  padding: var(--space-5);
+  /*
+   * The bottom padding is a variable because a sticky element inside needs
+   * to know it. Sticky positioning measures from inside the padding, so a
+   * Save bar pinned at bottom: 0 stopped that far above the edge and fields
+   * scrolled through the gap under it.
+   */
+  --main-pad-b: var(--space-8);
+  flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-8);
+  padding-bottom: var(--main-pad-b);
 }
 
+/*
+ * Phone navigation, §3.8.
+ *
+ * Five slots with Add in the middle, raised and round, because it is the
+ * action this app exists for and the middle of the bar is where a thumb lands
+ * without looking.
+ */
 .fms-bottomnav {
   display: none;
   position: fixed;
   inset-inline: 0;
   bottom: 0;
   z-index: 20;
+  align-items: stretch;
   background: var(--surface);
   border-top: 1px solid var(--hairline);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 .fms-bnitem {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 56px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
+  padding: var(--space-1) 0;
   border: none;
   background: transparent;
+  color: var(--ink-3);
+  font-weight: 500;
 }
 
+.fms-bnitem--on {
+  color: var(--brand-700);
+  font-weight: 600;
+}
+
+.fms-bnlabel {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fms-bnadd {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-top: -28px;
+  border-radius: var(--radius-full);
+  background: var(--brand-700);
+  color: var(--on-brand);
+  box-shadow: var(--shadow-raised);
+  transition: background var(--motion-hover) var(--ease-out);
+}
+
+.fms-bnitem--add:hover .fms-bnadd,
+.fms-bnitem--add.fms-bnitem--on .fms-bnadd {
+  background: var(--brand-hover);
+}
+
+/*
+ * Toasts sit bottom right on a desktop and bottom centre, above the
+ * navigation, on a phone (§3.7). Never wider than the screen.
+ */
 .fms-toastwrap {
   position: fixed;
+  right: var(--space-6);
   bottom: var(--space-6);
-  left: 50%;
-  transform: translateX(-50%);
   z-index: 30;
+  display: flex;
+  justify-content: flex-end;
+  width: min(440px, calc(100vw - var(--space-8)));
+  pointer-events: none;
+}
+
+.fms-toastwrap > * {
+  pointer-events: auto;
 }
 
 /* ══ Dashboard ══════════════════════════════════════════════════════════════ */
 
 .fms-dash {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   max-width: 1600px;
 }
 
+/*
+ * min(100%, ...) in every auto-fit grid.
+ *
+ * A bare minmax(240px, 1fr) promises that no column is narrower than 240px,
+ * and on a screen narrower than that plus its padding the grid keeps the
+ * promise by running off the side. min(100%, 240px) lets a single column be
+ * as narrow as the screen it is on.
+ */
 .fms-kpis {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
 }
 
 /*
@@ -176,6 +295,7 @@
 
 .fms-kpifoot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
@@ -185,18 +305,37 @@
 .fms-charts {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
 }
 
-/* Label left, figure right: a real two-column grid, so the numbers stay in
-   a column even when a label wraps. */
+/*
+ * Label left, figure right, and the figure takes a line of its own when the
+ * two cannot share one.
+ *
+ * This was a two column grid, which kept figures in a column but gave the
+ * figure first claim on the width: a long figure squeezed its label into a
+ * sliver, and a label with no spaces pushed the figure out of the card.
+ * Wrapping puts the figure under its label, still right-aligned, and only
+ * when there is no room beside it.
+ */
 .fms-qrow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--space-3);
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
   padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--hairline);
+}
+
+.fms-qrow > :first-child {
+  flex: 1 1 9rem;
+  min-width: 0;
+}
+
+.fms-qrow > :last-child:not(:first-child) {
+  margin-left: auto;
+  text-align: right;
 }
 
 .fms-qrow:last-child {
@@ -207,21 +346,51 @@
 .fms-walletgrid {
   display: grid;
   gap: var(--space-3);
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
 }
 
 .fms-walletcard {
   display: grid;
+  justify-items: start;
+  align-content: start;
   gap: 2px;
+  min-width: 0;
   padding: var(--space-3);
   background: var(--surface-sunk);
   border-radius: var(--radius-md);
 }
 
 .fms-wname {
+  justify-self: stretch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A debt card's name and outstanding figure, and the status line under them. */
+.fms-debthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+}
+
+.fms-debthead > :first-child {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.fms-debthead > :last-child:not(:first-child) {
+  margin-left: auto;
+}
+
+.fms-debtmeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 /* ══ Database ═══════════════════════════════════════════════════════════════ */
@@ -237,6 +406,12 @@
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--hairline);
+}
+
+@container (max-width: 560px) {
+  .fms-dbtools {
+    padding: var(--space-3) var(--space-4);
+  }
 }
 
 .fms-truncate {
@@ -259,10 +434,44 @@
   border-bottom: 1px solid var(--hairline);
 }
 
+/*
+ * Checkbox, text and amount on one line, and the amount on a line of its own
+ * when there is not room for all three.
+ *
+ * The text gives way first, so a long amount narrows the description rather
+ * than the amount. Only when the text would be left with almost nothing does
+ * the amount wrap, right-aligned under it, instead of pushing the row out of
+ * the card.
+ */
 .fms-dbrow-main {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-1) var(--space-3);
+}
+
+.fms-dbrow-text {
+  flex: 1 1 7rem;
+  min-width: 0;
+}
+
+.fms-dbrow-figure {
+  flex: 0 0 auto;
+  margin-left: auto;
+  text-align: right;
+}
+
+/* The item and its flow badge share a line, and the item is what gives way. */
+.fms-dbrow-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-dbrow-title > .fms-badge {
+  flex: 0 0 auto;
 }
 
 /*
@@ -285,6 +494,7 @@
 
 .fms-bulkbar-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   margin-left: auto;
 }
@@ -304,13 +514,17 @@
 /*
  * The row's text keeps the free space, not the gap between it and the money.
  *
- * `.fms-dbrow-main` spreads its children apart, which reads correctly with
+ * .fms-dbrow-main spreads its children apart, which reads correctly with
  * two of them. Adding a checkbox in front made three, and the text block
  * ended up floating in the middle of the row with a hand's width of nothing
  * either side of it.
+ *
+ * A small basis rather than auto: auto is the full width of the text, which
+ * is always more than a phone has, so the amount wrapped under every row.
  */
 .fms-dbpick + div {
-  flex: 1 1 auto;
+  flex: 1 1 7rem;
+  min-width: 0;
 }
 
 .fms-dbpick input {
@@ -322,15 +536,18 @@
 
 .fms-dbrow-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-3);
 }
 
 .fms-binactions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
-  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: var(--space-2) var(--space-3);
+  margin-left: auto;
 }
 
 /*
@@ -338,33 +555,31 @@
  *
  * The amount, Restore and Delete forever sat on the same line as the item, in
  * a row that refused to wrap: at 375px the buttons ran off the right of the
- * card and the amount landed on top of the record number. So on a phone the
- * row stacks, and the actions take a line of their own.
+ * card and the amount landed on top of the record number. So on a narrow card
+ * the row stacks, and the actions take a line of their own.
  */
-@media (max-width: 719px) {
-  .fms-binlist .fms-dbrow-main {
-    flex-wrap: wrap;
-  }
-
+@container (max-width: 600px) {
   .fms-binactions {
     width: 100%;
     justify-content: space-between;
-    margin-top: var(--space-3);
+    margin-top: var(--space-2);
   }
 
   .fms-binlist .fms-dbpick + div {
     flex: 1 1 60%;
   }
+}
 
-  /*
-   * Rule D10: 44px, on the buttons that move money records about.
-   *
-   * A small button is 32px, which is right beside a row of text on a desktop
-   * and is not a thumb target. Edit, Restore and Delete forever all sit at
-   * the end of a row your thumb is already travelling along, so on a phone
-   * they get the height the rule asks for. Set here rather than by passing a
-   * larger size, so the desktop table keeps its compact row.
-   */
+/*
+ * Rule D10: 44px, on the buttons that move money records about.
+ *
+ * A small button is 32px, which is right beside a row of text on a desktop
+ * and is not a thumb target. Edit, Restore and Delete forever all sit at
+ * the end of a row your thumb is already travelling along, so on a phone
+ * they get the height the rule asks for. Set here rather than by passing a
+ * larger size, so the desktop table keeps its compact row.
+ */
+@media (max-width: 1023px), (pointer: coarse) {
   .fms-dbrow-actions button,
   .fms-binactions button,
   .fms-bulkbar button {
@@ -372,7 +587,7 @@
   }
 }
 
-/* ══ Entry screen: one page, no scrolling on desktop ═══════════════════════ */
+/* ══ Entry screen ═══════════════════════════════════════════════════════════ */
 
 /*
  * Narrow enough that the card fits the form inside it.
@@ -391,6 +606,7 @@
 }
 
 .fms-panel {
+  min-width: 0;
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
@@ -421,6 +637,8 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 1px;
+  min-width: 0;
+  max-width: 100%;
   /* 44px minimum, per D10: this is a primary action on a phone. */
   min-height: 44px;
   padding: var(--space-2) var(--space-3);
@@ -446,6 +664,26 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-2);
   margin-bottom: var(--space-4);
+}
+
+/*
+ * The form lays itself out by its own width.
+ *
+ * The same form is 900px wide on a laptop, 400px beside the assistant on a
+ * wide monitor and 340px on a phone, and the width of the window says
+ * nothing about which of those it is: the narrowest form in the app is on the
+ * widest screens. Every rule below that changes the form's shape asks the
+ * form (the "entry" container) rather than the window.
+ *
+ * Two and two when four across would cut the words off. "⇄ Transfer" and
+ * "Borrow or repay" need about 100px a tile, and a form under 480px gives each
+ * one less than that, which is how the tiles came to read "↑ Spendi" and
+ * "↓ Revenu". Two rows of two keeps every word whole.
+ */
+@container entry (max-width: 480px) {
+  .fms-flowrow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* Kept for the legacy screens under features/_legacy. */
@@ -475,17 +713,24 @@
 }
 
 .fms-choice {
-  min-height: 40px;
-  padding: 0 var(--space-2);
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2);
   background: var(--surface);
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-md);
   color: var(--ink-2);
   cursor: pointer;
-  /* Long labels shrink rather than overflowing their half. */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /*
+   * A long label wraps inside its half rather than being cut.
+   *
+   * It used to end in an ellipsis, which on a phone asked "To my own acc..."
+   * or "To someone e...": the one question on the form that decides whether
+   * money counts as spending, asked with its words missing.
+   */
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .fms-choice[aria-checked="true"] {
@@ -497,7 +742,7 @@
 /*
  * The same control, in the colour of the thing it is choosing about.
  *
- * The plain `.fms-choice` is grey because it lives in the Transfer form, and
+ * The plain .fms-choice is grey because it lives in the Transfer form, and
  * grey is what a transfer is: neither gain nor loss. A debt movement is
  * amber, because a liability is not an expense. Rule D3 either way.
  */
@@ -513,12 +758,17 @@
   align-items: flex-start;
   justify-content: center;
   gap: 1px;
+  min-width: 0;
   min-height: 52px;
   padding: var(--space-2) var(--space-3);
   border-style: solid;
   border-radius: var(--radius-md);
   text-align: left;
   transition: background var(--motion-hover) var(--ease-out);
+}
+
+.fms-flowtile > span {
+  max-width: 100%;
 }
 
 /*
@@ -552,13 +802,9 @@
  *
  * Deliberately quiet. It marks provenance, it does not ask for attention, and
  * flow colour is reserved for direction of money (rule D3).
- */
-/*
- * The marker sits on a wrapper, not on the control.
  *
- * `forms.tsx` styles its inputs inline, so a class on them would lose to the
- * style attribute anyway. A rule on the wrapper is both simpler and the reason
- * those components did not need a new className prop.
+ * The marker sits on a wrapper, not on the control, so the components that
+ * draw the controls did not need a new prop for it.
  */
 .fms-suggested {
   border-left: 2px solid var(--brand-700);
@@ -570,12 +816,12 @@
 .fms-readonly {
   display: inline-flex;
   align-items: center;
-  min-height: 40px;
+  min-height: 44px;
   color: var(--ink-2);
 }
 
-/* Desktop: label beside the control, Excel style. The label column is a fixed
-   width so every control lines up at the same offset in both columns. */
+/* Label beside the control when the form has room for both, Excel style. The
+   label column is a fixed width so every control starts at the same x. */
 .fms-row {
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
@@ -587,20 +833,57 @@
 .fms-rowlabel {
   color: var(--ink-2);
   text-align: right;
+  overflow-wrap: anywhere;
 }
 
-.fms-control {
-  width: 100%;
-  height: 44px;
-  padding: 0 var(--space-3);
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--radius-md);
+/*
+ * Label above the control when it does not.
+ *
+ * Beside a 96px label, a control in a 360px form is 250px wide and its hint
+ * and error text wrap three lines deep under it. Above, the control has the
+ * whole width.
+ */
+@container entry (max-width: 399px) {
+  .fms-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: var(--space-1);
+    min-height: 0;
+  }
+
+  .fms-rowlabel {
+    text-align: left;
+  }
+}
+
+/*
+ * The amount, and the amount it usually is, side by side while they fit.
+ *
+ * The suggestion button appears only while the field is empty, and it used to
+ * take its width out of the field: on a phone the field shrank to a sliver the
+ * moment a guess arrived. The field keeps at least ten characters now, and the
+ * button moves under it when there is not room for both.
+ */
+.fms-amountrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.fms-amountrow > :first-child {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.fms-amountrow > .fms-btn {
+  flex: 0 0 auto;
+  min-height: 44px;
 }
 
 .fms-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
   margin-top: var(--space-4);
@@ -608,14 +891,86 @@
   border-top: 1px solid var(--hairline);
 }
 
-/* Two real columns, so amounts align even when a wallet name wraps. */
-.fms-balrow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+.fms-actions-spacer {
+  flex: 1 1 auto;
+}
+
+/* On a narrow form the two buttons share the line, Save the larger. */
+@container entry (max-width: 440px) {
+  .fms-actions-spacer,
+  .fms-actions > .fms-badge {
+    display: none;
+  }
+
+  .fms-actions > .fms-btn {
+    flex: 1 1 0;
+    min-height: 44px;
+  }
+
+  .fms-actions > .fms-btn--primary {
+    flex-grow: 2;
+  }
+}
+
+/*
+ * Save stays under your thumb.
+ *
+ * Below the three column layout the form is as tall as its fields, and Save
+ * was at the bottom of a page you had to scroll to reach, past the warnings,
+ * on the screen where it is pressed most. Pinned to the bottom of the
+ * scrolling area it is always in reach, and it lets go at the end of the form
+ * so it never floats over anything below it.
+ */
+@media (max-width: 1279px) {
+  .fms-actions {
+    position: sticky;
+    /* The edge of the scrolling area itself, not the edge of its padding. */
+    bottom: calc(var(--main-pad-b, 0px) * -1);
+    z-index: 3;
+    margin: var(--space-4) calc(var(--space-4) * -1) calc(var(--space-4) * -1);
+    padding: var(--space-3) var(--space-4);
+    background: var(--surface);
+    border-bottom-left-radius: var(--radius-lg);
+    border-bottom-right-radius: var(--radius-lg);
+  }
+}
+
+/* Above the phone bar the raised Add button stands 14px into the page, so
+   the Save bar keeps that much clear under its buttons. */
+@media (max-width: 1023px) {
+  .fms-actions {
+    padding-bottom: calc(var(--space-3) + var(--space-4));
+  }
+}
+
+/* A wallet before and after this entry: before, an arrow, after. */
+.fms-afterbal {
+  display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--space-3);
+  gap: 0 var(--space-2);
+  min-width: 0;
+  margin-top: 2px;
+}
+
+/* The same label and figure pattern as .fms-qrow, tighter. */
+.fms-balrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
   padding: 5px 0;
   border-bottom: 1px solid var(--hairline);
+}
+
+.fms-balrow > :first-child {
+  flex: 1 1 7rem;
+  min-width: 0;
+}
+
+.fms-balrow > :last-child:not(:first-child) {
+  margin-left: auto;
 }
 
 .fms-balrow:last-child {
@@ -634,12 +989,39 @@
   .fms-bottomnav {
     display: flex;
   }
-  .fms-main {
-    padding: var(--space-4);
-    padding-bottom: 88px;
+
+  /*
+   * The content column ends where the navigation begins.
+   *
+   * The bar is fixed over the bottom of the screen, and the scrolling region
+   * used to run on underneath it, with 88px of padding to make up the
+   * difference. That was enough to scroll to the end and not enough for
+   * anything pinned to the bottom of the region: a sticky Save bar sat behind
+   * the navigation. Stopping the column at the bar makes the bottom of the
+   * scroll area the top of the bar.
+   */
+  .fms-content {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
   }
+
+  .fms-main {
+    /* Room for the raised Add button, which stands above the bar. */
+    --main-pad-b: calc(var(--space-5) + var(--space-4));
+    padding: var(--space-5);
+    padding-bottom: var(--main-pad-b);
+  }
+
+  .fms-topbar {
+    padding: var(--space-3) var(--space-5);
+  }
+
   .fms-toastwrap {
-    bottom: 76px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    justify-content: center;
+    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+    width: calc(100vw - var(--space-8));
   }
 
   /* The side panel stacks BELOW the form: on a small screen you came here to
@@ -650,13 +1032,9 @@
 
   /* Stacked, the assistant is the one box that still states a height: nothing
      beside it to match, and a conversation that would otherwise run the page
-     long. */
+     long. Never most of the screen, so the composer stays in reach. */
   .fms-ask {
-    height: 420px;
-  }
-
-  .fms-charts {
-    grid-template-columns: minmax(0, 1fr);
+    height: min(520px, 75dvh);
   }
 
   /* A table never scrolls sideways on a phone: stack it into rows. */
@@ -669,51 +1047,58 @@
 }
 
 @media (max-width: 719px) {
-  .fms-fields {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-3);
-  }
-
-  .fms-row {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-    gap: var(--space-1);
-    min-height: 0;
-  }
-
-  .fms-rowlabel {
-    text-align: left;
-  }
-
   .fms-flowgrid {
     grid-template-columns: repeat(2, 1fr);
   }
-  .fms-panel {
-    padding: var(--space-3);
+}
+
+@media (max-width: 639px) {
+  .fms-main {
+    --main-pad-b: calc(var(--space-4) + var(--space-4));
+    padding: var(--space-4);
+    padding-bottom: var(--main-pad-b);
   }
-  .fms-actions > button {
-    flex: 1;
+
+  .fms-topbar {
+    padding: var(--space-3) var(--space-4);
   }
-  .fms-dbtools {
-    padding: var(--space-3);
+}
+
+/*
+ * The navigation steps aside while you type.
+ *
+ * With the on-screen keyboard up a phone has perhaps 300px left, and the bar
+ * is fixed to the bottom of what remains, so it sat on top of the field being
+ * typed into and the error under it. Only on a touch screen, where focusing a
+ * field is what brings the keyboard up.
+ */
+@media (max-width: 1023px) and (pointer: coarse) {
+  .fms-app:has(input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus) .fms-bottomnav {
+    display: none;
+  }
+
+  .fms-app:has(input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus) .fms-content {
+    padding-bottom: 0;
   }
 }
 
 /* ── Sidebar count badge ────────────────────────────────────────────────── */
 
 .fms-navcount {
+  flex: 0 0 auto;
   margin-left: auto;
   padding: 1px 7px;
   border-radius: var(--radius-full);
   background: var(--surface-sunk);
   color: var(--ink-2);
+  font-weight: 500;
 }
 
 /* ── Insights calendar ──────────────────────────────────────────────────── */
 
 .fms-cal {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 4px;
 }
 
@@ -725,6 +1110,7 @@
 
 .fms-calday {
   aspect-ratio: 1;
+  min-width: 0;
   display: grid;
   place-items: center;
   border-radius: var(--radius-sm);
@@ -737,17 +1123,30 @@
 .fms-stmttools {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-end;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--hairline);
 }
 
+/*
+ * A picker is wide enough for "September" and no wider than it needs to be.
+ *
+ * minmax(0, 1fr) is what lets the select inside actually shrink. Left to size
+ * itself, the grid track grew to the full length of the chosen option, and a
+ * long statement name pushed the next picker off the card.
+ */
 .fms-stmtfield {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
-  min-width: 160px;
-  flex: 1 1 160px;
-  max-width: 240px;
+  flex: 1 1 150px;
+  min-width: min(150px, 100%);
+  max-width: 260px;
+}
+
+.fms-stmtexport {
+  margin-left: auto;
 }
 
 .fms-stmtsummary {
@@ -759,6 +1158,26 @@
   padding: var(--space-3) var(--space-5);
   background: var(--surface-sunk);
   border-bottom: 1px solid var(--hairline);
+}
+
+@container (max-width: 560px) {
+  .fms-stmttools,
+  .fms-stmtsummary {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+
+  .fms-stmtfield {
+    max-width: none;
+  }
+
+  .fms-stmtexport {
+    flex: 1 1 100%;
+  }
+
+  .fms-stmtexport > .fms-btn {
+    width: 100%;
+  }
 }
 
 /* ── Phone "More" sheet ─────────────────────────────────────────────────── */
@@ -776,13 +1195,29 @@
   bottom: 0;
   z-index: 26;
   display: grid;
+  align-content: start;
   gap: 2px;
-  padding: var(--space-2) var(--space-3) 72px;
+  /* A landscape phone is short: the list scrolls rather than running off the top. */
+  max-height: calc(100dvh - var(--space-12));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-2) var(--space-3) calc(72px + env(safe-area-inset-bottom, 0px));
   background: var(--surface);
   border-top-left-radius: var(--radius-lg);
   border-top-right-radius: var(--radius-lg);
   box-shadow: var(--shadow-overlay);
-  animation: fms-sheet-in var(--motion-sheet) var(--ease-sheet);
+}
+
+/*
+ * The sheet slides in; it never fades in from nothing.
+ *
+ * It started at opacity 0, so anything that stopped the animation from
+ * advancing (a page the browser has throttled in the background, a slow
+ * frame) left a sheet that took taps while showing nothing at all. A sheet
+ * that fails to animate should still be a sheet.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .fms-sheet { animation: fms-sheet-in var(--motion-sheet) var(--ease-sheet); }
 }
 
 .fms-sheethandle {
@@ -794,18 +1229,27 @@
 }
 
 @keyframes fms-sheet-in {
-  from { transform: translateY(12px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from { transform: translateY(24px); }
+  to { transform: translateY(0); }
 }
 
 /* ══ Fixed-height screens ═══════════════════════════════════════════════════
-   The shell never scrolls. Normally the content column does; a "fixed" screen
+   The shell never scrolls. Normally the main column does; a "fixed" screen
    takes that over and scrolls its own inner panel instead. */
 
-.fms-app { height: 100vh; overflow: hidden; }
-.fms-content { min-height: 0; }
-.fms-main { overflow-y: auto; }
 .fms-main--fixed { overflow: hidden; display: flex; flex-direction: column; }
+
+/*
+ * The Database is only fixed where it has a fixed layout to fill.
+ *
+ * It asked for .fms-main--fixed at every width, and below 1024px nothing
+ * inside it scrolls: the rows are a plain list that expects the page to
+ * scroll. With the page's own scrolling switched off, a phone showed the
+ * first screenful of the ledger and no way to reach the rest of it.
+ */
+@media (min-width: 1024px) {
+  .fms-main--fixed-lg { overflow: hidden; display: flex; flex-direction: column; }
+}
 
 /* ══ Settings ═══════════════════════════════════════════════════════════════ */
 
@@ -825,17 +1269,6 @@
   flex-wrap: wrap;
 }
 
-@media (max-width: 719px) {
-  .fms-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    padding-bottom: 2px;
-  }
-  .fms-tabs::-webkit-scrollbar { display: none; }
-  .fms-tab { flex: 0 0 auto; padding: 0 var(--space-3); }
-}
-
 .fms-tab {
   min-height: 40px;
   padding: 0 var(--space-4);
@@ -843,6 +1276,7 @@
   border: 1px solid var(--hairline-strong);
   background: var(--surface);
   color: var(--ink-2);
+  white-space: nowrap;
   transition: background var(--motion-hover) var(--ease-out);
 }
 .fms-tab:hover { background: var(--surface-hover); }
@@ -854,6 +1288,29 @@
   font-weight: 600;
 }
 
+/*
+ * One line that scrolls, below a desktop.
+ *
+ * Eight tabs wrapped onto two rows on a tablet, which pushed the panel down by
+ * a row of buttons on the screen with the least height to spare. This block
+ * comes after .fms-tab on purpose: it sat before it, so the narrower padding it
+ * sets for a phone never applied.
+ */
+@media (max-width: 1023px) {
+  .fms-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 2px;
+  }
+  .fms-tabs::-webkit-scrollbar { display: none; }
+  .fms-tab { flex: 0 0 auto; padding: 0 var(--space-3); }
+}
+
+@media (pointer: coarse) {
+  .fms-tab { min-height: 44px; }
+}
+
 /* The one scrolling region on the screen. */
 .fms-panel-scroll {
   min-height: 0;
@@ -862,8 +1319,8 @@
   padding: 2px var(--space-2) var(--space-6) 2px;
 }
 
-@media (max-width: 719px) {
-  .fms-panel-scroll { padding: var(--space-3); }
+@media (max-width: 1023px) {
+  .fms-panel-scroll { padding: 2px 2px var(--space-6); }
 }
 
 /* ══ Settings tables ════════════════════════════════════════════════════════
@@ -889,6 +1346,11 @@
   align-items: start;
 }
 
+/*
+ * A settings card is a size container, so the table inside it stacks by the
+ * width of the card and not of the window (see "A settings table stacks"
+ * below).
+ */
 .fms-card {
   background: var(--surface);
   border: 1px solid var(--hairline);
@@ -896,12 +1358,15 @@
   box-shadow: var(--shadow-card);
   padding: var(--space-4) var(--space-5) var(--space-5);
   min-width: 0;
+  container-type: inline-size;
+}
+
+@media (max-width: 639px) {
+  .fms-card { padding: var(--space-4); }
 }
 
 /* A section whose table has more than two columns needs the whole row. */
 .fms-card--wide { grid-column: 1 / -1; }
-
-
 
 .fms-table {
   width: 100%;
@@ -941,7 +1406,15 @@
 .fms-table th.fms-th-right,
 .fms-table td.fms-td-right { text-align: right; }
 
-/* Actions sit in one column, right-aligned, so they form a clean edge. */
+/*
+ * Actions sit in one column, right-aligned, so they form a clean edge.
+ *
+ * Every action column also starts at the same x, whatever it holds. Tables
+ * with one action ended 104px to the right of tables with two, so scanning
+ * down the Categories tab the buttons stepped sideways at every section
+ * break. Reserving the width of the widest set (two buttons and the gap
+ * between them) lines them all up without changing any button.
+ */
 .fms-rowactions {
   display: grid;
   grid-auto-flow: column;
@@ -949,21 +1422,11 @@
   gap: var(--space-2);
   justify-content: end;
   white-space: nowrap;
+  min-width: 200px;
 }
 
 .fms-rowactions > button { min-width: 96px; }
 
-/*
- * Every action column starts at the same x, whatever it holds.
- *
- * Tables with one action ended 104px to the right of tables with two, so
- * scanning down the Categories tab the buttons stepped sideways at every
- * section break. Reserving the width of the widest set (two buttons and the
- * gap between them) lines them all up without changing any button.
- */
-.fms-rowactions { min-width: 200px; }
-
-/* A named block inside the panel. */
 /*
  * A settings section spaces its own children.
  *
@@ -974,20 +1437,30 @@
  *
  * One gap on the container is the fix, rather than a margin on each thing that
  * might follow another thing.
+ *
+ * minmax(0, 1fr), so a wide table or a long name inside the section cannot
+ * size the section's only column wider than the card.
  */
 .fms-setgroup {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   align-content: start;
 }
 
 .fms-setgroup > header {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-3);
   /* The container's gap now does this, and both together doubled it. */
   margin-bottom: 0;
+}
+
+.fms-setgroup > header > :first-child {
+  flex: 1 1 14rem;
+  min-width: 0;
 }
 
 /* The add-row under each table. */
@@ -1003,6 +1476,21 @@
 
 .fms-addrow > .fms-grow { flex: 1 1 220px; min-width: 0; }
 
+/*
+ * On a narrow card each part of an add row takes a line of its own.
+ *
+ * Several pickers here carry a fixed inline width for the desktop row, and
+ * beside a text field on a phone that left a 150px picker and a button
+ * sharing a line with room for neither. The inline widths are overridden here
+ * and only here, which is what the !important is for.
+ */
+@container (max-width: 520px) {
+  .fms-addrow > * {
+    flex: 1 1 100%;
+    width: auto !important;
+  }
+}
+
 /* A two-column definition list for the AI / data section. */
 .fms-deflist {
   display: grid;
@@ -1011,6 +1499,7 @@
 }
 
 .fms-deflist > * {
+  min-width: 0;
   padding: var(--space-3) 0;
   border-bottom: 1px solid var(--hairline);
 }
@@ -1020,59 +1509,91 @@
 }
 .fms-deflist > *:nth-last-child(-n + 2) { border-bottom: 0; }
 
-@media (max-width: 719px) {
-  /* A settings table stacks into rows, like every other table in the app. */
+/* On a narrow card the value goes under its name instead of beside it. */
+@container (max-width: 520px) {
+  .fms-deflist {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fms-deflist > *:nth-child(odd) {
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+  .fms-deflist > *:nth-child(even) {
+    padding-left: 0;
+    padding-top: var(--space-1);
+    text-align: left;
+  }
+  .fms-deflist > *:nth-child(even):not(:last-child) {
+    border-bottom: 1px solid var(--hairline);
+  }
+}
+
+/*
+ * A settings table stacks into rows when its card is too narrow for it.
+ *
+ * Keyed to the card rather than the window. The Credit table has five columns
+ * and needs about 880px to show them, and on a 768px tablet it crushed the
+ * name column to 35px, which was room for "Ma..." and nothing else. Most
+ * tables stack below 600px of card; one marked fms-table--wide stacks below
+ * 880px, because it has more to fit.
+ *
+ * The width reset is !important because two cells set a width inline for the
+ * desktop table, and a stacked cell has to be the full width of its row.
+ */
+@container (max-width: 600px) {
   .fms-table thead { display: none; }
-  .fms-table, .fms-table tbody, .fms-table tr, .fms-table td { display: block; width: 100%; }
+  .fms-table, .fms-table tbody, .fms-table tr, .fms-table th, .fms-table td { display: block; width: 100%; }
+  .fms-table td, .fms-table td.fms-shrink { width: 100% !important; }
   .fms-table tr {
     padding: var(--space-3) 0;
     border-bottom: 1px solid var(--hairline);
   }
+  .fms-table tbody tr:last-child { border-bottom: 0; }
   .fms-table td { border-bottom: 0; padding: 2px 0; }
   .fms-table td.fms-td-right { text-align: left; }
-  .fms-rowactions { justify-content: flex-start; margin-top: var(--space-2); }
+  .fms-table td.fms-cell-flex { max-width: none; }
+  .fms-table .fms-shrink,
+  .fms-table th { white-space: normal; }
+  .fms-rowactions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    min-width: 0;
+    margin-top: var(--space-2);
+    white-space: normal;
+  }
+  .fms-rowactions > button { flex: 1 1 auto; min-width: 0; }
+}
+
+@container (max-width: 880px) {
+  .fms-table--wide thead { display: none; }
+  .fms-table.fms-table--wide, .fms-table--wide tbody, .fms-table--wide tr, .fms-table--wide th, .fms-table--wide td { display: block; width: 100%; }
+  .fms-table--wide td, .fms-table--wide td.fms-shrink { width: 100% !important; }
+  .fms-table--wide tr {
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .fms-table--wide tbody tr:last-child { border-bottom: 0; }
+  .fms-table--wide td { border-bottom: 0; padding: 2px 0; }
+  .fms-table--wide td.fms-td-right { text-align: left; }
+  .fms-table--wide td.fms-cell-flex { max-width: none; }
+  .fms-table--wide .fms-shrink,
+  .fms-table--wide th { white-space: normal; }
+  .fms-table--wide .fms-rowactions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    min-width: 0;
+    margin-top: var(--space-2);
+    white-space: normal;
+  }
+  .fms-table--wide .fms-rowactions > button { flex: 1 1 auto; min-width: 0; }
 }
 
 /* ══ Buttons ════════════════════════════════════════════════════════════════
-   The palette lives in primitives.tsx as inline style; hover, active and focus
-   cannot be expressed inline, so they live here. Without them a button gives
-   no feedback at all and reads as text. */
-
-.fms-btn {
-  cursor: pointer;
-  white-space: nowrap;
-  user-select: none;
-  box-shadow: var(--shadow-card);
-}
-.fms-btn:disabled { cursor: default; box-shadow: none; }
-
-.fms-btn:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
-}
-
-.fms-btn--primary:hover:not(:disabled) { background: var(--brand-hover); }
-.fms-btn--primary:active:not(:disabled) { background: var(--brand-active); }
-
-.fms-btn--secondary { box-shadow: none; }
-.fms-btn--secondary:hover:not(:disabled) {
-  background: var(--surface-hover);
-  border-color: var(--hairline-strong);
-}
-.fms-btn--secondary:active:not(:disabled) { background: var(--hairline); }
-
-/* Ghost carries no chrome at rest, so it must gain some on hover to read as a
-   control rather than a label. */
-.fms-btn--ghost { box-shadow: none; }
-.fms-btn--ghost:hover:not(:disabled) {
-  background: var(--surface-sunk);
-  border-color: var(--hairline-strong);
-}
-.fms-btn--ghost:active:not(:disabled) { background: var(--hairline); }
-
-.fms-btn--danger { box-shadow: none; }
-.fms-btn--danger:hover:not(:disabled) { border-color: var(--over); }
-.fms-btn--danger:active:not(:disabled) { filter: brightness(0.96); }
+   In components.css, with the other shared controls. They were split between
+   inline styles in primitives.tsx and hover rules here, and the inline
+   background beat every hover rule, so no button ever showed a hover. */
 
 
 /* ══ Scrollbars ═════════════════════════════════════════════════════════════
@@ -1166,8 +1687,18 @@
   background: rgba(16, 24, 16, 0.45);
 }
 
+/*
+ * A dialog is never taller than the screen.
+ *
+ * The body of a confirmation names the record, the amount and what happens
+ * next, and on a short landscape phone that pushed the buttons off the bottom
+ * of a box with no way to scroll to them.
+ */
 .fms-dialog {
   width: min(440px, 100%);
+  max-height: calc(100dvh - var(--space-8));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: grid;
   gap: var(--space-4);
   padding: var(--space-5);
@@ -1175,6 +1706,7 @@
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-overlay);
+  overflow-wrap: anywhere;
 }
 
 .fms-dialog-actions {
@@ -1182,6 +1714,42 @@
   gap: var(--space-2);
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+/* The confirm button's wrapper is only there to be found; it takes no room. */
+.fms-dialog-confirm {
+  display: contents;
+}
+
+/*
+ * A bottom sheet on a phone, §3.11.
+ *
+ * Centred, a dialog put its buttons in the middle of the screen, the one
+ * place a thumb does not rest. At the bottom, full width and with the action
+ * on top, they are where the thumb already is.
+ */
+@media (max-width: 639px) {
+  .fms-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .fms-dialog {
+    width: 100%;
+    max-height: calc(100dvh - var(--space-6));
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    padding-bottom: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .fms-dialog-actions {
+    flex-direction: column-reverse;
+  }
+
+  .fms-dialog-actions .fms-btn {
+    width: 100%;
+    min-height: 48px;
+  }
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -1204,23 +1772,39 @@
 .fms-table tbody tr.fms-grouphead:first-child th { padding-top: var(--space-2); }
 .fms-table tbody tr.fms-grouphead:hover { background: transparent; }
 
+/* A group's name and its hint share a line, and the hint wraps under the name
+   when the card is too narrow for both. */
 .fms-groupname {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--space-2);
+  gap: 0 var(--space-2);
   text-transform: none;
   letter-spacing: 0;
 }
 
 /* ══ Sign-in gate ═══════════════════════════════════════════════════════════ */
 
+/*
+ * Centred when it fits, scrollable when it does not.
+ *
+ * The page does not scroll (see base.css), so a card taller than a landscape
+ * phone was cut off with its button below the fold. The gate scrolls itself,
+ * and auto margins centre the card without the clipping that centring by
+ * alignment causes when the card is the taller of the two.
+ */
 .fms-gate {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
   display: flex;
-  align-items: center;
-  justify-content: center;
   padding: var(--space-5);
   background: var(--paper);
+}
+
+.fms-gatecard {
+  width: min(440px, 100%);
+  margin: auto;
 }
 
 /* ══ Select ═════════════════════════════════════════════════════════════════
@@ -1234,6 +1818,7 @@
   align-items: center;
   justify-content: flex-start;
   width: 100%;
+  min-width: 0;
   /* Room on the right for the chevron, so the value never runs under it. */
   padding: 0 var(--space-8) 0 var(--space-3);
   background: var(--surface);
@@ -1254,11 +1839,22 @@
 }
 .fms-select--invalid { border-color: var(--over); }
 
+/*
+ * The value takes whatever width the box has, and not a pixel more.
+ *
+ * A flex item is as wide as its text unless told otherwise, and "as wide as
+ * its text" became the width of the whole select. A long option name pushed
+ * the box, and the grid it sat in, wider than the card: the Statements
+ * pickers ran off the right edge the moment a long statement was chosen. A
+ * zero basis fills the box and cuts the text with an ellipsis instead.
+ */
 .fms-select-value {
+  flex: 1 1 0%;
+  width: 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
 }
 .fms-select-placeholder { color: var(--ink-3); }
 
@@ -1298,22 +1894,35 @@
   background-clip: content-box;
 }
 
+/*
+ * A long option wraps inside the menu.
+ *
+ * The menu grows to its longest option up to 420px or the width of the
+ * screen, and past that an option kept on one line was wider than the menu,
+ * which then scrolled sideways inside a dropdown.
+ */
 .fms-menu-item {
   display: flex;
-  white-space: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
   min-height: 40px;
-  padding: 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   color: var(--ink);
   cursor: pointer;
   text-align: left;
+  line-height: 1.3;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .fms-menu-item[data-active="true"] { background: var(--surface-sunk); }
 .fms-menu-item[aria-selected="true"] { font-weight: 600; }
 .fms-menu-item + .fms-menu-item { border-top: 1px solid var(--hairline); }
+
+@media (pointer: coarse) {
+  .fms-menu-item { min-height: 44px; }
+}
 
 .fms-menu-tick { color: var(--brand-700); line-height: 0; flex: 0 0 auto; }
 
@@ -1402,21 +2011,16 @@
 /*
  * Row actions inside a data table.
  *
- * Distinct from `.fms-rowactions`, which reserves a fixed width so the Settings
+ * Distinct from .fms-rowactions, which reserves a fixed width so the Settings
  * tables agree with one another. A ledger table has one action column and
- * hundreds of rows, so it wants the opposite: as little width as the buttons
- * need, because everything it takes comes off the description.
+ * hundreds of rows, so it wants the opposite: icon buttons, as the style
+ * guide asks for row actions (§3.4), taking only the width they need, because
+ * everything they take comes off the description.
  */
 .fms-tableactions {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-1);
-  white-space: nowrap;
-}
-
-.fms-tableactions > button {
-  min-width: 0;
-  padding: 0 var(--space-2);
 }
 
 /* ══ Database: only the rows move ═══════════════════════════════════════════
@@ -1504,12 +2108,20 @@
  * where the columns stack and a fixed height would only cut the form off.
  */
 @media (min-width: 1280px) {
+  /*
+   * The form never goes narrower than 400px.
+   *
+   * The side columns used to be sized first and the form got what was left,
+   * which at 1280px was 320px: the flow tiles cut their words off and Save
+   * spilled out of the panel. The form has a floor now, and the balances and
+   * the assistant share whatever is spare above it.
+   */
   .fms-entry {
     height: 100%;
     min-height: 560px;
     max-width: none;
     grid-template-rows: minmax(0, 1fr);
-    grid-template-columns: minmax(0, 1fr) minmax(200px, 260px) minmax(260px, 360px);
+    grid-template-columns: minmax(400px, 1fr) minmax(200px, 260px) minmax(280px, 380px);
     align-items: stretch;
   }
 
@@ -1563,12 +2175,19 @@
   }
 }
 
-/* The column the fields scroll inside. Harmless at any width: the same
-   children in the same order, with the buttons last. */
+/*
+ * The column the fields scroll inside. Harmless at any width: the same
+ * children in the same order, with the buttons last.
+ *
+ * It is also the "entry" container every rule that changes the form's shape
+ * answers to (see "The form lays itself out by its own width").
+ */
 .fms-entryform {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
+  container: entry / inline-size;
 }
 
 /*
@@ -1619,7 +2238,7 @@
   }
   .fms-ask {
     grid-column: 1 / -1;
-    height: 420px;
+    height: 480px;
   }
 }
 
@@ -1682,7 +2301,7 @@
   padding: var(--space-2) var(--space-3);
   background: var(--surface-sunk);
   border-radius: var(--radius-md);
-  color: var(--ink-1);
+  color: var(--ink);
   /*
    * A grid item will not shrink below its own content, which is how a bubble
    * ended up wider than the panel holding it and spilled past the right edge.

@@ -19,6 +19,7 @@ import {
   type Flow as FlowTone,
 } from "../components/primitives";
 import { SearchInput } from "../components/forms";
+import { Icon } from "../components/Icon";
 import { useConfirm } from "../components/Confirm";
 import { formatAmount } from "../domain/money";
 import { DataTable, type Column } from "../components/DataTable";
@@ -251,12 +252,25 @@ export function Database({
     setLimit(PAGE);
   };
 
+  /*
+   * Ten columns, and a 1024px screen has room for about six of them.
+   *
+   * Record, Type and Status leave below 880px of table, and Fee and
+   * Description below 1200px (see `hideBelow` in DataTable). What Type and
+   * Description said moves under the item instead, so a narrower window shows
+   * fewer columns and never less about a row.
+   *
+   * Every fixed width is set to hold its widest real value with the cell's
+   * padding: a 112px Total column holding ₱222,259.14 had spilled into
+   * Status, and "Transferred" was wider than its 84px pill column.
+   */
   const columns: Column<Transaction>[] = [
     {
       key: "record",
       header: "Record",
-      width: "72px",
+      width: "96px",
       sortable: true,
+      hideBelow: "md",
       render: (t) => (
         <span className="t-num-s" style={{ color: "var(--ink-3)" }}>
           {String(t.recordNumber).padStart(4, "0")}
@@ -266,15 +280,20 @@ export function Database({
     {
       key: "date",
       header: "Date",
-      width: "92px",
+      width: "116px",
       sortable: true,
       render: (t) => <span className="t-num-s">{formatShort(t.date)}</span>,
     },
-    { key: "flow", header: "Type", width: "96px", render: (t) => <FlowBadge flow={TONE[t.type]} /> },
+    {
+      key: "flow",
+      header: "Type",
+      width: "112px",
+      hideBelow: "md",
+      render: (t) => <FlowBadge flow={TONE[t.type]} />,
+    },
     {
       key: "wallet",
       header: "Wallet",
-      width: "18%",
       render: (t) => (
         <span
           className="t-caption fms-truncate"
@@ -288,17 +307,30 @@ export function Database({
     {
       key: "item",
       header: "Item",
-      width: "14%",
       sortable: true,
       render: (t) => (
-        <span className="t-body-strong fms-truncate" title={t.item}>
-          {t.item}
-        </span>
+        <>
+          <span className="t-body-strong fms-truncate" title={t.item}>
+            {t.item}
+          </span>
+          {/* Shown only while the Type and Description columns are gone. */}
+          <span className="fms-dt-sub fms-dt-only-narrow">
+            <span className="fms-dt-only-md" style={{ flex: "0 0 auto" }}>
+              <FlowBadge flow={TONE[t.type]} />
+            </span>
+            {t.description && (
+              <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }} title={t.description}>
+                {t.description}
+              </span>
+            )}
+          </span>
+        </>
       ),
     },
     {
       key: "description",
       header: "Description",
+      hideBelow: "lg",
       render: (t) => (
         <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }} title={t.description}>
           {t.description}
@@ -309,7 +341,8 @@ export function Database({
       key: "fee",
       header: "Fee",
       align: "right",
-      width: "76px",
+      width: "112px",
+      hideBelow: "lg",
       render: (t) =>
         t.fee ? (
           <Money value={t.fee} size="s" tone="var(--warn)" />
@@ -321,14 +354,15 @@ export function Database({
       key: "amount",
       header: "Total",
       align: "right",
-      width: "112px",
+      width: "144px",
       sortable: true,
       render: (t) => <Money value={t.total} />,
     },
     {
       key: "status",
       header: "Status",
-      width: "84px",
+      width: "124px",
+      hideBelow: "md",
       render: (t) =>
         t.status ? (
           <StatusPill status={t.status === "Paid" || t.status === "Withdrawn" ? "over" : "ok"}>
@@ -341,34 +375,40 @@ export function Database({
           key: "actions",
           header: "",
           align: "right" as const,
-          width: "132px",
+          width: "104px",
           render: (t: Transaction) => (
             /*
              * Not `.fms-rowactions`: that reserves 200px and gives every
              * button a 96px minimum so the Settings tables line up with each
              * other. Applied to 442 ledger rows it pushed the table past its
              * container, and Delete was cut off at the right edge.
+             *
+             * Icons, as §3.4 asks for row actions, with their words kept in
+             * the label for a screen reader and in the tooltip for a mouse.
+             * Two worded buttons took 132px of every row, and at 1024px that
+             * came straight out of the item and the description.
              */
             <span className="fms-tableactions">
               {onEdit && (
                 <Button
                   size="sm"
-                  variant="secondary"
+                  variant="ghost"
                   ariaLabel={`Edit record ${t.recordNumber}`}
+                  title="Edit"
+                  iconLeft={<Icon name="edit" size={18} />}
                   onClick={() => onEdit(t)}
-                >
-                  Edit
-                </Button>
+                />
               )}
               {onDelete && (
                 <Button
                   size="sm"
-                  variant="danger"
+                  variant="ghost"
+                  tone="danger"
                   ariaLabel={`Delete record ${t.recordNumber}`}
+                  title="Delete"
+                  iconLeft={<Icon name="bin" size={18} />}
                   onClick={() => void askDelete(t)}
-                >
-                  Delete
-                </Button>
+                />
               )}
             </span>
           ),
@@ -489,8 +529,8 @@ export function Database({
                           />
                         </label>
                       )}
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                      <div className="fms-dbrow-text">
+                        <div className="fms-dbrow-title">
                           <span className="t-body-strong fms-truncate">{t.item || "Uncategorised"}</span>
                           <FlowBadge flow={TONE[t.type]} />
                         </div>
@@ -501,7 +541,7 @@ export function Database({
                           {formatShort(t.date)} · {walletPath(t)}
                         </div>
                       </div>
-                      <div style={{ textAlign: "right", flex: "0 0 auto" }}>
+                      <div className="fms-dbrow-figure">
                         <Money value={t.type === "Revenue" ? t.total : -t.total} signed />
                         {t.fee > 0 && (
                           <div className="t-micro" style={{ color: "var(--warn)" }}>

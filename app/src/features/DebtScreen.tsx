@@ -134,11 +134,13 @@ function DebtCard({
 
   return (
     <button
+      type="button"
       onClick={onSelect}
       aria-pressed={selected}
       style={{
         display: "block",
         width: "100%",
+        minWidth: 0,
         textAlign: "left",
         padding: "var(--space-3)",
         borderRadius: "var(--radius-md)",
@@ -146,7 +148,12 @@ function DebtCard({
         border: `${selected ? 2 : 1}px solid ${overdue ? "var(--over)" : "var(--flow-debt)"}`,
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "var(--space-3)" }}>
+      {/*
+        The name and the figure share a line while they fit, and the figure
+        moves under the name when they do not. A long credit line name beside
+        a large outstanding figure used to push the figure out of the card.
+      */}
+      <div className="fms-debthead">
         <span className="t-body-strong" style={{ color: "var(--flow-debt-text)" }}>{debt.name}</span>
         <Money value={position.outstanding} size="l" tone={overdue ? "var(--over)" : "var(--flow-debt-text)"} />
       </div>
@@ -157,7 +164,7 @@ function DebtCard({
 
       <div
         className="t-caption"
-        style={{ marginTop: "var(--space-2)", display: "flex", flexWrap: "wrap", gap: "var(--space-3)", color: "var(--flow-debt-text)" }}
+        style={{ marginTop: "var(--space-2)", display: "flex", flexWrap: "wrap", gap: "var(--space-1) var(--space-3)", color: "var(--flow-debt-text)" }}
       >
         <span>Drawn <Money value={position.drawn} size="s" tone="var(--flow-debt-text)" /></span>
         <span>Repaid <Money value={position.repaid} size="s" tone="var(--flow-debt-text)" /></span>
@@ -166,7 +173,7 @@ function DebtCard({
         )}
       </div>
 
-      <div style={{ marginTop: "var(--space-2)", display: "flex", gap: "var(--space-2)", alignItems: "center" }}>
+      <div className="fms-debtmeta">
         <StatusPill status={overdue ? "over" : position.status === "open" ? "warn" : "ok"}>
           {position.status}
         </StatusPill>
@@ -204,8 +211,10 @@ function DebtHistory({
     position.debt.id,
   );
 
+  // Both figure columns hold ₱999,999.99 with their padding; at 124px the
+  // outstanding figure ran into the column beside it.
   const columns: Column<(typeof statement.rows)[number]>[] = [
-    { key: "date", header: "Date", width: "104px", render: (r) => <span className="t-num-s">{formatShort(r.transaction.date)}</span> },
+    { key: "date", header: "Date", width: "116px", render: (r) => <span className="t-num-s">{formatShort(r.transaction.date)}</span> },
     {
       key: "effect",
       header: "Effect",
@@ -225,12 +234,12 @@ function DebtHistory({
         </span>
       ),
     },
-    { key: "amount", header: "Amount", align: "right", width: "124px", render: (r) => <Money value={r.transaction.total} /> },
+    { key: "amount", header: "Amount", align: "right", width: "144px", render: (r) => <Money value={r.transaction.total} /> },
     {
       key: "running",
       header: "Outstanding",
       align: "right",
-      width: "132px",
+      width: "144px",
       render: (r) => <Money value={r.runningBalance ?? 0} tone="var(--flow-debt-text)" />,
     },
   ];
@@ -248,7 +257,7 @@ function DebtHistory({
             {statement.rows.map((r) => (
               <li key={r.transaction.id} className="fms-dbrow">
                 <div className="fms-dbrow-main">
-                  <div style={{ minWidth: 0 }}>
+                  <div className="fms-dbrow-text">
                     <span className="t-body-strong">{r.transaction.debtEffect}</span>
                     <div className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>
                       {r.transaction.description}
@@ -257,7 +266,7 @@ function DebtHistory({
                       {formatShort(r.transaction.date)}
                     </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
+                  <div className="fms-dbrow-figure">
                     <Money value={r.transaction.total} />
                     <div className="t-micro" style={{ color: "var(--ink-3)" }}>
                       left <Money value={r.runningBalance ?? 0} size="s" tone="var(--flow-debt-text)" />
