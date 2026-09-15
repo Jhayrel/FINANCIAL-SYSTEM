@@ -452,11 +452,8 @@ export function Database({
           )}
         </div>
 
-        {/* Shown on a phone only, where editing and picking rows are switched off. */}
-        <p className="t-caption fms-phone-note">
-          On a phone the database is for looking entries up. Editing, deleting and picking several
-          rows at once are on a bigger screen.
-        </p>
+        {/* Shown on a phone only: one row at a time there, many at once on a bigger screen. */}
+        <p className="t-micro fms-phone-note">Picking several rows at once is on a bigger screen.</p>
 
         {onDeleteMany && chosen.length > 0 && (
           /*
@@ -552,20 +549,46 @@ export function Database({
                           />
                         </label>
                       )}
+                      {/*
+                        A title that says what the row is. Every transfer read
+                        "Uncategorised", because a transfer has no item, and
+                        the description under it repeated what the title should
+                        have said. The figure takes its flow's colour, so a
+                        transfer is grey (rule D3) rather than red.
+                      */}
                       <div className="fms-dbrow-text">
                         <div className="fms-dbrow-title">
-                          <span className="t-body-strong fms-truncate">{t.item || "Uncategorised"}</span>
+                          <span className="t-body-strong fms-truncate">
+                            {t.item.trim() ||
+                              t.description.trim() ||
+                              (t.type === "Transfer" ? (t.toWallet ? `To ${t.toWallet}` : "Sent to someone") : `${t.type}, no item`)}
+                          </span>
                           <FlowBadge flow={TONE[t.type]} />
                         </div>
-                        <div className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>
-                          {t.description || "No description"}
-                        </div>
-                        <div className="t-micro" style={{ color: "var(--ink-3)" }}>
-                          {formatShort(t.date)} · {walletPath(t)}
+                        {t.item.trim() && t.description.trim() && (
+                          <div className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>
+                            {t.description}
+                          </div>
+                        )}
+                        <div className="t-micro fms-truncate" style={{ color: "var(--ink-3)" }}>
+                          #{String(t.recordNumber).padStart(4, "0")} · {formatShort(t.date)} · {walletPath(t)}
                         </div>
                       </div>
                       <div className="fms-dbrow-figure">
-                        <Money value={t.type === "Revenue" ? t.total : -t.total} signed />
+                        <Money
+                          value={t.type === "Revenue" ? t.total : -t.total}
+                          signed
+                          size="s"
+                          tone={
+                            t.type === "Revenue"
+                              ? "var(--flow-revenue-text)"
+                              : t.type === "Transfer"
+                                ? "var(--ink-2)"
+                                : t.type === "Debt"
+                                  ? "var(--flow-debt-text)"
+                                  : "var(--flow-spending-text)"
+                          }
+                        />
                         {t.fee > 0 && (
                           <div className="t-micro" style={{ color: "var(--warn)" }}>
                             incl. {fmtShort(t.fee)} fee
@@ -587,23 +610,24 @@ export function Database({
                     {(onEdit || onDelete) && (
                       <div className="fms-dbrow-actions">
                         {onEdit && (
-                          <Button
-                            size="sm"
-                            ariaLabel={`Edit record ${t.recordNumber}`}
+                          <button
+                            type="button"
+                            className="t-caption fms-linkbtn"
+                            aria-label={`Correct record ${t.recordNumber}`}
                             onClick={() => onEdit(t)}
                           >
-                            Edit
-                          </Button>
+                            Correct
+                          </button>
                         )}
                         {onDelete && (
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            ariaLabel={`Delete record ${t.recordNumber}`}
+                          <button
+                            type="button"
+                            className="t-caption fms-linkbtn fms-linkbtn--danger"
+                            aria-label={`Move record ${t.recordNumber} to the bin`}
                             onClick={() => void askDelete(t)}
                           >
-                            Delete
-                          </Button>
+                            Move to bin
+                          </button>
                         )}
                       </div>
                     )}

@@ -34,6 +34,7 @@ import { BiggerScreen } from "./components/BiggerScreen";
 import { Icon, type IconName } from "./components/Icon";
 import { AskPanel } from "./features/AskPanel";
 import { useProposalSink } from "./features/useProposalSink";
+import { useReportScreenFallback } from "./features/screenReport";
 import { useMediaQuery } from "./features/useMediaQuery";
 import { aiSurfaceOn } from "./domain/aiSurface";
 import type { Draft } from "./domain/entry";
@@ -46,7 +47,7 @@ import { netWorth, positionsOf, renameDebtAccount, type Debt, type DebtEffect } 
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
-import type { Centavos } from "./domain/money";
+import { formatMoney, type Centavos } from "./domain/money";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { emptyDraft, insertChronologically } from "./domain/entry";
 import { formatMedium, getYear, today } from "./domain/dates";
@@ -133,7 +134,23 @@ const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean }[] = 
  * Settings stays reachable from the gear in the top bar, because the AI switch
  * and the accounts live there and a phone still needs both.
  */
-const PHONE_SCREENS: readonly Screen[] = ["dashboard", "database", "add", "budget", "ai", "settings"];
+const PHONE_SCREENS: readonly Screen[] = [
+  "dashboard",
+  "database",
+  "add",
+  "budget",
+  "ai",
+  "settings",
+  /**
+   * Added later the same day, at the owner's word: what is crucial on a phone
+   * must not wait for a bigger screen. A debt payment, a look at a day on the
+   * calendar, and taking back an entry binned by mistake all happen away from
+   * a desk. They are reached from the "More" sheet.
+   */
+  "debt",
+  "insights",
+  "bin",
+];
 
 /** The phone bar, left to right. Add is drawn raised; with the AI tab it is dead centre. */
 const BAR: readonly Screen[] = ["dashboard", "database", "add", "budget"];
@@ -175,6 +192,8 @@ export default function App() {
   /** The floating chat on a computer: open now, and mounted since it was first opened. */
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMounted, setChatMounted] = useState(false);
+  /** The phone's list of the screens its bar has no room for. */
+  const [moreOpen, setMoreOpen] = useState(false);
   /**
    * A card the assistant sent to the form from outside the Add screen, and the
    * last row the form saved. Held here because the assistant can be in three
@@ -721,7 +740,11 @@ export default function App() {
     setDeleted((prev) => [{ ...row, deletedAt: at }, ...prev]);
     push((l) => l.bin(id, at));
     record(binnedEvent(row));
-    flash(`Moved record #${String(row.recordNumber).padStart(4, "0")} to the bin.`);
+    // Undo, for the tap that was meant for the row beside it.
+    flash(`Moved record #${String(row.recordNumber).padStart(4, "0")} to the bin.`, {
+      label: "Undo",
+      run: () => handleRestore(id),
+    });
   };
 
   /**
@@ -1023,6 +1046,31 @@ export default function App() {
     mainRef.current?.scrollTo({ top: 0 });
   }, [screen]);
 
+  /**
+   * What is on screen, for the assistant: a short report for every screen,
+   * which a screen with more to say replaces with its own. The assistant's own
+   * tab keeps the report of the screen it was opened from (features/screenReport.ts).
+   */
+  useReportScreenFallback(() => {
+    if (screen === "ai") return null;
+    const label = NAV.find((n) => n.id === screen)?.label ?? screen;
+    const lines: string[] = [];
+    if (screen === "database") {
+      lines.push(dbFilter === "flagged" ? "Showing the rows flagged for review." : "Showing every row in the ledger.");
+      if (dbQuery?.query) lines.push(`Searched for "${dbQuery.query}".`);
+      lines.push(`${transactions.length} entries in the ledger.`);
+    }
+    if (screen === "bin") lines.push(`${deleted.length} entries in the bin, each restorable.`);
+    if (screen === "statements") lines.push("Statements for a period: an account, a category or a debt, exportable as CSV.");
+    if (screen === "activity") lines.push("The trail of every entry added, changed, binned or restored, and every budget change.");
+    if (screen === "settings") {
+      lines.push(`Active accounts: ${settings.accounts.filter((a) => !a.archived).map((a) => a.name).join(", ") || "none"}.`);
+      lines.push(`Debts: ${settings.credits.filter((c) => !c.archived).map((c) => c.name).join(", ") || "none"}.`);
+      lines.push(`Low balance warning at ${formatMoney(settings.lowBalanceThreshold)}.`);
+    }
+    return { screen: label, lines };
+  }, [screen, dbFilter, dbQuery, deleted.length, transactions.length, settings]);
+
   /** Every AI surface goes when AI or its chat is off (domain/aiSurface.ts). */
   const chatOn = aiSurfaceOn(settings.ai, "chat");
 
@@ -1127,6 +1175,9 @@ export default function App() {
     // and so does a pending return to the screen that sent you to Add.
     setDbQuery(null);
     setReturnTo(null);
+    setMoreOpen(false);
+    // Leaving the form ends a correction: coming back to Add is a new entry, not the old row.
+    if (id !== "add") setEditing(null);
   };
 
   /** Where a finding is dealt with: its rows when it names some, otherwise its screen. */
@@ -1148,6 +1199,7 @@ export default function App() {
         go("debt");
         break;
       case "goals":
+      case "settings":
         go("settings");
         break;
       case "pattern":
@@ -1284,16 +1336,16 @@ export default function App() {
                 ) : undefined
               }
             />
-            {/* Settings on a phone: the bar has no room for it, and the AI switch lives there. */}
+            {/* The screens a phone's bar has no room for, Settings among them. */}
             {compact && (
               <button
                 type="button"
                 className="fms-topbar-action"
-                aria-label="Settings"
-                aria-current={screen === "settings" ? "page" : undefined}
-                onClick={() => go("settings")}
+                aria-label="More screens"
+                aria-expanded={moreOpen}
+                onClick={() => setMoreOpen((open) => !open)}
               >
-                <Icon name="settings" size={22} />
+                <Icon name="more" size={22} />
               </button>
             )}
           </div>
@@ -1453,6 +1505,7 @@ export default function App() {
               asOf={asOf}
               settings={settings}
               onOpenBudget={() => go("budget")}
+              onEditRow={startEditing}
               onRecordBill={(bill) => {
                 setIncoming({
                   draft: {
@@ -1613,6 +1666,29 @@ export default function App() {
           );
         })}
       </nav>
+
+      {compact && moreOpen && (
+        <>
+          <div className="fms-scrim" aria-hidden onClick={() => setMoreOpen(false)} />
+          <div className="fms-sheet" role="dialog" aria-label="More screens">
+            <div className="fms-sheethandle" aria-hidden />
+            {NAV.filter((n) => !BAR_WITH_AI.includes(n.id)).map((n) => (
+              <button
+                key={n.id}
+                type="button"
+                className="fms-sheetitem"
+                aria-current={screen === n.id ? "page" : undefined}
+                onClick={() => go(n.id)}
+              >
+                <Icon name={n.icon} size={20} />
+                <span className="t-body">{n.label}</span>
+                {n.id === "bin" && deleted.length > 0 && <span className="t-micro fms-navcount">{deleted.length}</span>}
+                {!PHONE_SCREENS.includes(n.id) && <span className="t-micro fms-sheetnote">Bigger screen</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {/*
         The assistant on a computer, on every screen but Add.

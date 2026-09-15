@@ -295,14 +295,14 @@ The most-used screen. Pattern:
 1. **Flow picker**, four equal tiles (Revenue / Spending / Transfer / Debt), each in its flow colour, glyph above label. Selected tile gets a 2px flow-coloured border and its wash. This choice drives which fields render.
 2. **Only the fields that flow needs.** Never a single form with disabled fields.
 3. **Live running balance** under the wallet field: `Maya ₱5,795.74 → ₱4,695.74`, updating as the amount is typed. Turns `--over` if it goes negative.
-4. **Autofill ghost text**, `--ink-3` inline suggestion; tap or `Tab` accepts.
+4. **Autofill ghost text**, `--ink-3` inline suggestion; tap or `Tab` accepts. A value the form filled itself reads in `--ink-2` until it is edited. No bar or border beside it: a green bar beside Description was taken for an error. No hint lines repeating where a guess came from ("Filed this way 12 times", "Last time: …", "Usually ₱15.00"); a hint appears only when it offers something not already in the field.
 5. **Inline warnings**, never blocking: negative balance, savings withdrawal, borrowing-looks-like-revenue, repay exceeds outstanding.
 6. **Save** → toast `Saved. Record #0442.` with **Undo** for 6s.
 7. **On a phone the form is the page** (below 640px): no card around it, labels above the fields whenever the form is under 520px wide, and the Save bar runs edge to edge above the navigation. Values nothing types into (record number, total) keep their label on the same line.
 8. **Latest entries where the chat would be.** With AI off, a desktop shows the eight newest rows beside the form (under the balances below 1600px, a third column above it), so a new entry is checked against the last ones before it is saved.
 9. **The form says what an entry does before it is saved.** Beside it on a desktop, under it on a phone:
    - **What it does to the month's budget**: the track it counts toward, what is left before and after, the kind of spending so far, and its limit if it has one. When the month has no budget, a link to Budget. When the month is closed, a note saying the entry still counts against the budget as it was planned (docs/08, rule Y4).
-   - **Everything due within a week or late**, above the flow tiles: bills from the same list as the Budget screen, and debt payments from the same dates as the Debt screen. Late first, three shown with "Show all" for the rest, so ten due bills never push the form off the screen. A tap fills the form, and asks first when that would replace something typed. Hidden while a saved row is being corrected.
+   - **Everything due within a week or late**, above the flow tiles: bills from the same list as the Budget screen, and debt payments from the same dates as the Debt screen. Late first, as many as fit on one line (each at least 180px), with "Show all N" only when more are hidden, so ten due bills never push the form off the screen and a wide form never shows three beside empty room. A tap fills the form, and asks first when that would replace something typed. Hidden while a saved row is being corrected.
    - **What it does to a debt**: the debt's balance before and after the entry.
    - **A likely duplicate**, with a link to that row in the Database. A bill already paid that month is named with its date.
    - **Latest entries** open for editing on a tap.
@@ -315,6 +315,9 @@ The most-used screen. Pattern:
     - A date days ahead or over a year back is questioned.
     - A fee larger than its amount is questioned.
     - One press saves once.
+    - **Every check is said once, in one "Before you save" list** under the fields, each with its action beside it as a link ("Book it as a repayment", "Open #0412"). Not a stack of boxes: three boxes for one repayment pushed the fields apart. Only errors after a save attempt keep their own red box.
+11. **Fields in pairs on a wide form.** At 760px of form and up, fields that belong together share a line: record number and date, debt and effect, from and to, category and item, amount and fee, total and status. Everything else spans the row. Total shows only when there is a fee in it.
+12. **A correction left half done is not restored as a new entry**, and leaving Add for another screen ends a correction.
 
 ### 3.4 Tables
 
@@ -428,6 +431,10 @@ All badges: `micro`, 22px tall, 8px horizontal padding, never interactive unless
 
 **Phone bottom nav**: 5 items max, 56px + safe area, `--surface`, 1px top hairline. Icon 24px + `micro` label. Active in `--brand-700`. The centre slot is a raised circular **＋** in `--brand-700`, 56px, `--shadow-raised`, the most-used action gets the best position. With four items (AI switched off) there is no centre slot: the four share the bar equally and Add is a level 56×32 pill in `--brand-700` with its label under it, like the others.
 
+**Phone "More" sheet**: the top bar's ⋯ button opens a sheet listing every screen the bar has no room for, 48px rows, icon + label, the Bin with its count. What matters away from a desk works on a phone: Debt, Insights and the Bin, as well as Dashboard, Database, Add, Budget (including this month's planner), AI and Settings. Statements and Activity are listed with "Bigger screen" beside them rather than hidden, so nothing seems to be missing.
+
+**Moving to the bin says Undo**: the toast after binning a row carries Undo, which restores it, for the tap meant for the row beside it.
+
 **Tabs**: underline style, 2px `--brand-700` on the active tab, `--ink-2` inactive. For switching views of the same data.
 
 **Segmented control**: pill group, used for filters (`All · Revenue · Spending · Transfer · Debt · Flagged`), not for navigation.
@@ -469,6 +476,16 @@ Charts explain, they don't decorate. Every chart answers one question stated in 
 **Category colours** are assigned by **annual rank**, fixed, so a category keeps its colour across every chart and render. Greens for ordinary life, ambers for discretionary, greys for leakage, `Unknown` is deliberately dull because it represents a gap.
 
 **Banned:** 3D, pie charts with more than 6 slices, dual Y-axes, rainbow palettes, gradient fills beyond the single flat opacity above, chart junk (drop shadows on bars, textures).
+
+**Insights calendar**, first on the screen, beside what was picked:
+
+| Part | Spec |
+|---|---|
+| Picking | "One day" or "A range". In a range the first tap sets one end and the second the other, in either order; Shift-click extends on a desktop. Quick picks: Today, This week, Last 7 days, Next 7 days, Month so far (or Whole month for a past one). |
+| Days | Shaded by what went out that day, a green dot when money came in, today underlined, the picked days marked along the bottom and the ends outlined. Days still ahead are dashed and can be picked. The amount under each day hides when the card is under 520px wide. |
+| What was picked | Its own card, never text under the grid. Went out, came in, and either expected ahead or the heaviest day; where it went; every entry with Correct; what is still expected (bills monthly, debt payments from the Debt screen's dates, habits from the ledger) with Pay now on a bill; and what that range allows at today's safe amount a day. A range can cross months and years. |
+
+**The assistant knows the screen it was opened from.** Every screen reports a few plain lines of what it shows (the month and its figures on Dashboard, the picked range on Insights, the half-typed entry on Add, the search on Database). "What do you think" is answered about that, not about the whole ledger. The report is text, rebuilt from the same figures the screen draws, and never includes settings the assistant has no reason to see.
 
 ### 3.10 Empty, loading, error states
 

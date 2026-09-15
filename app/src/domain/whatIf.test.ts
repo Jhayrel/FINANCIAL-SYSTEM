@@ -246,6 +246,43 @@ describe("safe to spend when things go wrong", () => {
   });
 });
 
+describe("accounts that do not add up", () => {
+  const alertsWith = (ledger: readonly Transaction[], list: readonly Account[]) =>
+    financeAlerts({
+      transactions: ledger,
+      accounts: list,
+      budgets: {},
+      debts: [],
+      bills: [],
+      lowBalanceThreshold: 0,
+      asOf: AS_OF,
+    });
+
+  it("asks about two accounts under one name, and two that differ only in capitals", () => {
+    const twice = alertsWith([], [...accounts, { id: "cash-2", name: "Cash", kind: "spending", archived: false }]);
+    expect(twice.some((a) => a.id.startsWith("same-name-") && a.title === "2 accounts are called Cash")).toBe(true);
+
+    const spelt = alertsWith([], [...accounts, { id: "gcash-2", name: "GCash", kind: "spending", archived: false }]);
+    expect(spelt.some((a) => a.id.startsWith("same-name-") && a.title.includes("look like one account"))).toBe(true);
+  });
+
+  it("asks about money under a wallet name no account has, and about a deactivated account still holding money", () => {
+    const typo = save([], income(100000, "2026-09-01", "Gcsh"));
+    expect(alertsWith(typo, accounts).some((a) => a.id === "stray-Gcsh")).toBe(true);
+
+    const held = save([], income(100000, "2026-09-01", "Savings"));
+    const off = accounts.map((a) => (a.id === "savings" ? { ...a, archived: true } : a));
+    expect(alertsWith(held, off).find((a) => a.id === "stray-Savings")?.title).toContain("deactivated");
+  });
+
+  it("asks about an entry dated a year ahead", () => {
+    const typo = save([], d({ date: "2027-09-10", flow: "Spending", fromWallet: "Cash", category: "Spending", item: "Food", amount: 10000 }));
+    expect(alertsWith(typo, accounts).some((a) => a.id === "far-ahead")).toBe(true);
+    const soon = save([], d({ date: "2026-09-20", flow: "Spending", fromWallet: "Cash", category: "Spending", item: "Food", amount: 10000 }));
+    expect(alertsWith(soon, accounts).some((a) => a.id === "far-ahead")).toBe(false);
+  });
+});
+
 describe("the assistant saves through the same checks", () => {
   it("flags extra zeros on a card exactly as the form does", () => {
     let ledger: Transaction[] = [];

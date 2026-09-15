@@ -89,6 +89,25 @@ export function parseAmount(input: string | number | null | undefined): Centavos
   }
 }
 
+/**
+ * Every separate figure in a piece of text.
+ *
+ * Asked how much the bills came to, the owner answered "999, 199, 239", and
+ * the reply was read as PHP 999,199,239.00: `parseAmount` drops every comma,
+ * because a comma is a thousands separator. It is one only when nothing but
+ * three digits follows it. A comma followed by a space is a list. So this
+ * finds the figures one at a time, and a reply with more than one is not a
+ * single amount.
+ */
+export function figuresIn(text: string): Centavos[] {
+  const out: Centavos[] = [];
+  for (const match of text.matchAll(/\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/g)) {
+    const value = parseAmount(match[0]);
+    if (value !== null && value > 0) out.push(value);
+  }
+  return out;
+}
+
 const PESO_FORMAT = new Intl.NumberFormat("en-PH", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,

@@ -28,7 +28,7 @@
  * 3 days left" is a fact they can act on.
  */
 
-import { walletBalance } from "./balances";
+import { allWalletBalances, walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { overdue, upcoming, type BillStatus } from "./bills";
 import { basisWords, debtDue, debtNamedBy, paymentsFiledAsSpending, positionsOf, type Debt } from "./debt";
@@ -53,7 +53,9 @@ export type AlertArea =
   | "goals"
   /** How the money moved, rather than what it came to. */
   | "pattern"
-  | "review";
+  | "review"
+  /** Accounts and lists, fixed in Settings. */
+  | "settings";
 
 export interface Alert {
   readonly id: string;
@@ -402,6 +404,88 @@ export function financeAlerts(input: AlertInput): Alert[] {
       detail: `−${money(balance)}. More has left it than was ever put in, so a row is missing or filed against the wrong account.`,
       weight: 92,
       query: account.name,
+    });
+  }
+
+  // ── Two accounts under one name ──────────────────────────────────────────
+  /**
+   * Settings listed "Cash" twice on 2026-09-15. Balances are kept by name, so
+   * two accounts with one name share one balance and every list shows it
+   * twice; two that differ only in spelling or capitals split one account's
+   * rows between them, so neither balance is the whole account.
+   */
+  const byName = new Map<string, Account[]>();
+  for (const account of accounts) {
+    if (account.archived) continue;
+    const key = account.name.trim().toLowerCase();
+    byName.set(key, [...(byName.get(key) ?? []), account]);
+  }
+  for (const same of byName.values()) {
+    const first = same[0];
+    if (same.length < 2 || !first) continue;
+    const exact = same.every((a) => a.name.trim() === first.name.trim());
+    out.push({
+      id: `same-name-${first.id}`,
+      level: "warn",
+      area: "settings",
+      title: exact
+        ? `${same.length} accounts are called ${first.name.trim()}`
+        : `${same.map((a) => `"${a.name.trim()}"`).join(" and ")} look like one account`,
+      detail: exact
+        ? `Balances are kept by name, so they share one balance of ${money(walletBalance(transactions, first.name))} and lists show it twice. Deactivate the extra one in Settings.`
+        : "Rows are split between them by spelling, so neither balance is the whole account. Rename one to match the other in Settings and its rows move with it.",
+      weight: 57,
+    });
+  }
+
+  // ── Money under a name that is not an account ────────────────────────────
+  /**
+   * A row that names a wallet no active account has puts its money in no
+   * balance, total or net worth: a typo in a wallet name, or an account
+   * deactivated while it still held money.
+   */
+  if (accounts.length > 0) {
+    const active = new Set(accounts.filter((a) => !a.archived).map((a) => a.name.trim()));
+    for (const [name, balance] of allWalletBalances(transactions)) {
+      if (balance === 0 || active.has(name.trim())) continue;
+      const sign = balance < 0 ? "−" : "";
+      const deactivated = accounts.some((a) => a.archived && a.name.trim() === name.trim());
+      out.push({
+        id: `stray-${name}`,
+        level: "warn",
+        area: deactivated ? "settings" : "review",
+        title: deactivated
+          ? `${name} is deactivated but holds ${sign}${money(balance)}`
+          : `${sign}${money(balance)} sits under "${name}", which is not one of your accounts`,
+        detail: deactivated
+          ? "While it is deactivated that money is left out of your wallets and net worth. Move it to an active account, or reactivate it in Settings."
+          : "A row names a wallet no account has, so this money is in no balance and no total. Open the rows and pick the right account.",
+        weight: 70,
+        ...(deactivated ? {} : { query: name }),
+      });
+    }
+  }
+
+  // ── Dated far ahead ──────────────────────────────────────────────────────
+  /**
+   * An entry dated more than a month after today: usually a year typed wrong.
+   * It sits in a month that has not happened, so every figure for now leaves
+   * it out, and nothing on the screens for now shows it.
+   */
+  const farAhead = transactions
+    .filter((t) => daysBetween(asOf, t.date) > 31)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const furthest = farAhead[0];
+  if (furthest) {
+    const number = `#${String(furthest.recordNumber).padStart(4, "0")}`;
+    out.push({
+      id: "far-ahead",
+      level: "warn",
+      area: "review",
+      title: `${farAhead.length} ${farAhead.length === 1 ? "entry is" : "entries are"} dated more than a month ahead`,
+      detail: `The furthest is ${formatMedium(furthest.date)}, record ${number}. A year typed wrong files money into a month that has not happened, and every figure for now leaves it out.`,
+      weight: 64,
+      query: number,
     });
   }
 

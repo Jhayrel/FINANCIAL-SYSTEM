@@ -99,8 +99,9 @@ import {
   type Chart,
 } from "../domain/charts";
 import { inferFromHistory } from "../domain/infer";
-import { debtWalletDirection, itemsFor, withDebtEffect } from "../domain/entry";
-import { detectIntent, isAdvice, isQuestion, type Intent } from "../domain/intent";
+import { monthBills } from "../domain/budgetView";
+import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
+import { detectIntent, isAdvice, isBudgetCommand, isQuestion, wantsAllBillsPaid, type Intent } from "../domain/intent";
 import { addressesEveryCard } from "../domain/capture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
@@ -126,6 +127,9 @@ import { aiEvent, correctionsFrom, type AiEvent, type AttachmentNote } from "../
 import { carded, cardsIn, drawn, drew, proposed, said, type StoredCard } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
+import { currentScreen } from "./screenReport";
+import { screenText } from "../domain/screenContext";
+import { figuresIn } from "../domain/money";
 import { transactionToDraft } from "../domain/entry";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
@@ -1175,7 +1179,11 @@ export function AskPanel({
         kind: "assistant",
         text:
           pending.blank === "amount"
-            ? "I could not find a figure in that. How much was it, in pesos?"
+            ? figuresIn(reply).length > 1
+              ? `That reads as ${figuresIn(reply).length} separate amounts (${figuresIn(reply)
+                  .map((c) => formatMoney(c))
+                  .join(", ")}), not one. Send each one on its own with what it was for, such as "wifi 999".`
+              : "I could not find a figure in that. How much was it, in pesos?"
             : pending.blank === "item"
               ? "What was it for?"
               : `That is not one of your accounts. ${[...reference.wallets, ...reference.savings].join(", ")}`,
@@ -1579,7 +1587,8 @@ export function AskPanel({
 
     const history = spokenHistory(turns, HISTORY_TURNS);
 
-    const answer = await ai.ask("chat", { question, history });
+    // What the owner has open, so "what do you think" is about that screen (domain/screenContext.ts).
+    const answer = await ai.ask("chat", { question, history, screen: screenText(currentScreen()) });
 
     /**
      * A failed answer says so, and says why underneath.
@@ -1599,6 +1608,66 @@ export function AskPanel({
     const note = (typed ?? draft).trim();
     if (busy) return;
     if (!note && files.length === 0) return;
+
+    /**
+     * A budget, which is changed on the Budget screen and never from here.
+     *
+     * "add buget same as last month" came back as "Dropped it.": an entry was
+     * waiting for its amount and the sentence was taken as giving up on it.
+     * The assistant writes entries only, so the answer is where the button
+     * is, and the entry being asked about is left waiting, untouched.
+     */
+    if (files.length === 0 && !as && isBudgetCommand(note)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      const reply = `Budgets are set on the Budget screen, not here: I only add entries. Open Budget, and the planner's "Use last month's budget" button (it names the month) copies it in one tap.${
+        pending ? " The entry I asked about is still waiting for its answer." : ""
+      }`;
+      say({ kind: "assistant", text: reply, from: "this device", ephemeral: true });
+      log(aiEvent("asked", "add", { text: note }));
+      log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+      return;
+    }
+
+    /**
+     * "paid all my bills": a card for each bill still open this month.
+     *
+     * It names no bill and no figure, so it was read as one entry with every
+     * blank empty and asked "How much was it?", which has no single answer.
+     * The open bills are known, and so is what each cost last time.
+     */
+    if (files.length === 0 && !as && wantsAllBillsPaid(note)) {
+      setDraft("");
+      setPending(null);
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      const open = monthBills(transactions, reference, Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)), asOf).bills.filter(
+        (b) => b.state !== "paid" && b.amount > 0,
+      );
+      const reply =
+        open.length === 0
+          ? "Every bill and subscription this month is already recorded as paid, so there is nothing to add."
+          : `${open.length === 1 ? "One is" : `${open.length} are`} still open this month, one card each at what it cost last time. Change an amount before adding it if it was different.`;
+      say({ kind: "assistant", text: reply, from: "this device", ephemeral: true });
+      for (const bill of open) {
+        const start: Draft = { ...emptyDraft(asOf), flow: "Spending", category: bill.category, item: bill.item, amount: bill.amount };
+        const { draft: filled, because } = inferFromHistory(start, transactions, reference, bill.item);
+        say({
+          kind: "proposal",
+          proposal: {
+            draft: filled,
+            confidence: "medium",
+            adjustments: [`${bill.item} at its last amount, ${formatMoney(bill.amount)}.`, ...because],
+            sourceRef: "this month's open bills",
+            said: note,
+          },
+          state: "open",
+          cardId: newCardId(),
+        });
+      }
+      log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+      return;
+    }
 
     /**
      * What does this message want.

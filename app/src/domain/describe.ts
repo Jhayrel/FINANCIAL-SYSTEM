@@ -47,9 +47,13 @@ export function describePlan(
   // An item is the minimum: "Spending from Maya" is not a description.
   if (!draft.flow || !draft.item.trim()) return { kind: "not-yet" };
 
-  const fromHistory = suggest({ ...draft, description: "" }, transactions).description;
-  if (fromHistory && fromHistory.trim()) {
-    return { kind: "history", text: fromHistory.trim() };
+  const fromHistory = (suggest({ ...draft, description: "" }, transactions).description ?? "").trim();
+  /**
+   * A past description that only repeats the item says nothing the item does
+   * not: "food" for Food was filled in, marked, and had to be cleared by hand.
+   */
+  if (fromHistory && fromHistory.toLowerCase() !== draft.item.trim().toLowerCase()) {
+    return { kind: "history", text: fromHistory };
   }
 
   return { kind: "model", fields: describeFields(draft) };

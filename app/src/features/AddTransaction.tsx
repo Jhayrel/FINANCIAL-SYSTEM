@@ -45,12 +45,13 @@ import { useProposalSink } from "./useProposalSink";
 import { useConfirm } from "../components/Confirm";
 import type { Provenance } from "../domain/activity";
 import type { CategoryResult } from "../data/aiClient";
-import { predictAmount, reasons, steadyValue, type DueBill } from "../domain/predict";
+import { predictAmount, steadyValue, type DueBill } from "../domain/predict";
 import { monthBills } from "../domain/budgetView";
 import { formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { duplicateHeadline, duplicatesOf } from "../domain/duplicates";
 import { entryImpact } from "../domain/entryImpact";
 import { whenWords } from "./Dashboard";
+import { useReportScreen } from "./screenReport";
 import type { Budgets, DeletedTransaction, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
 /**
@@ -478,6 +479,24 @@ export function AddTransaction({
    * form off the screen.
    */
   const [allDue, setAllDue] = useState(false);
+
+  /**
+   * As many as fit on one line, then "Show all".
+   *
+   * It showed three, always: "Show all 4" beside three chips and room for two
+   * more. The line is measured, so a wide form shows what fits and a phone
+   * shows one or two.
+   */
+  const [chipEl, setChipEl] = useState<HTMLDivElement | null>(null);
+  const [perRow, setPerRow] = useState(DUE_SHOWN);
+  useEffect(() => {
+    if (!chipEl || typeof ResizeObserver === "undefined") return;
+    const measure = (): void => setPerRow(Math.max(1, Math.floor((chipEl.clientWidth + 8) / (180 + 8))));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(chipEl);
+    return () => observer.disconnect();
+  }, [chipEl]);
   const chips = useMemo<DueChip[]>(() => {
     const fromDebts: DueChip[] = debtDues.map((d) => {
       const { debt } = d.position;
@@ -537,9 +556,6 @@ export function AddTransaction({
   const impact = useMemo(() => entryImpact(draft, transactions, budgets, asOf), [draft, transactions, budgets, asOf]);
 
   const guess = useMemo(() => predictAmount(transactions, draft), [transactions, draft]);
-  const why = useMemo(() => reasons(draft, transactions), [draft, transactions]);
-  const reasonFor = (field: string): string | undefined =>
-    why.find((r) => r.field === field)?.why;
 
 
   const allWallets = [...reference.wallets, ...reference.savings];
@@ -631,6 +647,76 @@ export function AddTransaction({
 
   /** When the last save went through, so a second press of the same button is not a second entry. */
   const lastPress = useRef(0);
+
+  useReportScreen(
+    () => ({
+      screen: "Add",
+      lines: [
+        editing ? `Correcting saved record #${String(editingNumber).padStart(4, "0")}.` : "Adding a new entry.",
+        draft.flow
+          ? `The form holds: ${draft.flow}${draft.item ? `, ${draft.item}` : ""}${
+              draft.amount !== null ? `, ${formatMoney(draft.amount + draft.fee)}` : ", no amount yet"
+            }${draft.fromWallet ? `, from ${draft.fromWallet}` : ""}${draft.toWallet ? `, into ${draft.toWallet}` : ""}, dated ${draft.date}.`
+          : "",
+        ...(showWarnings ? check.warnings.map((w) => `The form warns: ${w.message}`) : []),
+        impact
+          ? `Effect on the budget: ${MONTH_NAMES[impact.month - 1]} ${impact.track === "billsSubs" ? "bills and subscriptions" : "spending"} goes from ${formatMoney(
+              impact.budget - impact.spentBefore,
+            )} left to ${formatMoney(impact.leftAfter)}${impact.budget === 0 ? ", with no budget set" : ""}.`
+          : "",
+        chips.length > 0 ? `Due now: ${chips.map((c) => `${c.name} ${formatMoney(c.amount)} (${c.why})`).join(", ")}.` : "",
+      ],
+    }),
+    [draft, check, impact, chips, editing, showWarnings, editingNumber],
+  );
+
+  /** Every check on the form, once, each with the one thing to do about it. */
+  const checks: { key: string; text: string; action?: React.ReactNode }[] = [];
+  if (showWarnings) {
+    for (const w of check.warnings) {
+      if (check.debtPayment && w.field === "item") continue;
+      checks.push({ key: w.message, text: w.message });
+    }
+  }
+  if (check.debtPayment) {
+    checks.push({
+      key: "debt-named",
+      text: check.warnings.find((w) => w.field === "item")?.message ?? `${check.debtPayment.name} is a debt, not spending.`,
+      action: (
+        <>
+          {" "}
+          <button type="button" className="t-caption fms-linkbtn" onClick={bookAsDebt}>
+            {namedDebt?.kind === "receivable" ? "Book it as lending" : "Book it as a repayment"}
+          </button>
+        </>
+      ),
+    });
+  }
+  if (dupe) {
+    const number = `#${String(dupe.row.recordNumber).padStart(4, "0")}`;
+    checks.push({
+      key: "dupe",
+      text: `${duplicateHeadline(dupe)} ${dupe.evidence.map((e) => e.replace(/\.+$/, "")).join("; ")}. Save anyway if it is a second, separate one.`,
+      ...(onShowRows
+        ? {
+            action: (
+              <>
+                {" "}
+                <button type="button" className="t-caption fms-linkbtn" onClick={() => onShowRows(number)}>
+                  Open {number}
+                </button>
+              </>
+            ),
+          }
+        : {}),
+    });
+  }
+  if (check.repaymentSplit && check.repaymentSplit.interest > 0 && check.repaymentSplit.principal > 0) {
+    checks.push({
+      key: "split",
+      text: `This payment splits in two: ${formatMoney(check.repaymentSplit.principal)} principal and ${formatMoney(check.repaymentSplit.interest)} interest.`,
+    });
+  }
 
   const save = async (): Promise<void> => {
     setSubmitted(true);
@@ -754,6 +840,16 @@ export function AddTransaction({
 
   const tone = FLOWS.find((f) => f.id === draft.flow)?.tone;
 
+  // Which fields are on the form, so two that belong together can share a line on a wide one.
+  const showFrom = needs(draft.flow, "fromWallet") && debtSide !== "in";
+  const showTo = needs(draft.flow, "toWallet") && debtSide !== "out";
+  const showCategory = needs(draft.flow, "category") && categories.length > 1;
+  const showItem = needs(draft.flow, "item");
+  const showFee = needs(draft.flow, "fee");
+  // The total only says something when there is a fee in it.
+  const showTotal = showFee && draft.fee > 0;
+  const showStatus = needs(draft.flow, "status");
+
   return (
     <div className={showChat ? "fms-entry" : "fms-entry fms-entry--nochat"}>
       {dialog}
@@ -766,7 +862,7 @@ export function AddTransaction({
               <span className="t-caption" style={{ color: "var(--ink-2)" }}>
                 {chips.length} due now. One tap fills the form, for checking before saving.
               </span>
-              {chips.length > DUE_SHOWN && (
+              {chips.length > perRow && (
                 <button
                   type="button"
                   className="t-caption fms-linkbtn"
@@ -777,8 +873,8 @@ export function AddTransaction({
                 </button>
               )}
             </div>
-            <div className="fms-duechips">
-              {(allDue ? chips : chips.slice(0, DUE_SHOWN)).map((chip) => {
+            <div className="fms-duechips" ref={setChipEl}>
+              {(allDue ? chips : chips.slice(0, perRow)).map((chip) => {
                 const here = chip.inForm(draft);
                 return (
                   <button
@@ -858,13 +954,13 @@ export function AddTransaction({
                 against the database, and seeing it in advance tells you the
                 form is on a new entry rather than an edit.
               */}
-              <Row label="Record number" inline hint={editing ? "Editing a saved entry" : undefined}>
+              <Row label="Record number" inline half hint={editing ? "Correcting a saved entry" : undefined}>
                 <span className="t-num-s fms-readonly">
                   {String(editing ? editingNumber : nextRecordNumber).padStart(4, "0")}
                 </span>
               </Row>
 
-              <Row label="Date" required error={errorFor("date")}>
+              <Row label="Date" required half error={errorFor("date")}>
                 <input
                   type="date"
                   value={draft.date}
@@ -884,7 +980,7 @@ export function AddTransaction({
                     not be found again, and the box showed the raw id back
                     because it was matching a name list against one.
                   */}
-                  <Row label="Debt" required error={errorFor("debt")}>
+                  <Row label="Debt" required half error={errorFor("debt")}>
                     <Select
                       value={selectedDebt?.name ?? ""}
                       onChange={(name) =>
@@ -922,7 +1018,7 @@ export function AddTransaction({
                     money in, repaying takes it out, and leaving it on the
                     wrong side moves the balance by twice the amount.
                   */}
-                  <Row label="Effect" required error={errorFor("debtEffect")}>
+                  <Row label="Effect" required half error={errorFor("debtEffect")}>
                     <Select
                       value={draft.debtEffect ? (EFFECT_LABEL[draft.debtEffect] ?? draft.debtEffect) : ""}
                       onChange={(label) => {
@@ -942,7 +1038,7 @@ export function AddTransaction({
                   label={draft.flow === "Debt" ? "Paid from" : "From wallet"}
                   required={draft.flow !== "Debt" || debtSide === "out"}
                   error={errorFor("fromWallet")}
-                  hint={reasonFor("fromWallet")}
+                  half={showFrom && showTo}
                 >
                   <Select
                     value={draft.fromWallet}
@@ -956,6 +1052,7 @@ export function AddTransaction({
 
               {needs(draft.flow, "toWallet") && debtSide !== "out" && (
                 <Row
+                  half={showFrom && showTo}
                   label={
                     draft.flow === "Transfer"
                       ? "Where to"
@@ -1059,11 +1156,10 @@ export function AddTransaction({
                 <Row
                   label="Category"
                   required
+                  half={showCategory && showItem}
                   hint={
-                    categoryHint
-                      ? categoryHint.source === "history"
-                        ? `Filed this way ${categoryHint.seen ?? 0} times before`
-                        : `Suggested: ${categoryHint.category} (${categoryHint.confidence} confidence)`
+                    categoryHint && categoryHint.source !== "history" && !draft.category
+                      ? `Maybe ${categoryHint.category}`
                       : undefined
                   }
                 >
@@ -1086,11 +1182,8 @@ export function AddTransaction({
               {needs(draft.flow, "item") && (
                 <Row
                   label="Item"
-                  hint={
-                    ghost.item && !draft.item
-                      ? `Suggested: ${ghost.item}`
-                      : reasonFor("item")
-                  }
+                  half={showCategory && showItem}
+                  hint={ghost.item && !draft.item ? `Maybe ${ghost.item}` : undefined}
                 >
                   <Select
                     value={draft.item}
@@ -1101,12 +1194,7 @@ export function AddTransaction({
                 </Row>
               )}
 
-              <Row
-                label="Amount"
-                required
-                error={errorFor("amount")}
-                hint={guess && draft.amount === null ? guess.why : undefined}
-              >
+              <Row label="Amount" required half={showFee} error={errorFor("amount")}>
                 <div className="fms-amountrow">
                   <div>
                     <AmountInput
@@ -1137,11 +1225,7 @@ export function AddTransaction({
                 failure than the bad value it was refusing.
               */}
               {needs(draft.flow, "fee") && (
-                <Row
-                  label="Fee"
-                  error={errorFor("fee")}
-                  hint={ghost.fee ? `Usually ${formatMoney(ghost.fee)}` : undefined}
-                >
+                <Row label="Fee" half error={errorFor("fee")}>
                   <AmountInput
                     value={draft.fee}
                     onChange={(v) => set("fee", v ?? 0)}
@@ -1157,16 +1241,27 @@ export function AddTransaction({
                 the wrong box shows here before saving rather than in a
                 balance afterwards.
               */}
-              {needs(draft.flow, "fee") && (
-                <Row label="Total" inline>
+              {showTotal && (
+                <Row label="Total" inline half={showStatus}>
                   <span className="fms-readonly">
                     <Money value={(draft.amount ?? 0) + draft.fee} />
                   </span>
                 </Row>
               )}
 
+              {showStatus && (
+                <Row label="Status" half={showTotal}>
+                  <Select
+                    value={draft.status}
+                    onChange={(v) => set("status", v as Draft["status"])}
+                    options={STATUSES}
+                    placeholder={ghost.status || "Pick a status"}
+                  />
+                </Row>
+              )}
+
               {needs(draft.flow, "description") && (
-                <Row label="Description" span hint={ghost.description && !draft.description ? `Last time: ${ghost.description}` : undefined}>
+                <Row label="Description" span>
                   <div className={suggested.has("description") ? "fms-suggested" : undefined}>
                   <TextInput
                     value={draft.description}
@@ -1186,68 +1281,38 @@ export function AddTransaction({
                 </Row>
               )}
 
-              {needs(draft.flow, "status") && (
-                <Row label="Status">
-                  <Select
-                    value={draft.status}
-                    onChange={(v) => set("status", v as Draft["status"])}
-                    options={STATUSES}
-                    placeholder={ghost.status ? `${ghost.status} (suggested)` : "Pick a status"}
-                  />
-                </Row>
-              )}
             </div>
 
-            {/* Warnings sit between the fields and the action, where they
-                interrupt without blocking. */}
-            <div style={{ display: "grid", gap: "var(--space-2)", marginTop: "var(--space-3)" }}>
-              {showWarnings &&
-                check.warnings
-                  .filter((w) => !(check.debtPayment && w.field === "item"))
-                  .map((w) => (
-                    <Alert key={w.message} status="warn">{w.message}</Alert>
-                  ))}
-              {check.debtPayment && (
-                <Alert
-                  status="warn"
-                  title={`${check.debtPayment.name} is a debt, not spending`}
-                  action={
-                    <Button size="sm" onClick={bookAsDebt}>
-                      {namedDebt?.kind === "receivable" ? "Book it as lending" : "Book it as a repayment"}
-                    </Button>
-                  }
-                >
-                  {check.warnings.find((w) => w.field === "item")?.message}
-                </Alert>
-              )}
-              {dupe && (
-                <Alert
-                  status="warn"
-                  title={duplicateHeadline(dupe)}
-                  action={
-                    onShowRows ? (
-                      <Button
-                        size="sm"
-                        onClick={() => onShowRows(`#${String(dupe.row.recordNumber).padStart(4, "0")}`)}
-                      >
-                        Open it in the Database
-                      </Button>
-                    ) : undefined
-                  }
-                >
-                  {dupe.evidence.join(". ")}. Save anyway if this is a second, separate one.
-                </Alert>
-              )}
-              {check.repaymentSplit && check.repaymentSplit.interest > 0 && (
-                <Alert status="info" title="This payment splits in two">
-                  Principal <Money value={check.repaymentSplit.principal} size="s" /> · Interest{" "}
-                  <Money value={check.repaymentSplit.interest} size="s" tone="var(--flow-debt-text)" />
-                </Alert>
-              )}
+            {/*
+              What to look at before saving, as one quiet list.
+
+              Each check was a box of its own, and a repayment against a line
+              already paid off showed three, one of them "Principal ₱0.00 ·
+              Interest ₱8,950.00", which only restated the first. The owner
+              called the screen messy, and it was: the fields shrank to make
+              room for boxes. The list keeps every check, says each once, and
+              puts its action beside it.
+            */}
+            <div className="fms-checks">
               {submitted && check.errors.length > 0 && (
                 <Alert status="over" title={`${check.errors.length} thing${check.errors.length === 1 ? "" : "s"} to fix`}>
                   {check.errors.map((e) => e.message).join(" ")}
                 </Alert>
+              )}
+              {checks.length > 0 && (
+                <div className="fms-checklist" role="status">
+                  <span className="t-label" style={{ color: "var(--warn)" }}>
+                    Before you save
+                  </span>
+                  <ul>
+                    {checks.map((c) => (
+                      <li key={c.key} className="t-caption">
+                        {c.text}
+                        {c.action}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
 
@@ -1544,6 +1609,7 @@ function Row({
   hint,
   span,
   inline,
+  half,
 }: {
   label: string;
   children: React.ReactNode;
@@ -1553,8 +1619,10 @@ function Row({
   span?: boolean;
   /** A value nothing types into: it keeps its label beside it at any width. */
   inline?: boolean;
+  /** Shares a line with the field beside it, on a form wide enough for both. */
+  half?: boolean;
 }) {
-  const className = ["fms-row", span && "fms-row-span", inline && "fms-row--inline"]
+  const className = ["fms-row", span && "fms-row-span", inline && "fms-row--inline", half && "fms-row--half"]
     .filter(Boolean)
     .join(" ");
   return (
@@ -1660,6 +1728,12 @@ function restoreDraft(): Draft | null {
     const parsed = JSON.parse(raw) as Partial<Draft>;
     // Shaped, not trusted: a stored draft is still input.
     if (!parsed || typeof parsed !== "object" || typeof parsed.date !== "string") return null;
+    /**
+     * A correction left half done is not brought back as a new entry. It
+     * carries the saved row's id, so it would have saved over that row under
+     * a "Save transaction" button, with the next record number showing.
+     */
+    if (parsed.id) return null;
     return { ...emptyDraft(), ...parsed } as Draft;
   } catch {
     return null;

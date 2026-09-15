@@ -799,7 +799,8 @@
  */
 .fms-duechips {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
+  /* auto-fill, so one chip keeps its column instead of stretching across the form. */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
   gap: var(--space-2);
 }
 
@@ -977,10 +978,12 @@
  * The marker sits on a wrapper, not on the control, so the components that
  * draw the controls did not need a new prop for it.
  */
-.fms-suggested {
-  border-left: 2px solid var(--brand-700);
-  padding-left: var(--space-2);
-  margin-left: -10px;
+/*
+ * Now quiet: the value reads a shade lighter until it is edited. It was a
+ * green bar beside the field, which the owner took for something wrong.
+ */
+.fms-suggested :is(input, textarea, button) {
+  color: var(--ink-2);
 }
 
 /* A value the form shows but nothing can type into. */
@@ -3411,7 +3414,11 @@
   display: none;
 }
 
-/* On a phone the database is for looking things up: no picking, no edit or delete. */
+/*
+ * On a phone a row can be corrected or binned; picking many at once is for a
+ * bigger screen. Correcting a wrong entry was switched off on a phone, the one
+ * device the owner has with them when they notice the mistake.
+ */
 @media (max-width: 1023px) {
   .fms-phone-note {
     display: block;
@@ -3422,9 +3429,14 @@
   }
 
   .fms-db .fms-dbpick,
-  .fms-db .fms-dbrow-actions,
   .fms-db .fms-bulkbar {
     display: none;
+  }
+
+  .fms-db .fms-dbrow-actions {
+    justify-content: flex-end;
+    gap: var(--space-4);
+    margin-top: var(--space-1);
   }
 }
 
@@ -5769,4 +5781,422 @@ button.fms-calday:focus-visible {
 .fms-duechip.is-in-form {
   border-color: var(--brand-700);
   background: var(--brand-50);
+}
+
+/* ══ Screens that scroll only their rows, beside the AI button ══════════════
+   The button reserves 92px under a page that scrolls, so the last card can
+   rise above it. These screens never scroll as a page, so the reserve showed
+   as a band of nothing under every table. The rows keep the room instead. */
+
+@media (min-width: 1024px) {
+  .fms-app--fab .fms-main--fixed,
+  .fms-app--fab .fms-main--fixed-lg {
+    --main-pad-b: var(--space-8);
+  }
+
+  .fms-app--fab .fms-main--fixed-lg .scroll-slim,
+  .fms-app--fab .fms-main--fixed-lg .fms-binscroll,
+  .fms-app--fab .fms-main--fixed-lg .fms-actlist,
+  .fms-app--fab .fms-main--fixed .fms-panel-scroll {
+    padding-bottom: calc(56px + var(--space-8));
+  }
+}
+
+/* ══ Add: fields in pairs, and one list of checks ═══════════════════════════ */
+
+@container entry (min-width: 760px) {
+  .fms-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: var(--space-6);
+  }
+
+  .fms-fields > .fms-row:not(.fms-row--half) {
+    grid-column: 1 / -1;
+  }
+}
+
+.fms-checks {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.fms-checks:empty {
+  display: none;
+}
+
+.fms-checklist {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-bg);
+}
+
+.fms-checklist ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--ink);
+}
+
+.fms-checklist li {
+  line-height: 1.45;
+}
+
+.fms-linkbtn--danger {
+  color: var(--over);
+}
+
+/* ══ Insights: the calendar, and the pick beside it ═════════════════════════ */
+
+.fms-calrow {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+  align-items: stretch;
+}
+
+.fms-calquick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.fms-calchip {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-calchip:hover {
+  background: var(--surface-hover);
+}
+
+.fms-calchip[aria-pressed="true"] {
+  border-color: var(--brand-700);
+  background: var(--brand-50);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+button.fms-calday {
+  position: relative;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 1px;
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+}
+
+/* A range marks many days, so a pressed day is not outlined: the edges are. */
+button.fms-calday[aria-pressed="true"] {
+  outline: none;
+}
+
+button.fms-calday.is-in {
+  box-shadow: inset 0 -3px 0 var(--brand-700);
+}
+
+button.fms-calday.is-edge,
+button.fms-calday.is-anchor {
+  box-shadow: inset 0 0 0 2px var(--brand-700);
+}
+
+button.fms-calday.is-today .fms-calday-num {
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+button.fms-calday.is-ahead {
+  border: 1px dashed var(--hairline-strong);
+  background: transparent;
+  color: var(--ink-3);
+}
+
+.fms-calday-amt {
+  font-size: 10px;
+  line-height: 12px;
+}
+
+.fms-calday-in {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: var(--radius-full);
+  background: var(--flow-revenue);
+  box-shadow: 0 0 0 1.5px var(--surface);
+}
+
+@container (max-width: 519px) {
+  .fms-calday-amt {
+    display: none;
+  }
+}
+
+.fms-callegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin-top: var(--space-3);
+  color: var(--ink-3);
+}
+
+.fms-callegend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fms-legend-heat,
+.fms-legend-today,
+.fms-legend-ahead {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.fms-legend-heat {
+  background: color-mix(in srgb, var(--flow-spending) 60%, var(--surface));
+}
+
+.fms-legend-in {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--flow-revenue);
+}
+
+.fms-legend-today {
+  box-shadow: inset 0 0 0 2px var(--brand-700);
+}
+
+.fms-legend-ahead {
+  border: 1px dashed var(--hairline-strong);
+}
+
+.fms-sel {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+}
+
+.fms-selhint {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--brand-50);
+  color: var(--ink);
+}
+
+.fms-selfigs {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+}
+
+@container (max-width: 420px) {
+  .fms-selfigs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.fms-selsection {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fms-selrows {
+  display: grid;
+  max-height: 280px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  scrollbar-width: thin;
+}
+
+.fms-selrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-selrow:last-child {
+  border-bottom: 0;
+}
+
+.fms-selrow-text {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1px;
+  min-width: 0;
+}
+
+.fms-selrow-end {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ══ The phone's "More" sheet ═══════════════════════════════════════════════ */
+
+.fms-sheetitem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-sheetitem:hover,
+.fms-sheetitem[aria-current="page"] {
+  background: var(--surface-sunk);
+}
+
+.fms-sheetitem > .fms-navcount,
+.fms-sheetnote {
+  margin-left: auto;
+}
+
+.fms-sheetnote {
+  color: var(--ink-3);
+}
+
+/* ══ A settings row on a narrow card: the name and its figure on one line ═══ */
+
+@container (max-width: 600px) {
+  .fms-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: var(--space-3);
+    row-gap: var(--space-2);
+  }
+
+  .fms-table tr > td {
+    grid-column: 1 / -1;
+  }
+
+  .fms-table tr > td:first-child {
+    grid-column: 1;
+  }
+
+  .fms-table tr > td:first-child + td.fms-td-right {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: right;
+  }
+
+  .fms-rowactions {
+    justify-content: flex-end;
+    margin-top: 0;
+  }
+
+  .fms-rowactions > button {
+    flex: 0 1 auto;
+    min-width: 88px;
+  }
+}
+
+/*
+ * A phone, at a phone's sizes: the second step down.
+ *
+ * The first step still read as a computer made narrow. The owner held it up
+ * beside other apps and it was bigger than all of them, so type comes down
+ * to what a phone app uses and cards give up a little more of their padding.
+ * Fields keep 16px, or iOS zooms the page on every tap into one. Touch
+ * targets are untouched: rule D10's 44px still holds on a touch screen.
+ */
+@media (max-width: 639px) {
+  .t-body { font-size: 13.5px; line-height: 19px; }
+  .t-display-m { font-size: 15px; line-height: 20px; }
+  .t-caption { font-size: 12px; line-height: 16px; }
+  .t-label { font-size: 11px; line-height: 14px; }
+  .t-micro { font-size: 10px; line-height: 13px; }
+  .t-num-xl { font-size: 22px; line-height: 28px; }
+  .t-num-l { font-size: 16px; line-height: 22px; }
+  .t-num { font-size: 13.5px; }
+  .t-num-s { font-size: 12px; line-height: 16px; }
+
+  :is(input, select, textarea).t-body,
+  .fms-control {
+    font-size: 16px;
+  }
+
+  .fms-main .fms-section-head {
+    padding: 10px var(--space-3) 0;
+  }
+
+  .fms-main .fms-section-body {
+    padding: 10px var(--space-3) var(--space-3);
+  }
+
+  .fms-main .fms-kpi {
+    padding: 10px var(--space-3);
+  }
+
+  .fms-home,
+  .fms-calrow {
+    gap: var(--space-3);
+  }
+
+  /* The quick picks slide sideways instead of stacking into two tall rows. */
+  .fms-calquick {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-right: calc(var(--space-3) * -1);
+    padding-right: var(--space-3);
+  }
+
+  .fms-calchip {
+    flex: 0 0 auto;
+  }
+
+  .fms-selfigs {
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .fms-checklist {
+    padding: var(--space-2);
+  }
+}
+
+@media (pointer: coarse) {
+  .fms-calchip {
+    min-height: 44px;
+  }
 }

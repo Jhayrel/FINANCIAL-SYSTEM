@@ -65,7 +65,12 @@ export interface UseAi {
    */
   readonly ask: (
     task: AiTask,
-    options?: { question?: string; history?: readonly { role: "you" | "assistant"; text: string }[] },
+    options?: {
+      question?: string;
+      history?: readonly { role: "you" | "assistant"; text: string }[];
+      /** What is on screen while asking (`domain/screenContext.ts`). */
+      screen?: string;
+    },
   ) => Promise<AiAnswer>;
   readonly clear: () => void;
 }
@@ -184,7 +189,11 @@ export function useAi({
   const ask = useCallback(
     async (
       task: AiTask,
-      options: { question?: string; history?: readonly { role: "you" | "assistant"; text: string }[] } = {},
+      options: {
+        question?: string;
+        history?: readonly { role: "you" | "assistant"; text: string }[];
+        screen?: string;
+      } = {},
     ): Promise<AiAnswer> => {
       // Switched off means nothing is sent, not that nothing comes back.
       if (disabled) {
@@ -217,6 +226,7 @@ export function useAi({
               // about how it got there, which is every question anyone asks
               // about a credit line.
               credits: settings.credits,
+              ...(options.screen ? { screen: options.screen } : {}),
             }).text
           : undefined;
 

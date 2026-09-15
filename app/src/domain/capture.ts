@@ -24,6 +24,7 @@
  */
 
 import { itemsFor, needs, type Draft, type Flow } from "./entry";
+import { figuresIn } from "./money";
 import { itemHintIn } from "./filipino";
 import { matchExact, readMoney } from "./proposal";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
@@ -163,6 +164,8 @@ export function applyReply(
 
   switch (blank) {
     case "amount": {
+      // "999, 199, 239" is three payments, not PHP 999,199,239.00. A list is not one amount.
+      if (figuresIn(text).length > 1) return null;
       const amount = readMoney(text) ?? firstAmountIn(text);
       if (amount !== null && amount > 0) return { ...draft, amount };
 

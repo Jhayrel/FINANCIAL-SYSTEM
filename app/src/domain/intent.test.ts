@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { detectIntent } from "./intent";
+import { detectIntent, isBudgetCommand, wantsAllBillsPaid } from "./intent";
 
 describe("detectIntent: entries", () => {
   it("reads the sentence that was answered as a question instead", () => {
@@ -101,5 +101,42 @@ describe("detectIntent: questions", () => {
   it("treats an empty message as a question, which sends nothing anyway", () => {
     expect(detectIntent("")).toBe("ask");
     expect(detectIntent("   ")).toBe("ask");
+  });
+});
+
+
+describe("isBudgetCommand", () => {
+  it("reads the sentence that came back as \"Dropped it.\"", () => {
+    expect(isBudgetCommand("add buget same as last month")).toBe(true);
+  });
+
+  it("reads plain and misspelt instructions", () => {
+    for (const text of ["set my budget to 20000", "copy the budget from august", "raise budget for food", "bajet same as last month"]) {
+      expect(isBudgetCommand(text), text).toBe(true);
+    }
+  });
+
+  it("leaves questions about a budget alone", () => {
+    for (const text of ["how is my budget", "what is my budget left?", "show me the budget", "should I raise my budget"]) {
+      expect(isBudgetCommand(text), text).toBe(false);
+    }
+  });
+
+  it("leaves an entry alone", () => {
+    expect(isBudgetCommand("spent 200 on food")).toBe(false);
+  });
+});
+
+describe("wantsAllBillsPaid", () => {
+  it("reads the ways it gets said", () => {
+    for (const text of ["paid all my bills", "I paid all bills today", "paid all my subscriptions", "pay every bill"]) {
+      expect(wantsAllBillsPaid(text), text).toBe(true);
+    }
+  });
+
+  it("is not one bill with a figure, or a question", () => {
+    for (const text of ["paid 999 wifi bill", "did I pay all my bills?", "paid the electric bill"]) {
+      expect(wantsAllBillsPaid(text), text).toBe(false);
+    }
   });
 });

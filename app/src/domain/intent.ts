@@ -168,6 +168,44 @@ const ADVICE =
  */
 export const isAdvice = (text: string): boolean => ADVICE.test(text.trim());
 
+/**
+ * An instruction to change a budget, which the assistant does not carry out.
+ *
+ * "add buget same as last month" came back as "Dropped it.": the misspelling
+ * hid the word, a half-read entry was waiting for an amount, and the sentence
+ * was taken as the end of that entry. Budgets are set on the Budget screen,
+ * not by the assistant (spec: the assistant writes transactions only), so the
+ * answer is where to do it, and the entry being asked about stays as it was.
+ *
+ * Misspellings are matched because they are how it gets typed. A question
+ * about a budget ("how is my budget") is a question, and is left alone.
+ */
+const BUDGET_WORD = /\b(?:budget|buget|budgt|budjet|bugdet|bajet|budgets|budgeting)\b/i;
+const BUDGET_VERB =
+  /\b(?:set|add|make|create|change|raise|lower|increase|decrease|cut|copy|use|put|update|adjust|edit|same as|like last|as last|reset|lock|close)\b/i;
+
+export function isBudgetCommand(text: string): boolean {
+  const said = text.trim();
+  if (!said || said.length > 120) return false;
+  if (!BUDGET_WORD.test(said)) return false;
+  if (said.endsWith("?") || ASKING.test(said) || REQUESTING.test(said) || ADVICE.test(said)) return false;
+  return BUDGET_VERB.test(said);
+}
+
+/**
+ * "paid all my bills": every bill still open this month, each as its own card.
+ *
+ * It has no figure and names no bill, so it read as an entry with nothing in
+ * it and asked "How much was it?", which has no one answer. The bills it
+ * means are known, and so is what each cost last time.
+ */
+export function wantsAllBillsPaid(text: string): boolean {
+  const said = text.trim();
+  if (!said || said.length > 80 || said.endsWith("?")) return false;
+  if (/\d/.test(said)) return false;
+  return /\b(?:paid|pay|settled|done with)\b.*\b(?:all|every|each)\b.*\b(?:bills?|subscriptions?|subs)\b/i.test(said);
+}
+
 export function isQuestion(text: string): boolean {
   /**
    * Leading punctuation is not part of the question.

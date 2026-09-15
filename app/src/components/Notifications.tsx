@@ -31,6 +31,7 @@ const GO: Record<AlertArea, string> = {
   bills: "Record it on Add",
   debt: "Open Debt",
   goals: "Open Settings",
+  settings: "Open Settings",
   pattern: "Open Insights",
   review: "Review in the Database",
 };

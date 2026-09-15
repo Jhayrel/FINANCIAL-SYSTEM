@@ -208,6 +208,11 @@ export interface ChatContextInput {
    * without them and a missing list is a missing section, not an error.
    */
   readonly credits?: readonly Debt[];
+  /**
+   * What the owner has open while asking (`domain/screenContext.ts`), put
+   * first so "what do you think" is about the screen they are looking at.
+   */
+  readonly screen?: string | undefined;
 }
 
 export interface ChatContext {
@@ -232,7 +237,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   const year = asOf.slice(0, 4);
   const thisYear = rows.filter((t) => t.date.startsWith(year));
 
-  const out: string[] = [contextToText(snapshot), ""];
+  const out: string[] = [...(input.screen ? [input.screen, ""] : []), contextToText(snapshot), ""];
 
   // ── The ledger, described ────────────────────────────────────────────────
   const dates = rows.map((t) => t.date).sort();

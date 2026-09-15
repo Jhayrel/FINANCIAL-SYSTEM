@@ -41,6 +41,7 @@ import { creditLineState, DEBT_FORM_LABEL, loanSchedule } from "../domain/debtFo
 import { formatMoney, type Centavos } from "../domain/money";
 import type { Transaction } from "../domain/types";
 import { whenWords } from "./Dashboard";
+import { useReportScreen } from "./screenReport";
 
 const EFFECT_WORD: Record<DebtEffect, string> = {
   draw: "Borrowed",
@@ -111,6 +112,25 @@ export function DebtScreen({
 
   const soon = duesWithin(dues, 7);
   const archived = debts.length - live.length;
+
+  useReportScreen(
+    () => ({
+      screen: "Debt",
+      lines: [
+        `You owe ${formatMoney(owe)}. Owed to you ${formatMoney(owedToYou)}.`,
+        ...dues.map(
+          (d) =>
+            `${d.position.debt.name}, ${d.position.debt.kind === "payable" ? "owed by the owner" : "owed to the owner"}: ${formatMoney(
+              Math.max(0, d.position.outstanding),
+            )} outstanding; next payment ${d.nextDue ? `${d.nextDue} (${whenWords(d.daysToDue).toLowerCase()})` : "not dated"}; last payment ${
+              d.lastPayment ? `${formatMoney(d.lastPayment.amount)} on ${d.lastPayment.date}` : "none"
+            }.`,
+        ),
+        misfiled.length > 0 ? `${misfiled.length} spending rows name a debt, and may be payments filed as spending.` : "",
+      ],
+    }),
+    [owe, owedToYou, dues, misfiled],
+  );
   const selected = dues.find((d) => d.position.debt.id === openId) ?? dues[0];
 
   const record = (d: DebtDue): void => {

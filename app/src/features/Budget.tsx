@@ -99,6 +99,7 @@ import type {
 } from "../domain/types";
 import { pickableYears } from "../domain/year";
 import { useMediaQuery } from "./useMediaQuery";
+import { useReportScreen } from "./screenReport";
 
 const TRACKS = [
   { id: "spending", label: "Spending" },
@@ -349,6 +350,32 @@ export function Budget({
 
   const lastChange = history[0];
 
+  useReportScreen(
+    () => ({
+      screen: "Budget",
+      lines: [
+        `Looking at ${name} ${year}: ${
+          view.phase === "current" ? `${view.daysLeft} days left` : view.phase === "past" ? "the month is over" : "not started"
+        }. Its budget is ${
+          lock.state === "open" ? "open to changes" : lock.state === "grace" ? `in its grace days, changeable until ${lock.editableUntil ?? "soon"}` : "closed"
+        }.`,
+        a.combined.budget === 0
+          ? `No budget set for ${name} ${year}. Spent ${formatMoney(a.combined.spent)}.`
+          : `Budget ${formatMoney(a.combined.budget)}: spending ${formatMoney(a.spending.spent)} of ${formatMoney(a.spending.budget)}, bills and subscriptions ${formatMoney(a.billsSubs.spent)} of ${formatMoney(a.billsSubs.budget)}.`,
+        previous ? `${monthLabel(previous.month)} ${previous.year} was budgeted at ${formatMoney(previous.spending + previous.billsSubs)}; the planner can copy it in one tap.` : "",
+        lines.length > 0
+          ? `Spending by kind: ${lines
+              .slice(0, 6)
+              .map((l) => `${l.name} ${formatMoney(l.spent)}${l.limit !== null ? ` of a ${formatMoney(l.limit)} limit` : ""}`)
+              .join(", ")}.`
+          : "",
+        bills.bills.length > 0 ? `Bills: ${bills.bills.map((b) => `${b.item} ${formatMoney(b.amount)} ${b.state}`).join(", ")}.` : "",
+        lastChange ? `Last budget change: ${describeRevision(lastChange)}.` : "",
+      ],
+    }),
+    [name, year, view, lock, a, previous, lines, bills, lastChange],
+  );
+
   return (
     <div className="fms-budgetpage">
       <div className="fms-budgetpicker">
@@ -495,7 +522,8 @@ export function Budget({
       </div>
 
       {/* ── Setting the budget: a desk task ──────────────────────────────── */}
-      {!phone && (
+      {/* On a phone too: setting this month's budget is not a desk task. */}
+      {
         <aside ref={plannerRef} className="fms-budgetrail" aria-label={`Set the budget for ${name}`}>
           <Planner
             key={`${year}-${month}-${suggestions.current.spending}-${suggestions.current.billsSubs}`}
@@ -510,7 +538,7 @@ export function Budget({
             onUndo={undo}
           />
         </aside>
-      )}
+      }
 
       {/* ── The detail ───────────────────────────────────────────────────── */}
         <div className="fms-budgetgrid">
@@ -704,7 +732,7 @@ export function Budget({
       <div className="fms-budgetrest">
         {phone ? (
           <p className="t-caption fms-bigger-note">
-            Setting budgets and limits, and the tables for the whole of {year}, are on a bigger screen.
+            Limits for kinds of spending, and the tables for the whole of {year}, are on a bigger screen.
           </p>
         ) : (
           <>

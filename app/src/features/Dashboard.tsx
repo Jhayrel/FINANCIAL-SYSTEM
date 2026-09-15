@@ -45,6 +45,7 @@ import { isOpenBill, monthBrief } from "../domain/monthPlan";
 import { monthlyTotalsForYear, spendingRanking, totalSpending } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction, WalletBalance } from "../domain/types";
 import { useMediaQuery } from "./useMediaQuery";
+import { useReportScreen } from "./screenReport";
 
 type Place = "budget" | "insights" | "debt";
 
@@ -153,6 +154,29 @@ export function Dashboard({
 
   const paidBills = brief.bills.bills.filter((b) => b.state === "paid");
   const kindMax = Math.max(1, ...brief.kinds.map((k) => k.amount));
+
+  useReportScreen(
+    () => ({
+      screen: "Dashboard",
+      lines: [
+        `${name} ${year}, ${brief.daysLeft} days left.`,
+        safe
+          ? `Safe to spend ${formatMoney(safe.perDay)} a day, ${formatMoney(safe.safe)} for the rest of the month: wallets ${formatMoney(safe.wallets)}, bills still due ${formatMoney(safe.reservedBills)}, debt payments due ${formatMoney(safe.reservedDebt)}.`
+          : "",
+        noBudget
+          ? `No budget set for ${name}. Spent ${formatMoney(t.combined.spent)}.`
+          : `Spent ${formatMoney(t.combined.spent)} of ${formatMoney(t.combined.budget)} budgeted.`,
+        ...brief.notes,
+        upcoming.length > 0
+          ? `Still to pay: ${upcoming.map((u) => `${u.name} ${formatMoney(u.amount)} (${whenWords(u.days).toLowerCase()})`).join(", ")}.`
+          : "Nothing left to pay this month.",
+        `Net worth ${formatMoney(v.worth.total)}: wallets ${formatMoney(v.worth.wallets)}, savings ${formatMoney(v.worth.savings)}, owed ${formatMoney(v.worth.payables)}.`,
+        alerts.length > 0 ? `Needs attention: ${alerts.slice(0, 5).map((a) => a.title).join("; ")}.` : "Nothing needs attention.",
+        brief.kinds.length > 0 ? `Where it went: ${brief.kinds.map((k) => `${k.name} ${formatMoney(k.amount)}`).join(", ")}.` : "",
+      ],
+    }),
+    [brief, v, alerts, name, year, noBudget],
+  );
 
   return (
     <div className="fms-home">
