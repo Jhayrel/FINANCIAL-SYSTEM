@@ -31,8 +31,8 @@
 import { walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { overdue, upcoming, type BillStatus } from "./bills";
-import { basisWords, debtDue, paymentsFiledAsSpending, positionsOf, type Debt } from "./debt";
-import { daysBetween, daysInMonth, formatMedium, getMonth, getYear, monthName } from "./dates";
+import { basisWords, debtDue, debtNamedBy, paymentsFiledAsSpending, positionsOf, type Debt } from "./debt";
+import { addDays, daysBetween, daysInMonth, formatMedium, getMonth, getYear, monthName } from "./dates";
 import { unusualRows } from "./unusual";
 import { actionableIssues, checkIntegrity } from "./integrity";
 import { monthTotals } from "./totals";
@@ -353,6 +353,35 @@ export function financeAlerts(input: AlertInput): Alert[] {
     });
   }
 
+  /**
+   * Borrowing saved as income: the mistake that put PHP 5,450.00 of Maya
+   * Credit into the income line for eight months. Amounts under PHP 50.00 are
+   * left out, because the migration deliberately kept record #411's PHP 0.85
+   * reward as revenue under the same name.
+   */
+  const asIncome = new Map<string, { name: string; rows: Transaction[] }>();
+  const owedLines = live.filter((d) => d.kind === "payable");
+  for (const row of transactions) {
+    if (row.type !== "Revenue" || row.total < BORROWING_FLOOR) continue;
+    if (row.date > asOf || daysBetween(row.date, asOf) > 90) continue;
+    const debt = debtNamedBy(owedLines, row.item);
+    if (!debt) continue;
+    const entry = asIncome.get(debt.id) ?? { name: debt.name, rows: [] };
+    entry.rows.push(row);
+    asIncome.set(debt.id, entry);
+  }
+  for (const [id, { name, rows }] of asIncome) {
+    out.push({
+      id: `borrowed-income-${id}`,
+      level: "warn",
+      area: "debt",
+      title: `${rows.length} ${name} ${rows.length === 1 ? "row" : "rows"} saved as income`,
+      detail: `${money(rows.reduce((s, r) => s + r.total, 0))} from ${name} counts as income, but borrowed money is not income: it overstates what came in, and what you owe never went up by it. Open ${rows.length === 1 ? "it" : "them"} and change the type to Debt, with Draw.`,
+      weight: 60,
+      query: name,
+    });
+  }
+
   // ── An account below zero ────────────────────────────────────────────────
   /**
    * More has left it than was ever put in, which money cannot do. A row is
@@ -417,6 +446,40 @@ export function financeAlerts(input: AlertInput): Alert[] {
     });
   }
 
+  // ── The same entry saved more than once on one day ───────────────────────
+  /**
+   * On 2026-09-15 the Maya Credit history showed three PHP 2,000.00 draws on
+   * September 5, and nothing anywhere asked about them. Same day, same kind,
+   * same amount, same thing: most often one entry saved again. Everyday
+   * spending under PHP 500.00 is left out, since two PHP 150.00 meals on one
+   * day are ordinary, and bills are the month check's above. Reported, never
+   * removed.
+   */
+  const sameDay = new Map<string, Transaction[]>();
+  const since = addDays(asOf, -60);
+  for (const t of transactions) {
+    if (t.date > asOf || t.date <= since || t.category === "Opening") continue;
+    if (t.type === "Spending" && (t.category === "Bills" || t.category === "Subscriptions")) continue;
+    if (t.type === "Spending" && t.total < REPEAT_FLOOR) continue;
+    const key = [t.date, t.type, t.total, t.item.trim().toLowerCase(), t.debtId ?? "", t.debtEffect ?? ""].join("|");
+    sameDay.set(key, [...(sameDay.get(key) ?? []), t]);
+  }
+  for (const rows of sameDay.values()) {
+    const first = rows[0];
+    if (rows.length < 2 || !first) continue;
+    const what = first.item.trim() || debts.find((d) => d.id === first.debtId)?.name || first.type;
+    const numbers = rows.map((r) => `#${String(r.recordNumber).padStart(4, "0")}`);
+    out.push({
+      id: `repeat-${first.id}`,
+      level: "warn",
+      area: "review",
+      title: `${what}, ${money(first.total)}, saved ${rows.length === 2 ? "twice" : `${rows.length} times`} on ${formatMedium(first.date)}`,
+      detail: `Records ${numbers.join(", ")} are the same kind, amount and item on the same day. If one was saved again by mistake, move it to the bin. If each is real, leave them.`,
+      weight: 62,
+      query: numbers[0],
+    });
+  }
+
   // ── Rows the ledger cannot make sense of ─────────────────────────────────
   const issues = actionableIssues(checkIntegrity(transactions));
   if (issues.length > 0) {
@@ -433,6 +496,11 @@ export function financeAlerts(input: AlertInput): Alert[] {
 
   return out.sort((a, b) => b.weight - a.weight);
 }
+
+/** PHP 500.00: under this, the same spending twice in a day is an ordinary day. */
+const REPEAT_FLOOR: Centavos = 50_000;
+/** PHP 50.00: under this, income under a debt's name is a reward, not borrowing. */
+const BORROWING_FLOOR: Centavos = 5_000;
 
 /** The worst level present, or null when there is nothing to say. */
 export function worstLevel(alerts: readonly Alert[]): AlertLevel | null {

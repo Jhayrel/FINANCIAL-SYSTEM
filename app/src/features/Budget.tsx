@@ -351,8 +351,7 @@ export function Budget({
 
   return (
     <div className="fms-budgetpage">
-      {/* ── The month ────────────────────────────────────────────────────── */}
-      <div className="fms-budgettop">
+      <div className="fms-budgetpicker">
         <PeriodPicker
           year={year}
           month={month}
@@ -361,7 +360,10 @@ export function Budget({
           active={active}
           today={{ year: asOfYear, month: asOfMonth }}
         />
+      </div>
 
+      {/* ── The month ────────────────────────────────────────────────────── */}
+      <div className="fms-budgettop">
         <Card
           title={`${name} ${year}`}
           subtitle={
@@ -510,8 +512,7 @@ export function Budget({
         </aside>
       )}
 
-      {/* ── The detail, and the year ─────────────────────────────────────── */}
-      <div className="fms-budgetrest">
+      {/* ── The detail ───────────────────────────────────────────────────── */}
         <div className="fms-budgetgrid">
           <Card
             title="Where it went"
@@ -699,6 +700,8 @@ export function Budget({
           </Card>
         </div>
 
+      {/* ── The year ─────────────────────────────────────────────────────── */}
+      <div className="fms-budgetrest">
         {phone ? (
           <p className="t-caption fms-bigger-note">
             Setting budgets and limits, and the tables for the whole of {year}, are on a bigger screen.
@@ -800,7 +803,7 @@ export function Budget({
 
             {monthsSoFar > 0 && (
               <>
-                <div className="fms-charts">
+                <div className="fms-budgetcharts">
                   <Card title="Budget against spending" subtitle="Red where a month went over">
                     <BarChart
                       labels={MONTH_NAMES.slice(0, monthsSoFar).map((n) => n.slice(0, 3))}

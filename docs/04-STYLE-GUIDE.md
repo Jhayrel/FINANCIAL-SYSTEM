@@ -356,6 +356,8 @@ Wallets ₱6,112.45 · Debt −₱2,762.06 ← caption, components in flow colou
 - Optional 40px sparkline bottom-right.
 - **Net worth always shows its components.** Never a bare total.
 
+**Boxes sit in rows and share their edges.** Wherever cards stand side by side, each fills its grid cell, so neighbours share a top and a bottom edge; a row is as tall as its tallest card. Screens use the whole width, with no maximum. A list inside a card goes in whole rows (six figures in threes or twos, never five and one). A table that would stack into a list at half width gets the full width instead. Zoomed out, a page reads as a set of aligned rectangles, never a tall column beside a short one.
+
 **The Dashboard answers "how much can I spend today" first.** Its main column is:
 
 1. **The month.** What is safe to spend a day, how the budget stands, and the month's sentences.

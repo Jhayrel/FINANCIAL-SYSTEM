@@ -314,11 +314,11 @@
 
 /* ══ Dashboard ══════════════════════════════════════════════════════════════ */
 
+/* The whole width: capped, a zoomed-out page left a band of nothing down the right. */
 .fms-dash {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
-  max-width: 1600px;
 }
 
 /*
@@ -3946,10 +3946,19 @@ button.fms-recent-row:disabled {
   gap: var(--space-2);
 }
 
+/* Side by side, the two boxes share their bottom edge. */
 .fms-budgetgrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
-  align-items: start;
+  align-items: stretch;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* The chart and the forecast share a row only when the forecast's table still has room to be a table. */
+.fms-budgetcharts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 640px), 1fr));
   gap: var(--space-4);
 }
 
@@ -4117,14 +4126,19 @@ button.fms-recent-row:disabled {
  * where it belongs on a phone: straight under the figure it changes. On a
  * wide screen it moves into its own column beside both and stays in view.
  */
+/*
+ * The picker across the top; the month and its detail on the left, with the
+ * planner beside them reaching down to the detail's bottom edge; the year
+ * across the whole width underneath. Zoomed out, the planner used to stop
+ * halfway down the detail and the page read as boxes of random heights.
+ */
 .fms-budgetpage {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  align-items: start;
   gap: var(--space-4);
-  max-width: 1600px;
 }
 
+.fms-budgetpicker,
 .fms-budgettop,
 .fms-budgetrest {
   display: grid;
@@ -4134,33 +4148,33 @@ button.fms-recent-row:disabled {
 }
 
 .fms-budgetrail {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   scroll-margin-top: var(--space-4);
 }
 
+.fms-budgetrail > .fms-section {
+  flex: 1 1 auto;
+}
+
 @media (min-width: 1280px) {
   .fms-budgetpage {
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
-    /* Extra height from the tall planner goes below the month, not into it. */
-    grid-template-rows: auto 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+    grid-template-areas:
+      "picker picker"
+      "top rail"
+      "grid rail"
+      "rest rest";
+    /* A planner taller than the month and its detail stretches the detail, not the month. */
+    grid-template-rows: auto auto 1fr auto;
   }
 
-  .fms-budgettop {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .fms-budgetrest {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
-  .fms-budgetrail {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    position: sticky;
-    top: 0;
-  }
+  .fms-budgetpicker { grid-area: picker; }
+  .fms-budgettop { grid-area: top; }
+  .fms-budgetgrid { grid-area: grid; }
+  .fms-budgetrest { grid-area: rest; }
+  .fms-budgetrail { grid-area: rail; }
 }
 
 .fms-planner {
@@ -5233,52 +5247,95 @@ textarea.fms-askinput {
 
 /* ══ Dashboard: the month, with your money beside it ════════════════════════ */
 
+/*
+ * Boxes in rows, each sharing its top and bottom edge with the box beside it.
+ *
+ * The first version was a tall column of boxes beside a short one, so zoomed
+ * out no edge met another. Every box is a grid cell now and fills it, the
+ * page uses the whole width, and a row is as tall as its tallest box.
+ */
 .fms-home {
   display: grid;
   gap: var(--space-4);
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
-    "main"
-    "rail"
-    "wide";
-  align-items: start;
-  max-width: 1600px;
+    "month"
+    "due"
+    "money"
+    "attn"
+    "where"
+    "note";
 }
 
-.fms-home-main,
-.fms-home-rail,
-.fms-home-wide {
-  display: grid;
-  gap: var(--space-4);
+.fms-home > * {
   min-width: 0;
 }
 
-.fms-home-main { grid-area: main; }
-.fms-home-rail { grid-area: rail; }
-.fms-home-wide { grid-area: wide; }
+.fms-home > * > .fms-section {
+  height: 100%;
+}
 
-@media (min-width: 1200px) {
+.fms-home-month { grid-area: month; }
+.fms-home-money { grid-area: money; }
+.fms-home-due { grid-area: due; }
+.fms-home-attn { grid-area: attn; }
+.fms-home-where { grid-area: where; }
+.fms-home-top { grid-area: top; }
+.fms-home-income { grid-area: income; }
+.fms-home-rev { grid-area: rev; }
+.fms-home-bva { grid-area: bva; }
+.fms-home-note { grid-area: note; }
+
+@media (min-width: 1024px) {
   .fms-home {
-    grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas:
-      "main rail"
-      "wide wide";
+      "month month"
+      "due money"
+      "attn where"
+      "top income"
+      "rev bva";
   }
 }
 
+@media (min-width: 1440px) {
+  .fms-home {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    grid-template-areas:
+      "month month month month month month month month money money money money"
+      "due due due due due due attn attn attn attn attn attn"
+      "where where where where top top top top income income income income"
+      "rev rev rev rev rev rev bva bva bva bva bva bva";
+  }
+}
+
+/* The month's two halves: the lists at the bottom of each line up with each other. */
 .fms-month {
   display: grid;
   gap: var(--space-5);
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-  align-items: start;
+  align-items: stretch;
 }
 
-.fms-month-safe,
-.fms-month-budget {
-  display: grid;
-  align-content: start;
+.fms-month-half {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
+}
+
+.fms-month-half > .fms-month-lines {
+  margin-top: auto;
+  padding-top: var(--space-3);
+}
+
+.fms-month-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-2);
+  min-height: 22px;
 }
 
 .fms-month-lines {
@@ -5477,18 +5534,21 @@ textarea.fms-askinput {
   min-width: 0;
 }
 
+/* One debt takes the whole row; two share it, level with each other. */
 .fms-debtgrid {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
-  align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
+  align-items: stretch;
 }
 
 /* Amber edge for a debt (rule D3), red once a payment is late. */
 .fms-debtcard {
   display: grid;
+  align-content: start;
   gap: var(--space-3);
   min-width: 0;
+  container-type: inline-size;
   padding: var(--space-4);
   background: var(--surface);
   border: 1px solid var(--hairline);
@@ -5535,13 +5595,24 @@ textarea.fms-askinput {
 
 .fms-debtfacts {
   display: grid;
-  gap: var(--space-2) var(--space-4);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: var(--space-3) var(--space-4);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+@container (max-width: 640px) {
+  .fms-debtfacts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .fms-debtfacts > div {
   display: grid;
+  grid-template-rows: auto auto 1fr;
+  align-content: start;
   gap: 2px;
   min-width: 0;
 }
@@ -5628,10 +5699,17 @@ textarea.fms-askinput {
 .fms-brief-figs {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: start;
   padding: var(--space-4);
   background: var(--surface-sunk);
   border-radius: var(--radius-md);
+}
+
+@container (max-width: 899px) {
+  .fms-brief-figs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .fms-safe-hero {
@@ -5651,6 +5729,13 @@ button.fms-calday {
   border: 0;
   font-family: inherit;
   cursor: pointer;
+}
+
+/* Wider than tall in a wide box: square days made the calendar twice the height of the box beside it. */
+@container (min-width: 520px) {
+  button.fms-calday {
+    aspect-ratio: 1.7;
+  }
 }
 
 button.fms-calday[aria-pressed="true"] {

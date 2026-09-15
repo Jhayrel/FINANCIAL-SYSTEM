@@ -97,12 +97,14 @@ export function DebtScreen({
   const [editId, setEditId] = useState<string | null>(null);
 
   const year = getYear(asOf);
-  const owe = dues
-    .filter((d) => d.position.debt.kind === "payable")
-    .reduce((s, d) => s + Math.max(0, d.position.outstanding), 0);
-  const owedToYou = dues
-    .filter((d) => d.position.debt.kind === "receivable")
-    .reduce((s, d) => s + Math.max(0, d.position.outstanding), 0);
+  // Every debt, archived ones too: money still owed is owed whether or not the line is in use.
+  const everything = positionsOf(debts, transactions, asOf);
+  const owe = everything
+    .filter((p) => p.debt.kind === "payable")
+    .reduce((s, p) => s + Math.max(0, p.outstanding), 0);
+  const owedToYou = everything
+    .filter((p) => p.debt.kind === "receivable")
+    .reduce((s, p) => s + Math.max(0, p.outstanding), 0);
   const interestThisYear = transactions
     .filter((t) => t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee") && getYear(t.date) === year)
     .reduce((s, t) => s + t.total, 0);
@@ -307,47 +309,59 @@ function DebtCard({
         </div>
       ) : null}
 
+      {/*
+        Four facts, each a label, a value and one line under it, so the four
+        sit level however their words wrap. The date and its pill shared a
+        line and broke onto two when they did not fit, and the column beside
+        it no longer lined up.
+      */}
       <dl className="fms-debtfacts">
         <div>
           <dt className="t-micro">Next payment</dt>
-          <dd className="t-caption">
-            {settled ? (
-              "Nothing owed"
-            ) : due.nextDue ? (
-              <>
-                {formatMedium(due.nextDue)}{" "}
-                <StatusPill status={late ? "over" : (due.daysToDue ?? 99) <= 7 ? "warn" : "ok"}>
-                  {whenWords(due.daysToDue)}
-                </StatusPill>
-              </>
-            ) : owed ? (
-              "No date to go by"
+          <dd className="t-body-strong">
+            {settled ? "Nothing owed" : due.nextDue ? formatMedium(due.nextDue) : owed ? "No date to go by" : "No date agreed"}
+          </dd>
+          <dd>
+            {!settled && due.nextDue ? (
+              <StatusPill status={late ? "over" : (due.daysToDue ?? 99) <= 7 ? "warn" : "ok"}>
+                {whenWords(due.daysToDue)}
+              </StatusPill>
             ) : (
-              "No date agreed"
+              <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+                {settled ? "Paid off" : "Set a due day under Details"}
+              </span>
             )}
           </dd>
         </div>
-        {due.nextDue && (
-          <div>
-            <dt className="t-micro">{owed ? "To pay" : "To collect"}</dt>
-            <dd>
-              <Money value={due.amountDue} size="s" />
-            </dd>
-          </div>
-        )}
+        <div>
+          <dt className="t-micro">{owed ? "To pay" : "To collect"}</dt>
+          <dd>
+            <Money value={settled ? 0 : due.amountDue || position.outstanding} size="m" />
+          </dd>
+          <dd className="t-micro" style={{ color: "var(--ink-3)" }}>
+            {settled ? "Nothing" : due.basis === "schedule" ? "This instalment" : "Everything outstanding"}
+          </dd>
+        </div>
         <div>
           <dt className="t-micro">Last {owed ? "payment" : "repayment"}</dt>
-          <dd className="t-caption">
-            {due.lastPayment
-              ? `${formatMoney(due.lastPayment.amount)}, ${formatMedium(due.lastPayment.date)}`
-              : "None yet"}
+          <dd>
+            {due.lastPayment ? (
+              <Money value={due.lastPayment.amount} size="m" />
+            ) : (
+              <span className="t-body-strong">None yet</span>
+            )}
+          </dd>
+          <dd className="t-micro" style={{ color: "var(--ink-3)" }}>
+            {due.lastPayment ? formatMedium(due.lastPayment.date) : "Nothing paid back yet"}
           </dd>
         </div>
         <div>
           <dt className="t-micro">Last 30 days</dt>
-          <dd className="t-caption">
-            {owed ? "Borrowed" : "Lent"} {formatMoney(pace.added30)}, {owed ? "paid" : "collected"}{" "}
-            {formatMoney(pace.paid30)}
+          <dd className="t-body-strong">
+            {owed ? "Borrowed" : "Lent"} {formatMoney(pace.added30)}
+          </dd>
+          <dd className="t-micro" style={{ color: "var(--ink-3)" }}>
+            {owed ? "Paid back" : "Collected"} {formatMoney(pace.paid30)}
           </dd>
         </div>
       </dl>

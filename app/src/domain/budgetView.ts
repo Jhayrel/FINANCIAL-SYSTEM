@@ -440,6 +440,42 @@ export function applyPlan(
 // ── Limits for kinds of spending ───────────────────────────────────────────
 
 /** The limits set for one month, only those above nothing. */
+/**
+ * A kind of spending renamed in Settings, carried into its limits.
+ *
+ * The rows are renamed (`renameItem`), and a limit is keyed by the kind's
+ * name, so without this the limit on "Food" stayed on a name no row used any
+ * more: the Budget screen showed Meals with no limit, and the limit sat on a
+ * kind with nothing in it. Where both names have a limit in a month, the one
+ * already on the new name is kept. The change history keeps the old name,
+ * since that is what the kind was called when it changed.
+ */
+export function renameLimitKind(
+  budgets: Budgets,
+  from: string,
+  to: string,
+): { readonly budgets: Budgets; readonly years: readonly string[] } {
+  const was = from.trim();
+  const now = to.trim();
+  if (!was || !now || was === now) return { budgets, years: [] };
+
+  const next: Record<string, BudgetYear> = { ...budgets };
+  const years: string[] = [];
+  for (const [year, plan] of Object.entries(budgets)) {
+    const moving = plan.categories?.[was];
+    if (!moving) continue;
+    const categories: Record<string, Amounts> = {};
+    for (const [name, amounts] of Object.entries(plan.categories ?? {})) {
+      if (name !== was) categories[name] = amounts;
+    }
+    const kept = categories[now];
+    categories[now] = kept ? (kept.map((v, i) => (v > 0 ? v : (moving[i] ?? 0))) as unknown as Amounts) : moving;
+    next[year] = { ...plan, categories };
+    years.push(year);
+  }
+  return { budgets: next, years };
+}
+
 export function categoryLimits(plan: BudgetYear | undefined, month: number): Map<string, Centavos> {
   const out = new Map<string, Centavos>();
   for (const [name, amounts] of Object.entries(plan?.categories ?? {})) {

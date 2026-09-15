@@ -179,17 +179,33 @@ export function Insights({
               <Track label="Bills and subscriptions" spent={t.billsSubs.spent} budget={t.billsSubs.budget} pace={isThisMonth ? (brief.daysInMonth - brief.daysLeft + 1) / brief.daysInMonth : undefined} />
             </div>
           </div>
+          {/*
+            Six figures, each with a line under it, in three columns or two:
+            always whole rows. Five in a row that wraps left one figure alone
+            on a line of its own.
+          */}
           <div className="fms-brief-figs">
-            <Fig label="Came in" value={brief.cameIn} tone="var(--flow-revenue-text)" />
-            <Fig label="Went out" value={brief.wentOut} tone="var(--flow-spending-text)" />
+            <Fig label="Came in" value={brief.cameIn} tone="var(--flow-revenue-text)" hint="Income, not starting balances" />
+            <Fig label="Went out" value={brief.wentOut} tone="var(--flow-spending-text)" hint="Everything the budget counts" />
             <Fig
               label={brief.kept < 0 ? "More out than in" : "Kept"}
               value={brief.kept}
               signed
               hint={brief.cameIn > 0 ? `${Math.round((brief.kept / brief.cameIn) * 100)}% of what came in` : "No income"}
             />
-            <Fig label={brief.phase === "past" ? "Wallets at the end" : "Wallets now"} value={brief.wallets} />
-            <Fig label={brief.phase === "past" ? "Savings at the end" : "Savings now"} value={brief.savings} />
+            <Fig
+              label="Budgeted"
+              value={t.combined.budget}
+              hint={
+                t.combined.budget <= 0
+                  ? "No budget set"
+                  : t.combined.remaining < 0
+                    ? `${formatMoney(-t.combined.remaining)} over`
+                    : `${formatMoney(t.combined.remaining)} left`
+              }
+            />
+            <Fig label="Wallets" value={brief.wallets} hint={brief.phase === "past" ? "At the end of the month" : "Today"} />
+            <Fig label="Savings" value={brief.savings} hint={brief.phase === "past" ? "At the end of the month" : "Today"} />
           </div>
         </div>
       </Card>

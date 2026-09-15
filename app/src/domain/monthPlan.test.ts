@@ -158,7 +158,9 @@ describe("safe to spend", () => {
   });
 
   it("says plainly when the wallets cannot cover what is due, and offers nothing a day", () => {
-    const brief = briefOf(300000, 700000);
+    // Wallets of PHP 1,300.00 against PHP 1,500.00 of rent and PHP 1,000.00 of debt still due.
+    const brief = briefOf(150000, 700000);
+    expect(brief.safe?.wallets).toBe(130000);
     expect(brief.safe?.free).toBeLessThan(0);
     expect(brief.safe?.safe).toBe(0);
     expect(brief.safe?.perDay).toBe(0);

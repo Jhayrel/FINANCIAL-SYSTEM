@@ -492,8 +492,8 @@ export function AddTransaction({
           d.basis === "last-payment" || d.basis === "borrowed" ? ", going by the last payment" : ""
         }`,
         inForm: (x) => x.flow === "Debt" && x.debtId === debt.id && x.debtEffect === effect,
-        fill: (x) => ({
-          ...emptyDraft(x.date),
+        fill: () => ({
+          ...emptyDraft(asOf),
           flow: "Debt",
           debtId: debt.id,
           debtEffect: effect,
@@ -510,8 +510,8 @@ export function AddTransaction({
       late: b.daysAway < 0,
       why: b.why,
       inForm: (x) => x.flow === "Spending" && x.item === b.item && x.category === b.category,
-      fill: (x) => ({
-        ...emptyDraft(x.date),
+      fill: () => ({
+        ...emptyDraft(asOf),
         flow: "Spending",
         category: b.category,
         item: b.item,
@@ -522,7 +522,7 @@ export function AddTransaction({
       }),
     }));
     return [...fromDebts, ...fromBills].sort((a, b) => Number(b.late) - Number(a.late));
-  }, [debtDues, due]);
+  }, [debtDues, due, asOf]);
 
   /** The same entry already in the ledger, as the assistant's cards have always checked. */
   const dupe = useMemo(
@@ -626,7 +626,7 @@ export function AddTransaction({
       });
       if (!ok) return;
     }
-    applyDraft(chip.fill(draft));
+    applyDraft(chip.fill());
   };
 
   /** When the last save went through, so a second press of the same button is not a second entry. */
@@ -1598,8 +1598,12 @@ interface DueChip {
   readonly late: boolean;
   /** Whether the form already holds it, so a second tap does nothing. */
   readonly inForm: (draft: Draft) => boolean;
-  /** The form with it filled in, keeping the date already chosen. */
-  readonly fill: (draft: Draft) => Draft;
+  /**
+   * The form with it filled in, dated today. Something due now is paid now,
+   * and the date field keeps the last entry's date, which could be a month
+   * already closed.
+   */
+  readonly fill: () => Draft;
 }
 
 /**

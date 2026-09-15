@@ -138,8 +138,10 @@ export function monthBrief(input: {
   const cameIn = monthTotals(transactions, year, month).revenue;
   const wentOut = tracks.combined.spent;
 
-  const upTo = phase === "past" ? end : asOf;
-  const held = transactions.filter((t) => t.date <= upTo);
+  // A month that is over, as it ended. This month and later, as net worth counts
+  // it: an entry dated later in the month is already in the wallets there, and
+  // leaving it out here put two different wallet totals on one screen.
+  const held = phase === "past" ? transactions.filter((t) => t.date <= end) : transactions;
   const wallets = totalWalletBalance(held, reference.wallets);
   const savings = totalSavingsBalance(held, reference.savings);
 
@@ -263,7 +265,10 @@ function notesFor(
       safe.reservedDebt > 0 ? (safe.reservedBills > 0 ? "bills and debt payments" : "debt payments") : "bills";
     const days = `${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"}`;
 
-    if (safe.free < 0) {
+    if (safe.wallets < 0) {
+      // Said as what it is. "The ₱0.00 of bills still due is more than your wallets hold" was true and meant nothing.
+      out.push(`Your wallets are ${money(-safe.wallets)} below zero, so nothing is safe to spend until that is put right.`);
+    } else if (safe.free < 0) {
       out.push(`The ${money(reserved)} of ${what} still due this month is ${money(-safe.free)} more than your wallets hold.`);
     } else if (reserved > 0) {
       out.push(`After the ${money(reserved)} of ${what} still due, ${money(safe.safe)} is safe to spend: ${money(safe.perDay)} a day for ${days}.`);

@@ -15,13 +15,19 @@
  * below zero said so. The findings moved to the bell in the top bar, which
  * every screen has; the worst three are repeated here.
  *
+ * ── Boxes in rows ─────────────────────────────────────────────────────────
+ *
+ * Zoomed out, the first version was a tall column of three boxes beside a
+ * short column of three, so the edges never met and the page read as
+ * unfinished. Every box now sits in a row with the box beside it and shares
+ * its top and bottom edges: the month beside your money, what is due beside
+ * what needs attention, then where it went, the year's top spending and income
+ * quality, then the two charts.
+ *
  * The month's figures are `domain/monthPlan.ts`, the brief Insights reads, so
  * the two screens cannot disagree. Net worth stays broken into its parts (spec
- * 7.2): the Excel showed ₱7,670.03 "TOTAL FUNDS" with no idea that ₱2,950 of
- * it was borrowed.
- *
- * On a phone it is the month, what is due, your money and what needs
- * attention. The year's charts are on a bigger screen.
+ * 7.2) and counts every debt, archived ones included: money still owed is owed
+ * whether or not the line is still in use.
  */
 
 import { useMemo, type ReactNode } from "react";
@@ -32,8 +38,8 @@ import type { Alert as Finding } from "../domain/alerts";
 import { totalSavingsBalance, totalWalletBalance } from "../domain/balances";
 import { budgetSummary } from "../domain/budget";
 import type { MonthBill } from "../domain/budgetView";
-import { debtDue, incomeQuality, netWorth, positionsOf, type Debt, type DebtEffect } from "../domain/debt";
-import { formatMedium, getMonth, getYear, MONTH_NAMES_SHORT, monthName } from "../domain/dates";
+import { incomeQuality, netWorth, positionsOf, type Debt, type DebtEffect } from "../domain/debt";
+import { getMonth, getYear, MONTH_NAMES_SHORT, monthName } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
 import { isOpenBill, monthBrief } from "../domain/monthPlan";
 import { monthlyTotalsForYear, spendingRanking, totalSpending } from "../domain/totals";
@@ -96,17 +102,14 @@ export function Dashboard({
   );
 
   const v = useMemo(() => {
-    const live = debts.filter((d) => !d.archived);
-    const positions = positionsOf(live, transactions, asOf);
     const range = { start: `${year}-01-01`, end: `${year}-12-31` };
     const perMonth = monthlyTotalsForYear(transactions, year);
     return {
       worth: netWorth(
         totalWalletBalance(transactions, reference.wallets),
         totalSavingsBalance(transactions, reference.savings),
-        positions,
+        positionsOf(debts, transactions, asOf),
       ),
-      dues: positions.filter((p) => p.status === "open").map((p) => debtDue(p, transactions, asOf)),
       income: incomeQuality(transactions, debts, range),
       annual: totalSpending(transactions, range),
       ranking: spendingRanking(transactions, reference.spendingTypes, range).slice(0, 6),
@@ -118,6 +121,7 @@ export function Dashboard({
 
   const t = brief.tracks;
   const noBudget = t.combined.budget <= 0;
+  const over = !noBudget && t.combined.remaining < 0;
   const elapsed = (brief.daysInMonth - brief.daysLeft + 1) / brief.daysInMonth;
   const safe = brief.safe;
   const name = monthName(month);
@@ -148,14 +152,12 @@ export function Dashboard({
   ].sort((a, b) => (a.days ?? 99) - (b.days ?? 99));
 
   const paidBills = brief.bills.bills.filter((b) => b.state === "paid");
-  const payables = v.worth.payables;
-  const receivables = v.worth.receivables;
   const kindMax = Math.max(1, ...brief.kinds.map((k) => k.amount));
 
   return (
     <div className="fms-home">
       {/* ── The month ──────────────────────────────────────────────────── */}
-      <div className="fms-home-main">
+      <div className="fms-home-month">
         <Card
           title={`${name} ${year}`}
           subtitle={`${brief.daysLeft} ${brief.daysLeft === 1 ? "day" : "days"} left, today included`}
@@ -166,58 +168,46 @@ export function Dashboard({
           }
         >
           <div className="fms-month">
-            {safe && (
-              <div className="fms-month-safe">
+            <div className="fms-month-half">
+              <div className="fms-month-head">
                 <span className="t-label" style={{ color: "var(--ink-2)" }}>
                   Safe to spend a day
                 </span>
-                <Money value={safe.perDay} size="xl" tone={safe.perDay === 0 ? "var(--over)" : undefined} />
-                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                  {formatMoney(safe.safe)} for the rest of {name}
-                </span>
-                <div className="fms-month-lines">
-                  <Line label="In your wallets" value={safe.wallets} />
-                  {safe.reservedBills > 0 && <Line label="Bills still due" value={-safe.reservedBills} />}
-                  {safe.reservedDebt > 0 && <Line label="Debt payments due" value={-safe.reservedDebt} />}
-                  {safe.budgetLeft !== null && (
-                    <Line label="Left of the spending budget" value={safe.budgetLeft} quiet />
-                  )}
-                </div>
               </div>
-            )}
+              <Money value={safe?.perDay ?? 0} size="xl" tone={(safe?.perDay ?? 0) === 0 ? "var(--over)" : undefined} />
+              <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                {formatMoney(safe?.safe ?? 0)} for the rest of {name}
+              </span>
+              <div className="fms-month-lines">
+                <Line label="In your wallets" value={safe?.wallets ?? brief.wallets} />
+                <Line label="Bills still due" value={safe && safe.reservedBills > 0 ? -safe.reservedBills : 0} quiet={!safe || safe.reservedBills === 0} />
+                <Line label="Debt payments due" value={safe && safe.reservedDebt > 0 ? -safe.reservedDebt : 0} quiet={!safe || safe.reservedDebt === 0} />
+                {safe && safe.budgetLeft !== null ? (
+                  <Line label="Left of the spending budget" value={safe.budgetLeft} tone={safe.budgetLeft < 0 ? "var(--over)" : undefined} />
+                ) : (
+                  <TextLine label="Spending budget" text="None set" />
+                )}
+              </div>
+            </div>
 
-            <div className="fms-month-budget">
-              <div className="fms-qrow" style={{ border: 0, paddingBottom: 0 }}>
+            <div className="fms-month-half">
+              <div className="fms-month-head">
                 <span className="t-label" style={{ color: "var(--ink-2)" }}>
                   Spent in {name}
                 </span>
                 {noBudget ? (
                   <StatusPill status="none">No budget set</StatusPill>
                 ) : (
-                  <StatusPill status={t.combined.remaining < 0 ? "over" : "ok"}>
-                    {t.combined.remaining < 0
-                      ? `${formatMoney(-t.combined.remaining)} over`
-                      : `${formatMoney(t.combined.remaining)} left`}
+                  <StatusPill status={over ? "over" : "ok"}>
+                    {over ? `${formatMoney(-t.combined.remaining)} over` : `${formatMoney(t.combined.remaining)} left`}
                   </StatusPill>
                 )}
               </div>
-              <Money
-                value={t.combined.spent}
-                size="l"
-                tone={t.combined.remaining < 0 && !noBudget ? "var(--over)" : undefined}
-              />
-              {noBudget ? (
-                <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-                  Nothing to measure it against. A budget turns this into what is left.
-                </p>
-              ) : (
-                <>
-                  <ProgressBar value={t.combined.spent} max={t.combined.budget} pace={elapsed} />
-                  <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                    of {formatMoney(t.combined.budget)}
-                  </span>
-                </>
-              )}
+              <Money value={t.combined.spent} size="xl" tone={over ? "var(--over)" : undefined} />
+              <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                {noBudget ? "Nothing to measure it against yet" : `of ${formatMoney(t.combined.budget)} budgeted`}
+              </span>
+              <ProgressBar value={t.combined.spent} max={t.combined.budget} {...(noBudget ? {} : { pace: elapsed })} />
               <div className="fms-month-lines">
                 <TrackLine label="Spending" spent={t.spending.spent} budget={t.spending.budget} />
                 <TrackLine label="Bills and subscriptions" spent={t.billsSubs.spent} budget={t.billsSubs.budget} />
@@ -237,8 +227,46 @@ export function Dashboard({
             </ul>
           )}
         </Card>
+      </div>
 
-        {/* ── Still to pay ────────────────────────────────────────────── */}
+      {/* ── Your money ─────────────────────────────────────────────────── */}
+      <div className="fms-home-money">
+        <Card title="Your money" subtitle="Net worth, and where it is">
+          <Money value={v.worth.total} size="xl" />
+          <div className="fms-month-lines">
+            <Line label="Wallets" value={v.worth.wallets} />
+            <Line label="Savings" value={v.worth.savings} />
+            <Line label="Owed to you" value={v.worth.receivables} quiet={v.worth.receivables === 0} />
+            <Line
+              label="You owe"
+              value={v.worth.payables > 0 ? -v.worth.payables : 0}
+              tone={v.worth.payables > 0 ? "var(--flow-debt-text)" : undefined}
+              quiet={v.worth.payables === 0}
+            />
+          </div>
+          <ul className="fms-moneylist">
+            {balances.map((w) => {
+              const below = w.balance < 0;
+              const low = !below && !w.isSavings && lowBalanceThreshold > 0 && w.balance < lowBalanceThreshold;
+              return (
+                <li key={w.name} className="fms-moneyrow">
+                  <span className="t-caption fms-truncate" style={{ color: w.balance === 0 ? "var(--ink-3)" : "var(--ink)" }}>
+                    {w.name}
+                  </span>
+                  <span className="fms-moneyrow-end">
+                    {below && <StatusPill status="over">Below zero</StatusPill>}
+                    {low && <StatusPill status="warn">Low</StatusPill>}
+                    <Money value={w.balance} size="s" tone={below ? "var(--over)" : w.balance === 0 ? "var(--ink-3)" : undefined} />
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      </div>
+
+      {/* ── Still to pay ───────────────────────────────────────────────── */}
+      <div className="fms-home-due">
         <Card
           title="Still to pay this month"
           subtitle={
@@ -258,10 +286,7 @@ export function Dashboard({
                 <li key={u.key} className="fms-duerow">
                   <div className="fms-duerow-text">
                     <span className="t-body-strong fms-truncate">{u.name}</span>
-                    <span
-                      className="t-caption"
-                      style={{ color: u.days !== undefined && u.days < 0 ? "var(--over)" : "var(--ink-3)" }}
-                    >
+                    <span className="t-caption" style={{ color: u.days !== undefined && u.days < 0 ? "var(--over)" : "var(--ink-3)" }}>
                       {u.what} · {whenWords(u.days)}
                       {u.on ? `, ${shortDay(u.on)}` : ""}
                     </span>
@@ -286,8 +311,46 @@ export function Dashboard({
             </p>
           )}
         </Card>
+      </div>
 
-        {/* ── Where it went ───────────────────────────────────────────── */}
+      {/* ── Needs attention ────────────────────────────────────────────── */}
+      <div className="fms-home-attn">
+        <Card
+          title="Needs attention"
+          subtitle={
+            alerts.length === 0
+              ? "Checked every time the ledger changes"
+              : alerts.length > 3
+                ? `The worst 3 of ${alerts.length}. The bell at the top has every one.`
+                : "Worst first. The bell at the top has these too."
+          }
+        >
+          {alerts.length === 0 ? (
+            <p className="t-body" style={{ margin: 0, color: "var(--ink-2)" }}>
+              Nothing right now: no bill late, no account below zero, nothing that looks entered twice.
+            </p>
+          ) : (
+            <ul className="fms-attn">
+              {alerts.slice(0, 3).map((a) => (
+                <li key={a.id}>
+                  <button type="button" className="fms-attn-item" onClick={() => onOpenAlert(a)}>
+                    <span aria-hidden className="fms-attn-dot" style={{ background: `var(--${a.level})` }} />
+                    <span className="fms-attn-text">
+                      <span className="t-body-strong">{a.title}</span>
+                      <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                        {a.detail}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+
+      {/* ── Where it went ──────────────────────────────────────────────── */}
+      <div className="fms-home-where">
         <Card
           title="Where it went"
           subtitle={`${name}'s spending by kind, against ${previous}`}
@@ -331,120 +394,28 @@ export function Dashboard({
         </Card>
       </div>
 
-      {/* ── Your money, and what needs attention ─────────────────────────── */}
-      <aside className="fms-home-rail" aria-label="Your money">
-        <Card title="Your money" subtitle="Net worth, and where it is">
-          <Money value={v.worth.total} size="xl" />
-          <div className="fms-month-lines" style={{ marginTop: "var(--space-3)" }}>
-            <Line label="Wallets" value={v.worth.wallets} />
-            <Line label="Savings" value={v.worth.savings} />
-            {receivables > 0 && <Line label="Owed to you" value={receivables} />}
-            {payables > 0 && <Line label="You owe" value={-payables} tone="var(--flow-debt-text)" />}
-          </div>
-          <ul className="fms-moneylist">
-            {balances.map((w) => {
-              const below = w.balance < 0;
-              const low = !below && !w.isSavings && lowBalanceThreshold > 0 && w.balance < lowBalanceThreshold;
-              return (
-                <li key={w.name} className="fms-moneyrow">
-                  <span className="t-caption fms-truncate" style={{ color: w.balance === 0 ? "var(--ink-3)" : "var(--ink)" }}>
-                    {w.name}
-                  </span>
-                  <span className="fms-moneyrow-end">
-                    {below && <StatusPill status="over">Below zero</StatusPill>}
-                    {low && <StatusPill status="warn">Low</StatusPill>}
-                    <Money
-                      value={w.balance}
-                      size="s"
-                      tone={below ? "var(--over)" : w.balance === 0 ? "var(--ink-3)" : undefined}
-                    />
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </Card>
-
-        {alerts.length > 0 && (
-          <Card
-            title="Needs attention"
-            subtitle={
-              alerts.length > 3
-                ? `The worst 3 of ${alerts.length}. The bell at the top has every one.`
-                : "Worst first. The bell at the top has these too."
-            }
-          >
-            <ul className="fms-attn">
-              {alerts.slice(0, 3).map((a) => (
-                <li key={a.id}>
-                  <button type="button" className="fms-attn-item" onClick={() => onOpenAlert(a)}>
-                    <span aria-hidden className="fms-attn-dot" style={{ background: `var(--${a.level})` }} />
-                    <span className="fms-attn-text">
-                      <span className="t-body-strong">{a.title}</span>
-                      <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                        {a.detail}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        )}
-
-        {v.dues.length > 0 && (
-          <Card
-            title="Debts"
-            action={
-              !phone ? (
-                <Button size="sm" onClick={() => onGo("debt")}>
-                  Open Debt
-                </Button>
-              ) : undefined
-            }
-          >
-            <ul className="fms-duelist">
-              {v.dues.map((d) => {
-                const { debt } = d.position;
-                const owed = debt.kind === "payable";
-                return (
-                  <li key={debt.id} className="fms-duerow">
-                    <div className="fms-duerow-text">
-                      <span className="t-body-strong fms-truncate">{debt.name}</span>
-                      <span
-                        className="t-caption"
-                        style={{ color: d.daysToDue !== undefined && d.daysToDue < 0 ? "var(--over)" : "var(--ink-3)" }}
-                      >
-                        {d.nextDue
-                          ? `${whenWords(d.daysToDue)}, ${formatMedium(d.nextDue)}`
-                          : owed
-                            ? "No payment date to go by"
-                            : "No date agreed"}
-                      </span>
-                    </div>
-                    <div className="fms-duerow-end">
-                      <Money value={d.position.outstanding} size="s" tone={owed ? "var(--flow-debt-text)" : undefined} />
-                      <Button
-                        size="sm"
-                        onClick={() => onRecordDebt(debt.id, owed ? "repay" : "collect", d.nextDue ? d.amountDue : null)}
-                      >
-                        {owed ? "Pay" : "Collect"}
-                      </Button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </Card>
-        )}
-      </aside>
-
-      {/* ── The year: a desk view ────────────────────────────────────────── */}
+      {/* ── The year: a desk view ──────────────────────────────────────── */}
       {phone ? (
-        <p className="t-caption fms-bigger-note fms-home-wide">The charts for {year} are on a bigger screen.</p>
+        <p className="t-caption fms-bigger-note fms-home-note">The charts for {year} are on a bigger screen.</p>
       ) : (
-        <div className="fms-home-wide">
-          <div className="fms-charts">
+        <>
+          <div className="fms-home-top">
+            <Card title="Top spending" subtitle={`${year} so far`} action={<CountChip>{formatMoney(v.annual)}</CountChip>}>
+              <RankBars rows={v.ranking} />
+            </Card>
+          </div>
+          <div className="fms-home-income">
+            <Card title="Income quality" subtitle="What the revenue line is really made of">
+              <div className="fms-month-lines" style={{ marginTop: 0 }}>
+                <Line label="Cash in this year" value={v.income.cashIn} strong />
+                <Line label="True income" value={v.income.trueIncome} tone="var(--flow-revenue-text)" />
+                <Line label="Borrowed, not income" value={v.income.borrowed} tone={v.income.borrowed > 0 ? "var(--flow-debt-text)" : undefined} quiet={v.income.borrowed === 0} />
+                <Line label="Opening balance, not income" value={v.income.openingBalance} quiet />
+                <Line label="Self-moves, not income" value={v.income.selfMoves} quiet />
+              </div>
+            </Card>
+          </div>
+          <div className="fms-home-rev">
             <Card title="Revenue and spending" subtitle={`January to ${name} ${year}`}>
               <AreaChart
                 labels={MONTH_NAMES_SHORT.slice(0, month)}
@@ -454,6 +425,8 @@ export function Dashboard({
                 ]}
               />
             </Card>
+          </div>
+          <div className="fms-home-bva">
             <Card title="Budget vs actual" subtitle="Red where the month went over">
               <BarChart
                 labels={MONTH_NAMES_SHORT.slice(0, month)}
@@ -462,30 +435,7 @@ export function Dashboard({
               />
             </Card>
           </div>
-
-          <div className="fms-charts">
-            <Card
-              title="Top spending"
-              subtitle={`${year} so far`}
-              action={<CountChip>{formatMoney(v.annual)}</CountChip>}
-            >
-              <RankBars rows={v.ranking} />
-            </Card>
-            <Card title="Income quality" subtitle="What the revenue line is really made of">
-              <div className="fms-month-lines">
-                <Line label="Cash in this year" value={v.income.cashIn} strong />
-                <Line label="True income" value={v.income.trueIncome} tone="var(--flow-revenue-text)" />
-                {v.income.borrowed > 0 && (
-                  <Line label="Borrowed, not income" value={v.income.borrowed} tone="var(--flow-debt-text)" />
-                )}
-                {v.income.openingBalance > 0 && (
-                  <Line label="Opening balance, not income" value={v.income.openingBalance} quiet />
-                )}
-                {v.income.selfMoves > 0 && <Line label="Self-moves, not income" value={v.income.selfMoves} quiet />}
-              </div>
-            </Card>
-          </div>
-        </div>
+        </>
       )}
     </div>
   );
@@ -501,22 +451,30 @@ function Line({
 }: {
   label: ReactNode;
   value: Centavos;
-  tone?: string;
-  strong?: boolean;
-  quiet?: boolean;
-  signed?: boolean;
+  tone?: string | undefined;
+  strong?: boolean | undefined;
+  quiet?: boolean | undefined;
+  signed?: boolean | undefined;
 }) {
   return (
     <div className="fms-line">
       <span className={strong ? "t-body-strong" : "t-caption"} style={{ color: quiet ? "var(--ink-3)" : "var(--ink-2)" }}>
         {label}
       </span>
-      <Money
-        value={value}
-        size="s"
-        signed={signed}
-        tone={tone ?? (quiet ? "var(--ink-3)" : value < 0 ? "var(--ink-2)" : undefined)}
-      />
+      <Money value={value} size="s" signed={signed} tone={tone ?? (quiet ? "var(--ink-3)" : undefined)} />
+    </div>
+  );
+}
+
+function TextLine({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="fms-line">
+      <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+        {label}
+      </span>
+      <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+        {text}
+      </span>
     </div>
   );
 }

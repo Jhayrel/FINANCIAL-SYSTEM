@@ -42,10 +42,10 @@ import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
 import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
-import { netWorth, positionsOf, type Debt, type DebtEffect } from "./domain/debt";
+import { netWorth, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
-import type { MonthBill } from "./domain/budgetView";
+import { renameLimitKind, type MonthBill } from "./domain/budgetView";
 import type { Centavos } from "./domain/money";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { emptyDraft, insertChronologically } from "./domain/entry";
@@ -170,6 +170,8 @@ export default function App() {
   const updateReady = useUpdateAvailable();
   /** So a missing rules deploy is reported once, not once per row saved. */
   const activityWarned = useRef(false);
+  /** Accounts renamed in Settings, waiting for the settings object that renames them. See `handleRename`. */
+  const pendingAccountRenames = useRef<[string, string][]>([]);
   /** The floating chat on a computer: open now, and mounted since it was first opened. */
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMounted, setChatMounted] = useState(false);
@@ -797,6 +799,35 @@ export default function App() {
    * writes, so a renamed row in the bin stays in the bin.
    */
   const handleRename = (kind: "account" | "item", from: string, to: string): void => {
+    /**
+     * What else names the thing being renamed.
+     *
+     * A debt names the account it moves through and a limit names its kind of
+     * spending, and a rename reached neither: "Record payment" then filled in
+     * an account that no longer existed, and a limit sat on a kind no row used.
+     *
+     * The limits are their own state, so they are renamed here. The debts live
+     * in the settings object, and Settings sends its own copy of that object
+     * straight after this call, built before it; renaming them here would be
+     * written over a moment later. So the rename waits and is applied to that
+     * object as it arrives (the Settings `onChange` below).
+     */
+    if (kind === "account") {
+      pendingAccountRenames.current.push([from, to]);
+    } else {
+      const moved = renameLimitKind(budgets, from, to);
+      if (moved.years.length > 0) {
+        setBudgets(moved.budgets);
+        const uid = cloud.uid;
+        if (uid) {
+          for (const key of moved.years) {
+            const plan = moved.budgets[key];
+            if (plan) saveBudget(uid, key, plan).catch((e: Error) => setSyncError(e.message));
+          }
+        }
+      }
+    }
+
     const rename = <T extends Transaction>(rows: readonly T[]): T[] =>
       kind === "account" ? renameAccount(rows, from, to) : renameItem(rows, from, to);
 
@@ -1506,7 +1537,17 @@ export default function App() {
               ledgerSource={cloud.uid ? ledgerSource : undefined}
               uploading={uploading}
               onUpload={cloud.uid ? () => void handleUpload() : undefined}
-              onChange={setSettings}
+              onChange={(next) => {
+                // An account renamed a moment ago: its debts follow it onto this object.
+                const renames = pendingAccountRenames.current;
+                pendingAccountRenames.current = [];
+                setSettings(
+                  renames.reduce<AppSettings>(
+                    (s, [from, to]) => ({ ...s, credits: renameDebtAccount(s.credits, from, to) }),
+                    next,
+                  ),
+                );
+              }}
               onRenameAccount={(from, to) => handleRename("account", from, to)}
               onRenameItem={(from, to) => handleRename("item", from, to)}
               onExport={handleExport}

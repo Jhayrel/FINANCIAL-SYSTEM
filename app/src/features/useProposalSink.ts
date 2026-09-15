@@ -95,6 +95,7 @@ export function useProposalSink(input: SinkInput): ProposalSink {
           ok: c.ok,
           problems: c.errors.map((e) => e.message),
           warnings: c.warnings.map((w) => w.message),
+          unusual: c.unusual?.times,
         };
       },
       use: (d) => handlers.current.onUse(d),

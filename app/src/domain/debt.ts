@@ -492,6 +492,26 @@ export function debtNamedBy(debts: readonly Debt[], item: string): Debt | undefi
   });
 }
 
+/**
+ * An account renamed in Settings, carried into the debts that move through it.
+ *
+ * The rows are renamed by `renameAccount`. A debt names its account too, and
+ * left on the old name, "Record payment" filled in a wallet that no longer
+ * existed: the payment saved against a name with no account behind it, and
+ * that name's balance went negative on no screen at all.
+ */
+export function renameDebtAccount(debts: readonly Debt[], from: string, to: string): Debt[] {
+  return debts.map((d) =>
+    d.wallet === from || d.counterparty === from
+      ? {
+          ...d,
+          wallet: d.wallet === from ? to : d.wallet,
+          counterparty: d.counterparty === from ? to : d.counterparty,
+        }
+      : d,
+  );
+}
+
 /** Spending rows that name a debt: payments or loans filed as spending. */
 export function paymentsFiledAsSpending(
   debts: readonly Debt[],

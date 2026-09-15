@@ -146,6 +146,8 @@ export interface ProposalSink {
     readonly ok: boolean;
     readonly problems: readonly string[];
     readonly warnings: readonly string[];
+    /** Far larger than any row of its kind: how many times. The card asks twice before adding it. */
+    readonly unusual?: number | undefined;
   };
   /** Put it in the form, for a correction before saving. */
   readonly use: (draft: Draft) => void;
@@ -2810,7 +2812,11 @@ export function AskPanel({
   /** Cards still waiting on a decision, and how many of those could save. */
   const open = turns.filter((t): t is Offered => isOffer(t) && t.state === "open");
   const openCount = open.length;
-  const readyCount = open.filter((t) => sink.check(t.proposal.draft).ok).length;
+  // A card with extra zeros is never "ready": it is added on its own, after a second tap.
+  const readyCount = open.filter((t) => {
+    const c = sink.check(t.proposal.draft);
+    return c.ok && c.unusual === undefined;
+  }).length;
 
   /**
    * Have I got this one already.
@@ -2903,7 +2909,8 @@ export function AskPanel({
     // afterwards showed every card in the batch the same figure.
     const given = new Map<number, number | null>();
     turns.forEach((t, i) => {
-      if (isOffer(t) && t.state === "open" && sink.check(t.proposal.draft).ok) {
+      const ready = isOffer(t) && t.state === "open" ? sink.check(t.proposal.draft) : null;
+      if (isOffer(t) && ready?.ok && ready.unusual === undefined) {
         given.set(
           i,
           sink.add(t.proposal.draft, {
@@ -3562,6 +3569,27 @@ function ProposalCard({
   const { proposal, state } = offered;
   const { draft } = proposal;
   const check = sink.check(draft);
+
+  /**
+   * Extra zeros take a second tap.
+   *
+   * The Add form asks before saving an amount far larger than anything of its
+   * kind. A card saved it on the first tap with the warning printed above it,
+   * which is all it took for PHP 1,000,000.00 to land in the income line. The
+   * first tap now only says the figure was read; the second adds it.
+   */
+  const [sure, setSure] = useState(false);
+  const cardTotal = (draft.amount ?? 0) + draft.fee;
+  const askFirst = check.unusual !== undefined && !sure;
+  const addLabel = askFirst
+    ? `Check ${formatMoney(cardTotal)} first`
+    : check.unusual !== undefined
+      ? `Yes, add ${formatMoney(cardTotal)}`
+      : "Add to ledger";
+  const pressAdd = (): void => {
+    if (askFirst) setSure(true);
+    else onAdd();
+  };
   // Stable and unique per card, so each label points at its own select.
   const pickerId = useId();
   const itemPickerId = useId();
@@ -3881,8 +3909,8 @@ function ProposalCard({
               <Button size="sm" onClick={onUse}>
                 Put back in the form
               </Button>
-              <Button size="sm" variant="primary" disabled={!check.ok} onClick={onAdd}>
-                Add to ledger
+              <Button size="sm" variant="primary" disabled={!check.ok} onClick={pressAdd}>
+                {addLabel}
               </Button>
               <Button size="sm" onClick={onDiscard}>
                 Discard
@@ -3893,8 +3921,8 @@ function ProposalCard({
       ) : (
         <>
           <div className="fms-proposalactions">
-            <Button size="sm" variant="primary" disabled={!check.ok} onClick={onAdd}>
-              Add to ledger
+            <Button size="sm" variant="primary" disabled={!check.ok} onClick={pressAdd}>
+              {addLabel}
             </Button>
             <Button size="sm" onClick={onUse}>
               Edit first
