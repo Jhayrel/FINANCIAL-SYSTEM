@@ -3582,8 +3582,42 @@
 
 .fms-budgetcat {
   display: grid;
-  gap: var(--space-1);
+  gap: 6px;
   min-width: 0;
+}
+
+.fms-budgetcat-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fms-budgetcat-head > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fms-budgetcat-head > :last-child {
+  flex: 0 0 auto;
+}
+
+/* A name that opens its rows, and reads as a name until hovered. */
+.fms-linkish {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-linkish:hover {
+  text-decoration: underline;
 }
 
 .fms-budgetcat-bar {
@@ -3601,12 +3635,25 @@
 }
 
 .fms-budgetcat-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-2);
   color: var(--ink-3);
 }
 
-/* A quarter above the usual is worth a second look, not an alarm. */
-.fms-budgetcat-foot--up {
+/* Worth a second look, not an alarm: a quiet pill, on the few rows that earn it. */
+.fms-budgetcat-flag {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--warn-bg);
   color: var(--warn);
+}
+
+.fms-budgetnote {
+  margin: var(--space-3) 0 0;
+  color: var(--ink-3);
 }
 
 .fms-budgetbill {

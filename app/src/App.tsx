@@ -41,7 +41,7 @@ import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
 import { netWorth, positionsOf } from "./domain/debt";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
-import { insertChronologically } from "./domain/entry";
+import { emptyDraft, insertChronologically } from "./domain/entry";
 import { formatMedium, getYear, today } from "./domain/dates";
 import { systemToCsv } from "./domain/csv";
 import { browserSettingsStore, type SettingsStore } from "./data/settingsStore";
@@ -142,6 +142,8 @@ export default function App() {
   const cloud = useCloud();
   const [screen, setScreen] = useState<Screen>("dashboard");
   const [dbFilter, setDbFilter] = useState<"all" | "flagged">("all");
+  /** A search another screen opened the Database with, such as a kind of spending on Budget. */
+  const [dbQuery, setDbQuery] = useState<{ query: string; at: number } | null>(null);
   /**
    * The row the Add screen is editing, if any.
    *
@@ -1045,6 +1047,8 @@ export default function App() {
   const go = (id: Screen): void => {
     setScreen(id);
     setChatOpen(false);
+    // A search a link opened the Database with ends when you go elsewhere.
+    setDbQuery(null);
   };
 
   return (
@@ -1223,9 +1227,10 @@ export default function App() {
           )}
           {screen === "database" && (
             <Database
-              key={dbFilter}
+              key={`${dbFilter}-${dbQuery?.at ?? 0}`}
               transactions={transactions}
               initialFilter={dbFilter}
+              initialQuery={dbQuery?.query}
               onDelete={handleDelete}
               onDeleteMany={handleDeleteMany}
               onEdit={startEditing}
@@ -1259,6 +1264,26 @@ export default function App() {
               reference={reference}
               asOf={asOf}
               onReplaceYear={handleBudgetYear}
+              onRecordBill={(bill) => {
+                // Filled in and shown, never saved: the Add form is where it is checked.
+                setIncoming({
+                  draft: {
+                    ...emptyDraft(asOf),
+                    flow: "Spending",
+                    category: bill.category,
+                    item: bill.item,
+                    amount: bill.amount,
+                    status: "Paid",
+                  },
+                  at: Date.now(),
+                });
+                go("add");
+              }}
+              onShowRows={(query) => {
+                go("database");
+                setDbFilter("all");
+                setDbQuery({ query, at: Date.now() });
+              }}
             />
           )}
           {screen === "statements" && (

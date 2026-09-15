@@ -9,10 +9,19 @@
  * person asks while a month is still running.
  *
  * It opens on a month now, with the year as one table under it. A budget is
- * set in the planner beside the month rather than typed into a grid: it
- * starts from the ledger (the usual income, the bills actually being paid,
- * what spending usually runs to), shows what the plan leaves of the income,
- * and saves to the month, the rest of the year or all of it in one go.
+ * set in the planner beside the month rather than typed into a grid, and
+ * starts from the ledger.
+ *
+ * ── Tidied the same day ───────────────────────────────────────────────────
+ *
+ * The first version was right and read as noise. Every kind of spending had
+ * an orange percentage under it ("+560% against the usual ₱285.00"), the
+ * month card offered two buttons as well as the planner beside it, cards
+ * showed "None" and "₱0.00 due", and the planner and the bills card gave two
+ * different figures for the same bills. Now each card answers one question
+ * with the figure every other card uses, a difference is shown in pesos and
+ * only when it is worth a look, and the screen links out: a bill still to
+ * pay opens the Add form filled in, a kind of spending opens its rows.
  *
  * Rule 3.6 is untouched: the two tracks, their verdicts and every figure are
  * the same functions as before, and `budgetView.test.ts` asserts the month
@@ -35,22 +44,24 @@ import {
 import { AmountInput } from "../components/forms";
 import { BarChart } from "../components/charts";
 import { useConfirm } from "../components/Confirm";
-import { billStatuses, type BillStatus } from "../domain/bills";
 import { budgetForYear, budgetSummary, budgetYearTotals, type MonthBudgetRow } from "../domain/budget";
 import {
   applyPlan,
   categoryLines,
+  monthBills,
   monthPlanView,
   planSuggestions,
   withMonthPlan,
+  type BillState,
   type CategoryLine,
+  type MonthBill,
   type MonthPhase,
   type PlanScope,
   type PlanSuggestions,
 } from "../domain/budgetView";
 import type { Debt } from "../domain/debt";
 import { cashFlow, explainBasis, forecastYear } from "../domain/forecast";
-import { firstOfMonth, getMonth, getYear, lastOfMonth, MONTH_NAMES } from "../domain/dates";
+import { getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
 import type { BudgetTrack, BudgetYear, Budgets, ReferenceLists, Transaction } from "../domain/types";
 
@@ -61,6 +72,13 @@ const TRACKS = [
 
 /** Enough to see the shape of a month without a wall of small amounts. */
 const TOP_CATEGORIES = 8;
+
+/**
+ * A difference worth a look: at least ₱500.00 above the usual, and half as
+ * much again. Below that a percentage of a small figure only alarms: ₱285.00
+ * becoming ₱1,880.00 is worth saying, ₱40.00 becoming ₱90.00 is not.
+ */
+const NOTABLE = 50000;
 
 const monthLabel = (m: number): string => MONTH_NAMES[m - 1] ?? "";
 
@@ -87,6 +105,8 @@ export function Budget({
   reference,
   asOf,
   onReplaceYear,
+  onRecordBill,
+  onShowRows,
 }: {
   transactions: readonly Transaction[];
   budgets: Budgets;
@@ -95,6 +115,10 @@ export function Budget({
   asOf: string;
   /** A year's plan, written once, whichever months a save touched. */
   onReplaceYear: (year: number, next: BudgetYear) => void;
+  /** Opens the Add form with this bill filled in, for checking before saving. */
+  onRecordBill?: ((bill: MonthBill) => void) | undefined;
+  /** Opens the Database searched for these words. */
+  onShowRows?: ((query: string) => void) | undefined;
 }) {
   const year = getYear(asOf);
   const asOfMonth = getMonth(asOf);
@@ -114,21 +138,15 @@ export function Budget({
     };
   }, [transactions, budgets, debts, year, asOfMonth]);
 
-  const m = useMemo(() => {
-    const view = monthPlanView(transactions, budgets, year, month, asOf);
-    const billsAsOf =
-      view.phase === "current"
-        ? asOf
-        : view.phase === "past"
-          ? lastOfMonth(year, month)
-          : firstOfMonth(year, month);
-    return {
-      view,
+  const m = useMemo(
+    () => ({
+      view: monthPlanView(transactions, budgets, year, month, asOf),
       lines: categoryLines(transactions, year, month),
-      bills: billStatuses(transactions, reference, billsAsOf),
-      suggestions: planSuggestions(transactions, reference, budgets, year, month),
-    };
-  }, [transactions, budgets, reference, year, month, asOf]);
+      bills: monthBills(transactions, reference, year, month, asOf),
+      suggestions: planSuggestions(transactions, reference, budgets, year, month, asOf),
+    }),
+    [transactions, budgets, reference, year, month, asOf],
+  );
 
   const { view, lines, bills, suggestions } = m;
   const previous = suggestions.previous;
@@ -136,12 +154,21 @@ export function Budget({
   const name = monthLabel(month);
   const noPlan = a.combined.budget === 0;
   const pace = view.phase === "current" ? view.elapsed : undefined;
+  const spentByKind = lines.reduce((s, l) => s + l.spent, 0);
 
-  const paid = bills.filter((b) => b.paidThisMonth);
-  const paidTotal = paid.reduce((s, b) => s + b.paidThisMonthAmount, 0);
-  const stillExpected = bills
-    .filter((b) => !b.paidThisMonth && b.timesPaid > 0)
-    .reduce((s, b) => s + (b.lastAmount || b.averageAmount), 0);
+  /**
+   * Bills and subscriptions rows with no item are counted by the track and
+   * cannot be put against a named bill, so they are said once, not lost.
+   */
+  const unnamedBills = view.phase === "future" ? 0 : a.billsSubs.spent - bills.paid;
+
+  /**
+   * An income far above the usual month. Often it is money that was already
+   * there, typed as income, which inflates "Came in" and "Kept" alike.
+   */
+  const usual = suggestions.usualIncome;
+  const unusualIncome =
+    usual !== null && usual > 0 && view.revenue >= usual * 3 && view.revenue - usual >= 5_000_000;
 
   const planSpending = y.plan.spending.reduce((s, v) => s + v, 0);
   const planBills = y.plan.billsSubs.reduce((s, v) => s + v, 0);
@@ -208,28 +235,27 @@ export function Budget({
           {noPlan ? (
             <div className="fms-budgetempty">
               <p className="t-body" style={{ margin: 0, color: "var(--ink-2)" }}>
-                No budget set for {name}.{" "}
+                No budget for {name} yet.{" "}
                 {a.combined.spent > 0
                   ? `${formatMoney(a.combined.spent)} has gone out with nothing to measure it against.`
                   : "Set one and this shows what is left, and what that is a day."}
               </p>
-              <div className="fms-budgetempty-actions">
-                {previous && (
-                  <Button variant="primary" onClick={usePrevious}>
-                    Use {previousName}'s plan, {formatMoney(previous.spending + previous.billsSubs)}
-                  </Button>
-                )}
-                <Button variant={previous ? "secondary" : "primary"} onClick={focusPlanner}>
-                  Set it from your history
+              {previous ? (
+                <Button variant="primary" onClick={usePrevious}>
+                  Use {previousName}'s plan, {formatMoney(previous.spending + previous.billsSubs)}
                 </Button>
-              </div>
+              ) : (
+                <Button variant="primary" onClick={focusPlanner}>
+                  Set the budget
+                </Button>
+              )}
             </div>
           ) : (
             <div className="fms-budgethero">
               <div className="fms-budgethero-figure">
                 <span className="t-label" style={{ color: "var(--ink-2)" }}>
                   {a.combined.remaining < 0
-                    ? "Over the plan by"
+                    ? "Over the budget by"
                     : view.phase === "past"
                       ? "Left unspent"
                       : "Left to spend"}
@@ -259,7 +285,7 @@ export function Budget({
               <div style={{ marginTop: "var(--space-4)" }}>
                 <Alert status="warn" title="On pace to go over">
                   At the rate so far {name} ends near {formatMoney(view.projected)},{" "}
-                  {formatMoney(view.projected - a.combined.budget)} past the plan. Keeping to{" "}
+                  {formatMoney(view.projected - a.combined.budget)} past the budget. Keeping to{" "}
                   {formatMoney(view.perDay)} a day holds it inside.
                 </Alert>
               </div>
@@ -278,23 +304,29 @@ export function Budget({
             >
               <Money value={view.kept} size="m" signed />
             </Stat>
-            <Stat
-              label="Plan against income"
-              hint={
-                view.planShareOfIncome === null
-                  ? noPlan
-                    ? "No plan to compare"
-                    : "No income to compare"
-                  : view.planShareOfIncome > 1
-                    ? "The plan spends more than came in"
-                    : "Of what came in is planned to go out"
-              }
-            >
-              <span className="t-num-m" style={{ color: "var(--ink)" }}>
-                {view.planShareOfIncome === null ? "None" : pct(view.planShareOfIncome)}
-              </span>
-            </Stat>
+            {view.planShareOfIncome !== null && (
+              <Stat
+                label="Budget against income"
+                hint={
+                  view.planShareOfIncome > 1
+                    ? "The budget spends more than came in"
+                    : "Of what came in is budgeted to go out"
+                }
+              >
+                <span className="t-num-m" style={{ color: "var(--ink)" }}>
+                  {pct(view.planShareOfIncome)}
+                </span>
+              </Stat>
+            )}
           </div>
+
+          {unusualIncome && usual !== null && (
+            <p className="t-caption fms-budgetnote">
+              {formatMoney(view.revenue)} came in, against a usual month of {formatMoney(usual)}. If
+              some of it was money you already had, add it as a starting balance instead, so it
+              stops counting as income here and on the Dashboard.
+            </p>
+          )}
         </Card>
       </div>
 
@@ -315,13 +347,12 @@ export function Budget({
         <div className="fms-budgetgrid">
           <Card
             title="Where it went"
-            subtitle={`Spending in ${name}, against the usual for the three months before`}
-            action={
-              lines.length > 0 ? (
-                <span className="t-micro fms-badge fms-badge--count">
-                  {lines.length} {lines.length === 1 ? "kind" : "kinds"}
-                </span>
-              ) : undefined
+            subtitle={
+              lines.length > 0
+                ? `${formatMoney(spentByKind)} across ${lines.length} ${
+                    lines.length === 1 ? "kind" : "kinds"
+                  } of spending, each beside its usual month`
+                : `Spending in ${name}, by kind`
             }
           >
             {lines.length === 0 ? (
@@ -332,7 +363,7 @@ export function Budget({
               <>
                 <ol className="fms-budgetcats">
                   {(allCategories ? lines : lines.slice(0, TOP_CATEGORIES)).map((l) => (
-                    <CategoryRow key={l.name} line={l} />
+                    <CategoryRow key={l.name} line={l} onShow={onShowRows} />
                   ))}
                 </ol>
                 {lines.length > TOP_CATEGORIES && (
@@ -348,42 +379,71 @@ export function Budget({
 
           <Card
             title="Bills and subscriptions"
-            subtitle={`The Bills & subs track: ${formatMoney(a.billsSubs.spent)} of ${formatMoney(a.billsSubs.budget)}`}
+            subtitle={
+              a.billsSubs.budget > 0
+                ? `${formatMoney(a.billsSubs.spent)} of the ${formatMoney(a.billsSubs.budget)} budgeted`
+                : `${formatMoney(a.billsSubs.spent)} so far, with nothing budgeted`
+            }
             action={
-              bills.length > 0 ? (
+              bills.bills.length > 0 ? (
                 <span className="t-micro fms-badge fms-badge--count">
-                  {paid.length} of {bills.length} paid
+                  {bills.bills.filter((b) => b.state === "paid").length} of {bills.bills.length} paid
                 </span>
               ) : undefined
             }
           >
-            {bills.length === 0 ? (
-              <EmptyState message="No bills or subscriptions yet. Add them in Settings, under Categories." />
+            {bills.bills.length === 0 ? (
+              <EmptyState
+                message={
+                  bills.neverPaid.length > 0
+                    ? "No bill has been paid in the last two months, so there is nothing to expect yet."
+                    : "No bills or subscriptions yet. Add them in Settings, under Categories."
+                }
+              />
             ) : (
               <>
                 <ul className="fms-budgetbills">
-                  {bills.map((b) => (
-                    <BillRow key={b.item} bill={b} phase={view.phase} month={name} />
+                  {bills.bills.map((b) => (
+                    <BillRow
+                      key={b.item}
+                      bill={b}
+                      month={name}
+                      onRecord={onRecordBill ? () => onRecordBill(b) : undefined}
+                    />
                   ))}
                 </ul>
                 <div className="t-caption fms-budgetfoot">
                   <span>
-                    Paid <Money value={paidTotal} size="s" />
+                    Paid <Money value={bills.paid} size="s" />
                   </span>
                   {view.phase !== "past" && (
                     <span>
-                      Still expected <Money value={stillExpected} size="s" tone="var(--ink-2)" />
+                      Still expected <Money value={bills.stillExpected} size="s" tone="var(--ink-2)" />
                     </span>
                   )}
+                  <span>
+                    {name} <Money value={bills.total} size="s" />
+                  </span>
                 </div>
               </>
+            )}
+            {unnamedBills > 0 && (
+              <p className="t-caption fms-budgetnote">
+                Another {formatMoney(unnamedBills)} was filed under Bills or Subscriptions with no item, so
+                it counts toward the track without a name here.
+              </p>
+            )}
+            {bills.neverPaid.length > 0 && (
+              <p className="t-caption fms-budgetnote">
+                Never paid, so not expected: {bills.neverPaid.join(", ")}.
+              </p>
             )}
           </Card>
         </div>
 
         <Card
-          title={`Plan for ${year}`}
-          subtitle={`Set aside ${formatMoney(y.totals.budget)}, spent ${formatMoney(y.totals.spent)}, ${
+          title={`Budget for ${year}`}
+          subtitle={`Budgeted ${formatMoney(y.totals.budget)}, spent ${formatMoney(y.totals.spent)}, ${
             y.totals.remaining >= 0
               ? `${formatMoney(y.totals.remaining)} left`
               : `${formatMoney(-y.totals.remaining)} over`
@@ -440,7 +500,7 @@ export function Budget({
                       <td className="fms-rnum" data-label="Left">
                         {r.budget === 0 ? (
                           <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                            No plan
+                            No budget
                           </span>
                         ) : (
                           <Money value={r.remaining} size="s" />
@@ -474,7 +534,7 @@ export function Budget({
         </Card>
 
         <div className="fms-charts">
-          <Card title="Plan against spending" subtitle="Red where a month went over">
+          <Card title="Budget against spending" subtitle="Red where a month went over">
             <BarChart
               labels={MONTH_NAMES.slice(0, asOfMonth).map((n) => n.slice(0, 3))}
               budget={y.rows.slice(0, asOfMonth).map((r) => r.budget)}
@@ -572,10 +632,10 @@ export function Budget({
 /**
  * Setting a month's budget.
  *
- * It starts from what the month already has, or else the month before's plan,
- * or else the ledger's own figures, so a first budget is one look and one
- * press rather than twelve cells typed from memory. Each figure it offers is
- * a button that fills the field, never a value written in silently.
+ * It starts from what the month already has, or else the month before's
+ * budget, or else the ledger's own figures, and says which, so a filled-in
+ * field is never mistaken for one already saved. Each figure it offers is a
+ * button that fills the field, never a value written in silently.
  */
 function Planner({
   year,
@@ -592,11 +652,14 @@ function Planner({
 }) {
   const name = monthLabel(month);
   const hasPlan = s.current.spending + s.current.billsSubs > 0;
+  const source = s.previous
+    ? `${s.previous.year === year ? monthLabel(s.previous.month) : `last ${monthLabel(s.previous.month)}`}'s budget`
+    : "your ledger";
   const start = hasPlan
     ? s.current
     : s.previous
       ? { spending: s.previous.spending, billsSubs: s.previous.billsSubs }
-      : { spending: s.spendingUsual ?? 0, billsSubs: s.billsTotal };
+      : { spending: s.spendingUsual ?? 0, billsSubs: s.bills.total };
 
   const [bills, setBills] = useState<Centavos | null>(start.billsSubs);
   const [spending, setSpending] = useState<Centavos | null>(start.spending);
@@ -604,7 +667,14 @@ function Planner({
   const { confirm, dialog } = useConfirm();
 
   const total = (bills ?? 0) + (spending ?? 0);
-  const keep = s.usualIncome === null ? null : s.usualIncome - total;
+  const changed = (bills ?? 0) !== s.current.billsSubs || (spending ?? 0) !== s.current.spending;
+  const keep = s.expectedIncome === null ? null : s.expectedIncome - total;
+  const incomeWords =
+    s.expectedIncome === null
+      ? ""
+      : s.expectedFrom === "month"
+        ? `the ${formatMoney(s.expectedIncome)} that came in this month`
+        : `your usual ${formatMoney(s.expectedIncome)} income`;
 
   const scopes: { id: PlanScope; label: string }[] = [
     { id: "month", label: `${name.slice(0, 3)} only` },
@@ -613,10 +683,10 @@ function Planner({
   ];
 
   const billNames =
-    s.bills
+    s.bills.bills
       .slice(0, 4)
       .map((b) => `${b.item} ${formatMoney(b.amount)}`)
-      .join(", ") + (s.bills.length > 4 ? `, and ${s.bills.length - 4} more` : "");
+      .join(", ") + (s.bills.bills.length > 4 ? `, and ${s.bills.bills.length - 4} more` : "");
 
   const save = async (): Promise<void> => {
     const value = { spending: spending ?? 0, billsSubs: bills ?? 0 };
@@ -644,8 +714,8 @@ function Planner({
       title="Set the budget"
       subtitle={
         hasPlan
-          ? `${name} ${year} has a plan. Change it here.`
-          : `${name} ${year} has none yet. These figures start from your own ledger.`
+          ? `${name} ${year} is budgeted at ${formatMoney(s.current.spending + s.current.billsSubs)}.`
+          : `Nothing saved for ${name} yet. Filled in from ${source}, and saved only when you press Save.`
       }
     >
       {dialog}
@@ -655,14 +725,14 @@ function Planner({
             Bills and subscriptions
           </span>
           <AmountInput value={bills} onChange={setBills} ariaLabel={`${name} bills and subscriptions budget`} />
-          {s.bills.length > 0 ? (
+          {s.bills.bills.length > 0 ? (
             <>
-              <p className="t-caption fms-planner-note">Paid in the last two months: {billNames}.</p>
               <div className="fms-planner-chips">
-                <Button size="sm" onClick={() => setBills(s.billsTotal)}>
-                  Those bills, {formatMoney(s.billsTotal)}
+                <Button size="sm" onClick={() => setBills(s.bills.total)}>
+                  {name}'s bills, {formatMoney(s.bills.total)}
                 </Button>
               </div>
+              <p className="t-caption fms-planner-note">{billNames}.</p>
             </>
           ) : (
             <p className="t-caption fms-planner-note">No bills paid in the last two months to go by.</p>
@@ -674,46 +744,46 @@ function Planner({
             Spending
           </span>
           <AmountInput value={spending} onChange={setSpending} ariaLabel={`${name} spending budget`} />
-          <div className="fms-planner-chips">
-            {s.spendingLastMonth !== null && (
-              <Button size="sm" onClick={() => setSpending(s.spendingLastMonth)}>
-                Last month, {formatMoney(s.spendingLastMonth)}
-              </Button>
-            )}
-            {s.spendingUsual !== null && (
-              <Button size="sm" onClick={() => setSpending(s.spendingUsual)}>
-                Usual, {formatMoney(s.spendingUsual)}
-              </Button>
-            )}
-            {s.spendingKeepFifth !== null && s.spendingKeepFifth > 0 && (
-              <Button size="sm" onClick={() => setSpending(s.spendingKeepFifth)}>
-                Keep a fifth of income, {formatMoney(s.spendingKeepFifth)}
-              </Button>
-            )}
-          </div>
+          {(s.spendingLastMonth !== null || s.spendingUsual !== null || (s.spendingKeepFifth ?? 0) > 0) && (
+            <div className="fms-planner-chips">
+              {s.spendingLastMonth !== null && (
+                <Button size="sm" onClick={() => setSpending(s.spendingLastMonth)}>
+                  Last month, {formatMoney(s.spendingLastMonth)}
+                </Button>
+              )}
+              {s.spendingUsual !== null && (
+                <Button size="sm" onClick={() => setSpending(s.spendingUsual)}>
+                  Usual, {formatMoney(s.spendingUsual)}
+                </Button>
+              )}
+              {s.spendingKeepFifth !== null && s.spendingKeepFifth > 0 && (
+                <Button size="sm" onClick={() => setSpending(s.spendingKeepFifth)}>
+                  Keep a fifth, {formatMoney(s.spendingKeepFifth)}
+                </Button>
+              )}
+            </div>
+          )}
           <p className="t-caption fms-planner-note">
-            Everything but bills and subscriptions: what you buy, money sent to other people, transfer
-            fees and interest.
+            Everything but bills: what you buy, money sent to other people, transfer fees and interest.
           </p>
         </div>
 
         <div className="fms-planner-sum">
           <div className="fms-planner-sumrow">
             <span className="t-label" style={{ color: "var(--ink-2)" }}>
-              Budget for the month
+              {hasPlan && !changed ? "Budget for the month" : "New budget for the month"}
             </span>
             <Money value={total} size="l" />
           </div>
-          {s.usualIncome === null ? (
-            <p className="t-caption fms-planner-note">No income in the months before {name} to compare with.</p>
-          ) : keep !== null && keep >= 0 ? (
+          {keep === null ? (
+            <p className="t-caption fms-planner-note">No income before {name} to compare it with.</p>
+          ) : keep >= 0 ? (
             <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
-              Leaves {formatMoney(keep)} of your usual {formatMoney(s.usualIncome)} income
-              {s.usualIncome > 0 ? `, ${pct(keep / s.usualIncome)}` : ""}.
+              Leaves {formatMoney(keep)} of {incomeWords}.
             </p>
           ) : (
             <p className="t-caption" style={{ margin: 0, color: "var(--over)" }}>
-              Plans {formatMoney(-(keep ?? 0))} more than your usual {formatMoney(s.usualIncome)} income.
+              {formatMoney(-keep)} more than {incomeWords}.
             </p>
           )}
         </div>
@@ -739,7 +809,7 @@ function Planner({
         </div>
 
         <Button variant="primary" fullWidth onClick={() => void save()}>
-          Save budget
+          {hasPlan ? "Save changes" : "Save budget"}
         </Button>
 
         {note && (
@@ -754,7 +824,7 @@ function Planner({
 
 // ── Parts ──────────────────────────────────────────────────────────────────
 
-/** One track: what went out, the plan, a bar with today's pace on it, and the verdict. */
+/** One track: what went out, the budget, a bar with today's pace on it, and the verdict. */
 function TrackRow({ label, track, pace }: { label: string; track: BudgetTrack; pace?: number | undefined }) {
   const none = track.status === "NO BUDGET SET";
   const over = track.status === "OVER THE BUDGET";
@@ -773,7 +843,7 @@ function TrackRow({ label, track, pace }: { label: string; track: BudgetTrack; p
         <StatusPill status={statusOf(track)}>{none ? "No budget" : over ? "Over" : "Within"}</StatusPill>
         <span>
           {none
-            ? "Nothing planned for this track"
+            ? "Nothing budgeted for this track"
             : over
               ? `${formatMoney(-track.remaining)} over`
               : `${formatMoney(track.remaining)} left`}
@@ -783,67 +853,118 @@ function TrackRow({ label, track, pace }: { label: string; track: BudgetTrack; p
   );
 }
 
-function CategoryRow({ line }: { line: CategoryLine }) {
-  let note: string;
-  let up = false;
-  if (line.usual === null) {
-    note = "Nothing earlier to compare with";
-  } else if (line.usual === 0) {
-    note = "Usually nothing";
-  } else {
-    const change = Math.round(((line.spent - line.usual) / line.usual) * 100);
-    up = change >= 25;
-    note = `${change >= 0 ? "+" : "−"}${Math.abs(change)}% against the usual ${formatMoney(line.usual)}`;
-  }
+/**
+ * A kind of spending: what it came to, its share, and its usual month.
+ *
+ * The difference is in pesos, and only flagged when it is worth a look.
+ */
+function CategoryRow({
+  line,
+  onShow,
+}: {
+  line: CategoryLine;
+  onShow?: ((query: string) => void) | undefined;
+}) {
+  const above = line.usual === null ? 0 : line.spent - line.usual;
+  const notable = line.usual !== null && above >= NOTABLE && (line.usual === 0 || above >= line.usual / 2);
 
   return (
     <li className="fms-budgetcat">
-      <div className="fms-rankhead">
-        <span className="t-body fms-rankname">{line.name}</span>
+      <div className="fms-budgetcat-head">
+        {onShow ? (
+          <button
+            type="button"
+            className="t-body fms-linkish"
+            onClick={() => onShow(line.name)}
+            title={`Show the ${line.name} rows in the Database`}
+          >
+            {line.name}
+          </button>
+        ) : (
+          <span className="t-body">{line.name}</span>
+        )}
         <Money value={line.spent} size="s" />
       </div>
       <div className="fms-budgetcat-bar" aria-hidden>
         <span style={{ width: `${Math.max(2, Math.round(line.share * 100))}%` }} />
       </div>
-      <span className={up ? "t-caption fms-budgetcat-foot fms-budgetcat-foot--up" : "t-caption fms-budgetcat-foot"}>
-        {note}
-      </span>
+      <div className="t-caption fms-budgetcat-foot">
+        <span>
+          {line.usual === null
+            ? "First month on record"
+            : line.usual === 0
+              ? "Usually nothing"
+              : `Usually ${formatMoney(line.usual)}`}
+        </span>
+        {notable && <span className="t-micro fms-budgetcat-flag">{formatMoney(above)} more than usual</span>}
+      </div>
     </li>
   );
 }
 
-function BillRow({ bill, phase, month }: { bill: BillStatus; phase: MonthPhase; month: string }) {
-  const open = !bill.paidThisMonth && bill.timesPaid > 0 && bill.daysToDue !== undefined;
-  const late = phase === "current" && open && (bill.daysToDue ?? 0) < 0;
-  const soon = phase === "current" && open && !late && (bill.daysToDue ?? 99) <= 3;
+const BILL_PILL: Record<BillState, readonly [Status, string]> = {
+  paid: ["ok", "Paid"],
+  late: ["over", "Late"],
+  soon: ["warn", "Soon"],
+  due: ["none", "Due"],
+  expected: ["none", "Expected"],
+  missed: ["none", "Not paid"],
+};
 
+function BillRow({
+  bill,
+  month,
+  onRecord,
+}: {
+  bill: MonthBill;
+  month: string;
+  onRecord?: (() => void) | undefined;
+}) {
   let when: string;
-  if (bill.paidThisMonth) when = `Paid in ${month}`;
-  else if (bill.timesPaid === 0) when = "Never paid";
-  else if (phase === "past") when = `Not paid in ${month}`;
-  else if (phase === "future") when = "Expected, going by the last payment";
-  else if (bill.daysToDue === undefined) when = "Due date unknown";
-  else if (bill.daysToDue < 0) {
-    const days = -bill.daysToDue;
-    when = `${days} ${days === 1 ? "day" : "days"} late, going by last month`;
-  } else if (bill.daysToDue === 0) when = "Due today, going by last month";
-  else when = `Due in ${bill.daysToDue} ${bill.daysToDue === 1 ? "day" : "days"}`;
+  switch (bill.state) {
+    case "paid":
+      when = `Paid in ${month}`;
+      break;
+    case "missed":
+      when = `Not paid in ${month}`;
+      break;
+    case "expected":
+      when = "Expected at the last amount paid";
+      break;
+    case "late": {
+      const days = -(bill.daysToDue ?? 0);
+      when = `${days} ${days === 1 ? "day" : "days"} late, going by last month`;
+      break;
+    }
+    default:
+      when =
+        bill.daysToDue === undefined
+          ? "Due this month"
+          : bill.daysToDue === 0
+            ? "Due today"
+            : `Due in ${bill.daysToDue} ${bill.daysToDue === 1 ? "day" : "days"}`;
+  }
 
-  const amount = bill.paidThisMonth ? bill.paidThisMonthAmount : bill.lastAmount || bill.averageAmount;
+  const [status, word] = BILL_PILL[bill.state];
+  const open = bill.state !== "paid" && bill.state !== "missed";
 
   return (
     <li className="fms-budgetbill">
       <div className="fms-budgetbill-text">
         <span className="t-body fms-truncate">{bill.item}</span>
-        <span className="t-caption" style={{ color: late ? "var(--over)" : "var(--ink-3)" }}>
+        <span className="t-caption" style={{ color: bill.state === "late" ? "var(--over)" : "var(--ink-3)" }}>
           {bill.category === "Bills" ? "Bill" : "Subscription"} · {when}
         </span>
       </div>
       <div className="fms-budgetbill-figure">
-        <Money value={amount} size="s" tone={bill.paidThisMonth ? undefined : "var(--ink-3)"} />
-        <StatusPill status={bill.paidThisMonth ? "ok" : late ? "over" : soon ? "warn" : "none"}>
-          {bill.paidThisMonth ? "Paid" : late ? "Late" : phase === "past" ? "Unpaid" : "Due"}
-        </StatusPill>
+        <Money value={bill.amount} size="s" tone={bill.state === "paid" ? undefined : "var(--ink-3)"} />
+        {open && onRecord ? (
+          <Button size="sm" onClick={onRecord}>
+            Record payment
+          </Button>
+        ) : (
+          <StatusPill status={status}>{word}</StatusPill>
+        )}
       </div>
     </li>
   );

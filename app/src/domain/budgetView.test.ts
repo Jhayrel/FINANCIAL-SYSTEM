@@ -2,7 +2,8 @@
  * The Budget screen's month view.
  *
  * The first block is the one that matters: the view adds to rule 3.6 and must
- * carry its verdicts and figures exactly. The rest pins the additions.
+ * carry its verdicts and figures exactly. The rest pins the additions, and
+ * that every card asking the same question gets the same figure.
  */
 
 import { describe, expect, it } from "vitest";
@@ -13,7 +14,9 @@ import {
   applyPlan,
   categoryLines,
   copyPlanForward,
+  monthBills,
   monthPlanView,
+  phaseOf,
   planSuggestions,
   previousPlan,
   withMonthPlan,
@@ -53,11 +56,10 @@ describe("the month view carries rule 3.6 and changes none of it", () => {
   });
 
   it("closes a month that is over and has not started one that is ahead", () => {
-    const past = view(MONTH - 1);
-    expect(past).toMatchObject({ phase: "past", elapsed: 1, daysLeft: 0, perDay: 0, projected: null });
-
-    const ahead = view(MONTH + 1);
-    expect(ahead).toMatchObject({ phase: "future", elapsed: 0, projected: null });
+    expect(view(MONTH - 1)).toMatchObject({ phase: "past", elapsed: 1, daysLeft: 0, perDay: 0, projected: null });
+    expect(view(MONTH + 1)).toMatchObject({ phase: "future", elapsed: 0, projected: null });
+    expect(phaseOf(YEAR + 1, 1, AS_OF)).toBe("future");
+    expect(phaseOf(YEAR - 1, 12, AS_OF)).toBe("past");
   });
 });
 
@@ -126,6 +128,39 @@ describe("where the month went", () => {
   });
 });
 
+// ── The month's bills ──────────────────────────────────────────────────────
+
+describe("a month's bills, one definition", () => {
+  const running = monthBills(fx.transactions, fx.reference, YEAR, MONTH, AS_OF);
+
+  it("adds up: paid and still expected make the month's total", () => {
+    expect(running.total).toBe(running.paid + running.stillExpected);
+    expect(running.paid).toBe(running.bills.filter((b) => b.state === "paid").reduce((a, b) => a + b.amount, 0));
+  });
+
+  it("lists what needs doing first and what is paid last", () => {
+    const order = ["late", "soon", "due", "expected", "missed", "paid"];
+    const ranks = running.bills.map((b) => order.indexOf(b.state));
+    expect(ranks.every((r, i) => i === 0 || (ranks[i - 1] ?? 0) <= r)).toBe(true);
+  });
+
+  it("names a bill never paid instead of counting it as nothing due", () => {
+    expect(running.bills.some((b) => running.neverPaid.includes(b.item))).toBe(false);
+  });
+
+  it("expects nothing more of a month that is over", () => {
+    const over = monthBills(fx.transactions, fx.reference, YEAR, MONTH - 1, AS_OF);
+    expect(over.stillExpected).toBe(0);
+    expect(over.bills.every((b) => b.state === "paid" || b.state === "missed")).toBe(true);
+  });
+
+  it("expects every bill of a month ahead", () => {
+    const ahead = monthBills(fx.transactions, fx.reference, YEAR, MONTH + 1, AS_OF);
+    expect(ahead.paid).toBe(0);
+    expect(ahead.bills.every((b) => b.state === "expected")).toBe(true);
+  });
+});
+
 // ── Setting a plan ─────────────────────────────────────────────────────────
 
 describe("setting a plan once", () => {
@@ -148,7 +183,7 @@ describe("setting a plan once", () => {
     const next = withMonthPlan(plan, 9, { spending: 800000, billsSubs: 170000 });
     expect(next.spending[8]).toBe(800000);
     expect(next.billsSubs[8]).toBe(170000);
-    expect(next.spending.filter((v, i) => i !== 8)).toEqual(plan.spending.filter((_, i) => i !== 8));
+    expect(next.spending.filter((_, i) => i !== 8)).toEqual(plan.spending.filter((_, i) => i !== 8));
   });
 
   it("finds the nearest earlier month with a plan", () => {
@@ -175,8 +210,6 @@ describe("setting a plan once", () => {
   });
 });
 
-// ── Planning from history ──────────────────────────────────────────────────
-
 describe("which months a budget is saved to", () => {
   const plan = budgetForYear(fx.budgets, YEAR);
   const value = { spending: 900000, billsSubs: 150000 };
@@ -202,9 +235,11 @@ describe("which months a budget is saved to", () => {
   });
 });
 
+// ── Planning from history ──────────────────────────────────────────────────
+
 describe("a budget that starts from the ledger", () => {
   const next = MONTH + 1;
-  const s = planSuggestions(fx.transactions, fx.reference, fx.budgets, YEAR, next);
+  const s = planSuggestions(fx.transactions, fx.reference, fx.budgets, YEAR, next, AS_OF);
 
   it("offers the plan of the month before", () => {
     expect(s.previous).toMatchObject({ year: YEAR, month: MONTH });
@@ -221,27 +256,40 @@ describe("a budget that starts from the ledger", () => {
     expect(s.usualIncome).toBe(incomes[1]);
   });
 
-  it("counts the bills actually being paid, and adds them up", () => {
-    expect(s.bills.length).toBeGreaterThan(0);
-    expect(s.billsTotal).toBe(s.bills.reduce((a, b) => a + b.amount, 0));
-    expect(s.bills.every((b, i) => i === 0 || (s.bills[i - 1]?.amount ?? 0) >= b.amount)).toBe(true);
+  it("shows the planner the very bills the Bills card shows", () => {
+    expect(s.bills).toEqual(monthBills(fx.transactions, fx.reference, YEAR, next, AS_OF));
+  });
+
+  it("measures a month ahead against the usual income", () => {
+    expect(s.incomeSoFar).toBe(0);
+    expect(s.expectedFrom).toBe("usual");
+    expect(s.expectedIncome).toBe(s.usualIncome);
+  });
+
+  it("measures the running month against what came in, once that is more than usual", () => {
+    const now = planSuggestions(fx.transactions, fx.reference, fx.budgets, YEAR, MONTH, AS_OF);
+    const soFar = monthTotals(fx.transactions, YEAR, MONTH).revenue;
+    expect(now.incomeSoFar).toBe(soFar);
+    expect(now.expectedIncome).toBe(Math.max(soFar, now.usualIncome ?? 0));
   });
 
   it("keeps a fifth of income, in whole hundreds of pesos", () => {
     const income = s.usualIncome ?? 0;
-    const expected = Math.max(0, Math.round((Math.round(income * 0.8) - s.billsTotal) / 10000) * 10000);
+    const expected = Math.max(0, Math.round((Math.round(income * 0.8) - s.bills.total) / 10000) * 10000);
     expect(s.spendingKeepFifth).toBe(expected);
     expect(Math.abs((s.spendingKeepFifth ?? 0) % 10000)).toBe(0);
   });
 
   it("suggests nothing it has no history for", () => {
-    expect(planSuggestions([], fx.reference, {}, 2026, 1)).toMatchObject({
+    const empty = planSuggestions([], fx.reference, {}, 2026, 1, "2026-01-15");
+    expect(empty).toMatchObject({
       usualIncome: null,
+      expectedIncome: null,
       spendingUsual: null,
       spendingLastMonth: null,
       spendingKeepFifth: null,
       previous: null,
-      billsTotal: 0,
     });
+    expect(empty.bills.total).toBe(0);
   });
 });

@@ -59,6 +59,7 @@ const PAGE = 25;
 export function Database({
   transactions,
   initialFilter = "all",
+  initialQuery = "",
   onDelete,
   onDeleteMany,
   onEdit,
@@ -66,6 +67,8 @@ export function Database({
 }: {
   transactions: readonly Transaction[];
   initialFilter?: FilterId;
+  /** Words to search for on arrival, from a link on another screen. */
+  initialQuery?: string | undefined;
   onDelete?: (id: string) => void;
   /** Several at once, as one move with one record of it. */
   onDeleteMany?: ((ids: readonly string[]) => void) | undefined;
@@ -74,7 +77,7 @@ export function Database({
   /** Today, for the Today, Yesterday, Last 7 days and This month shortcuts. */
   asOf: string;
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [period, setPeriod] = useState<Period>("all");
   /**
