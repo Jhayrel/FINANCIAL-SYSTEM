@@ -190,6 +190,22 @@ export function Activity({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shown, limit]);
 
+  /** The whole trail at a glance, whatever the filters are showing. */
+  const summary = useMemo(() => {
+    const list = events ?? [];
+    const count = (test: (e: ActivityEvent) => boolean): number => list.filter(test).length;
+    return {
+      added: count((e) => e.action === "transaction.create"),
+      changed: count((e) => e.action === "transaction.update"),
+      binned: count((e) => e.action === "transaction.bin"),
+      restored: count((e) => e.action === "transaction.restore"),
+      settings: count((e) => e.action.startsWith("settings.")),
+      assistant: count((e) => e.actor === "ai"),
+      days: new Set(list.map((e) => dayOf(e.at))).size,
+      since: list[list.length - 1]?.at,
+    };
+  }, [events]);
+
   const filtered = who !== "all" || kind !== "all";
   const now = new Date();
 
@@ -308,6 +324,58 @@ export function Activity({
           </div>
         )}
       </Card>
+
+      {/*
+        The trail at a glance, in the width a wide screen left empty. Each
+        count is also its filter: one click shows just those.
+      */}
+      {total > 0 && !failed && (
+        <aside className="fms-actrail" aria-label="The trail at a glance">
+          <Card
+            title="At a glance"
+            subtitle={`${summary.days} ${summary.days === 1 ? "day" : "days"} with changes${
+              summary.since ? `, since ${shortDate(dayOf(summary.since))}` : ""
+            }`}
+          >
+            <ul className="fms-actsum">
+              {(
+                [
+                  ["added", "Added", summary.added, "add"],
+                  ["changed", "Changed", summary.changed, "edit"],
+                  // One row, because it is one filter: two rows lit up together.
+                  ["binned", "Binned or restored", summary.binned + summary.restored, "bin"],
+                  ["settings", "Settings changed", summary.settings, "settings"],
+                ] as const
+              ).map(([id, label, n, icon]) => (
+                <li key={label}>
+                  <button
+                    type="button"
+                    className="fms-actsum-row"
+                    aria-pressed={kind === id}
+                    onClick={() => setKind(kind === id ? "all" : id)}
+                  >
+                    <span aria-hidden className="fms-acticon">
+                      <Icon name={icon} size={16} />
+                    </span>
+                    <span className="t-body fms-actsum-label">{label}</span>
+                    <span className="t-num-s">{n}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            <div className="fms-actwho">
+              <div className="fms-actwho-bar" aria-hidden>
+                <span style={{ width: `${(summary.assistant / total) * 100}%` }} />
+              </div>
+              <div className="t-caption fms-actwho-legend">
+                <span>Typed by you {total - summary.assistant}</span>
+                <span>Read by the assistant {summary.assistant}</span>
+              </div>
+            </div>
+          </Card>
+        </aside>
+      )}
     </div>
   );
 }

@@ -611,9 +611,72 @@
  * them reachable, and no scrollbar to say there were more.
  */
 .fms-bin {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-4);
   width: 100%;
-  max-width: 1080px;
+  max-width: 1600px;
   min-width: 0;
+}
+
+/*
+ * The width a wide screen has spare goes to a side panel, not to longer rows:
+ * the counts by type and what restoring would do to each wallet.
+ */
+@media (min-width: 1280px) {
+  .fms-bin {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  }
+
+  .fms-binrail {
+    position: sticky;
+    top: 0;
+  }
+}
+
+.fms-binrail {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fms-binsum {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-binsum > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 7px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-binsum > li:first-child {
+  border-top: none;
+}
+
+.fms-binsum-type {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-binmore {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--hairline);
 }
 
 /* Clip, not hidden: hidden would make the card the box the bar sticks to. */
@@ -3099,11 +3162,102 @@
  */
 .fms-activity {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
+  align-items: start;
   gap: var(--space-4);
   width: 100%;
-  max-width: 960px;
+  max-width: 1600px;
   min-width: 0;
+}
+
+/* Wide enough, the trail and its summary side by side. */
+@media (min-width: 1280px) {
+  .fms-activity {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  }
+
+  .fms-activity > .fms-alert {
+    grid-column: 1 / -1;
+  }
+
+  .fms-actrail {
+    position: sticky;
+    top: 0;
+  }
+}
+
+.fms-actrail {
+  min-width: 0;
+}
+
+.fms-actsum {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-actsum-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--ease-out);
+}
+
+.fms-actsum-row:hover {
+  background: var(--surface-hover);
+}
+
+.fms-actsum-row[aria-pressed="true"] {
+  background: var(--brand-50);
+}
+
+.fms-actsum-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Who did it, as one bar: yours in green, the assistant's in its own accent. */
+.fms-actwho {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-actwho-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--brand-700);
+}
+
+.fms-actwho-bar > span {
+  display: block;
+  height: 100%;
+  margin-left: auto;
+  background: var(--ai-glow-ring);
+}
+
+.fms-actwho-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  color: var(--ink-3);
 }
 
 /* The two filters, as one toolbar across the top of the card. */
@@ -3522,6 +3676,123 @@
 
 .fms-monthlink:hover {
   text-decoration: underline;
+}
+
+/*
+ * The month, and beside it the planner that sets its budget.
+ *
+ * In the DOM the planner sits between the month and the detail, which is
+ * where it belongs on a phone: straight under the figure it changes. On a
+ * wide screen it moves into its own column beside both and stays in view.
+ */
+.fms-budgetpage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-4);
+  max-width: 1600px;
+}
+
+.fms-budgettop,
+.fms-budgetrest {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fms-budgetrail {
+  min-width: 0;
+  scroll-margin-top: var(--space-4);
+}
+
+@media (min-width: 1280px) {
+  .fms-budgetpage {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+    /* Extra height from the tall planner goes below the month, not into it. */
+    grid-template-rows: auto 1fr;
+  }
+
+  .fms-budgettop {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .fms-budgetrest {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .fms-budgetrail {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    position: sticky;
+    top: 0;
+  }
+}
+
+.fms-planner {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.fms-planner-field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-planner-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.fms-planner-chips > .fms-btn {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+
+.fms-planner-note {
+  margin: 0;
+  color: var(--ink-3);
+}
+
+.fms-planner-sum {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+}
+
+.fms-planner-sumrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+  min-width: 0;
+}
+
+.fms-planner-scope {
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* Three answers that share the width and wrap their words rather than overflow. */
+.fms-planner-scope .fms-segmented {
+  display: flex;
+  width: 100%;
+}
+
+.fms-planner-scope .fms-seg {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  line-height: 1.2;
 }
 
 /*

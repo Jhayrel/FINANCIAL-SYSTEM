@@ -6,14 +6,17 @@
  * The screen was the BUDGETING sheet: a grid of twelve months of two numbers,
  * a summary table where every month so far was a red row, and the forecast
  * and cash flow under it. It answered "was I over in March" and nothing a
- * person asks while a month is still running: how much is left, how much
- * that is a day, which bills are still to come, where the money is going,
- * and how the plan compares with what came in.
+ * person asks while a month is still running.
  *
- * It opens on a month now, and the year is one table under it. Rule 3.6 is
- * untouched: the two tracks, their verdicts and every figure are the same
- * functions as before, and `budgetView.test.ts` asserts the month view
- * carries them exactly.
+ * It opens on a month now, with the year as one table under it. A budget is
+ * set in the planner beside the month rather than typed into a grid: it
+ * starts from the ledger (the usual income, the bills actually being paid,
+ * what spending usually runs to), shows what the plan leaves of the income,
+ * and saves to the month, the rest of the year or all of it in one go.
+ *
+ * Rule 3.6 is untouched: the two tracks, their verdicts and every figure are
+ * the same functions as before, and `budgetView.test.ts` asserts the month
+ * view carries them exactly.
  */
 
 import { useMemo, useRef, useState, type ReactNode } from "react";
@@ -35,13 +38,15 @@ import { useConfirm } from "../components/Confirm";
 import { billStatuses, type BillStatus } from "../domain/bills";
 import { budgetForYear, budgetSummary, budgetYearTotals, type MonthBudgetRow } from "../domain/budget";
 import {
+  applyPlan,
   categoryLines,
-  copyPlanForward,
   monthPlanView,
-  previousPlan,
+  planSuggestions,
   withMonthPlan,
   type CategoryLine,
   type MonthPhase,
+  type PlanScope,
+  type PlanSuggestions,
 } from "../domain/budgetView";
 import type { Debt } from "../domain/debt";
 import { cashFlow, explainBasis, forecastYear } from "../domain/forecast";
@@ -50,8 +55,8 @@ import { formatMoney, type Centavos } from "../domain/money";
 import type { BudgetTrack, BudgetYear, Budgets, ReferenceLists, Transaction } from "../domain/types";
 
 const TRACKS = [
-  { id: "spending", label: "Spending", spoken: "spending" },
-  { id: "billsSubs", label: "Bills & subs", spoken: "bills and subscriptions" },
+  { id: "spending", label: "Spending" },
+  { id: "billsSubs", label: "Bills & subs" },
 ] as const;
 
 /** Enough to see the shape of a month without a wall of small amounts. */
@@ -81,7 +86,6 @@ export function Budget({
   debts,
   reference,
   asOf,
-  onChangeBudget,
   onReplaceYear,
 }: {
   transactions: readonly Transaction[];
@@ -89,17 +93,15 @@ export function Budget({
   debts: readonly Debt[];
   reference: ReferenceLists;
   asOf: string;
-  onChangeBudget: (year: number, month: number, track: "spending" | "billsSubs", value: Centavos) => void;
-  /** A whole year's plan at once, for the actions that change several months. */
+  /** A year's plan, written once, whichever months a save touched. */
   onReplaceYear: (year: number, next: BudgetYear) => void;
 }) {
   const year = getYear(asOf);
   const asOfMonth = getMonth(asOf);
   const [month, setMonth] = useState(asOfMonth);
-  const [editing, setEditing] = useState(false);
+  const [savedNote, setSavedNote] = useState<string | null>(null);
   const [allCategories, setAllCategories] = useState(false);
-  const planRef = useRef<HTMLDivElement>(null);
-  const { confirm, dialog } = useConfirm();
+  const plannerRef = useRef<HTMLElement>(null);
 
   const y = useMemo(() => {
     const rows = budgetSummary(transactions, budgets, year);
@@ -124,11 +126,12 @@ export function Budget({
       view,
       lines: categoryLines(transactions, year, month),
       bills: billStatuses(transactions, reference, billsAsOf),
-      previous: previousPlan(budgets, year, month),
+      suggestions: planSuggestions(transactions, reference, budgets, year, month),
     };
   }, [transactions, budgets, reference, year, month, asOf]);
 
-  const { view, lines, bills, previous } = m;
+  const { view, lines, bills, suggestions } = m;
+  const previous = suggestions.previous;
   const a = view.assessment;
   const name = monthLabel(month);
   const noPlan = a.combined.budget === 0;
@@ -143,26 +146,34 @@ export function Budget({
   const planSpending = y.plan.spending.reduce((s, v) => s + v, 0);
   const planBills = y.plan.billsSubs.reduce((s, v) => s + v, 0);
 
-  const openPlan = (): void => {
-    setEditing(true);
-    planRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const pickMonth = (next: number): void => {
+    setMonth(next);
+    setSavedNote(null);
+  };
+
+  const focusPlanner = (): void => {
+    const el = plannerRef.current;
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
   };
 
   const usePrevious = (): void => {
-    if (previous) onReplaceYear(year, withMonthPlan(y.plan, month, previous));
+    if (!previous) return;
+    onReplaceYear(year, withMonthPlan(y.plan, month, previous));
+    setSavedNote(`Saved. ${name} uses the same plan as ${monthLabel(previous.month)}.`);
   };
 
-  const copyForward = async (): Promise<void> => {
-    if (month >= 12) return;
-    const spending = y.plan.spending[month - 1] ?? 0;
-    const billsSubs = y.plan.billsSubs[month - 1] ?? 0;
-    const ok = await confirm({
-      title: `Copy ${name}'s plan to ${monthLabel(month + 1)} through December?`,
-      body: `Each of those months becomes ${formatMoney(spending)} for spending and ${formatMoney(billsSubs)} for bills and subscriptions. Months before ${name} stay as they are, and any month can be changed afterwards.`,
-      confirmLabel: "Copy the plan",
-      tone: "normal",
-    });
-    if (ok) onReplaceYear(year, copyPlanForward(y.plan, month));
+  const savePlan = (value: { spending: Centavos; billsSubs: Centavos }, scope: PlanScope): void => {
+    onReplaceYear(year, applyPlan(y.plan, month, value, scope));
+    const total = formatMoney(value.spending + value.billsSubs);
+    setSavedNote(
+      scope === "month"
+        ? `Saved. ${name} is set to ${total}.`
+        : scope === "rest"
+          ? `Saved. ${name} through December are set to ${total} each.`
+          : `Saved. Every month of ${year} is set to ${total}.`,
+    );
   };
 
   const previousName = previous
@@ -172,194 +183,204 @@ export function Budget({
     : "";
 
   return (
-    <div className="fms-dash">
-      {dialog}
+    <div className="fms-budgetpage">
+      {/* ── The month ────────────────────────────────────────────────────── */}
+      <div className="fms-budgettop">
+        <SegmentedControl
+          options={MONTH_OPTIONS}
+          value={String(month)}
+          onChange={(id) => pickMonth(Number(id))}
+          scroll
+          label={`Month of ${year}`}
+        />
 
-      <SegmentedControl
-        options={MONTH_OPTIONS}
-        value={String(month)}
-        onChange={(id) => setMonth(Number(id))}
-        scroll
-        label={`Month of ${year}`}
-      />
-
-      {/* ── The month ────────────────────────────────────────────────── */}
-      <Card
-        title={`${name} ${year}`}
-        subtitle={
-          view.phase === "current"
-            ? `${view.daysLeft} ${view.daysLeft === 1 ? "day" : "days"} left in the month`
-            : view.phase === "past"
-              ? "The month is over"
-              : "Not started yet"
-        }
-        action={<StatusPill status={statusOf(a.combined)}>{statusWord(a.combined, view.phase)}</StatusPill>}
-      >
-        {noPlan ? (
-          <div className="fms-budgetempty">
-            <p className="t-body" style={{ margin: 0, color: "var(--ink-2)" }}>
-              No budget set for {name}.{" "}
-              {a.combined.spent > 0
-                ? `${formatMoney(a.combined.spent)} has gone out with nothing to measure it against.`
-                : "Set one and this shows what is left, and what that is a day."}
-            </p>
-            <div className="fms-budgetempty-actions">
-              {previous && (
-                <Button variant="primary" onClick={usePrevious}>
-                  Use {previousName}'s plan, {formatMoney(previous.spending + previous.billsSubs)}
-                </Button>
-              )}
-              <Button variant={previous ? "secondary" : "primary"} onClick={openPlan}>
-                Set it
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="fms-budgethero">
-            <div className="fms-budgethero-figure">
-              <span className="t-label" style={{ color: "var(--ink-2)" }}>
-                {a.combined.remaining < 0
-                  ? "Over the plan by"
-                  : view.phase === "past"
-                    ? "Left unspent"
-                    : "Left to spend"}
-              </span>
-              <Money
-                value={Math.abs(a.combined.remaining)}
-                size="xl"
-                tone={a.combined.remaining < 0 ? "var(--over)" : undefined}
-              />
-              <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                {formatMoney(a.combined.spent)} spent of {formatMoney(a.combined.budget)}
-                {view.phase !== "past" && view.perDay > 0 ? ` · ${formatMoney(view.perDay)} a day` : ""}
-              </span>
-            </div>
-            <div className="fms-budgettracks">
-              {TRACKS.map((t) => (
-                <TrackRow key={t.id} label={t.label} track={a[t.id]} pace={pace} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {view.projected !== null &&
-          a.combined.budget > 0 &&
-          a.combined.remaining >= 0 &&
-          view.projected > a.combined.budget && (
-            <div style={{ marginTop: "var(--space-4)" }}>
-              <Alert status="warn" title="On pace to go over">
-                At the rate so far {name} ends near {formatMoney(view.projected)},{" "}
-                {formatMoney(view.projected - a.combined.budget)} past the plan. Keeping to{" "}
-                {formatMoney(view.perDay)} a day holds it inside.
-              </Alert>
-            </div>
-          )}
-
-        <div className="fms-budgetincome">
-          <Stat label="Came in" hint="Income, not counting starting balances">
-            <Money value={view.revenue} size="m" tone="var(--flow-revenue-text)" />
-          </Stat>
-          <Stat label="Went out" hint="Everything the two tracks count">
-            <Money value={a.combined.spent} size="m" tone="var(--flow-spending-text)" />
-          </Stat>
-          <Stat
-            label="Kept"
-            hint={view.keptRate === null ? "No income this month" : `${pct(view.keptRate)} of what came in`}
-          >
-            <Money value={view.kept} size="m" signed />
-          </Stat>
-          <Stat
-            label="Plan against income"
-            hint={
-              view.planShareOfIncome === null
-                ? noPlan
-                  ? "No plan to compare"
-                  : "No income to compare"
-                : view.planShareOfIncome > 1
-                  ? "The plan spends more than came in"
-                  : "Of what came in is planned to go out"
-            }
-          >
-            <span className="t-num-m" style={{ color: "var(--ink)" }}>
-              {view.planShareOfIncome === null ? "None" : pct(view.planShareOfIncome)}
-            </span>
-          </Stat>
-        </div>
-      </Card>
-
-      <div className="fms-budgetgrid">
-        {/* ── Where it went ────────────────────────────────────────────── */}
         <Card
-          title="Where it went"
-          subtitle={`Spending in ${name}, against the usual for the three months before`}
-          action={
-            lines.length > 0 ? (
-              <span className="t-micro fms-badge fms-badge--count">
-                {lines.length} {lines.length === 1 ? "kind" : "kinds"}
-              </span>
-            ) : undefined
+          title={`${name} ${year}`}
+          subtitle={
+            view.phase === "current"
+              ? `${view.daysLeft} ${view.daysLeft === 1 ? "day" : "days"} left in the month`
+              : view.phase === "past"
+                ? "The month is over"
+                : "Not started yet"
           }
+          action={<StatusPill status={statusOf(a.combined)}>{statusWord(a.combined, view.phase)}</StatusPill>}
         >
-          {lines.length === 0 ? (
-            <EmptyState
-              message={view.phase === "future" ? `${name} has not started.` : `Nothing spent in ${name}.`}
-            />
-          ) : (
-            <>
-              <ol className="fms-budgetcats">
-                {(allCategories ? lines : lines.slice(0, TOP_CATEGORIES)).map((l) => (
-                  <CategoryRow key={l.name} line={l} />
-                ))}
-              </ol>
-              {lines.length > TOP_CATEGORIES && (
-                <div style={{ marginTop: "var(--space-4)" }}>
-                  <Button size="sm" onClick={() => setAllCategories((x) => !x)}>
-                    {allCategories ? `Show the top ${TOP_CATEGORIES}` : `Show all ${lines.length}`}
+          {noPlan ? (
+            <div className="fms-budgetempty">
+              <p className="t-body" style={{ margin: 0, color: "var(--ink-2)" }}>
+                No budget set for {name}.{" "}
+                {a.combined.spent > 0
+                  ? `${formatMoney(a.combined.spent)} has gone out with nothing to measure it against.`
+                  : "Set one and this shows what is left, and what that is a day."}
+              </p>
+              <div className="fms-budgetempty-actions">
+                {previous && (
+                  <Button variant="primary" onClick={usePrevious}>
+                    Use {previousName}'s plan, {formatMoney(previous.spending + previous.billsSubs)}
                   </Button>
-                </div>
-              )}
-            </>
-          )}
-        </Card>
-
-        {/* ── Bills ────────────────────────────────────────────────────── */}
-        <Card
-          title="Bills and subscriptions"
-          subtitle={`The Bills & subs track: ${formatMoney(a.billsSubs.spent)} of ${formatMoney(a.billsSubs.budget)}`}
-          action={
-            bills.length > 0 ? (
-              <span className="t-micro fms-badge fms-badge--count">
-                {paid.length} of {bills.length} paid
-              </span>
-            ) : undefined
-          }
-        >
-          {bills.length === 0 ? (
-            <EmptyState message="No bills or subscriptions yet. Add them in Settings, under Categories." />
-          ) : (
-            <>
-              <ul className="fms-budgetbills">
-                {bills.map((b) => (
-                  <BillRow key={b.item} bill={b} phase={view.phase} month={name} />
-                ))}
-              </ul>
-              <div className="t-caption fms-budgetfoot">
-                <span>
-                  Paid <Money value={paidTotal} size="s" />
-                </span>
-                {view.phase !== "past" && (
-                  <span>
-                    Still expected <Money value={stillExpected} size="s" tone="var(--ink-2)" />
-                  </span>
                 )}
+                <Button variant={previous ? "secondary" : "primary"} onClick={focusPlanner}>
+                  Set it from your history
+                </Button>
               </div>
-            </>
+            </div>
+          ) : (
+            <div className="fms-budgethero">
+              <div className="fms-budgethero-figure">
+                <span className="t-label" style={{ color: "var(--ink-2)" }}>
+                  {a.combined.remaining < 0
+                    ? "Over the plan by"
+                    : view.phase === "past"
+                      ? "Left unspent"
+                      : "Left to spend"}
+                </span>
+                <Money
+                  value={Math.abs(a.combined.remaining)}
+                  size="xl"
+                  tone={a.combined.remaining < 0 ? "var(--over)" : undefined}
+                />
+                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                  {formatMoney(a.combined.spent)} spent of {formatMoney(a.combined.budget)}
+                  {view.phase !== "past" && view.perDay > 0 ? ` · ${formatMoney(view.perDay)} a day` : ""}
+                </span>
+              </div>
+              <div className="fms-budgettracks">
+                {TRACKS.map((t) => (
+                  <TrackRow key={t.id} label={t.label} track={a[t.id]} pace={pace} />
+                ))}
+              </div>
+            </div>
           )}
+
+          {view.projected !== null &&
+            a.combined.budget > 0 &&
+            a.combined.remaining >= 0 &&
+            view.projected > a.combined.budget && (
+              <div style={{ marginTop: "var(--space-4)" }}>
+                <Alert status="warn" title="On pace to go over">
+                  At the rate so far {name} ends near {formatMoney(view.projected)},{" "}
+                  {formatMoney(view.projected - a.combined.budget)} past the plan. Keeping to{" "}
+                  {formatMoney(view.perDay)} a day holds it inside.
+                </Alert>
+              </div>
+            )}
+
+          <div className="fms-budgetincome">
+            <Stat label="Came in" hint="Income, not counting starting balances">
+              <Money value={view.revenue} size="m" tone="var(--flow-revenue-text)" />
+            </Stat>
+            <Stat label="Went out" hint="Everything the two tracks count">
+              <Money value={a.combined.spent} size="m" tone="var(--flow-spending-text)" />
+            </Stat>
+            <Stat
+              label="Kept"
+              hint={view.keptRate === null ? "No income this month" : `${pct(view.keptRate)} of what came in`}
+            >
+              <Money value={view.kept} size="m" signed />
+            </Stat>
+            <Stat
+              label="Plan against income"
+              hint={
+                view.planShareOfIncome === null
+                  ? noPlan
+                    ? "No plan to compare"
+                    : "No income to compare"
+                  : view.planShareOfIncome > 1
+                    ? "The plan spends more than came in"
+                    : "Of what came in is planned to go out"
+              }
+            >
+              <span className="t-num-m" style={{ color: "var(--ink)" }}>
+                {view.planShareOfIncome === null ? "None" : pct(view.planShareOfIncome)}
+              </span>
+            </Stat>
+          </div>
         </Card>
       </div>
 
-      {/* ── The year's plan ──────────────────────────────────────────────── */}
-      <div ref={planRef} className="fms-budgetplan">
+      {/* ── Setting the budget ───────────────────────────────────────────── */}
+      <aside ref={plannerRef} className="fms-budgetrail" aria-label={`Set the budget for ${name}`}>
+        <Planner
+          key={`${year}-${month}-${suggestions.current.spending}-${suggestions.current.billsSubs}`}
+          year={year}
+          month={month}
+          suggestions={suggestions}
+          note={savedNote}
+          onSave={savePlan}
+        />
+      </aside>
+
+      {/* ── The detail, and the year ─────────────────────────────────────── */}
+      <div className="fms-budgetrest">
+        <div className="fms-budgetgrid">
+          <Card
+            title="Where it went"
+            subtitle={`Spending in ${name}, against the usual for the three months before`}
+            action={
+              lines.length > 0 ? (
+                <span className="t-micro fms-badge fms-badge--count">
+                  {lines.length} {lines.length === 1 ? "kind" : "kinds"}
+                </span>
+              ) : undefined
+            }
+          >
+            {lines.length === 0 ? (
+              <EmptyState
+                message={view.phase === "future" ? `${name} has not started.` : `Nothing spent in ${name}.`}
+              />
+            ) : (
+              <>
+                <ol className="fms-budgetcats">
+                  {(allCategories ? lines : lines.slice(0, TOP_CATEGORIES)).map((l) => (
+                    <CategoryRow key={l.name} line={l} />
+                  ))}
+                </ol>
+                {lines.length > TOP_CATEGORIES && (
+                  <div style={{ marginTop: "var(--space-4)" }}>
+                    <Button size="sm" onClick={() => setAllCategories((x) => !x)}>
+                      {allCategories ? `Show the top ${TOP_CATEGORIES}` : `Show all ${lines.length}`}
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </Card>
+
+          <Card
+            title="Bills and subscriptions"
+            subtitle={`The Bills & subs track: ${formatMoney(a.billsSubs.spent)} of ${formatMoney(a.billsSubs.budget)}`}
+            action={
+              bills.length > 0 ? (
+                <span className="t-micro fms-badge fms-badge--count">
+                  {paid.length} of {bills.length} paid
+                </span>
+              ) : undefined
+            }
+          >
+            {bills.length === 0 ? (
+              <EmptyState message="No bills or subscriptions yet. Add them in Settings, under Categories." />
+            ) : (
+              <>
+                <ul className="fms-budgetbills">
+                  {bills.map((b) => (
+                    <BillRow key={b.item} bill={b} phase={view.phase} month={name} />
+                  ))}
+                </ul>
+                <div className="t-caption fms-budgetfoot">
+                  <span>
+                    Paid <Money value={paidTotal} size="s" />
+                  </span>
+                  {view.phase !== "past" && (
+                    <span>
+                      Still expected <Money value={stillExpected} size="s" tone="var(--ink-2)" />
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
+          </Card>
+        </div>
+
         <Card
           title={`Plan for ${year}`}
           subtitle={`Set aside ${formatMoney(y.totals.budget)}, spent ${formatMoney(y.totals.spent)}, ${
@@ -368,20 +389,9 @@ export function Budget({
               : `${formatMoney(-y.totals.remaining)} over`
           }`}
           action={
-            <div className="fms-budgetplan-actions">
-              {editing && month < 12 && (
-                <Button size="sm" onClick={() => void copyForward()}>
-                  Copy {name} to the months after
-                </Button>
-              )}
-              <Button
-                size="sm"
-                variant={editing ? "primary" : "secondary"}
-                onClick={() => setEditing((e) => !e)}
-              >
-                {editing ? "Done" : "Edit plan"}
-              </Button>
-            </div>
+            <Button size="sm" onClick={focusPlanner}>
+              Change {name}
+            </Button>
           }
           padded={false}
         >
@@ -411,7 +421,7 @@ export function Budget({
                           type="button"
                           className="fms-monthlink"
                           aria-pressed={r.month === month}
-                          onClick={() => setMonth(r.month)}
+                          onClick={() => pickMonth(r.month)}
                         >
                           {r.monthName}
                         </button>
@@ -420,15 +430,7 @@ export function Budget({
                         const value = y.plan[t.id][i] ?? 0;
                         return (
                           <td key={t.id} className="fms-rnum" data-label={t.label}>
-                            {editing ? (
-                              <AmountInput
-                                value={value}
-                                onChange={(val) => onChangeBudget(year, i + 1, t.id, val ?? 0)}
-                                ariaLabel={`${r.monthName} ${t.spoken} budget`}
-                              />
-                            ) : (
-                              <Money value={value} size="s" tone={value === 0 ? "var(--ink-3)" : undefined} />
-                            )}
+                            <Money value={value} size="s" tone={value === 0 ? "var(--ink-3)" : undefined} />
                           </td>
                         );
                       })}
@@ -470,94 +472,283 @@ export function Budget({
             </table>
           </div>
         </Card>
-      </div>
 
-      <div className="fms-charts">
-        <Card title="Plan against spending" subtitle="Red where a month went over">
-          <BarChart
-            labels={MONTH_NAMES.slice(0, asOfMonth).map((n) => n.slice(0, 3))}
-            budget={y.rows.slice(0, asOfMonth).map((r) => r.budget)}
-            actual={y.rows.slice(0, asOfMonth).map((r) => r.spent)}
-          />
-        </Card>
+        <div className="fms-charts">
+          <Card title="Plan against spending" subtitle="Red where a month went over">
+            <BarChart
+              labels={MONTH_NAMES.slice(0, asOfMonth).map((n) => n.slice(0, 3))}
+              budget={y.rows.slice(0, asOfMonth).map((r) => r.budget)}
+              actual={y.rows.slice(0, asOfMonth).map((r) => r.spent)}
+            />
+          </Card>
 
-        <Card title="Forecast" subtitle="Estimates for the months still ahead" padded={false}>
+          <Card title="Forecast" subtitle="Estimates for the months still ahead" padded={false}>
+            <div className="fms-rtable-wrap">
+              <table className="fms-rtable">
+                <thead>
+                  <tr>
+                    <th className="t-th">Month</th>
+                    <th className="t-th fms-rnum">Spending</th>
+                    <th className="t-th fms-rnum">Bills</th>
+                    <th className="t-th fms-rnum">Total</th>
+                    <th className="t-th">Basis</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {y.forecast
+                    .filter((f) => !f.isActual)
+                    .map((f) => (
+                      <tr key={f.month}>
+                        <td className="t-body fms-rhead">{monthLabel(f.month)}</td>
+                        <td className="fms-rnum" data-label="Spending">
+                          <Money value={f.spending} size="s" />
+                        </td>
+                        <td className="fms-rnum" data-label="Bills">
+                          <Money value={f.billsSubs} size="s" />
+                        </td>
+                        <td className="fms-rnum" data-label="Total">
+                          <Money value={f.total} size="s" />
+                        </td>
+                        <td className="t-micro" data-label="Basis" style={{ color: "var(--ink-3)" }}>
+                          {explainBasis(f.basis)}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+
+        <Card
+          title="Net cash flow"
+          subtitle="What came in against what went out, and how much was kept"
+          padded={false}
+        >
           <div className="fms-rtable-wrap">
             <table className="fms-rtable">
               <thead>
                 <tr>
                   <th className="t-th">Month</th>
-                  <th className="t-th fms-rnum">Spending</th>
-                  <th className="t-th fms-rnum">Bills</th>
-                  <th className="t-th fms-rnum">Total</th>
-                  <th className="t-th">Basis</th>
+                  <th className="t-th fms-rnum">Revenue</th>
+                  <th className="t-th fms-rnum">Expense</th>
+                  <th className="t-th fms-rnum">Transfers</th>
+                  <th className="t-th fms-rnum">Net</th>
+                  <th className="t-th fms-rnum">Kept</th>
                 </tr>
               </thead>
               <tbody>
-                {y.forecast
-                  .filter((f) => !f.isActual)
-                  .map((f) => (
-                    <tr key={f.month}>
-                      <td className="t-body fms-rhead">{monthLabel(f.month)}</td>
-                      <td className="fms-rnum" data-label="Spending">
-                        <Money value={f.spending} size="s" />
-                      </td>
-                      <td className="fms-rnum" data-label="Bills">
-                        <Money value={f.billsSubs} size="s" />
-                      </td>
-                      <td className="fms-rnum" data-label="Total">
-                        <Money value={f.total} size="s" />
-                      </td>
-                      <td className="t-micro" data-label="Basis" style={{ color: "var(--ink-3)" }}>
-                        {explainBasis(f.basis)}
-                      </td>
-                    </tr>
-                  ))}
+                {y.flow.slice(0, asOfMonth).map((r) => (
+                  <tr key={r.month}>
+                    <td className="t-body fms-rhead">{monthLabel(r.month)}</td>
+                    <td className="fms-rnum" data-label="Revenue">
+                      <Money value={r.revenue} size="s" tone="var(--flow-revenue-text)" />
+                    </td>
+                    <td className="fms-rnum" data-label="Expense">
+                      <Money value={r.expense} size="s" tone="var(--flow-spending-text)" />
+                    </td>
+                    <td className="fms-rnum" data-label="Transfers">
+                      <Money value={r.transfer} size="s" tone="var(--ink-3)" />
+                    </td>
+                    <td className="fms-rnum" data-label="Net">
+                      <Money value={r.net} size="s" signed />
+                    </td>
+                    <td className="fms-rnum t-caption" data-label="Kept" style={{ color: "var(--ink-2)" }}>
+                      {r.revenue > 0 ? pct(r.net / r.revenue) : "No income"}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         </Card>
       </div>
-
-      <Card title="Net cash flow" subtitle="What came in against what went out, and how much was kept" padded={false}>
-        <div className="fms-rtable-wrap">
-          <table className="fms-rtable">
-            <thead>
-              <tr>
-                <th className="t-th">Month</th>
-                <th className="t-th fms-rnum">Revenue</th>
-                <th className="t-th fms-rnum">Expense</th>
-                <th className="t-th fms-rnum">Transfers</th>
-                <th className="t-th fms-rnum">Net</th>
-                <th className="t-th fms-rnum">Kept</th>
-              </tr>
-            </thead>
-            <tbody>
-              {y.flow.slice(0, asOfMonth).map((r) => (
-                <tr key={r.month}>
-                  <td className="t-body fms-rhead">{monthLabel(r.month)}</td>
-                  <td className="fms-rnum" data-label="Revenue">
-                    <Money value={r.revenue} size="s" tone="var(--flow-revenue-text)" />
-                  </td>
-                  <td className="fms-rnum" data-label="Expense">
-                    <Money value={r.expense} size="s" tone="var(--flow-spending-text)" />
-                  </td>
-                  <td className="fms-rnum" data-label="Transfers">
-                    <Money value={r.transfer} size="s" tone="var(--ink-3)" />
-                  </td>
-                  <td className="fms-rnum" data-label="Net">
-                    <Money value={r.net} size="s" signed />
-                  </td>
-                  <td className="fms-rnum t-caption" data-label="Kept" style={{ color: "var(--ink-2)" }}>
-                    {r.revenue > 0 ? pct(r.net / r.revenue) : "No income"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
     </div>
+  );
+}
+
+// ── The planner ────────────────────────────────────────────────────────────
+
+/**
+ * Setting a month's budget.
+ *
+ * It starts from what the month already has, or else the month before's plan,
+ * or else the ledger's own figures, so a first budget is one look and one
+ * press rather than twelve cells typed from memory. Each figure it offers is
+ * a button that fills the field, never a value written in silently.
+ */
+function Planner({
+  year,
+  month,
+  suggestions: s,
+  note,
+  onSave,
+}: {
+  year: number;
+  month: number;
+  suggestions: PlanSuggestions;
+  note: string | null;
+  onSave: (value: { spending: Centavos; billsSubs: Centavos }, scope: PlanScope) => void;
+}) {
+  const name = monthLabel(month);
+  const hasPlan = s.current.spending + s.current.billsSubs > 0;
+  const start = hasPlan
+    ? s.current
+    : s.previous
+      ? { spending: s.previous.spending, billsSubs: s.previous.billsSubs }
+      : { spending: s.spendingUsual ?? 0, billsSubs: s.billsTotal };
+
+  const [bills, setBills] = useState<Centavos | null>(start.billsSubs);
+  const [spending, setSpending] = useState<Centavos | null>(start.spending);
+  const [scope, setScope] = useState<PlanScope>("month");
+  const { confirm, dialog } = useConfirm();
+
+  const total = (bills ?? 0) + (spending ?? 0);
+  const keep = s.usualIncome === null ? null : s.usualIncome - total;
+
+  const scopes: { id: PlanScope; label: string }[] = [
+    { id: "month", label: `${name.slice(0, 3)} only` },
+    ...(month < 12 ? [{ id: "rest" as const, label: `${name.slice(0, 3)} to Dec` }] : []),
+    { id: "year", label: `All ${year}` },
+  ];
+
+  const billNames =
+    s.bills
+      .slice(0, 4)
+      .map((b) => `${b.item} ${formatMoney(b.amount)}`)
+      .join(", ") + (s.bills.length > 4 ? `, and ${s.bills.length - 4} more` : "");
+
+  const save = async (): Promise<void> => {
+    const value = { spending: spending ?? 0, billsSubs: bills ?? 0 };
+    if (scope !== "month") {
+      const ok = await confirm({
+        title:
+          scope === "rest"
+            ? `Set ${name} through December to ${formatMoney(total)} each?`
+            : `Set every month of ${year} to ${formatMoney(total)}?`,
+        body: `Each of those months gets ${formatMoney(value.spending)} for spending and ${formatMoney(
+          value.billsSubs,
+        )} for bills and subscriptions, replacing what it had. ${
+          scope === "year" ? "Months already over are included." : `Months before ${name} stay as they are.`
+        }`,
+        confirmLabel: "Set the budget",
+        tone: "normal",
+      });
+      if (!ok) return;
+    }
+    onSave(value, scope);
+  };
+
+  return (
+    <Card
+      title="Set the budget"
+      subtitle={
+        hasPlan
+          ? `${name} ${year} has a plan. Change it here.`
+          : `${name} ${year} has none yet. These figures start from your own ledger.`
+      }
+    >
+      {dialog}
+      <div className="fms-planner">
+        <div className="fms-planner-field">
+          <span className="t-label" style={{ color: "var(--ink-2)" }}>
+            Bills and subscriptions
+          </span>
+          <AmountInput value={bills} onChange={setBills} ariaLabel={`${name} bills and subscriptions budget`} />
+          {s.bills.length > 0 ? (
+            <>
+              <p className="t-caption fms-planner-note">Paid in the last two months: {billNames}.</p>
+              <div className="fms-planner-chips">
+                <Button size="sm" onClick={() => setBills(s.billsTotal)}>
+                  Those bills, {formatMoney(s.billsTotal)}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <p className="t-caption fms-planner-note">No bills paid in the last two months to go by.</p>
+          )}
+        </div>
+
+        <div className="fms-planner-field">
+          <span className="t-label" style={{ color: "var(--ink-2)" }}>
+            Spending
+          </span>
+          <AmountInput value={spending} onChange={setSpending} ariaLabel={`${name} spending budget`} />
+          <div className="fms-planner-chips">
+            {s.spendingLastMonth !== null && (
+              <Button size="sm" onClick={() => setSpending(s.spendingLastMonth)}>
+                Last month, {formatMoney(s.spendingLastMonth)}
+              </Button>
+            )}
+            {s.spendingUsual !== null && (
+              <Button size="sm" onClick={() => setSpending(s.spendingUsual)}>
+                Usual, {formatMoney(s.spendingUsual)}
+              </Button>
+            )}
+            {s.spendingKeepFifth !== null && s.spendingKeepFifth > 0 && (
+              <Button size="sm" onClick={() => setSpending(s.spendingKeepFifth)}>
+                Keep a fifth of income, {formatMoney(s.spendingKeepFifth)}
+              </Button>
+            )}
+          </div>
+          <p className="t-caption fms-planner-note">
+            Everything but bills and subscriptions: what you buy, money sent to other people, transfer
+            fees and interest.
+          </p>
+        </div>
+
+        <div className="fms-planner-sum">
+          <div className="fms-planner-sumrow">
+            <span className="t-label" style={{ color: "var(--ink-2)" }}>
+              Budget for the month
+            </span>
+            <Money value={total} size="l" />
+          </div>
+          {s.usualIncome === null ? (
+            <p className="t-caption fms-planner-note">No income in the months before {name} to compare with.</p>
+          ) : keep !== null && keep >= 0 ? (
+            <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+              Leaves {formatMoney(keep)} of your usual {formatMoney(s.usualIncome)} income
+              {s.usualIncome > 0 ? `, ${pct(keep / s.usualIncome)}` : ""}.
+            </p>
+          ) : (
+            <p className="t-caption" style={{ margin: 0, color: "var(--over)" }}>
+              Plans {formatMoney(-(keep ?? 0))} more than your usual {formatMoney(s.usualIncome)} income.
+            </p>
+          )}
+        </div>
+
+        <div className="fms-planner-scope">
+          <span className="t-label" style={{ color: "var(--ink-2)" }}>
+            Save it to
+          </span>
+          <div className="fms-segmented" role="radiogroup" aria-label="Which months the budget is saved to">
+            {scopes.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                role="radio"
+                aria-checked={scope === o.id}
+                className={`fms-seg ${scope === o.id ? "t-body-strong" : "t-body"}`}
+                onClick={() => setScope(o.id)}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <Button variant="primary" fullWidth onClick={() => void save()}>
+          Save budget
+        </Button>
+
+        {note && (
+          <p className="t-caption" role="status" style={{ margin: 0, color: "var(--ink-2)" }}>
+            {note}
+          </p>
+        )}
+      </div>
+    </Card>
   );
 }
 

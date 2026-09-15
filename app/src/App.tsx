@@ -80,7 +80,6 @@ import {
   type ActivityEvent,
   type Provenance,
 } from "./domain/activity";
-import type { Centavos } from "./domain/money";
 import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction } from "./domain/types";
 
 type Screen =
@@ -785,32 +784,12 @@ export default function App() {
         flash("Removed from this browser.");
       };
 
-  const handleBudgetChange = (
-    year: number,
-    month: number,
-    track: "spending" | "billsSubs",
-    value: Centavos,
-  ): void => {
-    setBudgets((prev) => {
-      const key = String(year);
-      const current = prev[key] ?? {
-        spending: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] as const,
-        billsSubs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] as const,
-      };
-      const next = [...current[track]];
-      next[month - 1] = value;
-      const updated = { ...current, [track]: next as unknown as typeof current.spending };
-      if (cloud.uid) {
-        saveBudget(cloud.uid, key, updated).catch((e: Error) => setSyncError(e.message));
-      }
-      return { ...prev, [key]: updated };
-    });
-  };
-
   /**
-   * A whole year's plan at once: "use last month's plan" and "copy to the
-   * months after". One state change and one write, rather than a write per
-   * month that each read a budget the previous one had not yet replaced.
+   * A year's budget, however many months a save touched.
+   *
+   * The Budget screen's planner saves to one month, the rest of the year or
+   * all of it. Each is one state change and one write, rather than a write
+   * per month that each read a budget the previous one had not yet replaced.
    */
   const handleBudgetYear = (year: number, next: BudgetYear): void => {
     const key = String(year);
@@ -1279,7 +1258,6 @@ export default function App() {
               debts={settings.credits}
               reference={reference}
               asOf={asOf}
-              onChangeBudget={handleBudgetChange}
               onReplaceYear={handleBudgetYear}
             />
           )}

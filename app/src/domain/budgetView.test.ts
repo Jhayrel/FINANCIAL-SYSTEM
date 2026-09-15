@@ -10,9 +10,11 @@ import { describe, expect, it } from "vitest";
 import { loadFixture } from "../fixtures/load";
 import { assessMonthFor, budgetForYear, dailyPacing } from "./budget";
 import {
+  applyPlan,
   categoryLines,
   copyPlanForward,
   monthPlanView,
+  planSuggestions,
   previousPlan,
   withMonthPlan,
 } from "./budgetView";
@@ -94,7 +96,7 @@ describe("where the month went", () => {
     expect(lines.every((l, i) => i === 0 || (lines[i - 1]?.spent ?? 0) >= l.spent)).toBe(true);
   });
 
-  it("averages the usual over months that had spending, not over empty ones", () => {
+  it("takes the usual from months that had spending, not from empty ones", () => {
     const rows = [
       spend("2026-06-10", "Food", 100000),
       spend("2026-08-10", "Food", 300000),
@@ -102,6 +104,16 @@ describe("where the month went", () => {
     ];
     // July had nothing at all, so it is not counted as a month of spending nothing.
     expect(categoryLines(rows, 2026, 9)[0]?.usual).toBe(200000);
+  });
+
+  it("is not dragged up by one unusually large month", () => {
+    const rows = [
+      spend("2026-06-10", "Food", 100000),
+      spend("2026-07-10", "Food", 900000),
+      spend("2026-08-10", "Food", 120000),
+      spend("2026-09-05", "Food", 150000),
+    ];
+    expect(categoryLines(rows, 2026, 9)[0]?.usual).toBe(120000);
   });
 
   it("has no usual before there is any history", () => {
@@ -160,5 +172,76 @@ describe("setting a plan once", () => {
 
   it("finds nothing when no month has a plan", () => {
     expect(previousPlan({}, 2026, 5)).toBeNull();
+  });
+});
+
+// ── Planning from history ──────────────────────────────────────────────────
+
+describe("which months a budget is saved to", () => {
+  const plan = budgetForYear(fx.budgets, YEAR);
+  const value = { spending: 900000, billsSubs: 150000 };
+
+  it("saves to the month alone", () => {
+    const next = applyPlan(plan, 9, value, "month");
+    expect([next.spending[8], next.billsSubs[8]]).toEqual([900000, 150000]);
+    expect(next.spending[9]).toBe(plan.spending[9]);
+    expect(next.spending[7]).toBe(plan.spending[7]);
+  });
+
+  it("saves to the month and every month after it", () => {
+    const next = applyPlan(plan, 9, value, "rest");
+    expect(next.spending[7]).toBe(plan.spending[7]);
+    expect(next.spending.slice(8)).toEqual([900000, 900000, 900000, 900000]);
+    expect(next.billsSubs.slice(8)).toEqual([150000, 150000, 150000, 150000]);
+  });
+
+  it("saves to every month of the year", () => {
+    const next = applyPlan(plan, 9, value, "year");
+    expect(next.spending.every((v) => v === 900000)).toBe(true);
+    expect(next.billsSubs.every((v) => v === 150000)).toBe(true);
+  });
+});
+
+describe("a budget that starts from the ledger", () => {
+  const next = MONTH + 1;
+  const s = planSuggestions(fx.transactions, fx.reference, fx.budgets, YEAR, next);
+
+  it("offers the plan of the month before", () => {
+    expect(s.previous).toMatchObject({ year: YEAR, month: MONTH });
+  });
+
+  it("takes last month's spending from the spending track, as rule 3.6 counts it", () => {
+    expect(s.spendingLastMonth).toBe(assessMonthFor(fx.transactions, fx.budgets, YEAR, MONTH).spending.spent);
+  });
+
+  it("takes the usual income from the middle of the three months before", () => {
+    const incomes = [MONTH, MONTH - 1, MONTH - 2]
+      .map((m) => monthTotals(fx.transactions, YEAR, m).revenue)
+      .sort((a, b) => a - b);
+    expect(s.usualIncome).toBe(incomes[1]);
+  });
+
+  it("counts the bills actually being paid, and adds them up", () => {
+    expect(s.bills.length).toBeGreaterThan(0);
+    expect(s.billsTotal).toBe(s.bills.reduce((a, b) => a + b.amount, 0));
+    expect(s.bills.every((b, i) => i === 0 || (s.bills[i - 1]?.amount ?? 0) >= b.amount)).toBe(true);
+  });
+
+  it("keeps a fifth of income, in whole hundreds of pesos", () => {
+    const income = s.usualIncome ?? 0;
+    const expected = Math.max(0, Math.round((Math.round(income * 0.8) - s.billsTotal) / 10000) * 10000);
+    expect(s.spendingKeepFifth).toBe(expected);
+    expect(Math.abs((s.spendingKeepFifth ?? 0) % 10000)).toBe(0);
+  });
+
+  it("suggests nothing it has no history for", () => {
+    expect(planSuggestions([], fx.reference, {}, 2026, 1)).toMatchObject({
+      usualIncome: null,
+      spendingUsual: null,
+      spendingLastMonth: null,
+      spendingKeepFifth: null,
+      previous: null,
+      billsTotal: 0,
+    });
   });
 });

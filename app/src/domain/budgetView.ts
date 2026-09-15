@@ -13,11 +13,27 @@
  *   - a plan that can be set once and carried forward
  */
 
+import { billStatuses } from "./bills";
 import { assessMonth, budgetForMonth, dailyPacing } from "./budget";
-import { daysInMonth, firstOfMonth, getMonth, getYear, lastOfMonth, MONTH_NAMES } from "./dates";
+import {
+  daysBetween,
+  daysInMonth,
+  firstOfMonth,
+  getMonth,
+  getYear,
+  lastOfMonth,
+  MONTH_NAMES,
+} from "./dates";
 import type { Centavos } from "./money";
 import { monthTotals, spendingAttribution } from "./totals";
-import type { BudgetAssessment, BudgetYear, Budgets, IsoDate, Transaction } from "./types";
+import type {
+  BudgetAssessment,
+  BudgetYear,
+  Budgets,
+  IsoDate,
+  ReferenceLists,
+  Transaction,
+} from "./types";
 
 export type MonthPhase = "past" | "current" | "future";
 
@@ -103,13 +119,31 @@ export function monthPlanView(
 
 // ── Where it went ──────────────────────────────────────────────────────────
 
+/**
+ * The middle of a few months' figures, not their mean.
+ *
+ * One unusually large month drags a mean with it. Walking the planner on
+ * 2026-09-15 offered a "usual" spend of ₱42,206.67 beside a last month of
+ * ₱13,486.00, a suggestion nobody would budget by. The middle month of three
+ * ignores a single outlier and still moves when two of the three do. Null
+ * with nothing to go on.
+ */
+function middle(values: readonly Centavos[]): Centavos | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const half = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? (sorted[half] ?? 0)
+    : Math.round(((sorted[half - 1] ?? 0) + (sorted[half] ?? 0)) / 2);
+}
+
 export interface CategoryLine {
   readonly name: string;
   readonly spent: Centavos;
   /**
-   * The average for this kind of spending over the months before, counting
-   * only months that had any spending at all. Null when there are none: a
-   * month before the ledger began is not a month of spending nothing.
+   * The middle figure for this kind of spending over the months before,
+   * counting only months that had any spending at all. Null when there are
+   * none: a month before the ledger began is not a month of spending nothing.
    */
   readonly usual: Centavos | null;
   /** Share of the month's spending by type. */
@@ -148,10 +182,7 @@ export function categoryLines(
     .map(([name, spent]) => ({
       name,
       spent,
-      usual:
-        history.length > 0
-          ? Math.round(history.reduce((sum, h) => sum + (h.get(name) ?? 0), 0) / history.length)
-          : null,
+      usual: middle(history.map((h) => h.get(name) ?? 0)),
       share: total > 0 ? spent / total : 0,
     }))
     .sort((a, b) => b.spent - a.spent);
@@ -208,4 +239,104 @@ export function previousPlan(
   }
   const december = budgetForMonth(budgets, year - 1, 12);
   return december.spending + december.billsSubs > 0 ? { year: year - 1, month: 12, ...december } : null;
+}
+
+// ── Planning a month from your own history ────────────────────────────────
+
+/** Which months a budget is saved to. */
+export type PlanScope = "month" | "rest" | "year";
+
+/** A month's plan saved to that month, to it and every month after, or to the whole year. */
+export function applyPlan(
+  plan: BudgetYear,
+  month: number,
+  value: { readonly spending: Centavos; readonly billsSubs: Centavos },
+  scope: PlanScope,
+): BudgetYear {
+  if (scope === "year") {
+    return {
+      spending: plan.spending.map(() => value.spending) as unknown as Amounts,
+      billsSubs: plan.billsSubs.map(() => value.billsSubs) as unknown as Amounts,
+    };
+  }
+  const set = withMonthPlan(plan, month, value);
+  return scope === "rest" ? copyPlanForward(set, month) : set;
+}
+
+export interface PlanSuggestions {
+  /** What the month is set to now. */
+  readonly current: { readonly spending: Centavos; readonly billsSubs: Centavos };
+  readonly previous: ReturnType<typeof previousPlan>;
+  /** The middle income of the months before that had any money moving. */
+  readonly usualIncome: Centavos | null;
+  /** The bills and subscriptions paid in the two months before, at their latest amount. */
+  readonly bills: readonly { readonly item: string; readonly amount: Centavos }[];
+  readonly billsTotal: Centavos;
+  /** The spending track as rule 3.6 counts it, for the month before. */
+  readonly spendingLastMonth: Centavos | null;
+  /** The middle of the same over the months before that had any money moving. */
+  readonly spendingUsual: Centavos | null;
+  /**
+   * What spending can be while bills and spending together stay at four
+   * fifths of the usual income, so a fifth is kept. Rounded to the nearest
+   * hundred pesos, because a budget is a round figure people remember.
+   */
+  readonly spendingKeepFifth: Centavos | null;
+}
+
+const LOOKBACK = 3;
+const toNearestHundred = (c: Centavos): Centavos => Math.round(c / 10000) * 10000;
+
+/**
+ * Starting figures for a month's budget, from the ledger itself.
+ *
+ * The workbook's plan was twelve cells typed from memory. The ledger already
+ * knows what comes in, which bills get paid and what spending usually runs
+ * to, so the plan starts there and the owner adjusts it.
+ */
+export function planSuggestions(
+  transactions: readonly Transaction[],
+  reference: ReferenceLists,
+  budgets: Budgets,
+  year: number,
+  month: number,
+): PlanSuggestions {
+  const start = firstOfMonth(year, month);
+
+  const before: { spending: Centavos; revenue: Centavos }[] = [];
+  let lastMonth: Centavos | null = null;
+
+  for (let back = 1; back <= LOOKBACK; back++) {
+    const index = year * 12 + (month - 1) - back;
+    const totals = monthTotals(transactions, Math.floor(index / 12), (index % 12) + 1);
+    // A month before the ledger began is not a month of earning nothing.
+    if (totals.total === 0 && totals.revenue === 0) continue;
+    const spending = assessMonth(totals, { spending: 0, billsSubs: 0 }).spending.spent;
+    if (back === 1) lastMonth = spending;
+    before.push({ spending, revenue: totals.revenue });
+  }
+
+  const usualIncome = middle(before.map((b) => b.revenue));
+
+  const bills = billStatuses(transactions, reference, start)
+    .filter((b) => b.timesPaid > 0 && b.lastPaid !== undefined && daysBetween(b.lastPaid, start) <= 62)
+    .map((b) => ({ item: b.item, amount: b.lastAmount }))
+    .filter((b) => b.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+
+  const billsTotal = bills.reduce((a, b) => a + b.amount, 0);
+
+  return {
+    current: budgetForMonth(budgets, year, month),
+    previous: previousPlan(budgets, year, month),
+    usualIncome,
+    bills,
+    billsTotal,
+    spendingLastMonth: lastMonth,
+    spendingUsual: middle(before.map((b) => b.spending)),
+    spendingKeepFifth:
+      usualIncome === null
+        ? null
+        : Math.max(0, toNearestHundred(Math.round(usualIncome * 0.8) - billsTotal)),
+  };
 }

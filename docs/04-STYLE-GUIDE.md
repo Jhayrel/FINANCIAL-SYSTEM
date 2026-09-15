@@ -156,7 +156,9 @@ One face. Self-hosted via `@fontsource` so the PWA keeps its type offline.
 |---|---|---|
 | phone | < 640 | 1 column · bottom nav (5) · 16px padding |
 | tablet | 640–1023 | 2 columns · bottom nav · 20px padding |
-| desktop | ≥ 1024 | 240px sidebar + fluid · 32px padding · max 1440px |
+| desktop | ≥ 1024 | 240px sidebar + fluid · 32px padding · max 1600px |
+
+**Spare width goes to a side panel, not to longer rows** (owner, 2026-09-15: "use all spaces"). From 1280px a list screen puts a summary beside the list: the Bin shows counts by type and what restoring would do to each wallet, Activity shows its counts, Budget keeps the planner beside the month. A row stretched to 1600px puts its action a hand's width from its label, so rows keep their reading width. Settings is the exception and stays one column: a two column Settings was rejected on sight (see `layout.css`, "One column, always").
 
 ### 2.4 Radius, borders, elevation
 
