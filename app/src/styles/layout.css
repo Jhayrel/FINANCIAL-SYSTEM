@@ -602,6 +602,47 @@
   margin-top: var(--space-3);
 }
 
+/*
+ * The bin scrolls as a page.
+ *
+ * It borrowed the Database's wrapper, which on a desktop is exactly one
+ * screen tall with a scrolling region inside it. The bin has no such region,
+ * so its card clipped at the bottom of the window: 136 binned rows, ten of
+ * them reachable, and no scrollbar to say there were more.
+ */
+.fms-bin {
+  width: 100%;
+  max-width: 1080px;
+  min-width: 0;
+}
+
+/* Clip, not hidden: hidden would make the card the box the bar sticks to. */
+.fms-bin > .fms-section {
+  overflow: clip;
+}
+
+/*
+ * Select all and Restore stay in reach down a long bin. Pinned to the top
+ * edge of the scrolling area, which sits outside its padding.
+ */
+.fms-bin .fms-bulkbar {
+  position: sticky;
+  top: calc(var(--space-8) * -1);
+  z-index: 2;
+}
+
+@media (max-width: 1023px) {
+  .fms-bin .fms-bulkbar {
+    top: calc(var(--space-5) * -1);
+  }
+}
+
+@media (max-width: 639px) {
+  .fms-bin .fms-bulkbar {
+    top: calc(var(--space-4) * -1);
+  }
+}
+
 .fms-binactions {
   display: flex;
   flex-wrap: wrap;
@@ -1419,6 +1460,8 @@
  */
 @media (max-width: 1023px) {
   .fms-tabs {
+    /* The offset parent, so the chosen tab can be scrolled to. */
+    position: relative;
     flex-wrap: nowrap;
     overflow-x: auto;
     scrollbar-width: none;
@@ -1582,6 +1625,76 @@
 .fms-setgroup > header > :first-child {
   flex: 1 1 14rem;
   min-width: 0;
+}
+
+/* ── AI, switched off ──────────────────────────────────────────────────── */
+
+.fms-aiswitch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fms-aioff {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fms-aioff-lead {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.fms-aioff-box {
+  display: grid;
+  gap: var(--space-2);
+  justify-self: stretch;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-md);
+}
+
+.fms-aioff-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-aioff-list li {
+  position: relative;
+  min-width: 0;
+  padding-left: var(--space-4);
+  color: var(--ink-2);
+}
+
+/* A small green dot, centred on the first line whatever the text size. */
+.fms-aioff-list li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: calc(0.75em - 3px);
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--brand-700);
+}
+
+.fms-aioff-note {
+  margin: 0;
+  color: var(--ink-3);
+}
+
+/* On a phone-sized card the button takes the width, under the thumb. */
+@container (max-width: 520px) {
+  .fms-aioff {
+    justify-items: stretch;
+  }
 }
 
 /* The add-row under each table. */
@@ -2252,8 +2365,44 @@
    * hand's width from its field.
    */
   .fms-entry--nochat {
-    grid-template-columns: minmax(400px, 1fr) minmax(220px, 300px);
-    max-width: 1180px;
+    height: auto;
+    min-height: 0;
+    grid-template-rows: none;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+    align-items: start;
+    max-width: 1280px;
+  }
+
+  /*
+   * Without the assistant nothing needs the screen's height, so the form is
+   * as tall as its fields and the page scrolls.
+   *
+   * Held to the window's height, the fields scrolled in a box of their own
+   * under the bills and the four tiles: at 1080px it showed six fields with
+   * Description cut in half, a second scrollbar with arrows beside the page's,
+   * and a column of empty space under the balances.
+   */
+  .fms-entry--nochat .fms-entryform > .fms-fields {
+    flex: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .fms-entry--nochat .fms-actions {
+    position: sticky;
+    bottom: calc(var(--main-pad-b, 0px) * -1);
+    z-index: 3;
+    margin: var(--space-4) calc(var(--space-4) * -1) calc(var(--space-4) * -1);
+    padding: var(--space-3) var(--space-4);
+    background: var(--surface);
+    border-bottom-left-radius: var(--radius-lg);
+    border-bottom-right-radius: var(--radius-lg);
+  }
+
+  /* The balances stay beside the form while it scrolls. */
+  .fms-entry--nochat .fms-side {
+    position: sticky;
+    top: 0;
   }
 
   .fms-entry > * {
@@ -2861,7 +3010,7 @@
  * A reading width, not the window's.
  *
  * Stretched across a 1920px screen an event's summary sat a hand's width from
- * its time, and the note under the list ran to 180 characters a line.
+ * its time, and the line under it ran to 180 characters.
  */
 .fms-activity {
   display: grid;
@@ -2872,34 +3021,62 @@
   min-width: 0;
 }
 
-/* Side by side while both fit, one above the other when they do not. */
-.fms-actfilters {
+/* The two filters, as one toolbar across the top of the card. */
+.fms-acttools {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3) var(--space-6);
-  min-width: 0;
-}
-
-.fms-actfilter {
-  display: grid;
-  gap: var(--space-2);
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.fms-actfilter-label {
-  color: var(--ink-3);
-}
-
-.fms-actloading {
-  display: grid;
+  align-items: center;
   gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
 }
 
-.fms-actdays {
+/* A segmented control that scrolls sideways rather than running off the card. */
+.fms-segmented--scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fms-segmented--scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.fms-segmented--scroll .fms-seg {
+  flex: 0 0 auto;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+}
+
+.fms-segcount {
+  margin-left: var(--space-2);
+  color: var(--ink-3);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (pointer: coarse) {
+  .fms-segmented--scroll .fms-seg {
+    min-height: 44px;
+  }
+}
+
+.fms-actlist {
   display: grid;
   gap: var(--space-5);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+}
+
+@container (max-width: 520px) {
+  .fms-acttools {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .fms-actlist {
+    padding: var(--space-3) var(--space-4) var(--space-4);
+  }
 }
 
 .fms-actday-title {
@@ -2921,21 +3098,23 @@
 
 .fms-acts {
   display: grid;
-  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 /*
- * Hairline separated, square. Rule D2: no card per row, no shadow. A list of
- * two hundred events with a border-radius on each one reads as two hundred
- * things to deal with rather than one thing to scan.
+ * One event: what kind of change, what it said, who, and when.
+ *
+ * Hairline separated and square. Rule D2: no card per row. Two hundred events
+ * with a border each read as two hundred things to deal with rather than one
+ * thing to scan.
  */
 .fms-act {
   display: grid;
-  gap: var(--space-1);
-  min-width: 0;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-3);
   padding: var(--space-3) 0;
   border-top: 1px solid var(--hairline);
 }
@@ -2944,17 +3123,35 @@
   border-top: none;
 }
 
-.fms-acthead {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: var(--space-2);
+.fms-acticon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+}
+
+.fms-actmain {
+  display: grid;
+  gap: var(--space-1);
   min-width: 0;
 }
 
-.fms-acthead > span:first-child {
+.fms-acthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
   min-width: 0;
+}
+
+.fms-actsummary {
+  flex: 1 1 16rem;
+  min-width: 0;
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
 
@@ -2968,16 +3165,23 @@
 .fms-actmeta {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
   color: var(--ink-3);
+}
+
+.fms-actmeta > span + span::before {
+  content: "·";
+  margin-right: var(--space-2);
 }
 
 /*
  * Who did it, as a word rather than a colour.
  *
  * Flow colour means direction of money (rule D3), so it cannot also mean
- * provenance. The assistant's marker is a ring in the AI accent, which is the
- * one colour in this palette that already means "the model was involved".
+ * provenance. The assistant's marker is a ring in the AI accent, the one
+ * colour in this palette that already means "the model was involved".
  */
 .fms-actor {
   padding: 0 var(--space-2);
@@ -2988,28 +3192,53 @@
 
 .fms-actor--ai {
   border-color: var(--ai-glow-ring);
-  color: var(--ink-2);
 }
 
-/* An edit's before and after, set off from the summary it belongs to. */
-.fms-actdiff {
+/* An edit, field by field: what it was, struck through, and what it is. */
+.fms-actchanges {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px var(--space-3);
+  gap: var(--space-1);
   margin: var(--space-1) 0 0;
   padding: var(--space-2) var(--space-3);
   background: var(--surface-sunk);
   border-radius: var(--radius-md);
-  color: var(--ink-2);
 }
 
-.fms-actdiff dt {
-  white-space: nowrap;
+.fms-actchange {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: var(--space-3);
 }
 
-.fms-actdiff dd {
+.fms-actchange dt {
+  color: var(--ink-3);
+}
+
+.fms-actchange dd {
   margin: 0;
+  min-width: 0;
+  color: var(--ink);
   overflow-wrap: anywhere;
+}
+
+.fms-actold {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
+.fms-actarrow {
+  margin: 0 var(--space-2);
+  color: var(--ink-3);
+}
+
+.fms-actmore {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
 }
 
 /*

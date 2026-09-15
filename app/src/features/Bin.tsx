@@ -55,7 +55,7 @@ export function Bin({
   const expected = target ? String(target.recordNumber).padStart(4, "0") : "";
 
   return (
-    <div className="fms-db">
+    <div className="fms-bin">
       <Card
         title="Recycle bin"
         subtitle="Deleted transactions stay here until you clear them"

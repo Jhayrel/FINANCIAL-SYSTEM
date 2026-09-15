@@ -19,6 +19,7 @@ import {
   ProgressBar,
   StatusPill,
 } from "../components/primitives";
+import { Icon } from "../components/Icon";
 import { AmountInput, Field, Select, Switch, TextInput } from "../components/forms";
 import { useConfirm, type ConfirmRequest } from "../components/Confirm";
 import {
@@ -149,6 +150,22 @@ export function Settings({
   onUpload?: (() => void) | undefined;
 }) {
   const [tab, setTab] = useState<Tab>("accounts");
+  const tabStrip = useRef<HTMLDivElement>(null);
+
+  /**
+   * The chosen tab stays in view.
+   *
+   * On a phone the eight tabs are one line that scrolls, and on the AI tab
+   * the strip still showed Accounts to Categories: no tab looked chosen, and
+   * the card under the strip seemed to belong to none of them. The strip
+   * scrolls, never the page.
+   */
+  useEffect(() => {
+    const strip = tabStrip.current;
+    const on = strip?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!strip || !on || strip.scrollWidth <= strip.clientWidth) return;
+    strip.scrollTo({ left: Math.max(0, on.offsetLeft - (strip.clientWidth - on.offsetWidth) / 2) });
+  }, [tab]);
   const patch = (part: Partial<AppSettings>): void => onChange({ ...settings, ...part });
 
   const goals = useMemo(
@@ -173,7 +190,7 @@ export function Settings({
 
   return (
     <div className="fms-settings">
-      <div className="fms-tabs" role="tablist" aria-label="Settings sections">
+      <div ref={tabStrip} className="fms-tabs" role="tablist" aria-label="Settings sections">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -186,6 +203,12 @@ export function Settings({
             {counts[t.id] > 0 && (
               <span className="t-micro" style={{ marginLeft: 6, opacity: 0.75 }}>
                 {counts[t.id]}
+              </span>
+            )}
+            {/* Whether AI is on, readable without opening the tab. */}
+            {t.id === "ai" && !settings.ai.enabled && (
+              <span className="t-micro" style={{ marginLeft: 6, opacity: 0.75 }}>
+                off
               </span>
             )}
           </button>
@@ -1863,38 +1886,79 @@ function AiSection({
     if (ok) setAi(part);
   };
 
+  /** The same question whichever control asks it: the switch or the button. */
+  const toggle = (enabled: boolean): void =>
+    void ask(
+      enabled ? "Turn AI on?" : "Turn AI off?",
+      enabled
+        ? "The app may send figures it has already calculated to the provider you pick. Nothing leaves this device until you turn this on."
+        : "Every AI chat and AI card disappears, on the phone and on the computer, and nothing is sent anywhere. Your ledger and every figure stay exactly as they are.",
+      enabled ? "Turn it on" : "Turn it off",
+      { enabled },
+      enabled ? "normal" : "danger",
+    );
+
   return (
     <>
       {dialog}
 
       <Group
-        title="AI"
+        title="AI assistant"
         hint="Rewrites figures the app already computed"
         action={
-          <Switch
-            checked={ai.enabled}
-            label="Enable AI"
-            onChange={(enabled) =>
-              void ask(
-                enabled ? "Turn AI on?" : "Turn AI off?",
-                enabled
-                  ? "The app may send figures it has already calculated to the provider below. Nothing leaves this device until you turn this on."
-                  : "Every AI chat and AI card disappears, on the phone and on the computer, and nothing is sent anywhere. Your ledger and every figure stay exactly as they are.",
-                enabled ? "Turn it on" : "Turn it off",
-                { enabled },
-                enabled ? "normal" : "danger",
-              )
-            }
-          />
+          /*
+           * The switch says what it is set to.
+           *
+           * A bare grey switch at the top of an otherwise empty screen was the
+           * only sign of the state, and on a phone it read as a control that
+           * had not loaded yet.
+           */
+          <div className="fms-aiswitch">
+            <StatusPill status={off ? "none" : "ok"}>{off ? "Off" : "On"}</StatusPill>
+            <Switch checked={ai.enabled} label="Enable AI" onChange={toggle} />
+          </div>
         }
       >
-        <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
-          It never writes to your ledger, never adds a transaction, and never changes a balance.
-          Every number it repeats was calculated here first.
-        </p>
-        {off && (
-          <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-            Off. The assistant, its chat and its cards are hidden everywhere until you turn this on.
+        {off ? (
+          /*
+           * What switched off looks like.
+           *
+           * It was a switch and two captions at the top of an empty screen,
+           * which looked like a page that had failed to load rather than a
+           * feature at rest. This says what is off, what turning it on would
+           * bring back, and offers the one thing there is to do.
+           */
+          <div className="fms-aioff">
+            <p className="t-body fms-aioff-lead">
+              No chat and no AI cards, on the phone or on the computer, and nothing is sent
+              anywhere. The ledger and every figure work exactly the same without it.
+            </p>
+
+            <div className="fms-aioff-box">
+              <div className="t-label" style={{ color: "var(--ink-2)" }}>
+                Turning it on adds
+              </div>
+              <ul className="fms-aioff-list t-body">
+                <li>A chat beside the Add form, and a chat button on every other screen</li>
+                <li>An AI tab on the phone</li>
+                <li>A short read of what needs attention on the Dashboard and of the month on Insights</li>
+                <li>Receipts and statements read into rows you check before adding</li>
+              </ul>
+            </div>
+
+            <Button variant="primary" onClick={() => toggle(true)} iconLeft={<Icon name="ai" size={18} />}>
+              Turn on AI
+            </Button>
+
+            <p className="t-caption fms-aioff-note">
+              Even on, it never writes to your ledger, never adds a transaction and never changes a
+              balance. Every number it repeats was calculated here first.
+            </p>
+          </div>
+        ) : (
+          <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+            It never writes to your ledger, never adds a transaction, and never changes a balance.
+            Every number it repeats was calculated here first.
           </p>
         )}
       </Group>
