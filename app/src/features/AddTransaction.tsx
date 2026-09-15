@@ -263,6 +263,8 @@ export function AddTransaction({
 
   /** Fields filled by a suggestion, so they can be styled and cleared. */
   const [suggested, setSuggested] = useState<Set<string>>(new Set());
+  /** A description the history or the model offers, shown in the empty field and never typed in for you. */
+  const [descriptionIdea, setDescriptionIdea] = useState("");
 
   const markSuggested = (field: string): void =>
     setSuggested((current) => new Set(current).add(field));
@@ -326,10 +328,18 @@ export function AddTransaction({
 
         if (!draft.description) {
           const result = await describeDraft(draft, transactions, { allowModel, tone: ai.tone });
-          if (latest.current !== run || !result.text) return;
+          if (latest.current !== run) return;
 
-          setDraft((d) => (d.description ? d : { ...d, description: result.text }));
-          markSuggested("description");
+          /**
+           * An idea, not an entry.
+           *
+           * It was written into the field, so Item "Food" saved with the
+           * description "food", and a green bar beside it said the app had
+           * done it. A description is what this one was, which only you
+           * know. The idea waits in the empty field, and Tab takes it.
+           */
+          const idea = (result.text ?? "").trim();
+          setDescriptionIdea(idea && idea.toLowerCase() !== draft.item.trim().toLowerCase() ? idea : "");
         }
       })();
     }, AUTOFILL_DELAY_MS);
@@ -1044,7 +1054,7 @@ export function AddTransaction({
                     value={draft.fromWallet}
                     onChange={(v) => set("fromWallet", v)}
                     options={allWallets}
-                    placeholder={ghost.fromWallet ? `${ghost.fromWallet} (suggested)` : "Pick a wallet"}
+                    placeholder={ghost.fromWallet ? `Usually ${ghost.fromWallet}` : "Pick a wallet"}
                     invalid={Boolean(errorFor("fromWallet"))}
                   />
                 </Row>
@@ -1103,7 +1113,7 @@ export function AddTransaction({
                           value={draft.toWallet}
                           onChange={(v) => set("toWallet", v)}
                           options={allWallets}
-                          placeholder={ghost.toWallet ? `${ghost.toWallet} (suggested)` : "Pick a wallet"}
+                          placeholder={ghost.toWallet ? `Usually ${ghost.toWallet}` : "Pick a wallet"}
                           invalid={Boolean(errorFor("toWallet"))}
                         />
                       )}
@@ -1113,7 +1123,7 @@ export function AddTransaction({
                       value={draft.toWallet}
                       onChange={(v) => set("toWallet", v)}
                       options={allWallets}
-                      placeholder={ghost.toWallet ? `${ghost.toWallet} (suggested)` : "Pick a wallet"}
+                      placeholder={ghost.toWallet ? `Usually ${ghost.toWallet}` : "Pick a wallet"}
                       invalid={Boolean(errorFor("toWallet"))}
                     />
                   )}
@@ -1173,7 +1183,7 @@ export function AddTransaction({
                       setDraft((d) => ({ ...d, category: v as TransactionCategory, item: "" }));
                     }}
                     options={categories}
-                    placeholder={ghost.category ? `${ghost.category} (suggested)` : "Pick a category"}
+                    placeholder={ghost.category ? `Usually ${ghost.category}` : "Pick a category"}
                   />
                   </div>
                 </Row>
@@ -1269,7 +1279,14 @@ export function AddTransaction({
                       unmark("description");
                       set("description", v);
                     }}
-                    placeholder="What was it for?"
+                    placeholder={descriptionIdea || "What was it for?"}
+                    onKeyDown={(e) => {
+                      // Tab takes the idea in the empty field; a second Tab moves on as usual.
+                      if (e.key === "Tab" && !e.shiftKey && !draft.description && descriptionIdea) {
+                        e.preventDefault();
+                        set("description", descriptionIdea);
+                      }
+                    }}
                   />
                   </div>
                 </Row>

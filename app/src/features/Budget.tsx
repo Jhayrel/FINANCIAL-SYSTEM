@@ -35,8 +35,8 @@
  *
  * ── On a phone ────────────────────────────────────────────────────────────
  *
- * A phone shows where the month stands, where it went and the bills. Setting
- * budgets and limits and reading the year's tables are on a bigger screen.
+ * A phone shows all of it: the month, the planner, limits for kinds of
+ * spending and the year's tables, one card under another.
  *
  * Rule 3.6 is untouched: `budgetView.test.ts` asserts the month view carries
  * it exactly.
@@ -98,7 +98,6 @@ import type {
   Transaction,
 } from "../domain/types";
 import { pickableYears } from "../domain/year";
-import { useMediaQuery } from "./useMediaQuery";
 import { useReportScreen } from "./screenReport";
 
 const TRACKS = [
@@ -175,7 +174,6 @@ export function Budget({
 }) {
   const asOfYear = getYear(asOf);
   const asOfMonth = getMonth(asOf);
-  const phone = useMediaQuery("(max-width: 1023px)");
 
   const [year, setYear] = useState(asOfYear);
   const [month, setMonth] = useState(asOfMonth);
@@ -234,7 +232,7 @@ export function Budget({
   const pace = view.phase === "current" ? view.elapsed : undefined;
   const spentByKind = lines.reduce((s, l) => s + l.spent, 0);
   const limitsTotal = [...limits.values()].reduce((s, v) => s + v, 0);
-  const limitsOpen = !phone && lock.state !== "closed";
+  const limitsOpen = lock.state !== "closed";
 
   const unnamedBills = view.phase === "future" ? 0 : a.billsSubs.spent - bills.paid;
 
@@ -422,18 +420,17 @@ export function Budget({
                     ? ""
                     : "Set one and this shows what is left, and what that is a day."}
               </p>
-              {!phone &&
-                (lock.state === "closed" ? (
-                  <Button onClick={focusPlanner}>Correct it, with a reason</Button>
-                ) : previous ? (
-                  <Button variant="primary" onClick={usePrevious}>
-                    Use {previousName}'s budget, {formatMoney(previous.spending + previous.billsSubs)}
-                  </Button>
-                ) : (
-                  <Button variant="primary" onClick={focusPlanner}>
-                    Set the budget
-                  </Button>
-                ))}
+              {lock.state === "closed" ? (
+                <Button onClick={focusPlanner}>Correct it, with a reason</Button>
+              ) : previous ? (
+                <Button variant="primary" onClick={usePrevious}>
+                  Use {previousName}'s budget, {formatMoney(previous.spending + previous.billsSubs)}
+                </Button>
+              ) : (
+                <Button variant="primary" onClick={focusPlanner}>
+                  Set the budget
+                </Button>
+              )}
             </div>
           ) : (
             <div className="fms-budgethero">
@@ -550,8 +547,7 @@ export function Budget({
                 : `Spending in ${name}, by kind`
             }
           >
-            {!phone &&
-              (limits.size > 0 ? (
+            {limits.size > 0 ? (
                 <div className="fms-limitsum">
                   <div className="fms-planner-sumrow">
                     <span className="t-label" style={{ color: "var(--ink-2)" }}>
@@ -582,7 +578,7 @@ export function Budget({
                   Any kind of spending can have its own limit inside the spending budget: food, travel,
                   whatever moves month to month. Bills are followed one by one in their own card.
                 </p>
-              ) : null)}
+              ) : null}
 
             {limitNote && (
               <p
@@ -730,11 +726,8 @@ export function Budget({
 
       {/* ── The year ─────────────────────────────────────────────────────── */}
       <div className="fms-budgetrest">
-        {phone ? (
-          <p className="t-caption fms-bigger-note">
-            Limits for kinds of spending, and the tables for the whole of {year}, are on a bigger screen.
-          </p>
-        ) : (
+        {/* The whole year, on a phone too. */}
+        {
           <>
             <Card
               title={`Budget for ${year}`}
@@ -925,7 +918,7 @@ export function Budget({
               </>
             )}
           </>
-        )}
+        }
       </div>
     </div>
   );

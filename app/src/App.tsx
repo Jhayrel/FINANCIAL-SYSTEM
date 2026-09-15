@@ -30,7 +30,6 @@ import { Statements } from "./features/Statements";
 import { Alert, Button, Card, EmptyState, Money, Toast } from "./components/primitives";
 import { Notifications } from "./components/Notifications";
 import { useUpdateAvailable } from "./data/updateCheck";
-import { BiggerScreen } from "./components/BiggerScreen";
 import { Icon, type IconName } from "./components/Icon";
 import { AskPanel } from "./features/AskPanel";
 import { useProposalSink } from "./features/useProposalSink";
@@ -125,32 +124,16 @@ const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean }[] = 
   { id: "settings", label: "Settings", icon: "settings" },
 ];
 
-/**
- * What a phone shows, and nothing else.
+/*
+ * Every screen works on a phone.
  *
- * The owner's list on 2026-09-15: adding, the dashboard, the database, the
- * budget, and the assistant on a tab of its own. Debt, Insights, Statements,
- * the Bin and Activity stay on the computer, where there is room for them.
- * Settings stays reachable from the gear in the top bar, because the AI switch
- * and the accounts live there and a phone still needs both.
+ * A phone once showed five screens and a note on the rest ("on a bigger
+ * screen"). The owner asked twice on 2026-09-15 for nothing crucial to wait for
+ * a desk, and for what one screen links to be reachable from it: the Debt
+ * screen opens a statement, a notification opens Activity, the Dashboard opens
+ * Insights. A screen that answered those with a note was a dead end. The bar
+ * holds four or five of them; the rest are in the "More" sheet.
  */
-const PHONE_SCREENS: readonly Screen[] = [
-  "dashboard",
-  "database",
-  "add",
-  "budget",
-  "ai",
-  "settings",
-  /**
-   * Added later the same day, at the owner's word: what is crucial on a phone
-   * must not wait for a bigger screen. A debt payment, a look at a day on the
-   * calendar, and taking back an entry binned by mistake all happen away from
-   * a desk. They are reached from the "More" sheet.
-   */
-  "debt",
-  "insights",
-  "bin",
-];
 
 /** The phone bar, left to right. Add is drawn raised; with the AI tab it is dead centre. */
 const BAR: readonly Screen[] = ["dashboard", "database", "add", "budget"];
@@ -1092,8 +1075,7 @@ export default function App() {
       }
       return;
     }
-    // A screen that is not for a phone now says so where it is (BiggerScreen),
-    // instead of the phone quietly jumping back to the Dashboard.
+    // Every other screen works at every width, so there is nowhere else to send it.
   }, [screen, compact, chatOn]);
 
   /** Escape closes the floating chat, unless a picture or a dialog is open over it. */
@@ -1165,8 +1147,6 @@ export default function App() {
   }
 
   const title = screen === "ai" ? "AI assistant" : (NAV.find((n) => n.id === screen)?.label ?? "");
-  /** A desk screen on a phone: shown as a note, not squeezed. */
-  const blocked = compact && !PHONE_SCREENS.includes(screen);
 
   const go = (id: Screen): void => {
     setScreen(id);
@@ -1366,12 +1346,6 @@ export default function App() {
                 : ""
           }`}
         >
-          {blocked && (
-            <BiggerScreen
-              what={NAV.find((n) => n.id === screen)?.label ?? "This screen"}
-              onBack={() => go("dashboard")}
-            />
-          )}
           {updateReady && (
             <div style={{ marginBottom: "var(--space-4)" }}>
               <Alert
@@ -1478,7 +1452,7 @@ export default function App() {
               asOf={asOf}
             />
           )}
-          {screen === "debt" && !blocked && (
+          {screen === "debt" && (
             <DebtScreen
               transactions={transactions}
               debts={settings.credits}
@@ -1496,7 +1470,7 @@ export default function App() {
               }}
             />
           )}
-          {screen === "insights" && !blocked && (
+          {screen === "insights" && (
             <Insights
               transactions={transactions}
               reference={reference}
@@ -1555,7 +1529,7 @@ export default function App() {
               }}
             />
           )}
-          {screen === "statements" && !blocked && (
+          {screen === "statements" && (
             <Statements
               transactions={transactions}
               reference={reference}
@@ -1563,7 +1537,7 @@ export default function App() {
               year={getYear(asOf)}
             />
           )}
-          {screen === "bin" && !blocked && (
+          {screen === "bin" && (
             <Bin
               deleted={deleted}
               onRestore={handleRestore}
@@ -1571,7 +1545,7 @@ export default function App() {
               onPurge={handlePurge}
             />
           )}
-          {screen === "activity" && !blocked && (
+          {screen === "activity" && (
             <Activity uid={cloud.uid ?? null} reloadKey={activityKey} onAdd={() => go("add")} />
           )}
           {screen === "settings" && (
@@ -1682,9 +1656,7 @@ export default function App() {
               >
                 <Icon name={n.icon} size={20} />
                 <span className="t-body">{n.label}</span>
-                {n.id === "bin" && deleted.length > 0 && <span className="t-micro fms-navcount">{deleted.length}</span>}
-                {!PHONE_SCREENS.includes(n.id) && <span className="t-micro fms-sheetnote">Bigger screen</span>}
-              </button>
+                {n.id === "bin" && deleted.length > 0 && <span className="t-micro fms-navcount">{deleted.length}</span>}              </button>
             ))}
           </div>
         </>

@@ -67,6 +67,7 @@ export function TextInput({
   id,
   describedBy,
   ariaLabel,
+  onKeyDown,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -76,12 +77,15 @@ export function TextInput({
   id?: string | undefined;
   describedBy?: string | undefined;
   ariaLabel?: string | undefined;
+  /** For a suggestion in the placeholder that a key accepts. */
+  onKeyDown?: ((e: React.KeyboardEvent<HTMLInputElement>) => void) | undefined;
 }) {
   return (
     <input
       id={id}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onKeyDown={onKeyDown}
       placeholder={placeholder}
       disabled={disabled}
       aria-invalid={invalid || undefined}

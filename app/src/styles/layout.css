@@ -2355,16 +2355,23 @@
     height: 100%;
   }
 
+  /*
+   * As tall as its rows, and no taller than the screen.
+   *
+   * These grew to fill the screen, so a search that found three rows drew
+   * three rows and then a card of nothing to the bottom of the window. They
+   * shrink now, and only start scrolling once the rows reach the bottom.
+   */
   .fms-db > section,
   .fms-db > section > div:last-child,
   .fms-db .fms-tablewrap,
   .fms-db .fms-tablewrap > div {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
   }
 
   /* The one scrolling region on the screen. */
   .fms-db .scroll-slim {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-height: 0;
     overflow-y: auto;
   }
@@ -5276,7 +5283,10 @@ textarea.fms-askinput {
     "money"
     "attn"
     "where"
-    "note";
+    "top"
+    "income"
+    "rev"
+    "bva";
 }
 
 .fms-home > * {

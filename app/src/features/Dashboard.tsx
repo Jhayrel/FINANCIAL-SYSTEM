@@ -44,7 +44,6 @@ import { formatMoney, type Centavos } from "../domain/money";
 import { isOpenBill, monthBrief } from "../domain/monthPlan";
 import { monthlyTotalsForYear, spendingRanking, totalSpending } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction, WalletBalance } from "../domain/types";
-import { useMediaQuery } from "./useMediaQuery";
 import { useReportScreen } from "./screenReport";
 
 type Place = "budget" | "insights" | "debt";
@@ -93,7 +92,6 @@ export function Dashboard({
   onRecordDebt: (debtId: string, effect: DebtEffect, amount: Centavos | null) => void;
   onGo: (place: Place) => void;
 }) {
-  const phone = useMediaQuery("(max-width: 1023px)");
   const year = getYear(asOf);
   const month = getMonth(asOf);
 
@@ -379,11 +377,9 @@ export function Dashboard({
           title="Where it went"
           subtitle={`${name}'s spending by kind, against ${previous}`}
           action={
-            !phone ? (
-              <Button size="sm" onClick={() => onGo("insights")}>
-                Open Insights
-              </Button>
-            ) : undefined
+            <Button size="sm" onClick={() => onGo("insights")}>
+              Open Insights
+            </Button>
           }
         >
           {brief.kinds.length === 0 ? (
@@ -419,9 +415,8 @@ export function Dashboard({
       </div>
 
       {/* ── The year: a desk view ──────────────────────────────────────── */}
-      {phone ? (
-        <p className="t-caption fms-bigger-note fms-home-note">The charts for {year} are on a bigger screen.</p>
-      ) : (
+      {/* The year, on a phone too: the charts are narrow enough for one. */}
+      {
         <>
           <div className="fms-home-top">
             <Card title="Top spending" subtitle={`${year} so far`} action={<CountChip>{formatMoney(v.annual)}</CountChip>}>
@@ -460,7 +455,7 @@ export function Dashboard({
             </Card>
           </div>
         </>
-      )}
+      }
     </div>
   );
 }
