@@ -202,6 +202,36 @@ export interface BudgetYear {
    * Absent on every year written before 2026-09-15.
    */
   readonly categories?: Readonly<Record<string, MonthlyAmounts>> | undefined;
+  /**
+   * Every change to a month's budget or limits, oldest first, keyed by the
+   * month ("1" to "12"). What the budget was, what it became, when in the
+   * month's life it changed and, for a closed month, why. See
+   * `domain/budgetLock.ts`.
+   */
+  readonly revisions?: Readonly<Record<string, readonly BudgetRevision[]>> | undefined;
+}
+
+/** One change to a month's budget. */
+export interface BudgetRevision {
+  /** When the change was made, ISO 8601. */
+  readonly at: string;
+  /** The two tracks, or the limit for one kind of spending. */
+  readonly what: "tracks" | "limit";
+  /** The kind of spending, for a limit. */
+  readonly name?: string | undefined;
+  readonly spending?: Centavos | undefined;
+  readonly billsSubs?: Centavos | undefined;
+  readonly wasSpending?: Centavos | undefined;
+  readonly wasBillsSubs?: Centavos | undefined;
+  readonly limit?: Centavos | undefined;
+  readonly wasLimit?: Centavos | undefined;
+  /**
+   * The month's state when it changed: running or ahead, in the days just
+   * after it ended, or closed (which makes the change a correction).
+   */
+  readonly when: "open" | "grace" | "closed";
+  /** Why, required for a correction to a closed month. */
+  readonly reason?: string | undefined;
 }
 
 export type Budgets = Readonly<Record<string, BudgetYear>>;

@@ -115,7 +115,7 @@ function paidSince(
  * "Usually Maya" is useful. "Maya four times out of nine" is a coin toss
  * dressed up as a suggestion, so it returns nothing instead.
  */
-function steadyValue(values: readonly string[], threshold = 0.6): string {
+export function steadyValue(values: readonly string[], threshold = 0.6): string {
   const counts = new Map<string, number>();
   let total = 0;
 

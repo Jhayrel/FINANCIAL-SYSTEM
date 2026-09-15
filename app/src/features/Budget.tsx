@@ -17,21 +17,26 @@
  * ── Any year ──────────────────────────────────────────────────────────────
  *
  * The year and month are one picker, and every year with rows or a budget is
- * on it, plus next year. Imported history is readable the moment it lands,
- * and next year can be budgeted before it starts (docs/08, rule Y1).
+ * on it, plus next year (docs/08, rule Y3).
  *
  * ── Two levels ────────────────────────────────────────────────────────────
  *
  * The two tracks stay the budget: rule 3.6 judges them and the Dashboard
  * reports them. A kind of spending can also have a limit of its own inside
- * the spending track, for the few that move month to month. Bills need none,
- * being followed one by one in their own card.
+ * the spending track. Bills need none, being followed one by one.
+ *
+ * ── When a month's budget can change ──────────────────────────────────────
+ *
+ * A running or future month changes freely and every change is kept. For
+ * five days after a month ends it still takes changes, marked as late. After
+ * that it is closed: its budget stays as planned, and a correction needs a
+ * reason. `domain/budgetLock.ts` holds the rules and the real cases they
+ * answer (docs/08, rule Y4).
  *
  * ── On a phone ────────────────────────────────────────────────────────────
  *
- * A phone shows where the month stands, where it went and the bills, which
- * is what a phone is for here. Setting budgets and limits and reading the
- * year's tables are on a bigger screen, and the screen says so.
+ * A phone shows where the month stands, where it went and the bills. Setting
+ * budgets and limits and reading the year's tables are on a bigger screen.
  *
  * Rule 3.6 is untouched: `budgetView.test.ts` asserts the month view carries
  * it exactly.
@@ -49,21 +54,30 @@ import {
   StatusPill,
   type Status,
 } from "../components/primitives";
-import { AmountInput, Select } from "../components/forms";
+import { AmountInput, Select, TextInput } from "../components/forms";
 import { BarChart } from "../components/charts";
 import { useConfirm } from "../components/Confirm";
 import { PeriodPicker } from "../components/PeriodPicker";
 import { budgetForYear, budgetSummary, budgetYearTotals, type MonthBudgetRow } from "../domain/budget";
 import {
-  applyPlan,
+  describeRevision,
+  monthHistory,
+  monthLock,
+  monthMarks,
+  revisionSummary,
+  saveLimit,
+  saveTracks,
+  undoLast,
+  type MonthLock,
+  type SaveOutcome,
+} from "../domain/budgetLock";
+import {
   categoryLimits,
   categoryLines,
   monthBills,
   monthPlanView,
   phaseOf,
   planSuggestions,
-  setCategoryLimit,
-  withMonthPlan,
   type BillState,
   type CategoryLine,
   type MonthBill,
@@ -75,7 +89,14 @@ import type { Debt } from "../domain/debt";
 import { cashFlow, explainBasis, forecastYear } from "../domain/forecast";
 import { getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
-import type { BudgetTrack, BudgetYear, Budgets, ReferenceLists, Transaction } from "../domain/types";
+import type {
+  BudgetRevision,
+  BudgetTrack,
+  BudgetYear,
+  Budgets,
+  ReferenceLists,
+  Transaction,
+} from "../domain/types";
 import { pickableYears } from "../domain/year";
 import { useMediaQuery } from "./useMediaQuery";
 
@@ -87,15 +108,38 @@ const TRACKS = [
 /** Enough to see the shape of a month without a wall of small amounts. */
 const TOP_CATEGORIES = 8;
 
-/**
- * A difference worth a look: at least ₱500.00 above the usual, and half as
- * much again. Below that a percentage of a small figure only alarms.
- */
+/** A difference worth a look: at least ₱500.00 above the usual, and half as much again. */
 const NOTABLE = 50000;
+
+/** A sentence under a control, saying what a save did or why it did not. */
+interface Note {
+  readonly text: string;
+  readonly over: boolean;
+}
 
 const monthLabel = (m: number): string => MONTH_NAMES[m - 1] ?? "";
 
 const pct = (ratio: number): string => `${Math.round(ratio * 100)}%`;
+
+const shortDay = (iso: string | undefined): string => {
+  if (!iso) return "";
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+};
+
+const changedAt = (at: string): string => {
+  const d = new Date(at);
+  return Number.isNaN(d.getTime())
+    ? at
+    : d.toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+};
+
+/** "August", or "January to August", for months left alone. */
+const spanOf = (months: readonly number[]): string => {
+  const first = months[0] ?? 1;
+  const last = months[months.length - 1] ?? first;
+  return first === last ? monthLabel(first) : `${monthLabel(first)} to ${monthLabel(last)}`;
+};
 
 const statusOf = (t: BudgetTrack): Status =>
   t.status === "NO BUDGET SET" ? "none" : t.status === "OVER THE BUDGET" ? "over" : "ok";
@@ -121,8 +165,8 @@ export function Budget({
   debts: readonly Debt[];
   reference: ReferenceLists;
   asOf: string;
-  /** A year's plan, written once, whichever months a save touched. */
-  onReplaceYear: (year: number, next: BudgetYear) => void;
+  /** A year's plan, written once, with a sentence for each change it holds. */
+  onReplaceYear: (year: number, next: BudgetYear, changes?: readonly string[]) => void;
   /** Opens the Add form with this bill filled in, for checking before saving. */
   onRecordBill?: ((bill: MonthBill) => void) | undefined;
   /** Opens the Database searched for these words. */
@@ -134,8 +178,8 @@ export function Budget({
 
   const [year, setYear] = useState(asOfYear);
   const [month, setMonth] = useState(asOfMonth);
-  const [savedNote, setSavedNote] = useState<string | null>(null);
-  const [limitNote, setLimitNote] = useState<string | null>(null);
+  const [note, setNote] = useState<Note | null>(null);
+  const [limitNote, setLimitNote] = useState<Note | null>(null);
   const [limitFor, setLimitFor] = useState<string | null>(null);
   const [allCategories, setAllCategories] = useState(false);
   const plannerRef = useRef<HTMLElement>(null);
@@ -165,7 +209,11 @@ export function Budget({
     [y.rows],
   );
 
-  const limits = useMemo(() => categoryLimits(budgets[String(year)], month), [budgets, year, month]);
+  const stored = budgets[String(year)];
+  const limits = useMemo(() => categoryLimits(stored, month), [stored, month]);
+  const lock = monthLock(year, month, asOf);
+  const marks = monthMarks(stored, month);
+  const history = useMemo(() => monthHistory(stored, month), [stored, month]);
 
   const m = useMemo(
     () => ({
@@ -185,11 +233,10 @@ export function Budget({
   const pace = view.phase === "current" ? view.elapsed : undefined;
   const spentByKind = lines.reduce((s, l) => s + l.spent, 0);
   const limitsTotal = [...limits.values()].reduce((s, v) => s + v, 0);
+  const limitsOpen = !phone && lock.state !== "closed";
 
-  /** Bills and subscriptions rows with no item: counted by the track, said once here. */
   const unnamedBills = view.phase === "future" ? 0 : a.billsSubs.spent - bills.paid;
 
-  /** An income far above the usual month, often money already there typed as income. */
   const usual = suggestions.usualIncome;
   const unusualIncome =
     usual !== null && usual > 0 && view.revenue >= usual * 3 && view.revenue - usual >= 5_000_000;
@@ -197,7 +244,6 @@ export function Budget({
   const planSpending = y.plan.spending.reduce((s, v) => s + v, 0);
   const planBills = y.plan.billsSubs.reduce((s, v) => s + v, 0);
 
-  /** Kinds of spending that can be given a limit without anything spent on them yet. */
   const addable = reference.spendingTypes
     .map((s) => s.name)
     .filter((n) => n.trim() && !lines.some((l) => l.name === n));
@@ -205,7 +251,7 @@ export function Budget({
   const pick = (nextYear: number, nextMonth: number): void => {
     setYear(nextYear);
     setMonth(nextMonth);
-    setSavedNote(null);
+    setNote(null);
     setLimitNote(null);
     setLimitFor(null);
   };
@@ -217,34 +263,82 @@ export function Budget({
     el.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
   };
 
+  /**
+   * Write what a save produced, or say why it was refused.
+   *
+   * Every change goes to the trail as its own sentence, and months a save
+   * reached but left alone because they are over are named, never skipped
+   * in silence (budgetLock B6).
+   */
+  const commit = (outcome: SaveOutcome, done: string, show: (n: Note) => void): boolean => {
+    if (outcome.refused) {
+      show({ text: outcome.refused, over: true });
+      return false;
+    }
+    const left =
+      outcome.skipped.length > 0
+        ? ` ${spanOf(outcome.skipped)} ${outcome.skipped.length === 1 ? "is" : "are"} already over and ${
+            outcome.skipped.length === 1 ? "was" : "were"
+          } left as planned.`
+        : "";
+    if (outcome.written.length === 0) {
+      show({ text: `Nothing changed: those are already the figures.${left}`, over: false });
+      return true;
+    }
+    onReplaceYear(
+      year,
+      outcome.plan,
+      outcome.revisions.map((r, i) => revisionSummary(year, outcome.written[i] ?? month, r)),
+    );
+    show({ text: `${done}${left}`, over: false });
+    return true;
+  };
+
+  const now = (): string => new Date().toISOString();
+
   const usePrevious = (): void => {
     if (!previous) return;
-    onReplaceYear(year, withMonthPlan(y.plan, month, previous));
-    setSavedNote(`Saved. ${name} uses the same budget as ${monthLabel(previous.month)}.`);
+    commit(
+      saveTracks(y.plan, year, month, { spending: previous.spending, billsSubs: previous.billsSubs }, "month", asOf, now()),
+      `Saved. ${name} uses the same budget as ${monthLabel(previous.month)}.`,
+      setNote,
+    );
   };
 
-  const savePlan = (value: { spending: Centavos; billsSubs: Centavos }, scope: PlanScope): void => {
-    onReplaceYear(year, applyPlan(y.plan, month, value, scope));
+  const savePlan = (
+    value: { spending: Centavos; billsSubs: Centavos },
+    scope: PlanScope,
+    reason: string,
+  ): boolean => {
     const total = formatMoney(value.spending + value.billsSubs);
-    setSavedNote(
-      scope === "month"
-        ? `Saved. ${name} is set to ${total}.`
-        : scope === "rest"
-          ? `Saved. ${name} through December are set to ${total} each.`
-          : `Saved. Every month of ${year} is set to ${total}.`,
+    const done =
+      lock.state === "closed"
+        ? `Corrected. ${name} ${year} is now ${total}, and the reason is kept with it.`
+        : scope === "month"
+          ? `Saved. ${name} is set to ${total}.`
+          : scope === "rest"
+            ? `Saved. ${name} through December are set to ${total} each.`
+            : `Saved. Every month of ${year} still ahead is set to ${total}.`;
+    return commit(saveTracks(y.plan, year, month, value, scope, asOf, now(), reason), done, setNote);
+  };
+
+  const undo = (): void => {
+    commit(
+      undoLast(y.plan, year, month, asOf, now()),
+      "Undone. The budget is back to what it was before the last change.",
+      setNote,
     );
   };
 
-  const saveLimit = (kind: string, value: Centavos, scope: PlanScope): void => {
-    onReplaceYear(year, setCategoryLimit(y.plan, kind, month, value, scope));
-    setLimitFor(null);
+  const saveLimitFor = (kind: string, value: Centavos, scope: PlanScope): void => {
     const months =
-      scope === "month" ? `in ${name}` : scope === "rest" ? `from ${name} to December` : `in every month of ${year}`;
-    setLimitNote(
-      value > 0
-        ? `Saved. ${kind} is limited to ${formatMoney(value)} a month ${months}.`
-        : `Removed the limit on ${kind} ${months}.`,
+      scope === "month" ? `in ${name}` : scope === "rest" ? `from ${name} to December` : `in every month of ${year} still ahead`;
+    const ok = commit(
+      saveLimit(y.plan, year, month, kind, value, scope, asOf, now()),
+      value > 0 ? `Saved. ${kind} is limited to ${formatMoney(value)} a month ${months}.` : `Removed the limit on ${kind} ${months}.`,
+      setLimitNote,
     );
+    if (ok) setLimitFor(null);
   };
 
   const previousName = previous
@@ -252,6 +346,8 @@ export function Budget({
       ? monthLabel(previous.month)
       : `last ${monthLabel(previous.month)}`
     : "";
+
+  const lastChange = history[0];
 
   return (
     <div className="fms-budgetpage">
@@ -271,22 +367,36 @@ export function Budget({
           subtitle={
             view.phase === "current"
               ? `${view.daysLeft} ${view.daysLeft === 1 ? "day" : "days"} left in the month`
-              : view.phase === "past"
-                ? "The month is over"
-                : "Not started yet"
+              : view.phase === "future"
+                ? "Not started yet"
+                : lock.state === "grace"
+                  ? `Ended. Its budget can change until ${shortDay(lock.editableUntil)}`
+                  : "The month is over and its budget is closed"
           }
-          action={<StatusPill status={statusOf(a.combined)}>{statusWord(a.combined, view.phase)}</StatusPill>}
+          action={
+            <span className="fms-marks">
+              {marks.corrected && <StatusPill status="warn">Corrected</StatusPill>}
+              {marks.late && !marks.corrected && <StatusPill status="info">Set late</StatusPill>}
+              <StatusPill status={statusOf(a.combined)}>{statusWord(a.combined, view.phase)}</StatusPill>
+            </span>
+          }
         >
           {noPlan ? (
             <div className="fms-budgetempty">
               <p className="t-body" style={{ margin: 0, color: "var(--ink-2)" }}>
-                No budget for {name} {year} yet.{" "}
+                {lock.state === "closed"
+                  ? `No budget was set for ${name} ${year}, and the month is closed.`
+                  : `No budget for ${name} ${year} yet.`}{" "}
                 {a.combined.spent > 0
-                  ? `${formatMoney(a.combined.spent)} has gone out with nothing to measure it against.`
-                  : "Set one and this shows what is left, and what that is a day."}
+                  ? `${formatMoney(a.combined.spent)} went out with nothing to measure it against.`
+                  : lock.state === "closed"
+                    ? ""
+                    : "Set one and this shows what is left, and what that is a day."}
               </p>
               {!phone &&
-                (previous ? (
+                (lock.state === "closed" ? (
+                  <Button onClick={focusPlanner}>Correct it, with a reason</Button>
+                ) : previous ? (
                   <Button variant="primary" onClick={usePrevious}>
                     Use {previousName}'s budget, {formatMoney(previous.spending + previous.billsSubs)}
                   </Button>
@@ -322,6 +432,12 @@ export function Budget({
                 ))}
               </div>
             </div>
+          )}
+
+          {lastChange && !noPlan && (
+            <p className="t-caption fms-budgetnote">
+              Last change, {changedAt(lastChange.at)}: {describeRevision(lastChange)}.
+            </p>
           )}
 
           {view.projected !== null &&
@@ -385,8 +501,11 @@ export function Budget({
             month={month}
             suggestions={suggestions}
             limitsTotal={limitsTotal}
-            note={savedNote}
+            lock={lock}
+            history={history}
+            note={note}
             onSave={savePlan}
+            onUndo={undo}
           />
         </aside>
       )}
@@ -426,18 +545,23 @@ export function Budget({
                       : limitsTotal > a.spending.budget
                         ? `The limits add up to ${formatMoney(limitsTotal - a.spending.budget)} more than the spending budget.`
                         : `${formatMoney(a.spending.budget - limitsTotal)} of the spending budget is for everything without a limit.`}
+                    {lock.state === "closed" ? ` ${name} is closed, so its limits stay as they were.` : ""}
                   </p>
                 </div>
-              ) : (
+              ) : lock.state !== "closed" ? (
                 <p className="t-caption fms-planner-note fms-limitintro">
                   Any kind of spending can have its own limit inside the spending budget: food, travel,
                   whatever moves month to month. Bills are followed one by one in their own card.
                 </p>
-              ))}
+              ) : null)}
 
             {limitNote && (
-              <p className="t-caption" role="status" style={{ margin: "0 0 var(--space-3)", color: "var(--ink-2)" }}>
-                {limitNote}
+              <p
+                className={limitNote.over ? "t-caption fms-note-over" : "t-caption"}
+                role="status"
+                style={{ margin: "0 0 var(--space-3)", ...(limitNote.over ? {} : { color: "var(--ink-2)" }) }}
+              >
+                {limitNote.text}
               </p>
             )}
 
@@ -453,16 +577,17 @@ export function Budget({
                       key={l.name}
                       line={l}
                       onShow={onShowRows}
-                      onLimit={phone ? undefined : () => setLimitFor(limitFor === l.name ? null : l.name)}
+                      onLimit={limitsOpen ? () => setLimitFor(limitFor === l.name ? null : l.name) : undefined}
                       editor={
-                        !phone && limitFor === l.name ? (
+                        limitsOpen && limitFor === l.name ? (
                           <LimitEditor
                             kind={l.name}
                             year={year}
                             month={month}
+                            onlyThisMonth={lock.state !== "open"}
                             current={l.limit}
                             usual={l.usual}
-                            onSave={(value, scope) => saveLimit(l.name, value, scope)}
+                            onSave={(value, scope) => saveLimitFor(l.name, value, scope)}
                             onCancel={() => setLimitFor(null)}
                           />
                         ) : null
@@ -480,7 +605,7 @@ export function Budget({
               </>
             )}
 
-            {!phone && addable.length > 0 && (
+            {limitsOpen && addable.length > 0 && (
               <div className="fms-limitadd">
                 <span className="t-caption" style={{ color: "var(--ink-3)" }}>
                   Limit another kind
@@ -496,14 +621,15 @@ export function Budget({
               </div>
             )}
 
-            {!phone && limitFor !== null && !lines.some((l) => l.name === limitFor) && (
+            {limitsOpen && limitFor !== null && !lines.some((l) => l.name === limitFor) && (
               <LimitEditor
                 kind={limitFor}
                 year={year}
                 month={month}
+                onlyThisMonth={lock.state !== "open"}
                 current={null}
                 usual={null}
-                onSave={(value, scope) => saveLimit(limitFor, value, scope)}
+                onSave={(value, scope) => saveLimitFor(limitFor, value, scope)}
                 onCancel={() => setLimitFor(null)}
               />
             )}
@@ -588,7 +714,7 @@ export function Budget({
               }`}
               action={
                 <Button size="sm" onClick={focusPlanner}>
-                  Change {name}
+                  {lock.state === "closed" ? `Look at ${name}` : `Change ${name}`}
                 </Button>
               }
               padded={false}
@@ -642,7 +768,12 @@ export function Budget({
                           )}
                         </td>
                         <td data-label="Status">
-                          <RowStatus row={r} phase={phaseOf(year, r.month, asOf)} />
+                          <RowStatus
+                            row={r}
+                            phase={phaseOf(year, r.month, asOf)}
+                            closed={monthLock(year, r.month, asOf).state === "closed"}
+                            corrected={monthMarks(stored, r.month).corrected}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -771,6 +902,10 @@ export function Budget({
 
 // ── Choosing months ────────────────────────────────────────────────────────
 
+/**
+ * Which months a save reaches. A month that has ended takes changes only on
+ * its own, so for one the choice is not offered at all.
+ */
 function ScopeChoice({
   year,
   month,
@@ -811,30 +946,38 @@ function ScopeChoice({
 // ── The planner ────────────────────────────────────────────────────────────
 
 /**
- * Setting a month's budget.
+ * Setting a month's budget, and its record.
  *
  * It starts from what the month already has, or else the month before's
- * budget, or else the ledger's own figures, and says which, so a filled-in
- * field is never mistaken for one already saved. Each figure it offers is a
- * button that fills the field, never a value written in silently.
+ * budget, or else the ledger's own figures, and says which. A month in its
+ * grace days says until when; a closed month shows what was planned and
+ * offers a correction, which needs a reason. Every change is listed under it,
+ * and the last one can be undone while the month still takes changes.
  */
 function Planner({
   year,
   month,
   suggestions: s,
   limitsTotal,
+  lock,
+  history,
   note,
   onSave,
+  onUndo,
 }: {
   year: number;
   month: number;
   suggestions: PlanSuggestions;
   limitsTotal: Centavos;
-  note: string | null;
-  onSave: (value: { spending: Centavos; billsSubs: Centavos }, scope: PlanScope) => void;
+  lock: MonthLock;
+  history: readonly BudgetRevision[];
+  note: Note | null;
+  onSave: (value: { spending: Centavos; billsSubs: Centavos }, scope: PlanScope, reason: string) => boolean;
+  onUndo: () => void;
 }) {
   const name = monthLabel(month);
   const hasPlan = s.current.spending + s.current.billsSubs > 0;
+  const closed = lock.state === "closed";
   const source = s.previous
     ? `${s.previous.year === year ? monthLabel(s.previous.month) : `last ${monthLabel(s.previous.month)}`}'s budget`
     : "your ledger";
@@ -847,7 +990,13 @@ function Planner({
   const [bills, setBills] = useState<Centavos | null>(start.billsSubs);
   const [spending, setSpending] = useState<Centavos | null>(start.spending);
   const [scope, setScope] = useState<PlanScope>("month");
+  const [correcting, setCorrecting] = useState(false);
+  const [reason, setReason] = useState("");
+  const [allChanges, setAllChanges] = useState(false);
   const { confirm, dialog } = useConfirm();
+
+  const editable = !closed || correcting;
+  const manyMonths = lock.state === "open";
 
   const total = (bills ?? 0) + (spending ?? 0);
   const changed = (bills ?? 0) !== s.current.billsSubs || (spending ?? 0) !== s.current.spending;
@@ -867,129 +1016,237 @@ function Planner({
 
   const save = async (): Promise<void> => {
     const value = { spending: spending ?? 0, billsSubs: bills ?? 0 };
-    if (scope !== "month") {
+    const reach = manyMonths ? scope : "month";
+    if (reach !== "month") {
       const ok = await confirm({
         title:
-          scope === "rest"
+          reach === "rest"
             ? `Set ${name} through December to ${formatMoney(total)} each?`
-            : `Set every month of ${year} to ${formatMoney(total)}?`,
+            : `Set every month of ${year} still ahead to ${formatMoney(total)}?`,
         body: `Each of those months gets ${formatMoney(value.spending)} for spending and ${formatMoney(
           value.billsSubs,
-        )} for bills and subscriptions, replacing what it had. ${
-          scope === "year" ? "Months already over are included." : `Months before ${name} stay as they are.`
-        } Limits for kinds of spending are kept.`,
+        )} for bills and subscriptions, replacing what it had. Months already over stay as they were planned, and limits for kinds of spending are kept.`,
         confirmLabel: "Set the budget",
         tone: "normal",
       });
       if (!ok) return;
     }
-    onSave(value, scope);
+    onSave(value, reach, closed ? reason : "");
   };
 
+  const subtitle = closed
+    ? `${name} ${year} is closed.`
+    : hasPlan
+      ? `${name} ${year} is budgeted at ${formatMoney(s.current.spending + s.current.billsSubs)}.`
+      : `Nothing saved for ${name} ${year} yet. Filled in from ${source}, and saved only when you press Save.`;
+
   return (
-    <Card
-      title="Set the budget"
-      subtitle={
-        hasPlan
-          ? `${name} ${year} is budgeted at ${formatMoney(s.current.spending + s.current.billsSubs)}.`
-          : `Nothing saved for ${name} ${year} yet. Filled in from ${source}, and saved only when you press Save.`
-      }
-    >
+    <Card title="Set the budget" subtitle={subtitle}>
       {dialog}
       <div className="fms-planner">
-        <div className="fms-planner-field">
-          <span className="t-label" style={{ color: "var(--ink-2)" }}>
-            Bills and subscriptions
-          </span>
-          <AmountInput value={bills} onChange={setBills} ariaLabel={`${name} bills and subscriptions budget`} />
-          {s.bills.bills.length > 0 ? (
-            <>
-              <div className="fms-planner-chips">
-                <Button size="sm" onClick={() => setBills(s.bills.total)}>
-                  {name}'s bills, {formatMoney(s.bills.total)}
-                </Button>
-              </div>
-              <p className="t-caption fms-planner-note">{billNames}.</p>
-            </>
-          ) : (
-            <p className="t-caption fms-planner-note">No bills paid in the two months before to go by.</p>
-          )}
-        </div>
+        {lock.state === "grace" && (
+          <div className="fms-lockbanner t-caption">
+            {name} has ended. Its budget can still be set or changed until {shortDay(lock.editableUntil)},
+            marked as changed after the month ended. After that the month closes.
+          </div>
+        )}
 
-        <div className="fms-planner-field">
-          <span className="t-label" style={{ color: "var(--ink-2)" }}>
-            Spending
-          </span>
-          <AmountInput value={spending} onChange={setSpending} ariaLabel={`${name} spending budget`} />
-          {(s.spendingLastMonth !== null || s.spendingUsual !== null || (s.spendingKeepFifth ?? 0) > 0) && (
-            <div className="fms-planner-chips">
-              {s.spendingLastMonth !== null && (
-                <Button size="sm" onClick={() => setSpending(s.spendingLastMonth)}>
-                  Last month, {formatMoney(s.spendingLastMonth)}
-                </Button>
+        {closed && (
+          <div className="fms-lockbanner t-caption">
+            <span>
+              Its budget stays as it was planned, so the month is judged against the plan it had rather
+              than one set afterwards.
+            </span>
+            {!correcting && (
+              <button type="button" className="t-caption fms-linkbtn" onClick={() => setCorrecting(true)}>
+                The budget was wrong: correct it
+              </button>
+            )}
+          </div>
+        )}
+
+        {!editable ? (
+          <div className="fms-lockfigures">
+            <div className="fms-planner-sumrow">
+              <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                Bills and subscriptions
+              </span>
+              <Money value={s.current.billsSubs} size="s" />
+            </div>
+            <div className="fms-planner-sumrow">
+              <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                Spending
+              </span>
+              <Money value={s.current.spending} size="s" />
+            </div>
+            <div className="fms-planner-sumrow">
+              <span className="t-label" style={{ color: "var(--ink-2)" }}>
+                Budget for the month
+              </span>
+              <Money value={s.current.spending + s.current.billsSubs} size="l" />
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="fms-planner-field">
+              <span className="t-label" style={{ color: "var(--ink-2)" }}>
+                Bills and subscriptions
+              </span>
+              <AmountInput value={bills} onChange={setBills} ariaLabel={`${name} bills and subscriptions budget`} />
+              {s.bills.bills.length > 0 ? (
+                <>
+                  <div className="fms-planner-chips">
+                    <Button size="sm" onClick={() => setBills(s.bills.total)}>
+                      {name}'s bills, {formatMoney(s.bills.total)}
+                    </Button>
+                  </div>
+                  <p className="t-caption fms-planner-note">{billNames}.</p>
+                </>
+              ) : (
+                <p className="t-caption fms-planner-note">No bills paid in the two months before to go by.</p>
               )}
-              {s.spendingUsual !== null && (
-                <Button size="sm" onClick={() => setSpending(s.spendingUsual)}>
-                  Usual, {formatMoney(s.spendingUsual)}
-                </Button>
+            </div>
+
+            <div className="fms-planner-field">
+              <span className="t-label" style={{ color: "var(--ink-2)" }}>
+                Spending
+              </span>
+              <AmountInput value={spending} onChange={setSpending} ariaLabel={`${name} spending budget`} />
+              {(s.spendingLastMonth !== null || s.spendingUsual !== null || (s.spendingKeepFifth ?? 0) > 0) && (
+                <div className="fms-planner-chips">
+                  {s.spendingLastMonth !== null && (
+                    <Button size="sm" onClick={() => setSpending(s.spendingLastMonth)}>
+                      Last month, {formatMoney(s.spendingLastMonth)}
+                    </Button>
+                  )}
+                  {s.spendingUsual !== null && (
+                    <Button size="sm" onClick={() => setSpending(s.spendingUsual)}>
+                      Usual, {formatMoney(s.spendingUsual)}
+                    </Button>
+                  )}
+                  {s.spendingKeepFifth !== null && s.spendingKeepFifth > 0 && (
+                    <Button size="sm" onClick={() => setSpending(s.spendingKeepFifth)}>
+                      Keep a fifth, {formatMoney(s.spendingKeepFifth)}
+                    </Button>
+                  )}
+                </div>
               )}
-              {s.spendingKeepFifth !== null && s.spendingKeepFifth > 0 && (
-                <Button size="sm" onClick={() => setSpending(s.spendingKeepFifth)}>
-                  Keep a fifth, {formatMoney(s.spendingKeepFifth)}
+              <p className="t-caption fms-planner-note">
+                {limitsTotal > 0
+                  ? `Limits for kinds of spending inside it come to ${formatMoney(limitsTotal)}${
+                      (spending ?? 0) < limitsTotal ? ", more than this" : ""
+                    }.`
+                  : "Everything but bills: what you buy, money sent to other people, transfer fees and interest."}
+              </p>
+            </div>
+
+            <div className="fms-planner-sum">
+              <div className="fms-planner-sumrow">
+                <span className="t-label" style={{ color: "var(--ink-2)" }}>
+                  {hasPlan && !changed ? "Budget for the month" : "New budget for the month"}
+                </span>
+                <Money value={total} size="l" />
+              </div>
+              {keep === null ? (
+                <p className="t-caption fms-planner-note">No income before {name} to compare it with.</p>
+              ) : keep >= 0 ? (
+                <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+                  Leaves {formatMoney(keep)} of {incomeWords}.
+                </p>
+              ) : (
+                <p className="t-caption" style={{ margin: 0, color: "var(--over)" }}>
+                  {formatMoney(-keep)} more than {incomeWords}.
+                </p>
+              )}
+            </div>
+
+            {closed ? (
+              <div className="fms-planner-field">
+                <span className="t-label" style={{ color: "var(--ink-2)" }}>
+                  Why it needs correcting
+                </span>
+                <TextInput
+                  value={reason}
+                  onChange={setReason}
+                  placeholder="For example: forgot to set it, or the rent went up"
+                  ariaLabel="Why the budget needs correcting"
+                />
+                <p className="t-caption fms-planner-note">
+                  Kept with the correction, under this card and in Activity.
+                </p>
+              </div>
+            ) : manyMonths ? (
+              <div className="fms-planner-scope">
+                <span className="t-label" style={{ color: "var(--ink-2)" }}>
+                  Save it to
+                </span>
+                <ScopeChoice
+                  year={year}
+                  month={month}
+                  value={scope}
+                  onChange={setScope}
+                  label="Which months the budget is saved to"
+                />
+              </div>
+            ) : null}
+
+            <div className="fms-limitedit-actions">
+              <Button variant="primary" fullWidth onClick={() => void save()}>
+                {closed ? "Save the correction" : hasPlan ? "Save changes" : "Save budget"}
+              </Button>
+              {closed && (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setCorrecting(false);
+                    setReason("");
+                  }}
+                >
+                  Cancel
                 </Button>
               )}
             </div>
-          )}
-          <p className="t-caption fms-planner-note">
-            {limitsTotal > 0
-              ? `Limits for kinds of spending inside it come to ${formatMoney(limitsTotal)}${
-                  (spending ?? 0) < limitsTotal ? ", more than this" : ""
-                }.`
-              : "Everything but bills: what you buy, money sent to other people, transfer fees and interest."}
-          </p>
-        </div>
-
-        <div className="fms-planner-sum">
-          <div className="fms-planner-sumrow">
-            <span className="t-label" style={{ color: "var(--ink-2)" }}>
-              {hasPlan && !changed ? "Budget for the month" : "New budget for the month"}
-            </span>
-            <Money value={total} size="l" />
-          </div>
-          {keep === null ? (
-            <p className="t-caption fms-planner-note">No income before {name} to compare it with.</p>
-          ) : keep >= 0 ? (
-            <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
-              Leaves {formatMoney(keep)} of {incomeWords}.
-            </p>
-          ) : (
-            <p className="t-caption" style={{ margin: 0, color: "var(--over)" }}>
-              {formatMoney(-keep)} more than {incomeWords}.
-            </p>
-          )}
-        </div>
-
-        <div className="fms-planner-scope">
-          <span className="t-label" style={{ color: "var(--ink-2)" }}>
-            Save it to
-          </span>
-          <ScopeChoice
-            year={year}
-            month={month}
-            value={scope}
-            onChange={setScope}
-            label="Which months the budget is saved to"
-          />
-        </div>
-
-        <Button variant="primary" fullWidth onClick={() => void save()}>
-          {hasPlan ? "Save changes" : "Save budget"}
-        </Button>
+          </>
+        )}
 
         {note && (
-          <p className="t-caption" role="status" style={{ margin: 0, color: "var(--ink-2)" }}>
-            {note}
+          <p
+            className={note.over ? "t-caption fms-note-over" : "t-caption"}
+            role="status"
+            style={{ margin: 0, ...(note.over ? {} : { color: "var(--ink-2)" }) }}
+          >
+            {note.text}
           </p>
+        )}
+
+        {history.length > 0 && (
+          <div>
+            <div className="fms-planner-foot">
+              <span className="t-label" style={{ color: "var(--ink-2)" }}>
+                Changes to {name}'s budget
+              </span>
+              {!closed && (
+                <button type="button" className="t-caption fms-linkbtn" onClick={onUndo}>
+                  Undo the last change
+                </button>
+              )}
+            </div>
+            <ol className="fms-history">
+              {(allChanges ? history : history.slice(0, 4)).map((r, i) => (
+                <li key={`${r.at}-${i}`}>
+                  <span className="t-micro fms-history-when">{changedAt(r.at)}</span>
+                  <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                    {describeRevision(r)}
+                  </span>
+                </li>
+              ))}
+            </ol>
+            {history.length > 4 && (
+              <button type="button" className="t-caption fms-linkbtn" onClick={() => setAllChanges((x) => !x)}>
+                {allChanges ? "Show the last four" : `Show all ${history.length} changes`}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </Card>
@@ -1003,6 +1260,7 @@ function LimitEditor({
   kind,
   year,
   month,
+  onlyThisMonth,
   current,
   usual,
   onSave,
@@ -1011,6 +1269,8 @@ function LimitEditor({
   kind: string;
   year: number;
   month: number;
+  /** A month that has ended takes a limit only for itself. */
+  onlyThisMonth: boolean;
   current: Centavos | null;
   usual: Centavos | null;
   onSave: (value: Centavos, scope: PlanScope) => void;
@@ -1021,7 +1281,7 @@ function LimitEditor({
     current ?? (usual !== null && usual > 0 ? Math.round(usual / 10000) * 10000 : null),
   );
   // A limit is usually meant to last, so it defaults to the rest of the year.
-  const [scope, setScope] = useState<PlanScope>(month < 12 ? "rest" : "month");
+  const [scope, setScope] = useState<PlanScope>(!onlyThisMonth && month < 12 ? "rest" : "month");
 
   return (
     <div className="fms-limitedit">
@@ -1029,19 +1289,23 @@ function LimitEditor({
         {kind}: limit a month
       </span>
       <AmountInput value={value} onChange={setValue} ariaLabel={`${kind} limit a month`} />
-      <ScopeChoice
-        year={year}
-        month={month}
-        value={scope}
-        onChange={setScope}
-        label={`Which months the ${kind} limit is for`}
-      />
+      {onlyThisMonth ? (
+        <p className="t-caption fms-planner-note">{monthLabel(month)} has ended, so this is for {monthLabel(month)} only.</p>
+      ) : (
+        <ScopeChoice
+          year={year}
+          month={month}
+          value={scope}
+          onChange={setScope}
+          label={`Which months the ${kind} limit is for`}
+        />
+      )}
       <div className="fms-limitedit-actions">
-        <Button size="sm" variant="primary" onClick={() => onSave(value ?? 0, scope)}>
+        <Button size="sm" variant="primary" onClick={() => onSave(value ?? 0, onlyThisMonth ? "month" : scope)}>
           Save limit
         </Button>
         {current !== null && (
-          <Button size="sm" tone="danger" onClick={() => onSave(0, scope)}>
+          <Button size="sm" tone="danger" onClick={() => onSave(0, onlyThisMonth ? "month" : scope)}>
             Remove
           </Button>
         )}
@@ -1086,10 +1350,6 @@ function TrackRow({ label, track, pace }: { label: string; track: BudgetTrack; p
 
 /**
  * A kind of spending: what it came to, and either its limit or its usual month.
- *
- * With a limit, the bar is the limit and the foot says what is left of it.
- * Without one, the bar is its share of the month and a quiet pill appears only
- * when it runs well above its usual.
  */
 function CategoryRow({
   line,
@@ -1234,11 +1494,41 @@ function BillRow({
   );
 }
 
-function RowStatus({ row, phase }: { row: MonthBudgetRow; phase: MonthPhase }) {
-  if (row.budget === 0) return <StatusPill status="none">No budget</StatusPill>;
-  if (phase === "future" && row.spent === 0) return <StatusPill status="info">Planned</StatusPill>;
-  if (row.status === "OVER THE BUDGET") return <StatusPill status="over">Over</StatusPill>;
-  return <StatusPill status="ok">Within</StatusPill>;
+function RowStatus({
+  row,
+  phase,
+  closed,
+  corrected,
+}: {
+  row: MonthBudgetRow;
+  phase: MonthPhase;
+  closed: boolean;
+  corrected: boolean;
+}) {
+  const verdict =
+    row.budget === 0 ? (
+      <StatusPill status="none">No budget</StatusPill>
+    ) : phase === "future" && row.spent === 0 ? (
+      <StatusPill status="info">Planned</StatusPill>
+    ) : row.status === "OVER THE BUDGET" ? (
+      <StatusPill status="over">Over</StatusPill>
+    ) : (
+      <StatusPill status="ok">Within</StatusPill>
+    );
+  return (
+    <span className="fms-marks" style={{ justifyContent: "flex-start" }}>
+      {verdict}
+      {corrected ? (
+        <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+          corrected
+        </span>
+      ) : closed ? (
+        <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+          closed
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function Stat({ label, hint, children }: { label: string; hint: string; children: ReactNode }) {

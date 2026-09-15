@@ -3521,6 +3521,123 @@
   }
 }
 
+/* ── Budget changes: locks, history, corrections ────────────────────────── */
+
+.fms-lockbanner {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+}
+
+.fms-lockfigures {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.fms-planner-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.fms-history {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-history > li {
+  display: grid;
+  gap: 2px;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-history > li:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.fms-history-when {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.fms-marks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.fms-note-over {
+  color: var(--over);
+}
+
+/* ── Add: what the entry does to the budget ─────────────────────────────── */
+
+.fms-impact {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--brand-50);
+}
+
+.fms-impact.is-over {
+  background: var(--over-bg);
+}
+
+.fms-impact p {
+  margin: 0;
+}
+
+/* The latest entries open for correcting, so each is a button that reads as a row. */
+button.fms-recent-row {
+  width: 100%;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+li:first-child > button.fms-recent-row {
+  border-top: 0;
+}
+
+button.fms-recent-row:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+button.fms-recent-row:disabled {
+  cursor: default;
+}
+
+.fms-recent-more {
+  justify-self: start;
+}
+
+.fms-qrow-end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 /* The two filters, as one toolbar across the top of the card. */
 .fms-acttools {
   display: flex;

@@ -300,6 +300,12 @@ The most-used screen. Pattern:
 6. **Save** → toast `Saved. Record #0442.` with **Undo** for 6s.
 7. **On a phone the form is the page** (below 640px): no card around it, labels above the fields whenever the form is under 520px wide, and the Save bar runs edge to edge above the navigation. Values nothing types into (record number, total) keep their label on the same line.
 8. **Latest entries where the chat would be.** With AI off, a desktop shows the eight newest rows beside the form (under the balances below 1600px, a third column above it), so a new entry is checked against the last ones before it is saved.
+9. **The form says what an entry does before it is saved.** Beside it on a desktop, under it on a phone:
+   - **What it does to the month's budget**: the track it counts toward, what is left before and after, the kind of spending so far, and its limit if it has one. When the month has no budget, a link to Budget. When the month is closed, a note saying the entry still counts against the budget as it was planned (docs/08, rule Y4).
+   - **Bills due within a week or late**, from the same list as the Budget screen, each one tap to fill the form.
+   - **A likely duplicate**, with a link to that row in the Database.
+   - **Latest entries** open for editing on a tap.
+   - **After a save, the toast links to the row.** When the form was opened from a bill on Budget or Insights, saving goes back there.
 
 ### 3.4 Tables
 

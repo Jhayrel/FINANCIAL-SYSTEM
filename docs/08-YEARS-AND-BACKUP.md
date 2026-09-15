@@ -137,3 +137,31 @@ Budgets are stored per year (`users/{uid}/budgets/{year}`) and travel in a
 backup whole, including the limits for kinds of spending added on 2026-09-15.
 A January plan looks back to the December before it, and "usual" figures
 reach across the year boundary the same way.
+
+---
+
+## Y4. A month's budget closes.
+
+A budget is a promise made before the money is spent. If a month's budget can
+be raised after the month is over, "within budget" means nothing: any
+overspend disappears by moving the line to meet it. So a month that is over
+stops taking changes. The rules live in `domain/budgetLock.ts` and each is
+tested in `budgetLock.test.ts`.
+
+| # | Case | What happens |
+|---|---|---|
+| B1 | The month is running, or ahead | Changes freely. The last day of the month is still the month: it closes the day after, by this device's date |
+| B2 | Set it today, change it next week | Both kept: what it was, what it became, when. Listed under the planner, newest first, and on the Activity trail |
+| B3 | Decided a change was wrong | "Undo the last change" puts back what it replaced, while the month still takes changes |
+| B4 | Forgot to set last month's budget | For five days after a month ends it still takes changes, marked "set late" |
+| B5 | The month is closed and its budget was wrong | Correctable on its own, with a reason. Marked "corrected", with the reason, in the planner, the year table and Activity |
+| B6 | Saving to "the rest of the year" or "all of it" | Writes only months still running or ahead; months already over are named as left alone |
+| B7 | Limits for kinds of spending | The same rules |
+| B8 | A save that changes nothing | Not recorded |
+
+**Entries are never locked.** A receipt found in October for August still goes
+in, and counts against August's budget as it was planned; the Add form says
+the month is closed while it does.
+
+The record is stored with the year's budget (`revisions`, up to 30 changes a
+month) and travels in a backup with it.

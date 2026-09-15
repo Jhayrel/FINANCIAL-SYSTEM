@@ -314,18 +314,63 @@ function toBudgetYear(d: DocumentData): BudgetYear | null {
     }
   }
 
-  return Object.keys(categories).length > 0 ? { spending, billsSubs, categories } : { spending, billsSubs };
+  /**
+   * The record of changes to each month, when there is one. An entry that is
+   * not the shape a change has is dropped on its own, so one bad entry cannot
+   * cost the year its budget.
+   */
+  const revisions: Record<string, BudgetRevisionShape[]> = {};
+  if (d.revisions && typeof d.revisions === "object") {
+    for (const [month, list] of Object.entries(d.revisions as Record<string, unknown>)) {
+      if (!/^(?:[1-9]|1[0-2])$/.test(month) || !Array.isArray(list)) continue;
+      const kept = list.filter(isRevision);
+      if (kept.length > 0) revisions[month] = kept;
+    }
+  }
+
+  return {
+    spending,
+    billsSubs,
+    ...(Object.keys(categories).length > 0 ? { categories } : {}),
+    ...(Object.keys(revisions).length > 0 ? { revisions } : {}),
+  };
+}
+
+type BudgetRevisionShape = import("../domain/types").BudgetRevision;
+
+const WHOLE = (v: unknown): boolean => v === undefined || Number.isInteger(v);
+
+function isRevision(v: unknown): v is BudgetRevisionShape {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.at === "string" &&
+    (r.what === "tracks" || r.what === "limit") &&
+    (r.when === "open" || r.when === "grace" || r.when === "closed") &&
+    (r.name === undefined || typeof r.name === "string") &&
+    (r.reason === undefined || typeof r.reason === "string") &&
+    WHOLE(r.spending) &&
+    WHOLE(r.billsSubs) &&
+    WHOLE(r.wasSpending) &&
+    WHOLE(r.wasBillsSubs) &&
+    WHOLE(r.limit) &&
+    WHOLE(r.wasLimit)
+  );
 }
 
 export async function saveBudget(uid: string, year: string, budget: BudgetYear): Promise<void> {
   const categories = Object.fromEntries(
     Object.entries(budget.categories ?? {}).map(([name, amounts]) => [name, [...amounts]]),
   );
+  // Firestore refuses `undefined` anywhere in a document, so each change is
+  // written as plain JSON: an optional field that is absent stays absent.
+  const revisions = JSON.parse(JSON.stringify(budget.revisions ?? {})) as Record<string, unknown>;
   // The whole document, so a limit removed here is removed there.
   await setDoc(budgetDoc(firestore(), uid, year), {
     spending: [...budget.spending],
     billsSubs: [...budget.billsSubs],
     ...(Object.keys(categories).length > 0 ? { categories } : {}),
+    ...(Object.keys(revisions).length > 0 ? { revisions } : {}),
   });
 }
 

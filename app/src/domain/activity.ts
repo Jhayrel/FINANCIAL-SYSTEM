@@ -216,6 +216,14 @@ export function settingsChanged(what: string, by: Provenance = BY_OWNER): Activi
   return build("settings.update", by, what);
 }
 
+/**
+ * A budget or a limit set, changed, corrected once its month closed, or undone.
+ * The summary names the month and says what moved (`revisionSummary`).
+ */
+export function budgetChanged(summary: string, by: Provenance = BY_OWNER): ActivityEvent {
+  return build("budget.update", by, summary);
+}
+
 export function proposalDiscarded(what: string, model?: string): ActivityEvent {
   return build(
     "ai.proposal.discarded",

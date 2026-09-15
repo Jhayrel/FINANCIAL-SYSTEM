@@ -27,7 +27,7 @@ import type { AppSettings } from "../domain/settings";
 import { aiSurfaceOn } from "../domain/aiSurface";
 import { RankBars } from "../components/charts";
 import { learnPatterns, planDay, REASON_LABEL } from "../domain/allocation";
-import { billStatuses, overdue, paidThisMonth, upcoming } from "../domain/bills";
+import { monthBills, type MonthBill } from "../domain/budgetView";
 import { assessMonthFor, dailyPacing } from "../domain/budget";
 import { totalWalletBalance } from "../domain/balances";
 import type { Debt } from "../domain/debt";
@@ -55,6 +55,8 @@ export function Insights({
   debts,
   asOf,
   settings,
+  onRecordBill,
+  onOpenBudget,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -62,6 +64,10 @@ export function Insights({
   debts: readonly Debt[];
   asOf: string;
   settings: AppSettings;
+  /** Opens the Add form with a bill filled in. */
+  onRecordBill?: ((bill: MonthBill) => void) | undefined;
+  /** The Budget screen, where the two tracks are set. */
+  onOpenBudget?: (() => void) | undefined;
 }) {
   /**
    * Any month of any year the ledger covers, not only this year's. A year is
@@ -96,12 +102,8 @@ export function Insights({
     const budget = assessMonthFor(transactions, budgets, year, month);
     const pacing = dailyPacing(transactions, budgets, makeDate(year, month, Math.min(isThisMonth ? Number(asOf.slice(8)) : 1, daysInMonth(year, month))));
     const days = dailySpending(transactions, year, month, daysInMonth(year, month));
-    // Bills as they stood at the end of the month shown, or today for this month.
-    const bills = billStatuses(
-      transactions,
-      reference,
-      isThisMonth ? asOf : makeDate(year, month, daysInMonth(year, month)),
-    );
+    // The Budget screen's own list of the month's bills, so the two agree.
+    const bills = monthBills(transactions, reference, year, month, asOf);
     const positions = positionsOf(debts, transactions, asOf);
     const walletBalance = totalWalletBalance(transactions, reference.wallets);
     const plan = planDay(walletBalance, learnPatterns(transactions, asOf), positions, asOf);
@@ -130,9 +132,9 @@ export function Insights({
     [transactions, v.range],
   );
 
-  const due = upcoming(v.bills);
-  const late = overdue(v.bills);
-  const paid = paidThisMonth(v.bills);
+  const due = v.bills.bills.filter((b) => b.state !== "paid" && b.state !== "missed");
+  const late = v.bills.bills.filter((b) => b.state === "late");
+  const paid = v.bills.bills.filter((b) => b.state === "paid");
   const maxDay = Math.max(1, ...v.days);
 
   return (
@@ -179,7 +181,17 @@ export function Insights({
       )}
 
       {late.length > 0 && (
-        <Alert status="over" title={`${late.length} bill${late.length === 1 ? "" : "s"} overdue`}>
+        <Alert
+          status="over"
+          title={`${late.length} bill${late.length === 1 ? "" : "s"} overdue`}
+          action={
+            onRecordBill && late[0] ? (
+              <Button size="sm" onClick={() => late[0] && onRecordBill(late[0])}>
+                Record {late[0].item}
+              </Button>
+            ) : undefined
+          }
+        >
           {late.map((b) => b.item).join(", ")}: predicted due before today and not yet paid.
         </Alert>
       )}
@@ -214,7 +226,17 @@ export function Insights({
         </Card>
 
         {/* Two-track budget */}
-        <Card title="Budget vs actual" subtitle="Two independent tracks">
+        <Card
+          title="Budget vs actual"
+          subtitle="Two independent tracks"
+          action={
+            onOpenBudget ? (
+              <Button size="sm" onClick={onOpenBudget}>
+                Open Budget
+              </Button>
+            ) : undefined
+          }
+        >
           <div style={{ display: "grid", gap: "var(--space-4)" }}>
             {([
               ["Spending", v.budget.spending],
@@ -313,13 +335,23 @@ export function Insights({
                   <div key={b.item} className="fms-qrow">
                     <span className="t-body">
                       {b.item}
-                      {b.nextDue && (
-                        <span className="t-micro" style={{ color: b.daysToDue !== undefined && b.daysToDue < 0 ? "var(--over)" : "var(--ink-3)" }}>
-                          {" "}· {b.daysToDue !== undefined && b.daysToDue < 0 ? `${Math.abs(b.daysToDue)}d overdue` : `in ${b.daysToDue}d`}
-                        </span>
+                      <span className="t-micro" style={{ color: b.state === "late" ? "var(--over)" : "var(--ink-3)" }}>
+                        {" "}·{" "}
+                        {b.state === "late"
+                          ? `${Math.abs(b.daysToDue ?? 0)}d late`
+                          : b.state === "expected"
+                            ? "expected"
+                            : `in ${b.daysToDue ?? 0}d`}
+                      </span>
+                    </span>
+                    <span className="fms-qrow-end">
+                      <Money value={b.amount} size="s" />
+                      {onRecordBill && (
+                        <Button size="sm" onClick={() => onRecordBill(b)}>
+                          Record
+                        </Button>
                       )}
                     </span>
-                    <Money value={b.lastAmount || b.averageAmount} size="s" />
                   </div>
                 ))
               )}
@@ -335,7 +367,7 @@ export function Insights({
                 paid.map((b) => (
                   <div key={b.item} className="fms-qrow">
                     <span className="t-body">{b.item}</span>
-                    <Money value={b.paidThisMonthAmount} size="s" tone="var(--ok)" />
+                    <Money value={b.amount} size="s" tone="var(--ok)" />
                   </div>
                 ))
               )}

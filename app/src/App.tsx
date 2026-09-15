@@ -74,6 +74,7 @@ import { aiLogStore } from "./data/aiLogStore";
 import { manualCorrections } from "./domain/aiLog";
 import {
   binned as binnedEvent,
+  budgetChanged,
   created as createdEvent,
   restored as restoredEvent,
   updated as updatedEvent,
@@ -153,7 +154,10 @@ export default function App() {
    * form goes back to being a new entry.
    */
   const [editing, setEditing] = useState<Transaction | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  /** A short confirmation, and at most one thing to do next (style guide §3.7). */
+  const [toast, setToast] = useState<{ text: string; action?: { label: string; run: () => void } } | null>(null);
+  /** Where to go once the Add form saves, when a screen sent it there ("Record payment"). */
+  const [returnTo, setReturnTo] = useState<Screen | null>(null);
   /** Bumped on every recorded event, so the Activity screen refetches. */
   const [activityKey, setActivityKey] = useState(0);
   /** A newer build has been published than the one this tab is running. */
@@ -526,8 +530,8 @@ export default function App() {
     };
   }, [transactions, settings.credits, reference]);
 
-  const flash = (message: string): void => {
-    setToast(message);
+  const flash = (message: string, action?: { label: string; run: () => void }): void => {
+    setToast(action ? { text: message, action } : { text: message });
     window.setTimeout(() => setToast(null), 6000);
   };
 
@@ -566,10 +570,20 @@ export default function App() {
     const landed = renumbers
       ? insertChronologically(transactions, stamped).find((t) => t.id === stamped[0]?.id)
       : stamped[0];
+    const number = `#${String(landed?.recordNumber ?? 0).padStart(4, "0")}`;
     flash(
-      rows.length > 1
-        ? `Saved. ${rows.length} rows added.`
-        : `Saved. Record #${String(landed?.recordNumber ?? 0).padStart(4, "0")}.`,
+      rows.length > 1 ? `Saved. ${rows.length} rows added.` : `Saved. Record ${number}.`,
+      // The saved row, one tap away: the Database searched for its number.
+      rows.length === 1
+        ? {
+            label: "View",
+            run: () => {
+              go("database");
+              setDbFilter("all");
+              setDbQuery({ query: number, at: Date.now() });
+            },
+          }
+        : undefined,
     );
   };
 
@@ -794,12 +808,14 @@ export default function App() {
    * all of it. Each is one state change and one write, rather than a write
    * per month that each read a budget the previous one had not yet replaced.
    */
-  const handleBudgetYear = (year: number, next: BudgetYear): void => {
+  const handleBudgetYear = (year: number, next: BudgetYear, changes: readonly string[] = []): void => {
     const key = String(year);
     setBudgets((prev) => ({ ...prev, [key]: next }));
     if (cloud.uid) {
       saveBudget(cloud.uid, key, next).catch((e: Error) => setSyncError(e.message));
     }
+    // Each change to a month's budget is on the trail, like a change to a row.
+    if (changes.length > 0) record(...changes.map((c) => budgetChanged(c)));
   };
 
   /** Download a blob without leaving the page. */
@@ -1052,8 +1068,10 @@ export default function App() {
   const go = (id: Screen): void => {
     setScreen(id);
     setChatOpen(false);
-    // A search a link opened the Database with ends when you go elsewhere.
+    // A search a link opened the Database with ends when you go elsewhere,
+    // and so does a pending return to the screen that sent you to Add.
     setDbQuery(null);
+    setReturnTo(null);
   };
 
   return (
@@ -1217,7 +1235,17 @@ export default function App() {
               showChat={chatOn && !compact}
               incoming={incoming}
               lastSaved={lastSaved}
-              onSaved={setLastSaved}
+              onSaved={(saved) => {
+                setLastSaved(saved);
+                if (returnTo) go(returnTo);
+              }}
+              onEditRow={startEditing}
+              onOpenBudget={() => go("budget")}
+              onShowRows={(query) => {
+                go("database");
+                setDbFilter("all");
+                setDbQuery({ query, at: Date.now() });
+              }}
             />
           )}
           {screen === "ai" && chatOn && (
@@ -1265,6 +1293,22 @@ export default function App() {
               debts={settings.credits}
               asOf={asOf}
               settings={settings}
+              onOpenBudget={() => go("budget")}
+              onRecordBill={(bill) => {
+                setIncoming({
+                  draft: {
+                    ...emptyDraft(asOf),
+                    flow: "Spending",
+                    category: bill.category,
+                    item: bill.item,
+                    amount: bill.amount,
+                    status: "Paid",
+                  },
+                  at: Date.now(),
+                });
+                go("add");
+                setReturnTo("insights");
+              }}
             />
           )}
           {screen === "budget" && (
@@ -1289,6 +1333,8 @@ export default function App() {
                   at: Date.now(),
                 });
                 go("add");
+                // Back to the Budget once it is saved, where the bill now reads as paid.
+                setReturnTo("budget");
               }}
               onShowRows={(query) => {
                 go("database");
@@ -1450,7 +1496,24 @@ export default function App() {
 
       {toast && (
         <div className="fms-toastwrap">
-          <Toast>{toast}</Toast>
+          <Toast
+            action={
+              toast.action ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    toast.action?.run();
+                    setToast(null);
+                  }}
+                >
+                  {toast.action.label}
+                </Button>
+              ) : undefined
+            }
+          >
+            {toast.text}
+          </Toast>
         </div>
       )}
     </div>

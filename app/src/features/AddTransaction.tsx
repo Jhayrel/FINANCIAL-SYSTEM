@@ -45,7 +45,11 @@ import { useProposalSink } from "./useProposalSink";
 import { useConfirm } from "../components/Confirm";
 import type { Provenance } from "../domain/activity";
 import type { CategoryResult } from "../data/aiClient";
-import { billsToLog, predictAmount, reasons, type DueBill } from "../domain/predict";
+import { predictAmount, reasons, steadyValue, type DueBill } from "../domain/predict";
+import { monthBills } from "../domain/budgetView";
+import { formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
+import { duplicateHeadline, duplicatesOf } from "../domain/duplicates";
+import { entryImpact } from "../domain/entryImpact";
 import type { Budgets, DeletedTransaction, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
 /**
@@ -110,6 +114,9 @@ export function AddTransaction({
   incoming,
   lastSaved,
   onSaved,
+  onEditRow,
+  onOpenBudget,
+  onShowRows,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -147,6 +154,12 @@ export function AddTransaction({
   /** The last row this form saved, shared so a card anywhere can say so. */
   lastSaved: { draft: Draft; at: number } | null;
   onSaved: (saved: { draft: Draft; at: number }) => void;
+  /** Loads a saved row back into this form, from the latest entries beside it. */
+  onEditRow?: ((row: Transaction) => void) | undefined;
+  /** The Budget screen, for a month that has no budget yet. */
+  onOpenBudget?: (() => void) | undefined;
+  /** The Database searched for these words, such as a record number. */
+  onShowRows?: ((query: string) => void) | undefined;
 }) {
   /**
    * Opens on Spending, rather than on nothing.
@@ -392,7 +405,52 @@ export function AddTransaction({
    * Globe, and proposing "Food" because food is more frequent overall is
    * confidently wrong. One tap fills the whole row from last month's.
    */
-  const due = useMemo(() => billsToLog(transactions, draft.date), [transactions, draft.date]);
+  /**
+   * Bills to log now: the Budget screen's own list for this month.
+   *
+   * This strip used its own prediction with a four-day window, so the Add form
+   * showed two bills due while the Budget screen showed three, and Microsoft
+   * Office 365 was due on one screen and nowhere on the other. It reads
+   * `monthBills` now, the one definition, and shows the unpaid ones due within
+   * a week, late first. The wallet is still the one each bill is usually paid from.
+   */
+  const due = useMemo<DueBill[]>(() => {
+    const month = monthBills(transactions, reference, getYear(asOf), getMonth(asOf), asOf);
+    return month.bills
+      .filter((b) => (b.state === "late" || b.state === "soon" || b.state === "due") && (b.daysToDue ?? 0) <= 7)
+      .slice(0, 4)
+      .map((b) => {
+        const days = b.daysToDue ?? 0;
+        return {
+          item: b.item,
+          category: b.category,
+          expected: b.amount,
+          dueDate: asOf,
+          daysAway: days,
+          wallet: steadyValue(
+            transactions.filter((t) => t.type === "Spending" && t.item === b.item).map((t) => t.fromWallet),
+          ),
+          why:
+            days < 0
+              ? `${-days} ${days === -1 ? "day" : "days"} late, going by last month`
+              : days === 0
+                ? "Due today, going by last month"
+                : `Due in ${days} ${days === 1 ? "day" : "days"}, going by last month`,
+        };
+      });
+  }, [transactions, reference, asOf]);
+
+  /** The same entry already in the ledger, as the assistant's cards have always checked. */
+  const dupe = useMemo(
+    () =>
+      draft.flow
+        ? duplicatesOf(draft, transactions, { ignoreId: draft.id ?? editing?.id, most: 1 })[0]
+        : undefined,
+    [draft, transactions, editing],
+  );
+
+  /** What this entry does to its month's budget, while the amount is still in the field. */
+  const impact = useMemo(() => entryImpact(draft, transactions, budgets, asOf), [draft, transactions, budgets, asOf]);
 
   const guess = useMemo(() => predictAmount(transactions, draft), [transactions, draft]);
   const why = useMemo(() => reasons(draft, transactions), [draft, transactions]);
@@ -938,6 +996,24 @@ export function AddTransaction({
               {check.warnings.map((w) => (
                 <Alert key={w.message} status="warn">{w.message}</Alert>
               ))}
+              {dupe && (
+                <Alert
+                  status="warn"
+                  title={duplicateHeadline(dupe)}
+                  action={
+                    onShowRows ? (
+                      <Button
+                        size="sm"
+                        onClick={() => onShowRows(`#${String(dupe.row.recordNumber).padStart(4, "0")}`)}
+                      >
+                        Open it in the Database
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  {dupe.evidence.join(". ")}. Save anyway if this is a second, separate one.
+                </Alert>
+              )}
               {check.repaymentSplit && check.repaymentSplit.interest > 0 && (
                 <Alert status="info" title="This payment splits in two">
                   Principal <Money value={check.repaymentSplit.principal} size="s" /> · Interest{" "}
@@ -971,6 +1047,76 @@ export function AddTransaction({
 
       {/* ── Right: balances, exactly like the Excel INPUT PAGE ──────────── */}
       <aside className="fms-panel fms-side">
+        {/*
+          What this entry does to its month's budget, beside the balance it
+          moves. The same figures the Budget screen shows, before saving
+          rather than after.
+        */}
+        {impact && (
+          <div
+            className={
+              impact.budget > 0 && impact.leftAfter < 0 ? "fms-impact is-over" : "fms-impact"
+            }
+          >
+            <div className="t-label" style={{ color: "var(--ink-2)" }}>
+              {MONTH_NAMES[impact.month - 1]} {impact.track === "billsSubs" ? "bills and subscriptions" : "spending"}
+            </div>
+            {impact.budget > 0 ? (
+              <>
+                <div className="fms-afterbal">
+                  <Money value={impact.budget - impact.spentBefore} size="s" tone="var(--ink-3)" />
+                  <span aria-hidden style={{ color: "var(--ink-3)" }}>→</span>
+                  <Money
+                    value={impact.leftAfter}
+                    size="l"
+                    tone={impact.leftAfter < 0 ? "var(--over)" : "var(--ink)"}
+                  />
+                </div>
+                <p className="t-caption" style={{ color: "var(--ink-2)" }}>
+                  {impact.leftAfter < 0
+                    ? `${formatMoney(-impact.leftAfter)} over the ${formatMoney(impact.budget)} budget after this`
+                    : `left of the ${formatMoney(impact.budget)} budget after this`}
+                </p>
+              </>
+            ) : (
+              <p className="t-caption" style={{ color: "var(--ink-2)" }}>
+                No budget for {MONTH_NAMES[impact.month - 1]} yet, so there is nothing to measure this against.{" "}
+                {onOpenBudget && impact.lock.state !== "closed" && (
+                  <button type="button" className="t-caption fms-linkbtn" onClick={onOpenBudget}>
+                    Set one
+                  </button>
+                )}
+              </p>
+            )}
+            {impact.kind && impact.limit !== null && (
+              <p
+                className="t-caption"
+                style={{ color: impact.limit - impact.kindBefore - impact.cost < 0 ? "var(--over)" : "var(--ink-2)" }}
+              >
+                {impact.kind} limit: {formatMoney(impact.limit - impact.kindBefore)} left, then{" "}
+                {formatMoney(impact.limit - impact.kindBefore - impact.cost)}
+              </p>
+            )}
+            {impact.kind && impact.limit === null && impact.kindBefore > 0 && (
+              <p className="t-caption" style={{ color: "var(--ink-3)" }}>
+                {impact.kind} so far in {MONTH_NAMES[impact.month - 1]}: {formatMoney(impact.kindBefore)}
+              </p>
+            )}
+            {impact.paidAlready && (
+              <p className="t-caption" style={{ color: "var(--warn)" }}>
+                {draft.item.trim()} was already paid on {formatMedium(impact.paidAlready.date)},{" "}
+                {formatMoney(impact.paidAlready.cost)}. Save only if this is a second payment for{" "}
+                {MONTH_NAMES[impact.month - 1]}.
+              </p>
+            )}
+            {impact.lock.state === "closed" && (
+              <p className="t-caption" style={{ color: "var(--ink-3)" }}>
+                {MONTH_NAMES[impact.month - 1]} {impact.year} is closed. This still counts against its budget as it stood.
+              </p>
+            )}
+          </div>
+        )}
+
         {balance && (
           <div
             style={{
@@ -1045,7 +1191,15 @@ export function AddTransaction({
           ) : (
             <ol className="fms-recent-list">
               {latestOf(transactions).map((t) => (
-                <li key={t.id} className="fms-recent-row">
+                <li key={t.id}>
+                  {/* Opens the row in this form, to correct it, the way the Database's edit does. */}
+                  <button
+                    type="button"
+                    className="fms-recent-row"
+                    disabled={!onEditRow}
+                    onClick={() => onEditRow?.(t)}
+                    title={onEditRow ? `Open #${String(t.recordNumber).padStart(4, "0")} to correct it` : undefined}
+                  >
                   <div className="fms-recent-text">
                     <span className="t-body fms-truncate">{t.item || t.description || t.type}</span>
                     <span className="t-micro fms-truncate" style={{ color: "var(--ink-3)" }}>
@@ -1053,9 +1207,15 @@ export function AddTransaction({
                     </span>
                   </div>
                   <Money value={t.total} size="s" tone={AMOUNT_TONE[t.type]} />
+                  </button>
                 </li>
               ))}
             </ol>
+          )}
+          {onShowRows && transactions.length > 0 && (
+            <button type="button" className="t-caption fms-linkbtn fms-recent-more" onClick={() => onShowRows("")}>
+              See every entry in the Database
+            </button>
           )}
         </aside>
       )}

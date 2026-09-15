@@ -16,7 +16,7 @@ import type { ActivityEvent, Actor } from "../domain/activity";
 import { factChanges, readRow } from "../domain/activityRead";
 
 type Who = Actor | "all";
-type Kind = "all" | "added" | "changed" | "binned" | "settings";
+type Kind = "all" | "added" | "changed" | "binned" | "budget" | "settings";
 
 /** Enough to scan in one go. Three hundred rows at once was a wall. */
 const PAGE = 50;
@@ -42,6 +42,8 @@ const KIND: readonly {
     phrase: "Nothing binned or restored",
     match: (a) => a === "transaction.bin" || a === "transaction.restore",
   },
+  // Budgets and limits: set, changed, corrected once closed, or undone.
+  { id: "budget", label: "Budget", phrase: "No budget changed", match: (a) => a === "budget.update" },
   { id: "settings", label: "Settings", phrase: "No settings changed", match: (a) => a.startsWith("settings.") },
 ];
 
@@ -200,6 +202,7 @@ export function Activity({
       binned: count((e) => e.action === "transaction.bin"),
       restored: count((e) => e.action === "transaction.restore"),
       settings: count((e) => e.action.startsWith("settings.")),
+      budget: count((e) => e.action === "budget.update"),
       assistant: count((e) => e.actor === "ai"),
       days: new Set(list.map((e) => dayOf(e.at))).size,
       since: list[list.length - 1]?.at,
@@ -344,6 +347,7 @@ export function Activity({
                   ["changed", "Changed", summary.changed, "edit"],
                   // One row, because it is one filter: two rows lit up together.
                   ["binned", "Binned or restored", summary.binned + summary.restored, "bin"],
+                  ["budget", "Budget changed", summary.budget, "budget"],
                   ["settings", "Settings changed", summary.settings, "settings"],
                 ] as const
               ).map(([id, label, n, icon]) => (
