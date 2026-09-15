@@ -43,6 +43,9 @@ import type { AppSettings } from "../domain/settings";
 import { aiSurfaceOn } from "../domain/aiSurface";
 import type { MonthBill } from "../domain/budgetView";
 import type { Debt } from "../domain/debt";
+import { positionsOf } from "../domain/debt";
+import { healthWords, moneyHealth } from "../domain/health";
+import type { Necessity } from "../domain/types";
 import {
   addDays,
   dayOfWeek,
@@ -167,6 +170,28 @@ export function Insights({
     }
     return { spent, came };
   }, [transactions, monthStart]);
+
+  /**
+   * How the money is doing, rather than what it did (domain/health.ts).
+   *
+   * Read over the last three months and a year, so it does not swing with the
+   * month being looked at: these answer how things are going, and the month
+   * above answers what happened.
+   */
+  const healthLines = useMemo(() => {
+    const necessity: Record<string, Necessity> = {};
+    for (const type of settings.spendingTypes) if (type.necessity) necessity[type.name] = type.necessity;
+    return healthWords(
+      moneyHealth({
+        transactions,
+        accounts: settings.accounts,
+        debts,
+        positions: positionsOf(debts.filter((d) => !d.archived), transactions, asOf),
+        necessity,
+        asOf,
+      }),
+    );
+  }, [transactions, settings.accounts, settings.spendingTypes, debts, asOf]);
 
   const income = useMemo(() => {
     const bySource = new Map<string, Centavos>();
@@ -346,9 +371,10 @@ export function Insights({
             }.`
           : "",
         safe ? `Safe to spend ${formatMoney(safe.perDay)} a day (${formatMoney(safe.safe)}), set by the ${safe.limitedBy}.` : "",
+        ...healthLines,
       ],
     }),
-    [name, year, phaseWords, brief, sel.start, sel.end, when, report, safe],
+    [name, year, phaseWords, brief, sel.start, sel.end, when, report, safe, healthLines],
   );
 
   return (
@@ -567,7 +593,13 @@ export function Insights({
             ))}
           </div>
 
-          <div className="fms-ical-body" role="tabpanel" aria-live="polite">
+          {/* Keyed by the pick and the tab, so every list opens at its top. */}
+          <div
+            key={`${sel.start}-${sel.end}-${shownTab ?? "none"}`}
+            className="fms-ical-body"
+            role="tabpanel"
+            aria-live="polite"
+          >
             {shownTab === null && (
               <p className="t-body fms-ical-empty">
                 Nothing was recorded {multi ? "on these days" : "that day"}, and nothing is expected on {multi ? "them" : "it"}.
@@ -722,6 +754,24 @@ export function Insights({
           </div>
         </Card>
       )}
+
+      {/* ── How the money is doing ──────────────────────────────────────── */}
+      <Card
+        title="How the money is doing"
+        subtitle="The last three months, and what is owed against a year of income"
+      >
+        {healthLines.length === 0 ? (
+          <EmptyState message="Not enough recorded yet to say." />
+        ) : (
+          <ul className="fms-month-notes">
+            {healthLines.map((line) => (
+              <li key={line} className="t-body">
+                {line}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
       {/* ── The month in brief ─────────────────────────────────────────── */}
       <Card

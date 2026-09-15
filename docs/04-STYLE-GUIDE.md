@@ -538,6 +538,21 @@ The owner asked, on 2026-09-16, what happens when the connection cuts off, when 
 | A budget below what is already spent | It saves, and the planner says before Save: "August has already spent ₱7,150.37 on spending, so this budget starts ₱7,050.37 over." The month then reads as over with nothing safe to spend. A closed month still needs a reason; a budget never goes below zero. |
 | A screen has a bug | That screen alone shows "Add stopped working", that nothing saved is affected and a half-typed entry is kept, with Try this screen again, Go to the Dashboard and Reload the app. Every other screen keeps working. |
 
+### 3.13 Figures that say how it is going
+
+From the review of 2026-09-16. Every one of these is worked out from figures the app already had; none needs new data collection, and each says what it is measured against rather than giving a bare number.
+
+| Where | What it says |
+|---|---|
+| Insights, "How the money is doing" | Five sentences over the last three months, and what is owed against a year: what was kept of what was **earned** (borrowed money is never income), what went into reserve and savings, how long the spendable wallets would last at the recent rate, what is owed against a year of income, the share of marked spending that was discretionary with the number of kinds still unmarked, and how much of each payment left again within two days. A figure with nothing behind it says so instead of reading as zero. Nothing here says whether a figure is good: the app does not know what the money is for. |
+| Settings, Categories | Each kind of spending carries "Not marked", "Essential", "Discretionary" or "Emergency". Unmarked is the honest default, and the discretionary share is worked out over marked kinds only. |
+| Budget, Forecast | Each estimate carries a likely range (one standard deviation either side) and how steady the months behind it are: "Steady month to month", "Varies a little", "Varies a lot, so treat this loosely". The basis names the trend it carries, such as "The last 3 months, weighted to the newest, 4% down on the trend". |
+| Debt | What one more cycle costs when a balance is left, told apart properly: a flat charge is charged once however long it sits, a monthly rate compounds every cycle. Interest paid also reads as a share of everything ever borrowed. |
+
+**The forecast's own rules** (replacing the Excel's flat 3%, see `domain/forecast.ts`): growth is the average month-on-month change over the last six months, held within 15% either way and flat when there are fewer than three changes to read; the recent average weights the newest month heaviest (3, 2, 1); the same month last year is blended at 40% rather than overriding; a debt is charged to the month its payment is actually due, not to the month after today.
+
+**Bills** are expected a month after the last payment when they keep to a day of the month, and on their own rhythm when they do not (four-weekly stays four-weekly). Either way the date comes from the most recent payment alone, so a skipped cycle leaves no backlog.
+
 ## 4. Content & voice
 
 | Rule | Example |

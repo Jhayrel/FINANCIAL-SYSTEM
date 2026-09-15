@@ -205,9 +205,28 @@ Spending, in priority order: same month last year * 1.03 → mean of last 3
 months * 1.03 → overall mean * 1.03.
 Bills: most recent non-zero month, and **never forecast below it**.
 
+**The app no longer does this (2026-09-16), deliberately.** The rule above is
+what the workbook did, kept here as the record of it. `domain/forecast.ts` now
+measures the growth instead of assuming 3%: the average month-on-month change
+over six months, held within 15% either way, and flat when there are fewer than
+three changes to read. The recent average weights the newest month heaviest
+(3, 2, 1). The same month last year is blended at 40% rather than overriding,
+so one unusual month last year no longer becomes next month. Every estimate
+carries a range and how steady the months behind it are, and a debt is charged
+to the month its payment is due rather than to the month after today. The bills
+rule is unchanged. See `domain/forecast.test.ts`.
+
 ### 3.9 Bill due prediction
 
 `nextDue = lastPaidDate + 1 month`, per bill/subscription item.
+
+**The app no longer does this in every case (2026-09-16).** A bill that keeps
+to a day of the month still gets the calendar month, so the 31st stays the
+31st. One that does not keep to a day follows the rhythm its own payments show,
+so a four-weekly subscription is no longer called late for two days in every
+four weeks. Either way the date comes from the most recent payment alone, so a
+cycle genuinely skipped leaves no backlog. See `domain/bills.ts` and
+`domain/bills.test.ts`.
 
 ### 3.10 Statement filters (Module5)
 

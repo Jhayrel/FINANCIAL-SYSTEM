@@ -1571,6 +1571,22 @@ const DERIVED_TYPES = new Set(["money send", "transaction fee"]);
 
 const isDerived = (name: string): boolean => DERIVED_TYPES.has(name.trim().toLowerCase());
 
+/**
+ * Whether a kind of spending had to happen.
+ *
+ * Unmarked is a real answer and the one every kind starts on: the
+ * discretionary share is worked out over the kinds that carry a mark and says
+ * how many do not, rather than calling an unmarked ledger entirely essential.
+ */
+const NECESSITY_LABEL = {
+  unmarked: "Not marked",
+  essential: "Essential",
+  discretionary: "Discretionary",
+  emergency: "Emergency",
+} as const;
+
+const NECESSITY_KEYS = Object.keys(NECESSITY_LABEL) as (keyof typeof NECESSITY_LABEL)[];
+
 function SpendingTypes({
   types,
   transactions,
@@ -1653,6 +1669,8 @@ function SpendingTypes({
           <tr>
             <th style={{ width: 190 }}>Type</th>
             <th>What counts as this</th>
+            {/* Marked kinds make the discretionary share on Insights mean something. */}
+            <th style={{ width: 150 }}>Need</th>
             <th className="fms-th-right fms-shrink">Rows</th>
             <th className="fms-shrink" />
           </tr>
@@ -1671,6 +1689,9 @@ function SpendingTypes({
                     {rows > 0
                       ? `Renaming rewrites ${rows} row${rows === 1 ? "" : "s"}.`
                       : "Nothing uses this type yet."}
+                  </td>
+                  <td className="t-caption" style={{ color: "var(--ink-3)" }}>
+                    {NECESSITY_LABEL[t.necessity ?? "unmarked"]}
                   </td>
                   <td className="fms-td-right">
                     <span className="t-num-s" style={{ color: "var(--ink-3)" }}>{rows || "0"}</span>
@@ -1697,6 +1718,25 @@ function SpendingTypes({
                       onChange(types.map((x) => (x.name === t.name ? { ...x, remark: remark.slice(0, MAX_REMARK) } : x)))
                     }
                     placeholder="A few words"
+                  />
+                </td>
+                <td>
+                  <Select
+                    value={NECESSITY_LABEL[t.necessity ?? "unmarked"]}
+                    ariaLabel={`Is ${t.name} essential`}
+                    options={Object.values(NECESSITY_LABEL)}
+                    onChange={(label) => {
+                      const found = NECESSITY_KEYS.find((k) => NECESSITY_LABEL[k] === label) ?? "unmarked";
+                      onChange(
+                        types.map((x) =>
+                          x.name === t.name
+                            ? found === "unmarked"
+                              ? { name: x.name, remark: x.remark }
+                              : { ...x, necessity: found }
+                            : x,
+                        ),
+                      );
+                    }}
                   />
                 </td>
                 <td className="fms-td-right">

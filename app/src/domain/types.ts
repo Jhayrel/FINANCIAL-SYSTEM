@@ -145,9 +145,20 @@ export interface TransactionDraft {
 
 // ── Reference data (CATEGORIES sheet) ──────────────────────────────────────
 
+/** Whether a kind of spending had to happen. Unmarked kinds are left out of the share. */
+export type Necessity = "essential" | "discretionary" | "emergency";
+
 export interface SpendingType {
   readonly name: string;
   readonly remark: string;
+  /**
+   * Marked essential, discretionary or emergency, or left unmarked.
+   *
+   * The discretionary share (domain/health.ts) is worked out over the kinds
+   * that carry a mark and says how many do not, so an unmarked ledger reads
+   * as unmarked rather than as entirely essential or entirely not.
+   */
+  readonly necessity?: Necessity | undefined;
 }
 
 /**

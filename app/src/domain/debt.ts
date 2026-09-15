@@ -486,10 +486,23 @@ const sameText = (a: string): string => a.trim().toLowerCase();
 export function debtNamedBy(debts: readonly Debt[], item: string): Debt | undefined {
   const said = sameText(item);
   if (!said) return undefined;
-  return debts.find((d) => {
+  // An exact name is never ambiguous, whatever else the row reads like.
+  const exact = debts.find((d) => sameText(d.name) === said);
+  if (exact) return exact;
+
+  /**
+   * Two debts owed to the same person: "Tita loan" and "Tita loan 2".
+   *
+   * The loose match returned whichever came first, so a payment on the second
+   * was offered against the first and the balance of a debt nobody was paying
+   * came down. Two loose matches and no exact one means the row has to say
+   * which, so nothing is offered and the form asks.
+   */
+  const loose = debts.filter((d) => {
     const name = sameText(d.name);
-    return name !== "" && (said === name || (name.length >= 6 && said.includes(name)));
+    return name.length >= 6 && said.includes(name);
   });
+  return loose.length === 1 ? loose[0] : undefined;
 }
 
 /**

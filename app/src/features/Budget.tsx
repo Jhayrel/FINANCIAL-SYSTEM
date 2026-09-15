@@ -86,7 +86,7 @@ import {
   type PlanSuggestions,
 } from "../domain/budgetView";
 import type { Debt } from "../domain/debt";
-import { cashFlow, explainBasis, forecastYear } from "../domain/forecast";
+import { cashFlow, confidenceWords, explainBasis, forecastYear } from "../domain/forecast";
 import { getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
 import type {
@@ -197,7 +197,7 @@ export function Budget({
       rows,
       totals: budgetYearTotals(rows),
       plan: budgetForYear(budgets, year),
-      forecast: year === asOfYear ? forecastYear(transactions, year, asOfMonth, debts) : [],
+      forecast: year === asOfYear ? forecastYear(transactions, year, asOfMonth, debts, asOf) : [],
       flow: cashFlow(transactions, year),
     };
   }, [transactions, budgets, debts, year, asOfYear, asOfMonth]);
@@ -855,6 +855,11 @@ export function Budget({
                                   <td className="t-body fms-rhead">{monthLabel(f.month)}</td>
                                   <td className="fms-rnum" data-label="Spending">
                                     <Money value={f.spending} size="s" />
+                                    {f.high > f.low && (
+                                      <div className="t-micro" style={{ color: "var(--ink-3)" }}>
+                                        {formatMoney(f.low)} to {formatMoney(f.high)}
+                                      </div>
+                                    )}
                                   </td>
                                   <td className="fms-rnum" data-label="Bills">
                                     <Money value={f.billsSubs} size="s" />
@@ -863,7 +868,8 @@ export function Budget({
                                     <Money value={f.total} size="s" />
                                   </td>
                                   <td className="t-micro" data-label="Basis" style={{ color: "var(--ink-3)" }}>
-                                    {explainBasis(f.basis)}
+                                    {explainBasis(f.basis, f.growth)}
+                                    {f.basis !== "none" && <div>{confidenceWords(f.confidence)}</div>}
                                   </td>
                                 </tr>
                               ))}

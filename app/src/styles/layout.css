@@ -6888,3 +6888,31 @@ textarea.fms-askinput {
 .fms-conn--warn::before {
   background: var(--warn);
 }
+
+/*
+ * The panel parts that must never shrink.
+ *
+ * Inside the fixed-height panel every part could shrink, and a box that
+ * scrolls sideways (the tab row) may shrink to nothing. With 54 entries the
+ * list asked for thousands of pixels and the squeeze was shared out: the tabs
+ * collapsed to a thin line and disappeared as soon as Entries was opened. The
+ * heading, the figures, the tabs, the quick picks and the legend now keep
+ * their height, and only the list gives way.
+ */
+.fms-ical-head,
+.fms-ical-panelhead,
+.fms-ical-figs,
+.fms-ical-tabs,
+.fms-ical-quick,
+.fms-ical-legend {
+  flex: 0 0 auto;
+}
+
+.fms-ical-body {
+  flex: 1 1 0;
+}
+
+/* A picked range reads as a light wash over the spending shades, not a brown mix. */
+.fms-ical-day.is-in::after {
+  background: color-mix(in srgb, var(--brand-700) 12%, transparent);
+}

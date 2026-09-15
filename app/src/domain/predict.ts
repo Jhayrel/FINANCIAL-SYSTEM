@@ -139,6 +139,9 @@ export function steadyValue(values: readonly string[], threshold = 0.6): string 
   return bestCount / total >= threshold ? best : "";
 }
 
+/** A run this long at one amount is the price now, whatever the older rows say. */
+const RECENT_RUN = 3;
+
 export interface AmountGuess {
   readonly amount: Centavos;
   readonly why: string;
@@ -189,6 +192,20 @@ export function predictAmount(
      */
     const last = history[0];
     return last ? { amount: last.total, why: `Last time it was this. The amount varies.` } : null;
+  }
+
+  /**
+   * Recency eventually beats frequency.
+   *
+   * A subscription at PHP 119.00 for eight months that rises to PHP 149.00
+   * keeps PHP 119.00 as the most frequent figure for months, so the form went
+   * on offering a price that no longer exists. Three in a row at one amount is
+   * the price now.
+   */
+  const latest = history.slice(0, RECENT_RUN).map((t) => t.total);
+  const newest = latest[0];
+  if (newest !== undefined && latest.length === RECENT_RUN && latest.every((v) => v === newest) && newest !== amount) {
+    return { amount: newest, why: `The last ${RECENT_RUN} were this amount` };
   }
 
   return {
