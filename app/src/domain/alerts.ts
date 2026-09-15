@@ -564,6 +564,36 @@ export function financeAlerts(input: AlertInput): Alert[] {
     });
   }
 
+  // ── Two entries with one record number ───────────────────────────────────
+  /**
+   * The phone and the laptop each give a new entry the next number after the
+   * highest they have seen. Saved on both in the moment before either hears
+   * of the other, or while one is offline, two entries take the same number,
+   * and "#0519" stops naming one entry. Reported with both, never renumbered:
+   * which one keeps the number is the owner's call. A split repayment's
+   * interest row shares its payment's number by design and is left out.
+   */
+  const byNumber = new Map<number, Transaction[]>();
+  for (const t of transactions) {
+    if (t.id.endsWith("-interest")) continue;
+    byNumber.set(t.recordNumber, [...(byNumber.get(t.recordNumber) ?? []), t]);
+  }
+  for (const [number, rows] of byNumber) {
+    if (rows.length < 2) continue;
+    const label = `#${String(number).padStart(4, "0")}`;
+    out.push({
+      id: `shared-number-${number}`,
+      level: "warn",
+      area: "review",
+      title: `${rows.length} entries share record ${label}`,
+      detail: `${rows
+        .map((r) => `${formatMedium(r.date)}, ${r.item.trim() || r.type}, ${money(r.total)}`)
+        .join("; ")}. Usually two devices saved at the same moment. If one is the same entry saved again, move it to the bin; if both are real, they can keep the number.`,
+      weight: 60,
+      query: label,
+    });
+  }
+
   // ── Rows the ledger cannot make sense of ─────────────────────────────────
   const issues = actionableIssues(checkIntegrity(transactions));
   if (issues.length > 0) {

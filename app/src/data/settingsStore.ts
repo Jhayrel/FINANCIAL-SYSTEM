@@ -17,6 +17,13 @@ export interface SettingsStore {
   readonly name: string;
   load(): Promise<AppSettings>;
   save(settings: AppSettings): Promise<void>;
+  /**
+   * Only the sections that changed, each replaced whole, every other section
+   * left as the database has it, so two devices editing different sections
+   * both keep their change (see domain/settingsDiff.ts). `whole` is the full
+   * settings, for the checks a save makes.
+   */
+  savePart?(part: Partial<AppSettings>, whole: AppSettings): Promise<void>;
   /** Notifies on changes from elsewhere (another tab, another device). */
   subscribe?(onChange: (settings: AppSettings) => void): () => void;
 }

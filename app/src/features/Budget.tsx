@@ -533,6 +533,7 @@ export function Budget({
             note={note}
             onSave={savePlan}
             onUndo={undo}
+            spent={{ spending: a.spending.spent, billsSubs: a.billsSubs.spent }}
           />
         </aside>
       }
@@ -988,6 +989,7 @@ function Planner({
   note,
   onSave,
   onUndo,
+  spent,
 }: {
   year: number;
   month: number;
@@ -998,6 +1000,8 @@ function Planner({
   note: Note | null;
   onSave: (value: { spending: Centavos; billsSubs: Centavos }, scope: PlanScope, reason: string) => boolean;
   onUndo: () => void;
+  /** What the month has already spent on each track, so a budget below it says so while it is typed. */
+  spent: { spending: Centavos; billsSubs: Centavos };
 }) {
   const name = monthLabel(month);
   const hasPlan = s.current.spending + s.current.billsSubs > 0;
@@ -1163,6 +1167,28 @@ function Planner({
                   : "Everything but bills: what you buy, money sent to other people, transfer fees and interest."}
               </p>
             </div>
+
+            {/*
+              A budget below what the month has already spent.
+
+              The owner asked what happens when a budget is set after the
+              spending is already high. It saves, and every screen then reads
+              the month as over with nothing safe to spend. That is right, and
+              it should not come as a surprise after pressing Save, so it is
+              said here while the figure is typed.
+            */}
+            {[
+              { label: "spending", planned: spending, done: spent.spending },
+              { label: "bills and subscriptions", planned: bills, done: spent.billsSubs },
+            ]
+              .filter((t) => t.planned !== null && t.planned > 0 && t.done > t.planned)
+              .map((t) => (
+                <p key={t.label} className="t-caption fms-planner-note fms-note-over" role="status">
+                  {name} has already spent {formatMoney(t.done)} on {t.label}, so this budget starts{" "}
+                  {formatMoney(t.done - (t.planned ?? 0))} over. It still saves, and the month will then read as over
+                  with nothing safe to spend.
+                </p>
+              ))}
 
             <div className="fms-planner-sum">
               <div className="fms-planner-sumrow">

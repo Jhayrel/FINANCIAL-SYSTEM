@@ -30,7 +30,7 @@ import {
 import {
   initializeFirestore,
   persistentLocalCache,
-  persistentSingleTabManager,
+  persistentMultipleTabManager,
   type Firestore,
 } from "firebase/firestore";
 
@@ -63,10 +63,12 @@ function ensureApp(): FirebaseApp {
 export function firestore(): Firestore {
   if (!db) {
     // The offline cache is what makes this usable on a phone with patchy
-    // signal: reads come from disk, writes queue and replay. Single-tab is
-    // correct here: one user, one device at a time.
+    // signal: reads come from disk, writes queue and replay, and a write made
+    // offline survives closing the tab. Every tab shares it: with the
+    // single-tab manager a second tab of the app got no cache at all, so its
+    // offline writes lived in memory and were lost when it closed.
     db = initializeFirestore(ensureApp(), {
-      localCache: persistentLocalCache({ tabManager: persistentSingleTabManager({}) }),
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
     });
   }
   return db;

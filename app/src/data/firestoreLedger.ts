@@ -257,6 +257,31 @@ export function firestoreSettingsStore(uid: string): SettingsStore {
       await setDoc(settingsDoc(db, uid), settings as DocumentData);
     },
 
+    async savePart(part, whole) {
+      assertNoSecrets(whole);
+
+      // The same guard as `save`: an empty account list is never written over a full one.
+      if (part.accounts && part.accounts.length === 0) {
+        const existing = await getDoc(settingsDoc(db, uid));
+        const stored = existing.exists() ? normaliseSettings(existing.data()) : null;
+        if (stored && stored.accounts.length > 0) {
+          throw new Error(
+            `Refusing to save: this would erase ${stored.accounts.length} accounts and leave the ledger without them. Reload before changing anything.`,
+          );
+        }
+      }
+
+      const keys = Object.keys(part);
+      if (keys.length === 0) return;
+      const data: DocumentData = {};
+      for (const key of keys) {
+        const value = (part as Record<string, unknown>)[key];
+        data[key] = value === undefined ? deleteField() : value;
+      }
+      // Each named section replaced whole; every section not named stays as the database has it.
+      await setDoc(settingsDoc(db, uid), data, { mergeFields: keys });
+    },
+
     subscribe(onChange) {
       return onSnapshot(settingsDoc(db, uid), (snap) => {
         if (snap.exists() && !snap.metadata.hasPendingWrites) {

@@ -523,6 +523,21 @@ Both: focus trapped, `Esc` closes, focus returns to the trigger, body scroll loc
 
 ---
 
+### 3.12 When something goes wrong
+
+The owner asked, on 2026-09-16, what happens when the connection cuts off, when the phone and the laptop are used at once, when a budget is set after the spending is already high, and when a screen has a bug. Each has a rule, and `domain/hardScenarios.test.ts` runs every one.
+
+| Case | What the app does |
+|---|---|
+| The connection cuts off | Every change is kept on the device by the offline cache and sent by itself when the connection returns, in every open tab. A banner says "Offline, 3 changes waiting"; a save still waiting after three seconds online says "Saving 1 change". Closing the tab offline with changes waiting, the browser asks first. |
+| A save is refused | "A change did not save", why in plain words ("sign in again as the owner"), that it is not in the database and should be added again, and that everything before it is safe. It stays until dismissed. |
+| Two devices take one record number | Reported as "2 entries share record #0519" with both entries and a link to them. Never renumbered: which one keeps it is the owner's call. A split repayment's interest row shares its payment's number by design and is not reported. |
+| The same entry saved on both devices | From ₱500.00 up, "saved twice on" the day, with both numbers. Under that, two meals on one day are ordinary and left alone. |
+| Settings changed on both devices | Only the sections that changed are saved, so a change to accounts on one and to alerts on the other both survive. Two changes to the same list at the same moment keep the later one. |
+| A row binned on one device while corrected on the other | The correction closes and says so, with the way to restore it. |
+| A budget below what is already spent | It saves, and the planner says before Save: "August has already spent ₱7,150.37 on spending, so this budget starts ₱7,050.37 over." The month then reads as over with nothing safe to spend. A closed month still needs a reason; a budget never goes below zero. |
+| A screen has a bug | That screen alone shows "Add stopped working", that nothing saved is affected and a half-typed entry is kept, with Try this screen again, Go to the Dashboard and Reload the app. Every other screen keeps working. |
+
 ## 4. Content & voice
 
 | Rule | Example |

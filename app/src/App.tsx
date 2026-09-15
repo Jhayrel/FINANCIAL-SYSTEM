@@ -34,6 +34,9 @@ import { Icon, type IconName } from "./components/Icon";
 import { AskPanel } from "./features/AskPanel";
 import { useProposalSink } from "./features/useProposalSink";
 import { useReportScreenFallback } from "./features/screenReport";
+import { ScreenBoundary } from "./components/ScreenBoundary";
+import { changedSections } from "./domain/settingsDiff";
+import { syncWords } from "./domain/syncState";
 import { useMediaQuery } from "./features/useMediaQuery";
 import { aiSurfaceOn } from "./domain/aiSurface";
 import type { Draft } from "./domain/entry";
@@ -325,12 +328,17 @@ export default function App() {
    * question that actually matters.
    */
   const [loadedStore, setLoadedStore] = useState<SettingsStore | null>(null);
+  /** Settings as the database last had them, so a save sends only the sections that differ. */
+  const lastSynced = useRef<AppSettings | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     // A new store has not been read yet, whatever the previous one told us.
     setLoadedStore(null);
+    lastSynced.current = null;
     void store.load().then((stored) => {
+      // What is stored, before cleaning: whatever the cleaning changes is then saved back.
+      if (!cancelled) lastSynced.current = isBlankSettings(stored) ? null : stored;
       /**
        * Clean on every load, not just on the first build.
        *
@@ -360,7 +368,26 @@ export default function App() {
   useEffect(() => {
     // Never write to a store that has not been read yet.
     if (loadedStore !== store) return;
-    void store.save(settings);
+    /**
+     * Only what changed, where the store can take a part.
+     *
+     * Settings went up as one document, so a change on the phone and a
+     * different change on the laptop at the same time left only the later
+     * one: its whole copy, with the other device's section as it was before,
+     * replaced the document. Sections travel on their own now
+     * (`domain/settingsDiff.ts`), and a settings change counts as waiting
+     * until the database confirms it, like any other write.
+     */
+    const was = lastSynced.current;
+    lastSynced.current = settings;
+    if (store.savePart && was) {
+      const part = changedSections(was, settings);
+      if (Object.keys(part).length > 0) track(store.savePart(part, settings));
+      return;
+    }
+    track(store.save(settings));
+    // `track` only counts and reports; it is not an input to what is saved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, settings, loadedStore]);
 
   /**
@@ -378,6 +405,8 @@ export default function App() {
     if (loadedStore !== store || !store.subscribe) return;
     return store.subscribe((incoming) => {
       const next = cleanedSettings(incoming);
+      // What the database now holds, so the save this sets off sends nothing back.
+      lastSynced.current = incoming;
       setSettings((current) => {
         /**
          * Only accept a genuine change.
@@ -448,6 +477,21 @@ export default function App() {
         setDeleted([...snap.deleted]);
         setLedgerSource("live");
         setSyncError(null);
+
+        /**
+         * The row being corrected went to the bin on another device.
+         *
+         * The form kept it open, and saving would have written the correction
+         * onto a row sitting in the bin, live on one screen and binned on the
+         * other. It closes now, and says why.
+         */
+        const open = editingRef.current;
+        if (open && snap.deleted.some((t) => t.id === open.id)) {
+          setEditing(null);
+          flash(
+            `#${String(open.recordNumber).padStart(4, "0")} was moved to the bin on another device, so its correction was closed. Restore it from the Bin to correct it.`,
+          );
+        }
       },
       (e) => setSyncError(e.message),
     );
@@ -464,12 +508,75 @@ export default function App() {
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  /** The row being corrected, for the live ledger to check against without resubscribing. */
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
 
   /** Writes through to Firestore when connected; a no-op when local. */
+  /**
+   * Writes the database has not confirmed yet.
+   *
+   * A write made offline does not fail: the offline cache keeps it and the
+   * promise waits. So nothing on screen changed while entries piled up on the
+   * device, and a saved entry looked the same as one still waiting. The owner
+   * asked what happens when the connection cuts off; this counts what is
+   * waiting, so the banner can say how many and that they are safe.
+   */
+  const [pending, setPending] = useState(0);
+  /**
+   * A write the database refused, kept until it is dismissed.
+   *
+   * Apart from `syncError`, which every live update clears: one arrives the
+   * moment a refused write is rolled back, so a refusal reported there was
+   * gone before it could be read.
+   */
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const track = (write: Promise<unknown>): void => {
+    setPending((count) => count + 1);
+    write
+      .catch((e: Error) => setWriteError(e.message))
+      .finally(() => setPending((count) => Math.max(0, count - 1)));
+  };
+
   const push = (fn: (l: ReturnType<typeof firestoreLedger>) => Promise<void>): void => {
     if (!cloud.uid) return;
-    fn(firestoreLedger(cloud.uid)).catch((e: Error) => setSyncError(e.message));
+    track(fn(firestoreLedger(cloud.uid)));
   };
+
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
+  useEffect(() => {
+    const up = (): void => setOnline(true);
+    const down = (): void => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
+
+  /** A save that takes a moment is normal; only one still waiting after three seconds is mentioned. */
+  const [slow, setSlow] = useState(false);
+  const waiting = pending > 0;
+  useEffect(() => {
+    if (!waiting) {
+      setSlow(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSlow(true), 3000);
+    return () => window.clearTimeout(timer);
+  }, [waiting]);
+
+  /** Closing the tab offline with changes waiting: the browser asks first. */
+  useEffect(() => {
+    if (!waiting || online) return;
+    const hold = (e: BeforeUnloadEvent): void => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", hold);
+    return () => window.removeEventListener("beforeunload", hold);
+  }, [waiting, online]);
 
   /**
    * Write the audit event beside the data write.
@@ -865,7 +972,7 @@ export default function App() {
         if (uid) {
           for (const key of moved.years) {
             const plan = moved.budgets[key];
-            if (plan) saveBudget(uid, key, plan).catch((e: Error) => setSyncError(e.message));
+            if (plan) track(saveBudget(uid, key, plan));
           }
         }
       }
@@ -910,7 +1017,7 @@ export default function App() {
     const key = String(year);
     setBudgets((prev) => ({ ...prev, [key]: next }));
     if (cloud.uid) {
-      saveBudget(cloud.uid, key, next).catch((e: Error) => setSyncError(e.message));
+      track(saveBudget(cloud.uid, key, next));
     }
     // Each change to a month's budget is on the trail, like a change to a row.
     if (changes.length > 0) record(...changes.map((c) => budgetChanged(c)));
@@ -1399,14 +1506,32 @@ export default function App() {
               </Alert>
             </div>
           )}
-          {syncError && (
-            <div style={{ marginBottom: "var(--space-4)" }}>
-              <Alert status="over" title="Not saving to Firebase">
-                {syncError} Your changes are still on screen but are not reaching the database.
-                check the security rules and that you are signed in as the owner.
-              </Alert>
-            </div>
-          )}
+          {(() => {
+            // Offline, slow or refused, said once (domain/syncState.ts). Only a signed-in app talks to a database.
+            const sync = syncWords({
+              online: cloud.uid ? online : true,
+              pending: cloud.uid && (slow || !online) ? pending : 0,
+              error: writeError ?? syncError,
+            });
+            return sync ? (
+              <div style={{ marginBottom: "var(--space-4)" }} role="status" aria-live="polite">
+                <Alert
+                  status={sync.level}
+                  title={sync.title}
+                  action={
+                    writeError ? (
+                      <Button size="sm" onClick={() => setWriteError(null)}>
+                        Dismiss
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  {sync.detail}
+                </Alert>
+              </div>
+            ) : null;
+          })()}
+          <ScreenBoundary key={screen} where={title} onHome={() => go("dashboard")}>
           {screen === "dashboard" && (
             <Dashboard
               transactions={transactions}
@@ -1622,6 +1747,7 @@ export default function App() {
               onExport={handleExport}
             />
           )}
+          </ScreenBoundary>
         </main>
       </div>
 
