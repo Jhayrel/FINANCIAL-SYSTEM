@@ -302,10 +302,19 @@ The most-used screen. Pattern:
 8. **Latest entries where the chat would be.** With AI off, a desktop shows the eight newest rows beside the form (under the balances below 1600px, a third column above it), so a new entry is checked against the last ones before it is saved.
 9. **The form says what an entry does before it is saved.** Beside it on a desktop, under it on a phone:
    - **What it does to the month's budget**: the track it counts toward, what is left before and after, the kind of spending so far, and its limit if it has one. When the month has no budget, a link to Budget. When the month is closed, a note saying the entry still counts against the budget as it was planned (docs/08, rule Y4).
-   - **Bills due within a week or late**, from the same list as the Budget screen, each one tap to fill the form.
-   - **A likely duplicate**, with a link to that row in the Database.
+   - **Everything due within a week or late**, above the flow tiles: bills from the same list as the Budget screen, and debt payments from the same dates as the Debt screen. Late first, three shown with "Show all" for the rest, so ten due bills never push the form off the screen. A tap fills the form, and asks first when that would replace something typed. Hidden while a saved row is being corrected.
+   - **What it does to a debt**: the debt's balance before and after the entry.
+   - **A likely duplicate**, with a link to that row in the Database. A bill already paid that month is named with its date.
    - **Latest entries** open for editing on a tap.
-   - **After a save, the toast links to the row.** When the form was opened from a bill on Budget or Insights, saving goes back there.
+   - **After a save, the toast links to the row.** When the form was opened from a bill on Budget, Insights or the Dashboard, or from a debt, saving goes back there.
+10. **Checks that stop a quiet mistake.** Warnings wait until an amount is typed. None blocks a save except where noted:
+    - A debt offers only the effects its direction takes: draw, repay, interest or write-off for money you owe; lend, collect or write-off for money owed to you. The wrong one is refused.
+    - An archived debt takes no new rows.
+    - A spending row named after a debt offers "Book it as a repayment".
+    - An amount five times the largest of its kind asks once before saving.
+    - A date days ahead or over a year back is questioned.
+    - A fee larger than its amount is questioned.
+    - One press saves once.
 
 ### 3.4 Tables
 
@@ -347,6 +356,23 @@ Wallets ₱6,112.45 · Debt −₱2,762.06 ← caption, components in flow colou
 - Optional 40px sparkline bottom-right.
 - **Net worth always shows its components.** Never a bare total.
 
+**The Dashboard answers "how much can I spend today" first.** Its main column is:
+
+1. **The month.** What is safe to spend a day, how the budget stands, and the month's sentences.
+2. **Still to pay.** Each item has a button to record it.
+3. **Where it went.** Spending by kind, against last month.
+
+A rail beside it holds your money (net worth, then each account, with Low and Below zero said), the worst three findings, and the debts. The year's charts sit below, on a desktop only. "Safe to spend" is the spending wallets less the bills and debt payments still due this month, capped by what is left of the spending budget, divided by the days left and rounded down (`domain/monthPlan.ts`). Insights reads the same brief for any month, so the two screens cannot disagree.
+
+**The Debt screen judges its dates.** Each debt card shows:
+
+- the next payment and whether it has passed
+- how much is due
+- the last payment
+- the last 30 days of borrowing against payments
+
+A due day, limit or term is set under Details. "Record payment" opens the Add form filled in. The history covers every year.
+
 ### 3.6 Badges, chips, tags
 
 | Type | Shape | Use |
@@ -363,6 +389,14 @@ All badges: `micro`, 22px tall, 8px horizontal padding, never interactive unless
 **Inline alert** (inside a form or card): 1px border in the status colour, status wash, `radius-md`, 12px padding, 16px status icon, `body` text, optional action link. Used for the entry-form warnings.
 
 **Page banner**: full width above content, same colours, dismissible only if informational. Overdue debt is persistent.
+
+**Notifications**: every finding lives behind a bell at the top right of every screen, not as a stack of boxes on the Dashboard.
+
+- **Count on the bell:** findings not yet looked at, in the colour of the worst of them. It clears once the list is opened.
+- **The list:** drops down under the bell, worst first. Each finding is a title, one line of figures, and where tapping it goes: its rows in the Database, or the screen that deals with it.
+- **On a phone:** the list spans the screen under the bar.
+- **Where "seen" is kept:** in the browser only.
+- **The assistant's paragraph:** sits under the list while AI is on.
 
 **Toast**: bottom-centre on phone, bottom-right on desktop. `--surface`, `--shadow-overlay`, `radius-md`, max 2 lines, auto-dismiss 6s, pauses on hover. Carries at most one action (`Undo`). Never stack more than 3.
 

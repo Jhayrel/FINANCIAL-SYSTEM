@@ -12,9 +12,10 @@
 
 import { walletBalance } from "./balances";
 import type { Debt, DebtEffect } from "./debt";
-import { outstandingOf, splitRepayment } from "./debt";
-import { today } from "./dates";
+import { debtNamedBy, effectsFor, outstandingOf, splitRepayment } from "./debt";
+import { daysBetween, formatMedium, getMonth, getYear, monthName, today } from "./dates";
 import { formatMoney as money, type Centavos } from "./money";
+import { kindKey, unusualAgainst, type Unusual } from "./unusual";
 import type {
   IsoDate,
   ReferenceLists,
@@ -292,6 +293,13 @@ export interface EntryCheck {
   readonly warnings: readonly EntryIssue[];
   /** Principal/interest breakdown, shown before saving a repayment. */
   readonly repaymentSplit?: { principal: Centavos; interest: Centavos } | undefined;
+  /**
+   * A spending row whose item names a debt: most likely a payment to it, or
+   * money lent, filed as spending. The form offers to book it properly.
+   */
+  readonly debtPayment?: { readonly debtId: string; readonly name: string } | undefined;
+  /** Far larger than any row of its kind before. The form asks before saving it. */
+  readonly unusual?: Unusual | undefined;
 }
 
 export function checkDraft(
@@ -299,6 +307,8 @@ export function checkDraft(
   transactions: readonly Transaction[],
   reference: ReferenceLists,
   debts: readonly Debt[] = [],
+  /** Today, for a date far ahead of it or far behind. */
+  asOf: IsoDate = today(),
 ): EntryCheck {
   const errors: EntryIssue[] = [];
   const warnings: EntryIssue[] = [];
@@ -398,6 +408,39 @@ export function checkDraft(
     if (!draft.debtEffect) {
       errors.push({ field: "debtEffect", message: "Pick what this does: draw, repay, interest or write-off." });
     }
+
+    const debt = draft.debtId ? debts.find((d) => d.id === draft.debtId) : undefined;
+
+    /**
+     * The effect has to suit the direction.
+     *
+     * A "draw" against money lent to a friend put the money into a wallet
+     * and raised what they owed at the same time, so the same PHP 500 was
+     * counted twice. Money you owe is drawn and repaid; money owed to you is
+     * lent and collected.
+     */
+    if (debt && draft.debtEffect && !effectsFor(debt.kind).includes(draft.debtEffect)) {
+      errors.push({
+        field: "debtEffect",
+        message:
+          debt.kind === "payable"
+            ? `${debt.name} is money you owe. Pick draw, repay, interest or write-off.`
+            : `${debt.name} is money owed to you. Pick lend, collect or write-off.`,
+      });
+    }
+
+    /**
+     * An archived debt takes no new rows. Settings says archiving removes it
+     * from the entry form; the form still listed it, so a movement could be
+     * filed against a line that no longer shows anywhere. Editing a row that
+     * is already filed against it is still allowed.
+     */
+    if (debt?.archived && !draft.id) {
+      errors.push({
+        field: "debt",
+        message: `${debt.name} is archived. Reopen it in Settings, under Credit and loans, to record something new against it.`,
+      });
+    }
   }
 
   // ── Warnings ─────────────────────────────────────────────────────────────
@@ -467,6 +510,92 @@ export function checkDraft(
     }
   }
 
+  /**
+   * A spending row named after a debt.
+   *
+   * The Excel filed the Maya Credit bill under Bills, and the habit carries
+   * over: the money leaves the wallet, counts as spending, and what is owed
+   * never comes down, so the Debt screen reports a balance already paid.
+   */
+  let debtPayment: EntryCheck["debtPayment"];
+  if (draft.flow === "Spending") {
+    const named = debtNamedBy(
+      debts.filter((d) => !d.archived),
+      draft.item,
+    );
+    if (named) {
+      debtPayment = { debtId: named.id, name: named.name };
+      warnings.push({
+        field: "item",
+        message:
+          named.kind === "payable"
+            ? `"${named.name}" is a debt. Paying it lowers what you owe and is not spending, so as spending it would count twice. Book it as a repayment instead?`
+            : `"${named.name}" is money owed to you. Handing them more is lending, not spending. Book it as lending instead?`,
+      });
+    }
+  }
+
+  /**
+   * Far more than anything of its kind before: extra zeros, most likely.
+   * See `domain/unusual.ts`. The screen asks before saving it.
+   */
+  let unusual: Unusual | undefined;
+  if (draft.flow && draft.flow !== "Opening" && total < MOST_MONEY) {
+    const type: Transaction["type"] = draft.flow;
+    const key = kindKey({ type, category: draft.category, debtEffect: draft.debtEffect });
+    if (key !== null) {
+      const peers = transactions.filter(
+        (t) => t.id !== draft.id && t.id !== `${draft.id}-interest` && kindKey(t) === key,
+      );
+      const found = unusualAgainst(total, peers);
+      if (found) {
+        unusual = found;
+        const kind =
+          type === "Revenue" ? "income" : type === "Debt" ? `${draft.debtEffect ?? "debt"} row` : type.toLowerCase();
+        warnings.push({
+          field: "amount",
+          message: `${money(total)} is ${found.times} times the largest ${kind} ever recorded (${money(found.largest)}). Check the zeros before saving.`,
+        });
+      }
+    }
+  }
+
+  /**
+   * A date far from today, on a new entry.
+   *
+   * The date field keeps whatever it was last set to, and typing 2025 for
+   * 2026 files a row a year away from its month. Neither is refused: a
+   * receipt from last year is real. Editing a saved row says nothing, since
+   * old rows are old on purpose.
+   */
+  if (draft.date && !draft.id) {
+    const ahead = daysBetween(asOf, draft.date);
+    if (ahead > 3) {
+      warnings.push({
+        field: "date",
+        message: `This is dated ${ahead} days from today, so it counts in ${monthName(getMonth(draft.date))} ${getYear(draft.date)}, not now. Is the date right?`,
+      });
+    } else if (ahead < -365) {
+      warnings.push({
+        field: "date",
+        message: `This is dated ${formatMedium(draft.date)}, more than a year ago. Is the year right?`,
+      });
+    }
+  }
+
+  // A fee bigger than what it was charged on: the two boxes swapped, usually.
+  if (
+    (draft.flow === "Transfer" || draft.flow === "Spending") &&
+    draft.amount !== null &&
+    draft.amount > 0 &&
+    draft.fee > draft.amount
+  ) {
+    warnings.push({
+      field: "fee",
+      message: `The fee (${money(draft.fee)}) is more than the amount (${money(draft.amount)}). Are the two the wrong way round?`,
+    });
+  }
+
   // Rules D2 and D3.
   if (draft.flow === "Debt" && draft.debtId) {
     const debt = debts.find((d) => d.id === draft.debtId);
@@ -492,9 +621,22 @@ export function checkDraft(
       if (split.interest > 0) {
         warnings.push({
           field: "amount",
-          message: `Only ${money(split.principal)} of this is principal. The other ${money(split.interest)} will be recorded as interest.`,
+          message:
+            outstanding <= 0
+              ? `Nothing is owed on ${debt?.name ?? "this debt"}, so all ${money(amount)} would be recorded as interest. If you borrowed first, record that draw before this payment.`
+              : `Only ${money(split.principal)} of this is principal. The other ${money(split.interest)} will be recorded as interest.`,
         });
       }
+    }
+
+    // Collecting or forgiving more than is outstanding takes it below zero.
+    if ((draft.debtEffect === "collect" || draft.debtEffect === "writeoff") && amount > Math.max(0, outstanding)) {
+      warnings.push({
+        field: "amount",
+        message: `Only ${money(Math.max(0, outstanding))} is outstanding on ${debt?.name ?? "this debt"}. ${
+          draft.debtEffect === "collect" ? "Collecting" : "Writing off"
+        } ${money(amount)} takes it below zero.`,
+      });
     }
 
     if (draft.debtEffect === "draw" && debt?.creditLimit) {
@@ -508,7 +650,7 @@ export function checkDraft(
     }
   }
 
-  return { ok: errors.length === 0, errors, warnings, repaymentSplit };
+  return { ok: errors.length === 0, errors, warnings, repaymentSplit, debtPayment, unusual };
 }
 
 // ── Commit ─────────────────────────────────────────────────────────────────

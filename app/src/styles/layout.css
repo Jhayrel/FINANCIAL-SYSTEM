@@ -3459,6 +3459,13 @@
     --main-pad-b: var(--space-3);
   }
 
+  /* The Save bar reaches the screen's edges through the page padding, which is 12px here, not 16px:
+     at 16px it ran 4px past each side and the whole Add screen scrolled sideways. */
+  .fms-actions {
+    margin-left: calc(var(--space-3) * -1);
+    margin-right: calc(var(--space-3) * -1);
+  }
+
   .fms-topbar {
     padding: var(--space-2) var(--space-3);
   }
@@ -5059,4 +5066,622 @@ textarea.fms-askinput {
  */
 .fms-describedline:first-line {
   font-weight: 650;
+}
+
+/* ══ Notifications ══════════════════════════════════════════════════════════
+   What needs attention, behind the bell at the top right of every screen.
+   The count sits on the bell in the colour of the worst new finding, and the
+   list drops down under it. See components/Notifications.tsx. */
+
+.fms-topbar-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-right: calc(var(--space-2) * -1);
+}
+
+.fms-topbar-actions .fms-topbar-action {
+  margin-right: 0;
+}
+
+.fms-notify,
+.fms-notify-btn {
+  position: relative;
+}
+
+/* The page colour for the figure: white on a light theme, dark on a dark one,
+   so it reads on the red, amber and blue of either. */
+.fms-notify-count {
+  position: absolute;
+  top: 5px;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  color: var(--surface);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.fms-notify-panel {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 45;
+  width: min(420px, calc(100vw - var(--space-8)));
+  max-height: min(70vh, 620px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+}
+
+.fms-notify-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-notify-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-notify-list > li + li {
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-notify-item {
+  display: flex;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-notify-item:hover {
+  background: var(--surface-hover);
+}
+
+.fms-notify-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.fms-notify-glyph {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: var(--radius-full);
+  color: var(--surface);
+  font-weight: 700;
+}
+
+.fms-notify-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-notify-text .t-caption {
+  line-height: 1.45;
+}
+
+.fms-notify-new {
+  color: var(--brand-700);
+  font-weight: 600;
+}
+
+.fms-notify-go {
+  margin-top: 2px;
+  color: var(--ink-3);
+  text-decoration: underline;
+  text-decoration-color: var(--hairline-strong);
+  text-underline-offset: 3px;
+}
+
+.fms-notify-empty {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--ink-3);
+}
+
+.fms-notify-ai {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+/* A phone: the list is the width of the screen, under the bar. */
+@media (max-width: 639px) {
+  .fms-notify-panel {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 60px);
+    left: var(--space-3);
+    right: var(--space-3);
+    width: auto;
+    max-height: calc(100dvh - 150px);
+  }
+}
+
+/* ══ Dashboard: the month, with your money beside it ════════════════════════ */
+
+.fms-home {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "main"
+    "rail"
+    "wide";
+  align-items: start;
+  max-width: 1600px;
+}
+
+.fms-home-main,
+.fms-home-rail,
+.fms-home-wide {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fms-home-main { grid-area: main; }
+.fms-home-rail { grid-area: rail; }
+.fms-home-wide { grid-area: wide; }
+
+@media (min-width: 1200px) {
+  .fms-home {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+    grid-template-areas:
+      "main rail"
+      "wide wide";
+  }
+}
+
+.fms-month {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  align-items: start;
+}
+
+.fms-month-safe,
+.fms-month-budget {
+  display: grid;
+  align-content: start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.fms-month-lines {
+  display: grid;
+  min-width: 0;
+  margin-top: var(--space-3);
+}
+
+/* A label and its figure, the figure under it only when they cannot share a line. */
+.fms-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-line > :first-child {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.fms-line > :last-child:not(:first-child) {
+  margin-left: auto;
+  text-align: right;
+}
+
+.fms-line:last-child {
+  border-bottom: 0;
+}
+
+.fms-month-notes {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-4) 0 0;
+  padding: var(--space-4) 0 0 var(--space-5);
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-2);
+}
+
+.fms-month-notes li::marker {
+  color: var(--ink-3);
+}
+
+.fms-duelist {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-duerow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-duerow:last-child {
+  border-bottom: 0;
+}
+
+.fms-duerow-text {
+  display: grid;
+  gap: 1px;
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.fms-duerow-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+}
+
+.fms-habits {
+  margin: var(--space-3) 0 0;
+  color: var(--ink-3);
+}
+
+.fms-kinds {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-kind {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fms-moneylist {
+  display: grid;
+  margin: var(--space-4) 0 0;
+  padding: var(--space-3) 0 0;
+  list-style: none;
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-moneyrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 5px 0;
+}
+
+.fms-moneyrow > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fms-moneyrow-end {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fms-attn {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-attn > li + li {
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-attn-item {
+  display: flex;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-attn-item:hover .t-body-strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.fms-attn-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: var(--radius-full);
+}
+
+.fms-attn-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-attn-text .t-caption {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* ══ Debt ═══════════════════════════════════════════════════════════════════ */
+
+.fms-debtsum {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.fms-debtfig {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-debtgrid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+  align-items: start;
+}
+
+/* Amber edge for a debt (rule D3), red once a payment is late. */
+.fms-debtcard {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--flow-debt);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.fms-debtcard.is-selected {
+  border-color: var(--flow-debt);
+}
+
+.fms-debtcard.is-late {
+  border-left-color: var(--over);
+}
+
+.fms-debtcard-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-debtcard-name {
+  display: grid;
+  gap: 1px;
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.fms-debtbar {
+  display: grid;
+  gap: 4px;
+}
+
+.fms-debtfacts {
+  display: grid;
+  gap: var(--space-2) var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  margin: 0;
+}
+
+.fms-debtfacts > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-debtfacts dt {
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fms-debtfacts dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--ink);
+}
+
+.fms-debtnote {
+  margin: 0;
+  color: var(--ink-3);
+}
+
+.fms-debtactions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.fms-debtdetails {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-md);
+}
+
+.fms-debtfield {
+  display: grid;
+  gap: var(--space-1);
+  max-width: 320px;
+}
+
+.fms-debtnotecell {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ══ Insights: a month in brief ═════════════════════════════════════════════ */
+
+.fms-brief {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  align-items: start;
+}
+
+.fms-brief-words {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fms-brief-words .fms-month-notes {
+  margin: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.fms-brief-tracks {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.fms-brief-track {
+  display: grid;
+  gap: 4px;
+}
+
+.fms-brief-figs {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  padding: var(--space-4);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-md);
+}
+
+.fms-safe-hero {
+  display: grid;
+  gap: 2px;
+  margin-bottom: var(--space-2);
+}
+
+.fms-billgroups {
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* Each day is a button now, so it can open the day's spending. */
+button.fms-calday {
+  padding: 0;
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button.fms-calday[aria-pressed="true"] {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+button.fms-calday:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fms-daylist {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
+}
+
+/* ══ Add: what is due now ═══════════════════════════════════════════════════ */
+
+.fms-duestrip-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+}
+
+.fms-duechip.is-in-form {
+  border-color: var(--brand-700);
+  background: var(--brand-50);
 }

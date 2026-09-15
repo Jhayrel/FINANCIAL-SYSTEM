@@ -247,6 +247,10 @@ export interface MonthBill {
   readonly amount: Centavos;
   /** Negative when late. Going by one month after the last payment. */
   readonly daysToDue?: number | undefined;
+  /** When it is expected: one month after the last payment. */
+  readonly dueOn?: IsoDate | undefined;
+  /** When it was paid in this month, the latest payment if more than one. */
+  readonly paidOn?: IsoDate | undefined;
 }
 
 export interface MonthBills {
@@ -309,12 +313,30 @@ export function monthBills(
     else if (b.daysToDue !== undefined && b.daysToDue <= 3) state = "soon";
     else state = "due";
 
+    let paidOn: IsoDate | undefined;
+    if (b.paidThisMonth) {
+      for (const t of transactions) {
+        if (
+          t.type === "Spending" &&
+          t.category === b.category &&
+          t.item === b.item &&
+          getYear(t.date) === year &&
+          getMonth(t.date) === month &&
+          (!paidOn || t.date > paidOn)
+        ) {
+          paidOn = t.date;
+        }
+      }
+    }
+
     bills.push({
       item: b.item,
       category: b.category,
       state,
       amount: b.paidThisMonth ? b.paidThisMonthAmount : b.lastAmount || b.averageAmount,
       daysToDue: b.daysToDue,
+      dueOn: b.nextDue,
+      paidOn,
     });
   }
 

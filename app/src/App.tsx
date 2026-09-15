@@ -21,12 +21,14 @@ import { Bin } from "./features/Bin";
 import { CoderView } from "./features/CoderView";
 import { Budget } from "./features/Budget";
 import { Dashboard } from "./features/Dashboard";
+import { AlertsSummary } from "./features/AlertsSummary";
 import { Database } from "./features/Database";
 import { DebtScreen } from "./features/DebtScreen";
 import { Insights } from "./features/Insights";
 import { Settings } from "./features/Settings";
 import { Statements } from "./features/Statements";
 import { Alert, Button, Card, EmptyState, Money, Toast } from "./components/primitives";
+import { Notifications } from "./components/Notifications";
 import { useUpdateAvailable } from "./data/updateCheck";
 import { BiggerScreen } from "./components/BiggerScreen";
 import { Icon, type IconName } from "./components/Icon";
@@ -40,7 +42,11 @@ import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
 import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
-import { netWorth, positionsOf } from "./domain/debt";
+import { netWorth, positionsOf, type Debt, type DebtEffect } from "./domain/debt";
+import { financeAlerts, type Alert as Finding } from "./domain/alerts";
+import { billStatuses } from "./domain/bills";
+import type { MonthBill } from "./domain/budgetView";
+import type { Centavos } from "./domain/money";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { emptyDraft, insertChronologically } from "./domain/entry";
 import { formatMedium, getYear, today } from "./domain/dates";
@@ -529,6 +535,24 @@ export default function App() {
       ),
     };
   }, [transactions, settings.credits, reference]);
+
+  /**
+   * Everything worth a look, worst first: the bell on every screen and the
+   * Dashboard's short list read this one list, so the two cannot disagree.
+   */
+  const alerts = useMemo(
+    () =>
+      financeAlerts({
+        transactions,
+        accounts: settings.accounts,
+        budgets,
+        debts: settings.credits,
+        bills: billStatuses(transactions, reference, asOf),
+        lowBalanceThreshold: settings.lowBalanceThreshold,
+        asOf,
+      }),
+    [transactions, settings.accounts, settings.credits, settings.lowBalanceThreshold, budgets, reference, asOf],
+  );
 
   const flash = (message: string, action?: { label: string; run: () => void }): void => {
     setToast(action ? { text: message, action } : { text: message });
@@ -1074,6 +1098,79 @@ export default function App() {
     setReturnTo(null);
   };
 
+  /** Where a finding is dealt with: its rows when it names some, otherwise its screen. */
+  const openAlert = (finding: Finding): void => {
+    if (finding.query) {
+      go("database");
+      setDbFilter("all");
+      setDbQuery({ query: finding.query, at: Date.now() });
+      return;
+    }
+    switch (finding.area) {
+      case "budget":
+        go("budget");
+        break;
+      case "bills":
+        go("add");
+        break;
+      case "debt":
+        go("debt");
+        break;
+      case "goals":
+        go("settings");
+        break;
+      case "pattern":
+        go("insights");
+        break;
+      case "review":
+        setDbFilter("flagged");
+        go("database");
+        break;
+      default:
+        go("dashboard");
+    }
+  };
+
+  /** A bill into the Add form, filled in and never saved: it is checked there. */
+  const recordBill = (bill: MonthBill, back: Screen): void => {
+    setIncoming({
+      draft: {
+        ...emptyDraft(asOf),
+        flow: "Spending",
+        category: bill.category,
+        item: bill.item,
+        amount: bill.amount,
+        status: "Paid",
+      },
+      at: Date.now(),
+    });
+    go("add");
+    setReturnTo(back);
+  };
+
+  /**
+   * A debt movement into the Add form, with the wallet on the side the effect
+   * moves money: a payment leaves the debt's account, a draw lands in it.
+   */
+  const recordDebt = (debt: Debt | undefined, effect: DebtEffect, amount: Centavos | null, back: Screen): void => {
+    if (!debt) return;
+    const into = effect === "draw" || effect === "collect";
+    setIncoming({
+      draft: {
+        ...emptyDraft(asOf),
+        flow: "Debt",
+        debtId: debt.id,
+        debtEffect: effect,
+        fromWallet: into ? "" : debt.wallet,
+        toWallet: into ? debt.wallet : "",
+        amount,
+      },
+      at: Date.now(),
+    });
+    go("add");
+    setReturnTo(back);
+  };
+
   return (
     <div
       className={[
@@ -1139,18 +1236,36 @@ export default function App() {
               <Money value={view.worth.total} size="s" />
             </p>
           </div>
-          {/* Settings on a phone: the bar has no room for it, and the AI switch lives there. */}
-          {compact && (
-            <button
-              type="button"
-              className="fms-topbar-action"
-              aria-label="Settings"
-              aria-current={screen === "settings" ? "page" : undefined}
-              onClick={() => go("settings")}
-            >
-              <Icon name="settings" size={22} />
-            </button>
-          )}
+          <div className="fms-topbar-actions">
+            {/* What needs attention, on every screen (components/Notifications.tsx). */}
+            <Notifications
+              alerts={alerts}
+              onOpen={openAlert}
+              footer={
+                alerts.length > 0 && aiSurfaceOn(settings.ai, "alerts") ? (
+                  <AlertsSummary
+                    settings={settings}
+                    transactions={transactions}
+                    budgets={budgets}
+                    reference={reference}
+                    asOf={asOf}
+                  />
+                ) : undefined
+              }
+            />
+            {/* Settings on a phone: the bar has no room for it, and the AI switch lives there. */}
+            {compact && (
+              <button
+                type="button"
+                className="fms-topbar-action"
+                aria-label="Settings"
+                aria-current={screen === "settings" ? "page" : undefined}
+                onClick={() => go("settings")}
+              >
+                <Icon name="settings" size={22} />
+              </button>
+            )}
+          </div>
         </header>
 
         {/*
@@ -1205,11 +1320,15 @@ export default function App() {
               budgets={budgets}
               debts={settings.credits}
               balances={view.rows}
-              accounts={settings.accounts}
               lowBalanceThreshold={settings.lowBalanceThreshold}
               asOf={asOf}
-              onReview={() => { setDbFilter("flagged"); go("database"); }}
-              settings={settings}
+              alerts={alerts}
+              onOpenAlert={openAlert}
+              onRecordBill={(bill) => recordBill(bill, "dashboard")}
+              onRecordDebt={(debtId, effect, amount) =>
+                recordDebt(settings.credits.find((d) => d.id === debtId), effect, amount, "dashboard")
+              }
+              onGo={(place) => go(place)}
             />
           )}
           {screen === "add" && (
@@ -1280,9 +1399,18 @@ export default function App() {
             <DebtScreen
               transactions={transactions}
               debts={settings.credits}
-              reference={reference}
               asOf={asOf}
-              onAdd={() => go("add")}
+              onRecord={(debt, effect, amount) => recordDebt(debt, effect, amount, "debt")}
+              onEditRow={startEditing}
+              onUpdateDebt={(next) =>
+                setSettings((s) => ({ ...s, credits: s.credits.map((c) => (c.id === next.id ? next : c)) }))
+              }
+              onManage={() => go("settings")}
+              onShowRows={(query) => {
+                go("database");
+                setDbFilter("all");
+                setDbQuery({ query, at: Date.now() });
+              }}
             />
           )}
           {screen === "insights" && !blocked && (

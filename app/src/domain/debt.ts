@@ -20,10 +20,20 @@
  * collect (wallet ▲, asset ▼). Neither is spending or income.
  */
 
-import { addMonths, daysBetween, today } from "./dates";
+import {
+  addDays,
+  addMonths,
+  daysBetween,
+  daysInMonth,
+  getDay,
+  getMonth,
+  getYear,
+  makeDate,
+  today,
+} from "./dates";
 import { formatMoney as fmt, type Centavos } from "./money";
 import type { DebtEffect, IsoDate, Transaction } from "./types";
-import type { CounterpartyKind, DebtForm } from "./debtForms";
+import { loanSchedule, type CounterpartyKind, type DebtForm } from "./debtForms";
 
 /** Re-exported so debt consumers import from one place. */
 export type { DebtEffect } from "./types";
@@ -41,6 +51,12 @@ export interface Debt {
   readonly counterparty: string;
   readonly openedDate: IsoDate;
   readonly dueDate?: IsoDate | undefined;
+  /**
+   * The day of the month a payment falls due, 1 to 31. Without it a credit
+   * line is expected a month after its last payment, the way bills are. A day
+   * past the end of a short month means that month's last day.
+   */
+  readonly dueDay?: number | undefined;
   /** Wallet the money moves through. */
   readonly wallet: string;
   readonly interestType: InterestType;
@@ -437,6 +453,253 @@ export function debtAlerts(
   }
 
   return out;
+}
+
+// ── Which way the money moves, by direction ─────────────────────────────────
+
+const PAYABLE_EFFECTS: readonly DebtEffect[] = ["draw", "repay", "interest", "writeoff"];
+const RECEIVABLE_EFFECTS: readonly DebtEffect[] = ["lend", "collect", "writeoff"];
+
+/**
+ * The effects a debt can take.
+ *
+ * The form offered draw, repay, interest and write-off for every debt, so
+ * money lent to a friend could be recorded as a "draw": the wallet went up
+ * (a draw lands money in an account) and so did what they owed you, and the
+ * same PHP 500 was counted twice. Money owed to you is lent and collected.
+ * Interest on it would be income, not spending, so it is not offered.
+ */
+export function effectsFor(kind: DebtKind): readonly DebtEffect[] {
+  return kind === "payable" ? PAYABLE_EFFECTS : RECEIVABLE_EFFECTS;
+}
+
+const sameText = (a: string): string => a.trim().toLowerCase();
+
+/**
+ * The debt a spending row's item names, if any.
+ *
+ * The Excel filed the Maya Credit bill under Bills, and that habit carries
+ * over: the money leaves the wallet, counts as spending, and what is owed
+ * never comes down. The item naming the debt is the tell. A name shorter
+ * than six letters is only matched exactly, so "Joy" does not catch "Joyride".
+ */
+export function debtNamedBy(debts: readonly Debt[], item: string): Debt | undefined {
+  const said = sameText(item);
+  if (!said) return undefined;
+  return debts.find((d) => {
+    const name = sameText(d.name);
+    return name !== "" && (said === name || (name.length >= 6 && said.includes(name)));
+  });
+}
+
+/** Spending rows that name a debt: payments or loans filed as spending. */
+export function paymentsFiledAsSpending(
+  debts: readonly Debt[],
+  transactions: readonly Transaction[],
+): { readonly debt: Debt; readonly row: Transaction }[] {
+  const out: { debt: Debt; row: Transaction }[] = [];
+  if (debts.length === 0) return out;
+  for (const row of transactions) {
+    if (row.type !== "Spending") continue;
+    const debt = debtNamedBy(debts, row.item);
+    if (debt) out.push({ debt, row });
+  }
+  return out;
+}
+
+// ── When the next payment falls due ────────────────────────────────────────
+
+export type DueBasis = "due-day" | "schedule" | "last-payment" | "borrowed" | "none";
+
+export interface DebtDue {
+  readonly position: DebtPosition;
+  /** The next payment date. Undefined when nothing is owed or there is no rhythm to go by. */
+  readonly nextDue?: IsoDate | undefined;
+  /** Negative when late. */
+  readonly daysToDue?: number | undefined;
+  /** How the date was worked out, so the screen can say "going by the last payment". */
+  readonly basis: DueBasis;
+  /** A loan's instalment; otherwise everything outstanding. Never more than is owed. */
+  readonly amountDue: Centavos;
+  readonly lastPayment?: { readonly date: IsoDate; readonly amount: Centavos } | undefined;
+  /** When the balance now owed began: the first movement after it was last at zero. */
+  readonly since?: IsoDate | undefined;
+}
+
+/**
+ * A payment this close before a due day is taken as paying that due day.
+ * Paying Maya Credit on the 30th for a bill due on the 3rd is on time, and
+ * without this the 3rd would be reported late.
+ */
+const PAID_AHEAD_DAYS = 20;
+/** A balance begun this close to a due day is first due the month after. */
+const FIRST_DUE_DAYS = 14;
+
+function onDay(year: number, month: number, day: number): IsoDate {
+  return makeDate(year, month, Math.min(Math.max(1, day), daysInMonth(year, month)));
+}
+
+function monthAfter(date: IsoDate, day: number): IsoDate {
+  const index = getYear(date) * 12 + getMonth(date); // the month after, zero-based
+  return onDay(Math.floor(index / 12), (index % 12) + 1, day);
+}
+
+/** The first date after `from` that falls on `day` of its month. */
+function nextOnDay(from: IsoDate, day: number): IsoDate {
+  const same = onDay(getYear(from), getMonth(from), day);
+  return same > from ? same : monthAfter(from, day);
+}
+
+/**
+ * When the next payment on a debt is due, and how much.
+ *
+ * ── Why this replaced the fixed due date ─────────────────────────────────
+ *
+ * Rule D6 only knew `dueDate`, one date that nothing in the app could set,
+ * so no debt was ever reported due. The Debt screen did project a date, a
+ * month after the last repayment, and printed it without judging it: Maya
+ * Credit read "next due September 3, 2026" on September 15 with nothing
+ * saying that was twelve days ago.
+ *
+ * In order:
+ *
+ *   1. A loan with a schedule: its next instalment.
+ *   2. A due day: the first one after the last payment, skipping one a
+ *      payment was made for in the twenty days before it.
+ *   3. A credit line: a month after the last payment, or after the balance
+ *      began if nothing has been paid since.
+ *   4. Money borrowed from or lent to a person, with no due day: none. A
+ *      handshake has no schedule, and inventing one would nag.
+ */
+export function debtDue(
+  position: DebtPosition,
+  transactions: readonly Transaction[],
+  asOf: IsoDate,
+): DebtDue {
+  const { debt } = position;
+  const paying: DebtEffect = debt.kind === "payable" ? "repay" : "collect";
+
+  let balance = 0;
+  let since: IsoDate | undefined;
+  let lastPayment: { date: IsoDate; amount: Centavos } | undefined;
+  for (const t of rowsFor(transactions, debt.id)) {
+    if (t.debtEffect === undefined) continue;
+    const before = balance;
+    if (INCREASING.has(t.debtEffect)) balance += t.amount;
+    else if (DECREASING.has(t.debtEffect) || t.debtEffect === "writeoff") balance -= t.amount;
+    if (before <= 0 && balance > 0) since = t.date;
+    if (t.debtEffect === paying) lastPayment = { date: t.date, amount: t.amount };
+  }
+
+  const none: DebtDue = { position, basis: "none", amountDue: 0, lastPayment, since };
+  if (position.status !== "open" || position.outstanding <= 0) return none;
+
+  const withDate = (nextDue: IsoDate, basis: DueBasis, amountDue: Centavos): DebtDue => ({
+    position,
+    nextDue,
+    daysToDue: daysBetween(asOf, nextDue),
+    basis,
+    amountDue: Math.min(amountDue, position.outstanding),
+    lastPayment,
+    since,
+  });
+
+  const form = debt.form ?? "credit-line";
+  if (form === "term-loan") {
+    const schedule = loanSchedule(position, asOf);
+    if (schedule?.nextDue) return withDate(schedule.nextDue, "schedule", schedule.monthlyPayment);
+  }
+
+  // A payment made for this balance, rather than for one already cleared.
+  const paidSince = lastPayment && (!since || lastPayment.date >= since) ? lastPayment : undefined;
+  const anchor = paidSince?.date ?? since;
+  if (!anchor) return none;
+
+  const day = debt.dueDay ?? (debt.dueDate ? getDay(debt.dueDate) : undefined);
+  if (day !== undefined && day >= 1 && day <= 31) {
+    let next = nextOnDay(anchor, day);
+    const gap = daysBetween(anchor, next);
+    // Paid within the twenty days before it: that due day is covered. Begun
+    // within the fortnight before it: the balance is first due the month after.
+    if (paidSince ? gap <= PAID_AHEAD_DAYS : gap < FIRST_DUE_DAYS) {
+      next = monthAfter(next, day);
+    }
+    return withDate(next, "due-day", position.outstanding);
+  }
+
+  if (form === "informal") return none;
+  return withDate(addMonths(anchor, 1), paidSince ? "last-payment" : "borrowed", position.outstanding);
+}
+
+/** Payments late or due within `days`, soonest first. */
+export function duesWithin(dues: readonly DebtDue[], days = 7): DebtDue[] {
+  return dues
+    .filter((d) => d.daysToDue !== undefined && d.daysToDue <= days)
+    .sort((a, b) => (a.daysToDue ?? 0) - (b.daysToDue ?? 0));
+}
+
+/** "going by the last payment", for a date that was worked out rather than set. */
+export function basisWords(basis: DueBasis): string {
+  switch (basis) {
+    case "last-payment":
+      return "a month after the last payment";
+    case "borrowed":
+      return "a month after it was borrowed";
+    case "schedule":
+      return "the loan's schedule";
+    case "due-day":
+      return "its due day";
+    default:
+      return "";
+  }
+}
+
+// ── How fast it is moving ──────────────────────────────────────────────────
+
+export interface DebtPace {
+  /** Borrowed, or lent, in the last 30 days. */
+  readonly added30: Centavos;
+  /** Paid down, or collected, in the last 30 days. */
+  readonly paid30: Centavos;
+  /** A month's payments, averaged over the last three months. 0 when none. */
+  readonly monthlyPayment: Centavos;
+  /** Months to clear at that rate, or null when nothing is being paid. */
+  readonly monthsToClear: number | null;
+}
+
+/**
+ * Whether a debt is shrinking, and how long it has left at this rate.
+ *
+ * Not a forecast: a statement about the last three months, said as one.
+ */
+export function debtPace(
+  position: DebtPosition,
+  transactions: readonly Transaction[],
+  asOf: IsoDate,
+): DebtPace {
+  const month = addDays(asOf, -30);
+  const quarter = addDays(asOf, -90);
+  let added30 = 0;
+  let paid30 = 0;
+  let paid90 = 0;
+  for (const t of rowsFor(transactions, position.debt.id)) {
+    if (t.date > asOf || t.debtEffect === undefined) continue;
+    if (INCREASING.has(t.debtEffect) && t.date > month) added30 += t.amount;
+    if (DECREASING.has(t.debtEffect)) {
+      if (t.date > month) paid30 += t.amount;
+      if (t.date > quarter) paid90 += t.amount;
+    }
+  }
+  const monthlyPayment = Math.round(paid90 / 3);
+  return {
+    added30,
+    paid30,
+    monthlyPayment,
+    monthsToClear:
+      monthlyPayment > 0 && position.outstanding > 0
+        ? Math.ceil(position.outstanding / monthlyPayment)
+        : null,
+  };
 }
 
 /** Next due date for a monthly debt with no explicit date set. */

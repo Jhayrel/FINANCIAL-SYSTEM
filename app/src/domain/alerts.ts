@@ -31,8 +31,9 @@
 import { walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { overdue, upcoming, type BillStatus } from "./bills";
-import { debtAlerts, positionsOf, type Debt } from "./debt";
-import { daysInMonth, getMonth, getYear } from "./dates";
+import { basisWords, debtDue, paymentsFiledAsSpending, positionsOf, type Debt } from "./debt";
+import { daysBetween, daysInMonth, formatMedium, getMonth, getYear, monthName } from "./dates";
+import { unusualRows } from "./unusual";
 import { actionableIssues, checkIntegrity } from "./integrity";
 import { monthTotals } from "./totals";
 import { overdueGoals } from "./goalClose";
@@ -63,6 +64,8 @@ export interface Alert {
   readonly detail: string;
   /** Sorted on this, highest first. */
   readonly weight: number;
+  /** Words to search the Database for, when the finding is about particular rows. */
+  readonly query?: string | undefined;
 }
 
 /**
@@ -178,9 +181,15 @@ export function financeAlerts(input: AlertInput): Alert[] {
         id: `low-${account.id}`,
         level: balance <= 0 ? "over" : "warn",
         area: "wallet",
-        title: balance <= 0 ? `${account.name} is empty` : `${account.name} is running low`,
-        detail: `${money(balance)}, under the ${money(lowBalanceThreshold)} you asked to be warned at.`,
+        title:
+          balance < 0
+            ? `${account.name} is below zero`
+            : balance === 0
+              ? `${account.name} is empty`
+              : `${account.name} is running low`,
+        detail: `${balance < 0 ? "−" : ""}${money(balance)}, under the ${money(lowBalanceThreshold)} you asked to be warned at.`,
         weight: balance <= 0 ? 90 : 60,
+        query: account.name,
       });
     }
   }
@@ -273,15 +282,61 @@ export function financeAlerts(input: AlertInput): Alert[] {
   }
 
   // ── Debt ─────────────────────────────────────────────────────────────────
-  const positions = positionsOf(debts, transactions, asOf);
-  for (const d of debtAlerts(positions, asOf)) {
+  /**
+   * A payment late or due within the week, on the date the Debt screen shows.
+   *
+   * This read only a fixed `dueDate` that nothing in the app could set, so no
+   * debt was ever reported due: on 2026-09-15 Maya Credit had gone twelve
+   * days past the date its own card printed, and the list said nothing.
+   * `debtDue` works the date out the way the card does.
+   */
+  const live = debts.filter((d) => !d.archived);
+  for (const p of positionsOf(live, transactions, asOf)) {
+    const due = debtDue(p, transactions, asOf);
+    if (due.nextDue === undefined || due.daysToDue === undefined || due.daysToDue > 7) continue;
+    const late = due.daysToDue < 0;
+    const days = Math.abs(due.daysToDue);
+    const owed = p.debt.kind === "payable";
+    const worked = due.basis === "last-payment" || due.basis === "borrowed" ? `, ${basisWords(due.basis)}` : "";
     out.push({
-      id: `debt-${d.position.debt.id}`,
-      level: d.severity,
+      id: `debt-${p.debt.id}`,
+      level: late ? "over" : "warn",
       area: "debt",
-      title: d.position.debt.name,
-      detail: d.message,
-      weight: d.severity === "over" ? 95 : 65,
+      title: late
+        ? `${p.debt.name} ${owed ? "payment" : "repayment to you"} is ${days} day${days === 1 ? "" : "s"} late`
+        : days === 0
+          ? `${p.debt.name} is due today`
+          : `${p.debt.name} is due in ${days} day${days === 1 ? "" : "s"}`,
+      detail: `Due ${formatMedium(due.nextDue)}${worked}. ${money(due.amountDue)} ${owed ? "to pay" : "to collect"}${
+        due.amountDue < p.outstanding ? `, of ${money(p.outstanding)} outstanding` : ""
+      }.`,
+      weight: late ? 95 : 65,
+    });
+  }
+
+  /**
+   * Payments to a debt filed as spending, in the last three months.
+   *
+   * The money left the wallet and counted as spending, and what is owed
+   * never came down, so the debt reads higher than it is and the month's
+   * spending higher than it was. See `paymentsFiledAsSpending`.
+   */
+  const misfiled = new Map<string, { name: string; rows: Transaction[] }>();
+  for (const { debt, row } of paymentsFiledAsSpending(live, transactions)) {
+    if (row.date > asOf || daysBetween(row.date, asOf) > 90) continue;
+    const entry = misfiled.get(debt.id) ?? { name: debt.name, rows: [] };
+    entry.rows.push(row);
+    misfiled.set(debt.id, entry);
+  }
+  for (const [id, { name, rows }] of misfiled) {
+    out.push({
+      id: `misfiled-${id}`,
+      level: "warn",
+      area: "debt",
+      title: `${rows.length} payment${rows.length === 1 ? "" : "s"} to ${name} filed as spending`,
+      detail: `${money(rows.reduce((s, r) => s + r.total, 0))} went to ${name} as spending, so what is owed has not come down by it. Open ${rows.length === 1 ? "it" : "them"} and change the type to Debt.`,
+      weight: 58,
+      query: name,
     });
   }
 
@@ -295,6 +350,70 @@ export function financeAlerts(input: AlertInput): Alert[] {
       title: `${goal.name} is past its deadline`,
       detail: `${money(balance)} still set aside. Close it to move the money back, or extend the deadline.`,
       weight: 50,
+    });
+  }
+
+  // ── An account below zero ────────────────────────────────────────────────
+  /**
+   * More has left it than was ever put in, which money cannot do. A row is
+   * missing, or was filed against the wrong account. On 2026-09-15 a reserve
+   * read −PHP 2,400.00 and nothing said so. A spending wallet is left to the
+   * low balance warning when that is switched on, so it is not said twice.
+   */
+  for (const account of accounts) {
+    if (account.archived) continue;
+    if (account.kind === "spending" && lowBalanceThreshold > 0) continue;
+    const balance = walletBalance(transactions, account.name);
+    if (balance >= 0) continue;
+    out.push({
+      id: `negative-${account.id}`,
+      level: "over",
+      area: "review",
+      title: `${account.name} is below zero`,
+      detail: `−${money(balance)}. More has left it than was ever put in, so a row is missing or filed against the wrong account.`,
+      weight: 92,
+      query: account.name,
+    });
+  }
+
+  // ── Extra zeros ──────────────────────────────────────────────────────────
+  for (const found of unusualRows(transactions, asOf)) {
+    const number = `#${String(found.row.recordNumber).padStart(4, "0")}`;
+    out.push({
+      id: `unusual-${found.row.id}`,
+      level: "warn",
+      area: "review",
+      title: `${money(found.row.total)} is far more than usual`,
+      detail: `Record ${number}, ${found.row.type === "Revenue" ? "income" : found.row.type.toLowerCase()} on ${formatMedium(found.row.date)}, is ${found.times} times the largest before it (${money(found.largest)}). If a zero slipped in, it is moving every total.`,
+      weight: 80,
+      query: number,
+    });
+  }
+
+  // ── The same bill twice in a month ───────────────────────────────────────
+  /**
+   * Same item, same amount, same month: usually one payment entered twice.
+   * Different amounts are left alone, since prepaid loads and top-ups
+   * really do come round more than once.
+   */
+  const repeats = new Map<string, Transaction[]>();
+  for (const t of transactions) {
+    if (t.type !== "Spending" || (t.category !== "Bills" && t.category !== "Subscriptions")) continue;
+    if (!t.item.trim() || getYear(t.date) !== year || getMonth(t.date) !== month) continue;
+    const key = `${t.item.trim().toLowerCase()}|${t.total}`;
+    repeats.set(key, [...(repeats.get(key) ?? []), t]);
+  }
+  for (const rows of repeats.values()) {
+    const first = rows[0];
+    if (rows.length < 2 || !first) continue;
+    out.push({
+      id: `twice-${first.id}`,
+      level: "warn",
+      area: "bills",
+      title: `${first.item.trim()} paid ${rows.length === 2 ? "twice" : `${rows.length} times`} in ${monthName(month)}`,
+      detail: `${money(first.total)} on ${rows.map((r) => formatMedium(r.date)).join(" and ")}. If one is the same payment entered again, move it to the bin.`,
+      weight: 52,
+      query: first.item.trim(),
     });
   }
 

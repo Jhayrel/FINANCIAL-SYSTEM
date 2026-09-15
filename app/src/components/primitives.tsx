@@ -382,7 +382,8 @@ export function ProgressBar({
 }) {
   const over = max > 0 && value > max;
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
-  const tick = pace === undefined ? null : Math.min(100, Math.max(0, pace * 100));
+  // No budget, no pace: a tick on an empty track said "you are here" on nothing.
+  const tick = pace === undefined || max <= 0 ? null : Math.min(100, Math.max(0, pace * 100));
 
   return (
     <div

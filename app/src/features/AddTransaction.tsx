@@ -22,8 +22,8 @@ import {
 import { AmountInput, Select, TextInput } from "../components/forms";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
-import { outstandingOf } from "../domain/debt";
-import { formatMoney } from "../domain/money";
+import { debtDue, effectsFor, outstandingOf, positionsOf } from "../domain/debt";
+import { formatMoney, type Centavos } from "../domain/money";
 import {
   categoriesFor,
   checkDraft,
@@ -50,6 +50,7 @@ import { monthBills } from "../domain/budgetView";
 import { formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { duplicateHeadline, duplicatesOf } from "../domain/duplicates";
 import { entryImpact } from "../domain/entryImpact";
+import { whenWords } from "./Dashboard";
 import type { Budgets, DeletedTransaction, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
 /**
@@ -81,13 +82,23 @@ const FLOWS: { id: Flow; tone: FlowTone; glyph: string; hint: string }[] = [
   { id: "Debt", tone: "debt", glyph: "◑", hint: "Borrow or repay" },
 ];
 
-const EFFECTS: DebtEffect[] = ["draw", "repay", "interest", "writeoff"];
-const EFFECT_LABEL: Record<string, string> = {
+/**
+ * Every effect's words. Which ones a debt offers depends on which way it is
+ * owed (`effectsFor`): a draw against money lent to a friend counted the same
+ * pesos twice.
+ */
+const EFFECT_LABEL: Record<DebtEffect, string> = {
   draw: "Draw: borrow more",
   repay: "Repay: pay it down",
   interest: "Interest or fee",
+  fee: "Fee",
   writeoff: "Write-off: forgiven",
+  lend: "Lend: money out to them",
+  collect: "Collect: they paid you back",
 };
+
+/** Due now chips shown before "Show all": enough to act on, not a wall. */
+const DUE_SHOWN = 3;
 
 const STATUSES = ["Paid", "Done", "Received", "Transferred", "Withdrawn"];
 
@@ -273,7 +284,7 @@ export function AddTransaction({
     if (!editing) return;
     // `transactionToDraft` reads a blank destination back as Money Send, so
     // there is nothing to set separately any more.
-    setDraft(transactionToDraft(editing));
+    setDraft(draftForEditing(editing, transactions));
     setSuggested(new Set());
     setSubmitted(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -391,8 +402,8 @@ export function AddTransaction({
   }, [incoming?.at]);
 
   const check = useMemo(
-    () => checkDraft(draft, transactions, reference, debts),
-    [draft, transactions, reference, debts],
+    () => checkDraft(draft, transactions, reference, debts, asOf),
+    [draft, transactions, reference, debts, asOf],
   );
   const ghost = useMemo(() => suggest(draft, transactions), [draft, transactions]);
   const balance = runningBalance(draft, transactions, draft.id);
@@ -418,7 +429,6 @@ export function AddTransaction({
     const month = monthBills(transactions, reference, getYear(asOf), getMonth(asOf), asOf);
     return month.bills
       .filter((b) => (b.state === "late" || b.state === "soon" || b.state === "due") && (b.daysToDue ?? 0) <= 7)
-      .slice(0, 4)
       .map((b) => {
         const days = b.daysToDue ?? 0;
         return {
@@ -440,6 +450,80 @@ export function AddTransaction({
       });
   }, [transactions, reference, asOf]);
 
+  /**
+   * Debt payments late or due within a week, beside the bills.
+   *
+   * A credit line's payment is as much a thing due now as the Wi-Fi bill, and
+   * it was the one thing the strip never offered: Maya Credit went twelve days
+   * past its date on 2026-09-15 with nothing on this screen saying so.
+   */
+  const debtDues = useMemo(
+    () =>
+      positionsOf(
+        debts.filter((d) => !d.archived),
+        transactions,
+        asOf,
+      )
+        .map((p) => debtDue(p, transactions, asOf))
+        .filter((d) => d.daysToDue !== undefined && d.daysToDue <= 7),
+    [debts, transactions, asOf],
+  );
+
+  /**
+   * Everything due now, late first, as one list.
+   *
+   * It showed at most four bills and dropped the rest without a word, so the
+   * fifth bill due never appeared anywhere on the form. All of them are here;
+   * three show until "Show all" is pressed, so ten due bills do not push the
+   * form off the screen.
+   */
+  const [allDue, setAllDue] = useState(false);
+  const chips = useMemo<DueChip[]>(() => {
+    const fromDebts: DueChip[] = debtDues.map((d) => {
+      const { debt } = d.position;
+      const owed = debt.kind === "payable";
+      const effect: DebtEffect = owed ? "repay" : "collect";
+      return {
+        key: `debt-${debt.id}`,
+        name: debt.name,
+        amount: d.amountDue,
+        late: (d.daysToDue ?? 0) < 0,
+        why: `${whenWords(d.daysToDue)}${
+          d.basis === "last-payment" || d.basis === "borrowed" ? ", going by the last payment" : ""
+        }`,
+        inForm: (x) => x.flow === "Debt" && x.debtId === debt.id && x.debtEffect === effect,
+        fill: (x) => ({
+          ...emptyDraft(x.date),
+          flow: "Debt",
+          debtId: debt.id,
+          debtEffect: effect,
+          fromWallet: owed ? debt.wallet : "",
+          toWallet: owed ? "" : debt.wallet,
+          amount: d.amountDue > 0 ? d.amountDue : null,
+        }),
+      };
+    });
+    const fromBills: DueChip[] = due.map((b) => ({
+      key: `bill-${b.item}`,
+      name: b.item,
+      amount: b.expected,
+      late: b.daysAway < 0,
+      why: b.why,
+      inForm: (x) => x.flow === "Spending" && x.item === b.item && x.category === b.category,
+      fill: (x) => ({
+        ...emptyDraft(x.date),
+        flow: "Spending",
+        category: b.category,
+        item: b.item,
+        // Filled because the point is one tap; it is in the field for checking before saving.
+        amount: b.expected,
+        fromWallet: b.wallet,
+        status: "Paid",
+      }),
+    }));
+    return [...fromDebts, ...fromBills].sort((a, b) => Number(b.late) - Number(a.late));
+  }, [debtDues, due]);
+
   /** The same entry already in the ledger, as the assistant's cards have always checked. */
   const dupe = useMemo(
     () =>
@@ -457,19 +541,6 @@ export function AddTransaction({
   const reasonFor = (field: string): string | undefined =>
     why.find((r) => r.field === field)?.why;
 
-  const logBill = (bill: DueBill): void => {
-    setDraft((d) => ({
-      ...d,
-      flow: "Spending",
-      category: bill.category,
-      item: bill.item,
-      // The amount is filled here because the whole point is one tap, and it
-      // is visible in the field for checking before anything is saved.
-      amount: bill.expected,
-      fromWallet: bill.wallet || d.fromWallet,
-      status: "Paid",
-    }));
-  };
 
   const allWallets = [...reference.wallets, ...reference.savings];
   const items = itemsFor(draft.flow, draft.category, reference);
@@ -478,9 +549,115 @@ export function AddTransaction({
   const errorFor = (field: string): string | undefined =>
     submitted ? check.errors.find((e) => e.field === field)?.message : undefined;
 
-  const save = (): void => {
+  /**
+   * Warnings wait for an amount.
+   *
+   * The form opened saying "No item, so this will not appear in any breakdown
+   * by item. Save it without one?" before anything had been typed at all. A
+   * form with nothing in it has nothing to warn about yet.
+   */
+  const showWarnings = submitted || draft.amount !== null;
+
+  /** Debts open to new rows, and the one a row being corrected is filed against. */
+  const debtOptions = debts.filter((d) => !d.archived || d.id === draft.debtId);
+  const selectedDebt = debts.find((d) => d.id === draft.debtId);
+  const effects = effectsFor(selectedDebt?.kind ?? "payable");
+  const namedDebt = check.debtPayment ? debts.find((d) => d.id === check.debtPayment?.debtId) : undefined;
+
+  /** The number shown while correcting: the payment's own, when a split pair was opened by its interest row. */
+  const editingNumber = editing
+    ? (transactions.find((t) => t.id === draft.id)?.recordNumber ?? editing.recordNumber)
+    : 0;
+
+  /** What this entry does to the debt it is filed against. */
+  const debtAfter = (() => {
+    if (draft.flow !== "Debt" || !selectedDebt || !draft.debtEffect || draft.amount === null) return null;
+    const base = draft.id
+      ? transactions.filter((t) => t.id !== draft.id && t.id !== `${draft.id}-interest`)
+      : transactions;
+    const before = outstandingOf(base, selectedDebt.id);
+    const amount = draft.amount;
+    const change =
+      draft.debtEffect === "draw" || draft.debtEffect === "lend"
+        ? amount
+        : draft.debtEffect === "repay"
+          ? -(check.repaymentSplit?.principal ?? amount)
+          : draft.debtEffect === "collect" || draft.debtEffect === "writeoff"
+            ? -amount
+            : 0;
+    return { name: selectedDebt.name, owed: selectedDebt.kind === "payable", before, after: before + change };
+  })();
+
+  /**
+   * A spending row that names a debt, turned into the debt movement it is.
+   *
+   * The amount carries the fee with it, since a debt row has no fee field and
+   * all of it left the wallet. What was written in the description moves to
+   * the notes. A row being corrected keeps its id, so saving changes that row
+   * rather than adding one: this is how the Maya Credit bills filed as
+   * spending are put right, one at a time, from the Database.
+   */
+  const bookAsDebt = (): void => {
+    if (!namedDebt) return;
+    const owed = namedDebt.kind === "payable";
+    setDraft((d) => ({
+      ...emptyDraft(d.date),
+      id: d.id,
+      flow: "Debt",
+      debtId: namedDebt.id,
+      debtEffect: owed ? "repay" : "lend",
+      fromWallet: d.fromWallet || namedDebt.wallet,
+      amount: d.amount === null ? null : d.amount + d.fee,
+      notes: [d.description, d.notes].filter((x) => x.trim()).join(". "),
+    }));
+    setSuggested(new Set());
+    setSubmitted(false);
+  };
+
+  /** One tap on something due: into the form, asking first when that would replace typing. */
+  const fillFrom = async (chip: DueChip): Promise<void> => {
+    if (chip.inForm(draft)) return;
+    if (!isBlankDraft(draft)) {
+      const ok = await confirm({
+        title: `Put ${chip.name} in the form?`,
+        body: "What is in the form now is replaced. Nothing has been saved yet, so nothing else changes.",
+        confirmLabel: "Replace it",
+        tone: "normal",
+      });
+      if (!ok) return;
+    }
+    applyDraft(chip.fill(draft));
+  };
+
+  /** When the last save went through, so a second press of the same button is not a second entry. */
+  const lastPress = useRef(0);
+
+  const save = async (): Promise<void> => {
     setSubmitted(true);
     if (!check.ok) return;
+
+    // One entry per press: a double tap on a slow phone saved the row twice.
+    const pressed = Date.now();
+    if (pressed - lastPress.current < 1500) return;
+    lastPress.current = pressed;
+
+    /**
+     * Extra zeros are asked about once, before they move every total.
+     * See `domain/unusual.ts`: a real windfall saves with one more tap.
+     */
+    if (check.unusual) {
+      const total = (draft.amount ?? 0) + draft.fee;
+      const ok = await confirm({
+        title: `Save ${formatMoney(total)}?`,
+        body: `That is ${check.unusual.times} times the largest entry of its kind so far (${formatMoney(check.unusual.largest)}). If a zero slipped in, go back and correct the amount first.`,
+        confirmLabel: `Save ${formatMoney(total)}`,
+        tone: "normal",
+      });
+      if (!ok) {
+        lastPress.current = 0;
+        return;
+      }
+    }
 
     /**
      * An edit is an edit however the row got here.
@@ -491,16 +668,22 @@ export function AddTransaction({
      * number, quietly duplicating it. The id is the fact; the prop is one way
      * of arriving at it.
      */
-    const target = editing ?? (draft.id ? transactions.find((t) => t.id === draft.id) : undefined);
+    const target = (draft.id ? transactions.find((t) => t.id === draft.id) : undefined) ?? editing;
 
     if (target) {
       /**
        * Same id, same record number. An edit is the entry corrected, not a
        * new one, and reissuing either would break every reference to it.
        */
-      onUpdate(
-        draftToTransactions(draft, target.recordNumber, target.id, check.repaymentSplit),
-      );
+      const rows = draftToTransactions(draft, target.recordNumber, target.id, check.repaymentSplit);
+      onUpdate(rows);
+      /**
+       * A split repayment corrected so it no longer covers interest: its old
+       * interest row would stay behind, booking interest that the payment no
+       * longer includes. It goes to the bin, where it can still be restored.
+       */
+      const interest = transactions.find((t) => t.id === `${target.id}-interest`);
+      if (interest && !rows.some((r) => r.id === interest.id)) onBin(interest.id);
     } else {
       onSave(
         draftToTransactions(draft, nextRecordNumber, `t-${Date.now()}`, check.repaymentSplit),
@@ -576,33 +759,46 @@ export function AddTransaction({
       {dialog}
       {/* ── Left: the form ─────────────────────────────────────────────── */}
       <section className="fms-panel fms-entryform">
-        {due.length > 0 && (
+        {/* Not while correcting a saved row: a tap here would turn that row into the bill. */}
+        {!editing && chips.length > 0 && (
           <div className="fms-duestrip">
-            <div className="t-caption" style={{ color: "var(--ink-3)" }}>
-              Due around now, going by last month. One tap fills the row.
+            <div className="fms-duestrip-head">
+              <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                {chips.length} due now. One tap fills the form, for checking before saving.
+              </span>
+              {chips.length > DUE_SHOWN && (
+                <button
+                  type="button"
+                  className="t-caption fms-linkbtn"
+                  aria-expanded={allDue}
+                  onClick={() => setAllDue((x) => !x)}
+                >
+                  {allDue ? "Show fewer" : `Show all ${chips.length}`}
+                </button>
+              )}
             </div>
             <div className="fms-duechips">
-              {due.map((bill) => (
-                <button
-                  key={bill.item}
-                  type="button"
-                  className="fms-duechip"
-                  onClick={() => logBill(bill)}
-                  style={{
-                    borderColor:
-                      bill.daysAway < 0 ? "var(--over)" : "var(--hairline-strong)",
-                  }}
-                >
-                  <span className="t-body-strong">{bill.item}</span>
-                  <span className="t-num-s">{formatMoney(bill.expected)}</span>
-                  <span
-                    className="t-micro"
-                    style={{ color: bill.daysAway < 0 ? "var(--over)" : "var(--ink-3)" }}
+              {(allDue ? chips : chips.slice(0, DUE_SHOWN)).map((chip) => {
+                const here = chip.inForm(draft);
+                return (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    className={here ? "fms-duechip is-in-form" : "fms-duechip"}
+                    aria-pressed={here}
+                    onClick={() => void fillFrom(chip)}
+                    style={here ? undefined : { borderColor: chip.late ? "var(--over)" : "var(--hairline-strong)" }}
                   >
-                    {bill.why}
-                  </span>
-                </button>
-              ))}
+                    <span className="t-body-strong fms-truncate" style={{ maxWidth: "100%" }}>
+                      {chip.name}
+                    </span>
+                    <span className="t-num-s">{formatMoney(chip.amount)}</span>
+                    <span className="t-micro" style={{ color: chip.late && !here ? "var(--over)" : "var(--ink-3)" }}>
+                      {here ? "In the form" : chip.why}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -664,7 +860,7 @@ export function AddTransaction({
               */}
               <Row label="Record number" inline hint={editing ? "Editing a saved entry" : undefined}>
                 <span className="t-num-s fms-readonly">
-                  {String(editing ? editing.recordNumber : nextRecordNumber).padStart(4, "0")}
+                  {String(editing ? editingNumber : nextRecordNumber).padStart(4, "0")}
                 </span>
               </Row>
 
@@ -690,11 +886,23 @@ export function AddTransaction({
                   */}
                   <Row label="Debt" required error={errorFor("debt")}>
                     <Select
-                      value={debts.find((d) => d.id === draft.debtId)?.name ?? ""}
+                      value={selectedDebt?.name ?? ""}
                       onChange={(name) =>
-                        set("debtId", debts.find((d) => d.name === name)?.id)
+                        setDraft((d) => {
+                          const debt = debtOptions.find((x) => x.name === name);
+                          if (!debt) return { ...d, debtId: undefined };
+                          // Another direction cannot keep an effect it does not take.
+                          const effect =
+                            d.debtEffect && effectsFor(debt.kind).includes(d.debtEffect) ? d.debtEffect : undefined;
+                          const next: Draft = { ...d, debtId: debt.id, debtEffect: effect };
+                          // The account the debt moves through, when no wallet is picked yet.
+                          if (next.fromWallet || next.toWallet || !debt.wallet) return next;
+                          return effect
+                            ? withDebtEffect({ ...next, fromWallet: debt.wallet }, effect)
+                            : { ...next, fromWallet: debt.wallet };
+                        })
                       }
-                      options={debts.map((d) => d.name)}
+                      options={debtOptions.map((d) => d.name)}
                       placeholder="Pick a debt"
                       invalid={Boolean(errorFor("debt"))}
                     />
@@ -718,10 +926,10 @@ export function AddTransaction({
                     <Select
                       value={draft.debtEffect ? (EFFECT_LABEL[draft.debtEffect] ?? draft.debtEffect) : ""}
                       onChange={(label) => {
-                        const picked = EFFECTS.find((e) => (EFFECT_LABEL[e] ?? e) === label);
+                        const picked = effects.find((e) => EFFECT_LABEL[e] === label);
                         setDraft((d) => (picked ? withDebtEffect(d, picked) : { ...d, debtEffect: undefined }));
                       }}
-                      options={EFFECTS.map((e) => EFFECT_LABEL[e] ?? e)}
+                      options={effects.map((e) => EFFECT_LABEL[e])}
                       placeholder="What does this do?"
                       invalid={Boolean(errorFor("debtEffect"))}
                     />
@@ -993,9 +1201,25 @@ export function AddTransaction({
             {/* Warnings sit between the fields and the action, where they
                 interrupt without blocking. */}
             <div style={{ display: "grid", gap: "var(--space-2)", marginTop: "var(--space-3)" }}>
-              {check.warnings.map((w) => (
-                <Alert key={w.message} status="warn">{w.message}</Alert>
-              ))}
+              {showWarnings &&
+                check.warnings
+                  .filter((w) => !(check.debtPayment && w.field === "item"))
+                  .map((w) => (
+                    <Alert key={w.message} status="warn">{w.message}</Alert>
+                  ))}
+              {check.debtPayment && (
+                <Alert
+                  status="warn"
+                  title={`${check.debtPayment.name} is a debt, not spending`}
+                  action={
+                    <Button size="sm" onClick={bookAsDebt}>
+                      {namedDebt?.kind === "receivable" ? "Book it as lending" : "Book it as a repayment"}
+                    </Button>
+                  }
+                >
+                  {check.warnings.find((w) => w.field === "item")?.message}
+                </Alert>
+              )}
               {dupe && (
                 <Alert
                   status="warn"
@@ -1037,7 +1261,7 @@ export function AddTransaction({
                   Clear
                 </Button>
               )}
-              <Button variant="primary" onClick={save}>
+              <Button variant="primary" onClick={() => void save()}>
                 {editing ? "Save changes" : "Save transaction"}
               </Button>
             </div>
@@ -1117,6 +1341,28 @@ export function AddTransaction({
           </div>
         )}
 
+        {debtAfter && (
+          <div className="fms-impact">
+            <div className="t-label" style={{ color: "var(--ink-2)" }}>
+              {debtAfter.name}, {debtAfter.owed ? "owed" : "owed to you"}
+            </div>
+            <div className="fms-afterbal">
+              <Money value={debtAfter.before} size="s" tone="var(--ink-3)" />
+              <span aria-hidden style={{ color: "var(--ink-3)" }}>→</span>
+              <Money
+                value={debtAfter.after}
+                size="l"
+                tone={debtAfter.after < 0 ? "var(--over)" : debtAfter.owed ? "var(--flow-debt-text)" : "var(--ink)"}
+              />
+            </div>
+            {debtAfter.after < 0 && (
+              <p className="t-caption" style={{ color: "var(--over)" }}>
+                Below zero after this: more {debtAfter.owed ? "paid back than was borrowed" : "collected than was lent"}.
+              </p>
+            )}
+          </div>
+        )}
+
         {balance && (
           <div
             style={{
@@ -1153,17 +1399,26 @@ export function AddTransaction({
           </>
         )}
 
-        {debts.length > 0 && (
+        {debts.some((d) => !d.archived) && (
           <>
             <div className="t-label" style={{ color: "var(--ink-2)", margin: "var(--space-4) 0 var(--space-2)" }}>
-              Owed
+              Debts
             </div>
-            {debts.map((d) => (
-              <div key={d.id} className="fms-balrow">
-                <span className="t-caption">{d.name}</span>
-                <Money value={outstandingOf(transactions, d.id)} size="s" tone="var(--flow-debt-text)" />
-              </div>
-            ))}
+            {debts
+              .filter((d) => !d.archived)
+              .map((d) => (
+                <div key={d.id} className="fms-balrow">
+                  <span className="t-caption">
+                    {d.name}
+                    {d.kind === "receivable" && <span style={{ color: "var(--ink-3)" }}> · owed to you</span>}
+                  </span>
+                  <Money
+                    value={outstandingOf(transactions, d.id)}
+                    size="s"
+                    tone={d.kind === "payable" ? "var(--flow-debt-text)" : undefined}
+                  />
+                </div>
+              ))}
           </>
         )}
       </aside>
@@ -1334,6 +1589,39 @@ function Row({
  * a few embedded browsers, and a form that refuses to render because it could
  * not save a draft is a worse outcome than a draft that was not saved.
  */
+/** One thing due now, above the flow tiles: a bill or a debt payment. */
+interface DueChip {
+  readonly key: string;
+  readonly name: string;
+  readonly amount: Centavos;
+  readonly why: string;
+  readonly late: boolean;
+  /** Whether the form already holds it, so a second tap does nothing. */
+  readonly inForm: (draft: Draft) => boolean;
+  /** The form with it filled in, keeping the date already chosen. */
+  readonly fill: (draft: Draft) => Draft;
+}
+
+/**
+ * A saved row into the form, with a split repayment put back together.
+ *
+ * A repayment larger than what was owed is saved as two rows: the principal,
+ * and an interest row beside it. Opening either one showed only its own part,
+ * so correcting the ₱2,500.00 principal re-split ₱2,500.00 with no interest,
+ * and opening the interest row saved it as a repayment of its own. The form
+ * holds the whole payment now, the principal's row is the one saved, and the
+ * split is worked out again from what is owed.
+ */
+function draftForEditing(row: Transaction, transactions: readonly Transaction[]): Draft {
+  const principalId = row.id.endsWith("-interest") ? row.id.slice(0, -"-interest".length) : row.id;
+  const principal = transactions.find((t) => t.id === principalId);
+  const interest = transactions.find((t) => t.id === `${principalId}-interest`);
+  if (principal && interest && principal.debtEffect === "repay" && interest.debtEffect === "interest") {
+    return { ...transactionToDraft(principal), amount: principal.amount + interest.amount };
+  }
+  return transactionToDraft(row);
+}
+
 const DRAFT_KEY = "fms.add.draft";
 
 /** Nothing typed that clearing the form or leaving it would lose. */
