@@ -30,6 +30,34 @@ export interface SyncNotice {
 
 const changes = (n: number): string => `${n} ${n === 1 ? "change" : "changes"}`;
 
+export interface ConnectionInput {
+  /** Signed in, so saves go to the database rather than this browser alone. */
+  readonly signedIn: boolean;
+  readonly online: boolean;
+  readonly pending: number;
+}
+
+export interface ConnectionNote {
+  readonly tone: "ok" | "busy" | "warn" | "local";
+  readonly text: string;
+}
+
+/**
+ * Where a save goes, in a few words beside the form.
+ *
+ * The owner asked for the form to connect better to the database. It saved to
+ * it all along, but nothing on the form said so, or said when it could not:
+ * offline, a save looked exactly like one that had arrived.
+ */
+export function connectionWords({ signedIn, online, pending }: ConnectionInput): ConnectionNote {
+  if (!signedIn) return { tone: "local", text: "Saving on this device only" };
+  if (!online) {
+    return { tone: "warn", text: pending > 0 ? `Offline: ${changes(pending)} kept here` : "Offline: saves kept on this device" };
+  }
+  if (pending > 0) return { tone: "busy", text: `Saving ${changes(pending)}` };
+  return { tone: "ok", text: "Connected to the database" };
+}
+
 export function syncWords({ online, pending, error }: SyncInput): SyncNotice | null {
   if (error) {
     const signIn = /permission|insufficient|unauthenticated|unauthorized|auth/i.test(error);

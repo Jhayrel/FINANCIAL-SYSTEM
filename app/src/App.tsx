@@ -727,7 +727,12 @@ export default function App() {
       : stamped[0];
     const number = `#${String(landed?.recordNumber ?? 0).padStart(4, "0")}`;
     flash(
-      rows.length > 1 ? `Saved. ${rows.length} rows added.` : `Saved. Record ${number}.`,
+      // Offline, a save is kept on the device and says so, rather than reading like one that arrived.
+      cloud.uid && !online
+        ? `Saved on this device${rows.length > 1 ? `: ${rows.length} rows` : ` as ${number}`}. It goes to the database when the connection is back.`
+        : rows.length > 1
+          ? `Saved. ${rows.length} rows added.`
+          : `Saved. Record ${number}.`,
       // The saved row, one tap away: the Database searched for its number.
       rows.length === 1
         ? {
@@ -1557,6 +1562,7 @@ export default function App() {
               debts={settings.credits}
               balances={view.rows}
               uid={cloud.uid ?? null}
+              sync={{ signedIn: Boolean(cloud.uid), online, pending }}
               onSave={handleSave}
               onBin={handleDelete}
               onBinMany={handleDeleteMany}

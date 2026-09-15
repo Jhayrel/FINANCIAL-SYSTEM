@@ -22,7 +22,7 @@ import { checkIntegrity } from "./integrity";
 import { monthBrief } from "./monthPlan";
 import { defaultSettings } from "./settings";
 import { changedSections } from "./settingsDiff";
-import { syncWords } from "./syncState";
+import { connectionWords, syncWords } from "./syncState";
 import type { BudgetYear, Budgets, ReferenceLists, Transaction } from "./types";
 
 const fx = loadFixture();
@@ -174,6 +174,22 @@ describe("the connection cuts off", () => {
     expect(notice?.level).toBe("over");
     expect(notice?.detail).toContain("sign in again");
     expect(notice?.detail).toContain("add it again");
+  });
+});
+
+describe("the Add form says where a save goes", () => {
+  it("names the database when connected and nothing is waiting", () => {
+    expect(connectionWords({ signedIn: true, online: true, pending: 0 })).toEqual({ tone: "ok", text: "Connected to the database" });
+  });
+
+  it("counts what is still on its way, and what is kept offline", () => {
+    expect(connectionWords({ signedIn: true, online: true, pending: 2 }).text).toBe("Saving 2 changes");
+    expect(connectionWords({ signedIn: true, online: false, pending: 1 })).toEqual({ tone: "warn", text: "Offline: 1 change kept here" });
+    expect(connectionWords({ signedIn: true, online: false, pending: 0 }).text).toBe("Offline: saves kept on this device");
+  });
+
+  it("says a save stays on this device when nobody is signed in", () => {
+    expect(connectionWords({ signedIn: false, online: true, pending: 0 })).toEqual({ tone: "local", text: "Saving on this device only" });
   });
 });
 

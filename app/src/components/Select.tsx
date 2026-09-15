@@ -20,9 +20,19 @@
  * What it costs: the keyboard and screen-reader behaviour that came free with
  * the native element has to be written out. It is written out below, following
  * the ARIA listbox pattern.
+ *
+ * ── A figure beside each option, and a search box ────────────────────────
+ *
+ * The Add form showed every wallet as a box of its own with its balance. With
+ * five that was a wall; with ten or more, which the owner will have, it was the
+ * whole form. A wallet is one field again, and the list it opens carries what
+ * the boxes did: each balance on the right (below zero in red), the usual one
+ * tagged, spending and savings under their own headings, and a search box at
+ * the top once the list is longer than eight. Every other select is unchanged.
  */
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useId,
@@ -36,10 +46,14 @@ import { createPortal } from "react-dom";
 const CONTROL_HEIGHT = 44;
 /** Roughly seven rows before it scrolls. */
 const MAX_MENU_HEIGHT = 264;
+/** Room for the search box above the rows. */
+const SEARCH_HEIGHT = 52;
 /** Wide enough for the longest account name, narrow enough to stay a menu. */
 const MAX_MENU_WIDTH = 420;
 /** Breathing room kept between the menu and the edge of the screen. */
 const EDGE = 8;
+/** Past this many options the list opens with a search box. */
+const SEARCH_FROM = 8;
 
 export function Select({
   value,
@@ -50,6 +64,11 @@ export function Select({
   disabled,
   id,
   ariaLabel,
+  details,
+  detailTones,
+  tags,
+  groups,
+  searchable,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -59,24 +78,42 @@ export function Select({
   disabled?: boolean | undefined;
   id?: string | undefined;
   ariaLabel?: string | undefined;
+  /** A figure beside an option, such as a wallet's balance: in the list and in the closed box. */
+  details?: Readonly<Record<string, string>> | undefined;
+  /** The colour of an option's figure, such as `--over` for a balance below zero. */
+  detailTones?: Readonly<Record<string, string>> | undefined;
+  /** A short word beside an option, such as "Usual". */
+  tags?: Readonly<Record<string, string>> | undefined;
+  /** The heading an option sits under. Options sharing one should be next to each other. */
+  groups?: Readonly<Record<string, string>> | undefined;
+  /** A search box at the top of the list. On by itself past eight options. */
+  searchable?: boolean | undefined;
 }) {
   const listId = useId();
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const search = useRef<HTMLInputElement>(null);
 
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [box, setBox] = useState<CSSProperties | null>(null);
+  const [query, setQuery] = useState("");
 
-  const items = placeholder ? ["", ...options] : [...options];
+  const withSearch = searchable ?? options.length > SEARCH_FROM;
+  const all = placeholder ? ["", ...options] : [...options];
+  const needle = query.trim().toLowerCase();
+  const items = needle ? all.filter((o) => o !== "" && o.toLowerCase().includes(needle)) : all;
   const selectedIndex = Math.max(0, items.indexOf(value));
+  const headings = groups ? new Set(items.map((o) => groups[o]).filter(Boolean)).size : 0;
 
   const place = useCallback(() => {
     const el = button.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
     const below = window.innerHeight - r.bottom;
-    const height = Math.min(MAX_MENU_HEIGHT, items.length * 40 + 8);
+    const extra = (withSearch ? SEARCH_HEIGHT : 0) + headings * 28;
+    const cap = MAX_MENU_HEIGHT + (withSearch ? SEARCH_HEIGHT : 0);
+    const height = Math.min(cap, items.length * 40 + 8 + extra);
     // Flip upward when there is not room underneath, so the menu is never
     // half off the bottom of a phone screen.
     const flip = below < height + 8 && r.top > below;
@@ -91,9 +128,9 @@ export function Select({
       minWidth: r.width,
       maxWidth: Math.min(MAX_MENU_WIDTH, window.innerWidth - EDGE * 2),
       ...(flip ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }),
-      maxHeight: Math.min(MAX_MENU_HEIGHT, flip ? r.top - 12 : below - 12),
+      maxHeight: Math.min(cap, flip ? r.top - 12 : below - 12),
     });
-  }, [items.length]);
+  }, [items.length, withSearch, headings]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -119,19 +156,24 @@ export function Select({
     setBox((b) => (b ? { ...b, left: shifted } : b));
   }, [open, box]);
 
+  const close = useCallback((): void => {
+    setOpen(false);
+    setQuery("");
+  }, []);
+
   useEffect(() => {
     if (!open) return;
 
     const onPointer = (e: MouseEvent): void => {
       const t = e.target as Node;
-      if (!button.current?.contains(t) && !menu.current?.contains(t)) setOpen(false);
+      if (!button.current?.contains(t) && !menu.current?.contains(t)) close();
     };
     // Scrolling an ancestor moves the anchor, and tracking that continuously
     // costs more than it is worth, so the menu closes. Scrolling INSIDE the
     // menu is not that, and closing on it made the list impossible to scroll.
     const onScroll = (e: Event): void => {
       if (menu.current?.contains(e.target as Node)) return;
-      setOpen(false);
+      close();
     };
 
     document.addEventListener("mousedown", onPointer);
@@ -142,7 +184,12 @@ export function Select({
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", place);
     };
-  }, [open, place]);
+  }, [open, place, close]);
+
+  // The search box takes the typing the moment a long list opens.
+  useEffect(() => {
+    if (open && withSearch) search.current?.focus();
+  }, [open, withSearch]);
 
   useEffect(() => {
     if (!open) return;
@@ -154,18 +201,20 @@ export function Select({
   const commit = (i: number): void => {
     const picked = items[i];
     if (picked !== undefined) onChange(picked);
-    setOpen(false);
+    close();
     button.current?.focus();
   };
 
   const openAt = (i: number): void => {
     if (disabled) return;
+    setQuery("");
     setActive(i);
     setOpen(true);
   };
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
     if (disabled) return;
+    const inSearch = e.target === search.current;
 
     if (!open) {
       if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -178,10 +227,16 @@ export function Select({
     switch (e.key) {
       case "Escape":
         e.preventDefault();
-        setOpen(false);
+        close();
+        button.current?.focus();
+        break;
+      case " ":
+        // A space typed into the search box is part of the search.
+        if (inSearch) return;
+        e.preventDefault();
+        commit(active);
         break;
       case "Enter":
-      case " ":
         e.preventDefault();
         commit(active);
         break;
@@ -194,19 +249,22 @@ export function Select({
         setActive((i) => Math.max(0, i - 1));
         break;
       case "Home":
+        if (inSearch) return;
         e.preventDefault();
         setActive(0);
         break;
       case "End":
+        if (inSearch) return;
         e.preventDefault();
         setActive(items.length - 1);
         break;
       case "Tab":
-        setOpen(false);
+        close();
         break;
       default: {
-        // Typeahead, the one native behaviour people miss most.
-        if (e.key.length !== 1) return;
+        // Typeahead, the one native behaviour people miss most. A list with a
+        // search box leaves typing to the box.
+        if (inSearch || withSearch || e.key.length !== 1) return;
         const from = active + 1;
         const order = [...items.slice(from), ...items.slice(0, from)];
         const hit = order.findIndex((o) => o.toLowerCase().startsWith(e.key.toLowerCase()));
@@ -216,6 +274,7 @@ export function Select({
   };
 
   const label = value || placeholder || "";
+  const closedDetail = value ? details?.[value] : undefined;
 
   return (
     <>
@@ -230,12 +289,20 @@ export function Select({
         aria-invalid={invalid || undefined}
         aria-label={ariaLabel}
         disabled={disabled}
-        onClick={() => (open ? setOpen(false) : openAt(selectedIndex))}
+        onClick={() => (open ? close() : openAt(selectedIndex))}
         onKeyDown={onKeyDown}
         className={`t-body fms-select${invalid ? " fms-select--invalid" : ""}`}
         style={{ height: CONTROL_HEIGHT }}
       >
         <span className={`fms-select-value${value ? "" : " fms-select-placeholder"}`}>{label}</span>
+        {closedDetail && (
+          <span
+            className="t-num-s fms-select-detail"
+            style={value && detailTones?.[value] ? { color: detailTones[value] } : undefined}
+          >
+            {closedDetail}
+          </span>
+        )}
         <span aria-hidden className="fms-select-chevron">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
             <path
@@ -257,37 +324,79 @@ export function Select({
             id={listId}
             role="listbox"
             aria-label={ariaLabel}
-            className="fms-menu"
+            className={withSearch ? "fms-menu fms-menu--search" : "fms-menu"}
             style={box}
             onKeyDown={onKeyDown}
             tabIndex={-1}
           >
-            {items.map((o, i) => (
-              <div
-                key={o || "__placeholder"}
-                role="option"
-                aria-selected={o === value}
-                data-active={i === active}
-                className="fms-menu-item"
-                onMouseEnter={() => setActive(i)}
-                onClick={() => commit(i)}
-              >
-                <span className={o ? undefined : "fms-select-placeholder"}>{o || placeholder}</span>
-                {o === value && (
-                  <span aria-hidden className="fms-menu-tick">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                      <path
-                        d="M2.5 6.2 4.8 8.5 9.5 3.8"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                )}
+            {withSearch && (
+              <div className="fms-menu-search">
+                <input
+                  ref={search}
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setActive(0);
+                  }}
+                  placeholder="Search"
+                  aria-label={`Search ${ariaLabel ?? "the list"}`}
+                  autoComplete="off"
+                  enterKeyHint="search"
+                  className="t-body fms-input"
+                />
               </div>
-            ))}
+            )}
+            {items.length === 0 && (
+              <div className="t-caption fms-menu-empty">Nothing matches "{query.trim()}".</div>
+            )}
+            {items.map((o, i) => {
+              const group = o ? groups?.[o] : undefined;
+              const before = i > 0 ? items[i - 1] : undefined;
+              const heading = group && group !== (before ? groups?.[before] : undefined) ? group : undefined;
+              const tag = o ? tags?.[o] : undefined;
+              const detail = o ? details?.[o] : undefined;
+              const tone = o ? detailTones?.[o] : undefined;
+              return (
+                <Fragment key={o || "__placeholder"}>
+                  {heading && (
+                    <div role="presentation" className="t-micro fms-menu-group">
+                      {heading}
+                    </div>
+                  )}
+                  <div
+                    role="option"
+                    aria-selected={o === value}
+                    data-active={i === active}
+                    className="fms-menu-item"
+                    onMouseEnter={() => setActive(i)}
+                    onClick={() => commit(i)}
+                  >
+                    <span className={o ? "fms-menu-label" : "fms-menu-label fms-select-placeholder"}>
+                      {o || placeholder}
+                    </span>
+                    {tag && <span className="t-micro fms-menu-tag">{tag}</span>}
+                    {detail && (
+                      <span className="t-num-s fms-menu-detail" style={tone ? { color: tone } : undefined}>
+                        {detail}
+                      </span>
+                    )}
+                    {o === value && (
+                      <span aria-hidden className="fms-menu-tick">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                          <path
+                            d="M2.5 6.2 4.8 8.5 9.5 3.8"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </span>
+                    )}
+                  </div>
+                </Fragment>
+              );
+            })}
           </div>,
           document.body,
         )}

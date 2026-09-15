@@ -6037,65 +6037,6 @@ textarea.fms-askinput {
   color: var(--ink);
 }
 
-.fms-pickchips {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
-  gap: var(--space-2);
-}
-
-.fms-pickchip {
-  display: grid;
-  align-content: center;
-  gap: 2px;
-  min-width: 0;
-  min-height: 52px;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--ink);
-  text-align: left;
-  cursor: pointer;
-}
-
-.fms-pickchip:hover {
-  background: var(--surface-hover);
-}
-
-.fms-pickchip[aria-checked="true"] {
-  border-color: var(--brand-700);
-  box-shadow: inset 0 0 0 1px var(--brand-700);
-  background: var(--brand-50);
-}
-
-.fms-pickchips.is-invalid .fms-pickchip {
-  border-color: var(--over);
-}
-
-.fms-pickchip-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  min-width: 0;
-}
-
-.fms-pickchip-tag {
-  flex: 0 0 auto;
-  padding: 0 6px;
-  border-radius: var(--radius-full);
-  background: var(--surface-sunk);
-  color: var(--ink-2);
-}
-
-.fms-pickchip-sub {
-  color: var(--ink-3);
-}
-
-.fms-choicerow--many {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
-}
-
 .fms-stack {
   display: grid;
   gap: var(--space-2);
@@ -6807,4 +6748,143 @@ textarea.fms-askinput {
   display: block;
   margin-top: 3px;
   color: var(--over);
+}
+
+/* ══ A select that carries a figure, and the quieter Add form ═══════════════
+   A wallet is one field with its balance, and its list has the balances, a
+   Usual tag, headings and a search box. A debt effect is a slim row of
+   choices. The form header says where a save goes. */
+
+.fms-select-detail {
+  flex: 0 0 auto;
+  margin-left: var(--space-2);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.fms-menu--search {
+  padding-top: 0;
+}
+
+.fms-menu-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 0;
+  background: var(--surface);
+}
+
+.fms-menu-search .fms-input {
+  width: 100%;
+  height: 40px;
+}
+
+.fms-menu-group {
+  padding: var(--space-2) var(--space-3) 2px;
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fms-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fms-menu-tag {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+}
+
+.fms-menu-detail {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.fms-menu-empty {
+  padding: var(--space-3);
+  color: var(--ink-3);
+}
+
+.fms-segpills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+}
+
+.fms-segpill {
+  flex: 1 1 auto;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fms-segpill:hover {
+  color: var(--ink);
+}
+
+.fms-segpill[aria-checked="true"] {
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--flow-debt);
+  color: var(--flow-debt-text);
+  font-weight: 600;
+}
+
+@media (pointer: coarse) {
+  .fms-segpill {
+    min-height: 44px;
+  }
+}
+
+.fms-entryhead-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2) var(--space-3);
+}
+
+.fms-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.fms-conn::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--ink-3);
+}
+
+.fms-conn--ok::before {
+  background: var(--ok);
+}
+
+.fms-conn--busy::before {
+  background: var(--brand-700);
+}
+
+.fms-conn--warn {
+  color: var(--warn);
+}
+
+.fms-conn--warn::before {
+  background: var(--warn);
 }

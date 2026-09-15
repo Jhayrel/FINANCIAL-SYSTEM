@@ -50,6 +50,7 @@ import { monthBills } from "../domain/budgetView";
 import { addDays, formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { duplicateHeadline, duplicatesOf } from "../domain/duplicates";
 import { draftChanges } from "../domain/draftChanges";
+import { connectionWords } from "../domain/syncState";
 import { entryImpact } from "../domain/entryImpact";
 import { whenWords } from "./Dashboard";
 import { useReportScreen } from "./screenReport";
@@ -99,6 +100,17 @@ const EFFECT_LABEL: Record<DebtEffect, string> = {
   collect: "Collect: they paid you back",
 };
 
+/** The same effects in a word or two, for the row of choices; the full words are their tooltips. */
+const EFFECT_SHORT: Record<DebtEffect, string> = {
+  draw: "Borrow more",
+  repay: "Pay it down",
+  interest: "Interest or fee",
+  fee: "Fee",
+  writeoff: "Forgiven",
+  lend: "Lend",
+  collect: "Paid back",
+};
+
 /** Due now chips shown before "Show all": enough to act on, not a wall. */
 const DUE_SHOWN = 3;
 
@@ -133,6 +145,7 @@ export function AddTransaction({
   onEditRow,
   onOpenBudget,
   onShowRows,
+  sync,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -176,6 +189,8 @@ export function AddTransaction({
   onOpenBudget?: (() => void) | undefined;
   /** The Database searched for these words, such as a record number. */
   onShowRows?: ((query: string) => void) | undefined;
+  /** Signed in, online, and saves not yet confirmed: for the note beside the form. */
+  sync?: { signedIn: boolean; online: boolean; pending: number } | undefined;
 }) {
   /**
    * Opens on Spending, rather than on nothing.
@@ -578,31 +593,55 @@ export function AddTransaction({
   /** Every wallet a row can use, once each, with what it holds today. */
   const walletChoices = useMemo(() => {
     const seen = new Set<string>();
-    const out: { name: string; balance: Centavos | null; savings: boolean }[] = [];
-    const add = (raw: string, savings: boolean): void => {
+    const out: { name: string; balance: Centavos | null; group: string }[] = [];
+    const add = (raw: string, group: string): void => {
       const name = raw.trim();
       if (!name || seen.has(name)) return;
       seen.add(name);
-      out.push({ name, balance: balances.find((b) => b.name === name)?.balance ?? null, savings });
+      out.push({ name, balance: balances.find((b) => b.name === name)?.balance ?? null, group });
     };
-    for (const w of reference.wallets) add(w, false);
-    for (const w of reference.savings) add(w, true);
+    for (const w of reference.wallets) add(w, "Wallets");
+    for (const w of reference.savings) add(w, "Savings");
     // A row being corrected keeps a wallet deactivated since it was saved.
-    add(draft.fromWallet, false);
-    add(draft.toWallet, false);
+    add(draft.fromWallet, "Not active");
+    add(draft.toWallet, "Not active");
     return out;
   }, [reference, balances, draft.fromWallet, draft.toWallet]);
 
-  const walletOptions = (usual: string | undefined, exclude?: string): PickOption[] =>
-    walletChoices
-      .filter((w) => w.name !== exclude)
-      .map((w) => ({
-        id: w.name,
-        label: w.name,
-        sub: w.balance === null ? (w.savings ? "Savings" : "") : formatMoney(w.balance),
-        ...(w.balance !== null && w.balance < 0 ? { subTone: "var(--over)" } : {}),
-        ...(usual === w.name ? { tag: "Usual" } : {}),
-      }));
+  /**
+   * One wallet field and the list it opens.
+   *
+   * Every wallet was a box of its own with its balance under the name. The
+   * owner, looking at five of them twice over on a debt: with ten or more
+   * banks that area is a wall, and it made the form hard to look at. A wallet
+   * is one field again. Its list carries what the boxes did: each balance on
+   * the right, below zero in red, the usual one tagged, spending and savings
+   * under their own headings, and a search box once there are more than eight.
+   */
+  const walletSelect = (usual: string | undefined, exclude?: string) => {
+    const list = walletChoices.filter((w) => w.name !== exclude);
+    const kinds = new Set(list.map((w) => w.group));
+    return {
+      options: list.map((w) => w.name),
+      details: Object.fromEntries(list.filter((w) => w.balance !== null).map((w) => [w.name, formatMoney(w.balance ?? 0)])),
+      detailTones: Object.fromEntries(list.filter((w) => (w.balance ?? 0) < 0).map((w) => [w.name, "var(--over)"])),
+      tags: usual ? { [usual]: "Usual" } : {},
+      groups: kinds.size > 1 ? Object.fromEntries(list.map((w) => [w.name, w.group])) : undefined,
+    };
+  };
+
+  /** "Use Cash": the wallet this is usually paid from or into, one tap away while nothing is chosen. */
+  const usualLink = (
+    usual: string | undefined,
+    current: string,
+    pick: (v: string) => void,
+    exclude?: string,
+  ): React.ReactNode =>
+    usual && !current && usual !== exclude && walletChoices.some((w) => w.name === usual) ? (
+      <button type="button" className="t-micro fms-linkbtn fms-truncate" onClick={() => pick(usual)}>
+        Use {usual}
+      </button>
+    ) : undefined;
 
   /**
    * The status a row is saved with when none was picked.
@@ -664,6 +703,24 @@ export function AddTransaction({
   const debtOptions = debts.filter((d) => !d.archived || d.id === draft.debtId);
   const selectedDebt = debts.find((d) => d.id === draft.debtId);
   const effects = effectsFor(selectedDebt?.kind ?? "payable");
+
+  /** A debt into the draft: its effect kept only if that debt takes it, and its account as the wallet when none is chosen. */
+  const pickDebt = (d: Draft, debt: Debt): Draft => {
+    // Another direction cannot keep an effect it does not take.
+    const effect = d.debtEffect && effectsFor(debt.kind).includes(d.debtEffect) ? d.debtEffect : undefined;
+    const next: Draft = { ...d, debtId: debt.id, debtEffect: effect };
+    // The account the debt moves through, when no wallet is picked yet.
+    if (next.fromWallet || next.toWallet || !debt.wallet) return next;
+    return effect ? withDebtEffect({ ...next, fromWallet: debt.wallet }, effect) : { ...next, fromWallet: debt.wallet };
+  };
+
+  /** One debt open: choosing Debt picks it, since there is nothing to choose between. */
+  const onlyDebt = debtOptions.length === 1 ? debtOptions[0] : undefined;
+  useEffect(() => {
+    if (draft.flow !== "Debt" || draft.debtId || !onlyDebt) return;
+    setDraft((d) => (d.flow === "Debt" && !d.debtId ? pickDebt(d, onlyDebt) : d));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.flow, draft.debtId, onlyDebt?.id]);
   const namedDebt = check.debtPayment ? debts.find((d) => d.id === check.debtPayment?.debtId) : undefined;
 
   /** The number shown while correcting: the payment's own, when a split pair was opened by its interest row. */
@@ -928,10 +985,16 @@ export function AddTransaction({
   };
 
   const tone = FLOWS.find((f) => f.id === draft.flow)?.tone;
+  const connection = sync ? connectionWords(sync) : null;
 
   // Which fields are on the form, so two that belong together can share a line on a wide one.
-  const showFrom = needs(draft.flow, "fromWallet") && debtSide !== "in";
-  const showTo = needs(draft.flow, "toWallet") && debtSide !== "out";
+  /*
+   * A debt shows the one wallet its effect moves money through, and none until
+   * an effect is picked: both lists at once, before anything was chosen, was
+   * the most crowded the form ever got.
+   */
+  const showFrom = draft.flow === "Debt" ? debtSide === "out" : needs(draft.flow, "fromWallet");
+  const showTo = draft.flow === "Debt" ? debtSide === "in" : needs(draft.flow, "toWallet");
   const showCategory = needs(draft.flow, "category") && categories.length > 1;
   const showItem = needs(draft.flow, "item");
   const showFee = needs(draft.flow, "fee");
@@ -983,11 +1046,19 @@ export function AddTransaction({
                 : `Saves as #${String(nextRecordNumber).padStart(4, "0")}`}
             </span>
           </div>
-          {editing && (
-            <Button size="sm" onClick={cancelEdit}>
-              Stop correcting
-            </Button>
-          )}
+          <div className="fms-entryhead-end">
+            {/* Where a save goes, said beside the form (domain/syncState.ts). */}
+            {connection && (
+              <span className={`t-micro fms-conn fms-conn--${connection.tone}`} role="status">
+                {connection.text}
+              </span>
+            )}
+            {editing && (
+              <Button size="sm" onClick={cancelEdit}>
+                Stop correcting
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Not while correcting a saved row: a tap here would turn that row into the bill. */}
@@ -1102,30 +1173,24 @@ export function AddTransaction({
                         No debt to file this against yet. Add one in Settings, under Credit and loans.
                       </p>
                     ) : (
-                      <PickChips
-                        label="Which debt"
-                        value={draft.debtId ?? ""}
-                        invalid={Boolean(errorFor("debt"))}
-                        options={debtOptions.map((d) => ({
-                          id: d.id,
-                          label: d.name,
-                          sub: `${formatMoney(outstandingOf(transactions, d.id))} ${d.kind === "payable" ? "owed" : "owed to you"}`,
-                        }))}
-                        onChange={(id) =>
+                      <Select
+                        value={selectedDebt?.name ?? ""}
+                        onChange={(name) =>
                           setDraft((d) => {
-                            const debt = debtOptions.find((x) => x.id === id);
-                            if (!debt) return { ...d, debtId: undefined };
-                            // Another direction cannot keep an effect it does not take.
-                            const effect =
-                              d.debtEffect && effectsFor(debt.kind).includes(d.debtEffect) ? d.debtEffect : undefined;
-                            const next: Draft = { ...d, debtId: debt.id, debtEffect: effect };
-                            // The account the debt moves through, when no wallet is picked yet.
-                            if (next.fromWallet || next.toWallet || !debt.wallet) return next;
-                            return effect
-                              ? withDebtEffect({ ...next, fromWallet: debt.wallet }, effect)
-                              : { ...next, fromWallet: debt.wallet };
+                            const debt = debtOptions.find((x) => x.name === name);
+                            return debt ? pickDebt(d, debt) : { ...d, debtId: undefined };
                           })
                         }
+                        options={debtOptions.map((d) => d.name)}
+                        details={Object.fromEntries(
+                          debtOptions.map((d) => [
+                            d.name,
+                            `${formatMoney(outstandingOf(transactions, d.id))} ${d.kind === "payable" ? "owed" : "owed to you"}`,
+                          ]),
+                        )}
+                        placeholder="Pick a debt"
+                        ariaLabel="Which debt"
+                        invalid={Boolean(errorFor("debt"))}
                       />
                     )}
                   </Field>
@@ -1135,23 +1200,26 @@ export function AddTransaction({
                     amount. Picking one moves the wallet to the side it implies
                     (`withDebtEffect`), as the chat card does.
                   */}
-                  <Field label="What it does" required error={errorFor("debtEffect")}>
-                    <div className="fms-choicerow fms-choicerow--many" role="radiogroup" aria-label="What this does to the debt">
-                      {effects.map((effect) => {
-                        const on = draft.debtEffect === effect;
-                        return (
-                          <button
-                            key={effect}
-                            type="button"
-                            role="radio"
-                            aria-checked={on}
-                            className={`fms-choice fms-choice--debt ${on ? "t-body-strong" : "t-body"}`}
-                            onClick={() => setDraft((d) => withDebtEffect(d, effect))}
-                          >
-                            {EFFECT_LABEL[effect]}
-                          </button>
-                        );
-                      })}
+                  <Field
+                    label="What it does"
+                    required
+                    error={errorFor("debtEffect")}
+                    hint={draft.debtEffect ? undefined : "Pick one, and the wallet it moves money through appears."}
+                  >
+                    <div className="fms-segpills" role="radiogroup" aria-label="What this does to the debt">
+                      {effects.map((effect) => (
+                        <button
+                          key={effect}
+                          type="button"
+                          role="radio"
+                          aria-checked={draft.debtEffect === effect}
+                          title={EFFECT_LABEL[effect]}
+                          className="t-body fms-segpill"
+                          onClick={() => setDraft((d) => withDebtEffect(d, effect))}
+                        >
+                          {EFFECT_SHORT[effect]}
+                        </button>
+                      ))}
                     </div>
                   </Field>
                 </>
@@ -1288,13 +1356,15 @@ export function AddTransaction({
                   label={draft.flow === "Transfer" ? "From" : "Paid from"}
                   required={draft.flow !== "Debt" || debtSide === "out"}
                   error={errorFor("fromWallet")}
+                  aside={usualLink(ghost.fromWallet, draft.fromWallet, (v) => set("fromWallet", v))}
                 >
-                  <PickChips
-                    label="The wallet the money leaves"
+                  <Select
                     value={draft.fromWallet}
-                    options={walletOptions(ghost.fromWallet)}
-                    invalid={Boolean(errorFor("fromWallet"))}
                     onChange={(v) => set("fromWallet", v)}
+                    placeholder="Pick a wallet"
+                    ariaLabel="The wallet the money leaves"
+                    invalid={Boolean(errorFor("fromWallet"))}
+                    {...walletSelect(ghost.fromWallet)}
                   />
                 </Field>
               )}
@@ -1304,6 +1374,11 @@ export function AddTransaction({
                   label={draft.flow === "Transfer" ? "To" : draft.flow === "Debt" ? "Lands in" : "Received into"}
                   required={draft.flow !== "Debt" || debtSide === "in"}
                   error={errorFor("toWallet")}
+                  aside={
+                    draft.flow === "Transfer" && sentOut
+                      ? undefined
+                      : usualLink(ghost.toWallet, draft.toWallet, (v) => set("toWallet", v), draft.flow === "Transfer" ? draft.fromWallet : undefined)
+                  }
                 >
                   {draft.flow === "Transfer" ? (
                     <div className="fms-stack">
@@ -1329,12 +1404,13 @@ export function AddTransaction({
                         ))}
                       </div>
                       {!sentOut && (
-                        <PickChips
-                          label="The wallet the money lands in"
+                        <Select
                           value={draft.toWallet}
-                          options={walletOptions(ghost.toWallet, draft.fromWallet)}
-                          invalid={Boolean(errorFor("toWallet"))}
                           onChange={(v) => set("toWallet", v)}
+                          placeholder="Pick a wallet"
+                          ariaLabel="The wallet the money lands in"
+                          invalid={Boolean(errorFor("toWallet"))}
+                          {...walletSelect(ghost.toWallet, draft.fromWallet)}
                         />
                       )}
                       {/* What the row counts as, worked out from the answer above. */}
@@ -1352,12 +1428,13 @@ export function AddTransaction({
                       </div>
                     </div>
                   ) : (
-                    <PickChips
-                      label="The wallet the money lands in"
+                    <Select
                       value={draft.toWallet}
-                      options={walletOptions(ghost.toWallet)}
-                      invalid={Boolean(errorFor("toWallet"))}
                       onChange={(v) => set("toWallet", v)}
+                      placeholder="Pick a wallet"
+                      ariaLabel="The wallet the money lands in"
+                      invalid={Boolean(errorFor("toWallet"))}
+                      {...walletSelect(ghost.toWallet)}
                     />
                   )}
                 </Field>
@@ -1799,15 +1876,6 @@ function BalanceRow({ wallet }: { wallet: WalletBalance }) {
   );
 }
 
-/** One answer in a `PickChips` group. */
-interface PickOption {
-  readonly id: string;
-  readonly label: string;
-  readonly sub?: string | undefined;
-  readonly subTone?: string | undefined;
-  readonly tag?: string | undefined;
-}
-
 /**
  * One field, its label on top.
  *
@@ -1856,75 +1924,6 @@ function Field({
           {error || hint}
         </p>
       )}
-    </div>
-  );
-}
-
-/**
- * A handful of answers as buttons, for a choice made several times a day.
- *
- * A wallet was a dropdown: two taps, every option hidden until it opened, and
- * nothing in it saying which wallet held the money. Each one is a button now
- * with its balance under the name, so the choice is one tap made with the
- * figure in view. The arrow keys move through them, as in any radio group.
- */
-function PickChips({
-  label,
-  value,
-  options,
-  onChange,
-  invalid,
-}: {
-  label: string;
-  value: string;
-  options: readonly PickOption[];
-  onChange: (id: string) => void;
-  invalid?: boolean | undefined;
-}) {
-  const chosen = options.findIndex((o) => o.id === value);
-  const move = (e: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
-    const step =
-      e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
-    if (step === 0 || options.length === 0) return;
-    e.preventDefault();
-    const to = (index + step + options.length) % options.length;
-    const next = options[to];
-    if (!next) return;
-    onChange(next.id);
-    e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("button")[to]?.focus();
-  };
-  return (
-    <div
-      className={invalid ? "fms-pickchips is-invalid" : "fms-pickchips"}
-      role="radiogroup"
-      aria-label={label}
-      aria-invalid={invalid || undefined}
-    >
-      {options.map((o, i) => {
-        const on = o.id === value;
-        return (
-          <button
-            key={o.id}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            tabIndex={on || (chosen === -1 && i === 0) ? 0 : -1}
-            className="fms-pickchip"
-            onClick={() => onChange(o.id)}
-            onKeyDown={(e) => move(e, i)}
-          >
-            <span className="fms-pickchip-top">
-              <span className="t-body-strong fms-truncate">{o.label}</span>
-              {o.tag && <span className="t-micro fms-pickchip-tag">{o.tag}</span>}
-            </span>
-            {o.sub && (
-              <span className="t-num-s fms-pickchip-sub" style={o.subTone ? { color: o.subTone } : undefined}>
-                {o.sub}
-              </span>
-            )}
-          </button>
-        );
-      })}
     </div>
   );
 }
