@@ -297,13 +297,35 @@ function toBudgetYear(d: DocumentData): BudgetYear | null {
 
   const spending = track(d.spending);
   const billsSubs = track(d.billsSubs);
-  return spending && billsSubs ? { spending, billsSubs } : null;
+  if (!spending || !billsSubs) return null;
+
+  /**
+   * Limits for kinds of spending, when a year has any.
+   *
+   * Read one by one: a malformed entry is dropped on its own rather than
+   * taking the year's two tracks down with it. A year written before limits
+   * existed simply has none.
+   */
+  const categories: Record<string, MonthlyAmounts> = {};
+  if (d.categories && typeof d.categories === "object") {
+    for (const [name, value] of Object.entries(d.categories as Record<string, unknown>)) {
+      const amounts = track(value);
+      if (name.trim() && amounts) categories[name] = amounts;
+    }
+  }
+
+  return Object.keys(categories).length > 0 ? { spending, billsSubs, categories } : { spending, billsSubs };
 }
 
 export async function saveBudget(uid: string, year: string, budget: BudgetYear): Promise<void> {
+  const categories = Object.fromEntries(
+    Object.entries(budget.categories ?? {}).map(([name, amounts]) => [name, [...amounts]]),
+  );
+  // The whole document, so a limit removed here is removed there.
   await setDoc(budgetDoc(firestore(), uid, year), {
     spending: [...budget.spending],
     billsSubs: [...budget.billsSubs],
+    ...(Object.keys(categories).length > 0 ? { categories } : {}),
   });
 }
 

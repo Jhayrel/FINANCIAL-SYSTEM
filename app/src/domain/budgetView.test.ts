@@ -12,6 +12,7 @@ import { loadFixture } from "../fixtures/load";
 import { assessMonthFor, budgetForYear, dailyPacing } from "./budget";
 import {
   applyPlan,
+  categoryLimits,
   categoryLines,
   copyPlanForward,
   monthBills,
@@ -19,6 +20,7 @@ import {
   phaseOf,
   planSuggestions,
   previousPlan,
+  setCategoryLimit,
   withMonthPlan,
 } from "./budgetView";
 import { firstOfMonth, getMonth, getYear, lastOfMonth } from "./dates";
@@ -232,6 +234,50 @@ describe("which months a budget is saved to", () => {
     const next = applyPlan(plan, 9, value, "year");
     expect(next.spending.every((v) => v === 900000)).toBe(true);
     expect(next.billsSubs.every((v) => v === 150000)).toBe(true);
+  });
+});
+
+// ── Limits for kinds of spending ───────────────────────────────────────────
+
+describe("limits for kinds of spending, inside the spending track", () => {
+  const plan = budgetForYear(fx.budgets, YEAR);
+  const withFood = setCategoryLimit(plan, "Food", MONTH, 300000, "rest");
+
+  it("sets a limit for the month and every month after it, and none before", () => {
+    const food = withFood.categories?.["Food"] ?? [];
+    expect(food.slice(MONTH - 1)).toEqual(Array(13 - MONTH).fill(300000));
+    expect(food.slice(0, MONTH - 1).every((v) => v === 0)).toBe(true);
+  });
+
+  it("leaves the two tracks exactly as they were", () => {
+    expect(withFood.spending).toEqual(plan.spending);
+    expect(withFood.billsSubs).toEqual(plan.billsSubs);
+  });
+
+  it("keeps the limits whenever the budget itself is saved", () => {
+    const value = { spending: 900000, billsSubs: 150000 };
+    expect(applyPlan(withFood, MONTH, value, "year").categories).toEqual(withFood.categories);
+    expect(applyPlan(withFood, MONTH, value, "month").categories).toEqual(withFood.categories);
+    expect(withMonthPlan(withFood, 1, value).categories).toEqual(withFood.categories);
+    expect(copyPlanForward(withFood, 2).categories).toEqual(withFood.categories);
+  });
+
+  it("reads the limits for one month, and only the ones set", () => {
+    expect([...categoryLimits(withFood, MONTH)]).toEqual([["Food", 300000]]);
+    expect(categoryLimits(withFood, MONTH - 1).size).toBe(0);
+    expect(categoryLimits(undefined, MONTH).size).toBe(0);
+  });
+
+  it("takes a limit set to nothing off the year altogether", () => {
+    expect(setCategoryLimit(withFood, "Food", 1, 0, "year").categories).toBeUndefined();
+  });
+
+  it("lists a limited kind of spending before anything is spent on it", () => {
+    const lines = categoryLines([spend("2026-09-01", "Gas", 2500)], 2026, 9, 3, new Map([["Food", 300000]]));
+    expect(lines.map((l) => [l.name, l.spent, l.limit])).toEqual([
+      ["Gas", 2500, null],
+      ["Food", 0, 300000],
+    ]);
   });
 });
 

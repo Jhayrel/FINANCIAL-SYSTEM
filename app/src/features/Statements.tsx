@@ -23,6 +23,7 @@ import {
   type StatementType,
 } from "../domain/statements";
 import type { ReferenceLists, Transaction } from "../domain/types";
+import { yearsCovered } from "../domain/year";
 
 const TYPES: StatementType[] = ["account", "revenue", "expense", "savings", "debt"];
 
@@ -30,13 +31,20 @@ export function Statements({
   transactions,
   reference,
   debts,
-  year,
+  year: initialYear,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
   debts: readonly Debt[];
+  /** The year it opens on. Any year the ledger covers can be picked. */
   year: number;
 }) {
+  const [year, setYear] = useState(initialYear);
+  /** Newest first. An imported year appears here as soon as its rows do. */
+  const years = useMemo(
+    () => [...new Set([...yearsCovered(transactions), initialYear])].sort((a, b) => b - a),
+    [transactions, initialYear],
+  );
   const [type, setType] = useState<StatementType>("account");
   const [from, setFrom] = useState(1);
   const [to, setTo] = useState(12);
@@ -150,6 +158,13 @@ export function Statements({
             />
           </label>
 
+          {years.length > 1 && (
+            <label className="fms-stmtfield">
+              <span className="t-label" style={{ color: "var(--ink-2)" }}>Year</span>
+              <Select value={String(year)} onChange={(v) => setYear(Number(v))} options={years.map(String)} />
+            </label>
+          )}
+
           <label className="fms-stmtfield">
             <span className="t-label" style={{ color: "var(--ink-2)" }}>From</span>
             <Select
@@ -203,7 +218,7 @@ export function Statements({
         </div>
 
         {statement.rows.length === 0 ? (
-          <EmptyState message={`Nothing in the ${STATEMENT_LABEL[type].toLowerCase()} for ${MONTH_NAMES[from - 1]} to ${MONTH_NAMES[to - 1]}.`} />
+          <EmptyState message={`Nothing in the ${STATEMENT_LABEL[type].toLowerCase()} for ${MONTH_NAMES[from - 1]} to ${MONTH_NAMES[to - 1]} ${year}.`} />
         ) : (
           <>
             <div className="fms-tablewrap">

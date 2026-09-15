@@ -160,6 +160,12 @@ One face. Self-hosted via `@fontsource` so the PWA keeps its type offline.
 
 **Spare width goes to a side panel, not to longer rows** (owner, 2026-09-15: "use all spaces"). From 1280px a list screen puts a summary beside the list: the Bin shows counts by type and what restoring would do to each wallet, Activity shows its counts, Budget keeps the planner beside the month. A row stretched to 1600px puts its action a hand's width from its label, so rows keep their reading width. Settings is the exception and stays one column: a two column Settings was rejected on sight (see `layout.css`, "One column, always").
 
+**List screens move their rows, not their heading** (owner, 2026-09-15). From 1024px the Database, Statements, the Bin and Activity are exactly one screen tall: the title, search, filters and column headings stay put and only the rows scroll. Tables inside cards on a scrolling page (Budget, Debt, Insights) keep their column headings pinned to the top of the page while they are in view.
+
+**A phone is for adding and for the summary** (owner, 2026-09-15). Below 1024px the bar holds Dashboard, Database, Add, Budget and the assistant. Debt, Insights, Statements, the Bin and Activity show "…is on a bigger screen" with the way back, rather than a squeezed desktop. On a phone the Database looks things up (no picking, editing or deleting) and Budget shows the month, where it went and the bills (setting budgets and limits, and the year's tables, are desk work).
+
+**A phone has its own sizes.** Below 640px the type and spacing come down a step: hero figure 26px, card titles 16px, captions 12px, 12px of page and card padding, a 52px bar with a 48px Add. Fields stay 16px so iOS does not zoom.
+
 ### 2.4 Radius, borders, elevation
 
 | Token | px | Use |

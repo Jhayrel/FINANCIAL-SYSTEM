@@ -15,13 +15,12 @@ import {
   Alert,
   Button,
   Card,
-  CountChip,
   EmptyState,
   Money,
   ProgressBar,
-  SegmentedControl,
   StatusPill,
 } from "../components/primitives";
+import { PeriodPicker } from "../components/PeriodPicker";
 import { AiAnswerView } from "../components/AiAnswer";
 import { useAi } from "./useAi";
 import type { AppSettings } from "../domain/settings";
@@ -42,10 +41,10 @@ import {
   getYear,
   makeDate,
   monthName,
-  MONTH_NAMES,
 } from "../domain/dates";
 import { dailySpending, expenseRanking, monthTotals, spendingRanking } from "../domain/totals";
 import type { Budgets, ReferenceLists, Transaction } from "../domain/types";
+import { pickableYears } from "../domain/year";
 
 const DAY_INITIALS = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -64,15 +63,25 @@ export function Insights({
   asOf: string;
   settings: AppSettings;
 }) {
-  const year = getYear(asOf);
+  /**
+   * Any month of any year the ledger covers, not only this year's. A year is
+   * a filter on one continuous ledger (docs/08, rule Y1), so an imported 2025
+   * reads here like 2026 does.
+   */
+  const [year, setYear] = useState(getYear(asOf));
   const [month, setMonth] = useState(getMonth(asOf));
+  const isThisMonth = year === getYear(asOf) && month === getMonth(asOf);
+  const years = useMemo(
+    () => pickableYears(transactions, Object.keys(budgets), asOf),
+    [transactions, budgets, asOf],
+  );
 
   /**
    * The summary follows the month picker, not the clock. Looking at March and
    * reading a description of August would be wrong in a way that is very hard
    * to spot, because every figure in it would be real.
    */
-  const viewing = month === getMonth(asOf) ? asOf : makeDate(year, month, 1);
+  const viewing = isThisMonth ? asOf : makeDate(year, month, 1);
   const ai = useAi({
     settings,
     transactions,
@@ -85,9 +94,14 @@ export function Insights({
   const v = useMemo(() => {
     const totals = monthTotals(transactions, year, month);
     const budget = assessMonthFor(transactions, budgets, year, month);
-    const pacing = dailyPacing(transactions, budgets, makeDate(year, month, Math.min(getMonth(asOf) === month ? Number(asOf.slice(8)) : 1, daysInMonth(year, month))));
+    const pacing = dailyPacing(transactions, budgets, makeDate(year, month, Math.min(isThisMonth ? Number(asOf.slice(8)) : 1, daysInMonth(year, month))));
     const days = dailySpending(transactions, year, month, daysInMonth(year, month));
-    const bills = billStatuses(transactions, reference, asOf);
+    // Bills as they stood at the end of the month shown, or today for this month.
+    const bills = billStatuses(
+      transactions,
+      reference,
+      isThisMonth ? asOf : makeDate(year, month, daysInMonth(year, month)),
+    );
     const positions = positionsOf(debts, transactions, asOf);
     const walletBalance = totalWalletBalance(transactions, reference.wallets);
     const plan = planDay(walletBalance, learnPatterns(transactions, asOf), positions, asOf);
@@ -128,14 +142,16 @@ export function Insights({
           One line that scrolls, not three rows of pills: twelve months wrapped
           three deep on a phone and pushed the month's figures below the fold.
         */}
-        <SegmentedControl
-          options={MONTH_NAMES.slice(0, 12).map((m, i) => ({ id: String(i + 1), label: m.slice(0, 3) }))}
-          value={String(month)}
-          onChange={(id) => setMonth(Number(id))}
-          scroll
-          label="Month"
+        <PeriodPicker
+          year={year}
+          month={month}
+          years={years}
+          onChange={(y, m) => {
+            setYear(y);
+            setMonth(m);
+          }}
+          today={{ year: getYear(asOf), month: getMonth(asOf) }}
         />
-        <CountChip>{monthName(month)} {year}</CountChip>
       </div>
 
       {/* Only while AI and this surface are on: off means gone (domain/aiSurface.ts). */}

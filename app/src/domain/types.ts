@@ -195,6 +195,13 @@ export type MonthlyAmounts = readonly [
 export interface BudgetYear {
   readonly spending: MonthlyAmounts;
   readonly billsSubs: MonthlyAmounts;
+  /**
+   * Limits for kinds of spending, inside the spending track, keyed by the
+   * spending type's name. Twelve amounts each, like the tracks. Advice about
+   * the track, never a third verdict: rule 3.6 still judges two tracks.
+   * Absent on every year written before 2026-09-15.
+   */
+  readonly categories?: Readonly<Record<string, MonthlyAmounts>> | undefined;
 }
 
 export type Budgets = Readonly<Record<string, BudgetYear>>;

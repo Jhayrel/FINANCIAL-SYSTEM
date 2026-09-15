@@ -9,7 +9,8 @@
  *   - where the month stands: what is left, what that is a day, and whether
  *     the pace so far carries it over
  *   - the plan against the money that came in, and what was kept
- *   - where the money went, against what each kind of spending usually costs
+ *   - where the money went, against what each kind of spending usually costs,
+ *     and against its own limit where one is set
  *   - the month's bills, paid and still to come
  *   - a plan that starts from the ledger and can be saved to several months
  *
@@ -20,6 +21,14 @@
  * a usual income of ₱7,338.22 beside ₱1,005,006.95 that had come in. Every
  * card now reads the same functions: `monthBills` for bills, and one
  * `expectedIncome` for what a plan is measured against.
+ *
+ * ── Two levels of budget ──────────────────────────────────────────────────
+ *
+ * The two tracks stay the budget: they are what rule 3.6 judges, what the
+ * Dashboard reports and what every earlier year was set in. A kind of
+ * spending can also have a limit of its own, inside the spending track, for
+ * the few that move month to month. Bills need none: each is already followed
+ * by name. A limit is advice about the track, never a third verdict.
  */
 
 import { billStatuses } from "./bills";
@@ -163,6 +172,8 @@ export interface CategoryLine {
   readonly usual: Centavos | null;
   /** Share of the month's spending by type. */
   readonly share: number;
+  /** The limit set for this kind of spending this month, or null for none. */
+  readonly limit: Centavos | null;
 }
 
 const monthRange = (year: number, month: number) => ({
@@ -170,12 +181,17 @@ const monthRange = (year: number, month: number) => ({
   end: lastOfMonth(year, month),
 });
 
-/** The spending attribution for a month, biggest first, with the usual beside it. */
+/**
+ * The spending attribution for a month, biggest first, with the usual beside
+ * it. A kind of spending with a limit is listed even before anything is spent
+ * on it, so a limit set at the start of a month is visible from day one.
+ */
 export function categoryLines(
   transactions: readonly Transaction[],
   year: number,
   month: number,
   lookback = 3,
+  limits: ReadonlyMap<string, Centavos> = new Map(),
 ): CategoryLine[] {
   const current = spendingAttribution(transactions, monthRange(year, month));
 
@@ -190,17 +206,27 @@ export function categoryLines(
   }
 
   let total = 0;
-  for (const value of current.values()) if (value > 0) total += value;
+  const names = new Set<string>();
+  for (const [name, value] of current) {
+    if (value > 0) {
+      total += value;
+      names.add(name);
+    }
+  }
+  for (const name of limits.keys()) names.add(name);
 
-  return [...current.entries()]
-    .filter(([, spent]) => spent > 0)
-    .map(([name, spent]) => ({
-      name,
-      spent,
-      usual: middle(history.map((h) => h.get(name) ?? 0)),
-      share: total > 0 ? spent / total : 0,
-    }))
-    .sort((a, b) => b.spent - a.spent);
+  return [...names]
+    .map((name) => {
+      const spent = current.get(name) ?? 0;
+      return {
+        name,
+        spent: Math.max(0, spent),
+        usual: middle(history.map((h) => h.get(name) ?? 0)),
+        share: total > 0 ? Math.max(0, spent) / total : 0,
+        limit: limits.get(name) ?? null,
+      };
+    })
+    .sort((a, b) => b.spent - a.spent || (b.limit ?? 0) - (a.limit ?? 0) || a.name.localeCompare(b.name));
 }
 
 // ── The month's bills ──────────────────────────────────────────────────────
@@ -310,7 +336,14 @@ export function monthBills(
 
 type Amounts = BudgetYear["spending"];
 
-/** One month's plan set, every other month left as it was. */
+const NOTHING: Amounts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+/**
+ * One month's plan set, every other month left as it was.
+ *
+ * Every function here spreads the year it was given, so the limits for kinds
+ * of spending travel with a saved budget instead of being dropped by it.
+ */
 export function withMonthPlan(
   plan: BudgetYear,
   month: number,
@@ -318,6 +351,7 @@ export function withMonthPlan(
 ): BudgetYear {
   const i = month - 1;
   return {
+    ...plan,
     spending: plan.spending.map((v, j) => (j === i ? value.spending : v)) as unknown as Amounts,
     billsSubs: plan.billsSubs.map((v, j) => (j === i ? value.billsSubs : v)) as unknown as Amounts,
   };
@@ -335,6 +369,7 @@ export function copyPlanForward(plan: BudgetYear, fromMonth: number): BudgetYear
   const spending = plan.spending[i] ?? 0;
   const billsSubs = plan.billsSubs[i] ?? 0;
   return {
+    ...plan,
     spending: plan.spending.map((v, j) => (j > i ? spending : v)) as unknown as Amounts,
     billsSubs: plan.billsSubs.map((v, j) => (j > i ? billsSubs : v)) as unknown as Amounts,
   };
@@ -362,6 +397,9 @@ export function previousPlan(
 /** Which months a budget is saved to. */
 export type PlanScope = "month" | "rest" | "year";
 
+const inScope = (j: number, i: number, scope: PlanScope): boolean =>
+  scope === "year" || j === i || (scope === "rest" && j > i);
+
 /** A month's plan saved to that month, to it and every month after, or to the whole year. */
 export function applyPlan(
   plan: BudgetYear,
@@ -369,14 +407,51 @@ export function applyPlan(
   value: { readonly spending: Centavos; readonly billsSubs: Centavos },
   scope: PlanScope,
 ): BudgetYear {
-  if (scope === "year") {
-    return {
-      spending: plan.spending.map(() => value.spending) as unknown as Amounts,
-      billsSubs: plan.billsSubs.map(() => value.billsSubs) as unknown as Amounts,
-    };
+  const i = month - 1;
+  return {
+    ...plan,
+    spending: plan.spending.map((v, j) => (inScope(j, i, scope) ? value.spending : v)) as unknown as Amounts,
+    billsSubs: plan.billsSubs.map((v, j) => (inScope(j, i, scope) ? value.billsSubs : v)) as unknown as Amounts,
+  };
+}
+
+// ── Limits for kinds of spending ───────────────────────────────────────────
+
+/** The limits set for one month, only those above nothing. */
+export function categoryLimits(plan: BudgetYear | undefined, month: number): Map<string, Centavos> {
+  const out = new Map<string, Centavos>();
+  for (const [name, amounts] of Object.entries(plan?.categories ?? {})) {
+    const value = amounts[month - 1] ?? 0;
+    if (value > 0) out.set(name, value);
   }
-  const set = withMonthPlan(plan, month, value);
-  return scope === "rest" ? copyPlanForward(set, month) : set;
+  return out;
+}
+
+/**
+ * A limit for one kind of spending, saved to the month, the rest of the year
+ * or all of it. Nothing removes it, and a kind of spending left with no limit
+ * in any month is taken off the year altogether. The two tracks are untouched.
+ */
+export function setCategoryLimit(
+  plan: BudgetYear,
+  name: string,
+  month: number,
+  value: Centavos,
+  scope: PlanScope,
+): BudgetYear {
+  const key = name.trim();
+  if (!key) return plan;
+
+  const i = month - 1;
+  const was: readonly Centavos[] = plan.categories?.[key] ?? NOTHING;
+  const next = was.map((v, j) => (inScope(j, i, scope) ? Math.max(0, value) : v));
+
+  const categories: Record<string, Amounts> = { ...(plan.categories ?? {}) };
+  if (next.every((v) => v === 0)) delete categories[key];
+  else categories[key] = next as unknown as Amounts;
+
+  const { categories: _replaced, ...tracks } = plan;
+  return Object.keys(categories).length > 0 ? { ...tracks, categories } : tracks;
 }
 
 // ── Planning a month from your own history ────────────────────────────────
@@ -417,7 +492,8 @@ const toNearestHundred = (c: Centavos): Centavos => Math.round(c / 10000) * 1000
  *
  * The workbook's plan was twelve cells typed from memory. The ledger already
  * knows what comes in, which bills get paid and what spending usually runs
- * to, so the plan starts there and the owner adjusts it.
+ * to, so the plan starts there and the owner adjusts it. January looks back
+ * into the December before, because the ledger does not stop at a year.
  */
 export function planSuggestions(
   transactions: readonly Transaction[],

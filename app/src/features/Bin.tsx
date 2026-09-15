@@ -225,7 +225,8 @@ export function Bin({
             action={<Button onClick={clearFilters}>Clear filters</Button>}
           />
         ) : (
-          <>
+          /* The one part that scrolls on a desktop: the title, search and Select all stay put. */
+          <div className="fms-binscroll">
             <ul className="fms-binlist" style={{ listStyle: "none", margin: 0, padding: 0 }}>
               {shown.map((t) => (
                 <li key={t.id} className="fms-dbrow">
@@ -324,7 +325,7 @@ export function Bin({
                 </Button>
               </div>
             )}
-          </>
+          </div>
         )}
       </Card>
 

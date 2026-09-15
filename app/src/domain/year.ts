@@ -96,6 +96,28 @@ export function yearsCovered(transactions: readonly Transaction[]): number[] {
   return [...years].sort((a, b) => a - b);
 }
 
+/**
+ * The years a screen can be moved to, oldest first.
+ *
+ * Every year with a row in it or a budget for it, this year, and next year so
+ * a budget can be set before the year starts. Imported history brings its own
+ * years with it: merge a backup of 2025 and 2025 is on every picker, with
+ * nothing to switch on. Years with nothing at all are left out rather than
+ * filled in, so a mistyped date cannot put a century of empty years in the way.
+ */
+export function pickableYears(
+  transactions: readonly Transaction[],
+  budgetYears: readonly string[],
+  asOf: Parameters<typeof getYear>[0],
+): number[] {
+  const now = getYear(asOf);
+  const years = new Set<number>([...yearsCovered(transactions), now, now + 1]);
+  for (const key of budgetYears) {
+    if (/^\d{4}$/.test(key)) years.add(Number(key));
+  }
+  return [...years].sort((a, b) => a - b);
+}
+
 // ── The Excel's carry-forward rows ─────────────────────────────────────────
 
 export interface CarryForward {

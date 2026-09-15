@@ -9,23 +9,32 @@
  * person asks while a month is still running.
  *
  * It opens on a month now, with the year as one table under it. A budget is
- * set in the planner beside the month rather than typed into a grid, and
- * starts from the ledger.
+ * set in the planner beside the month and starts from the ledger. Each card
+ * answers one question with the figure every other card uses, and the screen
+ * links out: a bill still to pay opens the Add form filled in, a kind of
+ * spending opens its rows.
  *
- * ── Tidied the same day ───────────────────────────────────────────────────
+ * ── Any year ──────────────────────────────────────────────────────────────
  *
- * The first version was right and read as noise. Every kind of spending had
- * an orange percentage under it ("+560% against the usual ₱285.00"), the
- * month card offered two buttons as well as the planner beside it, cards
- * showed "None" and "₱0.00 due", and the planner and the bills card gave two
- * different figures for the same bills. Now each card answers one question
- * with the figure every other card uses, a difference is shown in pesos and
- * only when it is worth a look, and the screen links out: a bill still to
- * pay opens the Add form filled in, a kind of spending opens its rows.
+ * The year and month are one picker, and every year with rows or a budget is
+ * on it, plus next year. Imported history is readable the moment it lands,
+ * and next year can be budgeted before it starts (docs/08, rule Y1).
  *
- * Rule 3.6 is untouched: the two tracks, their verdicts and every figure are
- * the same functions as before, and `budgetView.test.ts` asserts the month
- * view carries them exactly.
+ * ── Two levels ────────────────────────────────────────────────────────────
+ *
+ * The two tracks stay the budget: rule 3.6 judges them and the Dashboard
+ * reports them. A kind of spending can also have a limit of its own inside
+ * the spending track, for the few that move month to month. Bills need none,
+ * being followed one by one in their own card.
+ *
+ * ── On a phone ────────────────────────────────────────────────────────────
+ *
+ * A phone shows where the month stands, where it went and the bills, which
+ * is what a phone is for here. Setting budgets and limits and reading the
+ * year's tables are on a bigger screen, and the screen says so.
+ *
+ * Rule 3.6 is untouched: `budgetView.test.ts` asserts the month view carries
+ * it exactly.
  */
 
 import { useMemo, useRef, useState, type ReactNode } from "react";
@@ -37,20 +46,23 @@ import {
   EmptyState,
   Money,
   ProgressBar,
-  SegmentedControl,
   StatusPill,
   type Status,
 } from "../components/primitives";
-import { AmountInput } from "../components/forms";
+import { AmountInput, Select } from "../components/forms";
 import { BarChart } from "../components/charts";
 import { useConfirm } from "../components/Confirm";
+import { PeriodPicker } from "../components/PeriodPicker";
 import { budgetForYear, budgetSummary, budgetYearTotals, type MonthBudgetRow } from "../domain/budget";
 import {
   applyPlan,
+  categoryLimits,
   categoryLines,
   monthBills,
   monthPlanView,
+  phaseOf,
   planSuggestions,
+  setCategoryLimit,
   withMonthPlan,
   type BillState,
   type CategoryLine,
@@ -64,6 +76,8 @@ import { cashFlow, explainBasis, forecastYear } from "../domain/forecast";
 import { getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
 import type { BudgetTrack, BudgetYear, Budgets, ReferenceLists, Transaction } from "../domain/types";
+import { pickableYears } from "../domain/year";
+import { useMediaQuery } from "./useMediaQuery";
 
 const TRACKS = [
   { id: "spending", label: "Spending" },
@@ -75,17 +89,11 @@ const TOP_CATEGORIES = 8;
 
 /**
  * A difference worth a look: at least ₱500.00 above the usual, and half as
- * much again. Below that a percentage of a small figure only alarms: ₱285.00
- * becoming ₱1,880.00 is worth saying, ₱40.00 becoming ₱90.00 is not.
+ * much again. Below that a percentage of a small figure only alarms.
  */
 const NOTABLE = 50000;
 
 const monthLabel = (m: number): string => MONTH_NAMES[m - 1] ?? "";
-
-const MONTH_OPTIONS = Array.from({ length: 12 }, (_, i) => ({
-  id: String(i + 1),
-  label: monthLabel(i + 1).slice(0, 3),
-}));
 
 const pct = (ratio: number): string => `${Math.round(ratio * 100)}%`;
 
@@ -120,12 +128,25 @@ export function Budget({
   /** Opens the Database searched for these words. */
   onShowRows?: ((query: string) => void) | undefined;
 }) {
-  const year = getYear(asOf);
+  const asOfYear = getYear(asOf);
   const asOfMonth = getMonth(asOf);
+  const phone = useMediaQuery("(max-width: 1023px)");
+
+  const [year, setYear] = useState(asOfYear);
   const [month, setMonth] = useState(asOfMonth);
   const [savedNote, setSavedNote] = useState<string | null>(null);
+  const [limitNote, setLimitNote] = useState<string | null>(null);
+  const [limitFor, setLimitFor] = useState<string | null>(null);
   const [allCategories, setAllCategories] = useState(false);
   const plannerRef = useRef<HTMLElement>(null);
+
+  const years = useMemo(
+    () => pickableYears(transactions, Object.keys(budgets), asOf),
+    [transactions, budgets, asOf],
+  );
+
+  /** How many months of the year have happened: all of a past year, none of a future one. */
+  const monthsSoFar = year < asOfYear ? 12 : year > asOfYear ? 0 : asOfMonth;
 
   const y = useMemo(() => {
     const rows = budgetSummary(transactions, budgets, year);
@@ -133,19 +154,27 @@ export function Budget({
       rows,
       totals: budgetYearTotals(rows),
       plan: budgetForYear(budgets, year),
-      forecast: forecastYear(transactions, year, asOfMonth, debts),
+      forecast: year === asOfYear ? forecastYear(transactions, year, asOfMonth, debts) : [],
       flow: cashFlow(transactions, year),
     };
-  }, [transactions, budgets, debts, year, asOfMonth]);
+  }, [transactions, budgets, debts, year, asOfYear, asOfMonth]);
+
+  /** Months with anything recorded or budgeted: the picker shows the rest quieter. */
+  const active = useMemo(
+    () => new Set(y.rows.filter((r) => r.spent > 0 || r.budget > 0).map((r) => r.month)),
+    [y.rows],
+  );
+
+  const limits = useMemo(() => categoryLimits(budgets[String(year)], month), [budgets, year, month]);
 
   const m = useMemo(
     () => ({
       view: monthPlanView(transactions, budgets, year, month, asOf),
-      lines: categoryLines(transactions, year, month),
+      lines: categoryLines(transactions, year, month, 3, limits),
       bills: monthBills(transactions, reference, year, month, asOf),
       suggestions: planSuggestions(transactions, reference, budgets, year, month, asOf),
     }),
-    [transactions, budgets, reference, year, month, asOf],
+    [transactions, budgets, reference, year, month, asOf, limits],
   );
 
   const { view, lines, bills, suggestions } = m;
@@ -155,17 +184,12 @@ export function Budget({
   const noPlan = a.combined.budget === 0;
   const pace = view.phase === "current" ? view.elapsed : undefined;
   const spentByKind = lines.reduce((s, l) => s + l.spent, 0);
+  const limitsTotal = [...limits.values()].reduce((s, v) => s + v, 0);
 
-  /**
-   * Bills and subscriptions rows with no item are counted by the track and
-   * cannot be put against a named bill, so they are said once, not lost.
-   */
+  /** Bills and subscriptions rows with no item: counted by the track, said once here. */
   const unnamedBills = view.phase === "future" ? 0 : a.billsSubs.spent - bills.paid;
 
-  /**
-   * An income far above the usual month. Often it is money that was already
-   * there, typed as income, which inflates "Came in" and "Kept" alike.
-   */
+  /** An income far above the usual month, often money already there typed as income. */
   const usual = suggestions.usualIncome;
   const unusualIncome =
     usual !== null && usual > 0 && view.revenue >= usual * 3 && view.revenue - usual >= 5_000_000;
@@ -173,9 +197,17 @@ export function Budget({
   const planSpending = y.plan.spending.reduce((s, v) => s + v, 0);
   const planBills = y.plan.billsSubs.reduce((s, v) => s + v, 0);
 
-  const pickMonth = (next: number): void => {
-    setMonth(next);
+  /** Kinds of spending that can be given a limit without anything spent on them yet. */
+  const addable = reference.spendingTypes
+    .map((s) => s.name)
+    .filter((n) => n.trim() && !lines.some((l) => l.name === n));
+
+  const pick = (nextYear: number, nextMonth: number): void => {
+    setYear(nextYear);
+    setMonth(nextMonth);
     setSavedNote(null);
+    setLimitNote(null);
+    setLimitFor(null);
   };
 
   const focusPlanner = (): void => {
@@ -188,7 +220,7 @@ export function Budget({
   const usePrevious = (): void => {
     if (!previous) return;
     onReplaceYear(year, withMonthPlan(y.plan, month, previous));
-    setSavedNote(`Saved. ${name} uses the same plan as ${monthLabel(previous.month)}.`);
+    setSavedNote(`Saved. ${name} uses the same budget as ${monthLabel(previous.month)}.`);
   };
 
   const savePlan = (value: { spending: Centavos; billsSubs: Centavos }, scope: PlanScope): void => {
@@ -203,6 +235,18 @@ export function Budget({
     );
   };
 
+  const saveLimit = (kind: string, value: Centavos, scope: PlanScope): void => {
+    onReplaceYear(year, setCategoryLimit(y.plan, kind, month, value, scope));
+    setLimitFor(null);
+    const months =
+      scope === "month" ? `in ${name}` : scope === "rest" ? `from ${name} to December` : `in every month of ${year}`;
+    setLimitNote(
+      value > 0
+        ? `Saved. ${kind} is limited to ${formatMoney(value)} a month ${months}.`
+        : `Removed the limit on ${kind} ${months}.`,
+    );
+  };
+
   const previousName = previous
     ? previous.year === year
       ? monthLabel(previous.month)
@@ -213,12 +257,13 @@ export function Budget({
     <div className="fms-budgetpage">
       {/* ── The month ────────────────────────────────────────────────────── */}
       <div className="fms-budgettop">
-        <SegmentedControl
-          options={MONTH_OPTIONS}
-          value={String(month)}
-          onChange={(id) => pickMonth(Number(id))}
-          scroll
-          label={`Month of ${year}`}
+        <PeriodPicker
+          year={year}
+          month={month}
+          years={years}
+          onChange={pick}
+          active={active}
+          today={{ year: asOfYear, month: asOfMonth }}
         />
 
         <Card
@@ -235,20 +280,21 @@ export function Budget({
           {noPlan ? (
             <div className="fms-budgetempty">
               <p className="t-body" style={{ margin: 0, color: "var(--ink-2)" }}>
-                No budget for {name} yet.{" "}
+                No budget for {name} {year} yet.{" "}
                 {a.combined.spent > 0
                   ? `${formatMoney(a.combined.spent)} has gone out with nothing to measure it against.`
                   : "Set one and this shows what is left, and what that is a day."}
               </p>
-              {previous ? (
-                <Button variant="primary" onClick={usePrevious}>
-                  Use {previousName}'s plan, {formatMoney(previous.spending + previous.billsSubs)}
-                </Button>
-              ) : (
-                <Button variant="primary" onClick={focusPlanner}>
-                  Set the budget
-                </Button>
-              )}
+              {!phone &&
+                (previous ? (
+                  <Button variant="primary" onClick={usePrevious}>
+                    Use {previousName}'s budget, {formatMoney(previous.spending + previous.billsSubs)}
+                  </Button>
+                ) : (
+                  <Button variant="primary" onClick={focusPlanner}>
+                    Set the budget
+                  </Button>
+                ))}
             </div>
           ) : (
             <div className="fms-budgethero">
@@ -330,17 +376,20 @@ export function Budget({
         </Card>
       </div>
 
-      {/* ── Setting the budget ───────────────────────────────────────────── */}
-      <aside ref={plannerRef} className="fms-budgetrail" aria-label={`Set the budget for ${name}`}>
-        <Planner
-          key={`${year}-${month}-${suggestions.current.spending}-${suggestions.current.billsSubs}`}
-          year={year}
-          month={month}
-          suggestions={suggestions}
-          note={savedNote}
-          onSave={savePlan}
-        />
-      </aside>
+      {/* ── Setting the budget: a desk task ──────────────────────────────── */}
+      {!phone && (
+        <aside ref={plannerRef} className="fms-budgetrail" aria-label={`Set the budget for ${name}`}>
+          <Planner
+            key={`${year}-${month}-${suggestions.current.spending}-${suggestions.current.billsSubs}`}
+            year={year}
+            month={month}
+            suggestions={suggestions}
+            limitsTotal={limitsTotal}
+            note={savedNote}
+            onSave={savePlan}
+          />
+        </aside>
+      )}
 
       {/* ── The detail, and the year ─────────────────────────────────────── */}
       <div className="fms-budgetrest">
@@ -348,13 +397,50 @@ export function Budget({
           <Card
             title="Where it went"
             subtitle={
-              lines.length > 0
-                ? `${formatMoney(spentByKind)} across ${lines.length} ${
-                    lines.length === 1 ? "kind" : "kinds"
-                  } of spending, each beside its usual month`
+              spentByKind > 0
+                ? `${formatMoney(spentByKind)} across ${lines.filter((l) => l.spent > 0).length} kinds of spending`
                 : `Spending in ${name}, by kind`
             }
           >
+            {!phone &&
+              (limits.size > 0 ? (
+                <div className="fms-limitsum">
+                  <div className="fms-planner-sumrow">
+                    <span className="t-label" style={{ color: "var(--ink-2)" }}>
+                      Limits on {limits.size} {limits.size === 1 ? "kind" : "kinds"}
+                    </span>
+                    <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                      <Money value={limitsTotal} size="s" />
+                      {a.spending.budget > 0 && (
+                        <>
+                          {" "}
+                          of <Money value={a.spending.budget} size="s" tone="var(--ink-3)" />
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  {a.spending.budget > 0 && <ProgressBar value={limitsTotal} max={a.spending.budget} height={6} />}
+                  <p className="t-caption fms-planner-note">
+                    {a.spending.budget === 0
+                      ? "No spending budget for the month yet, so the limits stand on their own."
+                      : limitsTotal > a.spending.budget
+                        ? `The limits add up to ${formatMoney(limitsTotal - a.spending.budget)} more than the spending budget.`
+                        : `${formatMoney(a.spending.budget - limitsTotal)} of the spending budget is for everything without a limit.`}
+                  </p>
+                </div>
+              ) : (
+                <p className="t-caption fms-planner-note fms-limitintro">
+                  Any kind of spending can have its own limit inside the spending budget: food, travel,
+                  whatever moves month to month. Bills are followed one by one in their own card.
+                </p>
+              ))}
+
+            {limitNote && (
+              <p className="t-caption" role="status" style={{ margin: "0 0 var(--space-3)", color: "var(--ink-2)" }}>
+                {limitNote}
+              </p>
+            )}
+
             {lines.length === 0 ? (
               <EmptyState
                 message={view.phase === "future" ? `${name} has not started.` : `Nothing spent in ${name}.`}
@@ -363,7 +449,25 @@ export function Budget({
               <>
                 <ol className="fms-budgetcats">
                   {(allCategories ? lines : lines.slice(0, TOP_CATEGORIES)).map((l) => (
-                    <CategoryRow key={l.name} line={l} onShow={onShowRows} />
+                    <CategoryRow
+                      key={l.name}
+                      line={l}
+                      onShow={onShowRows}
+                      onLimit={phone ? undefined : () => setLimitFor(limitFor === l.name ? null : l.name)}
+                      editor={
+                        !phone && limitFor === l.name ? (
+                          <LimitEditor
+                            kind={l.name}
+                            year={year}
+                            month={month}
+                            current={l.limit}
+                            usual={l.usual}
+                            onSave={(value, scope) => saveLimit(l.name, value, scope)}
+                            onCancel={() => setLimitFor(null)}
+                          />
+                        ) : null
+                      }
+                    />
                   ))}
                 </ol>
                 {lines.length > TOP_CATEGORIES && (
@@ -374,6 +478,34 @@ export function Budget({
                   </div>
                 )}
               </>
+            )}
+
+            {!phone && addable.length > 0 && (
+              <div className="fms-limitadd">
+                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                  Limit another kind
+                </span>
+                <span className="fms-grow">
+                  <Select
+                    value=""
+                    onChange={(v) => setLimitFor(v)}
+                    options={addable}
+                    placeholder="Pick a kind of spending"
+                  />
+                </span>
+              </div>
+            )}
+
+            {!phone && limitFor !== null && !lines.some((l) => l.name === limitFor) && (
+              <LimitEditor
+                kind={limitFor}
+                year={year}
+                month={month}
+                current={null}
+                usual={null}
+                onSave={(value, scope) => saveLimit(limitFor, value, scope)}
+                onCancel={() => setLimitFor(null)}
+              />
             )}
           </Card>
 
@@ -396,7 +528,7 @@ export function Budget({
               <EmptyState
                 message={
                   bills.neverPaid.length > 0
-                    ? "No bill has been paid in the last two months, so there is nothing to expect yet."
+                    ? "No bill has been paid in the two months before, so there is nothing to expect yet."
                     : "No bills or subscriptions yet. Add them in Settings, under Categories."
                 }
               />
@@ -441,188 +573,237 @@ export function Budget({
           </Card>
         </div>
 
-        <Card
-          title={`Budget for ${year}`}
-          subtitle={`Budgeted ${formatMoney(y.totals.budget)}, spent ${formatMoney(y.totals.spent)}, ${
-            y.totals.remaining >= 0
-              ? `${formatMoney(y.totals.remaining)} left`
-              : `${formatMoney(-y.totals.remaining)} over`
-          }`}
-          action={
-            <Button size="sm" onClick={focusPlanner}>
-              Change {name}
-            </Button>
-          }
-          padded={false}
-        >
-          <div className="fms-rtable-wrap">
-            <table className="fms-rtable">
-              <thead>
-                <tr>
-                  <th className="t-th">Month</th>
-                  {TRACKS.map((t) => (
-                    <th key={t.id} className="t-th fms-rnum">
-                      {t.label}
-                    </th>
-                  ))}
-                  <th className="t-th fms-rnum">Spent</th>
-                  <th className="t-th fms-rnum">Left</th>
-                  <th className="t-th">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {y.rows.map((r, i) => {
-                  const phase: MonthPhase =
-                    r.month < asOfMonth ? "past" : r.month > asOfMonth ? "future" : "current";
-                  return (
-                    <tr key={r.month} className={r.month === month ? "fms-budgetplan-on" : undefined}>
-                      <td className="t-body-strong fms-rhead">
-                        <button
-                          type="button"
-                          className="fms-monthlink"
-                          aria-pressed={r.month === month}
-                          onClick={() => pickMonth(r.month)}
-                        >
-                          {r.monthName}
-                        </button>
-                      </td>
-                      {TRACKS.map((t) => {
-                        const value = y.plan[t.id][i] ?? 0;
-                        return (
-                          <td key={t.id} className="fms-rnum" data-label={t.label}>
-                            <Money value={value} size="s" tone={value === 0 ? "var(--ink-3)" : undefined} />
-                          </td>
-                        );
-                      })}
-                      <td className="fms-rnum" data-label="Spent">
-                        <Money value={r.spent} size="s" tone={r.spent === 0 ? "var(--ink-3)" : undefined} />
-                      </td>
-                      <td className="fms-rnum" data-label="Left">
-                        {r.budget === 0 ? (
-                          <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                            No budget
-                          </span>
-                        ) : (
-                          <Money value={r.remaining} size="s" />
-                        )}
-                      </td>
-                      <td data-label="Status">
-                        <RowStatus row={r} phase={phase} />
-                      </td>
+        {phone ? (
+          <p className="t-caption fms-bigger-note">
+            Setting budgets and limits, and the tables for the whole of {year}, are on a bigger screen.
+          </p>
+        ) : (
+          <>
+            <Card
+              title={`Budget for ${year}`}
+              subtitle={`Budgeted ${formatMoney(y.totals.budget)}, spent ${formatMoney(y.totals.spent)}, ${
+                y.totals.remaining >= 0
+                  ? `${formatMoney(y.totals.remaining)} left`
+                  : `${formatMoney(-y.totals.remaining)} over`
+              }`}
+              action={
+                <Button size="sm" onClick={focusPlanner}>
+                  Change {name}
+                </Button>
+              }
+              padded={false}
+            >
+              <div className="fms-rtable-wrap">
+                <table className="fms-rtable">
+                  <thead>
+                    <tr>
+                      <th className="t-th">Month</th>
+                      {TRACKS.map((t) => (
+                        <th key={t.id} className="t-th fms-rnum">
+                          {t.label}
+                        </th>
+                      ))}
+                      <th className="t-th fms-rnum">Spent</th>
+                      <th className="t-th fms-rnum">Left</th>
+                      <th className="t-th">Status</th>
                     </tr>
-                  );
-                })}
-                <tr className="fms-rtotal">
-                  <td className="t-body-strong fms-rhead">Total</td>
-                  <td className="fms-rnum" data-label="Spending">
-                    <Money value={planSpending} />
-                  </td>
-                  <td className="fms-rnum" data-label="Bills & subs">
-                    <Money value={planBills} />
-                  </td>
-                  <td className="fms-rnum" data-label="Spent">
-                    <Money value={y.totals.spent} />
-                  </td>
-                  <td className="fms-rnum" data-label="Left">
-                    <Money value={y.totals.remaining} />
-                  </td>
-                  <td />
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        <div className="fms-charts">
-          <Card title="Budget against spending" subtitle="Red where a month went over">
-            <BarChart
-              labels={MONTH_NAMES.slice(0, asOfMonth).map((n) => n.slice(0, 3))}
-              budget={y.rows.slice(0, asOfMonth).map((r) => r.budget)}
-              actual={y.rows.slice(0, asOfMonth).map((r) => r.spent)}
-            />
-          </Card>
-
-          <Card title="Forecast" subtitle="Estimates for the months still ahead" padded={false}>
-            <div className="fms-rtable-wrap">
-              <table className="fms-rtable">
-                <thead>
-                  <tr>
-                    <th className="t-th">Month</th>
-                    <th className="t-th fms-rnum">Spending</th>
-                    <th className="t-th fms-rnum">Bills</th>
-                    <th className="t-th fms-rnum">Total</th>
-                    <th className="t-th">Basis</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {y.forecast
-                    .filter((f) => !f.isActual)
-                    .map((f) => (
-                      <tr key={f.month}>
-                        <td className="t-body fms-rhead">{monthLabel(f.month)}</td>
-                        <td className="fms-rnum" data-label="Spending">
-                          <Money value={f.spending} size="s" />
+                  </thead>
+                  <tbody>
+                    {y.rows.map((r, i) => (
+                      <tr key={r.month} className={r.month === month ? "fms-budgetplan-on" : undefined}>
+                        <td className="t-body-strong fms-rhead">
+                          <button
+                            type="button"
+                            className="fms-monthlink"
+                            aria-pressed={r.month === month}
+                            onClick={() => pick(year, r.month)}
+                          >
+                            {r.monthName}
+                          </button>
                         </td>
-                        <td className="fms-rnum" data-label="Bills">
-                          <Money value={f.billsSubs} size="s" />
+                        {TRACKS.map((t) => {
+                          const value = y.plan[t.id][i] ?? 0;
+                          return (
+                            <td key={t.id} className="fms-rnum" data-label={t.label}>
+                              <Money value={value} size="s" tone={value === 0 ? "var(--ink-3)" : undefined} />
+                            </td>
+                          );
+                        })}
+                        <td className="fms-rnum" data-label="Spent">
+                          <Money value={r.spent} size="s" tone={r.spent === 0 ? "var(--ink-3)" : undefined} />
                         </td>
-                        <td className="fms-rnum" data-label="Total">
-                          <Money value={f.total} size="s" />
+                        <td className="fms-rnum" data-label="Left">
+                          {r.budget === 0 ? (
+                            <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                              No budget
+                            </span>
+                          ) : (
+                            <Money value={r.remaining} size="s" />
+                          )}
                         </td>
-                        <td className="t-micro" data-label="Basis" style={{ color: "var(--ink-3)" }}>
-                          {explainBasis(f.basis)}
+                        <td data-label="Status">
+                          <RowStatus row={r} phase={phaseOf(year, r.month, asOf)} />
                         </td>
                       </tr>
                     ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        </div>
+                    <tr className="fms-rtotal">
+                      <td className="t-body-strong fms-rhead">Total</td>
+                      <td className="fms-rnum" data-label="Spending">
+                        <Money value={planSpending} />
+                      </td>
+                      <td className="fms-rnum" data-label="Bills & subs">
+                        <Money value={planBills} />
+                      </td>
+                      <td className="fms-rnum" data-label="Spent">
+                        <Money value={y.totals.spent} />
+                      </td>
+                      <td className="fms-rnum" data-label="Left">
+                        <Money value={y.totals.remaining} />
+                      </td>
+                      <td />
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </Card>
 
-        <Card
-          title="Net cash flow"
-          subtitle="What came in against what went out, and how much was kept"
-          padded={false}
-        >
-          <div className="fms-rtable-wrap">
-            <table className="fms-rtable">
-              <thead>
-                <tr>
-                  <th className="t-th">Month</th>
-                  <th className="t-th fms-rnum">Revenue</th>
-                  <th className="t-th fms-rnum">Expense</th>
-                  <th className="t-th fms-rnum">Transfers</th>
-                  <th className="t-th fms-rnum">Net</th>
-                  <th className="t-th fms-rnum">Kept</th>
-                </tr>
-              </thead>
-              <tbody>
-                {y.flow.slice(0, asOfMonth).map((r) => (
-                  <tr key={r.month}>
-                    <td className="t-body fms-rhead">{monthLabel(r.month)}</td>
-                    <td className="fms-rnum" data-label="Revenue">
-                      <Money value={r.revenue} size="s" tone="var(--flow-revenue-text)" />
-                    </td>
-                    <td className="fms-rnum" data-label="Expense">
-                      <Money value={r.expense} size="s" tone="var(--flow-spending-text)" />
-                    </td>
-                    <td className="fms-rnum" data-label="Transfers">
-                      <Money value={r.transfer} size="s" tone="var(--ink-3)" />
-                    </td>
-                    <td className="fms-rnum" data-label="Net">
-                      <Money value={r.net} size="s" signed />
-                    </td>
-                    <td className="fms-rnum t-caption" data-label="Kept" style={{ color: "var(--ink-2)" }}>
-                      {r.revenue > 0 ? pct(r.net / r.revenue) : "No income"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+            {monthsSoFar > 0 && (
+              <>
+                <div className="fms-charts">
+                  <Card title="Budget against spending" subtitle="Red where a month went over">
+                    <BarChart
+                      labels={MONTH_NAMES.slice(0, monthsSoFar).map((n) => n.slice(0, 3))}
+                      budget={y.rows.slice(0, monthsSoFar).map((r) => r.budget)}
+                      actual={y.rows.slice(0, monthsSoFar).map((r) => r.spent)}
+                    />
+                  </Card>
+
+                  {y.forecast.some((f) => !f.isActual) && (
+                    <Card title="Forecast" subtitle="Estimates for the months still ahead" padded={false}>
+                      <div className="fms-rtable-wrap">
+                        <table className="fms-rtable">
+                          <thead>
+                            <tr>
+                              <th className="t-th">Month</th>
+                              <th className="t-th fms-rnum">Spending</th>
+                              <th className="t-th fms-rnum">Bills</th>
+                              <th className="t-th fms-rnum">Total</th>
+                              <th className="t-th">Basis</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {y.forecast
+                              .filter((f) => !f.isActual)
+                              .map((f) => (
+                                <tr key={f.month}>
+                                  <td className="t-body fms-rhead">{monthLabel(f.month)}</td>
+                                  <td className="fms-rnum" data-label="Spending">
+                                    <Money value={f.spending} size="s" />
+                                  </td>
+                                  <td className="fms-rnum" data-label="Bills">
+                                    <Money value={f.billsSubs} size="s" />
+                                  </td>
+                                  <td className="fms-rnum" data-label="Total">
+                                    <Money value={f.total} size="s" />
+                                  </td>
+                                  <td className="t-micro" data-label="Basis" style={{ color: "var(--ink-3)" }}>
+                                    {explainBasis(f.basis)}
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </Card>
+                  )}
+                </div>
+
+                <Card
+                  title="Net cash flow"
+                  subtitle="What came in against what went out, and how much was kept"
+                  padded={false}
+                >
+                  <div className="fms-rtable-wrap">
+                    <table className="fms-rtable">
+                      <thead>
+                        <tr>
+                          <th className="t-th">Month</th>
+                          <th className="t-th fms-rnum">Revenue</th>
+                          <th className="t-th fms-rnum">Expense</th>
+                          <th className="t-th fms-rnum">Transfers</th>
+                          <th className="t-th fms-rnum">Net</th>
+                          <th className="t-th fms-rnum">Kept</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {y.flow.slice(0, monthsSoFar).map((r) => (
+                          <tr key={r.month}>
+                            <td className="t-body fms-rhead">{monthLabel(r.month)}</td>
+                            <td className="fms-rnum" data-label="Revenue">
+                              <Money value={r.revenue} size="s" tone="var(--flow-revenue-text)" />
+                            </td>
+                            <td className="fms-rnum" data-label="Expense">
+                              <Money value={r.expense} size="s" tone="var(--flow-spending-text)" />
+                            </td>
+                            <td className="fms-rnum" data-label="Transfers">
+                              <Money value={r.transfer} size="s" tone="var(--ink-3)" />
+                            </td>
+                            <td className="fms-rnum" data-label="Net">
+                              <Money value={r.net} size="s" signed />
+                            </td>
+                            <td className="fms-rnum t-caption" data-label="Kept" style={{ color: "var(--ink-2)" }}>
+                              {r.revenue > 0 ? pct(r.net / r.revenue) : "No income"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              </>
+            )}
+          </>
+        )}
       </div>
+    </div>
+  );
+}
+
+// ── Choosing months ────────────────────────────────────────────────────────
+
+function ScopeChoice({
+  year,
+  month,
+  value,
+  onChange,
+  label,
+}: {
+  year: number;
+  month: number;
+  value: PlanScope;
+  onChange: (scope: PlanScope) => void;
+  label: string;
+}) {
+  const short = monthLabel(month).slice(0, 3);
+  const options: { id: PlanScope; label: string }[] = [
+    { id: "month", label: `${short} only` },
+    ...(month < 12 ? [{ id: "rest" as const, label: `${short} to Dec` }] : []),
+    { id: "year", label: `All ${year}` },
+  ];
+  return (
+    <div className="fms-segmented fms-scope" role="radiogroup" aria-label={label}>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          role="radio"
+          aria-checked={value === o.id}
+          className={`fms-seg ${value === o.id ? "t-body-strong" : "t-body"}`}
+          onClick={() => onChange(o.id)}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -641,12 +822,14 @@ function Planner({
   year,
   month,
   suggestions: s,
+  limitsTotal,
   note,
   onSave,
 }: {
   year: number;
   month: number;
   suggestions: PlanSuggestions;
+  limitsTotal: Centavos;
   note: string | null;
   onSave: (value: { spending: Centavos; billsSubs: Centavos }, scope: PlanScope) => void;
 }) {
@@ -676,12 +859,6 @@ function Planner({
         ? `the ${formatMoney(s.expectedIncome)} that came in this month`
         : `your usual ${formatMoney(s.expectedIncome)} income`;
 
-  const scopes: { id: PlanScope; label: string }[] = [
-    { id: "month", label: `${name.slice(0, 3)} only` },
-    ...(month < 12 ? [{ id: "rest" as const, label: `${name.slice(0, 3)} to Dec` }] : []),
-    { id: "year", label: `All ${year}` },
-  ];
-
   const billNames =
     s.bills.bills
       .slice(0, 4)
@@ -700,7 +877,7 @@ function Planner({
           value.billsSubs,
         )} for bills and subscriptions, replacing what it had. ${
           scope === "year" ? "Months already over are included." : `Months before ${name} stay as they are.`
-        }`,
+        } Limits for kinds of spending are kept.`,
         confirmLabel: "Set the budget",
         tone: "normal",
       });
@@ -715,7 +892,7 @@ function Planner({
       subtitle={
         hasPlan
           ? `${name} ${year} is budgeted at ${formatMoney(s.current.spending + s.current.billsSubs)}.`
-          : `Nothing saved for ${name} yet. Filled in from ${source}, and saved only when you press Save.`
+          : `Nothing saved for ${name} ${year} yet. Filled in from ${source}, and saved only when you press Save.`
       }
     >
       {dialog}
@@ -735,7 +912,7 @@ function Planner({
               <p className="t-caption fms-planner-note">{billNames}.</p>
             </>
           ) : (
-            <p className="t-caption fms-planner-note">No bills paid in the last two months to go by.</p>
+            <p className="t-caption fms-planner-note">No bills paid in the two months before to go by.</p>
           )}
         </div>
 
@@ -764,7 +941,11 @@ function Planner({
             </div>
           )}
           <p className="t-caption fms-planner-note">
-            Everything but bills: what you buy, money sent to other people, transfer fees and interest.
+            {limitsTotal > 0
+              ? `Limits for kinds of spending inside it come to ${formatMoney(limitsTotal)}${
+                  (spending ?? 0) < limitsTotal ? ", more than this" : ""
+                }.`
+              : "Everything but bills: what you buy, money sent to other people, transfer fees and interest."}
           </p>
         </div>
 
@@ -792,20 +973,13 @@ function Planner({
           <span className="t-label" style={{ color: "var(--ink-2)" }}>
             Save it to
           </span>
-          <div className="fms-segmented" role="radiogroup" aria-label="Which months the budget is saved to">
-            {scopes.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                role="radio"
-                aria-checked={scope === o.id}
-                className={`fms-seg ${scope === o.id ? "t-body-strong" : "t-body"}`}
-                onClick={() => setScope(o.id)}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
+          <ScopeChoice
+            year={year}
+            month={month}
+            value={scope}
+            onChange={setScope}
+            label="Which months the budget is saved to"
+          />
         </div>
 
         <Button variant="primary" fullWidth onClick={() => void save()}>
@@ -819,6 +993,63 @@ function Planner({
         )}
       </div>
     </Card>
+  );
+}
+
+// ── Limits ─────────────────────────────────────────────────────────────────
+
+/** A limit for one kind of spending, and which months it applies to. */
+function LimitEditor({
+  kind,
+  year,
+  month,
+  current,
+  usual,
+  onSave,
+  onCancel,
+}: {
+  kind: string;
+  year: number;
+  month: number;
+  current: Centavos | null;
+  usual: Centavos | null;
+  onSave: (value: Centavos, scope: PlanScope) => void;
+  onCancel: () => void;
+}) {
+  // Starts at the limit it has, or its usual month in whole hundreds of pesos.
+  const [value, setValue] = useState<Centavos | null>(
+    current ?? (usual !== null && usual > 0 ? Math.round(usual / 10000) * 10000 : null),
+  );
+  // A limit is usually meant to last, so it defaults to the rest of the year.
+  const [scope, setScope] = useState<PlanScope>(month < 12 ? "rest" : "month");
+
+  return (
+    <div className="fms-limitedit">
+      <span className="t-label" style={{ color: "var(--ink-2)" }}>
+        {kind}: limit a month
+      </span>
+      <AmountInput value={value} onChange={setValue} ariaLabel={`${kind} limit a month`} />
+      <ScopeChoice
+        year={year}
+        month={month}
+        value={scope}
+        onChange={setScope}
+        label={`Which months the ${kind} limit is for`}
+      />
+      <div className="fms-limitedit-actions">
+        <Button size="sm" variant="primary" onClick={() => onSave(value ?? 0, scope)}>
+          Save limit
+        </Button>
+        {current !== null && (
+          <Button size="sm" tone="danger" onClick={() => onSave(0, scope)}>
+            Remove
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -854,24 +1085,35 @@ function TrackRow({ label, track, pace }: { label: string; track: BudgetTrack; p
 }
 
 /**
- * A kind of spending: what it came to, its share, and its usual month.
+ * A kind of spending: what it came to, and either its limit or its usual month.
  *
- * The difference is in pesos, and only flagged when it is worth a look.
+ * With a limit, the bar is the limit and the foot says what is left of it.
+ * Without one, the bar is its share of the month and a quiet pill appears only
+ * when it runs well above its usual.
  */
 function CategoryRow({
   line,
   onShow,
+  onLimit,
+  editor,
 }: {
   line: CategoryLine;
   onShow?: ((query: string) => void) | undefined;
+  onLimit?: (() => void) | undefined;
+  editor: ReactNode;
 }) {
   const above = line.usual === null ? 0 : line.spent - line.usual;
-  const notable = line.usual !== null && above >= NOTABLE && (line.usual === 0 || above >= line.usual / 2);
+  const notable =
+    line.limit === null && line.usual !== null && above >= NOTABLE && (line.usual === 0 || above >= line.usual / 2);
+  const over = line.limit !== null && line.spent > line.limit;
+
+  const usualWords =
+    line.usual === null ? "First month on record" : line.usual === 0 ? "Usually nothing" : `Usually ${formatMoney(line.usual)}`;
 
   return (
     <li className="fms-budgetcat">
       <div className="fms-budgetcat-head">
-        {onShow ? (
+        {onShow && line.spent > 0 ? (
           <button
             type="button"
             className="t-body fms-linkish"
@@ -883,21 +1125,43 @@ function CategoryRow({
         ) : (
           <span className="t-body">{line.name}</span>
         )}
-        <Money value={line.spent} size="s" />
+        <span className="fms-budgetcat-figure">
+          <Money value={line.spent} size="s" tone={over ? "var(--over)" : undefined} />
+          {line.limit !== null && (
+            <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+              of {formatMoney(line.limit)}
+            </span>
+          )}
+        </span>
       </div>
-      <div className="fms-budgetcat-bar" aria-hidden>
-        <span style={{ width: `${Math.max(2, Math.round(line.share * 100))}%` }} />
-      </div>
+
+      {line.limit !== null ? (
+        <ProgressBar value={line.spent} max={line.limit} height={6} />
+      ) : (
+        <div className="fms-budgetcat-bar" aria-hidden>
+          <span style={{ width: `${Math.max(2, Math.round(line.share * 100))}%` }} />
+        </div>
+      )}
+
       <div className="t-caption fms-budgetcat-foot">
         <span>
-          {line.usual === null
-            ? "First month on record"
-            : line.usual === 0
-              ? "Usually nothing"
-              : `Usually ${formatMoney(line.usual)}`}
+          {line.limit === null
+            ? usualWords
+            : over
+              ? `${formatMoney(line.spent - line.limit)} over the limit`
+              : `${formatMoney(line.limit - line.spent)} left of the limit`}
         </span>
-        {notable && <span className="t-micro fms-budgetcat-flag">{formatMoney(above)} more than usual</span>}
+        <span className="fms-budgetcat-actions">
+          {notable && <span className="t-micro fms-budgetcat-flag">{formatMoney(above)} more than usual</span>}
+          {onLimit && (
+            <button type="button" className="t-caption fms-linkbtn" onClick={onLimit}>
+              {line.limit !== null ? "Change limit" : "Set a limit"}
+            </button>
+          )}
+        </span>
       </div>
+
+      {editor}
     </li>
   );
 }

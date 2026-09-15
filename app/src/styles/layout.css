@@ -3260,6 +3260,267 @@
   color: var(--ink-3);
 }
 
+/* ══ List screens: only the rows move ═══════════════════════════════════════
+   The Database has done this since it was built; the Bin and Activity scrolled
+   as whole pages, so the title, the search, the filters and Select all went
+   off the top after a screenful and had to be scrolled back to. On a desktop
+   each is now exactly one screen tall and only its rows scroll. On a phone the
+   page scrolls as a page, which is what a thumb expects. */
+
+@media (min-width: 1024px) {
+  .fms-bin,
+  .fms-activity {
+    height: 100%;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .fms-activity--note {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .fms-bin > .fms-section,
+  .fms-activity > .fms-section {
+    display: flex;
+    flex-direction: column;
+    align-self: start;
+    max-height: 100%;
+    min-height: 0;
+  }
+
+  .fms-bin > .fms-section > .fms-section-flush,
+  .fms-activity > .fms-section > .fms-section-flush {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .fms-binscroll,
+  .fms-activity .fms-actlist {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--hairline-strong) transparent;
+  }
+
+  /* The day's heading stays at the top of its own events while they scroll. */
+  .fms-activity .fms-actday-title {
+    position: sticky;
+    top: calc(var(--space-4) * -1);
+    z-index: 1;
+    padding-top: var(--space-2);
+    background: var(--surface);
+  }
+
+  /* The side panels scroll on their own, beside a list that does. */
+  .fms-binrail,
+  .fms-actrail {
+    position: static;
+    max-height: 100%;
+    overflow-y: auto;
+    align-self: start;
+  }
+}
+
+/* One screen tall, a list has no room for a panel under it: the panel is beside it or not at all. */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .fms-binrail,
+  .fms-actrail {
+    display: none;
+  }
+}
+
+/*
+ * Table headings stay while a long table scrolls with the page.
+ *
+ * Budget, Debt and Insights tables live in cards on a page that scrolls, so
+ * the months went by under no heading at all. A card clips rather than hides
+ * its overflow, which keeps its corners and lets a heading stick to the top
+ * of the page; the table's own sideways safety net clips for the same reason.
+ * Pinned to the edge of the scrolling area, which sits outside its padding.
+ */
+.fms-main .fms-section {
+  overflow: clip;
+}
+
+.fms-main .fms-rtable-wrap {
+  overflow-x: clip;
+}
+
+.fms-main .fms-rtable thead th {
+  position: sticky;
+  top: calc(var(--space-8) * -1);
+  z-index: 2;
+}
+
+@media (max-width: 1023px) {
+  .fms-main .fms-rtable thead th {
+    top: calc(var(--space-5) * -1);
+  }
+}
+
+@media (max-width: 639px) {
+  .fms-main .fms-rtable thead th {
+    top: calc(var(--space-3) * -1);
+  }
+}
+
+/* ══ A phone's limits ═══════════════════════════════════════════════════════ */
+
+.fms-bigger {
+  display: grid;
+  place-items: start center;
+  padding-top: var(--space-6);
+}
+
+.fms-bigger-card {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 440px;
+  padding: var(--space-5);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.fms-bigger-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+}
+
+.fms-bigger-note {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--hairline-strong);
+  border-radius: var(--radius-md);
+  color: var(--ink-3);
+}
+
+.fms-phone-note {
+  display: none;
+}
+
+/* On a phone the database is for looking things up: no picking, no edit or delete. */
+@media (max-width: 1023px) {
+  .fms-phone-note {
+    display: block;
+    margin: 0;
+    padding: var(--space-2) var(--space-4);
+    border-bottom: 1px solid var(--hairline);
+    color: var(--ink-3);
+  }
+
+  .fms-db .fms-dbpick,
+  .fms-db .fms-dbrow-actions,
+  .fms-db .fms-bulkbar {
+    display: none;
+  }
+}
+
+/*
+ * A phone's own sizes, not a desktop's shrunk.
+ *
+ * The phone used the desktop scale under a narrower width: a 32px hero figure,
+ * 20px of padding inside every card, 16px around the page and a 56px raised
+ * button, so the Dashboard showed two and a half cards to a screen and read as
+ * a cropped computer. A phone is held a hand away, not an arm, so type and
+ * space come down a step. Fields stay at 16px (base.css), because smaller
+ * than that and iOS zooms the page on every tap into one.
+ */
+@media (max-width: 639px) {
+  .t-display-xl { font-size: 28px; line-height: 32px; }
+  .t-display-l { font-size: 20px; line-height: 26px; }
+  .t-display-m { font-size: 16px; line-height: 22px; }
+  .t-caption { font-size: 12px; line-height: 17px; }
+  .t-label { font-size: 11.5px; line-height: 15px; }
+  .t-micro { font-size: 10.5px; line-height: 13px; }
+  .t-num-xl { font-size: 26px; }
+  .t-num-l { font-size: 18px; }
+  .t-num-s { font-size: 12.5px; line-height: 17px; }
+
+  .fms-main {
+    --main-pad-b: calc(var(--space-3) + var(--space-4));
+    padding: var(--space-3);
+    padding-bottom: var(--main-pad-b);
+  }
+
+  .fms-app--evennav .fms-main {
+    --main-pad-b: var(--space-3);
+  }
+
+  .fms-topbar {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .fms-main .fms-section-head {
+    padding: var(--space-3) var(--space-3) 0;
+  }
+
+  .fms-main .fms-section-body {
+    padding: var(--space-3);
+  }
+
+  .fms-main .fms-kpi {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .fms-dash,
+  .fms-kpis,
+  .fms-charts,
+  .fms-budgetpage,
+  .fms-budgettop,
+  .fms-budgetrest,
+  .fms-budgetgrid {
+    gap: var(--space-3);
+  }
+
+  .fms-budgetincome {
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+    padding-top: var(--space-3);
+  }
+
+  .fms-dbtools,
+  .fms-acttools {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .fms-dbrow {
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .fms-bnitem {
+    min-height: 52px;
+  }
+
+  .fms-bnadd {
+    width: 48px;
+    height: 48px;
+    margin-top: -20px;
+  }
+
+  .fms-bottomnav--even .fms-bnadd {
+    width: 52px;
+    height: 30px;
+    margin-top: 0;
+  }
+
+  .fms-content {
+    padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 /* The two filters, as one toolbar across the top of the card. */
 .fms-acttools {
   display: flex;
@@ -3840,6 +4101,230 @@
   min-width: 0;
   padding: var(--space-1) var(--space-2);
   line-height: 1.2;
+}
+
+/* The same three answers wherever months are chosen: the planner and a limit. */
+.fms-scope {
+  display: flex;
+  width: 100%;
+}
+
+.fms-scope .fms-seg {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  line-height: 1.2;
+}
+
+/* ── Limits for kinds of spending ───────────────────────────────────────── */
+
+.fms-limitsum {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+}
+
+.fms-limitintro {
+  margin: 0 0 var(--space-4);
+}
+
+.fms-limitedit {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.fms-limitedit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.fms-limitadd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px dashed var(--hairline-strong);
+}
+
+.fms-limitadd > .fms-grow {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.fms-budgetcat-figure {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0 var(--space-1);
+}
+
+.fms-budgetcat-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* A small action that reads as a word until hovered. */
+.fms-linkbtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--hairline-strong);
+  text-underline-offset: 3px;
+}
+
+.fms-linkbtn:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+@media (pointer: coarse) {
+  .fms-linkbtn {
+    min-height: 44px;
+  }
+}
+
+/* ══ Year and month picker ══════════════════════════════════════════════════
+   One control for "which month of which year", shared by every screen that
+   shows a month. See components/PeriodPicker.tsx. */
+
+.fms-period {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+.fms-period-year,
+.fms-period-months {
+  padding: 3px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+}
+
+.fms-period-year {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.fms-period-step {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-period-step:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.fms-period-step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.fms-period-label {
+  min-width: 4.5ch;
+  color: var(--ink);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.fms-period-months {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fms-period-months::-webkit-scrollbar {
+  display: none;
+}
+
+.fms-period-month {
+  position: relative;
+  flex: 1 0 auto;
+  min-width: 44px;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--ease-out);
+}
+
+.fms-period-month:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+/* Nothing recorded or budgeted: still pickable, just quieter. */
+.fms-period-month.is-quiet {
+  color: var(--ink-3);
+}
+
+.fms-period-month.is-on {
+  border-color: var(--hairline-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.fms-period-dot {
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: var(--radius-full);
+  background: var(--brand-700);
+}
+
+@media (pointer: coarse) {
+  .fms-period-step {
+    width: 44px;
+    height: 44px;
+  }
+
+  .fms-period-month {
+    min-height: 44px;
+  }
 }
 
 /*

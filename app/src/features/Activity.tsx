@@ -214,7 +214,7 @@ export function Activity({
   } in this trail.`;
 
   return (
-    <div className="fms-activity">
+    <div className={uid ? "fms-activity" : "fms-activity fms-activity--note"}>
       {!uid && (
         <Alert status="info" title="Kept for this session only">
           You are not signed in, so this trail is gone when the page closes. Signed in, it is

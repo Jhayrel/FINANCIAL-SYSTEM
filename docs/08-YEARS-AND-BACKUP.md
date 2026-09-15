@@ -109,3 +109,31 @@ run would run them again over already converted rows.
 
 Refusals, all tested: not a backup, newer version, truncated against the
 manifest, `total ≠ amount + fee`, and fractional centavos.
+
+---
+
+## Y3. Every screen that shows a period can show any year.
+
+Y1 made the ledger continuous; the screens still only showed the year on the
+calendar. Budget and Insights picked a month of this year, Statements a range
+of this year, and the Database had no year at all, so an imported 2025 was in
+the database and on no screen.
+
+`pickableYears` (`domain/year.ts`) is the one list: every year with a row in
+it or a budget for it, this year, and next year so a budget can be set before
+it starts. Imported history brings its years with it, with nothing to switch
+on. Years with nothing at all are left out rather than filled in, so a
+mistyped date cannot put a century of empty years in the way.
+
+| Screen | How a year is picked |
+|---|---|
+| Budget | Year and month picker; next year is budgetable; forecast only for this year |
+| Insights | Year and month picker; bills as they stood at the end of the month shown |
+| Statements | A Year field beside From and To, once there is more than one year |
+| Database | A Year filter beside the date shortcuts, once there is more than one year |
+| Dashboard | This month, by design: it is the summary of now |
+
+Budgets are stored per year (`users/{uid}/budgets/{year}`) and travel in a
+backup whole, including the limits for kinds of spending added on 2026-09-15.
+A January plan looks back to the December before it, and "usual" figures
+reach across the year boundary the same way.

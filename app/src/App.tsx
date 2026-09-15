@@ -28,6 +28,7 @@ import { Settings } from "./features/Settings";
 import { Statements } from "./features/Statements";
 import { Alert, Button, Card, EmptyState, Money, Toast } from "./components/primitives";
 import { useUpdateAvailable } from "./data/updateCheck";
+import { BiggerScreen } from "./components/BiggerScreen";
 import { Icon, type IconName } from "./components/Icon";
 import { AskPanel } from "./features/AskPanel";
 import { useProposalSink } from "./features/useProposalSink";
@@ -972,7 +973,8 @@ export default function App() {
       }
       return;
     }
-    if (compact && !PHONE_SCREENS.includes(screen)) setScreen("dashboard");
+    // A screen that is not for a phone now says so where it is (BiggerScreen),
+    // instead of the phone quietly jumping back to the Dashboard.
   }, [screen, compact, chatOn]);
 
   /** Escape closes the floating chat, unless a picture or a dialog is open over it. */
@@ -1044,6 +1046,9 @@ export default function App() {
   }
 
   const title = screen === "ai" ? "AI assistant" : (NAV.find((n) => n.id === screen)?.label ?? "");
+  /** A desk screen on a phone: shown as a note, not squeezed. */
+  const blocked = compact && !PHONE_SCREENS.includes(screen);
+
   const go = (id: Screen): void => {
     setScreen(id);
     setChatOpen(false);
@@ -1140,11 +1145,17 @@ export default function App() {
           className={`fms-main${
             screen === "settings" || screen === "ai"
               ? " fms-main--fixed"
-              : screen === "database"
+              : screen === "database" || screen === "statements" || screen === "bin" || screen === "activity"
                 ? " fms-main--fixed-lg"
                 : ""
           }`}
         >
+          {blocked && (
+            <BiggerScreen
+              what={NAV.find((n) => n.id === screen)?.label ?? "This screen"}
+              onBack={() => go("dashboard")}
+            />
+          )}
           {updateReady && (
             <div style={{ marginBottom: "var(--space-4)" }}>
               <Alert
@@ -1237,7 +1248,7 @@ export default function App() {
               asOf={asOf}
             />
           )}
-          {screen === "debt" && (
+          {screen === "debt" && !blocked && (
             <DebtScreen
               transactions={transactions}
               debts={settings.credits}
@@ -1246,7 +1257,7 @@ export default function App() {
               onAdd={() => go("add")}
             />
           )}
-          {screen === "insights" && (
+          {screen === "insights" && !blocked && (
             <Insights
               transactions={transactions}
               reference={reference}
@@ -1286,7 +1297,7 @@ export default function App() {
               }}
             />
           )}
-          {screen === "statements" && (
+          {screen === "statements" && !blocked && (
             <Statements
               transactions={transactions}
               reference={reference}
@@ -1294,7 +1305,7 @@ export default function App() {
               year={getYear(asOf)}
             />
           )}
-          {screen === "bin" && (
+          {screen === "bin" && !blocked && (
             <Bin
               deleted={deleted}
               onRestore={handleRestore}
@@ -1302,7 +1313,7 @@ export default function App() {
               onPurge={handlePurge}
             />
           )}
-          {screen === "activity" && (
+          {screen === "activity" && !blocked && (
             <Activity uid={cloud.uid ?? null} reloadKey={activityKey} onAdd={() => go("add")} />
           )}
           {screen === "settings" && (

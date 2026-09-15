@@ -23,8 +23,9 @@ import { Icon } from "../components/Icon";
 import { useConfirm } from "../components/Confirm";
 import { formatAmount } from "../domain/money";
 import { DataTable, type Column } from "../components/DataTable";
-import { formatShort } from "../domain/dates";
+import { formatShort, getYear } from "../domain/dates";
 import { inPeriod, matchesSearch, parseSearch, PERIODS, type Period } from "../domain/search";
+import { yearsCovered } from "../domain/year";
 import { checkIntegrity, type Issue } from "../domain/integrity";
 import type { Transaction, TransactionType } from "../domain/types";
 
@@ -80,6 +81,9 @@ export function Database({
   const [query, setQuery] = useState(initialQuery);
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [period, setPeriod] = useState<Period>("all");
+  /** A year is a filter on one continuous ledger (docs/08, rule Y1). */
+  const [year, setYear] = useState<number | "all">("all");
+  const years = useMemo(() => yearsCovered(transactions), [transactions]);
   /**
    * Newest entry first, by record number rather than by date.
    *
@@ -185,6 +189,7 @@ export function Database({
       if (filter === "flagged" && !issuesById.has(t.id)) return false;
       if (filter !== "all" && filter !== "flagged" && t.type !== filter) return false;
       if (!inPeriod(t.date, period, asOf)) return false;
+      if (year !== "all" && getYear(t.date) !== year) return false;
       return matchesSearch(t, terms);
     });
 
@@ -203,7 +208,7 @@ export function Database({
           );
       }
     });
-  }, [transactions, query, filter, period, asOf, issuesById, sortKey, sortDir]);
+  }, [transactions, query, filter, period, year, asOf, issuesById, sortKey, sortDir]);
 
   const shown = rows.slice(0, limit);
   const flaggedCount = issuesById.size;
@@ -428,7 +433,30 @@ export function Database({
             value={period}
             onChange={(id) => { setPeriod(id); setLimit(PAGE); }}
           />
+          {/*
+            Once the ledger spans more than one year, which it does the moment
+            an older year is imported. Before that it would be one pill that
+            filters nothing.
+          */}
+          {years.length > 1 && (
+            <SegmentedControl
+              label="Year"
+              scroll
+              options={[
+                { id: "all", label: "All years" },
+                ...[...years].reverse().map((y) => ({ id: String(y), label: String(y) })),
+              ]}
+              value={String(year)}
+              onChange={(id) => { setYear(id === "all" ? "all" : Number(id)); setLimit(PAGE); }}
+            />
+          )}
         </div>
+
+        {/* Shown on a phone only, where editing and picking rows are switched off. */}
+        <p className="t-caption fms-phone-note">
+          On a phone the database is for looking entries up. Editing, deleting and picking several
+          rows at once are on a bigger screen.
+        </p>
 
         {onDeleteMany && chosen.length > 0 && (
           /*

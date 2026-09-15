@@ -35,7 +35,9 @@ export type IconName =
   | "edit"
   | "close"
   | "search"
-  | "ai";
+  | "ai"
+  | "chevronLeft"
+  | "chevronRight";
 
 const SHAPES: Record<IconName, ReactNode> = {
   dashboard: (
@@ -123,6 +125,9 @@ const SHAPES: Record<IconName, ReactNode> = {
       <path d="M18.5 3.5v3M17 5h3" />
     </>
   ),
+  // Steps between years. Drawn, not typed: ‹ and › come out a different size in every font.
+  chevronLeft: <path d="M14.5 6l-6 6 6 6" />,
+  chevronRight: <path d="M9.5 6l6 6-6 6" />,
 };
 
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
