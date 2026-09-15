@@ -1022,6 +1022,44 @@ export function AddTransaction({
         )}
       </aside>
 
+      {/*
+        The latest entries, where the assistant would otherwise sit.
+
+        With the chat switched off, a wide screen had a column of nothing to
+        the right of the balances. The last few rows are what a new entry gets
+        checked against: the same bill twice, a fee typed as a row of its own,
+        yesterday's lunch entered again today.
+      */}
+      {!showChat && (
+        <aside className="fms-panel fms-recent" aria-label="Latest entries">
+          <div className="fms-recent-head">
+            <span className="t-label" style={{ color: "var(--ink-2)" }}>
+              Latest entries
+            </span>
+            <span className="t-micro fms-badge fms-badge--count">{transactions.length} in all</span>
+          </div>
+          {transactions.length === 0 ? (
+            <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+              Nothing saved yet. What you save shows here.
+            </p>
+          ) : (
+            <ol className="fms-recent-list">
+              {latestOf(transactions).map((t) => (
+                <li key={t.id} className="fms-recent-row">
+                  <div className="fms-recent-text">
+                    <span className="t-body fms-truncate">{t.item || t.description || t.type}</span>
+                    <span className="t-micro fms-truncate" style={{ color: "var(--ink-3)" }}>
+                      #{String(t.recordNumber).padStart(4, "0")} · {shortDay(t.date)} · {walletsOf(t)}
+                    </span>
+                  </div>
+                  <Money value={t.total} size="s" tone={AMOUNT_TONE[t.type]} />
+                </li>
+              ))}
+            </ol>
+          )}
+        </aside>
+      )}
+
       {showChat && (
         <AskPanel
           sink={sink}
@@ -1038,6 +1076,33 @@ export function AddTransaction({
       )}
     </div>
   );
+}
+
+/** Direction of money in its own colour, rule D3: a transfer stays grey. */
+const AMOUNT_TONE: Record<Transaction["type"], string> = {
+  Revenue: "var(--flow-revenue-text)",
+  Spending: "var(--flow-spending-text)",
+  Transfer: "var(--ink-3)",
+  Debt: "var(--flow-debt-text)",
+};
+
+/** Newest by date, then by number within a day. */
+function latestOf(transactions: readonly Transaction[], count = 8): Transaction[] {
+  return [...transactions]
+    .sort((a, b) => b.date.localeCompare(a.date) || b.recordNumber - a.recordNumber)
+    .slice(0, count);
+}
+
+function shortDay(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+}
+
+function walletsOf(t: Transaction): string {
+  if (t.fromWallet && t.toWallet) return `${t.fromWallet} to ${t.toWallet}`;
+  return t.fromWallet || t.toWallet || "No wallet";
 }
 
 function BalanceRow({ wallet }: { wallet: WalletBalance }) {

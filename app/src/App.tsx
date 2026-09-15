@@ -26,7 +26,8 @@ import { DebtScreen } from "./features/DebtScreen";
 import { Insights } from "./features/Insights";
 import { Settings } from "./features/Settings";
 import { Statements } from "./features/Statements";
-import { Alert, Card, EmptyState, Money, Toast } from "./components/primitives";
+import { Alert, Button, Card, EmptyState, Money, Toast } from "./components/primitives";
+import { useUpdateAvailable } from "./data/updateCheck";
 import { Icon, type IconName } from "./components/Icon";
 import { AskPanel } from "./features/AskPanel";
 import { useProposalSink } from "./features/useProposalSink";
@@ -80,7 +81,7 @@ import {
   type Provenance,
 } from "./domain/activity";
 import type { Centavos } from "./domain/money";
-import type { Budgets, DeletedTransaction, ReferenceLists, Transaction } from "./domain/types";
+import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction } from "./domain/types";
 
 type Screen =
   | "dashboard"
@@ -153,6 +154,8 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   /** Bumped on every recorded event, so the Activity screen refetches. */
   const [activityKey, setActivityKey] = useState(0);
+  /** A newer build has been published than the one this tab is running. */
+  const updateReady = useUpdateAvailable();
   /** So a missing rules deploy is reported once, not once per row saved. */
   const activityWarned = useRef(false);
   /** The floating chat on a computer: open now, and mounted since it was first opened. */
@@ -804,6 +807,19 @@ export default function App() {
     });
   };
 
+  /**
+   * A whole year's plan at once: "use last month's plan" and "copy to the
+   * months after". One state change and one write, rather than a write per
+   * month that each read a budget the previous one had not yet replaced.
+   */
+  const handleBudgetYear = (year: number, next: BudgetYear): void => {
+    const key = String(year);
+    setBudgets((prev) => ({ ...prev, [key]: next }));
+    if (cloud.uid) {
+      saveBudget(cloud.uid, key, next).catch((e: Error) => setSyncError(e.message));
+    }
+  };
+
   /** Download a blob without leaving the page. */
   const download = (name: string, body: string, mime: string): void => {
     const url = URL.createObjectURL(new Blob([body], { type: mime }));
@@ -1146,6 +1162,22 @@ export default function App() {
                 : ""
           }`}
         >
+          {updateReady && (
+            <div style={{ marginBottom: "var(--space-4)" }}>
+              <Alert
+                status="info"
+                title="A newer version of the app is ready"
+                action={
+                  <Button size="sm" variant="primary" onClick={() => window.location.reload()}>
+                    Reload
+                  </Button>
+                }
+              >
+                This tab is still running the version it opened with, so recent fixes are not on
+                screen yet. A half-typed entry on the Add screen is kept.
+              </Alert>
+            </div>
+          )}
           {syncError && (
             <div style={{ marginBottom: "var(--space-4)" }}>
               <Alert status="over" title="Not saving to Firebase">
@@ -1245,8 +1277,10 @@ export default function App() {
               transactions={transactions}
               budgets={budgets}
               debts={settings.credits}
+              reference={reference}
               asOf={asOf}
               onChangeBudget={handleBudgetChange}
+              onReplaceYear={handleBudgetYear}
             />
           )}
           {screen === "statements" && (

@@ -1,0 +1,164 @@
+/**
+ * The Budget screen's month view.
+ *
+ * The first block is the one that matters: the view adds to rule 3.6 and must
+ * carry its verdicts and figures exactly. The rest pins the additions.
+ */
+
+import { describe, expect, it } from "vitest";
+
+import { loadFixture } from "../fixtures/load";
+import { assessMonthFor, budgetForYear, dailyPacing } from "./budget";
+import {
+  categoryLines,
+  copyPlanForward,
+  monthPlanView,
+  previousPlan,
+  withMonthPlan,
+} from "./budgetView";
+import { firstOfMonth, getMonth, getYear, lastOfMonth } from "./dates";
+import { monthTotals, spendingAttribution } from "./totals";
+import type { Budgets, Transaction } from "./types";
+
+const fx = loadFixture();
+const AS_OF = fx.expected.asOf;
+const YEAR = getYear(AS_OF);
+const MONTH = getMonth(AS_OF);
+
+const view = (month: number) => monthPlanView(fx.transactions, fx.budgets, YEAR, month, AS_OF);
+
+describe("the month view carries rule 3.6 and changes none of it", () => {
+  it("gives the same two-track verdict as assessMonthFor, figure for figure", () => {
+    for (let m = 1; m <= 12; m++) {
+      expect(view(m).assessment).toEqual(assessMonthFor(fx.transactions, fx.budgets, YEAR, m));
+    }
+  });
+
+  it("paces the running month exactly as the Dashboard does", () => {
+    const v = view(MONTH);
+    const pace = dailyPacing(fx.transactions, fx.budgets, AS_OF);
+    expect(v.phase).toBe("current");
+    expect(v.daysLeft).toBe(pace.daysLeft);
+    expect(v.projected).toBe(pace.projected);
+    expect(v.perDay).toBe(pace.perDay);
+  });
+
+  it("keeps what came in less what went out", () => {
+    const t = monthTotals(fx.transactions, YEAR, MONTH);
+    const v = view(MONTH);
+    expect(v.revenue).toBe(t.revenue);
+    expect(v.kept).toBe(t.revenue - t.total);
+  });
+
+  it("closes a month that is over and has not started one that is ahead", () => {
+    const past = view(MONTH - 1);
+    expect(past).toMatchObject({ phase: "past", elapsed: 1, daysLeft: 0, perDay: 0, projected: null });
+
+    const ahead = view(MONTH + 1);
+    expect(ahead).toMatchObject({ phase: "future", elapsed: 0, projected: null });
+  });
+});
+
+// ── Where it went ──────────────────────────────────────────────────────────
+
+const spend = (date: string, item: string, total: number): Transaction => ({
+  id: `${date}-${item}`,
+  recordNumber: 1,
+  date,
+  type: "Spending",
+  fromWallet: "Cash",
+  toWallet: "",
+  category: "Spending",
+  item,
+  description: "",
+  amount: total,
+  fee: 0,
+  total,
+  notes: "",
+  status: "Paid",
+});
+
+describe("where the month went", () => {
+  it("is the month's spending attribution, biggest first, and nothing else", () => {
+    const lines = categoryLines(fx.transactions, YEAR, MONTH);
+    const attributed = [
+      ...spendingAttribution(fx.transactions, {
+        start: firstOfMonth(YEAR, MONTH),
+        end: lastOfMonth(YEAR, MONTH),
+      }).values(),
+    ]
+      .filter((v) => v > 0)
+      .reduce((a, v) => a + v, 0);
+
+    expect(lines.reduce((a, l) => a + l.spent, 0)).toBe(attributed);
+    expect(lines.every((l, i) => i === 0 || (lines[i - 1]?.spent ?? 0) >= l.spent)).toBe(true);
+  });
+
+  it("averages the usual over months that had spending, not over empty ones", () => {
+    const rows = [
+      spend("2026-06-10", "Food", 100000),
+      spend("2026-08-10", "Food", 300000),
+      spend("2026-09-05", "Food", 250000),
+    ];
+    // July had nothing at all, so it is not counted as a month of spending nothing.
+    expect(categoryLines(rows, 2026, 9)[0]?.usual).toBe(200000);
+  });
+
+  it("has no usual before there is any history", () => {
+    expect(categoryLines([spend("2026-01-04", "Food", 5000)], 2026, 1)[0]?.usual).toBeNull();
+  });
+
+  it("gives every line its share of the month", () => {
+    const rows = [spend("2026-09-01", "Food", 7500), spend("2026-09-02", "Gas", 2500)];
+    expect(categoryLines(rows, 2026, 9).map((l) => l.share)).toEqual([0.75, 0.25]);
+  });
+});
+
+// ── Setting a plan ─────────────────────────────────────────────────────────
+
+describe("setting a plan once", () => {
+  const plan = budgetForYear(fx.budgets, YEAR);
+
+  it("copies a month's plan to every month after it, and to none before", () => {
+    const next = copyPlanForward(plan, MONTH);
+    for (let i = 0; i < 12; i++) {
+      if (i < MONTH) {
+        expect(next.spending[i]).toBe(plan.spending[i]);
+        expect(next.billsSubs[i]).toBe(plan.billsSubs[i]);
+      } else {
+        expect(next.spending[i]).toBe(plan.spending[MONTH - 1]);
+        expect(next.billsSubs[i]).toBe(plan.billsSubs[MONTH - 1]);
+      }
+    }
+  });
+
+  it("sets one month and leaves the other eleven alone", () => {
+    const next = withMonthPlan(plan, 9, { spending: 800000, billsSubs: 170000 });
+    expect(next.spending[8]).toBe(800000);
+    expect(next.billsSubs[8]).toBe(170000);
+    expect(next.spending.filter((v, i) => i !== 8)).toEqual(plan.spending.filter((_, i) => i !== 8));
+  });
+
+  it("finds the nearest earlier month with a plan", () => {
+    expect(previousPlan(fx.budgets, YEAR, MONTH + 1)).toMatchObject({
+      year: YEAR,
+      month: MONTH,
+      spending: plan.spending[MONTH - 1],
+      billsSubs: plan.billsSubs[MONTH - 1],
+    });
+  });
+
+  it("looks back to the December before for a January", () => {
+    const budgets: Budgets = {
+      "2025": {
+        spending: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 500000],
+        billsSubs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      },
+    };
+    expect(previousPlan(budgets, 2026, 1)).toMatchObject({ year: 2025, month: 12, spending: 500000 });
+  });
+
+  it("finds nothing when no month has a plan", () => {
+    expect(previousPlan({}, 2026, 5)).toBeNull();
+  });
+});

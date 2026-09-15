@@ -2399,12 +2399,6 @@
     border-bottom-right-radius: var(--radius-lg);
   }
 
-  /* The balances stay beside the form while it scrolls. */
-  .fms-entry--nochat .fms-side {
-    position: sticky;
-    top: 0;
-  }
-
   .fms-entry > * {
     min-width: 0;
     min-height: 0;
@@ -2519,6 +2513,97 @@
   .fms-ask {
     grid-column: 1 / -1;
     height: 480px;
+  }
+}
+
+/*
+ * Without the assistant: the form, and beside it the balances with the latest
+ * entries under them, or three columns on a screen wide enough.
+ *
+ * The chat column simply went, and at 1920px that left the balances as a
+ * short card with a third of the screen empty to their right.
+ */
+@media (min-width: 1024px) {
+  .fms-entry--nochat {
+    grid-template-areas:
+      "form side"
+      "form recent";
+    grid-template-rows: auto 1fr;
+    align-items: start;
+  }
+
+  .fms-entry--nochat > .fms-entryform {
+    grid-area: form;
+  }
+
+  .fms-entry--nochat > .fms-side {
+    grid-area: side;
+  }
+
+  .fms-entry--nochat > .fms-recent {
+    grid-area: recent;
+  }
+}
+
+@media (min-width: 1600px) {
+  .fms-entry--nochat {
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 300px) minmax(300px, 360px);
+    grid-template-areas: "form side recent";
+    grid-template-rows: auto;
+    max-width: 1600px;
+  }
+}
+
+.fms-recent {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fms-recent-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.fms-recent-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-recent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 7px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-recent-row:first-child {
+  border-top: none;
+}
+
+.fms-recent-text {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fms-recent-row > :last-child {
+  flex: 0 0 auto;
+}
+
+/* A phone has the Database one tap away and no room to spare under the form. */
+@media (max-width: 1023px) {
+  .fms-recent {
+    display: none;
   }
 }
 
@@ -3239,6 +3324,204 @@
   gap: var(--space-3);
   padding-top: var(--space-3);
   border-top: 1px solid var(--hairline);
+}
+
+/* ══ Budget ═════════════════════════════════════════════════════════════════
+   A month first, the year under it. The figure you look for during a month
+   is what is left, so it is the biggest thing on the screen. */
+
+.fms-budgethero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  align-items: start;
+  gap: var(--space-6);
+}
+
+@container (max-width: 720px) {
+  .fms-budgethero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-5);
+  }
+}
+
+.fms-budgethero-figure {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.fms-budgettracks {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fms-budgettrack {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-budgettrack-figs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-1);
+  color: var(--ink-3);
+}
+
+.fms-budgettrack-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--ink-3);
+}
+
+/* What came in, what went out, what was kept: the plan in context. */
+.fms-budgetincome {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-budgetstat {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-budgetempty {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+}
+
+.fms-budgetempty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.fms-budgetgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  align-items: start;
+  gap: var(--space-4);
+}
+
+.fms-budgetcats,
+.fms-budgetbills {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-budgetcats {
+  gap: var(--space-4);
+}
+
+.fms-budgetcat {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.fms-budgetcat-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunk);
+}
+
+.fms-budgetcat-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--brand-700);
+}
+
+.fms-budgetcat-foot {
+  color: var(--ink-3);
+}
+
+/* A quarter above the usual is worth a second look, not an alarm. */
+.fms-budgetcat-foot--up {
+  color: var(--warn);
+}
+
+.fms-budgetbill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-budgetbill:first-child {
+  border-top: none;
+}
+
+.fms-budgetbill-text {
+  display: grid;
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.fms-budgetbill-figure {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.fms-budgetfoot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-2);
+}
+
+.fms-budgetplan {
+  min-width: 0;
+  scroll-margin-top: var(--space-4);
+}
+
+.fms-budgetplan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* The month the screen is showing, marked in the year's table. */
+.fms-rtable tr.fms-budgetplan-on > td {
+  background: var(--brand-50);
+}
+
+.fms-monthlink {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-monthlink:hover {
+  text-decoration: underline;
 }
 
 /*

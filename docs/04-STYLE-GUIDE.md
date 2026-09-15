@@ -291,6 +291,7 @@ The most-used screen. Pattern:
 5. **Inline warnings**, never blocking: negative balance, savings withdrawal, borrowing-looks-like-revenue, repay exceeds outstanding.
 6. **Save** → toast `Saved. Record #0442.` with **Undo** for 6s.
 7. **On a phone the form is the page** (below 640px): no card around it, labels above the fields whenever the form is under 520px wide, and the Save bar runs edge to edge above the navigation. Values nothing types into (record number, total) keep their label on the same line.
+8. **Latest entries where the chat would be.** With AI off, a desktop shows the eight newest rows beside the form (under the balances below 1600px, a third column above it), so a new entry is checked against the last ones before it is saved.
 
 ### 3.4 Tables
 
