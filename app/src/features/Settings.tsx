@@ -34,6 +34,7 @@ import {
   type AccountKind,
 } from "../domain/accounts";
 import { walletBalance } from "../domain/balances";
+import type { Alert as Finding } from "../domain/alerts";
 import { describeClose, planGoalClose } from "../domain/goalClose";
 import { validateBackup, type Backup, type RestoreMode, type Validation } from "../domain/backup";
 import { formatBytes, measureStorage } from "../domain/storage";
@@ -50,7 +51,7 @@ import {
   saveConfig,
   saveOwnerUid,
 } from "../data/firebaseConfig";
-import { makeDebtId, positionsOf, type Debt, type DebtKind } from "../domain/debt";
+import { makeDebtId, outstandingOf, positionsOf, type Debt, type DebtKind } from "../domain/debt";
 import {
   DEBT_FORM_LABEL,
   debtExplanation,
@@ -124,6 +125,8 @@ export function Settings({
   ledgerSource,
   uploading,
   onUpload,
+  alerts,
+  asOf,
 }: {
   settings: AppSettings;
   transactions: readonly Transaction[];
@@ -148,6 +151,10 @@ export function Settings({
   ledgerSource?: "seed" | "live" | undefined;
   uploading?: boolean | undefined;
   onUpload?: (() => void) | undefined;
+  /** What the app has found, for the panel beside the settings. */
+  alerts?: readonly Finding[] | undefined;
+  /** Today, as every other screen reads it. */
+  asOf?: string | undefined;
 }) {
   const [tab, setTab] = useState<Tab>("accounts");
   const tabStrip = useRef<HTMLDivElement>(null);
@@ -290,7 +297,198 @@ export function Settings({
         )}
        </div>
       </div>
+
+      <SettingsRail
+        tab={tab}
+        settings={settings}
+        transactions={transactions}
+        deleted={deleted}
+        alerts={alerts ?? []}
+        asOf={asOf}
+      />
     </div>
+  );
+}
+
+/**
+ * The side of Settings, which stood empty.
+ *
+ * The owner asked for the space to the right of the settings to be used. The
+ * settings stay one column: a two-column layout was tried and rejected (see
+ * "One column, always" in layout.css). This panel only reads out what the open
+ * tab is about, with the figures behind it and anything worth a look, so a
+ * change is made knowing what it touches. A wide screen only.
+ */
+function SettingsRail({
+  tab,
+  settings,
+  transactions,
+  deleted,
+  alerts,
+  asOf,
+}: {
+  tab: Tab;
+  settings: AppSettings;
+  transactions: readonly Transaction[];
+  deleted: readonly Transaction[];
+  alerts: readonly Finding[];
+  asOf?: string | undefined;
+}) {
+  const on = asOf ?? today();
+  const active = settings.accounts.filter((a) => !a.archived && a.kind !== "goal");
+  /** A name once, however many rows list it: a balance belongs to the name. */
+  const namesOf = (list: readonly Account[]): string[] => [...new Set(list.map((a) => a.name.trim()))];
+  const lines: { label: string; value?: Centavos | undefined; text?: string | undefined; tone?: string | undefined }[] = [];
+
+  if (tab === "accounts") {
+    let all = 0;
+    for (const group of GROUPS) {
+      const names = namesOf(active.filter((a) => a.kind === group));
+      const sum = names.reduce((s, n) => s + walletBalance(transactions, n), 0);
+      all += sum;
+      lines.push({ label: `${KIND_LABEL[group]}, ${names.length} ${names.length === 1 ? "account" : "accounts"}`, value: sum });
+    }
+    lines.push({ label: "In these accounts", value: all });
+    const holding = settings.accounts.filter(
+      (a) => a.archived && a.kind !== "goal" && walletBalance(transactions, a.name) !== 0,
+    );
+    if (holding.length > 0) {
+      lines.push({ label: "Inactive, still holding money", text: holding.map((a) => a.name).join(", "), tone: "var(--warn)" });
+    }
+  }
+
+  if (tab === "goals") {
+    const progress = settings.accounts
+      .filter((a) => a.kind === "goal" && !a.archived)
+      .map((g) => goalProgress(g, transactions, on));
+    lines.push({ label: "Open goals", text: String(progress.length) });
+    if (progress.length > 0) {
+      lines.push({ label: "Put aside", value: progress.reduce((s, p) => s + p.saved, 0) });
+      lines.push({ label: "Aiming for", value: progress.reduce((s, p) => s + p.target, 0) });
+      const behind = progress.filter((p) => !p.onTrack && p.remaining > 0);
+      if (behind.length > 0) {
+        lines.push({ label: "Behind", text: behind.map((p) => p.account.name).join(", "), tone: "var(--warn)" });
+      }
+    }
+  }
+
+  if (tab === "credit") {
+    let owed = 0;
+    let owedToYou = 0;
+    for (const c of settings.credits.filter((x) => !x.archived)) {
+      const amount = outstandingOf(transactions, c.id);
+      if (c.kind === "payable") owed += amount;
+      else owedToYou += amount;
+      lines.push({ label: c.kind === "payable" ? c.name : `${c.name}, owed to you`, value: amount });
+    }
+    lines.push({ label: "You owe in all", value: owed, tone: owed > 0 ? "var(--flow-debt-text)" : undefined });
+    if (owedToYou > 0) lines.push({ label: "Owed to you in all", value: owedToYou });
+  }
+
+  if (tab === "categories") {
+    lines.push(
+      { label: "Bills", text: String(settings.bills.length) },
+      { label: "Subscriptions", text: String(settings.subscriptions.length) },
+      { label: "Kinds of income", text: String(settings.revenueCategories.length) },
+      { label: "Kinds of spending", text: String(settings.spendingTypes.length) },
+    );
+  }
+
+  if (tab === "alerts") {
+    const threshold = settings.lowBalanceThreshold;
+    lines.push(threshold > 0 ? { label: "Low balance warning", value: threshold } : { label: "Low balance warning", text: "Off" });
+    if (threshold > 0) {
+      const low = namesOf(active.filter((a) => a.kind === "spending")).filter((n) => walletBalance(transactions, n) < threshold);
+      lines.push({
+        label: "Below it today",
+        text: low.length === 0 ? "None" : low.join(", "),
+        tone: low.length > 0 ? "var(--warn)" : undefined,
+      });
+    }
+  }
+
+  if (tab === "ai") {
+    const features = Object.values(settings.ai.features);
+    lines.push({ label: "AI", text: settings.ai.enabled ? "On" : "Off" });
+    if (settings.ai.enabled) {
+      lines.push({ label: "Used on", text: `${features.filter((f) => f !== false).length} of ${features.length} surfaces` });
+    }
+  }
+
+  if (tab === "appearance") {
+    lines.push({ label: "Applies to", text: "This device only" });
+  }
+
+  if (tab === "data") {
+    const dates = transactions.map((t) => t.date).sort();
+    lines.push(
+      { label: "Entries", text: transactions.length.toLocaleString() },
+      { label: "In the bin", text: deleted.length.toLocaleString() },
+    );
+    const first = dates[0];
+    const last = dates[dates.length - 1];
+    if (first && last) lines.push({ label: "From", text: formatMedium(first) }, { label: "To", text: formatMedium(last) });
+  }
+
+  /** The findings that belong to the open tab. */
+  const AREAS: Partial<Record<Tab, readonly Finding["area"][]>> = {
+    accounts: ["settings", "wallet"],
+    goals: ["goals"],
+    credit: ["debt"],
+    categories: ["bills"],
+    alerts: ["wallet", "budget"],
+    data: ["review"],
+  };
+  const areas = AREAS[tab];
+  const findings = areas ? alerts.filter((a) => areas.includes(a.area)).slice(0, 6) : [];
+
+  return (
+    <aside className="fms-setrail" aria-label="About this section">
+      <section className="fms-card fms-setrail-card">
+        <div className="t-label" style={{ color: "var(--ink-2)" }}>
+          At a glance
+        </div>
+        <dl className="fms-setrail-lines">
+          {lines.map((l, i) => (
+            <div key={`${l.label}-${i}`} className="fms-setrail-line">
+              <dt className="t-caption">{l.label}</dt>
+              <dd className="t-caption" style={l.tone ? { color: l.tone } : undefined}>
+                {l.value !== undefined ? <Money value={l.value} size="s" tone={l.tone} /> : l.text}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      {areas && (
+        <section className="fms-card fms-setrail-card">
+          <div className="t-label" style={{ color: "var(--ink-2)" }}>
+            Worth checking
+          </div>
+          {findings.length === 0 ? (
+            <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+              Nothing here needs a look.
+            </p>
+          ) : (
+            <ul className="fms-setrail-findings">
+              {findings.map((f) => (
+                <li key={f.id}>
+                  <span
+                    className="t-body-strong"
+                    style={{ color: f.level === "over" ? "var(--over)" : f.level === "warn" ? "var(--warn)" : "var(--ink)" }}
+                  >
+                    {f.title}
+                  </span>
+                  <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                    {f.detail}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+    </aside>
   );
 }
 
@@ -367,9 +565,6 @@ function AccountsSection({
     setError(null);
   };
 
-  const update = (id: string, part: Partial<Account>): void =>
-    onChange(accounts.map((a) => (a.id === id ? { ...a, ...part } : a)));
-
   return (
     <>
       {dialog}
@@ -411,13 +606,19 @@ function AccountsSection({
                       </tr>,
                     ]
                   : rows.map((a) => (
+                      /*
+                       * By the row, not by its id. Two accounts with one name share one
+                       * id (`makeAccountId`), so a rename or a type change on one row
+                       * changed both, and the list drew them under one key.
+                       */
                       <AccountRow
-                        key={a.id}
+                        key={`${a.id}-${accounts.indexOf(a)}`}
                         account={a}
                         accounts={accounts}
                         transactions={transactions}
                         confirm={confirm}
-                        onUpdate={(part) => update(a.id, part)}
+                        onUpdate={(part) => onChange(accounts.map((x) => (x === a ? { ...x, ...part } : x)))}
+                        onRemoveCopy={() => onChange(accounts.filter((x) => x !== a))}
                         onRename={onRename}
                         onAddTransactions={onAddTransactions}
                       />
@@ -484,12 +685,27 @@ function AccountsSection({
                         size="sm"
                         variant="primary"
                         onClick={async () => {
+                          /**
+                           * Not beside an active account of the same name.
+                           *
+                           * Reactivating was the one way in with no name check, and a
+                           * second "Cash" in Spending is two rows over one balance: each
+                           * shows all of it, and neither can be deactivated, because
+                           * each "still holds money".
+                           */
+                          const twin = accounts.find(
+                            (x) => x !== a && !x.archived && x.name.trim().toLowerCase() === a.name.trim().toLowerCase(),
+                          );
+                          if (twin) {
+                            setError(`${twin.name} is already active, so reactivating this would list the same account twice.`);
+                            return;
+                          }
                           const ok = await confirm({
                             title: `Reactivate ${a.name}?`,
                             body: "It comes back in every wallet picker. Its history and balance are unchanged.",
                             confirmLabel: "Reactivate",
                           });
-                          if (ok) update(a.id, { archived: false });
+                          if (ok) onChange(accounts.map((x) => (x === a ? { ...x, archived: false } : x)));
                         }}
                       >
                         Reactivate
@@ -512,6 +728,7 @@ function AccountRow({
   transactions,
   confirm,
   onUpdate,
+  onRemoveCopy,
   onRename,
   onAddTransactions,
 }: {
@@ -520,6 +737,8 @@ function AccountRow({
   transactions: readonly Transaction[];
   confirm: (req: ConfirmRequest) => Promise<boolean>;
   onUpdate: (part: Partial<Account>) => void;
+  /** Takes this row off the list when another row already has its exact name. */
+  onRemoveCopy: () => void;
   onRename: (from: string, to: string) => void;
   onAddTransactions: (rows: Transaction[]) => void;
 }) {
@@ -581,12 +800,39 @@ function AccountRow({
 
   const balance = walletBalance(transactions, account.name);
   const impact = renameImpact(transactions, account.name);
+
+  /**
+   * The same name on another active row: one account listed twice.
+   *
+   * A balance belongs to a name, so both rows show all of it, and neither can
+   * be deactivated while it "still holds money". The later row offers "Remove
+   * copy" instead, which takes only the list entry away: every row in the
+   * ledger names the account, not the entry, so nothing in it changes.
+   */
+  const twin = accounts.find((x) => x !== account && !x.archived && x.name.trim() === account.name.trim());
+  const isCopy = twin !== undefined && accounts.indexOf(twin) < accounts.indexOf(account);
+  const removeCopy = async (): Promise<void> => {
+    const ok = await confirm({
+      title: `Remove the second ${account.name}?`,
+      body: `It is the same account listed twice. Its balance and history belong to the name, so they stay with the other ${account.name} row, and nothing in the ledger changes.`,
+      confirmLabel: "Remove copy",
+      tone: "danger",
+    });
+    if (ok) onRemoveCopy();
+  };
   const goalCount = accounts.filter((a) => a.parentId === account.id && !a.archived).length;
 
   const commitRename = async (): Promise<void> => {
     const next = name.trim();
     if (!next || next === account.name) {
       setEditing(false);
+      return;
+    }
+
+    // Not onto another account's name: the two would then share one balance.
+    const clash = accounts.find((x) => x !== account && x.name.trim().toLowerCase() === next.toLowerCase());
+    if (clash) {
+      setBlocked(`"${clash.name}" is already an account${clash.archived ? ", an inactive one" : ""}. Pick another name.`);
       return;
     }
 
@@ -639,7 +885,19 @@ function AccountRow({
     return (
       <tr>
         <td className="fms-cell-flex">
-          <TextInput value={name} onChange={setName} />
+          <TextInput
+            value={name}
+            onChange={(v) => {
+              setName(v);
+              setBlocked(null);
+            }}
+            ariaLabel={`New name for ${account.name}`}
+          />
+          {blocked && (
+            <span className="t-caption" role="alert" style={{ color: "var(--over)" }}>
+              {blocked}
+            </span>
+          )}
         </td>
         <td className="fms-td-right">
           <Money value={balance} size="s" tone="var(--ink-3)" />
@@ -664,6 +922,11 @@ function AccountRow({
       <tr>
         <td className="fms-cell-flex">
           <span className="t-body fms-truncate" title={account.name}>{account.name}</span>
+          {twin && (
+            <span className="t-micro" style={{ color: "var(--warn)" }}>
+              Listed twice. Both rows are the same money, counted once in net worth.
+            </span>
+          )}
           {goalCount > 0 && (
             <span className="t-micro" style={{ color: "var(--ink-3)" }}>
               {goalCount} goal{goalCount === 1 ? "" : "s"} inside
@@ -705,7 +968,13 @@ function AccountRow({
         <td>
           <span className="fms-rowactions">
             <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>Rename</Button>
-            <Button size="sm" variant="danger" onClick={() => void deactivate()}>Deactivate</Button>
+            {isCopy ? (
+              <Button size="sm" variant="danger" onClick={() => void removeCopy()}>
+                Remove copy
+              </Button>
+            ) : (
+              <Button size="sm" variant="danger" onClick={() => void deactivate()}>Deactivate</Button>
+            )}
           </span>
         </td>
       </tr>
@@ -803,6 +1072,11 @@ function GoalsSection({
       setError(issues[0]!.message);
       return;
     }
+    // A deadline already past makes a goal that is over the moment it is made.
+    if (deadline <= today()) {
+      setError("Pick a deadline after today.");
+      return;
+    }
 
     onChange([...accounts, goal]);
     setName("");
@@ -868,7 +1142,11 @@ function GoalsSection({
                 <input
                   type="date"
                   value={deadline}
-                  onChange={(e) => setDeadline(e.target.value)}
+                  min={today()}
+                  onChange={(e) => {
+                    setDeadline(e.target.value);
+                    setError(null);
+                  }}
                   className="t-body fms-control"
                 />
               </label>
@@ -1086,7 +1364,7 @@ function GoalRow({
             </p>
             <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ width: 160 }}>
-                <AmountInput value={actualBalance} onChange={setActualBalance} />
+                <AmountInput value={actualBalance} onChange={setActualBalance} allowNegative />
               </span>
               <Button
                 size="sm"
@@ -1113,8 +1391,11 @@ function GoalRow({
           <input
             type="date"
             value={goal.deadline ?? ""}
+            min={today()}
             onChange={(e) => {
               const next = e.target.value;
+              // Cleared, or typed into the past past the picker's limit: not a deadline.
+              if (!next || next <= today()) return;
               void (async () => {
                 const ok = await confirm({
                   title: `Move the deadline to ${next}?`,

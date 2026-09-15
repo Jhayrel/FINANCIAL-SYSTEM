@@ -47,8 +47,9 @@ import type { Provenance } from "../domain/activity";
 import type { CategoryResult } from "../data/aiClient";
 import { predictAmount, steadyValue, type DueBill } from "../domain/predict";
 import { monthBills } from "../domain/budgetView";
-import { formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
+import { addDays, formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { duplicateHeadline, duplicatesOf } from "../domain/duplicates";
+import { draftChanges } from "../domain/draftChanges";
 import { entryImpact } from "../domain/entryImpact";
 import { whenWords } from "./Dashboard";
 import { useReportScreen } from "./screenReport";
@@ -102,6 +103,9 @@ const EFFECT_LABEL: Record<DebtEffect, string> = {
 const DUE_SHOWN = 3;
 
 const STATUSES = ["Paid", "Done", "Received", "Transferred", "Withdrawn"];
+
+/** The status a kind of entry gets when the ledger has none to learn from. */
+const FALLBACK_STATUS: Record<string, string> = { Spending: "Paid", Revenue: "Received", Transfer: "Transferred" };
 
 export function AddTransaction({
   transactions,
@@ -307,7 +311,11 @@ export function AddTransaction({
   const latest = useRef(0);
 
   useEffect(() => {
-    if (!draft.flow || !draft.item.trim()) return;
+    if (!draft.flow || !draft.item.trim()) {
+      // An idea for one item is not an idea for the next, or for no item at all.
+      setDescriptionIdea("");
+      return;
+    }
 
     const run = ++latest.current;
     const timer = setTimeout(() => {
@@ -567,8 +575,76 @@ export function AddTransaction({
 
   const guess = useMemo(() => predictAmount(transactions, draft), [transactions, draft]);
 
+  /** Every wallet a row can use, once each, with what it holds today. */
+  const walletChoices = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { name: string; balance: Centavos | null; savings: boolean }[] = [];
+    const add = (raw: string, savings: boolean): void => {
+      const name = raw.trim();
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      out.push({ name, balance: balances.find((b) => b.name === name)?.balance ?? null, savings });
+    };
+    for (const w of reference.wallets) add(w, false);
+    for (const w of reference.savings) add(w, true);
+    // A row being corrected keeps a wallet deactivated since it was saved.
+    add(draft.fromWallet, false);
+    add(draft.toWallet, false);
+    return out;
+  }, [reference, balances, draft.fromWallet, draft.toWallet]);
 
-  const allWallets = [...reference.wallets, ...reference.savings];
+  const walletOptions = (usual: string | undefined, exclude?: string): PickOption[] =>
+    walletChoices
+      .filter((w) => w.name !== exclude)
+      .map((w) => ({
+        id: w.name,
+        label: w.name,
+        sub: w.balance === null ? (w.savings ? "Savings" : "") : formatMoney(w.balance),
+        ...(w.balance !== null && w.balance < 0 ? { subTone: "var(--over)" } : {}),
+        ...(usual === w.name ? { tag: "Usual" } : {}),
+      }));
+
+  /**
+   * The status a row is saved with when none was picked.
+   *
+   * The box showed "Paid" in grey and saved an empty status, so the ledger
+   * filled with rows whose status was blank while the form had said otherwise.
+   * What the box shows is what is saved now: the one picked, else the item's
+   * usual one, else the one this kind of entry is usually saved with.
+   */
+  const usualStatus = useMemo(() => {
+    const counts = new Map<string, Map<string, number>>();
+    for (const t of transactions) {
+      if (!t.status) continue;
+      const byStatus = counts.get(t.type) ?? new Map<string, number>();
+      byStatus.set(t.status, (byStatus.get(t.status) ?? 0) + 1);
+      counts.set(t.type, byStatus);
+    }
+    const out: Record<string, string> = {};
+    for (const [type, byStatus] of counts) out[type] = [...byStatus].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+    return out;
+  }, [transactions]);
+  const effectiveStatus = needs(draft.flow, "status")
+    ? draft.status || ghost.status || usualStatus[draft.flow] || FALLBACK_STATUS[draft.flow] || ""
+    : "";
+
+  /** Status, a spending fee and notes: asked for rarely, so folded away until wanted. */
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  /** The row as it was saved, so a correction can say what it changes. */
+  const original = useMemo(() => (editing ? draftForEditing(editing, transactions) : null), [editing, transactions]);
+  const changes = original ? draftChanges(original, draft) : [];
+
+  /** A change in words: a debt by its name, an effect by its label, a date as a date. */
+  const changeWords = (field: string, value: string): string => {
+    if (value === "none") return "none";
+    if (field === "debtId") return debts.find((d) => d.id === value)?.name ?? value;
+    if (field === "debtEffect") return EFFECT_LABEL[value as DebtEffect] ?? value;
+    if (field === "date") return formatMedium(value);
+    return value;
+  };
+
+
   const items = itemsFor(draft.flow, draft.category, reference);
   const categories = categoriesFor(draft.flow);
 
@@ -764,6 +840,9 @@ export function AddTransaction({
      * number, quietly duplicating it. The id is the fact; the prop is one way
      * of arriving at it.
      */
+    /** What the Status box showed is what is saved (see `effectiveStatus`). */
+    const final: Draft = effectiveStatus && !draft.status ? { ...draft, status: effectiveStatus as Draft["status"] } : draft;
+
     const target = (draft.id ? transactions.find((t) => t.id === draft.id) : undefined) ?? editing;
 
     if (target) {
@@ -771,7 +850,7 @@ export function AddTransaction({
        * Same id, same record number. An edit is the entry corrected, not a
        * new one, and reissuing either would break every reference to it.
        */
-      const rows = draftToTransactions(draft, target.recordNumber, target.id, check.repaymentSplit);
+      const rows = draftToTransactions(final, target.recordNumber, target.id, check.repaymentSplit);
       onUpdate(rows);
       /**
        * A split repayment corrected so it no longer covers interest: its old
@@ -782,12 +861,12 @@ export function AddTransaction({
       if (interest && !rows.some((r) => r.id === interest.id)) onBin(interest.id);
     } else {
       onSave(
-        draftToTransactions(draft, nextRecordNumber, `t-${Date.now()}`, check.repaymentSplit),
+        draftToTransactions(final, nextRecordNumber, `t-${Date.now()}`, check.repaymentSplit),
       );
     }
 
     // The card that supplied this row can now say it was saved.
-    onSaved({ draft, at: Date.now() });
+    onSaved({ draft: final, at: Date.now() });
     forgetDraft();
     setDraft({ ...emptyDraft(draft.date), flow: "Spending" });
     setSuggested(new Set());
@@ -859,12 +938,58 @@ export function AddTransaction({
   // The total only says something when there is a fee in it.
   const showTotal = showFee && draft.fee > 0;
   const showStatus = needs(draft.flow, "status");
+  // A transfer's fee sits beside its amount; a spending fee is rare, so it waits in the fold.
+  const feeInDetails = showFee && draft.flow !== "Transfer";
+  const hasMore = showStatus || needs(draft.flow, "notes") || feeInDetails;
+  // A problem inside the fold opens it: an error nobody can see cannot be fixed.
+  const detailsOpen = moreOpen || (feeInDetails && Boolean(errorFor("fee")));
+  const moreSummary = [
+    showStatus ? effectiveStatus || "no status" : "",
+    feeInDetails ? (draft.fee > 0 ? `fee ${formatMoney(draft.fee)}` : "no fee") : "",
+    needs(draft.flow, "notes") ? (draft.notes.trim() ? "has notes" : "no notes") : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  /** The button says what it will do: the amount for a new entry, the count of changes for a correction. */
+  const saveLabel = editing
+    ? changes.length === 0
+      ? "Save"
+      : `Save ${changes.length} ${changes.length === 1 ? "change" : "changes"}`
+    : draft.amount !== null && draft.amount > 0
+      ? `Save ${formatMoney(draft.amount + draft.fee)}`
+      : "Save";
 
   return (
     <div className={showChat ? "fms-entry" : "fms-entry fms-entry--nochat"}>
       {dialog}
       {/* ── Left: the form ─────────────────────────────────────────────── */}
       <section className="fms-panel fms-entryform">
+        {/*
+          Which entry this is, before anything else.
+
+          Correcting a row from the Database opened the same form with "Correcting
+          a saved entry" in small type under a record number, so a correction
+          looked like a new entry until Save. It says so at the top now, with the
+          row as it was saved, and the list above Save says what will change.
+        */}
+        <div className={editing ? "fms-entryhead is-editing" : "fms-entryhead"}>
+          <div className="fms-entryhead-text">
+            <span className="t-body-strong">
+              {editing ? `Correcting #${String(editingNumber).padStart(4, "0")}` : "New entry"}
+            </span>
+            <span className="t-caption fms-truncate" style={{ color: editing ? "var(--ink-2)" : "var(--ink-3)" }}>
+              {editing
+                ? `As saved: ${editing.type}, ${editing.item || editing.description || "no item"}, ${formatMoney(original ? (original.amount ?? 0) + original.fee : editing.total)}, ${formatMedium(editing.date)}`
+                : `Saves as #${String(nextRecordNumber).padStart(4, "0")}`}
+            </span>
+          </div>
+          {editing && (
+            <Button size="sm" onClick={cancelEdit}>
+              Stop correcting
+            </Button>
+          )}
+        </div>
+
         {/* Not while correcting a saved row: a tap here would turn that row into the bill. */}
         {!editing && chips.length > 0 && (
           <div className="fms-duestrip">
@@ -955,135 +1080,237 @@ export function AddTransaction({
           </p>
         ) : (
           <>
+            {/*
+              One path down the form, in the order a person answers it.
+
+              The owner found the form hard to move through, and it was: labels
+              in a column of their own a hand's width from their fields, two
+              fields on a line with their labels at different heights, "Usually
+              Maya" in a wallet box that looked chosen and was not, and Status,
+              Fee and Notes given the same weight as the amount. It reads top to
+              bottom now: how much, what for, which wallet, when, and the rest
+              folded under "More details". A label sits on its field. A wallet
+              is one tap on a button that shows what it holds, the usual one says
+              so, and nothing looks chosen that is not.
+            */}
             <div className="fms-fields">
-              {/*
-                The number this entry will get, shown before it is saved.
-
-                The Excel put it at the top of the input page and it was worth
-                having: it is how a row is referred to when checking something
-                against the database, and seeing it in advance tells you the
-                form is on a new entry rather than an edit.
-              */}
-              <Row label="Record number" inline half hint={editing ? "Correcting a saved entry" : undefined}>
-                <span className="t-num-s fms-readonly">
-                  {String(editing ? editingNumber : nextRecordNumber).padStart(4, "0")}
-                </span>
-              </Row>
-
-              <Row label="Date" required half error={errorFor("date")}>
-                <input
-                  type="date"
-                  value={draft.date}
-                  onChange={(e) => set("date", e.target.value)}
-                  className="t-body fms-control"
-                />
-              </Row>
-
               {needs(draft.flow, "debt") && (
                 <>
+                  <Field label="Debt" required error={errorFor("debt")}>
+                    {debtOptions.length === 0 ? (
+                      <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+                        No debt to file this against yet. Add one in Settings, under Credit and loans.
+                      </p>
+                    ) : (
+                      <PickChips
+                        label="Which debt"
+                        value={draft.debtId ?? ""}
+                        invalid={Boolean(errorFor("debt"))}
+                        options={debtOptions.map((d) => ({
+                          id: d.id,
+                          label: d.name,
+                          sub: `${formatMoney(outstandingOf(transactions, d.id))} ${d.kind === "payable" ? "owed" : "owed to you"}`,
+                        }))}
+                        onChange={(id) =>
+                          setDraft((d) => {
+                            const debt = debtOptions.find((x) => x.id === id);
+                            if (!debt) return { ...d, debtId: undefined };
+                            // Another direction cannot keep an effect it does not take.
+                            const effect =
+                              d.debtEffect && effectsFor(debt.kind).includes(d.debtEffect) ? d.debtEffect : undefined;
+                            const next: Draft = { ...d, debtId: debt.id, debtEffect: effect };
+                            // The account the debt moves through, when no wallet is picked yet.
+                            if (next.fromWallet || next.toWallet || !debt.wallet) return next;
+                            return effect
+                              ? withDebtEffect({ ...next, fromWallet: debt.wallet }, effect)
+                              : { ...next, fromWallet: debt.wallet };
+                          })
+                        }
+                      />
+                    )}
+                  </Field>
                   {/*
-                    Names on screen, ids in the row.
-
-                    `Select` is plain strings in and out, so listing names and
-                    storing what came back put the credit line's *name* in
-                    `debtId`. Every lookup keys on the id, so the debt could
-                    not be found again, and the box showed the raw id back
-                    because it was matching a name list against one.
+                    Every effect in view rather than behind a dropdown: there are
+                    three or four, and the wrong one moves a balance by twice the
+                    amount. Picking one moves the wallet to the side it implies
+                    (`withDebtEffect`), as the chat card does.
                   */}
-                  <Row label="Debt" required half error={errorFor("debt")}>
-                    <Select
-                      value={selectedDebt?.name ?? ""}
-                      onChange={(name) =>
-                        setDraft((d) => {
-                          const debt = debtOptions.find((x) => x.name === name);
-                          if (!debt) return { ...d, debtId: undefined };
-                          // Another direction cannot keep an effect it does not take.
-                          const effect =
-                            d.debtEffect && effectsFor(debt.kind).includes(d.debtEffect) ? d.debtEffect : undefined;
-                          const next: Draft = { ...d, debtId: debt.id, debtEffect: effect };
-                          // The account the debt moves through, when no wallet is picked yet.
-                          if (next.fromWallet || next.toWallet || !debt.wallet) return next;
-                          return effect
-                            ? withDebtEffect({ ...next, fromWallet: debt.wallet }, effect)
-                            : { ...next, fromWallet: debt.wallet };
-                        })
-                      }
-                      options={debtOptions.map((d) => d.name)}
-                      placeholder="Pick a debt"
-                      invalid={Boolean(errorFor("debt"))}
-                    />
-                  </Row>
-                  {/*
-                    The same confusion, and this one made the row unsaveable.
-
-                    The options are labels like "Draw: borrow more", and what
-                    came back was written straight into `debtEffect`. So the
-                    stored effect was the label, `debtWalletDirection` read it
-                    as nothing, the debt arithmetic could not classify it, and
-                    `firestore.rules` refused the write outright because it
-                    checks the effect against the four real values.
-
-                    Picking one also moves the wallet to the side that effect
-                    implies, exactly as the chat card does: borrowing puts
-                    money in, repaying takes it out, and leaving it on the
-                    wrong side moves the balance by twice the amount.
-                  */}
-                  <Row label="Effect" required half error={errorFor("debtEffect")}>
-                    <Select
-                      value={draft.debtEffect ? (EFFECT_LABEL[draft.debtEffect] ?? draft.debtEffect) : ""}
-                      onChange={(label) => {
-                        const picked = effects.find((e) => EFFECT_LABEL[e] === label);
-                        setDraft((d) => (picked ? withDebtEffect(d, picked) : { ...d, debtEffect: undefined }));
-                      }}
-                      options={effects.map((e) => EFFECT_LABEL[e])}
-                      placeholder="What does this do?"
-                      invalid={Boolean(errorFor("debtEffect"))}
-                    />
-                  </Row>
+                  <Field label="What it does" required error={errorFor("debtEffect")}>
+                    <div className="fms-choicerow fms-choicerow--many" role="radiogroup" aria-label="What this does to the debt">
+                      {effects.map((effect) => {
+                        const on = draft.debtEffect === effect;
+                        return (
+                          <button
+                            key={effect}
+                            type="button"
+                            role="radio"
+                            aria-checked={on}
+                            className={`fms-choice fms-choice--debt ${on ? "t-body-strong" : "t-body"}`}
+                            onClick={() => setDraft((d) => withDebtEffect(d, effect))}
+                          >
+                            {EFFECT_LABEL[effect]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Field>
                 </>
               )}
 
-              {needs(draft.flow, "fromWallet") && debtSide !== "in" && (
-                <Row
-                  label={draft.flow === "Debt" ? "Paid from" : "From wallet"}
-                  required={draft.flow !== "Debt" || debtSide === "out"}
-                  error={errorFor("fromWallet")}
-                  half={showFrom && showTo}
-                >
-                  <Select
-                    value={draft.fromWallet}
-                    onChange={(v) => set("fromWallet", v)}
-                    options={allWallets}
-                    placeholder={ghost.fromWallet ? `Usually ${ghost.fromWallet}` : "Pick a wallet"}
-                    invalid={Boolean(errorFor("fromWallet"))}
+              <Field label="Amount" required half={draft.flow === "Transfer"} error={errorFor("amount")}>
+                <div className="fms-amounthero">
+                  <AmountInput
+                    value={draft.amount}
+                    onChange={(v) => set("amount", v)}
+                    invalid={Boolean(errorFor("amount"))}
+                    ariaLabel="Amount"
                   />
-                </Row>
+                </div>
+                {/*
+                  Offered, never filled. An amount that is silently almost right
+                  is the one mistake here that quietly corrupts a balance, so it
+                  takes a deliberate tap.
+                */}
+                {guess && draft.amount === null && (
+                  <button type="button" className="fms-guesschip t-caption" onClick={() => set("amount", guess.amount)}>
+                    Usually <span className="t-num-s">{formatMoney(guess.amount)}</span>, tap to use it
+                  </button>
+                )}
+              </Field>
+
+              {draft.flow === "Transfer" && (
+                <Field label="Fee" half error={errorFor("fee")}>
+                  <div className="fms-amounthero fms-amounthero--quiet">
+                    <AmountInput
+                      value={draft.fee}
+                      onChange={(v) => set("fee", v ?? 0)}
+                      invalid={Boolean(errorFor("fee"))}
+                      ariaLabel="Fee"
+                    />
+                  </div>
+                </Field>
               )}
 
-              {needs(draft.flow, "toWallet") && debtSide !== "out" && (
-                <Row
-                  half={showFrom && showTo}
-                  label={
-                    draft.flow === "Transfer"
-                      ? "Where to"
-                      : draft.flow === "Debt"
-                        ? "Lands in"
-                        : "To wallet"
+              {showCategory && (
+                <Field
+                  label="Category"
+                  required
+                  half={showItem}
+                  aside={
+                    !draft.category && (ghost.category || categoryHint?.category) ? (
+                      <button
+                        type="button"
+                        className="t-micro fms-linkbtn fms-truncate"
+                        onClick={() => {
+                          const pick = (ghost.category || categoryHint?.category || "") as TransactionCategory;
+                          setCategoryHint(null);
+                          unmark("category");
+                          setDraft((d) => ({ ...d, category: pick, item: "" }));
+                        }}
+                      >
+                        Use {ghost.category || categoryHint?.category}
+                      </button>
+                    ) : undefined
                   }
+                >
+                  <div className={suggested.has("category") ? "fms-suggested" : undefined}>
+                    <Select
+                      value={draft.category}
+                      onChange={(v) => {
+                        setCategoryHint(null);
+                        // Choosing it makes it yours, so autofill leaves it alone.
+                        unmark("category");
+                        setDraft((d) => ({ ...d, category: v as TransactionCategory, item: "" }));
+                      }}
+                      options={categories}
+                      placeholder="Pick a category"
+                      ariaLabel="Category"
+                    />
+                  </div>
+                </Field>
+              )}
+
+              {showItem && (
+                <Field
+                  label="Item"
+                  half={showCategory}
+                  aside={
+                    ghost.item && !draft.item ? (
+                      <button type="button" className="t-micro fms-linkbtn fms-truncate" onClick={() => set("item", ghost.item ?? "")}>
+                        Use {ghost.item}
+                      </button>
+                    ) : undefined
+                  }
+                >
+                  <Select value={draft.item} onChange={(v) => set("item", v)} options={items} placeholder="Pick an item" ariaLabel="Item" />
+                </Field>
+              )}
+
+              {needs(draft.flow, "description") && (
+                <Field
+                  label="Description"
+                  aside={
+                    descriptionIdea && !draft.description ? (
+                      <button
+                        type="button"
+                        className="t-micro fms-linkbtn fms-truncate"
+                        onClick={() => set("description", descriptionIdea)}
+                      >
+                        Use "{descriptionIdea}"
+                      </button>
+                    ) : undefined
+                  }
+                >
+                  <div className={suggested.has("description") ? "fms-suggested" : undefined}>
+                    <TextInput
+                      value={draft.description}
+                      onChange={(v) => {
+                        unmark("description");
+                        set("description", v);
+                      }}
+                      placeholder={descriptionIdea || "What was it for?"}
+                      ariaLabel="Description"
+                      maxLength={160}
+                      onKeyDown={(e) => {
+                        // Tab takes the idea in the empty field; a second Tab moves on as usual.
+                        if (e.key === "Tab" && !e.shiftKey && !draft.description && descriptionIdea) {
+                          e.preventDefault();
+                          set("description", descriptionIdea);
+                        }
+                      }}
+                    />
+                  </div>
+                </Field>
+              )}
+
+              {showFrom && (
+                <Field
+                  label={draft.flow === "Transfer" ? "From" : "Paid from"}
+                  required={draft.flow !== "Debt" || debtSide === "out"}
+                  error={errorFor("fromWallet")}
+                >
+                  <PickChips
+                    label="The wallet the money leaves"
+                    value={draft.fromWallet}
+                    options={walletOptions(ghost.fromWallet)}
+                    invalid={Boolean(errorFor("fromWallet"))}
+                    onChange={(v) => set("fromWallet", v)}
+                  />
+                </Field>
+              )}
+
+              {showTo && (
+                <Field
+                  label={draft.flow === "Transfer" ? "To" : draft.flow === "Debt" ? "Lands in" : "Received into"}
                   required={draft.flow !== "Debt" || debtSide === "in"}
                   error={errorFor("toWallet")}
                 >
-                  {/*
-                    Two questions, asked in the order a person thinks them.
-
-                    "Am I moving this or sending it away" comes first, because
-                    it is the one that changes what the entry means. It used to
-                    be the last item in a list of wallet names, which is how
-                    sending money to someone ended up looking impossible: you
-                    had to already know it was there to find it.
-                  */}
                   {draft.flow === "Transfer" ? (
-                    <div style={{ display: "grid", gap: "var(--space-2)" }}>
+                    <div className="fms-stack">
+                      {/*
+                        "Am I moving this or sending it away" first, because it is
+                        the answer that changes what the entry means.
+                      */}
                       <div className="fms-choicerow" role="radiogroup" aria-label="Where the money goes">
                         {[
                           { out: false, label: "To my own account" },
@@ -1095,210 +1322,168 @@ export function AddTransaction({
                             role="radio"
                             aria-checked={sentOut === option.out}
                             className={sentOut === option.out ? "fms-choice t-body-strong" : "fms-choice t-body"}
-                            onClick={() =>
-                              setDraft((d) => ({ ...d, sentOut: option.out, toWallet: "" }))
-                            }
+                            onClick={() => setDraft((d) => ({ ...d, sentOut: option.out, toWallet: "" }))}
                           >
                             {option.label}
                           </button>
                         ))}
                       </div>
-
-                      {sentOut ? (
-                        <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-                          It leaves your accounts, so the whole amount counts as spending.
-                        </p>
-                      ) : (
-                        <Select
+                      {!sentOut && (
+                        <PickChips
+                          label="The wallet the money lands in"
                           value={draft.toWallet}
-                          onChange={(v) => set("toWallet", v)}
-                          options={allWallets}
-                          placeholder={ghost.toWallet ? `Usually ${ghost.toWallet}` : "Pick a wallet"}
+                          options={walletOptions(ghost.toWallet, draft.fromWallet)}
                           invalid={Boolean(errorFor("toWallet"))}
+                          onChange={(v) => set("toWallet", v)}
                         />
                       )}
+                      {/* What the row counts as, worked out from the answer above. */}
+                      <div className="fms-derived">
+                        <StatusPill status={sentOut ? "over" : "none"}>
+                          {sentOut ? "Money Send" : draft.fee > 0 ? "Transaction Fee" : "Not spending"}
+                        </StatusPill>
+                        <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                          {sentOut
+                            ? "It leaves your accounts, so the whole amount is spending."
+                            : draft.fee > 0
+                              ? "Still your money, in another pocket. Only the fee is spending."
+                              : "Still your money, in another pocket. Nothing here is spending."}
+                        </span>
+                      </div>
                     </div>
                   ) : (
-                    <Select
+                    <PickChips
+                      label="The wallet the money lands in"
                       value={draft.toWallet}
-                      onChange={(v) => set("toWallet", v)}
-                      options={allWallets}
-                      placeholder={ghost.toWallet ? `Usually ${ghost.toWallet}` : "Pick a wallet"}
+                      options={walletOptions(ghost.toWallet)}
                       invalid={Boolean(errorFor("toWallet"))}
+                      onChange={(v) => set("toWallet", v)}
                     />
                   )}
-                </Row>
+                </Field>
               )}
 
-              {/* What this row will count as, worked out from the answer above.
-                  The Excel asked you to pick "Money Send" or "Transaction Fee"
-                  by hand and lost the money whenever you did not. */}
               {draft.flow === "Opening" && (
-                <Row label="Counts as">
+                <Field label="Counts as">
                   <div className="fms-derived">
                     <StatusPill status="none">Starting balance</StatusPill>
                     <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-                      Money you already had. It sets the account's balance without counting as
-                      income, so your revenue figures stay true.
+                      Money you already had. It sets the account's balance without counting as income, so your revenue
+                      figures stay true.
                     </span>
                   </div>
-                </Row>
+                </Field>
               )}
 
-              {draft.flow === "Transfer" && (
-                <Row label="Counts as">
-                  <div className="fms-derived">
-                    <StatusPill status={sentOut ? "over" : "none"}>
-                      {sentOut ? "Money Send" : draft.fee > 0 ? "Transaction Fee" : "Not spending"}
-                    </StatusPill>
-                    <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-                      {sentOut
-                        ? "The money leaves your accounts, so the whole amount is spending."
-                        : draft.fee > 0
-                          ? "Still your money, in another pocket. Only the fee is spending."
-                          : "Still your money, in another pocket. Nothing here is spending."}
-                    </span>
-                  </div>
-                </Row>
-              )}
-
-              {needs(draft.flow, "category") && categories.length > 1 && (
-                <Row
-                  label="Category"
-                  required
-                  half={showCategory && showItem}
-                  hint={
-                    categoryHint && categoryHint.source !== "history" && !draft.category
-                      ? `Maybe ${categoryHint.category}`
-                      : undefined
-                  }
-                >
-                  <div className={suggested.has("category") ? "fms-suggested" : undefined}>
-                  <Select
-                    value={draft.category}
-                    onChange={(v) => {
-                      setCategoryHint(null);
-                      // Choosing it makes it yours, so autofill leaves it alone.
-                      unmark("category");
-                      setDraft((d) => ({ ...d, category: v as TransactionCategory, item: "" }));
-                    }}
-                    options={categories}
-                    placeholder={ghost.category ? `Usually ${ghost.category}` : "Pick a category"}
+              <Field label="Date" required error={errorFor("date")}>
+                <div className="fms-datechips">
+                  {[
+                    { label: "Today", date: asOf },
+                    { label: "Yesterday", date: addDays(asOf, -1) },
+                  ].map((c) => (
+                    <button
+                      key={c.label}
+                      type="button"
+                      className="fms-datechip t-body"
+                      aria-pressed={draft.date === c.date}
+                      onClick={() => set("date", c.date)}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                  <input
+                    type="date"
+                    aria-label="Date"
+                    value={draft.date}
+                    onChange={(e) => set("date", e.target.value)}
+                    className="t-body fms-control fms-datechips-input"
                   />
-                  </div>
-                </Row>
-              )}
-
-              {needs(draft.flow, "item") && (
-                <Row
-                  label="Item"
-                  half={showCategory && showItem}
-                  hint={ghost.item && !draft.item ? `Maybe ${ghost.item}` : undefined}
-                >
-                  <Select
-                    value={draft.item}
-                    onChange={(v) => set("item", v)}
-                    options={items}
-                    placeholder="Pick an item"
-                  />
-                </Row>
-              )}
-
-              <Row label="Amount" required half={showFee} error={errorFor("amount")}>
-                <div className="fms-amountrow">
-                  <div>
-                    <AmountInput
-                      value={draft.amount}
-                      onChange={(v) => set("amount", v)}
-                      invalid={Boolean(errorFor("amount"))}
-                    />
-                  </div>
-                  {/*
-                    Offered, never filled. An amount that is silently almost
-                    right is the one mistake here that quietly corrupts a
-                    balance, so this takes a deliberate tap.
-                  */}
-                  {guess && draft.amount === null && (
-                    <Button onClick={() => set("amount", guess.amount)}>
-                      {formatMoney(guess.amount)}
-                    </Button>
-                  )}
                 </div>
-              </Row>
+              </Field>
 
-              {/*
-                The fee shows its own errors, and this is not cosmetic.
-
-                It was the one money field with no `error` prop, so a fee
-                `checkDraft` refuses left Save disabled with nothing on screen
-                saying why: a dead button and no explanation, which is a worse
-                failure than the bad value it was refusing.
-              */}
-              {needs(draft.flow, "fee") && (
-                <Row label="Fee" half error={errorFor("fee")}>
-                  <AmountInput
-                    value={draft.fee}
-                    onChange={(v) => set("fee", v ?? 0)}
-                    invalid={Boolean(errorFor("fee"))}
-                  />
-                </Row>
+              {hasMore && (
+                <button
+                  type="button"
+                  className="fms-more"
+                  aria-expanded={detailsOpen}
+                  onClick={() => setMoreOpen((open) => !open)}
+                >
+                  <span className="t-body-strong">More details</span>
+                  <span className="t-caption fms-more-sum fms-truncate">{moreSummary}</span>
+                </button>
               )}
 
-              {/*
-                The total, as the workbook showed it under the fee (E17, the
-                amount plus the fee), and read only, as E17 was protected. It
-                is what the row will carry as its total, so a fee typed into
-                the wrong box shows here before saving rather than in a
-                balance afterwards.
-              */}
+              {hasMore && detailsOpen && (
+                <>
+                  {feeInDetails && (
+                    <Field label="Fee" half={showStatus} error={errorFor("fee")}>
+                      <div className="fms-amounthero fms-amounthero--quiet">
+                        <AmountInput
+                          value={draft.fee}
+                          onChange={(v) => set("fee", v ?? 0)}
+                          invalid={Boolean(errorFor("fee"))}
+                          ariaLabel="Fee"
+                        />
+                      </div>
+                    </Field>
+                  )}
+                  {showStatus && (
+                    <Field label="Status" half={feeInDetails}>
+                      <Select
+                        value={effectiveStatus}
+                        onChange={(v) => set("status", v as Draft["status"])}
+                        options={STATUSES}
+                        placeholder="Pick a status"
+                        ariaLabel="Status"
+                      />
+                    </Field>
+                  )}
+                  {needs(draft.flow, "notes") && (
+                    <Field label="Notes">
+                      <TextInput
+                        value={draft.notes}
+                        onChange={(v) => set("notes", v)}
+                        placeholder="Anything worth remembering"
+                        ariaLabel="Notes"
+                        maxLength={500}
+                      />
+                    </Field>
+                  )}
+                </>
+              )}
+
               {showTotal && (
-                <Row label="Total" inline half={showStatus}>
-                  <span className="fms-readonly">
-                    <Money value={(draft.amount ?? 0) + draft.fee} />
+                <div className="fms-totalline">
+                  <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                    Total, with the fee
                   </span>
-                </Row>
+                  <Money value={(draft.amount ?? 0) + draft.fee} />
+                </div>
               )}
-
-              {showStatus && (
-                <Row label="Status" half={showTotal}>
-                  <Select
-                    value={draft.status}
-                    onChange={(v) => set("status", v as Draft["status"])}
-                    options={STATUSES}
-                    placeholder={ghost.status || "Pick a status"}
-                  />
-                </Row>
-              )}
-
-              {needs(draft.flow, "description") && (
-                <Row label="Description" span>
-                  <div className={suggested.has("description") ? "fms-suggested" : undefined}>
-                  <TextInput
-                    value={draft.description}
-                    onChange={(v) => {
-                      unmark("description");
-                      set("description", v);
-                    }}
-                    placeholder={descriptionIdea || "What was it for?"}
-                    onKeyDown={(e) => {
-                      // Tab takes the idea in the empty field; a second Tab moves on as usual.
-                      if (e.key === "Tab" && !e.shiftKey && !draft.description && descriptionIdea) {
-                        e.preventDefault();
-                        set("description", descriptionIdea);
-                      }
-                    }}
-                  />
-                  </div>
-                </Row>
-              )}
-
-              {needs(draft.flow, "notes") && (
-                <Row label="Notes" span>
-                  <TextInput value={draft.notes} onChange={(v) => set("notes", v)} placeholder="Anything worth remembering" />
-                </Row>
-              )}
-
             </div>
+
+            {/* A correction says what it changes before it is saved. */}
+            {editing && (
+              <div className={changes.length > 0 ? "fms-changes has-changes" : "fms-changes"} role="status" aria-live="polite">
+                <span className="t-label" style={{ color: "var(--ink-2)" }}>
+                  {changes.length === 0
+                    ? `Nothing changed yet. Change what is wrong in #${String(editingNumber).padStart(4, "0")}, then save.`
+                    : `${changes.length} ${changes.length === 1 ? "change" : "changes"} to #${String(editingNumber).padStart(4, "0")}`}
+                </span>
+                {changes.length > 0 && (
+                  <ul>
+                    {changes.map((c) => (
+                      <li key={c.field} className="t-caption">
+                        <span className="fms-changes-label">{c.label}</span>
+                        <span className="fms-changes-before">{changeWords(c.field, c.before)}</span>
+                        <span aria-hidden className="fms-changes-arrow">→</span>
+                        <span className="fms-changes-after">{changeWords(c.field, c.after)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
 
             {/*
               What to look at before saving, as one quiet list.
@@ -1344,7 +1529,7 @@ export function AddTransaction({
                 </Button>
               )}
               <Button variant="primary" onClick={() => void save()}>
-                {editing ? "Save changes" : "Save transaction"}
+                {saveLabel}
               </Button>
             </div>
           </>
@@ -1614,51 +1799,132 @@ function BalanceRow({ wallet }: { wallet: WalletBalance }) {
   );
 }
 
+/** One answer in a `PickChips` group. */
+interface PickOption {
+  readonly id: string;
+  readonly label: string;
+  readonly sub?: string | undefined;
+  readonly subTone?: string | undefined;
+  readonly tag?: string | undefined;
+}
+
 /**
- * One field. Label sits above on a phone and beside the control on desktop,
- * the horizontal form is what lets the whole page fit without scrolling.
+ * One field, its label on top.
+ *
+ * Labels sat in a right-aligned column beside the controls, so on every line
+ * the eye went left for the label and right for the field, and two fields
+ * sharing a line had their labels at different heights. On top, a label and
+ * its field read as one thing and a pair lines up. A one-tap suggestion sits
+ * at the end of the label line, where it is seen without being in the way.
  */
-function Row({
+function Field({
   label,
   children,
   required,
   error,
   hint,
-  span,
-  inline,
+  aside,
   half,
 }: {
   label: string;
   children: React.ReactNode;
-  required?: boolean;
+  required?: boolean | undefined;
   error?: string | undefined;
   hint?: string | undefined;
-  span?: boolean;
-  /** A value nothing types into: it keeps its label beside it at any width. */
-  inline?: boolean;
+  /** A suggestion beside the label, such as "Use Food". */
+  aside?: React.ReactNode;
   /** Shares a line with the field beside it, on a form wide enough for both. */
-  half?: boolean;
+  half?: boolean | undefined;
 }) {
-  const className = ["fms-row", span && "fms-row-span", inline && "fms-row--inline", half && "fms-row--half"]
-    .filter(Boolean)
-    .join(" ");
   return (
-    <div className={className}>
-      <label className="t-label fms-rowlabel">
-        {label}
-        {required && <span style={{ color: "var(--over)" }}> *</span>}
-      </label>
-      <div className="fms-rowcontrol">
-        {children}
-        {(error || hint) && (
-          <p
-            className="t-micro"
-            style={{ margin: "3px 0 0", color: error ? "var(--over)" : "var(--ink-3)" }}
-          >
-            {error || hint}
-          </p>
-        )}
+    <div className={half ? "fms-field fms-field--half" : "fms-field"}>
+      <div className="fms-field-head">
+        <span className="t-label fms-field-label">
+          {label}
+          {required && (
+            <span aria-hidden className="fms-req">
+              {" "}
+              *
+            </span>
+          )}
+        </span>
+        {aside}
       </div>
+      {children}
+      {(error || hint) && (
+        <p className={error ? "t-caption fms-field-error" : "t-micro fms-field-hint"} role={error ? "alert" : undefined}>
+          {error || hint}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A handful of answers as buttons, for a choice made several times a day.
+ *
+ * A wallet was a dropdown: two taps, every option hidden until it opened, and
+ * nothing in it saying which wallet held the money. Each one is a button now
+ * with its balance under the name, so the choice is one tap made with the
+ * figure in view. The arrow keys move through them, as in any radio group.
+ */
+function PickChips({
+  label,
+  value,
+  options,
+  onChange,
+  invalid,
+}: {
+  label: string;
+  value: string;
+  options: readonly PickOption[];
+  onChange: (id: string) => void;
+  invalid?: boolean | undefined;
+}) {
+  const chosen = options.findIndex((o) => o.id === value);
+  const move = (e: React.KeyboardEvent<HTMLButtonElement>, index: number): void => {
+    const step =
+      e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+    if (step === 0 || options.length === 0) return;
+    e.preventDefault();
+    const to = (index + step + options.length) % options.length;
+    const next = options[to];
+    if (!next) return;
+    onChange(next.id);
+    e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("button")[to]?.focus();
+  };
+  return (
+    <div
+      className={invalid ? "fms-pickchips is-invalid" : "fms-pickchips"}
+      role="radiogroup"
+      aria-label={label}
+      aria-invalid={invalid || undefined}
+    >
+      {options.map((o, i) => {
+        const on = o.id === value;
+        return (
+          <button
+            key={o.id}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            tabIndex={on || (chosen === -1 && i === 0) ? 0 : -1}
+            className="fms-pickchip"
+            onClick={() => onChange(o.id)}
+            onKeyDown={(e) => move(e, i)}
+          >
+            <span className="fms-pickchip-top">
+              <span className="t-body-strong fms-truncate">{o.label}</span>
+              {o.tag && <span className="t-micro fms-pickchip-tag">{o.tag}</span>}
+            </span>
+            {o.sub && (
+              <span className="t-num-s fms-pickchip-sub" style={o.subTone ? { color: o.subTone } : undefined}>
+                {o.sub}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

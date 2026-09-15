@@ -139,6 +139,26 @@ const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean }[] = 
 const BAR: readonly Screen[] = ["dashboard", "database", "add", "budget"];
 const BAR_WITH_AI: readonly Screen[] = ["dashboard", "database", "add", "budget", "ai"];
 
+/** "amount and wallet": what a correction changed, for the message that confirms it. */
+function changedWords(was: Transaction, now: Transaction): string {
+  const fields: readonly (readonly [keyof Transaction, string])[] = [
+    ["type", "type"],
+    ["date", "date"],
+    ["amount", "amount"],
+    ["fee", "fee"],
+    ["category", "category"],
+    ["item", "item"],
+    ["description", "description"],
+    ["fromWallet", "wallet"],
+    ["toWallet", "destination"],
+    ["status", "status"],
+  ];
+  const words = [...new Set(fields.filter(([key]) => was[key] !== now[key]).map(([, word]) => word))];
+  if (words.length === 0) return "nothing changed";
+  if (words.length === 1) return words[0] ?? "";
+  return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
 /**
  * The fixture is a snapshot ending 2026-08-28, so running against it anchors
  * "today" there: a demo ledger with no rows for the current month reports an
@@ -668,7 +688,15 @@ export default function App() {
     });
     push((l) => l.saveMany(rows));
     setEditing(null);
-    flash(`Updated record #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}.`);
+    // Says what changed, and takes it back in one tap when every row was already there.
+    const first = rows[0];
+    const was = first ? previous.get(first.id) : undefined;
+    const changed = first && was ? changedWords(was, first) : "";
+    const undoable = rows.every((r) => previous.has(r.id));
+    flash(
+      `Corrected #${String(first?.recordNumber ?? 0).padStart(4, "0")}${changed ? `: ${changed}` : ""}.`,
+      undoable ? { label: "Undo", run: () => handleUpdate(rows.map((r) => previous.get(r.id) ?? r), by) } : undefined,
+    );
   };
 
   /**
@@ -701,9 +729,18 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transactions]);
 
+  /**
+   * A correction goes back to where it was asked for.
+   *
+   * Pressing Correct in the Database opened the form and, once saved, left you
+   * on it, a screen away from the row you were checking. `go` clears the way
+   * back, so it is set again after.
+   */
   const startEditing = (row: Transaction): void => {
+    const from = screen;
     setEditing(row);
     go("add");
+    if (from !== "add" && from !== "ai") setReturnTo(from);
   };
 
   /** Soft delete: the row moves to the bin, never out of existence. */
@@ -1403,7 +1440,10 @@ export default function App() {
               reserved={renumbers ? undefined : deleted}
               onUpdate={handleUpdate}
               editing={editing}
-              onCancelEdit={() => setEditing(null)}
+              onCancelEdit={() => {
+                setEditing(null);
+                if (returnTo) go(returnTo);
+              }}
               ai={settings.ai}
               settings={settings}
               budgets={budgets}
@@ -1555,6 +1595,8 @@ export default function App() {
               reference={reference}
               deleted={deleted}
               budgets={budgets}
+              alerts={alerts}
+              asOf={asOf}
               storeName={store.name}
               quota={cloud.uid ? FIRESTORE_QUOTA : BROWSER_QUOTA}
               onBackup={handleBackup}

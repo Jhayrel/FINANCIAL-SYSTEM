@@ -11,8 +11,8 @@
  * For the days that have happened: what went out and came in, the spending
  * per day, the heaviest day, where it went, and every entry. For the days
  * still ahead: the bills, debt payments and regular spending expected on them.
- * The same definitions every other screen uses: `costOf` for what a row cost,
- * `spendingAttribution` for the kind, `billStatuses` for when a bill is next
+ * The same definitions every other screen uses: `costOf` for what a row cost
+ * (and so for where it went), `billStatuses` for when a bill is next
  * due, `debtDue` for a debt, `learnPatterns` for a habit.
  */
 
@@ -21,7 +21,7 @@ import { billStatuses } from "./bills";
 import { debtDue, positionsOf, type Debt } from "./debt";
 import { addDays, addMonths, daysBetween, formatMedium, getDay, getMonth, getYear, monthName } from "./dates";
 import type { Centavos } from "./money";
-import { costOf, spendingAttribution } from "./totals";
+import { costOf } from "./totals";
 import type { IsoDate, RankedAmount, ReferenceLists, Transaction } from "./types";
 
 export interface DayRange {
@@ -117,9 +117,38 @@ export function rangeReport(input: {
     if (!biggest || amount > biggest.amount) biggest = { date, amount };
   }
 
-  const kinds = [...spendingAttribution(rows)]
+  /*
+   * Where every peso of `spent` went, largest first, adding up to it exactly.
+   *
+   * It read `spendingAttribution`, which is the spending track's split: kept
+   * to the workbook by the parity tests, and silent on bills, subscriptions
+   * and debt interest by design. `spent` counts all three (`costOf`), so on
+   * the owner's ledger the kinds came up ₱1,641.00 short in every month from
+   * January to July and ₱4,329.79 short in August, under a panel that showed
+   * them as where the money went. It also kept only the six largest.
+   *
+   * So each row's own cost is filed once, under the name it is known by: the
+   * item for spending, a bill and a subscription; the debt for its interest
+   * and fees; Money Send for money that left, Transaction Fee for a fee
+   * between your own accounts. Every kind is kept; the screen folds the
+   * smallest into one line.
+   */
+  const byKind = new Map<string, Centavos>();
+  for (const t of rows) {
+    const cost = costOf(t);
+    if (cost <= 0) continue;
+    const name =
+      t.type === "Transfer"
+        ? t.toWallet.trim()
+          ? "Transaction Fee"
+          : "Money Send"
+        : t.type === "Debt"
+          ? `Interest and fees, ${debts.find((d) => d.id === t.debtId)?.name ?? "a debt"}`
+          : t.item.trim() || (t.category === "Spending" ? "No item" : t.category);
+    byKind.set(name, (byKind.get(name) ?? 0) + cost);
+  }
+  const kinds = [...byKind]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 6)
     .map(([name, amount]) => ({ name, amount }));
 
   const expected: ExpectedItem[] = [];

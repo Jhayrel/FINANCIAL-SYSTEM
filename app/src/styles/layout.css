@@ -1322,30 +1322,6 @@
   font-weight: 500;
 }
 
-/* ── Insights calendar ──────────────────────────────────────────────────── */
-
-.fms-cal {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 4px;
-}
-
-.fms-calhead {
-  text-align: center;
-  color: var(--ink-3);
-  padding-bottom: var(--space-1);
-}
-
-.fms-calday {
-  aspect-ratio: 1;
-  min-width: 0;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
 /* ── Statements toolbar ─────────────────────────────────────────────────── */
 
 .fms-stmttools {
@@ -1568,6 +1544,10 @@
  * your eye has to track back up the page to find what comes next.
  *
  * The spare width is not a problem to solve. Do not reintroduce this.
+ *
+ * The panel beside the settings on a wide screen (.fms-setrail, 2026-09-16,
+ * at the owner's request to use the right side) is not a second column of
+ * settings: it reads out the open tab, and nothing in it changes anything.
  */
 .fms-settings-inner {
   display: grid;
@@ -5745,31 +5725,6 @@ textarea.fms-askinput {
   gap: var(--space-4);
 }
 
-/* Each day is a button now, so it can open the day's spending. */
-button.fms-calday {
-  padding: 0;
-  border: 0;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-/* Wider than tall in a wide box: square days made the calendar twice the height of the box beside it. */
-@container (min-width: 520px) {
-  button.fms-calday {
-    aspect-ratio: 1.7;
-  }
-}
-
-button.fms-calday[aria-pressed="true"] {
-  outline: 2px solid var(--ink);
-  outline-offset: 1px;
-}
-
-button.fms-calday:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
-}
-
 .fms-daylist {
   display: grid;
   gap: var(--space-2);
@@ -5858,219 +5813,6 @@ button.fms-calday:focus-visible {
 
 .fms-linkbtn--danger {
   color: var(--over);
-}
-
-/* ══ Insights: the calendar, and the pick beside it ═════════════════════════ */
-
-.fms-calrow {
-  display: grid;
-  gap: var(--space-4);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
-  align-items: stretch;
-}
-
-.fms-calquick {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-bottom: var(--space-3);
-}
-
-.fms-calchip {
-  min-height: 32px;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--radius-full);
-  background: var(--surface);
-  color: var(--ink-2);
-  cursor: pointer;
-}
-
-.fms-calchip:hover {
-  background: var(--surface-hover);
-}
-
-.fms-calchip[aria-pressed="true"] {
-  border-color: var(--brand-700);
-  background: var(--brand-50);
-  color: var(--ink);
-  font-weight: 600;
-}
-
-button.fms-calday {
-  position: relative;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: 1px;
-  background: var(--surface-sunk);
-  color: var(--ink-2);
-}
-
-/* A range marks many days, so a pressed day is not outlined: the edges are. */
-button.fms-calday[aria-pressed="true"] {
-  outline: none;
-}
-
-button.fms-calday.is-in {
-  box-shadow: inset 0 -3px 0 var(--brand-700);
-}
-
-button.fms-calday.is-edge,
-button.fms-calday.is-anchor {
-  box-shadow: inset 0 0 0 2px var(--brand-700);
-}
-
-button.fms-calday.is-today .fms-calday-num {
-  font-weight: 700;
-  text-decoration: underline;
-  text-decoration-thickness: 2px;
-  text-underline-offset: 3px;
-}
-
-button.fms-calday.is-ahead {
-  border: 1px dashed var(--hairline-strong);
-  background: transparent;
-  color: var(--ink-3);
-}
-
-.fms-calday-amt {
-  font-size: 10px;
-  line-height: 12px;
-}
-
-.fms-calday-in {
-  position: absolute;
-  bottom: 4px;
-  left: 50%;
-  width: 6px;
-  height: 6px;
-  margin-left: -3px;
-  border-radius: var(--radius-full);
-  background: var(--flow-revenue);
-  box-shadow: 0 0 0 1.5px var(--surface);
-}
-
-@container (max-width: 519px) {
-  .fms-calday-amt {
-    display: none;
-  }
-}
-
-.fms-callegend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-4);
-  margin-top: var(--space-3);
-  color: var(--ink-3);
-}
-
-.fms-callegend > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.fms-legend-heat,
-.fms-legend-today,
-.fms-legend-ahead {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-}
-
-.fms-legend-heat {
-  background: color-mix(in srgb, var(--flow-spending) 60%, var(--surface));
-}
-
-.fms-legend-in {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-full);
-  background: var(--flow-revenue);
-}
-
-.fms-legend-today {
-  box-shadow: inset 0 0 0 2px var(--brand-700);
-}
-
-.fms-legend-ahead {
-  border: 1px dashed var(--hairline-strong);
-}
-
-.fms-sel {
-  display: grid;
-  align-content: start;
-  gap: var(--space-4);
-}
-
-.fms-selhint {
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  background: var(--brand-50);
-  color: var(--ink);
-}
-
-.fms-selfigs {
-  display: grid;
-  gap: var(--space-3);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--surface-sunk);
-}
-
-@container (max-width: 420px) {
-  .fms-selfigs {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-.fms-selsection {
-  display: grid;
-  gap: var(--space-2);
-}
-
-.fms-selrows {
-  display: grid;
-  max-height: 280px;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  list-style: none;
-  scrollbar-width: thin;
-}
-
-.fms-selrow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  min-width: 0;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.fms-selrow:last-child {
-  border-bottom: 0;
-}
-
-.fms-selrow-text {
-  display: grid;
-  flex: 1 1 auto;
-  gap: 1px;
-  min-width: 0;
-}
-
-.fms-selrow-end {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: var(--space-3);
 }
 
 /* ══ The phone's "More" sheet ═══════════════════════════════════════════════ */
@@ -6177,27 +5919,8 @@ button.fms-calday.is-ahead {
     padding: 10px var(--space-3);
   }
 
-  .fms-home,
-  .fms-calrow {
+  .fms-home {
     gap: var(--space-3);
-  }
-
-  /* The quick picks slide sideways instead of stacking into two tall rows. */
-  .fms-calquick {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    margin-right: calc(var(--space-3) * -1);
-    padding-right: var(--space-3);
-  }
-
-  .fms-calchip {
-    flex: 0 0 auto;
-  }
-
-  .fms-selfigs {
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
   }
 
   .fms-checklist {
@@ -6205,8 +5928,883 @@ button.fms-calday.is-ahead {
   }
 }
 
+/* ══ Add: one path down the form ════════════════════════════════════════════
+   Labels on their fields, the amount first and largest, a wallet as one tap on
+   a button that shows its balance, the date as Today or Yesterday, and the
+   fields asked for rarely folded under "More details". See AddTransaction. */
+
+.fms-entryhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  margin-bottom: var(--space-3);
+}
+
+.fms-entryhead-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* A correction is not a new entry, and it looks like one no longer. */
+.fms-entryhead.is-editing {
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-md);
+  background: var(--warn-bg);
+}
+
+.fms-fields {
+  row-gap: var(--space-4);
+}
+
+.fms-field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fms-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-field-label {
+  flex: 0 0 auto;
+  color: var(--ink-2);
+}
+
+.fms-field-head > .fms-linkbtn {
+  min-width: 0;
+  max-width: 70%;
+  text-align: right;
+}
+
+.fms-req {
+  color: var(--over);
+}
+
+.fms-field-error {
+  margin: 0;
+  color: var(--over);
+}
+
+.fms-field-hint {
+  margin: 0;
+  color: var(--ink-3);
+}
+
+@container entry (min-width: 760px) {
+  .fms-fields > :not(.fms-field--half) {
+    grid-column: 1 / -1;
+  }
+}
+
+/* The amount is the answer that matters most, so it is the largest thing on the form. */
+.fms-amounthero .fms-input--amount {
+  height: 56px;
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.fms-amounthero--quiet .fms-input--amount {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.fms-guesschip {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px dashed var(--hairline-strong);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-guesschip:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+
+.fms-pickchips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
+  gap: var(--space-2);
+}
+
+.fms-pickchip {
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 52px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-pickchip:hover {
+  background: var(--surface-hover);
+}
+
+.fms-pickchip[aria-checked="true"] {
+  border-color: var(--brand-700);
+  box-shadow: inset 0 0 0 1px var(--brand-700);
+  background: var(--brand-50);
+}
+
+.fms-pickchips.is-invalid .fms-pickchip {
+  border-color: var(--over);
+}
+
+.fms-pickchip-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-pickchip-tag {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+}
+
+.fms-pickchip-sub {
+  color: var(--ink-3);
+}
+
+.fms-choicerow--many {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+}
+
+.fms-stack {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-datechips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fms-datechip {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-datechip[aria-pressed="true"] {
+  border-color: var(--brand-700);
+  background: var(--brand-50);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.fms-datechips-input {
+  flex: 1 1 11rem;
+  width: auto;
+  min-width: 0;
+  max-width: 16rem;
+}
+
+.fms-more {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-more-sum {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink-3);
+}
+
+.fms-more::after {
+  content: "";
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-right: 2px solid var(--ink-3);
+  border-bottom: 2px solid var(--ink-3);
+  transform: rotate(45deg);
+}
+
+.fms-more[aria-expanded="true"]::after {
+  margin-top: 4px;
+  transform: rotate(-135deg);
+}
+
+.fms-totalline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--hairline);
+}
+
+.fms-changes {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+}
+
+.fms-changes.has-changes {
+  border-left: 3px solid var(--warn);
+}
+
+.fms-changes ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-changes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fms-changes-label {
+  min-width: 6rem;
+  color: var(--ink-2);
+}
+
+.fms-changes-before {
+  color: var(--ink-3);
+  text-decoration: line-through;
+  overflow-wrap: anywhere;
+}
+
+.fms-changes-arrow {
+  color: var(--ink-3);
+}
+
+.fms-changes-after {
+  color: var(--ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 @media (pointer: coarse) {
-  .fms-calchip {
+  .fms-guesschip {
     min-height: 44px;
   }
+}
+
+/* ══ Insights: the calendar and what a pick holds, in one frame ═════════════
+   One height at every pick: six week rows always, and the panel's lists scroll
+   inside it. Five quiet heat steps, a filled circle for today, and a tint only
+   on days actually picked. */
+
+.fms-ical {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+@media (min-width: 1024px) {
+  .fms-ical {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    height: 560px;
+  }
+}
+
+.fms-ical-cal,
+.fms-ical-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  container-type: inline-size;
+}
+
+.fms-ical-head,
+.fms-ical-panelhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+.fms-ical-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-ical-title h2 {
+  margin: 0;
+}
+
+.fms-ical-sub {
+  color: var(--ink-3);
+}
+
+.fms-ical-quick {
+  display: flex;
+  gap: var(--space-1);
+  margin: var(--space-3) 0 var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fms-ical-quick::-webkit-scrollbar {
+  display: none;
+}
+
+.fms-ical-pick {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-ical-pick:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.fms-ical-pick[aria-pressed="true"] {
+  border-color: var(--brand-700);
+  background: var(--brand-50);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.fms-ical-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-auto-rows: 46px;
+  gap: 3px;
+}
+
+@media (min-width: 1024px) {
+  .fms-ical-grid {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-rows: auto repeat(6, minmax(0, 1fr));
+    grid-auto-rows: unset;
+  }
+}
+
+.fms-ical-dow {
+  padding-bottom: 4px;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.fms-ical-blank {
+  min-width: 0;
+}
+
+.fms-ical-day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunk);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-ical-day:hover {
+  border-color: var(--hairline-strong);
+}
+
+.fms-ical-day:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.fms-ical-day[data-heat="1"],
+.fms-ical-scale > i[data-heat="1"] {
+  background: color-mix(in srgb, var(--flow-spending) 14%, var(--surface-sunk));
+}
+
+.fms-ical-day[data-heat="2"],
+.fms-ical-scale > i[data-heat="2"] {
+  background: color-mix(in srgb, var(--flow-spending) 26%, var(--surface-sunk));
+}
+
+.fms-ical-day[data-heat="3"],
+.fms-ical-scale > i[data-heat="3"] {
+  background: color-mix(in srgb, var(--flow-spending) 38%, var(--surface-sunk));
+}
+
+.fms-ical-day[data-heat="4"],
+.fms-ical-scale > i[data-heat="4"] {
+  background: color-mix(in srgb, var(--flow-spending) 50%, var(--surface-sunk));
+}
+
+.fms-ical-day.is-ahead {
+  border-color: var(--hairline);
+  background: transparent;
+  color: var(--ink-3);
+}
+
+.fms-ical-day.is-in::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--brand-700) 18%, transparent);
+  pointer-events: none;
+}
+
+.fms-ical-day.is-edge,
+.fms-ical-day.is-anchor {
+  border-color: var(--brand-700);
+  box-shadow: inset 0 0 0 1px var(--brand-700);
+}
+
+.fms-ical-num {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fms-ical-day.is-today .fms-ical-num {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: -2px 0 0 -3px;
+  border-radius: var(--radius-full);
+  background: var(--brand-700);
+  color: var(--on-brand);
+  font-weight: 700;
+}
+
+.fms-ical-amt {
+  align-self: flex-end;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 10px;
+  line-height: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fms-ical-in {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--flow-revenue);
+}
+
+@container (max-width: 459px) {
+  .fms-ical-amt {
+    display: none;
+  }
+}
+
+.fms-ical-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  margin-top: var(--space-2);
+  color: var(--ink-3);
+}
+
+.fms-ical-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fms-ical-scale {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.fms-ical-scale > i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--surface-sunk);
+}
+
+.fms-ical-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--flow-revenue);
+}
+
+.fms-ical-ring {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: var(--brand-700);
+}
+
+.fms-ical-figs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-3) 0 var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-ical-fig {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-ical-fig > .t-label {
+  color: var(--ink-2);
+}
+
+.fms-ical-fig > .t-caption {
+  color: var(--ink-3);
+}
+
+.fms-ical-tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fms-ical-tab {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-ical-tab[aria-selected="true"] {
+  background: var(--surface-sunk);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.fms-ical-tab:disabled {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.fms-ical-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.fms-ical-tab[aria-selected="true"] .fms-ical-count {
+  background: var(--surface);
+}
+
+.fms-ical-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-right: 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* Stacked under the calendar, the panel keeps a height of its own for the same reason. */
+@media (max-width: 1023px) {
+  .fms-ical-panel {
+    height: 480px;
+  }
+}
+
+.fms-ical-empty {
+  margin: 0;
+  padding: var(--space-6) var(--space-3);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.fms-ical-kinds {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-ical-kind {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 4px var(--space-3);
+}
+
+.fms-ical-kindbar {
+  grid-column: 1 / -1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunk);
+}
+
+.fms-ical-kindbar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.fms-ical-share {
+  display: inline-block;
+  min-width: 3ch;
+  margin-left: 8px;
+  color: var(--ink-3);
+  text-align: right;
+}
+
+.fms-ical-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-2);
+}
+
+.fms-ical-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-ical-daygroup {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 6px 0 4px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--ink-2);
+}
+
+.fms-ical-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-ical-row-text {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 1px;
+  min-width: 0;
+}
+
+.fms-ical-row-end {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.fms-ical-note {
+  margin: var(--space-3) 0 0;
+  color: var(--ink-2);
+}
+
+@media (pointer: coarse) {
+  .fms-ical-pick,
+  .fms-ical-tab {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 639px) {
+  .fms-ical-cal,
+  .fms-ical-panel {
+    padding: var(--space-3);
+  }
+
+  .fms-ical-figs {
+    gap: var(--space-2);
+  }
+}
+
+/* ══ Settings: the side panel ═══════════════════════════════════════════════
+   The settings stay one column (see "One column, always"). On a wide screen
+   the space to their right, which stood empty, reads out what the open tab is
+   about: its figures, and anything worth a look. */
+
+.fms-setrail {
+  display: none;
+}
+
+@media (min-width: 1280px) {
+  .fms-settings {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+    column-gap: var(--space-5);
+    max-width: none;
+  }
+
+  .fms-settings > .fms-tabs {
+    grid-column: 1 / -1;
+  }
+
+  .fms-setrail {
+    display: grid;
+    align-content: start;
+    gap: var(--space-4);
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2px 2px var(--space-6);
+  }
+}
+
+.fms-setrail-card {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fms-setrail-lines {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.fms-setrail-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-setrail-line:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.fms-setrail-line > dt {
+  color: var(--ink-2);
+}
+
+.fms-setrail-line > dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.fms-setrail-findings {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-setrail-findings > li {
+  display: grid;
+  gap: 2px;
+}
+
+/* ══ A money field that refuses a minus sign says so under it ═══════════════ */
+
+.fms-amount-box {
+  position: relative;
+  min-width: 0;
+}
+
+.fms-amount-refused {
+  display: block;
+  margin-top: 3px;
+  color: var(--over);
 }

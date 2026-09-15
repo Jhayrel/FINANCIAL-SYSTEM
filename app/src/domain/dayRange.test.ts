@@ -121,3 +121,25 @@ describe("a day, or a run of days", () => {
     expect(describeRange({ start: "2026-08-28", end: "2026-09-03" })).toBe("August 28 to September 3, 2026");
   });
 });
+
+describe("where it went covers everything that went out", () => {
+  it("names bills, debt interest and money sent away, and adds up to the total", () => {
+    const rows = [
+      row({ date: "2026-09-02", item: "Food", amount: 20000 }),
+      row({ date: "2026-09-02", category: "Bills", item: "Wifi", amount: 99900 }),
+      row({ date: "2026-09-03", type: "Debt", category: "", item: "", debtId: "d1", debtEffect: "interest", fromWallet: "", amount: 18879 }),
+      row({ date: "2026-09-04", type: "Transfer", category: "", item: "", toWallet: "", amount: 50000 }),
+      row({ date: "2026-09-04", type: "Transfer", category: "", item: "", toWallet: "Maya", amount: 100000, fee: 1500 }),
+    ];
+    const debts = [{ id: "d1", name: "Maya Credit", kind: "payable" }] as unknown as Debt[];
+    const r = rangeReport({ transactions: rows, reference, debts, range: { start: "2026-09-01", end: "2026-09-05" }, asOf: AS_OF });
+    expect(r.kinds.reduce((sum, k) => sum + k.amount, 0)).toBe(r.spent);
+    expect(Object.fromEntries(r.kinds.map((k) => [k.name, k.amount]))).toEqual({
+      Wifi: 99900,
+      "Money Send": 50000,
+      Food: 20000,
+      "Interest and fees, Maya Credit": 18879,
+      "Transaction Fee": 1500,
+    });
+  });
+});

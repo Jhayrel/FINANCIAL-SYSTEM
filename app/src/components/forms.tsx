@@ -68,6 +68,7 @@ export function TextInput({
   describedBy,
   ariaLabel,
   onKeyDown,
+  maxLength,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -79,6 +80,8 @@ export function TextInput({
   ariaLabel?: string | undefined;
   /** For a suggestion in the placeholder that a key accepts. */
   onKeyDown?: ((e: React.KeyboardEvent<HTMLInputElement>) => void) | undefined;
+  /** The longest text that means something here; a pasted page is not a description. */
+  maxLength?: number | undefined;
 }) {
   return (
     <input
@@ -86,6 +89,7 @@ export function TextInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={onKeyDown}
+      maxLength={maxLength}
       placeholder={placeholder}
       disabled={disabled}
       aria-invalid={invalid || undefined}
@@ -115,6 +119,7 @@ export function AmountInput({
   id,
   placeholder = "0.00",
   ariaLabel,
+  allowNegative = false,
 }: {
   value: Centavos | null;
   onChange: (v: Centavos | null) => void;
@@ -123,9 +128,21 @@ export function AmountInput({
   id?: string | undefined;
   placeholder?: string | undefined;
   ariaLabel?: string | undefined;
+  /**
+   * Whether a figure below zero means anything here.
+   *
+   * Only a balance can be below zero. Every other money field (an amount, a
+   * fee, a budget, a limit, a target, a credit limit) took "-500" as typed,
+   * and nothing behind the budget planner refused it, so a slip of the minus
+   * key saved a budget of minus five hundred pesos.
+   */
+  allowNegative?: boolean | undefined;
 }) {
   const [text, setText] = useState(() => (value === null ? "" : formatAmount(value)));
   const [focused, setFocused] = useState(false);
+  /** A minus sign where none belongs: kept in the box and said under it, never saved and never silently dropped. */
+  const [refused, setRefused] = useState(false);
+  const wrongSign = (parsed: Centavos | null): boolean => parsed !== null && parsed < 0 && !allowNegative;
 
   /**
    * While you are not typing in it, the field shows what is actually saved.
@@ -137,38 +154,53 @@ export function AmountInput({
    * no change at all, so it can never be retried.
    */
   const committed = value === null ? "" : formatAmount(value);
-  if (!focused && text !== committed) setText(committed);
+  // A value set from outside (a suggestion tapped, a form cleared) replaces a refused figure.
+  if (!focused && refused && value !== null) setRefused(false);
+  if (!focused && (!refused || value !== null) && text !== committed) setText(committed);
 
   return (
     <div className="fms-amount">
-      <span aria-hidden className="t-num fms-amount-peso">
-        ₱
-      </span>
-      <input
-        id={id}
-        value={text}
-        inputMode="decimal"
-        autoComplete="off"
-        enterKeyHint="done"
-        disabled={disabled}
-        aria-invalid={invalid || undefined}
-        aria-label={ariaLabel}
-        placeholder={placeholder}
-        onFocus={() => setFocused(true)}
-        onChange={(e) => {
-          setText(e.target.value);
-          if (focused) onChange(parseAmount(e.target.value));
-        }}
-        onBlur={() => {
-          setFocused(false);
-          const parsed = parseAmount(text);
-          onChange(parsed);
-          // Show what was typed for now. If the caller declines it, the
-          // re-sync above puts the committed value back on the next render.
-          setText(parsed === null ? "" : formatAmount(parsed));
-        }}
-        className="t-num fms-input fms-input--amount"
-      />
+      <div className="fms-amount-box">
+        <span aria-hidden className="t-num fms-amount-peso">
+          ₱
+        </span>
+        <input
+          id={id}
+          value={text}
+          inputMode="decimal"
+          autoComplete="off"
+          enterKeyHint="done"
+          disabled={disabled}
+          aria-invalid={invalid || refused || undefined}
+          aria-label={ariaLabel}
+          placeholder={placeholder}
+          onFocus={() => setFocused(true)}
+          onChange={(e) => {
+            setText(e.target.value);
+            const parsed = parseAmount(e.target.value);
+            const wrong = wrongSign(parsed);
+            setRefused(wrong);
+            if (focused) onChange(wrong ? null : parsed);
+          }}
+          onBlur={() => {
+            setFocused(false);
+            const parsed = parseAmount(text);
+            const wrong = wrongSign(parsed);
+            setRefused(wrong);
+            onChange(wrong ? null : parsed);
+            // Show what was typed for now. If the caller declines it, the
+            // re-sync above puts the committed value back on the next render.
+            // A refused figure stays as typed, so it is corrected rather than retyped.
+            if (!wrong) setText(parsed === null ? "" : formatAmount(parsed));
+          }}
+          className="t-num fms-input fms-input--amount"
+        />
+      </div>
+      {refused && (
+        <span className="t-micro fms-amount-refused" role="alert">
+          This takes an amount above zero. Leave out the minus sign.
+        </span>
+      )}
     </div>
   );
 }
