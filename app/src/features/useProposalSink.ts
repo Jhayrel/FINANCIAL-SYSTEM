@@ -19,7 +19,12 @@ import { useEffect, useMemo, useRef } from "react";
 
 import type { Provenance } from "../domain/activity";
 import type { Debt } from "../domain/debt";
-import { checkDraft, draftToTransactions, type Draft } from "../domain/entry";
+import {
+  checkDraft,
+  draftToTransactions,
+  nextRecordNumber as numberAfter,
+  type Draft,
+} from "../domain/entry";
 import type { ReferenceLists, Transaction } from "../domain/types";
 import type { ProposalSink } from "./AskPanel";
 
@@ -27,6 +32,11 @@ export interface SinkInput {
   readonly transactions: readonly Transaction[];
   readonly reference: ReferenceLists;
   readonly debts: readonly Debt[];
+  /**
+   * Rows whose numbers stay taken though they are not live: the bin, where
+   * the ledger keeps its numbers. Left out where every write renumbers.
+   */
+  readonly reserved?: readonly Transaction[] | undefined;
   readonly onSave: (rows: Transaction[], by?: Provenance) => void;
   readonly onBin: (id: string) => void;
   readonly onBinMany: (ids: readonly string[]) => void;
@@ -39,7 +49,7 @@ export interface SinkInput {
 let proposed = 0;
 
 export function useProposalSink(input: SinkInput): ProposalSink {
-  const { transactions, reference, debts } = input;
+  const { transactions, reference, debts, reserved } = input;
 
   /**
    * The handlers, read at the moment they are called.
@@ -52,8 +62,8 @@ export function useProposalSink(input: SinkInput): ProposalSink {
   handlers.current = input;
 
   const nextRecordNumber = useMemo(
-    () => Math.max(0, ...transactions.map((t) => t.recordNumber)) + 1,
-    [transactions],
+    () => numberAfter(transactions, reserved),
+    [transactions, reserved],
   );
 
   /**

@@ -290,6 +290,7 @@ The most-used screen. Pattern:
 4. **Autofill ghost text**, `--ink-3` inline suggestion; tap or `Tab` accepts.
 5. **Inline warnings**, never blocking: negative balance, savings withdrawal, borrowing-looks-like-revenue, repay exceeds outstanding.
 6. **Save** → toast `Saved. Record #0442.` with **Undo** for 6s.
+7. **On a phone the form is the page** (below 640px): no card around it, labels above the fields whenever the form is under 520px wide, and the Save bar runs edge to edge above the navigation. Values nothing types into (record number, total) keep their label on the same line.
 
 ### 3.4 Tables
 
@@ -374,7 +375,7 @@ All badges: `micro`, 22px tall, 8px horizontal padding, never interactive unless
 
 **Desktop sidebar**: 240px, `--surface`, 1px right hairline. Items 40px, `radius-md`, icon + label. Active: `--brand-100` fill, `--brand-700` text, `body-strong`. Hover: `--surface-hover`.
 
-**Phone bottom nav**: 5 items max, 56px + safe area, `--surface`, 1px top hairline. Icon 24px + `micro` label. Active in `--brand-700`. The centre slot is a raised circular **＋** in `--brand-700`, 56px, `--shadow-raised`, the most-used action gets the best position.
+**Phone bottom nav**: 5 items max, 56px + safe area, `--surface`, 1px top hairline. Icon 24px + `micro` label. Active in `--brand-700`. The centre slot is a raised circular **＋** in `--brand-700`, 56px, `--shadow-raised`, the most-used action gets the best position. With four items (AI switched off) there is no centre slot: the four share the bar equally and Add is a level 56×32 pill in `--brand-700` with its label under it, like the others.
 
 **Tabs**: underline style, 2px `--brand-700` on the active tab, `--ink-2` inactive. For switching views of the same data.
 

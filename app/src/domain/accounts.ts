@@ -310,12 +310,16 @@ export function renameImpact(
  *
  * Leaving history pointing at the old name would silently split the account in
  * two and corrupt every balance, so the rewrite is all-or-nothing.
+ *
+ * Generic so the bin goes through it too and keeps its `deletedAt`. A binned
+ * row left on the old name came back from a restore into an account that no
+ * longer existed.
  */
-export function renameAccount(
-  transactions: readonly Transaction[],
+export function renameAccount<T extends Transaction>(
+  transactions: readonly T[],
   from: string,
   to: string,
-): Transaction[] {
+): T[] {
   const next = to.trim();
   if (!next || next === from) return [...transactions];
 
@@ -331,11 +335,11 @@ export function renameAccount(
 }
 
 /** Same, for a spending type: it is the key every ranking groups by. */
-export function renameItem(
-  transactions: readonly Transaction[],
+export function renameItem<T extends Transaction>(
+  transactions: readonly T[],
   from: string,
   to: string,
-): Transaction[] {
+): T[] {
   const next = to.trim();
   if (!next || next === from) return [...transactions];
   return transactions.map((t) => (t.item === from ? { ...t, item: next } : t));

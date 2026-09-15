@@ -526,6 +526,16 @@ export default function App() {
     window.setTimeout(() => setToast(null), 6000);
   };
 
+  /**
+   * Whether this ledger renumbers on every write.
+   *
+   * The Excel did, and the ledger here does until it lives in Firebase (spec
+   * 5.11). Firebase keeps the number a row was saved with. Every write path
+   * asks this one question, so the numbers on screen never disagree with the
+   * numbers stored.
+   */
+  const renumbers = ledgerSource !== "live";
+
   const handleSave = (rows: Transaction[], by: Provenance = BY_OWNER): void => {
     /**
      * Stamped here, at the one place provenance is known.
@@ -537,13 +547,24 @@ export default function App() {
      */
     const stamped = rows.map((r) => ({ ...r, entrySource: by.actor }) as Transaction);
 
-    setTransactions((prev) => insertChronologically(prev, stamped));
+    setTransactions((prev) => insertChronologically(prev, stamped, { renumber: renumbers }));
     push((l) => l.saveMany(stamped));
     record(...stamped.map((r) => createdEvent(r, by)));
+
+    /**
+     * The number the row ended up with, not the one it was handed.
+     *
+     * Where the ledger renumbers, a back-dated entry takes its place among the
+     * dates and its number changes with it. "Saved. Record #0442." for a row
+     * that landed at #0300 sent you looking for the wrong row.
+     */
+    const landed = renumbers
+      ? insertChronologically(transactions, stamped).find((t) => t.id === stamped[0]?.id)
+      : stamped[0];
     flash(
       rows.length > 1
         ? `Saved. ${rows.length} rows added.`
-        : `Saved. Record #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}.`,
+        : `Saved. Record #${String(landed?.recordNumber ?? 0).padStart(4, "0")}.`,
     );
   };
 
@@ -643,6 +664,14 @@ export default function App() {
     const row = transactions.find((t) => t.id === id);
     if (!row) return;
     const at = new Date().toISOString();
+    /**
+     * A row being edited that goes to the bin stops being edited.
+     *
+     * Otherwise the form kept it, and Save wrote it back into the ledger as
+     * an update while its binned copy stayed in the bin: one entry live and
+     * binned at once, and a restore that made two.
+     */
+    if (editing?.id === id) setEditing(null);
     setTransactions((prev) => prev.filter((t) => t.id !== id));
     setDeleted((prev) => [{ ...row, deletedAt: at }, ...prev]);
     push((l) => l.bin(id, at));
@@ -666,6 +695,7 @@ export default function App() {
     const at = new Date().toISOString();
     const gone = new Set(rows.map((t) => t.id));
 
+    if (editing && gone.has(editing.id)) setEditing(null);
     setTransactions((prev) => prev.filter((t) => !gone.has(t.id)));
     setDeleted((prev) => [...rows.map((t) => ({ ...t, deletedAt: at })), ...prev]);
     push(async (l) => {
@@ -684,7 +714,7 @@ export default function App() {
     if (!row) return;
     setDeleted((prev) => prev.filter((t) => t.id !== id));
     const { deletedAt: _ignored, ...restored } = row;
-    setTransactions((prev) => insertChronologically(prev, [restored]));
+    setTransactions((prev) => insertChronologically(prev, [restored], { renumber: renumbers }));
     push((l) => l.restore(id));
     record(restoredEvent(restored));
     flash(`Restored record #${String(row.recordNumber).padStart(4, "0")}.`);
@@ -698,7 +728,7 @@ export default function App() {
 
     setDeleted((prev) => prev.filter((t) => !back.has(t.id)));
     const restored = rows.map(({ deletedAt: _ignored, ...rest }) => rest);
-    setTransactions((prev) => insertChronologically(prev, restored));
+    setTransactions((prev) => insertChronologically(prev, restored, { renumber: renumbers }));
     push(async (l) => {
       for (const t of rows) await l.restore(t.id);
     });
@@ -708,6 +738,36 @@ export default function App() {
         ? `Restored record #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}.`
         : `Restored ${rows.length} records.`,
     );
+  };
+
+  /**
+   * Rename an account or an item everywhere it appears.
+   *
+   * It used to rewrite the rows on screen and nothing else. Binned rows kept
+   * the old name, so restoring one brought back an account that no longer
+   * existed and split its balance in two, the one thing a rename must never
+   * do. And nothing reached the database: signed in, the next change from
+   * anywhere replaced the renamed rows with the stored ones and quietly
+   * undid it.
+   *
+   * `saveMany` merges, and a binned row's `deletedAt` is not part of what it
+   * writes, so a renamed row in the bin stays in the bin.
+   */
+  const handleRename = (kind: "account" | "item", from: string, to: string): void => {
+    const rename = <T extends Transaction>(rows: readonly T[]): T[] =>
+      kind === "account" ? renameAccount(rows, from, to) : renameItem(rows, from, to);
+
+    const live = rename(transactions);
+    const binned = rename(deleted);
+    const changed: Transaction[] = [
+      ...live.filter((t, i) => t !== transactions[i]),
+      ...binned.filter((t, i) => t !== deleted[i]),
+    ];
+    if (changed.length === 0) return;
+
+    setTransactions(live);
+    setDeleted(binned);
+    push((l) => l.saveMany(changed));
   };
 
   /**
@@ -941,6 +1001,7 @@ export default function App() {
     transactions,
     reference,
     debts: settings.credits,
+    reserved: renumbers ? undefined : deleted,
     onSave: handleSave,
     onBin: handleDelete,
     onBinMany: handleDeleteMany,
@@ -992,7 +1053,15 @@ export default function App() {
   };
 
   return (
-    <div className={!compact && chatOn && screen !== "add" ? "fms-app fms-app--fab" : "fms-app"}>
+    <div
+      className={[
+        "fms-app",
+        !compact && chatOn && screen !== "add" && "fms-app--fab",
+        (chatOn ? BAR_WITH_AI : BAR).length % 2 === 0 && "fms-app--evennav",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
       {/* Fixed sidebar. Never scrolls with the content. */}
       <aside className="fms-sidebar">
         <div className="fms-brand">
@@ -1111,6 +1180,7 @@ export default function App() {
               onBinMany={handleDeleteMany}
               onRestoreRow={handleRestore}
               deleted={deleted}
+              reserved={renumbers ? undefined : deleted}
               onUpdate={handleUpdate}
               editing={editing}
               onCancelEdit={() => setEditing(null)}
@@ -1196,7 +1266,7 @@ export default function App() {
             />
           )}
           {screen === "activity" && (
-            <Activity uid={cloud.uid ?? null} reloadKey={activityKey} />
+            <Activity uid={cloud.uid ?? null} reloadKey={activityKey} onAdd={() => go("add")} />
           )}
           {screen === "settings" && (
             <Settings
@@ -1215,10 +1285,8 @@ export default function App() {
               uploading={uploading}
               onUpload={cloud.uid ? () => void handleUpload() : undefined}
               onChange={setSettings}
-              onRenameAccount={(from, to) =>
-                setTransactions((prev) => renameAccount(prev, from, to))
-              }
-              onRenameItem={(from, to) => setTransactions((prev) => renameItem(prev, from, to))}
+              onRenameAccount={(from, to) => handleRename("account", from, to)}
+              onRenameItem={(from, to) => handleRename("item", from, to)}
               onExport={handleExport}
             />
           )}
@@ -1231,8 +1299,15 @@ export default function App() {
         Add sits raised and round, per style guide §3.8: it is the action this
         app exists for. The AI tab is there only while AI is on.
       */}
-      <nav className="fms-bottomnav safe-b" aria-label="Screens">
-        {(chatOn ? BAR_WITH_AI : BAR).map((id) => {
+      <nav
+        className={
+          (chatOn ? BAR_WITH_AI : BAR).length % 2 === 0
+            ? "fms-bottomnav fms-bottomnav--even safe-b"
+            : "fms-bottomnav safe-b"
+        }
+        aria-label="Screens"
+      >
+        {(chatOn ? BAR_WITH_AI : BAR).map((id, _, bar) => {
           const n = NAV.find((x) => x.id === id);
           const label = id === "ai" ? "AI" : (n?.label ?? "");
           const icon: IconName = id === "ai" ? "ai" : (n?.icon ?? "dashboard");
@@ -1249,8 +1324,14 @@ export default function App() {
                 className={`t-micro fms-bnitem fms-bnitem--add${active ? " fms-bnitem--on" : ""}`}
               >
                 <span aria-hidden className="fms-bnadd">
-                  <Icon name="add" size={26} />
+                  <Icon name="add" size={bar.length % 2 === 0 ? 22 : 26} />
                 </span>
+                {/* Level with the others, it is labelled like them. */}
+                {bar.length % 2 === 0 && (
+                  <span aria-hidden className="fms-bnlabel">
+                    Add
+                  </span>
+                )}
               </button>
             );
           }

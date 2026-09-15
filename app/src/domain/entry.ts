@@ -470,7 +470,20 @@ export function checkDraft(
   // Rules D2 and D3.
   if (draft.flow === "Debt" && draft.debtId) {
     const debt = debts.find((d) => d.id === draft.debtId);
-    const outstanding = outstandingOf(transactions, draft.debtId);
+    /**
+     * What is owed without the row being edited.
+     *
+     * Editing the ₱2,500.00 repayment up to ₱3,500.00 split it into
+     * ₱2,950.00 principal and ₱550.00 interest, because the ₱2,950.00 still
+     * owed had already been reduced by the very payment being corrected.
+     * Without it ₱5,450.00 is owed and the whole ₱3,500.00 is principal.
+     * Saving the edit would have booked a ₱550.00 interest row that never
+     * happened. A draw being edited had the same fault against the credit
+     * limit. `runningBalance` already leaves the edited row out; this does
+     * the same.
+     */
+    const others = draft.id ? transactions.filter((t) => t.id !== draft.id) : transactions;
+    const outstanding = outstandingOf(others, draft.debtId);
     const amount = draft.amount ?? 0;
 
     if (draft.debtEffect === "repay" && amount > 0) {
@@ -592,9 +605,37 @@ export function draftToTransactions(
 export function insertChronologically(
   transactions: readonly Transaction[],
   additions: readonly Transaction[],
+  /**
+   * `false` sorts without renumbering, for a ledger whose numbers are stored
+   * rather than rewritten (Firebase). Renumbering there lasted only until the
+   * database answered with the stored numbers, so every earlier row's number
+   * flickered on each back-dated save.
+   */
+  options: { readonly renumber?: boolean } = {},
 ): Transaction[] {
   const merged = [...transactions, ...additions].sort((a, b) =>
     a.date === b.date ? a.recordNumber - b.recordNumber : a.date.localeCompare(b.date),
   );
+  if (options.renumber === false) return merged;
   return merged.map((t, i) => ({ ...t, recordNumber: i + 1 }));
+}
+
+/**
+ * The number a new row gets: one past every number in use.
+ *
+ * `binned` is for a ledger that keeps its numbers. A binned row keeps its
+ * number and restoring it brings that number back, so counting only the live
+ * rows handed the newest row's number straight back out the moment it was
+ * binned: bin it, add another, restore it, and two rows carried one number.
+ * Where the ledger is renumbered on every write the restore renumbers anyway,
+ * and the bin is left out so the form shows the number the row will get.
+ */
+export function nextRecordNumber(
+  live: readonly Transaction[],
+  binned: readonly Transaction[] = [],
+): number {
+  let highest = 0;
+  for (const t of live) if (t.recordNumber > highest) highest = t.recordNumber;
+  for (const t of binned) if (t.recordNumber > highest) highest = t.recordNumber;
+  return highest + 1;
 }

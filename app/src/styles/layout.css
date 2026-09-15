@@ -261,6 +261,38 @@
 }
 
 /*
+ * Four items have no middle.
+ *
+ * With AI switched off the bar holds four, and a raised button in the third
+ * of four slots sat right of centre, two tabs on one side of it and one on
+ * the other, which read as a slot gone missing. Four share the bar equally
+ * and Add keeps its green, level with the others and labelled like them.
+ */
+.fms-bottomnav--even .fms-bnadd {
+  width: 56px;
+  height: 32px;
+  margin-top: 0;
+  box-shadow: none;
+}
+
+/* Nothing stands above a level bar, so nothing needs clearing under it. */
+@media (max-width: 1023px) {
+  .fms-app--evennav .fms-main {
+    --main-pad-b: var(--space-5);
+  }
+
+  .fms-app--evennav .fms-actions {
+    padding-bottom: var(--space-3);
+  }
+}
+
+@media (max-width: 639px) {
+  .fms-app--evennav .fms-main {
+    --main-pad-b: var(--space-4);
+  }
+}
+
+/*
  * Toasts sit bottom right on a desktop and bottom centre, above the
  * navigation, on a phone (§3.7). Never wider than the screen.
  */
@@ -655,9 +687,15 @@
   border-bottom: 1px solid var(--hairline);
 }
 
+/*
+ * Even columns, not a ragged wrap.
+ *
+ * Each bill was as wide as its own name, so on a phone the second one broke
+ * onto a line of its own at a different width from the first.
+ */
 .fms-duechips {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr));
   gap: var(--space-2);
 }
 
@@ -865,14 +903,22 @@
   overflow-wrap: anywhere;
 }
 
+.fms-rowcontrol {
+  min-width: 0;
+}
+
 /*
  * Label above the control when it does not.
  *
  * Beside a 96px label, a control in a 360px form is 250px wide and its hint
  * and error text wrap three lines deep under it. Above, the control has the
  * whole width.
+ *
+ * Every phone, not only the narrowest. At 399px the break left a 450px phone
+ * with labels squeezed into a right-aligned column and every field a third
+ * shorter than the screen: a desktop form shrunk rather than a phone form.
  */
-@container entry (max-width: 399px) {
+@container entry (max-width: 519px) {
   .fms-row {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
@@ -882,6 +928,27 @@
 
   .fms-rowlabel {
     text-align: left;
+  }
+
+  /*
+   * A value nothing types into keeps its label on its line.
+   *
+   * Stacked, "Record number" and its four digits took two lines and 70px for
+   * something you read and never touch. Label left and value right is how a
+   * summary line reads, and the Total lines up under the amounts above it.
+   */
+  .fms-row--inline {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .fms-row--inline > .fms-rowcontrol {
+    text-align: right;
+  }
+
+  .fms-row--inline .fms-readonly {
+    min-height: 32px;
   }
 }
 
@@ -969,6 +1036,31 @@
 @media (max-width: 1023px) {
   .fms-actions {
     padding-bottom: calc(var(--space-3) + var(--space-4));
+  }
+}
+
+/*
+ * On a phone the form is the page.
+ *
+ * Inside a card it was inset twice, by the page and again by the card, which
+ * took 34px from every field on the narrowest screen there is, and the Save
+ * bar stopped short of both edges with a strip of card showing under it.
+ * Flat, the fields have the width and the bar runs edge to edge above the
+ * navigation.
+ */
+@media (max-width: 639px) {
+  .fms-entryform.fms-panel {
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .fms-actions {
+    margin: var(--space-4) calc(var(--space-4) * -1) 0;
+    background: var(--paper);
+    border-radius: 0;
   }
 }
 
@@ -2765,43 +2857,66 @@
    append only at the database, so there is no control here that could exist
    even if one were wanted. */
 
-.fms-actbar {
+/*
+ * A reading width, not the window's.
+ *
+ * Stretched across a 1920px screen an event's summary sat a hand's width from
+ * its time, and the note under the list ran to 180 characters a line.
+ */
+.fms-activity {
   display: grid;
-  gap: var(--space-2);
-  margin-bottom: var(--space-4);
+  align-content: start;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 960px;
+  min-width: 0;
 }
 
-.fms-chips {
+/* Side by side while both fit, one above the other when they do not. */
+.fms-actfilters {
   display: flex;
   flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  min-width: 0;
+}
+
+.fms-actfilter {
+  display: grid;
   gap: var(--space-2);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
-.fms-chip {
-  min-height: 32px;
-  padding: 0 var(--space-3);
-  background: var(--surface);
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--radius-md);
+.fms-actfilter-label {
+  color: var(--ink-3);
+}
+
+.fms-actloading {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fms-actdays {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.fms-actday-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--hairline);
   color: var(--ink-2);
-  cursor: pointer;
 }
 
-.fms-chip:hover {
-  color: var(--ink);
-}
-
-.fms-chip[aria-pressed="true"] {
-  background: var(--brand-50);
-  border-color: var(--brand-600);
-  color: var(--ink);
-}
-
-/* Rule D10: a real target on a phone. */
-@media (max-width: 1023px) {
-  .fms-chip {
-    min-height: 44px;
-  }
+.fms-actday-count {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--surface-sunk);
+  color: var(--ink-3);
 }
 
 .fms-acts {
@@ -2866,8 +2981,9 @@
  */
 .fms-actor {
   padding: 0 var(--space-2);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-full);
+  color: var(--ink-2);
 }
 
 .fms-actor--ai {
@@ -2875,12 +2991,16 @@
   color: var(--ink-2);
 }
 
+/* An edit's before and after, set off from the summary it belongs to. */
 .fms-actdiff {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 2px var(--space-2);
+  gap: 2px var(--space-3);
   margin: var(--space-1) 0 0;
-  color: var(--ink-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-md);
+  color: var(--ink-2);
 }
 
 .fms-actdiff dt {

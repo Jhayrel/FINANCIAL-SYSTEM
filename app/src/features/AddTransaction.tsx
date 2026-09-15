@@ -98,6 +98,7 @@ export function AddTransaction({
   onBinMany,
   onRestoreRow,
   deleted,
+  reserved,
   editing,
   onCancelEdit,
   ai,
@@ -122,6 +123,8 @@ export function AddTransaction({
   onBinMany: (ids: readonly string[]) => void;
   onRestoreRow: (id: string) => void;
   deleted: readonly DeletedTransaction[];
+  /** Numbers still taken by rows outside the ledger. See `useProposalSink`. */
+  reserved?: readonly Transaction[] | undefined;
   /** A saved row being corrected, rather than a new entry. */
   editing: Transaction | null;
   onCancelEdit: () => void;
@@ -355,6 +358,7 @@ export function AddTransaction({
     transactions,
     reference,
     debts,
+    reserved,
     onSave,
     onBin,
     onBinMany,
@@ -600,7 +604,7 @@ export function AddTransaction({
                 against the database, and seeing it in advance tells you the
                 form is on a new entry rather than an edit.
               */}
-              <Row label="Record number" hint={editing ? "Editing a saved entry" : undefined}>
+              <Row label="Record number" inline hint={editing ? "Editing a saved entry" : undefined}>
                 <span className="t-num-s fms-readonly">
                   {String(editing ? editing.recordNumber : nextRecordNumber).padStart(4, "0")}
                 </span>
@@ -888,7 +892,7 @@ export function AddTransaction({
                 balance afterwards.
               */}
               {needs(draft.flow, "fee") && (
-                <Row label="Total">
+                <Row label="Total" inline>
                   <span className="fms-readonly">
                     <Money value={(draft.amount ?? 0) + draft.fee} />
                   </span>
@@ -1059,6 +1063,7 @@ function Row({
   error,
   hint,
   span,
+  inline,
 }: {
   label: string;
   children: React.ReactNode;
@@ -1066,14 +1071,19 @@ function Row({
   error?: string | undefined;
   hint?: string | undefined;
   span?: boolean;
+  /** A value nothing types into: it keeps its label beside it at any width. */
+  inline?: boolean;
 }) {
+  const className = ["fms-row", span && "fms-row-span", inline && "fms-row--inline"]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <div className={span ? "fms-row fms-row-span" : "fms-row"}>
+    <div className={className}>
       <label className="t-label fms-rowlabel">
         {label}
         {required && <span style={{ color: "var(--over)" }}> *</span>}
       </label>
-      <div style={{ minWidth: 0 }}>
+      <div className="fms-rowcontrol">
         {children}
         {(error || hint) && (
           <p
