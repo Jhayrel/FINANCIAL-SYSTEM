@@ -108,6 +108,29 @@ const ENDPOINT = "/api/ai";
 const DEFAULT_TIMEOUT_MS = 25_000;
 
 /**
+ * How long to wait for the routing answer.
+ *
+ * ── Why this is not the default ───────────────────────────────────────────
+ *
+ * Routing is asked about every message now, before any rule in the panel
+ * looks at it, which is the order the owner asked for. That puts it on the
+ * critical path for everything: a question waits for this call and then waits
+ * again for the answer call behind it.
+ *
+ * What is being asked for here is a few hundred tokens in and one word back.
+ * A provider that has not managed that in six seconds is degraded, and the
+ * only thing a longer wait buys is a later arrival at the same fallback. So
+ * the deadline is short and the fallback is unchanged: `routeMessage` returns
+ * null, the local rules run exactly as they always have, and the owner gets a
+ * slightly worse reading six seconds sooner instead of an identical one
+ * twelve seconds later.
+ *
+ * This trades a little routing accuracy for latency, deliberately, and only
+ * in the case where the model was already failing to answer.
+ */
+const ROUTE_TIMEOUT_MS = 6_000;
+
+/**
  * How many times to try before giving up.
  *
  * "Every model in the chain failed" was reported after a single pass, and on
@@ -809,7 +832,7 @@ export async function routeMessage(options: {
   ].join(nl);
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 12_000);
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? ROUTE_TIMEOUT_MS);
 
   try {
     const response = await (options.fetcher ?? fetch)(ENDPOINT, {
