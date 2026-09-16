@@ -150,7 +150,18 @@ function directionOf(question: string): "spending" | "revenue" {
  */
 function kindOf(question: string, by: ChartBy): ChartKind {
   if (/\b(pie|donut|doughnut|circle)\b/i.test(question)) {
-    return by === "month" ? "bars" : "pie";
+    /**
+     * A pie of months, when a pie is what was asked for.
+     *
+     * This used to answer a pie request across months with bars, on the
+     * reasoning that months are not a share of a whole. They are: the months
+     * in a window partition that window, and they add up to exactly the total
+     * printed on the card, which is the test a pie has to pass.
+     *
+     * Changed at the owner's request on 2026-09-16, after asking for a pie
+     * chart and being given bars twice.
+     */
+    return "pie";
   }
   if (/\b(line|trend|over time|curve|movement|progression)\b/i.test(question)) {
     return by === "month" ? "line" : "bars";

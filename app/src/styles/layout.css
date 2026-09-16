@@ -4775,7 +4775,15 @@ textarea.fms-askinput {
   color: var(--ink-2);
 }
 
+/*
+ * Both of these are spans, because a chart row is a button now and a button
+ * may not contain a div. A span is inline, and height does nothing to an
+ * inline box: the track kept its 10px only because a grid item is blockified
+ * automatically, and the bar inside it, which is not a grid item, collapsed
+ * to nothing. Every bar was an empty outline.
+ */
 .fms-charttrack {
+  display: block;
   min-width: 0;
   height: 10px;
   background: var(--surface-sunk);
@@ -4783,7 +4791,9 @@ textarea.fms-askinput {
 }
 
 .fms-chartbar {
+  display: block;
   height: 100%;
+  /* Overridden per row by rank. This is the fallback for a single series. */
   background: var(--brand-600);
 }
 

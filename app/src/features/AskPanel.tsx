@@ -2230,12 +2230,30 @@ export function AskPanel({
      * figure and its wallet, is not a reply to anything. It starts a new row
      * and the half-finished one is dropped.
      */
-    const startsAfresh =
-      pending !== null &&
-      files.length === 0 &&
-      !as &&
-      note.trim().split(/\s+/).length >= 4 &&
-      readEntry(note, transactions, reference, asOf).worthOffering;
+    /**
+     * ── The figure is what makes it a new entry ──────────────────────────
+     *
+     * The owner typed "I earn 1000", was asked what it was for, answered
+     * "maya and income from my business", and was then asked how much it was.
+     * They had said how much in their first word of it.
+     *
+     * This gate is why. The reply is six words, names income and names a
+     * wallet, so it read as a whole entry, the half finished one was dropped,
+     * and the PHP 1,000 went with it. The paragraph above already says what a
+     * fresh start needs: its flow, its figure and its wallet. The figure was
+     * never actually required, so an answer that happened to be wordy was
+     * mistaken for a new row.
+     *
+     * A reply carrying no figure of its own cannot be a new entry. It is an
+     * answer to the question that was asked, which is the far commoner thing
+     * to be typing while a question is on screen.
+     */
+    const afresh =
+      pending !== null && files.length === 0 && !as && note.trim().split(/\s+/).length >= 4
+        ? readEntry(note, transactions, reference, asOf)
+        : null;
+
+    const startsAfresh = afresh !== null && afresh.worthOffering && afresh.draft.amount !== null;
 
     if (startsAfresh) setPending(null);
 
@@ -4436,6 +4454,20 @@ function FoundList({
  * anyone who cannot separate the hues a legend would have needed.
  */
 /**
+ * The category palette, by rank.
+ *
+ * Style guide 3.9: category colours are assigned by rank and fixed, so the
+ * largest kind keeps its colour across every chart and every render. The
+ * palette runs greens, then ambers, then greys, which is deliberate and is
+ * why there is no red in it: red means money going out (rule D3), so a red
+ * bar would read as a direction rather than as the eighth largest item.
+ *
+ * Length still carries the comparison. Colour only tells one row from
+ * another, which is what a legend would otherwise have to do.
+ */
+const catColour = (rank: number): string => `var(--cat-${Math.min(rank + 1, 17)})`;
+
+/**
  * The figures for whichever part is being pointed at.
  *
  * A chart says the shape and hides the arithmetic: a bar three quarters
@@ -4528,10 +4560,14 @@ function ChartView({ chart }: { chart: Chart }) {
             >
               <span className="fms-chartlabel t-micro">{r.label}</span>
               <span className="fms-charttrack">
-                {/* Width is the only thing carrying the comparison. */}
+                {/* Width carries the comparison; colour only tells rows apart. */}
                 <span
                   className="fms-chartbar"
-                  style={{ width: `${Math.max(r.share * 100, 1.5)}%` }}
+                  style={{
+                    width: `${Math.max(r.share * 100, 1.5)}%`,
+                    background: catColour(i),
+                    opacity: at === null || at === i ? 1 : 0.5,
+                  }}
                 />
               </span>
               <span className="t-micro fms-chartvalue fms-proposalmoney">{chartLabel(r.value)}</span>
@@ -4648,8 +4684,8 @@ function PieView({
               cy={centre}
               r={radius}
               fill="none"
-              stroke="var(--brand-600)"
-              strokeOpacity={at === null || at === i ? s.opacity : s.opacity * 0.4}
+              stroke={catColour(i)}
+              strokeOpacity={at === null || at === i ? 1 : 0.45}
               strokeWidth={at === i ? 26 : 22}
               strokeDasharray={`${s.dash} ${circumference - s.dash}`}
               strokeDashoffset={-s.offset}
@@ -4679,7 +4715,7 @@ function PieView({
               onBlur={leave}
               onClick={() => pin(i)}
             >
-              <span className="fms-pieswatch" style={{ opacity: s.opacity }} aria-hidden />
+              <span className="fms-pieswatch" style={{ background: catColour(i) }} aria-hidden />
               <span className="fms-pielabel">{s.label}</span>
               <span className="fms-piefigure fms-proposalmoney">
                 {s.percent}% · {chartLabel(s.value)}
