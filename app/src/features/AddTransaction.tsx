@@ -201,6 +201,11 @@ export function AddTransaction({
    * majority of entries, so it is the right thing to be ready for.
    */
   const [draft, setDraft] = useState<Draft>(() => restoreDraft() ?? { ...emptyDraft(), flow: "Spending" });
+  /**
+   * The entry either side of the last type change, for the tap that was meant
+   * for the button beside it. Null once there is nothing to offer.
+   */
+  const [undoSwitch, setUndoSwitch] = useState<{ was: Draft; now: Draft } | null>(null);
 
   /**
    * A half-typed entry survives leaving the screen.
@@ -971,16 +976,46 @@ export function AddTransaction({
    */
   const switchFlow = (flow: Flow): void => {
     if (flow === draft.flow) return;
-    setDraft((d) => ({
-      ...emptyDraft(d.date),
+
+    /**
+     * What the entry was, before the type changed under it.
+     *
+     * ── Why this is kept ────────────────────────────────────────────────
+     *
+     * Changing the type empties the form: the fields a Transfer needs are not
+     * the fields Spending needs, so both wallets, the category, the item, the
+     * fee and the status all go. That is right, and it is also unrecoverable,
+     * and these four buttons sit in a row where the one you want is next to
+     * the one you do not. The owner filled in a transfer, tapped Spending by
+     * accident, and lost the lot with nothing on screen offering it back.
+     *
+     * Both halves are remembered: what it was, and what it became. The offer
+     * appears only while the form still matches what the switch produced, so
+     * undoing can never throw away something typed afterwards. Start typing
+     * and the offer goes, because by then it would cost more than it returns.
+     */
+    const was = draft;
+    const now: Draft = {
+      ...emptyDraft(draft.date),
       flow,
-      amount: d.amount,
+      amount: draft.amount,
       description:
-        needs(flow, "description") && !suggested.has("description") ? d.description : "",
-      notes: needs(flow, "notes") ? d.notes : "",
-    }));
+        needs(flow, "description") && !suggested.has("description") ? draft.description : "",
+      notes: needs(flow, "notes") ? draft.notes : "",
+    };
+
+    setUndoSwitch({ was, now });
+    setDraft(now);
     setSuggested((s) => (s.has("amount") ? new Set(["amount"]) : new Set()));
     setCategoryHint(null);
+    setSubmitted(false);
+  };
+
+  /** Put the entry back as it was before the type changed. */
+  const undoFlow = (): void => {
+    if (!undoSwitch) return;
+    setDraft(undoSwitch.was);
+    setUndoSwitch(null);
     setSubmitted(false);
   };
 
@@ -1144,6 +1179,22 @@ export function AddTransaction({
             );
           })}
         </div>
+
+        {/*
+          Only while the form still holds exactly what the switch produced.
+          Once anything has been typed, putting the old entry back would take
+          that typing with it, so the offer withdraws instead.
+        */}
+        {undoSwitch && JSON.stringify(draft) === JSON.stringify(undoSwitch.now) && (
+          <p className="t-micro fms-flowundo">
+            <span>
+              Changed to {draft.flow}, which empties the fields {undoSwitch.was.flow} was using.
+            </span>
+            <button type="button" onClick={undoFlow}>
+              Undo, back to {undoSwitch.was.flow}
+            </button>
+          </p>
+        )}
 
         {!draft.flow ? (
           <p className="t-caption" style={{ color: "var(--ink-3)", margin: "var(--space-6) 0", textAlign: "center" }}>

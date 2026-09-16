@@ -4665,6 +4665,35 @@ textarea.fms-askinput {
  * name and a long figure both stay whole.
  */
 /*
+ * The way back from a type tapped by accident.
+ *
+ * Under the row it is about, in the quiet colour: it is an offer, not a
+ * warning, and it is gone the moment anything is typed.
+ */
+.fms-flowundo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  margin: var(--space-2) 0 0;
+  color: var(--ink-3);
+}
+
+.fms-flowundo button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--brand-600);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.fms-flowundo button:hover {
+  color: var(--ink);
+}
+
+/*
  * A row is a control now, because a bar you can point at has to be one.
  *
  * Reset rather than restyled: a button brings its own font, padding, border
