@@ -1822,6 +1822,11 @@ export function AddTransaction({
       {showChat && (
         <AskPanel
           sink={sink}
+          /*
+            What the form holds right now, so a card sent to the form stops
+            being a photograph of it and starts being a view of it.
+          */
+          formDraft={draft}
           deleted={deleted}
           debts={debts}
           lastSaved={lastSaved}

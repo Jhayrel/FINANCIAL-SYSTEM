@@ -435,6 +435,7 @@ export function AskPanel({
   uid,
   deleted,
   debts,
+  formDraft,
 }: {
   settings: AppSettings;
   transactions: readonly Transaction[];
@@ -456,6 +457,16 @@ export function AskPanel({
    * disagreed about what had happened to it.
    */
   lastSaved: { draft: Draft; at: number } | null;
+  /**
+   * What the form beside this holds, right now.
+   *
+   * The card sent to the form was a photograph of the entry at the moment it
+   * was sent. Change the amount in the form from PHP 1,000.00 to PHP
+   * 10,000.00 and the card went on saying PHP 1,000.00, so the two halves of
+   * one entry disagreed on screen and the owner had no way to tell which one
+   * was about to be saved.
+   */
+  formDraft?: Draft | undefined;
 }) {
   /**
    * Gated on its own setting, not on the Insights panel's.
@@ -468,6 +479,60 @@ export function AskPanel({
   const ai = useAi({ settings, transactions, budgets, reference, feature: "chat", asOf });
 
   const [turns, setTurns] = useState<Turn[]>([]);
+
+  /**
+   * The card in the form follows the form.
+   *
+   * ── Why the card's own draft moves, rather than just its display ────────
+   *
+   * Showing the live figure while the buttons still held the old one would be
+   * worse than the staleness it fixes: the card would read PHP 10,000.00 and
+   * Add to ledger would save PHP 1,000.00. So the card's draft is what moves.
+   * Everything downstream then agrees by construction: the fields, the
+   * checks, the warning about extra zeros, and the figure on the button.
+   *
+   * ── Why a cleared form stops it ─────────────────────────────────────────
+   *
+   * An empty form is not an edit, it is the entry being put down, and a card
+   * that followed it there would erase the only remaining copy of what was
+   * read. So clearing stops the tracking and the card keeps what it last
+   * held, which is what makes "Put back in the form" a way back from a Clear
+   * pressed by accident.
+   *
+   * Only the most recent card sent to the form, because only one entry can be
+   * in the form at a time. Older ones keep what they held.
+   */
+  useEffect(() => {
+    if (!formDraft) return;
+
+    const empty =
+      formDraft.amount === null &&
+      formDraft.item.trim() === "" &&
+      formDraft.description.trim() === "";
+    if (empty) return;
+
+    setTurns((prev) => {
+      let at = -1;
+      for (let i = prev.length - 1; i >= 0; i -= 1) {
+        const t = prev[i];
+        if (t && isOffer(t) && t.state === "used") {
+          at = i;
+          break;
+        }
+      }
+      if (at < 0) return prev;
+
+      const card = prev[at];
+      if (!card || !isOffer(card)) return prev;
+      // Same entry, so nothing to do. Without this the effect would set state
+      // on every render and never settle.
+      if (JSON.stringify(card.proposal.draft) === JSON.stringify(formDraft)) return prev;
+
+      return prev.map((t, i) =>
+        i === at && isOffer(t) ? { ...t, proposal: { ...t.proposal, draft: formDraft } } : t,
+      );
+    });
+  }, [formDraft]);
   const [draft, setDraft] = useState("");
   const [files, setFiles] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
@@ -4106,7 +4171,7 @@ function ProposalCard({
           <p className="t-micro fms-proposalfrom">
             {state === "added"
               ? "Saved to the ledger. It is in the Database and in the activity trail."
-              : "Loaded into the form beside this. Check it and press Save transaction."}
+              : "Following the form beside this: whatever you change there shows here. Check it and press Save transaction."}
           </p>
           {/*
             A way back.
