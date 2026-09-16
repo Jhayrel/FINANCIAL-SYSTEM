@@ -124,6 +124,7 @@ import {
 import { chatStore } from "../data/chatStore";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AttachmentNote } from "../domain/aiLog";
+import { verifyReading } from "../domain/verify";
 import { carded, cardsIn, drawn, drew, proposed, said, type StoredCard } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
@@ -1106,10 +1107,51 @@ export function AskPanel({
     const { draft, because } = useHistory
       ? inferFromHistory(start, transactions, reference, hint)
       : { draft: start, because: learned };
+
+    /**
+     * ── Between step 3 and step 4: check the reading against what was said ─
+     *
+     * Everything above this line builds the row: the model reads the
+     * sentence, your corrections are applied, then the ledger and Settings
+     * fill and constrain it. Every one of those steps checks a field against
+     * a list. None of them looks back at the sentence.
+     *
+     * So a row could pass every check and still be wrong about the message,
+     * which is the failure the owner kept hitting: the right shape built from
+     * the wrong half of what they said. This asks the questions only the
+     * sentence can answer. Did you write a larger figure than the one that
+     * was read. Did you name a wallet other than this one. Did you name one
+     * of your own items other than this one. Is it dated after today. And is
+     * every field this flow needs actually filled in.
+     *
+     * It changes nothing and refuses nothing: every answer is a line on the
+     * card, beside the field it is about, and `checkDraft` is still the only
+     * thing that can stop a save. A reading with a question over it drops to
+     * low confidence, which is what the card already uses to say "look at
+     * this one".
+     *
+     * No second call to the model. These are answerable from the sentence and
+     * your own lists, which is string matching and arithmetic: it runs in
+     * well under a millisecond, with no key and no network, and it cannot be
+     * wrong about the ledger in the way a model can.
+     */
+    const checked = verifyReading(
+      draft,
+      proposal.said ?? hint,
+      reference,
+      asOf,
+      proposal.confidence,
+    );
+
     const filled: Proposal = {
       ...proposal,
       draft,
-      adjustments: [...proposal.adjustments, ...(useHistory ? [...learned, ...because] : because)],
+      confidence: checked.confidence,
+      adjustments: [
+        ...proposal.adjustments,
+        ...(useHistory ? [...learned, ...because] : because),
+        ...checked.notes,
+      ],
     };
 
     /**
