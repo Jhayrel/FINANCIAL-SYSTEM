@@ -276,7 +276,24 @@ interface DebtChoice {
 
 interface Offered {
   readonly kind: "proposal";
+  /**
+   * What was read, and it never changes.
+   *
+   * This is the way back. It used to be overwritten while the card followed
+   * the form, which destroyed the only copy of the entry as it was first
+   * read: switching Transfer to Spending by accident cleared the wallet and
+   * the status, the card followed it down, and "Put back in the form" had
+   * nothing left to put back.
+   */
   readonly proposal: Proposal;
+  /**
+   * What the form holds right now, while this card is the one in it.
+   *
+   * Separate from `proposal` on purpose. The card shows this, and adds this,
+   * because it is what you can see; but the original above survives
+   * underneath it, so an accidental change is always undoable.
+   */
+  readonly live?: Draft | undefined;
   /**
    * `used` keeps the card. Sending it to the form used to replace it with one
    * line of text, so the thing you had just asked to look at disappeared at
@@ -526,11 +543,12 @@ export function AskPanel({
       if (!card || !isOffer(card)) return prev;
       // Same entry, so nothing to do. Without this the effect would set state
       // on every render and never settle.
-      if (JSON.stringify(card.proposal.draft) === JSON.stringify(formDraft)) return prev;
+      const showing = card.live ?? card.proposal.draft;
+      if (JSON.stringify(showing) === JSON.stringify(formDraft)) return prev;
 
-      return prev.map((t, i) =>
-        i === at && isOffer(t) ? { ...t, proposal: { ...t.proposal, draft: formDraft } } : t,
-      );
+      // Only `live` moves. The reading stays where it is, so there is always
+      // something to go back to.
+      return prev.map((t, i) => (i === at && isOffer(t) ? { ...t, live: formDraft } : t));
     });
   }, [formDraft]);
   const [draft, setDraft] = useState("");
@@ -607,7 +625,25 @@ export function AskPanel({
   /** An attachment being looked at full size. Session only, never stored. */
   const [previewing, setPreviewing] = useState<Attachment | null>(null);
   /** What has been corrected before, so the same guess is not made twice. */
-  const [learnedItems, setLearnedItems] = useState<ReadonlyMap<string, string>>(new Map());
+  /**
+   * The corrections, kept as events rather than as a finished lookup.
+   *
+   * Working them out here, against the current lists, is what stops a
+   * correction to a field value being applied as if it taught something about
+   * the word. Kept raw because the lists can change while the panel is open.
+   */
+  const [learnedEvents, setLearnedEvents] = useState<readonly AiEvent[]>([]);
+
+  const learnedItems = useMemo(
+    () =>
+      correctionsFrom(learnedEvents, "item", [
+        ...reference.spendingTypes.map((s) => s.name),
+        ...reference.bills,
+        ...reference.subscriptions,
+        ...reference.revenueCategories,
+      ]),
+    [learnedEvents, reference],
+  );
 
   /**
    * Everything the assistant did, and what was done about it.
@@ -628,7 +664,7 @@ export function AskPanel({
     aiLogStore(uid)
       .recent()
       .then((events) => {
-        if (live) setLearnedItems(correctionsFrom(events, "item"));
+        if (live) setLearnedEvents(events);
       })
       .catch(() => {});
     return () => {
@@ -3400,7 +3436,10 @@ export function AskPanel({
                       : {}),
                   }),
                 );
-                const given = sink.add(turn.proposal.draft, {
+                // What is on the card, which is what the form holds if it is
+                // following it. Adding the original here would save something
+                // other than the figures being looked at.
+                const given = sink.add(turn.live ?? turn.proposal.draft, {
                   actor: "ai",
                   // A picture and a sentence are different enough to tell
                   // apart when reading the trail back.
@@ -3844,7 +3883,17 @@ function ProposalCard({
   onDiscard: () => void;
 }) {
   const { proposal, state } = offered;
-  const { draft } = proposal;
+  /**
+   * What is on the card: the form while it is following it, and otherwise
+   * what was read. Everything below reads this one binding, so the fields,
+   * the checks, the duplicate warning and the figure on the button cannot
+   * disagree with each other.
+   */
+  const draft = offered.live ?? proposal.draft;
+  /** The form has been changed since this was read, so there is an undo to offer. */
+  const changedInForm =
+    offered.live !== undefined &&
+    JSON.stringify(offered.live) !== JSON.stringify(proposal.draft);
   const check = sink.check(draft);
 
   /**
@@ -4171,7 +4220,9 @@ function ProposalCard({
           <p className="t-micro fms-proposalfrom">
             {state === "added"
               ? "Saved to the ledger. It is in the Database and in the activity trail."
-              : "Following the form beside this: whatever you change there shows here. Check it and press Save transaction."}
+              : changedInForm
+                ? "Following the form beside this, which no longer matches what I read. Put the original back to undo what changed there."
+                : "Following the form beside this: whatever you change there shows here. Check it and press Save transaction."}
           </p>
           {/*
             A way back.
@@ -4184,7 +4235,7 @@ function ProposalCard({
           {state === "used" && (
             <div className="fms-proposalactions">
               <Button size="sm" onClick={onUse}>
-                Put back in the form
+                {changedInForm ? "Put the original back" : "Put back in the form"}
               </Button>
               <Button size="sm" variant="primary" disabled={!check.ok} onClick={pressAdd}>
                 {addLabel}

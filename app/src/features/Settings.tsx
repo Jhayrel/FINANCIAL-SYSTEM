@@ -2437,7 +2437,7 @@ function AiSection({
         )}
       </Group>
 
-      <AiLearningGroup uid={signedInUid} />
+      <AiLearningGroup uid={signedInUid} reference={reference} />
 
       <AiHistoryGroup uid={signedInUid} />
 
@@ -3224,18 +3224,27 @@ function AiHistoryGroup({ uid }: { uid: string | null }) {
           </p>
           <ol className="fms-acts">
             {[...messages].reverse().slice(0, showAll ? 200 : 8).map((m) => (
-              <li key={m.id} className="fms-act">
-                <div className="fms-acthead">
-                  <span className="t-caption" style={{ whiteSpace: "pre-wrap" }}>
-                    {m.text}
-                  </span>
-                  <span className="t-micro fms-actwhen">{new Date(m.at).toLocaleString("en-PH")}</span>
-                </div>
-                <div className="fms-actmeta t-micro">
-                  <span className={m.role === "you" ? "fms-actor" : "fms-actor fms-actor--ai"}>
-                    {m.role === "you" ? "you" : "assistant"}
-                  </span>
-                  {m.from && <span>{m.from}</span>}
+              <li key={m.id} className="fms-act fms-act--plain">
+                {/*
+                  Same wrapper as every other use of this row. Without it the
+                  message was laid out in the 32px column meant for an icon,
+                  which is why the transcript read one word per line.
+                */}
+                <div className="fms-actmain">
+                  <div className="fms-acthead">
+                    <span className="t-caption fms-actsummary" style={{ whiteSpace: "pre-wrap" }}>
+                      {m.text}
+                    </span>
+                    <span className="t-micro fms-actwhen">
+                      {new Date(m.at).toLocaleString("en-PH")}
+                    </span>
+                  </div>
+                  <div className="fms-actmeta t-micro">
+                    <span className={m.role === "you" ? "fms-actor" : "fms-actor fms-actor--ai"}>
+                      {m.role === "you" ? "you" : "assistant"}
+                    </span>
+                    {m.from && <span>{m.from}</span>}
+                  </div>
                 </div>
               </li>
             ))}
@@ -3281,7 +3290,14 @@ function AiHistoryGroup({ uid }: { uid: string | null }) {
  * Never the picture: a photo is a megabyte and a document is capped at one,
  * so an image would be the least useful byte in the database.
  */
-function AiLearningGroup({ uid }: { uid: string | null }) {
+function AiLearningGroup({
+  uid,
+  reference,
+}: {
+  uid: string | null;
+  /** The names each field already means, so a row correction is not shown as a lesson. */
+  reference: ReferenceLists;
+}) {
   const [events, setEvents] = useState<AiEvent[] | null>(null);
 
   useEffect(() => {
@@ -3301,7 +3317,15 @@ function AiLearningGroup({ uid }: { uid: string | null }) {
 
   const [showAll, setShowAll] = useState(false);
   const all = events ?? [];
-  const learned = correctionsFrom(all, "item");
+  const everyItem = [
+    ...reference.spendingTypes.map((s) => s.name),
+    ...reference.bills,
+    ...reference.subscriptions,
+    ...reference.revenueCategories,
+  ];
+  const everyWallet = [...reference.wallets, ...reference.savings];
+
+  const learned = correctionsFrom(all, "item", everyItem);
   /**
    * The other three fields corrections are recorded against.
    *
@@ -3311,9 +3335,12 @@ function AiLearningGroup({ uid }: { uid: string | null }) {
    * different statement about the wallet than about the category.
    */
   const learnedElsewhere = [
-    ["wallet it came from", correctionsFrom(all, "fromWallet")],
-    ["wallet it went to", correctionsFrom(all, "toWallet")],
-    ["category", correctionsFrom(all, "category")],
+    ["wallet it came from", correctionsFrom(all, "fromWallet", everyWallet)],
+    ["wallet it went to", correctionsFrom(all, "toWallet", everyWallet)],
+    [
+      "category",
+      correctionsFrom(all, "category", ["Spending", "Bills", "Subscriptions", "Revenue", "Opening"]),
+    ],
   ] as const;
   const count = (action: string): number => all.filter((e) => e.action === action).length;
 

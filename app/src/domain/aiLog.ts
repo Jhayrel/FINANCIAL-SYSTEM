@@ -161,8 +161,43 @@ export function aiEvent(
 export function correctionsFrom(
   events: readonly AiEvent[],
   field: string,
+  /**
+   * The names this field already has a meaning for: your accounts for a
+   * wallet, your own items for an item, the fixed list for a category.
+   *
+   * ── What went on screen without this ────────────────────────────────────
+   *
+   * "What it has learned" was showing three things it had supposedly worked
+   * out:
+   *
+   *   gcash is Cash        cash is Gcash        maya is Cash
+   *
+   * The first two contradict each other, and all three are nonsense, because
+   * none of them is a thing that can be learned. They came from correcting
+   * the wallet on a row in the form. A form correction says "this row was
+   * wrong", and the pair it records is the old field value against the new
+   * one, so correcting one row taught the assistant that the word Gcash means
+   * Cash, on every future entry.
+   *
+   * The guard above only caught a value mapped onto itself. The rule this
+   * file already states is the wider one: a mapping is worth keeping only
+   * when its key is a term the ledger does not already have a meaning for.
+   * That is what this is, and it needs the lists to be able to tell.
+   *
+   * "Jolibee is Treat" is real learning and survives, because Jolibee is not
+   * one of the owner's items: it is a name the assistant invented, and being
+   * corrected is how it finds that out. "Gcash is Cash" does not survive,
+   * because Gcash is an account and already means itself.
+   *
+   * Optional, so a caller with no lists to hand gets the old behaviour rather
+   * than silently getting nothing.
+   */
+  known: readonly string[] = [],
 ): Map<string, string> {
   const learned = new Map<string, string>();
+  const already = new Set(
+    known.map((name) => name.trim().toLowerCase()).filter((name) => name !== ""),
+  );
 
   // Oldest first, so a later correction replaces an earlier one.
   for (const e of [...events].sort((a, b) => (a.at < b.at ? -1 : 1))) {
@@ -181,6 +216,13 @@ export function correctionsFrom(
      * meaning for, which is exactly the case this is for.
      */
     if (from === to.toLowerCase()) continue;
+
+    /**
+     * The key already means something, so the correction is about this row
+     * and not about the word. Dropped rather than applied to every future
+     * entry that happens to mention it.
+     */
+    if (already.has(from)) continue;
 
     learned.set(from, to);
   }

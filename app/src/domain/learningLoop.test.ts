@@ -131,6 +131,34 @@ describe("the loop closes: recorded, then read back", () => {
   it("keeps corrections to other fields out of the item lookup", () => {
     const events = manualCorrections(row(), row({ fromWallet: "Maya" }), "add");
     expect(correctionsFrom(events, "item").size).toBe(0);
-    expect(correctionsFrom(events, "fromWallet").get("cash")).toBe("Maya");
+  });
+
+  /**
+   * The three lines that were on screen under "It now knows":
+   *
+   *   gcash is Cash        cash is Gcash        maya is Cash
+   *
+   * The first two contradict each other and none of them is learnable. They
+   * came from correcting the wallet on a row, which records the old field
+   * value against the new one, so one correction taught the assistant that
+   * the word Gcash means Cash on every future entry.
+   *
+   * Told which names are accounts, the pair is dropped. This is the rule the
+   * test above states, applied to the fields it was never applied to.
+   */
+  it("refuses to learn that one of your own accounts means another", () => {
+    const events = manualCorrections(row(), row({ fromWallet: "Maya" }), "add");
+    const accounts = ["Cash", "Maya", "Gcash"];
+    expect(correctionsFrom(events, "fromWallet", accounts).size).toBe(0);
+  });
+
+  /**
+   * And the other half of the rule: a name the ledger has no meaning for is
+   * still learned, which is the whole point of keeping corrections at all.
+   */
+  it("still learns a name that is not one of your own", () => {
+    const events = manualCorrections(row({ item: "Jolibee" }), row({ item: "Treat" }), "add");
+    const items = ["Food", "Gas", "Treat"];
+    expect(correctionsFrom(events, "item", items).get("jolibee")).toBe("Treat");
   });
 });
