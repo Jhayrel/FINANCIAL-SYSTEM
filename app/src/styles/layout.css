@@ -3746,6 +3746,19 @@ button.fms-recent-row:disabled {
   border-top: none;
 }
 
+/*
+ * The same row, without the icon column.
+ *
+ * Settings reuses this list for what the assistant has learned, where every
+ * row is the assistant and there is no icon to draw. Left as the two column
+ * grid, the summary was laid out in the 32px column meant for the icon: one
+ * word per line, with the badges alongside it. This drops the column instead
+ * of filling it with a blank.
+ */
+.fms-act--plain {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .fms-acticon {
   display: grid;
   place-items: center;
@@ -4651,12 +4664,107 @@ textarea.fms-askinput {
  * Label, bar, figure. The bar is the only part that gives, so a long item
  * name and a long figure both stay whole.
  */
+/*
+ * A row is a control now, because a bar you can point at has to be one.
+ *
+ * Reset rather than restyled: a button brings its own font, padding, border
+ * and centring, and every one of those fights the grid it is standing in.
+ */
 .fms-chartrow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(40px, 2fr) auto;
   align-items: center;
   gap: var(--space-2);
+  width: 100%;
   min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-chartrow:hover .fms-chartbar,
+.fms-chartrow:focus-visible .fms-chartbar,
+.fms-chartrow[aria-pressed="true"] .fms-chartbar {
+  background: var(--brand-700, var(--brand-600));
+}
+
+.fms-chartrow[aria-pressed="true"] .fms-chartlabel,
+.fms-chartrow[aria-pressed="true"] .fms-chartvalue {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/*
+ * The figures for the part being pointed at.
+ *
+ * Always present, including the line that says how to use it, so the card is
+ * the same height whether or not anything is being read. A readout that
+ * appears on hover moves everything under it, which on a phone means the
+ * thing you tapped jumps out from under your thumb.
+ */
+.fms-chartread {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  min-height: 1.4em;
+  margin: var(--space-2) 0 0;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-2);
+}
+
+.fms-chartread--idle {
+  color: var(--ink-3);
+}
+
+.fms-chartread-label {
+  font-weight: 600;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.fms-chartread-money {
+  color: var(--ink);
+}
+
+.fms-chartread-of {
+  color: var(--ink-3);
+}
+
+/* A legend entry is a control too, and resets the same way. */
+.fms-legendrow {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  padding: 1px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-legendrow[aria-pressed="true"] .fms-pielabel,
+.fms-legendrow[aria-pressed="true"] .fms-piefigure {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* The month being read, as a rule down the drawing. */
+.fms-lineat {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
 }
 
 .fms-chartlabel {
@@ -4867,7 +4975,7 @@ textarea.fms-askinput {
 
 .fms-tallies {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: var(--space-3);
 }
 
@@ -4952,6 +5060,12 @@ textarea.fms-askinput {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.fms-pielegend,
+.fms-linelegend {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 3px var(--space-4);
 }
 
 .fms-pielegend li,

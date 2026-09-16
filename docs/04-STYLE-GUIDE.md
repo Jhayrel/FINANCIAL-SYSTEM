@@ -469,6 +469,22 @@ Charts explain, they don't decorate. Every chart answers one question stated in 
 | Empty | `No data for this period.` centred in `--ink-3`, axes still drawn. |
 | Accessibility | Every chart has a visually-hidden data table and an `aria-label` summary. Never colour alone, bars carry labels, lines carry direct end-labels. |
 
+**A chart inside a message** (the assistant's cards) reads its figures in a
+fixed line under the drawing rather than in a floating tooltip. This departs
+from the Tooltip row above deliberately, for two reasons a full screen chart
+does not have. A message card is as narrow as 280px, so a tooltip following
+the cursor covers the thing it is describing. And a readout that appears only
+while pointing changes the height of a message that has more messages under
+it, which on a phone moves what you just tapped out from under your thumb. The
+line is always present, and says how to use it while nothing is picked.
+
+Pointing itself behaves as that row says: hover reads, tap pins, and tapping
+the pinned part again lets it go. Every part is a real control (a bar, a
+slice, a legend row, the band above a month), so the figures are reachable by
+keyboard and named to a screen reader instead of being hover only. A series of
+one month is drawn in the middle with no line through it: a single point has
+no slope to show, and one drawn against the left edge reads as a fault.
+
 **Types and when to use them**
 
 | Chart | Use for | Colour |
@@ -552,6 +568,21 @@ From the review of 2026-09-16. Every one of these is worked out from figures the
 **The forecast's own rules** (replacing the Excel's flat 3%, see `domain/forecast.ts`): growth is the average month-on-month change over the last six months, held within 15% either way and flat when there are fewer than three changes to read; the recent average weights the newest month heaviest (3, 2, 1); the same month last year is blended at 40% rather than overriding; a debt is charged to the month its payment is actually due, not to the month after today.
 
 **Bills** are expected a month after the last payment when they keep to a day of the month, and on their own rhythm when they do not (four-weekly stays four-weekly). Either way the date comes from the most recent payment alone, so a skipped cycle leaves no backlog.
+
+### 3.14 What the assistant is doing
+
+One word for whatever is actually running, beside the three dots.
+
+| Rule | Spec |
+|---|---|
+| Source | Set where the work starts, never on a timer. "Reading what you asked" is the routing call, "Reading your ledger" is a question going out, "Reading what you sent" is a receipt, "Checking it against your ledger" is a card being grounded in your corrections and your history, "Checking your answer" is a reply to a blank. |
+| Still going | After eight seconds the same call changes to "Still ..." wording. True by construction: that call has not returned. |
+| Never | A word that names no real work, a sequence that plays out regardless of what is happening, or a percentage. |
+| Motion | The three dots only, stopped entirely under `prefers-reduced-motion` (rule D9), where the words alone still say what is happening. |
+
+Why it matters: one unchanging "Thinking" for fifteen seconds says nothing,
+and the honest question a reader asks of it is whether anything is happening
+at all.
 
 ## 4. Content & voice
 

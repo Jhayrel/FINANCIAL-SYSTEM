@@ -123,7 +123,7 @@ import {
 } from "../data/aiClient";
 import { chatStore } from "../data/chatStore";
 import { aiLogStore } from "../data/aiLogStore";
-import { aiEvent, correctionsFrom, type AiEvent, type AttachmentNote } from "../domain/aiLog";
+import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AttachmentNote } from "../domain/aiLog";
 import { carded, cardsIn, drawn, drew, proposed, said, type StoredCard } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
@@ -470,6 +470,39 @@ export function AskPanel({
   const [draft, setDraft] = useState("");
   const [files, setFiles] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
+
+  /**
+   * What is happening right now, in words.
+   *
+   * "Thinking" sat there unchanged for as long as the work took, whether it
+   * was routing a sentence, reading a receipt, counting entries or waiting on
+   * a provider. It is the same word for every one of those, so it says
+   * nothing, and after ten seconds of it the honest question is whether
+   * anything is happening at all.
+   *
+   * Every word this shows is set at the point the work it names really
+   * starts, and none of them is on a timer pretending to be progress. The
+   * one thing that is time based is the "still" wording, which is true by
+   * construction: it only appears while the same call is still running.
+   */
+  const [stage, setStage] = useState("");
+
+  /**
+   * Run something, saying what it is while it runs.
+   *
+   * `still` replaces the words once the call has been going for eight
+   * seconds. That is not a second phase invented to look busy: the first
+   * phase has not finished, and the new words say exactly that.
+   */
+  const during = async <T,>(words: string, run: () => Promise<T>, still?: string): Promise<T> => {
+    setStage(words);
+    const timer = still === undefined ? undefined : setTimeout(() => setStage(still), 8_000);
+    try {
+      return await run();
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
   /**
    * A half-read entry and the blank being asked about.
    *
@@ -624,6 +657,21 @@ export function AskPanel({
   const held = useRef<{ readonly index: number; readonly offset: number } | null>(null);
 
   /**
+   * Whether the thread has been put at the latest message yet.
+   *
+   * A refresh restores the whole conversation in one render, and the rules
+   * below only hold the view at the end when it is already near the end. On
+   * the render where the history arrives the view is at the top, so that is
+   * where it stayed: the owner opened the panel above months of conversation
+   * and had to scroll all the way down to what they were last reading.
+   *
+   * Once, on the first render that has anything in it. After that the rules
+   * below own the position again, so following along still follows and
+   * reading something further up still holds still.
+   */
+  const landed = useRef(false);
+
+  /**
    * How far below the top of the thread this element starts.
    *
    * Measured off the rectangles rather than `offsetTop`, so it does not
@@ -670,6 +718,13 @@ export function AskPanel({
         thread.scrollTop = Math.max(0, thread.scrollTop + topWithin(el, thread) - anchor.offset);
         return;
       }
+    }
+
+    // The restored conversation, opened at its latest message.
+    if (!landed.current && turns.length > 0) {
+      landed.current = true;
+      thread.scrollTop = thread.scrollHeight;
+      return;
     }
 
     const distance = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
@@ -1003,6 +1058,9 @@ export function AskPanel({
     batch = false,
     settled: readonly Blank[] = [],
   ): Promise<void> => {
+    // Steps 2 and 3 below are the work this names: your corrections, then the
+    // ledger and Settings. It is set here because it starts here.
+    setStage("Checking it against your ledger");
     /**
      * ── Step 2 of 4: what you have already corrected ────────────────────
      *
@@ -1026,7 +1084,9 @@ export function AskPanel({
      * a Revenue row.
      */
     const said = (proposal.said ?? hint).trim().toLowerCase();
-    const taught = said ? learnedItems.get(said) : undefined;
+    // Matched on the words that carry the meaning, not on the whole sentence:
+    // the figure changes every time and an exact lookup never fired twice.
+    const taught = said ? taughtFor(said, learnedItems) : undefined;
     const flow = proposal.draft.flow;
     const teachable =
       taught && flow && itemsFor(flow, proposal.draft.category, reference).includes(taught);
@@ -1286,13 +1346,18 @@ export function AskPanel({
 
     const control = new AbortController();
     stopper.current = control;
-    const result = await extractProposals({
-      note,
-      attachments: sent,
-      reference,
-      asOf,
-      signal: control.signal,
-    });
+    const result = await during(
+      sent.length > 0 ? "Reading what you sent" : "Working out the entry",
+      () =>
+        extractProposals({
+          note,
+          attachments: sent,
+          reference,
+          asOf,
+          signal: control.signal,
+        }),
+      "Still reading it",
+    );
     stopper.current = null;
 
     /**
@@ -1588,7 +1653,11 @@ export function AskPanel({
     const history = spokenHistory(turns, HISTORY_TURNS);
 
     // What the owner has open, so "what do you think" is about that screen (domain/screenContext.ts).
-    const answer = await ai.ask("chat", { question, history, screen: screenText(currentScreen()) });
+    const answer = await during(
+      "Reading your ledger",
+      () => ai.ask("chat", { question, history, screen: screenText(currentScreen()) }),
+      "Still waiting on the model",
+    );
 
     /**
      * A failed answer says so, and says why underneath.
@@ -1608,6 +1677,7 @@ export function AskPanel({
     const note = (typed ?? draft).trim();
     if (busy) return;
     if (!note && files.length === 0) return;
+    setStage("");
 
     /**
      * A budget, which is changed on the Budget screen and never from here.
@@ -1617,7 +1687,70 @@ export function AskPanel({
      * The assistant writes entries only, so the answer is where the button
      * is, and the entry being asked about is left waiting, untouched.
      */
-    if (files.length === 0 && !as && isBudgetCommand(note)) {
+    /**
+     * ── The model reads it first, before any rule in this file ──────────
+     *
+     * This used to run below the two gates underneath it, which meant a
+     * pattern decided what a sentence was and the model was asked second,
+     * about whatever the pattern had left. The owner asked for the other
+     * order, in these words: analyse, then hand to the code that does the
+     * work, then show the result.
+     *
+     * So it is asked first, about the message as typed. The rules below
+     * are still here and still matter, but they are now a refinement of
+     * one answer rather than the first opinion: they run when the model
+     * said this is an entry, or when there was no model to ask.
+     *
+     * That is also why moving it costs nothing in time. It was already on
+     * the critical path for every message that reached it; it is the same
+     * one call, asked earlier.
+     */
+    /**
+     * What does this message want.
+     *
+     * The model decides. Every branch below used to be a regular expression
+     * and every one of them got things wrong: "Delete that last" found
+     * nothing because "last" was stripped as filler, "how about this week"
+     * was answered in prose because the chart follow-up pattern knew nothing
+     * about weeks, and "edit the last one" was told the assistant cannot
+     * change anything. Those are not patterns, they are sentences that mean
+     * something only next to what came before them.
+     *
+     * `routed` is null when there is no model or it could not answer, and
+     * then the local rules run exactly as they did. Wrong sometimes beats
+     * absent.
+     */
+    let routed: { intent: Routed; target: string; period: string } | null = null;
+    if (files.length === 0 && !as && !ai.disabled) {
+      setBusy(true);
+      try {
+        setStage("Reading what you asked");
+        routed = await routeMessage({
+          text: note,
+          history: spokenHistory(turns, HISTORY_TURNS),
+          onScreen: {
+            openCard: turns.some((t) => isOffer(t) && t.state === "open"),
+            chart: turns.some(isChart),
+            awaitingAnswer: pending?.blank ?? "",
+          },
+        });
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    /**
+     * Whether the rules below get a say.
+     *
+     * A budget instruction and "paid all my bills" both read as entries to
+     * the router, which is exactly the case those two rules exist to catch,
+     * so they still run then. A message the model read as a delete, a chart
+     * or a question is none of their business and they stand down: that is
+     * what asking first is for.
+     */
+    const modelSawEntry = routed === null || routed.intent === "entry";
+
+    if (files.length === 0 && !as && modelSawEntry && isBudgetCommand(note)) {
       setDraft("");
       say({ kind: "you", text: note });
       const reply = `Budgets are set on the Budget screen, not here: I only add entries. Open Budget, and the planner's "Use last month's budget" button (it names the month) copies it in one tap.${
@@ -1636,7 +1769,7 @@ export function AskPanel({
      * blank empty and asked "How much was it?", which has no single answer.
      * The open bills are known, and so is what each cost last time.
      */
-    if (files.length === 0 && !as && wantsAllBillsPaid(note)) {
+    if (files.length === 0 && !as && modelSawEntry && wantsAllBillsPaid(note)) {
       setDraft("");
       setPending(null);
       say({ kind: "you", text: note });
@@ -1669,38 +1802,6 @@ export function AskPanel({
       return;
     }
 
-    /**
-     * What does this message want.
-     *
-     * The model decides. Every branch below used to be a regular expression
-     * and every one of them got things wrong: "Delete that last" found
-     * nothing because "last" was stripped as filler, "how about this week"
-     * was answered in prose because the chart follow-up pattern knew nothing
-     * about weeks, and "edit the last one" was told the assistant cannot
-     * change anything. Those are not patterns, they are sentences that mean
-     * something only next to what came before them.
-     *
-     * `routed` is null when there is no model or it could not answer, and
-     * then the local rules run exactly as they did. Wrong sometimes beats
-     * absent.
-     */
-    let routed: { intent: Routed; target: string; period: string } | null = null;
-    if (files.length === 0 && !as && !ai.disabled) {
-      setBusy(true);
-      try {
-        routed = await routeMessage({
-          text: note,
-          history: spokenHistory(turns, HISTORY_TURNS),
-          onScreen: {
-            openCard: turns.some((t) => isOffer(t) && t.state === "open"),
-            chart: turns.some(isChart),
-            awaitingAnswer: pending?.blank ?? "",
-          },
-        });
-      } finally {
-        setBusy(false);
-      }
-    }
 
     /**
      * Every message, whatever it turns out to be.
@@ -2005,7 +2106,7 @@ export function AskPanel({
       setDraft("");
       setBusy(true);
       try {
-        await answerPending(note);
+        await during("Checking your answer", () => answerPending(note), "Still checking it");
       } finally {
         setBusy(false);
       }
@@ -3316,7 +3417,7 @@ export function AskPanel({
               <i />
             </span>
             <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-              {attached ? "Reading the picture" : intent === "log" ? "Reading" : "Thinking"}
+              {stage || (attached ? "Reading the picture" : intent === "log" ? "Reading" : "Thinking")}
             </span>
           </div>
         )}
@@ -4176,7 +4277,69 @@ function FoundList({
  * comparison, which is what a bar chart is for, and it stays readable to
  * anyone who cannot separate the hues a legend would have needed.
  */
+/**
+ * The figures for whichever part is being pointed at.
+ *
+ * A chart says the shape and hides the arithmetic: a bar three quarters
+ * along is "about three quarters of something". This says the rest of it,
+ * in one line that is always there, so the reading never depends on
+ * hovering and never moves the layout when you do.
+ *
+ * The share is of the total, not of the largest. The bar length is already
+ * of the largest, and printing that number beside it would be the same
+ * fact twice while the more useful one went unsaid.
+ */
+function ChartRead({ chart, at }: { chart: Chart; at: number | null }) {
+  const row = at === null ? undefined : chart.rows[at];
+
+  if (!row) {
+    return (
+      <p className="t-micro fms-chartread fms-chartread--idle">
+        Point at any part of it, or tap, for its own figures.
+      </p>
+    );
+  }
+
+  const share = chart.total > 0 ? Math.round((row.value / chart.total) * 100) : 0;
+
+  return (
+    <p className="t-micro fms-chartread">
+      <span className="fms-chartread-label">{row.label}</span>
+      <span className="fms-proposalmoney fms-chartread-money">{chartLabel(row.value)}</span>
+      <span className="fms-chartread-of">
+        {share}% of the total, {row.count} {row.count === 1 ? "entry" : "entries"}
+      </span>
+    </p>
+  );
+}
+
 function ChartView({ chart }: { chart: Chart }) {
+  /**
+   * Which part is being read, shared by every shape.
+   *
+   * Hover sets it and tapping pins it, because a phone has no hover and the
+   * owner asked to be able to tap a chart and see the figure. Pinned means
+   * pinned: tapping the same part again lets it go.
+   */
+  const [at, setAt] = useState<number | null>(null);
+  const [pinned, setPinned] = useState(false);
+
+  const point = (i: number): void => {
+    if (!pinned) setAt(i);
+  };
+  const pin = (i: number): void => {
+    if (pinned && at === i) {
+      setPinned(false);
+      setAt(null);
+      return;
+    }
+    setPinned(true);
+    setAt(i);
+  };
+  const leave = (): void => {
+    if (!pinned) setAt(null);
+  };
+
   return (
     <div className="fms-proposal">
       <div className="fms-proposalhead">
@@ -4189,23 +4352,37 @@ function ChartView({ chart }: { chart: Chart }) {
       </div>
 
       {chart.kind === "pie" ? (
-        <PieView chart={chart} />
+        <PieView chart={chart} at={at} point={point} pin={pin} leave={leave} />
       ) : chart.kind === "line" ? (
-        <LineView chart={chart} />
+        <LineView chart={chart} at={at} point={point} pin={pin} leave={leave} />
       ) : (
-      <div className="fms-chartrows">
-        {chart.rows.map((r) => (
-          <div key={r.label} className="fms-chartrow">
-            <div className="fms-chartlabel t-micro">{r.label}</div>
-            <div className="fms-charttrack">
-              {/* Width is the only thing carrying the comparison. */}
-              <div className="fms-chartbar" style={{ width: `${Math.max(r.share * 100, 1.5)}%` }} />
-            </div>
-            <div className="t-micro fms-chartvalue fms-proposalmoney">{chartLabel(r.value)}</div>
-          </div>
-        ))}
-      </div>
+        <div className="fms-chartrows" onMouseLeave={leave}>
+          {chart.rows.map((r, i) => (
+            <button
+              key={r.label}
+              type="button"
+              className="fms-chartrow"
+              aria-pressed={pinned && at === i}
+              onMouseEnter={() => point(i)}
+              onFocus={() => point(i)}
+              onBlur={leave}
+              onClick={() => pin(i)}
+            >
+              <span className="fms-chartlabel t-micro">{r.label}</span>
+              <span className="fms-charttrack">
+                {/* Width is the only thing carrying the comparison. */}
+                <span
+                  className="fms-chartbar"
+                  style={{ width: `${Math.max(r.share * 100, 1.5)}%` }}
+                />
+              </span>
+              <span className="t-micro fms-chartvalue fms-proposalmoney">{chartLabel(r.value)}</span>
+            </button>
+          ))}
+        </div>
       )}
+
+      <ChartRead chart={chart} at={at} />
 
       <p className="t-micro fms-proposalfrom">
         {chart.othersCount > 0
@@ -4266,7 +4443,19 @@ function markCleared(): void {
  * Every slice is labelled underneath with its own figure, so the drawing is a
  * summary of the list rather than the only way to read it.
  */
-function PieView({ chart }: { chart: Chart }) {
+function PieView({
+  chart,
+  at,
+  point,
+  pin,
+  leave,
+}: {
+  chart: Chart;
+  at: number | null;
+  point: (i: number) => void;
+  pin: (i: number) => void;
+  leave: () => void;
+}) {
   const size = 132;
   const radius = 52;
   const centre = size / 2;
@@ -4290,11 +4479,11 @@ function PieView({ chart }: { chart: Chart }) {
   });
 
   return (
-    <div className="fms-pie">
+    <div className="fms-pie" onMouseLeave={leave}>
       <svg viewBox={`0 0 ${size} ${size}`} className="fms-piesvg" role="img" aria-label={chart.title}>
         {/* Rotated so the first slice starts at the top, where reading starts. */}
         <g transform={`rotate(-90 ${centre} ${centre})`}>
-          {slices.map((s) => (
+          {slices.map((s, i) => (
             <circle
               key={s.label}
               cx={centre}
@@ -4302,10 +4491,13 @@ function PieView({ chart }: { chart: Chart }) {
               r={radius}
               fill="none"
               stroke="var(--brand-600)"
-              strokeOpacity={s.opacity}
-              strokeWidth={22}
+              strokeOpacity={at === null || at === i ? s.opacity : s.opacity * 0.4}
+              strokeWidth={at === i ? 26 : 22}
               strokeDasharray={`${s.dash} ${circumference - s.dash}`}
               strokeDashoffset={-s.offset}
+              onMouseEnter={() => point(i)}
+              onClick={() => pin(i)}
+              style={{ cursor: "pointer" }}
             />
           ))}
         </g>
@@ -4317,18 +4509,24 @@ function PieView({ chart }: { chart: Chart }) {
         </text>
       </svg>
 
-      <ul className="fms-pielegend">
-        {slices.map((s) => (
-          <li key={s.label} className="t-micro">
-            <span
-              className="fms-pieswatch"
-              style={{ opacity: s.opacity }}
-              aria-hidden
-            />
-            <span className="fms-pielabel">{s.label}</span>
-            <span className="fms-piefigure fms-proposalmoney">
-              {s.percent}% · {chartLabel(s.value)}
-            </span>
+<ul className="fms-pielegend">
+        {slices.map((s, i) => (
+          <li key={s.label}>
+            <button
+              type="button"
+              className="t-micro fms-legendrow"
+              aria-pressed={at === i}
+              onMouseEnter={() => point(i)}
+              onFocus={() => point(i)}
+              onBlur={leave}
+              onClick={() => pin(i)}
+            >
+              <span className="fms-pieswatch" style={{ opacity: s.opacity }} aria-hidden />
+              <span className="fms-pielabel">{s.label}</span>
+              <span className="fms-piefigure fms-proposalmoney">
+                {s.percent}% · {chartLabel(s.value)}
+              </span>
+            </button>
           </li>
         ))}
       </ul>
@@ -4347,47 +4545,125 @@ function PieView({ chart }: { chart: Chart }) {
  * value makes a quiet month look like a collapse, which is a lie told with
  * geometry rather than with a figure.
  */
-function LineView({ chart }: { chart: Chart }) {
+function LineView({
+  chart,
+  at,
+  point,
+  pin,
+  leave,
+}: {
+  chart: Chart;
+  at: number | null;
+  point: (i: number) => void;
+  pin: (i: number) => void;
+  leave: () => void;
+}) {
   const width = 260;
-  const height = 96;
+  const height = 110;
   const pad = 6;
   const top = pad;
   const bottom = height - pad;
 
   const highest = Math.max(...chart.rows.map((r) => r.value), 1);
-  const step = chart.rows.length > 1 ? (width - pad * 2) / (chart.rows.length - 1) : 0;
+
+  /**
+   * One month is drawn in the middle, not in the corner.
+   *
+   * The step was zero for a single row, so the only point landed hard against
+   * the left edge with a polygon of no width behind it: a stray dot in the
+   * corner of an empty box, which is what the owner was looking at when they
+   * said the trend was broken. A series of one has no slope to show, so it is
+   * placed where a reading is, and the figure beside it does the talking.
+   */
+  const single = chart.rows.length < 2;
+  const step = single ? 0 : (width - pad * 2) / (chart.rows.length - 1);
 
   const points = chart.rows.map((r, i) => ({
     label: r.label,
     value: r.value,
-    x: pad + i * step,
+    count: r.count,
+    x: single ? width / 2 : pad + i * step,
     y: bottom - (r.value / highest) * (bottom - top),
   }));
 
   const line = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-  const area = `${pad},${bottom} ${line} ${(pad + (chart.rows.length - 1) * step).toFixed(1)},${bottom}`;
+  const firstX = points[0]?.x ?? pad;
+  const lastX = points[points.length - 1]?.x ?? width - pad;
+  const area = `${firstX.toFixed(1)},${bottom} ${line} ${lastX.toFixed(1)},${bottom}`;
+
+  /** Half a step either side, so the whole width of the chart is pointable. */
+  const grab = single ? width / 2 : step / 2;
 
   return (
-    <div className="fms-line">
+    <div className="fms-line" onMouseLeave={leave}>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="fms-linesvg"
         role="img"
         aria-label={chart.title}
       >
-        <polygon points={area} className="fms-linefill" />
-        <polyline points={line} className="fms-linestroke" />
-        {points.map((p) => (
-          <circle key={p.label} cx={p.x} cy={p.y} r={2.5} className="fms-linedot" />
+        {single ? null : <polygon points={area} className="fms-linefill" />}
+        {single ? null : <polyline points={line} className="fms-linestroke" />}
+
+        {/* The one being read, marked down the full height so it is findable. */}
+        {at !== null && points[at] ? (
+          <line
+            x1={points[at]?.x ?? 0}
+            y1={top}
+            x2={points[at]?.x ?? 0}
+            y2={bottom}
+            className="fms-lineat"
+          />
+        ) : null}
+
+        {points.map((p, i) => (
+          <circle
+            key={p.label}
+            cx={p.x}
+            cy={p.y}
+            r={at === i ? 4 : 2.5}
+            className="fms-linedot"
+          />
+        ))}
+
+        {/*
+          The part you actually point at.
+
+          A 2.5px dot is not a target on a phone, and the owner asked to be
+          able to tap the chart. Each band is the full height of the drawing
+          and half a step wide, so anywhere above a month reads that month.
+        */}
+        {points.map((p, i) => (
+          <rect
+            key={`${p.label}-hit`}
+            x={p.x - grab}
+            y={0}
+            width={grab * 2}
+            height={height}
+            fill="transparent"
+            style={{ cursor: "pointer" }}
+            onMouseEnter={() => point(i)}
+            onClick={() => pin(i)}
+          />
         ))}
       </svg>
 
       {/* The figures, because a line says the shape and not the numbers. */}
       <ul className="fms-linelegend">
-        {points.map((p) => (
-          <li key={p.label} className="t-micro">
-            <span className="fms-pielabel">{p.label}</span>
-            <span className="fms-piefigure fms-proposalmoney">{chartLabel(p.value)}</span>
+        {points.map((p, i) => (
+          <li key={p.label}>
+            <button
+              type="button"
+              className="t-micro fms-legendrow"
+              aria-pressed={at === i}
+              onMouseEnter={() => point(i)}
+              onFocus={() => point(i)}
+              onBlur={leave}
+              onClick={() => pin(i)}
+            >
+              <span className="fms-pielabel">{p.label}</span>
+              <span className="fms-piefigure fms-proposalmoney">{chartLabel(p.value)}</span>
+            </button>
           </li>
         ))}
       </ul>

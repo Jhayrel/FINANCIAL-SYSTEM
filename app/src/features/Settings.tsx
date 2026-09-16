@@ -3302,6 +3302,19 @@ function AiLearningGroup({ uid }: { uid: string | null }) {
   const [showAll, setShowAll] = useState(false);
   const all = events ?? [];
   const learned = correctionsFrom(all, "item");
+  /**
+   * The other three fields corrections are recorded against.
+   *
+   * `manualCorrections` has always written all four, and only the item was
+   * ever read back, so a panel headed "what it has learned" was showing at
+   * most a quarter of it. Naming the field matters: "maya is Cash" is a
+   * different statement about the wallet than about the category.
+   */
+  const learnedElsewhere = [
+    ["wallet it came from", correctionsFrom(all, "fromWallet")],
+    ["wallet it went to", correctionsFrom(all, "toWallet")],
+    ["category", correctionsFrom(all, "category")],
+  ] as const;
   const count = (action: string): number => all.filter((e) => e.action === action).length;
 
   /**
@@ -3358,17 +3371,25 @@ function AiLearningGroup({ uid }: { uid: string | null }) {
             ))}
           </div>
 
-          {learned.size > 0 && (
+          {(learned.size > 0 || learnedElsewhere.some(([, map]) => map.size > 0)) && (
             <>
               <div className="t-label" style={{ color: "var(--ink-2)", margin: "var(--space-4) 0 var(--space-2)" }}>
                 It now knows
               </div>
               <ul className="fms-learned">
                 {[...learned.entries()].map(([from, to]) => (
-                  <li key={from} className="t-caption">
+                  <li key={`item-${from}`} className="t-caption">
                     <span style={{ color: "var(--ink-3)" }}>{from}</span> is <strong>{to}</strong>
                   </li>
                 ))}
+                {learnedElsewhere.flatMap(([what, map]) =>
+                  [...map.entries()].map(([from, to]) => (
+                    <li key={`${what}-${from}`} className="t-caption">
+                      <span style={{ color: "var(--ink-3)" }}>{from}</span> is <strong>{to}</strong>
+                      <span style={{ color: "var(--ink-3)" }}> for the {what}</span>
+                    </li>
+                  )),
+                )}
               </ul>
             </>
           )}
@@ -3378,23 +3399,35 @@ function AiLearningGroup({ uid }: { uid: string | null }) {
           </div>
           <ol className="fms-acts">
             {all.slice(0, showAll ? 200 : 8).map((e) => (
-              <li key={e.id} className="fms-act">
-                <div className="fms-acthead">
-                  <span className="t-caption">
-                    {e.action === "edited" && e.field
-                      ? `Corrected the ${e.field}: ${e.proposed} became ${e.corrected}`
-                      : e.action === "uploaded"
-                        ? (e.files ?? [])
-                            .map((f) => `${f.name} (${f.kind}): ${f.details}`)
-                            .join(" · ")
-                        : (e.text ?? e.entry ?? e.action)}
-                  </span>
-                  <span className="t-micro fms-actwhen">{new Date(e.at).toLocaleString("en-PH")}</span>
-                </div>
-                <div className="fms-actmeta t-micro">
-                  <span className="fms-actor">{e.action}</span>
-                  <span>{e.where}</span>
-                  {e.model && <span>{e.model}</span>}
+              <li key={e.id} className="fms-act fms-act--plain">
+                {/*
+                  The wrapper this list is built around.
+
+                  `.fms-act` is a two column grid, an icon and then the body.
+                  Written without the body wrapper, the summary landed in the
+                  32px icon column and wrapped one word per line with the
+                  badges pressed against it. Every row here is the assistant,
+                  so there is no icon to show and the modifier drops the
+                  column rather than filling it with a blank.
+                */}
+                <div className="fms-actmain">
+                  <div className="fms-acthead">
+                    <span className="t-caption fms-actsummary">
+                      {e.action === "edited" && e.field
+                        ? `Corrected the ${e.field}: ${e.proposed} became ${e.corrected}`
+                        : e.action === "uploaded"
+                          ? (e.files ?? [])
+                              .map((f) => `${f.name} (${f.kind}): ${f.details}`)
+                              .join(" · ")
+                          : (e.text ?? e.entry ?? e.action)}
+                    </span>
+                    <span className="t-micro fms-actwhen">{new Date(e.at).toLocaleString("en-PH")}</span>
+                  </div>
+                  <div className="fms-actmeta t-micro">
+                    <span className="fms-actor">{e.action}</span>
+                    <span>{e.where}</span>
+                    {e.model && <span>{e.model}</span>}
+                  </div>
                 </div>
               </li>
             ))}

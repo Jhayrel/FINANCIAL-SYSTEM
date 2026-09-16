@@ -188,6 +188,64 @@ export function correctionsFrom(
   return learned;
 }
 
+/** A figure, which is the part of a sentence that changes between two of the same purchase. */
+const FIGURE = /^[0-9][0-9.,]*$/;
+
+/** The words of a sentence, without punctuation or case. */
+function wordsOf(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * What a phrase was corrected to, allowing for the parts that change.
+ *
+ * ── Why the exact lookup was not learning ─────────────────────────────────
+ *
+ * Corrections are keyed on the sentence that produced the card, and they were
+ * read back with a plain `get`. So a correction fired again only when the
+ * owner typed the identical sentence, and the parts of a sentence that differ
+ * between two of the same purchase are exactly the figure, the date and the
+ * wallet. "jollibee 200" taught nothing about "jollibee 350". Told once that
+ * Jollibee is Food, it asked again the very next time, which is what the
+ * owner meant by saying it was not really learning.
+ *
+ * A key matches when every word in it that is not a figure appears in the new
+ * sentence. The longest key wins, so "coffee beans for the office" beats
+ * "coffee" on a sentence containing both, and a correction taught on a figure
+ * alone matches nothing but itself: every sentence has figures in it, and one
+ * that matched on those would attach itself to unrelated entries.
+ */
+export function taughtFor(
+  phrase: string,
+  learned: ReadonlyMap<string, string>,
+): string | undefined {
+  const said = phrase.trim().toLowerCase();
+  if (!said || learned.size === 0) return undefined;
+
+  // The sentence as typed, which is still the strongest signal there is.
+  const exact = learned.get(said);
+  if (exact) return exact;
+
+  const words = new Set(wordsOf(said));
+  if (words.size === 0) return undefined;
+
+  let best: { readonly to: string; readonly weight: number } | undefined;
+  for (const [key, to] of learned) {
+    const keyWords = wordsOf(key).filter((w) => !FIGURE.test(w));
+    if (keyWords.length === 0) continue;
+    if (!keyWords.every((w) => words.has(w))) continue;
+    if (best === undefined || keyWords.length > best.weight) {
+      best = { to, weight: keyWords.length };
+    }
+  }
+
+  return best?.to;
+}
+
 /** Newest first, which is the only order this is read in. */
 export const byNewest = (a: AiEvent, b: AiEvent): number =>
   a.at < b.at ? 1 : a.at > b.at ? -1 : b.id.localeCompare(a.id);
