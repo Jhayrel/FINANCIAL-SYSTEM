@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { aiSurfaceOn } from "./aiSurface";
-import { DEFAULT_AI, type AiSettings } from "./settings";
+import { DEFAULT_AI, normaliseSettings, type AiSettings } from "./settings";
 
 const on: AiSettings = { ...DEFAULT_AI, enabled: true };
 
@@ -26,5 +26,28 @@ describe("aiSurfaceOn", () => {
     };
     expect(aiSurfaceOn(older, "chat")).toBe(true);
     expect(aiSurfaceOn(older, "capture")).toBe(true);
+  });
+});
+
+/**
+ * Switched off, and still off after a reload.
+ *
+ * `normaliseSettings` copied three of the five switches and dropped `chat`
+ * and `capture`, whose absence reads as on, so the chat came back by itself
+ * the next time the settings were loaded.
+ */
+describe("a switch that survives loading", () => {
+  it("keeps the chat and photo reading switched off", () => {
+    const saved = { ai: { ...on, features: { ...on.features, chat: false, capture: false } } };
+    const loaded = normaliseSettings(JSON.parse(JSON.stringify(saved)));
+    expect(aiSurfaceOn(loaded.ai, "chat")).toBe(false);
+    expect(aiSurfaceOn(loaded.ai, "capture")).toBe(false);
+  });
+
+  it("still reads settings saved before the two switches existed as on", () => {
+    const saved = { ai: { ...on, features: { alerts: true, insightSummary: true, descriptions: false } } };
+    const loaded = normaliseSettings(JSON.parse(JSON.stringify(saved)));
+    expect(aiSurfaceOn(loaded.ai, "chat")).toBe(true);
+    expect(aiSurfaceOn(loaded.ai, "capture")).toBe(true);
   });
 });

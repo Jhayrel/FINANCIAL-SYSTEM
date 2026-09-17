@@ -1117,7 +1117,7 @@ export function AddTransaction({
             </span>
             <span className="t-caption fms-truncate" style={{ color: editing ? "var(--ink-2)" : "var(--ink-3)" }}>
               {editing
-                ? `As saved: ${editing.type}, ${editing.item || editing.description || "no item"}, ${formatMoney(original ? (original.amount ?? 0) + original.fee : editing.total)}, ${formatMedium(editing.date)}`
+                ? `As saved: ${editing.type === "Debt" ? recentTitle(editing, debts) : `${editing.type}, ${editing.item || editing.description || "no item"}`}, ${formatMoney(original ? (original.amount ?? 0) + original.fee : editing.total)}, ${formatMedium(editing.date)}`
                 : `Saves as #${String(nextRecordNumber).padStart(4, "0")}`}
             </span>
           </div>

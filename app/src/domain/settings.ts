@@ -185,6 +185,14 @@ export function normaliseSettings(raw: unknown): AppSettings {
         alerts: input.ai?.features?.alerts ?? base.ai.features.alerts,
         insightSummary: input.ai?.features?.insightSummary ?? base.ai.features.insightSummary,
         descriptions: input.ai?.features?.descriptions ?? base.ai.features.descriptions,
+        /*
+         * The chat and photo reading, which this list left out. Switching
+         * either off in Settings lasted until the next load, when the field
+         * was dropped here and its absence read as on (`aiSurfaceOn`), so
+         * the chat came back by itself.
+         */
+        chat: input.ai?.features?.chat ?? base.ai.features.chat ?? true,
+        capture: input.ai?.features?.capture ?? base.ai.features.capture ?? true,
       },
     },
     theme: input.theme ?? base.theme,

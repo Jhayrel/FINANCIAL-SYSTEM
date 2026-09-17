@@ -762,6 +762,13 @@
   flex: 0 0 auto;
 }
 
+/* One half of a debt payment naming the other, under the item at every width. */
+.fms-dt-link {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-3);
+}
+
 /* Columns that leave, and the stand-ins that arrive in their place. These
    come last so they win over the display values set above. */
 @container (max-width: 879px) {

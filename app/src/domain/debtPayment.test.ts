@@ -33,7 +33,8 @@ import {
   type Debt,
 } from "./debt";
 import { debtCardIntro, readDebtSentence } from "./debtSentence";
-import { checkDraft, draftToTransactions, emptyDraft, type Draft } from "./entry";
+import { checkDraft, draftToTransactions, emptyDraft, runningBalance, type Draft } from "./entry";
+import { entryImpact } from "./entryImpact";
 import { readMoney } from "./proposal";
 import { readEntry } from "./readEntry";
 import type { ReferenceLists, Transaction } from "./types";
@@ -306,5 +307,27 @@ describe("the chat, end to end", () => {
   it("never writes an em dash", () => {
     const intro = debtCardIntro(payment({ interest: 12000 }), true, [credit]);
     expect(intro.includes(String.fromCharCode(0x2014))).toBe(false);
+  });
+});
+
+describe("the previews beside the form, while a payment is corrected", () => {
+  const saved = [...ledger, ...save(payment({ interest: 12000 }))];
+  const reopened = payment({ id: "pay", interest: 12000 });
+
+  /** Maya read ₱120.00 low on both sides of the arrow: the interest row was counted as well as the draft. */
+  it("leaves the whole payment out of the wallet's balance before it", () => {
+    const balance = runningBalance(reopened, saved, "pay");
+    expect(balance?.before).toBe(600000);
+    expect(balance?.after).toBe(500000);
+  });
+
+  /** Built without the split, the payment cost nothing and its interest never reached the budget. */
+  it("counts the interest against the month's spending", () => {
+    const impact = entryImpact(payment({ interest: 12000 }), ledger, {}, "2026-09-10");
+    expect(impact?.cost).toBe(12000);
+  });
+
+  it("counts nothing when none of the payment was interest", () => {
+    expect(entryImpact(payment(), ledger, {}, "2026-09-10")).toBeNull();
   });
 });

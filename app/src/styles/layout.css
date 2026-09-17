@@ -5228,6 +5228,18 @@ textarea.fms-askinput {
   border-top: 1px solid var(--hairline);
 }
 
+/* The interest inside a payment: the box as wide as the choices above it, its split under it. */
+.fms-debtinterest {
+  display: grid;
+  flex: 1 1 100%;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fms-debtinterest > .fms-amount {
+  width: 100%;
+}
+
 .fms-debteffects {
   display: grid;
   gap: var(--space-2);

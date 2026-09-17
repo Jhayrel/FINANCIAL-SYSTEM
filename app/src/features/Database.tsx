@@ -22,7 +22,7 @@ import { SearchInput } from "../components/forms";
 import { Icon } from "../components/Icon";
 import { useConfirm } from "../components/Confirm";
 import { formatAmount } from "../domain/money";
-import { interestOf } from "../domain/debt";
+import { interestOf, paymentOf } from "../domain/debt";
 import { DataTable, type Column } from "../components/DataTable";
 import { formatShort, getYear } from "../domain/dates";
 import { inPeriod, matchesSearch, parseSearch, PERIODS, type Period } from "../domain/search";
@@ -255,6 +255,28 @@ export function Database({
    * padding: a 112px Total column holding ₱222,259.14 had spilled into
    * Status, and "Transferred" was wider than its 84px pill column.
    */
+  /**
+   * Which rows are halves of one debt payment, said on the row.
+   *
+   * The owner asked how the database knows that ₱120.00 of interest belongs
+   * to the ₱1,000.00 just paid. It is in the data (`partOf`), and here it is
+   * on screen: each half names the other by its record number.
+   */
+  const paymentLinks = useMemo(() => {
+    const links = new Map<string, string>();
+    const number = (t: Transaction): string => `#${String(t.recordNumber).padStart(4, "0")}`;
+    for (const t of transactions) {
+      if (t.debtEffect === "interest") {
+        const payment = paymentOf(t, transactions);
+        if (payment) links.set(t.id, `Interest in the payment ${number(payment)}`);
+      } else if (t.debtEffect === "repay") {
+        const interest = interestOf(t, transactions);
+        if (interest) links.set(t.id, `Paid with ₱${formatAmount(interest.total)} of interest, ${number(interest)}`);
+      }
+    }
+    return links;
+  }, [transactions]);
+
   const columns: Column<Transaction>[] = [
     {
       key: "record",
@@ -315,6 +337,12 @@ export function Database({
               </span>
             )}
           </span>
+          {/* At every width, since it is what makes the row make sense. */}
+          {paymentLinks.has(t.id) && (
+            <span className="t-micro fms-truncate fms-dt-link" title={paymentLinks.get(t.id)}>
+              {paymentLinks.get(t.id)}
+            </span>
+          )}
         </>
       ),
     },

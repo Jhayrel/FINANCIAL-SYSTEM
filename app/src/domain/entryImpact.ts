@@ -18,6 +18,7 @@ import { assessMonth, budgetForMonth } from "./budget";
 import { monthLock, type MonthLock } from "./budgetLock";
 import { categoryLimits } from "./budgetView";
 import { firstOfMonth, getMonth, getYear, lastOfMonth } from "./dates";
+import { interestOf, outstandingOf, splitRepayment } from "./debt";
 import { draftToTransactions, type Draft } from "./entry";
 import type { Centavos } from "./money";
 import { costOf, monthTotals, spendingAttribution, UNCATEGORISED } from "./totals";
@@ -72,18 +73,30 @@ export function entryImpact(
 ): EntryImpact | null {
   if (!draft.flow || draft.amount === null || draft.amount <= 0 || !draft.date) return null;
 
-  const rows = draftToTransactions(draft, 0, draft.id ?? "draft-preview");
+  // Editing a saved row: measure against the month without it, a payment's interest row included.
+  const edited = draft.id ? transactions.find((t) => t.id === draft.id) : undefined;
+  const itsInterest = edited ? interestOf(edited, transactions) : undefined;
+  const others = draft.id
+    ? transactions.filter((t) => t.id !== draft.id && t.id !== itsInterest?.id)
+    : transactions;
+
+  /*
+   * A debt payment's interest is spending, and the budget should hear about
+   * it before the save. Built without the split, the payment was one
+   * repayment row that cost nothing, so ₱120.00 of interest went into the
+   * month's spending without a word here.
+   */
+  const split =
+    draft.flow === "Debt" && draft.debtEffect === "repay" && draft.debtId
+      ? splitRepayment(draft.amount, outstandingOf(others, draft.debtId), draft.interest)
+      : undefined;
+  const rows = draftToTransactions(draft, 0, draft.id ?? "draft-preview", split);
   const cost = rows.reduce((sum, r) => sum + costOf(r), 0);
-  const main = rows[0];
+  const main = rows.find((r) => costOf(r) > 0) ?? rows[0];
   if (!main || cost <= 0) return null;
 
   const year = getYear(draft.date);
   const month = getMonth(draft.date);
-
-  // Editing a saved row: measure against the month without it.
-  const others = draft.id
-    ? transactions.filter((t) => t.id !== draft.id && t.id !== `${draft.id}-interest`)
-    : transactions;
 
   const assessment = assessMonth(monthTotals(others, year, month), budgetForMonth(budgets, year, month));
   const track =

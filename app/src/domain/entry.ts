@@ -12,7 +12,7 @@
 
 import { walletBalance } from "./balances";
 import type { Debt, DebtEffect } from "./debt";
-import { debtNamedBy, effectsFor, outstandingOf, splitRepayment } from "./debt";
+import { debtNamedBy, effectsFor, interestOf, outstandingOf, splitRepayment } from "./debt";
 import { daysBetween, formatMedium, getMonth, getYear, monthName, today } from "./dates";
 import { formatMoney as money, type Centavos } from "./money";
 import { kindKey, unusualAgainst, type Unusual } from "./unusual";
@@ -269,8 +269,15 @@ export function runningBalance(
   const wallet = outgoing ? draft.fromWallet : draft.toWallet;
   if (!wallet) return null;
 
+  /*
+   * A payment being corrected is two rows when some of it was interest, and
+   * the draft holds both. Leaving the interest row in counted it twice: the
+   * wallet read PHP 120.00 lower before the correction and after it.
+   */
+  const edited = excludeId ? transactions.find((t) => t.id === excludeId) : undefined;
+  const itsInterest = edited ? interestOf(edited, transactions) : undefined;
   const base = excludeId
-    ? transactions.filter((t) => t.id !== excludeId)
+    ? transactions.filter((t) => t.id !== excludeId && t.id !== itsInterest?.id)
     : transactions;
 
   const before = walletBalance(base, wallet);

@@ -4939,8 +4939,10 @@ function DebtCard({
   if (state === "settled") {
     return (
       <div ref={hostRef} className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
-        Added: {draft.item || "debt movement"}, {formatMoney(draft.amount ?? 0)}. It is in the
-        Database and in the activity trail.
+        Added: {debts.find((d) => d.id === draft.debtId)?.name ?? "debt movement"}
+        {draft.debtEffect ? `, ${DEBT_EFFECT_LABEL[draft.debtEffect].toLowerCase()}` : ""}, {formatMoney(draft.amount ?? 0)}
+        {draft.debtEffect === "repay" && (draft.interest ?? 0) > 0 ? `, ${formatMoney(draft.interest ?? 0)} of it interest` : ""}. It
+        is in the Database and in the activity trail.
       </div>
     );
   }
