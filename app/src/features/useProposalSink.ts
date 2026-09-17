@@ -47,6 +47,8 @@ export interface SinkInput {
   readonly onUpdate?: ((rows: Transaction[], by?: Provenance) => void) | undefined;
   /** Replace a year's budget, with a line per month it changed. */
   readonly onBudget?: ((year: number, plan: BudgetYear, changes: readonly string[]) => void) | undefined;
+  /** Add a person or lender to the debt list. */
+  readonly onAddDebt?: ((debt: Debt) => void) | undefined;
 }
 
 /** Makes ids unique within one millisecond, when a batch saves together. */
@@ -108,6 +110,8 @@ export function useProposalSink(input: SinkInput): ProposalSink {
       update: (rows, by) => handlers.current.onUpdate?.([...rows], by ?? { actor: "ai", via: "ai_chat" }),
       canBudget: Boolean(input.onBudget),
       budget: (year, plan, changes) => handlers.current.onBudget?.(year, plan, changes),
+      canAddDebt: Boolean(input.onAddDebt),
+      addDebt: (debt) => handlers.current.onAddDebt?.(debt),
       bin: (id) => handlers.current.onBin(id),
       binMany: (ids) => handlers.current.onBinMany(ids),
       restore: (id) => handlers.current.onRestore(id),

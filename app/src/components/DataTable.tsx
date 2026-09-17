@@ -111,7 +111,7 @@ export function DataTable<T>({
                         if (el) el.indeterminate = selectedHere > 0 && !allHere;
                       }}
                       onChange={onToggleAll}
-                      aria-label={allHere ? "Clear selection" : "Select the rows on screen"}
+                      aria-label={allHere ? "Unselect all" : "Select the rows on screen"}
                     />
                   )}
                 </th>

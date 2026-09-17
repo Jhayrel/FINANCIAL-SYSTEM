@@ -32,6 +32,22 @@ export interface Recall {
   readonly phrase: string;
 }
 
+/**
+ * "that last transaction is a mistake", "the input earlier is wrong".
+ *
+ * Neither names a field or a figure, so neither is a correction to apply:
+ * they point at the newest entry and say it is wrong. The caller shows the
+ * newest entries with a way to correct or bin each one.
+ */
+export function saysLatestIsWrong(text: string): boolean {
+  const t = text.replace(/\bthe(input|entry|transaction|record|data)\b/gi, "the $1");
+  if (/\d/.test(t) || t.trim().split(/\s+/).length > 12) return false;
+  return (
+    /\b(wrong|mistake|mistaken|incorrect|error|erroneous|mali|maling)\b/i.test(t) &&
+    /\b(last|latest|earlier|previous|recent|just now|input|entry|transaction|record|one i (?:added|entered|made|saved))\b/i.test(t)
+  );
+}
+
 /** Getting rid of one. */
 const BIN =
   /\b(delete|remove|erase|bin|cancel|undo|scrap|discard|take out|get rid of)\b/i;
@@ -254,7 +270,8 @@ export function wantsDiscardOpen(text: string): boolean {
     return false;
   }
 
-  return /\b(discard|reject|scrap|nevermind|never mind)\b/i.test(said);
+  // "cancel", "cancel this", "cancel it": the card in front of you, never a ledger row.
+  return /\b(discard|reject|scrap|nevermind|never mind)\b/i.test(said) || /^(?:please\s+)?(?:cancel|remove|delete|drop)(?:\s+(?:this|it|that|this one|that one|the card))?[.!]*$/i.test(said);
 }
 
 export function wantsDiscardAll(text: string): boolean {

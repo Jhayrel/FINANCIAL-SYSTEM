@@ -301,7 +301,7 @@ describe("the chat, end to end", () => {
 
   it("still asks for both when the sentence gave neither", () => {
     const intro = debtCardIntro({ ...emptyDraft("2026-09-10"), flow: "Debt", amount: 50000 }, false, [credit]);
-    expect(intro).toContain("Pick which credit line and what it does");
+    expect(intro).toContain("Pick which debt and what it does");
   });
 
   it("never writes an em dash", () => {

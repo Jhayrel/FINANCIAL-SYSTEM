@@ -414,6 +414,7 @@ export function AddTransaction({
     onUse: applyDraft,
     onUpdate,
     onBudget,
+    onAddDebt,
   });
   const nextRecordNumber = sink.nextRecordNumber;
 
@@ -423,7 +424,14 @@ export function AddTransaction({
    * same card twice fills the form twice.
    */
   useEffect(() => {
-    if (incoming) applyDraft(incoming.draft);
+    /*
+     * Once each. The app keeps the last card it sent, so coming back to Add
+     * after saving it refilled the form with the same entry and warned it
+     * was already in the ledger: one more tap on Save would have doubled it.
+     */
+    if (!incoming || incoming.at === appliedAt) return;
+    appliedAt = incoming.at;
+    applyDraft(incoming.draft);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incoming?.at]);
 
@@ -665,6 +673,12 @@ export function AddTransaction({
   const [newPerson, setNewPerson] = useState<string | null>(null);
   /** Which way that person's money passes: held for them, or sent for them. */
   const [personKind, setPersonKind] = useState<Debt["kind"] | null>(null);
+  /**
+   * What the new person is: a loan between the two of you, or money passing
+   * through. "Someone new" only ever made the second, so borrowing from a
+   * brother or lending to a friend had nowhere to go but Settings.
+   */
+  const [personForm, setPersonForm] = useState<"informal" | "pass-through">("informal");
 
   /** The row as it was saved, so a correction can say what it changes. */
   const original = useMemo(() => (editing ? draftForEditing(editing, transactions) : null), [editing, transactions]);
@@ -719,7 +733,7 @@ export function AddTransaction({
   const debtOptions = debts.filter((d) => !d.archived || d.id === draft.debtId);
   const selectedDebt = debts.find((d) => d.id === draft.debtId);
   /** The debt the choices are worded for: the one picked, or the person being added. */
-  const debtShape = selectedDebt ?? (personKind ? { kind: personKind, form: "pass-through" as const } : undefined);
+  const debtShape = selectedDebt ?? (personKind ? { kind: personKind, form: personForm } : undefined);
   const effects = choicesFor(debtShape?.kind ?? "payable", draft.debtEffect, debtShape?.form);
 
   /** A debt into the draft: its effect kept only if that debt takes it, and its account as the wallet when none is chosen. */
@@ -760,6 +774,7 @@ export function AddTransaction({
       return withDebtEffect(base, effect);
     });
     setPersonKind(kind);
+    setPersonForm("pass-through");
     if (people.length !== 1) setNewPerson("");
   };
 
@@ -782,7 +797,7 @@ export function AddTransaction({
       id,
       name: trimmed,
       kind,
-      form: "pass-through",
+      form: personForm,
       counterparty: trimmed,
       counterpartyType: "person",
       openedDate: draft.date,
@@ -1100,7 +1115,14 @@ export function AddTransaction({
       notes: needs(flow, "notes") ? draft.notes : "",
     };
 
-    setUndoSwitch({ was, now });
+    // Offered only when the switch threw something away: an empty form has nothing to give back.
+    const lost =
+      [was.fromWallet, was.toWallet, was.category, was.item, was.status, was.debtId ?? ""].some((v) => v.trim() !== "") ||
+      was.fee > 0 ||
+      was.debtEffect !== undefined ||
+      (was.interest ?? null) !== null ||
+      (was.charges ?? null) !== null;
+    setUndoSwitch(lost ? { was, now } : null);
     setDraft(now);
     setSuggested((s) => (s.has("amount") ? new Set(["amount"]) : new Set()));
     setCategoryHint(null);
@@ -1320,19 +1342,43 @@ export function AddTransaction({
                     error={errorFor("debt")}
                     aside={
                       onAddDebt && newPerson === null ? (
-                        <button type="button" className="t-micro fms-linkbtn" onClick={() => setNewPerson("")}>
-                          Someone new, money passing through
+                        <button
+                          type="button"
+                          className="t-micro fms-linkbtn"
+                          onClick={() => {
+                            setPersonForm("informal");
+                            setNewPerson("");
+                          }}
+                        >
+                          Someone new
                         </button>
                       ) : undefined
                     }
                   >
                     {newPerson !== null && (
                       <div className="fms-newperson">
+                        <div className="fms-choicerow" role="radiogroup" aria-label="What it is">
+                          {[
+                            { form: "informal" as const, label: "A loan between us" },
+                            { form: "pass-through" as const, label: "Money passing through" },
+                          ].map((o) => (
+                            <button
+                              key={o.form}
+                              type="button"
+                              role="radio"
+                              aria-checked={personForm === o.form}
+                              className={personForm === o.form ? "fms-choice t-body-strong" : "fms-choice t-body"}
+                              onClick={() => setPersonForm(o.form)}
+                            >
+                              {o.label}
+                            </button>
+                          ))}
+                        </div>
                         <TextInput
                           value={newPerson}
                           onChange={setNewPerson}
-                          placeholder="Their name, such as Mama or a client"
-                          ariaLabel="Who the money passes through for"
+                          placeholder={personForm === "informal" ? "Their name, such as Juan or Kuya Ben" : "Their name, such as Mama or a client"}
+                          ariaLabel="Their name"
                           maxLength={60}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
@@ -1341,11 +1387,17 @@ export function AddTransaction({
                             }
                           }}
                         />
-                        <div className="fms-choicerow" role="radiogroup" aria-label="Which way it passes through">
-                          {[
-                            { kind: "payable" as const, label: "I hold it for them" },
-                            { kind: "receivable" as const, label: "They pay me back" },
-                          ].map((o) => {
+                        <div className="fms-choicerow" role="radiogroup" aria-label="Which way the money goes">
+                          {(personForm === "informal"
+                            ? [
+                                { kind: "payable" as const, label: "I borrowed from them" },
+                                { kind: "receivable" as const, label: "I lent to them" },
+                              ]
+                            : [
+                                { kind: "payable" as const, label: "I hold it for them" },
+                                { kind: "receivable" as const, label: "They pay me back" },
+                              ]
+                          ).map((o) => {
                             const chosen =
                               (personKind ?? (draft.debtEffect === "lend" || draft.debtEffect === "collect" ? "receivable" : draft.debtEffect ? "payable" : null)) === o.kind;
                             return (
@@ -1355,7 +1407,15 @@ export function AddTransaction({
                                 role="radio"
                                 aria-checked={chosen}
                                 className={chosen ? "fms-choice t-body-strong" : "fms-choice t-body"}
-                                onClick={() => setPersonKind(o.kind)}
+                                onClick={() => {
+                                  setPersonKind(o.kind);
+                                  // The movement follows: borrowed is money in from them, lent is money out to them.
+                                  setDraft((d) =>
+                                    d.debtEffect && effectsFor(o.kind).includes(d.debtEffect)
+                                      ? d
+                                      : withDebtEffect(d, o.kind === "payable" ? "draw" : "lend"),
+                                  );
+                                }}
                               >
                                 {o.label}
                               </button>
@@ -1378,14 +1438,16 @@ export function AddTransaction({
                           </Button>
                         </div>
                         <p className="t-micro" style={{ margin: 0, color: "var(--ink-3)" }}>
-                          Money passing through is never income or spending. It is kept under Credit and loans in Settings, where it can be renamed or archived.
+                          {personForm === "informal"
+                            ? "Borrowing and lending are never income or spending: what is owed goes up and down, and the Debt screen keeps the running figure. They are kept under Credit and loans in Settings, where they can be renamed or archived."
+                            : "Money passing through is never income or spending. It is kept under Credit and loans in Settings, where it can be renamed or archived."}
                         </p>
                       </div>
                     )}
                     {debtOptions.length === 0 ? (
                       newPerson === null && (
                         <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-                          Nothing to file this against yet. Add a credit line or loan in Settings, under Credit and loans, or someone money passes through above.
+                          Nothing to file this against yet. Add a person above with Someone new, or a credit line or bank loan in Settings, under Credit and loans.
                         </p>
                       )
                     ) : (
@@ -2317,6 +2379,9 @@ function draftForEditing(row: Transaction, transactions: readonly Transaction[])
 }
 
 const DRAFT_KEY = "fms.add.draft";
+
+/** When the last card sent to the form was put in it, so remounting the form does not put it in again. */
+let appliedAt = 0;
 
 /** Nothing typed that clearing the form or leaving it would lose. */
 function isBlankDraft(draft: Draft): boolean {

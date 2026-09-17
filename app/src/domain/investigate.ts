@@ -29,6 +29,16 @@
  *                     offered as a possibility and never as a finding
  *   cash              for cash, which has no statement, how many days of
  *                     unrecorded spending the gap is at the recent rate
+ *   wrong account     a row filed on another account for exactly the gap
+ *   unrecorded        money that came in or went out and was never written
+ *                     down: interest, a refund, someone paying you back, a fee
+ *
+ * ── When it last matched ──────────────────────────────────────────────────
+ *
+ * "Yesterday it matched to the peso, today the bank has more." The owner
+ * knows the day it was last right, and that one fact rules out every row
+ * before it. Given that day, only what moved after it is searched, however
+ * many hundreds of rows came before.
  *
  * ── What it never does ────────────────────────────────────────────────────
  *
@@ -64,7 +74,9 @@ export type Clue =
     }
   | { readonly kind: "duplicate"; readonly row: Transaction; readonly twin: Transaction; readonly explains: Centavos }
   | { readonly kind: "together"; readonly rows: readonly Transaction[]; readonly explains: Centavos }
-  | { readonly kind: "cash"; readonly perDay: Centavos; readonly days: number; readonly explains: Centavos };
+  | { readonly kind: "cash"; readonly perDay: Centavos; readonly days: number; readonly explains: Centavos }
+  | { readonly kind: "wrong-account"; readonly row: Transaction; readonly other: string; readonly explains: Centavos }
+  | { readonly kind: "unrecorded"; readonly direction: "in" | "out"; readonly explains: Centavos };
 
 export interface Investigation {
   readonly account: string;
@@ -85,6 +97,10 @@ export interface Investigation {
   readonly unexplained: Centavos;
   /** The period the statement covered, when there was one. */
   readonly covered?: { readonly from: IsoDate; readonly to: IsoDate } | undefined;
+  /** The last day the account and the ledger agreed, when the owner said. */
+  readonly since?: IsoDate | undefined;
+  /** What the ledger recorded on the account after that day. */
+  readonly movedSince?: { readonly count: number; readonly into: Centavos; readonly outOf: Centavos } | undefined;
 }
 
 /** What one row did to one account, by the same terms `walletBalance` uses. */
@@ -222,10 +238,18 @@ export interface InvestigateInput {
   readonly statement?: readonly StatementLine[] | undefined;
   /** How far back to look without a statement. */
   readonly lookBackDays?: number | undefined;
+  /**
+   * The last day the account and the ledger agreed. Everything on or before
+   * it is taken as right, so only what came after is searched.
+   */
+  readonly matchedOn?: IsoDate | undefined;
 }
 
 export function investigate(input: InvestigateInput): Investigation {
   const { transactions, account, actual, asOf } = input;
+  const since = input.matchedOn && input.matchedOn < asOf ? input.matchedOn : undefined;
+  /** Inside the search: after the day it last matched, or within the look-back. */
+  const searched = (t: Transaction, days: number): boolean => (since ? t.date > since : t.date >= addDays(asOf, -days));
   const onAccount = transactions.filter((t) => t.date <= asOf && movedOn(t, account) !== 0);
   const recorded = onAccount.reduce((sum, t) => sum + movedOn(t, account), 0);
   const gap = recorded - actual;
@@ -313,8 +337,7 @@ export function investigate(input: InvestigateInput): Investigation {
     }
   } else {
     // Without a statement: rows entered twice are evidence enough on their own.
-    const since = addDays(asOf, -(input.lookBackDays ?? 90));
-    const recent = onAccount.filter((t) => t.date >= since);
+    const recent = onAccount.filter((t) => searched(t, input.lookBackDays ?? 90));
     for (const p of twins(recent, account)) {
       found.push({ kind: "duplicate", row: p.row, twin: p.twin, explains: movedOn(p.row, account) });
     }
@@ -322,6 +345,7 @@ export function investigate(input: InvestigateInput): Investigation {
 
   const explained = found.reduce((sum, c) => sum + c.explains, 0);
   const unexplained = gap - explained;
+  const isCash = /(^|[^a-z])cash([^a-z]|$)/i.test(account);
 
   /*
    * What is left, as possibilities: one recent row, or two, that add up to
@@ -336,9 +360,8 @@ export function investigate(input: InvestigateInput): Investigation {
    * answer.
    */
   if (unexplained !== 0) {
-    const since = addDays(asOf, -(input.lookBackDays ?? 60));
     const pool = onAccount
-      .filter((t) => t.date >= since && (!covered || t.date < covered.from))
+      .filter((t) => searched(t, input.lookBackDays ?? 60) && (!covered || t.date < covered.from))
       .map((row) => ({ row, value: movedOn(row, account) }))
       .filter((r) => Math.sign(r.value) === Math.sign(unexplained))
       .sort((a, b) => b.row.date.localeCompare(a.row.date) || Math.abs(b.value) - Math.abs(a.value));
@@ -352,7 +375,7 @@ export function investigate(input: InvestigateInput): Investigation {
      * of that it would take.
      */
     // The word on its own: Gcash is an e-wallet with a statement, not cash.
-    if (/(^|[^a-z])cash([^a-z]|$)/i.test(account) && unexplained > 0) {
+    if (isCash && unexplained > 0) {
       const monthAgo = addDays(asOf, -30);
       const spent = onAccount
         .filter((t) => t.date > monthAgo && t.type === "Spending")
@@ -362,9 +385,50 @@ export function investigate(input: InvestigateInput): Investigation {
         possible.push({ kind: "cash", perDay, days: Math.max(1, Math.round(unexplained / perDay)), explains: unexplained });
       }
     }
+
+    /*
+     * Filed on the wrong account. Buried in hundreds of rows, an entry saved
+     * against Gcash that really moved Maya is invisible from Maya's side. A
+     * row on another account for exactly what is unaccounted for, moving the
+     * way the gap points, is offered to be opened and corrected.
+     *
+     * Too much recorded here: something left this account and was filed as
+     * leaving another. Too little: something arrived here and was filed as
+     * arriving somewhere else.
+     */
+    const elsewhere = transactions
+      .filter((t) => t.date <= asOf && searched(t, input.lookBackDays ?? 60) && movedOn(t, account) === 0)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    let wrong = 0;
+    for (const t of elsewhere) {
+      if (wrong >= 3) break;
+      for (const other of new Set([t.fromWallet, t.toWallet])) {
+        if (!other || other === account || movedOn(t, other) !== -unexplained) continue;
+        possible.push({ kind: "wrong-account", row: t, other, explains: unexplained });
+        wrong += 1;
+        break;
+      }
+    }
+
+    // Money nobody wrote down, which is the answer whenever nothing recorded is.
+    if (!(isCash && unexplained > 0)) {
+      possible.push({ kind: "unrecorded", direction: unexplained < 0 ? "in" : "out", explains: unexplained });
+    }
   }
 
-  return { account, asOf, recorded, actual, gap, found, possible, explained, unexplained, covered };
+  const movedSince = since
+    ? onAccount
+        .filter((t) => t.date > since)
+        .reduce(
+          (m, t) => {
+            const v = movedOn(t, account);
+            return { count: m.count + 1, into: m.into + Math.max(0, v), outOf: m.outOf + Math.max(0, -v) };
+          },
+          { count: 0, into: 0, outOf: 0 },
+        )
+    : undefined;
+
+  return { account, asOf, recorded, actual, gap, found, possible, explained, unexplained, covered, since, movedSince };
 }
 
 // ── In words ───────────────────────────────────────────────────────────────
@@ -397,6 +461,14 @@ export function clueWords(clue: Clue): string {
       return `Cash has no statement. At your recent rate of ${formatMoney(clue.perDay)} a day, ${formatMoney(clue.explains)} is about ${clue.days} ${
         clue.days === 1 ? "day" : "days"
       } of spending that was not written down.`;
+    case "wrong-account":
+      return `${row(clue.row)} is filed on ${clue.other}, for exactly ${formatMoney(Math.abs(clue.explains))}. If it really ${
+        clue.explains > 0 ? "came out of" : "went into"
+      } this account, that is the difference.`;
+    case "unrecorded":
+      return clue.direction === "in"
+        ? `${formatMoney(Math.abs(clue.explains))} came in that the ledger does not have: bank interest, a refund or cashback, or someone sending or paying you back. Add it as what it was.`
+        : `${formatMoney(Math.abs(clue.explains))} went out that the ledger does not have: a fee, a purchase or a transfer not written down. Add it as what it was.`;
   }
 }
 
@@ -406,13 +478,16 @@ export function investigationWords(result: Investigation): {
   readonly lines: readonly string[];
   /** The sentence about what is still unaccounted for, when something is. */
   readonly rest: string | null;
+  /** What was searched, when the owner gave the day it last matched. */
+  readonly since: string | null;
 } {
-  const { account, recorded, actual, gap, found, possible, explained, unexplained, covered } = result;
+  const { account, recorded, actual, gap, found, possible, explained, unexplained, covered, since, movedSince } = result;
   if (gap === 0) {
     return {
       headline: `${account} matches: the ledger and the account both hold ${formatMoney(actual)}.`,
       lines: found.length > 0 ? found.map(clueWords) : [],
       rest: null,
+      since: null,
     };
   }
 
@@ -422,6 +497,14 @@ export function investigationWords(result: Investigation): {
 
   const lines: string[] = [];
   let rest: string | null = null;
+  let searched: string | null = null;
+  if (since && movedSince) {
+    searched =
+      movedSince.count === 0
+        ? `Nothing is recorded on ${account} since ${formatMedium(since)}, when it last matched, so the whole difference arrived or left since then without being written down.`
+        : `Since ${formatMedium(since)}, when it last matched, ${movedSince.count} ${movedSince.count === 1 ? "movement is" : "movements are"} recorded on ${account}: ${formatMoney(movedSince.into)} in and ${formatMoney(movedSince.outOf)} out. Only those were searched.`;
+    lines.push(searched);
+  }
   if (found.length > 0) {
     lines.push(
       unexplained === 0
@@ -442,13 +525,65 @@ export function investigationWords(result: Investigation): {
       lines.push(rest);
     }
   }
-  return { headline, lines, rest };
+  return { headline, lines, rest, since: searched };
 }
 
 // ── Putting it right ───────────────────────────────────────────────────────
 
+/**
+ * The ways to record money nobody wrote down, each as an entry to check.
+ *
+ * More money than recorded is interest, income, or a loan coming back; less
+ * is spending. The owner picks which it was, since the balance alone cannot
+ * say.
+ */
+export function choicesForClue(
+  clue: Clue,
+  account: string,
+  asOf: IsoDate,
+  interestItem = "",
+): { readonly label: string; readonly draft: Draft }[] {
+  if (clue.kind !== "unrecorded") {
+    const draft = draftForClue(clue, account, asOf, interestItem);
+    return draft ? [{ label: "Add it", draft }] : [];
+  }
+  const amount = Math.abs(clue.explains);
+  if (clue.direction === "out") {
+    return [
+      {
+        label: "Add as spending",
+        draft: { ...emptyDraft(asOf), flow: "Spending", category: "Spending", fromWallet: account, amount, description: "Spent, not written down at the time", status: "Paid" },
+      },
+    ];
+  }
+  const income = (item: string, description: string): Draft => ({
+    ...emptyDraft(asOf),
+    flow: "Revenue",
+    category: "Revenue",
+    toWallet: account,
+    item,
+    amount,
+    description,
+    status: "Received",
+  });
+  return [
+    ...(interestItem ? [{ label: "Add as interest", draft: income(interestItem, "Interest earned") }] : []),
+    { label: "Add as income", draft: income("", "Came in, not written down at the time") },
+    {
+      label: "Someone paid me back",
+      draft: { ...emptyDraft(asOf), flow: "Debt", debtEffect: "collect", toWallet: account, amount },
+    },
+  ];
+}
+
 /** The entry a finding would add, for the Add form or a card to check before it is saved. */
-export function draftForClue(clue: Clue, account: string, asOf: IsoDate): Draft | null {
+export function draftForClue(clue: Clue, account: string, asOf: IsoDate, interestItem = ""): Draft | null {
+  if (clue.kind === "unrecorded") {
+    const choices = choicesForClue(clue, account, asOf, interestItem);
+    // Small sums arriving on their own are nearly always interest; anything larger is left for the owner to name.
+    const pick = clue.direction === "in" && interestItem && Math.abs(clue.explains) <= 10000 ? choices[0] : choices.find((c) => c.label !== "Add as interest");
+    return pick?.draft ?? null;
+  }
   if (clue.kind === "missing") {
     const out = clue.line.amount < 0;
     return {

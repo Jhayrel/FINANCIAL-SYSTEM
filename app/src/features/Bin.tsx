@@ -186,7 +186,7 @@ export function Bin({
                     return next;
                   })
                 }
-                aria-label={allPicked ? "Clear selection" : filtered ? "Select every row shown" : "Select everything in the bin"}
+                aria-label={allPicked ? "Unselect all" : filtered ? "Select every row shown" : "Select everything in the bin"}
               />
               {chosen.length > 0 ? (
                 <span className="t-body-strong">
@@ -202,8 +202,9 @@ export function Bin({
             </label>
             {chosen.length > 0 && (
               <span className="fms-bulkbar-actions">
+                {/* "Clear" read as emptying the bin. It only unticks the rows. */}
                 <Button size="sm" onClick={() => setPicked(new Set())}>
-                  Clear
+                  Unselect
                 </Button>
                 <Button size="sm" variant="primary" onClick={restoreChosen}>
                   Restore {chosen.length}
@@ -214,7 +215,7 @@ export function Bin({
         )}
 
         {deleted.length === 0 ? (
-          <EmptyState message="Nothing deleted. Deleted transactions stay here until you clear them." />
+          <EmptyState message="Nothing deleted. Anything you delete waits here and can be restored." />
         ) : matching.length === 0 ? (
           <EmptyState
             message={

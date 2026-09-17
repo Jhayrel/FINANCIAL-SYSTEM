@@ -258,15 +258,16 @@ describe("readProposals: shape tolerance and bounds", () => {
     expect(readProposals({ summary: "hello" }, reference, ASOF).proposals).toHaveLength(0);
   });
 
+  // Forty: a week of a savings account's interest, twice a day, is fourteen lines on one screen.
   it("caps how many rows one reply can produce", () => {
-    const many = Array.from({ length: 60 }, () => ({
+    const many = Array.from({ length: 90 }, () => ({
       flow: "Spending",
       fromWallet: "Cash",
       item: "Food",
       amountPesos: 10,
     }));
     const { proposals } = readProposals({ proposals: many }, reference, ASOF);
-    expect(proposals.length).toBeLessThanOrEqual(20);
+    expect(proposals.length).toBeLessThanOrEqual(40);
   });
 
   it("treats a missing or odd confidence as the weakest, never the strongest", () => {

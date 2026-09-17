@@ -519,7 +519,7 @@ export function Database({
             </span>
             <span className="fms-bulkbar-actions">
               <Button size="sm" onClick={() => setPicked(new Set())}>
-                Clear
+                Unselect
               </Button>
               <Button size="sm" variant="danger" onClick={() => void askDeleteMany(chosen)}>
                 Move to bin

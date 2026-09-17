@@ -81,7 +81,8 @@ export interface ProposalRead {
 }
 
 /** A model can be asked for many rows; a screenshot usually holds several. */
-const MAX_PROPOSALS = 20;
+// A week of a savings account's interest is fourteen lines on one screen.
+const MAX_PROPOSALS = 40;
 
 const FLOWS: readonly Flow[] = ["Spending", "Revenue", "Transfer"];
 

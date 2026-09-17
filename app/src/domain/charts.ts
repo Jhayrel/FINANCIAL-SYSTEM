@@ -58,6 +58,17 @@ export interface Chart {
   readonly total: number;
   /** What was left out, when there was more than fits. */
   readonly othersCount: number;
+  /**
+   * Money in or money out, which decides the colour (rule D3): income green,
+   * spending red. Absent on charts stored before it existed, which read it
+   * from the title.
+   */
+  readonly direction?: "spending" | "revenue" | undefined;
+}
+
+/** Which way the money in a chart went, including charts stored before it was recorded. */
+export function chartDirection(chart: Chart): "spending" | "revenue" {
+  return chart.direction ?? (/^income\b/i.test(chart.title) ? "revenue" : "spending");
 }
 
 /**
@@ -638,6 +649,7 @@ export function buildChart(
     })),
     total,
     othersCount: all.length - kept.length,
+    direction,
   };
 }
 

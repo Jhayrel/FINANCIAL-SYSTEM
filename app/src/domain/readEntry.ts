@@ -113,7 +113,19 @@ const MOVED =
  * debt rather than read as ordinary spending by the word "paid".
  */
 const DEBT =
-  /\b(debt|debts|dept|borrowed|borrow|borrowing|loan|loans|loaned|loaning|utang|nangutang|umutang|inutang|hulog|hulugan|credit card|credit line|installment|instalment|repaid|repay|repayment|interest|paid off|pay off|owe|owes|owed|owing)\b/i;
+  /\b(debt|debts|dept|borrowed|borrow|borrowing|loan|loans|loaned|loaning|utang|nangutang|umutang|inutang|hulog|hulugan|credit card|credit line|installment|instalment|repaid|repay|repayment|interest|paid off|pay off|owe|owes|owed|owing|lent|lend|lending|pinautang|nagpautang|pautang|inutangan|paid me back|pay me back|paying me back|my credit|the credit|credit bill|credit payment)\b/i;
+
+/**
+ * Interest earned: a savings account, a time deposit, a bank paying you.
+ *
+ * "my maya savings earned 0.31 interest today" was read as debt, because
+ * "interest" is a debt word. Interest a bank pays you is income, and on the
+ * owner's own screen it arrives twice a day into savings. Only "bank
+ * interest" was set aside before; now any interest said to be earned, or on
+ * savings or a deposit, is income.
+ */
+const INTEREST_EARNED =
+  /\b(earn\w*|received|receive|recieved|got|credited|kumita|natanggap)\b(?:[^.]|\.\d)*\binterest\b|\binterest\b(?:[^.]|\.\d)*\b(earn\w*|received|credited)\b|\b(savings?|saving|deposit|time deposit|td)\b(?:[^.]|\.\d)*\binterest\b|\binterest\b(?:[^.]|\.\d)*\b(savings?|deposit)\b|\binterest (earned|income)\b/i;
 
 /**
  * Drawing on credit, said as "I credited".
@@ -140,7 +152,7 @@ const CREDITED_MYSELF = /\b(?:i|we)\s+(?:just\s+)?credited\b/i;
  * opinion about it.
  */
 const SOMEONE_ELSE =
-  /\b(friend|friends|kaibigan|barkada|mother|mom|mama|nanay|father|dad|papa|tatay|sister|ate|brother|kuya|cousin|pinsan|tita|tito|aunt|auntie|uncle|lola|lolo|grandma|grandpa|classmate|schoolmate|officemate|roommate|neighbou?r|landlord|landlady|teacher|driver|boss|seller|shop|store|vendor|rider|courier|girlfriend|boyfriend|wife|husband|someone|somebody|him|her|them|his|hers|their|theirs)\b/i;
+  /\b(friend|friends|freind|freinds|frend|frends|fren|frnd|bestfriend|bff|tropa|jowa|gf|bf|kaibigan|barkada|mother|mom|mama|nanay|father|dad|papa|tatay|sister|ate|brother|kuya|cousin|pinsan|tita|tito|aunt|auntie|uncle|lola|lolo|grandma|grandpa|classmate|schoolmate|officemate|roommate|neighbou?r|landlord|landlady|teacher|driver|boss|seller|shop|store|vendor|rider|courier|girlfriend|boyfriend|wife|husband|someone|somebody|him|her|them|his|hers|their|theirs)\b/i;
 
 /**
  * A possessive that is not yours: "mama's gcash", "Jhayrel's maya".
@@ -164,7 +176,7 @@ const THEIR_POSSESSIVE = /\b(?!my\b|our\b)[\w-]+['’]s\b/i;
  * friend told me about the promo" stays a bill.
  */
 const PAID_A_PERSON =
-  /\b(?:paid|pay|paying|repaid|reimbursed|sent|send|gave|give|giving)\s+(?:back\s+)?(?:to\s+)?(?:my|his|her|their|our|the|a)?\s*(?:friend|friends|kaibigan|barkada|mother|mom|mama|nanay|father|dad|papa|tatay|sister|brother|kuya|cousin|pinsan|tita|tito|aunt|auntie|uncle|lola|lolo|grandma|grandpa|classmate|schoolmate|girlfriend|boyfriend|wife|husband|someone|somebody|him|her|them)\b|\b(?:nagpadala|pinadala|padala|nagbigay|binigay|ibinigay)\b[^.]*?\bsa\s+(?:aking\s+|ang\s+|kay\s+)?(?:nanay|tatay|mama|papa|kuya|ate|pinsan|tita|tito|lola|lolo|kaibigan|barkada)\b/i;
+  /\b(?:paid|pay|paying|repaid|reimbursed|sent|send|gave|give|giving|transferred|transfered|tranfer|transfer)\s+(?:back\s+)?(?:\S+\s+)?(?:to\s+)?(?:my|his|her|their|our|the|a)?\s*(?:friend|friends|freind|freinds|frend|fren|frnd|bestfriend|bff|tropa|jowa|kaibigan|barkada|mother|mom|mama|nanay|father|dad|papa|tatay|sister|brother|kuya|cousin|pinsan|tita|tito|aunt|auntie|uncle|lola|lolo|grandma|grandpa|classmate|schoolmate|girlfriend|boyfriend|wife|husband|someone|somebody|him|her|them)\b|\b(?:nagpadala|pinadala|padala|nagbigay|binigay|ibinigay)\b[^.]*?\bsa\s+(?:aking\s+|ang\s+|kay\s+)?(?:nanay|tatay|mama|papa|kuya|ate|pinsan|tita|tito|lola|lolo|kaibigan|barkada)\b/i;
 
 /** Explicitly one of yours: "my gcash", "my own savings". */
 const MINE = /\b(my|mine|our|ours|own)\b/i;
@@ -517,7 +529,8 @@ export function readEntry(
    * Taken out before the test rather than excepted after it, so "I paid the
    * interest on maya credit" is still debt: only the exact phrase goes.
    */
-  const withoutIncome = text.replace(/\bbank interest\b/gi, " ");
+  const earnsInterest = INTEREST_EARNED.test(text) && !/\b(credit|loan|utang|debt|owe)\b/i.test(text);
+  const withoutIncome = (earnsInterest ? text.replace(/\b(bank )?interest\b/gi, " ") : text).replace(/\bbank interest\b/gi, " ");
 
   /** Money passing through for someone else, which is debt in the ledger's terms. */
   const passing = readPassThrough(text);
@@ -542,7 +555,7 @@ export function readEntry(
     flowOf(text) === null &&
     itemFromHistory(text, transactions.filter((t) => t.type === "Spending")) !== null;
 
-  const flow = readsAsDebt ? null : (flowOf(text) ?? (verbless ? "Spending" : null));
+  const flow = readsAsDebt ? null : earnsInterest ? "Revenue" : (flowOf(text) ?? (verbless ? "Spending" : null));
   if (!flow) {
     /**
      * A debt sentence still gives up its date, amount and wallet.
@@ -680,7 +693,12 @@ export function readEntry(
   const destination = theirs ? "" : walletAfter(text, TO_WORDS, accounts);
 
   const loose = walletIn(text, accounts);
-  const source = stated || (destination ? "" : loose);
+  /*
+   * "I spend 350 today to my maya food" paid from Maya. A purchase has no
+   * destination wallet, so a wallet named after "to" is where it was paid
+   * from, not where it went.
+   */
+  const source = stated || (flow === "Spending" ? destination || loose : destination ? "" : loose);
 
   const because: string[] = [];
   if (said && date !== asOf) because.push(`Dated ${date}, from what you said.`);
@@ -738,6 +756,20 @@ export function readEntry(
         "")
       : "";
 
+  /*
+   * Interest earned lands in the savings account the sentence means. "maya
+   * savings" is not the wallet Maya: it is the savings account with Maya in
+   * its name, when there is one. "credited to maya" names the wallet itself
+   * and stays there.
+   */
+  const savingsNamed = earnsInterest && /\b(savings?|deposit)\b/i.test(text)
+    ? reference.savings.find((name) => {
+        const words = name.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && w !== "personal" && w !== "savings" && w !== "bank");
+        return words.length > 0 && words.every((w) => new RegExp(`\\b${w}\\b`, "i").test(text));
+      }) ?? ""
+    : "";
+  const interestItem = earnsInterest ? (reference.revenueCategories.find((c) => /interest/i.test(c)) ?? "") : "";
+
   const base: Draft = {
     ...emptyDraft(date),
     flow,
@@ -745,7 +777,7 @@ export function readEntry(
     fromWallet: flow === "Revenue" ? "" : source,
     toWallet:
       flow === "Revenue"
-        ? destination || loose
+        ? savingsNamed || destination || loose
         : flow === "Transfer"
           ? (destination !== source ? destination : "")
           : "",
@@ -767,6 +799,7 @@ export function readEntry(
      * leaves the field blank exactly as before.
      */
     ...(filipinoItem ? { item: filipinoItem } : {}),
+    ...(interestItem ? { item: interestItem, description: "Interest earned" } : {}),
     /**
      * The credit line, when the sentence named one.
      *

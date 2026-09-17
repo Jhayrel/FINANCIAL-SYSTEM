@@ -71,8 +71,10 @@ function scopeIn(text: string): PlanScope {
 }
 
 /** Read a budget request, or return null when the sentence is not one. */
-export function readBudgetAsk(text: string, reference: ReferenceLists, asOf: IsoDate): BudgetAsk | null {
-  if (!/\b(budget|limit|cap)\b/i.test(text) || !SET.test(text)) return null;
+export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: IsoDate): BudgetAsk | null {
+  // "add buget same as last month": the misspellings that came in, read as the word.
+  const text = said.replace(/\b(buget|budjet|bugdet|budgt|budet|bujet|budgets?)\b/gi, "budget");
+  if (!/\b(budget|limit|cap)\b/i.test(text) || !(SET.test(text) || /\badd\b/i.test(text))) return null;
   const { year, month } = monthIn(text, asOf);
   const scope = scopeIn(text);
 

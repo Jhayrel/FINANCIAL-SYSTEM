@@ -54,7 +54,7 @@ import { formatMoney, type Centavos } from "./money";
 
 export interface DebtSentence {
   /** The effect the words state beyond doubt, or undefined to leave it for the owner. */
-  readonly effect?: "repay" | "draw" | "interest" | "charge" | undefined;
+  readonly effect?: "repay" | "draw" | "interest" | "charge" | "lend" | "collect" | undefined;
   /** A borrowing's fees, added on top of what was received. */
   readonly charges: Centavos | null;
   /** Everything paid. The sentence's own figure unless it built the payment out of parts. */
@@ -102,6 +102,13 @@ const PAY_VERB =
 /** Paying with a credit line rather than paying it off: buying on credit. */
 const PAID_WITH =
   /\b(?:with|using|via|thru|through|gamit|by)\s+(?:my\s+|the\s+|ang\s+)?(?:[a-z]+\s+){0,2}(?:credit|loan|spaylater|paylater)\b/i;
+
+/** Money lent to someone: "I lent 500 to Juan", "pinautang". */
+const LEND_VERB = /\b(lent|lend|lending|loaned (?:it |the money )?to|pinautang|nagpautang|pautang|inutangan|gave \S+ (?:a )?loan)\b/i;
+
+/** Money lent coming back: "Juan paid me back 200", "ibinalik". */
+const COLLECT_VERB =
+  /\b(paid me back|paid back to me|gave (?:it |the money |my money )?back|returned (?:the |my )?(?:money|loan|utang)|collected|nagbayad sa akin|binayaran (?:ako|niya|nya)|ibinalik)\b/i;
 
 /** Money taken from a credit line or a lender. */
 const BORROW_VERB =
@@ -160,6 +167,13 @@ export function readDebtSentence(
   amountOf: (text: string) => Centavos | null,
   readFigure: (raw: string) => Centavos | null,
 ): DebtSentence {
+  // Money you lent, going out and coming back. Checked first: "paid me back" is not you paying.
+  if (COLLECT_VERB.test(text)) {
+    return { effect: "collect", amount: amountOf(text), charges: null, interest: null, interestUnstated: false };
+  }
+  if (LEND_VERB.test(text) && !BORROW_VERB.test(text)) {
+    return { effect: "lend", amount: amountOf(text), charges: null, interest: null, interestUnstated: false };
+  }
   // Fees first, so their figures are never mistaken for the amount.
   const fees = feesIn(text, readFigure);
   const body = fees.without;
@@ -239,7 +253,7 @@ export function readDebtSentence(
 
 /** Money sent for someone who pays it back: "she will pay me back", "inabonohan". */
 const FRONTED =
-  /\b(pays? me back|paying me back|paid me back|pay (it|this) back|give (it|me|the money|the cash)? ?back|will give (me )?(it|the money|cash|the cash)|return(s)? (it|the money)|reimburse\w*|abono|abonohan|inabonohan|inabonuhan|nag ?abono|babayaran (ako|niya|nya)|bayaran (ako|niya|nya))\b/i;
+  /\b(will pay me back|pays me back|going to pay me back|to pay me back|pay me back later|will pay (it|this) back|give (it|me|the money|the cash)? ?back|will give (me )?(it|the money|cash|the cash)|return(s)? (it|the money)|reimburse\w*|abono|abonohan|inabonohan|inabonuhan|nag ?abono|babayaran (ako|niya|nya)|bayaran (ako|niya|nya))\b/i;
 
 /** Money received that belongs to someone else: "for the company, I'll pass it on". */
 const HELD =
@@ -254,7 +268,7 @@ const HELD =
  * read when the words say it: a payment back, or money that is not theirs.
  */
 export function readPassThrough(text: string): "held" | "fronted" | null {
-  if (FRONTED.test(text)) return "fronted";
+  if (FRONTED.test(text) && !COLLECT_VERB.test(text)) return "fronted";
   if (HELD.test(text)) return "held";
   return null;
 }
@@ -292,7 +306,11 @@ export function debtCardIntro(
     return parts.join(" ");
   }
   const what =
-    draft.debtEffect === "repay"
+    draft.debtEffect === "lend"
+      ? "money you lent"
+      : draft.debtEffect === "collect"
+        ? "money paid back to you"
+        : draft.debtEffect === "repay"
       ? "a payment"
       : draft.debtEffect === "draw"
         ? "borrowing"
@@ -301,11 +319,13 @@ export function debtCardIntro(
           : draft.debtEffect === "interest"
             ? "interest paid on its own"
             : "debt";
-  const parts = [`That reads as ${what}${line ? ` on **${line}**` : ""}.`];
-  const missing = [!line ? "which credit line" : "", !draft.debtEffect ? "what it does" : ""].filter(Boolean);
+  const with_ = draft.debtEffect === "lend" ? "to" : draft.debtEffect === "collect" ? "from" : "on";
+  const parts = [`That reads as ${what}${line ? ` ${with_} **${line}**` : ""}.`];
+  const toYou = draft.debtEffect === "lend" || draft.debtEffect === "collect";
+  const missing = [!line ? (toYou ? "who it is" : "which debt") : "", !draft.debtEffect ? "what it does" : ""].filter(Boolean);
   if (missing.length > 0) {
     parts.push(
-      `Pick ${missing.join(" and ")} on the card: ${missing.length === 2 ? "those are" : "that is"} not something to guess with borrowed money.`,
+      `Pick ${missing.join(" and ")} on the card: ${missing.length === 2 ? "those are" : "that is"} not something to guess with money that is owed.`,
     );
   }
   if (draft.debtEffect === "draw" && (draft.charges ?? 0) > 0 && draft.amount !== null) {

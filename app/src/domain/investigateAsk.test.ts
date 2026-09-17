@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readInvestigateAsk } from "./investigateAsk";
+import { matchedOnIn, readInvestigateAsk } from "./investigateAsk";
 
 const accounts = ["Cash", "Gcash", "Maya", "Maya Bank (Personal savings)"];
 const recorded = (account: string): number => ({ Cash: 500_000, Gcash: 450_000, Maya: 5_000_000 })[account] ?? 0;
@@ -41,5 +41,15 @@ describe("asking where a difference went", () => {
     expect(read("where did I spend the most this month")).toBeNull();
     expect(read("I paid 500 for food from maya")).toBeNull();
     expect(read("how much is in maya")).toBeNull();
+  });
+});
+
+describe("the day it last matched", () => {
+  it("reads yesterday, days ago and a named day, and never takes them for money", () => {
+    const asked = readInvestigateAsk("yesterday my maya matched 100% but now the bank has extra money, it says 50,250", accounts, recorded, "2026-09-17");
+    expect(asked).toMatchObject({ account: "Maya", actual: 5_025_000, matchedOn: "2026-09-16" });
+    expect(matchedOnIn("gcash was correct 3 days ago", "2026-09-17")).toBe("2026-09-14");
+    expect(matchedOnIn("it matched on sep 10", "2026-09-17")).toBe("2026-09-10");
+    expect(matchedOnIn("where did my 20k go", "2026-09-17")).toBeNull();
   });
 });

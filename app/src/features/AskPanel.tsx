@@ -79,6 +79,7 @@ import {
 import { readEntry, splitEntries } from "../domain/readEntry";
 import { readRich } from "../domain/richText";
 import {
+  saysLatestIsWrong,
   detectRecall,
   detectSweep,
   findRows,
@@ -90,6 +91,7 @@ import {
 } from "../domain/recall";
 import {
   buildChart,
+  chartDirection,
   chartInWords,
   chartLabel,
   isChartFollowUp,
@@ -147,6 +149,8 @@ import type { Proposal } from "../domain/proposal";
 import { choicesFor, effectsFor, type Debt, type DebtEffect } from "../domain/debt";
 import { effectInline, effectLabel } from "../domain/debtWords";
 import { debtCardIntro } from "../domain/debtSentence";
+import { fillDebt, personDebt } from "../domain/debtFill";
+import { foldInterest } from "../domain/interestFold";
 import { AmountInput } from "../components/forms";
 import type { Provenance } from "../domain/activity";
 import { imageLimits, type AppSettings } from "../domain/settings";
@@ -210,6 +214,10 @@ export interface ProposalSink {
   readonly canBudget: boolean;
   /** Replace a year's budget, as the Budget screen does. */
   readonly budget: (year: number, plan: BudgetYear, changes: readonly string[]) => void;
+  /** Whether a person or lender can be added to the debt list from here. */
+  readonly canAddDebt: boolean;
+  /** Add someone to the debt list, as the Add form's "Someone new" does. */
+  readonly addDebt: (debt: Debt) => void;
 }
 
 /** Saved entries about to change: each one before, and after. */
@@ -280,6 +288,8 @@ interface Found {
    */
   readonly action: RecallAction | "edit";
   readonly candidates: readonly Candidate[];
+  /** An edit list that also offers the bin: "that last entry is a mistake" can mean either. */
+  readonly alsoBin?: boolean;
   /** A whole named set, so the card offers one button for all of them. */
   readonly sweep?: boolean;
   /** Ids already acted on, so a button does not offer the same row twice. */
@@ -304,6 +314,8 @@ interface DebtChoice {
   readonly kind: "debt";
   readonly draft: Draft;
   readonly state: "open" | "settled";
+  /** Someone the sentence named who is not on the debt list yet, offered as a button. */
+  readonly newPerson?: string | undefined;
   /**
    * Stable across a refresh, so the record can say what became of this card.
    *
@@ -894,6 +906,14 @@ export function AskPanel({
    * on load rather than edited in place, and the last message carrying a
    * given card id is the truth about that card.
    */
+  /**
+   * The last thing written for each card, so the same state is not written twice.
+   *
+   * Pressing "Put back in the form" six times in a second wrote six identical
+   * "Sent to the form" messages, which then read in the record as six entries.
+   */
+  const lastRecorded = useRef(new Map<string, string>());
+
   const recordCard = (turn: Offered | DebtChoice): void => {
     const card = isOffer(turn)
       ? {
@@ -914,6 +934,10 @@ export function AskPanel({
           draft: turn.draft as unknown as Record<string, unknown>,
         };
 
+    const signature = JSON.stringify(card);
+    if (lastRecorded.current.get(card.id) === signature) return;
+    lastRecorded.current.set(card.id, signature);
+
     const d = isOffer(turn) ? turn.proposal.draft : turn.draft;
     const what = isOffer(turn)
       ? `${d.date} ${d.flow} ${d.item} ${formatMoney(d.amount ?? 0)}`
@@ -922,6 +946,29 @@ export function AskPanel({
     void chatStore(uid)
       .record(proposed(card, `${CARD_WORD[card.state]}: ${what}`))
       .catch(() => {});
+  };
+
+  /**
+   * A debt card, with the line and the amount filled where only one answer fits.
+   *
+   * "I paid my credit" names the one credit line and the Debt screen already
+   * knows what is due on it. Every path that makes a debt card comes through
+   * here, so a model reading and the rules reading end in the same card.
+   */
+  const debtCard = (draft: Draft, text: string): { turn: DebtChoice; notes: readonly string[] } => {
+    const fill = fillDebt(draft, text, debts, transactions, [...reference.wallets, ...reference.savings], asOf);
+    return {
+      turn: {
+        kind: "debt",
+        draft: fill.draft,
+        state: "open",
+        cardId: newCardId(),
+        ...(fill.newPerson ? { newPerson: fill.newPerson } : {}),
+      },
+      notes: fill.newPerson
+        ? [...fill.notes, `**${fill.newPerson}** is not on your debt list yet. Press **Add ${fill.newPerson}** on the card and every movement with them adds up in one place.`]
+        : fill.notes,
+    };
   };
 
   const say = (turn: Turn): void => {
@@ -1322,7 +1369,7 @@ export function AskPanel({
           text: hint,
         }),
       );
-      say({ kind: "debt", draft: filled.draft, state: "open", cardId: newCardId() });
+      say(debtCard(filled.draft, hint).turn);
       return;
     }
 
@@ -1532,7 +1579,7 @@ export function AskPanel({
 
     const control = new AbortController();
     stopper.current = control;
-    const result = await during(
+    const read = await during(
       sent.length > 0 ? "Reading what you sent" : "Working out the entry",
       () =>
         extractProposals({
@@ -1545,6 +1592,8 @@ export function AskPanel({
       "Still reading it",
     );
     stopper.current = null;
+    // A screenful of daily interest is one entry, not sixty cards (domain/interestFold.ts).
+    const result = { ...read, proposals: foldInterest(read.proposals, transactions, reference) };
 
     /**
      * The photo, as a description of itself.
@@ -1694,7 +1743,7 @@ export function AskPanel({
               text: line,
             }),
           );
-          say({ kind: "debt", draft: read.draft, state: "open", cardId: newCardId() });
+          say(debtCard(read.draft, line).turn);
           continue;
         }
         await offer(
@@ -1914,7 +1963,8 @@ export function AskPanel({
       return;
     }
 
-    const result = investigate({ transactions, account, actual, asOf: readOn, statement });
+    const result = investigate({ transactions, account, actual, asOf: readOn, statement, matchedOn: ask.matchedOn ?? undefined });
+    const interestItem = reference.revenueCategories.find((c) => /interest/i.test(c)) ?? "";
     const words = investigationWords(result);
     const bold = (text: string): string => text.replace(formatMoney(Math.abs(result.gap)), (m) => `**${m}**`);
     const reply = [
@@ -1927,7 +1977,7 @@ export function AskPanel({
 
     // What can be put right, as cards.
     const adds = [...result.found, ...result.possible]
-      .map((clue) => draftForClue(clue, account, readOn))
+      .map((clue) => draftForClue(clue, account, readOn, interestItem))
       .filter((draft): draft is Draft => draft !== null);
     /*
      * Each card is checked against its own line, not the whole message: the
@@ -1957,7 +2007,9 @@ export function AskPanel({
           ? [{ row: c.row, score: 90, why: [c.kind === "amount-differs" ? "a different figure on the statement" : "not on the statement"] }]
           : c.kind === "together"
             ? c.rows.map((row) => ({ row, score: 50, why: ["could be the difference"] }))
-            : [],
+            : c.kind === "wrong-account"
+              ? [{ row: c.row, score: 60, why: [`filed on ${c.other}`] }]
+              : [],
       )
       .filter((c) => !seen.has(c.row.id) && Boolean(seen.add(c.row.id)));
     if (toCheck.length > 0) say({ kind: "found", action: "edit", candidates: toCheck, done: [] });
@@ -2277,9 +2329,9 @@ export function AskPanel({
     const findable = [...reference.wallets, ...reference.savings];
     const askedToFind = as
       ? null
-      : readInvestigateAsk(note, findable, (account) => walletBalance(transactions, account)) ??
+      : readInvestigateAsk(note, findable, (account) => walletBalance(transactions, account), asOf) ??
         (routed?.intent === "investigate"
-          ? (readInvestigateAsk(`${note} doesn't match`, findable, (account) => walletBalance(transactions, account)) ?? {
+          ? (readInvestigateAsk(`${note} doesn't match`, findable, (account) => walletBalance(transactions, account), asOf) ?? {
               account: "",
               actual: null,
               gap: null,
@@ -2432,6 +2484,61 @@ export function AskPanel({
         from: "this device",
         ephemeral: true,
       });
+      return;
+    }
+
+    /**
+     * "cancel" with nothing open.
+     *
+     * It went on to the bin search with nothing left to search for and came
+     * back "No entry matches that", which reads as the app not listening.
+     */
+    if (
+      !pending &&
+      openCards.length === 0 &&
+      files.length === 0 &&
+      !as &&
+      /^(?:please\s+)?(?:cancel|nevermind|never mind|discard|scrap)(?:\s+(?:this|it|that|this one|that one))?[.!]*$/i.test(note.trim())
+    ) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      say({
+        kind: "assistant",
+        text: 'Nothing is open, so nothing changed. To remove a saved entry, name it: "delete the Jollibee on Monday", or "delete the last one".',
+        from: "this device",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    /**
+     * "that last transaction is a mistake", "the input earlier is wrong".
+     *
+     * Both were answered with nothing. They name no field to change, so the
+     * newest entries are shown with both ways to fix them: correct it in the
+     * form, or move it to the bin. Nothing moves until a button is pressed.
+     */
+    if (openCards.length === 0 && !pending && files.length === 0 && !as && saysLatestIsWrong(note)) {
+      const newest = [...transactions].sort((x, y) => y.recordNumber - x.recordNumber).slice(0, 3);
+      setDraft("");
+      say({ kind: "you", text: note });
+      if (newest.length === 0) {
+        say({ kind: "assistant", text: "The ledger has no entries yet, so there is nothing to correct.", from: "this device" });
+        return;
+      }
+      say({
+        kind: "assistant",
+        text: "Here are your newest entries. **Edit this** puts one in the form to correct, keeping its record number. **Move to bin** removes it, and the Bin can bring it back.",
+        from: "this device",
+      });
+      say({
+        kind: "found",
+        action: "edit",
+        alsoBin: true,
+        candidates: newest.map((row, n) => ({ row, score: 100 - n, why: [n === 0 ? "the newest entry" : "a recent entry"] })),
+        done: [],
+      });
+      log(aiEvent("answered", "add", { text: `Offered the ${newest.length} newest entries to correct. Asked: ${note}`, model: "this device" }));
       return;
     }
 
@@ -3224,9 +3331,14 @@ export function AskPanel({
            * chosen rather than inferred, so they are offered as buttons and
            * the rest of the row is already filled in.
            */
+          const card = debtCard(local.draft, note);
+          const intro = debtCardIntro(card.turn.draft, local.interestUnstated ?? false, debts, local.passThrough);
           say({
             kind: "assistant",
-            text: debtCardIntro(local.draft, local.interestUnstated ?? false, debts, local.passThrough),
+            text:
+              card.notes.length > 0
+                ? intro.replace(/Check the card, then add it\.$/, `${card.notes.join(" ")} Check the card, then add it.`)
+                : intro,
             from: "this device",
             ephemeral: true,
           });
@@ -3236,7 +3348,7 @@ export function AskPanel({
               text: note,
             }),
           );
-          say({ kind: "debt", draft: local.draft, state: "open", cardId: newCardId() });
+          say(card.turn);
           return;
         }
 
@@ -3352,7 +3464,7 @@ export function AskPanel({
                   text: lines[i] ?? "",
                 }),
               );
-              say({ kind: "debt", draft: r.draft, state: "open", cardId: newCardId() });
+              say(debtCard(r.draft, lines[i] ?? "").turn);
               continue;
             }
             if (!r.worthOffering) continue;
@@ -3692,6 +3804,7 @@ export function AskPanel({
               key={i}
               turn={turn}
               debts={debts}
+              wallets={[...reference.wallets, ...reference.savings]}
               sink={sink}
               hostRef={(el) => keepCard(i, el)}
               onSettle={() => {
@@ -3715,8 +3828,10 @@ export function AskPanel({
             <FoundList
               key={i}
               found={turn}
-              onAct={(id) => {
-                if (turn.action === "edit") {
+              onAct={(id, how) => {
+                if (how === "bin") {
+                  sink.bin(id);
+                } else if (turn.action === "edit") {
                   const row = transactions.find((t) => t.id === id);
                   if (row) sink.use(transactionToDraft(row));
                 } else if (turn.action === "bin") {
@@ -4768,7 +4883,7 @@ function FoundList({
   onActAll,
 }: {
   found: Found;
-  onAct: (id: string) => void;
+  onAct: (id: string, how?: "bin") => void;
   onActAll: (ids: readonly string[]) => void;
 }) {
   const { action, candidates, done, sweep } = found;
@@ -4839,13 +4954,24 @@ function FoundList({
             <p className="t-micro fms-proposalnote">Matched on {why.join(", ")}.</p>
             {settled ? (
               <p className="t-micro fms-proposalfrom">
-                {action === "edit"
+                {found.alsoBin
+                  ? "Done. A corrected entry keeps its number, and a binned one can be restored from the Bin screen."
+                  : action === "edit"
                   ? "Loaded into the form beside this. Change it and press Save transaction."
                   : action === "bin"
                     ? "Moved to the bin. It is restorable from the Bin screen."
                     : "Restored. It is back in the Database."}
               </p>
-            ) : sweep ? null : (
+            ) : sweep ? null : found.alsoBin ? (
+              <div className="fms-proposalactions">
+                <Button size="sm" onClick={() => onAct(row.id)}>
+                  {verb}
+                </Button>
+                <Button size="sm" variant="danger" onClick={() => onAct(row.id, "bin")}>
+                  Move to bin
+                </Button>
+              </div>
+            ) : (
               <Button size="sm" onClick={() => onAct(row.id)}>
                 {verb}
               </Button>
@@ -4900,7 +5026,19 @@ function FoundList({
  * Length still carries the comparison. Colour only tells one row from
  * another, which is what a legend would otherwise have to do.
  */
-const catColour = (rank: number): string => `var(--cat-${Math.min(rank + 1, 17)})`;
+/**
+ * A chart's colour is the colour of its money (rule D3).
+ *
+ * Every chart was drawn in the brand green, so a chart of spending looked
+ * like good news. Spending is red and income is green, the same as on every
+ * other screen, and the rows step lighter from the largest so they stay
+ * apart without borrowing a colour that means something else.
+ */
+const toneOf = (chart: Chart): string =>
+  chartDirection(chart) === "revenue" ? "var(--flow-revenue)" : "var(--flow-spending)";
+
+/** Largest strongest, then lighter. Never below 0.3, where a bar stops reading against the track. */
+const stepOpacity = (rank: number, count: number): number => Math.max(0.3, 1 - rank * (0.7 / Math.max(count - 1, 1)));
 
 /**
  * The figures for whichever part is being pointed at.
@@ -4982,7 +5120,16 @@ function ChartView({ chart }: { chart: Chart }) {
         <LineView chart={chart} at={at} point={point} pin={pin} leave={leave} />
       ) : (
         <div className="fms-chartrows" onMouseLeave={leave}>
-          {chart.rows.map((r, i) => (
+          {chart.rows.map((r, i) => {
+            /*
+             * Months are a series, so their order is the calendar's and rank
+             * means nothing. A month above the average is drawn at full
+             * strength: for spending that is the red that needs looking at.
+             */
+            const average = chart.total / Math.max(chart.rows.length, 1);
+            const strength =
+              chart.by === "month" ? (r.value > average ? 1 : 0.45) : stepOpacity(i, chart.rows.length);
+            return (
             <button
               key={r.label}
               type="button"
@@ -4995,19 +5142,20 @@ function ChartView({ chart }: { chart: Chart }) {
             >
               <span className="fms-chartlabel t-micro">{r.label}</span>
               <span className="fms-charttrack">
-                {/* Width carries the comparison; colour only tells rows apart. */}
+                {/* Width carries the comparison; the colour says which way the money went. */}
                 <span
                   className="fms-chartbar"
                   style={{
                     width: `${Math.max(r.share * 100, 1.5)}%`,
-                    background: catColour(i),
-                    opacity: at === null || at === i ? 1 : 0.5,
+                    background: toneOf(chart),
+                    opacity: at === null || at === i ? strength : strength * 0.5,
                   }}
                 />
               </span>
               <span className="t-micro fms-chartvalue fms-proposalmoney">{chartLabel(r.value)}</span>
             </button>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -5017,6 +5165,9 @@ function ChartView({ chart }: { chart: Chart }) {
         {chart.othersCount > 0
           ? `The ${chart.rows.length} largest, with ${chart.othersCount} smaller left off. Totals worked out on this device.`
           : "Totals worked out on this device, from your entries."}
+        {chart.kind === "bars" && chart.by === "month"
+          ? ` Full colour marks the months above the average of ${chartLabel(Math.round(chart.total / Math.max(chart.rows.length, 1)))}.`
+          : ""}
       </p>
     </div>
   );
@@ -5098,9 +5249,8 @@ function PieView({
       value: r.value,
       dash: fraction * circumference,
       offset,
-      // Largest darkest, then stepping lighter. Never below 0.28, where the
-      // ring stops being distinguishable from the surface behind it.
-      opacity: Math.max(0.28, 1 - i * (0.72 / Math.max(chart.rows.length - 1, 1))),
+      // Largest darkest, then stepping lighter, in the colour of the money.
+      opacity: stepOpacity(i, chart.rows.length),
       percent: Math.round(fraction * 100),
     };
     offset += fraction * circumference;
@@ -5119,8 +5269,8 @@ function PieView({
               cy={centre}
               r={radius}
               fill="none"
-              stroke={catColour(i)}
-              strokeOpacity={at === null || at === i ? 1 : 0.45}
+              stroke={toneOf(chart)}
+              strokeOpacity={(at === null || at === i ? 1 : 0.45) * s.opacity}
               strokeWidth={at === i ? 26 : 22}
               strokeDasharray={`${s.dash} ${circumference - s.dash}`}
               strokeDashoffset={-s.offset}
@@ -5150,7 +5300,7 @@ function PieView({
               onBlur={leave}
               onClick={() => pin(i)}
             >
-              <span className="fms-pieswatch" style={{ background: catColour(i) }} aria-hidden />
+              <span className="fms-pieswatch" style={{ background: toneOf(chart), opacity: s.opacity }} aria-hidden />
               <span className="fms-pielabel">{s.label}</span>
               <span className="fms-piefigure fms-proposalmoney">
                 {s.percent}% · {chartLabel(s.value)}
@@ -5231,8 +5381,8 @@ function LineView({
         role="img"
         aria-label={chart.title}
       >
-        {single ? null : <polygon points={area} className="fms-linefill" />}
-        {single ? null : <polyline points={line} className="fms-linestroke" />}
+        {single ? null : <polygon points={area} className="fms-linefill" style={{ fill: toneOf(chart) }} />}
+        {single ? null : <polyline points={line} className="fms-linestroke" style={{ stroke: toneOf(chart) }} />}
 
         {/* The one being read, marked down the full height so it is findable. */}
         {at !== null && points[at] ? (
@@ -5252,6 +5402,7 @@ function LineView({
             cy={p.y}
             r={at === i ? 4 : 2.5}
             className="fms-linedot"
+            style={{ fill: toneOf(chart) }}
           />
         ))}
 
@@ -5335,6 +5486,7 @@ function effectFor(effect: DebtEffect | undefined, kind: Debt["kind"]): DebtEffe
 function DebtCard({
   turn,
   debts,
+  wallets,
   sink,
   hostRef,
   onSettle,
@@ -5342,6 +5494,7 @@ function DebtCard({
 }: {
   turn: DebtChoice;
   debts: readonly Debt[];
+  wallets: readonly string[];
   sink: ProposalSink;
   /** So the panel can measure this card and hold it still when it changes. */
   hostRef: (el: HTMLDivElement | null) => void;
@@ -5354,7 +5507,17 @@ function DebtCard({
   const named = draft.fromWallet || draft.toWallet;
   const direction = debtWalletDirection(draft.debtEffect);
   const chosen = debts.find((d) => d.id === draft.debtId);
-  const effects = choicesFor(chosen?.kind ?? "payable", draft.debtEffect, chosen?.form);
+  /*
+   * Money lent is owed to you, so before a person is picked the choices are
+   * the ones for money owed to you. They read Borrowed and Paid, with nothing
+   * chosen, on "I lent 500 to Juan".
+   */
+  const toYou = draft.debtEffect === "lend" || draft.debtEffect === "collect";
+  const effects = choicesFor(
+    chosen?.kind ?? (toYou ? "receivable" : "payable"),
+    draft.debtEffect,
+    chosen?.form ?? (turn.newPerson ? "informal" : undefined),
+  );
   const borrowing = draft.debtEffect === "draw" && chosen?.form !== "pass-through";
   const paying = draft.debtEffect === "repay" && chosen?.form !== "pass-through";
 
@@ -5395,24 +5558,64 @@ function DebtCard({
 
       <dl className="fms-proposalfields">
         <Field label="Date" value={draft.date} mono />
-        <Field
-          label="Amount"
-          value={draft.amount === null ? "" : formatMoney(draft.amount)}
-          required
-          mono
-        />
-        <Field
-          label={direction === "in" ? "Lands in" : direction === "out" ? "Paid from" : "Wallet"}
-          value={named}
-        />
       </dl>
 
+      {/*
+        The amount and the wallet are changed here, not only in the form.
+
+        A figure filled from what is due, or read off a sentence, is the part
+        most likely to need one number changed, and sending the whole entry to
+        the form for that was the long way round.
+      */}
       <div className="fms-debtpick">
-        <label className="t-micro fms-pfieldlabel" htmlFor="debt-line">
-          {live.some((d) => d.form === "pass-through") ? "Which debt or person" : "Which credit line"}
+        <label className="t-micro fms-pfieldlabel" htmlFor={`debt-amount-${turn.cardId}`}>
+          Amount
+        </label>
+        <AmountInput
+          id={`debt-amount-${turn.cardId}`}
+          value={draft.amount}
+          onChange={(v) => onChange({ ...draft, amount: v })}
+          ariaLabel="Amount"
+        />
+      </div>
+
+      {direction !== null && direction !== undefined && (
+        <div className="fms-debtpick">
+          <label className="t-micro fms-pfieldlabel" htmlFor={`debt-wallet-${turn.cardId}`}>
+            {direction === "in" ? "Lands in" : "Paid from"}
+          </label>
+          <select
+            id={`debt-wallet-${turn.cardId}`}
+            className="t-caption fms-proposalselect"
+            value={named}
+            onChange={(e) =>
+              onChange(
+                direction === "in"
+                  ? { ...draft, toWallet: e.target.value, fromWallet: "" }
+                  : { ...draft, fromWallet: e.target.value, toWallet: "" },
+              )
+            }
+          >
+            <option value="">Pick one</option>
+            {wallets.map((w) => (
+              <option key={w} value={w}>
+                {w}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div className="fms-debtpick">
+        <label className="t-micro fms-pfieldlabel" htmlFor={`debt-line-${turn.cardId}`}>
+          {toYou || turn.newPerson
+            ? "Who it is"
+            : live.some((d) => d.form === "pass-through" || d.counterpartyType === "person")
+              ? "Which debt or person"
+              : "Which credit line"}
         </label>
         <select
-          id="debt-line"
+          id={`debt-line-${turn.cardId}`}
           className="t-caption fms-proposalselect"
           value={draft.debtId ?? ""}
           onChange={(e) => {
@@ -5423,12 +5626,29 @@ function DebtCard({
           }}
         >
           <option value="">Pick one</option>
-          {live.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
+          {/* Money lent goes to a person or something owed to you, never a credit line. */}
+          {live
+            .filter((d) => !toYou || d.kind === "receivable" || d.counterpartyType === "person" || d.id === draft.debtId)
+            .map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
         </select>
+        {!draft.debtId && turn.newPerson && sink.canAddDebt && (
+          <Button
+            size="sm"
+            onClick={() => {
+              const person = personDebt(turn.newPerson ?? "", draft, debts, wallets[0] ?? "");
+              sink.addDebt(person);
+              const effect = effectFor(draft.debtEffect, person.kind);
+              const next = { ...draft, debtId: person.id };
+              onChange(effect && effect !== draft.debtEffect ? withDebtEffect(next, effect) : next);
+            }}
+          >
+            Add {turn.newPerson}
+          </Button>
+        )}
       </div>
 
       <div className="fms-debteffects">
@@ -5545,8 +5765,10 @@ function DebtCard({
 
       <p className="t-micro fms-proposalfrom">
         {draft.debtId && draft.debtEffect
-          ? "The line and what it does were read from your words. Check both before adding: reading either wrong turns borrowing into income."
-          : "Which line and what it does are the two things nobody should guess at with borrowed money, so they are picked unless your words said them plainly."}
+          ? toYou
+            ? "Who it is and what it does were read from your words. Check both before adding: lending read as paid back would say they owe you less."
+            : "The line and what it does were read from your words. Check both before adding: reading either wrong turns borrowing into income."
+          : "Who it is with and what it does are the two things nobody should guess at with money that is owed, so they are picked unless your words said them plainly."}
       </p>
     </div>
   );

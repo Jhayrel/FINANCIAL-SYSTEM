@@ -4741,12 +4741,15 @@ textarea.fms-askinput {
  * Under the row it is about, in the quiet colour: it is an offer, not a
  * warning, and it is gone the moment anything is typed.
  */
+/* Its own line under the types, with room before the first field's label. */
 .fms-flowundo {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-1) var(--space-2);
-  margin: var(--space-2) 0 0;
+  margin: var(--space-2) 0 var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--hairline);
   color: var(--ink-3);
 }
 
@@ -4786,10 +4789,11 @@ textarea.fms-askinput {
   cursor: pointer;
 }
 
+/* The bar's colour is its money's; pointing at it only brings it to full strength. */
 .fms-chartrow:hover .fms-chartbar,
 .fms-chartrow:focus-visible .fms-chartbar,
 .fms-chartrow[aria-pressed="true"] .fms-chartbar {
-  background: var(--brand-700, var(--brand-600));
+  opacity: 1 !important;
 }
 
 .fms-chartrow[aria-pressed="true"] .fms-chartlabel,
@@ -6015,7 +6019,20 @@ textarea.fms-askinput {
 
 .fms-find-go {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-start;
+  gap: var(--space-2);
+}
+
+/* The way out of an answer, under it. */
+.fms-find-done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
 }
 
 .fms-find-result {
@@ -6065,6 +6082,15 @@ textarea.fms-askinput {
 
 .fms-findrow--maybe > .t-body {
   color: var(--ink-2);
+}
+
+/* Several ways to put it right: the buttons go under the sentence, so the sentence keeps the width. */
+.fms-findrow--stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.fms-findrow--stack > .fms-findrow-end {
+  justify-content: flex-start;
 }
 
 .fms-findrow-end,

@@ -1302,6 +1302,7 @@ export default function App() {
     },
     onUpdate: handleUpdate,
     onBudget: handleBudgetYear,
+    onAddDebt: (debt) => setSettings((s) => ({ ...s, credits: [...s.credits, debt] })),
   });
 
   // With Firebase configured, nothing renders until the owner is signed in,

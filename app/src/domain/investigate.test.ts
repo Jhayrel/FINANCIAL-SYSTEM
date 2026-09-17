@@ -11,6 +11,9 @@ import { describe, expect, it } from "vitest";
 
 import { walletBalance } from "./balances";
 import {
+  choicesForClue,
+  clueWords,
+  draftForClue,
   investigate,
   investigationWords,
   looksMistyped,
@@ -233,5 +236,49 @@ describe("history pasted as text", () => {
       { date: "2026-09-06", amount: -1_500_000, description: "Travel booking" },
       { date: "2026-09-07", amount: 1_250_000, description: "Received from client" },
     ]);
+  });
+});
+
+describe("when it last matched, and money nobody wrote down", () => {
+  /** Two hundred rows, all right, and one wrong one after the day it matched. */
+  const busy: Transaction[] = [
+    income("2026-06-01", 10_000_000, "Salary"),
+    ...Array.from({ length: 200 }, (_, i) =>
+      spend(`2026-0${6 + Math.floor(i / 70)}-${String(1 + (i % 28)).padStart(2, "0")}`, 5_000, "Food"),
+    ),
+  ];
+
+  it("searches only what came after the day it matched", () => {
+    const ledger = [...busy, spend("2026-09-15", 5_000, "Food", "lunch")];
+    const matched = walletBalance(ledger.filter((t) => t.date <= "2026-09-14"), "Maya");
+    const result = investigate({ transactions: ledger, account: "Maya", actual: matched, asOf: "2026-09-16", matchedOn: "2026-09-14" });
+    expect(result.gap).toBe(-5_000);
+    expect(result.movedSince).toEqual({ count: 1, into: 0, outOf: 5_000 });
+    const together = result.possible.filter((c) => c.kind === "together");
+    expect(together).toHaveLength(1);
+    expect(together[0]?.kind === "together" && together[0].rows.map((r) => r.date)).toEqual(["2026-09-15"]);
+    expect(investigationWords(result).lines[0]).toContain("Only those were searched");
+  });
+
+  it("offers interest, income or a loan coming back when the account holds more", () => {
+    const recorded = walletBalance(ledger, "Maya");
+    const result = investigate({ transactions: ledger, account: "Maya", actual: recorded + 22, asOf: "2026-09-16", matchedOn: "2026-09-15" });
+    const extra = result.possible.find((c) => c.kind === "unrecorded");
+    expect(extra).toMatchObject({ direction: "in", explains: -22 });
+    const choices = extra ? choicesForClue(extra, "Maya", "2026-09-16", "Bank interest") : [];
+    expect(choices.map((c) => c.label)).toEqual(["Add as interest", "Add as income", "Someone paid me back"]);
+    expect(choices[0]?.draft).toMatchObject({ flow: "Revenue", toWallet: "Maya", item: "Bank interest", amount: 22 });
+    expect(choices[2]?.draft).toMatchObject({ flow: "Debt", debtEffect: "collect", toWallet: "Maya", amount: 22 });
+    // A few centavos arriving on their own are nearly always interest.
+    expect(extra && draftForClue(extra, "Maya", "2026-09-16", "Bank interest")?.item).toBe("Bank interest");
+  });
+
+  it("finds an entry filed on the wrong account", () => {
+    const filed = [...ledger, spend("2026-09-10", 250_000, "Travel", "bus ticket", "Gcash")];
+    const recorded = walletBalance(filed, "Maya");
+    const result = investigate({ transactions: filed, account: "Maya", actual: recorded - 250_000, asOf: "2026-09-16" });
+    const wrong = result.possible.find((c) => c.kind === "wrong-account");
+    expect(wrong).toMatchObject({ other: "Gcash", explains: 250_000 });
+    expect(wrong && clueWords(wrong)).toContain("filed on Gcash");
   });
 });
