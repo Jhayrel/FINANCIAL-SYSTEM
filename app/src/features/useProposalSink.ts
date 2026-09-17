@@ -25,7 +25,7 @@ import {
   nextRecordNumber as numberAfter,
   type Draft,
 } from "../domain/entry";
-import type { ReferenceLists, Transaction } from "../domain/types";
+import type { BudgetYear, ReferenceLists, Transaction } from "../domain/types";
 import type { ProposalSink } from "./AskPanel";
 
 export interface SinkInput {
@@ -43,6 +43,10 @@ export interface SinkInput {
   readonly onRestore: (id: string) => void;
   /** Put a draft in the form, for a correction before saving. */
   readonly onUse: (draft: Draft) => void;
+  /** Replace saved rows: the app's own correction path, which keeps ids and numbers. */
+  readonly onUpdate?: ((rows: Transaction[], by?: Provenance) => void) | undefined;
+  /** Replace a year's budget, with a line per month it changed. */
+  readonly onBudget?: ((year: number, plan: BudgetYear, changes: readonly string[]) => void) | undefined;
 }
 
 /** Makes ids unique within one millisecond, when a batch saves together. */
@@ -100,6 +104,10 @@ export function useProposalSink(input: SinkInput): ProposalSink {
         };
       },
       use: (d) => handlers.current.onUse(d),
+      canUpdate: Boolean(input.onUpdate),
+      update: (rows, by) => handlers.current.onUpdate?.([...rows], by ?? { actor: "ai", via: "ai_chat" }),
+      canBudget: Boolean(input.onBudget),
+      budget: (year, plan, changes) => handlers.current.onBudget?.(year, plan, changes),
       bin: (id) => handlers.current.onBin(id),
       binMany: (ids) => handlers.current.onBinMany(ids),
       restore: (id) => handlers.current.onRestore(id),

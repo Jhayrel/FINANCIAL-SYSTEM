@@ -5937,6 +5937,30 @@ textarea.fms-askinput {
   white-space: nowrap;
 }
 
+/* ══ Chat: changes to saved entries and budgets ══════════════════════════════ */
+
+.fms-changelist {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-changerow {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-changerow:first-child {
+  border-top: 0;
+}
+
+.fms-changerow > .fms-linkish {
+  justify-self: start;
+}
+
 /* ══ Find a difference ═══════════════════════════════════════════════════════ */
 
 /* The question beside the answer on a wide card, the answer under it on a narrow one. */

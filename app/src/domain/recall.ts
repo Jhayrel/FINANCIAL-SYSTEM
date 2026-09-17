@@ -310,6 +310,8 @@ export function findRows(
   phrase: string,
   rows: readonly Transaction[],
   asOf: IsoDate,
+  /** How many to return. More than five is for a change meant for every match. */
+  most = MOST,
 ): Candidate[] {
   const { day, rest } = dayIn(phrase, asOf);
   const number = numberIn(rest);
@@ -407,5 +409,5 @@ export function findRows(
 
   return scored
     .sort((a, b) => b.score - a.score || b.row.recordNumber - a.row.recordNumber)
-    .slice(0, MOST);
+    .slice(0, most);
 }

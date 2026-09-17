@@ -1300,6 +1300,8 @@ export default function App() {
       setChatOpen(false);
       setScreen("add");
     },
+    onUpdate: handleUpdate,
+    onBudget: handleBudgetYear,
   });
 
   // With Firebase configured, nothing renders until the owner is signed in,
@@ -1610,6 +1612,7 @@ export default function App() {
               deleted={deleted}
               reserved={renumbers ? undefined : deleted}
               onUpdate={handleUpdate}
+              onBudget={handleBudgetYear}
               editing={editing}
               onCancelEdit={() => {
                 setEditing(null);

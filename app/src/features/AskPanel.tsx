@@ -150,7 +150,10 @@ import { debtCardIntro } from "../domain/debtSentence";
 import { AmountInput } from "../components/forms";
 import type { Provenance } from "../domain/activity";
 import { imageLimits, type AppSettings } from "../domain/settings";
-import type { Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
+import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
+import { changeWords, planEdit, readEditAsk, type EditPlan } from "../domain/chatChanges";
+import { planBudget, readBudgetAsk, type BudgetPlan } from "../domain/budgetAsk";
+import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 
 /**
  * What the panel is allowed to do with a proposal.
@@ -199,6 +202,28 @@ export interface ProposalSink {
   readonly restore: (id: string) => void;
   /** The number this entry would take, shown before it is saved. */
   readonly nextRecordNumber: number;
+  /** Whether saved rows can be corrected from here. */
+  readonly canUpdate: boolean;
+  /** Correct saved rows, through the app's own correction path. */
+  readonly update: (rows: readonly Transaction[], by?: Provenance) => void;
+  /** Whether a budget can be set from here. */
+  readonly canBudget: boolean;
+  /** Replace a year's budget, as the Budget screen does. */
+  readonly budget: (year: number, plan: BudgetYear, changes: readonly string[]) => void;
+}
+
+/** Saved entries about to change: each one before, and after. */
+interface Changing {
+  readonly kind: "change";
+  readonly plan: EditPlan;
+  readonly state: "open" | "applied" | "discarded";
+}
+
+/** A budget about to change. */
+interface Budgeting {
+  readonly kind: "budget";
+  readonly plan: BudgetPlan;
+  readonly state: "open" | "applied" | "discarded";
 }
 
 interface Said {
@@ -329,12 +354,14 @@ interface Offered {
   readonly cardId: string;
 }
 
-type Turn = Said | Offered | Found | Drawn | DebtChoice;
+type Turn = Said | Offered | Found | Drawn | DebtChoice | Changing | Budgeting;
 
 const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
 const isFound = (t: Turn): t is Found => t.kind === "found";
 const isChart = (t: Turn): t is Drawn => t.kind === "chart";
 const isDebt = (t: Turn): t is DebtChoice => t.kind === "debt";
+const isChanging = (t: Turn): t is Changing => t.kind === "change";
+const isBudgeting = (t: Turn): t is Budgeting => t.kind === "budget";
 
 /**
  * A turn that is actually words, said by one of us.
@@ -946,7 +973,8 @@ export function AskPanel({
       return;
     }
 
-    if (isFound(turn) || turn.ephemeral) return;
+    // A change or budget card is not kept: what it did is written as a message when it is applied.
+    if (isFound(turn) || isChanging(turn) || isBudgeting(turn) || turn.ephemeral) return;
 
     /**
      * A message carrying photos waits until it knows what they were.
@@ -2039,16 +2067,113 @@ export function AskPanel({
      */
     const modelSawEntry = routed === null || routed.intent === "entry";
 
-    if (files.length === 0 && !as && modelSawEntry && isBudgetCommand(note)) {
+    /**
+     * What the assistant can do, and where it stops.
+     *
+     * Answered on this device, from one list (`assistantScope.ts`), so the
+     * answer is the same every time and never promises what is not built.
+     */
+    // A line starting with "//" is a note, handled further down, and never an instruction.
+    const isNoteLine = /^\s*\/\//.test(note);
+
+    if (files.length === 0 && !as && !isNoteLine && wantsCapabilities(note)) {
       setDraft("");
       say({ kind: "you", text: note });
-      const reply = `Budgets are set on the Budget screen, not here: I only add entries. Open Budget, and the planner's "Use last month's budget" button (it names the month) copies it in one tap.${
-        pending ? " The entry I asked about is still waiting for its answer." : ""
-      }`;
-      say({ kind: "assistant", text: reply, from: "this device", ephemeral: true });
+      const reply = capabilitiesAnswer();
+      say({ kind: "assistant", text: reply, from: "this device" });
       log(aiEvent("asked", "add", { text: note }));
-      log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+      log(aiEvent("answered", "add", { text: "Said what the assistant can do.", model: "this device" }));
       return;
+    }
+
+    if (files.length === 0 && !as && !isNoteLine && asksSettingsChange(note)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      say({ kind: "assistant", text: SETTINGS_ARE_YOURS, from: "this device" });
+      log(aiEvent("asked", "add", { text: note }));
+      log(aiEvent("answered", "add", { text: "Settings are changed on the Settings screen.", model: "this device" }));
+      return;
+    }
+
+    /**
+     * A budget, set from here.
+     *
+     * "add buget same as last month" used to be refused with directions to
+     * the Budget screen. The owner asked for the assistant to change
+     * everything but Settings, so the change is worked out with the Budget
+     * screen's own rules and shown on a card to apply.
+     */
+    const budgetAsk = files.length === 0 && !as && !isNoteLine && sink.canBudget ? readBudgetAsk(note, reference, asOf) : null;
+    if (budgetAsk || (files.length === 0 && !as && modelSawEntry && isBudgetCommand(note))) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      if (!budgetAsk) {
+        const reply = `Say the figure and the month, and I will set it: "set my budget to 8000", "limit food to 3000", or "same budget as last month".${
+          pending ? " The entry I asked about is still waiting for its answer." : ""
+        }`;
+        say({ kind: "assistant", text: reply, from: "this device", ephemeral: true });
+        log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+        return;
+      }
+      const plan = planBudget(budgetAsk, budgets, asOf, new Date().toISOString());
+      if (plan.outcome.refused) {
+        say({ kind: "assistant", text: `${plan.outcome.refused} Corrections to a closed month are made on the Budget screen, where the reason is kept with them.`, from: "this device" });
+        log(aiEvent("answered", "add", { text: plan.outcome.refused, model: "this device" }));
+        return;
+      }
+      if (plan.outcome.written.length === 0) {
+        say({ kind: "assistant", text: "Nothing to change: the budget already reads that way.", from: "this device" });
+        log(aiEvent("answered", "add", { text: "Budget already set.", model: "this device" }));
+        return;
+      }
+      say({ kind: "assistant", text: `Here is the change. ${plan.words} Apply it on the card.`, from: "this device", ephemeral: true });
+      say({ kind: "budget", plan, state: "open" });
+      log(aiEvent("proposed", "add", { entry: plan.words, text: note }));
+      return;
+    }
+
+    /**
+     * A correction to saved entries: an amount, a wallet, a date, an item.
+     *
+     * "change the treat yesterday to 1200" or "move all grab rides this month
+     * to cash". Worked out and checked as the form would check it, then shown
+     * before and after on a card. A request with no change in it that the
+     * router called an edit still goes to the finder below, which opens the
+     * row in the form.
+     */
+    const editAsk = files.length === 0 && !as && !isNoteLine && sink.canUpdate ? readEditAsk(note, reference, asOf) : null;
+    if (editAsk && (routed === null || routed.intent === "editEntry" || routed.intent === "correction" || routed.intent === "entry" || routed.intent === "question")) {
+      const onScreen = turns.some((t) => isOffer(t) && t.state === "open");
+      // "make it 300" with a card open is about the card, not the ledger.
+      if (!(onScreen && !/#|\b(all|every|entry|record|yesterday|last)\b/i.test(note) && routed?.intent !== "editEntry")) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const plan = planEdit(editAsk, transactions, reference, debts, asOf);
+        if (plan.rows.length === 0) {
+          const reply =
+            plan.refused.length > 0
+              ? `Found ${plan.refused.length === 1 ? "the entry" : `${plan.refused.length} entries`}, and could not change ${plan.refused.length === 1 ? "it" : "them"}: ${plan.refused
+                  .map((r) => `#${String(r.row.recordNumber).padStart(4, "0")}: ${r.reason}`)
+                  .join(" ")}`
+              : "No saved entry matches that. Name the day, the item, the amount or the record number.";
+          say({ kind: "assistant", text: reply, from: "this device" });
+          log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+          return;
+        }
+        say({
+          kind: "assistant",
+          text: `${plan.rows.length === 1 ? "One entry" : `${plan.rows.length} entries`} to change. ${plan.rows.length === 1 ? "Check it" : "Check each one"}, then apply.${
+            plan.refused.length > 0 ? ` ${plan.refused.length} more matched and cannot take the change, listed on the card.` : ""
+          }`,
+          from: "this device",
+          ephemeral: true,
+        });
+        say({ kind: "change", plan, state: "open" });
+        log(aiEvent("proposed", "add", { entry: plan.rows.map(changeWords).join("; "), text: note }));
+        return;
+      }
     }
 
     /**
@@ -3534,7 +3659,35 @@ export function AskPanel({
         )}
 
         {turns.map((turn, i) =>
-          isDebt(turn) ? (
+          isChanging(turn) ? (
+            <ChangeCard
+              key={i}
+              turn={turn}
+              onApply={() => {
+                sink.update(turn.plan.rows.map((r) => r.after), { actor: "ai", via: "ai_chat" });
+                const done = `Changed ${turn.plan.rows
+                  .map((r) => `#${String(r.before.recordNumber).padStart(4, "0")} ${changeWords(r)}`)
+                  .join("; ")}.`;
+                log(aiEvent("accepted", "add", { entry: done }));
+                setTurns((prev) => prev.map((t, j) => (j === i && isChanging(t) ? { ...t, state: "applied" } : t)));
+                say({ kind: "assistant", text: done, from: "this device" });
+              }}
+              onDiscard={() => setTurns((prev) => prev.map((t, j) => (j === i && isChanging(t) ? { ...t, state: "discarded" } : t)))}
+              onOpen={(row) => sink.use(transactionToDraft(row))}
+            />
+          ) : isBudgeting(turn) ? (
+            <BudgetCard
+              key={i}
+              turn={turn}
+              onApply={() => {
+                sink.budget(turn.plan.year, turn.plan.outcome.plan, turn.plan.changes);
+                log(aiEvent("accepted", "add", { entry: turn.plan.words }));
+                setTurns((prev) => prev.map((t, j) => (j === i && isBudgeting(t) ? { ...t, state: "applied" } : t)));
+                say({ kind: "assistant", text: `Set. ${turn.plan.words}`, from: "this device" });
+              }}
+              onDiscard={() => setTurns((prev) => prev.map((t, j) => (j === i && isBudgeting(t) ? { ...t, state: "discarded" } : t)))}
+            />
+          ) : isDebt(turn) ? (
             <DebtCard
               key={i}
               turn={turn}
@@ -4496,6 +4649,119 @@ function Field({
  * without being pressed: a sentence is evidence about which row was meant,
  * not permission to remove it.
  */
+/** Saved entries about to change, each shown before and after. */
+function ChangeCard({
+  turn,
+  onApply,
+  onDiscard,
+  onOpen,
+}: {
+  turn: Changing;
+  onApply: () => void;
+  onDiscard: () => void;
+  onOpen: (row: Transaction) => void;
+}) {
+  const { plan, state } = turn;
+  const number = (t: Transaction): string => `#${String(t.recordNumber).padStart(4, "0")}`;
+  return (
+    <div className="fms-proposal">
+      <div className="fms-proposalhead">
+        <span className="t-label" style={{ color: "var(--ink-2)" }}>
+          {plan.rows.length === 1 ? "Change one entry" : `Change ${plan.rows.length} entries`}
+        </span>
+        <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+          {state === "applied" ? "changed" : state === "discarded" ? "left as it was" : "nothing is changed yet"}
+        </span>
+      </div>
+      <ul className="fms-changelist">
+        {plan.rows.map((r) => (
+          <li key={r.before.id} className="fms-changerow">
+            <span className="t-body-strong">
+              {number(r.before)} {r.before.item || r.before.description || r.before.type}
+            </span>
+            <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+              {changeWords(r)}
+            </span>
+            {state === "open" && plan.rows.length === 1 && (
+              <button type="button" className="t-micro fms-linkish" onClick={() => onOpen(r.after)}>
+                Open in the form instead
+              </button>
+            )}
+          </li>
+        ))}
+        {plan.refused.map((r) => (
+          <li key={`x${r.row.id}`} className="fms-changerow">
+            <span className="t-body" style={{ color: "var(--ink-2)" }}>
+              {number(r.row)} {r.row.item || r.row.description || r.row.type}
+            </span>
+            <span className="t-caption" style={{ color: "var(--warn)" }}>
+              {r.reason}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {state === "open" && (
+        <div className="fms-proposalactions">
+          <Button size="sm" variant="primary" onClick={onApply}>
+            {plan.rows.length === 1 ? "Apply the change" : `Apply ${plan.rows.length} changes`}
+          </Button>
+          <Button size="sm" onClick={onDiscard}>
+            Discard
+          </Button>
+        </div>
+      )}
+      <p className="t-micro fms-proposalfrom">
+        A change keeps each entry's record number and goes in the activity trail. Undo is on the notice that appears when it is applied.
+      </p>
+    </div>
+  );
+}
+
+/** A budget about to change. */
+function BudgetCard({ turn, onApply, onDiscard }: { turn: Budgeting; onApply: () => void; onDiscard: () => void }) {
+  const { plan, state } = turn;
+  const skipped = plan.outcome.skipped.length;
+  return (
+    <div className="fms-proposal">
+      <div className="fms-proposalhead">
+        <span className="t-label" style={{ color: "var(--ink-2)" }}>
+          Budget change
+        </span>
+        <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+          {state === "applied" ? "set" : state === "discarded" ? "left as it was" : "nothing is changed yet"}
+        </span>
+      </div>
+      <p className="t-body" style={{ margin: 0 }}>
+        {plan.words}
+      </p>
+      <ul className="fms-changelist">
+        {plan.changes.map((line) => (
+          <li key={line} className="fms-changerow">
+            <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+              {line}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {skipped > 0 && (
+        <p className="t-micro fms-proposalnote fms-proposalnote--warn">
+          {skipped === 1 ? "One month is" : `${skipped} months are`} already over and left as planned.
+        </p>
+      )}
+      {state === "open" && (
+        <div className="fms-proposalactions">
+          <Button size="sm" variant="primary" onClick={onApply}>
+            Apply
+          </Button>
+          <Button size="sm" onClick={onDiscard}>
+            Discard
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FoundList({
   found,
   onAct,

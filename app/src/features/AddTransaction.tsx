@@ -55,7 +55,7 @@ import { connectionWords } from "../domain/syncState";
 import { entryImpact } from "../domain/entryImpact";
 import { whenWords } from "./Dashboard";
 import { useReportScreen } from "./screenReport";
-import type { Budgets, DeletedTransaction, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
+import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
 /**
  * The four things that can happen to money.
@@ -101,6 +101,7 @@ export function AddTransaction({
   balances,
   onSave,
   onUpdate,
+  onBudget,
   onBin,
   onBinMany,
   onRestoreRow,
@@ -128,6 +129,8 @@ export function AddTransaction({
   balances: readonly WalletBalance[];
   onSave: (rows: Transaction[], by?: Provenance) => void;
   onUpdate: (rows: Transaction[], by?: Provenance) => void;
+  /** A year's budget replaced, when the assistant sets one. */
+  onBudget?: ((year: number, plan: BudgetYear, changes: readonly string[]) => void) | undefined;
   /** Soft delete and its undo, so the assistant can find a row to bin. */
   onBin: (id: string) => void;
   /** Several at once, for a whole set named in the chat. */
@@ -402,6 +405,8 @@ export function AddTransaction({
     onBinMany,
     onRestore: onRestoreRow,
     onUse: applyDraft,
+    onUpdate,
+    onBudget,
   });
   const nextRecordNumber = sink.nextRecordNumber;
 
