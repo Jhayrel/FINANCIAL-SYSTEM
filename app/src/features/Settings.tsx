@@ -3385,7 +3385,7 @@ function AiLearningGroup({
         </p>
       ) : all.length === 0 ? (
         <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-          Nothing yet. Correct a suggestion once and it will use your correction from then on.
+          Nothing yet. Change the item or the wallet on a card, on the card or in the form, and save it: the next sentence with the same words is filled in your way.
         </p>
       ) : (
         <>
@@ -3411,6 +3411,9 @@ function AiLearningGroup({
               <div className="t-label" style={{ color: "var(--ink-2)", margin: "var(--space-4) 0 var(--space-2)" }}>
                 It now knows
               </div>
+              <p className="t-caption" style={{ margin: "0 0 var(--space-2)", color: "var(--ink-3)" }}>
+                Learned from cards you corrected and then saved. A sentence with these words is filled in the same way, and the card says so.
+              </p>
               <ul className="fms-learned">
                 {[...learned.entries()].map(([from, to]) => (
                   <li key={`item-${from}`} className="t-caption">

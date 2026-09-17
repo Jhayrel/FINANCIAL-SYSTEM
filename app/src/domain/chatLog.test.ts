@@ -9,11 +9,13 @@
 import { describe, expect, it } from "vitest";
 
 import { readBudgetAsk } from "./budgetAsk";
+import { applyReply, nextQuestion } from "./capture";
 import type { Debt } from "./debt";
 import { fillDebt, personDebt, personIn } from "./debtFill";
 import { readPassThrough } from "./debtSentence";
 import { emptyDraft, withDebtEffect, type Draft } from "./entry";
 import { REFERENCE, TODAY } from "./eval/corpus";
+import { detectIntent } from "./intent";
 import { readEntry } from "./readEntry";
 import { detectRecall, saysLatestIsWrong, wantsDiscardOpen } from "./recall";
 import type { Transaction } from "./types";
@@ -97,6 +99,26 @@ describe("cancelling and correcting from the chat", () => {
     expect(saysLatestIsWrong("that last transaction is a mistake")).toBe(true);
     expect(saysLatestIsWrong("the last one is wrong, it was 300")).toBe(false);
     expect(saysLatestIsWrong("what is wrong with my budget")).toBe(false);
+  });
+
+  /**
+   * With a card open, a message that is not an entry is read as a correction
+   * to it. "I earn 1000" was not recognised as an entry, so a snack on the
+   * open card became ₱1,000.00 and the next reply moved it to Maya.
+   */
+  it("reads earning as an entry, never as a correction to the card on screen", () => {
+    expect(detectIntent("I earn 1700")).toBe("log");
+    expect(detectIntent("recieved 500 from client")).toBe("log");
+    expect(detectIntent("make it 300")).toBe("ask");
+  });
+
+  it("splits an answer holding a wallet and what it was for, and does not ask again", () => {
+    const earned = read("I earn 1700").draft;
+    const filled = applyReply(earned, "item", "maya and income from my business", REFERENCE, []);
+    expect(filled).toMatchObject({ toWallet: "Maya", item: "", description: "income from my business", amount: 170000 });
+    expect(filled && nextQuestion(filled, REFERENCE, ["item"])).toBeNull();
+    // A short answer is still the item.
+    expect(applyReply(earned, "item", "allowance", REFERENCE, [])?.item).toBe("Allowance");
   });
 
   it("reads a misspelt budget request", () => {

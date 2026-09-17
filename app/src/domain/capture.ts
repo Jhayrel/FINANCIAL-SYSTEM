@@ -200,8 +200,32 @@ export function applyReply(
        * groups by item. `matchItem` reads those lists, including the note
        * beside each type, which is there to say what counts as it.
        */
-      const { item } = matchItem(text, draft.flow as Flow, draft.category, reference);
-      return { ...draft, item };
+      /*
+       * "maya and income from my business" answered "What was it for?" and
+       * became a new income kind with that whole sentence as its name. It
+       * holds two answers: the wallet, which the entry was also missing, and
+       * what it was for, which is a description and not a name for a list.
+       */
+      let next = draft;
+      let rest = text;
+      const wallet = walletInside(text, accounts);
+      if (wallet) {
+        const side = draft.flow === "Revenue" ? "toWallet" : draft.flow === "Spending" ? "fromWallet" : null;
+        if (side && !draft[side]) next = { ...next, [side]: wallet };
+        const at = text.toLowerCase().indexOf(wallet.toLowerCase());
+        rest = `${text.slice(0, at)} ${text.slice(at + wallet.length)}`
+          .replace(/^[\s,&]*(?:and|in|into|to|from|using|via|thru|sa)?[\s,&]+/i, "")
+          .replace(/[\s,&]+(?:and|in|into|to|from|using|via|thru|sa)?[\s,&]*$/i, "")
+          .trim();
+        if (!rest) return null;
+      }
+      const match = matchItem(rest, draft.flow as Flow, draft.category, reference);
+      if (match.matched) return { ...next, item: match.item };
+      // A sentence that names none of their kinds is what it was for, kept as the description; the card offers the kinds.
+      if (rest.split(/\s+/).length > 3) {
+        return { ...next, item: "", description: next.description.trim() ? next.description : rest };
+      }
+      return { ...next, item: match.item };
     }
   }
 }

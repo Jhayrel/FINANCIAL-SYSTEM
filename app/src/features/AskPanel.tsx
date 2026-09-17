@@ -151,6 +151,7 @@ import { effectInline, effectLabel } from "../domain/debtWords";
 import { debtCardIntro } from "../domain/debtSentence";
 import { fillDebt, personDebt } from "../domain/debtFill";
 import { foldInterest } from "../domain/interestFold";
+import { lessonKey, lessonsFrom } from "../domain/learning";
 import { AmountInput } from "../components/forms";
 import type { Provenance } from "../domain/activity";
 import { imageLimits, type AppSettings } from "../domain/settings";
@@ -652,6 +653,16 @@ export function AskPanel({
     blank: Blank;
     /** Blanks that are blank on purpose, carried so they stay unasked. */
     settled: readonly Blank[];
+    /**
+     * The sentence the questions are about, and the entry as first read.
+     *
+     * The card an answer finishes was keyed on the answer ("food"), so the
+     * sentence it answered was lost: nothing was learned, the description
+     * was blank, and "bought kwek kwek 45 cash" asked the same question as
+     * "bought kwek kwek 60 cash" had a minute before.
+     */
+    said: string;
+    first: Draft;
   } | null>(null);
   /** A file is over the panel right now. */
   const [dragging, setDragging] = useState(false);
@@ -698,6 +709,15 @@ export function AskPanel({
       ]),
     [learnedEvents, reference],
   );
+  /** The wallets corrected before, keyed on the words, never on a wallet's own name. */
+  const learnedFrom = useMemo(
+    () => correctionsFrom(learnedEvents, "fromWallet", [...reference.wallets, ...reference.savings]),
+    [learnedEvents, reference],
+  );
+  const learnedTo = useMemo(
+    () => correctionsFrom(learnedEvents, "toWallet", [...reference.wallets, ...reference.savings]),
+    [learnedEvents, reference],
+  );
 
   /**
    * Everything the assistant did, and what was done about it.
@@ -739,17 +759,21 @@ export function AskPanel({
   useEffect(() => {
     if (!lastSaved) return;
     const saved = lastSaved.draft;
-    setTurns((prev) =>
-      prev.map((t) =>
-        isOffer(t) &&
-        t.state === "used" &&
-        t.proposal.draft.date === saved.date &&
-        t.proposal.draft.amount === saved.amount &&
-        t.proposal.draft.item.trim().toLowerCase() === saved.item.trim().toLowerCase()
-          ? { ...t, state: "added" }
-          : t,
-      ),
-    );
+    /*
+     * The card the form was following, when there is one. Matched on the
+     * item as well, it missed exactly the cards worth learning from: the ones
+     * whose item was corrected in the form before saving.
+     */
+    const same = (t: Turn): t is Offered => {
+      if (!isOffer(t) || t.state !== "used") return false;
+      const shown = t.live ?? t.proposal.draft;
+      return shown.date === saved.date && shown.amount === saved.amount && shown.flow === saved.flow;
+    };
+    const card = [...turns].reverse().find(same);
+    if (!card) return;
+    learnFrom(card, saved);
+    setTurns((prev) => prev.map((t) => (isOffer(t) && t.cardId === card.cardId ? { ...t, state: "added" } : t)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSaved]);
 
   /**
@@ -971,7 +995,26 @@ export function AskPanel({
     };
   };
 
+  /**
+   * Each card as it was first read, by card id.
+   *
+   * What the owner changed before saving is the lesson, so the first reading
+   * has to outlive the card's own edits.
+   */
+  const firstRead = useRef(new Map<string, Draft>());
+
+  /** Learn from a card whose row was saved: every field changed is a lesson (domain/learning.ts). */
+  const learnFrom = (turn: Offered, saved: Draft): void => {
+    const first = firstRead.current.get(turn.cardId) ?? turn.proposal.draft;
+    const lessons = lessonsFrom(first, saved, turn.proposal.said ?? "", reference);
+    if (lessons.length === 0) return;
+    for (const lesson of lessons) log(lesson);
+    // Used from the next sentence on, not from the next visit.
+    setLearnedEvents((prev) => [...prev, ...lessons]);
+  };
+
   const say = (turn: Turn): void => {
+    if (isOffer(turn) && !firstRead.current.has(turn.cardId)) firstRead.current.set(turn.cardId, turn.proposal.draft);
     setTurns((prev) => [...prev, turn]);
     // Only what was said is kept. A card and a found list are decisions in
     // progress, and the entry or the bin already holds their outcome.
@@ -1280,13 +1323,52 @@ export function AskPanel({
     // the figure changes every time and an exact lookup never fired twice.
     const taught = said ? taughtFor(said, learnedItems) : undefined;
     const flow = proposal.draft.flow;
-    const teachable =
-      taught && flow && itemsFor(flow, proposal.draft.category, reference).includes(taught);
+    /*
+     * The list the taught item is on decides the category: an item corrected
+     * to a bill is a bill next time, even when the reading said Spending.
+     */
+    const taughtCategory: Draft["category"] | null =
+      !taught || !flow
+        ? null
+        : flow === "Revenue"
+          ? reference.revenueCategories.includes(taught) ? proposal.draft.category : null
+          : flow === "Spending"
+            ? reference.bills.includes(taught)
+              ? "Bills"
+              : reference.subscriptions.includes(taught)
+                ? "Subscriptions"
+                : reference.spendingTypes.some((s) => s.name === taught)
+                  ? "Spending"
+                  : null
+            : null;
+    const teachable = taught !== undefined && taughtCategory !== null;
 
-    const start = teachable ? { ...proposal.draft, item: taught } : proposal.draft;
-    const learned = teachable
-      ? [`Booked as ${taught}, which is what you corrected this to last time.`]
-      : [];
+    const accounts = [...reference.wallets, ...reference.savings];
+    const taughtFrom = said ? taughtFor(said, learnedFrom) : undefined;
+    const taughtTo = said ? taughtFor(said, learnedTo) : undefined;
+    const fromTaught =
+      !proposal.draft.fromWallet && taughtFrom && accounts.includes(taughtFrom) && (flow === "Spending" || flow === "Transfer")
+        ? taughtFrom
+        : "";
+    const toTaught =
+      !proposal.draft.toWallet && taughtTo && accounts.includes(taughtTo) && (flow === "Revenue" || (flow === "Transfer" && !proposal.draft.sentOut))
+        ? taughtTo
+        : "";
+
+    // The words that named it, as the description, when the reading wrote none.
+    const named = proposal.draft.description.trim() ? "" : lessonKey(said, reference);
+    const start: Draft = {
+      ...proposal.draft,
+      ...(named ? { description: named } : {}),
+      ...(teachable ? { item: taught, category: taughtCategory } : {}),
+      ...(fromTaught ? { fromWallet: fromTaught } : {}),
+      ...(toTaught ? { toWallet: toTaught } : {}),
+    };
+    const learned = [
+      ...(teachable ? [`Booked as ${taught}, which is what you corrected this to last time.`] : []),
+      ...(fromTaught ? [`Paid from ${fromTaught}, which is what you corrected this to last time.`] : []),
+      ...(toTaught ? [`Into ${toTaught}, which is what you corrected this to last time.`] : []),
+    ];
 
     /**
      * ── Step 3 of 4: the ledger, then Settings ─────────────────────────
@@ -1339,7 +1421,8 @@ export function AskPanel({
       draft,
       confidence: checked.confidence,
       adjustments: [
-        ...proposal.adjustments,
+        // One reason, said once: the ledger agreeing with a lesson is not a second note about the same item.
+        ...proposal.adjustments.filter((note) => !(teachable && note.startsWith(`Booked as ${taught}`))),
         ...(useHistory ? [...learned, ...because] : because),
         ...checked.notes,
       ],
@@ -1457,7 +1540,7 @@ export function AskPanel({
       );
       return;
     }
-    setPending({ draft: ready.draft, blank: asked.blank, settled });
+    setPending({ draft: ready.draft, blank: asked.blank, settled, said: proposal.said ?? hint, first: ready.draft });
     say({ kind: "assistant", ephemeral: true, text: asked.question, from: "this device" });
   };
 
@@ -1485,9 +1568,12 @@ export function AskPanel({
       return;
     }
 
-    const asked = nextQuestion(filled, reference, pending.settled);
+    // Answered with what it was for rather than which kind: not asked again, the card offers the kinds.
+    const settledNow: readonly Blank[] =
+      pending.blank === "item" && !filled.item.trim() ? [...pending.settled, "item"] : pending.settled;
+    const asked = nextQuestion(filled, reference, settledNow);
     if (asked) {
-      setPending({ draft: filled, blank: asked.blank, settled: pending.settled });
+      setPending({ ...pending, draft: filled, blank: asked.blank, settled: settledNow });
       say({ kind: "assistant", ephemeral: true, text: asked.question, from: "this device" });
       return;
     }
@@ -1543,17 +1629,24 @@ export function AskPanel({
         );
       }
     }
+    // The words that named it, as the description, when nothing else wrote one.
+    const named = pending.said ? lessonKey(pending.said, reference) : "";
+    if (!complete.description.trim() && named) complete = { ...complete, description: named };
+
+    const cardId = newCardId();
+    // Learned from when it is saved: what was blank before the answers is what was taught.
+    firstRead.current.set(cardId, pending.first);
     say({
       kind: "proposal",
       proposal: {
         draft: complete,
         confidence: "high",
         sourceRef: "what you told me",
-        said: reply,
+        said: pending.said || reply,
         adjustments: because,
       },
       state: "open",
-      cardId: newCardId(),
+      cardId,
     });
   };
 
@@ -3097,24 +3190,7 @@ export function AskPanel({
            * meant Food, so the sentence is the key, and a phrase that is
            * itself one of the owner's item names is never learned from.
            */
-          const phrase = (card.turn.proposal.said ?? "").trim();
-          const teaches =
-            phrase.length > 0 &&
-            phrase.length <= 80 &&
-            !matchItem(phrase, now.flow || "Spending", now.category, reference).matched;
-
-          for (const field of ["item", "fromWallet", "toWallet"] as const) {
-            if (was[field] === now[field] || !now[field]) continue;
-            if (field === "item" && !teaches) continue;
-            log(
-              aiEvent("edited", "add", {
-                field,
-                proposed: field === "item" ? phrase : was[field],
-                corrected: now[field],
-                entry: `${now.date} ${now.flow} ${now.item}`,
-              }),
-            );
-          }
+          // The item and the wallets are learned when the card is saved (`learnFrom`), so only a saved correction teaches.
           if (was.amount !== now.amount || was.date !== now.date) {
             log(
               aiEvent("edited", "add", {
@@ -3872,7 +3948,9 @@ export function AskPanel({
                 turn.recordNumber ?? predictedNumber.get(i) ?? sink.nextRecordNumber
               }
               onChange={(draft) => replaceProposal(i, { ...turn.proposal, draft })}
-              onChangeAll={(draft) => applyToAll(draft)}
+              onChangeAll={
+                turns.some((t, j) => j !== i && isOffer(t) && t.state === "open") ? (draft) => applyToAll(draft) : undefined
+              }
               onAdd={() => {
                 hold(i);
                 log(
@@ -3894,6 +3972,7 @@ export function AskPanel({
                 // What is on the card, which is what the form holds if it is
                 // following it. Adding the original here would save something
                 // other than the figures being looked at.
+                learnFrom(turn, turn.live ?? turn.proposal.draft);
                 const given = sink.add(turn.live ?? turn.proposal.draft, {
                   actor: "ai",
                   // A picture and a sentence are different enough to tell
@@ -4332,7 +4411,8 @@ function ProposalCard({
   /** The entry an earlier card already holds, when this one repeats it. */
   repeatOfCard?: Draft | undefined;
   onChange: (draft: Draft) => void;
-  onChangeAll: (draft: Draft) => void;
+  /** Absent when this is the only open card, so there is nothing to apply it to. */
+  onChangeAll?: ((draft: Draft) => void) | undefined;
   onAdd: () => void;
   onUse: () => void;
   onDiscard: () => void;
@@ -4520,7 +4600,7 @@ function ProposalCard({
               </option>
             ))}
           </select>
-          {draft[walletField] && (
+          {draft[walletField] && onChangeAll && (
             <button
               type="button"
               className="t-micro fms-linkish"
@@ -5579,7 +5659,7 @@ function DebtCard({
         />
       </div>
 
-      {direction !== null && direction !== undefined && (
+      {direction !== "none" && (
         <div className="fms-debtpick">
           <label className="t-micro fms-pfieldlabel" htmlFor={`debt-wallet-${turn.cardId}`}>
             {direction === "in" ? "Lands in" : "Paid from"}

@@ -40,8 +40,14 @@ const ASKING =
  * Present and past, because both get typed. "Add" is here because "add 100
  * cash food" is how this gets used once the novelty wears off.
  */
+/*
+ * "I earn 1000" was missing, and it cost more than a missed entry: with a card
+ * open, a message that is not an entry is read as a correction to that card,
+ * so a ₱20.00 snack became ₱1,000.00 and the next reply moved it to Maya.
+ * The spellings the owner actually types are here too.
+ */
 const MOVING =
-  /\b(spent|spend|spending|paid|pay|paying|bought|buy|purchased|paid for|cost|got|received|receive|earned|sent|send|transferred|transfer|added|add|log|logged|record|withdrew|withdraw|deposited|deposit|gave|given|borrowed|lent|loaded|reload|topped up|top up|refunded)\b/i;
+  /\b(spent|spend|spending|paid|pay|paying|bought|buy|purchased|paid for|cost|got|received|receive|recieved|recieve|recived|earned|earn|earns|earnd|sent|send|transferred|transfer|transfered|added|add|log|logged|record|withdrew|withdraw|withdrawed|deposited|deposit|gave|given|borrowed|borrow|lent|lend|loaned|collected|loaded|reload|topped up|top up|refunded|cashed out|kumita|natanggap|nagbayad|bumili|binili|nagpadala|nangutang|pinautang)\b/i;
 
 /**
  * A figure that could be money.
@@ -66,7 +72,7 @@ const AMOUNT = /(?:₱|php)?\s*\d{1,3}(?:,\d{3})+(?:\.\d+)?|(?:₱|php)?\s*\d+\.
  * rule.
  */
 const HAPPENED =
-  /\b(spent|paid|bought|purchased|received|earned|sent|transferred|withdrew|deposited|gave|borrowed|lent|loaded|refunded|topped up)\b/i;
+  /\b(spent|paid|bought|purchased|received|recieved|recived|earned|earnd|sent|transferred|transfered|withdrew|withdrawed|deposited|gave|borrowed|lent|loaned|collected|loaded|refunded|topped up|cashed out|kumita|natanggap|nagbayad|bumili|binili|nagpadala|nangutang|pinautang)\b/i;
 
 /** What this message most likely wants. */
 export function detectIntent(text: string): Intent {
