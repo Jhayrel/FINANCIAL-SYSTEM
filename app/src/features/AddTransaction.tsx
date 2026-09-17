@@ -22,7 +22,7 @@ import {
 import { AmountInput, Select, TextInput } from "../components/forms";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
-import { choicesFor, debtDue, effectsFor, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionsOf } from "../domain/debt";
+import { choicesFor, debtDue, effectsFor, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionsOf } from "../domain/debt";
 import { effectInline, effectLabel, effectMeaning, partWords } from "../domain/debtWords";
 import { formatMoney, type Centavos } from "../domain/money";
 import {
@@ -119,6 +119,7 @@ export function AddTransaction({
   lastSaved,
   onSaved,
   onEditRow,
+  onAddDebt,
   onOpenBudget,
   onShowRows,
   sync,
@@ -163,6 +164,12 @@ export function AddTransaction({
   onSaved: (saved: { draft: Draft; at: number }) => void;
   /** Loads a saved row back into this form, from the latest entries beside it. */
   onEditRow?: ((row: Transaction) => void) | undefined;
+  /**
+   * A new record for money passing through, added from the form: the person
+   * money is held for, or sent for. Only that kind: credit lines and loans
+   * are set up in Settings.
+   */
+  onAddDebt?: ((debt: Debt) => void) | undefined;
   /** The Budget screen, for a month that has no budget yet. */
   onOpenBudget?: (() => void) | undefined;
   /** The Database searched for these words, such as a record number. */
@@ -654,6 +661,10 @@ export function AddTransaction({
 
   /** Status, a spending fee and notes: asked for rarely, so folded away until wanted. */
   const [moreOpen, setMoreOpen] = useState(false);
+  /** The name typed for a new person money passes through, while it is being added. */
+  const [newPerson, setNewPerson] = useState<string | null>(null);
+  /** Which way that person's money passes: held for them, or sent for them. */
+  const [personKind, setPersonKind] = useState<Debt["kind"] | null>(null);
 
   /** The row as it was saved, so a correction can say what it changes. */
   const original = useMemo(() => (editing ? draftForEditing(editing, transactions) : null), [editing, transactions]);
@@ -707,7 +718,9 @@ export function AddTransaction({
   /** Debts open to new rows, and the one a row being corrected is filed against. */
   const debtOptions = debts.filter((d) => !d.archived || d.id === draft.debtId);
   const selectedDebt = debts.find((d) => d.id === draft.debtId);
-  const effects = choicesFor(selectedDebt?.kind ?? "payable", draft.debtEffect, selectedDebt?.form);
+  /** The debt the choices are worded for: the one picked, or the person being added. */
+  const debtShape = selectedDebt ?? (personKind ? { kind: personKind, form: "pass-through" as const } : undefined);
+  const effects = choicesFor(debtShape?.kind ?? "payable", draft.debtEffect, debtShape?.form);
 
   /** A debt into the draft: its effect kept only if that debt takes it, and its account as the wallet when none is chosen. */
   const pickDebt = (d: Draft, debt: Debt): Draft => {
@@ -719,13 +732,90 @@ export function AddTransaction({
     return effect ? withDebtEffect({ ...next, fromWallet: debt.wallet }, effect) : { ...next, fromWallet: debt.wallet };
   };
 
+  /**
+   * Money passing through, chosen from an ordinary flow.
+   *
+   * The owner described it: money a client sends to a personal account, or
+   * money their mother asks them to send to family and pays back in cash.
+   * The bank records it and none of it is income or spending. From the
+   * Revenue and Transfer forms it is one tap: the entry becomes a movement on
+   * a "passing through" record, and the one person it is for is picked, or
+   * added on the spot.
+   */
+  const passThrough = (effect: "draw" | "lend"): void => {
+    const kind = effect === "draw" ? "payable" : "receivable";
+    const people = debts.filter((d) => !d.archived && d.form === "pass-through" && d.kind === kind);
+    setDraft((d) => {
+      const wallet = effect === "draw" ? d.toWallet : d.fromWallet;
+      const base: Draft = {
+        ...d,
+        flow: "Debt",
+        category: "",
+        item: "",
+        sentOut: undefined,
+        debtId: people.length === 1 ? people[0]?.id : undefined,
+        fromWallet: effect === "lend" ? wallet : "",
+        toWallet: effect === "draw" ? wallet : "",
+      };
+      return withDebtEffect(base, effect);
+    });
+    setPersonKind(kind);
+    if (people.length !== 1) setNewPerson("");
+  };
+
+  const addPerson = (name: string): void => {
+    const trimmed = name.trim();
+    if (!trimmed || !onAddDebt) return;
+    // Someone already here under that name is picked, not added a second time.
+    const existing = debts.find((d) => !d.archived && d.name.trim().toLowerCase() === trimmed.toLowerCase());
+    if (existing) {
+      setNewPerson(null);
+      setPersonKind(null);
+      setDraft((d) => pickDebt(d, existing));
+      return;
+    }
+    const kind: Debt["kind"] =
+      personKind ?? (draft.debtEffect === "lend" || draft.debtEffect === "collect" ? "receivable" : "payable");
+    let id = makeDebtId(trimmed);
+    for (let n = 2; debts.some((d) => d.id === id); n += 1) id = `${makeDebtId(trimmed)}-${n}`;
+    const debt: Debt = {
+      id,
+      name: trimmed,
+      kind,
+      form: "pass-through",
+      counterparty: trimmed,
+      counterpartyType: "person",
+      openedDate: draft.date,
+      wallet: draft.fromWallet || draft.toWallet || reference.wallets[0] || "",
+      interestType: "none",
+      interestRate: 0,
+      notes: "",
+      archived: false,
+    };
+    onAddDebt(debt);
+    setNewPerson(null);
+    setPersonKind(null);
+    // The movement that fits the way it passes: sent for them, or received for them.
+    setDraft((d) => {
+      const effect = d.debtEffect && effectsFor(kind).includes(d.debtEffect) ? d.debtEffect : kind === "payable" ? "draw" : "lend";
+      return withDebtEffect({ ...d, debtId: id }, effect);
+    });
+  };
+
   /** One debt open: choosing Debt picks it, since there is nothing to choose between. */
   const onlyDebt = debtOptions.length === 1 ? debtOptions[0] : undefined;
   useEffect(() => {
-    if (draft.flow !== "Debt" || draft.debtId || !onlyDebt) return;
+    /*
+     * Not while a person is being added, and not when the movement already
+     * chosen does not fit that debt: "For someone who pays me back" set
+     * "sent for them", and picking Maya Credit for it threw that away.
+     */
+    if (draft.flow !== "Debt" || draft.debtId || !onlyDebt || newPerson !== null) return;
+    if (draft.debtEffect && !effectsFor(onlyDebt.kind).includes(draft.debtEffect)) return;
+    if (personKind !== null) return;
     setDraft((d) => (d.flow === "Debt" && !d.debtId ? pickDebt(d, onlyDebt) : d));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.flow, draft.debtId, onlyDebt?.id]);
+  }, [draft.flow, draft.debtId, draft.debtEffect, onlyDebt?.id, newPerson, personKind]);
   const namedDebt = check.debtPayment ? debts.find((d) => d.id === check.debtPayment?.debtId) : undefined;
 
   /** The number shown while correcting: the payment's own, when a split pair was opened by its interest row. */
@@ -1224,11 +1314,80 @@ export function AddTransaction({
             <div className="fms-fields">
               {needs(draft.flow, "debt") && (
                 <>
-                  <Field label="Debt" required error={errorFor("debt")}>
+                  <Field
+                    label={selectedDebt?.form === "pass-through" ? "Who it is for" : "Debt"}
+                    required
+                    error={errorFor("debt")}
+                    aside={
+                      onAddDebt && newPerson === null ? (
+                        <button type="button" className="t-micro fms-linkbtn" onClick={() => setNewPerson("")}>
+                          Someone new, money passing through
+                        </button>
+                      ) : undefined
+                    }
+                  >
+                    {newPerson !== null && (
+                      <div className="fms-newperson">
+                        <TextInput
+                          value={newPerson}
+                          onChange={setNewPerson}
+                          placeholder="Their name, such as Mama or a client"
+                          ariaLabel="Who the money passes through for"
+                          maxLength={60}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              addPerson(newPerson);
+                            }
+                          }}
+                        />
+                        <div className="fms-choicerow" role="radiogroup" aria-label="Which way it passes through">
+                          {[
+                            { kind: "payable" as const, label: "I hold it for them" },
+                            { kind: "receivable" as const, label: "They pay me back" },
+                          ].map((o) => {
+                            const chosen =
+                              (personKind ?? (draft.debtEffect === "lend" || draft.debtEffect === "collect" ? "receivable" : draft.debtEffect ? "payable" : null)) === o.kind;
+                            return (
+                              <button
+                                key={o.kind}
+                                type="button"
+                                role="radio"
+                                aria-checked={chosen}
+                                className={chosen ? "fms-choice t-body-strong" : "fms-choice t-body"}
+                                onClick={() => setPersonKind(o.kind)}
+                              >
+                                {o.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="fms-newperson-actions">
+                          <Button size="sm" variant="primary" disabled={!newPerson.trim()} onClick={() => addPerson(newPerson)}>
+                            Add {newPerson.trim() || "them"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setNewPerson(null);
+                              setPersonKind(null);
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                        <p className="t-micro" style={{ margin: 0, color: "var(--ink-3)" }}>
+                          Money passing through is never income or spending. It is kept under Credit and loans in Settings, where it can be renamed or archived.
+                        </p>
+                      </div>
+                    )}
                     {debtOptions.length === 0 ? (
-                      <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-                        No debt to file this against yet. Add one in Settings, under Credit and loans.
-                      </p>
+                      newPerson === null && (
+                        <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+                          Nothing to file this against yet. Add a credit line or loan in Settings, under Credit and loans, or someone money passes through above.
+                        </p>
+                      )
                     ) : (
                       <Select
                         value={selectedDebt?.name ?? ""}
@@ -1242,7 +1401,9 @@ export function AddTransaction({
                         details={Object.fromEntries(
                           debtOptions.map((d) => [
                             d.name,
-                            `${formatMoney(outstandingOf(transactions, d.id))} ${d.kind === "payable" ? "owed" : "owed to you"}`,
+                            `${formatMoney(outstandingOf(transactions, d.id))} ${
+                              d.form === "pass-through" ? (d.kind === "payable" ? "held for them" : "to come back") : d.kind === "payable" ? "owed" : "owed to you"
+                            }`,
                           ]),
                         )}
                         placeholder="Pick a debt"
@@ -1263,7 +1424,7 @@ export function AddTransaction({
                     error={errorFor("debtEffect")}
                     hint={
                       draft.debtEffect
-                        ? effectMeaning(draft.debtEffect, selectedDebt)
+                        ? effectMeaning(draft.debtEffect, debtShape)
                         : "Pick one, and the wallet it moves money through appears."
                     }
                   >
@@ -1274,11 +1435,11 @@ export function AddTransaction({
                           type="button"
                           role="radio"
                           aria-checked={draft.debtEffect === effect}
-                          title={effectMeaning(effect, selectedDebt)}
+                          title={effectMeaning(effect, debtShape)}
                           className="t-body fms-segpill"
                           onClick={() => setDraft((d) => withDebtEffect(d, effect))}
                         >
-                          {effectLabel(effect, selectedDebt)}
+                          {effectLabel(effect, debtShape)}
                         </button>
                       ))}
                     </div>
@@ -1523,6 +1684,11 @@ export function AddTransaction({
                             {option.label}
                           </button>
                         ))}
+                        {onAddDebt && (
+                          <button type="button" role="radio" aria-checked={false} className="fms-choice t-body" onClick={() => passThrough("lend")}>
+                            For someone who pays me back
+                          </button>
+                        )}
                       </div>
                       {!sentOut && (
                         <Select
@@ -1549,14 +1715,26 @@ export function AddTransaction({
                       </div>
                     </div>
                   ) : (
-                    <Select
-                      value={draft.toWallet}
-                      onChange={(v) => set("toWallet", v)}
-                      placeholder="Pick a wallet"
-                      ariaLabel="The wallet the money lands in"
-                      invalid={Boolean(errorFor("toWallet"))}
-                      {...walletSelect(ghost.toWallet)}
-                    />
+                    <div className="fms-stack">
+                      <Select
+                        value={draft.toWallet}
+                        onChange={(v) => set("toWallet", v)}
+                        placeholder="Pick a wallet"
+                        ariaLabel="The wallet the money lands in"
+                        invalid={Boolean(errorFor("toWallet"))}
+                        {...walletSelect(ghost.toWallet)}
+                      />
+                      {draft.flow === "Revenue" && onAddDebt && (
+                        <div className="fms-choicerow" role="radiogroup" aria-label="Whose money it is">
+                          <button type="button" role="radio" aria-checked={true} className="fms-choice t-body-strong">
+                            It is mine
+                          </button>
+                          <button type="button" role="radio" aria-checked={false} className="fms-choice t-body" onClick={() => passThrough("draw")}>
+                            It is for someone else
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </Field>
               )}

@@ -28,7 +28,7 @@
 
 import { daysBackIn, itemHintIn } from "./filipino";
 import { emptyDraft, itemsFor, withDebtEffect, type Draft, type Flow } from "./entry";
-import { readDebtSentence } from "./debtSentence";
+import { readDebtSentence, readPassThrough } from "./debtSentence";
 import type { Blank } from "./capture";
 import { makeDebtId } from "./debt";
 import { inferFromHistory, itemFromHistory } from "./infer";
@@ -59,6 +59,8 @@ export interface ReadEntry {
    * rather than assuming a rate.
    */
   readonly interestUnstated?: boolean | undefined;
+  /** Money passing through for someone else, when the sentence says so. */
+  readonly passThrough?: "held" | "fronted" | null | undefined;
 }
 
 /**
@@ -517,8 +519,11 @@ export function readEntry(
    */
   const withoutIncome = text.replace(/\bbank interest\b/gi, " ");
 
+  /** Money passing through for someone else, which is debt in the ledger's terms. */
+  const passing = readPassThrough(text);
+
   const readsAsDebt =
-    DEBT.test(withoutIncome) || creditNamed !== undefined || CREDITED_MYSELF.test(text);
+    DEBT.test(withoutIncome) || creditNamed !== undefined || CREDITED_MYSELF.test(text) || passing !== null;
 
   /**
    * A sentence with no verb in it.
@@ -552,7 +557,7 @@ export function readEntry(
      * The interest inside a payment, and the effect when the words leave no
      * doubt about it. See `debtSentence.ts`.
      */
-    const debtSaid = readsAsDebt ? readDebtSentence(text, amountIn, readMoney) : null;
+    const debtSaid = readsAsDebt && !passing ? readDebtSentence(text, amountIn, readMoney) : null;
     const filled: Draft = readsAsDebt
       ? {
           ...emptyDraft(dateIn(text, asOf).date),
@@ -560,7 +565,17 @@ export function readEntry(
           amount: debtSaid?.amount ?? amountIn(text),
           ...(debtSaid?.interest != null ? { interest: debtSaid.interest } : {}),
           ...(debtSaid?.charges != null ? { charges: debtSaid.charges } : {}),
-          fromWallet: walletIn(text, accounts),
+          /*
+           * For money sent for someone, how they pay it back is not where it
+           * left from: "send 1000 from maya, she will pay me back in cash"
+           * left Maya. The pay-back clause is set aside before the wallet is read.
+           */
+          fromWallet: walletIn(
+            passing === "fronted"
+              ? text.replace(/\b(pay|paying|pays|paid|give|giving|gives|return|returns|reimburse)\w*\b[^,.;]*$/i, " ")
+              : text,
+            accounts,
+          ),
           /**
            * The credit line, when the sentence named one.
            *
@@ -577,7 +592,8 @@ export function readEntry(
         }
       : emptyDraft(asOf);
     // The wallet goes on the side the effect moves money through.
-    const partial = debtSaid?.effect ? withDebtEffect(filled, debtSaid.effect) : filled;
+    const effect = passing === "fronted" ? "lend" : passing === "held" ? "draw" : debtSaid?.effect;
+    const partial = effect ? withDebtEffect(filled, effect) : filled;
 
     return {
       draft: partial,
@@ -586,6 +602,7 @@ export function readEntry(
       settled: [],
       readsAsDebt,
       interestUnstated: debtSaid?.interestUnstated ?? false,
+      passThrough: passing,
     };
   }
 

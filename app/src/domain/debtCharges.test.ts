@@ -229,6 +229,31 @@ describe("money passing through for someone else", () => {
   });
 });
 
+describe("money passing through, said in a sentence", () => {
+  it("reads money sent for someone who pays it back as lending to them, from the wallet it left", () => {
+    const got = readEntry("my mother asked me to send 1000 to tita from maya, she will pay me back in cash", [], reference, "2026-09-10");
+    expect(got.readsAsDebt).toBe(true);
+    expect(got.passThrough).toBe("fronted");
+    expect(got.draft).toMatchObject({ flow: "Debt", debtEffect: "lend", fromWallet: "Maya", amount: 100000 });
+  });
+
+  it("names the person when they are already kept", () => {
+    const got = readEntry("sent 500 from gcash for mama, she will pay me back", [], reference, "2026-09-10");
+    expect(got.draft).toMatchObject({ debtId: "mama", debtEffect: "lend", fromWallet: "Gcash" });
+  });
+
+  it("reads a client's money received for someone else as held for them", () => {
+    const got = readEntry("received 5000 in maya for the company, I will pass it on", [], reference, "2026-09-10");
+    expect(got.passThrough).toBe("held");
+    expect(got.draft).toMatchObject({ debtEffect: "draw", toWallet: "Maya", amount: 500000 });
+  });
+
+  it("leaves an ordinary payment and an ordinary income alone", () => {
+    expect(readEntry("I paid 500 for food from maya", [], reference, "2026-09-10").passThrough ?? null).toBeNull();
+    expect(readEntry("received 5000 salary in maya", [], reference, "2026-09-10").passThrough ?? null).toBeNull();
+  });
+});
+
 describe("reading the lender's words", () => {
   const figure = (t: string) => {
     const m = /(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d{1,2}|\d{2,})/.exec(t);

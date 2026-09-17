@@ -2561,9 +2561,14 @@
 
 /* The assistant drops below the form before the balances do. */
 @media (min-width: 1024px) and (max-width: 1279px) {
+  /* The balances reach the form's bottom edge, with the chat full width under both. */
   .fms-entry {
     max-width: none;
     grid-template-columns: minmax(0, 1fr) minmax(190px, 240px);
+    align-items: stretch;
+  }
+  .fms-entry > .fms-side {
+    align-content: start;
   }
   .fms-ask {
     grid-column: 1 / -1;
@@ -2656,6 +2661,15 @@
 }
 
 @media (min-width: 1600px) {
+  /*
+   * With the assistant, a wide screen gives the chat room for its cards.
+   * At 1920px it was 380px beside a 944px form, so a debt card's choices
+   * wrapped onto two lines while the form's fields sat far apart.
+   */
+  .fms-entry:not(.fms-entry--nochat) {
+    grid-template-columns: minmax(440px, 1fr) minmax(220px, 280px) minmax(380px, 30%);
+  }
+
   .fms-entry--nochat {
     grid-template-columns: minmax(0, 1fr) minmax(260px, 300px) minmax(300px, 360px);
     grid-template-areas: "form side recent";
@@ -5935,6 +5949,22 @@ textarea.fms-askinput {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A person money passes through, added from the form. */
+.fms-newperson {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  margin-bottom: var(--space-2);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-md);
+}
+
+.fms-newperson-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 /* ══ Chat: changes to saved entries and budgets ══════════════════════════════ */

@@ -3226,7 +3226,7 @@ export function AskPanel({
            */
           say({
             kind: "assistant",
-            text: debtCardIntro(local.draft, local.interestUnstated ?? false, debts),
+            text: debtCardIntro(local.draft, local.interestUnstated ?? false, debts, local.passThrough),
             from: "this device",
             ephemeral: true,
           });
@@ -5409,7 +5409,7 @@ function DebtCard({
 
       <div className="fms-debtpick">
         <label className="t-micro fms-pfieldlabel" htmlFor="debt-line">
-          Which credit line
+          {live.some((d) => d.form === "pass-through") ? "Which debt or person" : "Which credit line"}
         </label>
         <select
           id="debt-line"

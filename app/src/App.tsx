@@ -1613,6 +1613,7 @@ export default function App() {
               reserved={renumbers ? undefined : deleted}
               onUpdate={handleUpdate}
               onBudget={handleBudgetYear}
+              onAddDebt={(debt) => setSettings((s) => ({ ...s, credits: [...s.credits, debt] }))}
               editing={editing}
               onCancelEdit={() => {
                 setEditing(null);

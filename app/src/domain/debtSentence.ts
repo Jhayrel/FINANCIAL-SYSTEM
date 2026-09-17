@@ -237,6 +237,28 @@ export function readDebtSentence(
   };
 }
 
+/** Money sent for someone who pays it back: "she will pay me back", "inabonohan". */
+const FRONTED =
+  /\b(pays? me back|paying me back|paid me back|pay (it|this) back|give (it|me|the money|the cash)? ?back|will give (me )?(it|the money|cash|the cash)|return(s)? (it|the money)|reimburse\w*|abono|abonohan|inabonohan|inabonuhan|nag ?abono|babayaran (ako|niya|nya)|bayaran (ako|niya|nya))\b/i;
+
+/** Money received that belongs to someone else: "for the company, I'll pass it on". */
+const HELD =
+  /\b(not mine|hindi akin|to pass (it )?on|pass (it|this) on|passing it on|forward (it|this) to|ipapasa|ipasa|remit (it|this) to|hand (it|this) over|hold(ing)? it for|for (the |my |our )?(company|client|boss|office|employer)|(client|company|boss)('s)? (payment|money))\b/i;
+
+/**
+ * Money that only passes through, said in so many words.
+ *
+ * The owner's own examples, 2026-09-17: their mother asks them to send money
+ * to family and pays it back in cash, or a client's payment lands in their
+ * personal account for someone else. Neither is income or spending. Only
+ * read when the words say it: a payment back, or money that is not theirs.
+ */
+export function readPassThrough(text: string): "held" | "fronted" | null {
+  if (FRONTED.test(text)) return "fronted";
+  if (HELD.test(text)) return "held";
+  return null;
+}
+
 /**
  * What the chat says above a debt card: what it read, and what is left.
  *
@@ -245,8 +267,30 @@ export function readDebtSentence(
  * line and the payment had not been named. And "including its interest" was
  * passed over in silence, when it is the one figure the card cannot know.
  */
-export function debtCardIntro(draft: Draft, interestUnstated: boolean, debts: readonly Debt[]): string {
+export function debtCardIntro(
+  draft: Draft,
+  interestUnstated: boolean,
+  debts: readonly Debt[],
+  passThrough?: "held" | "fronted" | null,
+): string {
   const line = debts.find((d) => d.id === draft.debtId)?.name;
+  if (passThrough) {
+    const who = line ? ` for **${line}**` : "";
+    const parts = [
+      passThrough === "fronted"
+        ? `That reads as money you sent${who} that comes back to you. None of it is spending, and their payment back is not income.`
+        : `That reads as money you are holding${who}, to pass on. None of it is income, and passing it on is not spending.`,
+    ];
+    if (!line) {
+      parts.push(
+        debts.some((d) => d.form === "pass-through")
+          ? "Pick who it is for on the card."
+          : "Open it in the form and add who it is for under Someone new: they are kept, so what they owe you or what you hold for them adds up.",
+      );
+    }
+    parts.push("If a fee was charged to send it and you paid it yourself, add the fee as its own spending.");
+    return parts.join(" ");
+  }
   const what =
     draft.debtEffect === "repay"
       ? "a payment"
