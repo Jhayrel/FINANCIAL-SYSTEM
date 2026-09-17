@@ -135,6 +135,9 @@ service cloud.firestore {
           // the assistant existed has no opinion on the matter, and rejecting
           // those would make the whole history unwritable.
           && (!('entrySource' in d) || d.entrySource in ['manual', 'ai'])
+          // The payment an interest row was part of, by that payment's id.
+          && (!('partOf' in d) || (d.partOf is string && d.partOf.size() > 0
+                                   && d.partOf.size() <= 200))
           && noSecretKeys(d.keys());
     }
 

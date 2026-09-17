@@ -46,6 +46,14 @@ const TRANSACTION_HEADER = [
   "Total",
   "Notes",
   "Status",
+  /*
+   * Which debt a Debt row belongs to, and the payment an interest row was
+   * part of. Without them a ledger with two credit lines could not be told
+   * apart in the export, and an interest row read as a charge of its own.
+   */
+  "Debt",
+  "Part of",
+  "Entered by",
 ];
 
 const transactionRow = (t: Transaction): (string | number)[] => [
@@ -63,6 +71,9 @@ const transactionRow = (t: Transaction): (string | number)[] => [
   money(t.total),
   t.notes,
   t.status,
+  t.debtId ?? "",
+  t.partOf ?? "",
+  t.entrySource ?? "",
 ];
 
 /**

@@ -2225,7 +2225,7 @@ function AiSection({
 
       <Group
         title="AI assistant"
-        hint="Rewrites figures the app already computed"
+        hint="Reads receipts, answers questions and drafts entries you confirm"
         action={
           /*
            * The switch says what it is set to.
@@ -2233,11 +2233,18 @@ function AiSection({
            * A bare grey switch at the top of an otherwise empty screen was the
            * only sign of the state, and on a phone it read as a control that
            * had not loaded yet.
+           *
+           * Only while it is on. Off, the screen had an "Off" pill and a switch
+           * in the corner and a "Turn on AI" button under the list: two
+           * controls for one decision, a hand's width apart. The button stays,
+           * because it sits under what turning it on would bring.
            */
-          <div className="fms-aiswitch">
-            <StatusPill status={off ? "none" : "ok"}>{off ? "Off" : "On"}</StatusPill>
-            <Switch checked={ai.enabled} label="Enable AI" onChange={toggle} />
-          </div>
+          off ? undefined : (
+            <div className="fms-aiswitch">
+              <StatusPill status="ok">On</StatusPill>
+              <Switch checked={ai.enabled} label="Enable AI" onChange={toggle} />
+            </div>
+          )
         }
       >
         {off ? (
@@ -2272,14 +2279,14 @@ function AiSection({
             </Button>
 
             <p className="t-caption fms-aioff-note">
-              Even on, it never writes to your ledger, never adds a transaction and never changes a
-              balance. Every number it repeats was calculated here first.
+              Even on, nothing is added, changed or deleted until you press the button on its card.
+              Every number it repeats was calculated here first.
             </p>
           </div>
         ) : (
           <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
-            It never writes to your ledger, never adds a transaction, and never changes a balance.
-            Every number it repeats was calculated here first.
+            Nothing is added, changed or deleted until you press the button on its card. Every
+            number it repeats was calculated here first.
           </p>
         )}
       </Group>

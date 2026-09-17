@@ -45,7 +45,7 @@ import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
 import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
-import { netWorth, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
+import { interestOf, isInterestOf, netWorth, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
@@ -796,7 +796,13 @@ export default function App() {
       // A split repayment can turn one row into two, so anything the edit
       // produced that was not already there still has to be inserted.
       const added = rows.filter((r) => !prev.some((t) => t.id === r.id));
-      return added.length ? insertChronologically(replaced, added) : replaced;
+      /*
+       * With the ledger's own numbering rule. Without it, correcting a
+       * payment to include interest renumbered every row on screen in the
+       * live ledger, whose numbers are stored and never rewritten, until the
+       * database answered and put them all back.
+       */
+      return added.length ? insertChronologically(replaced, added, { renumber: renumbers }) : replaced;
     });
     push((l) => l.saveMany(rows));
     setEditing(null);
@@ -859,6 +865,19 @@ export default function App() {
   const handleDelete = (id: string): void => {
     const row = transactions.find((t) => t.id === id);
     if (!row) return;
+    /**
+     * A debt payment goes with the interest that was part of it.
+     *
+     * Binning the payment left its interest row live: the payment gone from
+     * the balance and the wallet, and its interest still counted as spending
+     * and still taken from the wallet. They left the wallet together, so they
+     * go to the bin together, and come back together (see `handleRestore`).
+     */
+    const interest = interestOf(row, transactions);
+    if (interest) {
+      handleDeleteMany([id, interest.id]);
+      return;
+    }
     const at = new Date().toISOString();
     /**
      * A row being edited that goes to the bin stops being edited.
@@ -890,7 +909,15 @@ export default function App() {
    * message rather than six.
    */
   const handleDeleteMany = (ids: readonly string[]): void => {
-    const rows = transactions.filter((t) => ids.includes(t.id));
+    // Each payment's interest with it, as in `handleDelete`.
+    const wanted = new Set(ids);
+    for (const t of transactions) {
+      if (wanted.has(t.id)) {
+        const interest = interestOf(t, transactions);
+        if (interest) wanted.add(interest.id);
+      }
+    }
+    const rows = transactions.filter((t) => wanted.has(t.id));
     if (rows.length === 0) return;
     const at = new Date().toISOString();
     const gone = new Set(rows.map((t) => t.id));
@@ -912,6 +939,12 @@ export default function App() {
   const handleRestore = (id: string): void => {
     const row = deleted.find((t) => t.id === id);
     if (!row) return;
+    // A payment comes back with the interest that went to the bin with it.
+    const interest = deleted.find((t) => isInterestOf(t, row) && t.deletedAt === row.deletedAt);
+    if (interest) {
+      handleRestoreMany([id, interest.id]);
+      return;
+    }
     setDeleted((prev) => prev.filter((t) => t.id !== id));
     const { deletedAt: _ignored, ...restored } = row;
     setTransactions((prev) => insertChronologically(prev, [restored], { renumber: renumbers }));
@@ -922,7 +955,13 @@ export default function App() {
 
   /** The same move backwards: several rows out of the bin at once. */
   const handleRestoreMany = (ids: readonly string[]): void => {
-    const rows = deleted.filter((t) => ids.includes(t.id));
+    const wanted = new Set(ids);
+    for (const t of deleted) {
+      if (!wanted.has(t.id)) continue;
+      const interest = deleted.find((d) => isInterestOf(d, t) && d.deletedAt === t.deletedAt);
+      if (interest) wanted.add(interest.id);
+    }
+    const rows = deleted.filter((t) => wanted.has(t.id));
     if (rows.length === 0) return;
     const back = new Set(rows.map((t) => t.id));
 

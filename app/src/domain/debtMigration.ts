@@ -265,6 +265,8 @@ export function applyDebtMigration(
         description: `Interest on ${plan.debt.name}`,
         debtId: plan.debt.id,
         debtEffect: "interest",
+        // Part of the one payment above, which the database now says outright.
+        partOf: t.id,
       });
     } else {
       out.push({

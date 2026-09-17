@@ -194,6 +194,20 @@ describe("asking for income and being shown spending", () => {
     }
   });
 
+  /** "chart my revenu by month" drew Spending: the opposite of what was asked. */
+  it("reads them misspelt", () => {
+    for (const q of ["chart my revenu by month", "graph my incom this year", "chart my reveneu per month", "chart my sallary this year"]) {
+      expect(buildChart(q, both, ASOF)?.title, q).toContain("Income");
+    }
+  });
+
+  /** One letter from "earnings", and a chart of what they cost. */
+  it("does not take a near word for one of them", () => {
+    for (const q of ["chart my earrings this year", "show me warnings as a chart", "chart my receipts this year"]) {
+      expect(buildChart(q, both, ASOF)?.title ?? "Spending", q).not.toContain("Income");
+    }
+  });
+
   it("leaves spending as the default", () => {
     const chart = buildChart("chart this year", both, ASOF);
     expect(chart?.title).toContain("Spending");

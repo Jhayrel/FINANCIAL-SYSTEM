@@ -22,7 +22,7 @@ import {
 import { AmountInput, Select, TextInput } from "../components/forms";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
-import { debtDue, effectsFor, outstandingOf, positionsOf } from "../domain/debt";
+import { debtDue, effectsFor, interestOf, movementsOf, outstandingOf, paymentOf, positionsOf } from "../domain/debt";
 import { formatMoney, type Centavos } from "../domain/money";
 import {
   categoriesFor,
@@ -91,25 +91,50 @@ const FLOWS: { id: Flow; tone: FlowTone; glyph: string; hint: string }[] = [
  * pesos twice.
  */
 const EFFECT_LABEL: Record<DebtEffect, string> = {
-  draw: "Draw: borrow more",
-  repay: "Repay: pay it down",
-  interest: "Interest or fee",
-  fee: "Fee",
-  writeoff: "Write-off: forgiven",
-  lend: "Lend: money out to them",
-  collect: "Collect: they paid you back",
+  draw: "Borrowed: money taken from it",
+  repay: "Paid: a payment to it",
+  interest: "Interest only: a charge paid on its own",
+  fee: "Fee: a charge paid on its own",
+  writeoff: "Waived: cancelled with no money moving",
+  lend: "Lent: money out to them",
+  collect: "Paid back: they paid you",
 };
 
-/** The same effects in a word or two, for the row of choices; the full words are their tooltips. */
+/**
+ * The same effects in a word or two, for the row of choices.
+ *
+ * "Interest or fee" and "Forgiven" were the two the owner could not place.
+ * Interest is almost always part of a payment, which the payment now says
+ * for itself (see "Interest included"), so the choice of its own is named for
+ * the rare case it covers, and every choice says in a sentence what it does.
+ */
 const EFFECT_SHORT: Record<DebtEffect, string> = {
-  draw: "Borrow more",
-  repay: "Pay it down",
-  interest: "Interest or fee",
+  draw: "Borrowed",
+  repay: "Paid",
+  interest: "Interest only",
   fee: "Fee",
-  writeoff: "Forgiven",
-  lend: "Lend",
+  writeoff: "Waived",
+  lend: "Lent",
   collect: "Paid back",
 };
+
+/** What each choice does, in a sentence, under the row of choices. */
+const EFFECT_MEANS: Record<DebtEffect, string> = {
+  draw: "Money you took from it. What you owe goes up by this much.",
+  repay: "A payment. It lowers what you owe. If the bill says part of it was interest, put that part in Interest included.",
+  interest: "Interest or a late fee paid on its own, with no payment beside it. It counts as spending and what you owe stays the same.",
+  fee: "A fee paid on its own. It counts as spending and what you owe stays the same.",
+  writeoff: "The lender cancelled part of what you owe and no money moved. What you owe goes down by this much.",
+  lend: "Money you gave them. What they owe you goes up by this much.",
+  collect: "Money they paid you. What they owe you goes down by this much.",
+};
+
+function effectMeans(effect: DebtEffect, kind: Debt["kind"]): string {
+  if (effect === "writeoff" && kind === "receivable") {
+    return "Money you have stopped expecting back, with no money moving. What they owe you goes down by this much.";
+  }
+  return EFFECT_MEANS[effect];
+}
 
 /** Due now chips shown before "Show all": enough to act on, not a wall. */
 const DUE_SHOWN = 3;
@@ -695,6 +720,19 @@ export function AddTransaction({
   const errorFor = (field: string): string | undefined =>
     submitted ? check.errors.find((e) => e.field === field)?.message : undefined;
 
+  /** A debt payment, which is the one movement that can carry interest inside it. */
+  const paying = draft.flow === "Debt" && draft.debtEffect === "repay";
+  /**
+   * Interest larger than the payment it is part of, said as soon as it is
+   * typed: it is a contradiction between two fields side by side, not a
+   * forgotten field that should wait for Save.
+   */
+  const interestError = paying
+    ? (submitted || (draft.interest ?? null) !== null
+        ? check.errors.find((e) => e.field === "interest")?.message
+        : undefined)
+    : undefined;
+
   /**
    * Warnings wait for an amount.
    *
@@ -736,8 +774,10 @@ export function AddTransaction({
   /** What this entry does to the debt it is filed against. */
   const debtAfter = (() => {
     if (draft.flow !== "Debt" || !selectedDebt || !draft.debtEffect || draft.amount === null) return null;
+    const editedRow = draft.id ? transactions.find((t) => t.id === draft.id) : undefined;
+    const editedInterest = editedRow ? interestOf(editedRow, transactions) : undefined;
     const base = draft.id
-      ? transactions.filter((t) => t.id !== draft.id && t.id !== `${draft.id}-interest`)
+      ? transactions.filter((t) => t.id !== draft.id && t.id !== editedInterest?.id)
       : transactions;
     const before = outstandingOf(base, selectedDebt.id);
     const amount = draft.amount;
@@ -862,7 +902,7 @@ export function AddTransaction({
   if (check.repaymentSplit && check.repaymentSplit.interest > 0 && check.repaymentSplit.principal > 0) {
     checks.push({
       key: "split",
-      text: `This payment splits in two: ${formatMoney(check.repaymentSplit.principal)} principal and ${formatMoney(check.repaymentSplit.interest)} interest.`,
+      text: `Saved as one payment in two linked rows: ${formatMoney(check.repaymentSplit.principal)} off what you owe, and ${formatMoney(check.repaymentSplit.interest)} interest, which counts as spending.`,
     });
   }
 
@@ -919,7 +959,7 @@ export function AddTransaction({
        * interest row would stay behind, booking interest that the payment no
        * longer includes. It goes to the bin, where it can still be restored.
        */
-      const interest = transactions.find((t) => t.id === `${target.id}-interest`);
+      const interest = interestOf(target, transactions);
       if (interest && !rows.some((r) => r.id === interest.id)) onBin(interest.id);
     } else {
       onSave(
@@ -1255,7 +1295,11 @@ export function AddTransaction({
                     label="What it does"
                     required
                     error={errorFor("debtEffect")}
-                    hint={draft.debtEffect ? undefined : "Pick one, and the wallet it moves money through appears."}
+                    hint={
+                      draft.debtEffect
+                        ? effectMeans(draft.debtEffect, selectedDebt?.kind ?? "payable")
+                        : "Pick one, and the wallet it moves money through appears."
+                    }
                   >
                     <div className="fms-segpills" role="radiogroup" aria-label="What this does to the debt">
                       {effects.map((effect) => (
@@ -1268,7 +1312,7 @@ export function AddTransaction({
                           className="t-body fms-segpill"
                           onClick={() => setDraft((d) => withDebtEffect(d, effect))}
                         >
-                          {EFFECT_SHORT[effect]}
+                          {effect === "writeoff" && selectedDebt?.kind === "receivable" ? "Given up" : EFFECT_SHORT[effect]}
                         </button>
                       ))}
                     </div>
@@ -1276,7 +1320,12 @@ export function AddTransaction({
                 </>
               )}
 
-              <Field label="Amount" required half={draft.flow === "Transfer"} error={errorFor("amount")}>
+              <Field
+                label={paying ? "Amount paid" : "Amount"}
+                required
+                half={draft.flow === "Transfer" || paying}
+                error={errorFor("amount")}
+              >
                 <div className="fms-amounthero">
                   <AmountInput
                     value={draft.amount}
@@ -1296,6 +1345,34 @@ export function AddTransaction({
                   </button>
                 )}
               </Field>
+
+              {/*
+                The interest inside a payment, as the bill says it.
+
+                "I paid my credit 1,000" says nothing about how much of it was
+                interest, and no rate can be assumed, because every lender
+                counts it differently. So it is asked, beside the amount, and
+                read off the bill or the lender's app. Blank is fine: then only
+                a payment larger than what is owed has interest in it (rule
+                D2). The two rows it saves are linked (see `Transaction.partOf`).
+              */}
+              {paying && (
+                <Field
+                  label="Interest included"
+                  half
+                  error={interestError}
+                  hint={interestError ? undefined : "From the bill or app. Blank if none."}
+                >
+                  <div className="fms-amounthero fms-amounthero--quiet">
+                    <AmountInput
+                      value={draft.interest ?? null}
+                      onChange={(v) => set("interest", v)}
+                      invalid={Boolean(interestError)}
+                      ariaLabel="Interest included in the payment"
+                    />
+                  </div>
+                </Field>
+              )}
 
               {draft.flow === "Transfer" && (
                 <Field label="Fee" half error={errorFor("fee")}>
@@ -1840,7 +1917,7 @@ export function AddTransaction({
             </p>
           ) : (
             <ol className="fms-recent-list">
-              {latestOf(transactions).map((t) => (
+              {latestOf(transactions).map(({ row: t, interest, total }) => (
                 <li key={t.id}>
                   {/* Opens the row in this form, to correct it, the way the Database's edit does. */}
                   <button
@@ -1851,12 +1928,13 @@ export function AddTransaction({
                     title={onEditRow ? `Open #${String(t.recordNumber).padStart(4, "0")} to correct it` : undefined}
                   >
                   <div className="fms-recent-text">
-                    <span className="t-body fms-truncate">{t.item || t.description || t.type}</span>
+                    <span className="t-body fms-truncate">{recentTitle(t, debts)}</span>
                     <span className="t-micro fms-truncate" style={{ color: "var(--ink-3)" }}>
                       #{String(t.recordNumber).padStart(4, "0")} · {shortDay(t.date)} · {walletsOf(t)}
+                      {interest ? ` · ${formatMoney(interest.total)} interest` : ""}
                     </span>
                   </div>
-                  <Money value={t.total} size="s" tone={AMOUNT_TONE[t.type]} />
+                  <Money value={total} size="s" tone={AMOUNT_TONE[t.type]} />
                   </button>
                 </li>
               ))}
@@ -1901,11 +1979,47 @@ const AMOUNT_TONE: Record<Transaction["type"], string> = {
   Debt: "var(--flow-debt-text)",
 };
 
-/** Newest by date, then by number within a day. */
-function latestOf(transactions: readonly Transaction[], count = 8): Transaction[] {
-  return [...transactions]
-    .sort((a, b) => b.date.localeCompare(a.date) || b.recordNumber - a.recordNumber)
-    .slice(0, count);
+/**
+ * Newest by date, then by number within a day.
+ *
+ * More than a card holds on purpose: the card shows as many whole rows as fit
+ * beside the form (see "As many whole entries as the card has room for" in
+ * layout.css), which is two on the short Debt form and twelve on a tall
+ * screen.
+ */
+function latestOf(transactions: readonly Transaction[], count = 24) {
+  /*
+   * A debt payment with interest in it is one line, as it was one payment:
+   * "Maya Credit, paid PHP 2,688.79", not a PHP 2,500.00 line and a PHP 188.79
+   * line that read as two separate things.
+   */
+  return movementsOf(
+    [...transactions].sort((a, b) => b.date.localeCompare(a.date) || b.recordNumber - a.recordNumber),
+  ).slice(0, count);
+}
+
+/** What a debt row did, in the words the form's choices use. */
+const RECENT_EFFECT: Record<DebtEffect, string> = {
+  draw: "borrowed",
+  repay: "paid",
+  interest: "interest",
+  fee: "fee",
+  writeoff: "waived",
+  lend: "lent",
+  collect: "paid back to you",
+};
+
+/**
+ * A line's name. A debt row had no item and showed the word "Debt", so three
+ * borrowings and a payment on Maya Credit read as four lines saying "Debt".
+ */
+function recentTitle(t: Transaction, debts: readonly Debt[]): string {
+  if (t.type === "Debt") {
+    const name = debts.find((d) => d.id === t.debtId)?.name || t.item;
+    const did = t.debtEffect ? RECENT_EFFECT[t.debtEffect] : "";
+    return [name || "Debt", did].filter(Boolean).join(", ");
+  }
+  return t.item || t.description || t.type;
 }
 
 function shortDay(iso: string): string {
@@ -2021,13 +2135,17 @@ interface DueChip {
  * and opening the interest row saved it as a repayment of its own. The form
  * holds the whole payment now, the principal's row is the one saved, and the
  * split is worked out again from what is owed.
+ *
+ * The interest goes back in as stated interest. Worked out again from what is
+ * owed, PHP 120.00 of interest inside a PHP 1,000.00 payment on a PHP 1,000.00
+ * balance came back as no interest at all, and saving the correction would
+ * have binned the interest row the owner had typed.
  */
 function draftForEditing(row: Transaction, transactions: readonly Transaction[]): Draft {
-  const principalId = row.id.endsWith("-interest") ? row.id.slice(0, -"-interest".length) : row.id;
-  const principal = transactions.find((t) => t.id === principalId);
-  const interest = transactions.find((t) => t.id === `${principalId}-interest`);
-  if (principal && interest && principal.debtEffect === "repay" && interest.debtEffect === "interest") {
-    return { ...transactionToDraft(principal), amount: principal.amount + interest.amount };
+  const principal = paymentOf(row, transactions) ?? row;
+  const interest = interestOf(principal, transactions);
+  if (interest) {
+    return { ...transactionToDraft(principal), amount: principal.amount + interest.amount, interest: interest.amount };
   }
   return transactionToDraft(row);
 }

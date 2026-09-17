@@ -47,6 +47,16 @@ export interface Draft {
   debtId?: string | undefined;
   debtEffect?: DebtEffect | undefined;
   /**
+   * A debt payment only: how much of `amount` was interest, as the lender's
+   * bill or app shows it.
+   *
+   * Absent or null means the owner has not said, and only a payment larger
+   * than what is owed has any interest in it (rule D2). There is no rate to
+   * work it out from: every lender counts interest its own way, so the figure
+   * is read off the bill, never guessed. See `splitRepayment`.
+   */
+  interest?: Centavos | null | undefined;
+  /**
    * Transfer only: the money left your accounts.
    *
    * A transfer with no destination is Money Send, which is a documented,
@@ -135,7 +145,8 @@ export type FieldName =
   | "notes"
   | "status"
   | "debt"
-  | "debtEffect";
+  | "debtEffect"
+  | "interest";
 
 /**
  * Only the fields that flow actually needs.
@@ -615,16 +626,30 @@ export function checkDraft(
     const outstanding = outstandingOf(others, draft.debtId);
     const amount = draft.amount ?? 0;
 
-    if (draft.debtEffect === "repay" && amount > 0) {
-      const split = splitRepayment(amount, outstanding);
+    const stated = draft.debtEffect === "repay" ? (draft.interest ?? null) : null;
+    if (stated !== null && stated < 0) {
+      errors.push({ field: "interest", message: "Interest can not be less than ₱0.00." });
+    } else if (stated !== null && amount > 0 && stated > amount) {
+      errors.push({
+        field: "interest",
+        message: `The interest (${money(stated)}) is more than the whole payment (${money(amount)}). The amount is everything you paid, interest included.`,
+      });
+    }
+
+    if (draft.debtEffect === "repay" && amount > 0 && !(stated !== null && stated > amount)) {
+      const split = splitRepayment(amount, outstanding, stated);
       repaymentSplit = split;
-      if (split.interest > 0) {
+      /** The part above what is owed, which is interest whatever was stated. */
+      const over = split.interest - Math.max(0, Math.min(stated ?? 0, amount));
+      if (outstanding <= 0 && split.principal === 0 && (stated ?? 0) < amount) {
         warnings.push({
           field: "amount",
-          message:
-            outstanding <= 0
-              ? `Nothing is owed on ${debt?.name ?? "this debt"}, so all ${money(amount)} would be recorded as interest. If you borrowed first, record that draw before this payment.`
-              : `Only ${money(split.principal)} of this is principal. The other ${money(split.interest)} will be recorded as interest.`,
+          message: `Nothing is owed on ${debt?.name ?? "this debt"}, so all ${money(amount)} would be recorded as interest. If you borrowed first, record that borrowing before this payment.`,
+        });
+      } else if (over > 0) {
+        warnings.push({
+          field: "amount",
+          message: `Only ${money(Math.max(0, outstanding))} is owed, so ${money(split.principal)} of this pays it down and the other ${money(split.interest)} is recorded as interest.`,
         });
       }
     }
@@ -720,17 +745,28 @@ export function draftToTransactions(
   };
 
   if (draft.flow === "Debt" && draft.debtEffect === "repay" && split && split.interest > 0) {
+    const interest: Transaction = {
+      ...base,
+      amount: split.interest,
+      fee: 0,
+      total: split.interest,
+      description: `Interest on ${draft.item || "debt"}`,
+      debtEffect: "interest",
+    };
+    /**
+     * All of it interest: one row, and nothing to link it to. A PHP 0.00
+     * repayment row beside it was saved before, which is a row that says
+     * nothing happened.
+     */
+    if (split.principal === 0) return [interest];
     return [
       { ...base, amount: split.principal, fee: 0, total: split.principal, debtEffect: "repay" },
-      {
-        ...base,
-        id: `${id}-interest`,
-        amount: split.interest,
-        fee: 0,
-        total: split.interest,
-        description: `Interest on ${draft.item || "debt"}`,
-        debtEffect: "interest",
-      },
+      /**
+       * The link. The interest row names the payment it was part of, so the
+       * database holds that the two went out together, not just that they
+       * share a date (see `Transaction.partOf`).
+       */
+      { ...interest, id: `${id}-interest`, partOf: id },
     ];
   }
 

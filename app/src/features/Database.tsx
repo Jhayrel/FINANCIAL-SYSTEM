@@ -22,6 +22,7 @@ import { SearchInput } from "../components/forms";
 import { Icon } from "../components/Icon";
 import { useConfirm } from "../components/Confirm";
 import { formatAmount } from "../domain/money";
+import { interestOf } from "../domain/debt";
 import { DataTable, type Column } from "../components/DataTable";
 import { formatShort, getYear } from "../domain/dates";
 import { inPeriod, matchesSearch, parseSearch, PERIODS, type Period } from "../domain/search";
@@ -125,9 +126,15 @@ export function Database({
   const askDelete = async (t: Transaction): Promise<void> => {
     if (!onDelete) return;
 
+    // A debt payment goes to the bin with the interest that was part of it, and says so.
+    const interest = interestOf(t, transactions);
     const ok = await confirm({
       title: `Delete record #${String(t.recordNumber).padStart(4, "0")}?`,
-      body: `${t.item || "This entry"}, ${t.description || "no description"}, ₱${formatAmount(t.total)} on ${formatShort(t.date)}. It moves to the bin, where you can restore it. Balances and totals update straight away.`,
+      body: `${t.item || "This entry"}, ${t.description || "no description"}, ₱${formatAmount(t.total)} on ${formatShort(t.date)}.${
+        interest
+          ? ` Its ₱${formatAmount(interest.total)} of interest, #${String(interest.recordNumber).padStart(4, "0")}, was part of the same payment and goes with it.`
+          : ""
+      } It moves to the bin, where you can restore it. Balances and totals update straight away.`,
       confirmLabel: "Move to bin",
       tone: "danger",
     });

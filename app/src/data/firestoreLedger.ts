@@ -86,7 +86,15 @@ function toDocument(t: Transaction, deletedAt?: string): DocumentData {
   };
   if (t.debtId !== undefined) d.debtId = t.debtId;
   if (t.debtEffect !== undefined) d.debtEffect = t.debtEffect;
+  if (t.partOf !== undefined) d.partOf = t.partOf;
   if (t.reviewed !== undefined) d.reviewed = t.reviewed;
+  /*
+   * Who filled the row in. It was stamped on every save and never written,
+   * so after a refresh every row read as typed: the Database lost its AI
+   * marks, and a correction to a row the assistant entered taught it nothing,
+   * because `manualCorrections` only learns from rows marked "ai".
+   */
+  if (t.entrySource !== undefined) d.entrySource = t.entrySource;
   if (deletedAt !== undefined) d.deletedAt = deletedAt;
   return d;
 }
@@ -112,7 +120,9 @@ function fromDocument(snap: QueryDocumentSnapshot<DocumentData>): Transaction & 
     status: d.status ?? "",
     ...(d.debtId !== undefined ? { debtId: String(d.debtId) } : {}),
     ...(d.debtEffect !== undefined ? { debtEffect: d.debtEffect } : {}),
+    ...(typeof d.partOf === "string" && d.partOf.length > 0 ? { partOf: d.partOf } : {}),
     ...(d.reviewed !== undefined ? { reviewed: Boolean(d.reviewed) } : {}),
+    ...(d.entrySource === "ai" || d.entrySource === "manual" ? { entrySource: d.entrySource } : {}),
     ...(typeof d.deletedAt === "string" && d.deletedAt.length > 0
       ? { deletedAt: d.deletedAt }
       : {}),

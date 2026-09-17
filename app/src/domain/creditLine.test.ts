@@ -48,10 +48,16 @@ describe("a sentence that names a credit line", () => {
     }
   });
 
+  /**
+   * The wallet on the side borrowing puts it. "borrowed" is a plain verb, so
+   * the effect is read (see `debtSentence.ts`), and borrowed money lands in
+   * the wallet rather than leaving it.
+   */
   it("still keeps the amount and the wallet it did read", () => {
     const r = read("I borrowed 2000 on maya credit into gcash");
     expect(r.draft.amount).toBe(200000);
-    expect(r.draft.fromWallet).toBe("Gcash");
+    expect(r.draft.toWallet).toBe("Gcash");
+    expect(r.draft.fromWallet).toBe("");
   });
 
   /**
@@ -140,9 +146,22 @@ describe("the credit line the sentence named", () => {
     );
   });
 
-  /** What it does is never guessed. That one really is not in a sentence. */
-  it("never guesses what the movement does", () => {
-    expect(read("I borrowed 2000 on maya credit into gcash").draft.debtEffect).toBeUndefined();
+  /**
+   * What it does is read only from a verb that leaves no doubt, and never
+   * guessed otherwise.
+   *
+   * This said "never" until 2026-09-17. The owner asked for "I paid 1000
+   * including its interest" to be handled, and a card that ignored "paid"
+   * made them pick Paid by hand on every payment. "Borrowed" and "paid my
+   * Maya Credit" say it outright. "Paid with Maya Credit" says the opposite
+   * of paying it, and a sentence without a plain verb says nothing, so those
+   * two are still left for the owner to pick.
+   */
+  it("reads what the movement does only from a plain verb", () => {
+    expect(read("I borrowed 2000 on maya credit into gcash").draft.debtEffect).toBe("draw");
+    expect(read("I paid my maya credit 1000 from gcash").draft.debtEffect).toBe("repay");
+    expect(read("I paid 500 for food using maya credit").draft.debtEffect).toBeUndefined();
+    expect(read("I recived it in maya and the credit is from maya credit").draft.debtEffect).toBeUndefined();
   });
 
   it("leaves it blank when no line was named", () => {

@@ -343,7 +343,7 @@ describe("patternFindings", () => {
 
     expect(findings[0]?.kind).toBe("velocity");
     expect(findings[0]?.detail).toContain("80%");
-    expect(findings[0]?.detail).toContain("PHP 4,000.00");
+    expect(findings[0]?.detail).toContain("₱4,000.00");
   });
 
   it("never claims more than all of a deposit left it", () => {
@@ -364,7 +364,7 @@ describe("patternFindings", () => {
     expect(velocity!.detail).not.toMatch(/\b(1\d\d|[2-9]\d\d)%/);
     // It says the true and more useful thing instead.
     expect(velocity!.detail).toContain("more than arrived");
-    expect(velocity!.detail).toContain("PHP 1,991.00");
+    expect(velocity!.detail).toContain("₱1,991.00");
   });
 
   it("never prints a percentage above one hundred, on any ledger", () => {
@@ -394,7 +394,7 @@ describe("patternFindings", () => {
     for (const f of findings) {
       expect(f.detail).not.toMatch(scolding);
       // Every finding carries a figure. That is the whole intervention.
-      expect(f.detail).toMatch(/PHP |\d/);
+      expect(f.detail).toMatch(/₱|\d/);
     }
   });
 

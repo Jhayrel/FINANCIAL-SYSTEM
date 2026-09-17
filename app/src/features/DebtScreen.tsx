@@ -30,6 +30,7 @@ import {
   debtDue,
   debtPace,
   duesWithin,
+  movementsOf,
   paymentsFiledAsSpending,
   positionsOf,
   rowsFor,
@@ -43,14 +44,15 @@ import type { Transaction } from "../domain/types";
 import { whenWords } from "./Dashboard";
 import { useReportScreen } from "./screenReport";
 
+/** The words the Add form's choices use, so a row reads the way it was entered. */
 const EFFECT_WORD: Record<DebtEffect, string> = {
   draw: "Borrowed",
-  repay: "Paid back",
-  interest: "Interest",
+  repay: "Paid",
+  interest: "Interest only",
   fee: "Fee",
-  writeoff: "Written off",
+  writeoff: "Waived",
   lend: "Lent",
-  collect: "Collected",
+  collect: "Paid back",
 };
 
 const EFFECT_STATUS: Record<DebtEffect, Status> = {
@@ -170,7 +172,7 @@ export function DebtScreen({
       <div className="fms-debtsum">
         <Figure label="You owe" value={owe} tone="var(--flow-debt-text)" />
         <Figure label="Owed to you" value={owedToYou} />
-        <Figure label={`Interest and fees in ${year}`} value={interestThisYear} />
+        <Figure label={`Interest and fees paid in ${year}`} value={interestThisYear} />
         <Figure label="Net" value={owedToYou - owe} signed />
       </div>
 
@@ -219,7 +221,8 @@ export function DebtScreen({
             due={d}
             transactions={transactions}
             asOf={asOf}
-            selected={selected?.position.debt.id === d.position.debt.id}
+            selected={dues.length > 1 && selected?.position.debt.id === d.position.debt.id}
+            selectable={dues.length > 1}
             editing={editId === d.position.debt.id}
             onSelect={() => setOpenId(d.position.debt.id)}
             onRecord={(effect, amount) => onRecord(d.position.debt, effect, amount)}
@@ -262,6 +265,7 @@ function DebtCard({
   transactions,
   asOf,
   selected,
+  selectable,
   editing,
   onSelect,
   onRecord,
@@ -272,6 +276,12 @@ function DebtCard({
   transactions: readonly Transaction[];
   asOf: string;
   selected: boolean;
+  /**
+   * Whether there is a choice of history to show. With one debt its history
+   * is the only one, so the card wore an amber outline and "history below"
+   * all the time, which read as a warning about a debt that was fine.
+   */
+  selectable: boolean;
   editing: boolean;
   onSelect: () => void;
   onRecord: (effect: DebtEffect, amount: Centavos | null) => void;
@@ -288,22 +298,64 @@ function DebtCard({
   const schedule = form === "term-loan" ? loanSchedule(position, asOf) : null;
   const pace = debtPace(position, transactions, asOf);
 
+  const notes: { key: string; text: string; warn?: boolean }[] = [];
+  if (owed && pace.added30 > pace.paid30) {
+    notes.push({ key: "growing", text: "More was borrowed than paid back in the last 30 days, so it is growing.", warn: true });
+  }
+  if (!settled && pace.monthsToClear !== null) {
+    notes.push({
+      key: "pace",
+      text: `At ${formatMoney(pace.monthlyPayment)} a month, the rate of the last three months, it is cleared in about ${
+        pace.monthsToClear
+      } ${pace.monthsToClear === 1 ? "month" : "months"}.`,
+    });
+  }
+  if (!settled && due.nextDue && (due.basis === "last-payment" || due.basis === "borrowed")) {
+    notes.push({ key: "basis", text: `The date is ${basisWords(due.basis)}. Set the real due day under Details to make it exact.` });
+  }
+  if (!settled && !due.nextDue && form !== "informal") {
+    notes.push({ key: "noday", text: "Set a due day under Details and this says when the next payment is due." });
+  }
+  /*
+   * The question the owner asked: where does the interest go? Not into this
+   * balance (rule 5.6.2), so a lender's app showing more than this is not a
+   * mistake, and the way to record it is said where the balance is.
+   */
+  if (owed && !settled) {
+    notes.push({
+      key: "interest",
+      text: "Interest is not in this balance. When you pay, put the interest part of the payment in Interest included.",
+    });
+  }
+
   return (
     <article className={["fms-debtcard", selected && "is-selected", late && "is-late"].filter(Boolean).join(" ")}>
-      <button type="button" className="fms-debtcard-head" aria-pressed={selected} onClick={onSelect}>
-        <span className="fms-debtcard-name">
-          <span className="t-body-strong">{debt.name}</span>
-          <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-            {DEBT_FORM_LABEL[form]} · {owed ? "you owe" : "owed to you"}
-            {selected ? " · history below" : ""}
-          </span>
-        </span>
-        <Money
-          value={Math.max(0, position.outstanding)}
-          size="l"
-          tone={settled ? "var(--ink-3)" : late ? "var(--over)" : owed ? "var(--flow-debt-text)" : undefined}
-        />
-      </button>
+      {(() => {
+        const head = (
+          <>
+            <span className="fms-debtcard-name">
+              <span className="t-body-strong">{debt.name}</span>
+              <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+                {DEBT_FORM_LABEL[form]} · {owed ? "you owe" : "owed to you"}
+                {selectable ? (selected ? " · history below" : " · show its history") : ""}
+              </span>
+            </span>
+            <Money
+              value={Math.max(0, position.outstanding)}
+              size="l"
+              tone={settled ? "var(--ink-3)" : late ? "var(--over)" : owed ? "var(--flow-debt-text)" : undefined}
+            />
+          </>
+        );
+        // A heading when there is nothing to choose between, a button when there is.
+        return selectable ? (
+          <button type="button" className="fms-debtcard-head" aria-pressed={selected} onClick={onSelect}>
+            {head}
+          </button>
+        ) : (
+          <div className="fms-debtcard-head fms-debtcard-head--static">{head}</div>
+        );
+      })()}
 
       {credit ? (
         <div className="fms-debtbar">
@@ -372,7 +424,11 @@ function DebtCard({
             )}
           </dd>
           <dd className="t-micro" style={{ color: "var(--ink-3)" }}>
-            {due.lastPayment ? formatMedium(due.lastPayment.date) : "Nothing paid back yet"}
+            {due.lastPayment
+              ? `${formatMedium(due.lastPayment.date)}${
+                  due.lastPayment.interest > 0 ? `, ${formatMoney(due.lastPayment.interest)} of it interest` : ""
+                }`
+              : "Nothing paid back yet"}
           </dd>
         </div>
         <div>
@@ -386,24 +442,21 @@ function DebtCard({
         </div>
       </dl>
 
-      {!settled && due.nextDue && (due.basis === "last-payment" || due.basis === "borrowed") && (
-        <p className="t-micro fms-debtnote">
-          The date is {basisWords(due.basis)}. Set the real due day under Details to make it exact.
-        </p>
-      )}
-      {!settled && !due.nextDue && form !== "informal" && (
-        <p className="t-micro fms-debtnote">Set a due day under Details and this says when the next payment is due.</p>
-      )}
-      {!settled && pace.monthsToClear !== null && (
-        <p className="t-caption fms-debtnote">
-          At {formatMoney(pace.monthlyPayment)} a month, as over the last three months, it is cleared in about{" "}
-          {pace.monthsToClear} {pace.monthsToClear === 1 ? "month" : "months"}.
-        </p>
-      )}
-      {owed && pace.added30 > pace.paid30 && (
-        <p className="t-caption fms-debtnote" style={{ color: "var(--warn)" }}>
-          More was borrowed than paid back in the last 30 days, so it is growing.
-        </p>
+      {notes.length > 0 && (
+        /*
+          What the figures above mean, as one list in one size.
+
+          Three notes sat here in two type sizes and two colours, each on its
+          own line with its own spacing, and read as leftovers. They are one
+          group now, the warning first, because it is the one to act on.
+        */
+        <ul className="fms-debtnotes">
+          {notes.map((n) => (
+            <li key={n.key} className="t-caption" style={n.warn ? { color: "var(--warn)" } : undefined}>
+              {n.text}
+            </li>
+          ))}
+        </ul>
       )}
 
       <div className="fms-debtactions">
@@ -515,13 +568,21 @@ function History({
   const { debt } = due.position;
   const owed = debt.kind === "payable";
 
+  /**
+   * One line per movement, a payment and its interest together.
+   *
+   * "Interest ₱188.79" and "Paid back ₱2,500.00" were two lines with nothing
+   * to say they were one ₱2,688.79 payment. What is owed after each line
+   * still moves by the principal only (rule 5.6.2).
+   */
   const rows = useMemo(() => {
     let balance = 0;
-    return rowsFor(transactions, debt.id)
-      .map((t) => {
+    return movementsOf(rowsFor(transactions, debt.id))
+      .map((m) => {
+        const t = m.row;
         if (t.debtEffect === "draw" || t.debtEffect === "lend") balance += t.amount;
         else if (t.debtEffect === "repay" || t.debtEffect === "collect" || t.debtEffect === "writeoff") balance -= t.amount;
-        return { t, balance };
+        return { m, balance };
       })
       .reverse();
   }, [transactions, debt.id]);
@@ -529,7 +590,7 @@ function History({
   return (
     <Card
       title={`${debt.name} history`}
-      subtitle={`Every movement, newest first, with what was ${owed ? "owed" : "owed to you"} after it`}
+      subtitle={`Every movement, newest first, with what was ${owed ? "owed" : "owed to you"} after it. A payment shows the interest inside it.`}
       padded={false}
     >
       {rows.length === 0 ? (
@@ -549,13 +610,22 @@ function History({
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ t, balance }) => (
+              {rows.map(({ m, balance }) => {
+                const t = m.row;
+                return (
                 <tr key={t.id}>
                   <td className="t-num-s fms-rhead">{formatShort(t.date)}</td>
                   <td data-label="What">
-                    <StatusPill status={t.debtEffect ? EFFECT_STATUS[t.debtEffect] : "none"}>
-                      {t.debtEffect ? EFFECT_WORD[t.debtEffect] : "Debt"}
-                    </StatusPill>
+                    <span className="fms-debtwhat">
+                      <StatusPill status={t.debtEffect ? EFFECT_STATUS[t.debtEffect] : "none"}>
+                        {t.debtEffect === "writeoff" && !owed ? "Given up" : t.debtEffect ? EFFECT_WORD[t.debtEffect] : "Debt"}
+                      </StatusPill>
+                      {m.interest && (
+                        <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+                          {formatMoney(t.amount)} off the balance, {formatMoney(m.interest.amount)} interest
+                        </span>
+                      )}
+                    </span>
                   </td>
                   <td className="t-caption" data-label="Wallet">
                     {t.fromWallet || t.toWallet || "None"}
@@ -564,7 +634,7 @@ function History({
                     {t.description || t.notes}
                   </td>
                   <td className="fms-rnum" data-label="Amount">
-                    <Money value={t.total} size="s" />
+                    <Money value={m.total} size="s" />
                   </td>
                   <td className="fms-rnum" data-label={owed ? "Owed after" : "Owed to you after"}>
                     <Money value={balance} size="s" tone={balance > 0 && owed ? "var(--flow-debt-text)" : undefined} />
@@ -575,7 +645,8 @@ function History({
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

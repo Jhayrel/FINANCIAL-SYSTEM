@@ -2420,9 +2420,7 @@
   .fms-entry--nochat {
     height: auto;
     min-height: 0;
-    grid-template-rows: none;
     grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
-    align-items: start;
     max-width: 1280px;
   }
 
@@ -2434,9 +2432,13 @@
    * under the bills and the four tiles: at 1080px it showed six fields with
    * Description cut in half, a second scrollbar with arrows beside the page's,
    * and a column of empty space under the balances.
+   *
+   * The fields take any height the row gives the card beyond their own (see
+   * "The cards beside the form end where it ends"), so Save sits on the
+   * card's bottom edge rather than halfway up it.
    */
   .fms-entry--nochat .fms-entryform > .fms-fields {
-    flex: none;
+    flex: 1 0 auto;
     overflow: visible;
     padding-right: 0;
   }
@@ -2577,24 +2579,70 @@
  * short card with a third of the screen empty to their right.
  */
 @media (min-width: 1024px) {
+  /*
+   * The cards beside the form end where it ends.
+   *
+   * They sat at their own heights, so at 1440px the form stopped 72px above
+   * the latest entries beside it, and on a short flow the gap went the other
+   * way. The style guide asks for boxes that share their edges. Every card
+   * now stretches to the row, and the form, which is the reason for the
+   * page, sets the row's height: the latest entries are sized out of it
+   * (below), so they never push it taller.
+   */
   .fms-entry--nochat {
     grid-template-areas:
       "form side"
       "form recent";
     grid-template-rows: auto 1fr;
-    align-items: start;
+    align-items: stretch;
   }
 
   .fms-entry--nochat > .fms-entryform {
     grid-area: form;
   }
 
+  .fms-entry--nochat .fms-entryform > .fms-fields {
+    flex: 1 0 auto;
+  }
+
   .fms-entry--nochat > .fms-side {
     grid-area: side;
+    align-content: start;
   }
 
   .fms-entry--nochat > .fms-recent {
     grid-area: recent;
+    display: flex;
+    flex-direction: column;
+    min-height: 240px;
+  }
+
+  /*
+   * As many whole entries as the card has room for.
+   *
+   * `contain: size` keeps the list out of the row's height, so it fills the
+   * space the form leaves rather than asking for more. The rows wrap into a
+   * second column when they run out of height, and that column is outside
+   * the card and clipped, so an entry is shown whole or not at all: never a
+   * row cut through its middle, and never a second scrollbar.
+   */
+  .fms-entry--nochat .fms-recent-list {
+    flex: 1 1 0;
+    min-height: 0;
+    contain: size;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    overflow: hidden;
+  }
+
+  .fms-entry--nochat .fms-recent-list > li {
+    width: 100%;
+  }
+
+  .fms-entry--nochat .fms-recent-more {
+    align-self: flex-start;
   }
 }
 
@@ -5672,10 +5720,15 @@ textarea.fms-askinput {
 
 /* ══ Debt ═══════════════════════════════════════════════════════════════════ */
 
+/*
+ * Four totals, four across on a computer and two by two on a phone. At
+ * 180px a column they stacked one per line on a phone, a screen's height of
+ * figures before the first debt.
+ */
 .fms-debtsum {
   display: grid;
   gap: var(--space-4);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 136px), 1fr));
   padding: var(--space-4) var(--space-5);
   background: var(--surface);
   border: 1px solid var(--hairline);
@@ -5683,10 +5736,17 @@ textarea.fms-askinput {
   box-shadow: var(--shadow-card);
 }
 
+/* The figure on the row's bottom line, so a label that wraps does not lift its neighbour's. */
 .fms-debtfig {
   display: grid;
+  grid-template-rows: 1fr auto;
+  align-items: end;
   gap: 2px;
   min-width: 0;
+}
+
+.fms-debtfig > :first-child {
+  align-self: start;
 }
 
 /* One debt takes the whole row; two share it, level with each other. */
@@ -5790,6 +5850,28 @@ textarea.fms-askinput {
 .fms-debtnote {
   margin: 0;
   color: var(--ink-3);
+}
+
+/* The card's notes: one list, one size, one colour unless it is a warning. */
+.fms-debtnotes {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-3);
+}
+
+/* With one debt the head is a heading, not a button: no pointer, no press. */
+.fms-debtcard-head--static {
+  cursor: default;
+}
+
+/* A payment's pill, and under it the interest that was part of it. */
+.fms-debtwhat {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
 }
 
 .fms-debtactions {

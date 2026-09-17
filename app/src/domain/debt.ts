@@ -364,13 +364,102 @@ export interface RepaymentSplit {
  *
  * A repayment may not exceed what is outstanding; the excess is interest.
  * Shown to the user before saving, never applied silently.
+ *
+ * ── Interest the owner states ─────────────────────────────────────────────
+ *
+ * The excess rule only finds interest in a payment larger than the balance.
+ * The common case is the other one: PHP 1,000.00 borrowed, a bill for
+ * PHP 1,000.00 of which PHP 120.00 is interest, and PHP 1,000.00 paid. Nothing
+ * in the ledger can tell that PHP 120.00 of it was interest, and no rate can be
+ * assumed, because every lender works it out its own way. So the owner says
+ * how much, from the bill or the lender's app, and `statedInterest` carries
+ * it: that much is interest, and the rest pays the balance down.
+ *
+ * The rest is still held to what is owed. Stating PHP 120.00 of a PHP 1,500.00
+ * payment against PHP 1,000.00 owed leaves PHP 1,380.00 for a PHP 1,000.00
+ * balance, and the PHP 380.00 over it is interest too, as rule D2 says, with
+ * the screen saying so before anything is saved.
  */
 export function splitRepayment(
   payment: Centavos,
   outstanding: Centavos,
+  statedInterest?: Centavos | null,
 ): RepaymentSplit {
-  const principal = Math.max(0, Math.min(payment, Math.max(0, outstanding)));
+  const stated = Math.min(Math.max(0, statedInterest ?? 0), Math.max(0, payment));
+  const principal = Math.max(0, Math.min(payment - stated, Math.max(0, outstanding)));
   return { principal, interest: payment - principal };
+}
+
+// ── One payment, two rows ─────────────────────────────────────────────────
+
+/**
+ * Whether `row` is the interest split off the payment `payment`.
+ *
+ * By the link the row carries (`partOf`), or, for a row saved before that
+ * field existed, by the id the pair has always shared.
+ */
+export function isInterestOf(row: Transaction, payment: Transaction): boolean {
+  if (row.id === payment.id || row.debtEffect !== "interest") return false;
+  return row.partOf === payment.id || row.id === `${payment.id}-interest`;
+}
+
+/** The interest row saved with this payment, if some of it was interest. */
+export function interestOf(
+  payment: Transaction,
+  transactions: readonly Transaction[],
+): Transaction | undefined {
+  if (payment.debtEffect !== "repay") return undefined;
+  return transactions.find((t) => isInterestOf(t, payment));
+}
+
+/** The payment an interest row was split off, if it was. */
+export function paymentOf(
+  row: Transaction,
+  transactions: readonly Transaction[],
+): Transaction | undefined {
+  if (row.debtEffect !== "interest") return undefined;
+  const id = row.partOf ?? (row.id.endsWith("-interest") ? row.id.slice(0, -"-interest".length) : undefined);
+  if (!id) return undefined;
+  const payment = transactions.find((t) => t.id === id);
+  return payment && payment.debtEffect === "repay" ? payment : undefined;
+}
+
+/**
+ * A debt movement as the owner made it: a payment together with the interest
+ * that was part of it.
+ */
+export interface DebtMovement {
+  readonly row: Transaction;
+  /** The interest saved with this payment, when some of it was interest. */
+  readonly interest?: Transaction | undefined;
+  /** What left or reached the wallet: the row, and its interest with it. */
+  readonly total: Centavos;
+}
+
+/**
+ * Rows with each payment's interest folded into it.
+ *
+ * The Debt history listed "Interest PHP 188.79" and "Paid back PHP 2,500.00"
+ * as two unrelated lines, when they were one PHP 2,688.79 payment, and nothing
+ * on screen said the two belonged together. Order is kept; an interest row
+ * whose payment is not in `rows` stays a line of its own.
+ */
+export function movementsOf(rows: readonly Transaction[]): DebtMovement[] {
+  const folded = new Set<string>();
+  const byPayment = new Map<string, Transaction>();
+  for (const row of rows) {
+    const payment = paymentOf(row, rows);
+    if (payment) {
+      byPayment.set(payment.id, row);
+      folded.add(row.id);
+    }
+  }
+  return rows
+    .filter((row) => !folded.has(row.id))
+    .map((row) => {
+      const interest = byPayment.get(row.id);
+      return { row, interest, total: row.total + (interest?.total ?? 0) };
+    });
 }
 
 // ── Validation, rules D1, D3 ──────────────────────────────────────────────
@@ -554,7 +643,14 @@ export interface DebtDue {
   readonly basis: DueBasis;
   /** A loan's instalment; otherwise everything outstanding. Never more than is owed. */
   readonly amountDue: Centavos;
-  readonly lastPayment?: { readonly date: IsoDate; readonly amount: Centavos } | undefined;
+  /**
+   * The last payment as it was made: `amount` is all of it, interest
+   * included, and `interest` is the part of it that was interest. The card
+   * said "Last payment PHP 2,500.00" for a PHP 2,688.79 payment.
+   */
+  readonly lastPayment?:
+    | { readonly date: IsoDate; readonly amount: Centavos; readonly interest: Centavos }
+    | undefined;
   /** When the balance now owed began: the first movement after it was last at zero. */
   readonly since?: IsoDate | undefined;
 }
@@ -614,14 +710,18 @@ export function debtDue(
 
   let balance = 0;
   let since: IsoDate | undefined;
-  let lastPayment: { date: IsoDate; amount: Centavos } | undefined;
-  for (const t of rowsFor(transactions, debt.id)) {
+  let lastPayment: { date: IsoDate; amount: Centavos; interest: Centavos } | undefined;
+  const rows = rowsFor(transactions, debt.id);
+  for (const t of rows) {
     if (t.debtEffect === undefined) continue;
     const before = balance;
     if (INCREASING.has(t.debtEffect)) balance += t.amount;
     else if (DECREASING.has(t.debtEffect) || t.debtEffect === "writeoff") balance -= t.amount;
     if (before <= 0 && balance > 0) since = t.date;
-    if (t.debtEffect === paying) lastPayment = { date: t.date, amount: t.amount };
+    if (t.debtEffect === paying) {
+      const interest = interestOf(t, rows)?.amount ?? 0;
+      lastPayment = { date: t.date, amount: t.amount + interest, interest };
+    }
   }
 
   const none: DebtDue = { position, basis: "none", amountDue: 0, lastPayment, since };

@@ -44,8 +44,8 @@
  *   4. Report, never correct. Same rule as the integrity checks.
  */
 
-import { getMonth, getYear } from "./dates";
-import type { Centavos } from "./money";
+import { formatMedium, getMonth, getYear } from "./dates";
+import { formatMoney, type Centavos } from "./money";
 import { costOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 
@@ -63,8 +63,13 @@ const day = 86_400_000;
 const daysBetween = (a: IsoDate, b: IsoDate): number =>
   Math.round((new Date(b).getTime() - new Date(a).getTime()) / day);
 
-const php = (c: Centavos): string =>
-  `PHP ${(c / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/**
+ * Money and dates the way every other alert writes them.
+ *
+ * These lines said "PHP 1,991.00" and "arrived on 2026-07-16" in a list where
+ * the alert above said "₱8,791.37" and the one below "July 16, 2026".
+ */
+const php = (c: Centavos): string => formatMoney(c);
 
 /**
  * What a row cost: the app's own definition, not a fourth one.
@@ -468,8 +473,8 @@ export function patternFindings({ transactions, asOf, wallets }: PatternInput): 
      */
     const detail =
       worst.share > 1
-        ? `${php(worst.spentWithin)} went out within ${days} of the ${php(worst.amount)} that arrived on ${worst.date}. That is ${php(worst.spentWithin - worst.amount)} more than arrived, so the difference came from what was already there.`
-        : `${Math.round(worst.share * 100)}% of the ${php(worst.amount)} that arrived on ${worst.date} went back out within ${days}: ${php(worst.spentWithin)}.`;
+        ? `${php(worst.spentWithin)} went out within ${days} of the ${php(worst.amount)} that arrived on ${formatMedium(worst.date)}. That is ${php(worst.spentWithin - worst.amount)} more than arrived, so the difference came from what was already there.`
+        : `${Math.round(worst.share * 100)}% of the ${php(worst.amount)} that arrived on ${formatMedium(worst.date)} went back out within ${days}: ${php(worst.spentWithin)}.`;
 
     out.push({ id: `velocity-${worst.date}`, kind: "velocity", detail, weight: 90 });
   }
@@ -505,7 +510,7 @@ export function patternFindings({ transactions, asOf, wallets }: PatternInput): 
     out.push({
       id: `streak-${streak.category}`,
       kind: "streak",
-      detail: `${streak.days} days without a ${streak.category} entry ended on ${streak.brokenOn}, with ${php(streak.amount)}.`,
+      detail: `${streak.days} days without a ${streak.category} entry ended on ${formatMedium(streak.brokenOn)}, with ${php(streak.amount)}.`,
       weight: 55,
     });
   }

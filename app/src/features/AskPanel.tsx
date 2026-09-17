@@ -134,7 +134,9 @@ import { figuresIn } from "../domain/money";
 import { transactionToDraft } from "../domain/entry";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
-import type { Debt, DebtEffect } from "../domain/debt";
+import { effectsFor, type Debt, type DebtEffect } from "../domain/debt";
+import { debtCardIntro } from "../domain/debtSentence";
+import { AmountInput } from "../components/forms";
 import type { Provenance } from "../domain/activity";
 import { imageLimits, type AppSettings } from "../domain/settings";
 import type { Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
@@ -153,6 +155,8 @@ export interface ProposalSink {
     readonly warnings: readonly string[];
     /** Far larger than any row of its kind: how many times. The card asks twice before adding it. */
     readonly unusual?: number | undefined;
+    /** A debt payment's two parts, what lowers the balance and what is interest. */
+    readonly split?: { readonly principal: number; readonly interest: number } | undefined;
   };
   /** Put it in the form, for a correction before saving. */
   readonly use: (draft: Draft) => void;
@@ -2930,9 +2934,7 @@ export function AskPanel({
            */
           say({
             kind: "assistant",
-            text: `That reads as debt. I have filled in ${
-              local.draft.amount !== null ? "the amount" : "what the sentence gave"
-            }, the wallet and the date. Pick which credit line it belongs to and what it does, then add it: those two are not in a sentence, and reading either wrong turns borrowing into income.`,
+            text: debtCardIntro(local.draft, local.interestUnstated ?? false, debts),
             from: "this device",
             ephemeral: true,
           });
@@ -4865,13 +4867,32 @@ function LineView({
   );
 }
 
-/** The four things a debt movement can do, in the words the form uses. */
-const DEBT_EFFECTS: readonly { readonly value: DebtEffect; readonly label: string }[] = [
-  { value: "draw", label: "Borrowed more" },
-  { value: "repay", label: "Paid it down" },
-  { value: "interest", label: "Interest or fee" },
-  { value: "writeoff", label: "Written off" },
-];
+/** What a debt movement can do, in the words the form uses. */
+const DEBT_EFFECT_LABEL: Record<DebtEffect, string> = {
+  draw: "Borrowed",
+  repay: "Paid",
+  interest: "Interest only",
+  fee: "Fee",
+  writeoff: "Waived",
+  lend: "Lent",
+  collect: "Paid back",
+};
+
+/**
+ * The same movement, for a debt owed the other way.
+ *
+ * "Paid" picked from the sentence and then a debt chosen that is money lent
+ * to someone left the card on an effect that debt cannot take, with a
+ * refusal and no way to see why. A payment on money you are owed is them
+ * paying you back, and borrowing is lending.
+ */
+function effectFor(effect: DebtEffect | undefined, kind: Debt["kind"]): DebtEffect | undefined {
+  if (!effect) return undefined;
+  if (effectsFor(kind).includes(effect)) return effect;
+  const mirrored: Partial<Record<DebtEffect, DebtEffect>> =
+    kind === "receivable" ? { repay: "collect", draw: "lend" } : { collect: "repay", lend: "draw" };
+  return mirrored[effect];
+}
 
 /**
  * A debt movement, finished in the chat.
@@ -4910,6 +4931,9 @@ function DebtCard({
   const live = debts.filter((d) => !d.archived);
   const named = draft.fromWallet || draft.toWallet;
   const direction = debtWalletDirection(draft.debtEffect);
+  const chosen = debts.find((d) => d.id === draft.debtId);
+  const effects = effectsFor(chosen?.kind ?? "payable");
+  const paying = draft.debtEffect === "repay";
 
 
   if (state === "settled") {
@@ -4936,7 +4960,10 @@ function DebtCard({
             two when one is left reads as the card not having looked at
             itself.
           */}
-          {draft.debtId ? "one thing to pick" : "two things to pick"}
+          {(() => {
+            const left = (draft.debtId ? 0 : 1) + (draft.debtEffect ? 0 : 1);
+            return left === 0 ? "check, then add" : left === 1 ? "one thing to pick" : "two things to pick";
+          })()}
         </span>
       </div>
 
@@ -4962,7 +4989,12 @@ function DebtCard({
           id="debt-line"
           className="t-caption fms-proposalselect"
           value={draft.debtId ?? ""}
-          onChange={(e) => onChange({ ...draft, debtId: e.target.value })}
+          onChange={(e) => {
+            const debt = live.find((d) => d.id === e.target.value);
+            const effect = debt ? effectFor(draft.debtEffect, debt.kind) : draft.debtEffect;
+            const next = { ...draft, debtId: e.target.value };
+            onChange(effect && effect !== draft.debtEffect ? withDebtEffect(next, effect) : next);
+          }}
         >
           <option value="">Pick one</option>
           {live.map((d) => (
@@ -4986,24 +5018,52 @@ function DebtCard({
           as well as to the eye.
         */}
         <div className="fms-choicerow" role="radiogroup" aria-label="What this debt movement does">
-          {DEBT_EFFECTS.map((e) => (
+          {effects.map((effect) => (
             <button
-              key={e.value}
+              key={effect}
               type="button"
               role="radio"
-              aria-checked={draft.debtEffect === e.value}
+              aria-checked={draft.debtEffect === effect}
               className={
-                draft.debtEffect === e.value
+                draft.debtEffect === effect
                   ? "fms-choice fms-choice--debt t-body-strong"
                   : "fms-choice fms-choice--debt t-body"
               }
-              onClick={() => onChange(withDebtEffect(draft, e.value))}
+              onClick={() => onChange(withDebtEffect(draft, effect))}
             >
-              {e.label}
+              {effect === "writeoff" && chosen?.kind === "receivable" ? "Given up" : DEBT_EFFECT_LABEL[effect]}
             </button>
           ))}
         </div>
       </div>
+
+      {/*
+        The interest inside the payment, beside it, as on the form.
+
+        "I paid 1000 including its interest" gives the payment and not the
+        interest, and no rate is assumed: every lender counts it its own way.
+        A figure the sentence did give is already in the box.
+      */}
+      {paying && (
+        <div className="fms-debtpick">
+          <label className="t-micro fms-pfieldlabel" htmlFor={`debt-interest-${turn.cardId}`}>
+            Interest included
+          </label>
+          <div className="fms-debtinterest">
+            <AmountInput
+              id={`debt-interest-${turn.cardId}`}
+              value={draft.interest ?? null}
+              onChange={(v) => onChange({ ...draft, interest: v })}
+              ariaLabel="Interest included in the payment"
+            />
+            <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+              {check.split && check.split.interest > 0 && check.split.principal > 0
+                ? `${formatMoney(check.split.principal)} off the balance, ${formatMoney(check.split.interest)} interest.`
+                : "From the bill or the app. Blank if none."}
+            </span>
+          </div>
+        </div>
+      )}
 
       {check.problems.map((p) => (
         <p key={p} className="t-micro fms-proposalnote fms-proposalnote--stop">
@@ -5037,8 +5097,9 @@ function DebtCard({
       </div>
 
       <p className="t-micro fms-proposalfrom">
-        Which line and what it does are the two things nobody should guess at with borrowed money,
-        so they are picked rather than read out of the sentence.
+        {draft.debtId && draft.debtEffect
+          ? "The line and what it does were read from your words. Check both before adding: reading either wrong turns borrowing into income."
+          : "Which line and what it does are the two things nobody should guess at with borrowed money, so they are picked unless your words said them plainly."}
       </p>
     </div>
   );

@@ -597,7 +597,7 @@ Wallet balances are **unchanged** by this migration — only classification move
 | # | Rule |
 |---|---|
 | D1 | A `Debt` transaction **must** carry `debtId` and `debtEffect`. Reject the save otherwise. |
-| D2 | `repay` may not exceed `outstanding`. Excess auto-splits into an `interest` row, shown before saving. |
+| D2 | `repay` may not exceed `outstanding`. Excess auto-splits into an `interest` row, shown before saving. The owner may also state how much of a payment was interest, read off the lender's bill (added 2026-09-17: no rate is ever assumed, since every lender counts it differently). That part is booked as `interest` and the rest as `repay`, still capped at `outstanding`. The interest row carries `partOf`, the id of its payment row, and the two are shown, binned and restored as one payment. |
 | D3 | `draw` may not exceed `creditLimit − outstanding` when a limit is set. Warn, allow override. |
 | D4 | A debt auto-closes to `settled` when `outstanding` reaches 0. Reopens on a new draw. |
 | D5 | Interest on `monthly_pct` accrues on the **last day of the month** on the closing balance. Never compound silently — post a visible `interest` row. |

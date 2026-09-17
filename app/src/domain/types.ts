@@ -108,6 +108,20 @@ export interface Transaction {
   readonly debtId?: string | undefined;
   /** What this row does to that debt. Required when type is "Debt". */
   readonly debtEffect?: DebtEffect | undefined;
+  /**
+   * The payment this row is a part of, by that payment's id.
+   *
+   * One debt payment is saved as two rows when some of it was interest: the
+   * part that lowers what is owed (`repay`), and the interest (`interest`),
+   * which is spending and leaves the balance alone (rule 5.6.2). Both left
+   * the wallet together, so the interest row carries the id of the payment's
+   * own row here, and anything that shows the payment (the Debt history, the
+   * latest entries, the correcting form) puts the two back together by it.
+   *
+   * Its id is also the payment's id with `-interest` on the end, which is how
+   * the pair was found before this field existed, and still is for those rows.
+   */
+  readonly partOf?: string | undefined;
   /** Cleared through the integrity review queue. */
   readonly reviewed?: boolean | undefined;
   /**

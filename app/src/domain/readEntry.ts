@@ -27,7 +27,8 @@
  */
 
 import { daysBackIn, itemHintIn } from "./filipino";
-import { emptyDraft, itemsFor, type Draft, type Flow } from "./entry";
+import { emptyDraft, itemsFor, withDebtEffect, type Draft, type Flow } from "./entry";
+import { readDebtSentence } from "./debtSentence";
 import type { Blank } from "./capture";
 import { makeDebtId } from "./debt";
 import { inferFromHistory, itemFromHistory } from "./infer";
@@ -52,6 +53,12 @@ export interface ReadEntry {
    * months. The caller says so and points at the form.
    */
   readonly readsAsDebt: boolean;
+  /**
+   * A debt payment said to include interest, with no figure for it: "I paid
+   * 1000 including its interest". The chat asks for the figure off the bill
+   * rather than assuming a rate.
+   */
+  readonly interestUnstated?: boolean | undefined;
 }
 
 /**
@@ -541,11 +548,17 @@ export function readEntry(
      * useful half of what was asked for.
      */
     const accounts = readsAsDebt ? [...reference.wallets, ...reference.savings] : [];
-    const partial: Draft = readsAsDebt
+    /**
+     * The interest inside a payment, and the effect when the words leave no
+     * doubt about it. See `debtSentence.ts`.
+     */
+    const debtSaid = readsAsDebt ? readDebtSentence(text, amountIn, readMoney) : null;
+    const filled: Draft = readsAsDebt
       ? {
           ...emptyDraft(dateIn(text, asOf).date),
           flow: "Debt",
-          amount: amountIn(text),
+          amount: debtSaid?.amount ?? amountIn(text),
+          ...(debtSaid?.interest != null ? { interest: debtSaid.interest } : {}),
           fromWallet: walletIn(text, accounts),
           /**
            * The credit line, when the sentence named one.
@@ -562,6 +575,8 @@ export function readEntry(
           ...(creditNamed ? { debtId: makeDebtId(creditNamed) } : {}),
         }
       : emptyDraft(asOf);
+    // The wallet goes on the side the effect moves money through.
+    const partial = debtSaid?.effect ? withDebtEffect(filled, debtSaid.effect) : filled;
 
     return {
       draft: partial,
@@ -569,6 +584,7 @@ export function readEntry(
       worthOffering: false,
       settled: [],
       readsAsDebt,
+      interestUnstated: debtSaid?.interestUnstated ?? false,
     };
   }
 

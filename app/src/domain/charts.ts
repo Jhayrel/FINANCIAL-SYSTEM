@@ -21,6 +21,7 @@
  */
 
 import { toPesos } from "./money";
+import { editsBetween } from "./nearly";
 import { costOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 
@@ -130,13 +131,39 @@ const revenueOf = (t: Transaction): number =>
  *
  * Spending stays the default. It is what almost every question is about, and
  * a chart of income is asked for in words that say so.
+ *
+ * ── Said with a typo ──────────────────────────────────────────────────────
+ *
+ * "chart my revenu by month" drew Spending, the opposite of what was asked,
+ * because one missing letter matched nothing. "income", "revenue" and
+ * "salary" are now matched one letter off, or with two letters swapped
+ * ("reveneu"), as whole words of five letters or more. "earnings" is left
+ * out on purpose: one letter from it are "earrings" and "warnings", and a
+ * chart of what earrings cost is a chart of spending.
+ *
+ * "receipts" is no longer a word for income. Here a receipt is the slip from
+ * a purchase, the thing photographed for the chat, so "chart my receipts"
+ * reading as income was backwards.
  */
 function directionOf(question: string): "spending" | "revenue" {
-  return /\b(income|revenue|earned|earnings|earning|salary|allowance|received|receipts|money in|inflow|coming in)\b/i.test(
-    question,
-  )
+  if (/\b(income|revenue|earned|earnings|earning|salary|allowance|received|money in|inflow|coming in)\b/i.test(question)) {
+    return "revenue";
+  }
+  return question
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .some((word) => word.length >= 5 && MONEY_IN_WORDS.some((w) => editsBetween(word, w, 1) <= 1 || swappedOnce(word, w)))
     ? "revenue"
     : "spending";
+}
+
+const MONEY_IN_WORDS = ["income", "revenue", "salary"] as const;
+
+/** The same letters with one neighbouring pair the wrong way round. */
+function swappedOnce(a: string, b: string): boolean {
+  if (a.length !== b.length || a === b) return false;
+  const at = [...a].findIndex((c, i) => c !== b[i]);
+  return at >= 0 && at < a.length - 1 && a[at] === b[at + 1] && a[at + 1] === b[at] && a.slice(at + 2) === b.slice(at + 2);
 }
 
 /**
