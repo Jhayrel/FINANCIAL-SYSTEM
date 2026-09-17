@@ -66,6 +66,8 @@ import { costOf } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "../domain/types";
 import { pickableYears } from "../domain/year";
 import { whenWords } from "./Dashboard";
+import { Investigate } from "./Investigate";
+import type { Draft } from "../domain/entry";
 
 const DAY_INITIALS = ["S", "M", "T", "W", "T", "F", "S"];
 
@@ -103,6 +105,8 @@ export function Insights({
   onRecordBill,
   onOpenBudget,
   onEditRow,
+  onAdd,
+  onBin,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -116,6 +120,10 @@ export function Insights({
   onOpenBudget?: (() => void) | undefined;
   /** A saved row into the Add form, to correct it. */
   onEditRow?: ((row: Transaction) => void) | undefined;
+  /** The Add form with an entry filled in, to check and save. */
+  onAdd?: ((draft: Draft) => void) | undefined;
+  /** A row to the bin. */
+  onBin?: ((id: string) => void) | undefined;
 }) {
   const [year, setYear] = useState(getYear(asOf));
   const [month, setMonth] = useState(getMonth(asOf));
@@ -736,6 +744,16 @@ export function Insights({
           </div>
         </div>
       </section>
+
+      {/*
+        Where a difference went (owner, 2026-09-17): an account holds a
+        different amount than the ledger says, and this finds the entries
+        that explain it. Here, with typed figures and pasted history; in the
+        chat, with screenshots.
+      */}
+      {onAdd && onEditRow && onBin && (
+        <Investigate transactions={transactions} reference={reference} asOf={asOf} onAdd={onAdd} onEditRow={onEditRow} onBin={onBin} />
+      )}
 
       {aiSurfaceOn(settings.ai, "insightSummary") && (
         <Card title={`${name} in a sentence`} subtitle={ai.disabled ? "Written on this device" : "Ask the model to describe the month"}>

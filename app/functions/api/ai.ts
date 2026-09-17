@@ -539,7 +539,9 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "Money to a person leaves their accounts. I gave 500 to my mom from gcash: flow Transfer, fromWallet Gcash, toWallet empty.",
     "Money to their own account stays theirs. I sent 500 to my own gcash from maya: flow Transfer, fromWallet Maya, toWallet Gcash. When one sentence says both, output two proposals.",
     "A withdrawal is a transfer, not spending. I withdrew 5000 from maya to cash: flow Transfer, status Withdrawn, fromWallet Maya, toWallet Cash, amountPesos 5000.",
-    "A credit line is never a wallet. I borrowed 2000 on maya credit into gcash is borrowing, not a transfer from Maya: return an empty list, because borrowing is recorded on its own card.",
+    "A credit line is never a wallet. I borrowed 2000 on maya credit into gcash is borrowing, not a transfer from Maya: flow Debt, debt Maya Credit, debtEffect borrowed, toWallet Gcash, amountPesos 2000.",
+    "A credit line's own transaction list is debt, row by row, and debt is copied from their list of credit lines. Transferred money to My Wallet or cash out: debtEffect borrowed, toWallet the wallet it went to (My Wallet on a Maya Credit screen is Maya). Fee applied, service fee, DST, documentary stamp tax, interest, penalty or late fee: debtEffect charge, one proposal each, no wallet. Paid amount due or a payment: debtEffect paid, fromWallet the wallet it was paid from. Purchased via the credit line: debtEffect bought, with item and description for what was bought. Put the time shown next to each row in time as HH:MM, so fees can be matched to the borrowing they were charged on.",
+    "A balance on screen is not a transaction. Available balance, wallet balance, total balance or outstanding balance: one proposal with flow Balance, fromWallet the account it belongs to, amountText and amountPesos the balance, date the date shown or today. Never turn a balance into Spending or Revenue.",
     "Tagalog is ordinary input. nagbayad ako ng tricycle 500 kanina cash: flow Spending, travel, amountPesos 500, fromWallet Cash, today. bumili ako ng pagkain 200 gcash: flow Spending, food, amountPesos 200, fromWallet Gcash.",
     "A shop name says what was bought. I paid 285 at jollibee using gcash: flow Spending, food. I paid 950 at petron using cash: flow Spending, gas.",
     "A question is not a transaction. I have 20000 saved and tuition is 18000 next month, what should I do: return an empty list.",
@@ -566,6 +568,7 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "answer: the assistant asked them a question and this is the reply to it.",
     "delete: they want an entry removed. restore: they want one brought back.",
     "editEntry: they want to change an entry already saved in the ledger.",
+    "investigate: an account really holds a different amount than the app says and they want to know where the difference went, or they ask to check or reconcile a balance.",
     "chat: none of the above, including small talk.",
     "In target, put which entry they mean when they name one: the exact words, or the word last when they mean the most recent. In period, put the window when they name one, in their own words. Leave both empty when they name none.",
     "Prefer correction and answer over entry when something is on screen waiting: someone who has just been asked how much is telling you how much, not starting a new entry.",
@@ -583,6 +586,8 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "check my maya credit draw by draw: question, never chart.",
     "delete my latest spending thats wrong: delete, target last.",
     "restore my deleted entry yesterday: restore, period yesterday.",
+    "my maya balance is 30000 but here it says 50000, where is the rest: investigate, target maya.",
+    "I counted my cash and I only have 2000: investigate, target cash.",
     "how did august compare with july: chart, period july to august.",
     "nagbayad ako ng tricycle 500 kanina cash: entry.",
   ].join(" "),
@@ -656,7 +661,7 @@ const TASKS: Record<string, TaskSpec> = {
   extract: {
     instruction: TASK_INSTRUCTIONS["extract"] ?? "",
     shape:
-      '{"proposals": [{"reasoning": "what it was, which list it belongs to, which wallet", "flow": "Spending or Revenue or Transfer", "date": "YYYY-MM-DD", "fromWallet": "", "toWallet": "", "category": "Spending or Bills or Subscriptions or Revenue or Transfer", "item": "one name copied exactly from their lists, or empty", "description": "", "amountText": "exactly as written", "amountPesos": 0, "feePesos": 0, "status": "", "confidence": "high or medium or low", "sourceRef": ""}]}',
+      '{"proposals": [{"reasoning": "what it was, which list it belongs to, which wallet", "flow": "Spending or Revenue or Transfer or Debt or Balance", "date": "YYYY-MM-DD", "time": "HH:MM or empty", "fromWallet": "", "toWallet": "", "category": "Spending or Bills or Subscriptions or Revenue or Transfer", "item": "one name copied exactly from their lists, or empty", "description": "", "amountText": "exactly as written", "amountPesos": 0, "feePesos": 0, "debt": "a credit line copied from their list, Debt only", "debtEffect": "borrowed or charge or paid or bought or waived, Debt only", "status": "", "confidence": "high or medium or low", "sourceRef": ""}]}',
     parse: (v) => {
       const list = v["proposals"];
       // An empty list is a real answer: it means nothing was found in the
@@ -669,7 +674,7 @@ const TASKS: Record<string, TaskSpec> = {
   route: {
     instruction: TASK_INSTRUCTIONS["route"] ?? "",
     shape:
-      '{"reasoning": "one short sentence", "intent": "entry or question or chart or correction or answer or delete or restore or editEntry or chat", "target": "", "period": ""}',
+      '{"reasoning": "one short sentence", "intent": "entry or question or chart or correction or answer or delete or restore or editEntry or investigate or chat", "target": "", "period": ""}',
     parse: (v) => {
       const intent = str(v["intent"]);
       if (!intent) return null;

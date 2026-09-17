@@ -45,7 +45,7 @@ import type { AiTask } from "../domain/aiOffline";
 import { plainText } from "../domain/aiText";
 import { idToken } from "./auth";
 import { redact } from "../domain/aiRedact";
-import { readProposals, type Proposal, type Refused } from "../domain/proposal";
+import { readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
 import type { Attachment } from "./attachments";
 import type { IsoDate } from "../domain/types";
 
@@ -496,6 +496,8 @@ export interface ExtractOptions {
 
 export interface ExtractResult {
   readonly proposals: readonly Proposal[];
+  /** Account balances shown in the pictures: what an account holds, not a movement. */
+  readonly balances?: readonly ReadBalance[];
   /** Rows the model found but this app will not act on, with the reason. */
   readonly refused: readonly Refused[];
   readonly source: "model" | "offline";
@@ -535,6 +537,7 @@ function extractContext(options: ExtractOptions): string {
   const lines = [
     `Today is ${asOf}.`,
     `Their wallets: ${[...reference.wallets, ...reference.savings].join(", ") || "none set up yet"}`,
+    `Their credit lines, loans and people they hold or send money for: ${(reference.credits ?? []).join(", ") || "none"}`,
     "",
     "The only items allowed, and which category each one belongs to:",
     `Category "Spending": ${spendingTypes.join(", ") || "none"}`,
@@ -631,6 +634,7 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
     return {
       proposals: read.proposals,
       refused: read.refused,
+      balances: read.balances,
       source: "model",
       ...(typeof payload.model === "string" ? { model: payload.model } : {}),
     };
@@ -754,6 +758,7 @@ export type Intent =
   | "delete"
   | "restore"
   | "editEntry"
+  | "investigate"
   | "chat";
 
 export interface Routed {
@@ -773,6 +778,7 @@ const INTENTS: readonly Intent[] = [
   "delete",
   "restore",
   "editEntry",
+  "investigate",
   "chat",
 ];
 

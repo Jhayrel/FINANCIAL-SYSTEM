@@ -108,6 +108,16 @@ import { formatMoney } from "../domain/money";
 import { describeFile, summariseFile } from "../domain/photoNote";
 import { reconcile } from "../domain/reconcile";
 import { readAgainst, statementAccount } from "../domain/statement";
+import { walletBalance } from "../domain/balances";
+import {
+  draftForClue,
+  investigate,
+  investigationWords,
+  linesFromDrafts,
+  readHistory,
+  type StatementLine,
+} from "../domain/investigate";
+import { readInvestigateAsk, type InvestigateAsk } from "../domain/investigateAsk";
 import {
   duplicateHeadline,
   duplicatesOf,
@@ -1794,6 +1804,137 @@ export function AskPanel({
     return result.proposals.length > 0;
   };
 
+  /**
+   * Where a difference went, in the chat.
+   *
+   * Screenshots attached are read for two things: the balance on screen,
+   * which is what the account really holds, and the history, which is each
+   * movement to check against the ledger. Then `investigate` does the work
+   * on this device and the answer comes back as sentences with what each
+   * finding accounts for, and cards for the ones that can be put right: an
+   * entry to add, or rows to open or bin. Nothing is changed until a button
+   * is pressed.
+   */
+  const findDifference = async (note: string, ask: InvestigateAsk): Promise<void> => {
+    const sent = files;
+    setFiles([]);
+    setDraft("");
+    say({ kind: "you", text: note, ...(sent.length > 0 ? { shown: sent } : {}) });
+
+    const accounts = [...reference.wallets, ...reference.savings];
+    let account = ask.account;
+    let actual = ask.actual;
+    let readOn = asOf;
+    let statement: StatementLine[] = [];
+
+    if (sent.length > 0) {
+      const control = new AbortController();
+      stopper.current = control;
+      setBusy(true);
+      const read = await during(
+        "Reading what you sent",
+        () => extractProposals({ note, attachments: sent, reference, asOf, signal: control.signal }),
+        "Still reading it",
+      ).finally(() => {
+        stopper.current = null;
+        setBusy(false);
+      });
+      const drafts = read.proposals.map((p) => p.draft);
+      if (!account) {
+        account =
+          (sent.length === 1 && sent[0] ? statementAccount(sent[0].name, drafts, accounts) : "") ||
+          read.balances?.[0]?.account ||
+          "";
+      }
+      const balance = read.balances?.find((b) => b.account === account);
+      if (balance && actual === null) {
+        actual = balance.amount;
+        readOn = balance.date > asOf ? asOf : balance.date;
+      }
+      if (account) statement = linesFromDrafts(drafts, account);
+      log(
+        aiEvent("uploaded", "add", {
+          text: note,
+          files: sent.map((f) => ({ name: f.name, kind: f.kind === "text" ? "file" : "photo", bytes: f.bytes, details: `${statement.length} movements read for ${account || "no account"}` })),
+          model: read.model ?? "",
+        }),
+      );
+      if (read.source === "offline" && read.reason) {
+        say({ kind: "assistant", text: `The pictures could not be read: ${read.reason}`, from: "this device", ephemeral: true });
+      }
+    }
+
+    // History pasted under the question, one movement a line. Never the first
+    // line: "my maya on Sep 10 is 30000" is the balance, not a movement.
+    if (sent.length === 0 && account) {
+      statement = readHistory(note.split(/\r?\n/).slice(1).join("\n"), Number(asOf.slice(0, 4)));
+    }
+
+    if (!account) {
+      const reply = "Which account is it, and what does it really hold right now? For example: my Maya balance is 30,000. A screenshot of the balance works too, with its transaction history if you have it.";
+      say({ kind: "assistant", text: reply, from: "this device" });
+      log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+      return;
+    }
+
+    const ledgerThen = walletBalance(transactions.filter((t) => t.date <= readOn), account);
+    if (actual === null && ask.gap !== null) actual = ledgerThen - ask.gap;
+    if (actual === null) {
+      const reply = `The ledger says **${account}** holds **${formatMoney(ledgerThen)}**. What does it really hold? Say the figure, or send a screenshot of the balance, and its history if you have it, and I will look for where the difference went.`;
+      say({ kind: "assistant", text: reply, from: "this device" });
+      log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+      return;
+    }
+
+    const result = investigate({ transactions, account, actual, asOf: readOn, statement });
+    const words = investigationWords(result);
+    const bold = (text: string): string => text.replace(formatMoney(Math.abs(result.gap)), (m) => `**${m}**`);
+    const reply = [
+      bold(words.headline),
+      ...(statement.length > 0 ? [`Checked ${statement.length} ${statement.length === 1 ? "movement" : "movements"} from what you sent against the ledger.`] : []),
+      ...words.lines.map((line) => (line.endsWith(":") ? line : `- ${line}`)),
+    ].join("\n");
+    say({ kind: "assistant", text: reply, from: "this device" });
+    log(aiEvent("answered", "add", { text: `Investigated ${account}: gap ${formatMoney(result.gap)}, found ${formatMoney(result.explained)}.`, model: "this device" }));
+
+    // What can be put right, as cards.
+    const adds = [...result.found, ...result.possible]
+      .map((clue) => draftForClue(clue, account, readOn))
+      .filter((draft): draft is Draft => draft !== null);
+    /*
+     * Each card is checked against its own line, not the whole message: the
+     * message holds the balance, and comparing a ₱500.00 cinema line with
+     * "5000" said the card had misread the amount. The wallet is known, so no
+     * batch wallet picker either.
+     */
+    for (const draft of adds) {
+      await offer(
+        {
+          draft,
+          confidence: statement.length > 0 ? "high" : "medium",
+          sourceRef: statement.length > 0 ? "the history you sent" : "the difference",
+          adjustments: ["Found while looking for the difference. Check it before adding."],
+        },
+        draft.description,
+        true,
+        false,
+      );
+    }
+    const twins = result.found.flatMap((c) => (c.kind === "duplicate" ? [{ row: c.row, score: 100, why: ["entered twice"] }] : []));
+    if (twins.length > 0) say({ kind: "found", action: "bin", candidates: twins, done: [] });
+    const seen = new Set<string>();
+    const toCheck = [...result.found, ...result.possible]
+      .flatMap((c) =>
+        c.kind === "amount-differs" || c.kind === "not-on-statement"
+          ? [{ row: c.row, score: 90, why: [c.kind === "amount-differs" ? "a different figure on the statement" : "not on the statement"] }]
+          : c.kind === "together"
+            ? c.rows.map((row) => ({ row, score: 50, why: ["could be the difference"] }))
+            : [],
+      )
+      .filter((c) => !seen.has(c.row.id) && Boolean(seen.add(c.row.id)));
+    if (toCheck.length > 0) say({ kind: "found", action: "edit", candidates: toCheck, done: [] });
+  };
+
   /** Ask a question about the figures. */
   const askQuestion = async (question: string, echo = true): Promise<void> => {
     if (echo) say({ kind: "you", text: question });
@@ -1996,6 +2137,31 @@ export function AskPanel({
        * Deliberately not acting is not the same as doing nothing.
        */
       log(aiEvent("answered", "add", { text: "Noted, not acted on.", model: "this device" }));
+      return;
+    }
+
+    /**
+     * "my maya balance is 30000, where's the rest?"
+     *
+     * The owner, 2026-09-17: the account holds a different amount than the
+     * ledger says, and they want to know where the difference went, with
+     * screenshots of the balance and the history if they have them. Before
+     * the entry rules, because "maya 30000" in that sentence is a balance,
+     * not a payment.
+     */
+    const findable = [...reference.wallets, ...reference.savings];
+    const askedToFind = as
+      ? null
+      : readInvestigateAsk(note, findable, (account) => walletBalance(transactions, account)) ??
+        (routed?.intent === "investigate"
+          ? (readInvestigateAsk(`${note} doesn't match`, findable, (account) => walletBalance(transactions, account)) ?? {
+              account: "",
+              actual: null,
+              gap: null,
+            })
+          : null);
+    if (askedToFind) {
+      await findDifference(note, askedToFind);
       return;
     }
 

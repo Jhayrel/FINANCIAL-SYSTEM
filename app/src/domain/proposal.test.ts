@@ -95,14 +95,68 @@ describe("readProposals never invents", () => {
   });
 });
 
+/**
+ * A credit line's own transaction list, as the owner showed it: each borrowing
+ * followed by a service fee and stamp tax at the same minute, a purchase made
+ * on credit, and the payment that cleared it all. Figures invented.
+ */
+describe("a credit line's statement", () => {
+  const credit: ReferenceLists = { ...reference, credits: ["Easy Credit"] };
+  const rows = [
+    { flow: "Debt", debt: "Easy Credit", debtEffect: "borrowed", toWallet: "Maya", date: "2026-08-13", time: "19:40", amountText: "1,050.00", description: "Transferred money to My Wallet" },
+    { flow: "Debt", debt: "Easy Credit", debtEffect: "charge", date: "2026-08-13", time: "19:40", amountText: "78.64", description: "Service Fee" },
+    { flow: "Debt", debt: "Easy Credit", debtEffect: "charge", date: "2026-08-13", time: "19:40", amountText: "0.65", description: "DST" },
+    { flow: "Debt", debt: "Easy Credit", debtEffect: "bought", fromWallet: "Maya", date: "2026-08-14", time: "21:41", amountText: "789.00", item: "Food", description: "Purchased via Easy Credit" },
+    { flow: "Debt", debt: "Easy Credit", debtEffect: "paid", fromWallet: "Maya", date: "2026-09-01", amountText: "1,918.29", description: "Paid amount due" },
+    { flow: "Balance", fromWallet: "Maya", amountText: "5,795.74", date: "2026-09-01" },
+  ];
+
+  it("reads each movement with its line and effect, and folds the fees into their borrowing", () => {
+    const { proposals, balances } = readProposals({ proposals: rows }, credit, ASOF);
+    const debts = proposals.filter((p) => p.draft.flow === "Debt");
+    expect(debts.map((p) => p.draft.debtEffect)).toEqual(["draw", "draw", "repay"]);
+    expect(debts[0]?.draft).toMatchObject({ debtId: "easy-credit", toWallet: "Maya", amount: 105000, charges: 7929 });
+    expect(debts[2]?.draft).toMatchObject({ fromWallet: "Maya", amount: 191829 });
+    expect(balances).toEqual([{ account: "Maya", amount: 579574, date: "2026-09-01", sourceRef: "a screenshot" }]);
+  });
+
+  it("reads a purchase on credit as the borrowing and the purchase it paid for", () => {
+    const { proposals } = readProposals({ proposals: [rows[3]] }, credit, ASOF);
+    expect(proposals.map((p) => p.draft.flow)).toEqual(["Debt", "Spending"]);
+    expect(proposals[1]?.draft).toMatchObject({ fromWallet: "Maya", item: "Food", amount: 78900 });
+  });
+
+  it("leaves fees apart when it cannot tell which borrowing they belong to", () => {
+    const twoDraws = [
+      { ...rows[0], time: "" },
+      { ...rows[0], time: "", amountText: "500.00" },
+      { ...rows[1], time: "" },
+    ];
+    const { proposals } = readProposals({ proposals: twoDraws }, credit, ASOF);
+    expect(proposals.map((p) => p.draft.debtEffect)).toEqual(["draw", "draw", "charge"]);
+  });
+
+  it("never turns a balance into a movement", () => {
+    const { proposals, balances } = readProposals({ proposals: [rows[5]] }, credit, ASOF);
+    expect(proposals).toEqual([]);
+    expect(balances).toHaveLength(1);
+  });
+});
+
 describe("readProposals refuses rather than guesses", () => {
-  it("refuses a debt row, because the credit line and effect cannot be read off a receipt", () => {
-    const { proposals, refused } = readProposals(
-      { proposals: [{ flow: "Debt", amountPesos: 500 }] },
-      reference,
-      ASOF,
-    );
-    expect(proposals).toHaveLength(0);
+  /**
+   * A debt row with nothing said about it still becomes a debt card, where
+   * the line and the effect are picked. A debt row with no amount is not a
+   * row at all.
+   */
+  it("sends a debt row to its card with the line and effect left to pick, and refuses one with no amount", () => {
+    const { proposals } = readProposals({ proposals: [{ flow: "Debt", amountPesos: 500 }] }, reference, ASOF);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.draft).toMatchObject({ flow: "Debt", amount: 50000 });
+    expect(proposals[0]?.draft.debtId).toBeUndefined();
+    expect(proposals[0]?.draft.debtEffect).toBeUndefined();
+
+    const { refused } = readProposals({ proposals: [{ flow: "Debt" }] }, reference, ASOF);
     expect(refused[0]?.reason).toContain("debt");
   });
 

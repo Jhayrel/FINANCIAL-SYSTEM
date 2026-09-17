@@ -155,7 +155,7 @@ describe("extractProposals: what comes back", () => {
 
   it("keeps the reason a row was refused", async () => {
     const fetcher = vi.fn(async () =>
-      jsonResponse({ data: [{ flow: "Debt", amountPesos: 500 }] }),
+      jsonResponse({ data: [{ flow: "Debt" }] }),
     );
 
     const result = await extractProposals({

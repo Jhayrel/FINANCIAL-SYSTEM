@@ -1691,6 +1691,12 @@ export default function App() {
               settings={settings}
               onOpenBudget={() => go("budget")}
               onEditRow={startEditing}
+              onBin={handleDelete}
+              onAdd={(draft) => {
+                setIncoming({ draft, at: Date.now() });
+                go("add");
+                setReturnTo("insights");
+              }}
               onRecordBill={(bill) => {
                 setIncoming({
                   draft: {
