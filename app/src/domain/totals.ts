@@ -103,7 +103,7 @@ export function totalsFor(transactions: readonly Transaction[]): MonthTotals {
      * principal is not. Without this the month total drops by exactly the
      * interest whenever a repayment is split.
      */
-    if (t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee")) {
+    if (t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge")) {
       interest += t.total;
     }
   }
@@ -145,8 +145,11 @@ export function costOf(t: Transaction): Centavos {
   // Either way it is what the transfer cost, which `transferCost` decides.
   if (t.type === "Transfer") return transferCost(t);
 
-  // Interest and fees are expense; repaying principal is not (rule 5.2).
-  if (t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee")) return t.total;
+  // Interest, fees and charges are expense; repaying principal is not (rule 5.2).
+  // A charge added to the balance is spending on the day it is added.
+  if (t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge")) {
+    return t.total;
+  }
 
   return 0;
 }

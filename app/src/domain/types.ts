@@ -27,16 +27,22 @@ export type TransactionType =
 /**
  * What a Debt transaction does to its debt.
  *
- * The four statements the whole module rests on (spec 5.6.1):
+ * The statements the whole module rests on (spec 5.6.1):
  *   draw     wallet UP,   liability UP.    NOT revenue.
+ *   charge   no wallet,   liability UP.    IS spending.
  *   repay    wallet DOWN, liability DOWN.  NOT spending.
  *   interest wallet DOWN, liability flat.  IS spending.
  *   writeoff no wallet,   liability DOWN.
+ *
+ * `charge` is a fee, a tax, interest or a penalty the lender adds to what is
+ * owed rather than taking from a wallet, which is how most credit lines and
+ * loans charge. Added 2026-09-17.
  *
  * Mirror image for money you lend out: lend / collect.
  */
 export type DebtEffect =
   | "draw"
+  | "charge"
   | "repay"
   | "interest"
   | "fee"
@@ -109,17 +115,18 @@ export interface Transaction {
   /** What this row does to that debt. Required when type is "Debt". */
   readonly debtEffect?: DebtEffect | undefined;
   /**
-   * The payment this row is a part of, by that payment's id.
+   * The movement this row is a part of, by that movement's id.
    *
-   * One debt payment is saved as two rows when some of it was interest: the
-   * part that lowers what is owed (`repay`), and the interest (`interest`),
-   * which is spending and leaves the balance alone (rule 5.6.2). Both left
-   * the wallet together, so the interest row carries the id of the payment's
-   * own row here, and anything that shows the payment (the Debt history, the
-   * latest entries, the correcting form) puts the two back together by it.
+   * One debt movement is saved as two rows in two cases. A payment with some
+   * interest in it: the part that lowers what is owed (`repay`) and the
+   * interest (`interest`). A borrowing with fees added on top: the money
+   * received (`draw`) and the fees (`charge`). Either way the second row
+   * carries the id of the first here, and anything that shows the movement
+   * (the Debt history, the latest entries, the correcting form, the bin) puts
+   * the two back together by it.
    *
-   * Its id is also the payment's id with `-interest` on the end, which is how
-   * the pair was found before this field existed, and still is for those rows.
+   * Its id is also the first row's id with `-interest` or `-charge` on the
+   * end, which is how a pair was found before this field existed.
    */
   readonly partOf?: string | undefined;
   /** Cleared through the integrity review queue. */

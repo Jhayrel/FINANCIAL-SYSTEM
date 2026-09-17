@@ -66,7 +66,7 @@ export function syncWords({ online, pending, error }: SyncInput): SyncNotice | n
       title: "A change did not save",
       detail: `${
         signIn
-          ? "The database refused it: sign in again as the owner."
+          ? "The database refused it. Either you are signed out, so sign in again as the owner, or the database's rules are older than this version of the app, so publish the latest firestore.rules in the Firebase console."
           : `The database answered: ${error.replace(/\.+$/, "")}.`
       } That change is not in the database, so add it again once this is put right. Everything saved before it is safe.`,
     };

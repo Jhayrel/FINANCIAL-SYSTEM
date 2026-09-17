@@ -126,7 +126,7 @@ service cloud.firestore {
           // A Debt row without its debt cannot be reconciled later (rule D1).
           && (d.type != 'Debt' || (
                 d.debtId is string && d.debtId.size() > 0
-             && d.debtEffect in ['draw', 'repay', 'interest', 'fee',
+             && d.debtEffect in ['draw', 'charge', 'repay', 'interest', 'fee',
                                  'writeoff', 'lend', 'collect']
              ))
           // Present means binned; absent means live. Nothing else.

@@ -78,7 +78,8 @@ describe("the two things nobody may guess", () => {
     const draft: Draft = { ...asRead(), debtId: "d1" };
     const check = checkDraft(draft, ledger, reference, debts);
     expect(check.ok).toBe(false);
-    expect(check.errors.map((e) => e.message).join(" ").toLowerCase()).toContain("repay");
+    // The choices are named as the form names them: borrowed, charge added, paid, waived.
+    expect(check.errors.map((e) => e.message).join(" ").toLowerCase()).toContain("paid");
   });
 
   it("saves once both are picked, and only then", () => {

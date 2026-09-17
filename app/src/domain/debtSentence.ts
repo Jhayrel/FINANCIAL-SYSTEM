@@ -23,6 +23,20 @@
  * paid. The card shows both figures and what each does before anything is
  * saved, so a sentence meant the other way is one number to change.
  *
+ * ── Charges the lender adds ───────────────────────────────────────────────
+ *
+ * Lenders charge in different ways and no single formula fits them, so none
+ * is used. What a sentence or a statement line says is read as it is:
+ *
+ *   "borrowed 1050 on maya credit, service fee 78.64 and dst 0.65"
+ *        a borrowing of ₱1,050.00 with ₱79.29 of fees added to what is owed
+ *   "maya credit late fee 150"
+ *        a charge of ₱150.00 added to what is owed, with no money moving
+ *
+ * Every fee figure in the sentence is added up, whatever it is called: a
+ * service or processing fee, documentary stamp tax, a penalty, a finance
+ * charge, or interest added when the money was taken.
+ *
  * ── Paid or borrowed ──────────────────────────────────────────────────────
  *
  * Which credit line and what the movement does are picked on the card,
@@ -40,7 +54,9 @@ import { formatMoney, type Centavos } from "./money";
 
 export interface DebtSentence {
   /** The effect the words state beyond doubt, or undefined to leave it for the owner. */
-  readonly effect?: "repay" | "draw" | "interest" | undefined;
+  readonly effect?: "repay" | "draw" | "interest" | "charge" | undefined;
+  /** A borrowing's fees, added on top of what was received. */
+  readonly charges: Centavos | null;
   /** Everything paid. The sentence's own figure unless it built the payment out of parts. */
   readonly amount: Centavos | null;
   /** The interest inside the payment, as a figure the sentence gave. */
@@ -91,6 +107,40 @@ const PAID_WITH =
 const BORROW_VERB =
   /\b(?:borrowed|borrow|borrowing|loaned|nangutang|umutang|inutang|took\s+(?:a\s+)?loan|drew\s+from)\b/i;
 
+/** A fee the lender adds, by any of the names lenders give them. */
+const FEE_WORD = String.raw`(?:service\s+fees?|processing\s+fees?|convenience\s+fees?|late\s+(?:payment\s+)?(?:fees?|charges?)|finance\s+charges?|documentary\s+stamp\s+tax|stamp\s+tax|dst|penalty|penalties|fees?|charges?)`;
+
+/** "service fee 78.64", "dst: 0.65", "penalty of 150". */
+const FEE_THEN_FIGURE = new RegExp(String.raw`\b${FEE_WORD}\s*(?:is\s+|was\s+|of\s+|na\s+|:\s*|=\s*|-\s*)?${MONEY}`, "gi");
+
+/** "78.64 service fee", "150 in penalties". */
+const FIGURE_THEN_FEE = new RegExp(String.raw`${MONEY}\s*(?:in\s+|of\s+|as\s+|for\s+)?(?:the\s+)?${FEE_WORD}\b`, "gi");
+
+/** Every fee figure in a sentence, added up, and the sentence without them. */
+function feesIn(
+  text: string,
+  readFigure: (raw: string) => Centavos | null,
+): { readonly total: Centavos | null; readonly without: string } {
+  const taken: { start: number; end: number; value: Centavos }[] = [];
+  const overlaps = (start: number, end: number): boolean => taken.some((t) => start < t.end && end > t.start);
+  for (const pattern of [FEE_THEN_FIGURE, FIGURE_THEN_FEE]) {
+    pattern.lastIndex = 0;
+    for (const m of text.matchAll(pattern)) {
+      const start = m.index ?? 0;
+      const end = start + m[0].length;
+      const value = m[1] ? readFigure(m[1]) : null;
+      if (value === null || overlaps(start, end)) continue;
+      taken.push({ start, end, value });
+    }
+  }
+  if (taken.length === 0) return { total: null, without: text };
+  let without = text;
+  for (const t of [...taken].sort((a, b) => b.start - a.start)) {
+    without = `${without.slice(0, t.start)} ${without.slice(t.end)}`;
+  }
+  return { total: taken.reduce((sum, t) => sum + t.value, 0), without };
+}
+
 /** Paying the charge alone, with nothing against the balance. */
 const INTEREST_ONLY = new RegExp(
   String.raw`\b(?:only\s+(?:the\s+)?${INTEREST}|${INTEREST}\s+only|just\s+(?:the\s+)?${INTEREST})\b`,
@@ -110,43 +160,80 @@ export function readDebtSentence(
   amountOf: (text: string) => Centavos | null,
   readFigure: (raw: string) => Centavos | null,
 ): DebtSentence {
-  const onTop = ON_TOP.exec(text);
-  const match = onTop ?? FIGURE_THEN_INTEREST.exec(text) ?? INTEREST_THEN_FIGURE.exec(text);
+  // Fees first, so their figures are never mistaken for the amount.
+  const fees = feesIn(text, readFigure);
+  const body = fees.without;
+
+  const onTop = ON_TOP.exec(body);
+  const match = onTop ?? FIGURE_THEN_INTEREST.exec(body) ?? INTEREST_THEN_FIGURE.exec(body);
   const stated = match?.[1] ? readFigure(match[1]) : null;
 
-  const without = match ? `${text.slice(0, match.index)} ${text.slice(match.index + match[0].length)}` : text;
+  const without = match ? `${body.slice(0, match.index)} ${body.slice(match.index + match[0].length)}` : body;
   const principalMatch = PRINCIPAL.exec(without);
   const principal = principalMatch?.[1] ? readFigure(principalMatch[1]) : null;
-  const rest = stated !== null ? amountOf(without) : amountOf(text);
-
-  let amount: Centavos | null;
-  if (stated === null) amount = rest;
-  else if (principal !== null) amount = principal + stated;
-  else if (onTop && rest !== null) amount = rest + stated;
-  else amount = rest ?? stated;
-
-  /** The interest figure is the only figure: the whole payment was interest. */
-  const allInterest = stated !== null && rest === null;
+  const rest = amountOf(without);
 
   const paying = PAY_VERB.test(text) && !PAID_WITH.test(text);
   const borrowing = BORROW_VERB.test(text);
 
+  /*
+   * A borrowing with fees or interest named beside it: the money received,
+   * and everything named as added to what is owed.
+   */
+  if (borrowing && !PAY_VERB.test(text)) {
+    const added = (fees.total ?? 0) + (stated ?? 0);
+    return {
+      effect: "draw",
+      amount: rest,
+      charges: added > 0 ? added : null,
+      interest: null,
+      interestUnstated: false,
+    };
+  }
+
+  /*
+   * Fees named with no payment and no borrowing: the lender added a charge.
+   * "maya credit late fee 150" moved no money. A figure left over besides
+   * the fees is not the charge, so it is left for the owner to look at.
+   */
+  if (!paying && !borrowing && fees.total !== null) {
+    return {
+      effect: "charge",
+      amount: fees.total + (stated ?? 0),
+      charges: null,
+      interest: null,
+      interestUnstated: false,
+    };
+  }
+
+  // With a payment, fees named are paid in it, the same as interest.
+  const inside = stated !== null || fees.total !== null ? (stated ?? 0) + (fees.total ?? 0) : null;
+
+  let amount: Centavos | null;
+  if (inside === null) amount = rest;
+  else if (principal !== null) amount = principal + inside;
+  else if (onTop && rest !== null) amount = rest + inside;
+  else amount = rest ?? inside;
+
+  /** The interest or fee figure is the only figure: the whole payment was that. */
+  const allInterest = inside !== null && rest === null;
+
   let effect: DebtSentence["effect"];
   if ((INTEREST_ONLY.test(text) || allInterest) && !borrowing) effect = "interest";
   else if (paying && !borrowing) effect = "repay";
-  else if (borrowing && !PAY_VERB.test(text)) effect = "draw";
 
   // All of it interest: one "Interest only" row, with no part of it to state.
   if (effect === "interest") {
-    return { effect, amount, interest: null, interestUnstated: false };
+    return { effect, amount, charges: null, interest: null, interestUnstated: false };
   }
 
-  const interest = stated !== null && amount !== null && stated <= amount && effect !== "draw" ? stated : null;
+  const interest = inside !== null && amount !== null && inside <= amount ? inside : null;
   return {
     effect,
     amount,
+    charges: null,
     interest,
-    interestUnstated: interest === null && effect !== "draw" && INTEREST_SAID.test(text),
+    interestUnstated: interest === null && INTEREST_SAID.test(text),
   };
 }
 
@@ -165,9 +252,11 @@ export function debtCardIntro(draft: Draft, interestUnstated: boolean, debts: re
       ? "a payment"
       : draft.debtEffect === "draw"
         ? "borrowing"
-        : draft.debtEffect === "interest"
-          ? "interest paid on its own"
-          : "debt";
+        : draft.debtEffect === "charge"
+          ? "a charge the lender added"
+          : draft.debtEffect === "interest"
+            ? "interest paid on its own"
+            : "debt";
   const parts = [`That reads as ${what}${line ? ` on **${line}**` : ""}.`];
   const missing = [!line ? "which credit line" : "", !draft.debtEffect ? "what it does" : ""].filter(Boolean);
   if (missing.length > 0) {
@@ -175,7 +264,15 @@ export function debtCardIntro(draft: Draft, interestUnstated: boolean, debts: re
       `Pick ${missing.join(" and ")} on the card: ${missing.length === 2 ? "those are" : "that is"} not something to guess with borrowed money.`,
     );
   }
-  if (draft.debtEffect === "repay" && (draft.interest ?? null) !== null) {
+  if (draft.debtEffect === "draw" && (draft.charges ?? 0) > 0 && draft.amount !== null) {
+    parts.push(
+      `**${formatMoney(draft.charges ?? 0)}** of fees was added on top, so what you owe goes up by **${formatMoney(
+        draft.amount + (draft.charges ?? 0),
+      )}**, and the fees count as spending today.`,
+    );
+  } else if (draft.debtEffect === "charge" && draft.amount !== null) {
+    parts.push(`No money moved: what you owe goes up by **${formatMoney(draft.amount)}**, and it counts as spending today.`);
+  } else if (draft.debtEffect === "repay" && (draft.interest ?? null) !== null) {
     parts.push(`**${formatMoney(draft.interest ?? 0)}** of it is interest, so only the rest lowers what you owe.`);
   } else if (interestUnstated) {
     parts.push(

@@ -9,9 +9,17 @@
  *
  *   Event      Wallet   Liability   Income?   Spending?
  *   draw         ▲          ▲         NO         no
+ *   charge       no         ▲         no        YES
  *   repay        ▼          ▼         no         NO
  *   interest     ▼          flat      no        YES
  *   writeoff     no         ▼        yes¹        no
+ *
+ * `charge` was added on 2026-09-17 (spec 5.6.1). Most lenders do not take
+ * interest out of the wallet: they add a fee, a tax or interest to what is
+ * owed, and the next payment clears it. Maya Credit adds a service fee and
+ * documentary stamp tax to every draw, so ₱2,500.00 borrowed on July 29 was
+ * ₱2,688.79 owed and paid on August 3. A charge is spending on the day it is
+ * added, and the payment that clears it is not spending a second time.
  *
  * ¹ booked as Debt/writeoff, never Revenue, so it cannot contaminate the
  *   income trend.
@@ -84,10 +92,13 @@ export interface Debt {
 export interface DebtPosition {
   readonly debt: Debt;
   readonly drawn: Centavos;
+  /** Fees, taxes and interest the lender added to what is owed: spending, and owed. */
+  readonly charged: Centavos;
   readonly repaid: Centavos;
+  /** Interest and fees paid out of a wallet, inside a payment or on their own. */
   readonly interestPaid: Centavos;
   readonly writtenOff: Centavos;
-  /** drawn − repaid − writtenOff. Interest is excluded, it is expense. */
+  /** drawn + charged − repaid − writtenOff. Interest paid from a wallet is excluded: it is expense. */
   readonly outstanding: Centavos;
   readonly status: DebtStatus;
   readonly utilisation?: number | undefined;
@@ -119,7 +130,29 @@ const INCREASING: ReadonlySet<DebtEffect> = new Set(["draw", "lend"]);
 /** Effects that decrease it. */
 const DECREASING: ReadonlySet<DebtEffect> = new Set(["repay", "collect"]);
 /** Effects that are genuine expense, not principal movement. */
-const EXPENSE: ReadonlySet<DebtEffect> = new Set(["interest", "fee"]);
+const EXPENSE: ReadonlySet<DebtEffect> = new Set(["interest", "fee", "charge"]);
+
+/**
+ * What one row does to what is owed, signed.
+ *
+ * The one place the rule lives. The Debt screen's history, the statements and
+ * the due date each kept their own copy of it, and a new effect would have
+ * had to be taught to every one of them.
+ */
+export function owedChange(t: Pick<Transaction, "debtEffect" | "amount">): Centavos {
+  switch (t.debtEffect) {
+    case "draw":
+    case "lend":
+    case "charge":
+      return t.amount;
+    case "repay":
+    case "collect":
+    case "writeoff":
+      return -t.amount;
+    default:
+      return 0;
+  }
+}
 
 export const isDebtRow = (t: Transaction): boolean => t.type === "Debt";
 
@@ -142,11 +175,15 @@ export function rowsFor(
 /**
  * Outstanding balance.
  *
- *   outstanding = Σ draw − Σ repay − Σ writeoff
+ *   outstanding = Σ draw + Σ charge − Σ repay − Σ writeoff
  *
- * Interest is deliberately excluded. Paying ₱2,688.79 against a ₱2,500.00
- * draw reduces principal by ₱2,500.00 and books ₱188.79 as interest expense,
- * the liability falls by the principal only.
+ * Interest paid out of a wallet is deliberately excluded. Paying ₱2,688.79
+ * against a ₱2,500.00 draw reduces principal by ₱2,500.00 and books ₱188.79 as
+ * interest expense: the liability falls by the principal only.
+ *
+ * A charge the lender added to the balance is included, because it is owed.
+ * It is what the lender's own app shows as the outstanding balance, and what
+ * the next payment has to clear.
  */
 export function outstandingOf(
   transactions: readonly Transaction[],
@@ -154,11 +191,8 @@ export function outstandingOf(
 ): Centavos {
   let total = 0;
   for (const t of transactions) {
-    if (t.debtId !== debtId || t.debtEffect === undefined) continue;
-    if (INCREASING.has(t.debtEffect)) total += t.amount;
-    else if (DECREASING.has(t.debtEffect) || t.debtEffect === "writeoff") {
-      total -= t.amount;
-    }
+    if (t.debtId !== debtId) continue;
+    total += owedChange(t);
   }
   return total;
 }
@@ -169,6 +203,7 @@ export function positionOf(
   asOf: IsoDate = today(),
 ): DebtPosition {
   let drawn = 0;
+  let charged = 0;
   let repaid = 0;
   let interestPaid = 0;
   let writtenOff = 0;
@@ -180,6 +215,7 @@ export function positionOf(
     count++;
 
     if (INCREASING.has(t.debtEffect)) drawn += t.amount;
+    else if (t.debtEffect === "charge") charged += t.amount;
     else if (DECREASING.has(t.debtEffect)) {
       repaid += t.amount;
       repaymentCount++;
@@ -188,7 +224,7 @@ export function positionOf(
     else if (EXPENSE.has(t.debtEffect)) interestPaid += t.amount;
   }
 
-  const outstanding = drawn - repaid - writtenOff;
+  const outstanding = drawn + charged - repaid - writtenOff;
 
   // Rule D4: auto-closes at zero, reopens on a new draw.
   const status: DebtStatus =
@@ -201,6 +237,7 @@ export function positionOf(
   return {
     debt,
     drawn,
+    charged,
     repaid,
     interestPaid,
     writtenOff,
@@ -390,17 +427,47 @@ export function splitRepayment(
   return { principal, interest: payment - principal };
 }
 
-// ── One payment, two rows ─────────────────────────────────────────────────
+// ── One movement, two rows ────────────────────────────────────────────────
 
 /**
- * Whether `row` is the interest split off the payment `payment`.
+ * The part a movement can carry, and the id suffix its row is given.
  *
- * By the link the row carries (`partOf`), or, for a row saved before that
- * field existed, by the id the pair has always shared.
+ * A payment can have interest inside it (`interest`), and a borrowing can
+ * have fees added on top of it (`charge`). Either way the owner made one
+ * movement and the ledger holds two rows, so the second names the first in
+ * `partOf`, and everything that shows the movement puts them back together.
  */
+const PART_OF: Partial<Record<DebtEffect, { readonly part: DebtEffect; readonly suffix: string }>> = {
+  repay: { part: "interest", suffix: "-interest" },
+  draw: { part: "charge", suffix: "-charge" },
+};
+
+/** Whether `row` is the part saved with `parent`: its interest, or its fees. */
+export function isPartOf(row: Transaction, parent: Transaction): boolean {
+  const link = parent.debtEffect ? PART_OF[parent.debtEffect] : undefined;
+  if (!link || row.id === parent.id || row.debtEffect !== link.part) return false;
+  return row.partOf === parent.id || row.id === `${parent.id}${link.suffix}`;
+}
+
+/** The row saved as part of this movement, if there is one. */
+export function partOf(parent: Transaction, transactions: readonly Transaction[]): Transaction | undefined {
+  if (!parent.debtEffect || !PART_OF[parent.debtEffect]) return undefined;
+  return transactions.find((t) => isPartOf(t, parent));
+}
+
+/** The movement a part belongs to: the payment an interest row came with, the borrowing a charge did. */
+export function parentOf(row: Transaction, transactions: readonly Transaction[]): Transaction | undefined {
+  if (row.debtEffect !== "interest" && row.debtEffect !== "charge") return undefined;
+  const suffix = row.debtEffect === "interest" ? "-interest" : "-charge";
+  const id = row.partOf ?? (row.id.endsWith(suffix) ? row.id.slice(0, -suffix.length) : undefined);
+  if (!id) return undefined;
+  const parent = transactions.find((t) => t.id === id);
+  return parent && isPartOf(row, parent) ? parent : undefined;
+}
+
+/** Whether `row` is the interest split off the payment `payment`. */
 export function isInterestOf(row: Transaction, payment: Transaction): boolean {
-  if (row.id === payment.id || row.debtEffect !== "interest") return false;
-  return row.partOf === payment.id || row.id === `${payment.id}-interest`;
+  return payment.debtEffect === "repay" && isPartOf(row, payment);
 }
 
 /** The interest row saved with this payment, if some of it was interest. */
@@ -408,8 +475,7 @@ export function interestOf(
   payment: Transaction,
   transactions: readonly Transaction[],
 ): Transaction | undefined {
-  if (payment.debtEffect !== "repay") return undefined;
-  return transactions.find((t) => isInterestOf(t, payment));
+  return payment.debtEffect === "repay" ? partOf(payment, transactions) : undefined;
 }
 
 /** The payment an interest row was split off, if it was. */
@@ -417,48 +483,44 @@ export function paymentOf(
   row: Transaction,
   transactions: readonly Transaction[],
 ): Transaction | undefined {
-  if (row.debtEffect !== "interest") return undefined;
-  const id = row.partOf ?? (row.id.endsWith("-interest") ? row.id.slice(0, -"-interest".length) : undefined);
-  if (!id) return undefined;
-  const payment = transactions.find((t) => t.id === id);
-  return payment && payment.debtEffect === "repay" ? payment : undefined;
+  return row.debtEffect === "interest" ? parentOf(row, transactions) : undefined;
 }
 
 /**
- * A debt movement as the owner made it: a payment together with the interest
- * that was part of it.
+ * A debt movement as the owner made it: a payment with the interest inside
+ * it, or a borrowing with the fees added on top of it.
  */
 export interface DebtMovement {
   readonly row: Transaction;
-  /** The interest saved with this payment, when some of it was interest. */
-  readonly interest?: Transaction | undefined;
-  /** What left or reached the wallet: the row, and its interest with it. */
+  /** The interest or the fees saved with it. */
+  readonly part?: Transaction | undefined;
+  /** The whole movement: what was paid, or what was added to what is owed. */
   readonly total: Centavos;
 }
 
 /**
- * Rows with each payment's interest folded into it.
+ * Rows with each movement's part folded into it.
  *
- * The Debt history listed "Interest PHP 188.79" and "Paid back PHP 2,500.00"
- * as two unrelated lines, when they were one PHP 2,688.79 payment, and nothing
- * on screen said the two belonged together. Order is kept; an interest row
- * whose payment is not in `rows` stays a line of its own.
+ * The Debt history listed "Interest ₱188.79" and "Paid back ₱2,500.00" as two
+ * unrelated lines, when they were one ₱2,688.79 payment, and nothing on screen
+ * said the two belonged together. Order is kept; a part whose movement is not
+ * in `rows` stays a line of its own.
  */
 export function movementsOf(rows: readonly Transaction[]): DebtMovement[] {
   const folded = new Set<string>();
-  const byPayment = new Map<string, Transaction>();
+  const byParent = new Map<string, Transaction>();
   for (const row of rows) {
-    const payment = paymentOf(row, rows);
-    if (payment) {
-      byPayment.set(payment.id, row);
+    const parent = parentOf(row, rows);
+    if (parent) {
+      byParent.set(parent.id, row);
       folded.add(row.id);
     }
   }
   return rows
     .filter((row) => !folded.has(row.id))
     .map((row) => {
-      const interest = byPayment.get(row.id);
-      return { row, interest, total: row.total + (interest?.total ?? 0) };
+      const part = byParent.get(row.id);
+      return { row, part, total: row.total + (part?.total ?? 0) };
     });
 }
 
@@ -546,7 +608,7 @@ export function debtAlerts(
 
 // ── Which way the money moves, by direction ─────────────────────────────────
 
-const PAYABLE_EFFECTS: readonly DebtEffect[] = ["draw", "repay", "interest", "writeoff"];
+const PAYABLE_EFFECTS: readonly DebtEffect[] = ["draw", "charge", "repay", "interest", "writeoff"];
 const RECEIVABLE_EFFECTS: readonly DebtEffect[] = ["lend", "collect", "writeoff"];
 
 /**
@@ -560,6 +622,25 @@ const RECEIVABLE_EFFECTS: readonly DebtEffect[] = ["lend", "collect", "writeoff"
  */
 export function effectsFor(kind: DebtKind): readonly DebtEffect[] {
   return kind === "payable" ? PAYABLE_EFFECTS : RECEIVABLE_EFFECTS;
+}
+
+/**
+ * The effects offered as choices, which is fewer than the ones allowed.
+ *
+ * "Interest only" was a payment that was all interest, and a payment says
+ * that itself now ("Interest included"), so a new entry is offered Borrowed,
+ * Charge added, Paid and Waived. A saved interest row being corrected still
+ * shows its own effect, or the form would open with nothing chosen.
+ */
+export function choicesFor(
+  kind: DebtKind,
+  current?: DebtEffect | undefined,
+  form?: DebtForm | undefined,
+): readonly DebtEffect[] {
+  if (kind === "receivable") return RECEIVABLE_EFFECTS;
+  // Money held for someone takes no charges: nobody is lending it.
+  const base: DebtEffect[] = form === "pass-through" ? ["draw", "repay", "writeoff"] : ["draw", "charge", "repay", "writeoff"];
+  return current && !base.includes(current) && PAYABLE_EFFECTS.includes(current) ? [...base, current] : base;
 }
 
 const sameText = (a: string): string => a.trim().toLowerCase();
@@ -715,8 +796,7 @@ export function debtDue(
   for (const t of rows) {
     if (t.debtEffect === undefined) continue;
     const before = balance;
-    if (INCREASING.has(t.debtEffect)) balance += t.amount;
-    else if (DECREASING.has(t.debtEffect) || t.debtEffect === "writeoff") balance -= t.amount;
+    balance += owedChange(t);
     if (before <= 0 && balance > 0) since = t.date;
     if (t.debtEffect === paying) {
       const interest = interestOf(t, rows)?.amount ?? 0;
@@ -794,6 +874,8 @@ export interface DebtPace {
   readonly added30: Centavos;
   /** Paid down, or collected, in the last 30 days. */
   readonly paid30: Centavos;
+  /** Charges the lender added in the last 30 days. */
+  readonly charged30: Centavos;
   /** A month's payments, averaged over the last three months. 0 when none. */
   readonly monthlyPayment: Centavos;
   /** Months to clear at that rate, or null when nothing is being paid. */
@@ -814,10 +896,12 @@ export function debtPace(
   const quarter = addDays(asOf, -90);
   let added30 = 0;
   let paid30 = 0;
+  let charged30 = 0;
   let paid90 = 0;
   for (const t of rowsFor(transactions, position.debt.id)) {
     if (t.date > asOf || t.debtEffect === undefined) continue;
     if (INCREASING.has(t.debtEffect) && t.date > month) added30 += t.amount;
+    if (t.debtEffect === "charge" && t.date > month) charged30 += t.amount;
     if (DECREASING.has(t.debtEffect)) {
       if (t.date > month) paid30 += t.amount;
       if (t.date > quarter) paid90 += t.amount;
@@ -827,6 +911,7 @@ export function debtPace(
   return {
     added30,
     paid30,
+    charged30,
     monthlyPayment,
     monthsToClear:
       monthlyPayment > 0 && position.outstanding > 0

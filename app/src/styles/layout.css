@@ -2589,12 +2589,21 @@
    * page, sets the row's height: the latest entries are sized out of it
    * (below), so they never push it taller.
    */
+  /*
+   * And the page ends where the screen ends.
+   *
+   * On the short Debt form the three cards stopped a third of the way down a
+   * 1080px screen, over a band of empty page (owner, 2026-09-17: "use all
+   * spaces"). The row is at least as tall as the scrolling area, so the cards
+   * reach its bottom edge, and a longer form still grows past it and scrolls.
+   */
   .fms-entry--nochat {
     grid-template-areas:
       "form side"
       "form recent";
     grid-template-rows: auto 1fr;
     align-items: stretch;
+    min-height: 100%;
   }
 
   .fms-entry--nochat > .fms-entryform {
@@ -5769,63 +5778,59 @@ textarea.fms-askinput {
   align-items: stretch;
 }
 
-/* Amber edge for a debt (rule D3), red once a payment is late. */
-.fms-debtcard {
-  display: grid;
-  align-content: start;
-  gap: var(--space-3);
-  min-width: 0;
-  container-type: inline-size;
-  padding: var(--space-4);
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-left: 3px solid var(--flow-debt);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-}
-
-.fms-debtcard.is-selected {
-  border-color: var(--flow-debt);
-}
-
-.fms-debtcard.is-late {
-  border-left-color: var(--over);
-}
-
-.fms-debtcard-head {
+/*
+ * A debt is an ordinary card (`Card`, `.fms-section`).
+ *
+ * It had its own box with a 3px amber rail down a rounded edge and uppercase
+ * labels over its facts: the look the style guide rejects by name, and the
+ * owner called it vibe coded on sight. The card now has the same border,
+ * header and label type as every other card, and colour is left to what
+ * colour means here: the figure owed is in the debt colour, a late payment
+ * says so in its pill.
+ */
+.fms-debtgrid > .fms-section {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-1) var(--space-3);
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  flex-direction: column;
 }
 
-.fms-debtcard-name {
+.fms-debtgrid > .fms-section > .fms-section-body {
+  flex: 1 1 auto;
+}
+
+.fms-debtbody {
   display: grid;
-  gap: 1px;
-  flex: 1 1 10rem;
+  gap: var(--space-4);
+  height: 100%;
+  align-content: start;
+}
+
+/* What is owed now, and beside it the limit or the schedule. */
+.fms-debthero {
+  display: grid;
+  gap: var(--space-4) var(--space-6);
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+}
+
+@container (min-width: 560px) {
+  .fms-debthero:has(> .fms-debthero-side) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.fms-debthero-owed,
+.fms-debthero-side {
+  display: grid;
+  gap: var(--space-1);
   min-width: 0;
-}
-
-.fms-debtbar {
-  display: grid;
-  gap: 4px;
 }
 
 .fms-debtfacts {
   display: grid;
-  gap: var(--space-3) var(--space-4);
+  gap: var(--space-4);
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
-  padding: var(--space-3) 0;
+  padding: var(--space-4) 0;
   border-top: 1px solid var(--hairline);
   border-bottom: 1px solid var(--hairline);
 }
@@ -5836,7 +5841,8 @@ textarea.fms-askinput {
   }
 }
 
-.fms-debtfacts > div {
+/* A label, the value on one line, and what it is measured by: level across the row however the words wrap. */
+.fms-debtfact {
   display: grid;
   grid-template-rows: auto auto 1fr;
   align-content: start;
@@ -5844,19 +5850,41 @@ textarea.fms-askinput {
   min-width: 0;
 }
 
-.fms-debtfacts dt {
-  color: var(--ink-3);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.fms-debtfact > dt {
+  color: var(--ink-2);
 }
 
-.fms-debtfacts dd {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
+.fms-debtfact > dd {
   margin: 0;
+  min-width: 0;
+}
+
+.fms-debtfact-value {
   color: var(--ink);
+}
+
+.fms-debtfact-note {
+  color: var(--ink-3);
+}
+
+.fms-debtactions-spacer {
+  flex: 1 1 auto;
+}
+
+.fms-debtdetails-note {
+  margin: 0;
+  color: var(--ink-3);
+}
+
+/* Money passing through, under the debts, with its own heading. */
+.fms-debtthrough {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fms-debtthrough-head {
+  display: grid;
+  gap: 2px;
 }
 
 .fms-debtnote {
@@ -5874,12 +5902,7 @@ textarea.fms-askinput {
   color: var(--ink-3);
 }
 
-/* With one debt the head is a heading, not a button: no pointer, no press. */
-.fms-debtcard-head--static {
-  cursor: default;
-}
-
-/* A payment's pill, and under it the interest that was part of it. */
+/* A movement's pill, and under it the interest or fees that came with it. */
 .fms-debtwhat {
   display: grid;
   justify-items: start;

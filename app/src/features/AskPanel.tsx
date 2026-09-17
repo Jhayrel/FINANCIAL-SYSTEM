@@ -134,7 +134,8 @@ import { figuresIn } from "../domain/money";
 import { transactionToDraft } from "../domain/entry";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
-import { effectsFor, type Debt, type DebtEffect } from "../domain/debt";
+import { choicesFor, effectsFor, type Debt, type DebtEffect } from "../domain/debt";
+import { effectInline, effectLabel } from "../domain/debtWords";
 import { debtCardIntro } from "../domain/debtSentence";
 import { AmountInput } from "../components/forms";
 import type { Provenance } from "../domain/activity";
@@ -4867,17 +4868,6 @@ function LineView({
   );
 }
 
-/** What a debt movement can do, in the words the form uses. */
-const DEBT_EFFECT_LABEL: Record<DebtEffect, string> = {
-  draw: "Borrowed",
-  repay: "Paid",
-  interest: "Interest only",
-  fee: "Fee",
-  writeoff: "Waived",
-  lend: "Lent",
-  collect: "Paid back",
-};
-
 /**
  * The same movement, for a debt owed the other way.
  *
@@ -4932,15 +4922,17 @@ function DebtCard({
   const named = draft.fromWallet || draft.toWallet;
   const direction = debtWalletDirection(draft.debtEffect);
   const chosen = debts.find((d) => d.id === draft.debtId);
-  const effects = effectsFor(chosen?.kind ?? "payable");
-  const paying = draft.debtEffect === "repay";
+  const effects = choicesFor(chosen?.kind ?? "payable", draft.debtEffect, chosen?.form);
+  const borrowing = draft.debtEffect === "draw" && chosen?.form !== "pass-through";
+  const paying = draft.debtEffect === "repay" && chosen?.form !== "pass-through";
 
 
   if (state === "settled") {
     return (
       <div ref={hostRef} className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
         Added: {debts.find((d) => d.id === draft.debtId)?.name ?? "debt movement"}
-        {draft.debtEffect ? `, ${DEBT_EFFECT_LABEL[draft.debtEffect].toLowerCase()}` : ""}, {formatMoney(draft.amount ?? 0)}
+        {draft.debtEffect ? `, ${effectInline(draft.debtEffect, debts.find((d) => d.id === draft.debtId))}` : ""}, {formatMoney(draft.amount ?? 0)}
+        {draft.debtEffect === "draw" && (draft.charges ?? 0) > 0 ? `, ${formatMoney(draft.charges ?? 0)} in fees added` : ""}
         {draft.debtEffect === "repay" && (draft.interest ?? 0) > 0 ? `, ${formatMoney(draft.interest ?? 0)} of it interest` : ""}. It
         is in the Database and in the activity trail.
       </div>
@@ -5033,7 +5025,7 @@ function DebtCard({
               }
               onClick={() => onChange(withDebtEffect(draft, effect))}
             >
-              {effect === "writeoff" && chosen?.kind === "receivable" ? "Given up" : DEBT_EFFECT_LABEL[effect]}
+              {effectLabel(effect, chosen)}
             </button>
           ))}
         </div>
@@ -5046,6 +5038,27 @@ function DebtCard({
         interest, and no rate is assumed: every lender counts it its own way.
         A figure the sentence did give is already in the box.
       */}
+      {borrowing && (
+        <div className="fms-debtpick">
+          <label className="t-micro fms-pfieldlabel" htmlFor={`debt-charges-${turn.cardId}`}>
+            Fees added
+          </label>
+          <div className="fms-debtinterest">
+            <AmountInput
+              id={`debt-charges-${turn.cardId}`}
+              value={draft.charges ?? null}
+              onChange={(v) => onChange({ ...draft, charges: v })}
+              ariaLabel="Fees added to what you owe"
+            />
+            <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+              {(draft.charges ?? 0) > 0 && draft.amount !== null
+                ? `${formatMoney(draft.amount + (draft.charges ?? 0))} added to what you owe, ${formatMoney(draft.charges ?? 0)} of it fees.`
+                : "Service fee, tax or interest the lender added. Blank if none."}
+            </span>
+          </div>
+        </div>
+      )}
+
       {paying && (
         <div className="fms-debtpick">
           <label className="t-micro fms-pfieldlabel" htmlFor={`debt-interest-${turn.cardId}`}>

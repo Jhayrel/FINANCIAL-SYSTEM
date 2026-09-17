@@ -18,7 +18,7 @@ import { assessMonth, budgetForMonth } from "./budget";
 import { monthLock, type MonthLock } from "./budgetLock";
 import { categoryLimits } from "./budgetView";
 import { firstOfMonth, getMonth, getYear, lastOfMonth } from "./dates";
-import { interestOf, outstandingOf, splitRepayment } from "./debt";
+import { outstandingOf, partOf, splitRepayment } from "./debt";
 import { draftToTransactions, type Draft } from "./entry";
 import type { Centavos } from "./money";
 import { costOf, monthTotals, spendingAttribution, UNCATEGORISED } from "./totals";
@@ -75,9 +75,9 @@ export function entryImpact(
 
   // Editing a saved row: measure against the month without it, a payment's interest row included.
   const edited = draft.id ? transactions.find((t) => t.id === draft.id) : undefined;
-  const itsInterest = edited ? interestOf(edited, transactions) : undefined;
+  const itsPart = edited ? partOf(edited, transactions) : undefined;
   const others = draft.id
-    ? transactions.filter((t) => t.id !== draft.id && t.id !== itsInterest?.id)
+    ? transactions.filter((t) => t.id !== draft.id && t.id !== itsPart?.id)
     : transactions;
 
   /*

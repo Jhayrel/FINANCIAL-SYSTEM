@@ -559,6 +559,7 @@ export function readEntry(
           flow: "Debt",
           amount: debtSaid?.amount ?? amountIn(text),
           ...(debtSaid?.interest != null ? { interest: debtSaid.interest } : {}),
+          ...(debtSaid?.charges != null ? { charges: debtSaid.charges } : {}),
           fromWallet: walletIn(text, accounts),
           /**
            * The credit line, when the sentence named one.

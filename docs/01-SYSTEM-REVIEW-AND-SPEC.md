@@ -503,9 +503,14 @@ The whole module rests on four statements. Print them on the wall.
 | Event | Wallet | Liability | Counts as income? | Counts as spending? |
 |---|:---:|:---:|:---:|:---:|
 | **Draw** — you borrow | ▲ up | ▲ up | **NO** | no |
+| **Charge**: fee, tax or interest the lender adds | – none | ▲ up | no | **YES** |
 | **Repay** — principal | ▼ down | ▼ down | no | **NO** |
 | **Interest / fee** | ▼ down | – flat | no | **YES** |
 | **Write-off** — forgiven | – none | ▼ down | yes¹ | no |
+
+**Charge** was added on 2026-09-17 at the owner's instruction ("every bank has a different style, make the system accommodating to a universal scale"). Most lenders do not take interest from a wallet: they add a service fee, documentary stamp tax, interest or a penalty to what is owed, and the next payment clears it. A charge is spending on the day it is added, and the payment that clears it is not spending a second time. No rate or formula is assumed for any lender: charges are recorded as the lender shows them. A draw can carry its charges as a linked `charge` row (`partOf`), the way a repayment carries its interest.
+
+**Passing through** (`form: "pass-through"`, same date): money that only passes through the owner's accounts, held for someone (payable) or sent for someone who pays it back (receivable). It uses the same draw/repay and lend/collect movements, so none of it is income or spending.
 
 ¹ A forgiven debt is a genuine gain, but book it as `Debt/writeoff`, not `Revenue`, so it never contaminates the income trend.
 
@@ -523,11 +528,14 @@ Mirror image for money you lend out:
 
 ```
 outstanding(d) = SUM(amount) WHERE debtId=d AND debtEffect='draw'
+               + SUM(amount) WHERE debtId=d AND debtEffect='charge'
                − SUM(amount) WHERE debtId=d AND debtEffect='repay'
                − SUM(amount) WHERE debtId=d AND debtEffect='writeoff'
 ```
 
-Interest is **excluded** — it is expense, not principal. Paying ₱2,688.79 against a ₱2,500.00 draw reduces principal by ₱2,500.00 and books ₱188.79 as interest expense.
+Interest paid from a wallet is **excluded**: it is expense, not principal. Paying ₱2,688.79 against a ₱2,500.00 draw reduces principal by ₱2,500.00 and books ₱188.79 as interest expense.
+
+A **charge** is included (amended 2026-09-17): the lender added it to the balance, it is owed, and it is what the lender's own app shows as outstanding. The historical ledger has no charge rows, so every pinned figure (Maya Credit ₱2,950.00, net worth ₱4,690.03) is unchanged.
 
 ### 5.6.3 Net worth — the figure the Excel never had
 

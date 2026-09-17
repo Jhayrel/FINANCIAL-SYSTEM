@@ -45,7 +45,7 @@ import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
 import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
-import { interestOf, isInterestOf, netWorth, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
+import { isPartOf, netWorth, partOf, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
@@ -873,9 +873,10 @@ export default function App() {
      * and still taken from the wallet. They left the wallet together, so they
      * go to the bin together, and come back together (see `handleRestore`).
      */
-    const interest = interestOf(row, transactions);
-    if (interest) {
-      handleDeleteMany([id, interest.id]);
+    // A borrowing goes with the fees added on it, the same way.
+    const part = partOf(row, transactions);
+    if (part) {
+      handleDeleteMany([id, part.id]);
       return;
     }
     const at = new Date().toISOString();
@@ -913,8 +914,8 @@ export default function App() {
     const wanted = new Set(ids);
     for (const t of transactions) {
       if (wanted.has(t.id)) {
-        const interest = interestOf(t, transactions);
-        if (interest) wanted.add(interest.id);
+        const part = partOf(t, transactions);
+        if (part) wanted.add(part.id);
       }
     }
     const rows = transactions.filter((t) => wanted.has(t.id));
@@ -940,9 +941,9 @@ export default function App() {
     const row = deleted.find((t) => t.id === id);
     if (!row) return;
     // A payment comes back with the interest that went to the bin with it.
-    const interest = deleted.find((t) => isInterestOf(t, row) && t.deletedAt === row.deletedAt);
-    if (interest) {
-      handleRestoreMany([id, interest.id]);
+    const part = deleted.find((t) => isPartOf(t, row) && t.deletedAt === row.deletedAt);
+    if (part) {
+      handleRestoreMany([id, part.id]);
       return;
     }
     setDeleted((prev) => prev.filter((t) => t.id !== id));
@@ -958,8 +959,8 @@ export default function App() {
     const wanted = new Set(ids);
     for (const t of deleted) {
       if (!wanted.has(t.id)) continue;
-      const interest = deleted.find((d) => isInterestOf(d, t) && d.deletedAt === t.deletedAt);
-      if (interest) wanted.add(interest.id);
+      const part = deleted.find((d) => isPartOf(d, t) && d.deletedAt === t.deletedAt);
+      if (part) wanted.add(part.id);
     }
     const rows = deleted.filter((t) => wanted.has(t.id));
     if (rows.length === 0) return;

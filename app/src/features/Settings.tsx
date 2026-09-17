@@ -1773,7 +1773,8 @@ function SpendingTypes({
 // ── Credit and loans ──────────────────────────────────────
 
 const DIRECTIONS: DebtKind[] = ["payable", "receivable"];
-const FORMS: DebtForm[] = ["credit-line", "term-loan", "informal"];
+/* "Passing through" (2026-09-17): money held for someone, or sent for someone who pays it back. */
+const FORMS: DebtForm[] = ["credit-line", "term-loan", "informal", "pass-through"];
 
 const DIRECTION_LABEL: Record<DebtKind, string> = {
   payable: "I owe it",
@@ -2008,7 +2009,7 @@ function CreditLines({
             <TextInput
               value={name}
               onChange={(v) => { setName(v); setError(null); }}
-              placeholder="Maya Credit, a bank loan, money lent to a friend"
+              placeholder="Maya Credit, a bank loan, money lent to a friend, Mama"
             />
           </span>
           <span style={{ width: 175 }}>

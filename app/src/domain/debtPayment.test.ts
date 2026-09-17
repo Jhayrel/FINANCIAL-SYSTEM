@@ -198,7 +198,7 @@ describe("shown as one movement", () => {
     const moves = movementsOf(all);
     expect(moves).toHaveLength(3);
     const paid = moves.find((m) => m.row.id === "pay");
-    expect(paid?.interest?.id).toBe("pay-interest");
+    expect(paid?.part?.id).toBe("pay-interest");
     expect(paid?.total).toBe(100000);
     expect(moves.find((m) => m.row.id === "draw")?.interest).toBeUndefined();
   });

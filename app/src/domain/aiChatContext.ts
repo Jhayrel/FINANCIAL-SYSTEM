@@ -396,21 +396,29 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     out.push("");
     out.push("## Debt, every movement");
     out.push(
-      "outstanding = drawn - repaid - written off. Interest is spending and never reduces what is owed.",
+      "outstanding = drawn + charged - repaid - written off. A charge is a fee, tax or interest the lender added to what is owed: it is spending on the day it was added, and the payment that clears it is not spending again. Interest paid from a wallet is spending and never reduces what is owed. A debt marked passing through is money held for someone or sent for someone: none of it is income or spending.",
     );
 
     for (const p of positions) {
       out.push("");
       out.push(
-        `### ${p.debt.name} (${p.debt.kind === "payable" ? "I owe this" : "owed to me"})`,
+        `### ${p.debt.name} (${
+          p.debt.form === "pass-through"
+            ? p.debt.kind === "payable"
+              ? "money I hold for someone, passing through"
+              : "money I sent for someone, to be paid back, passing through"
+            : p.debt.kind === "payable"
+              ? "I owe this"
+              : "owed to me"
+        })`,
       );
       out.push(
-        `Drawn ${php(p.drawn)}, repaid ${php(p.repaid)}, interest paid ${php(
+        `Drawn ${php(p.drawn)}, charged ${php(p.charged)}, repaid ${php(p.repaid)}, interest paid ${php(
           p.interestPaid,
         )}, written off ${php(p.writtenOff)}.`,
       );
       out.push(
-        `Outstanding ${php(p.outstanding)} = ${php(p.drawn)} - ${php(p.repaid)} - ${php(
+        `Outstanding ${php(p.outstanding)} = ${php(p.drawn)} + ${php(p.charged)} - ${php(p.repaid)} - ${php(
           p.writtenOff,
         )}. ${p.transactionCount} movements, ${p.repaymentCount} of them repayments.`,
       );

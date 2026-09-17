@@ -8,6 +8,7 @@
 
 import type { Centavos } from "./money";
 import { getMonth, getYear } from "./dates";
+import { owedChange } from "./debt";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export type StatementType =
@@ -63,7 +64,7 @@ export function belongsIn(
       ) {
         return true;
       }
-      return t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee");
+      return t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge");
 
     case "savings":
       return savingsWallets.has(t.fromWallet) || savingsWallets.has(t.toWallet);
@@ -130,20 +131,14 @@ export function buildStatement(
     const start = `${year}-${String(lo).padStart(2, "0")}-01`;
     for (const t of transactions) {
       if (t.debtId !== debtId || t.date >= start) continue;
-      if (t.debtEffect === "draw" || t.debtEffect === "lend") running += t.amount;
-      else if (t.debtEffect === "repay" || t.debtEffect === "collect" || t.debtEffect === "writeoff") {
-        running -= t.amount;
-      }
+      running += owedChange(t);
     }
   }
 
   const rows: StatementRow[] = inPeriod.map((t) => {
     if (type !== "debt") return { transaction: t };
 
-    if (t.debtEffect === "draw" || t.debtEffect === "lend") running += t.amount;
-    else if (t.debtEffect === "repay" || t.debtEffect === "collect" || t.debtEffect === "writeoff") {
-      running -= t.amount;
-    }
+    running += owedChange(t);
     return { transaction: t, runningBalance: running };
   });
 

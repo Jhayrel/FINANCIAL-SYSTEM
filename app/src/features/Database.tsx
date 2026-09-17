@@ -22,7 +22,7 @@ import { SearchInput } from "../components/forms";
 import { Icon } from "../components/Icon";
 import { useConfirm } from "../components/Confirm";
 import { formatAmount } from "../domain/money";
-import { interestOf, paymentOf } from "../domain/debt";
+import { parentOf, partOf } from "../domain/debt";
 import { DataTable, type Column } from "../components/DataTable";
 import { formatShort, getYear } from "../domain/dates";
 import { inPeriod, matchesSearch, parseSearch, PERIODS, type Period } from "../domain/search";
@@ -126,13 +126,15 @@ export function Database({
   const askDelete = async (t: Transaction): Promise<void> => {
     if (!onDelete) return;
 
-    // A debt payment goes to the bin with the interest that was part of it, and says so.
-    const interest = interestOf(t, transactions);
+    // A debt payment goes to the bin with its interest, and a borrowing with its fees, and it says so.
+    const part = partOf(t, transactions);
     const ok = await confirm({
       title: `Delete record #${String(t.recordNumber).padStart(4, "0")}?`,
       body: `${t.item || "This entry"}, ${t.description || "no description"}, ₱${formatAmount(t.total)} on ${formatShort(t.date)}.${
-        interest
-          ? ` Its ₱${formatAmount(interest.total)} of interest, #${String(interest.recordNumber).padStart(4, "0")}, was part of the same payment and goes with it.`
+        part
+          ? ` Its ₱${formatAmount(part.total)} of ${t.debtEffect === "draw" ? "fees" : "interest"}, #${String(part.recordNumber).padStart(4, "0")}, was part of the same ${
+              t.debtEffect === "draw" ? "borrowing" : "payment"
+            } and goes with it.`
           : ""
       } It moves to the bin, where you can restore it. Balances and totals update straight away.`,
       confirmLabel: "Move to bin",
@@ -266,12 +268,21 @@ export function Database({
     const links = new Map<string, string>();
     const number = (t: Transaction): string => `#${String(t.recordNumber).padStart(4, "0")}`;
     for (const t of transactions) {
-      if (t.debtEffect === "interest") {
-        const payment = paymentOf(t, transactions);
-        if (payment) links.set(t.id, `Interest in the payment ${number(payment)}`);
-      } else if (t.debtEffect === "repay") {
-        const interest = interestOf(t, transactions);
-        if (interest) links.set(t.id, `Paid with ₱${formatAmount(interest.total)} of interest, ${number(interest)}`);
+      if (t.debtEffect === "interest" || t.debtEffect === "charge") {
+        const parent = parentOf(t, transactions);
+        if (parent) {
+          links.set(t.id, t.debtEffect === "interest" ? `Interest in the payment ${number(parent)}` : `Fees added on the borrowing ${number(parent)}`);
+        }
+      } else if (t.debtEffect === "repay" || t.debtEffect === "draw") {
+        const part = partOf(t, transactions);
+        if (part) {
+          links.set(
+            t.id,
+            t.debtEffect === "repay"
+              ? `Paid with ₱${formatAmount(part.total)} of interest, ${number(part)}`
+              : `With ₱${formatAmount(part.total)} of fees added, ${number(part)}`,
+          );
+        }
       }
     }
     return links;

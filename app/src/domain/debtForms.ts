@@ -39,7 +39,15 @@ import type { Centavos } from "./money";
 import type { Debt, DebtPosition } from "./debt";
 import type { IsoDate } from "./types";
 
-export type DebtForm = "credit-line" | "term-loan" | "informal";
+/**
+ * `pass-through` (added 2026-09-17) is money that only passes through the
+ * owner's accounts. A client's payment sent to a personal account, or money
+ * a mother asked to be sent on to family and pays back in cash: the bank
+ * records it, the balance moves, and none of it is income or spending. It is
+ * a debt in the ledger's terms, because until it is passed on or paid back,
+ * somebody is owed it, and that is what keeps it out of both totals.
+ */
+export type DebtForm = "credit-line" | "term-loan" | "informal" | "pass-through";
 
 /** Who is on the other side. An institution charges interest; a friend rarely does. */
 export type CounterpartyKind = "institution" | "person";
@@ -48,10 +56,14 @@ export const DEBT_FORM_LABEL: Record<DebtForm, string> = {
   "credit-line": "Credit line",
   "term-loan": "Loan",
   informal: "Informal",
+  "pass-through": "Passing through",
 };
 
 /** What each combination is called in the interface. */
 export function debtLabel(kind: Debt["kind"], form: DebtForm): string {
+  if (form === "pass-through") {
+    return kind === "payable" ? "Money I hold for someone" : "Money I fronted for someone";
+  }
   if (kind === "payable") {
     if (form === "credit-line") return "Credit line I use";
     if (form === "term-loan") return "Loan I am repaying";
@@ -64,6 +76,11 @@ export function debtLabel(kind: Debt["kind"], form: DebtForm): string {
 
 /** One line explaining what the combination means. */
 export function debtExplanation(kind: Debt["kind"], form: DebtForm): string {
+  if (form === "pass-through") {
+    return kind === "payable"
+      ? "Money that came into your account for someone else, such as a client's payment. It is not income, and passing it on is not spending."
+      : "Money you sent or paid for someone who pays you back, such as money your mother asked you to send. It is not spending, and their payment back is not income.";
+  }
   if (kind === "payable") {
     if (form === "credit-line") {
       return "A limit you can draw against again and again. Drawing is borrowing, not income.";
@@ -87,7 +104,7 @@ export function defaultsFor(form: DebtForm): {
   interestType: Debt["interestType"];
   counterpartyType: CounterpartyKind;
 } {
-  if (form === "informal") return { interestType: "none", counterpartyType: "person" };
+  if (form === "informal" || form === "pass-through") return { interestType: "none", counterpartyType: "person" };
   return { interestType: "monthly_pct", counterpartyType: "institution" };
 }
 

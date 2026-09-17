@@ -12,7 +12,7 @@
 
 import { walletBalance } from "./balances";
 import type { Debt, DebtEffect } from "./debt";
-import { debtNamedBy, effectsFor, interestOf, outstandingOf, splitRepayment } from "./debt";
+import { debtNamedBy, effectsFor, outstandingOf, partOf, splitRepayment } from "./debt";
 import { daysBetween, formatMedium, getMonth, getYear, monthName, today } from "./dates";
 import { formatMoney as money, type Centavos } from "./money";
 import { kindKey, unusualAgainst, type Unusual } from "./unusual";
@@ -56,6 +56,16 @@ export interface Draft {
    * is read off the bill, never guessed. See `splitRepayment`.
    */
   interest?: Centavos | null | undefined;
+  /**
+   * A borrowing only: fees, tax or interest the lender added to what is owed
+   * when the money was taken, on top of the amount received.
+   *
+   * Maya Credit adds a service fee and documentary stamp tax to every draw:
+   * ₱1,050.00 received on August 13 was ₱1,129.29 owed. Saved as a linked
+   * `charge` row, so what is owed matches the lender's app and the payment
+   * that clears it is not counted as spending a second time.
+   */
+  charges?: Centavos | null | undefined;
   /**
    * Transfer only: the money left your accounts.
    *
@@ -146,7 +156,8 @@ export type FieldName =
   | "status"
   | "debt"
   | "debtEffect"
-  | "interest";
+  | "interest"
+  | "charges";
 
 /**
  * Only the fields that flow actually needs.
@@ -275,9 +286,9 @@ export function runningBalance(
    * wallet read PHP 120.00 lower before the correction and after it.
    */
   const edited = excludeId ? transactions.find((t) => t.id === excludeId) : undefined;
-  const itsInterest = edited ? interestOf(edited, transactions) : undefined;
+  const itsPart = edited ? partOf(edited, transactions) : undefined;
   const base = excludeId
-    ? transactions.filter((t) => t.id !== excludeId && t.id !== itsInterest?.id)
+    ? transactions.filter((t) => t.id !== excludeId && t.id !== itsPart?.id)
     : transactions;
 
   const before = walletBalance(base, wallet);
@@ -424,7 +435,7 @@ export function checkDraft(
   if (draft.flow === "Debt") {
     if (!draft.debtId) errors.push({ field: "debt", message: "Pick which debt this belongs to." });
     if (!draft.debtEffect) {
-      errors.push({ field: "debtEffect", message: "Pick what this does: draw, repay, interest or write-off." });
+      errors.push({ field: "debtEffect", message: "Pick what this does: borrowed, charge added, paid or waived." });
     }
 
     const debt = draft.debtId ? debts.find((d) => d.id === draft.debtId) : undefined;
@@ -442,7 +453,7 @@ export function checkDraft(
         field: "debtEffect",
         message:
           debt.kind === "payable"
-            ? `${debt.name} is money you owe. Pick draw, repay, interest or write-off.`
+            ? `${debt.name} is money you owe. Pick borrowed, charge added, paid or waived.`
             : `${debt.name} is money owed to you. Pick lend, collect or write-off.`,
       });
     }
@@ -633,6 +644,11 @@ export function checkDraft(
     const outstanding = outstandingOf(others, draft.debtId);
     const amount = draft.amount ?? 0;
 
+    const charges = draft.debtEffect === "draw" ? (draft.charges ?? null) : null;
+    if (charges !== null && charges < 0) {
+      errors.push({ field: "charges", message: "Fees can not be less than ₱0.00." });
+    }
+
     const stated = draft.debtEffect === "repay" ? (draft.interest ?? null) : null;
     if (stated !== null && stated < 0) {
       errors.push({ field: "interest", message: "Interest can not be less than ₱0.00." });
@@ -672,11 +688,31 @@ export function checkDraft(
     }
 
     if (draft.debtEffect === "draw" && debt?.creditLimit) {
+      // The fees count against the limit too: the lender adds them to what is used.
+      const used = amount + Math.max(0, charges ?? 0);
       const available = debt.creditLimit - outstanding;
-      if (amount > available) {
+      if (used > available) {
         warnings.push({
           field: "amount",
-          message: `This goes ${money(amount - available)} over the ${money(debt.creditLimit)} limit on ${debt.name}.`,
+          message: `This goes ${money(used - available)} over the ${money(debt.creditLimit)} limit on ${debt.name}.`,
+        });
+      }
+    }
+
+    /**
+     * Interest stated on a payment when the lender's charges are already in
+     * the balance. The payment clears those charges, so stating them again as
+     * interest would count the same fees as spending twice and leave them
+     * owed besides.
+     */
+    if (draft.debtEffect === "repay" && (stated ?? 0) > 0) {
+      const charged = others
+        .filter((t) => t.debtId === draft.debtId && t.debtEffect === "charge")
+        .reduce((sum, t) => sum + t.amount, 0);
+      if (charged > 0) {
+        warnings.push({
+          field: "interest",
+          message: `${money(charged)} of charges are already recorded on ${debt?.name ?? "this debt"} and this payment clears them. Only put interest here that was never recorded as a charge.`,
         });
       }
     }
@@ -750,6 +786,30 @@ export function draftToTransactions(
     debtId: draft.debtId,
     debtEffect: draft.debtEffect,
   };
+
+  /*
+   * Fees added on top of a borrowing: the money received, and a charge row
+   * beside it with no wallet, because the lender added it to the balance and
+   * nothing left an account.
+   */
+  if (draft.flow === "Debt" && draft.debtEffect === "draw" && (draft.charges ?? 0) > 0) {
+    const charges = draft.charges ?? 0;
+    return [
+      base,
+      {
+        ...base,
+        id: `${id}-charge`,
+        fromWallet: "",
+        toWallet: "",
+        amount: charges,
+        fee: 0,
+        total: charges,
+        description: `Fees on ${draft.item || "debt"}`,
+        debtEffect: "charge",
+        partOf: id,
+      },
+    ];
+  }
 
   if (draft.flow === "Debt" && draft.debtEffect === "repay" && split && split.interest > 0) {
     const interest: Transaction = {

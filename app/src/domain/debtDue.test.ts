@@ -11,6 +11,7 @@ import {
   debtDue,
   debtNamedBy,
   debtPace,
+  choicesFor,
   effectsFor,
   paymentsFiledAsSpending,
   positionOf,
@@ -157,8 +158,21 @@ describe("when the next payment is due", () => {
 
 describe("which way the money moves", () => {
   it("offers money you owe draws and repayments, and money owed to you lending and collecting", () => {
-    expect(effectsFor("payable")).toEqual(["draw", "repay", "interest", "writeoff"]);
+    expect(effectsFor("payable")).toEqual(["draw", "charge", "repay", "interest", "writeoff"]);
     expect(effectsFor("receivable")).toEqual(["lend", "collect", "writeoff"]);
+  });
+
+  /**
+   * Allowed is not the same as offered. "Interest only" is a payment that was
+   * all interest, which a payment now says for itself, so a new entry is not
+   * offered it; a saved one being corrected still shows it.
+   */
+  it("offers a new entry the four plain choices, and keeps a saved row's own", () => {
+    expect(choicesFor("payable")).toEqual(["draw", "charge", "repay", "writeoff"]);
+    expect(choicesFor("payable", "interest")).toEqual(["draw", "charge", "repay", "writeoff", "interest"]);
+    expect(choicesFor("receivable")).toEqual(["lend", "collect", "writeoff"]);
+    // Money held for someone is never charged for.
+    expect(choicesFor("payable", undefined, "pass-through")).toEqual(["draw", "repay", "writeoff"]);
   });
 });
 

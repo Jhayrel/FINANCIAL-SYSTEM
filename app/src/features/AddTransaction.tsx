@@ -22,7 +22,8 @@ import {
 import { AmountInput, Select, TextInput } from "../components/forms";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
-import { debtDue, effectsFor, interestOf, movementsOf, outstandingOf, paymentOf, positionsOf } from "../domain/debt";
+import { choicesFor, debtDue, effectsFor, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionsOf } from "../domain/debt";
+import { effectInline, effectLabel, effectMeaning, partWords } from "../domain/debtWords";
 import { formatMoney, type Centavos } from "../domain/money";
 import {
   categoriesFor,
@@ -84,57 +85,6 @@ const FLOWS: { id: Flow; tone: FlowTone; glyph: string; hint: string }[] = [
   { id: "Transfer", tone: "transfer", glyph: "⇄", hint: "Move or send" },
   { id: "Debt", tone: "debt", glyph: "◑", hint: "Borrow or repay" },
 ];
-
-/**
- * Every effect's words. Which ones a debt offers depends on which way it is
- * owed (`effectsFor`): a draw against money lent to a friend counted the same
- * pesos twice.
- */
-const EFFECT_LABEL: Record<DebtEffect, string> = {
-  draw: "Borrowed: money taken from it",
-  repay: "Paid: a payment to it",
-  interest: "Interest only: a charge paid on its own",
-  fee: "Fee: a charge paid on its own",
-  writeoff: "Waived: cancelled with no money moving",
-  lend: "Lent: money out to them",
-  collect: "Paid back: they paid you",
-};
-
-/**
- * The same effects in a word or two, for the row of choices.
- *
- * "Interest or fee" and "Forgiven" were the two the owner could not place.
- * Interest is almost always part of a payment, which the payment now says
- * for itself (see "Interest included"), so the choice of its own is named for
- * the rare case it covers, and every choice says in a sentence what it does.
- */
-const EFFECT_SHORT: Record<DebtEffect, string> = {
-  draw: "Borrowed",
-  repay: "Paid",
-  interest: "Interest only",
-  fee: "Fee",
-  writeoff: "Waived",
-  lend: "Lent",
-  collect: "Paid back",
-};
-
-/** What each choice does, in a sentence, under the row of choices. */
-const EFFECT_MEANS: Record<DebtEffect, string> = {
-  draw: "Money you took from it. What you owe goes up by this much.",
-  repay: "A payment. It lowers what you owe. If the bill says part of it was interest, put that part in Interest included.",
-  interest: "Interest or a late fee paid on its own, with no payment beside it. It counts as spending and what you owe stays the same.",
-  fee: "A fee paid on its own. It counts as spending and what you owe stays the same.",
-  writeoff: "The lender cancelled part of what you owe and no money moved. What you owe goes down by this much.",
-  lend: "Money you gave them. What they owe you goes up by this much.",
-  collect: "Money they paid you. What they owe you goes down by this much.",
-};
-
-function effectMeans(effect: DebtEffect, kind: Debt["kind"]): string {
-  if (effect === "writeoff" && kind === "receivable") {
-    return "Money you have stopped expecting back, with no money moving. What they owe you goes down by this much.";
-  }
-  return EFFECT_MEANS[effect];
-}
 
 /** Due now chips shown before "Show all": enough to act on, not a wall. */
 const DUE_SHOWN = 3;
@@ -708,7 +658,7 @@ export function AddTransaction({
   const changeWords = (field: string, value: string): string => {
     if (value === "none") return "none";
     if (field === "debtId") return debts.find((d) => d.id === value)?.name ?? value;
-    if (field === "debtEffect") return EFFECT_LABEL[value as DebtEffect] ?? value;
+    if (field === "debtEffect") return effectLabel(value as DebtEffect, debts.find((d) => d.id === draft.debtId));
     if (field === "date") return formatMedium(value);
     return value;
   };
@@ -721,7 +671,14 @@ export function AddTransaction({
     submitted ? check.errors.find((e) => e.field === field)?.message : undefined;
 
   /** A debt payment, which is the one movement that can carry interest inside it. */
-  const paying = draft.flow === "Debt" && draft.debtEffect === "repay";
+  const paying = draft.flow === "Debt" && draft.debtEffect === "repay" && debts.find((d) => d.id === draft.debtId)?.form !== "pass-through";
+  /** A borrowing, which can carry fees the lender added on top of it. */
+  const borrowing = draft.flow === "Debt" && draft.debtEffect === "draw" && debts.find((d) => d.id === draft.debtId)?.form !== "pass-through";
+  const chargesError = borrowing
+    ? (submitted || (draft.charges ?? null) !== null
+        ? check.errors.find((e) => e.field === "charges")?.message
+        : undefined)
+    : undefined;
   /**
    * Interest larger than the payment it is part of, said as soon as it is
    * typed: it is a contradiction between two fields side by side, not a
@@ -745,7 +702,7 @@ export function AddTransaction({
   /** Debts open to new rows, and the one a row being corrected is filed against. */
   const debtOptions = debts.filter((d) => !d.archived || d.id === draft.debtId);
   const selectedDebt = debts.find((d) => d.id === draft.debtId);
-  const effects = effectsFor(selectedDebt?.kind ?? "payable");
+  const effects = choicesFor(selectedDebt?.kind ?? "payable", draft.debtEffect, selectedDebt?.form);
 
   /** A debt into the draft: its effect kept only if that debt takes it, and its account as the wallet when none is chosen. */
   const pickDebt = (d: Draft, debt: Debt): Draft => {
@@ -775,20 +732,18 @@ export function AddTransaction({
   const debtAfter = (() => {
     if (draft.flow !== "Debt" || !selectedDebt || !draft.debtEffect || draft.amount === null) return null;
     const editedRow = draft.id ? transactions.find((t) => t.id === draft.id) : undefined;
-    const editedInterest = editedRow ? interestOf(editedRow, transactions) : undefined;
+    const editedPart = editedRow ? partOf(editedRow, transactions) : undefined;
     const base = draft.id
-      ? transactions.filter((t) => t.id !== draft.id && t.id !== editedInterest?.id)
+      ? transactions.filter((t) => t.id !== draft.id && t.id !== editedPart?.id)
       : transactions;
     const before = outstandingOf(base, selectedDebt.id);
     const amount = draft.amount;
+    // The rows this entry would save, read by the same rule the balance is.
     const change =
-      draft.debtEffect === "draw" || draft.debtEffect === "lend"
-        ? amount
-        : draft.debtEffect === "repay"
-          ? -(check.repaymentSplit?.principal ?? amount)
-          : draft.debtEffect === "collect" || draft.debtEffect === "writeoff"
-            ? -amount
-            : 0;
+      draft.debtEffect === "repay"
+        ? -(check.repaymentSplit?.principal ?? amount)
+        : owedChange({ debtEffect: draft.debtEffect, amount }) +
+          (draft.debtEffect === "draw" ? Math.max(0, draft.charges ?? 0) : 0);
     return { name: selectedDebt.name, owed: selectedDebt.kind === "payable", before, after: before + change };
   })();
 
@@ -899,6 +854,12 @@ export function AddTransaction({
         : {}),
     });
   }
+  if (borrowing && (draft.charges ?? 0) > 0 && draft.amount !== null) {
+    checks.push({
+      key: "charges",
+      text: `Saved as one borrowing in two linked rows: ${formatMoney(draft.amount)} received, and ${formatMoney(draft.charges ?? 0)} of fees added to what you owe, which counts as spending today.`,
+    });
+  }
   if (check.repaymentSplit && check.repaymentSplit.interest > 0 && check.repaymentSplit.principal > 0) {
     checks.push({
       key: "split",
@@ -959,8 +920,8 @@ export function AddTransaction({
        * interest row would stay behind, booking interest that the payment no
        * longer includes. It goes to the bin, where it can still be restored.
        */
-      const interest = interestOf(target, transactions);
-      if (interest && !rows.some((r) => r.id === interest.id)) onBin(interest.id);
+      const part = partOf(target, transactions);
+      if (part && !rows.some((r) => r.id === part.id)) onBin(part.id);
     } else {
       onSave(
         draftToTransactions(final, nextRecordNumber, `t-${Date.now()}`, check.repaymentSplit),
@@ -1297,7 +1258,7 @@ export function AddTransaction({
                     error={errorFor("debtEffect")}
                     hint={
                       draft.debtEffect
-                        ? effectMeans(draft.debtEffect, selectedDebt?.kind ?? "payable")
+                        ? effectMeaning(draft.debtEffect, selectedDebt)
                         : "Pick one, and the wallet it moves money through appears."
                     }
                   >
@@ -1308,11 +1269,11 @@ export function AddTransaction({
                           type="button"
                           role="radio"
                           aria-checked={draft.debtEffect === effect}
-                          title={EFFECT_LABEL[effect]}
+                          title={effectMeaning(effect, selectedDebt)}
                           className="t-body fms-segpill"
                           onClick={() => setDraft((d) => withDebtEffect(d, effect))}
                         >
-                          {effect === "writeoff" && selectedDebt?.kind === "receivable" ? "Given up" : EFFECT_SHORT[effect]}
+                          {effectLabel(effect, selectedDebt)}
                         </button>
                       ))}
                     </div>
@@ -1356,6 +1317,33 @@ export function AddTransaction({
                 a payment larger than what is owed has interest in it (rule
                 D2). The two rows it saves are linked (see `Transaction.partOf`).
               */}
+              {/*
+                Fees added on top of a borrowing, as the lender's app lists them.
+
+                Maya Credit adds a service fee and documentary stamp tax each
+                time money is taken, and other lenders add a processing fee or
+                a first month's interest. They are owed, so they go into what is
+                owed; they are a cost, so they count as spending today. Blank
+                is fine for a lender that adds nothing.
+              */}
+              {borrowing && (
+                <Field
+                  label="Fees added"
+                  half
+                  error={chargesError}
+                  hint={chargesError ? undefined : "Service fee, tax or interest added. Blank if none."}
+                >
+                  <div className="fms-amounthero fms-amounthero--quiet">
+                    <AmountInput
+                      value={draft.charges ?? null}
+                      onChange={(v) => set("charges", v)}
+                      invalid={Boolean(chargesError)}
+                      ariaLabel="Fees added to what you owe"
+                    />
+                  </div>
+                </Field>
+              )}
+
               {paying && (
                 <Field
                   label="Interest included"
@@ -1917,7 +1905,7 @@ export function AddTransaction({
             </p>
           ) : (
             <ol className="fms-recent-list">
-              {latestOf(transactions).map(({ row: t, interest, total }) => (
+              {latestOf(transactions).map(({ row: t, part, total }) => (
                 <li key={t.id}>
                   {/* Opens the row in this form, to correct it, the way the Database's edit does. */}
                   <button
@@ -1931,7 +1919,7 @@ export function AddTransaction({
                     <span className="t-body fms-truncate">{recentTitle(t, debts)}</span>
                     <span className="t-micro fms-truncate" style={{ color: "var(--ink-3)" }}>
                       #{String(t.recordNumber).padStart(4, "0")} · {shortDay(t.date)} · {walletsOf(t)}
-                      {interest ? ` · ${formatMoney(interest.total)} interest` : ""}
+                      {part ? ` · ${formatMoney(part.total)} ${partWords(t.debtEffect)}` : ""}
                     </span>
                   </div>
                   <Money value={total} size="s" tone={AMOUNT_TONE[t.type]} />
@@ -1990,24 +1978,14 @@ const AMOUNT_TONE: Record<Transaction["type"], string> = {
 function latestOf(transactions: readonly Transaction[], count = 24) {
   /*
    * A debt payment with interest in it is one line, as it was one payment:
-   * "Maya Credit, paid PHP 2,688.79", not a PHP 2,500.00 line and a PHP 188.79
-   * line that read as two separate things.
+   * "Maya Credit, paid ₱2,688.79", not a ₱2,500.00 line and a ₱188.79 line
+   * that read as two separate things. A borrowing with fees added is one
+   * line the same way.
    */
   return movementsOf(
     [...transactions].sort((a, b) => b.date.localeCompare(a.date) || b.recordNumber - a.recordNumber),
   ).slice(0, count);
 }
-
-/** What a debt row did, in the words the form's choices use. */
-const RECENT_EFFECT: Record<DebtEffect, string> = {
-  draw: "borrowed",
-  repay: "paid",
-  interest: "interest",
-  fee: "fee",
-  writeoff: "waived",
-  lend: "lent",
-  collect: "paid back to you",
-};
 
 /**
  * A line's name. A debt row had no item and showed the word "Debt", so three
@@ -2015,8 +1993,9 @@ const RECENT_EFFECT: Record<DebtEffect, string> = {
  */
 function recentTitle(t: Transaction, debts: readonly Debt[]): string {
   if (t.type === "Debt") {
-    const name = debts.find((d) => d.id === t.debtId)?.name || t.item;
-    const did = t.debtEffect ? RECENT_EFFECT[t.debtEffect] : "";
+    const debt = debts.find((d) => d.id === t.debtId);
+    const name = debt?.name || t.item;
+    const did = t.debtEffect ? effectInline(t.debtEffect, debt) : "";
     return [name || "Debt", did].filter(Boolean).join(", ");
   }
   return t.item || t.description || t.type;
@@ -2142,10 +2121,14 @@ interface DueChip {
  * have binned the interest row the owner had typed.
  */
 function draftForEditing(row: Transaction, transactions: readonly Transaction[]): Draft {
-  const principal = paymentOf(row, transactions) ?? row;
-  const interest = interestOf(principal, transactions);
-  if (interest) {
-    return { ...transactionToDraft(principal), amount: principal.amount + interest.amount, interest: interest.amount };
+  const parent = parentOf(row, transactions) ?? row;
+  const part = partOf(parent, transactions);
+  if (part && parent.debtEffect === "repay") {
+    return { ...transactionToDraft(parent), amount: parent.amount + part.amount, interest: part.amount };
+  }
+  // A borrowing's fees were added on top of it, so the amount stays what was received.
+  if (part && parent.debtEffect === "draw") {
+    return { ...transactionToDraft(parent), charges: part.amount };
   }
   return transactionToDraft(row);
 }

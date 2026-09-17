@@ -192,6 +192,12 @@ reward as borrowing, and treats the whole ₱2,688.79 payment as principal when
 so the difference stays visible. If the owner decides the headline is right,
 change rule 5.6.2 first, then the code, never the other way round.
 
+On 2026-09-17 rule 5.6.2 was **extended, not reversed**, at the owner's
+instruction: a `charge` (a fee, tax or interest the lender adds to the
+balance) counts in what is owed, and is spending on the day it is added.
+Interest paid from a wallet is still excluded. The historical ledger has no
+charge rows, so every figure above is unchanged and still asserted.
+
 ### Migration safety, the load-bearing invariant
 
 Debt migration changes **classification only**. Wallet balances must be
