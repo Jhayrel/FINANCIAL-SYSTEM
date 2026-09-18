@@ -510,7 +510,18 @@ The whole module rests on four statements. Print them on the wall.
 
 **Charge** was added on 2026-09-17 at the owner's instruction ("every bank has a different style, make the system accommodating to a universal scale"). Most lenders do not take interest from a wallet: they add a service fee, documentary stamp tax, interest or a penalty to what is owed, and the next payment clears it. A charge is spending on the day it is added, and the payment that clears it is not spending a second time. No rate or formula is assumed for any lender: charges are recorded as the lender shows them. A draw can carry its charges as a linked `charge` row (`partOf`), the way a repayment carries its interest.
 
-**Passing through** (`form: "pass-through"`, same date): money that only passes through the owner's accounts, held for someone (payable) or sent for someone who pays it back (receivable). It uses the same draw/repay and lend/collect movements, so none of it is income or spending.
+**On behalf** (`form: "pass-through"`, same date; renamed and given its own type on 2026-09-17 at the owner's instruction): money paid, sent or held on another person's behalf. It is not a loan to the owner, so it is its own type on the Add form, its own filter in the Database and its own list on the Dashboard, and the Debt screen shows only banks, credit lines and loans. It is stored as movements on a person whose form is `pass-through`, so wallet balances and what is owed follow the rows above unchanged:
+
+| Side | Movement | Stored as | Wallet | Income or spending |
+|---|---|---|:---:|---|
+| They owe you | **Advance**: paid or sent on their behalf | `lend` | ▼ down | neither |
+| They owe you | **Reimbursed**: they paid it back | `collect` | ▲ up | neither |
+| They owe you | **Write off**: they will not pay | `writeoff`, category Spending, an item | – none | **spending**, on the day, under its item |
+| You hold theirs | **Held**: received on their behalf | `draw` | ▲ up | neither |
+| You hold theirs | **Released**: passed on to them | `repay` | ▼ down | neither |
+| You hold theirs | **Retained**: they let you keep it | `writeoff`, category Revenue, an item | – none | **income**, on the day |
+
+Write off and Retained are the one exception to footnote ¹ below, at the owner's instruction ("if he didn't pay me I can consider it now as spending"). An ordinary debt's write-off keeps category blank and still counts as neither. The historical ledger has no On behalf rows, so every known figure is unchanged.
 
 ¹ A forgiven debt is a genuine gain, but book it as `Debt/writeoff`, not `Revenue`, so it never contaminates the income trend.
 

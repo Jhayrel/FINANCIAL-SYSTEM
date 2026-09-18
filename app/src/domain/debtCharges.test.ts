@@ -176,17 +176,17 @@ describe("the choices, in plain words", () => {
     expect(effectMeaning("charge", line)).toContain("No money moves now");
   });
 
-  it("names money passing through by what happened", () => {
+  it("names money on someone's behalf in accounting terms", () => {
     expect(choicesFor("receivable", undefined, "pass-through").map((e) => effectLabel(e, mama))).toEqual([
-      "Sent for them",
-      "Paid back to you",
-      "Given up",
+      "Advance",
+      "Reimbursed",
+      "Write off",
     ]);
     const held = { ...mama, kind: "payable" as const };
     expect(choicesFor("payable", undefined, "pass-through").map((e) => effectLabel(e, held))).toEqual([
-      "Received for them",
-      "Passed on",
-      "Kept",
+      "Held",
+      "Released",
+      "Retained",
     ]);
   });
 });

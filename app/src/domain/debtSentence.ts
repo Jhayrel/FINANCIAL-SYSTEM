@@ -48,9 +48,10 @@
  * A sentence with both a payment and a borrowing in it is left alone too.
  */
 
-import type { Debt } from "./debt";
+import type { Debt, DebtEffect } from "./debt";
 import type { Draft } from "./entry";
 import { formatMoney, type Centavos } from "./money";
+import { effectLabel, effectMeaning } from "./debtWords";
 
 export interface DebtSentence {
   /** The effect the words state beyond doubt, or undefined to leave it for the owner. */
@@ -259,6 +260,68 @@ const FRONTED =
 const HELD =
   /\b(not mine|hindi akin|to pass (it )?on|pass (it|this) on|passing it on|forward (it|this) to|ipapasa|ipasa|remit (it|this) to|hand (it|this) over|hold(ing)? it for|for (the |my |our )?(company|client|boss|office|employer)|(client|company|boss)('s)? (payment|money))\b/i;
 
+/** Somebody other than the owner will pay: "he will repay me later", "my mother will pay for it". */
+const THEY_WILL_PAY =
+  /\b(he|she|they|his|her|mama|mom|mother|nanay|papa|dad|father|tatay|kuya|ate|tita|tito|lola|lolo|friend|freind|client|boss|brother|sister|bro|sis)\b[^.]{0,24}?\b(will|would|is going to|are going to|promised to|said (?:he|she|they)(?:'ll| will))\s+(?:re)?pay\b|\b(?:repay me|pay me (?:back )?later|will repay)\b/i;
+
+/** The same, with a name: "Stephen will repay me". Case matters here, so a name is told from "I". */
+const NAME_WILL_PAY = /\b[A-Z][a-z]+\s+(?:will|would|is going to|promised to)\s+(?:re)?pay\b/;
+
+/** They will not: written off, which counts as spending. */
+const WRITE_OFF =
+  /\b(write (?:it |this |that )?off|written off|writeoff|count (?:it )?as (?:spending|expense)|consider (?:it )?(?:as )?(?:spending|expense)|no longer expect\w*)\b|\b(?:he|she|they|mama|mom|mother|papa|dad|kuya|ate|tita|tito|friend|freind|client|boss|brother|sister)\b[^.]{0,20}?\b(?:won'?t|will not|didn'?t|did not|never|refuses? to|is not going to)\s+(?:re)?pay\b/i;
+const NAME_WONT_PAY = /\b[A-Z][a-z]+\s+(?:won'?t|will not|didn'?t|did not|never|refuses to|is not going to)\s+(?:re)?pay\b/;
+
+/** They let the owner keep it: retained, which counts as income. */
+const RETAIN =
+  /\b(let me keep|lets me keep|told me to keep|said (?:i can |to )?keep|you can keep|i can keep|keep the (?:money|change|rest)|it'?s mine now|akin (?:na|daw))\b/i;
+
+/**
+ * Their money passed on: "gave my boss his 5000", "remitted it to the company".
+ *
+ * The person comes between the verb and "his": "gave her 200 in cash" is a
+ * gift of the owner's own money, and "her" there is who got it.
+ */
+const RELEASE =
+  /\b(?:gave|give|handed|passed|sent|forwarded|returned)\s+(?:to\s+)?(?:my |the |our )?[a-z]+\s+(?:his|her|their)\s+(?:money|share|payment|cash|funds?|₱|php|\d)|\b(?:remitted|forwarded|handed over|passed on|turned over)\b/i;
+
+/** Holding someone's money: "I hold 1000 for my brother", "keeping 500 for mama". */
+const HOLDING = /\b(?:hold|holding|safekeep\w*|keeping|itinatago)\b[^.]{0,30}?\bfor\s+(?:my |her |his |the |our )?[a-z]+/i;
+
+/**
+ * On someone's behalf, said in so many words, and what happened.
+ *
+ * The owner's scenarios, 2026-09-17: paying for a friend's meal who repays
+ * later, sending money a mother pays back, holding money for someone, and a
+ * friend who never pays, which becomes spending. Checked in that order of
+ * certainty: keeping it and writing it off are the most explicit, holding
+ * the least. A payment back ("paid me back") is left to the person named,
+ * because it reads the same for a loan.
+ */
+export function readBehalf(text: string): { side: "owed" | "held"; effect: DebtEffect } | null {
+  if (RETAIN.test(text)) return { side: "held", effect: "writeoff" };
+  if (WRITE_OFF.test(text) || NAME_WONT_PAY.test(text)) return { side: "owed", effect: "writeoff" };
+  if (COLLECT_VERB.test(text)) return null;
+  if (FRONTED.test(text) || THEY_WILL_PAY.test(text) || NAME_WILL_PAY.test(text)) return { side: "owed", effect: "lend" };
+  if (RELEASE.test(text)) return { side: "held", effect: "repay" };
+  if (HELD.test(text) || HOLDING.test(text)) return { side: "held", effect: "draw" };
+  return null;
+}
+
+/** Where the sentence starts saying how it comes back, so the wallet is read from before it. */
+export function payBackClauseAt(text: string): number {
+  /*
+   * From the word before "will pay", not from the person named earlier:
+   * "i paid my friend food 180 cash and he will pay me back" paid from Cash,
+   * and cutting at "friend" threw the wallet away with the clause.
+   */
+  const clause = /(?:\b(?:and|but|so)\s+)?\b[a-z]+\s+(?:will|would|is going to|are going to|promised to)\s+(?:re)?pay\b|\b(?:repay me|pay me (?:back )?later)\b/i;
+  const found = [FRONTED, clause]
+    .map((re) => re.exec(text)?.index ?? -1)
+    .filter((i) => i >= 0);
+  return found.length > 0 ? Math.min(...found) : text.length;
+}
+
 /**
  * Money that only passes through, said in so many words.
  *
@@ -268,8 +331,9 @@ const HELD =
  * read when the words say it: a payment back, or money that is not theirs.
  */
 export function readPassThrough(text: string): "held" | "fronted" | null {
-  if (FRONTED.test(text) && !COLLECT_VERB.test(text)) return "fronted";
-  if (HELD.test(text)) return "held";
+  const said = readBehalf(text);
+  if (said?.side === "owed" && said.effect === "lend") return "fronted";
+  if (said?.side === "held" && said.effect === "draw") return "held";
   return null;
 }
 
@@ -288,6 +352,18 @@ export function debtCardIntro(
   passThrough?: "held" | "fronted" | null,
 ): string {
   const line = debts.find((d) => d.id === draft.debtId)?.name;
+  if (draft.behalf) {
+    const shape = { kind: draft.behalf === "owed" ? ("receivable" as const) : ("payable" as const), form: "pass-through" as const };
+    const parts = [
+      draft.debtEffect
+        ? `That reads as On behalf: **${effectLabel(draft.debtEffect, shape)}**${line ? ` with **${line}**` : ""}. ${effectMeaning(draft.debtEffect, shape)}`
+        : `That reads as On behalf${line ? ` with **${line}**` : ""}. Pick what happened on the card.`,
+    ];
+    if (!line) parts.push("Pick who it is on the card, or keep the new name it read.");
+    if (draft.debtEffect === "writeoff" && !draft.item) parts.push("Pick what it counts as on the card.");
+    parts.push("Check the card, then add it.");
+    return parts.join(" ");
+  }
   if (passThrough) {
     const who = line ? ` for **${line}**` : "";
     const parts = [

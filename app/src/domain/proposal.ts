@@ -232,6 +232,11 @@ function readOne(
     return readDebt(value, reference, asOf, sourceRef);
   }
 
+  // On someone's behalf: a debt movement on a person, with the side it is on.
+  if (!flow && /^on ?behalf$/i.test(rawFlow)) {
+    return readBehalfRow(value, reference, asOf, sourceRef);
+  }
+
   if (!flow) {
     /**
      * A model that has understood nothing copies the shape back verbatim,
@@ -400,6 +405,63 @@ function readOne(
 }
 
 const isRefused = (v: Proposal | Refused | Proposal[]): v is Refused => !Array.isArray(v) && "reason" in v;
+
+/** On behalf, as the model names it, and what it is here. */
+const BEHALF_WORDS: Readonly<Record<string, { side: "owed" | "held"; effect: NonNullable<Draft["debtEffect"]> }>> = {
+  advance: { side: "owed", effect: "lend" },
+  reimbursed: { side: "owed", effect: "collect" },
+  writeoff: { side: "owed", effect: "writeoff" },
+  "write off": { side: "owed", effect: "writeoff" },
+  held: { side: "held", effect: "draw" },
+  released: { side: "held", effect: "repay" },
+  retained: { side: "held", effect: "writeoff" },
+};
+
+function readBehalfRow(
+  value: Record<string, unknown>,
+  reference: ReferenceLists,
+  asOf: IsoDate,
+  sourceRef: string,
+): Proposal | Refused {
+  const said = BEHALF_WORDS[str(value["debtEffect"]).toLowerCase()];
+  const amount = readMoney(value["amountText"]) ?? readMoney(value["amountPesos"]);
+  if (amount === null || amount <= 0) {
+    return { sourceRef, reason: "An entry on someone's behalf with no amount in it could not be read." };
+  }
+  let date = str(value["date"]);
+  if (!ISO.test(date)) date = asOf;
+  const accounts = [...reference.wallets, ...reference.savings];
+  const wallet = matchExact(str(value["fromWallet"]), accounts) || matchExact(str(value["toWallet"]), accounts);
+  const person = matchExact(str(value["debt"]), [...(reference.credits ?? [])]);
+  const base: Draft = {
+    flow: "Debt",
+    date,
+    fromWallet: "",
+    toWallet: "",
+    category: "",
+    item: "",
+    description: str(value["description"]),
+    amount,
+    fee: 0,
+    notes: "",
+    status: "",
+    ...(said ? { behalf: said.side } : { behalf: "owed" as const }),
+    ...(person ? { debtId: makeDebtId(person) } : {}),
+  };
+  const withWallet: Draft = said
+    ? said.effect === "lend" || said.effect === "repay"
+      ? { ...base, debtEffect: said.effect, fromWallet: wallet }
+      : said.effect === "writeoff"
+        ? { ...base, debtEffect: said.effect }
+        : { ...base, debtEffect: said.effect, toWallet: wallet }
+    : base;
+  return {
+    draft: withWallet,
+    confidence: readConfidence(str(value["confidence"])),
+    sourceRef,
+    adjustments: str(value["debt"]) && !person ? [`${str(value["debt"])} is not on your list yet. The card keeps the name, and adding it saves them.`] : [],
+  };
+}
 
 /** What a credit statement calls each movement, and what it is here. */
 const DEBT_EFFECTS: Readonly<Record<string, NonNullable<Draft["debtEffect"]> | "bought">> = {

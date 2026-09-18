@@ -106,6 +106,14 @@ export function totalsFor(transactions: readonly Transaction[]): MonthTotals {
     if (t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge")) {
       interest += t.total;
     }
+
+    // On someone's behalf: written off is spending, retained is income.
+    if (writtenOffAsSpending(t)) {
+      if (t.category === "Bills") bills += t.total;
+      else if (t.category === "Subscriptions") subscriptions += t.total;
+      else spending += t.total;
+    }
+    if (retainedAsIncome(t)) revenue += t.total;
   }
 
   return {
@@ -134,6 +142,30 @@ export function totalsFor(transactions: readonly Transaction[]): MonthTotals {
  * over the whole ledger equals `totalsFor(...).total` exactly. The two cannot
  * drift without that test failing.
  */
+/**
+ * Money advanced on someone's behalf that will never come back.
+ *
+ * Stored as a write-off with a spending category (`entry.ts`, `debtCategory`),
+ * and counted as spending on the day it is written off, under its item.
+ */
+export const writtenOffAsSpending = (t: Transaction): boolean =>
+  t.type === "Debt" &&
+  t.debtEffect === "writeoff" &&
+  (t.category === "Spending" || t.category === "Bills" || t.category === "Subscriptions");
+
+/** Money held on someone's behalf that they let the owner keep: income on the day. */
+export const retainedAsIncome = (t: Transaction): boolean =>
+  t.type === "Debt" && t.debtEffect === "writeoff" && t.category === "Revenue";
+
+/**
+ * Income, the one definition. Revenue that is not an opening balance, and
+ * money held for someone that became the owner's.
+ */
+export function incomeOf(t: Transaction): Centavos {
+  if (t.type === "Revenue") return t.category === "Opening" ? 0 : t.total;
+  return retainedAsIncome(t) ? t.total : 0;
+}
+
 export function costOf(t: Transaction): Centavos {
   if (t.type === "Spending") {
     return t.category === "Spending" || t.category === "Bills" || t.category === "Subscriptions"
@@ -150,6 +182,8 @@ export function costOf(t: Transaction): Centavos {
   if (t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge")) {
     return t.total;
   }
+
+  if (writtenOffAsSpending(t)) return t.total;
 
   return 0;
 }

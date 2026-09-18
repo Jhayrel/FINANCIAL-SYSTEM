@@ -40,7 +40,8 @@ export function capabilitiesAnswer(): string {
     "- **Budgets and limits**: \"set my budget to 8000\", \"limit food to 3000 for the rest of the year\", \"same budget as last month\".",
     "- **Find a difference**: \"my maya balance is 30000, where's the rest?\", with screenshots of the balance and the history, or the history pasted underneath.",
     "- **Answer questions and advise** from your own figures, and **draw charts**: \"how did august compare with july\", \"chart my food this month\".",
-    "- **Money passing through**: money you hold for someone or send for someone, kept out of income and spending.",
+    "- **On behalf of someone**, apart from debt: an advance for a friend who pays you back, money sent that your mother repays, money you hold for someone. Reimbursed, released, a write off (it becomes spending) or retained (it becomes income): \"I paid Carlo's food 180 cash, he will pay me back\", \"Carlo will not pay, write it off\".",
+    "- **Debt** is banks, credit lines and loans, yours or with a person: \"I borrowed 1000 from kuya\", \"I lent 500 to Juan\", \"I paid my credit\".",
     "**Settings stay yours**: accounts, categories, credit lines, alerts, the theme and the AI's own switches are changed on the Settings screen, not by me.",
   ].join("\n");
 }

@@ -67,6 +67,14 @@ export interface Draft {
    */
   charges?: Centavos | null | undefined;
   /**
+   * On behalf of someone, and which side: money they owe you, or money you
+   * hold of theirs. Absent on an ordinary debt. Never saved as a field: the
+   * row is a movement on a debt whose form is `pass-through`, and this only
+   * tells the form and the chat which words and choices to show, and which
+   * people to list, before a person is picked.
+   */
+  behalf?: "owed" | "held" | undefined;
+  /**
    * Transfer only: the money left your accounts.
    *
    * A transfer with no destination is Money Send, which is a documented,
@@ -433,9 +441,29 @@ export function checkDraft(
 
   // Rule D1: a Debt row is meaningless without both.
   if (draft.flow === "Debt") {
-    if (!draft.debtId) errors.push({ field: "debt", message: "Pick which debt this belongs to." });
+    if (!draft.debtId) {
+      errors.push({ field: "debt", message: draft.behalf ? "Pick who it is for, or type a new name." : "Pick which debt this belongs to." });
+    }
     if (!draft.debtEffect) {
-      errors.push({ field: "debtEffect", message: "Pick what this does: borrowed, charge added, paid or waived." });
+      errors.push({
+        field: "debtEffect",
+        message:
+          draft.behalf === "owed"
+            ? "Pick what happened: advance, reimbursed or write off."
+            : draft.behalf === "held"
+              ? "Pick what happened: held, released or retained."
+              : "Pick what this does: borrowed, charge added, paid or waived.",
+      });
+    }
+    /*
+     * Written off or retained on someone's behalf becomes spending or income,
+     * so it needs the item it counts under, like any other spending or income.
+     */
+    if (draft.behalf && draft.debtEffect === "writeoff" && !draft.item.trim()) {
+      errors.push({
+        field: "item",
+        message: draft.behalf === "owed" ? "Pick what it counts as in your spending." : "Pick what it counts as in your income.",
+      });
     }
 
     const debt = draft.debtId ? debts.find((d) => d.id === draft.debtId) : undefined;
@@ -730,6 +758,18 @@ export function checkDraft(
  * in the ledger rather than hidden inside one row's metadata, the same shape
  * the migration produces.
  */
+/**
+ * What a debt row counts as, which is nothing, with one exception.
+ *
+ * Written off on someone's behalf is spending, and retained on someone's
+ * behalf is income (owner's instruction, 2026-09-17). The category is what
+ * says so to every total, so the rest of the app needs no second rule.
+ */
+function debtCategory(draft: Draft): TransactionCategory {
+  if (draft.debtEffect !== "writeoff" || !draft.behalf) return "";
+  return draft.behalf === "owed" ? "Spending" : "Revenue";
+}
+
 export function draftToTransactions(
   draft: Draft,
   recordNumber: number,
@@ -775,7 +815,9 @@ export function draftToTransactions(
       ? ("Opening" as const)
       : derived
         ? derived.category
-        : draft.category,
+        : type === "Debt"
+          ? debtCategory(draft)
+          : draft.category,
     item: opening ? "Opening balance" : derived ? derived.item : draft.item,
     description: draft.description,
     amount,

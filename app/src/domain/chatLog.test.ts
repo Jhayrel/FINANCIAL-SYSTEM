@@ -209,5 +209,6 @@ describe("filling a debt card from the owner's own debts", () => {
     expect(personIn("Juan paid me back 200 in cash", wallets)).toBe("Juan");
     expect(personIn("I borrowed 1000 from kuya in cash", wallets)).toBe("Kuya");
     expect(personIn("I paid 500 from maya", wallets)).toBeNull();
+    expect(personIn("i paid my freind Carlo food 180 cash and he will pay me back", wallets)).toBe("Carlo");
   });
 });

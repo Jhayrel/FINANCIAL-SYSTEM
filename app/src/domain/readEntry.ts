@@ -28,7 +28,7 @@
 
 import { daysBackIn, itemHintIn } from "./filipino";
 import { emptyDraft, itemsFor, withDebtEffect, type Draft, type Flow } from "./entry";
-import { readDebtSentence, readPassThrough } from "./debtSentence";
+import { payBackClauseAt, readBehalf, readDebtSentence, readPassThrough } from "./debtSentence";
 import type { Blank } from "./capture";
 import { makeDebtId } from "./debt";
 import { inferFromHistory, itemFromHistory } from "./infer";
@@ -534,9 +534,11 @@ export function readEntry(
 
   /** Money passing through for someone else, which is debt in the ledger's terms. */
   const passing = readPassThrough(text);
+  /** On someone's behalf, and what happened: advance, write off, held, released, retained. */
+  const behalf = readBehalf(text);
 
   const readsAsDebt =
-    DEBT.test(withoutIncome) || creditNamed !== undefined || CREDITED_MYSELF.test(text) || passing !== null;
+    DEBT.test(withoutIncome) || creditNamed !== undefined || CREDITED_MYSELF.test(text) || passing !== null || behalf !== null;
 
   /**
    * A sentence with no verb in it.
@@ -570,7 +572,7 @@ export function readEntry(
      * The interest inside a payment, and the effect when the words leave no
      * doubt about it. See `debtSentence.ts`.
      */
-    const debtSaid = readsAsDebt && !passing ? readDebtSentence(text, amountIn, readMoney) : null;
+    const debtSaid = readsAsDebt && !behalf ? readDebtSentence(text, amountIn, readMoney) : null;
     const filled: Draft = readsAsDebt
       ? {
           ...emptyDraft(dateIn(text, asOf).date),
@@ -584,11 +586,12 @@ export function readEntry(
            * left Maya. The pay-back clause is set aside before the wallet is read.
            */
           fromWallet: walletIn(
-            passing === "fronted"
-              ? text.replace(/\b(pay|paying|pays|paid|give|giving|gives|return|returns|reimburse)\w*\b[^,.;]*$/i, " ")
+            behalf?.effect === "lend"
+              ? text.slice(0, payBackClauseAt(text)).replace(/[\s,;]*(?:and|but|so)?\s*(?:he|she|they)?\s*$/i, " ")
               : text,
             accounts,
           ),
+          ...(behalf ? { behalf: behalf.side } : {}),
           /**
            * The credit line, when the sentence named one.
            *
@@ -605,7 +608,7 @@ export function readEntry(
         }
       : emptyDraft(asOf);
     // The wallet goes on the side the effect moves money through.
-    const effect = passing === "fronted" ? "lend" : passing === "held" ? "draw" : debtSaid?.effect;
+    const effect = behalf?.effect ?? debtSaid?.effect;
     const partial = effect ? withDebtEffect(filled, effect) : filled;
 
     return {

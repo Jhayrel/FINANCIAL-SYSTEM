@@ -22,7 +22,7 @@
 
 import { toPesos } from "./money";
 import { editsBetween } from "./nearly";
-import { costOf } from "./totals";
+import { costOf, incomeOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 
 export type ChartBy = "item" | "month" | "wallet" | "category";
@@ -127,8 +127,7 @@ const spendingOf = costOf;
  * a chart that disagrees with the Insights screen about the year is worse
  * than no chart. `chartAccuracy.test.ts` asserts the two agree.
  */
-const revenueOf = (t: Transaction): number =>
-  t.type === "Revenue" && t.category !== "Opening" ? t.total : 0;
+const revenueOf = incomeOf;
 
 /**
  * Which direction of money the question is about.

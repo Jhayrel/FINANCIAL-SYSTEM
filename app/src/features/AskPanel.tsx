@@ -147,7 +147,7 @@ import { transactionToDraft } from "../domain/entry";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
 import { choicesFor, effectsFor, type Debt, type DebtEffect } from "../domain/debt";
-import { effectInline, effectLabel } from "../domain/debtWords";
+import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, type BehalfSide } from "../domain/debtWords";
 import { debtCardIntro } from "../domain/debtSentence";
 import { fillDebt, personDebt } from "../domain/debtFill";
 import { foldInterest } from "../domain/interestFold";
@@ -168,7 +168,8 @@ import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabi
  * in `AddTransaction` with the same functions the form itself uses.
  */
 export interface ProposalSink {
-  readonly check: (draft: Draft) => {
+  /** `extraDebts`: someone new the card will add in the same tap, so the check knows them. */
+  readonly check: (draft: Draft, extraDebts?: readonly Debt[]) => {
     readonly ok: boolean;
     readonly problems: readonly string[];
     readonly warnings: readonly string[];
@@ -3881,21 +3882,27 @@ export function AskPanel({
               turn={turn}
               debts={debts}
               wallets={[...reference.wallets, ...reference.savings]}
+              reference={reference}
               sink={sink}
               hostRef={(el) => keepCard(i, el)}
-              onSettle={() => {
+              onSettle={(final) => {
                 hold(i);
                 // Recorded here, outside the updater, because an updater must
                 // be pure and React may run it more than once.
-                recordCard({ ...turn, state: "settled" });
+                recordCard({ ...turn, draft: final ?? turn.draft, state: "settled" });
                 setTurns((prev) =>
                   prev.map((t, j) =>
-                    j === i && isDebt(t) ? { ...t, state: "settled" } : t,
+                    j === i && isDebt(t) ? { ...t, draft: final ?? t.draft, state: "settled" } : t,
                   ),
                 );
               }}
               onChange={(draft) =>
                 setTurns((prev) => prev.map((t, j) => (j === i && isDebt(t) ? { ...t, draft } : t)))
+              }
+              onNewPerson={(name) =>
+                setTurns((prev) =>
+                  prev.map((t, j) => (j === i && isDebt(t) ? { ...t, newPerson: name.trim() ? name : undefined } : t)),
+                )
               }
             />
           ) : isChart(turn) ? (
@@ -5567,22 +5574,28 @@ function DebtCard({
   turn,
   debts,
   wallets,
+  reference,
   sink,
   hostRef,
   onSettle,
   onChange,
+  onNewPerson,
 }: {
   turn: DebtChoice;
   debts: readonly Debt[];
   wallets: readonly string[];
+  reference: ReferenceLists;
   sink: ProposalSink;
   /** So the panel can measure this card and hold it still when it changes. */
   hostRef: (el: HTMLDivElement | null) => void;
-  onSettle: () => void;
+  /** Done, with the entry as it was saved when it differs from the card. */
+  onSettle: (final?: Draft) => void;
   onChange: (draft: Draft) => void;
+  /** A name typed for someone not on the list, added with the entry. */
+  onNewPerson: (name: string) => void;
 }) {
   const { draft, state } = turn;
-  const check = sink.check(draft);
+  const behalf = draft.behalf;
   const live = debts.filter((d) => !d.archived);
   const named = draft.fromWallet || draft.toWallet;
   const direction = debtWalletDirection(draft.debtEffect);
@@ -5592,20 +5605,45 @@ function DebtCard({
    * the ones for money owed to you. They read Borrowed and Paid, with nothing
    * chosen, on "I lent 500 to Juan".
    */
-  const toYou = draft.debtEffect === "lend" || draft.debtEffect === "collect";
-  const effects = choicesFor(
-    chosen?.kind ?? (toYou ? "receivable" : "payable"),
-    draft.debtEffect,
-    chosen?.form ?? (turn.newPerson ? "informal" : undefined),
-  );
-  const borrowing = draft.debtEffect === "draw" && chosen?.form !== "pass-through";
-  const paying = draft.debtEffect === "repay" && chosen?.form !== "pass-through";
+  const toYou = behalf ? behalf === "owed" : draft.debtEffect === "lend" || draft.debtEffect === "collect";
+  const kind: Debt["kind"] = chosen?.kind ?? (toYou ? "receivable" : "payable");
+  const effects = choicesFor(kind, draft.debtEffect, chosen?.form ?? (turn.newPerson ? "informal" : undefined));
 
+  /*
+   * Someone new is added in the same tap as the entry, as the form does.
+   * The card had a button with their name on it to press first, and the
+   * owner asked for names to stay off buttons.
+   */
+  const NEW = "new-person";
+  const person = !draft.debtId && turn.newPerson && sink.canAddDebt ? personDebt(turn.newPerson, draft, debts, wallets[0] ?? "") : null;
+  const ready: Draft = person ? { ...draft, debtId: person.id } : draft;
+  const check = sink.check(ready, person ? [person] : undefined);
+  const borrowing = !behalf && draft.debtEffect === "draw" && chosen?.form !== "pass-through";
+  const paying = !behalf && draft.debtEffect === "repay" && chosen?.form !== "pass-through";
+
+  /** Who can be picked: people on this side for On behalf; banks, credit lines and loans otherwise. */
+  const options = live.filter(
+    (d) =>
+      d.id === draft.debtId ||
+      (behalf
+        ? d.form === "pass-through" && d.kind === (behalf === "owed" ? "receivable" : "payable")
+        : d.form !== "pass-through" && (!toYou || d.kind === "receivable")),
+  );
+
+  const chooseSide = (side: BehalfSide, effect: DebtEffect): void => {
+    const moved = behalf !== side;
+    onChange(
+      withDebtEffect(
+        { ...draft, behalf: side, debtId: moved ? undefined : draft.debtId, item: effect === "writeoff" ? draft.item : "", category: "" },
+        effect,
+      ),
+    );
+  };
 
   if (state === "settled") {
     return (
       <div ref={hostRef} className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
-        Added: {debts.find((d) => d.id === draft.debtId)?.name ?? "debt movement"}
+        Added{behalf ? `, ${ON_BEHALF.toLowerCase()}` : ""}: {debts.find((d) => d.id === draft.debtId)?.name ?? "the movement"}
         {draft.debtEffect ? `, ${effectInline(draft.debtEffect, debts.find((d) => d.id === draft.debtId))}` : ""}, {formatMoney(draft.amount ?? 0)}
         {draft.debtEffect === "draw" && (draft.charges ?? 0) > 0 ? `, ${formatMoney(draft.charges ?? 0)} in fees added` : ""}
         {draft.debtEffect === "repay" && (draft.interest ?? 0) > 0 ? `, ${formatMoney(draft.interest ?? 0)} of it interest` : ""}. It
@@ -5614,31 +5652,63 @@ function DebtCard({
     );
   }
 
+  const left = (ready.debtId ? 0 : 1) + (draft.debtEffect ? 0 : 1) + (behalf && draft.debtEffect === "writeoff" && !draft.item ? 1 : 0);
+
   return (
     <div ref={hostRef} className="fms-proposal">
       <div className="fms-proposalhead">
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
-          Debt movement
+          {behalf ? ON_BEHALF : "Debt movement"}
         </span>
         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-          {/*
-            Counted, not asserted.
-
-            The card said "two things to pick" whatever was already on it. Now
-            that a named credit line is filled in from the sentence, saying
-            two when one is left reads as the card not having looked at
-            itself.
-          */}
-          {(() => {
-            const left = (draft.debtId ? 0 : 1) + (draft.debtEffect ? 0 : 1);
-            return left === 0 ? "check, then add" : left === 1 ? "one thing to pick" : "two things to pick";
-          })()}
+          {left === 0 ? "check, then add" : left === 1 ? "one thing to pick" : `${left} things to pick`}
         </span>
       </div>
 
       <dl className="fms-proposalfields">
         <Field label="Date" value={draft.date} mono />
       </dl>
+
+      {/*
+        What happened first on someone's behalf: both sides in view, because
+        the wrong side moves a balance the wrong way.
+      */}
+      {behalf ? (
+        <div className="fms-debteffects">
+          <span className="t-micro fms-pfieldlabel">What happened</span>
+          {(["owed", "held"] as const).map((side) => {
+            const shape = { kind: side === "owed" ? ("receivable" as const) : ("payable" as const), form: "pass-through" as const };
+            return (
+              <div key={side} className="fms-behalf-side">
+                <span className="t-micro fms-behalf-label">{BEHALF_SIDE_LABEL[side]}</span>
+                <div className="fms-choicerow" role="radiogroup" aria-label={BEHALF_SIDE_LABEL[side]}>
+                  {BEHALF_EFFECTS[side].map((effect) => (
+                    <button
+                      key={effect}
+                      type="button"
+                      role="radio"
+                      aria-checked={behalf === side && draft.debtEffect === effect}
+                      className={
+                        behalf === side && draft.debtEffect === effect
+                          ? "fms-choice fms-choice--debt t-body-strong"
+                          : "fms-choice fms-choice--debt t-body"
+                      }
+                      onClick={() => chooseSide(side, effect)}
+                    >
+                      {effectLabel(effect, shape)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {draft.debtEffect && (
+            <p className="t-micro fms-proposalnote">
+              {effectMeaning(draft.debtEffect, { kind: behalf === "owed" ? "receivable" : "payable", form: "pass-through" })}
+            </p>
+          )}
+        </div>
+      ) : null}
 
       {/*
         The amount and the wallet are changed here, not only in the form.
@@ -5688,88 +5758,108 @@ function DebtCard({
 
       <div className="fms-debtpick">
         <label className="t-micro fms-pfieldlabel" htmlFor={`debt-line-${turn.cardId}`}>
-          {toYou || turn.newPerson
-            ? "Who it is"
-            : live.some((d) => d.form === "pass-through" || d.counterpartyType === "person")
-              ? "Which debt or person"
-              : "Which credit line"}
+          {behalf
+            ? behalf === "owed"
+              ? "On whose behalf"
+              : "Whose money"
+            : toYou || turn.newPerson
+              ? "Who it is"
+              : live.some((d) => d.counterpartyType === "person")
+                ? "Which debt or person"
+                : "Which credit line"}
         </label>
         <select
           id={`debt-line-${turn.cardId}`}
           className="t-caption fms-proposalselect"
-          value={draft.debtId ?? ""}
+          value={draft.debtId ?? (person ? NEW : "")}
           onChange={(e) => {
+            if (e.target.value === NEW) {
+              onChange({ ...draft, debtId: undefined });
+              return;
+            }
             const debt = live.find((d) => d.id === e.target.value);
             const effect = debt ? effectFor(draft.debtEffect, debt.kind) : draft.debtEffect;
-            const next = { ...draft, debtId: e.target.value };
+            const next = {
+              ...draft,
+              debtId: e.target.value || undefined,
+              ...(debt?.form === "pass-through" ? { behalf: debt.kind === "receivable" ? ("owed" as const) : ("held" as const) } : {}),
+            };
             onChange(effect && effect !== draft.debtEffect ? withDebtEffect(next, effect) : next);
           }}
         >
           <option value="">Pick one</option>
-          {/* Money lent goes to a person or something owed to you, never a credit line. */}
-          {live
-            .filter((d) => !toYou || d.kind === "receivable" || d.counterpartyType === "person" || d.id === draft.debtId)
-            .map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
+          {person && <option value={NEW}>{person.name} (new, added with this entry)</option>}
+          {options.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
         </select>
-        {!draft.debtId && turn.newPerson && sink.canAddDebt && (
-          <Button
-            size="sm"
-            onClick={() => {
-              const person = personDebt(turn.newPerson ?? "", draft, debts, wallets[0] ?? "");
-              sink.addDebt(person);
-              const effect = effectFor(draft.debtEffect, person.kind);
-              const next = { ...draft, debtId: person.id };
-              onChange(effect && effect !== draft.debtEffect ? withDebtEffect(next, effect) : next);
-            }}
-          >
-            Add {turn.newPerson}
-          </Button>
+        {/* Someone not on the list: typed here, and added in the same tap as the entry. */}
+        {!draft.debtId && sink.canAddDebt && (behalf || toYou || turn.newPerson) && (
+          <input
+            type="text"
+            className="t-caption fms-proposalselect"
+            value={turn.newPerson ?? ""}
+            maxLength={60}
+            placeholder="Or type a new name"
+            aria-label="A new name"
+            onChange={(e) => onNewPerson(e.target.value)}
+          />
         )}
       </div>
 
-      <div className="fms-debteffects">
-        <span className="t-micro fms-pfieldlabel">What it does</span>
-        {/*
-          The form's own choice control, in the debt colour.
-
-          It was four buttons with the chosen one filled in brand green,
-          which is the colour this app spends on income (rule D3): a green
-          "Paid it down" on a card about borrowing is the same confusion the
-          selected-row tint had. Amber is what a liability is written in
-          here, and this is a radio group, so it says so to a screen reader
-          as well as to the eye.
-        */}
-        <div className="fms-choicerow" role="radiogroup" aria-label="What this debt movement does">
-          {effects.map((effect) => (
-            <button
-              key={effect}
-              type="button"
-              role="radio"
-              aria-checked={draft.debtEffect === effect}
-              className={
-                draft.debtEffect === effect
-                  ? "fms-choice fms-choice--debt t-body-strong"
-                  : "fms-choice fms-choice--debt t-body"
-              }
-              onClick={() => onChange(withDebtEffect(draft, effect))}
-            >
-              {effectLabel(effect, chosen)}
-            </button>
-          ))}
+      {behalf && draft.debtEffect === "writeoff" && (
+        <div className="fms-debtpick">
+          <label className="t-micro fms-pfieldlabel" htmlFor={`debt-item-${turn.cardId}`}>
+            {behalf === "owed" ? "Counts as spending on" : "Counts as income from"}
+          </label>
+          <select
+            id={`debt-item-${turn.cardId}`}
+            className="t-caption fms-proposalselect"
+            value={draft.item}
+            onChange={(e) => onChange({ ...draft, item: e.target.value })}
+          >
+            <option value="">Pick one</option>
+            {(behalf === "owed" ? reference.spendingTypes.map((t) => t.name) : reference.revenueCategories).map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
         </div>
-      </div>
+      )}
 
-      {/*
-        The interest inside the payment, beside it, as on the form.
+      {!behalf && (
+        <div className="fms-debteffects">
+          <span className="t-micro fms-pfieldlabel">What it does</span>
+          {/*
+            The form's own choice control, in the debt colour.
 
-        "I paid 1000 including its interest" gives the payment and not the
-        interest, and no rate is assumed: every lender counts it its own way.
-        A figure the sentence did give is already in the box.
-      */}
+            It was four buttons with the chosen one filled in brand green,
+            which is the colour this app spends on income (rule D3).
+          */}
+          <div className="fms-choicerow" role="radiogroup" aria-label="What this debt movement does">
+            {effects.map((effect) => (
+              <button
+                key={effect}
+                type="button"
+                role="radio"
+                aria-checked={draft.debtEffect === effect}
+                className={
+                  draft.debtEffect === effect
+                    ? "fms-choice fms-choice--debt t-body-strong"
+                    : "fms-choice fms-choice--debt t-body"
+                }
+                onClick={() => onChange(withDebtEffect(draft, effect))}
+              >
+                {effectLabel(effect, chosen)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {borrowing && (
         <div className="fms-debtpick">
           <label className="t-micro fms-pfieldlabel" htmlFor={`debt-charges-${turn.cardId}`}>
@@ -5829,8 +5919,10 @@ function DebtCard({
           variant="primary"
           disabled={!check.ok}
           onClick={() => {
-            sink.add(draft, { actor: "ai", via: "ai_chat" });
-            onSettle();
+            // Someone new first, then the row that names them.
+            if (person) sink.addDebt(person);
+            sink.add(ready, { actor: "ai", via: "ai_chat" });
+            onSettle(ready);
           }}
         >
           Add to ledger
@@ -5838,17 +5930,19 @@ function DebtCard({
         <Button size="sm" onClick={() => sink.use(draft)}>
           Open in the form
         </Button>
-        <Button size="sm" onClick={onSettle}>
+        <Button size="sm" onClick={() => onSettle()}>
           Discard
         </Button>
       </div>
 
       <p className="t-micro fms-proposalfrom">
-        {draft.debtId && draft.debtEffect
-          ? toYou
-            ? "Who it is and what it does were read from your words. Check both before adding: lending read as paid back would say they owe you less."
-            : "The line and what it does were read from your words. Check both before adding: reading either wrong turns borrowing into income."
-          : "Who it is with and what it does are the two things nobody should guess at with money that is owed, so they are picked unless your words said them plainly."}
+        {behalf
+          ? "On someone's behalf is never income or spending, until it is written off (spending) or retained (income). Check who it is and what happened before adding."
+          : draft.debtId && draft.debtEffect
+            ? toYou
+              ? "Who it is and what it does were read from your words. Check both before adding: lending read as paid back would say they owe you less."
+              : "The line and what it does were read from your words. Check both before adding: reading either wrong turns borrowing into income."
+            : "Who it is with and what it does are the two things nobody should guess at with money that is owed, so they are picked unless your words said them plainly."}
       </p>
     </div>
   );

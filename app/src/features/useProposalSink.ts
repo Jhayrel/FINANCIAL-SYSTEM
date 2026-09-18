@@ -95,8 +95,8 @@ export function useProposalSink(input: SinkInput): ProposalSink {
   return useMemo<ProposalSink>(
     () => ({
       nextRecordNumber,
-      check: (d) => {
-        const c = checkDraft(d, transactions, reference, debts);
+      check: (d, extra) => {
+        const c = checkDraft(d, transactions, reference, extra && extra.length > 0 ? [...debts, ...extra] : debts);
         return {
           ok: c.ok,
           problems: c.errors.map((e) => e.message),

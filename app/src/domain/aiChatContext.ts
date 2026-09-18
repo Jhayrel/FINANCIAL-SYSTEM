@@ -46,7 +46,7 @@ import { contextToText, phpFigure, type AiContext } from "./aiContext";
 import { addDays, dayOfWeek, formatMedium } from "./dates";
 import { redact } from "./aiRedact";
 import { toPesos } from "./money";
-import { costOf } from "./totals";
+import { costOf, incomeOf } from "./totals";
 import { positionsOf, rowsFor, type Debt } from "./debt";
 import type { IsoDate, Transaction } from "./types";
 
@@ -135,8 +135,7 @@ const spendingOf = costOf;
  * and Insights show. The model should quote what the owner can see on
  * screen, so it follows `totalsFor`.
  */
-const revenueOf = (t: Transaction): number =>
-  t.type === "Revenue" && t.category !== "Opening" ? t.total : 0;
+const revenueOf = incomeOf;
 
 interface Group {
   amount: number;
@@ -396,7 +395,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     out.push("");
     out.push("## Debt, every movement");
     out.push(
-      "outstanding = drawn + charged - repaid - written off. A charge is a fee, tax or interest the lender added to what is owed: it is spending on the day it was added, and the payment that clears it is not spending again. Interest paid from a wallet is spending and never reduces what is owed. A debt marked passing through is money held for someone or sent for someone: none of it is income or spending.",
+      "outstanding = drawn + charged - repaid - written off. A charge is a fee, tax or interest the lender added to what is owed: it is spending on the day it was added, and the payment that clears it is not spending again. Interest paid from a wallet is spending and never reduces what is owed. A debt marked on behalf is money advanced for someone or held for someone: it is not a loan, and none of it is income or spending until it is written off (then spending) or retained (then income).",
     );
 
     for (const p of positions) {
@@ -405,8 +404,8 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
         `### ${p.debt.name} (${
           p.debt.form === "pass-through"
             ? p.debt.kind === "payable"
-              ? "money I hold for someone, passing through"
-              : "money I sent for someone, to be paid back, passing through"
+              ? "on behalf: money I hold for someone"
+              : "on behalf: money I advanced for someone, to be reimbursed"
             : p.debt.kind === "payable"
               ? "I owe this"
               : "owed to me"

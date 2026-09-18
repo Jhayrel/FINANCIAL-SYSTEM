@@ -135,7 +135,13 @@ export function checkIntegrity(transactions: readonly Transaction[]): Issue[] {
       one(t, "missing-item", "info", `No item, so excluded from every ranking.`);
     }
 
-    if (!t.fromWallet && !t.toWallet) {
+    /*
+     * A charge the lender adds and a write-off move no wallet by design: the
+     * balance owed changes and no money moves. Flagging them as broken put a
+     * warning on every written-off advance and every fee on a credit line.
+     */
+    const movesNoWallet = t.type === "Debt" && (t.debtEffect === "charge" || t.debtEffect === "writeoff");
+    if (!t.fromWallet && !t.toWallet && !movesNoWallet) {
       one(t, "no-wallet", "error", `No wallet on either side, so it affects no balance.`);
     }
 

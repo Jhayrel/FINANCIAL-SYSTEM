@@ -29,15 +29,23 @@ import { inPeriod, matchesSearch, parseSearch, PERIODS, type Period } from "../d
 import { yearsCovered } from "../domain/year";
 import { checkIntegrity, type Issue } from "../domain/integrity";
 import type { Transaction, TransactionType } from "../domain/types";
+import type { Debt } from "../domain/debt";
+import { ON_BEHALF } from "../domain/debtWords";
 
-type FilterId = "all" | TransactionType | "flagged";
+type FilterId = "all" | TransactionType | "behalf" | "flagged";
 
+/*
+ * On behalf is its own filter, as it is its own type on the Add form. Its
+ * rows are stored as debt movements on a person whose form is `pass-through`,
+ * so the Debt filter leaves them out and this one finds them.
+ */
 const FILTERS: { id: FilterId; label: string }[] = [
   { id: "all", label: "All" },
   { id: "Revenue", label: "Revenue" },
   { id: "Spending", label: "Spending" },
   { id: "Transfer", label: "Transfer" },
   { id: "Debt", label: "Debt" },
+  { id: "behalf", label: ON_BEHALF },
   { id: "flagged", label: "Needs review" },
 ];
 
@@ -66,8 +74,11 @@ export function Database({
   onDeleteMany,
   onEdit,
   asOf,
+  debts = [],
 }: {
   transactions: readonly Transaction[];
+  /** The debts and people, to tell an On behalf row from a Debt row. */
+  debts?: readonly Debt[];
   initialFilter?: FilterId;
   /** Words to search for on arrival, from a link on another screen. */
   initialQuery?: string | undefined;
@@ -80,6 +91,9 @@ export function Database({
   asOf: string;
 }) {
   const [query, setQuery] = useState(initialQuery);
+  const behalfIds = useMemo(() => new Set(debts.filter((d) => d.form === "pass-through").map((d) => d.id)), [debts]);
+  const onBehalf = (t: Transaction): boolean => t.type === "Debt" && t.debtId !== undefined && behalfIds.has(t.debtId);
+  const badge = (t: Transaction) => <FlowBadge flow={TONE[t.type]} label={onBehalf(t) ? ON_BEHALF : undefined} />;
   const [filter, setFilter] = useState<FilterId>(initialFilter);
   const [period, setPeriod] = useState<Period>("all");
   /** A year is a filter on one continuous ledger (docs/08, rule Y1). */
@@ -196,7 +210,9 @@ export function Database({
 
     const filtered = transactions.filter((t) => {
       if (filter === "flagged" && !issuesById.has(t.id)) return false;
-      if (filter !== "all" && filter !== "flagged" && t.type !== filter) return false;
+      if (filter === "behalf" && !onBehalf(t)) return false;
+      if (filter === "Debt" && onBehalf(t)) return false;
+      if (filter !== "all" && filter !== "flagged" && filter !== "behalf" && t.type !== filter) return false;
       if (!inPeriod(t.date, period, asOf)) return false;
       if (year !== "all" && getYear(t.date) !== year) return false;
       return matchesSearch(t, terms);
@@ -217,7 +233,8 @@ export function Database({
           );
       }
     });
-  }, [transactions, query, filter, period, year, asOf, issuesById, sortKey, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, query, filter, period, year, asOf, issuesById, sortKey, sortDir, behalfIds]);
 
   const shown = rows.slice(0, limit);
   const flaggedCount = issuesById.size;
@@ -313,7 +330,7 @@ export function Database({
       header: "Type",
       width: "112px",
       hideBelow: "md",
-      render: (t) => <FlowBadge flow={TONE[t.type]} />,
+      render: (t) => badge(t),
     },
     {
       key: "wallet",
@@ -340,7 +357,7 @@ export function Database({
           {/* Shown only while the Type and Description columns are gone. */}
           <span className="fms-dt-sub fms-dt-only-narrow">
             <span className="fms-dt-only-md" style={{ flex: "0 0 auto" }}>
-              <FlowBadge flow={TONE[t.type]} />
+              {badge(t)}
             </span>
             {t.description && (
               <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }} title={t.description}>
@@ -609,7 +626,7 @@ export function Database({
                               t.description.trim() ||
                               (t.type === "Transfer" ? (t.toWallet ? `To ${t.toWallet}` : "Sent to someone") : `${t.type}, no item`)}
                           </span>
-                          <FlowBadge flow={TONE[t.type]} />
+                          {badge(t)}
                         </div>
                         {t.item.trim() && t.description.trim() && (
                           <div className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>

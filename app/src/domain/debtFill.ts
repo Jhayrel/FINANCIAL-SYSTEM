@@ -63,6 +63,11 @@ export function personIn(text: string, accounts: readonly string[]): string | nu
     return cap(raw ?? "");
   };
 
+  // "my friend Carlo", "kuya Ben": the name after the word for who they are.
+  const called = /\b(?:friend|freind|frend|friends|bestfriend|classmate|officemate|cousin|brother|sister|boss|client|neighbor|neighbour)\s+([A-Z][a-z'-]+)/.exec(text);
+  const byCalled = fits(called?.[1]);
+  if (byCalled) return byCalled;
+
   const subject = /^\s*([a-z][a-z'-]*)\s+(?:has\s+|already\s+|just\s+)?(?:paid|gave|returned|sent|owes|borrowed|lent|nagbayad|ibinalik)\b/i.exec(text);
   const bySubject = fits(subject?.[1]);
   if (bySubject) return bySubject;
@@ -112,11 +117,19 @@ export function fillDebt(
         })
       : undefined;
 
-    if (byName) {
-      next = { ...next, debtId: byName.id };
-    } else if (person && (next.debtEffect === undefined || RECEIVABLE_EFFECTS.includes(next.debtEffect) || /\b(borrow|borrowed|utang|owe)\b/i.test(text))) {
+    if (byName && (!next.behalf || byName.form === "pass-through")) {
+      // Someone on the list for money on their behalf makes the card On behalf, on their side.
+      next = {
+        ...next,
+        debtId: byName.id,
+        ...(byName.form === "pass-through" ? { behalf: byName.kind === "receivable" ? ("owed" as const) : ("held" as const) } : {}),
+      };
+    } else if (
+      person &&
+      (next.behalf || next.debtEffect === undefined || RECEIVABLE_EFFECTS.includes(next.debtEffect) || /\b(borrow|borrowed|utang|owe)\b/i.test(text))
+    ) {
       newPerson = person;
-    } else {
+    } else if (!next.behalf) {
       const receivable = next.debtEffect !== undefined && RECEIVABLE_EFFECTS.includes(next.debtEffect);
       const pool = live.filter((d) => (receivable ? d.kind === "receivable" : d.kind === "payable") && d.form !== "pass-through");
       const saysCredit = /\b(credit|card)\b/i.test(text);
@@ -171,8 +184,13 @@ export function fillDebt(
  * Lent to or paid back by: they owe you. Borrowed from: you owe them.
  */
 export function personDebt(name: string, draft: Draft, debts: readonly Debt[], fallbackWallet: string): Debt {
-  const kind: Debt["kind"] =
-    draft.debtEffect === "lend" || draft.debtEffect === "collect" ? "receivable" : "payable";
+  const kind: Debt["kind"] = draft.behalf
+    ? draft.behalf === "owed"
+      ? "receivable"
+      : "payable"
+    : draft.debtEffect === "lend" || draft.debtEffect === "collect"
+      ? "receivable"
+      : "payable";
   const base = makeDebtId(name);
   let id = base;
   for (let n = 2; debts.some((d) => d.id === id); n += 1) id = `${base}-${n}`;
@@ -180,7 +198,7 @@ export function personDebt(name: string, draft: Draft, debts: readonly Debt[], f
     id,
     name: name.trim(),
     kind,
-    form: "informal",
+    form: draft.behalf ? "pass-through" : "informal",
     counterparty: name.trim(),
     counterpartyType: "person",
     openedDate: draft.date,

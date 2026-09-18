@@ -9,8 +9,19 @@
  * lists. They are taught here once.
  *
  * The words depend on the debt as well as the movement. Paying back a credit
- * line is "Paid". Handing on money you held for your mother is "Passed on",
+ * line is "Paid". Handing on money you held for your mother is "Released",
  * and it is the same movement in the ledger.
+ *
+ * ── On behalf ─────────────────────────────────────────────────────────────
+ *
+ * Money paid, sent or held for another person is not a loan to the owner,
+ * who asked on 2026-09-17 for it to stand apart from Debt, in professional
+ * words rather than everyday ones. It is still stored as a debt movement,
+ * because until it is settled somebody is owed it, and that is what keeps it
+ * out of income and spending. Only the words and the screens differ:
+ *
+ *   They owe you     Advance, Reimbursed, Write off
+ *   You hold theirs  Held, Released, Retained
  */
 
 import type { Debt, DebtEffect } from "./debt";
@@ -19,17 +30,41 @@ type Shape = Pick<Debt, "kind"> & { readonly form?: Debt["form"] };
 
 const passing = (debt: Shape | undefined): boolean => debt?.form === "pass-through";
 
+/** The fifth type of entry, beside Spending, Revenue, Transfer and Debt. */
+export const ON_BEHALF = "On behalf";
+
+/** Which side of an on-behalf balance: money they owe you, or money you hold of theirs. */
+export type BehalfSide = "owed" | "held";
+
+export const BEHALF_SIDE_LABEL: Record<BehalfSide, string> = {
+  owed: "They owe you",
+  held: "You hold theirs",
+};
+
+/** The movements offered on each side, in the order a balance goes through them. */
+export const BEHALF_EFFECTS: Record<BehalfSide, readonly DebtEffect[]> = {
+  owed: ["lend", "collect", "writeoff"],
+  held: ["draw", "repay", "writeoff"],
+};
+
+/** The side a movement is on, when the movement alone says so. */
+export function sideOfEffect(effect: DebtEffect | undefined): BehalfSide | undefined {
+  if (effect === "lend" || effect === "collect") return "owed";
+  if (effect === "draw" || effect === "repay") return "held";
+  return undefined;
+}
+
 /** A choice's label, a word or two. */
 export function effectLabel(effect: DebtEffect, debt?: Shape): string {
   if (passing(debt)) {
     if (debt?.kind === "receivable") {
-      if (effect === "lend") return "Sent for them";
-      if (effect === "collect") return "Paid back to you";
-      if (effect === "writeoff") return "Given up";
+      if (effect === "lend") return "Advance";
+      if (effect === "collect") return "Reimbursed";
+      if (effect === "writeoff") return "Write off";
     } else {
-      if (effect === "draw") return "Received for them";
-      if (effect === "repay") return "Passed on";
-      if (effect === "writeoff") return "Kept";
+      if (effect === "draw") return "Held";
+      if (effect === "repay") return "Released";
+      if (effect === "writeoff") return "Retained";
     }
   }
   if (effect === "writeoff" && debt?.kind === "receivable") return "Given up";
@@ -58,16 +93,20 @@ export function effectMeaning(effect: DebtEffect, debt?: Shape): string {
   if (passing(debt)) {
     if (debt?.kind === "receivable") {
       if (effect === "lend") {
-        return "Money you sent or paid for them. It is not spending: they owe it back to you. A fee you pay yourself is spending, so add it as its own entry.";
+        return "Paid or sent on their behalf, such as a friend's meal they will pay back. It is not spending while they owe it. A transfer fee you pay yourself is spending, so add it on its own.";
       }
       if (effect === "collect") return "They paid you back. It is not income: it was your money all along.";
-      if (effect === "writeoff") return "You no longer expect it back. What they owe you goes down and no money moves.";
+      if (effect === "writeoff") {
+        return "They will not pay it back. What they owe you is cleared, and the amount counts as spending today under the item you pick.";
+      }
     } else {
       if (effect === "draw") {
-        return "Money that came into your account for someone else. It is not income: you are holding it for them.";
+        return "Money that reached your account for someone else, such as a client's payment or money you keep for a relative. It is not income while you hold it.";
       }
-      if (effect === "repay") return "You handed it on. It is not spending: it was never yours.";
-      if (effect === "writeoff") return "They told you to keep it. What you hold for them goes down and no money moves.";
+      if (effect === "repay") return "You passed their money on. It is not spending: it was never yours.";
+      if (effect === "writeoff") {
+        return "They let you keep it. What you hold for them is cleared, and the amount counts as income today under the kind you pick.";
+      }
     }
   }
   switch (effect) {

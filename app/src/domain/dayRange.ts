@@ -21,7 +21,7 @@ import { billStatuses } from "./bills";
 import { debtDue, positionsOf, type Debt } from "./debt";
 import { addDays, addMonths, daysBetween, formatMedium, getDay, getMonth, getYear, monthName } from "./dates";
 import type { Centavos } from "./money";
-import { costOf } from "./totals";
+import { costOf, incomeOf } from "./totals";
 import type { IsoDate, RankedAmount, ReferenceLists, Transaction } from "./types";
 
 export interface DayRange {
@@ -109,7 +109,7 @@ export function rangeReport(input: {
       spent += cost;
       byDay.set(t.date, (byDay.get(t.date) ?? 0) + cost);
     }
-    if (t.type === "Revenue" && t.category !== "Opening") cameIn += t.total;
+    cameIn += incomeOf(t);
   }
 
   let biggest: RangeReport["biggest"] = null;

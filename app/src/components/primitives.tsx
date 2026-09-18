@@ -220,14 +220,14 @@ function Spinner() {
 // ── Badges, §3.6 ──────────────────────────────────────────────────────────
 
 /** Flow badge: dot in the flow accent, label in flow text, on the flow wash. */
-export function FlowBadge({ flow }: { flow: Flow }) {
+export function FlowBadge({ flow, label }: { flow: Flow; label?: string | undefined }) {
   return (
     <span
       className="t-micro fms-badge"
       style={{ background: `var(--flow-${flow}-bg)`, color: `var(--flow-${flow}-text)` }}
     >
       <span aria-hidden className="fms-badge-dot" style={{ background: `var(--flow-${flow})` }} />
-      {FLOW_LABEL[flow]}
+      {label ?? FLOW_LABEL[flow]}
     </span>
   );
 }

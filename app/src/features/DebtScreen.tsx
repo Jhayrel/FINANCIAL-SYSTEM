@@ -93,7 +93,12 @@ export function DebtScreen({
   /** The Database searched for these words. */
   onShowRows: (query: string) => void;
 }) {
-  const live = useMemo(() => debts.filter((d) => !d.archived), [debts]);
+  /*
+   * Debts only: banks, credit lines and loans, with a person or with an
+   * institution. Money paid or held on someone's behalf is not a loan, the
+   * owner said, and it is followed on the Dashboard under On behalf.
+   */
+  const live = useMemo(() => debts.filter((d) => !d.archived && !passing(d)), [debts]);
   const dues = useMemo(
     () => positionsOf(live, transactions, asOf).map((p) => debtDue(p, transactions, asOf)),
     [live, transactions, asOf],
@@ -105,30 +110,24 @@ export function DebtScreen({
 
   const year = getYear(asOf);
   // Every debt, archived ones too: money still owed is owed whether or not the line is in use.
-  const everything = positionsOf(debts, transactions, asOf);
+  const everything = positionsOf(debts.filter((d) => !passing(d)), transactions, asOf);
   const sum = (keep: (d: Debt) => boolean): Centavos =>
     everything.filter((p) => keep(p.debt)).reduce((s, p) => s + Math.max(0, p.outstanding), 0);
   const owe = sum((d) => d.kind === "payable" && !passing(d));
   const owedToYou = sum((d) => d.kind === "receivable" && !passing(d));
-  const heldForOthers = sum((d) => d.kind === "payable" && passing(d));
-  const frontedForOthers = sum((d) => d.kind === "receivable" && passing(d));
   const costThisYear = transactions
     .filter((t) => t.type === "Debt" && t.debtEffect !== undefined && COST.has(t.debtEffect) && getYear(t.date) === year)
     .reduce((s, t) => s + t.total, 0);
 
-  const lending = dues.filter((d) => !passing(d.position.debt));
-  const through = dues.filter((d) => passing(d.position.debt));
+  const lending = dues;
   const soon = duesWithin(lending, 7);
-  const archived = debts.length - live.length;
+  const archived = debts.filter((d) => d.archived && !passing(d)).length;
 
   useReportScreen(
     () => ({
       screen: "Debt",
       lines: [
         `You owe ${formatMoney(owe)}. Owed to you ${formatMoney(owedToYou)}. Charges and interest in ${year}: ${formatMoney(costThisYear)}.`,
-        heldForOthers || frontedForOthers
-          ? `Passing through: ${formatMoney(heldForOthers)} held for other people, ${formatMoney(frontedForOthers)} sent for other people and not yet paid back.`
-          : "",
         ...dues.map(
           (d) =>
             `${d.position.debt.name} (${DEBT_FORM_LABEL[d.position.debt.form ?? "credit-line"]}), ${
@@ -140,7 +139,7 @@ export function DebtScreen({
         misfiled.length > 0 ? `${misfiled.length} spending rows name a debt, and may be payments filed as spending.` : "",
       ],
     }),
-    [owe, owedToYou, heldForOthers, frontedForOthers, costThisYear, dues, misfiled],
+    [owe, owedToYou, costThisYear, dues, misfiled],
   );
   const selected = dues.find((d) => d.position.debt.id === openId) ?? dues[0];
 
@@ -157,7 +156,7 @@ export function DebtScreen({
             message={
               archived > 0
                 ? `Every debt is archived (${archived}). Reopen one in Settings, under Credit and loans, to follow it here again.`
-                : "No credit lines, loans, money lent or money passing through for someone are followed yet. Add one in Settings, under Credit and loans, and what is owed, the payments and the due dates show here."
+                : "No credit lines, bank loans or personal loans are followed yet. Add one in Settings, under Credit and loans, or record a personal loan from the Add form, and what is owed, the payments and the due dates show here."
             }
             action={
               <Button variant="primary" onClick={onManage}>
@@ -243,21 +242,6 @@ export function DebtScreen({
       ))}
 
       {lending.length > 0 && <div className="fms-debtgrid">{lending.map((d) => cardFor(d, lending))}</div>}
-
-      {through.length > 0 && (
-        <section className="fms-debtthrough" aria-label="Money passing through">
-          <div className="fms-debtthrough-head">
-            <h2 className="t-display-m" style={{ margin: 0 }}>
-              Money passing through
-            </h2>
-            <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-              Not income and not spending. {formatMoney(heldForOthers)} held for other people, {formatMoney(frontedForOthers)} sent
-              for other people and still to come back.
-            </p>
-          </div>
-          <div className="fms-debtgrid">{through.map((d) => cardFor(d, through))}</div>
-        </section>
-      )}
 
       <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
         {archived > 0 ? `${archived} archived, kept with their history. ` : ""}

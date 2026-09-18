@@ -38,7 +38,8 @@ import type { Alert as Finding } from "../domain/alerts";
 import { totalSavingsBalance, totalWalletBalance } from "../domain/balances";
 import { budgetSummary } from "../domain/budget";
 import type { MonthBill } from "../domain/budgetView";
-import { incomeQuality, netWorth, positionsOf, type Debt, type DebtEffect } from "../domain/debt";
+import { incomeQuality, netWorth, outstandingOf, positionsOf, type Debt, type DebtEffect } from "../domain/debt";
+import { ON_BEHALF } from "../domain/debtWords";
 import { getMonth, getYear, MONTH_NAMES_SHORT, monthName } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
 import { isOpenBill, monthBrief } from "../domain/monthPlan";
@@ -266,6 +267,48 @@ export function Dashboard({
               quiet={v.worth.payables === 0}
             />
           </div>
+          {/*
+            On behalf: money a person owes back or money held for them, apart
+            from Debt. The two buttons are the ways it ends: settled, or
+            written off (which counts as spending) or retained (as income).
+          */}
+          {(() => {
+            const open = debts
+              .filter((d) => !d.archived && d.form === "pass-through")
+              .map((d) => ({ d, owed: outstandingOf(transactions, d.id) }))
+              .filter((x) => x.owed > 0);
+            return open.length === 0 ? null : (
+              <div className="fms-behalfhome">
+                <div className="t-label" style={{ color: "var(--ink-2)" }}>
+                  {ON_BEHALF}
+                </div>
+                <ul className="fms-moneylist">
+                  {open.map(({ d, owed }) => {
+                    const theirs = d.kind === "payable";
+                    return (
+                      <li key={d.id} className="fms-moneyrow fms-behalfrow">
+                        <span className="t-caption fms-truncate">
+                          {d.name}
+                          <span style={{ color: "var(--ink-3)" }}>{theirs ? " · you hold" : " · owes you"}</span>
+                        </span>
+                        <span className="fms-moneyrow-end">
+                          <Money value={owed} size="s" tone={theirs ? "var(--flow-debt-text)" : undefined} />
+                        </span>
+                        <span className="fms-behalfrow-actions">
+                          <button type="button" className="t-micro fms-linkbtn" onClick={() => onRecordDebt(d.id, theirs ? "repay" : "collect", owed)}>
+                            {theirs ? "Released" : "Reimbursed"}
+                          </button>
+                          <button type="button" className="t-micro fms-linkbtn" onClick={() => onRecordDebt(d.id, "writeoff", owed)}>
+                            {theirs ? "Retained" : "Write off"}
+                          </button>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })()}
           <ul className="fms-moneylist">
             {balances.map((w) => {
               const below = w.balance < 0;

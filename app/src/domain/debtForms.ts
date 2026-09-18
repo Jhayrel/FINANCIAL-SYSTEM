@@ -55,14 +55,14 @@ export type CounterpartyKind = "institution" | "person";
 export const DEBT_FORM_LABEL: Record<DebtForm, string> = {
   "credit-line": "Credit line",
   "term-loan": "Loan",
-  informal: "Informal",
-  "pass-through": "Passing through",
+  informal: "Personal loan",
+  "pass-through": "On behalf",
 };
 
 /** What each combination is called in the interface. */
 export function debtLabel(kind: Debt["kind"], form: DebtForm): string {
   if (form === "pass-through") {
-    return kind === "payable" ? "Money I hold for someone" : "Money I fronted for someone";
+    return kind === "payable" ? "Held on their behalf" : "Advanced on their behalf";
   }
   if (kind === "payable") {
     if (form === "credit-line") return "Credit line I use";
@@ -78,8 +78,8 @@ export function debtLabel(kind: Debt["kind"], form: DebtForm): string {
 export function debtExplanation(kind: Debt["kind"], form: DebtForm): string {
   if (form === "pass-through") {
     return kind === "payable"
-      ? "Money that came into your account for someone else, such as a client's payment. It is not income, and passing it on is not spending."
-      : "Money you sent or paid for someone who pays you back, such as money your mother asked you to send. It is not spending, and their payment back is not income.";
+      ? "Money that reached your account for someone else, such as a client's payment. It is not income, and releasing it is not spending. If they let you keep it, it becomes income."
+      : "Money paid or sent on someone's behalf, such as a friend's meal or money your mother asked you to send. It is not spending, and their reimbursement is not income. Written off, it becomes spending.";
   }
   if (kind === "payable") {
     if (form === "credit-line") {

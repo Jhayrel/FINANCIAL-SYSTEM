@@ -9,6 +9,7 @@
 import type { Centavos } from "./money";
 import { getMonth, getYear } from "./dates";
 import { owedChange } from "./debt";
+import { retainedAsIncome, writtenOffAsSpending } from "./totals";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export type StatementType =
@@ -53,7 +54,8 @@ export function belongsIn(
       return true;
 
     case "revenue":
-      return t.type === "Revenue";
+      // Retained on someone's behalf is income, and is on this statement.
+      return t.type === "Revenue" || retainedAsIncome(t);
 
     case "expense":
       if (t.type === "Spending") return true;
@@ -64,7 +66,11 @@ export function belongsIn(
       ) {
         return true;
       }
-      return t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge");
+      // Written off on someone's behalf is spending, and is on this statement.
+      return (
+        (t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge")) ||
+        writtenOffAsSpending(t)
+      );
 
     case "savings":
       return savingsWallets.has(t.fromWallet) || savingsWallets.has(t.toWallet);

@@ -833,9 +833,24 @@
  */
 .fms-flowrow {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--space-2);
   margin-bottom: var(--space-4);
+}
+
+/* Five across needs about 110px a tile; under that, three and two. */
+@container entry (max-width: 640px) {
+  .fms-flowrow {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .fms-flowrow > .fms-flowtile {
+    grid-column: span 2;
+  }
+
+  .fms-flowrow > .fms-flowtile:nth-child(n + 4) {
+    grid-column: span 3;
+  }
 }
 
 /*
@@ -852,9 +867,18 @@
  * one less than that, which is how the tiles came to read "↑ Spendi" and
  * "↓ Revenu". Two rows of two keeps every word whole.
  */
-@container entry (max-width: 480px) {
+@container entry (max-width: 400px) {
   .fms-flowrow {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fms-flowrow > .fms-flowtile,
+  .fms-flowrow > .fms-flowtile:nth-child(n + 4) {
+    grid-column: auto;
+  }
+
+  .fms-flowrow > .fms-flowtile:last-child {
+    grid-column: span 2;
   }
 }
 
@@ -5969,6 +5993,38 @@ textarea.fms-askinput {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+/* The Dashboard's On behalf list: a row, and the two ways it ends under it. */
+.fms-behalfhome {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.fms-behalfrow {
+  flex-wrap: wrap;
+}
+
+.fms-behalfrow-actions {
+  display: flex;
+  flex-basis: 100%;
+  gap: var(--space-4);
+}
+
+/* On behalf: the two sides, each with its three movements. */
+.fms-behalf {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fms-behalf-side {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.fms-behalf-label {
+  color: var(--ink-3);
 }
 
 /* ══ Chat: changes to saved entries and budgets ══════════════════════════════ */

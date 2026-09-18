@@ -198,6 +198,12 @@ balance) counts in what is owed, and is spending on the day it is added.
 Interest paid from a wallet is still excluded. The historical ledger has no
 charge rows, so every figure above is unchanged and still asserted.
 
+Also on 2026-09-17, money paid, sent or held **on someone's behalf** became
+its own type (spec 5.6.1, "On behalf"), apart from Debt. It is still stored
+as debt movements on a `pass-through` person, so balances are unchanged. Its
+**Write off** counts as spending and its **Retained** as income, by category
+on the write-off row; an ordinary debt's write-off still counts as neither.
+
 ### Migration safety, the load-bearing invariant
 
 Debt migration changes **classification only**. Wallet balances must be

@@ -51,7 +51,7 @@ import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
 import { formatMoney, type Centavos } from "./domain/money";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
-import { emptyDraft, insertChronologically } from "./domain/entry";
+import { debtWalletDirection, emptyDraft, insertChronologically } from "./domain/entry";
 import { formatMedium, getYear, today } from "./domain/dates";
 import { systemToCsv } from "./domain/csv";
 import { browserSettingsStore, type SettingsStore } from "./data/settingsStore";
@@ -1409,15 +1409,17 @@ export default function App() {
    */
   const recordDebt = (debt: Debt | undefined, effect: DebtEffect, amount: Centavos | null, back: Screen): void => {
     if (!debt) return;
-    const into = effect === "draw" || effect === "collect";
+    // A write-off moves no money, so it names no wallet.
+    const side = debtWalletDirection(effect);
     setIncoming({
       draft: {
         ...emptyDraft(asOf),
         flow: "Debt",
         debtId: debt.id,
         debtEffect: effect,
-        fromWallet: into ? "" : debt.wallet,
-        toWallet: into ? debt.wallet : "",
+        ...(debt.form === "pass-through" ? { behalf: debt.kind === "receivable" ? ("owed" as const) : ("held" as const) } : {}),
+        fromWallet: side === "out" ? debt.wallet : "",
+        toWallet: side === "in" ? debt.wallet : "",
         amount,
       },
       at: Date.now(),
@@ -1661,6 +1663,7 @@ export default function App() {
               key={`${dbFilter}-${dbQuery?.at ?? 0}`}
               transactions={transactions}
               initialFilter={dbFilter}
+              debts={settings.credits}
               initialQuery={dbQuery?.query}
               onDelete={handleDelete}
               onDeleteMany={handleDeleteMany}
