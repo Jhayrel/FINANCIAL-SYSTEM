@@ -282,3 +282,48 @@ describe("when it last matched, and money nobody wrote down", () => {
     expect(wrong && clueWords(wrong)).toContain("filed on Gcash");
   });
 });
+
+/**
+ * Gcash, 19 September 2026, on the live app: a PHP 500.00 difference, five
+ * rows entered twice worth PHP 8,415.00 between them, and the answer read
+ * "Found +PHP 8,415.00" of a difference of -PHP 500.00, then offered to
+ * record "the other PHP 8,915.00" as money that came in. The findings were
+ * real; the arithmetic on top of them was not.
+ */
+describe("when the findings come to more than the difference", () => {
+  const twice: Transaction[] = [
+    income("2026-09-01", 5_000_000, "Salary", "Gcash"),
+    spend("2026-09-05", 200_000, "Food", "grocery", "Gcash"),
+    spend("2026-09-05", 200_000, "Food", "grocery", "Gcash"),
+    spend("2026-09-06", 500_000, "Bills", "rent", "Gcash"),
+    spend("2026-09-06", 500_000, "Bills", "rent", "Gcash"),
+  ];
+
+  it("says they are rows worth checking, not the difference found", () => {
+    const result = investigate({ transactions: twice, account: "Gcash", actual: 3_650_000, asOf: "2026-09-10" });
+    expect(result.recorded).toBe(3_600_000);
+    expect(result.gap).toBe(-50_000);
+    expect(result.explained).toBe(-700_000);
+    expect(result.overshoot).toBe(true);
+
+    const { lines, rest } = investigationWords(result);
+    expect(lines.join(" ")).toContain("2 rows are worth looking at, ₱7,000.00 between them, which is more than the difference");
+    expect(lines.join(" ")).not.toContain("Found");
+    expect(rest).toBeNull();
+  });
+
+  it("offers nothing worked out from what is left over", () => {
+    const result = investigate({ transactions: twice, account: "Gcash", actual: 3_500_000, asOf: "2026-09-10" });
+    expect(result.gap).toBe(100_000);
+    expect(result.overshoot).toBe(true);
+    expect(result.possible).toEqual([]);
+    expect(investigationWords(result).lines.join(" ")).not.toContain("could be");
+  });
+
+  it("still explains the rest when the findings fit inside the difference", () => {
+    const result = investigate({ transactions: twice, account: "Gcash", actual: 4_600_000, asOf: "2026-09-10" });
+    expect(result.gap).toBe(-1_000_000);
+    expect(result.overshoot).toBe(false);
+    expect(investigationWords(result).lines.join(" ")).toContain("Found ₱7,000.00 of it");
+  });
+});

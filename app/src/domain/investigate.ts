@@ -95,6 +95,14 @@ export interface Investigation {
   readonly explained: Centavos;
   /** What is still unaccounted for. */
   readonly unexplained: Centavos;
+  /**
+   * The findings add up to more than the difference, or point the other way.
+   *
+   * Rows entered twice are worth putting right whatever the balance says, so
+   * they are still listed. What cannot be done is arithmetic on the rest:
+   * "the other ₱8,915.00 could be" was printed against a ₱500.00 difference.
+   */
+  readonly overshoot: boolean;
   /** The period the statement covered, when there was one. */
   readonly covered?: { readonly from: IsoDate; readonly to: IsoDate } | undefined;
   /** The last day the account and the ledger agreed, when the owner said. */
@@ -348,6 +356,14 @@ export function investigate(input: InvestigateInput): Investigation {
   const isCash = /(^|[^a-z])cash([^a-z]|$)/i.test(account);
 
   /*
+   * More found than there is to find. Every possibility below is worked out
+   * from the remainder, and a remainder larger than the difference itself is
+   * not a remainder: it means some of the findings are wrong, or the
+   * difference has more than one cause pulling both ways.
+   */
+  const overshoot = gap !== 0 && explained !== 0 && (Math.sign(explained) !== Math.sign(gap) || Math.abs(explained) > Math.abs(gap));
+
+  /*
    * What is left, as possibilities: one recent row, or two, that add up to
    * exactly what is unaccounted for. With a statement, only rows from before
    * it can be the cause, because inside its period every row was checked.
@@ -359,7 +375,7 @@ export function investigate(input: InvestigateInput): Investigation {
    * it offered three different sets of three for ₱1,100.00, none of them the
    * answer.
    */
-  if (unexplained !== 0) {
+  if (unexplained !== 0 && !overshoot) {
     const pool = onAccount
       .filter((t) => searched(t, input.lookBackDays ?? 60) && (!covered || t.date < covered.from))
       .map((row) => ({ row, value: movedOn(row, account) }))
@@ -428,7 +444,7 @@ export function investigate(input: InvestigateInput): Investigation {
         )
     : undefined;
 
-  return { account, asOf, recorded, actual, gap, found, possible, explained, unexplained, covered, since, movedSince };
+  return { account, asOf, recorded, actual, gap, found, possible, explained, unexplained, overshoot, covered, since, movedSince };
 }
 
 // ── In words ───────────────────────────────────────────────────────────────
@@ -481,7 +497,7 @@ export function investigationWords(result: Investigation): {
   /** What was searched, when the owner gave the day it last matched. */
   readonly since: string | null;
 } {
-  const { account, recorded, actual, gap, found, possible, explained, unexplained, covered, since, movedSince } = result;
+  const { account, recorded, actual, gap, found, possible, explained, unexplained, overshoot, covered, since, movedSince } = result;
   if (gap === 0) {
     return {
       headline: `${account} matches: the ledger and the account both hold ${formatMoney(actual)}.`,
@@ -507,13 +523,15 @@ export function investigationWords(result: Investigation): {
   }
   if (found.length > 0) {
     lines.push(
-      unexplained === 0
-        ? `Found all ${formatMoney(Math.abs(gap))}, in ${found.length} ${found.length === 1 ? "place" : "places"}:`
-        : `Found ${formatMoney(Math.abs(explained))} of it, in ${found.length} ${found.length === 1 ? "place" : "places"}:`,
+      overshoot
+        ? `${found.length} ${found.length === 1 ? "row is" : "rows are"} worth looking at, ${formatMoney(Math.abs(explained))} between them, which is more than the difference. Put right the ones that are wrong and the difference is worked out again:`
+        : unexplained === 0
+          ? `Found all ${formatMoney(Math.abs(gap))}, in ${found.length} ${found.length === 1 ? "place" : "places"}:`
+          : `Found ${formatMoney(Math.abs(explained))} of it, in ${found.length} ${found.length === 1 ? "place" : "places"}:`,
     );
     lines.push(...found.map(clueWords));
   }
-  if (unexplained !== 0) {
+  if (unexplained !== 0 && !overshoot) {
     if (possible.length > 0) {
       rest = `${found.length > 0 ? "The other" : "The whole"} ${formatMoney(Math.abs(unexplained))} could be:`;
       lines.push(rest);

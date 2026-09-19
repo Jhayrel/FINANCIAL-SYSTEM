@@ -269,7 +269,7 @@ export function Investigate({
                 <Money value={result.gap} size="m" signed tone={result.gap === 0 ? "var(--ok)" : undefined} />
               </div>
               <div>
-                <span className="t-label">Found</span>
+                <span className="t-label">{result.overshoot ? "Worth checking" : "Found"}</span>
                 <Money value={result.explained} size="m" signed tone={result.unexplained === 0 && result.gap !== 0 ? "var(--ok)" : undefined} />
               </div>
             </div>
@@ -297,7 +297,7 @@ export function Investigate({
               </ul>
             )}
 
-            {result.unexplained !== 0 && (
+            {result.unexplained !== 0 && !result.overshoot && (
               <>
                 <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
                   {summary.rest}
