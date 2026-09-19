@@ -68,7 +68,7 @@ const budgetDoc = (db: Firestore, uid: string, year: string) =>
  * dropped rather than written as null: an absent field and a null field would
  * otherwise mean the same thing in two different ways.
  */
-function toDocument(t: Transaction, deletedAt?: string): DocumentData {
+export function toDocument(t: Transaction, deletedAt?: string): DocumentData {
   const d: DocumentData = {
     recordNumber: t.recordNumber,
     date: t.date,
