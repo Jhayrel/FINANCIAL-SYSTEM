@@ -72,6 +72,19 @@ export function parseAmount(input: string | number | null | undefined): Centavos
 
   const cleaned = input
     .replace(/[₱P]/gi, "")
+    /*
+     * The app writes a real minus sign, U+2212, never a hyphen (style guide
+     * 2.2). Until this line it could not read its own output back: a figure
+     * copied off a screen and pasted into an amount field, or into "what it
+     * really holds" on Insights, came back as nothing.
+     *
+     * The range takes the rest of the dash punctuation with it, U+2010 to
+     * U+2015: the hyphen a phone keyboard offers, the non-breaking one a
+     * bank statement uses, and the two long ones a word processor makes out
+     * of a typed hyphen. Every one of them means a negative figure to the
+     * person who pasted it, and none of them is a character this app writes.
+     */
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
     .replace(/,/g, "")
     .replace(/\s/g, "")
     .trim();
