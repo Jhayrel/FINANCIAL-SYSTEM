@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { byOldest, said, MAX_TEXT, type ChatMessage } from "./chat";
+import { byOldest, said, MAX_FROM, MAX_TEXT, type ChatMessage } from "./chat";
 import { imageLimits, DEFAULT_IMAGE, DEFAULT_AI } from "./settings";
 
 describe("said", () => {
@@ -71,5 +71,38 @@ describe("imageLimits", () => {
   it("ignores a value that is not a number at all", () => {
     const broken = { ...DEFAULT_AI, image: { maxCount: NaN, maxSizeMB: undefined } };
     expect(imageLimits(broken)).toEqual(DEFAULT_IMAGE);
+  });
+});
+
+/**
+ * The line under a message says where the words came from, and when nothing
+ * answered it says why. On 20 September 2026 that line read "... too large,
+ * then reje": cut at 80 characters, mid-word, with the cause missing.
+ */
+describe("the line under a message", () => {
+  const long =
+    "Every model in the chain failed. Tried: openai/gpt-oss-120b too large at every size, then rejected (413), meta/llama-4-scout rejected (429), google/gemma-2-27b unavailable, mistral/small-24b provider error (503), qwen/qwen3-32b timed out, deepseek/deepseek-chat no key for this provider.";
+
+  it("keeps the whole diagnosis when it fits", () => {
+    const fits = "Every model in the chain failed. Tried: openai/gpt-oss-120b too large at every size, then rejected (413).";
+    expect(said("assistant", "No answer.", fits).from).toBe(fits);
+  });
+
+  it("cuts a longer one on a word, not through one", () => {
+    const from = said("assistant", "No answer.", long).from ?? "";
+    expect(from.length).toBeGreaterThan(200);
+    expect(from.length).toBeLessThanOrEqual(MAX_FROM);
+    expect(from).toContain("too large at every size");
+
+    const kept = from.slice(0, -1);
+    expect(from.slice(-1)).toBe(String.fromCodePoint(0x2026));
+    expect(long.startsWith(kept)).toBe(true);
+    // The cut lands after a whole word: what follows it in the original is a
+    // space or the punctuation that was trimmed off the end, never a letter.
+    expect(long.charAt(kept.length)).toMatch(/[\s,;:.]/);
+  });
+
+  it("leaves a short one exactly as it is", () => {
+    expect(said("assistant", "Done.", "openai/gpt-oss-120b").from).toBe("openai/gpt-oss-120b");
   });
 });

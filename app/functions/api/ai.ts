@@ -126,6 +126,22 @@ const MAX_CHAT_CONTEXT_BYTES = 120_000;
 /** What a context is cut to for a model that refuses the full one for size. */
 const COMPACT_CONTEXT_CHARS = 18_000;
 
+/*
+ * The sizes to come down through when a model refuses a request as too large.
+ *
+ * One smaller version was not enough. On 20 September 2026 a message holding
+ * thirty entries came back "every model in the chain failed": the full
+ * request was refused with 413, the 18,000 character retry was refused too,
+ * and the chain moved on to models that then failed for their own reasons.
+ *
+ * The free tiers cap tokens per minute rather than context, so the ceiling
+ * moves through the day and no single smaller size can know where it is.
+ * Each step here is about a third of the one before it, and the last is the
+ * worked-out figures with barely any rows under them, which still answers a
+ * question about totals. A short answer beats none.
+ */
+const SHRINK_TO = [COMPACT_CONTEXT_CHARS, 6_000, 2_000] as const;
+
 /**
  * A context cut to size, the summaries kept and the rows trimmed.
  *
@@ -1010,12 +1026,12 @@ export const onRequestPost = async (ctx: {
    * the bottom are what grows. A refusal for size is retried once, on the
    * same model, with the summaries whole and as many rows as fit.
    */
-  const smaller = [
+  const sized = (chars: number): string => [
     spec.instruction,
     spec.toned ? (TONES[tone] ?? TONES.brief) : "",
     `Reply with only this JSON and nothing else: ${spec.shape}`,
     "---",
-    compactContext(context, COMPACT_CONTEXT_CHARS),
+    compactContext(context, chars),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1062,17 +1078,37 @@ export const onRequestPost = async (ctx: {
 
       attempts.push({ model: candidate.model, reason: "unreadable shape" });
     } catch (e) {
-      if (e instanceof Error && e.message === "413" && images.length === 0 && smaller.length < prompt.length) {
-        try {
-          const raw = await callProvider(candidate, env, smaller, maxTokens, [], task);
-          const answer = raw ? readAnswer(raw, spec) : null;
-          if (answer) return json({ ...answer, model: `${candidate.provider}:${candidate.model}`, attempts, trimmed: true });
-          attempts.push({ model: candidate.model, reason: "too large, and the smaller request was unreadable" });
-          continue;
-        } catch (again) {
-          attempts.push({ model: candidate.model, reason: `too large, then ${shortReason(again)}` });
-          continue;
+      if (e instanceof Error && e.message === "413" && images.length === 0) {
+        let refused: unknown = null;
+        let unreadable = false;
+
+        for (const chars of SHRINK_TO) {
+          const shorter = sized(chars);
+          if (shorter.length >= prompt.length) continue;
+          try {
+            const raw = await callProvider(candidate, env, shorter, maxTokens, [], task);
+            const answer = raw ? readAnswer(raw, spec) : null;
+            if (answer) return json({ ...answer, model: label, attempts, trimmed: true });
+            unreadable = true;
+          } catch (again) {
+            refused = again;
+            /*
+             * Refused for its size again: there is a smaller size to try.
+             * Refused for anything else: smaller will not help, so stop.
+             */
+            if (!(again instanceof Error && again.message === "413")) break;
+          }
         }
+
+        attempts.push({
+          model: candidate.model,
+          reason: unreadable
+            ? "too large, and the smaller request was unreadable"
+            : refused
+              ? `too large at every size, then ${shortReason(refused)}`
+              : "too large",
+        });
+        continue;
       }
       // A retired model, a rate limit, a blip. Try the next one; only an
       // exhausted chain is worth telling the owner about.
@@ -1080,7 +1116,23 @@ export const onRequestPost = async (ctx: {
     }
   }
 
-  return json({ error: "Every model in the chain failed.", attempts }, 502);
+  /*
+   * Nothing is broken when every refusal was about size. The owner sent more
+   * than the free tiers take in one request, the fix is theirs and takes a
+   * second, and "the model is not working" would send them looking for a
+   * fault that is not there.
+   */
+  const allAboutSize = attempts.length > 0 && attempts.every((a) => a.reason.startsWith("too large"));
+
+  return json(
+    {
+      error: allAboutSize
+        ? "That message and your figures together are more than the models take in one request. Send it in two or three shorter messages, or ask about one month at a time."
+        : "Every model in the chain failed.",
+      attempts,
+    },
+    502,
+  );
 };
 
 /**

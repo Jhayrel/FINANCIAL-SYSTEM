@@ -12,7 +12,7 @@ import { loadFixture } from "../fixtures/load";
 import { allowedCategories } from "../domain/categorise";
 import { buildContext } from "../domain/aiContext";
 import { migrateAccounts } from "../domain/accounts";
-import { askAi, describeDraft, MODEL_DOWN, suggestCategory } from "./aiClient";
+import { askAi, describeDraft, downSentence, MODEL_DOWN, suggestCategory } from "./aiClient";
 
 const fixture = loadFixture();
 const context = buildContext({
@@ -432,5 +432,28 @@ describe("suggestCategory", () => {
     });
 
     expect(result.source).toBe("none");
+  });
+});
+
+/**
+ * A request refused for its size is not a broken model.
+ *
+ * 20 September 2026: a message with thirty entries in it answered "The AI
+ * model is not working. Please try again." Nothing was wrong with the model.
+ * The message plus the ledger was over what a free tier takes in one
+ * request, and the only useful thing to say was how to get an answer: send
+ * less at a time.
+ */
+describe("the sentence shown when nothing answered", () => {
+  it("passes on the endpoint's own words when the request was too big", () => {
+    const said =
+      "That message and your figures together are more than the models take in one request. Send it in two or three shorter messages, or ask about one month at a time.";
+    expect(downSentence(`${said} Tried: a too large, b rejected (413).`)).toBe(said);
+  });
+
+  it("says the model is down for every other failure", () => {
+    expect(downSentence("Every model in the chain failed. Tried: a rejected (429).")).toBe(MODEL_DOWN);
+    expect(downSentence("The model took too long to answer.")).toBe(MODEL_DOWN);
+    expect(downSentence(undefined)).toBe(MODEL_DOWN);
   });
 });

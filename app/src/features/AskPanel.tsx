@@ -130,7 +130,7 @@ import {
 import {
   classifyItem,
   extractProposals,
-  MODEL_DOWN,
+  downSentence,
   routeMessage,
   type Intent as Routed,
 } from "../data/aiClient";
@@ -1805,7 +1805,7 @@ export function AskPanel({
       // that could not be sent is better answered by the question path, which
       // has its own offline reply, so this stays quiet and lets it try.
       if (sent.length > 0) {
-        say({ kind: "assistant", text: MODEL_DOWN, from: result.reason ?? "this device" });
+        say({ kind: "assistant", text: downSentence(result.reason), from: result.reason ?? "this device" });
       }
       return false;
     }

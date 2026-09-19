@@ -122,6 +122,27 @@ export interface StoredCard {
 /** A message is a sentence, not a document. */
 export const MAX_TEXT = 4000;
 
+/**
+ * How long the line under a message may be.
+ *
+ * It said where the words came from, a model name or "this device", so 80
+ * characters was plenty. It also carries why nothing answered, and on 20
+ * September 2026 that read "Every model in the chain failed. Tried:
+ * openai/gpt-oss-120b too large, then reje": cut mid-word, with the part
+ * naming the cause missing. A diagnosis worth keeping is worth keeping
+ * whole, and it is one line of small type.
+ */
+export const MAX_FROM = 240;
+
+/** Cut on a word, never through one, and say that it was cut. */
+function shorten(text: string, max: number): string {
+  const clean = text.trim();
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max - 1);
+  const at = cut.lastIndexOf(" ");
+  return `${(at > max * 0.6 ? cut.slice(0, at) : cut).replace(/[,;:]$/, "")}…`;
+}
+
 let counter = 0;
 
 /**
@@ -167,7 +188,7 @@ export function said(
     at,
     role,
     text: redact(text).slice(0, MAX_TEXT),
-    ...(from ? { from: from.slice(0, 80) } : {}),
+    ...(from ? { from: shorten(from, MAX_FROM) } : {}),
     ...(described.length > 0 ? { files: described } : {}),
   };
 }

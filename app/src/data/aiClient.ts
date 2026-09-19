@@ -172,6 +172,24 @@ function reasonFrom(payload: { error?: unknown; attempts?: unknown }): string {
   return reasons.length > 0 ? `${said} Tried: ${reasons.slice(0, 4).join(", ")}.` : said;
 }
 
+/**
+ * What the owner reads when nothing answered.
+ *
+ * Almost always "the AI model is not working", because almost always that is
+ * what happened. A request refused for its size is different: nothing is
+ * broken, the message was bigger than a free model takes in one go, and the
+ * owner can fix it in a second by sending less. Saying "not working" there
+ * sends them looking for a fault that is not there.
+ *
+ * The reason carries the endpoint's sentence and then the list of models it
+ * tried. Only the sentence is worth putting in front of them.
+ */
+export function downSentence(reason: string | undefined): string {
+  if (!reason) return MODEL_DOWN;
+  const said = reason.split(" Tried:")[0] ?? reason;
+  return /more than the models take|too (?:big|large)|bigger than/i.test(said) ? said : MODEL_DOWN;
+}
+
 interface OkPayload {
   readonly text?: unknown;
   readonly model?: unknown;
@@ -254,7 +272,7 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
         await wait(PAUSE_MS[attempt + 1] ?? 2000);
         return askAi({ ...options, attempt: attempt + 1 });
       }
-      return fallback(message);
+      return { text: downSentence(message), source: "offline", reason: message };
     }
 
     /**
