@@ -114,7 +114,13 @@ export function toDocument(t: Transaction, deletedAt?: string): DocumentData {
    * marks, and a correction to a row the assistant entered taught it nothing,
    * because `manualCorrections` only learns from rows marked "ai".
    */
-  if (t.entrySource !== undefined) d.entrySource = t.entrySource;
+  /*
+   * Only the two values the field and the rules take. A row carrying anything
+   * else ("owner", from the bug that refused every hand-typed row, or a bad
+   * import) is written without it rather than refused whole: the provenance
+   * is worth less than the money record.
+   */
+  if (t.entrySource === "manual" || t.entrySource === "ai") d.entrySource = t.entrySource;
   if (deletedAt !== undefined) d.deletedAt = deletedAt;
   return d;
 }

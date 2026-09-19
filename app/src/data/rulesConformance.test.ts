@@ -105,6 +105,14 @@ describe("every row the app saves passes the database rules", () => {
     });
   }
 
+  it("writes no provenance at all rather than one the rules refuse", () => {
+    const [row] = draftToTransactions(CASES[0]![1], 1, "t-1");
+    const doc = toDocument({ ...row!, entrySource: "owner" as unknown as "manual" });
+    expect(doc).not.toHaveProperty("entrySource");
+    expect(refusals(doc)).toEqual([]);
+    expect(toDocument({ ...row!, entrySource: "manual" }).entrySource).toBe("manual");
+  });
+
   it("bins and restores with a field the rules accept", () => {
     const [row] = draftToTransactions(CASES[0]![1], 1, "t-1");
     expect(refusals(toDocument(row!, "2026-09-18T10:00:00.000Z"))).toEqual([]);
