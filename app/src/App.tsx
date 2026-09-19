@@ -756,7 +756,14 @@ export default function App() {
      * through the whole domain layer for one field. Every writer comes
      * through here.
      */
-    const stamped = rows.map((r) => ({ ...r, entrySource: by.actor }) as Transaction);
+    /*
+     * "manual" or "ai", which is what a row may carry and what the database
+     * rules accept. It was written as the actor ("owner"), and a cast hid the
+     * mismatch, so from 2026-09-17 every hand-typed row was refused by the
+     * database while the assistant's own rows saved. Nothing on screen said
+     * so until the next reload, when the row was simply gone.
+     */
+    const stamped: Transaction[] = rows.map((r) => ({ ...r, entrySource: by.actor === "ai" ? "ai" : "manual" }));
 
     setTransactions((prev) => insertChronologically(prev, stamped, { renumber: renumbers }));
     push((l) => l.saveMany(stamped));
