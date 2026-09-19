@@ -71,6 +71,7 @@ import { Button } from "../components/primitives";
 import {
   amend,
   applyReply,
+  leftoverFigure,
   detectAlsoIn,
   matchItem,
   nextQuestion,
@@ -151,6 +152,7 @@ import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel
 import { debtCardIntro } from "../domain/debtSentence";
 import { fillDebt, personDebt } from "../domain/debtFill";
 import { foldInterest } from "../domain/interestFold";
+import { saysWhen } from "../domain/when";
 import { lessonKey, lessonsFrom } from "../domain/learning";
 import { AmountInput } from "../components/forms";
 import type { Provenance } from "../domain/activity";
@@ -1550,7 +1552,19 @@ export function AskPanel({
     if (!pending) return;
     say({ kind: "you", text: reply });
 
-    const filled = applyReply(pending.draft, pending.blank, reply, reference, transactions);
+    let filled = applyReply(pending.draft, pending.blank, reply, reference, transactions);
+    /*
+     * No figure in the reply, and one left in the message it was asked about:
+     * that is the answer ("add it", "you already know it").
+     */
+    let fromMessage: number | null = null;
+    if (!filled && pending.blank === "amount") {
+      const taken = turns.flatMap((t) =>
+        isOffer(t) ? [t.proposal.draft.amount, t.proposal.draft.fee] : isDebt(t) ? [t.draft.amount, t.draft.charges] : [],
+      );
+      fromMessage = leftoverFigure(pending.said, taken);
+      if (fromMessage !== null) filled = { ...pending.draft, amount: fromMessage };
+    }
     if (!filled) {
       say({
         kind: "assistant",
@@ -1560,7 +1574,7 @@ export function AskPanel({
               ? `That reads as ${figuresIn(reply).length} separate amounts (${figuresIn(reply)
                   .map((c) => formatMoney(c))
                   .join(", ")}), not one. Send each one on its own with what it was for, such as "wifi 999".`
-              : "I could not find a figure in that. How much was it, in pesos?"
+              : "I could not find a figure in that. Type only the amount, like 900, or say never mind to drop this entry."
             : pending.blank === "item"
               ? "What was it for?"
               : `That is not one of your accounts. ${[...reference.wallets, ...reference.savings].join(", ")}`,
@@ -1644,7 +1658,7 @@ export function AskPanel({
         confidence: "high",
         sourceRef: "what you told me",
         said: pending.said || reply,
-        adjustments: because,
+        adjustments: fromMessage !== null ? [`${formatMoney(fromMessage)}, the figure in your message that no other card took.`, ...because] : because,
       },
       state: "open",
       cardId,
@@ -1687,7 +1701,22 @@ export function AskPanel({
     );
     stopper.current = null;
     // A screenful of daily interest is one entry, not sixty cards (domain/interestFold.ts).
-    const result = { ...read, proposals: foldInterest(read.proposals, transactions, reference) };
+    const folded = foldInterest(read.proposals, transactions, reference);
+    /*
+     * A typed message that names no day is today's, whatever the model dated
+     * it (domain/when.ts). Pictures keep the dates printed on them.
+     */
+    const today = sent.length === 0 && note.trim() !== "" && !saysWhen(note);
+    const result = {
+      ...read,
+      proposals: today
+        ? folded.map((p) =>
+            p.draft.date === asOf
+              ? p
+              : { ...p, draft: { ...p.draft, date: asOf }, adjustments: [...p.adjustments, "Dated today: your message named no day."] },
+          )
+        : folded,
+    };
 
     /**
      * The photo, as a description of itself.
@@ -2291,8 +2320,13 @@ export function AskPanel({
     const editAsk = files.length === 0 && !as && !isNoteLine && sink.canUpdate ? readEditAsk(note, reference, asOf) : null;
     if (editAsk && (routed === null || routed.intent === "editEntry" || routed.intent === "correction" || routed.intent === "entry" || routed.intent === "question")) {
       const onScreen = turns.some((t) => isOffer(t) && t.state === "open");
-      // "make it 300" with a card open is about the card, not the ledger.
-      if (!(onScreen && !/#|\b(all|every|entry|record|yesterday|last)\b/i.test(note) && routed?.intent !== "editEntry")) {
+      /*
+       * "make it 300" with a card open is about the card, not the ledger,
+       * whatever the router called it. "change the description to Buy food"
+       * was routed as an edit of saved rows with a card on screen, found none,
+       * and the card never changed. A saved row is meant when one is named.
+       */
+      if (!(onScreen && !/#\s*\d|\b(all|every|entry|entries|record|records|saved|yesterday|last)\b/i.test(note))) {
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", "add", { text: note }));
@@ -2923,8 +2957,20 @@ export function AskPanel({
      * with a button beside each, and a sentence that matches nothing says so
      * rather than offering the ledger sorted arbitrarily.
      */
+    /*
+     * A correction the card on screen can take is about that card, even when
+     * the router calls it an edit of saved rows: the card is what is being
+     * looked at. A saved row is meant when one is named.
+     */
+    const shownCard = openCard();
+    const cardTakesIt =
+      shownCard !== null &&
+      files.length === 0 &&
+      !as &&
+      !/#\s*\d|\b(entry|entries|record|records|saved|yesterday)\b/i.test(note) &&
+      amend(shownCard.turn.proposal.draft, note, reference, asOf) !== null;
     const saysRecall =
-      routed?.intent === "delete" || routed?.intent === "restore" || routed?.intent === "editEntry";
+      !cardTakesIt && (routed?.intent === "delete" || routed?.intent === "restore" || routed?.intent === "editEntry");
     const recall =
       files.length > 0 || as
         ? null
@@ -3883,6 +3929,7 @@ export function AskPanel({
               debts={debts}
               wallets={[...reference.wallets, ...reference.savings]}
               reference={reference}
+              transactions={transactions}
               sink={sink}
               hostRef={(el) => keepCard(i, el)}
               onSettle={(final) => {
@@ -5575,6 +5622,7 @@ function DebtCard({
   debts,
   wallets,
   reference,
+  transactions,
   sink,
   hostRef,
   onSettle,
@@ -5585,6 +5633,8 @@ function DebtCard({
   debts: readonly Debt[];
   wallets: readonly string[];
   reference: ReferenceLists;
+  /** The ledger, so a movement already in it says so before it is added twice. */
+  transactions: readonly Transaction[];
   sink: ProposalSink;
   /** So the panel can measure this card and hold it still when it changes. */
   hostRef: (el: HTMLDivElement | null) => void;
@@ -5618,6 +5668,15 @@ function DebtCard({
   const person = !draft.debtId && turn.newPerson && sink.canAddDebt ? personDebt(turn.newPerson, draft, debts, wallets[0] ?? "") : null;
   const ready: Draft = person ? { ...draft, debtId: person.id } : draft;
   const check = sink.check(ready, person ? [person] : undefined);
+  /*
+   * The same ₱2,000.00 borrowing on Maya Credit was entered on 18 September
+   * and again on the 19th, and the debt card said nothing: only entry cards
+   * looked for their twin in the ledger. The same debt and movement, amount
+   * and nearby date is the same row.
+   */
+  const twins = ready.debtId
+    ? duplicatesOf(ready, transactions).filter((m) => m.row.debtId === ready.debtId && m.row.debtEffect === ready.debtEffect)
+    : [];
   const borrowing = !behalf && draft.debtEffect === "draw" && chosen?.form !== "pass-through";
   const paying = !behalf && draft.debtEffect === "repay" && chosen?.form !== "pass-through";
 
@@ -5912,6 +5971,11 @@ function DebtCard({
           {w}
         </p>
       ))}
+      {twins[0] && (
+        <p className="t-micro fms-proposalnote fms-proposalnote--warn">
+          {duplicateHeadline(twins[0])} Add it only if it is a second, separate one.
+        </p>
+      )}
 
       <div className="fms-proposalactions">
         <Button

@@ -615,6 +615,47 @@ export function foldCharges(proposals: readonly Proposal[]): Proposal[] {
 }
 
 /**
+ * A fee said with a withdrawal or a transfer is that transfer's fee.
+ *
+ * "I received 2000 from maya credit and I withdraw 1000 and 18 fee" came back
+ * as a ₱18.00 charge on Maya Credit beside a fee-less withdrawal. Saved, it
+ * would have raised what is owed to Maya Credit by ₱18.00 and left the
+ * withdrawal costing nothing. A lender's own fees are named as such (service
+ * fee, stamp tax, interest, penalty); a plain fee with a withdrawal or a
+ * transfer in the same breath belongs to it, when there is exactly one
+ * fee-less transfer that day to give it to.
+ */
+export function foldTransferFees(proposals: readonly Proposal[]): Proposal[] {
+  let out = [...proposals];
+  const LENDER_FEE = /\b(service|dst|stamp|documentary|interest|penalty|late|processing|finance charge)\b/i;
+  for (const fee of proposals) {
+    const d = fee.draft;
+    const words = `${d.item} ${d.description}`;
+    const isFee =
+      d.amount !== null &&
+      ((d.flow === "Debt" && (d.debtEffect === "charge" || d.debtEffect === "fee") && /\bfee\b/i.test(words) && !LENDER_FEE.test(words)) ||
+        (d.flow === "Spending" && /\b(transaction|withdraw\w*|transfer|atm|cash ?out) fee\b/i.test(words)));
+    if (!isFee) continue;
+    const open = out.filter((t) => t.draft.flow === "Transfer" && t.draft.fee === 0 && t.draft.date === d.date);
+    const target = open.length === 1 ? open[0] : undefined;
+    if (!target) continue;
+    const added = d.amount ?? 0;
+    out = out
+      .filter((t) => t !== fee)
+      .map((t) =>
+        t === target
+          ? {
+              ...t,
+              draft: { ...t.draft, fee: added },
+              adjustments: [...t.adjustments, `${pesos(added)} fee on this ${/withdraw/i.test(t.draft.description) || t.draft.status === "Withdrawn" ? "withdrawal" : "transfer"}, from the same message.`],
+            }
+          : t,
+      );
+  }
+  return out;
+}
+
+/**
  * Read whatever came back into proposals and refusals.
  *
  * Accepts either `{ proposals: [...] }` or a bare array, because a model asked
@@ -658,5 +699,5 @@ export function readProposals(
     else proposals.push(read);
   }
 
-  return { proposals: foldCharges(proposals), refused, balances };
+  return { proposals: foldTransferFees(foldCharges(proposals)), refused, balances };
 }

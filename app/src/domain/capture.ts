@@ -231,6 +231,28 @@ export function applyReply(
 }
 
 /**
+ * The one figure in a message that no card has taken yet.
+ *
+ * "I received 2000 from maya credit and I withdraw 1000 and 18 fee then I
+ * spend 900 in treating my friend" made cards for the 2000 and the 1000, and
+ * then asked how much the treat was. "add it", "you already know it" and
+ * "recall it" were each met with "I could not find a figure in that", four
+ * times, when the answer was in the message the question came from. A fee is
+ * its own figure and never the missing amount. Only an answer with exactly
+ * one figure left is given; two left means the question was a fair one.
+ */
+export function leftoverFigure(said: string, taken: readonly (number | null | undefined)[]): number | null {
+  if (!said.trim()) return null;
+  const withoutFees = said
+    .replace(/\b\d[\d,]*(?:\.\d{1,2})?\s*(?:pesos?\s*|php\s*)?(?:transaction\s+|service\s+)?fees?\b/gi, " ")
+    .replace(/\bfees?\s*(?:of|is|was|na)?\s*(?:₱|php\s*)?\d[\d,]*(?:\.\d{1,2})?/gi, " ")
+    .replace(/\b20\d{2}-\d{2}-\d{2}\b/g, " ");
+  const used = new Set(taken.filter((v): v is number => typeof v === "number" && v > 0));
+  const left = [...new Set(figuresIn(withoutFees))].filter((v) => !used.has(v));
+  return left.length === 1 ? (left[0] ?? null) : null;
+}
+
+/**
  * The first figure in a sentence.
  *
  * `readMoney` wants the whole string to be an amount. This finds one inside
@@ -323,7 +345,30 @@ export function amend(
   asOf: IsoDate,
 ): Amendment | null {
   const trimmed = text.trim();
-  if (!trimmed || trimmed.length > 60) return null;
+  if (!trimmed) return null;
+
+  /*
+   * "change the description to Buy food" was typed with the card open and
+   * nothing happened: the corrections here were dates, wallets, fees, amounts
+   * and "x not y", and a description is none of those. Checked first, because
+   * what follows "to" can hold a date or a figure ("to lunch on Monday") that
+   * belongs to the description, not to the entry.
+   */
+  const described =
+    /^(?:please\s+)?(?:change|set|make|update|put|edit|rename)?\s*(?:the\s+|its\s+|it'?s\s+)?(?:description|desc|note|details?|label)\s*(?:to|as|into|:|=|should be|is)\s+(.{1,160})$/i.exec(trimmed);
+  if (described?.[1]) {
+    const words = described[1].trim().replace(/^["'“”]+|["'“”.]+$/g, "").trim();
+    if (words) return { draft: { ...draft, description: words }, what: `Description set to "${words}".` };
+  }
+
+  // "change the item to treat": the item, matched to the owner's own list.
+  const itemSaid = /^(?:please\s+)?(?:change|set|make|update|put)?\s*(?:the\s+|its\s+)?(?:item|category|type)\s*(?:to|as|into|:|=|should be|is)\s+(.{1,60})$/i.exec(trimmed);
+  if (itemSaid?.[1] && (draft.flow === "Spending" || draft.flow === "Revenue")) {
+    const match = matchItem(itemSaid[1].trim(), draft.flow, draft.category, reference);
+    if (match.item) return { draft: { ...draft, item: match.item }, what: `Item set to ${match.item}.` };
+  }
+
+  if (trimmed.length > 60) return null;
 
   const accounts = [...reference.wallets, ...reference.savings];
 

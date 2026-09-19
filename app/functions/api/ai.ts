@@ -123,6 +123,37 @@ interface AskBody {
 const MAX_CONTEXT_BYTES = 24_000;
 const MAX_CHAT_CONTEXT_BYTES = 120_000;
 
+/** What a context is cut to for a model that refuses the full one for size. */
+const COMPACT_CONTEXT_CHARS = 18_000;
+
+/**
+ * A context cut to size, the summaries kept and the rows trimmed.
+ *
+ * Everything above "## Entries" is worked-out figures, and it is kept whole
+ * when it fits. The rows below are cut from the end, which holds the least
+ * relevant, and a line says so, so the model does not count what it cannot
+ * see.
+ */
+function compactContext(context: string, max: number): string {
+  if (context.length <= max) return context;
+  const at = context.indexOf("\n## Entries");
+  const head = at >= 0 ? context.slice(0, at) : context;
+  const tail = at >= 0 ? context.slice(at) : "";
+  const keptHead = head.length > max * 0.7 ? `${head.slice(0, Math.floor(max * 0.7)).replace(/\n[^\n]*$/, "")}\n(Cut to fit.)` : head;
+  const room = max - keptHead.length;
+  if (!tail || room <= 200) return keptHead;
+  const lines = tail.split("\n");
+  const kept: string[] = [];
+  let used = 0;
+  for (const line of lines) {
+    if (used + line.length + 1 > room - 120) break;
+    kept.push(line);
+    used += line.length + 1;
+  }
+  const dropped = lines.length - kept.length;
+  return `${keptHead}${kept.join("\n")}${dropped > 0 ? `\n(${dropped} more entries left out to fit. Say so if a count would need them.)` : ""}`;
+}
+
 /**
  * Image bounds, repeated from the client on purpose.
  *
@@ -539,6 +570,8 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "Money to a person leaves their accounts. I gave 500 to my mom from gcash: flow Transfer, fromWallet Gcash, toWallet empty.",
     "Money to their own account stays theirs. I sent 500 to my own gcash from maya: flow Transfer, fromWallet Maya, toWallet Gcash. When one sentence says both, output two proposals.",
     "A withdrawal is a transfer, not spending. I withdrew 5000 from maya to cash: flow Transfer, status Withdrawn, fromWallet Maya, toWallet Cash, amountPesos 5000.",
+    "A fee paid on a withdrawal or a transfer is that transfer's feePesos, in the same proposal, never a row of its own and never a debt charge. I withdraw 1000 from maya and 18 fee: flow Transfer, status Withdrawn, fromWallet Maya, toWallet Cash, amountPesos 1000, feePesos 18. Only a fee the lender adds to a credit line (service fee, stamp tax, interest, penalty) is a debt charge.",
+    "With no date in the message, every proposal is dated today, the date given above. Never yesterday unless they said so.",
     "A credit line is never a wallet. I borrowed 2000 on maya credit into gcash is borrowing, not a transfer from Maya: flow Debt, debt Maya Credit, debtEffect borrowed, toWallet Gcash, amountPesos 2000.",
     "A credit line's own transaction list is debt, row by row, and debt is copied from their list of credit lines. Transferred money to My Wallet or cash out: debtEffect borrowed, toWallet the wallet it went to (My Wallet on a Maya Credit screen is Maya). Fee applied, service fee, DST, documentary stamp tax, interest, penalty or late fee: debtEffect charge, one proposal each, no wallet. Paid amount due or a payment: debtEffect paid, fromWallet the wallet it was paid from. Purchased via the credit line: debtEffect bought, with item and description for what was bought. Put the time shown next to each row in time as HH:MM, so fees can be matched to the borrowing they were charged on.",
     "Interest a bank or wallet pays is income, not debt. On a savings screen, Net base interest 0.10 and Net boosted interest 0.12 on Sep 16: two proposals, each flow Revenue, item their interest category (such as Bank interest), toWallet the savings account on their savings list with that bank's name (a Maya Savings screen is their Maya savings account, not the wallet Maya), amountPesos as shown, the date of that line. Interest is debt only on a credit line or loan's own screen.",
@@ -966,6 +999,27 @@ export const onRequestPost = async (ctx: {
   const maxTokens = spec.maxTokens ?? DEFAULT_MAX_TOKENS;
   const attempts: { model: string; reason: string }[] = [];
 
+  /*
+   * The same request, smaller, for a model that refused the size.
+   *
+   * "Is my spending bad?" and "what's declining in my account?" both came
+   * back "Every model in the chain failed": the first model refused the
+   * request as too large (413) and the ones after it failed for their own
+   * reasons, so a question with a perfectly good answer got none. The ledger
+   * summaries at the top of the context answer most questions; the rows at
+   * the bottom are what grows. A refusal for size is retried once, on the
+   * same model, with the summaries whole and as many rows as fit.
+   */
+  const smaller = [
+    spec.instruction,
+    spec.toned ? (TONES[tone] ?? TONES.brief) : "",
+    `Reply with only this JSON and nothing else: ${spec.shape}`,
+    "---",
+    compactContext(context, COMPACT_CONTEXT_CHARS),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
   for (const candidate of chain) {
     const label = `${candidate.provider}:${candidate.model}`;
 
@@ -1008,6 +1062,18 @@ export const onRequestPost = async (ctx: {
 
       attempts.push({ model: candidate.model, reason: "unreadable shape" });
     } catch (e) {
+      if (e instanceof Error && e.message === "413" && images.length === 0 && smaller.length < prompt.length) {
+        try {
+          const raw = await callProvider(candidate, env, smaller, maxTokens, [], task);
+          const answer = raw ? readAnswer(raw, spec) : null;
+          if (answer) return json({ ...answer, model: `${candidate.provider}:${candidate.model}`, attempts, trimmed: true });
+          attempts.push({ model: candidate.model, reason: "too large, and the smaller request was unreadable" });
+          continue;
+        } catch (again) {
+          attempts.push({ model: candidate.model, reason: `too large, then ${shortReason(again)}` });
+          continue;
+        }
+      }
       // A retired model, a rate limit, a blip. Try the next one; only an
       // exhausted chain is worth telling the owner about.
       attempts.push({ model: candidate.model, reason: shortReason(e) });

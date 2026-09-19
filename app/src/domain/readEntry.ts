@@ -260,8 +260,17 @@ function flowOf(text: string): Flow | null {
  * followed by a suffix, it is a number and a stray letter, and reading it as
  * a hundred thousand would be inventing the zeroes.
  */
+/**
+ * A shop with a number in its name, which is not a price.
+ *
+ * "bumili ako ng pagkain 500 cash sa 711" was read as PHP 500.00, correctly,
+ * and then the card warned "You wrote PHP 711.00": the shop's name. The same
+ * shape of mistake made "microsoft office 365" a PHP 365.00 purchase.
+ */
+const SHOP_NUMBERS = /\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]?11|711|24[\s/-]?7)\b/gi;
+
 function amountIn(text: string): number | null {
-  let withoutDates = text.replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
+  let withoutDates = text.replace(SHOP_NUMBERS, " ").replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
 
   /**
    * A year beside a month is a date, not two thousand pesos.

@@ -48,6 +48,26 @@ import type {
   Transaction,
 } from "../domain/types";
 
+/**
+ * Rows the database refused, after everything it would take was saved.
+ *
+ * A refused row fails the whole batch it is written in, so one row the rules
+ * do not know took its neighbours with it. The batch is retried a row at a
+ * time and only the refused ones come back here, for the app to keep and
+ * offer again (`domain/unsaved.ts`).
+ */
+export class RowsNotSaved extends Error {
+  constructor(
+    readonly rows: readonly Transaction[],
+    reason: string,
+  ) {
+    super(reason);
+    this.name = "RowsNotSaved";
+  }
+}
+
+const reasonOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
 // ── Paths ──────────────────────────────────────────────────────────────────
 
 const userRoot = (uid: string): string => `users/${uid}`;
@@ -182,7 +202,11 @@ export function firestoreLedger(uid: string): LedgerStore {
     },
 
     async save(t) {
-      await setDoc(doc(txCollection(db, uid), t.id), toDocument(t), { merge: true });
+      try {
+        await setDoc(doc(txCollection(db, uid), t.id), toDocument(t), { merge: true });
+      } catch (e) {
+        throw new RowsNotSaved([t], reasonOf(e));
+      }
     },
 
     async bin(id, at) {
@@ -198,13 +222,34 @@ export function firestoreLedger(uid: string): LedgerStore {
     async saveMany(transactions) {
       // Firestore caps a batch at 500 writes. A rename touching 440 rows fits
       // in one; the chunking is here so it still works when it does not.
+      const refused: Transaction[] = [];
+      let reason = "";
       for (let i = 0; i < transactions.length; i += 450) {
+        const chunk = transactions.slice(i, i + 450);
         const batch = writeBatch(db);
-        for (const t of transactions.slice(i, i + 450)) {
+        for (const t of chunk) {
           batch.set(doc(txCollection(db, uid), t.id), toDocument(t), { merge: true });
         }
-        await batch.commit();
+        try {
+          await batch.commit();
+        } catch (e) {
+          reason = reasonOf(e);
+          // One at a time, so a row the rules refuse loses only itself.
+          if (chunk.length === 1) {
+            refused.push(...chunk);
+            continue;
+          }
+          for (const t of chunk) {
+            try {
+              await setDoc(doc(txCollection(db, uid), t.id), toDocument(t), { merge: true });
+            } catch (one) {
+              reason = reasonOf(one);
+              refused.push(t);
+            }
+          }
+        }
       }
+      if (refused.length > 0) throw new RowsNotSaved(refused, reason);
     },
   };
 }

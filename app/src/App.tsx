@@ -68,10 +68,12 @@ import { getPreference, setPreference } from "./theme";
 import {
   firestoreLedger,
   firestoreSettingsStore,
+  RowsNotSaved,
   saveBudget,
   seedIfEmpty,
   subscribeBudgets,
 } from "./data/firestoreLedger";
+import { mergeUnsaved, readUnsaved, unsavedLine, withoutSaved, writeUnsaved } from "./domain/unsaved";
 import { useCloud } from "./data/useCloud";
 import { SignIn } from "./features/SignIn";
 import { migrateAccounts, renameAccount, renameItem, type Account } from "./domain/accounts";
@@ -538,9 +540,54 @@ export default function App() {
       .finally(() => setPending((count) => Math.max(0, count - 1)));
   };
 
+  /**
+   * Entries the database refused, kept on this device until they reach it.
+   * See `domain/unsaved.ts` for the two days of borrowing this came from.
+   */
+  const [unsaved, setUnsaved] = useState<Transaction[]>([]);
+  useEffect(() => {
+    setUnsaved(cloud.uid ? readUnsaved(cloud.uid) : []);
+  }, [cloud.uid]);
+  const keepUnsaved = (next: Transaction[]): void => {
+    setUnsaved(next);
+    if (cloud.uid) writeUnsaved(cloud.uid, next);
+  };
+
   const push = (fn: (l: ReturnType<typeof firestoreLedger>) => Promise<void>): void => {
     if (!cloud.uid) return;
-    track(fn(firestoreLedger(cloud.uid)));
+    const uid = cloud.uid;
+    track(
+      fn(firestoreLedger(uid)).catch((e: unknown) => {
+        if (e instanceof RowsNotSaved) {
+          setUnsaved((prev) => {
+            const next = mergeUnsaved(prev, e.rows);
+            writeUnsaved(uid, next);
+            return next;
+          });
+        }
+        throw e;
+      }),
+    );
+  };
+
+  /** Send the kept rows again, after the cause is put right. What arrives leaves the list. */
+  const retryUnsaved = (): void => {
+    if (!cloud.uid || unsaved.length === 0) return;
+    const uid = cloud.uid;
+    const rows = unsaved;
+    setWriteError(null);
+    track(
+      firestoreLedger(uid)
+        .saveMany(rows)
+        .then(() => keepUnsaved(withoutSaved(unsaved, rows)))
+        .catch((e: unknown) => {
+          if (e instanceof RowsNotSaved) {
+            const stillRefused = new Set(e.rows.map((t) => t.id));
+            keepUnsaved(rows.filter((t) => stillRefused.has(t.id)));
+          }
+          throw e;
+        }),
+    );
   };
 
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
@@ -1561,10 +1608,46 @@ export default function App() {
             const sync = syncWords({
               online: cloud.uid ? online : true,
               pending: cloud.uid && (slow || !online) ? pending : 0,
-              error: writeError ?? syncError,
+              // The kept rows say it better than the general notice, and say what to do with them.
+              error: unsaved.length > 0 ? syncError : (writeError ?? syncError),
             });
-            return sync ? (
-              <div style={{ marginBottom: "var(--space-4)" }} role="status" aria-live="polite">
+            return sync || unsaved.length > 0 ? (
+              <div style={{ marginBottom: "var(--space-4)", display: "grid", gap: "var(--space-3)" }} role="status" aria-live="polite">
+                {/*
+                  The rows themselves, kept, rather than "add it again" with
+                  nothing left on screen to add again from.
+                */}
+                {unsaved.length > 0 && (
+                  <Alert
+                    status="over"
+                    title={`${unsaved.length} ${unsaved.length === 1 ? "entry is" : "entries are"} not in the database`}
+                    action={
+                      <span style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
+                        <Button size="sm" variant="primary" onClick={retryUnsaved}>
+                          Try again
+                        </Button>
+                        <Button size="sm" onClick={() => keepUnsaved([])}>
+                          Dismiss
+                        </Button>
+                      </span>
+                    }
+                  >
+                    <span style={{ display: "block" }}>
+                      The database refused {unsaved.length === 1 ? "it" : "them"}. They are kept on this device, so nothing is lost.
+                      If the rules in Firebase are older than this app, publish firestore.rules in the Firebase console, then press Try
+                      again.
+                    </span>
+                    <ul style={{ margin: "var(--space-2) 0 0", paddingLeft: "var(--space-4)" }}>
+                      {unsaved.slice(0, 6).map((t) => (
+                        <li key={t.id} className="t-caption">
+                          {unsavedLine(t)}
+                        </li>
+                      ))}
+                      {unsaved.length > 6 && <li className="t-caption">and {unsaved.length - 6} more</li>}
+                    </ul>
+                  </Alert>
+                )}
+                {sync && (
                 <Alert
                   status={sync.level}
                   title={sync.title}
@@ -1578,6 +1661,7 @@ export default function App() {
                 >
                   {sync.detail}
                 </Alert>
+                )}
               </div>
             ) : null;
           })()}

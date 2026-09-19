@@ -96,9 +96,27 @@ export function centavosIn(token: string): number | null {
   return Number(whole) * 100 + Number(frac.padEnd(2, "0"));
 }
 
-/** Every figure in a sentence, largest first. */
-function figuresIn(said: string): number[] {
-  const found = said.match(/\d[\d,]*(?:\.\d{1,2})?/g) ?? [];
+/**
+ * Every figure in a sentence, largest first, without the ones that name a
+ * thing rather than a price: a shop ("sa 711"), or one of the owner's own
+ * items with a number in it ("Microsoft Office 365").
+ */
+function figuresIn(said: string, reference?: ReferenceLists): number[] {
+  let text = said.replace(/\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]?11|711|24[\s/-]?7)\b/gi, " ");
+  if (reference) {
+    const numbered = [
+      ...reference.bills,
+      ...reference.subscriptions,
+      ...reference.spendingTypes.map((t) => t.name),
+      ...reference.revenueCategories,
+    ]
+      .filter((name) => /\d/.test(name))
+      .sort((a, b) => b.length - a.length);
+    for (const name of numbered) {
+      text = text.replace(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), " ");
+    }
+  }
+  const found = text.match(/\d[\d,]*(?:\.\d{1,2})?/g) ?? [];
   return found
     .map(centavosIn)
     .filter((c): c is number => c !== null)
@@ -140,7 +158,7 @@ export function verifyReading(
    * would make this noise rather than a check.
    */
   if (sentence !== "" && draft.amount !== null && draft.amount > 0) {
-    const biggest = figuresIn(sentence)[0];
+    const biggest = figuresIn(sentence, reference)[0];
     if (biggest !== undefined && biggest > draft.amount && biggest !== draft.fee) {
       findings.push({
         check: "figure",

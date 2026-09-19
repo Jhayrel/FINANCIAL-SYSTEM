@@ -29,6 +29,8 @@ export interface EntryChange {
   readonly wallet?: { readonly from?: string | undefined; readonly to: string } | undefined;
   readonly date?: IsoDate | undefined;
   readonly item?: string | undefined;
+  /** "change the description to Buy food": the words, as typed. */
+  readonly description?: string | undefined;
 }
 
 export interface EditAsk {
@@ -105,6 +107,18 @@ export function readEditAsk(text: string, reference: ReferenceLists, asOf: IsoDa
   let rest = ` ${text} `;
   const change: { -readonly [K in keyof EntryChange]: EntryChange[K] } = {};
 
+  /*
+   * The description, before anything else reads the words after "to": in
+   * "change the description to Buy food" they are the new description, and
+   * the item reader below took "food" out of them and changed the item.
+   */
+  // "description of #0532 to Buy food": the entry named in the middle is what to find.
+  const describedAs = /\b(?:description|desc|note)\b(?:\s+(?:of|for|on)\s+(.{1,60}?))?\s*(?:to|as|into|:|should be)\s+(.{1,160}?)\s*$/i.exec(text);
+  if (describedAs?.[2]) {
+    change.description = describedAs[2].replace(/^["'“”]+|["'“”.]+$/g, "").trim();
+    rest = ` ${text.slice(0, describedAs.index)} ${describedAs[1] ?? ""} `;
+  }
+
   // A wallet: "from gcash to maya", or "to maya" after move or switch.
   const fromTo = new RegExp(String.raw`\bfrom\s+(.+?)\s+(?:to|into|in)\s+(.+?)(?=$|[,.]|\s+(?:instead|and|on|for|this|last)\b)`, "i").exec(rest);
   if (fromTo?.[1] && fromTo[2]) {
@@ -147,7 +161,7 @@ export function readEditAsk(text: string, reference: ReferenceLists, asOf: IsoDa
   }
 
   // An item: "to food", a name from their own lists.
-  if (!change.wallet && change.amount === undefined && !change.date) {
+  if (!change.wallet && change.amount === undefined && !change.date && !change.description) {
     const itemTo = /\b(?:to|as|into)\s+(.+?)(?=$|[,.])/i.exec(rest);
     const item = itemTo?.[1] ? nameIn(itemTo[1], items) : "";
     if (itemTo && item) {
@@ -156,7 +170,7 @@ export function readEditAsk(text: string, reference: ReferenceLists, asOf: IsoDa
     }
   }
 
-  if (!change.wallet && change.amount === undefined && !change.date && !change.item) return null;
+  if (!change.wallet && change.amount === undefined && !change.date && !change.item && !change.description) return null;
 
   const target = rest
     .replace(VERB, " ")
@@ -216,13 +230,15 @@ export function changeRow(
             : "Spending";
     after = { ...after, item: change.item, category };
   }
+  if (change.description !== undefined) after = { ...after, description: change.description };
 
   if (
     after.amount === row.amount &&
     after.fromWallet === row.fromWallet &&
     after.toWallet === row.toWallet &&
     after.date === row.date &&
-    after.item === row.item
+    after.item === row.item &&
+    after.description === row.description
   ) {
     return { reason: "It already reads that way." };
   }
@@ -285,5 +301,6 @@ export function changeWords({ before, after }: ChangedRow): string {
   if (before.toWallet !== after.toWallet) parts.push(`into ${after.toWallet || "no wallet"} instead of ${before.toWallet || "no wallet"}`);
   if (before.date !== after.date) parts.push(`dated ${after.date} instead of ${before.date}`);
   if (before.item !== after.item) parts.push(`${before.item || "no item"} to ${after.item}`);
+  if (before.description !== after.description) parts.push(`described as "${after.description}"`);
   return parts.join(", ");
 }
