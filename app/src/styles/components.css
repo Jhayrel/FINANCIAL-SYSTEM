@@ -481,25 +481,31 @@
 
 /* ══ Alerts and toasts, §3.7 ════════════════════════════════════════════════ */
 
+/*
+ * A notice, ruled rather than boxed.
+ *
+ * It used to be a tinted card: a wash of the status colour, a border mixed
+ * from the same colour, a round badge with a glyph in it, and rounded
+ * corners. Four ways of saying one thing, and stacked two deep at the top of
+ * a screen they were the loudest objects in the app. The owner's verdict on
+ * 20 September 2026 was that it looked generated, and it did.
+ *
+ * It is now what every other block here is (rule D2): square, on the surface
+ * it already sits on, separated by a 2px rule. The status is carried by the
+ * rule and by a word, not by a wash, so colour still means something (rule
+ * D3) and the meaning survives without it. Every status colour clears 4.5:1
+ * on --surface and on --paper in both themes, asserted in contrast.test.ts.
+ */
 .fms-alert {
-  display: flex;
-  gap: var(--space-3);
+  display: grid;
+  gap: 2px;
   min-width: 0;
-  /* 12px was tight for two lines of prose next to a glyph. */
-  padding: var(--space-4);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  padding: var(--space-1) 0 var(--space-1) var(--space-3);
+  border-left: 2px solid var(--alert-rule);
 }
 
-.fms-alert-glyph {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-full);
-  color: var(--surface);
-  font-weight: 700;
+.fms-alert-kicker {
+  color: var(--alert-rule);
 }
 
 /* An error message can quote a path or an id with no spaces in it. */

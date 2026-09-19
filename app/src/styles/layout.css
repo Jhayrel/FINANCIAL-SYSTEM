@@ -1723,9 +1723,8 @@
   gap: var(--space-2);
   justify-self: stretch;
   min-width: 0;
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface-sunk);
-  border-radius: var(--radius-md);
+  padding: var(--space-1) 0 var(--space-1) var(--space-3);
+  border-left: 2px solid var(--hairline-strong);
 }
 
 .fms-aioff-list {
@@ -3160,25 +3159,23 @@
 /*
  * Already got this one.
  *
- * ── Why this one is tinted when the rest of the card is not ───────────────
+ * ── Why it is a rule and not a panel ──────────────────────────────────────
  *
- * Everything else on a proposal card is a field or a note about a field, and
- * those are framed rather than filled, because flow colour means direction of
- * money (rule D3) and a tint that could be read as a flow would be lying. The
- * warn pair is not a flow colour: it is the same one the budget rail and the
- * integrity queue already use for "look at this before you commit to it", and
- * a duplicate is exactly that. It clears 4.5:1 on its own background in both
- * themes, asserted in contrast.test.ts.
+ * It was a wash of --warn-bg with the rule on top, which made it the loudest
+ * thing on a card whose job is to show a figure. The rule alone says the same
+ * thing: this one is worth a look before you commit to it. The warn colour is
+ * not a flow colour, so it cannot be read as a direction of money (rule D3),
+ * and it clears 4.5:1 on the card surface in both themes, asserted in
+ * contrast.test.ts.
  *
- * Square, like every other block on a ledger surface (rule D2). The left rule
- * is 2px of ink, which is how separation is done here.
+ * Square, like every other block on a ledger surface (rule D2). Separation
+ * here is a 2px rule, never a fill and never a corner radius.
  */
 .fms-dupe {
   display: grid;
   gap: var(--space-2);
   min-width: 0;
-  padding: var(--space-2);
-  background: var(--warn-bg);
+  padding: var(--space-1) 0 var(--space-1) var(--space-3);
   border-left: 2px solid var(--warn);
 }
 
@@ -3628,9 +3625,8 @@
   display: grid;
   justify-items: start;
   gap: var(--space-2);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--surface-sunk);
+  padding: var(--space-1) 0 var(--space-1) var(--space-3);
+  border-left: 2px solid var(--hairline-strong);
   color: var(--ink-2);
 }
 
@@ -3930,9 +3926,8 @@ button.fms-recent-row:disabled {
   display: grid;
   gap: var(--space-1);
   margin: var(--space-1) 0 0;
-  padding: var(--space-2) var(--space-3);
-  background: var(--surface-sunk);
-  border-radius: var(--radius-md);
+  padding: var(--space-1) 0 var(--space-1) var(--space-3);
+  border-left: 2px solid var(--hairline);
 }
 
 .fms-actchange {
@@ -4317,7 +4312,6 @@ button.fms-recent-row:disabled {
   display: grid;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
   background: var(--surface-sunk);
 }
 
@@ -4368,7 +4362,6 @@ button.fms-recent-row:disabled {
   gap: var(--space-2);
   margin-bottom: var(--space-4);
   padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
   background: var(--surface-sunk);
 }
 
@@ -5963,7 +5956,6 @@ textarea.fms-askinput {
   gap: var(--space-3);
   padding: var(--space-3);
   background: var(--surface-sunk);
-  border-radius: var(--radius-md);
 }
 
 .fms-debtfield {
@@ -5983,10 +5975,9 @@ textarea.fms-askinput {
 .fms-newperson {
   display: grid;
   gap: var(--space-2);
-  padding: var(--space-3);
+  padding: var(--space-1) 0 var(--space-2) var(--space-3);
   margin-bottom: var(--space-2);
-  background: var(--surface-sunk);
-  border-radius: var(--radius-md);
+  border-left: 2px solid var(--hairline-strong);
 }
 
 .fms-newperson-actions {
@@ -6206,7 +6197,6 @@ textarea.fms-askinput {
   align-content: start;
   padding: var(--space-4);
   background: var(--surface-sunk);
-  border-radius: var(--radius-md);
 }
 
 @container (max-width: 899px) {
@@ -6294,10 +6284,8 @@ textarea.fms-askinput {
 .fms-checklist {
   display: grid;
   gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border-left: 3px solid var(--warn);
-  border-radius: var(--radius-sm);
-  background: var(--warn-bg);
+  padding: var(--space-1) 0 var(--space-1) var(--space-3);
+  border-left: 2px solid var(--warn);
 }
 
 .fms-checklist ul {
@@ -6449,12 +6437,18 @@ textarea.fms-askinput {
   min-width: 0;
 }
 
-/* A correction is not a new entry, and it looks like one no longer. */
+/*
+ * A correction is not a new entry, and it looks like one no longer.
+ *
+ * Said with a rule, not with a tint. Amber is what a debt is worth in this
+ * app, and a correction is not a debt: wrapping the header in --warn-bg
+ * borrowed a meaning it does not have, on top of a rounded panel that
+ * matched nothing else on the screen. The rule is ink, the record number is
+ * in the title, and the row as it was saved is on the line under it.
+ */
 .fms-entryhead.is-editing {
-  padding: var(--space-2) var(--space-3);
-  border-left: 3px solid var(--warn);
-  border-radius: var(--radius-md);
-  background: var(--warn-bg);
+  padding: 0 0 var(--space-1) var(--space-3);
+  border-left: 2px solid var(--hairline-strong);
 }
 
 .fms-fields {
@@ -6626,13 +6620,12 @@ textarea.fms-askinput {
   display: grid;
   gap: var(--space-1);
   margin-top: var(--space-3);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--surface-sunk);
+  padding: var(--space-1) 0 var(--space-1) var(--space-3);
+  border-left: 2px solid var(--hairline);
 }
 
 .fms-changes.has-changes {
-  border-left: 3px solid var(--warn);
+  border-left-color: var(--ink-3);
 }
 
 .fms-changes ul {

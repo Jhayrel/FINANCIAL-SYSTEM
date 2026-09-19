@@ -429,12 +429,20 @@ export function ProgressBar({
 
 // ── Alerts, §3.7 ──────────────────────────────────────────────────────────
 
-const ALERT_GLYPH: Record<Status, string> = {
-  ok: "✓",
-  over: "!",
-  warn: "!",
-  info: "i",
-  none: "·",
+/*
+ * The status in a word, where a coloured glyph used to be.
+ *
+ * A round badge with a tick or an exclamation mark in it said "this is an
+ * alert" and nothing else: the colour was the only content, and to anyone
+ * who cannot separate the two colours it was a dot. The word carries it
+ * instead, and the rule beside it carries the colour.
+ */
+const ALERT_WORD: Record<Status, string> = {
+  ok: "Done",
+  over: "Problem",
+  warn: "Check",
+  info: "Note",
+  none: "Note",
 };
 
 export function Alert({
@@ -452,20 +460,11 @@ export function Alert({
     <div
       role={status === "over" ? "alert" : "status"}
       className="fms-alert"
-      style={{
-        background: `var(--${status}-bg)`,
-        borderColor: `color-mix(in srgb, var(--${status}) 28%, transparent)`,
-      }}
+      style={{ "--alert-rule": `var(--${status})` } as CSSProperties}
     >
-      <span aria-hidden className="t-micro fms-alert-glyph" style={{ background: `var(--${status})` }}>
-        {ALERT_GLYPH[status]}
-      </span>
+      <span className="t-label fms-alert-kicker">{ALERT_WORD[status]}</span>
       <div className="fms-alert-body">
-        {title && (
-          <div className="t-body-strong" style={{ color: `var(--${status})` }}>
-            {title}
-          </div>
-        )}
+        {title && <div className="t-body-strong">{title}</div>}
         <div
           className="t-caption fms-alert-text"
           style={{ marginTop: title ? "var(--space-1)" : 0 }}

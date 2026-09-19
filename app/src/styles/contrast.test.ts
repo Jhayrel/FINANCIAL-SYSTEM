@@ -71,28 +71,35 @@ describe("status colours clear 4.5:1 on their own background", () => {
 });
 
 /**
- * The duplicate warning reads on its own tint.
+ * A notice reads on the surface it sits on.
  *
- * `.fms-dupe` is the one block in the app that puts body ink on a status
- * background rather than on a surface: the headline is `--warn` on
- * `--warn-bg`, already covered above, but the evidence lines underneath are
- * `--ink-2`, and rule D7 is that every colour clears 4.5:1 on its own
- * background in both themes. Verified, not assumed.
+ * Notices were tinted cards, so every status colour only ever had to read on
+ * its own wash. On 20 September 2026 the washes went: an alert, the checks
+ * above Save and the duplicate warning are now a 2px rule and words on the
+ * card or the page itself. Rule D7 is that every colour clears 4.5:1 on its
+ * own background in both themes, so these are the backgrounds to check.
  */
-describe("the duplicate warning reads on the warn tint", () => {
-  for (const [name, tokens] of themes) {
-    it(`${name}: --ink-2 on --warn-bg`, () => {
-      const fg = resolve(tokens, "--ink-2");
-      const bg = resolve(tokens, "--warn-bg");
-      const r = ratio(fg, bg);
-      expect(r, `${fg} on ${bg} = ${r}:1`).toBeGreaterThanOrEqual(AA);
-    });
+describe("notices read on the surface under them", () => {
+  const STATUSES = ["ok", "over", "warn", "info", "none"] as const;
+  const UNDER = ["--surface", "--surface-sunk", "--paper"] as const;
 
-    it(`${name}: --hairline is visible on --warn-bg`, () => {
-      const fg = resolve(tokens, "--hairline");
-      const bg = resolve(tokens, "--warn-bg");
-      const r = ratio(fg, bg);
-      expect(r, `${fg} on ${bg} = ${r}:1`).toBeGreaterThan(1.05);
+  for (const [name, tokens] of themes) {
+    for (const status of STATUSES) {
+      for (const under of UNDER) {
+        it(`${name}: --${status} on ${under}`, () => {
+          const fg = resolve(tokens, `--${status}`);
+          const bg = resolve(tokens, under);
+          const r = ratio(fg, bg);
+          expect(r, `${fg} on ${bg} = ${r}:1`).toBeGreaterThanOrEqual(AA);
+        });
+      }
+    }
+
+    it(`${name}: the rule beside a plain notice is visible`, () => {
+      // 2px of ink is a graphical object, so the 3:1 floor applies.
+      const rule = resolve(tokens, "--hairline-strong");
+      const surface = resolve(tokens, "--surface");
+      expect(ratio(rule, surface)).toBeGreaterThanOrEqual(1.2);
     });
   }
 });
