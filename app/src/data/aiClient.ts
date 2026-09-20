@@ -229,12 +229,20 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
         authorization: `Bearer ${auth}`,
       },
       body: JSON.stringify({
+        /*
+         * The question travels in its own field.
+         *
+         * Appended to the end of the context it was the first thing cut when
+         * a model refused the size, and the model then answered from the
+         * summaries alone: "No question was asked", and four questions
+         * answered with one paragraph, 20 September 2026.
+         */
+        ...(options.question ? { question: options.question } : {}),
         context: [
           options.contextText ?? contextToText(context),
           options.history?.length
             ? ["", "Earlier in this conversation:", ...options.history.map((h) => `${h.role}: ${h.text}`)].join(String.fromCharCode(10))
             : "",
-          options.question ? ["", `Question: ${options.question}`].join(String.fromCharCode(10)) : "",
         ]
           .filter(Boolean)
           .join(String.fromCharCode(10)),

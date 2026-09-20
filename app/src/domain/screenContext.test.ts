@@ -73,6 +73,13 @@ describe("whether the question is about what is on screen", () => {
   ];
 
   const ABOUT_THE_LEDGER = [
+    // "this month" is a span of time, not the screen. Live, 20 September
+    // 2026: "I have 11 days left this month, what should I cut?" was
+    // answered with a description of the Add form.
+    "I have 11 days left this month, what should I cut?",
+    "is 21k on Treat this month bad?",
+    "how much did I spend this week",
+    "what did I spend on food this year",
     "how much did I spend today",
     "what is my maya balance",
     "how much did I spend on food in august",

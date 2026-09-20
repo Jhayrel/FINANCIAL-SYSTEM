@@ -98,6 +98,22 @@ async function refuseStranger(request: Request, env: Env): Promise<Response | nu
 interface AskBody {
   /** The computed summary from `domain/aiContext.ts`. Figures, never raw rows. */
   readonly context?: unknown;
+  /**
+   * What was actually asked, kept apart from the figures.
+   *
+   * ── The bug this field exists to stop ─────────────────────────────────
+   *
+   * The question used to be appended to the end of the context. The context
+   * is trimmed from the end when a model refuses its size, so on any large
+   * ledger the question was the first thing thrown away, and the model
+   * answered from the summaries with no idea what had been asked. On 20
+   * September 2026 it replied "No question was asked", which was the literal
+   * truth, and then answered four different questions with the same
+   * paragraph.
+   *
+   * Kept out of `context` it cannot be trimmed, whatever happens to the rows.
+   */
+  readonly question?: unknown;
   /** Which fixed job to do. Not free text from the user. */
   readonly task?: unknown;
   readonly tone?: unknown;
@@ -976,6 +992,8 @@ export const onRequestPost = async (ctx: {
   const task = typeof body.task === "string" ? body.task : "summary";
   const tone = typeof body.tone === "string" ? body.tone : "brief";
   const context = typeof body.context === "string" ? body.context : "";
+  // Bounded: it goes in every prompt, including the smallest retry.
+  const question = typeof body.question === "string" ? body.question.slice(0, 2_000) : "";
 
   const spec = TASKS[task];
   if (!spec) return json({ error: "Unknown task." }, 400);
@@ -1029,6 +1047,7 @@ export const onRequestPost = async (ctx: {
     spec.instruction,
     spec.toned ? (TONES[tone] ?? TONES.brief) : "",
     `Reply with only this JSON and nothing else: ${spec.shape}`,
+    question ? `The question to answer, which is the whole job: ${question}` : "",
     "---",
     context,
   ]
@@ -1049,10 +1068,15 @@ export const onRequestPost = async (ctx: {
    * the bottom are what grows. A refusal for size is retried once, on the
    * same model, with the summaries whole and as many rows as fit.
    */
+  /*
+   * The question goes above the figures and outside the compaction, so the
+   * smallest retry still knows what it is answering.
+   */
   const sized = (chars: number): string => [
     spec.instruction,
     spec.toned ? (TONES[tone] ?? TONES.brief) : "",
     `Reply with only this JSON and nothing else: ${spec.shape}`,
+    question ? `The question to answer, which is the whole job: ${question}` : "",
     "---",
     compactContext(context, chars),
   ]

@@ -73,5 +73,19 @@ export function aboutTheScreen(question: string): boolean {
   }
 
   // Pointing words, which mean nothing without the screen.
-  return /\b(this|these|that one|here|on screen|ito|dito|ganito)\b/i.test(text);
+  /*
+   * "This month" is not this screen.
+   *
+   * The owner, 20 September 2026: "I have 11 days left this month, what
+   * should I cut?" was answered with "The screen shows a new entry form for
+   * a Debt from Maya", because "this" was read as pointing at the screen. A
+   * word for a span of time after it makes it a span of time, and a
+   * question about one is a question about the ledger.
+   */
+  const pointing = text.replace(
+    /\b(?:this|these|that)\s+(?:month|week|year|day|days|morning|afternoon|evening|night|time|period|quarter|payday|payslip)\b/gi,
+    " ",
+  );
+
+  return /\b(this|these|that one|here|on screen|ito|dito|ganito)\b/i.test(pointing);
 }

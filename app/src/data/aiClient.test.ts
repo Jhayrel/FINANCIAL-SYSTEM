@@ -457,3 +457,56 @@ describe("the sentence shown when nothing answered", () => {
     expect(downSentence(undefined)).toBe(MODEL_DOWN);
   });
 });
+
+/**
+ * The question must never be the part that gets cut.
+ *
+ * ── What happened on 20 September 2026 ─────────────────────────────────────
+ *
+ * It was appended to the end of the context. The endpoint trims the context
+ * from the end when a model refuses its size, so on this ledger the question
+ * was the first thing thrown away. The model answered from the summaries with
+ * no idea what had been asked: it replied "No question was asked", which was
+ * the literal truth, and then answered four different questions with the same
+ * paragraph about the budget.
+ *
+ * It travels in its own field now, which nothing trims.
+ */
+describe("what the endpoint is sent", () => {
+  const sent = async (question: string): Promise<{ question?: string; context: string }> => {
+    let body = "";
+    const fetcher = (async (_u: string, init: RequestInit) => {
+      body = String(init.body);
+      return new Response(JSON.stringify({ text: "ok" }), { headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    await askAi({ context, task: "chat", tone: "brief", question, fetcher, token: async () => "t" });
+    return JSON.parse(body) as { question?: string; context: string };
+  };
+
+  it("carries the question in a field of its own", async () => {
+    const asked = "can I spend 10k tonight?";
+    const payload = await sent(asked);
+
+    expect(payload.question, "the question is its own field").toBe(asked);
+  });
+
+  it("does not bury it at the end of the figures", async () => {
+    const asked = "how much did I spend today and on what?";
+    const payload = await sent(asked);
+
+    // Where it used to live, and where the trimming would have reached it.
+    expect(payload.context).not.toContain(`Question: ${asked}`);
+  });
+
+  it("sends nothing extra when there is no question", async () => {
+    let body = "";
+    const fetcher = (async (_u: string, init: RequestInit) => {
+      body = String(init.body);
+      return new Response(JSON.stringify({ text: "ok" }), { headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    await askAi({ context, task: "summary", tone: "brief", fetcher, token: async () => "t" });
+    expect(JSON.parse(body)).not.toHaveProperty("question");
+  });
+});
