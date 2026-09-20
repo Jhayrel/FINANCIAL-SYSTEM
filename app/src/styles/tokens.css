@@ -93,6 +93,42 @@
   --none-bg: #eff1ee;
 
   /* ── Chart palette, fixed by annual rank so colours never shuffle ────── */
+
+  /*
+   * A ranking is one flow, in five steps you can tell apart.
+   *
+   * The categorical palette made the biggest kind of spending green, which is
+   * the colour of money coming in (rule D3). One flow colour at four percent
+   * steps was honest and invisible: eight bars read as one block. These are
+   * five hand-picked steps of each flow, spread as far as the contrast floor
+   * allows, with the largest strongest: deepest in the light theme, brightest
+   * in the dark one. Every step clears 3:1 on the surface and on the track it
+   * sits on, in both themes, asserted in contrast.test.ts.
+   */
+  --ramp-spending-1: #521c17;
+  --ramp-spending-2: #71312c;
+  --ramp-spending-3: #904640;
+  --ramp-spending-4: #ae5b55;
+  --ramp-spending-5: #cd706a;
+
+  --ramp-revenue-1: #173d23;
+  --ramp-revenue-2: #265435;
+  --ramp-revenue-3: #366c47;
+  --ramp-revenue-4: #458359;
+  --ramp-revenue-5: #549a6b;
+
+  --ramp-transfer-1: #343931;
+  --ramp-transfer-2: #484e44;
+  --ramp-transfer-3: #5c6358;
+  --ramp-transfer-4: #71786c;
+  --ramp-transfer-5: #858d7f;
+
+  --ramp-debt-1: #483112;
+  --ramp-debt-2: #624520;
+  --ramp-debt-3: #7d5a2e;
+  --ramp-debt-4: #986e3d;
+  --ramp-debt-5: #b2824b;
+
   --cat-1: #1f4415;
   --cat-2: #2f6b21;
   --cat-3: #3f7a22;
@@ -207,6 +243,42 @@
   --info-bg: #152631;
   --none: #949e94;
   --none-bg: #1f251f;
+
+
+  /*
+   * A ranking is one flow, in five steps you can tell apart.
+   *
+   * The categorical palette made the biggest kind of spending green, which is
+   * the colour of money coming in (rule D3). One flow colour at four percent
+   * steps was honest and invisible: eight bars read as one block. These are
+   * five hand-picked steps of each flow, spread as far as the contrast floor
+   * allows, with the largest strongest: deepest in the light theme, brightest
+   * in the dark one. Every step clears 3:1 on the surface and on the track it
+   * sits on, in both themes, asserted in contrast.test.ts.
+   */
+  --ramp-spending-1: #f4aba3;
+  --ramp-spending-2: #dd9890;
+  --ramp-spending-3: #c6867d;
+  --ramp-spending-4: #af736a;
+  --ramp-spending-5: #986057;
+
+  --ramp-revenue-1: #a1d88a;
+  --ramp-revenue-2: #8dc077;
+  --ramp-revenue-3: #78a964;
+  --ramp-revenue-4: #649252;
+  --ramp-revenue-5: #507a3f;
+
+  --ramp-transfer-1: #bdc3b8;
+  --ramp-transfer-2: #a8aea3;
+  --ramp-transfer-3: #939a8e;
+  --ramp-transfer-4: #7e857a;
+  --ramp-transfer-5: #697065;
+
+  --ramp-debt-1: #e9c785;
+  --ramp-debt-2: #cfb072;
+  --ramp-debt-3: #b49860;
+  --ramp-debt-4: #9a814d;
+  --ramp-debt-5: #806a3a;
 
   --cat-1: #2f6b21;
   --cat-2: #3f7a22;

@@ -101,6 +101,7 @@ import {
   withoutTheFilePart,
   type Chart,
 } from "../domain/charts";
+import { rampFor } from "../components/charts";
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
@@ -5402,8 +5403,15 @@ function FoundList({
 const toneOf = (chart: Chart): string =>
   chartDirection(chart) === "revenue" ? "var(--flow-revenue)" : "var(--flow-spending)";
 
-/** Largest strongest, then lighter. Never below 0.3, where a bar stops reading against the track. */
-const stepOpacity = (rank: number, count: number): number => Math.max(0.3, 1 - rank * (0.7 / Math.max(count - 1, 1)));
+/**
+ * How strongly a row is drawn, when the chart is months.
+ *
+ * A month above the average is the point of that chart, so those are full
+ * strength and the rest are quieter. A ranking uses colour for this instead
+ * (`rampFor`), because fading a bar to a third of itself over a dark track
+ * turns it grey, which is the colour of a transfer.
+ */
+const monthStrength = (value: number, average: number): number => (value > average ? 1 : 0.55);
 
 /**
  * The figures for whichever part is being pointed at.
@@ -5492,8 +5500,11 @@ function ChartView({ chart }: { chart: Chart }) {
              * strength: for spending that is the red that needs looking at.
              */
             const average = chart.total / Math.max(chart.rows.length, 1);
-            const strength =
-              chart.by === "month" ? (r.value > average ? 1 : 0.45) : stepOpacity(i, chart.rows.length);
+            const months = chart.by === "month";
+            const strength = months ? monthStrength(r.value, average) : 1;
+            const colour = months
+              ? toneOf(chart)
+              : rampFor(chartDirection(chart) === "revenue" ? "revenue" : "spending", i, chart.rows.length);
             return (
             <button
               key={r.label}
@@ -5512,8 +5523,8 @@ function ChartView({ chart }: { chart: Chart }) {
                   className="fms-chartbar"
                   style={{
                     width: `${Math.max(r.share * 100, 1.5)}%`,
-                    background: toneOf(chart),
-                    opacity: at === null || at === i ? strength : strength * 0.5,
+                    background: colour,
+                    opacity: at === null || at === i ? strength : strength * 0.6,
                   }}
                 />
               </span>
@@ -5614,8 +5625,10 @@ function PieView({
       value: r.value,
       dash: fraction * circumference,
       offset,
-      // Largest darkest, then stepping lighter, in the colour of the money.
-      opacity: stepOpacity(i, chart.rows.length),
+      // Largest strongest, then stepping toward grey, in the colour of the
+      // money (`rampFor`). Fading one hue over a dark background turned the
+      // small slices the colour of a transfer.
+      colour: rampFor(chartDirection(chart) === "revenue" ? "revenue" : "spending", i, chart.rows.length),
       percent: Math.round(fraction * 100),
     };
     offset += fraction * circumference;
@@ -5634,8 +5647,8 @@ function PieView({
               cy={centre}
               r={radius}
               fill="none"
-              stroke={toneOf(chart)}
-              strokeOpacity={(at === null || at === i ? 1 : 0.45) * s.opacity}
+              stroke={s.colour}
+              strokeOpacity={at === null || at === i ? 1 : 0.55}
               strokeWidth={at === i ? 26 : 22}
               strokeDasharray={`${s.dash} ${circumference - s.dash}`}
               strokeDashoffset={-s.offset}
@@ -5665,7 +5678,7 @@ function PieView({
               onBlur={leave}
               onClick={() => pin(i)}
             >
-              <span className="fms-pieswatch" style={{ background: toneOf(chart), opacity: s.opacity }} aria-hidden />
+              <span className="fms-pieswatch" style={{ background: s.colour }} aria-hidden />
               <span className="fms-pielabel">{s.label}</span>
               <span className="fms-piefigure fms-proposalmoney">
                 {s.percent}% · {chartLabel(s.value)}

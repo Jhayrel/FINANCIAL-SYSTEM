@@ -83,26 +83,45 @@ describe("status colours clear 4.5:1 on their own background", () => {
  * The faintest bar in a ranking is still a bar.
  *
  * A ranking is one flow sorted, so every bar is that flow's colour, a step
- * lighter down the list (`components/charts.tsx`). The lightest step is 75
- * percent of the flow mixed into the track it sits on, and a 6px bar is a
+ * lighter down the list (`components/charts.tsx`). The lightest step is 60
+ * percent of the flow mixed toward a mid grey, and a 6px bar is a
  * graphical object, so the floor is 3:1 rather than 4.5:1. Mixed here the
  * way `color-mix(in srgb, ...)` mixes it, because "it looks fine" is not a
  * measurement (rule D7).
  */
-describe("the lightest rank bar is visible on its track", () => {
-  const mix = (a: string, b: string, percent: number): string => {
-    const part = (hex: string, i: number): number => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
-    const blend = (i: number): number => Math.round((part(a, i) * percent + part(b, i) * (100 - percent)) / 100);
-    return `#${[0, 1, 2].map((i) => blend(i).toString(16).padStart(2, "0")).join("")}`;
-  };
+describe("every step of a chart ramp reads where it is drawn", () => {
+  const FLOWS = ["spending", "revenue", "transfer", "debt"] as const;
+  const STEPS = [1, 2, 3, 4, 5];
 
   for (const [name, tokens] of themes) {
-    for (const flow of ["spending", "revenue"] as const) {
-      it(`${name}: ${flow} at 75 percent on the track`, () => {
-        const track = resolve(tokens, "--surface-sunk");
-        const faintest = mix(resolve(tokens, `--flow-${flow}`), track, 75);
-        const r = ratio(faintest, track);
-        expect(r, `${faintest} on ${track} = ${r}:1`).toBeGreaterThanOrEqual(AA_LARGE);
+    for (const flow of FLOWS) {
+      for (const step of STEPS) {
+        it(`${name}: ${flow} step ${step}`, () => {
+          const colour = resolve(tokens, `--ramp-${flow}-${step}`);
+          expect(colour, `--ramp-${flow}-${step} is defined`).toMatch(/^#[0-9a-f]{6}$/i);
+
+          // A bar is a graphical object, so the floor is 3:1 rather than 4.5.
+          for (const under of ["--surface", "--surface-sunk"] as const) {
+            const bg = resolve(tokens, under);
+            const r = ratio(colour, bg);
+            expect(r, `${colour} on ${bg} (${under}) = ${r}:1`).toBeGreaterThanOrEqual(AA_LARGE);
+          }
+        });
+      }
+
+      it(`${name}: ${flow} runs from one end to the other`, () => {
+        const first = resolve(tokens, `--ramp-${flow}-1`);
+        const last = resolve(tokens, `--ramp-${flow}-5`);
+        // Far enough apart that two bars in one chart are plainly different.
+        expect(ratio(first, last), `${first} against ${last}`).toBeGreaterThan(2.5);
+      });
+
+      it(`${name}: ${flow} steps in order, each one weaker than the last`, () => {
+        const surface = resolve(tokens, "--surface");
+        const contrasts = STEPS.map((step) => ratio(resolve(tokens, `--ramp-${flow}-${step}`), surface));
+        for (let i = 1; i < contrasts.length; i += 1) {
+          expect(contrasts[i]!, `step ${i + 1} against step ${i}`).toBeLessThan(contrasts[i - 1]!);
+        }
       });
     }
   }

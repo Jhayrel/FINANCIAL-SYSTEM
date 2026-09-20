@@ -396,8 +396,36 @@ const rowValue = (r: RankRow): Centavos => r.value ?? r.amount ?? 0;
  * clears it in both themes, so the ramp steps 4 points at a time and stops
  * there. Bar length carries the ranking; the shade only has to stay legible.
  */
-const rankShade = (flow: Flow, i: number): string =>
-  `color-mix(in srgb, var(--flow-${flow}) ${Math.max(75, 100 - i * 4)}%, var(--surface-sunk))`;
+/**
+ * One flow, five steps, largest strongest.
+ *
+ * ── Two wrong answers before this one ──────────────────────────────────────
+ *
+ * The first was the categorical palette, a different hue per row, so the
+ * largest kind of spending in a month was drawn in green. Green is money
+ * coming in (rule D3), and a ranking of what money went on is one flow
+ * sorted, not a set of unrelated things.
+ *
+ * The second was the flow colour at 100 down to 75 percent of itself. Honest,
+ * and invisible: four percent between neighbours is nothing, so eight bars
+ * read as one block of red, which is what the owner saw on 20 September 2026.
+ *
+ * The steps are hand-picked per flow and per theme in `tokens.css`, spread as
+ * far apart as the 3:1 floor allows: deepest first in the light theme,
+ * brightest first in the dark one. More rows than steps share the last one,
+ * which is correct, because by then the bars are short enough that length is
+ * doing the work.
+ */
+export const RAMP_STEPS = 5;
+
+export function rampFor(flow: Flow, index: number, count: number): string {
+  // Spread the steps over however many rows there are, so a chart of three
+  // and a chart of nine both use the whole ramp.
+  const spread = count <= 1 ? 0 : Math.round((Math.min(index, count - 1) / (count - 1)) * (RAMP_STEPS - 1));
+  return `var(--ramp-${flow}-${spread + 1})`;
+}
+
+const rankShade = (flow: Flow, i: number, count: number): string => rampFor(flow, i, count);
 
 export function RankBars({
   rows,
@@ -428,7 +456,7 @@ export function RankBars({
                 width: `${(rowValue(r) / max) * 100}%`,
                 height: "100%",
                 borderRadius: "var(--radius-full)",
-                background: rankShade(flow, i),
+                background: rankShade(flow, i, rows.length),
               }}
             />
           </div>
@@ -444,10 +472,13 @@ export function DonutChart({
   slices,
   size = 180,
   centreLabel,
+  flow = "spending",
 }: {
   slices: readonly RankRow[];
   size?: number;
   centreLabel?: string;
+  /** What the slices are made of. A composition is still one flow. */
+  flow?: Flow;
 }) {
   const total = slices.reduce((a, s) => a + rowValue(s), 0);
   const r = size / 2 - 10;
@@ -470,7 +501,7 @@ export function DonutChart({
                   cy={c}
                   r={r}
                   fill="none"
-                  stroke={`var(--cat-${Math.min(17, i + 1)})`}
+                  stroke={rampFor(flow, i, slices.length)}
                   strokeWidth="20"
                   strokeDasharray={`${dash} ${circumference - dash}`}
                   strokeDashoffset={-offset}
@@ -498,7 +529,7 @@ export function DonutChart({
         vertical
         items={slices.map((s, i) => ({
           label: s.name,
-          colour: `var(--cat-${Math.min(17, i + 1)})`,
+          colour: rampFor(flow, i, slices.length),
           value: formatAmount(rowValue(s)),
         }))}
       />
