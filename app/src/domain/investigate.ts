@@ -664,6 +664,14 @@ const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "
  * money out, which is what most history lists hold. Lines with no figure or
  * no date are skipped rather than guessed.
  */
+/** Whether a date is a day that exists: 31 September is not. */
+function isRealDate(date: IsoDate): boolean {
+  const [y, m, d] = date.split("-").map(Number) as [number, number, number];
+  if (!y || !m || !d || m < 1 || m > 12 || d < 1) return false;
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return d <= last;
+}
+
 export function readHistory(text: string, year: number): StatementLine[] {
   const out: StatementLine[] = [];
   for (const raw of text.split(/\r?\n/)) {
@@ -686,7 +694,15 @@ export function readHistory(text: string, year: number): StatementLine[] {
       date = `${named[3] ?? year}-${String(month).padStart(2, "0")}-${named[2]!.padStart(2, "0")}`;
       rest = rest.replace(named[0], " ");
     }
-    if (!date) continue;
+    /*
+     * A day that does not exist is a line that was misread.
+     *
+     * "Sep 31" and "02/30/2026" both parsed, and the date went on to be
+     * compared and subtracted: JavaScript reads 2026-09-31 as 1 October, so
+     * the line quietly moved a day and could match the wrong entry. A
+     * statement line whose date cannot be real is not evidence.
+     */
+    if (!date || !isRealDate(date)) continue;
 
     const figures = [...rest.matchAll(/([+-]|−)?\s*(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/gi)];
     const last = figures.at(-1);
