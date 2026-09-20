@@ -32,6 +32,7 @@ import { payBackClauseAt, readBehalf, readDebtSentence, readPassThrough } from "
 import type { Blank } from "./capture";
 import { makeDebtId } from "./debt";
 import { inferFromHistory, itemFromHistory } from "./infer";
+import { centavosInWords } from "./numberWords";
 import { readMoney } from "./proposal";
 import type { IsoDate, ReferenceLists, Transaction, TransactionStatus } from "./types";
 
@@ -315,7 +316,19 @@ function amountIn(text: string): number | null {
   const match = /(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d{1,2}|\d{2,})/i.exec(
     withoutDates,
   );
-  return match?.[1] ? readMoney(match[1]) : null;
+  if (match?.[1]) return readMoney(match[1]);
+
+  /*
+   * Written out, when nothing was typed in digits.
+   *
+   * The owner writes properly when the message is long: "I withdrew a
+   * thousand pesos from my Maya account into cash, and the bank charged me
+   * fifteen pesos". Every figure there is a word, and this reader found none
+   * of them, so a paragraph that reads perfectly well was worth nothing
+   * without a model. Only as a fallback: a digit anywhere is what somebody
+   * typed on purpose, and it wins.
+   */
+  return centavosInWords(withoutDates);
 }
 
 const shift = (asOf: IsoDate, days: number): IsoDate => {
