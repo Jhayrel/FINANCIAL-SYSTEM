@@ -583,6 +583,17 @@ export function AskPanel({
   const entriesLeftBehind = useRef<string | null>(null);
 
   /**
+   * What this conversation put in the bin, newest first.
+   *
+   * Live, 20 September 2026: a row was binned from the chat, and the next
+   * message, "restore it", came back with "nothing in the bin matches that.
+   * There are 144 entries in it." A search needs words to look for, and "it"
+   * has none: what it points at is the thing that just happened, which only
+   * the conversation knows.
+   */
+  const binnedHere = useRef<string[]>([]);
+
+  /**
    * The card in the form follows the form.
    *
    * ── Why the card's own draft moves, rather than just its display ────────
@@ -3152,7 +3163,23 @@ export function AskPanel({
        */
       const wantsLatest =
         /\b(last|latest|most recent|newest|recent|huli)\b/i.test(note);
-      const candidates = wantsLatest
+
+      /*
+       * "Restore it", about the row this conversation just binned.
+       *
+       * Before anything is searched for, because there is nothing to search
+       * for: the words are "it" or "that", and what they point at is the
+       * thing that happened a moment ago in this same thread.
+       */
+      const justBinned =
+        recall.action === "restore" && binnedHere.current.length > 0 && !wantsLatest
+          ? deleted.filter((row) => binnedHere.current.includes(row.id))
+          : [];
+      const pointsAtWhatHappened = justBinned.length > 0 && recall.phrase.trim().length <= 3;
+
+      const candidates = pointsAtWhatHappened
+        ? justBinned.slice(0, 1).map((row) => ({ row, score: 100, why: ["the one you just binned"] }))
+        : wantsLatest
         ? [...pool]
             .sort((a, b) => b.recordNumber - a.recordNumber)
             .slice(0, 1)
@@ -4083,11 +4110,13 @@ export function AskPanel({
               found={turn}
               onAct={(id, how) => {
                 if (how === "bin") {
+                  binnedHere.current = [id, ...binnedHere.current];
                   sink.bin(id);
                 } else if (turn.action === "edit") {
                   const row = transactions.find((t) => t.id === id);
                   if (row) sink.use(transactionToDraft(row));
                 } else if (turn.action === "bin") {
+                  binnedHere.current = [id, ...binnedHere.current];
                   sink.bin(id);
                 } else {
                   sink.restore(id);
@@ -4103,6 +4132,7 @@ export function AskPanel({
                  * removed from the table: one toast, one audit batch, and
                  * every row restorable together from the Bin.
                  */
+                binnedHere.current = [...ids, ...binnedHere.current];
                 sink.binMany(ids);
                 log(
                   aiEvent("accepted", "add", {
