@@ -1023,7 +1023,7 @@ export function Insights({
         </Card>
 
         <Card title="Where it came from" subtitle={`${name}'s income by source, starting balances left out`}>
-          {income.length === 0 ? <EmptyState message={`Nothing came in during ${name}.`} /> : <RankBars rows={income} />}
+          {income.length === 0 ? <EmptyState message={`Nothing came in during ${name}.`} /> : <RankBars rows={income} flow="revenue" />}
         </Card>
       </div>
 

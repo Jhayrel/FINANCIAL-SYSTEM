@@ -22,6 +22,7 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import { formatAmount, toPesos, type Centavos } from "../domain/money";
+import type { Flow } from "./primitives";
 
 /** Axis labels only: never in a table. §2.2 */
 export function abbreviate(c: Centavos): string {
@@ -379,12 +380,34 @@ export interface RankRow {
 
 const rowValue = (r: RankRow): Centavos => r.value ?? r.amount ?? 0;
 
+/**
+ * One colour per panel, not one per row.
+ *
+ * These bars were the categorical palette, `--cat-1` down, so the largest
+ * kind of spending in the month was drawn in green and the next in blue.
+ * Green means money in (rule D3), and a ranking of what money went on is not
+ * a composition of unrelated things: it is one flow, sorted. So the panel
+ * names the flow and every bar is that colour, lightened a step at a time
+ * down the ranking, which is the only thing the shade has to carry.
+ *
+ * The floor keeps the smallest bar visible against the track. 55 percent
+ * was the first try and the contrast test refused it: 2.22:1 for revenue in
+ * the light theme, against a 3:1 floor for something this size. 75 percent
+ * clears it in both themes, so the ramp steps 4 points at a time and stops
+ * there. Bar length carries the ranking; the shade only has to stay legible.
+ */
+const rankShade = (flow: Flow, i: number): string =>
+  `color-mix(in srgb, var(--flow-${flow}) ${Math.max(75, 100 - i * 4)}%, var(--surface-sunk))`;
+
 export function RankBars({
   rows,
   max: explicitMax,
+  flow = "spending",
 }: {
   rows: readonly RankRow[];
   max?: Centavos;
+  /** What the rows are: money out, money in, moved, or owed. */
+  flow?: Flow;
 }) {
   const max = explicitMax ?? Math.max(1, ...rows.map(rowValue));
 
@@ -405,7 +428,7 @@ export function RankBars({
                 width: `${(rowValue(r) / max) * 100}%`,
                 height: "100%",
                 borderRadius: "var(--radius-full)",
-                background: `var(--cat-${Math.min(17, i + 1)})`,
+                background: rankShade(flow, i),
               }}
             />
           </div>

@@ -79,6 +79,35 @@ describe("status colours clear 4.5:1 on their own background", () => {
  * card or the page itself. Rule D7 is that every colour clears 4.5:1 on its
  * own background in both themes, so these are the backgrounds to check.
  */
+/**
+ * The faintest bar in a ranking is still a bar.
+ *
+ * A ranking is one flow sorted, so every bar is that flow's colour, a step
+ * lighter down the list (`components/charts.tsx`). The lightest step is 75
+ * percent of the flow mixed into the track it sits on, and a 6px bar is a
+ * graphical object, so the floor is 3:1 rather than 4.5:1. Mixed here the
+ * way `color-mix(in srgb, ...)` mixes it, because "it looks fine" is not a
+ * measurement (rule D7).
+ */
+describe("the lightest rank bar is visible on its track", () => {
+  const mix = (a: string, b: string, percent: number): string => {
+    const part = (hex: string, i: number): number => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
+    const blend = (i: number): number => Math.round((part(a, i) * percent + part(b, i) * (100 - percent)) / 100);
+    return `#${[0, 1, 2].map((i) => blend(i).toString(16).padStart(2, "0")).join("")}`;
+  };
+
+  for (const [name, tokens] of themes) {
+    for (const flow of ["spending", "revenue"] as const) {
+      it(`${name}: ${flow} at 75 percent on the track`, () => {
+        const track = resolve(tokens, "--surface-sunk");
+        const faintest = mix(resolve(tokens, `--flow-${flow}`), track, 75);
+        const r = ratio(faintest, track);
+        expect(r, `${faintest} on ${track} = ${r}:1`).toBeGreaterThanOrEqual(AA_LARGE);
+      });
+    }
+  }
+});
+
 describe("notices read on the surface under them", () => {
   const STATUSES = ["ok", "over", "warn", "info", "none"] as const;
   const UNDER = ["--surface", "--surface-sunk", "--paper"] as const;

@@ -4123,11 +4123,19 @@ button.fms-recent-row:disabled {
   background: var(--surface-sunk);
 }
 
+/*
+ * Spending, in the colour spending is.
+ *
+ * It was --brand-700, the workbook green, on every kind-of-spending bar on
+ * the Dashboard, on Insights and on Budget. Green is money in (rule D3), so
+ * a month's worst spending was drawn in the colour of income. The owner said
+ * so on 19 September 2026: use red when it is bad, not green for everything.
+ */
 .fms-budgetcat-bar > span {
   display: block;
   height: 100%;
   border-radius: var(--radius-full);
-  background: var(--brand-700);
+  background: var(--flow-spending);
 }
 
 .fms-budgetcat-foot {
