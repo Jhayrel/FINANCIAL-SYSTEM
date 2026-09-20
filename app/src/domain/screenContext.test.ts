@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { loadFixture } from "../fixtures/load";
 import { buildContext } from "./aiContext";
 import { buildChatContext } from "./aiChatContext";
-import { screenText } from "./screenContext";
+import { aboutTheScreen, screenText } from "./screenContext";
 
 const fx = loadFixture();
 
@@ -16,11 +16,11 @@ describe("what is on screen", () => {
     expect(screenText(null)).toBe("");
   });
 
-  it("names the screen, says what 'this' means, and lists what it shows", () => {
+  it("names the screen and lists what it shows", () => {
     const text = screenText({ screen: "Dashboard", lines: ["Safe to spend PHP 65.01 a day.", "  ", "Spent PHP 3,834.11."] });
     expect(text.startsWith("## What is on screen now")).toBe(true);
     expect(text).toContain("on the Dashboard screen");
-    expect(text).toContain('"this"');
+    expect(text).toContain("asking about what is described below");
     expect(text).toContain("- Safe to spend PHP 65.01 a day.");
     expect(text.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(2);
   });
@@ -49,5 +49,44 @@ describe("what is on screen", () => {
 
     const without = buildChatContext({ snapshot, transactions: fx.transactions, asOf: "2026-08-29", question: "what do you think" });
     expect(without.text).not.toContain("What is on screen now");
+  });
+});
+
+/**
+ * The block tells the model to answer about the screen, so it must only be
+ * sent when the question is about the screen. Live, 20 September 2026: "how
+ * much did I spend today" was answered with a description of the empty amount
+ * field on the Add form, and the figure came third.
+ */
+describe("whether the question is about what is on screen", () => {
+  const POINTS_AT_IT = [
+    "what do you think",
+    "what do you think of this",
+    "is this right",
+    "is this ok?",
+    "how does this look",
+    "anything wrong here",
+    "should I save this",
+    "ano sa tingin mo",
+    "tama ba ito",
+    "these entries look odd",
+  ];
+
+  const ABOUT_THE_LEDGER = [
+    "how much did I spend today",
+    "what is my maya balance",
+    "how much did I spend on food in august",
+    "chart my spending",
+    "which wallet is lowest",
+    "magkano ang ginastos ko ngayong buwan",
+    "",
+  ];
+
+  it("is true when the question points at it", () => {
+    for (const said of POINTS_AT_IT) expect(aboutTheScreen(said), said).toBe(true);
+  });
+
+  it("is false for a question about the figures", () => {
+    for (const said of ABOUT_THE_LEDGER) expect(aboutTheScreen(said), said).toBe(false);
   });
 });

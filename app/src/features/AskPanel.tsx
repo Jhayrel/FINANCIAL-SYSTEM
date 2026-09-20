@@ -143,7 +143,7 @@ import { carded, cardsIn, drawn, drew, proposed, said, type StoredCard } from ".
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
 import { currentScreen } from "./screenReport";
-import { screenText } from "../domain/screenContext";
+import { aboutTheScreen, screenText } from "../domain/screenContext";
 import { figuresIn } from "../domain/money";
 import { transactionToDraft } from "../domain/entry";
 import type { Draft } from "../domain/entry";
@@ -2218,7 +2218,20 @@ export function AskPanel({
     // What the owner has open, so "what do you think" is about that screen (domain/screenContext.ts).
     const answer = await during(
       "Reading your ledger",
-      () => ai.ask("chat", { question, history, screen: screenText(currentScreen()) }),
+      () =>
+        ai.ask("chat", {
+          question,
+          history,
+          /*
+           * Only when the question points at it.
+           *
+           * The block tells the model to answer about the screen, so sending
+           * it with every question made every answer about the screen: "how
+           * much did I spend today" came back describing the empty amount
+           * field on the Add form.
+           */
+          screen: aboutTheScreen(question) ? screenText(currentScreen()) : "",
+        }),
       "Still waiting on the model",
     );
 

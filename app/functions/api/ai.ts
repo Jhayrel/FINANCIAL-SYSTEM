@@ -140,7 +140,7 @@ const COMPACT_CONTEXT_CHARS = 18_000;
  * worked-out figures with barely any rows under them, which still answers a
  * question about totals. A short answer beats none.
  */
-const SHRINK_TO = [COMPACT_CONTEXT_CHARS, 6_000, 2_000] as const;
+export const SHRINK_TO = [COMPACT_CONTEXT_CHARS, 6_000, 2_000] as const;
 
 /**
  * A context cut to size, the summaries kept and the rows trimmed.
@@ -150,7 +150,7 @@ const SHRINK_TO = [COMPACT_CONTEXT_CHARS, 6_000, 2_000] as const;
  * relevant, and a line says so, so the model does not count what it cannot
  * see.
  */
-function compactContext(context: string, max: number): string {
+export function compactContext(context: string, max: number): string {
   if (context.length <= max) return context;
   const at = context.indexOf("\n## Entries");
   const head = at >= 0 ? context.slice(0, at) : context;
@@ -1313,7 +1313,7 @@ async function send(
 }
 
 /** Enough to diagnose, never enough to leak a key or a figure. */
-function shortReason(e: unknown): string {
+export function shortReason(e: unknown): string {
   const message = e instanceof Error ? e.message : String(e);
   if (message === "no key") return "no key for this provider";
   if (/^4\d\d$/.test(message)) return `rejected (${message})`;

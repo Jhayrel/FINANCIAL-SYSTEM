@@ -38,7 +38,40 @@ export function screenText(report: ScreenReport | null): string {
 
   return [
     "## What is on screen now",
-    `The owner is on the ${report.screen} screen while asking. When they say "this", "here" or "these", or ask what you think, they mean what is described below: answer about it first, with these figures and the rest of this context.`,
+    `The owner is on the ${report.screen} screen and is asking about what is described below. Answer about it, with these figures and the rest of this context.`,
     ...lines.map((line) => `- ${line}`),
   ].join("\n");
+}
+
+/**
+ * Whether the question is about what is on screen at all.
+ *
+ * ── Why this gate exists ───────────────────────────────────────────────────
+ *
+ * The screen block was sent with every question, and it ends by telling the
+ * model to answer about the screen. So it did. Live, 20 September 2026, "how
+ * much did I spend today" came back as "You are adding a new spending entry
+ * for 2026-09-20, but the amount field is currently empty", and the figure
+ * that was asked for came third.
+ *
+ * A question about a figure is about the ledger. Only a question that points
+ * at something, or asks for an opinion on it, needs to know what is on
+ * screen, and for those it is most of the answer. So the block goes with
+ * those and with nothing else.
+ */
+export function aboutTheScreen(question: string): boolean {
+  const text = question.trim();
+  if (!text) return false;
+
+  // An opinion on something, and the something is whatever they are looking at.
+  if (
+    /\b(what do you think|thoughts on|how does (this|it) look|is (this|it) (ok|okay|right|correct|fine|good|bad)|anything wrong|ano sa tingin mo|tama ba)\b/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+
+  // Pointing words, which mean nothing without the screen.
+  return /\b(this|these|that one|here|on screen|ito|dito|ganito)\b/i.test(text);
 }
