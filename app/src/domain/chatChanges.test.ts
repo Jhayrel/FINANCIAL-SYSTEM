@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { loadFixture } from "../fixtures/load";
+
 import { changeWords, planEdit, readEditAsk } from "./chatChanges";
 import type { ReferenceLists, Transaction } from "./types";
 
@@ -107,5 +109,44 @@ describe("planning the change", () => {
     const plan = planEdit(ask, ledger, reference, [], ASOF);
     expect(plan.rows).toEqual([]);
     expect(plan.refused[0]?.reason).toBeTruthy();
+  });
+});
+
+/**
+ * A correction that says what the row is now.
+ *
+ * The owner, 20 September 2026: "The food I recorded for today was paid with
+ * my Gcash account and not with cash the way it is currently saved, and the
+ * amount should be two hundred and fifty pesos rather than what is showing
+ * now." Five food rows from one day came back, each with a button that
+ * changes a saved record. The sentence had already said which one: the one
+ * on Cash.
+ */
+describe("the wallet a row is on now", () => {
+  const fx2 = loadFixture();
+  const polite =
+    "I think I made a mistake with one of my entries earlier. The food I recorded for today was paid with my Gcash account and not with cash the way it is currently saved. Could you fix that for me please?";
+
+  it("is read as the one to move from", () => {
+    const ask = readEditAsk(polite, fx2.reference, "2026-09-20");
+    expect(ask?.change.wallet).toEqual({ from: "Cash", to: "Gcash" });
+  });
+
+  it("narrows the search to rows on that wallet", () => {
+    const ask = readEditAsk(polite, fx2.reference, "2026-09-20");
+    expect(ask).not.toBeNull();
+
+    const rows: Transaction[] = [
+      { id: "a", recordNumber: 1, date: "2026-09-20", type: "Spending", fromWallet: "Cash", toWallet: "", category: "Spending", item: "Food", description: "", amount: 12000, fee: 0, total: 12000, notes: "", status: "Paid" },
+      { id: "b", recordNumber: 2, date: "2026-09-20", type: "Spending", fromWallet: "Gcash", toWallet: "", category: "Spending", item: "Food", description: "", amount: 80000, fee: 0, total: 80000, notes: "", status: "Paid" },
+    ];
+
+    const plan = planEdit(ask!, rows, fx2.reference, [], "2026-09-20");
+    expect(plan.rows.map((r) => r.before.id)).toEqual(["a"]);
+  });
+
+  it("leaves a plain move alone", () => {
+    const ask = readEditAsk("move my spotify from gcash to maya", fx2.reference, "2026-09-20");
+    expect(ask?.change.wallet).toEqual({ from: "Gcash", to: "Maya" });
   });
 });

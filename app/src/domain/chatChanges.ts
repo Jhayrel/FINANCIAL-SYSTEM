@@ -129,6 +129,33 @@ export function readEditAsk(text: string, reference: ReferenceLists, asOf: IsoDa
       rest = rest.replace(fromTo[0], " ");
     }
   }
+  /*
+   * A correction that says what the row is now, as well as what it should
+   * be: "paid with my Gcash and not with cash the way it is currently
+   * saved".
+   *
+   * The owner wrote exactly that on 20 September 2026 and five food rows
+   * from one day came back, each with a button that changes a saved
+   * record. The sentence had already said which one: the one on Cash.
+   * `planEdit` narrows by the wallet a row is on today, so all this had to
+   * do was read it.
+   */
+  if (!change.wallet) {
+    const nowOn = /\b(?:not|instead of|rather than|and not|hindi)\s+(?:with\s+|from\s+|using\s+|sa\s+)?([a-z][a-z ()]{1,28}?)(?=$|[,.]|\s+(?:the|way|it|and|but|account|wallet)\b)/i.exec(rest);
+    const movedTo = /\b(?:paid|pay|charged|billed|used|spent|was|should be)\s+(?:with|from|using|sa|on)\s+(?:my\s+|the\s+|our\s+)?([a-z][a-z ()]{1,28}?)(?=$|[,.]|\s+(?:account|wallet|and|but|not|instead|rather)\b)/i.exec(rest);
+
+    const from = nowOn?.[1] ? nameIn(nowOn[1], accounts) : "";
+    const to = movedTo?.[1] ? nameIn(movedTo[1], accounts) : "";
+
+    // Both named and different: the row moves, and the one it is on now is
+    // what tells the search which row is meant.
+    if (from && to && from !== to) {
+      change.wallet = { from, to };
+      if (nowOn) rest = rest.replace(nowOn[0], " ");
+      if (movedTo) rest = rest.replace(movedTo[0], " ");
+    }
+  }
+
   if (!change.wallet && /\b(move|switch|ilipat)\b/i.test(text)) {
     const onto = new RegExp(String.raw`\b(?:to|into|sa)\s+(.+?)(?=$|[,.]|\s+(?:instead|and|on|for|this|last)\b)`, "i").exec(rest);
     const to = onto?.[1] ? nameIn(onto[1], accounts) : "";
