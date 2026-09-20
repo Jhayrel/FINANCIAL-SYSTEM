@@ -96,6 +96,7 @@ import {
   chartInWords,
   chartLabel,
   isChartFollowUp,
+  asksForProse,
   wantsChart,
   wantsStatement,
   withoutTheFilePart,
@@ -2987,10 +2988,21 @@ export function AskPanel({
       return name !== "" && flat.includes(` ${name} `);
     });
 
+    /*
+     * A request to be told something is not satisfied by being shown one.
+     *
+     * "tell me what actually caused the difference rather than just stating
+     * the totals" was answered with a bar chart of August (20 September
+     * 2026). The router calling it a chart is understandable, since it names
+     * a comparison and a grouping; the sentence still says what it wants.
+     */
+    const wantsWords = asksForProse(note);
+
     if (
       files.length === 0 &&
       !as &&
       !aboutADebt &&
+      !wantsWords &&
       (saysChart ||
         (routed === null && (wantsChart(note) || followUp)) ||
         // The model said prose; a chart is on screen and this names a period.

@@ -432,6 +432,27 @@ function windowOf(
   return { from: `${month}-01`, to: `${month}-31`, name: monthName(month) };
 }
 
+/**
+ * Asking to be told, rather than shown.
+ *
+ * ── The answer that was a picture ──────────────────────────────────────────
+ *
+ * The owner, 20 September 2026: "I would like to understand how this month
+ * compares with last month ... tell me what actually caused the difference
+ * rather than just stating the totals." It came back as a bar chart of
+ * August. Every word of that sentence asks for an explanation, and a chart
+ * is the one thing it explicitly said would not do.
+ *
+ * The router had called it a chart, which is understandable: it names a
+ * comparison and a grouping. This overrules it, the same way a question about
+ * a credit line does, because a request to be told something is not satisfied
+ * by being shown something.
+ */
+export const asksForProse = (question: string): boolean =>
+  /\b(?:tell me|explain|explain to me|why|what caused|what actually caused|walk me through|help me understand|i want to understand|i would like to understand|in words|rather than just|instead of just|not just|sabihin mo|bakit|ipaliwanag)\b/i.test(
+    question,
+  );
+
 /** True when the message is asking to see a chart at all. */
 export const wantsChart = (question: string): boolean => WANTS_CHART.test(question);
 

@@ -323,6 +323,25 @@ const MOST = 5;
  * nothing, rather than the whole ledger sorted arbitrarily. Being unable to
  * find a row is a fine outcome; offering the wrong one to be deleted is not.
  */
+/**
+ * Words that name no entry.
+ *
+ * ── What they cost ────────────────────────────────────────────────────────
+ *
+ * The owner, 20 September 2026, wrote a polite paragraph: "The food I
+ * recorded for today was paid with my Gcash account and not with cash the
+ * way it is currently saved". Five rows came back, and the line under them
+ * read "Matched on 2026-09-20, the, food, cash, the, the." Three of those
+ * five matched on the word "the".
+ *
+ * The recall path strips them as instruction words, but a correction goes
+ * through the same search with the sentence as written, so they are taken
+ * out here, where every caller gets it. Only words of three letters or more
+ * ever reached the search, which is exactly the length of the worst of them.
+ */
+const STOPWORDS =
+  /\b(?:the|and|but|for|with|that|this|these|those|was|were|are|is|been|being|have|has|had|not|you|your|yours|please|could|would|should|will|can|may|from|into|onto|out|off|than|then|there|here|when|where|which|what|who|whom|because|since|about|around|also|just|only|very|really|actually|currently|rather|way|thing|things|time|one|two|some|any|all|more|most|much|many|such|other|another|same|like|make|made|makes|making|want|wanted|need|needed|think|thought|know|knew|say|said|tell|told|fix|fixed|change|changed|record|recorded|entry|entries|amount|account|instead|now|today|earlier|later|mistake|wrong|right|correct|incorrect)\b/gi;
+
 export function findRows(
   phrase: string,
   rows: readonly Transaction[],
@@ -336,13 +355,18 @@ export function findRows(
   const withoutNumber = number === null ? rest : rest.replace(/#\s*\d{1,5}\b/, " ");
   const amount = amountIn(withoutNumber);
 
-  const words = withoutNumber
-    .toLowerCase()
-    .replace(OUR_OWN_WORDS, " ")
-    .replace(DAY_WORDS, " ")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !/^\d+$/.test(w));
+  const words = [
+    ...new Set(
+      withoutNumber
+        .toLowerCase()
+        .replace(OUR_OWN_WORDS, " ")
+        .replace(DAY_WORDS, " ")
+        .replace(STOPWORDS, " ")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 2 && !/^\d+$/.test(w)),
+    ),
+  ];
 
   if (!day && amount === null && number === null && words.length === 0) return [];
 
@@ -362,7 +386,7 @@ export function findRows(
     return !/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after);
   };
 
-  const scored: Candidate[] = [];
+  const scored: (Candidate & { namesTheThing: boolean })[] = [];
 
   for (const row of rows) {
     // A record number is unambiguous and answers the question by itself.
@@ -372,6 +396,7 @@ export function findRows(
           row,
           score: 100,
           why: [`record #${String(row.recordNumber).padStart(4, "0")}`],
+          namesTheThing: true,
         });
       }
       continue;
@@ -412,6 +437,17 @@ export function findRows(
       `${row.item} ${row.description} ${row.category} ${row.fromWallet} ${row.toWallet}`.toLowerCase();
     const hits = words.filter((w) => holds(haystack, w));
 
+    /*
+     * What it was, as opposed to where it came from.
+     *
+     * A sentence usually names both: "the food I paid with my Gcash and not
+     * with cash". Every row paid from Cash answers to the wallet, so on a
+     * busy day the wallet alone returns most of the day. The thing named is
+     * the narrower signal and it is the one meant.
+     */
+    const named = `${row.item} ${row.description}`.toLowerCase();
+    const namesTheThing = words.some((w) => holds(named, w));
+
     // Words were named and none of them is here. Whatever this row is, it is
     // not the one being described.
     if (words.length > 0 && hits.length === 0) continue;
@@ -421,10 +457,20 @@ export function findRows(
       why.push(hits.join(", "));
     }
 
-    if (score > 0) scored.push({ row, score, why });
+    if (score > 0) scored.push({ row, score: namesTheThing ? score + 6 : score, why, namesTheThing });
   }
 
-  return scored
+  /*
+   * When the sentence named a thing and some row carries it, the rows that
+   * matched on nothing but a wallet are not candidates. Offering them put
+   * five rows under a correction that was about one (20 September 2026), each
+   * with a button that changes a saved record.
+   */
+  const onTheThing = scored.filter((c) => c.namesTheThing);
+  const kept = onTheThing.length > 0 ? onTheThing : scored;
+
+  return kept
+    .map(({ row, score, why }) => ({ row, score, why }))
     .sort((a, b) => b.score - a.score || b.row.recordNumber - a.row.recordNumber)
     .slice(0, most);
 }

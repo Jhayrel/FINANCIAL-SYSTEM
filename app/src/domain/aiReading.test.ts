@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildChatContext } from "./aiChatContext";
 import { buildContext } from "./aiContext";
-import { wantsChart } from "./charts";
+import { asksForProse, wantsChart } from "./charts";
 import type { Budgets, ReferenceLists, Transaction } from "./types";
 
 const reference: ReferenceLists = {
@@ -159,5 +159,37 @@ describe("a request to see something reaches the part that draws", () => {
   it("leaves an ordinary question alone", () => {
     expect(wantsChart("how much did I spend on food")).toBe(false);
     expect(wantsChart("what should I do about my debt")).toBe(false);
+  });
+});
+
+/**
+ * Asking to be told, rather than shown.
+ *
+ * The owner, 20 September 2026: a five line paragraph ending "tell me what
+ * actually caused the difference rather than just stating the totals" came
+ * back as a bar chart of August.
+ */
+describe("a request for an explanation", () => {
+  const PROSE = [
+    "I would like to understand how this month compares with last month. Specifically, I want to know whether I am spending more or less overall, which kinds of spending have grown the most, and whether there is any particular week where things went wrong. Please answer with my own figures and tell me what actually caused the difference rather than just stating the totals.",
+    "explain why my food spending went up",
+    "tell me what happened in August",
+    "bakit ang laki ng gastos ko this month",
+    "help me understand my treats",
+  ];
+
+  const PICTURES = [
+    "chart my spending this month",
+    "pie of where my money went",
+    "show me the trend of this year treats",
+    "graph my food by month",
+  ];
+
+  it("is answered in words, whatever the router called it", () => {
+    for (const said of PROSE) expect(asksForProse(said), said).toBe(true);
+  });
+
+  it("and a plain request for a chart still is one", () => {
+    for (const said of PICTURES) expect(asksForProse(said), said).toBe(false);
   });
 });

@@ -218,3 +218,68 @@ describe("a sentence that is about a saved row", () => {
     }
   });
 });
+
+/**
+ * A sentence written politely is still a search.
+ *
+ * The owner, 20 September 2026: "The food I recorded for today was paid with
+ * my Gcash account and not with cash the way it is currently saved, and the
+ * amount should be two hundred and fifty pesos rather than what is showing
+ * now." Five rows came back and the line under them read "Matched on
+ * 2026-09-20, the, food, cash, the, the". Three of the five matched on the
+ * word "the", and every one of them carried a button that changes a saved
+ * record.
+ */
+describe("words that name no entry", () => {
+  let n = 0;
+  const make = (over: Partial<Transaction>): Transaction => {
+    n += 1;
+    return {
+      id: `s${n}`,
+      recordNumber: 500 + n,
+      date: "2026-09-20",
+      type: "Spending",
+      fromWallet: "Cash",
+      toWallet: "",
+      category: "Spending",
+      item: "Food",
+      description: "",
+      amount: 12000,
+      fee: 0,
+      total: 12000,
+      notes: "",
+      status: "Paid",
+      ...over,
+    };
+  };
+
+  const ledger = [
+    make({ item: "Food", fromWallet: "Cash", amount: 25000, total: 25000 }),
+    make({ item: "Food", fromWallet: "Gcash", amount: 80000, total: 80000 }),
+    make({ item: "Microsoft Office 365", category: "Subscriptions", amount: 23900, total: 23900 }),
+    make({ item: "Travel", amount: 46500, total: 46500 }),
+  ];
+
+  const polite =
+    "The food I recorded for today was paid with my Gcash account and not with cash the way it is currently saved, and the amount should be two hundred and fifty pesos rather than what is showing now";
+
+  it("never matches a row on a word like the, for or with", () => {
+    for (const found of findRows(polite, ledger, "2026-09-20")) {
+      for (const why of found.why) {
+        expect(why, `${found.row.item}: ${why}`).not.toMatch(/(the|for|with|that|was|and)/i);
+      }
+    }
+  });
+
+  it("says each reason once, rather than once per hit", () => {
+    for (const found of findRows(polite, ledger, "2026-09-20")) {
+      expect(new Set(found.why).size, found.why.join(", ")).toBe(found.why.length);
+    }
+  });
+
+  it("still finds the row the sentence is about", () => {
+    const found = findRows(polite, ledger, "2026-09-20");
+    expect(found.length).toBeGreaterThan(0);
+    expect(found.every((f) => f.row.item === "Food"), found.map((f) => f.row.item).join(", ")).toBe(true);
+  });
+});
