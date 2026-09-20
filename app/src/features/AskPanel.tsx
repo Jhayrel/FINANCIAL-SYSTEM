@@ -1986,14 +1986,35 @@ export function AskPanel({
     const batch = checked.length > 1;
     for (const proposal of checked) await offer(proposal, note, true, batch);
     if (batch) {
-      const blanks = result.proposals.filter(
-        (p) => nextQuestion(p.draft, reference) !== null,
-      ).length;
-      if (blanks > 0) {
+      /*
+       * Name what is actually missing.
+       *
+       * It said "need a wallet picked" whatever the blank was, so a card
+       * waiting for an amount or for what the money was for was reported as
+       * waiting for a wallet, and the owner went looking for a picker that
+       * was already filled in.
+       */
+      const missing = result.proposals
+        .map((p) => nextQuestion(p.draft, reference)?.blank)
+        .filter((b): b is NonNullable<typeof b> => Boolean(b));
+
+      if (missing.length > 0) {
+        const WORDS: Record<string, string> = {
+          amount: "an amount",
+          item: "what it was for",
+          fromWallet: "a wallet",
+          toWallet: "a wallet",
+        };
+        const kinds = [...new Set(missing.map((b) => WORDS[b] ?? "something"))];
+        const needs =
+          kinds.length === 1
+            ? kinds[0]
+            : `${kinds.slice(0, -1).join(", ")} or ${kinds[kinds.length - 1]}`;
+
         say({
           kind: "assistant",
           ephemeral: true,
-          text: `${blanks} of them need a wallet picked. Choose it on the card, or set one for all of them.`,
+          text: `${missing.length} of them still ${missing.length === 1 ? "needs" : "need"} ${needs}. Fill it in on the card, or say it here.`,
           from: "this device",
         });
       }

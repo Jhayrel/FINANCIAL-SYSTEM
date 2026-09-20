@@ -11,7 +11,9 @@
 
 import { describe, expect, it } from "vitest";
 
+import { loadFixture } from "../fixtures/load";
 import { walletBalance } from "./balances";
+import { applyReply, blanksIn, nextQuestion } from "./capture";
 import { outstandingOf, type Debt } from "./debt";
 import { personDebt } from "./debtFill";
 import { effectLabel } from "./debtWords";
@@ -152,5 +154,55 @@ describe("the words, the model and the people", () => {
     expect(personDebt("Pedro", entry({ behalf: "owed", debtEffect: "writeoff" }), [], "Cash")).toMatchObject({ kind: "receivable", form: "pass-through" });
     expect(personDebt("Ana", entry({ behalf: "held", debtEffect: "draw" }), [], "Cash")).toMatchObject({ kind: "payable", form: "pass-through" });
     expect(personDebt("Juan", entry({ debtEffect: "lend" }), [], "Cash").form).toBe("informal");
+  });
+});
+
+/**
+ * A debt movement is asked about the side its effect implies.
+ *
+ * Live, 20 September 2026: "I received 2000 from maya credit" produced a
+ * borrowing, and the card asked "Which one did it come out of?". An answer
+ * would have gone on the source side, where rule 3.1 takes money out of a
+ * wallet, so a borrowing would have left the wallet 2,000 lower instead of
+ * 2,000 higher. A charge and a write off move no wallet at all and are asked
+ * for neither.
+ */
+describe("which side of a debt movement the question is about", () => {
+  const fx = loadFixture();
+  const accounts = [...fx.reference.wallets, ...fx.reference.savings];
+  const d = (over: Partial<Draft>): Draft => ({ ...emptyDraft("2026-09-20"), flow: "Debt", debtId: "maya-credit", amount: 200000, ...over });
+
+  it("asks where borrowed money landed, not where it came from", () => {
+    const draft = d({ debtEffect: "draw" });
+    expect(blanksIn(draft, accounts)).toEqual(["toWallet"]);
+    expect(nextQuestion(draft, fx.reference)?.question).toMatch(/land/i);
+    expect(nextQuestion(draft, fx.reference)?.question).not.toMatch(/someone else/i);
+  });
+
+  it("asks the same of money collected back", () => {
+    expect(blanksIn(d({ debtEffect: "collect" }), accounts)).toEqual(["toWallet"]);
+  });
+
+  it("asks where a payment came from", () => {
+    const draft = d({ debtEffect: "repay" });
+    expect(blanksIn(draft, accounts)).toEqual(["fromWallet"]);
+    expect(nextQuestion(draft, fx.reference)?.question).toMatch(/come out of/i);
+  });
+
+  it("asks the same of money lent out", () => {
+    expect(blanksIn(d({ debtEffect: "lend" }), accounts)).toEqual(["fromWallet"]);
+  });
+
+  it("asks for no wallet at all on a charge or a write off", () => {
+    expect(blanksIn(d({ debtEffect: "charge" }), accounts)).toEqual([]);
+    expect(blanksIn(d({ debtEffect: "writeoff" }), accounts)).toEqual([]);
+  });
+
+  it("puts the answer on the side it asked about", () => {
+    const draft = d({ debtEffect: "draw" });
+    const q = nextQuestion(draft, fx.reference);
+    const filled = applyReply(draft, q!.blank, "Maya", fx.reference, fx.transactions);
+    expect(filled?.toWallet).toBe("Maya");
+    expect(filled?.fromWallet).toBe("");
   });
 });

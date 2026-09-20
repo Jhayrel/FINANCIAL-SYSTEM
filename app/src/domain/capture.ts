@@ -23,7 +23,7 @@
  * The model reads pictures and sentences. Filling in one blank is not that.
  */
 
-import { itemsFor, needs, type Draft, type Flow } from "./entry";
+import { debtWalletDirection, itemsFor, needs, type Draft, type Flow } from "./entry";
 import { figuresIn } from "./money";
 import { itemHintIn } from "./filipino";
 import { matchExact, readMoney } from "./proposal";
@@ -67,6 +67,21 @@ export function blanksIn(
       case "amount":
         return draft.amount === null || draft.amount <= 0;
       case "fromWallet":
+        /*
+         * A debt movement has a side, and it is the effect that says which.
+         *
+         * This asked every debt row which wallet it came out of, borrowing
+         * included: "I received 2000 from maya credit" was met with "which
+         * one did it come out of", and answering it put the wallet on the
+         * source side, where rule 3.1 takes the money out of it. A borrowing
+         * would have left the wallet 2,000 lower instead of 2,000 higher.
+         *
+         * A charge and a write off move no wallet at all, so neither side is
+         * asked for.
+         */
+        if (flow === "Debt") {
+          return debtWalletDirection(draft.debtEffect) === "out" && !matchExact(draft.fromWallet, accounts);
+        }
         return needs(flow, "fromWallet") && !matchExact(draft.fromWallet, accounts);
       case "toWallet":
         /**
@@ -79,6 +94,9 @@ export function blanksIn(
          * The owner could answer correctly and be asked forever.
          */
         if (draft.sentOut === true) return false;
+        if (flow === "Debt") {
+          return debtWalletDirection(draft.debtEffect) === "in" && !matchExact(draft.toWallet, accounts);
+        }
         return flow === "Transfer" && !matchExact(draft.toWallet, accounts);
       case "item":
         return (flow === "Spending" || flow === "Revenue") && !draft.item.trim();
@@ -123,6 +141,17 @@ export function nextQuestion(
        *
        * The form has always had this choice. The conversation never did.
        */
+      /*
+       * Money arriving on a debt movement has landed in one of your own
+       * accounts by definition: borrowing and being paid back are not money
+       * leaving, so the answer "someone else" is not one of the options.
+       */
+      if (draft.flow === "Debt") {
+        return {
+          blank,
+          question: list ? `Which one did it land in? ${list}` : "Which wallet did it land in?",
+        };
+      }
       return {
         blank,
         question: list
