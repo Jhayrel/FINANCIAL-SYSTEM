@@ -11,6 +11,9 @@ import { describe, expect, it } from "vitest";
 
 import { loadFixture } from "../fixtures/load";
 import { buildContext, contextSize, contextToText, type ContextInput } from "./aiContext";
+import { migrateAccounts } from "./accounts";
+import { addDays } from "./dates";
+import { costOf } from "./totals";
 import type { Account } from "./accounts";
 
 const fixture = loadFixture();
@@ -148,5 +151,53 @@ describe("an empty system", () => {
 
   it("still produces readable text", () => {
     expect(contextToText(empty).length).toBeGreaterThan(50);
+  });
+});
+
+/**
+ * The question everyone asks first.
+ *
+ * Live, 20 September 2026: "how much did I spend today" was answered with a
+ * paragraph about the month being over budget. The model was doing as it was
+ * told: it must never add figures up itself, and there was no figure for a
+ * day anywhere in the context. So there is one now.
+ */
+describe("today, in the context", () => {
+  const fx = loadFixture();
+  const asOf = fx.expected.asOf;
+  const built = buildContext({
+    transactions: fx.transactions,
+    accounts: migrateAccounts(fx.reference.wallets, fx.reference.savings, fx.transactions),
+    budgets: fx.budgets,
+    credits: [],
+    reference: fx.reference,
+    lowBalanceThreshold: 50000,
+    asOf,
+  });
+
+  it("counts what today cost the same way every other screen counts it", () => {
+    const rows = fx.transactions.filter((t) => t.date === asOf);
+    const spent = rows.reduce((sum, t) => sum + costOf(t), 0);
+
+    expect(built.recent.today.entries).toBe(rows.length);
+    expect(built.recent.today.spent).toBeCloseTo(spent / 100, 2);
+  });
+
+  it("holds yesterday and the week, so a comparison needs no arithmetic", () => {
+    const yesterday = addDays(asOf, -1);
+    const spentYesterday = fx.transactions
+      .filter((t) => t.date === yesterday)
+      .reduce((sum, t) => sum + costOf(t), 0);
+
+    expect(built.recent.yesterday.spent).toBeCloseTo(spentYesterday / 100, 2);
+    expect(built.recent.lastSevenDays.spent).toBeGreaterThanOrEqual(built.recent.today.spent);
+  });
+
+  it("says all three in the text the model reads", () => {
+    const text = contextToText(built);
+    expect(text).toContain("## Today and the days before it");
+    expect(text).toContain(`Today, ${asOf}`);
+    expect(text).toContain("Yesterday: spent");
+    expect(text).toContain("The last seven days");
   });
 });

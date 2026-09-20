@@ -37,9 +37,9 @@ import { walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { billStatuses, overdue, upcoming } from "./bills";
 import { incomeQuality, positionsOf, type Debt } from "./debt";
-import { getMonth, getYear, monthName } from "./dates";
+import { addDays, getMonth, getYear, monthName } from "./dates";
 import { financeAlerts, burnRate, daysLeft, dailyAllowance } from "./alerts";
-import { spendingRanking, monthTotals } from "./totals";
+import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
 import { toPesos } from "./money";
 import type { Account } from "./accounts";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
@@ -66,6 +66,20 @@ export interface AiContext {
       readonly fees: number;
       readonly debtInterest: number;
     };
+  };
+  /**
+   * Today, yesterday and the last seven days.
+   *
+   * "How much did I spend today" is the most ordinary question there is, and
+   * the context had no figure for it: the month, the year and the entries,
+   * but nothing about a day. The model is told never to add anything up
+   * itself, correctly, so it answered with the month instead and the owner
+   * got a paragraph about being over budget. Three figures fix it.
+   */
+  readonly recent: {
+    readonly today: { readonly spent: number; readonly received: number; readonly entries: number };
+    readonly yesterday: { readonly spent: number };
+    readonly lastSevenDays: { readonly spent: number };
   };
   readonly balances: readonly { readonly account: string; readonly balance: number }[];
   readonly netWorth: number;
@@ -153,6 +167,16 @@ export function buildContext(input: ContextInput): AiContext {
         fees: pesos(totals.fees),
         debtInterest: pesos(totals.interest),
       },
+    },
+
+    recent: {
+      today: {
+        spent: pesos(spentBetween(transactions, asOf, asOf)),
+        received: pesos(receivedBetween(transactions, asOf, asOf)),
+        entries: transactions.filter((t) => t.date === asOf).length,
+      },
+      yesterday: { spent: pesos(spentBetween(transactions, addDays(asOf, -1), addDays(asOf, -1))) },
+      lastSevenDays: { spent: pesos(spentBetween(transactions, addDays(asOf, -6), asOf)) },
     },
 
     balances: live
@@ -254,6 +278,14 @@ function recentMonths(
 export const phpFigure = (n: number): string =>
   `PHP ${n.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+/** What those days cost, by the one definition of cost this app has. */
+const spentBetween = (rows: readonly Transaction[], from: IsoDate, to: IsoDate): number =>
+  rows.filter((t) => t.date >= from && t.date <= to).reduce((sum, t) => sum + costOf(t), 0);
+
+/** And what came in over them, starting balances left out. */
+const receivedBetween = (rows: readonly Transaction[], from: IsoDate, to: IsoDate): number =>
+  rows.filter((t) => t.date >= from && t.date <= to).reduce((sum, t) => sum + incomeOf(t), 0);
+
 export function contextToText(c: AiContext): string {
   const lines: string[] = [];
   const php = phpFigure;
@@ -278,6 +310,14 @@ export function contextToText(c: AiContext): string {
   lines.push(
     `Split: spending ${php(c.month.breakdown.spending)}, bills ${php(c.month.breakdown.bills)}, subscriptions ${php(c.month.breakdown.subscriptions)}, transfer fees ${php(c.month.breakdown.fees)}, debt interest ${php(c.month.breakdown.debtInterest)}.`,
   );
+
+  lines.push("");
+  lines.push("## Today and the days before it");
+  lines.push(
+    `Today, ${c.asOf}: spent ${php(c.recent.today.spent)}, received ${php(c.recent.today.received)}, across ${c.recent.today.entries} ${c.recent.today.entries === 1 ? "entry" : "entries"}.`,
+  );
+  lines.push(`Yesterday: spent ${php(c.recent.yesterday.spent)}.`);
+  lines.push(`The last seven days, today included: spent ${php(c.recent.lastSevenDays.spent)}.`);
 
   lines.push("");
   lines.push("## Accounts");
