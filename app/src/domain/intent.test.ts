@@ -186,3 +186,29 @@ describe("the answer to the offer", () => {
     }
   });
 });
+
+/**
+ * An intention is not an entry.
+ *
+ * The owner, 20 September 2026: "where going dinner today I plan to spend
+ * 1000 in cash". Read as an entry it books a thousand pesos nobody has spent.
+ */
+describe("money not spent yet", () => {
+  const PLANS = [
+    "where going dinner today I plan to spend 1000 in cash",
+    "I am planning to spend 5000 on a phone",
+    "thinking of borrowing 2000",
+    "balak kong bumili ng 3000 na damit",
+    "I am going to spend 500 tonight",
+  ];
+
+  it("is a question, not a row", () => {
+    for (const said of PLANS) expect(detectIntent(said), said).toBe("ask");
+  });
+
+  it("and what already happened still is one", () => {
+    for (const said of ["I spent 500 on food", "bumili ako ng pagkain 200 gcash", "I paid 1000 for wifi"]) {
+      expect(detectIntent(said), said).toBe("log");
+    }
+  });
+});

@@ -260,6 +260,22 @@ const FRONTED =
 const HELD =
   /\b(not mine|hindi akin|to pass (it )?on|pass (it|this) on|passing it on|forward (it|this) to|ipapasa|ipasa|remit (it|this) to|hand (it|this) over|hold(ing)? it for|for (the |my |our )?(company|client|boss|office|employer)|(client|company|boss)('s)? (payment|money))\b/i;
 
+/**
+ * Money that arrived with an instruction attached.
+ *
+ * The owner, 20 September 2026: "My mom send 1000 in my gcash and ask me
+ * to send it to someone to my aunt for medical help". Their note under it
+ * reads "wrong that should be recived and on behalf", and they were right:
+ * it came back as a plain transfer with no destination, which books the
+ * whole thousand as money they spent.
+ *
+ * None of the phrases above fit it. What marks this one is the
+ * instruction: someone gave you money and asked you to move it on to a
+ * third person. It is theirs the whole way through.
+ */
+const ASKED_TO_PASS =
+  /\b(?:ask(?:ed|s)?|told|wants?|sabi|pakiusap|requested)\b[^.]{0,30}?\bme\b[^.]{0,30}?\bto\s+(?:send|give|transfer|pass|deliver|remit|forward|ipadala|ibigay|hatid)\b|\b(?:send|give|transfer|pass|remit|forward)\s+(?:it|this|the money|the cash|ito|iyon|yun)\s+to\b|\b(?:sabi|utos|bilin|pakiusap)\b[^.]{0,40}?\b(?:ipadala|ibigay|ipasa|iabot|hatid)\b|\b(?:ipadala|ibigay|ipasa|iabot)\s+ko\s+(?:sa|kay)\b/i;
+
 /** Somebody other than the owner will pay: "he will repay me later", "my mother will pay for it". */
 const THEY_WILL_PAY =
   /\b(he|she|they|his|her|mama|mom|mother|nanay|papa|dad|father|tatay|kuya|ate|tita|tito|lola|lolo|friend|freind|client|boss|brother|sister|bro|sis)\b[^.]{0,24}?\b(will|would|is going to|are going to|promised to|said (?:he|she|they)(?:'ll| will))\s+(?:re)?pay\b|\b(?:repay me|pay me (?:back )?later|will repay)\b/i;
@@ -304,7 +320,7 @@ export function readBehalf(text: string): { side: "owed" | "held"; effect: DebtE
   if (COLLECT_VERB.test(text)) return null;
   if (FRONTED.test(text) || THEY_WILL_PAY.test(text) || NAME_WILL_PAY.test(text)) return { side: "owed", effect: "lend" };
   if (RELEASE.test(text)) return { side: "held", effect: "repay" };
-  if (HELD.test(text) || HOLDING.test(text)) return { side: "held", effect: "draw" };
+  if (HELD.test(text) || HOLDING.test(text) || ASKED_TO_PASS.test(text)) return { side: "held", effect: "draw" };
   return null;
 }
 

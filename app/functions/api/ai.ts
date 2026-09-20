@@ -796,6 +796,27 @@ const TONES: Record<string, string> = {
   detailed: "Explain the reasoning, still under 150 words.",
 };
 
+const ADVICE_RULES = [
+  /*
+   * ── Read from the owner's own log, 20 September 2026 ────────────────────
+   *
+   * "can I spend 10k tonight?" was answered with "522 entries in total,
+   * comprising the 18 listed above plus 504 additional entries not
+   * displayed". "Can I spend 10k tonight for dinner?" and "Should I borrow 1k
+   * tonight for dinner?" both came back with the month's overage recited, and
+   * the owner wrote "// the response if off" under one of them.
+   *
+   * Every one of those is a yes or no question about one amount on one day.
+   * The answer is a yes or a no, the arithmetic that decides it, and what it
+   * leaves behind. What it is not is the briefing above the entries, however
+   * true that briefing is.
+   */
+  "A question asking whether to do something, spend this, borrow that, afford it tonight, is answered with yes or no in the first three words, then the arithmetic that decides it, then what it leaves. Never answer one by restating the month.",
+  "Work from what they would have left, not from the budget alone: what the account holds, what is already due before the next money arrives, and what the amount asked about would leave of both. A budget being over is a fact about a plan; being unable to pay a bill on Friday is a fact about money.",
+  "When the honest answer is no, say no and say what would make it yes: a smaller amount, a different account, or after a date when something arrives.",
+  "Never answer a question about tonight with a figure about the year.",
+].join(" ");
+
 const SYSTEM_BASE = [
   "You are summarising a single person's own financial figures, which they have already calculated.",
   "Every number you are given is correct. Repeat figures exactly; never round or estimate, and never redo a total that has already been worked out for you.",
@@ -811,7 +832,7 @@ const SYSTEM_BASE = [
    * because a total says what happened and not why: an answer that merely
    * restates a figure already on the dashboard has done no work.
    */
-  "Lead with the single figure that matters most, then say what produced it. The mechanism is the useful part: being over budget is an outcome, and where the money went and in which days is the reason it can be acted on.",
+  "When you are summarising, lead with the single figure that matters most and then say what produced it: the mechanism is the useful part. When you are answering a question, the figure that matters most is the one the question asked for, and nothing else leads.",
   "State facts with their figures and stop. Never advise, never praise, never warn about habits. Someone reading the numbers does not need to be told what they mean, and being told turns a fact into scolding, which gets ignored.",
   "Compare only against this person's own history, which is in the data. Never mention what people generally do, what is typical, or any outside benchmark.",
   "Say plainly when the data does not support a conclusion. Do not guess why something was bought or what someone intended.",
@@ -881,7 +902,9 @@ const RICH_FORMATTING = [
  * invited to produce it.
  */
 const systemFor = (task: string): string =>
-  `${SYSTEM_BASE} ${task === "chat" ? RICH_FORMATTING : PLAIN_FORMATTING}`;
+  task === "chat"
+    ? `${SYSTEM_BASE} ${ADVICE_RULES} ${RICH_FORMATTING}`
+    : `${SYSTEM_BASE} ${PLAIN_FORMATTING}`;
 
 /**
  * What the providers actually offer, right now.

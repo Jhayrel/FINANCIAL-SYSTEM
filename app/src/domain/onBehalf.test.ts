@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import { loadFixture } from "../fixtures/load";
 import { walletBalance } from "./balances";
 import { applyReply, blanksIn, nextQuestion } from "./capture";
+import { readBehalf } from "./debtSentence";
 import { outstandingOf, type Debt } from "./debt";
 import { personDebt } from "./debtFill";
 import { effectLabel } from "./debtWords";
@@ -204,5 +205,47 @@ describe("which side of a debt movement the question is about", () => {
     const filled = applyReply(draft, q!.blank, "Maya", fx.reference, fx.transactions);
     expect(filled?.toWallet).toBe("Maya");
     expect(filled?.fromWallet).toBe("");
+  });
+});
+
+/**
+ * Money that arrives with an instruction attached.
+ *
+ * The owner, 20 September 2026: "My mom send 1000 in my gcash and ask me to
+ * send it to someone to my aunt for medical help". It came back as a plain
+ * transfer with no destination, which books the whole thousand as money they
+ * spent, and their note under it reads "wrong that should be recived and on
+ * behalf".
+ */
+describe("someone sends you money to pass on", () => {
+  const fx2 = loadFixture();
+
+  const HELD_SHAPES = [
+    "My mom send 1000 in my gcash and ask me to send it to someone to my aunt for medical help",
+    "my mother sent 2000 to my maya and asked me to give it to my tita",
+    "my boss told me to send it to the supplier",
+    "nagpadala si mama ng 500 sa gcash ko, sabi niya ipadala ko sa tita ko",
+    "she wants me to transfer it to her brother",
+  ];
+
+  it("reads as money held for someone, not as a transfer of your own", () => {
+    for (const said of HELD_SHAPES) {
+      expect(readBehalf(said), said).toEqual({ side: "held", effect: "draw" });
+    }
+  });
+
+  it("reads the whole sentence into a card that owes it back", () => {
+    const read = readEntry(HELD_SHAPES[0]!, fx2.transactions, fx2.reference, "2026-09-20");
+    expect(read.draft.flow).toBe("Debt");
+    expect(read.draft.behalf).toBe("held");
+    expect(read.draft.debtEffect).toBe("draw");
+    expect(read.draft.amount).toBe(100_000);
+    expect(read.draft.toWallet).toBe("Gcash");
+  });
+
+  it("leaves an ordinary transfer alone", () => {
+    for (const said of ["I transferred 1000 from maya to gcash", "I sent 500 to my friend from gcash"]) {
+      expect(readBehalf(said), said).not.toEqual({ side: "held", effect: "draw" });
+    }
   });
 });

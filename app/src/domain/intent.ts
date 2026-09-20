@@ -75,6 +75,17 @@ const HAPPENED =
   /\b(spent|paid|bought|purchased|received|recieved|recived|earned|earnd|sent|transferred|transfered|withdrew|withdrawed|deposited|gave|borrowed|lent|loaned|collected|loaded|refunded|topped up|cashed out|kumita|natanggap|nagbayad|bumili|binili|nagpadala|nangutang|pinautang|nag[- ]?(?:withdraw|withdrew|deposit|transfer|send|load|padala|bayad|bili|utang))\b/i;
 
 /** What this message most likely wants. */
+/**
+ * Money not spent yet.
+ *
+ * "I plan to spend 1000", "balak kong bumili", "I am going to borrow":
+ * every one of them is about a decision, and the useful answer is whether
+ * it fits, not a row in the ledger. Past tense is deliberately absent, so
+ * "I planned to spend 1000 and did" is still an entry.
+ */
+const PLANNING =
+  /\b(?:plan(?:ning)? to|planning on|thinking of|thinking about|about to|going to|gonna|intend to|balak|plano|gusto kong|will (?:i|we) )\b/i;
+
 export function detectIntent(text: string): Intent {
   const trimmed = text.trim();
   if (!trimmed) return "ask";
@@ -82,6 +93,16 @@ export function detectIntent(text: string): Intent {
   // An explicit question is a question, whatever else is in it.
   if (trimmed.endsWith("?")) return "ask";
   if (ASKING.test(trimmed)) return "ask";
+
+  /*
+   * An intention is not an entry.
+   *
+   * The owner, 20 September 2026: "where going dinner today I plan to spend
+   * 1000 in cash". Nothing has happened yet. Read as an entry it books a
+   * thousand pesos they have not spent; read as what it is, it is a question
+   * about whether they can, which is the thing they were actually asking.
+   */
+  if (PLANNING.test(trimmed)) return "ask";
 
   // Something done: an entry, whether or not the figure was mentioned.
   if (HAPPENED.test(trimmed)) return "log";
