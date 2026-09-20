@@ -54,6 +54,8 @@ import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domai
 import { debtWalletDirection, emptyDraft, insertChronologically } from "./domain/entry";
 import { formatMedium, getYear, today } from "./domain/dates";
 import { systemToCsv } from "./domain/csv";
+import type { ExportAsk } from "./domain/exportAsk";
+import { buildStatement, statementFilename, statementToCsv } from "./domain/statements";
 import { browserSettingsStore, type SettingsStore } from "./data/settingsStore";
 import {
   checksum,
@@ -1236,6 +1238,40 @@ export default function App() {
     }
   };
 
+  /**
+   * A file the assistant was asked for, written the way the buttons write it.
+   *
+   * Three files, one for each thing the owner might mean by "export": the
+   * backup a restore reads, the spreadsheet of everything, and a statement
+   * for a period. Every one of them is the existing path, so a file asked for
+   * in the chat is the same file the screen gives.
+   */
+  const handleAskedExport = (ask: ExportAsk): void => {
+    if (ask.kind === "backup") {
+      void handleBackup();
+      return;
+    }
+    if (ask.kind === "csv") {
+      handleExport();
+      return;
+    }
+
+    const statement = buildStatement(
+      transactions,
+      ask.type ?? "account",
+      ask.year,
+      ask.fromMonth ?? 1,
+      ask.toMonth ?? 12,
+      reference,
+    );
+    download(statementFilename(statement), statementToCsv(statement), "text/csv;charset=utf-8");
+    flash(
+      statement.rows.length === 0
+        ? "That period has no entries, so the sheet has only its headings."
+        : `Saved ${statement.rows.length.toLocaleString()} ${statement.rows.length === 1 ? "entry" : "entries"} as a spreadsheet.`,
+    );
+  };
+
   const handleExport = (): void => {
     // Every part, not just the ledger. The old export wrote one account
     // statement, so opening it showed the database and nothing else.
@@ -1357,6 +1393,7 @@ export default function App() {
     onUpdate: handleUpdate,
     onBudget: handleBudgetYear,
     onAddDebt: (debt) => setSettings((s) => ({ ...s, credits: [...s.credits, debt] })),
+    onExport: handleAskedExport,
   });
 
   // With Firebase configured, nothing renders until the owner is signed in,

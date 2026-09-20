@@ -120,6 +120,7 @@ import {
   readHistory,
   type StatementLine,
 } from "../domain/investigate";
+import { exportWords, readExportAsk, type ExportAsk } from "../domain/exportAsk";
 import { readInvestigateAsk, type InvestigateAsk } from "../domain/investigateAsk";
 import {
   duplicateHeadline,
@@ -222,6 +223,15 @@ export interface ProposalSink {
   readonly canAddDebt: boolean;
   /** Add someone to the debt list, as the Add form's "Someone new" does. */
   readonly addDebt: (debt: Debt) => void;
+  /**
+   * Hand over a file, the way the buttons on Settings and Statements do.
+   *
+   * The owner asked for every part to be reachable by saying it, and export
+   * was the one that was not: a backup lives on Settings, a spreadsheet of
+   * everything lives beside it, and a statement for one month lives on a
+   * third screen. It goes to the browser's own download and nowhere else.
+   */
+  readonly exportFile: (ask: ExportAsk) => void;
 }
 
 /** Saved entries about to change: each one before, and after. */
@@ -235,6 +245,13 @@ interface Changing {
 interface Budgeting {
   readonly kind: "budget";
   readonly plan: BudgetPlan;
+  readonly state: "open" | "applied" | "discarded";
+}
+
+/** A file the owner asked for, waiting to be saved. */
+interface Exporting {
+  readonly kind: "export";
+  readonly ask: ExportAsk;
   readonly state: "open" | "applied" | "discarded";
 }
 
@@ -370,7 +387,7 @@ interface Offered {
   readonly cardId: string;
 }
 
-type Turn = Said | Offered | Found | Drawn | DebtChoice | Changing | Budgeting;
+type Turn = Said | Offered | Found | Drawn | DebtChoice | Changing | Budgeting | Exporting;
 
 const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
 const isFound = (t: Turn): t is Found => t.kind === "found";
@@ -378,6 +395,7 @@ const isChart = (t: Turn): t is Drawn => t.kind === "chart";
 const isDebt = (t: Turn): t is DebtChoice => t.kind === "debt";
 const isChanging = (t: Turn): t is Changing => t.kind === "change";
 const isBudgeting = (t: Turn): t is Budgeting => t.kind === "budget";
+const isExporting = (t: Turn): t is Exporting => t.kind === "export";
 
 /**
  * A turn that is actually words, said by one of us.
@@ -1067,7 +1085,7 @@ export function AskPanel({
     }
 
     // A change or budget card is not kept: what it did is written as a message when it is applied.
-    if (isFound(turn) || isChanging(turn) || isBudgeting(turn) || turn.ephemeral) return;
+    if (isFound(turn) || isChanging(turn) || isBudgeting(turn) || isExporting(turn) || turn.ephemeral) return;
 
     /**
      * A message carrying photos waits until it knows what they were.
@@ -2475,6 +2493,22 @@ export function AskPanel({
      * the entry rules, because "maya 30000" in that sentence is a balance,
      * not a payment.
      */
+    /*
+     * "Export my data", before anything that reads figures out of a sentence.
+     *
+     * "Save my september spending as csv" holds a month and a kind of
+     * spending, and every reader below would happily make an entry out of it.
+     * A request for a file is not a movement of money.
+     */
+    const askedToExport = as ? null : readExportAsk(note, asOf);
+    if (askedToExport) {
+      const words = exportWords(askedToExport, asOf);
+      say({ kind: "assistant", text: words, from: "this device" });
+      setTurns((prev) => [...prev, { kind: "export", ask: askedToExport, state: "open" }]);
+      log(aiEvent("answered", "statements", { text: words, model: "this device" }));
+      return;
+    }
+
     const findable = [...reference.wallets, ...reference.savings];
     const askedToFind = as
       ? null
@@ -3886,15 +3920,24 @@ export function AskPanel({
       */}
       {openCount > 1 && (
         <div className="fms-batchbar">
-          <span className="t-micro">
+          <span className="t-caption fms-batchbar-count">
             {openCount} suggested, {readyCount} ready
           </span>
           <Button size="sm" variant="primary" disabled={readyCount === 0 || busy} onClick={addReady}>
             Add {readyCount === openCount ? "all" : `the ${readyCount} ready`}
           </Button>
-          <button type="button" className="t-micro fms-linkish" onClick={discardOpen}>
-            Discard the rest
-          </button>
+          {/*
+            Throwing the rest away is a button, not a hyperlink.
+
+            It was underlined grey text beside a filled green button: two
+            languages in one row, with the destructive one dressed as a link
+            and easy to hit by mistake. It is a quiet button now, the same
+            kind of object as the one beside it, and it says how many it will
+            throw away rather than "the rest".
+          */}
+          <Button size="sm" tone="danger" disabled={busy} onClick={discardOpen}>
+            Discard {openCount === readyCount ? `all ${openCount}` : `the other ${openCount - readyCount}`}
+          </Button>
         </div>
       )}
 
@@ -3942,6 +3985,17 @@ export function AskPanel({
                 say({ kind: "assistant", text: `Set. ${turn.plan.words}`, from: "this device" });
               }}
               onDiscard={() => setTurns((prev) => prev.map((t, j) => (j === i && isBudgeting(t) ? { ...t, state: "discarded" } : t)))}
+            />
+          ) : isExporting(turn) ? (
+            <ExportCard
+              key={i}
+              turn={turn}
+              onSave={() => {
+                sink.exportFile(turn.ask);
+                log(aiEvent("accepted", "statements", { entry: turn.ask.said }));
+                setTurns((prev) => prev.map((t, j) => (j === i && isExporting(t) ? { ...t, state: "applied" } : t)));
+              }}
+              onDiscard={() => setTurns((prev) => prev.map((t, j) => (j === i && isExporting(t) ? { ...t, state: "discarded" } : t)))}
             />
           ) : isDebt(turn) ? (
             <DebtCard
@@ -4988,6 +5042,46 @@ function ChangeCard({
 }
 
 /** A budget about to change. */
+/**
+ * A file, offered rather than written.
+ *
+ * The same shape as every other card here: it says what the file will be and
+ * waits. Nothing is downloaded until the button is pressed, because a file
+ * appearing in the downloads folder because of a sentence is a surprise, and
+ * this one holds the owner's whole financial history.
+ */
+function ExportCard({ turn, onSave, onDiscard }: { turn: Exporting; onSave: () => void; onDiscard: () => void }) {
+  const { ask, state } = turn;
+  const what =
+    ask.kind === "backup" ? "Backup file" : ask.kind === "csv" ? "Spreadsheet of everything" : "Statement";
+
+  return (
+    <div className="fms-proposal">
+      <div className="fms-proposalhead">
+        <span className="t-label" style={{ color: "var(--ink-2)" }}>
+          {what}
+        </span>
+        <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+          {state === "applied" ? "saved to this device" : state === "discarded" ? "not saved" : "nothing is saved yet"}
+        </span>
+      </div>
+      <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+        It goes to this device's downloads and nowhere else.
+      </p>
+      {state === "open" && (
+        <div className="fms-proposalactions">
+          <Button size="sm" variant="primary" onClick={onSave}>
+            Save the file
+          </Button>
+          <Button size="sm" onClick={onDiscard}>
+            Not now
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BudgetCard({ turn, onApply, onDiscard }: { turn: Budgeting; onApply: () => void; onDiscard: () => void }) {
   const { plan, state } = turn;
   const skipped = plan.outcome.skipped.length;

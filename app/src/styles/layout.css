@@ -4632,11 +4632,20 @@ button.fms-recent-row:disabled {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2);
-  background: var(--brand-50);
-  border: 1px solid var(--brand-600);
-  border-radius: var(--radius-md);
+  /*
+   * Ruled, like every other block here, rather than a rounded green panel
+   * (rules D2 and D3). The rule is the brand green because this is the thing
+   * to act on, not because anything gained or lost money.
+   */
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  border-left: 2px solid var(--brand-700);
   color: var(--ink);
+}
+
+/* The count holds the left, the two buttons sit together on the right. */
+.fms-batchbar-count {
+  margin-right: auto;
+  color: var(--ink-2);
 }
 
 /*

@@ -19,6 +19,7 @@ import { useEffect, useMemo, useRef } from "react";
 
 import type { Provenance } from "../domain/activity";
 import type { Debt } from "../domain/debt";
+import type { ExportAsk } from "../domain/exportAsk";
 import {
   checkDraft,
   draftToTransactions,
@@ -49,6 +50,8 @@ export interface SinkInput {
   readonly onBudget?: ((year: number, plan: BudgetYear, changes: readonly string[]) => void) | undefined;
   /** Add a person or lender to the debt list. */
   readonly onAddDebt?: ((debt: Debt) => void) | undefined;
+  /** Write a file to this device: a backup, a spreadsheet, or a statement. */
+  readonly onExport?: ((ask: ExportAsk) => void) | undefined;
 }
 
 /** Makes ids unique within one millisecond, when a batch saves together. */
@@ -112,6 +115,7 @@ export function useProposalSink(input: SinkInput): ProposalSink {
       budget: (year, plan, changes) => handlers.current.onBudget?.(year, plan, changes),
       canAddDebt: Boolean(input.onAddDebt),
       addDebt: (debt) => handlers.current.onAddDebt?.(debt),
+      exportFile: (ask) => handlers.current.onExport?.(ask),
       bin: (id) => handlers.current.onBin(id),
       binMany: (ids) => handlers.current.onBinMany(ids),
       restore: (id) => handlers.current.onRestore(id),

@@ -28,7 +28,7 @@ export function asksSettingsChange(text: string): boolean {
 }
 
 export const SETTINGS_ARE_YOURS =
-  "Settings are yours to change: accounts, categories, bills and subscriptions, credit lines, alerts, the theme and the AI itself. Open Settings for those. Everything else I can do from here: add, correct, move, bin and restore entries, set budgets and limits, and find where a difference went.";
+  "Settings are yours to change: accounts, categories, bills and subscriptions, credit lines, alerts, the theme and the AI itself. Open Settings for those. Everything else I can do from here: add, correct, move, bin and restore entries, set budgets and limits, find where a difference went, and hand you a backup or a spreadsheet.";
 
 /** The answer to "what can you do", with the one restriction said plainly. */
 export function capabilitiesAnswer(): string {
@@ -42,6 +42,7 @@ export function capabilitiesAnswer(): string {
     "- **Answer questions and advise** from your own figures, and **draw charts**: \"how did august compare with july\", \"chart my food this month\".",
     "- **On behalf of someone**, apart from debt: an advance for a friend who pays you back, money sent that your mother repays, money you hold for someone. Reimbursed, released, a write off (it becomes spending) or retained (it becomes income): \"I paid Carlo's food 180 cash, he will pay me back\", \"Carlo will not pay, write it off\".",
     "- **Debt** is banks, credit lines and loans, yours or with a person: \"I borrowed 1000 from kuya\", \"I lent 500 to Juan\", \"I paid my credit\".",
+    "- **Give you a file**: \"export everything\", \"make me a backup\", \"export september as a spreadsheet\", \"download my debt statement\". It goes to this device and nowhere else.",
     "**Settings stay yours**: accounts, categories, credit lines, alerts, the theme and the AI's own switches are changed on the Settings screen, not by me.",
   ].join("\n");
 }
