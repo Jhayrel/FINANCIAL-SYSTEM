@@ -1849,13 +1849,25 @@ export function AskPanel({
     }
 
     if (result.proposals.length === 0 && result.refused.length === 0) {
-      if (sent.length > 0) {
-        say({
-          kind: "assistant",
-          text: "No transaction was readable in that. A clearer photo of the amount and the date usually works.",
-          from: modelLabel(result.model ?? "") || "the provider",
-        });
-      }
+      /*
+       * Say so either way.
+       *
+       * With a photo it explained itself; with a sentence it returned in
+       * silence. Live, 20 September 2026: "restore the snack from may 7" was
+       * echoed into the thread and nothing came back at all, twice. A message
+       * that produces no card, no answer and no reason reads as the app
+       * having crashed, and there is no way to tell that from it having
+       * decided there was nothing there (rule D8).
+       */
+      say({
+        kind: "assistant",
+        ephemeral: true,
+        text:
+          sent.length > 0
+            ? "No transaction was readable in that. A clearer photo of the amount and the date usually works."
+            : "I could not find an entry in that. Say it with the amount and the wallet, or use the form beside this.",
+        from: sent.length > 0 ? modelLabel(result.model ?? "") || "the provider" : "this device",
+      });
       return false;
     }
 
@@ -3057,6 +3069,19 @@ export function AskPanel({
       shownCard !== null &&
       files.length === 0 &&
       !as &&
+      /*
+       * A sentence about deleting or restoring is never an amendment.
+       *
+       * Live, 20 September 2026: "restore the snack from may 7" was taken as
+       * a correction to the card on screen, and "may 7" set its amount to
+       * PHP 7.00. The restore was never answered, the card quietly changed,
+       * and the only sign of either was a line reading "Amount changed."
+       *
+       * `amend` reads figures, and it will find one in almost any sentence.
+       * What decides this is the verb: a message carrying a delete or restore
+       * verb is about a saved row, whatever figures happen to be in it.
+       */
+      localRecall === null &&
       !/#\s*\d|\b(entry|entries|record|records|saved|yesterday)\b/i.test(note) &&
       amend(shownCard.turn.proposal.draft, note, reference, asOf) !== null;
     const saysRecall =

@@ -187,3 +187,34 @@ describe("everything the phrase names has to agree", () => {
     expect(found.map((c) => c.row.recordNumber)).toEqual([493]);
   });
 });
+
+/**
+ * A restore is about a saved row, whatever figures are in the sentence.
+ *
+ * Live, 20 September 2026: with a card open, "restore the snack from may 7"
+ * was taken as a correction to that card and "may 7" set its amount to
+ * PHP 7.00. The restore was never answered. The chat decides this by asking
+ * whether the sentence carries a delete or restore verb at all, so these are
+ * the shapes that must carry one.
+ */
+describe("a sentence that is about a saved row", () => {
+  const RECALLS = [
+    "restore the snack from may 7",
+    "restore it",
+    "bring back the groceries",
+    "undelete the last one",
+    "delete the food I paid yesterday",
+    "remove entry 0296",
+    "discard the gas from august 7",
+  ];
+
+  it("is recognised whatever else is in it", () => {
+    for (const said of RECALLS) expect(detectRecall(said), said).not.toBeNull();
+  });
+
+  it("and an ordinary entry is not", () => {
+    for (const said of ["I paid 500 for food from gcash", "500 maya food", "how much did I spend"]) {
+      expect(detectRecall(said), said).toBeNull();
+    }
+  });
+});
