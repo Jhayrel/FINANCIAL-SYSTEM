@@ -4649,6 +4649,22 @@ button.fms-recent-row:disabled {
 }
 
 /*
+ * On a phone the count takes its own line and the buttons share the one
+ * under it. Pushed apart at 390px they each wrapped, so the bar was three
+ * rows and 112px tall before a single card.
+ */
+@media (max-width: 479px) {
+  .fms-batchbar-count {
+    flex-basis: 100%;
+    margin-right: 0;
+  }
+
+  .fms-batchbar > .fms-btn {
+    flex: 1 1 0;
+  }
+}
+
+/*
  * The composer, as a textarea.
  *
  * Grows to a few lines then scrolls, so pasting a statement cannot push the
