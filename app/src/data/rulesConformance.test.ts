@@ -14,11 +14,15 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { draftToTransactions, emptyDraft, type Draft } from "../domain/entry";
+import { checkDraft, draftToTransactions, emptyDraft, type Draft } from "../domain/entry";
 import type { Transaction } from "../domain/types";
 import { toDocument } from "./firestoreLedger";
+import { choicesForClue, draftForClue, type Clue } from "../domain/investigate";
+import { readProposals } from "../domain/proposal";
+import { loadFixture } from "../fixtures/load";
 
 const RULES = readFileSync(resolve(__dirname, "../../../firestore.rules"), "utf8");
+const REFERENCE = loadFixture().reference;
 
 const TYPES = ["Revenue", "Spending", "Transfer", "Debt"];
 const CATEGORIES = ["Revenue", "Spending", "Bills", "Subscriptions", "Transfer", "Opening", ""];
@@ -116,5 +120,102 @@ describe("every row the app saves passes the database rules", () => {
   it("bins and restores with a field the rules accept", () => {
     const [row] = draftToTransactions(CASES[0]![1], 1, "t-1");
     expect(refusals(toDocument(row!, "2026-09-18T10:00:00.000Z"))).toEqual([]);
+  });
+});
+
+/*
+ * The other ways a row gets made.
+ *
+ * The cases above are the Add form. These are the buttons: the fixes the
+ * investigation offers on Insights, and the entries the chat proposes. Both
+ * build a draft and save it through the same writer, and both were untested
+ * against the database's own rules, which is where the manual entries were
+ * being lost in September.
+ */
+describe("rows the buttons make, not the form", () => {
+  const account = "Gcash";
+  const asOf = "2026-09-20";
+
+  const CLUES: [string, Clue][] = [
+    [
+      "a movement on the statement that the ledger is missing",
+      { kind: "missing", line: { date: "2026-09-10", amount: -50000, description: "Grocery store" }, explains: 50000 },
+    ],
+    [
+      "money that arrived and was never written down",
+      { kind: "unrecorded", direction: "in", explains: -2200 },
+    ],
+    [
+      "money that left and was never written down",
+      { kind: "unrecorded", direction: "out", explains: 45000 },
+    ],
+    [
+      "cash spent without a note of it",
+      { kind: "cash", explains: 30000, perDay: 10000, days: 3 },
+    ],
+  ];
+
+  for (const [name, clue] of CLUES) {
+    it(name, () => {
+      const drafts = [
+        ...choicesForClue(clue, account, asOf, "Bank interest").map((c) => c.draft),
+        ...(draftForClue(clue, account, asOf, "Bank interest") ? [draftForClue(clue, account, asOf, "Bank interest")!] : []),
+      ];
+      expect(drafts.length, "the fix must offer something").toBeGreaterThan(0);
+
+      for (const draft of drafts) {
+        /*
+         * A fix the form itself refuses never reaches the database, and one
+         * of them is refused on purpose: "Someone paid me back" cannot know
+         * who, so it opens the form and waits to be told. Only what the form
+         * would let through has to be savable.
+         */
+        if (checkDraft(draft, [], REFERENCE, [], asOf).errors.length > 0) continue;
+
+        const rows = draftToTransactions(draft, 500, "t-clue");
+        for (const row of rows) {
+          expect(refusals(toDocument({ ...row, entrySource: "manual" })), `${name}: ${JSON.stringify(row)}`).toEqual([]);
+        }
+      }
+    });
+  }
+
+
+  /*
+   * The one fix that cannot be saved as offered, and why that is right: a
+   * collection has to name who paid, or it moves no one's balance and the
+   * database refuses it for having no debt on it. The form says so in words.
+   */
+  it("asks who paid, rather than saving a collection against nobody", () => {
+    const paidBack = choicesForClue({ kind: "unrecorded", direction: "in", explains: -2200 }, account, asOf)
+      .find((c) => c.label === "Someone paid me back");
+
+    expect(paidBack, "the fix is still offered").toBeDefined();
+    const check = checkDraft(paidBack!.draft, [], REFERENCE, [], asOf);
+    expect(check.errors.map((e) => e.message)).toContain("Pick which debt this belongs to.");
+
+    // And as offered, it is indeed a row the database would refuse.
+    const [row] = draftToTransactions(paidBack!.draft, 501, "t-paidback");
+    expect(refusals(toDocument({ ...row!, entrySource: "manual" }))).toContain("debt");
+  });
+
+  it("an entry the chat proposed, read back from the model's own JSON", () => {
+    const proposed = readProposals(
+      [
+        { flow: "Spending", amountText: "350", fromWallet: "Cash", item: "Food", date: asOf, description: "lunch" },
+        { flow: "Revenue", amountText: "1,200.50", toWallet: "Maya", item: "Allowance", date: asOf },
+        { flow: "Transfer", amountText: "500", fromWallet: "Maya", toWallet: "Gcash", feeText: "15", date: asOf },
+        { flow: "Transfer", amountText: "800", fromWallet: "Maya", toWallet: "", date: asOf, description: "sent to mother" },
+      ],
+      REFERENCE,
+      asOf,
+    );
+
+    expect(proposed.proposals.length, "the model's rows must survive reading").toBeGreaterThan(0);
+    for (const [i, p] of proposed.proposals.entries()) {
+      for (const row of draftToTransactions(p.draft, 600 + i, `t-ai-${i}`)) {
+        expect(refusals(toDocument({ ...row, entrySource: "ai" })), JSON.stringify(row)).toEqual([]);
+      }
+    }
   });
 });
