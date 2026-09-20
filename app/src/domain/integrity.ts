@@ -127,11 +127,25 @@ export function checkIntegrity(transactions: readonly Transaction[]): Issue[] {
       );
     }
 
-    if (!t.category) {
+    /*
+     * A category and an item are expected on a spending or a revenue row and
+     * on nothing else.
+     *
+     * Both of these fired on every transfer and every debt row, where both
+     * fields are blank by design: a transfer has no category (the form offers
+     * none) and a debt row is named by its debt. On the owner's own ledger
+     * that was 64 notices that a transfer has no category and 63 that it has
+     * no item, against three real findings. A checker that reports 127 things
+     * that are not wrong is not a checker, and the sentence was false as well:
+     * a transfer is not in the category totals to be excluded from.
+     */
+    const named = t.type === "Spending" || t.type === "Revenue";
+
+    if (named && !t.category) {
       one(t, "missing-category", "info", `No category, so excluded from category totals.`);
     }
 
-    if (!t.item) {
+    if (named && !t.item) {
       one(t, "missing-item", "info", `No item, so excluded from every ranking.`);
     }
 
