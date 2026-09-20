@@ -72,7 +72,7 @@ const AMOUNT = /(?:₱|php)?\s*\d{1,3}(?:,\d{3})+(?:\.\d+)?|(?:₱|php)?\s*\d+\.
  * rule.
  */
 const HAPPENED =
-  /\b(spent|paid|bought|purchased|received|recieved|recived|earned|earnd|sent|transferred|transfered|withdrew|withdrawed|deposited|gave|borrowed|lent|loaned|collected|loaded|refunded|topped up|cashed out|kumita|natanggap|nagbayad|bumili|binili|nagpadala|nangutang|pinautang)\b/i;
+  /\b(spent|paid|bought|purchased|received|recieved|recived|earned|earnd|sent|transferred|transfered|withdrew|withdrawed|deposited|gave|borrowed|lent|loaned|collected|loaded|refunded|topped up|cashed out|kumita|natanggap|nagbayad|bumili|binili|nagpadala|nangutang|pinautang|nag[- ]?(?:withdraw|withdrew|deposit|transfer|send|load|padala|bayad|bili|utang))\b/i;
 
 /** What this message most likely wants. */
 export function detectIntent(text: string): Intent {
@@ -228,5 +228,43 @@ export function isQuestion(text: string): boolean {
     ASKING.test(trimmed) ||
     REQUESTING.test(trimmed) ||
     ADVICE.test(trimmed)
+  );
+}
+
+/**
+ * How many entries are sitting inside a message that is not one.
+ *
+ * ── What this is for ───────────────────────────────────────────────────────
+ *
+ * A message can be both. Live, 20 September 2026: thirty purchases in
+ * Taglish, then "pakisagot din: magkano lahat ng ginastos ko". It ends in a
+ * question, so it was answered, and the thirty entries were dropped without a
+ * word. Losing an entry the owner typed is the worst thing this app does, and
+ * a question mark at the end is not a reason to do it.
+ *
+ * Deliberately conservative. Every piece must carry a figure and a verb that
+ * moves money before it counts, so "how much did I spend on food in August,
+ * about 3000 I think" is one loose figure in a question and not an entry. The
+ * caller only acts on two or more, because one is almost always the question
+ * talking about itself.
+ */
+export function entriesInside(text: string): number {
+  const pieces = text
+    .split(/[\n.;]+|\b(?:then|tapos|after that|and also|at saka)\b/i)
+    .map((piece) => piece.trim())
+    .filter((piece) => piece.length > 0);
+
+  return pieces.filter((piece) => HAPPENED.test(piece) && AMOUNT.test(piece)).length;
+}
+
+/**
+ * "Yes, add them": an answer to the offer, and nothing else.
+ *
+ * Short and explicit on purpose. This runs before everything, so a phrase
+ * that could be an entry of its own must not match it.
+ */
+export function wantsThoseEntries(text: string): boolean {
+  return /^\s*(?:yes[,!. ]*)?(?:please[,!. ]*)?(?:go ahead[,!. ]*)?(?:add|log|save|record|i-?add|ilagay|isave)(?:\s+(?:them|those|these|all|lahat|it|the entries|the rest))?(?:\s+(?:mo|na|please|po))*\s*[.!]?\s*$/i.test(
+    text,
   );
 }

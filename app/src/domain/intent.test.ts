@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { detectIntent, isBudgetCommand, wantsAllBillsPaid } from "./intent";
+import { detectIntent, isBudgetCommand, wantsAllBillsPaid , entriesInside, wantsThoseEntries } from "./intent";
 
 describe("detectIntent: entries", () => {
   it("reads the sentence that was answered as a question instead", () => {
@@ -137,6 +137,52 @@ describe("wantsAllBillsPaid", () => {
   it("is not one bill with a figure, or a question", () => {
     for (const text of ["paid 999 wifi bill", "did I pay all my bills?", "paid the electric bill"]) {
       expect(wantsAllBillsPaid(text), text).toBe(false);
+    }
+  });
+});
+
+/**
+ * A message that is both.
+ *
+ * Live, 20 September 2026: thirty purchases in Taglish and then "pakisagot
+ * din: magkano lahat ng ginastos ko". It ends in a question, so it was
+ * answered, and the thirty entries were dropped without a word.
+ */
+describe("entries inside a message that is not one", () => {
+  it("counts each thing that happened with a figure on it", () => {
+    const said = [
+      "noong september 2 bumili ako ng item 1 ng 107 sa maya",
+      "noong september 3 bumili ako ng item 2 ng 114 sa gcash",
+      "nag withdraw ako ng 1200 sa maya",
+      "pakisagot din: magkano lahat ng ginastos ko",
+    ].join(". ");
+
+    expect(entriesInside(said)).toBe(3);
+  });
+
+  it("is not fooled by a question that mentions a figure", () => {
+    expect(entriesInside("how much did I spend on food in august, about 3000 I think")).toBeLessThan(2);
+    expect(entriesInside("is 5000 a lot for groceries")).toBe(0);
+    expect(entriesInside("what can you do")).toBe(0);
+    expect(entriesInside("")).toBe(0);
+  });
+
+  it("needs both a figure and something that happened", () => {
+    expect(entriesInside("I paid the wifi. I paid the electricity")).toBe(0);
+    expect(entriesInside("500. 300. 200")).toBe(0);
+  });
+});
+
+describe("the answer to the offer", () => {
+  it("takes the short ways of saying yes", () => {
+    for (const said of ["add them", "Add them.", "yes add them", "add all", "log them", "i-add mo", "save them", "add"]) {
+      expect(wantsThoseEntries(said), said).toBe(true);
+    }
+  });
+
+  it("is not an entry, and not a question", () => {
+    for (const said of ["add 500 food cash", "add spending", "yes", "add them to maya", "how do I add them"]) {
+      expect(wantsThoseEntries(said), said).toBe(false);
     }
   });
 });

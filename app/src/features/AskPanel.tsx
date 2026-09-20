@@ -104,7 +104,7 @@ import {
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
-import { detectIntent, isAdvice, isBudgetCommand, isQuestion, wantsAllBillsPaid, type Intent } from "../domain/intent";
+import { detectIntent, entriesInside, isAdvice, isBudgetCommand, isQuestion, wantsAllBillsPaid, wantsThoseEntries, type Intent } from "../domain/intent";
 import { addressesEveryCard } from "../domain/capture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
@@ -572,6 +572,15 @@ export function AskPanel({
   const ai = useAi({ settings, transactions, budgets, reference, feature: "chat", asOf });
 
   const [turns, setTurns] = useState<Turn[]>([]);
+
+  /**
+   * The last message that was answered as a question and had entries in it.
+   *
+   * Kept so "add them" has something to point at. A ref rather than state:
+   * nothing on screen depends on it, and a render for it would be a render
+   * for nothing.
+   */
+  const entriesLeftBehind = useRef<string | null>(null);
 
   /**
    * The card in the form follows the form.
@@ -2210,6 +2219,21 @@ export function AskPanel({
     if (!note && files.length === 0) return;
     setStage("");
 
+    /*
+     * "Add them", about the entries inside the last question.
+     *
+     * Read before anything else, because on its own it is two words that
+     * mean nothing to any other reader here, and after this point every
+     * branch would try to make an entry out of them.
+     */
+    if (entriesLeftBehind.current && wantsThoseEntries(note)) {
+      const message = entriesLeftBehind.current;
+      entriesLeftBehind.current = null;
+      setDraft("");
+      await send(message, "log");
+      return;
+    }
+
     /**
      * A budget, which is changed on the Budget screen and never from here.
      *
@@ -3416,6 +3440,30 @@ export function AskPanel({
     try {
       if (job === "ask") {
         await askQuestion(note);
+
+        /*
+         * A message can be both, and the entries in it must not be lost.
+         *
+         * Live, 20 September 2026: thirty purchases in Taglish and then
+         * "pakisagot din: magkano lahat ng ginastos ko". It ends in a
+         * question, so it was answered, and the thirty entries were dropped
+         * without a word. A question mark at the end is not a reason to throw
+         * away what someone typed.
+         *
+         * Offered rather than read straight away: an answer and a screenful
+         * of cards at once is its own kind of mess, and the offer costs one
+         * word. `wantsThoseEntries` takes it from there.
+         */
+        const alsoEntries = entriesInside(note);
+        if (alsoEntries >= 2) {
+          entriesLeftBehind.current = note;
+          say({
+            kind: "assistant",
+            ephemeral: true,
+            text: `That message has ${alsoEntries} entries in it as well. Say "add them" and I will read them out; nothing is saved until you press the button on each card.`,
+            from: "this device",
+          });
+        }
         return;
       }
 
@@ -3936,7 +3984,7 @@ export function AskPanel({
             throw away rather than "the rest".
           */}
           <Button size="sm" tone="danger" disabled={busy} onClick={discardOpen}>
-            Discard {openCount === readyCount ? `all ${openCount}` : `the other ${openCount - readyCount}`}
+            {openCount === readyCount ? `Discard all ${openCount}` : "Discard the rest"}
           </Button>
         </div>
       )}

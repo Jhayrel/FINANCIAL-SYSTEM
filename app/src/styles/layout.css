@@ -5301,9 +5301,32 @@ textarea.fms-askinput {
   width: 100%;
 }
 
+/*
+ * The six movements of an on-behalf card, as two short rows.
+ *
+ * Each choice was a 44px box in a two column grid, so six of them were six
+ * rows and 270px of buttons before the amount was even on screen: on a phone
+ * the card was mostly buttons. Three to a row where there is room, two where
+ * there is not, and the labels are one word each, so nothing is cut.
+ */
 .fms-debteffects {
   display: grid;
   gap: var(--space-2);
+}
+
+.fms-debteffects .fms-choicerow {
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+}
+
+/*
+ * What the chosen movement means, in the card's own quiet voice.
+ *
+ * It was `--ink-3` on a tinted note, which on the amber selection read as a
+ * warning about the choice just made rather than an explanation of it.
+ */
+.fms-debteffects > .fms-proposalnote {
+  color: var(--ink-2);
+  line-height: 1.45;
 }
 
 /*
@@ -6033,6 +6056,25 @@ textarea.fms-askinput {
 
 .fms-behalf-label {
   color: var(--ink-3);
+}
+
+/*
+ * The person, and the box for a new one, stacked once the card is narrow.
+ *
+ * Side by side in a chat card the select showed "School (new, adde..." and
+ * the name box had room for about six characters, so the one field that says
+ * whose money this is was the least readable thing on the card.
+ */
+@media (max-width: 719px) {
+  .fms-debtpick {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .fms-debtpick > select,
+  .fms-debtpick > input {
+    width: 100%;
+  }
 }
 
 /* ══ Chat: changes to saved entries and budgets ══════════════════════════════ */
