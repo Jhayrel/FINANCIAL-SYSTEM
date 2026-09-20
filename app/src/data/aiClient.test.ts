@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import { loadFixture } from "../fixtures/load";
+import type { Draft } from "../domain/entry";
 import { allowedCategories } from "../domain/categorise";
 import { buildContext } from "../domain/aiContext";
 import { migrateAccounts } from "../domain/accounts";
@@ -214,12 +215,12 @@ describe("askAi", () => {
 });
 
 describe("describeDraft", () => {
-  const draft = {
-    flow: "Spending" as const,
+  const draft: Draft = {
+    flow: "Spending",
     date: "2026-08-30",
     fromWallet: "Maya",
     toWallet: "",
-    category: "Food",
+    category: "Spending",
     item: "Zzz Never Bought This Before",
     description: "",
     amount: 15000,
@@ -312,8 +313,8 @@ describe("describeDraft", () => {
 });
 
 describe("suggestCategory", () => {
-  const draft = {
-    flow: "Spending" as const,
+  const draft: Draft = {
+    flow: "Spending",
     date: "2026-08-30",
     fromWallet: "Maya",
     toWallet: "",
@@ -333,7 +334,7 @@ describe("suggestCategory", () => {
   it("answers from history without asking, when the ledger already agrees", async () => {
     // The category has to be one the picker actually offers, or the plan
     // is right to refuse it.
-    const allowed = new Set(allowedCategories("Spending", fixture.reference));
+    const allowed = new Set(allowedCategories("Spending"));
     const filed = fixture.transactions.filter(
       (t) => t.type === "Spending" && t.item.trim() && allowed.has(t.category.trim()),
     );
@@ -345,7 +346,6 @@ describe("suggestCategory", () => {
     const result = await suggestCategory(
       { ...draft, item: repeated!.item },
       fixture.transactions,
-      fixture.reference,
       { fetcher: never, token: async () => "t" },
     );
 
@@ -355,7 +355,7 @@ describe("suggestCategory", () => {
   });
 
   it("does not call the model when the toggle is off", async () => {
-    const result = await suggestCategory(draft, fixture.transactions, fixture.reference, {
+    const result = await suggestCategory(draft, fixture.transactions, {
       allowModel: false,
       fetcher: never,
       token: async () => "t",
@@ -366,35 +366,35 @@ describe("suggestCategory", () => {
 
   it("accepts a category from the allowed list", async () => {
     const fetcher = (async () =>
-      new Response(JSON.stringify({ category: "Food", confidence: "high" }), {
+      new Response(JSON.stringify({ category: "Bills", confidence: "high" }), {
         headers: { "content-type": "application/json" },
       })) as unknown as typeof fetch;
 
-    const result = await suggestCategory(draft, fixture.transactions, fixture.reference, {
+    const result = await suggestCategory(draft, fixture.transactions, {
       allowModel: true,
       fetcher,
       token: async () => "t",
     });
 
     expect(result.source).toBe("model");
-    expect(result.category).toBe("Food");
+    expect(result.category).toBe("Bills");
     expect(result.confidence).toBe("high");
   });
 
   it("refuses a category the model invented", async () => {
     const fetcher = (async () =>
-      new Response(JSON.stringify({ category: "Snacks And Treats", confidence: "high" }), {
+      new Response(JSON.stringify({ category: "Food", confidence: "high" }), {
         headers: { "content-type": "application/json" },
       })) as unknown as typeof fetch;
 
-    const result = await suggestCategory(draft, fixture.transactions, fixture.reference, {
+    const result = await suggestCategory(draft, fixture.transactions, {
       allowModel: true,
       fetcher,
       token: async () => "t",
     });
 
-    // Better to offer nothing than to put a category into the totals that
-    // exists on exactly one row.
+    // "Food" is a kind of spending, not a track, and the database refuses
+    // it. Better to offer nothing than a row that cannot be saved.
     expect(result.source).toBe("none");
     expect(result.category).toBe("");
   });
@@ -403,12 +403,12 @@ describe("suggestCategory", () => {
     let sent = "";
     const fetcher = (async (_u: string, init: RequestInit) => {
       sent = String(init.body);
-      return new Response(JSON.stringify({ category: "Food", confidence: "high" }), {
+      return new Response(JSON.stringify({ category: "Bills", confidence: "high" }), {
         headers: { "content-type": "application/json" },
       });
     }) as unknown as typeof fetch;
 
-    await suggestCategory(draft, fixture.transactions, fixture.reference, {
+    await suggestCategory(draft, fixture.transactions, {
       allowModel: true,
       fetcher,
       token: async () => "t",
@@ -425,7 +425,7 @@ describe("suggestCategory", () => {
       throw new Error("offline");
     }) as unknown as typeof fetch;
 
-    const result = await suggestCategory(draft, fixture.transactions, fixture.reference, {
+    const result = await suggestCategory(draft, fixture.transactions, {
       allowModel: true,
       fetcher,
       token: async () => "t",

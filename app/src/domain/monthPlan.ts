@@ -34,7 +34,8 @@ import { monthBills, phaseOf, type MonthBill, type MonthBills, type MonthPhase }
 import { debtDue, positionsOf, type Debt, type DebtKind, type DueBasis } from "./debt";
 import { addDays, daysInMonth, firstOfMonth, getDay, lastOfMonth, monthName } from "./dates";
 import { formatMoney as money, type Centavos } from "./money";
-import { monthTotals, spendingAttribution } from "./totals";
+import { costByKind } from "./kinds";
+import { monthTotals } from "./totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
 type Tracks = ReturnType<typeof assessMonthFor>;
@@ -145,17 +146,28 @@ export function monthBrief(input: {
   const wallets = totalWalletBalance(held, reference.wallets);
   const savings = totalSavingsBalance(held, reference.savings);
 
+  /*
+   * Where it went, the same way Insights says it.
+   *
+   * This read `spendingAttribution`, the spending track's split, under a
+   * heading that says where the money went. Bills, subscriptions and what a
+   * lender charged are not in that split, so the Dashboard was short by
+   * PHP 1,641.00 in most of the owner's months, and in a month whose biggest
+   * outgoing is a bill it left the biggest thing off the list. Insights had
+   * already been put right on its own; `domain/kinds.ts` is now the one
+   * answer both screens read (`agreement.test.ts`).
+   */
   const back = year * 12 + (month - 1) - 1;
   const prevYear = Math.floor(back / 12);
   const prevMonth = (back % 12) + 1;
-  const before = spendingAttribution(transactions, {
-    start: firstOfMonth(prevYear, prevMonth),
-    end: lastOfMonth(prevYear, prevMonth),
-  });
-  const kinds = [...spendingAttribution(transactions, { start, end })]
-    .sort((a, b) => b[1] - a[1])
+  const inThis = transactions.filter((t) => t.date >= start && t.date <= end);
+  const inPrevious = transactions.filter(
+    (t) => t.date >= firstOfMonth(prevYear, prevMonth) && t.date <= lastOfMonth(prevYear, prevMonth),
+  );
+  const before = new Map(costByKind(inPrevious, debts).map((k) => [k.name, k.amount]));
+  const kinds = costByKind(inThis, debts)
     .slice(0, TOP_KINDS)
-    .map(([name, amount]) => ({ name, amount, lastMonth: before.get(name) ?? 0 }));
+    .map(({ name, amount }) => ({ name, amount, lastMonth: before.get(name) ?? 0 }));
 
   const bills = monthBills(transactions, reference, year, month, asOf);
 

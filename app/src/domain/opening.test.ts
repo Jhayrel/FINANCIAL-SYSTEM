@@ -176,6 +176,7 @@ describe("misdatedOpenings", () => {
     total: 10000,
     fromWallet: "Maya",
     toWallet: "",
+    notes: "",
     status: "Done",
     ...over,
   });
@@ -266,6 +267,7 @@ describe("ledgerStart and misdatedOpenings agree", () => {
     total: 10000,
     fromWallet: "Maya",
     toWallet: "",
+    notes: "",
     status: "Done",
     ...over,
   });
@@ -338,6 +340,7 @@ describe("a starting balance is only for setting up", () => {
     total: 10000,
     fromWallet: "Maya",
     toWallet: "",
+    notes: "",
     status: "Done",
     ...over,
   });
@@ -401,6 +404,7 @@ describe("suspectOpenings", () => {
     total: 10000,
     fromWallet: "Maya",
     toWallet: "",
+    notes: "",
     status: "Done",
     ...over,
   });

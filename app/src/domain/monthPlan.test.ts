@@ -118,8 +118,8 @@ describe("safe to spend", () => {
 
   const budgetsWith = (spending: number): Budgets => {
     const base = budgetForYear(fx.budgets, 2026);
-    const s = [...base.spending];
-    const b = [...base.billsSubs];
+    const s = [...base.spending] as [number, number, number, number, number, number, number, number, number, number, number, number];
+    const b = [...base.billsSubs] as typeof s;
     s[8] = spending;
     b[8] = 600000;
     return { ...fx.budgets, "2026": { ...base, spending: s, billsSubs: b } };

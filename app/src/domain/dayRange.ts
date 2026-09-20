@@ -21,6 +21,7 @@ import { billStatuses } from "./bills";
 import { debtDue, positionsOf, type Debt } from "./debt";
 import { addDays, addMonths, daysBetween, formatMedium, getDay, getMonth, getYear, monthName } from "./dates";
 import type { Centavos } from "./money";
+import { costByKind } from "./kinds";
 import { costOf, incomeOf } from "./totals";
 import type { IsoDate, RankedAmount, ReferenceLists, Transaction } from "./types";
 
@@ -120,36 +121,12 @@ export function rangeReport(input: {
   /*
    * Where every peso of `spent` went, largest first, adding up to it exactly.
    *
-   * It read `spendingAttribution`, which is the spending track's split: kept
-   * to the workbook by the parity tests, and silent on bills, subscriptions
-   * and debt interest by design. `spent` counts all three (`costOf`), so on
-   * the owner's ledger the kinds came up ₱1,641.00 short in every month from
-   * January to July and ₱4,329.79 short in August, under a panel that showed
-   * them as where the money went. It also kept only the six largest.
-   *
-   * So each row's own cost is filed once, under the name it is known by: the
-   * item for spending, a bill and a subscription; the debt for its interest
-   * and fees; Money Send for money that left, Transaction Fee for a fee
-   * between your own accounts. Every kind is kept; the screen folds the
-   * smallest into one line.
+   * `domain/kinds.ts` does the filing, because the Dashboard asks the same
+   * question about the same month and the two answers drifted apart once
+   * already. The screen folds the smallest kinds into one line; nothing is
+   * dropped here.
    */
-  const byKind = new Map<string, Centavos>();
-  for (const t of rows) {
-    const cost = costOf(t);
-    if (cost <= 0) continue;
-    const name =
-      t.type === "Transfer"
-        ? t.toWallet.trim()
-          ? "Transaction Fee"
-          : "Money Send"
-        : t.type === "Debt"
-          ? `Interest and fees, ${debts.find((d) => d.id === t.debtId)?.name ?? "a debt"}`
-          : t.item.trim() || (t.category === "Spending" ? "No item" : t.category);
-    byKind.set(name, (byKind.get(name) ?? 0) + cost);
-  }
-  const kinds = [...byKind]
-    .sort((a, b) => b[1] - a[1])
-    .map(([name, amount]) => ({ name, amount }));
+  const kinds = costByKind(rows, debts);
 
   const expected: ExpectedItem[] = [];
   if (end > asOf) {

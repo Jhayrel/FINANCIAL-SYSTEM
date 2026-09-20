@@ -7,7 +7,7 @@
  */
 
 import type { Centavos } from "./money";
-import { getMonth, getYear } from "./dates";
+import { firstOfMonth, getMonth, getYear, lastOfMonth } from "./dates";
 import { owedChange } from "./debt";
 import { retainedAsIncome, writtenOffAsSpending } from "./totals";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
@@ -161,8 +161,14 @@ export function buildStatement(
   return {
     type,
     rows,
-    from: `${year}-${String(lo).padStart(2, "0")}-01`,
-    to: `${year}-${String(hi).padStart(2, "0")}-01`,
+    from: firstOfMonth(year, lo),
+    /*
+     * The last day of the last month, not the first of it. A statement for
+     * January said "1 January to 1 January" while holding the whole month,
+     * and one for January to August said it ended on 1 August with three
+     * more weeks of rows under it.
+     */
+    to: lastOfMonth(year, hi),
     totalIn,
     totalOut,
     net: totalIn - totalOut,

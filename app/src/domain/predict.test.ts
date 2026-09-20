@@ -26,6 +26,7 @@ const row = (over: Partial<Transaction>): Transaction => ({
   total: 59900,
   fromWallet: "Maya",
   toWallet: "",
+  notes: "",
   status: "Paid",
   ...over,
 });
@@ -103,7 +104,7 @@ describe("billsToLog", () => {
 
   it("ignores anything that is not a bill or a subscription", () => {
     const due = billsToLog(
-      [row({ date: "2026-07-30", category: "Food", item: "Lunch" })],
+      [row({ date: "2026-07-30", category: "Spending", item: "Lunch" })],
       "2026-08-30",
     );
 

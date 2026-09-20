@@ -30,7 +30,7 @@ const row = (over: Partial<Transaction>): Transaction => {
     recordNumber: seq,
     date: "2026-08-01",
     type: "Spending",
-    category: "Food",
+    category: "Spending",
     item: "Lunch",
     description: "",
     amount: 10000,
@@ -38,7 +38,8 @@ const row = (over: Partial<Transaction>): Transaction => {
     total: 10000,
     fromWallet: "Maya",
     toWallet: "",
-    status: "Paid",
+    notes: "",
+    status: "Paid" as const,
     ...over,
   };
 };
@@ -59,30 +60,41 @@ const draft = (over: Partial<Draft> = {}): Draft => ({
 });
 
 describe("allowedCategories", () => {
-  it("offers spending types plus the recurring buckets, for spending", () => {
-    const allowed = allowedCategories("Spending", fixture.reference);
+  /*
+   * A category is the track a row is counted on, and the database refuses
+   * every other value. This list offered the owner's spending types instead,
+   * so a confident answer of "Food" was written into the field and the save
+   * was refused. It is the track now, and only ever something that can be
+   * saved.
+   */
+  it("offers the three tracks a spending row can be counted on", () => {
+    const allowed = allowedCategories("Spending");
 
-    expect(allowed).toContain("Bills");
-    expect(allowed).toContain("Subscriptions");
+    expect(allowed.slice(0, 3)).toEqual(["Spending", "Bills", "Subscriptions"]);
     expect(allowed[allowed.length - 1]).toBe(UNSURE);
   });
 
-  it("offers revenue categories, for revenue", () => {
-    const allowed = allowedCategories("Revenue", fixture.reference);
-
-    expect(allowed.length).toBeGreaterThan(1);
+  it("offers nothing to choose for revenue, which has one category", () => {
+    expect(allowedCategories("Revenue")).toEqual(["Revenue"]);
     // Filing a bill as income is the exact mistake this app exists to undo.
-    expect(allowed).not.toContain("Bills");
+    expect(allowedCategories("Revenue")).not.toContain("Bills");
+  });
+
+  it("offers only categories the database accepts", () => {
+    const legal = new Set(["Revenue", "Spending", "Bills", "Subscriptions", "Transfer", "Opening", UNSURE]);
+    for (const flow of ["Spending", "Revenue", "Opening", "Transfer", "Debt", ""] as const) {
+      for (const c of allowedCategories(flow)) expect(legal.has(c), flow + ": " + c).toBe(true);
+    }
   });
 
   it("offers nothing for flows the category does not apply to", () => {
-    expect(allowedCategories("Transfer", fixture.reference)).toEqual([]);
-    expect(allowedCategories("Debt", fixture.reference)).toEqual([]);
-    expect(allowedCategories("", fixture.reference)).toEqual([]);
+    expect(allowedCategories("Transfer")).toEqual([]);
+    expect(allowedCategories("Debt")).toEqual([]);
+    expect(allowedCategories("")).toEqual([]);
   });
 
   it("never repeats a category, even if two lists both name it", () => {
-    const allowed = allowedCategories("Spending", fixture.reference);
+    const allowed = allowedCategories("Spending");
     expect(new Set(allowed).size).toBe(allowed.length);
   });
 });
@@ -91,32 +103,32 @@ describe("pastLabels", () => {
   it("returns the owner's own labels for this item, newest first", () => {
     const examples = pastLabels(
       [
-        row({ date: "2026-01-01", item: "Grab", category: "Travel" }),
-        row({ date: "2026-08-01", item: "Grab", category: "Fun" }),
+        row({ date: "2026-01-01", item: "Grab", category: "Spending" }),
+        row({ date: "2026-08-01", item: "Grab", category: "Bills" }),
       ],
       "Spending",
       "Grab",
     );
 
-    expect(examples[0]).toEqual({ item: "Grab", category: "Fun" });
+    expect(examples[0]).toEqual({ item: "Grab", category: "Bills" });
   });
 
   it("prefers exact matches over merely related ones", () => {
     const examples = pastLabels(
       [
-        row({ date: "2026-08-01", item: "Jollibee lunch", category: "Treat" }),
-        row({ date: "2026-01-01", item: "Lunch", category: "Food" }),
+        row({ date: "2026-08-01", item: "Jollibee lunch", category: "Bills" }),
+        row({ date: "2026-01-01", item: "Lunch", category: "Spending" }),
       ],
       "Spending",
       "Lunch",
     );
 
-    expect(examples[0]?.category).toBe("Food");
+    expect(examples[0]?.category).toBe("Spending");
   });
 
   it("keeps to the same flow, since revenue says nothing about spending", () => {
     const examples = pastLabels(
-      [row({ item: "Lunch", category: "Salary", type: "Revenue" })],
+      [row({ item: "Lunch", category: "Revenue", type: "Revenue" })],
       "Spending",
       "Lunch",
     );
@@ -134,13 +146,12 @@ describe("categoryPlan", () => {
   it("answers from history when the item has been filed twice the same way", () => {
     const plan = categoryPlan(
       draft(),
-      [row({ item: "Lunch", category: "Food" }), row({ item: "Lunch", category: "Food" })],
-      fixture.reference,
+      [row({ item: "Lunch", category: "Bills" }), row({ item: "Lunch", category: "Bills" })],
     );
 
     expect(plan.kind).toBe("known");
     if (plan.kind === "known") {
-      expect(plan.category).toBe("Food");
+      expect(plan.category).toBe("Bills");
       expect(plan.seen).toBe(2);
     }
   });
@@ -148,8 +159,7 @@ describe("categoryPlan", () => {
   it("asks when there is only one past entry, which is not a pattern", () => {
     const plan = categoryPlan(
       draft(),
-      [row({ item: "Lunch", category: "Food" })],
-      fixture.reference,
+      [row({ item: "Lunch", category: "Bills" })],
     );
 
     expect(plan.kind).toBe("ask");
@@ -158,26 +168,26 @@ describe("categoryPlan", () => {
   it("asks when past entries disagree", () => {
     const plan = categoryPlan(
       draft(),
-      [row({ item: "Lunch", category: "Food" }), row({ item: "Lunch", category: "Treat" })],
-      fixture.reference,
+      [row({ item: "Lunch", category: "Bills" }), row({ item: "Lunch", category: "Subscriptions" })],
     );
 
     expect(plan.kind).toBe("ask");
   });
 
   it("stays quiet with no item, and on flows that have no category", () => {
-    expect(categoryPlan(draft({ item: "" }), [], fixture.reference).kind).toBe("not-yet");
-    expect(categoryPlan(draft({ flow: "Transfer" }), [], fixture.reference).kind).toBe("not-yet");
+    expect(categoryPlan(draft({ item: "" }), []).kind).toBe("not-yet");
+    expect(categoryPlan(draft({ flow: "Transfer" }), []).kind).toBe("not-yet");
+    // One possible answer is not a question: revenue is always Revenue.
+    expect(categoryPlan(draft({ flow: "Revenue", item: "Allowance" }), []).kind).toBe("not-yet");
   });
 
   it("never proposes a category outside the allowed list", () => {
     const plan = categoryPlan(
       draft(),
       [
-        row({ item: "Lunch", category: "Something Deleted" }),
-        row({ item: "Lunch", category: "Something Deleted" }),
+        row({ item: "Lunch", category: "Transfer" }),
+        row({ item: "Lunch", category: "Transfer" }),
       ],
-      fixture.reference,
     );
 
     // Twice filed, but the category no longer exists, so it must be asked.
@@ -189,12 +199,12 @@ describe("describeForCategory", () => {
   it("carries the item, the wallets and the past labels", () => {
     const fields = describeForCategory(
       draft(),
-      [row({ item: "Lunch", category: "Food" })],
+      [row({ item: "Lunch", category: "Bills" })],
     );
 
     expect(fields).toContain("Item: Lunch");
     expect(fields).toContain("From: Maya");
-    expect(fields).toContain("Lunch -> Food");
+    expect(fields).toContain("Lunch -> Bills");
   });
 
   it("never sends free text, the same boundary as describe.ts", () => {
@@ -227,17 +237,17 @@ describe("describeForCategory", () => {
 });
 
 describe("acceptCategory", () => {
-  const allowed = ["Food", "Travel", "Bills", UNSURE];
+  const allowed = ["Spending", "Bills", "Subscriptions", UNSURE];
 
   it("accepts a category from the list", () => {
-    expect(acceptCategory("Food", "high", allowed)).toEqual({
-      category: "Food",
+    expect(acceptCategory("Bills", "high", allowed)).toEqual({
+      category: "Bills",
       confidence: "high",
     });
   });
 
   it("matches case-insensitively, since models vary the casing", () => {
-    expect(acceptCategory("food", "high", allowed).category).toBe("Food");
+    expect(acceptCategory("bills", "high", allowed).category).toBe("Bills");
   });
 
   it("refuses an invented category rather than letting it into the totals", () => {
@@ -248,8 +258,8 @@ describe("acceptCategory", () => {
   });
 
   it("treats an unrecognised confidence as the weakest, never as none", () => {
-    expect(acceptCategory("Food", "very sure", allowed).confidence).toBe("low");
-    expect(acceptCategory("Food", "", allowed).confidence).toBe("low");
+    expect(acceptCategory("Bills", "very sure", allowed).confidence).toBe("low");
+    expect(acceptCategory("Bills", "", allowed).confidence).toBe("low");
   });
 
   it("keeps an unsure answer unsure even when the model claims otherwise", () => {
@@ -262,9 +272,9 @@ describe("acceptCategory", () => {
 
 describe("shouldApply", () => {
   it("fills the field only on a confident answer", () => {
-    expect(shouldApply({ category: "Food", confidence: "high" })).toBe(true);
-    expect(shouldApply({ category: "Food", confidence: "medium" })).toBe(false);
-    expect(shouldApply({ category: "Food", confidence: "low" })).toBe(false);
+    expect(shouldApply({ category: "Bills", confidence: "high" })).toBe(true);
+    expect(shouldApply({ category: "Bills", confidence: "medium" })).toBe(false);
+    expect(shouldApply({ category: "Bills", confidence: "low" })).toBe(false);
   });
 
   it("never fills the field with the unsure value", () => {
@@ -275,27 +285,27 @@ describe("shouldApply", () => {
 describe("the feedback loop", () => {
   it("makes a correction improve the next answer, with no extra storage", () => {
     // The owner files "Grab" as Travel once. Not yet settled, so it is asked.
-    const once = [row({ item: "Grab", category: "Travel" })];
-    expect(categoryPlan(draft({ item: "Grab" }), once, fixture.reference).kind).toBe("ask");
+    const once = [row({ item: "Grab", category: "Bills" })];
+    expect(categoryPlan(draft({ item: "Grab" }), once).kind).toBe("ask");
 
     // They file it the same way again. Now the ledger answers on its own, and
     // no model is asked. The correction was simply the saved row.
-    const twice = [...once, row({ item: "Grab", category: "Travel" })];
-    const plan = categoryPlan(draft({ item: "Grab" }), twice, fixture.reference);
+    const twice = [...once, row({ item: "Grab", category: "Bills" })];
+    const plan = categoryPlan(draft({ item: "Grab" }), twice);
 
     expect(plan.kind).toBe("known");
-    if (plan.kind === "known") expect(plan.category).toBe("Travel");
+    if (plan.kind === "known") expect(plan.category).toBe("Bills");
   });
 
   it("follows the owner when they change their mind", () => {
     const rows = [
-      row({ date: "2026-01-01", item: "Grab", category: "Travel" }),
-      row({ date: "2026-07-01", item: "Grab", category: "Fun" }),
-      row({ date: "2026-08-01", item: "Grab", category: "Fun" }),
+      row({ date: "2026-01-01", item: "Grab", category: "Spending" }),
+      row({ date: "2026-07-01", item: "Grab", category: "Bills" }),
+      row({ date: "2026-08-01", item: "Grab", category: "Bills" }),
     ];
 
-    const plan = categoryPlan(draft({ item: "Grab" }), rows, fixture.reference);
+    const plan = categoryPlan(draft({ item: "Grab" }), rows);
     if (plan.kind !== "known") throw new Error("expected history to answer");
-    expect(plan.category).toBe("Fun");
+    expect(plan.category).toBe("Bills");
   });
 });

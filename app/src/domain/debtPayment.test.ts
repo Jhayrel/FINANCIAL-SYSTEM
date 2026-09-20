@@ -200,7 +200,7 @@ describe("shown as one movement", () => {
     const paid = moves.find((m) => m.row.id === "pay");
     expect(paid?.part?.id).toBe("pay-interest");
     expect(paid?.total).toBe(100000);
-    expect(moves.find((m) => m.row.id === "draw")?.interest).toBeUndefined();
+    expect(moves.find((m) => m.row.id === "draw")?.part).toBeUndefined();
   });
 
   it("keeps an interest row on its own when its payment is not in view", () => {

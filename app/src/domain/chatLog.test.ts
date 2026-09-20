@@ -150,7 +150,7 @@ const row = (over: Partial<Transaction>): Transaction => ({
   type: "Debt",
   fromWallet: "",
   toWallet: "Maya",
-  category: "Debt",
+  category: "",
   item: "Maya Credit",
   description: "",
   amount: 295000,

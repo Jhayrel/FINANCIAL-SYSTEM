@@ -82,7 +82,7 @@ const alertsFor = (ledger: readonly Transaction[], budgets: Budgets = {}) =>
 
 const withSeptember = (spending: number): Budgets => {
   const base = budgetForYear({}, 2026);
-  const s = [...base.spending];
+  const s = [...base.spending] as [number, number, number, number, number, number, number, number, number, number, number, number];
   s[8] = spending;
   return { "2026": { ...base, spending: s } };
 };

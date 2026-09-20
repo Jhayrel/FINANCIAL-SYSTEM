@@ -24,7 +24,7 @@ const row = (over: Partial<Transaction>): Transaction => ({
   recordNumber: 1,
   date: "2026-01-01",
   type: "Spending",
-  category: "Food",
+  category: "Spending",
   item: "Lunch",
   description: "",
   amount: 10000,
@@ -32,6 +32,8 @@ const row = (over: Partial<Transaction>): Transaction => ({
   total: 10000,
   fromWallet: "Cash",
   toWallet: "",
+  notes: "",
+  status: "Paid",
   ...over,
 });
 

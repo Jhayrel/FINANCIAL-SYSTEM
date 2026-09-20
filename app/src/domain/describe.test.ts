@@ -17,7 +17,7 @@ const draft = (over: Partial<Draft> = {}): Draft => ({
   date: "2026-08-30",
   fromWallet: "Maya",
   toWallet: "",
-  category: "Food",
+  category: "Spending",
   item: "Lunch",
   description: "",
   amount: 15000,
@@ -50,7 +50,7 @@ describe("describePlan", () => {
 
   it("asks the model only when history has nothing", () => {
     const plan = describePlan(
-      draft({ item: "Zzz Never Bought This Before", category: "Food" }),
+      draft({ item: "Zzz Never Bought This Before", category: "Spending" }),
       fixture.transactions,
     );
 
@@ -111,7 +111,7 @@ describe("describeFields", () => {
     const fields = describeFields(draft());
 
     expect(fields).toContain("Flow: Spending");
-    expect(fields).toContain("Category: Food");
+    expect(fields).toContain("Category: Spending");
     expect(fields).toContain("Item: Lunch");
     expect(fields).toContain("From: Maya");
     expect(fields).toContain("PHP 150.00");

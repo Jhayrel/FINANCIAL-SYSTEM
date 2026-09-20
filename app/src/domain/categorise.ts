@@ -32,8 +32,8 @@
  * may be believed; `data/aiClient.ts` does the asking.
  */
 
-import type { Draft, Flow } from "./entry";
-import type { ReferenceLists, Transaction } from "./types";
+import { categoriesFor, type Draft, type Flow } from "./entry";
+import type { Transaction } from "./types";
 
 export type Confidence = "high" | "medium" | "low";
 
@@ -68,26 +68,38 @@ export const UNSURE = "Uncategorised";
  * bill ends up filed as income, which is the mistake this whole app exists to
  * stop repeating.
  */
-export function allowedCategories(flow: Flow | "", reference: ReferenceLists): string[] {
-  if (flow === "Spending") {
-    return [
-      ...reference.spendingTypes.map((t) => t.name),
-      "Bills",
-      "Subscriptions",
-      UNSURE,
-    ].filter(unique);
-  }
-
-  if (flow === "Revenue") {
-    return [...reference.revenueCategories, UNSURE].filter(unique);
-  }
-
-  // Transfer, Debt and Opening are decided by the flow, not by a category.
-  return [];
+/**
+ * The categories an entry of this flow may carry.
+ *
+ * ── What this got wrong, and what it cost ─────────────────────────────────
+ *
+ * It returned the owner's spending types, Food, Grab, Travel and the rest,
+ * with Bills and Subscriptions after them. Those are items. A category is the
+ * track a row is counted on: Revenue, Spending, Bills, Subscriptions,
+ * Transfer, Opening, and `firestore.rules` refuses every other value outright.
+ *
+ * Both halves of this module were broken by that, in opposite directions:
+ *
+ *   The model was asked to choose from a list on which almost every answer
+ *   was one the database would reject, and the Add screen wrote the answer
+ *   into the field with a cast. A confident "Food" produced a row that the
+ *   database refused on save, which is one of the ways an entry the owner
+ *   typed disappeared.
+ *
+ *   The half meant to avoid asking at all never fired. `categoryPlan` trusts
+ *   the ledger's own answer only when it is in this list, and the ledger's
+ *   answer for a spending row is "Spending", which was not in it. So every
+ *   entry went to a model to be told something the ledger already knew.
+ *
+ * The item has its own list on the form and its own suggestion from history.
+ * This is the track, and only the track.
+ */
+export function allowedCategories(flow: Flow | ""): string[] {
+  const real = categoriesFor(flow);
+  // One possible answer is not a question. Unsure is offered only when there
+  // is a genuine choice to be unsure about.
+  return real.length > 1 ? [...real, UNSURE] : [...real];
 }
-
-const unique = <T>(value: T, index: number, all: T[]): boolean =>
-  all.indexOf(value) === index;
 
 /**
  * How this item has been filed before.
@@ -148,10 +160,9 @@ function related(a: string, b: string): boolean {
 export function categoryPlan(
   draft: Draft,
   transactions: readonly Transaction[],
-  reference: ReferenceLists,
 ): CategoryPlan {
   const item = draft.item.trim();
-  const allowed = allowedCategories(draft.flow, reference);
+  const allowed = allowedCategories(draft.flow);
 
   if (!draft.flow || !item || allowed.length <= 1) return { kind: "not-yet" };
 

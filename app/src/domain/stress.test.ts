@@ -103,7 +103,7 @@ describe("a ledger a hundred and fifty times longer than the real one", () => {
     expect(months).toHaveLength(12);
     for (const m of months) {
       for (const [field, value] of Object.entries(m)) {
-        if (typeof value === "number") expect(Number.isInteger(value), `${m.month} ${field}`).toBe(true);
+        if (typeof value === "number") expect(Number.isInteger(value), field).toBe(true);
       }
     }
     expect(ms, `${Math.round(ms)}ms`).toBeLessThan(3000);

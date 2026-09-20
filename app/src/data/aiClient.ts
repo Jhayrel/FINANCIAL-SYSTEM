@@ -408,7 +408,6 @@ export interface CategoryResult {
 export async function suggestCategory(
   draft: Draft,
   transactions: readonly Transaction[],
-  reference: ReferenceLists,
   options: {
     readonly allowModel?: boolean;
     readonly fetcher?: typeof fetch;
@@ -418,7 +417,7 @@ export async function suggestCategory(
 ): Promise<CategoryResult> {
   const nothing: CategoryResult = { category: "", confidence: "low", source: "none" };
 
-  const plan = categoryPlan(draft, transactions, reference);
+  const plan = categoryPlan(draft, transactions);
   if (plan.kind === "not-yet") return nothing;
   if (plan.kind === "known") {
     return {

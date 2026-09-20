@@ -38,6 +38,7 @@ const row = (over: Partial<Transaction>): Transaction => {
     total: 10000,
     fromWallet: "Maya",
     toWallet: "",
+    notes: "",
     status: "Paid",
     ...over,
   };
@@ -307,15 +308,30 @@ describe("brokenStreaks", () => {
 });
 
 describe("uncategorisedCount", () => {
-  it("counts blank and unknown categories in the window", () => {
+  it("counts the blank ones in the window, and nothing else", () => {
     const rows = [
       row({ date: "2026-08-28", category: "" }),
-      row({ date: "2026-08-27", category: "Unknown" }),
-      row({ date: "2026-08-26", item: "Food" }),
+      row({ date: "2026-08-27", category: "Spending" }),
+      row({ date: "2026-08-26", category: "Bills" }),
       row({ date: "2026-01-01", category: "" }),
     ];
 
-    expect(uncategorisedCount(rows, "2026-08-30")).toBe(2);
+    expect(uncategorisedCount(rows, "2026-08-30")).toBe(1);
+  });
+
+  /*
+   * "Unknown" and "Uncategorised" are not categories the app can write: the
+   * database refuses anything outside the six tracks. Rows from before those
+   * rules can carry one, so the count still recognises them, and the cast is
+   * how a row like that is written down here.
+   */
+  it("still recognises the words an older row might carry", () => {
+    const stale = [
+      { ...row({ date: "2026-08-28" }), category: "Unknown" as never },
+      { ...row({ date: "2026-08-27" }), category: "Uncategorised" as never },
+    ];
+
+    expect(uncategorisedCount(stale, "2026-08-30")).toBe(2);
   });
 });
 

@@ -344,13 +344,24 @@ export function AddTransaction({
         const allowModel = ai.enabled && ai.features.descriptions;
 
         if (!draft.category) {
-          const result = await suggestCategory(draft, transactions, reference, { allowModel });
+          const result = await suggestCategory(draft, transactions, { allowModel });
           // A slower earlier request must never land on a newer draft.
           if (latest.current !== run) return;
 
-          setCategoryHint(result.category ? result : null);
-          if (result.category && (result.source === "history" || result.confidence === "high")) {
-            setDraft((d) => (d.category ? d : { ...d, category: result.category as TransactionCategory }));
+          /*
+           * Only a category this flow can actually carry.
+           *
+           * This was a cast, and the list the answer came from was the
+           * owner's spending types, so a confident "Food" went straight into
+           * the field and the database refused the row on save. The list is
+           * the track now (`domain/categorise.ts`), and this checks rather
+           * than asserts, because a cast is a promise the compiler cannot
+           * keep about a value that came off the network.
+           */
+          const offered = categoriesFor(draft.flow).find((c) => c === result.category);
+          setCategoryHint(offered ? result : null);
+          if (offered && (result.source === "history" || result.confidence === "high")) {
+            setDraft((d) => (d.category ? d : { ...d, category: offered }));
             markSuggested("category");
           }
         }
