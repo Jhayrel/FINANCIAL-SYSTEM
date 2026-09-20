@@ -501,11 +501,16 @@
   gap: 2px;
   min-width: 0;
   padding: var(--space-1) 0 var(--space-1) var(--space-3);
-  border-left: 2px solid var(--alert-rule);
+  /*
+   * The fallback is not decoration. The status sets --alert-rule inline, and
+   * a var() with nothing behind it makes the whole declaration invalid, so a
+   * notice rendered without one lost its rule and read as loose text.
+   */
+  border-left: 2px solid var(--alert-rule, var(--ink-3));
 }
 
 .fms-alert-kicker {
-  color: var(--alert-rule);
+  color: var(--alert-rule, var(--ink-2));
 }
 
 /* An error message can quote a path or an id with no spaces in it. */
