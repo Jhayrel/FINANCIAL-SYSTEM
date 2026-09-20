@@ -752,7 +752,34 @@ export function Insights({
         chat, with screenshots.
       */}
       {onAdd && onEditRow && onBin && (
-        <Investigate transactions={transactions} reference={reference} asOf={asOf} onAdd={onAdd} onEditRow={onEditRow} onBin={onBin} />
+        <Investigate
+          transactions={transactions}
+          reference={reference}
+          asOf={asOf}
+          onAdd={onAdd}
+          onEditRow={onEditRow}
+          onBin={onBin}
+          {...(ai.disabled
+            ? {}
+            : {
+                onAsk: async (finding: string) => {
+                  /*
+                   * The finding goes in the question, not in the context: it
+                   * is already worked out, and the model is being asked to
+                   * read it rather than to recompute it from the ledger.
+                   */
+                  const answer = await ai.ask("chat", {
+                    question: [
+                      "An account does not match my ledger. The app has already worked this out and every figure in it is correct:",
+                      finding,
+                      "",
+                      "In three sentences at most: which of these is most likely, given what I usually do, and what should I check first? Do not add anything up, and do not repeat the figures back to me.",
+                    ].join(String.fromCharCode(10)),
+                  });
+                  return answer.text;
+                },
+              })}
+        />
       )}
 
       {aiSurfaceOn(settings.ai, "insightSummary") && (

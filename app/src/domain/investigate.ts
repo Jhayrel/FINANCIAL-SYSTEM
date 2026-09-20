@@ -718,3 +718,42 @@ export function readHistory(text: string, year: number): StatementLine[] {
   }
   return out;
 }
+
+/**
+ * The finding, written out for the model.
+ *
+ * ── Why the assistant is asked at all ──────────────────────────────────────
+ *
+ * The arithmetic here is exact and the model would only make it worse, so it
+ * is never asked to work anything out. What it is good at is the part this
+ * module cannot do: saying which of five candidate rows is the likely one
+ * given what the owner actually does, and what to check first when nothing
+ * matched. So it is given the finished result and asked to read it, never to
+ * compute it.
+ *
+ * Figures and item names only. Descriptions and notes are the free text in
+ * the ledger and they stay on the device, the same boundary `describe.ts` and
+ * `categorise.ts` keep.
+ */
+export function investigationForModel(result: Investigation): string {
+  const { headline, lines, rest } = investigationWords(result);
+  const clue = (c: Clue): string => {
+    const row = "row" in c ? c.row : undefined;
+    const named = row ? `${row.item || row.category || row.type} on ${row.date}` : "";
+    return `${clueWords(c)}${named ? ` (${named})` : ""}`;
+  };
+
+  return [
+    `Account: ${result.account}.`,
+    `The ledger says ${formatMoney(result.recorded)}; it really holds ${formatMoney(result.actual)}.`,
+    `Difference: ${formatMoney(result.gap)}.`,
+    headline,
+    result.found.length > 0 ? `Rows it matched: ${result.found.map(clue).join("; ")}.` : "It matched no rows.",
+    result.possible.length > 0 ? `Possibilities it offered: ${result.possible.map(clueWords).join("; ")}.` : "",
+    result.overshoot ? "What it matched comes to more than the difference, so some of it is wrong." : "",
+    rest ?? "",
+    ...lines.slice(0, 2),
+  ]
+    .filter((line) => line.trim() !== "")
+    .join(String.fromCharCode(10));
+}

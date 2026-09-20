@@ -35,6 +35,7 @@ import {
   investigationWords,
   readHistory,
   type Clue,
+  investigationForModel,
 } from "../domain/investigate";
 import { formatMoney, type Centavos } from "../domain/money";
 import type { IsoDate, ReferenceLists, Transaction } from "../domain/types";
@@ -60,6 +61,7 @@ export function Investigate({
   onAdd,
   onEditRow,
   onBin,
+  onAsk,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -70,8 +72,16 @@ export function Investigate({
   onEditRow: (row: Transaction) => void;
   /** A row to the bin, which can be restored. */
   onBin: (id: string) => void;
+  /**
+   * Hand the finished finding to the assistant, and get its reading back.
+   *
+   * Absent when the AI is off, and the panel simply does not offer it then.
+   */
+  onAsk?: ((finding: string) => Promise<string>) | undefined;
 }) {
   const accounts = useMemo(() => [...reference.wallets, ...reference.savings], [reference]);
+  const [aiAnswer, setAiAnswer] = useState("");
+  const [asking, setAsking] = useState(false);
   const [asked, setAsked] = useState<Asked>(
     () =>
       kept && accounts.includes(kept.account)
@@ -320,6 +330,42 @@ export function Investigate({
                   </ul>
                 )}
               </>
+            )}
+
+            {/*
+              The assistant reads the finding, and never works it out.
+
+              The arithmetic above is exact and a model would only make it
+              worse. What it is good at is the part this screen cannot do:
+              which of five candidate rows is the likely one given what the
+              owner actually does, and what to check first when nothing
+              matched at all. So it is handed the finished result.
+            */}
+            {onAsk && result.gap !== 0 && (
+              <div className="fms-find-ask">
+                {aiAnswer ? (
+                  <p className="t-body" style={{ margin: 0 }}>
+                    {aiAnswer}
+                  </p>
+                ) : (
+                  <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                    The figures above are already worked out. The assistant can say which of them to check first.
+                  </span>
+                )}
+                <Button
+                  size="sm"
+                  loading={asking}
+                  onClick={() => {
+                    setAsking(true);
+                    setAiAnswer("");
+                    void onAsk(investigationForModel(result))
+                      .then((text) => setAiAnswer(text))
+                      .finally(() => setAsking(false));
+                  }}
+                >
+                  {aiAnswer ? "Ask again" : "Ask the assistant"}
+                </Button>
+              </div>
             )}
 
             {/* Finished: the answer is put away and the question emptied for the next one. */}

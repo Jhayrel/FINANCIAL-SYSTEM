@@ -15,6 +15,7 @@ import {
   clueWords,
   draftForClue,
   investigate,
+  investigationForModel,
   investigationWords,
   looksMistyped,
   movedOn,
@@ -22,6 +23,7 @@ import {
   rowsAddingTo,
   type StatementLine,
 } from "./investigate";
+import { formatMoney } from "./money";
 import type { Transaction } from "./types";
 
 let n = 0;
@@ -325,5 +327,57 @@ describe("when the findings come to more than the difference", () => {
     expect(result.gap).toBe(-1_000_000);
     expect(result.overshoot).toBe(false);
     expect(investigationWords(result).lines.join(" ")).toContain("Found ₱7,000.00 of it");
+  });
+});
+
+/**
+ * What the assistant is given about a difference.
+ *
+ * It is never asked to work anything out: the arithmetic here is exact and a
+ * model would only make it worse. It is asked to read a finished finding and
+ * say which part to check first, which is the one thing this module cannot
+ * do. So the text it gets is the result, and the boundary every other AI
+ * surface keeps holds here too: figures and item names, never the free text
+ * in the ledger.
+ */
+describe("the finding, written out for the model", () => {
+  const rows: Transaction[] = [
+    income("2026-08-25", 6_000_000, "Salary"),
+    row({
+      date: "2026-09-02",
+      amount: 400_000,
+      total: 400_000,
+      item: "Food",
+      description: "SECRET-DESCRIPTION-nobody-should-send",
+      notes: "SECRET-NOTE",
+      fromWallet: "Maya",
+    }),
+  ];
+
+  const result = investigate({ transactions: rows, account: "Maya", actual: 5_000_000, asOf: "2026-09-10" });
+
+  it("carries the figures, the account and what it matched", () => {
+    const text = investigationForModel(result);
+    expect(text).toContain("Account: Maya");
+    expect(text).toContain(formatMoney(result.recorded));
+    expect(text).toContain(formatMoney(result.actual));
+    expect(text).toContain(formatMoney(result.gap));
+  });
+
+  it("never sends a description or a note", () => {
+    const text = investigationForModel(result);
+    expect(text).not.toContain("SECRET-DESCRIPTION");
+    expect(text).not.toContain("SECRET-NOTE");
+  });
+
+  it("says plainly when what it matched overshoots, so the model does not treat it as solved", () => {
+    const twice = [
+      income("2026-09-01", 5_000_000, "Salary", "Gcash"),
+      spend("2026-09-05", 200_000, "Food", "grocery", "Gcash"),
+      spend("2026-09-05", 200_000, "Food", "grocery", "Gcash"),
+    ];
+    const over = investigate({ transactions: twice, account: "Gcash", actual: 4_620_000, asOf: "2026-09-10" });
+    expect(over.overshoot).toBe(true);
+    expect(investigationForModel(over)).toContain("more than the difference");
   });
 });
