@@ -70,7 +70,10 @@ describe("a statement PDF", () => {
 
   it("carries the system's name, who it is issued to, and closes with Nothing Follows", async () => {
     const { text } = await make(12);
-    expect(text).toContain(hexOf("Financial Management System", bold));
+    // Only in the small print at the foot: the owner asked for it off the top.
+    const name = hexOf("Financial Management System");
+    expect(text).toMatch(new RegExp(`/F1 7 Tf [^<]*<${name}>`));
+    expect(text).not.toMatch(new RegExp(`/F2 [0-9.]+ Tf [^<]*<${name}>`));
     expect(text).toContain(hexOf("Ana Cruz", bold));
     expect(text).toContain(hexOf("**Nothing Follows**", bold));
     expect(text).toContain(hexOf("ACCOUNT STATEMENT", bold));

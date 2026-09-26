@@ -22,6 +22,11 @@
  *   - A summary under the band: where it started, what came in, what went
  *     out, where it ended.
  *
+ * And then: "remove the logo in the first page ... I dont like the logo etc
+ * in the above just keep it clean even the 'Financial Management System'
+ * text". So nothing sits above the title, no page carries the logo, and the
+ * system's name is only in the small print at the foot of each page.
+ *
  * Paper has no dark theme, so the colours are fixed here rather than read
  * from `tokens.css` (style guide 3.15).
  */
@@ -272,15 +277,6 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
   return doc.bytes(o.issuedAt, { compress: o.compress !== false });
 }
 
-/** The system's mark: the app icon, drawn rather than pasted. */
-function logo(page: PdfPage, left: number, top: number, size: number, square: Rgb, strokes: Rgb): void {
-  const u = size / 32;
-  page.roundRect(left, top, size, size, 7 * u, square);
-  page.stroke(left + 11 * u, top + 9 * u, left + 22 * u, top + 9 * u, strokes, 2.6 * u);
-  page.stroke(left + 11 * u, top + 15.5 * u, left + 22 * u, top + 15.5 * u, strokes, 2.6 * u);
-  page.stroke(left + 11 * u, top + 22 * u, left + 17 * u, top + 22 * u, strokes, 2.6 * u);
-}
-
 /** The green band on the first page. Returns where what follows starts. */
 function header(page: PdfPage, doc: PdfDocument, o: StatementPdfOptions): number {
   const { sheet } = o;
@@ -293,19 +289,18 @@ function header(page: PdfPage, doc: PdfDocument, o: StatementPdfOptions): number
   const pad = 20;
   const blockW = 212;
   const bx = MARGIN + CONTENT_W - pad - blockW;
-  const left = pad + (sheet.subject ? 66 : 50);
-  const right = pad + 10 + (details.length - 1) * 15 + 6;
-  const height = Math.max(left, right) + pad - 4;
+  const left = pad + (sheet.subject ? 38 : 20);
+  const right = pad + 10 + (details.length - 1) * 15 + 2;
+  const height = Math.max(left, right) + pad - 2;
   page.rect(MARGIN, MARGIN, CONTENT_W, height, GREEN);
 
-  // Left: the system, then what this is, as large as fits beside the details.
-  logo(page, MARGIN + pad, MARGIN + pad - 2, 16, WHITE, GREEN);
-  page.text(MARGIN + pad + 22, MARGIN + pad + 9.8, SYSTEM_NAME, { font: "bold", size: 8.5, color: WHITE });
+  // Left: what this is, as large as fits beside the details. Nothing above
+  // it: the owner asked for the logo and the system's name off the top.
   const title = sheet.title.toUpperCase();
   const room = bx - (MARGIN + pad) - 18;
   const size = Math.min(22, (22 * room) / Math.max(1, doc.width(title, "bold", 22)));
-  page.text(MARGIN + pad, MARGIN + pad + 44, title, { font: "bold", size, color: WHITE });
-  if (sheet.subject) page.text(MARGIN + pad, MARGIN + pad + 62, sheet.subject, { font: "bold", size: 11, color: GREEN_SOFT });
+  page.text(MARGIN + pad, MARGIN + pad + 16, title, { font: "bold", size, color: WHITE });
+  if (sheet.subject) page.text(MARGIN + pad, MARGIN + pad + 34, sheet.subject, { font: "bold", size: 11, color: GREEN_SOFT });
 
   // Right: when, and for whom.
   details.forEach(([label, value], i) => {
@@ -349,10 +344,9 @@ function summary(page: PdfPage, sheet: StatementSheet, top: number): number {
 
 /** The top of every page after the first. */
 function continuation(page: PdfPage, sheet: StatementSheet): number {
-  logo(page, MARGIN, MARGIN, 14, GREEN, WHITE);
-  page.text(MARGIN + 20, MARGIN + 10.5, SYSTEM_NAME, { font: "bold", size: 8, color: INK });
-  page.text(MARGIN + CONTENT_W, MARGIN + 10.5, `${heading(sheet)} · ${sheet.period}`, { size: 8, color: INK_2, align: "right" });
-  return MARGIN + 26;
+  page.text(MARGIN, MARGIN + 10.5, heading(sheet), { font: "bold", size: 8.5, color: INK });
+  page.text(MARGIN + CONTENT_W, MARGIN + 10.5, `${sheet.period} (continued)`, { size: 8, color: INK_2, align: "right" });
+  return MARGIN + 22;
 }
 
 function tableHead(page: PdfPage, sheet: StatementSheet, x: Columns, top: number): number {
@@ -371,8 +365,7 @@ function tableHead(page: PdfPage, sheet: StatementSheet, x: Columns, top: number
 function footer(page: PdfPage, number: number, count: number, sheet: StatementSheet): void {
   const base = PAGE_H - MARGIN - 6;
   page.line(MARGIN, base - 12, MARGIN + CONTENT_W, base - 12, RULE, 0.5);
-  logo(page, MARGIN, base - 7.5, 9, GREEN, WHITE);
-  page.text(MARGIN + 13, base, SYSTEM_NAME, { size: 7, color: INK_3 });
+  page.text(MARGIN, base, SYSTEM_NAME, { size: 7, color: INK_3 });
   page.text(PAGE_W / 2, base, `${heading(sheet)} · ${sheet.period}`, { size: 7, color: INK_3, align: "center" });
   page.text(MARGIN + CONTENT_W, base, `Page ${number} of ${count}`, { size: 7, color: INK_3, align: "right" });
 }

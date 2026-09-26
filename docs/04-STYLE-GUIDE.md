@@ -607,8 +607,8 @@ at all.
 
 The PDF a statement exports (`pdf/statementPdf.ts`). From the owner's Excel
 it keeps the green band with the statement's name in capitals, the period,
-the date issued and who it is issued to and by, the system's logo and name,
-a green heading row over the table, and **Nothing Follows** at the end.
+the date issued and who it is issued to and by, a green heading row over the
+table, and **Nothing Follows** at the end.
 
 The first build also copied the Excel's grid: a peso sign and a dash in
 every empty cell, a rule between every column, every cell centred, five text
@@ -624,6 +624,7 @@ statement's, not a sheet's:
 | A summary strip under the band | Brought forward, in, out, and the closing figure in green: the four numbers a reader wants first |
 | Dates as "Jan 4" | A statement covers one year, and the year is in the band |
 | Negative figures in red, with the minus sign | The one place colour carries meaning on the page |
+| Nothing above the title, no logo on any page | The owner, later the same day: "remove the logo ... keep it clean". The system's name stays in the small print at the foot |
 
 Type is Inter, embedded: Regular and Bold with tabular digits and the peso
 sign (`tools/build_pdf_fonts.py`). The colours are fixed RGB values in that
