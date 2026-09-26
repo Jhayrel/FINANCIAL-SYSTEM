@@ -58,6 +58,23 @@ describe("the assistant is not told to deny what the app does", () => {
   it("still says files are beyond it", () => {
     expect(chatInstruction.toLowerCase()).toContain("pdf");
   });
+
+  /*
+   * 26 September 2026: "I cannot change the budget from here. To update it,
+   * go to the Budget section", when the chat sets budgets on a card. Every
+   * action the app takes from the chat is named, and Settings is named as
+   * the one thing it does not touch.
+   */
+  it("names every action the app takes from the chat", () => {
+    const said = chatInstruction.toLowerCase();
+    for (const action of ["budgets", "brings binned rows back", "corrects saved entries", "spreadsheet", "investigates"]) {
+      expect(said, action).toContain(action);
+    }
+  });
+
+  it("names settings as the one thing it cannot change", () => {
+    expect(chatInstruction.toLowerCase()).toContain("the one thing neither of you can change is settings");
+  });
 });
 
 describe("it advises on their money, and only theirs", () => {

@@ -796,6 +796,10 @@ export type Intent =
   | "restore"
   | "editEntry"
   | "investigate"
+  /** Set or change a budget or a limit, over any months: a card to apply. */
+  | "budget"
+  /** A file: a spreadsheet, a backup or a statement. */
+  | "export"
   | "chat";
 
 export interface Routed {
@@ -816,6 +820,8 @@ const INTENTS: readonly Intent[] = [
   "restore",
   "editEntry",
   "investigate",
+  "budget",
+  "export",
   "chat",
 ];
 

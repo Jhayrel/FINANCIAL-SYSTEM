@@ -92,10 +92,12 @@ import {
 } from "../domain/recall";
 import {
   buildChart,
+  wantsBothDirections,
   chartDirection,
   chartInWords,
   chartLabel,
   isChartFollowUp,
+  asksChartColour,
   asksForProse,
   wantsChart,
   wantsStatement,
@@ -169,11 +171,16 @@ import {
   planBudget,
   proposedBudgetIn,
   readBudgetAsk,
+  spanIn,
   type BudgetAsk,
   type BudgetPlan,
 } from "../domain/budgetAsk";
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { budgetForYear } from "../domain/budget";
+import { MONTH_NAMES } from "../domain/dates";
+import { forecastYear } from "../domain/forecast";
+import { withCommandWordsFixed } from "../domain/typos";
+import { asksForWrongRows, flaggedRows } from "../domain/integrity";
 
 /**
  * What the panel is allowed to do with a proposal.
@@ -1583,6 +1590,25 @@ export function AskPanel({
     return turn;
   };
 
+  /** The month after the one `asOf` is in. */
+  const nextOf = (day: string): { year: number; month: number } => {
+    const y = Number(day.slice(0, 4));
+    const m = Number(day.slice(5, 7));
+    return m === 12 ? { year: y + 1, month: 1 } : { year: y, month: m + 1 };
+  };
+
+  /** The budget question just asked, so the next message can answer it. */
+  const budgetQuestion = useRef<{ year: number; month: number; toMonth?: number; scope: "month" | "rest" | "year" } | null>(null);
+
+  /** What the Budget screen forecasts for a month: the figure "use the forecast" means. */
+  const forecastFor = (year: number, month: number): { spending: number; billsSubs: number } | null => {
+    const nowYear = Number(asOf.slice(0, 4));
+    // A month already running or over has no forecast, only what it spent.
+    if (year * 12 + month <= nowYear * 12 + Number(asOf.slice(5, 7))) return null;
+    const f = forecastYear(transactions, year, year === nowYear ? Number(asOf.slice(5, 7)) : year > nowYear ? 0 : 12, debts, asOf)[month - 1];
+    return f && f.spending > 0 ? { spending: f.spending, billsSubs: f.billsSubs } : null;
+  };
+
   const replaceProposal = (index: number, proposal: Proposal): void =>
     setTurns((prev) =>
       prev.map((t, i) => (i === index && isOffer(t) ? { ...t, proposal } : t)),
@@ -2584,6 +2610,11 @@ export function AskPanel({
 
   const send = async (typed?: string, as?: Intent): Promise<void> => {
     const note = (typed ?? draft).trim();
+    /**
+     * The sentence with its command words spelled right, for the rules to
+     * read (`domain/typos.ts`). What is shown and stored is always `note`.
+     */
+    const ruled = withCommandWordsFixed(note);
     if (busy) return;
     if (!note && files.length === 0) return;
     setStage("");
@@ -2711,7 +2742,9 @@ export function AskPanel({
      * screen's own rules and shown on a card to apply.
      */
     const couldBudget = files.length === 0 && !as && !isNoteLine && sink.canBudget;
-    let budgetAsk = couldBudget ? readBudgetAsk(note, reference, asOf) : null;
+    let budgetAsk = couldBudget ? readBudgetAsk(ruled, reference, asOf) : null;
+    const span = couldBudget ? spanIn(ruled, asOf) : null;
+    const saysBudget = couldBudget && (namesBudgetCommand(ruled) || routed?.intent === "budget");
 
     /**
      * "add that budget", with the figure sitting in the answer above it.
@@ -2734,24 +2767,95 @@ export function AskPanel({
       const said = [...turns].reverse().find((t) => t.kind === "assistant");
       return said && "text" in said ? said.text : "";
     })();
+    /** The most recent answer in the last few turns that recommended a budget, and its figure. */
+    const recentProposal = (() => {
+      for (const t of [...turns].reverse().slice(0, 12)) {
+        if (t.kind !== "assistant" || !("text" in t)) continue;
+        const value = proposedBudgetIn(t.text);
+        if (value !== null) return { value, text: t.text };
+      }
+      return null;
+    })();
+    /** The last budget card, if one is still near: the thing "make it long term" is about. */
+    const lastBudgetAt = (() => {
+      for (let i = turns.length - 1; i >= Math.max(0, turns.length - 10); i -= 1) {
+        const t = turns[i];
+        if (t && isBudgeting(t)) return i;
+      }
+      return -1;
+    })();
+    const lastBudget = lastBudgetAt >= 0 ? (turns[lastBudgetAt] as Budgeting) : undefined;
+    /** A figure of money in the message, leaving out years, days and counts of months. */
+    const namesFigure = /(?:₱|php\s*)?\d[\d,]{2,}(?:\.\d+)?|\b\d+(?:\.\d+)?\s*k\b/i.test(
+      ruled.replace(/\b20\d{2}\b/g, " ").replace(/\b\d{1,2}\s+months?\b/gi, " "),
+    );
+    /** The span a message names, laid over an ask, so "September to December" moves a card rather than making a new one. */
+    const over = (ask: BudgetAsk, s: NonNullable<typeof span>): BudgetAsk => {
+      const { toMonth: _dropped, ...rest } = ask;
+      // "make it long term" says how long, not when it starts: the card keeps its own first month.
+      const start = s.anchored === false ? { year: ask.year, month: ask.month } : { year: s.year, month: s.month };
+      return { ...rest, ...start, scope: s.scope, ...(s.toMonth && s.toMonth > start.month ? { toMonth: s.toMonth } : {}) } as BudgetAsk;
+    };
+
+    /*
+     * The answer to "What should the budget be for October?", asked by the
+     * branch below. "use the forecast", "use that" or a bare "9000" is that
+     * answer, and went to the model instead ("The AI model is not working")
+     * because none of them says "budget".
+     */
+    const asked = budgetQuestion.current;
+    budgetQuestion.current = null;
+    if (!budgetAsk && couldBudget && asked) {
+      const target = span ? { ...span, year: span.anchored === false ? asked.year : span.year, month: span.anchored === false ? asked.month : span.month } : asked;
+      const base = { kind: "tracks" as const, year: target.year, month: target.month, scope: target.scope };
+      if (/\b(forecast|expected|projection|projected)\b/i.test(ruled)) {
+        const f = forecastFor(target.year, target.month) ?? forecastFor(nextOf(asOf).year, nextOf(asOf).month);
+        if (f) budgetAsk = over({ ...base, spending: f.spending, billsSubs: f.billsSubs }, { ...target, anchored: true });
+      } else if (recentProposal && /\b(that|it|this|recommend\w*|suggest\w*|what you said)\b/i.test(ruled) && !namesFigure) {
+        budgetAsk = over({ ...base, spending: recentProposal.value }, { ...target, anchored: true });
+      } else if (namesFigure) {
+        const read = readBudgetAsk(`set budget ${ruled}`, reference, asOf);
+        if (read && read.kind === "tracks") budgetAsk = over({ ...read }, span ? { ...target, anchored: true } : { ...target, anchored: true });
+      }
+    }
+
     /*
      * "ok add it", straight after an answer that proposed a budget, is the
      * same request without the word. Only then: a yes after a card or a
      * question is theirs, and nothing here takes it from them.
      */
-    const yesToBudget =
-      couldBudget && !pending && !turns.some((t) => (isOffer(t) || isDebt(t)) && t.state === "open") && confirmsProposal(note) && proposedBudgetIn(lastAnswer) !== null;
-    if (!budgetAsk && couldBudget && (namesBudgetCommand(note) || yesToBudget)) {
-      const proposed = proposedBudgetIn(lastAnswer);
-      if (proposed !== null) {
-        const month = /\b(this|next|last)\s+month\b/i.test(note)
-          ? ""
-          : /\bnext month\b/i.test(lastAnswer)
-            ? " next month"
-            : "";
-        // "ok add it" never says "budget", so the request is put in the words the reader knows.
-        const asked = namesBudgetCommand(note) ? note : "set the budget";
-        budgetAsk = readBudgetAsk(`${asked}${month} ${formatMoney(proposed)}`, reference, asOf);
+    const noCardWaiting = !pending && !turns.some((t) => (isOffer(t) || isDebt(t)) && t.state === "open");
+    const yesToBudget = couldBudget && noCardWaiting && confirmsProposal(ruled) && proposedBudgetIn(lastAnswer) !== null;
+
+    /*
+     * "how about add it to september to december", "make it long term",
+     * right after a budget card: the same budget over different months. It
+     * went to the entry reader on 26 September 2026 ("No entry matches
+     * that"). The card is planned again over the months named, and the old
+     * one, if still open, is put aside so only one waits to be applied.
+     */
+    if (!budgetAsk && couldBudget && noCardWaiting && lastBudget?.ask && span && !namesFigure && ruled.split(/\s+/).length <= 16) {
+      budgetAsk = over(lastBudget.ask, span);
+      if (lastBudget.state === "open") decide(lastBudgetAt, "discarded");
+    }
+
+    if (!budgetAsk && couldBudget && (saysBudget || yesToBudget)) {
+      /*
+       * "use the forecast", "the recommended one": the figure is the app's own
+       * forecast for the month, or the one the answer above recommended.
+       */
+      const target = span ?? (() => {
+        const next = Number(asOf.slice(5, 7)) === 12 ? { year: Number(asOf.slice(0, 4)) + 1, month: 1 } : { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) + 1 };
+        const now = { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) };
+        return { ...(/\bnext month\b/i.test(recentProposal?.text ?? lastAnswer) || /\bnext month\b/i.test(ruled) ? next : now), scope: "month" as const };
+      })();
+      const wantsForecast = /\b(forecast|expected|projection|projected)\b/i.test(ruled);
+      const proposed = wantsForecast ? null : yesToBudget ? proposedBudgetIn(lastAnswer) : recentProposal?.value ?? null;
+      if (wantsForecast) {
+        const f = forecastFor(target.year, target.month) ?? forecastFor(nextOf(asOf).year, nextOf(asOf).month);
+        if (f) budgetAsk = over({ kind: "tracks", year: target.year, month: target.month, spending: f.spending, billsSubs: f.billsSubs, scope: "month" }, target);
+      } else if (proposed !== null && (yesToBudget || /\b(it|that|this|those|recommend\w*|suggest\w*|what you said)\b/i.test(ruled))) {
+        budgetAsk = over({ kind: "tracks", year: target.year, month: target.month, spending: proposed, scope: "month" }, target);
       }
     }
     /*
@@ -2759,14 +2863,39 @@ export function AskPanel({
      * it gets the reply below saying what to type, rather than falling
      * through to the model to be answered with a yes it cannot honour.
      */
-    if (budgetAsk || (couldBudget && namesBudgetCommand(note)) || (files.length === 0 && !as && modelSawEntry && isBudgetCommand(note))) {
+    if (budgetAsk || saysBudget || (files.length === 0 && !as && modelSawEntry && isBudgetCommand(ruled))) {
       setDraft("");
       say({ kind: "you", text: note });
       log(aiEvent("asked", "add", { text: note }));
       if (!budgetAsk) {
-        const reply = `Say the figure and the month, and I will set it: "set my budget to 8000", "limit food to 3000", or "same budget as last month".${
-          pending ? " The entry I asked about is still waiting for its answer." : ""
-        }`;
+        /*
+         * What to set it to, with the figures that could answer it.
+         *
+         * "chnage the budget last month i think I changed it or something"
+         * got the entry reader and then the model saying it could not change
+         * the budget. It asks now, and names the two figures the app has: the
+         * last one recommended here and what it forecasts for the month.
+         */
+        const target = span ?? { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), scope: "month" as const };
+        budgetQuestion.current = { year: target.year, month: target.month, scope: target.scope, ...(span?.toMonth ? { toMonth: span.toMonth } : {}) };
+        /*
+         * A month already running has no forecast, only what it has spent so
+         * far, so the next month's forecast is offered in its place.
+         */
+        const own = forecastFor(target.year, target.month);
+        const next = nextOf(asOf);
+        const f = own ?? forecastFor(next.year, next.month);
+        const name = `${MONTH_NAMES[target.month - 1] ?? ""} ${target.year}`;
+        const forecastName = own ? name : `${MONTH_NAMES[next.month - 1] ?? ""} ${next.year}, the next month to start,`;
+        const reply = [
+          `What should the budget be for ${name}${span?.toMonth ? ` to ${MONTH_NAMES[span.toMonth - 1] ?? ""}` : ""}?`,
+          recentProposal ? `The last figure recommended here was **${formatMoney(recentProposal.value)}**: say "use that".` : "",
+          f ? `The app forecasts ${forecastName} at about **${formatMoney(f.spending)}** for spending and ${formatMoney(f.billsSubs)} for bills: say "use the forecast".` : "",
+          `Or give a figure and the months: "set October to December to 9000", "limit food to 3000 from now on".`,
+          pending ? "The entry I asked about is still waiting for its answer." : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
         say({ kind: "assistant", text: reply, from: "this device", ephemeral: true });
         log(aiEvent("answered", "add", { text: reply, model: "this device" }));
         return;
@@ -2797,7 +2926,7 @@ export function AskPanel({
      * router called an edit still goes to the finder below, which opens the
      * row in the form.
      */
-    const editAsk = files.length === 0 && !as && !isNoteLine && sink.canUpdate ? readEditAsk(note, reference, asOf) : null;
+    const editAsk = files.length === 0 && !as && !isNoteLine && sink.canUpdate ? readEditAsk(ruled, reference, asOf) : null;
     if (editAsk && (routed === null || routed.intent === "editEntry" || routed.intent === "correction" || routed.intent === "entry" || routed.intent === "question")) {
       const onScreen = turns.some((t) => isOffer(t) && t.state === "open");
       /*
@@ -2941,7 +3070,7 @@ export function AskPanel({
      * spending, and every reader below would happily make an entry out of it.
      * A request for a file is not a movement of money.
      */
-    const askedToExport = as ? null : readExportAsk(note, asOf);
+    const askedToExport = as ? null : readExportAsk(ruled, asOf) ?? (routed?.intent === "export" ? readExportAsk(`export ${ruled}`, asOf) : null);
     if (askedToExport) {
       const words = exportWords(askedToExport, asOf);
       say({ kind: "assistant", text: words, from: "this device" });
@@ -2953,7 +3082,7 @@ export function AskPanel({
     const findable = [...reference.wallets, ...reference.savings];
     const askedToFind = as
       ? null
-      : readInvestigateAsk(note, findable, (account) => walletBalance(transactions, account), asOf) ??
+      : readInvestigateAsk(ruled, findable, (account) => walletBalance(transactions, account), asOf) ??
         (routed?.intent === "investigate"
           ? (readInvestigateAsk(`${note} doesn't match`, findable, (account) => walletBalance(transactions, account), asOf) ?? {
               account: "",
@@ -3130,7 +3259,31 @@ export function AskPanel({
      * newest entries are shown with both ways to fix them: correct it in the
      * form, or move it to the bin. Nothing moves until a button is pressed.
      */
-    if (openCards.length === 0 && !pending && files.length === 0 && !as && saysLatestIsWrong(note)) {
+    /*
+     * "find the wrong transactions", "delete those wrong transactions": the
+     * rows the app's own checks flag, the Database's "Needs review", each
+     * with the check that caught it and a button to correct it or bin it.
+     * Never binned as a set: a flagged row is often right and merely odd.
+     */
+    if (files.length === 0 && !as && !pending && asksForWrongRows(ruled)) {
+      const flagged = flaggedRows(transactions);
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      if (flagged.length === 0) {
+        const reply = "The app's checks find nothing wrong in the ledger: every total adds up, and every row has its wallet, its item and its category. If one entry looks wrong to you, name it and I will find it.";
+        say({ kind: "assistant", text: reply, from: "this device" });
+        log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+        return;
+      }
+      const reply = `${flagged.length} ${flagged.length === 1 ? "entry is" : "entries are"} flagged by the app's checks, the same list as **Needs review** in the Database. Each says what is wrong with it. **Edit this** corrects it and keeps its record number; **Move to bin** removes it, and the Bin can bring it back.`;
+      say({ kind: "assistant", text: reply, from: "this device" });
+      say({ kind: "found", action: "edit", alsoBin: true, candidates: flagged.map(({ row, why }, i) => ({ row, score: 100 - i, why: [...why] })), done: [] });
+      log(aiEvent("answered", "add", { text: `Listed ${flagged.length} flagged rows. Asked: ${note}`, model: "this device" }));
+      return;
+    }
+
+    if (openCards.length === 0 && !pending && files.length === 0 && !as && saysLatestIsWrong(ruled)) {
       const newest = [...transactions].sort((x, y) => y.recordNumber - x.recordNumber).slice(0, 3);
       setDraft("");
       say({ kind: "you", text: note });
@@ -3154,7 +3307,7 @@ export function AskPanel({
       return;
     }
 
-    if (openCards.length > 0 && files.length === 0 && !as && wantsDiscardAll(note)) {
+    if (openCards.length > 0 && files.length === 0 && !as && wantsDiscardAll(ruled)) {
       setDraft("");
       say({ kind: "you", text: note });
       discardEveryOpen(note);
@@ -3214,7 +3367,7 @@ export function AskPanel({
      * that outranks it is the sentence reading as an entry on its own, which
      * is checked at the point of use below.
      */
-    const localRecall = files.length === 0 && !as ? detectRecall(note) : null;
+    const localRecall = files.length === 0 && !as ? detectRecall(ruled) : null;
 
     const saysAnswer = routed?.intent === "answer";
     const saysCorrection = routed?.intent === "correction";
@@ -3324,7 +3477,28 @@ export function AskPanel({
       return;
     }
 
-    const followUp = isChartFollowUp(note, turns.some(isChart));
+    /*
+     * "make it blue", "change the colors", with a chart on screen.
+     *
+     * The colour of a chart is the direction of its money (rule D3), which
+     * is what lets a red bar be read without a legend on every screen and in
+     * both themes. So the answer says why it stays, and offers what can
+     * change instead, rather than a model promising a recolour it cannot do.
+     */
+    if (files.length === 0 && !as && asksChartColour(ruled) && (turns.some(isChart) || wantsChart(ruled))) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      say({
+        kind: "assistant",
+        text:
+          "Chart colours say which way the money went, so they stay the same everywhere: red is money out, green is money in, grey is a transfer and amber is debt. They follow the light and dark theme on their own. What I can change is the shape and the window: say \"as a line\", \"as a pie\" or \"as bars\", or name a period such as \"this week\" or \"since July\".",
+        from: "this device",
+      });
+      log(aiEvent("answered", "add", { text: `Explained chart colours. Asked: ${note}` }));
+      return;
+    }
+
+    const followUp = isChartFollowUp(ruled, turns.some(isChart));
     const saysChart = routed?.intent === "chart";
 
     /**
@@ -3389,19 +3563,26 @@ export function AskPanel({
        */
       const shown = [...turns].reverse().find(isChart)?.chart;
       const carried =
-        shown && !/\b(20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|month|year|week|today|yesterday|all|everything)\b/i.test(
-          note,
+        shown && !/\b(20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|month|year|week|today|yesterday|all|everything|days?|since|quarter|q[1-4])\b/i.test(
+          ruled,
         )
           ? `${note} ${shown.title}`
           : note;
 
-      const chart = buildChart(
-        routed?.period ? `${carried} ${routed.period}` : carried,
-        transactions,
-        asOf,
-      );
+      const asked = routed?.period ? `${carried} ${routed.period}` : carried;
+      /*
+       * Money in and money out together ("income vs spending", "cash flow")
+       * is two charts, each in its own colour, rather than one of them.
+       */
+      const both = wantsBothDirections(asked);
+      const chart = buildChart(asked, transactions, asOf, both ? "revenue" : undefined);
+      const second = both ? buildChart(asked, transactions, asOf, "spending") : null;
       setDraft("");
       say({ kind: "you", text: note });
+      if (second) {
+        say({ kind: "chart", chart: second });
+        log(aiEvent("answered", "add", { text: `Drew ${second.title}. ${chartInWords(second)}`, entry: second.title }));
+      }
       /**
        * Both outcomes are recorded, and that is the point of recording it.
        *
@@ -3421,7 +3602,9 @@ export function AskPanel({
       } else {
         say({
           kind: "assistant",
-          text: "There is no spending in that period to draw. Try a month with entries in it, or ask for the year.",
+          text: second
+            ? "There is no income in that period to draw beside it."
+            : "There is nothing in that period to draw. Try a wider window, a month with entries in it, or the year.",
           from: "this device",
         });
         log(
@@ -3481,7 +3664,7 @@ export function AskPanel({
               phrase: routed?.target || note,
             }
           : routed === null
-            ? detectRecall(note)
+            ? detectRecall(ruled)
             : /**
                * The local reading wins unless the sentence is an entry.
                *
@@ -5648,7 +5831,12 @@ function FoundList({
               #{String(row.recordNumber).padStart(4, "0")} · {row.date} · {row.type} ·{" "}
               {row.item || row.description || "no item"} · {formatMoney(row.total)}
             </div>
-            <p className="t-micro fms-proposalnote">Matched on {why.join(", ")}.</p>
+            {/* A check's own sentence is shown as it is; a matched word gets "Matched on". */}
+            <p className="t-micro fms-proposalnote">
+              {why.some((w) => w.includes(" ") && /[.]$/.test(w))
+                ? why.join(" ")
+                : `Matched on ${why.map((w) => w.replace(/\.+$/, "")).join(", ")}.`}
+            </p>
             {settled ? (
               <p className="t-micro fms-proposalfrom">
                 {found.alsoBin
@@ -5831,7 +6019,8 @@ function ChartView({ chart }: { chart: Chart }) {
              * strength: for spending that is the red that needs looking at.
              */
             const average = chart.total / Math.max(chart.rows.length, 1);
-            const months = chart.by === "month";
+            // Days are a series too: shaded by rank they would read as a ranking.
+            const months = chart.by === "month" || chart.by === "day";
             const strength = months ? monthStrength(r.value, average) : 1;
             const colour = months
               ? toneOf(chart)
@@ -5853,7 +6042,7 @@ function ChartView({ chart }: { chart: Chart }) {
                 <span
                   className="fms-chartbar"
                   style={{
-                    width: `${Math.max(r.share * 100, 1.5)}%`,
+                    width: r.value === 0 ? 0 : `${Math.max(r.share * 100, 1.5)}%`,
                     background: colour,
                     opacity: at === null || at === i ? strength : strength * 0.6,
                   }}
@@ -5872,8 +6061,8 @@ function ChartView({ chart }: { chart: Chart }) {
         {chart.othersCount > 0
           ? `The ${chart.rows.length} largest, with ${chart.othersCount} smaller left off. Totals worked out on this device.`
           : "Totals worked out on this device, from your entries."}
-        {chart.kind === "bars" && chart.by === "month"
-          ? ` Full colour marks the months above the average of ${chartLabel(Math.round(chart.total / Math.max(chart.rows.length, 1)))}.`
+        {chart.kind === "bars" && (chart.by === "month" || chart.by === "day")
+          ? ` Full colour marks the ${chart.by === "day" ? "days" : "months"} above the average of ${chartLabel(Math.round(chart.total / Math.max(chart.rows.length, 1)))}.`
           : ""}
       </p>
     </div>
@@ -6137,9 +6326,13 @@ function LineView({
         ))}
       </svg>
 
-      {/* The figures, because a line says the shape and not the numbers. */}
+      {/*
+        The figures, because a line says the shape and not the numbers.
+        A quiet day is on the line at zero and left out of the list, or a
+        month of days reads as thirty rows of PHP 0.00.
+      */}
       <ul className="fms-linelegend">
-        {points.map((p, i) => (
+        {points.map((p, i) => (p.value === 0 ? null : (
           <li key={p.label}>
             <button
               type="button"
@@ -6154,7 +6347,7 @@ function LineView({
               <span className="fms-piefigure fms-proposalmoney">{chartLabel(p.value)}</span>
             </button>
           </li>
-        ))}
+        )))}
       </ul>
     </div>
   );
