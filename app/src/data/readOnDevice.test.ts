@@ -66,6 +66,24 @@ describe("a picture read on the device", () => {
     expect(result.proposals).toHaveLength(1);
   });
 
+  it("a text answer with only refused rows still sends the pictures to a vision model", async () => {
+    const junk = { flow: "Spending or Revenue or Transfer or Debt or OnBehalf or Balance" };
+    const fetcher = vi.fn().mockResolvedValueOnce(reply([junk])).mockResolvedValueOnce(reply([row]));
+    const result = await extractProposals({ note: "This is maya credit", attachments: [maya], reference, asOf: "2026-09-26", fetcher: fetcher as unknown as typeof fetch, token, readPicture });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(result.proposals).toHaveLength(1);
+  });
+
+  it("keeps the text answer when the vision models are no better", async () => {
+    const junk = { flow: "" };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(reply([junk]))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Every model in the chain failed." }), { status: 502, headers: { "content-type": "application/json" } }));
+    const result = await extractProposals({ note: "", attachments: [maya], reference, asOf: "2026-09-26", fetcher: fetcher as unknown as typeof fetch, token, readPicture });
+    expect(result.source).toBe("model");
+    expect(result.readOnDevice).toBe(1);
+  });
+
   it("a reader that fails changes nothing: the picture goes as before", async () => {
     const fetcher = vi.fn(async () => reply([row]));
     await extractProposals({ note: "", attachments: [maya], reference, asOf: "2026-09-26", fetcher: fetcher as unknown as typeof fetch, token, readPicture: async () => { throw new Error("no wasm"); } });

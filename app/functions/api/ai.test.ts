@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { compactContext, emptyRead, firstInWaves, shortReason, SHRINK_TO, systemFor, toneFor, visionChain } from "./ai";
+import { compactContext, emptyRead, firstInWaves, shortReason, SHRINK_TO, systemFor, toneFor, usefulRead, visionChain } from "./ai";
 
 /** A context shaped like the real one: worked-out figures, then the rows. */
 function contextOf(rows: number): string {
@@ -295,5 +295,27 @@ describe("the vision models to try", () => {
 
   it("is empty only when neither provider has a model", () => {
     expect(visionChain([], [])).toEqual([]);
+  });
+});
+
+/**
+ * 26 September 2026, 23:45: the owner's Maya credit screen, read well on the
+ * device, came back "Nothing in that looked like a transaction": a row with
+ * no usable kind won the race.
+ */
+describe("an answer worth winning with", () => {
+  it("has at least one row of a kind the app can use", () => {
+    expect(usefulRead({ text: "2 found", data: [{ flow: "Debt" }, { flow: "" }] })).toBe(true);
+    expect(usefulRead({ text: "1 found", data: [{ flow: " OnBehalf " }] })).toBe(true);
+  });
+
+  it("is not empty, and not the template copied back", () => {
+    expect(usefulRead({ text: "0 found", data: [] })).toBe(false);
+    expect(usefulRead({ text: "1 found", data: [{ flow: "Spending or Revenue or Transfer or Debt or OnBehalf or Balance" }] })).toBe(false);
+    expect(usefulRead({ text: "1 found", data: [{ flow: "" }, {}] })).toBe(false);
+  });
+
+  it("leaves other tasks' answers alone", () => {
+    expect(usefulRead({ text: "A sentence." })).toBe(true);
   });
 });

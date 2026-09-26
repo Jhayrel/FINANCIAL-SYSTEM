@@ -671,12 +671,19 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
 
   const others = options.attachments.filter((a) => !(a.kind === "image" && a.dataUrl));
   const first = await extractOnce({ ...options, attachments: [...others, ...asText, ...stillPictures] });
-  const found = first.proposals.length + first.refused.length + (first.balances?.length ?? 0);
-  if ((first.source === "model" && found > 0) || options.signal?.aborted) {
+  /*
+   * Rows it could not use count for nothing here. On 26 September 2026 the
+   * text route returned one refused row, "Nothing in that looked like a
+   * transaction", which counted as an answer, and the pictures never went to
+   * a model that could look at them.
+   */
+  const usable = (r: ExtractResult): number =>
+    r.source !== "model" ? -1 : (r.proposals.length + (r.balances?.length ?? 0)) * 10 + r.refused.length;
+  if (usable(first) >= 10 || options.signal?.aborted) {
     return { ...first, readOnDevice: asText.length };
   }
   const second = await extractOnce(options);
-  return second.source === "model" || first.source !== "model" ? second : first;
+  return usable(second) > usable(first) ? second : { ...first, readOnDevice: asText.length };
 }
 
 /** One request, with whatever pictures and text it is given. */

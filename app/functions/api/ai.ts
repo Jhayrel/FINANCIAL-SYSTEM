@@ -1323,12 +1323,20 @@ export const onRequestPost = async (ctx: {
        * models that were still reading. It is returned only if no model in
        * the chain reads anything at all.
        */
-      if (first && images.length > 0 && emptyRead(first)) {
+      /*
+       * The same for text read off a picture on the device, and for any
+       * answer with no usable row in it: a model that copied the template
+       * back ("flow": "Spending or Revenue or ...") parsed perfectly and won,
+       * and the owner's Maya credit screen came back "Nothing in that looked
+       * like a transaction" (26 September 2026, 23:45) while the stronger
+       * model in the same wave was still reading it.
+       */
+      if (first && task === "extract" && !usefulRead(first)) {
         nothingFound ??= json({ ...first, model: label, attempts });
         attempts.push({ model: candidate.model, reason: "read nothing" });
         emptyReads += 1;
-        // Three models that could see it and found nothing: it is not there.
-        return emptyReads >= 3 ? nothingFound : null;
+        // A whole wave that found nothing usable: it is not there.
+        return emptyReads >= (images.length > 0 ? 3 : 2) ? nothingFound : null;
       }
       if (first) return json({ ...first, model: label, attempts });
 
@@ -1358,7 +1366,7 @@ export const onRequestPost = async (ctx: {
       );
 
       const second = repaired ? readAnswer(repaired, spec) : null;
-      if (second) return json({ ...second, model: label, attempts, repaired: true });
+      if (second && (task !== "extract" || usefulRead(second))) return json({ ...second, model: label, attempts, repaired: true });
 
       attempts.push({ model: candidate.model, reason: "unreadable shape" });
     } catch (e) {
@@ -1440,6 +1448,25 @@ export const onRequestPost = async (ctx: {
 export function emptyRead(answer: Answer): boolean {
   if (!Array.isArray(answer.data)) return false;
   return answer.data.length === 0;
+}
+
+/** The kinds of row the app can use, as the extract template names them. */
+const USABLE_FLOW = /^(spending|revenue|transfer|debt|on ?behalf|balance)$/i;
+
+/**
+ * An extract answer with at least one row the app can use.
+ *
+ * Not empty, and not only rows whose kind is missing or copied from the
+ * template ("Spending or Revenue or Transfer"), which the client can only
+ * refuse. Anything that is not a list of rows is some other task's answer
+ * and counts as usable.
+ */
+export function usefulRead(answer: Answer): boolean {
+  if (!Array.isArray(answer.data)) return true;
+  return answer.data.some((row) => {
+    const flow = row && typeof row === "object" ? (row as Record<string, unknown>)["flow"] : undefined;
+    return typeof flow === "string" && USABLE_FLOW.test(flow.trim());
+  });
 }
 
 /**
@@ -1608,6 +1635,20 @@ async function send(
         temperature: 0.1,
         max_tokens: maxTokens,
         ...(askForJson ? { response_format: { type: "json_object" } } : {}),
+        /*
+         * GPT-OSS thinks before it answers, at medium effort unless told,
+         * and the thinking counts against max_tokens: a six-row statement
+         * spent the room on thinking and returned half an object. Structured
+         * jobs are copying, not puzzling, so they ask for little of it; the
+         * conversation keeps the default. Only these models are sent it, in
+         * each provider's own spelling, so no other model sees a field it
+         * does not know.
+         */
+        ...(task !== "chat" && /gpt-oss/i.test(c.model)
+          ? c.provider === "groq"
+            ? { reasoning_effort: "low" }
+            : { reasoning: { effort: "low" } }
+          : {}),
       }),
     });
 
