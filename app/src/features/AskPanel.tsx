@@ -147,6 +147,7 @@ import {
 } from "../data/aiClient";
 import { chatStore } from "../data/chatStore";
 import { readPicture } from "../data/ocr";
+import { holdUpdates } from "../data/updateCheck";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AttachmentNote } from "../domain/aiLog";
 import { clauseFor, verifyReading } from "../domain/verify";
@@ -916,6 +917,11 @@ export function AskPanel({
   const [draft, setDraft] = useState("");
   const [files, setFiles] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
+  // Pictures waiting or an answer on its way: a new version waits until they are done (data/updateCheck.ts).
+  useEffect(() => {
+    holdUpdates("ask", files.length > 0 || busy);
+    return () => holdUpdates("ask", false);
+  }, [files.length, busy]);
 
   /**
    * What is happening right now, in words.

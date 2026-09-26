@@ -80,3 +80,15 @@ describe("a credit line's own screen", () => {
     expect(odd.proposals[0]!.draft.amount).toBe(7700);
   });
 });
+
+describe("a borrowing with nowhere to land", () => {
+  it("lands in the credit line's own wallet when the screen said My Wallet", () => {
+    const read = readProposals(
+      { proposals: [{ flow: "Debt", debt: "Maya Credit", debtEffect: "borrowed", toWallet: "My Wallet", amountPesos: 2000, date: "2026-09-20", time: "19:57" }] },
+      reference,
+      "2026-09-26",
+      { note: "This is maya credit all in maya with fees" },
+    );
+    expect(read.proposals[0]!.draft).toMatchObject({ flow: "Debt", debtEffect: "draw", toWallet: "Maya", item: "Maya Credit" });
+  });
+});

@@ -827,7 +827,22 @@ export function onCreditLine(proposals: readonly Proposal[], note: string, refer
     }
 
     if (d.flow === "Debt" && !d.debtId) {
-      return { ...p, draft: { ...d, debtId, item: line, notes: timeOf(p) } };
+      const lands = d.debtEffect === "draw" && !d.toWallet && home ? { toWallet: home } : {};
+      return { ...p, draft: { ...d, debtId, item: line, notes: timeOf(p), ...lands } };
+    }
+
+    /*
+     * A borrowing on the line with nowhere to land: "My Wallet" is not one of
+     * the owner's account names, so it read as blank and the card said "Pick
+     * the wallet the money lands in" (27 September 2026). On the line's own
+     * screen it is the line's wallet.
+     */
+    if (d.flow === "Debt" && d.debtEffect === "draw" && d.debtId === debtId && !d.toWallet && home) {
+      return {
+        ...p,
+        draft: { ...d, toWallet: home },
+        adjustments: [...p.adjustments, `"My Wallet" on ${line}'s screen is ${home}.`],
+      };
     }
     return p;
   });

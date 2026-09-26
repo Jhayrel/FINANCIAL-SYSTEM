@@ -26,3 +26,21 @@ describe("which bundle a page points at", () => {
     expect(bundleOf('<link rel="stylesheet" href="/assets/index-LB5nY7-W.css">')).toBeNull();
   });
 });
+
+/**
+ * 27 September 2026, 06:04: a phone tab left open overnight was still
+ * running the bundle from before a layout fix.
+ */
+describe("loading a new version on coming back", () => {
+  it("does, after a minute away with nothing in progress", async () => {
+    const { reloadOnReturn } = await import("./updateCheck");
+    expect(reloadOnReturn(8 * 60 * 60 * 1000, 0)).toBe(true);
+    expect(reloadOnReturn(60 * 1000, 0)).toBe(true);
+  });
+
+  it("does not, after a glance away, or with pictures attached or an answer on its way", async () => {
+    const { reloadOnReturn } = await import("./updateCheck");
+    expect(reloadOnReturn(5 * 1000, 0)).toBe(false);
+    expect(reloadOnReturn(8 * 60 * 60 * 1000, 1)).toBe(false);
+  });
+});

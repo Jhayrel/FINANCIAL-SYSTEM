@@ -29,7 +29,7 @@ import { Settings } from "./features/Settings";
 import { readIssued, Statements } from "./features/Statements";
 import { Button, Card, EmptyState, Money, Notice } from "./components/primitives";
 import { Notifications } from "./components/Notifications";
-import { useUpdateAvailable } from "./data/updateCheck";
+import { holdUpdates, useUpdateAvailable } from "./data/updateCheck";
 import { Icon, type IconName } from "./components/Icon";
 import { AskPanel } from "./features/AskPanel";
 import { useProposalSink } from "./features/useProposalSink";
@@ -619,6 +619,10 @@ export default function App() {
    */
   const [cleaning, setCleaning] = useState<{ done: number; total: number } | null>(null);
   const writingClean = cleaning !== null;
+  // Never reload into a new version halfway through writing a file into the database.
+  useEffect(() => {
+    holdUpdates("start-clean", writingClean);
+  }, [writingClean]);
   useEffect(() => {
     if (!writingClean) return;
     const hold = (e: BeforeUnloadEvent): void => {

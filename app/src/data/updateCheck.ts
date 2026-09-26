@@ -39,6 +39,30 @@ function runningBundle(): string | null {
 /** Often enough to catch a deploy during a session, rare enough to cost nothing. */
 const EVERY = 5 * 60 * 1000;
 
+/**
+ * Away long enough that coming back is starting again.
+ *
+ * 27 September 2026, 06:04: the owner's phone was still running the bundle
+ * from before a phone layout fix, in a tab left open overnight, and the fix
+ * looked like it had not worked. A notice asking to reload is easy to miss
+ * on a phone. Coming back to the app after a minute away, with nothing in
+ * progress, the new version is simply loaded.
+ */
+const AWAY_MS = 60 * 1000;
+
+/** Things in progress that a reload would lose: pictures attached, an answer on its way. */
+const holds = new Set<string>();
+
+export function holdUpdates(key: string, on: boolean): void {
+  if (on) holds.add(key);
+  else holds.delete(key);
+}
+
+/** Whether coming back to the tab should load the new version now. */
+export function reloadOnReturn(awayMs: number, held: number): boolean {
+  return awayMs >= AWAY_MS && held === 0;
+}
+
 export function useUpdateAvailable(): boolean {
   const [available, setAvailable] = useState(false);
 
@@ -46,6 +70,7 @@ export function useUpdateAvailable(): boolean {
     const running = runningBundle();
     if (!running) return;
     let stopped = false;
+    let newer = false;
 
     const check = async (): Promise<void> => {
       if (stopped || document.visibilityState === "hidden") return;
@@ -53,15 +78,27 @@ export function useUpdateAvailable(): boolean {
         const res = await fetch(`/?fresh=${Date.now()}`, { cache: "no-store" });
         if (!res.ok) return;
         const served = bundleOf(await res.text());
-        if (!stopped && served && served !== running) setAvailable(true);
+        if (!stopped && served && served !== running) {
+          newer = true;
+          setAvailable(true);
+        }
       } catch {
         // Offline. The next check tries again.
       }
     };
 
     // Coming back to the tab is exactly when a stale bundle gets used.
+    let hiddenAt = 0;
     const onReturn = (): void => {
-      if (document.visibilityState === "visible") void check();
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+        return;
+      }
+      const away = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = 0;
+      void check().then(() => {
+        if (!stopped && newer && reloadOnReturn(away, holds.size)) window.location.reload();
+      });
     };
 
     const timer = window.setInterval(() => void check(), EVERY);
