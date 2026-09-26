@@ -456,23 +456,48 @@ export function Alert({
   children: ReactNode;
   action?: ReactNode;
 }) {
+  /**
+   * ── Why the kicker and the buttons share the title's line ───────────────
+   *
+   * This had four bands stacked down the page: the status word on its own
+   * line, the title under it, the sentence under that, and the buttons under
+   * that again behind a space-3 margin. Two notices on one screen were eight
+   * bands of chrome above the thing you opened the app to do, and the owner
+   * said so on 26 September 2026: it read as a shape cut out and fitted in
+   * rather than part of the page.
+   *
+   * Nothing is removed. The status word goes inline in front of the title,
+   * where it reads as what it is, a label on that sentence, and the buttons
+   * sit at the far end of the same line, which is where the eye already is
+   * once the title has been read. Four bands become two and the notice
+   * becomes a rule with a line of text beside it, which is the same 2px ink
+   * rule the ledger rows are separated by (rule D2).
+   *
+   * The row wraps, so on a phone the buttons drop under the title rather
+   * than squeezing it, and the 44px targets of rule D10 are untouched.
+   */
+  const head = (
+    <div className="fms-alert-head">
+      {title ? (
+        <p className="t-body-strong fms-alert-title">
+          <span className="t-label fms-alert-kicker">{ALERT_WORD[status]}</span>
+          {title}
+        </p>
+      ) : (
+        <span className="t-label fms-alert-kicker">{ALERT_WORD[status]}</span>
+      )}
+      {action && <div className="fms-alert-action">{action}</div>}
+    </div>
+  );
+
   return (
     <div
       role={status === "over" ? "alert" : "status"}
       className="fms-alert"
       style={{ "--alert-rule": `var(--${status})` } as CSSProperties}
     >
-      <span className="t-label fms-alert-kicker">{ALERT_WORD[status]}</span>
-      <div className="fms-alert-body">
-        {title && <div className="t-body-strong">{title}</div>}
-        <div
-          className="t-caption fms-alert-text"
-          style={{ marginTop: title ? "var(--space-1)" : 0 }}
-        >
-          {children}
-        </div>
-        {action && <div className="fms-alert-action">{action}</div>}
-      </div>
+      {head}
+      <div className="t-caption fms-alert-text">{children}</div>
     </div>
   );
 }
