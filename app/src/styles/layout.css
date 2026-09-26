@@ -3074,6 +3074,24 @@
   max-width: 92%;
 }
 
+/*
+ * On the phone's AI screen the thread sits on the page, not in a panel, and
+ * the page is paper: the assistant's sunk grey (#f2f4f2 on #f4f6f4) and your
+ * palest green vanished into it. "I cant even see the chats", 26 September
+ * 2026. There each side takes a surface that stands off the paper in both
+ * themes: the assistant white (the dark surface in dark), you the brand tint,
+ * each with a visible edge.
+ */
+.fms-aiscreen .fms-turn:not(.fms-turn--you) {
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+}
+
+.fms-aiscreen .fms-turn--you {
+  background: var(--brand-100);
+  border-color: var(--brand-300);
+}
+
 /* ── What Send will do ───────────────────────────────────────────────────── */
 
 /*
@@ -8077,6 +8095,18 @@ textarea.fms-askinput {
     padding-inline: var(--space-4);
     border-radius: 22px;
     white-space: nowrap;
+  }
+
+  /*
+   * Send with nothing to send. Faded to 45% the green became white on pale
+   * green, which read as broken rather than waiting. It waits in grey, with
+   * words that can be read, and turns green when there is something to send.
+   */
+  .fms-aiscreen .fms-askform > .fms-btn:disabled:not([aria-busy="true"]) {
+    opacity: 1;
+    background: var(--surface-sunk);
+    border-color: var(--hairline-strong);
+    color: var(--ink-3);
   }
 
   /*
