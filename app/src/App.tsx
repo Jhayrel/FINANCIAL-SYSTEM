@@ -390,6 +390,11 @@ export default function App() {
         setPreference(stored.theme);
       }
       if (!cancelled) setLoadedStore(store);
+    }).catch((e: unknown) => {
+      // Not marked loaded, so nothing is saved over what could not be read.
+      if (cancelled) return;
+      setSettingsFailed(true);
+      setSyncError(`Your settings could not be read: ${(e as Error).message}`);
     });
     return () => { cancelled = true; };
   }, [store]);
@@ -478,6 +483,8 @@ export default function App() {
    */
   const [ledgerHeard, setLedgerHeard] = useState(false);
   const [budgetsHeard, setBudgetsHeard] = useState(false);
+  /** A settings read that failed still ends the wait: the screens show what they have, and the error says why. */
+  const [settingsFailed, setSettingsFailed] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   /**
@@ -530,13 +537,21 @@ export default function App() {
           );
         }
       },
-      (e) => setSyncError(e.message),
+      (e) => {
+        // An answer, if a refusal: the screens stop waiting and the error says why.
+        setLedgerHeard(true);
+        setSyncError(e.message);
+      },
     );
 
-    const stopBudgets = subscribeBudgets(uid, (b) => {
-      setBudgetsHeard(true);
-      if (Object.keys(b).length > 0) setBudgets(b);
-    });
+    const stopBudgets = subscribeBudgets(
+      uid,
+      (b) => {
+        setBudgetsHeard(true);
+        if (Object.keys(b).length > 0) setBudgets(b);
+      },
+      () => setBudgetsHeard(true),
+    );
 
     return () => { stop(); stopBudgets(); };
     // `settings` is read through a ref so a settings edit does not tear down
@@ -551,7 +566,7 @@ export default function App() {
    * 0.00, "No budget set", every wallet empty, for seconds after each
    * refresh. Not signed in, everything is already in memory.
    */
-  const ready = !cloud.uid || (loadedStore === store && ledgerHeard && budgetsHeard);
+  const ready = !cloud.uid || ((loadedStore === store || settingsFailed) && ledgerHeard && budgetsHeard);
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;

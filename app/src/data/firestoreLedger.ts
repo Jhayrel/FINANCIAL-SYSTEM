@@ -447,16 +447,21 @@ export function firestoreSettingsStore(uid: string): SettingsStore {
 export function subscribeBudgets(
   uid: string,
   onChange: (budgets: Budgets) => void,
+  onError?: (e: Error) => void,
 ): () => void {
   const db = firestore();
-  return onSnapshot(collection(db, `${userRoot(uid)}/budgets`), (qs) => {
-    const out: Record<string, BudgetYear> = {};
-    for (const snap of qs.docs) {
-      const year = toBudgetYear(snap.data());
-      if (year) out[snap.id] = year;
-    }
-    onChange(out);
-  });
+  return onSnapshot(
+    collection(db, `${userRoot(uid)}/budgets`),
+    (qs) => {
+      const out: Record<string, BudgetYear> = {};
+      for (const snap of qs.docs) {
+        const year = toBudgetYear(snap.data());
+        if (year) out[snap.id] = year;
+      }
+      onChange(out);
+    },
+    (e) => onError?.(e as Error),
+  );
 }
 
 /**
