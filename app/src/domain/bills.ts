@@ -99,6 +99,9 @@ export function keepsDayOfMonth(dates: readonly IsoDate[]): boolean {
   return highest - lowest <= DAY_DRIFT;
 }
 
+/** Past this many days since its last payment, a bill nobody declared is taken to have stopped. */
+export const STOPPED_AFTER_DAYS = 92;
+
 /**
  * Status of every known bill and subscription.
  *
@@ -137,10 +140,22 @@ export function billStatuses(
   }
 
   const out: BillStatus[] = [];
+  const declared = new Set([...reference.bills, ...reference.subscriptions]);
 
   for (const [item, { category, payments }] of acc) {
     payments.sort((a, b) => a.date.localeCompare(b.date));
     const last = payments.at(-1);
+
+    /*
+     * A bill only the ledger names, unpaid for three months, has stopped.
+     *
+     * Once the 2023 to 2025 records came in, every service ever paid became a
+     * bill: Storyblocks, last paid June 2023, was "past due" in September
+     * 2026, and so were Adobe and a postpaid plan cancelled a year before. A
+     * bill in the owner's own list is kept whatever its date, because
+     * declaring it is saying it is still expected.
+     */
+    if (!declared.has(item) && last && daysBetween(last.date, asOf) > STOPPED_AFTER_DAYS) continue;
 
     const thisMonth = payments.filter(
       (p) => getYear(p.date) === year && getMonth(p.date) === month,

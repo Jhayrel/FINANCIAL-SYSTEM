@@ -2,7 +2,7 @@
  * Turn the rebuilt 2023 to 2025 history into a backup file the app merges.
  *
  * Reads DIR/history.json (written by tools/migrate_history.py) and writes
- * DIR/fms-history-2023-2025.json and DIR/report.md. The directory is outside
+ * DIR/fms-history-FIRST-LAST.json and DIR/report.md. The directory is outside
  * the repository: this is the owner's financial history and is never
  * committed.
  *
@@ -76,6 +76,8 @@ interface FoundDebt {
 const history = JSON.parse(readFileSync(join(dir, "history.json"), "utf8")) as {
   years: Record<string, YearData>;
   current2026?: Transaction[];
+  /** The current year's budget from the same workbook, for the clean-start file. */
+  budgets?: Record<string, { spending: number[]; billsSubs: number[] }>;
 };
 
 const YEARS = Object.keys(history.years).map(Number).sort();
@@ -273,7 +275,7 @@ for (const i of newIssues) byCode.set(i.code, (byCode.get(i.code) ?? 0) + 1);
 
 // ── The report ─────────────────────────────────────────────────────────────
 
-say("# Migrating 2023 to 2025");
+say(`# Migrating ${YEARS[0]} to ${YEARS.at(-1)}`);
 say();
 say(failures.length ? `**Not ready: ${failures.length} check(s) failed.**` : "**Ready to merge. Every check passed.**");
 for (const f of failures) say(`- ${f}`);
@@ -396,7 +398,7 @@ if (current.length > 0) {
     {
       transactions: together,
       deleted: [],
-      budgets: {},
+      budgets: history.budgets ?? {},
       settings: { ...settings, accounts: cleanAccounts, credits: [...credits, plan.debt] },
       preferences: { theme: "system" },
       migrations: { debt: true, opening: true },
@@ -429,6 +431,11 @@ if (current.length > 0) {
   say(`- fms-clean-start.json: ${together.length.toLocaleString()} rows, the history above and the ${migrated.length} rows of ${year}.`);
   say(`- ${year} opens with ${peso(sheet.broughtForward ?? 0)} brought forward and its account statement closes at ${peso(sheet.closing)}, which is what the wallets hold: ${[...own.entries()].filter(([, b]) => b !== 0).map(([a, b]) => `${a} ${peso(b)}`).join(", ")}.`);
   say(`- Starting clean on top of the ${year} rows plus a test row keeps all ${cleanPlan.kept} and clears only the test row.`);
+  const bud = history.budgets?.[year];
+  if (bud) {
+    say(`- The ${year} budget comes with it, from the workbook's BUDGETING sheet: spending ${bud.spending.map((c) => (c ? peso(c) : "none")).join(", ")}; bills and subscriptions ${bud.billsSubs.map((c) => (c ? peso(c) : "none")).join(", ")}, January to December.`);
+    if (cleanPlan.budgetYears.join() !== year) failures.push(`Starting clean did not take the ${year} budget from the file`);
+  }
 }
 
 writeFileSync(join(dir, "report.md"), lines.join("\n"), "utf8");
@@ -436,6 +443,6 @@ if (failures.length) {
   console.error(lines.join("\n"));
   process.exit(1);
 }
-writeFileSync(join(dir, "fms-history-2023-2025.json"), JSON.stringify(backup, null, 2), "utf8");
+writeFileSync(join(dir, `fms-history-${YEARS[0]}-${YEARS.at(-1)}.json`), JSON.stringify(backup, null, 2), "utf8");
 if (clean) writeFileSync(join(dir, "fms-clean-start.json"), JSON.stringify(clean, null, 2), "utf8");
 console.log(lines.join("\n"));

@@ -2747,7 +2747,7 @@ function DataSection({
     const p = cleanPlan;
     const ok = await confirm({
       title: "Start clean from this file?",
-      body: `Your ledger becomes the file's ${p.transactions.length.toLocaleString()} rows. ${p.setAside.length.toLocaleString()} ${p.setAside.length === 1 ? "row" : "rows"} here that the file does not have, and ${p.binCleared.length.toLocaleString()} in the Bin, are cleared from every screen and total. They stay in the database and nothing is deleted. A backup of everything as it is now downloads first, so this can be undone by restoring it.`,
+      body: `Your ledger becomes the file's ${p.transactions.length.toLocaleString()} rows. ${p.setAside.length.toLocaleString()} ${p.setAside.length === 1 ? "row" : "rows"} here that the file does not have, and ${p.binCleared.length.toLocaleString()} in the Bin, are cleared from every screen and total.${p.budgetYears.length ? ` The file's budget replaces this one for ${p.budgetYears.join(", ")}.` : ""} Nothing is deleted from the database, and a backup of everything as it is now downloads first. Keep the page open until it says done.`,
       confirmLabel: "Start clean",
       tone: "danger",
     });
@@ -3030,8 +3030,11 @@ function DataSection({
                     <h3 className="t-body-strong" style={{ margin: 0 }}>Start clean from this file</h3>
                     <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
                       For clearing test data. Your ledger becomes exactly the file&apos;s rows, and
-                      everything else leaves every screen and total. Settings, budgets, AI choices
-                      and the theme stay as they are.
+                      everything else leaves every screen and total.{" "}
+                      {cleanPlan.budgetYears.length > 0
+                        ? `The file's budget replaces this one for ${cleanPlan.budgetYears.join(", ")}. Settings, AI choices and the theme stay as they are.`
+                        : "Settings, budgets, AI choices and the theme stay as they are."}
+                      {" "}Keep the page open until it says done.
                     </p>
                     <dl className="fms-deflist">
                       <dt className="t-body">Rows in the file</dt>

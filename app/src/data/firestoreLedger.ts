@@ -189,6 +189,7 @@ export interface LedgerStore {
     binned: readonly DeletedTransaction[],
     discard: readonly string[],
     at: string,
+    onProgress?: (done: number, total: number) => void,
   ): Promise<{ readonly notDiscarded: number }>;
 }
 
@@ -277,14 +278,23 @@ export function firestoreLedger(uid: string): LedgerStore {
       if (refused.length > 0) throw new RowsNotSaved(refused, reason);
     },
 
-    async startClean(live, binned, discard, at) {
+    async startClean(live, binned, discard, at, onProgress) {
       type Write = { id: string; data: DocumentData; row?: Transaction };
+      /*
+       * The test rows go first. The owner's first run wrote 900 of 3,070
+       * rows and stopped, and since the clearing came last, every test row
+       * and the whole Bin were still on screen. Cleared first, whatever is
+       * interrupted, the test data is gone, and running it again adds the
+       * rest.
+       */
       const writes: Write[] = [
+        ...discard.map((id) => ({ id, data: { discardedAt: at } })),
         // A document reused from the Bin or from an earlier discard comes back live.
         ...live.map((t) => ({ id: t.id, data: { ...toDocument(t), deletedAt: deleteField(), discardedAt: deleteField() }, row: t })),
         ...binned.map((t) => ({ id: t.id, data: { ...toDocument(t, t.deletedAt), discardedAt: deleteField() }, row: t })),
-        ...discard.map((id) => ({ id, data: { discardedAt: at } })),
       ];
+      let done = 0;
+      onProgress?.(0, writes.length);
 
       const refused: Transaction[] = [];
       let notDiscarded = 0;
@@ -299,8 +309,10 @@ export function firestoreLedger(uid: string): LedgerStore {
         }
       };
 
-      for (let i = 0; i < writes.length; i += 450) {
-        const chunk = writes.slice(i, i + 450);
+      // Smaller than the 500 a batch allows, so a refused batch retried a row
+      // at a time costs seconds, not minutes.
+      for (let i = 0; i < writes.length; i += 200) {
+        const chunk = writes.slice(i, i + 200);
         const batch = writeBatch(db);
         for (const w of chunk) batch.set(doc(txCollection(db, uid), w.id), w.data, { merge: true });
         try {
@@ -310,6 +322,8 @@ export function firestoreLedger(uid: string): LedgerStore {
           // One at a time, so a document the rules refuse holds up only itself.
           for (const w of chunk) await one(w);
         }
+        done += chunk.length;
+        onProgress?.(done, writes.length);
       }
       if (refused.length > 0) throw new RowsNotSaved(refused, reason);
       return { notDiscarded };

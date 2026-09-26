@@ -101,3 +101,41 @@ describe("when a bill is next expected", () => {
     expect(wifi?.nextDue).toBe("2026-10-20");
   });
 });
+
+describe("a bill that has stopped", () => {
+  const paid = (item: string, date: string, category: "Bills" | "Subscriptions" = "Subscriptions"): Transaction => ({
+    id: `${item}-${date}`,
+    recordNumber: 1,
+    date,
+    type: "Spending",
+    fromWallet: "Maya",
+    toWallet: "",
+    category,
+    item,
+    description: "",
+    amount: 8500,
+    fee: 0,
+    total: 8500,
+    notes: "",
+    status: "Paid",
+  });
+  const none = { wallets: [], savings: [], bills: [], subscriptions: [], revenueCategories: [], spendingTypes: [] };
+
+  it("is not past due years later when nobody declared it", () => {
+    // Imported history: paid monthly in 2023, then never again.
+    const rows = ["2023-04-14", "2023-05-14", "2023-06-14"].map((d) => paid("Storyblocks", d));
+    expect(billStatuses(rows, none, "2026-09-26")).toEqual([]);
+  });
+
+  it("is still expected when it is in the owner's list", () => {
+    const rows = ["2023-05-14", "2023-06-14"].map((d) => paid("Storyblocks", d));
+    const statuses = billStatuses(rows, { ...none, subscriptions: ["Storyblocks"] }, "2026-09-26");
+    expect(statuses.map((b) => b.item)).toEqual(["Storyblocks"]);
+  });
+
+  it("stays while it is only a month or two late", () => {
+    const rows = ["2026-06-17", "2026-07-17", "2026-08-17"].map((d) => paid("Google Drive", d));
+    expect(billStatuses(rows, none, "2026-09-26").map((b) => b.item)).toEqual(["Google Drive"]);
+  });
+});
+

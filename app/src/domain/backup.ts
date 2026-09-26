@@ -464,11 +464,20 @@ const identity = (t: Transaction): string =>
  * have in its bin, is set aside: marked `discardedAt` in the database, where
  * it stays, and shown on no screen and in no total. Nothing is deleted.
  *
- * Settings are kept (the AI choices, the theme, the budgets). The file's
- * accounts and debts are added by name, and an account or debt that no row
- * uses any more and the file does not name is archived, not removed, so the
- * test ones leave the screens and anything archived by mistake is one switch
- * away in Settings.
+ * Settings are kept (the AI choices, the theme). The file's accounts and
+ * debts are added by name, and an account or debt that no row uses any more
+ * and the file does not name is archived, not removed, so the test ones leave
+ * the screens and anything archived by mistake is one switch away in
+ * Settings. A year the file has a budget for takes the file's budget; other
+ * years keep theirs ("fix it everything like all even budget", the owner,
+ * after a test budget of PHP 100,000.00 was still showing).
+ *
+ * ── Running it again ──────────────────────────────────────────────────────
+ *
+ * The owner's first run stopped after 900 of its 3,070 rows. Running it
+ * again has to finish the job, not start a second one: a row already here
+ * under the file's own id is the same row, kept (and brought up to date),
+ * before anything is matched by content.
  */
 export interface CleanPlan {
   readonly transactions: readonly Transaction[];
@@ -489,6 +498,8 @@ export interface CleanPlan {
   readonly discard: readonly string[];
   readonly archivedAccounts: readonly string[];
   readonly archivedDebts: readonly string[];
+  /** The years whose budget the file replaces. */
+  readonly budgetYears: readonly string[];
 }
 
 export function planStartClean(backup: Backup, current: RestoreCurrent): CleanPlan {
@@ -501,8 +512,12 @@ export function planStartClean(backup: Backup, current: RestoreCurrent): CleanPl
     if (same && same.id !== d.id) debtIdFor.set(d.id, same.id);
   }
 
+  // Same id first: a row an earlier run already wrote is that row.
+  const fileIds = new Set(b.transactions.map((t) => t.id));
+  const currentIds = new Set([...current.transactions, ...current.deleted].map((t) => t.id));
   const available = new Map<string, Transaction[]>();
   for (const t of current.transactions) {
+    if (fileIds.has(t.id)) continue;
     const key = identity(t);
     available.set(key, [...(available.get(key) ?? []), t]);
   }
@@ -511,6 +526,11 @@ export function planStartClean(backup: Backup, current: RestoreCurrent): CleanPl
   const usedIds = new Set<string>();
   const transactions = b.transactions.map((t) => {
     const row = t.debtId && debtIdFor.has(t.debtId) ? { ...t, debtId: debtIdFor.get(t.debtId)! } : t;
+    if (currentIds.has(row.id)) {
+      kept += 1;
+      usedIds.add(row.id);
+      return row;
+    }
     const match = available.get(identity(row))?.shift();
     if (match) {
       kept += 1;
@@ -522,7 +542,7 @@ export function planStartClean(backup: Backup, current: RestoreCurrent): CleanPl
 
   const finalIds = new Set([...transactions.map((t) => t.id), ...b.deleted.map((t) => t.id)]);
   const setAside = current.transactions.filter((t) => !usedIds.has(t.id));
-  const binCleared = current.deleted.filter((t) => !b.deleted.some((d) => d.id === t.id));
+  const binCleared = current.deleted.filter((t) => !b.deleted.some((d) => d.id === t.id) && !usedIds.has(t.id));
   // A document the file's own row now writes over is not discarded: it is that row.
   const discard = [...setAside, ...binCleared].map((t) => t.id).filter((id) => !finalIds.has(id));
 
@@ -555,7 +575,8 @@ export function planStartClean(backup: Backup, current: RestoreCurrent): CleanPl
     transactions,
     deleted: b.deleted,
     settings: { ...current.settings, accounts, credits },
-    budgets: current.budgets,
+    budgets: { ...current.budgets, ...b.budgets },
+    budgetYears: Object.keys(b.budgets).sort(),
     preferences: current.preferences,
     migrations: {
       debt: current.migrations.debt || b.migrations.debt,

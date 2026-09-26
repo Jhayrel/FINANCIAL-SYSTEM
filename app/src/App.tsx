@@ -571,6 +571,25 @@ export default function App() {
    * Entries the database refused, kept on this device until they reach it.
    * See `domain/unsaved.ts` for the two days of borrowing this came from.
    */
+  /**
+   * "Start clean" writing to the database: how far it has got.
+   *
+   * The owner's first run wrote 900 of 3,070 rows and stopped, with nothing
+   * on screen to say it was still going. It now says how far it is, and the
+   * browser asks before the page is left while it is.
+   */
+  const [cleaning, setCleaning] = useState<{ done: number; total: number } | null>(null);
+  const writingClean = cleaning !== null;
+  useEffect(() => {
+    if (!writingClean) return;
+    const hold = (e: BeforeUnloadEvent): void => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", hold);
+    return () => window.removeEventListener("beforeunload", hold);
+  }, [writingClean]);
+
   const [unsaved, setUnsaved] = useState<Transaction[]>([]);
   useEffect(() => {
     setUnsaved(cloud.uid ? readUnsaved(cloud.uid) : []);
@@ -1306,24 +1325,40 @@ export default function App() {
     setTransactions([...plan.transactions]);
     setDeleted([...plan.deleted]);
     setSettings(plan.settings);
-    const at = new Date().toISOString();
-    push((l) =>
-      l.startClean(plan.transactions, plan.deleted, plan.discard, at).then((r) => {
-        if (r.notDiscarded > 0) {
-          flash(
-            `${r.notDiscarded.toLocaleString()} old ${r.notDiscarded === 1 ? "row was" : "rows were"} refused by the database rules and still show. Publish firestore.rules in the Firebase console, then start clean again.`,
-          );
-        }
-      }),
-    );
+    setBudgets(plan.budgets);
     record(
       settingsChanged(
         `Started clean from a backup file: ${plan.transactions.length.toLocaleString()} rows, ${plan.setAside.length.toLocaleString()} test rows and ${plan.binCleared.length.toLocaleString()} bin rows cleared`,
       ),
     );
-    flash(
-      `Started clean. ${plan.transactions.length.toLocaleString()} rows from the file; ${(plan.setAside.length + plan.binCleared.length).toLocaleString()} test and bin rows cleared. A backup of what was here downloaded first.`,
-    );
+    const cleared = plan.setAside.length + plan.binCleared.length;
+    const done = `Done. Your ledger is the file's ${plan.transactions.length.toLocaleString()} rows, and ${cleared.toLocaleString()} test and bin ${cleared === 1 ? "row is" : "rows are"} cleared. A backup of what was here downloaded first.`;
+
+    const uid = cloud.uid;
+    if (!uid) {
+      flash(done);
+      return;
+    }
+    // A budget restored from a file was set on screen and never saved, so the
+    // next load brought the old one back. The file's years are written now.
+    for (const year of plan.budgetYears) {
+      const budget = plan.budgets[year];
+      if (budget) track(saveBudget(uid, year, budget));
+    }
+    const at = new Date().toISOString();
+    setCleaning({ done: 0, total: plan.discard.length + plan.transactions.length + plan.deleted.length });
+    push(async (l) => {
+      try {
+        const r = await l.startClean(plan.transactions, plan.deleted, plan.discard, at, (d, t) => setCleaning({ done: d, total: t }));
+        flash(
+          r.notDiscarded > 0
+            ? `${done} ${r.notDiscarded.toLocaleString()} old ${r.notDiscarded === 1 ? "row was" : "rows were"} refused by the database and still show: run Start clean again with the same file.`
+            : done,
+        );
+      } finally {
+        setCleaning(null);
+      }
+    });
   };
 
   /**
@@ -2129,6 +2164,15 @@ export default function App() {
         screen jumping down under them, 26 September 2026.
       */}
       <div className="fms-notices" aria-live="polite">
+        {cleaning && (
+          <Notice
+            status="info"
+            title={`Loading your data: ${cleaning.done.toLocaleString()} of ${cleaning.total.toLocaleString()} written`}
+          >
+            Keep this page open until it says done. If it closes first, run Start clean again with the
+            same file: it carries on where it stopped.
+          </Notice>
+        )}
         {updateReady && !updateClosed && (
           <Notice
             status="info"

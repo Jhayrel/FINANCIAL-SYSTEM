@@ -1,5 +1,5 @@
 """
-Rebuild the 2023, 2024 and 2025 spending workbooks as ledger rows.
+Rebuild the 2022 to 2025 spending workbooks as ledger rows.
 
 READ-ONLY. Every workbook is opened with read_only=True and data_only=True
 and never saved. Nothing under "MY THINGS/" is touched. See ../CLAUDE.md.
@@ -10,6 +10,8 @@ refuses a path inside it). Nothing this script produces is ever committed.
 
 Each year was kept in a different workbook with a different layout:
 
+  2022  from May, the same calendar grids as 2023, without its income and
+        PNB sheets.
   2023  a calendar grid per wallet: one cell per day holding that day's
         total, no descriptions. Money moved between wallets was logged as
         "spending" in one sheet and "added" in another.
@@ -23,7 +25,7 @@ from. Every year is checked against the figures the workbook itself shows
 smoothed over.
 
 Usage:
-  python tools/migrate_history.py --y2023 A.xlsx --y2024 B.xlsx --y2025 C.xlsx [--y2026 D.xlsm] --out DIR
+  python tools/migrate_history.py [--y2022 Z.xlsx] --y2023 A.xlsx --y2024 B.xlsx --y2025 C.xlsx [--y2026 D.xlsm] --out DIR
 
 Writes DIR/history.json (rows and checks) and DIR/report.md (the analysis).
 """
@@ -343,7 +345,7 @@ def assign_income(arrivals: dict, entries: list, window: tuple[int, int] = (-2, 
     return named, unplaced
 
 
-def tidy_notes(notes: list[str]) -> list[str]:
+def tidy_notes(notes: list[str], year: int) -> list[str]:
     """One line per month for calendars that end early, instead of one per grid."""
     out, ends = [], defaultdict(set)
     for n in notes:
@@ -353,10 +355,10 @@ def tidy_notes(notes: list[str]) -> list[str]:
         else:
             out.append(n)
     for month, days in sorted(ends.items(), key=lambda kv: MONTH_INDEX[kv[0].lower()]):
-        last = calendar.monthrange(2023, MONTH_INDEX[month.lower()])[1]
+        last = calendar.monthrange(year, MONTH_INDEX[month.lower()])[1]
         stop = max(days)
-        out.insert(0, f"{month} 2023: the calendars end on day {stop}, so {stop + 1} to {last} {month} has no cells and nothing could be recorded for {'it' if stop + 1 == last else 'those days'}."
-                   if stop < last else f"{month} 2023: some calendars stop early.")
+        out.insert(0, f"{month} {year}: the calendars end on day {stop}, so {stop + 1} to {last} {month} has no cells and nothing could be recorded for {'it' if stop + 1 == last else 'those days'}."
+                   if stop < last else f"{month} {year}: some calendars stop early.")
     return out
 
 
@@ -675,12 +677,17 @@ def read_grid(cells: dict, year: int, name_col: int, first: int, total_col: int,
     return days
 
 
-def migrate_2023(path: str) -> Year:
+def migrate_calendar(path: str, year: int) -> Year:
+    """
+    The calendar-grid workbooks, 2022 and 2023. 2022 has no INCOME SHEET and
+    no PNB BANK, so money arriving in an account there is never labelled as
+    income: it is counted where it arrived and filed Not classified.
+    """
     wb = open_book(path)
-    y = Year(2023)
-    src = "2023 Money spending"
-    sheets = {name: grid(wb[name], 60) for name in {g[0] for g in GRIDS_2023.values()}}
-    g = {key: read_grid(sheets[sh], 2023, nc, fc, tc, f"{sh} {key.replace('_', ' ')}", y)
+    y = Year(year)
+    src = f"{year} Money spending"
+    sheets = {name: grid(wb[name], 60) for name in {g[0] for g in GRIDS_2023.values()} if name in wb.sheetnames}
+    g = {key: (read_grid(sheets[sh], year, nc, fc, tc, f"{sh} {key.replace('_', ' ')}", y) if sh in sheets else {})
          for key, (sh, nc, fc, tc) in GRIDS_2023.items()}
 
     # Cash withdrawn and extra cash put aside: one figure a month, under the month's name.
@@ -723,15 +730,15 @@ def migrate_2023(path: str) -> Year:
                     break
 
     for when, a, b, amt, fee in pairs:
-        y.rows.append(transfer(f"h2023-tr-{when}-{a}-{b}".lower(), when, a, b, f"{a} to {b}", amt, fee,
+        y.rows.append(transfer(f"h{year}-tr-{when}-{a}-{b}".lower(), when, a, b, f"{a} to {b}", amt, fee,
                                f"{src}: {a}'s money out and {b}'s money in on the same day, matched as one transfer."))
 
     # Savings in and out of the PayMaya sheet are transfers by the sheet's own formula.
     for when, amt in g["save_in"].items():
-        y.rows.append(Row(f"h2023-sv-in-{when}", when, "Transfer", "Maya", "Maya Bank (Personal savings)", "Transfer", "",
+        y.rows.append(Row(f"h{year}-sv-in-{when}", when, "Transfer", "Maya", "Maya Bank (Personal savings)", "Transfer", "",
                           "Maya to savings", amt, 0, f"{src}, PAYMAYA SAVINGS: added to savings", "Transferred"))
     for when, amt in g["save_out"].items():
-        y.rows.append(Row(f"h2023-sv-out-{when}", when, "Transfer", "Maya Bank (Personal savings)", "Maya", "Transfer", "",
+        y.rows.append(Row(f"h{year}-sv-out-{when}", when, "Transfer", "Maya Bank (Personal savings)", "Maya", "Transfer", "",
                           "Savings to Maya", amt, 0, f"{src}, PAYMAYA SAVINGS: decreased from savings", "Transferred"))
 
     # Income, from the income sheet, labelled on the money that arrived for it.
@@ -740,15 +747,15 @@ def migrate_2023(path: str) -> Year:
     arrivals = {(acct, when): amt for acct, inm in ins.items() if acct != "Cash" for when, amt in inm.items() if amt}
     named, unplaced = assign_income(arrivals, entries)
     for i, (acct, when, label, amt, ref, earned) in enumerate(named):
-        y.rows.append(Row(f"h2023-inc-{i}", when, "Revenue", "", acct, "Revenue", label, f"{label}, received in {acct}", amt, 0,
+        y.rows.append(Row(f"h{year}-inc-{i}", when, "Revenue", "", acct, "Revenue", label, f"{label}, received in {acct}", amt, 0,
                           f"{src}, {ref} for {earned}, received in {acct} on {when}", "Received"))
     for (acct, when), left in sorted(arrivals.items()):
         if left:
-            y.rows.append(not_classified_in(f"h2023-in-{acct}-{when}".lower(), when, acct, left, src, "2023"))
+            y.rows.append(not_classified_in(f"h{year}-in-{acct}-{when}".lower(), when, acct, left, src, str(year)))
     for when, amt in sorted(ins["Cash"].items()):
         if amt:
             # "Out source money": money from outside, the owner's own term for it.
-            y.rows.append(Row(f"h2023-os-{when}", when, "Revenue", "", "Cash", "Revenue", "Random",
+            y.rows.append(Row(f"h{year}-os-{when}", when, "Revenue", "", "Cash", "Revenue", "Random",
                               "Out source money", amt, 0, f"{src}, WALLET SPENDING: out source money", "Received"))
     if unplaced:
         y.notes.append(f"{sum(a for _, _, a, _ in unplaced) / 100:,.2f} of the income sheet ({len(unplaced)} entries) found no money arriving "
@@ -759,27 +766,30 @@ def migrate_2023(path: str) -> Year:
             if not amt:
                 continue
             if acct in ("Cash", "Extra Cash"):
-                y.rows.append(Row(f"h2023-out-{acct}-{when}".lower().replace(" ", "-"), when, "Spending", acct, "", "Spending", "Day total",
+                y.rows.append(Row(f"h{year}-out-{acct}-{when}".lower().replace(" ", "-"), when, "Spending", acct, "", "Spending", "Day total",
                                   f"Spent from {acct} on the day, no detail recorded", amt, 0,
-                                  f"{src}: the 2023 workbook kept a day's total, not each purchase.", "Paid"))
+                                  f"{src}: the {year} workbook kept a day's total, not each purchase.", "Paid"))
             else:
-                y.rows.append(not_classified_out(f"h2023-out-{acct}-{when}".lower(), when, acct, amt, src, "2023"))
+                y.rows.append(not_classified_out(f"h{year}-out-{acct}-{when}".lower(), when, acct, amt, src, str(year)))
 
     for m, amt in monthly["withdraw"].items():
         if amt:
-            y.rows.append(Row(f"h2023-wd-{m:02d}", iso(2023, m, 1), "Transfer", "", "Cash", "Transfer", "",
-                              f"Cash withdrawn during {MONTHS[m - 1]} 2023, from an account not recorded", amt, 0,
+            y.rows.append(Row(f"h{year}-wd-{m:02d}", iso(year, m, 1), "Transfer", "", "Cash", "Transfer", "",
+                              f"Cash withdrawn during {MONTHS[m - 1]} {year}, from an account not recorded", amt, 0,
                               f"{src}, WALLET SPENDING: the month's cash withdrawn, a month total dated the 1st.", "Withdrawn"))
     for m, amt in monthly["extra_in"].items():
         if amt:
-            y.rows.append(Row(f"h2023-ex-{m:02d}", iso(2023, m, 1), "Transfer", "", "Extra Cash", "Transfer", "",
-                              f"Put into Extra Cash during {MONTHS[m - 1]} 2023", amt, 0,
+            y.rows.append(Row(f"h{year}-ex-{m:02d}", iso(year, m, 1), "Transfer", "", "Extra Cash", "Transfer", "",
+                              f"Put into Extra Cash during {MONTHS[m - 1]} {year}", amt, 0,
                               f"{src}, WALLET SPENDING: the month's extra cash, a month total dated the 1st.", "Transferred"))
 
     # Online payments: paid from GCash by the workbook's own formula (GCASH SPENDING E70 adds the table),
     # one figure a month per service. Dated the day that month's money for it arrived in GCash, else the 1st.
-    services = {31: "Adobe", 32: "Storyblocks", 33: "Netflix", 34: "Google Drive", 35: "Spotify", 36: "Other online payments"}
     gc = sheets["GCASH SPENDING"]
+    # The services are the table's own headings (row 6): 2022 paid Epidemic Sound where 2023 paid Storyblocks.
+    services = {col: ("Other online payments" if str(gc.get((6, col), "")).strip().upper() == "OTHERS"
+                      else bill(str(gc.get((6, col), "")).strip().title()))
+                for col in range(31, 37) if gc.get((6, col))}
     arrived = {when: amt for when, amt in g_in_original.items()}
     for r in range(7, 19):
         m = r - 6
@@ -787,12 +797,12 @@ def migrate_2023(path: str) -> Year:
             amt = centavos(num(gc.get((r, col))))
             if not amt:
                 continue
-            day = next((d for d, a in sorted(arrived.items()) if d[:7] == f"2023-{m:02d}" and a == amt), iso(2023, m, 1))
-            y.rows.append(Row(f"h2023-sub-{m:02d}-{col}", day, "Spending", "Gcash", "", "Subscriptions", service, service, amt, 0,
+            day = next((d for d, a in sorted(arrived.items()) if d[:7] == f"{year}-{m:02d}" and a == amt), iso(year, m, 1))
+            y.rows.append(Row(f"h{year}-sub-{m:02d}-{col}", day, "Spending", "Gcash", "", "Subscriptions", service, service, amt, 0,
                               f"{src}, GCASH SPENDING online payments table, {MONTHS[m - 1]}. Its legend names PayMaya for some "
                               "services; the workbook's own formula charges GCash.", "Paid"))
     y.check("Online payments, GCASH SPENDING AE22", num(gc.get((22, 31))),
-            sum(r.amount for r in y.rows if r.id.startswith("h2023-sub-")))
+            sum(r.amount for r in y.rows if r.id.startswith(f"h{year}-sub-")))
 
     y.notes.append(f"{len(pairs)} same-day pairs of money out and money in were matched as transfers between accounts.")
 
@@ -803,9 +813,10 @@ def migrate_2023(path: str) -> Year:
                               ("Maya, ALL SPENDING P5", (5, 16), "Maya"), ("Maya savings, ALL SPENDING P8", (8, 16), "Maya Bank (Personal savings)"),
                               ("Extra Cash, ALL SPENDING B17", (17, 2), "Extra Cash")):
         y.check(label + " (closing balance)", num(s.get(cell)), b.get(acct, 0))
-    y.notes = tidy_notes(y.notes)
-    pnb = grid(wb["PNB BANK"], 30)
-    y.check("PNB, deposits less cash out (PNB BANK L3 less Y3... totals row 70)", num(pnb.get((70, 5))) - num(pnb.get((70, 18))), b.get("PNB", 0))
+    y.notes = tidy_notes(y.notes, year)
+    if "PNB BANK" in wb.sheetnames:
+        pnb = grid(wb["PNB BANK"], 30)
+        y.check("PNB, deposits less cash out (PNB BANK L3 less Y3... totals row 70)", num(pnb.get((70, 5))) - num(pnb.get((70, 18))), b.get("PNB", 0))
     return y
 
 
@@ -814,6 +825,7 @@ def migrate_2023(path: str) -> Year:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--y2022")
     ap.add_argument("--y2023")
     ap.add_argument("--y2024")
     ap.add_argument("--y2025")
@@ -827,8 +839,10 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     years: list[Year] = []
+    if args.y2022:
+        years.append(migrate_calendar(args.y2022, 2022))
     if args.y2023:
-        years.append(migrate_2023(args.y2023))
+        years.append(migrate_calendar(args.y2023, 2023))
     if args.y2025:
         years.append(migrate_2025(args.y2025))
     if args.y2024:
@@ -861,6 +875,19 @@ def main() -> int:
         for t in ledger:
             t["id"] = f"x{t['recordNumber']}"
         payload["current2026"] = ledger
+
+        # The year's budget, so starting clean from the file brings the real one.
+        # The backup copy has a header row and the months across B to M; the
+        # system workbook keeps them at H11:S12.
+        if "BUDGETING" in wb26.sheetnames and ledger:
+            from extract_fixture import read_budgets
+            bud = wb26["BUDGETING"]
+            year = max(t["date"][:4] for t in ledger)
+            if str(bud.cell(1, 1).value or "").strip().lower() == "category":
+                months = lambda r: [centavos(bud.cell(r, 2 + i).value) for i in range(12)]
+                payload["budgets"] = {year: {"spending": months(2), "billsSubs": months(3)}}
+            else:
+                payload["budgets"] = read_budgets(bud, int(year))
 
     (out / "history.json").write_text(json.dumps(payload, indent=1, ensure_ascii=False), encoding="utf-8")
     for y in years:

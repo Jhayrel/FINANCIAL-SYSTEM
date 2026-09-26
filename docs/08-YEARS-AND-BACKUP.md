@@ -179,7 +179,7 @@ never committed.
 
 | Layout | How it becomes rows |
 |---|---|
-| A calendar grid per account, one figure a day | One row per account per day. Money out of one account and the same money into another on the same day is paired as one transfer |
+| A calendar grid per account, one figure a day (2022, 2023) | One row per account per day. Money out of one account and the same money into another on the same day is paired as one transfer |
 | Month sheets of daily totals, with transfers, income and bills listed apart | Daily totals per account; the listed transfers, income and bills as their own rows |
 | Itemised lists of spending, revenue, transfers and bills | One row per line, with an item chosen only when the description says so plainly |
 
@@ -233,9 +233,16 @@ data in the live system, and everything in the Bin, to be removed.
 | Rows the file has | The ledger becomes exactly these. One already here with the same content keeps its id |
 | Rows here the file lacks | Marked `discardedAt` and kept in the database. Shown on no screen, in no total |
 | The Bin | Cleared the same way, except rows the file's own bin holds |
-| Settings, budgets, AI, theme | Kept. The file's accounts and debts are added by name |
+| Settings, AI, theme | Kept. The file's accounts and debts are added by name |
+| Budgets | A year the file has a budget for takes the file's, and it is saved to the database; other years are kept |
 | Accounts and debts nothing uses | Archived, not removed, so one switch in Settings brings one back |
 | Before it runs | A backup of everything as it stands downloads, so restoring it undoes the step |
+| While it runs | Test rows are cleared first, then the file's rows are written 200 at a time. A notice counts them, and leaving the page asks first |
+| Run again | A row already here under the file's own id is that row, kept. A run that stopped halfway finishes; a second full run changes nothing |
+
+The owner's first run on 26 September 2026 wrote 900 of 3,070 rows and
+stopped, with the clearing still to come and nothing on screen to say so.
+That is why the order, the count and the second-run rule above exist.
 
 The database rules refuse every delete (`allow delete: if false`), and that
 stays. `discardedAt` is the only new thing, and the rules accept it as an

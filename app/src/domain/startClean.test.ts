@@ -64,7 +64,7 @@ const file = createBackup(
       row("x3", "2026-02-01", { type: "Debt", fromWallet: "Maya", debtId: "file-card", debtEffect: "repay", category: "", description: "Card" }),
     ],
     deleted: [],
-    budgets: {},
+    budgets: { "2026": { spending: Array(12).fill(700000), billsSubs: Array(12).fill(170000) } } as unknown as BackupData["budgets"],
     settings: { ...defaultSettings(), accounts: [account("Cash"), account("Maya")], credits: [debt("file-card", "Maya Credit")] },
     preferences: { theme: "light" },
     migrations: { debt: true, opening: true },
@@ -107,10 +107,20 @@ describe("starting clean from a file", () => {
     expect(plan.settings.credits.find((d) => d.name === "Claude Tester")!.archived).toBe(true);
   });
 
-  it("keeps this device's settings, budgets and theme", () => {
+  it("keeps this device's settings and theme, and takes the file's budget for the years it has", () => {
     expect(plan.preferences.theme).toBe("dark");
-    expect(plan.budgets).toBe(current.budgets);
     expect(plan.settings.ai).toEqual(current.settings.ai);
+    expect(plan.budgetYears).toEqual(["2026"]);
+    expect(plan.budgets["2026"]!.spending[8]).toBe(700000);
+  });
+
+  it("finishes a run that stopped halfway instead of clearing what it had written", () => {
+    // The first run wrote the older row under the file's own id, then stopped.
+    const halfway = { ...current, transactions: [...current.transactions, { ...file.data.transactions[0]!, description: "Old wording" }] };
+    const again = planStartClean(file, halfway);
+    expect(again.setAside.map((t) => t.id)).toEqual(["app-t1", "app-t2"]);
+    expect(again.kept).toBe(3);
+    expect(again.transactions.find((t) => t.id === "x0")!.description).toBe("Old income");
   });
 
   it("does nothing more the second time", () => {
