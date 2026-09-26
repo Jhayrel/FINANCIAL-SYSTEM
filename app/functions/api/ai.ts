@@ -473,7 +473,7 @@ interface TaskSpec {
   readonly parse: (value: Record<string, unknown>) => Answer | null;
   readonly maxTokens?: number;
   /** Tone shapes a summary; it would ruin a five word description. */
-  readonly toned?: boolean;
+  readonly toned?: boolean | "chat";
   /**
    * Whether a plain prose reply is still an answer.
    *
@@ -691,14 +691,13 @@ const TASKS: Record<string, TaskSpec> = {
     shape: '{"summary": "your answer as plain sentences"}',
     parse: narrative,
     /**
-     * Not toned, unlike every other narrative task.
+     * Toned, but with the conversation's own three rather than the panels'.
      *
-     * Tone is a setting for the panels, and its default is "brief", which
-     * says "one line where possible, numbers first, no preamble". Appended to
-     * this instruction that was the louder of the two, so asking for more
-     * detail returned the same sentence again. A conversation decides its own
-     * length from the question, which is what the instruction now does.
+     * See `CHAT_TONES`. The panel tones are about length and would fight the
+     * conversation instruction; these are about how much of the working to
+     * show, which is what the setting is for.
      */
+    toned: "chat",
     proseIsFine: true,
     maxTokens: 2000,
   },
@@ -812,6 +811,44 @@ const TONES: Record<string, string> = {
   plain: "A short paragraph in plain language.",
   detailed: "Explain the reasoning, still under 150 words.",
 };
+
+/**
+ * The same three settings, said in a way a conversation can obey.
+ *
+ * ── Why the chat needs its own ─────────────────────────────────────────────
+ *
+ * The chat used to ignore the tone setting altogether, and the comment
+ * explaining that was honest about the reason: the panel tones are about
+ * length, "one line where possible" is the default, and appended to a
+ * conversation instruction it was the louder of the two, so asking for more
+ * detail returned the same short sentence. Switching it off fixed that and
+ * left the setting doing nothing on the one screen the owner actually uses.
+ * Their words, 26 September 2026: "Fix the ai in the settings make sure it
+ * actually works like if I say detailed etc life actually work."
+ *
+ * These say how much working out to show, not how many lines to use. A
+ * question with a one word answer still gets a one word answer on detailed;
+ * what changes is whether the comparison behind it is spelled out.
+ */
+const CHAT_TONES: Record<string, string> = {
+  brief: "Answer in as few sentences as the question needs. The figure and what it means, nothing around it.",
+  plain: "Answer in plain language, in a short paragraph, as you would explain it to the person whose money it is.",
+  detailed:
+    "Give the reasoning as well as the answer: what you compared the figure against, which entries produced it, and what follows from it. Still under 150 words, and still led by the answer rather than the working.",
+};
+
+/**
+ * The tone line a task's prompt gets, which is how the Settings choice
+ * reaches the model. Exported so the choice can be tested without a
+ * provider: everything else about this endpoint needs one.
+ */
+export function toneFor(task: string, tone: string): string {
+  const spec = TASKS[task];
+  if (!spec?.toned) return "";
+  return spec.toned === "chat"
+    ? (CHAT_TONES[tone] ?? CHAT_TONES["brief"] ?? "")
+    : (TONES[tone] ?? TONES["brief"] ?? "");
+}
 
 const ADVICE_RULES = [
   /*
@@ -1096,7 +1133,7 @@ export const onRequestPost = async (ctx: {
 
   const prompt = [
     spec.instruction,
-    spec.toned ? (TONES[tone] ?? TONES.brief) : "",
+    toneFor(task, tone),
     `Reply with only this JSON and nothing else: ${spec.shape}`,
     question ? `The question to answer, which is the whole job: ${question}` : "",
     "---",
@@ -1125,7 +1162,7 @@ export const onRequestPost = async (ctx: {
    */
   const sized = (chars: number): string => [
     spec.instruction,
-    spec.toned ? (TONES[tone] ?? TONES.brief) : "",
+    toneFor(task, tone),
     `Reply with only this JSON and nothing else: ${spec.shape}`,
     question ? `The question to answer, which is the whole job: ${question}` : "",
     "---",

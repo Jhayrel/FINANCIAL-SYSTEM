@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { compactContext, shortReason, SHRINK_TO } from "./ai";
+import { compactContext, shortReason, SHRINK_TO, toneFor } from "./ai";
 
 /** A context shaped like the real one: worked-out figures, then the rows. */
 function contextOf(rows: number): string {
@@ -124,5 +124,45 @@ describe("what a failure is called", () => {
     expect(shortReason(new Error("The operation was aborted"))).toBe("timed out");
     expect(shortReason(new Error("something nobody has seen"))).toBe("unavailable");
     expect(shortReason("a string, not an error")).toBe("unavailable");
+  });
+});
+
+/**
+ * The tone setting reaches the conversation.
+ *
+ * The owner, 26 September 2026: "Fix the ai in the settings make sure it
+ * actually works like if I say detailed etc life actually work." The chat
+ * was deliberately untoned, so the setting changed nothing on the one screen
+ * it is used from.
+ */
+describe("the tone setting in the chat", () => {
+  it("sends a different instruction for each of the three", () => {
+    const lines = ["brief", "plain", "detailed"].map((t) => toneFor("chat", t));
+    expect(new Set(lines).size).toBe(3);
+    for (const line of lines) expect(line).not.toBe("");
+  });
+
+  it("says what detailed means: the working, not more lines", () => {
+    expect(toneFor("chat", "detailed")).toContain("Give the reasoning as well as the answer");
+  });
+
+  /*
+   * Why it was switched off in the first place: the panel tone says "one
+   * line where possible", which fought the conversation instruction and made
+   * detailed return the same short sentence. That line must never reach a
+   * conversation again.
+   */
+  it("never sends the panel's one-line rule to a conversation", () => {
+    for (const tone of ["brief", "plain", "detailed"]) {
+      expect(toneFor("chat", tone), tone).not.toContain("One line where possible");
+    }
+  });
+
+  it("still sends the panel tones to a panel", () => {
+    expect(toneFor("summary", "brief")).toContain("One line where possible");
+  });
+
+  it("falls back to brief for a tone nobody set", () => {
+    expect(toneFor("chat", "shouty")).toBe(toneFor("chat", "brief"));
   });
 });
