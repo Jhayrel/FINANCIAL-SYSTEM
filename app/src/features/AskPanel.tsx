@@ -147,7 +147,7 @@ import { chatStore } from "../data/chatStore";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AttachmentNote } from "../domain/aiLog";
 import { clauseFor, verifyReading } from "../domain/verify";
-import { carded, cardsIn, drawn, drew, proposed, said, type StoredCard } from "../domain/chat";
+import { carded, cardsIn, drawn, drew, proposed, said, type ChatMessage, type StoredCard } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
 import { currentScreen } from "./screenReport";
@@ -1376,73 +1376,81 @@ export function AskPanel({
   /**
    * What was said last time.
    *
-   * Loaded once, and only into an empty thread, so a reload picks up where
-   * you left off without a conversation already in progress being pushed
-   * down by its own history.
+   * Loaded into an empty thread, so a reload picks up where you left off
+   * without a conversation already in progress being pushed down by its own
+   * history.
+   *
+   * Twice: first the copy this device holds, which is there at once, then
+   * the server's, which replaces it only while the thread is still just that
+   * history. Asking the server first left the phone's AI screen empty for
+   * seconds after every refresh (the owner, 26 September 2026).
    */
+  const shownHistory = useRef<Turn[] | null>(null);
   useEffect(() => {
     let live = true;
     const since = clearedAt();
-    chatStore(uid)
-      .recent()
-      .then((all) => {
-        const history = since ? all.filter((m) => m.at > since) : all;
-        if (!live || history.length === 0) return;
 
-        /**
-         * Cards come back where they were, in the state they ended in.
-         *
-         * A card that changed wrote a second message with the same id, so
-         * the final state is worked out first and the card is then emitted
-         * once, at its first appearance. Without that, a card added after
-         * three corrections would come back four times.
-         */
-        const final = cardsIn(history);
+    const rebuild = (all: readonly ChatMessage[]): Turn[] => {
+      const history = since ? all.filter((m) => m.at > since) : [...all];
 
-        setTurns((prev) => {
-          if (prev.length > 0) return prev;
-          const rebuilt: Turn[] = [];
-          /**
-           * Inside the updater, not outside it.
-           *
-           * React calls a state updater more than once in development, and it
-           * must be pure. Held outside, this set was already full on the
-           * second call, so every card hit the "already emitted" branch and
-           * the rebuilt thread came back with none of them: the conversation
-           * loaded, the cards silently did not.
-           */
-          const done = new Set<string>();
+      /**
+       * Cards come back where they were, in the state they ended in.
+       *
+       * A card that changed wrote a second message with the same id, so
+       * the final state is worked out first and the card is then emitted
+       * once, at its first appearance. Without that, a card added after
+       * three corrections would come back four times.
+       */
+      const final = cardsIn(history);
+      const rebuilt: Turn[] = [];
+      const done = new Set<string>();
 
-          for (const m of history) {
-            const chart = drawn(m) as Chart | null;
-            if (chart) {
-              rebuilt.push({ kind: "chart", chart });
-              continue;
-            }
+      for (const m of history) {
+        const chart = drawn(m) as Chart | null;
+        if (chart) {
+          rebuilt.push({ kind: "chart", chart });
+          continue;
+        }
 
-            // `carded` rather than JSON.parse: a malformed card must lose
-            // that one card, not the whole conversation.
-            const here = carded(m);
-            const stored = here ? final.get(here.id) : undefined;
-            if (stored) {
-              if (done.has(stored.id)) continue;
-              done.add(stored.id);
-              rebuilt.push(turnFromCard(stored));
-              continue;
-            }
+        // `carded` rather than JSON.parse: a malformed card must lose
+        // that one card, not the whole conversation.
+        const here = carded(m);
+        const stored = here ? final.get(here.id) : undefined;
+        if (stored) {
+          if (done.has(stored.id)) continue;
+          done.add(stored.id);
+          rebuilt.push(turnFromCard(stored));
+          continue;
+        }
 
-            rebuilt.push({
-              kind: m.role,
-              text: m.text,
-              ...(m.from ? { from: m.from } : {}),
-              ...(m.files && m.files.length > 0 ? { described: m.files } : {}),
-            });
-          }
-
-          return rebuilt;
+        rebuilt.push({
+          kind: m.role,
+          text: m.text,
+          ...(m.from ? { from: m.from } : {}),
+          ...(m.files && m.files.length > 0 ? { described: m.files } : {}),
         });
-      })
-      .catch(() => {});
+      }
+      return rebuilt;
+    };
+
+    // Worked out once, outside the updater: React may call an updater twice.
+    const show = (all: readonly ChatMessage[]): void => {
+      if (!live) return;
+      const rebuilt = rebuild(all);
+      if (rebuilt.length === 0) return;
+      const was = shownHistory.current;
+      shownHistory.current = rebuilt;
+      setTurns((prev) => (prev.length === 0 || prev === was ? rebuilt : prev));
+    };
+
+    const store = chatStore(uid);
+    void store
+      .cached()
+      .then(show)
+      .catch(() => {})
+      .finally(() => {
+        void store.recent().then(show).catch(() => {});
+      });
     return () => {
       live = false;
     };
@@ -5011,6 +5019,23 @@ export function AskPanel({
         onSubmit={(e) => {
           e.preventDefault();
           void send();
+        }}
+        /*
+         * Pressing Send or Stop keeps the focus in the field.
+         *
+         * On a phone the navigation hides while a field has focus, and the
+         * keyboard takes the bottom of the screen. Pressing Send moved the
+         * focus to the button first: the field lost it, the navigation came
+         * back, the keyboard went down, the page jumped, and the tap landed
+         * where the button had been. "I cannot click the send button in ai
+         * when I am using keyboard", 26 September 2026. Kept in the field,
+         * nothing moves, the tap lands, and the keyboard stays up for the
+         * next message, as in any chat.
+         */
+        onMouseDown={(e) => {
+          // Send and Stop sit directly in the form; attach and the camera sit inside the field.
+          const pressed = (e.target as HTMLElement).closest("button");
+          if (pressed && pressed.parentElement === e.currentTarget) e.preventDefault();
         }}
       >
         <input

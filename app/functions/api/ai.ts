@@ -224,7 +224,13 @@ const MAX_IMAGE_CHARS = 6_000_000;
  * than waiting.
  */
 const TIMEOUT_MS = 20_000;
-const VISION_TIMEOUT_MS = 40_000;
+/*
+ * Twenty, not forty, since pictures go out three at a time (see the wave in
+ * `onRequestPost`): two whole waves now fit inside the browser's forty five
+ * seconds, and a model still reading after twenty is one of three, not the
+ * only hope.
+ */
+const VISION_TIMEOUT_MS = 20_000;
 
 type Provider = "groq" | "openrouter";
 
@@ -1236,14 +1242,18 @@ export const onRequestPost = async (ctx: {
     .filter(Boolean)
     .join("\n\n");
 
-  for (const candidate of chain) {
+  /*
+   * One candidate, start to finish: its answer, a repaired answer, a smaller
+   * request after a refusal for size, or null with the reason recorded.
+   */
+  const attempt = async (candidate: Candidate, outer: AbortSignal): Promise<Response | null> => {
     const label = `${candidate.provider}:${candidate.model}`;
 
     try {
-      const raw = await callProvider(candidate, env, prompt, maxTokens, images, task);
+      const raw = await callProvider(candidate, env, prompt, maxTokens, images, task, outer);
       if (!raw) {
         attempts.push({ model: candidate.model, reason: "empty response" });
-        continue;
+        return null;
       }
 
       const first = readAnswer(raw, spec);
@@ -1271,6 +1281,7 @@ export const onRequestPost = async (ctx: {
         // came back plain when the first one was allowed structure would look
         // like the formatting switching itself off at random.
         task,
+        outer,
       );
 
       const second = repaired ? readAnswer(repaired, spec) : null;
@@ -1284,9 +1295,9 @@ export const onRequestPost = async (ctx: {
 
         for (const chars of SHRINK_TO) {
           const shorter = sized(chars);
-          if (shorter.length >= prompt.length) continue;
+          if (shorter.length >= prompt.length) return null;
           try {
-            const raw = await callProvider(candidate, env, shorter, maxTokens, [], task);
+            const raw = await callProvider(candidate, env, shorter, maxTokens, [], task, outer);
             const answer = raw ? readAnswer(raw, spec) : null;
             if (answer) return json({ ...answer, model: label, attempts, trimmed: true });
             unreadable = true;
@@ -1308,13 +1319,29 @@ export const onRequestPost = async (ctx: {
               ? `too large at every size, then ${shortReason(refused)}`
               : "too large",
         });
-        continue;
+        return null;
       }
       // A retired model, a rate limit, a blip. Try the next one; only an
       // exhausted chain is worth telling the owner about.
       attempts.push({ model: candidate.model, reason: shortReason(e) });
     }
-  }
+    return null;
+  };
+
+  /*
+   * Several at once, the first good answer wins.
+   *
+   * The chain was tried one model at a time, each allowed its full timeout.
+   * For a picture that meant forty seconds per free vision model that was
+   * busy or retired, and the browser gave up before the chain reached one
+   * that worked: the owner's last four screenshots on 26 September 2026 all
+   * came back "nothing readable" after a long "Still reading it". A wave now
+   * asks three vision models, or two chat models, together. The first
+   * readable answer is returned and the others are cancelled; only when a
+   * whole wave fails does the next one start.
+   */
+  const winner = await firstInWaves(chain, images.length > 0 ? 3 : 2, attempt);
+  if (winner) return winner;
 
   /*
    * Nothing is broken when every refusal was about size. The owner sent more
@@ -1415,15 +1442,17 @@ async function callProvider(
   maxTokens: number,
   images: readonly string[] = [],
   task = "",
+  /** Cancels the request when another model in the same wave has already answered. */
+  outer?: AbortSignal,
 ): Promise<string> {
   try {
-    return await send(c, env, prompt, maxTokens, true, images, task);
+    return await send(c, env, prompt, maxTokens, true, images, task, outer);
   } catch (e) {
     const status = e instanceof Error ? e.message : "";
     // Only a rejected request is worth reinterpreting. A rate limit or an
     // outage means the same thing with or without the field.
     if (status !== "400" && status !== "422") throw e;
-    return send(c, env, prompt, maxTokens, false, images, task);
+    return send(c, env, prompt, maxTokens, false, images, task, outer);
   }
 }
 
@@ -1442,6 +1471,7 @@ async function send(
    * answer per request and no chance of a stale one.
    */
   task = "",
+  outer?: AbortSignal,
 ): Promise<string> {
   const isGroq = c.provider === "groq";
   const key = isGroq ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
@@ -1456,6 +1486,8 @@ async function send(
     () => controller.abort(),
     images.length > 0 ? VISION_TIMEOUT_MS : TIMEOUT_MS,
   );
+  if (outer?.aborted) controller.abort();
+  outer?.addEventListener("abort", () => controller.abort(), { once: true });
 
   try {
     const response = await fetch(url, {
@@ -1510,6 +1542,31 @@ async function send(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Try `items` a wave at a time, all of a wave at once; the first non-null
+ * answer wins, and the rest of its wave is told to stop through the signal.
+ * A wave where nothing answers leads to the next. Null when none do.
+ */
+export async function firstInWaves<T, R>(
+  items: readonly T[],
+  size: number,
+  run: (item: T, stop: AbortSignal) => Promise<R | null>,
+): Promise<R | null> {
+  for (let i = 0; i < items.length; i += size) {
+    const stop = new AbortController();
+    const winner = await Promise.any(
+      items.slice(i, i + size).map(async (item) => {
+        const answer = await run(item, stop.signal);
+        if (answer === null) throw new Error("no answer");
+        return answer;
+      }),
+    ).catch(() => null);
+    stop.abort();
+    if (winner !== null) return winner;
+  }
+  return null;
 }
 
 /** Enough to diagnose, never enough to leak a key or a figure. */

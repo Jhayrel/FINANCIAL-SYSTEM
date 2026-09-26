@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { compactContext, shortReason, SHRINK_TO, toneFor } from "./ai";
+import { compactContext, firstInWaves, shortReason, SHRINK_TO, toneFor } from "./ai";
 
 /** A context shaped like the real one: worked-out figures, then the rows. */
 function contextOf(rows: number): string {
@@ -181,3 +181,43 @@ describe("the tone setting on the panels", () => {
     expect(toneFor("summary", "detailed")).toContain("Up to 150 words");
   });
 });
+
+describe("asking several models at once", () => {
+  const wait = (ms: number, signal: AbortSignal): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, ms);
+      signal.addEventListener("abort", () => {
+        clearTimeout(timer);
+        reject(new Error("aborted"));
+      });
+    });
+
+  it("takes the first good answer and stops the slow ones", async () => {
+    const stopped: string[] = [];
+    const started = Date.now();
+    const answer = await firstInWaves(["slow", "fast", "broken"], 3, async (name: string, stop: AbortSignal) => {
+      stop.addEventListener("abort", () => stopped.push(name));
+      if (name === "broken") return null;
+      await wait(name === "slow" ? 5_000 : 20, stop);
+      return name;
+    });
+    expect(answer).toBe("fast");
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(stopped).toContain("slow");
+  });
+
+  it("moves to the next wave only when a whole wave fails", async () => {
+    const tried: string[] = [];
+    const answer = await firstInWaves(["a", "b", "c", "d"], 2, async (name: string) => {
+      tried.push(name);
+      return name === "d" ? name : null;
+    });
+    expect(answer).toBe("d");
+    expect(tried).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("answers null when nothing answers", async () => {
+    expect(await firstInWaves([1, 2, 3], 2, async () => null)).toBeNull();
+  });
+});
+

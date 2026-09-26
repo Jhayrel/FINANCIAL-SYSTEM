@@ -10,7 +10,7 @@
  * record of it failed would be reporting the wrong problem.
  */
 
-import { collection, doc, getDocs, limit, orderBy, query, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, getDocsFromCache, limit, orderBy, query, setDoc } from "firebase/firestore";
 
 import { firestore } from "./firebase";
 import { byOldest, type ChatMessage } from "../domain/chat";
@@ -41,6 +41,12 @@ const memory: ChatMessage[] = [];
 export interface ChatStore {
   record(message: ChatMessage): Promise<void>;
   recent(): Promise<ChatMessage[]>;
+  /**
+   * What this device already holds, without asking the server. Empty when
+   * nothing is cached. Shown first, so the thread is there the moment the
+   * screen opens; `recent` then brings anything newer.
+   */
+  cached(): Promise<ChatMessage[]>;
 }
 
 export function chatStore(uid: string | null): ChatStore {
@@ -51,6 +57,9 @@ export function chatStore(uid: string | null): ChatStore {
         if (memory.length > PAGE) memory.splice(0, memory.length - PAGE);
       },
       async recent() {
+        return [...memory].sort(byOldest);
+      },
+      async cached() {
         return [...memory].sort(byOldest);
       },
     };
@@ -80,6 +89,20 @@ export function chatStore(uid: string | null): ChatStore {
       return snapshot.docs
         .map((d) => ({ id: d.id, ...d.data() }) as ChatMessage)
         .sort(byOldest);
+    },
+
+    async cached() {
+      if (!db) return [];
+      try {
+        const snapshot = await getDocsFromCache(
+          query(collection(db, path(uid)), orderBy("at", "desc"), limit(PAGE)),
+        );
+        return snapshot.docs
+          .map((d) => ({ id: d.id, ...d.data() }) as ChatMessage)
+          .sort(byOldest);
+      } catch {
+        return [];
+      }
     },
   };
 }

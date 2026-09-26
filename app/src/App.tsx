@@ -471,6 +471,13 @@ export default function App() {
    * 441 looks the same either way.
    */
   const [ledgerSource, setLedgerSource] = useState<"seed" | "live">("seed");
+  /**
+   * Whether the database has answered at all, for the ledger and for the
+   * budgets. Separate from `ledgerSource`, which stays "seed" on an empty
+   * database: an empty answer is still an answer.
+   */
+  const [ledgerHeard, setLedgerHeard] = useState(false);
+  const [budgetsHeard, setBudgetsHeard] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   /**
@@ -493,6 +500,7 @@ export default function App() {
 
     const stop = ledger.subscribe(
       (snap) => {
+        setLedgerHeard(true);
         if (snap.transactions.length === 0 && snap.deleted.length === 0) {
           // Nothing there yet. Seed once, from what is already in memory.
           if (seeding || seed.transactions.length === 0) return;
@@ -526,6 +534,7 @@ export default function App() {
     );
 
     const stopBudgets = subscribeBudgets(uid, (b) => {
+      setBudgetsHeard(true);
       if (Object.keys(b).length > 0) setBudgets(b);
     });
 
@@ -534,6 +543,15 @@ export default function App() {
     // and rebuild the ledger subscription.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloud.uid, seed.transactions]);
+
+  /**
+   * Every figure waits for all three parts: the accounts (settings), the
+   * entries and the budgets. On a phone the entries arrived first and the
+   * screens drew them against no accounts and no budget: net worth PHP
+   * 0.00, "No budget set", every wallet empty, for seconds after each
+   * refresh. Not signed in, everything is already in memory.
+   */
+  const ready = !cloud.uid || (loadedStore === store && ledgerHeard && budgetsHeard);
 
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -1733,7 +1751,7 @@ export default function App() {
 
         <div className="fms-networth">
           <div className="t-label" style={{ color: "var(--ink-2)" }}>Net worth</div>
-          <Money value={view.worth.total} size="l" />
+          {ready ? <Money value={view.worth.total} size="l" /> : <span className="t-caption" style={{ color: "var(--ink-3)" }}>Loading</span>}
           {view.owed > 0 && (
             <div className="t-caption" style={{ color: "var(--ink-3)", marginTop: 2 }}>
               after <Money value={view.owed} size="s" tone="var(--flow-debt-text)" /> owed
@@ -1748,8 +1766,14 @@ export default function App() {
           <div className="fms-topbar-titles">
             <h1 className="t-display-m" style={{ margin: 0 }}>{title}</h1>
             <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-              {transactions.length.toLocaleString()} records · net worth{" "}
-              <Money value={view.worth.total} size="s" />
+              {ready ? (
+                <>
+                  {transactions.length.toLocaleString()} records · net worth{" "}
+                  <Money value={view.worth.total} size="s" />
+                </>
+              ) : (
+                "Loading your figures"
+              )}
             </p>
           </div>
           <div className="fms-topbar-actions">
@@ -1799,6 +1823,15 @@ export default function App() {
                 : ""
           }`}
         >
+          {!ready && (
+            <Card>
+              <p className="t-body" style={{ margin: 0, color: "var(--ink-2)" }}>
+                Loading your figures. They show here the moment your accounts, entries and budget
+                have all arrived, so nothing reads as zero while they do.
+              </p>
+            </Card>
+          )}
+          {ready && (
           <ScreenBoundary key={screen} where={title} onHome={() => go("dashboard")}>
           {screen === "dashboard" && (
             <Dashboard
@@ -2026,6 +2059,7 @@ export default function App() {
             />
           )}
           </ScreenBoundary>
+          )}
         </main>
       </div>
 

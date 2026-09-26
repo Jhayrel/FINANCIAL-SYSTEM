@@ -29,6 +29,7 @@ import {
   deleteField,
   doc,
   getDoc,
+  getDocFromCache,
   onSnapshot,
   setDoc,
   writeBatch,
@@ -349,6 +350,23 @@ export function firestoreSettingsStore(uid: string): SettingsStore {
     name: "Firebase",
 
     async load() {
+      /*
+       * The copy this device already holds, first.
+       *
+       * `getDoc` asks the server and only falls back to the cache when
+       * offline, so on a slow phone connection every refresh showed the
+       * ledger with no accounts for seconds: net worth PHP 0.00, every wallet
+       * empty, the assistant looking switched off. The owner, 26 September
+       * 2026: "when you refresh it in phone ... after a few second its
+       * fixed". The cached copy is what was last seen, and `subscribe`
+       * brings any change from the server straight after.
+       */
+      try {
+        const cached = await getDocFromCache(settingsDoc(db, uid));
+        if (cached.exists()) return normaliseSettings(cached.data());
+      } catch {
+        // Nothing cached yet: this device's first load, so ask the server.
+      }
       const snap = await getDoc(settingsDoc(db, uid));
       // A first run has no document. Defaults, not an error, the app should
       // open and work, and the first edit creates the document.
