@@ -26,7 +26,7 @@
 
 import type { Scheduler } from "tesseract.js";
 
-import { binarize, tidyReading } from "../domain/ocrText";
+import { binarize, cutRows, darkBars, invertBoxes, joinPieces, tidyReading } from "../domain/ocrText";
 
 /** Kept in step with `OCR_BASE` in tools/ocrAssets.ts, which serves the files. */
 const BASE = "/ocr/v7";
@@ -78,12 +78,6 @@ const drawn = (src: string): Promise<HTMLImageElement> =>
     image.src = src;
   });
 
-/**
- * The text in one picture, both readings, tidied; null when nothing could be read.
- *
- * Gives up after `limitMs`, so a slow first load on a phone falls back to
- * the vision models rather than holding the owner up.
- */
 type Reading = { readonly plain: string; readonly raised: string };
 
 /**
@@ -95,14 +89,11 @@ type Reading = { readonly plain: string; readonly raised: string };
  */
 const readings = new Map<string, Promise<Reading | null>>();
 
-export function readPicture(dataUrl: string, limitMs = 12_000): Promise<Reading | null> {
-  const known = readings.get(dataUrl);
-  if (known) return known;
-  const reading = readOnce(dataUrl, limitMs);
-  readings.set(dataUrl, reading);
+function remember(key: string, reading: Promise<Reading | null>): Promise<Reading | null> {
+  readings.set(key, reading);
   // A failed reading is not kept, so the next try reads again.
   void reading.then((r) => {
-    if (!r) readings.delete(dataUrl);
+    if (!r) readings.delete(key);
   });
   // A handful is plenty: one message carries five at most.
   if (readings.size > 10) {
@@ -112,35 +103,119 @@ export function readPicture(dataUrl: string, limitMs = 12_000): Promise<Reading 
   return reading;
 }
 
-async function readOnce(dataUrl: string, limitMs: number): Promise<Reading | null> {
+/**
+ * Read a picture from the file as it arrived, before it is shrunk to be sent.
+ *
+ * A stitched wallet history seven screens tall is shrunk to 1,568 pixels on
+ * its long side, about 230 wide, where no letter is legible. The original is
+ * read instead, and `readPicture` finds the reading under the same key.
+ */
+export function readOriginal(key: string, file: Blob): Promise<Reading | null> {
+  const known = readings.get(key);
+  if (known) return known;
+  const url = URL.createObjectURL(file);
+  const reading = readOnce(url);
+  void reading.finally(() => URL.revokeObjectURL(url));
+  return remember(key, reading);
+}
+
+/** The text in one picture, both readings, tidied; null when nothing could be read. */
+export function readPicture(dataUrl: string, key?: string): Promise<Reading | null> {
+  const known = (key ? readings.get(key) : undefined) ?? readings.get(dataUrl);
+  if (known) return known;
+  return remember(key ?? dataUrl, readOnce(dataUrl));
+}
+
+/** Wide enough for the reader, narrow enough to be quick: a phone screenshot as it is. */
+const MAX_WIDTH = 1240;
+/** The height of one piece: about one screen of a phone's history. */
+const PIECE = 1600;
+
+async function readOnce(src: string): Promise<Reading | null> {
+  let limitMs = 12_000;
   const work = (async () => {
     warmReader();
+    const image = await drawn(src);
+    const natural = image.naturalWidth || image.width;
+    const scale = natural > MAX_WIDTH ? MAX_WIDTH / natural : 1;
+    const width = Math.max(1, Math.round(natural * scale));
+    const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+
+    const whole = document.createElement("canvas");
+    whole.width = width;
+    whole.height = height;
+    const all = whole.getContext("2d", { willReadFrequently: true });
+    if (!all) return null;
+    all.drawImage(image, 0, 0, width, height);
+
+    // White-on-black date pills turned dark-on-light, so the date is read in its place (domain/ocrText.ts).
+    const pixels = all.getImageData(0, 0, width, height);
+    invertBoxes(pixels.data, width, darkBars(pixels.data, width, height));
+    all.putImageData(pixels, 0, 0);
+
+    // Where to cut: the emptiest row near each screen's worth.
+    let cuts = [0, height];
+    if (height > PIECE) {
+      const px = pixels.data;
+      const ink: number[] = new Array(height);
+      for (let y = 0; y < height; y += 1) {
+        const row = y * width * 4;
+        const bg = 0.299 * px[row]! + 0.587 * px[row + 1]! + 0.114 * px[row + 2]!;
+        let count = 0;
+        for (let x = 0; x < width; x += 2) {
+          const i = row + x * 4;
+          if (Math.abs(0.299 * px[i]! + 0.587 * px[i + 1]! + 0.114 * px[i + 2]! - bg) > 40) count += 1;
+        }
+        ink[y] = count;
+      }
+      cuts = cutRows(ink, PIECE);
+    }
+    const pieces = cuts.length - 1;
+    // A long history gets more time, and only the reading that caught every line on a wallet screen.
+    limitMs = 8_000 + pieces * 3_000;
+    const both = pieces <= 2;
+
     const scheduler = await starting;
     if (!scheduler) return null;
 
-    const image = await drawn(dataUrl);
-    const width = image.naturalWidth || image.width;
-    const height = image.naturalHeight || image.height;
-    const plain = document.createElement("canvas");
-    plain.width = width;
-    plain.height = height;
-    plain.getContext("2d")?.drawImage(image, 0, 0);
-
-    const raised = document.createElement("canvas");
-    raised.width = width;
-    raised.height = height;
-    const context = raised.getContext("2d", { willReadFrequently: true });
-    if (!context) return null;
-    context.drawImage(image, 0, 0);
-    const pixels = context.getImageData(0, 0, width, height);
-    binarize(pixels.data, width, height);
-    context.putImageData(pixels, 0, 0);
-
-    const [a, b] = await Promise.all([scheduler.addJob("recognize", plain), scheduler.addJob("recognize", raised)]);
-    return { plain: tidyReading(a.data.text), raised: tidyReading(b.data.text) };
+    const jobs = [];
+    for (let i = 0; i < pieces; i += 1) {
+      const top = cuts[i]!;
+      const tall = cuts[i + 1]! - top;
+      const piece = (raise: boolean): HTMLCanvasElement => {
+        const c = document.createElement("canvas");
+        c.width = width;
+        c.height = tall;
+        const ctx = c.getContext("2d", { willReadFrequently: raise });
+        if (!ctx) return c;
+        ctx.drawImage(whole, 0, top, width, tall, 0, 0, width, tall);
+        if (raise) {
+          const pixels = ctx.getImageData(0, 0, width, tall);
+          binarize(pixels.data, width, tall);
+          ctx.putImageData(pixels, 0, 0);
+        }
+        return c;
+      };
+      jobs.push(Promise.all([
+        both ? scheduler.addJob("recognize", piece(false)).then((r) => r.data.text) : Promise.resolve(""),
+        scheduler.addJob("recognize", piece(true)).then((r) => r.data.text),
+      ]));
+    }
+    const read = await Promise.all(jobs);
+    return {
+      plain: both ? tidyReading(joinPieces(read.map(([p]) => tidyReading(p)))) : "",
+      raised: tidyReading(joinPieces(read.map(([, r]) => tidyReading(r)))),
+    };
   })();
 
-  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), limitMs));
+  // The limit is read when it fires, so a long picture's larger allowance counts.
+  const begun = Date.now();
+  const timeout = new Promise<null>((resolve) => {
+    const check = (): void => {
+      setTimeout(() => (Date.now() - begun >= limitMs ? resolve(null) : check()), 1_000);
+    };
+    check();
+  });
   try {
     return await Promise.race([work, timeout]);
   } catch {

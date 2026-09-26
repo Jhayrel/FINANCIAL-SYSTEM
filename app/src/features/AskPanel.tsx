@@ -146,7 +146,7 @@ import {
   type Intent as Routed,
 } from "../data/aiClient";
 import { chatStore } from "../data/chatStore";
-import { readPicture } from "../data/ocr";
+import { readOriginal, readPicture } from "../data/ocr";
 import { holdUpdates } from "../data/updateCheck";
 import { useBackToClose } from "../data/backButton";
 import { aiLogStore } from "../data/aiLogStore";
@@ -189,6 +189,7 @@ import {
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { budgetForYear } from "../domain/budget";
 import { MONTH_NAMES } from "../domain/dates";
+import { alikeKey, answerCard, cardQuestion, looksLikeAnswer, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
 import { forecastYear } from "../domain/forecast";
 import { withCommandWordsFixed } from "../domain/typos";
@@ -978,6 +979,20 @@ export function AskPanel({
     said: string;
     first: Draft;
   } | null>(null);
+  /**
+   * The cards a picture made that need an answer, and the one just asked
+   * about. One card at a time, like a person going down the list with you
+   * (domain/cardQuestions.ts).
+   */
+  const [asking, setAsking] = useState<{
+    readonly cards: readonly CardToAsk[];
+    readonly at: number;
+    readonly blank: Blank;
+    /** Cards the owner said skip to, with the rows like them, never asked again. */
+    readonly skipped: ReadonlySet<string>;
+    /** The question, shown above the box while it waits. */
+    readonly text: string;
+  } | null>(null);
   /** A file is over the panel right now. */
   const [dragging, setDragging] = useState(false);
   /**
@@ -1228,6 +1243,22 @@ export function AskPanel({
     const distance = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
     if (distance <= NEAR_BOTTOM) thread.scrollTop = thread.scrollHeight;
   }, [turns, busy]);
+
+  /*
+   * The card a question is about, brought into view. With a batch of
+   * twenty four the question would otherwise be about a card the owner has
+   * to go looking for.
+   */
+  const askedCard = asking ? asking.cards[asking.at]?.cardId : undefined;
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!askedCard || !thread) return;
+    const index = turns.findIndex((t) => isOffer(t) && t.cardId === askedCard);
+    const el = cardElements.current.get(index);
+    if (el) thread.scrollTop = Math.max(0, thread.scrollTop + topWithin(el, thread) - 8);
+    // Only when the question moves to another card, not on every change to the thread.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askedCard]);
 
   /**
    * Say it, and keep it.
@@ -1562,6 +1593,7 @@ export function AskPanel({
     }
 
     setTurns((prev) => prev.map((t) => closedCard(t) ?? t));
+    setAsking(null);
     return count;
   };
 
@@ -1721,9 +1753,16 @@ export function AskPanel({
    */
   const sentBefore = useRef(new Map<string, string>());
 
-  const attach = async (picked: ArrayLike<File> | null): Promise<void> => {
-    if (!picked || picked.length === 0) return;
-    const { attachments, rejected } = await readFiles(Array.from(picked), files, limits);
+  const attach = async (given: ArrayLike<File> | null): Promise<void> => {
+    if (!given || given.length === 0) return;
+    /*
+     * Copied now. The picker is cleared straight after it hands the files
+     * over, and a FileList is live: by the time the files were read it was
+     * empty, so the full-size original of a long screenshot was never found
+     * and only the shrunk copy, where no letter is legible, was read.
+     */
+    const picked = Array.from(given);
+    const { attachments, rejected } = await readFiles(picked, files, limits);
 
     const seenAgain = attachments.filter(
       (a) => a.digest !== undefined && sentBefore.current.has(a.digest),
@@ -1736,7 +1775,11 @@ export function AskPanel({
      * (data/ocr.ts). Nothing is sent anywhere by this.
      */
     for (const a of attachments) {
-      if (a.kind === "image" && a.dataUrl) void readPicture(a.dataUrl);
+      if (a.kind !== "image" || !a.dataUrl) continue;
+      // The file as it arrived, not the copy shrunk for sending: a long screenshot is only legible at full size.
+      const original = picked.find((f) => f.name === a.name);
+      if (original) void readOriginal(a.digest ?? a.dataUrl, original);
+      else void readPicture(a.dataUrl, a.digest);
     }
     for (const r of rejected) {
       say({ kind: "assistant", text: `${r.name}: ${r.reason}`, from: "this device" });
@@ -1764,7 +1807,9 @@ export function AskPanel({
     useHistory = true,
     batch = false,
     settled: readonly Blank[] = [],
-  ): Promise<void> => {
+    /** What the reading is checked against, when not the words it came from. */
+    against?: string,
+  ): Promise<CardToAsk | null> => {
     // Steps 2 and 3 below are the work this names: your corrections, then the
     // ledger and Settings. It is set here because it starts here.
     setStage("Checking it against your ledger");
@@ -1885,7 +1930,7 @@ export function AskPanel({
       // The clause this row came from, not the whole message. A card the
       // model returned carries no `said`, so it is worked out from the
       // amount; see `clauseFor`.
-      proposal.said ?? clauseFor(hint, draft.amount, reference),
+      against ?? proposal.said ?? clauseFor(hint, draft.amount, reference),
       reference,
       asOf,
       proposal.confidence,
@@ -1928,7 +1973,7 @@ export function AskPanel({
         }),
       );
       say(debtCard(filled.draft, hint).turn);
-      return;
+      return null;
     }
 
     /**
@@ -1964,7 +2009,13 @@ export function AskPanel({
       (ready.draft.flow === "Spending" || ready.draft.flow === "Revenue") &&
       !ready.draft.item.trim();
 
-    if (wantsItem && ready.draft.flow && !ai.disabled) {
+    /*
+     * Not for a row of a batch. The hint there was the whole message ("add
+     * these"), and a model reading the picture already had their list and
+     * chose to leave it blank, which is what the questions after the batch
+     * are for (domain/cardQuestions.ts).
+     */
+    if (wantsItem && ready.draft.flow && !ai.disabled && !batch) {
       const known = itemsFor(ready.draft.flow, ready.draft.category, reference);
       const withNotes = known.map((name) => ({
         name,
@@ -2006,18 +2057,185 @@ export function AskPanel({
     const asked = batch ? null : nextQuestion(ready.draft, reference, settled);
 
     if (!asked) {
-      say({ kind: "proposal", proposal: ready, state: "open", cardId: newCardId() });
+      const cardId = newCardId();
+      say({ kind: "proposal", proposal: ready, state: "open", cardId });
       log(
         aiEvent("proposed", "add", {
           entry: `${ready.draft.date} ${ready.draft.flow} ${ready.draft.item} ${formatMoney(ready.draft.amount ?? 0)}`,
           model: ready.sourceRef,
         }),
       );
-      return;
+      return { cardId, draft: ready.draft };
     }
     setPending({ draft: ready.draft, blank: asked.blank, settled, said: proposal.said ?? hint, first: ready.draft });
     say({ kind: "assistant", ephemeral: true, text: asked.question, from: "this device" });
+    return null;
   };
+
+  /**
+   * Ask about the next card from `from` on that still needs something.
+   *
+   * `known` holds a card's draft that the screen has not caught up with yet:
+   * the one an answer has just changed. A card added or discarded meanwhile
+   * is passed over.
+   */
+  const askFrom = (
+    cards: readonly CardToAsk[],
+    from: number,
+    known: ReadonlyMap<string, Draft> = new Map(),
+    skipped: ReadonlySet<string> = new Set(),
+  ): void => {
+    for (let i = from; i < cards.length; i += 1) {
+      const card = cards[i];
+      if (!card || skipped.has(card.cardId)) continue;
+      const shown = turns.find((t): t is Offered => isOffer(t) && t.cardId === card.cardId);
+      if (shown && shown.state !== "open") continue;
+      const draft = known.get(card.cardId) ?? shown?.proposal.draft ?? card.draft;
+      const q = cardQuestion(draft, reference, i + 1, cards.length);
+      if (!q) continue;
+      setAsking({ cards, at: i, blank: q.blank, skipped, text: q.text });
+      say({
+        kind: "assistant",
+        ephemeral: true,
+        text: i === 0 ? `${q.text} Say skip to leave one for its card, or stop.` : q.text,
+        from: "this device",
+      });
+      return;
+    }
+    setAsking(null);
+    if (from > 0) {
+      say({ kind: "assistant", ephemeral: true, text: "That was the last question. Check the cards, then add them.", from: "this device" });
+    }
+  };
+
+  /**
+   * A reply to a question about one card of a batch.
+   *
+   * False when it is not an answer, so the message goes on to be read as
+   * whatever else it is: a correction, a question, a new entry.
+   */
+  const answerAsked = async (note: string): Promise<boolean> => {
+    if (!asking) return false;
+    const card = asking.cards[asking.at];
+    const shown = card ? turns.find((t): t is Offered => isOffer(t) && t.cardId === card.cardId) : undefined;
+    if (!card || !shown || shown.state !== "open") {
+      setAsking(null);
+      return false;
+    }
+    if (STOP_ASKING.test(note)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      setAsking(null);
+      say({ kind: "assistant", ephemeral: true, text: "No more questions. What each card still needs is marked on it.", from: "this device" });
+      return true;
+    }
+    if (SKIP_CARD.test(note)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      // The rows like it are skipped with it: the same question about the same shop is the same answer.
+      const sameAs = alikeKey(shown.proposal.draft);
+      const twins = asking.cards.filter((c) => {
+        const t = turns.find((u): u is Offered => isOffer(u) && u.cardId === c.cardId);
+        return sameAs !== "" && alikeKey(t?.proposal.draft ?? c.draft) === sameAs;
+      });
+      askFrom(asking.cards, asking.at + 1, new Map(), new Set([...asking.skipped, card.cardId, ...twins.map((c) => c.cardId)]));
+      return true;
+    }
+
+    const before = shown.proposal.draft;
+    let filled = answerCard(before, asking.blank, note, reference, transactions);
+    if (!filled) return false;
+
+    // Not one of their kinds by name: a model says which one it is, as for a single entry.
+    const flow = filled.flow;
+    if (asking.blank === "item" && flow === before.flow && (flow === "Spending" || flow === "Revenue") && !ai.disabled) {
+      if (!matchItem(note, flow, filled.category, reference, learnedItems).matched) {
+        const known = itemsFor(flow, filled.category, reference);
+        const withNotes = known.map((name) => ({
+          name,
+          remark: reference.spendingTypes.find((t) => t.name === name)?.remark ?? "",
+        }));
+        const guessed = await classifyItem(note, withNotes);
+        if (guessed) filled = { ...filled, item: guessed.item };
+      }
+    }
+
+    setDraft("");
+    say({ kind: "you", text: note });
+    const what = whatChanged(before, filled);
+
+    /*
+     * The same answer for the rows like it still to come: five cash backs
+     * from Maya, or two payments to the same shop, are one question, not
+     * five. Only rows with the same kind and the same words, waiting on the
+     * same blank.
+     */
+    const sameAs = alikeKey(before);
+    const alike = sameAs
+      ? asking.cards.slice(asking.at + 1).flatMap((c) => {
+          const t = turns.find((u): u is Offered => isOffer(u) && u.cardId === c.cardId);
+          if (!t || t.state !== "open" || alikeKey(t.proposal.draft) !== sameAs) return [];
+          if (cardQuestion(t.proposal.draft, reference, 1, 1)?.blank !== asking.blank) return [];
+          const done = answerCard(t.proposal.draft, asking.blank, note, reference, transactions);
+          if (!done) return [];
+          return [{ turn: t, draft: done.flow === filled.flow && !done.item && filled.item ? { ...done, item: filled.item } : done }];
+        })
+      : [];
+
+    const changes = [{ turn: shown, draft: filled }, ...alike].filter((c) => whatChanged(c.turn.proposal.draft, c.draft) !== "");
+    const updated = new Map(
+      changes.map((c) => [
+        c.turn.cardId,
+        {
+          ...c.turn,
+          proposal: { ...c.turn.proposal, draft: c.draft, adjustments: [...c.turn.proposal.adjustments, whatChanged(c.turn.proposal.draft, c.draft)] },
+        } satisfies Offered,
+      ]),
+    );
+    setTurns((prev) => prev.map((t) => (isOffer(t) ? updated.get(t.cardId) ?? t : t)));
+    for (const turn of updated.values()) recordCard(turn);
+    log(
+      aiEvent("edited", "add", {
+        field: asking.blank,
+        proposed: `${before.date} ${before.flow} ${before.item}`,
+        corrected: `${filled.date} ${filled.flow} ${filled.item}`,
+        entry: `${filled.date} ${filled.flow} ${filled.item} ${formatMoney(filled.amount ?? 0)}`,
+      }),
+    );
+    const others = changes.length - (updated.has(card.cardId) ? 1 : 0);
+    const told = [
+      what || "That did not change the card, so it stays as it is. Fix it on the card if it needs it.",
+      others > 0 ? `The same for the ${others === 1 ? "other row" : `other ${others} rows`} like it.` : "",
+    ].filter(Boolean).join(" ");
+    say({ kind: "assistant", ephemeral: true, text: told, from: "this device" });
+
+    // The same card again when the answer opened a new blank (a transfer from which account); the next when not.
+    const again = cardQuestion(filled, reference, asking.at + 1, asking.cards.length);
+    const stuck = again !== null && again.blank === asking.blank;
+    const known = new Map<string, Draft>([[card.cardId, filled], ...alike.map((a) => [a.turn.cardId, a.draft] as const)]);
+    askFrom(asking.cards, stuck ? asking.at + 1 : asking.at, known, asking.skipped);
+    return true;
+  };
+
+  /*
+   * The card being asked about was added or discarded from its own buttons:
+   * the question moves on to the next card that needs something, or goes
+   * away when none does. Add all leaves nothing to ask about.
+   */
+  useEffect(() => {
+    if (!asking) return;
+    const card = asking.cards[asking.at];
+    const shown = card ? turns.find((t): t is Offered => isOffer(t) && t.cardId === card.cardId) : undefined;
+    if (!shown || shown.state === "open") return;
+    const more = asking.cards.slice(asking.at + 1).some((c) => {
+      const t = turns.find((u): u is Offered => isOffer(u) && u.cardId === c.cardId);
+      return t?.state === "open" && !asking.skipped.has(c.cardId) && cardQuestion(t.proposal.draft, reference, 1, 1) !== null;
+    });
+    if (more) askFrom(asking.cards, asking.at + 1, new Map(), asking.skipped);
+    else setAsking(null);
+    // Only when the cards change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turns]);
 
   /** An answer to the question the assistant just asked. */
   const answerPending = async (reply: string): Promise<void> => {
@@ -2476,8 +2694,37 @@ export function AskPanel({
     }
 
     const batch = checked.length > 1;
-    for (const proposal of checked) await offer(proposal, note, true, batch);
-    if (batch) {
+    const made: CardToAsk[] = [];
+    for (const proposal of checked) {
+      /*
+       * A row of a batch is about its own words, not the whole message: the
+       * ledger, the owner's lessons and the checks read "Purchased on
+       * JOLLIBEE", where the message only said "add these".
+       */
+      const own = batch && sent.length > 0 && !proposal.said && proposal.draft.description.trim() ? proposal.draft.description.trim() : "";
+      /*
+       * Its words are the shop's name, not something the owner wrote, so the
+       * reading is not checked against them: "7-Eleven-ST4817" is a store
+       * code, not a figure of PHP 4,817.00 that the ₱174.00 was misread from.
+       */
+      const card = await offer(own ? { ...proposal, said: own } : proposal, own || note, true, batch, [], own ? "" : undefined);
+      if (card) made.push(card);
+    }
+    /*
+     * The questions, one card at a time, for every card that needs
+     * something. The owner, 27 September 2026: "it should ask following
+     * question like the entry on this have send money to?".
+     */
+    const toAsk = batch ? made.filter((c) => cardQuestion(c.draft, reference, 1, 1) !== null) : [];
+    if (toAsk.length > 0) {
+      say({
+        kind: "assistant",
+        ephemeral: true,
+        text: `${toAsk.length === 1 ? "One of them needs" : `${toAsk.length} of them need`} something only you know. I will ask about ${toAsk.length === 1 ? "it" : "each one"} in turn.`,
+        from: "this device",
+      });
+      askFrom(toAsk, 0);
+    } else if (batch) {
       /*
        * Name what is actually missing.
        *
@@ -2715,6 +2962,21 @@ export function AskPanel({
       setDraft("");
       await send(message, "log");
       return;
+    }
+
+    /*
+     * An answer to a question about one card of a batch. Read before the
+     * router, because "school" or "sent to my friend" means nothing without
+     * the question above it; a question or a new entry typed instead is not
+     * an answer and goes on as usual (`looksLikeAnswer`).
+     */
+    if (asking && files.length === 0 && !as && !wantsDiscardOpen(note) && looksLikeAnswer(note, asking.blank)) {
+      setBusy(true);
+      try {
+        if (await during("Checking your answer", () => answerAsked(note), "Still checking it")) return;
+      } finally {
+        setBusy(false);
+      }
     }
 
     /**
@@ -5133,6 +5395,26 @@ export function AskPanel({
           document.body,
         )}
 
+      {/*
+        * The question about a card, where the thumb and the eye already are.
+        * Twenty four cards push the question itself far down the thread; the
+        * card it is about is scrolled into view above, and the question stays
+        * here with the two answers that need no typing.
+        */}
+      {asking && !pending && (
+        <div className="fms-askq" role="status" aria-live="polite">
+          <p className="t-body">{asking.text}</p>
+          <div className="fms-askq-actions">
+            <button type="button" className="fms-btn" disabled={busy} onClick={() => void send("skip")}>
+              Skip this one
+            </button>
+            <button type="button" className="fms-btn" disabled={busy} onClick={() => void send("stop")}>
+              Stop asking
+            </button>
+          </div>
+        </div>
+      )}
+
       {pending && (
         <div className="fms-intent">
           <span className="t-micro" style={{ color: "var(--ink-3)" }}>
@@ -5235,7 +5517,9 @@ export function AskPanel({
             }}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={
-              pending
+              asking && !pending
+                ? "Your answer, or skip"
+                : pending
                 ? pending.blank === "amount"
                   ? "How much?"
                   : "Your answer"

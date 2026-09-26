@@ -3138,6 +3138,39 @@
   align-items: center;
 }
 
+/*
+ * A question about one card of a batch, above the box. A hairline and the
+ * brand rule on its left say it is the assistant waiting, the same as a
+ * pending entry; the two answers that need no typing sit under it.
+ */
+.fms-askq {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--hairline-strong);
+  border-left: 2px solid var(--brand-600);
+  background: var(--surface);
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+.fms-askq > p {
+  margin: 0;
+  color: var(--ink);
+}
+
+.fms-askq-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.fms-askq-actions > .fms-btn {
+  min-height: 44px;
+}
+
 /* ── Attachments ─────────────────────────────────────────────────────────── */
 
 /*

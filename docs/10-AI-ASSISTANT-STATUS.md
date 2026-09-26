@@ -98,6 +98,18 @@ back into them.
 - Bills and Subscriptions keep their own categories
 - Items only ever come from Settings; a genuinely new one is capitalised and
   the card says it will add a new type
+- A long wallet history (a stitched Maya screenshot of 24 rows) is read on the
+  device from the full-size file, cut at its date lines into parts of about
+  eight rows (`piecesOf`, `domain/ocrText.ts`), and the parts go to the model
+  three at a time. One reply for 24 rows ran past what a free model writes in
+  one go, and a reply cut off halfway is not JSON, so the whole list was lost
+- After a batch, the assistant asks about each card that needs something, one
+  at a time, naming the row (`domain/cardQuestions.ts`). A bar above the box
+  holds the question with Skip and Stop, and the card it is about is scrolled
+  into view. "sent it to my friend" turns a payment into money that left the
+  accounts; "my own" or "from my gcash" turns money in into a transfer. One
+  answer covers the rows like it (the same kind and words), so five cash backs
+  are one question
 
 ### The conversation
 - Answers with real structure: bold and bullets, parsed and rendered as

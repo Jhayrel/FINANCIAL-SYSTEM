@@ -298,7 +298,7 @@ function firstAmountIn(text: string): number | null {
  * Longest first, so "Maya Bank (Personal savings)" is not beaten to the match
  * by "Maya". Word-boundary anchored, so "Cash" does not match "Cashier".
  */
-function walletInside(text: string, accounts: readonly string[]): string {
+export function walletInside(text: string, accounts: readonly string[]): string {
   const lower = text.toLowerCase();
   const byLength = [...accounts].sort((a, b) => b.length - a.length);
 

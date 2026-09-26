@@ -45,7 +45,7 @@ import type { AiTask } from "../domain/aiOffline";
 import { plainText } from "../domain/aiText";
 import { idToken } from "./auth";
 import { redact } from "../domain/aiRedact";
-import { readingFor } from "../domain/ocrText";
+import { piecesOf, readingFor, rowsIn } from "../domain/ocrText";
 import { readPicture } from "./ocr";
 import { readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
 import type { Attachment } from "./attachments";
@@ -538,7 +538,7 @@ export interface ExtractOptions {
    * tests; left out where there is no page to draw on, and then every
    * picture goes to a vision model as before.
    */
-  readonly readPicture?: (dataUrl: string) => Promise<{ readonly plain: string; readonly raised: string } | null>;
+  readonly readPicture?: (dataUrl: string, key?: string) => Promise<{ readonly plain: string; readonly raised: string } | null>;
   /** Set here, not by callers: what the device read, for checking the model's amounts against. */
   readonly readings?: readonly string[];
 }
@@ -657,11 +657,25 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
    * faster answer, never lose one.
    */
   const room = Math.floor(10_000 / pictures.length);
-  const readings = await Promise.all(pictures.map((p) => reader(p.dataUrl as string).catch(() => null)));
+  // Under its fingerprint, so a reading of the full-size original made at attach time is found (data/ocr.ts).
+  const readings = await Promise.all(pictures.map((p) => reader(p.dataUrl as string, p.digest).catch(() => null)));
   const asText: Attachment[] = [];
   const stillPictures: Attachment[] = [];
+  /** A long list's parts, each its own request (`piecesOf`). */
+  const parts: Attachment[] = [];
   pictures.forEach((picture, i) => {
     const reading = readings[i];
+    const long = reading ? longest(reading) : "";
+    const pieces = long ? piecesOf(long, LIST_PART_ROWS) : [];
+    if (pieces.length > 1) {
+      pieces.forEach((piece, k) => {
+        const text = readingFor(picture.name, { plain: piece, raised: "" }, room);
+        if (!text) return;
+        const said = `${text}\nPart ${k + 1} of ${pieces.length} of this list. The other parts are read separately, so give only the rows in this part.`;
+        parts.push({ id: `${picture.id}-${k + 1}`, name: `${picture.name}, part ${k + 1} of ${pieces.length}, read on this device`, kind: "text", bytes: said.length, text: redact(said) });
+      });
+      return;
+    }
     const text = reading ? readingFor(picture.name, reading, room) : null;
     if (text) {
       asText.push({ id: picture.id, name: `${picture.name}, read on this device`, kind: "text", bytes: text.length, text: redact(text) });
@@ -669,10 +683,30 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
       stillPictures.push(picture);
     }
   });
-  if (asText.length === 0 || options.signal?.aborted) return extractOnce(options);
+  if ((asText.length === 0 && parts.length === 0) || options.signal?.aborted) return extractOnce(options);
 
   const others = options.attachments.filter((a) => !(a.kind === "image" && a.dataUrl));
   const read = readings.flatMap((r) => (r ? [r.plain, r.raised] : []));
+  const readOnDevice = pictures.length - stillPictures.length;
+
+  if (parts.length > 0) {
+    /*
+     * Each part on its own, three at a time, and the answers put back in
+     * order. Everything that is not a part (another picture, a file) goes
+     * with the first request, so nothing is read twice.
+     */
+    const jobs: Attachment[][] = parts.map((part, k) => (k === 0 ? [...others, ...asText, part] : [part]));
+    if (stillPictures.length > 0) jobs.push(stillPictures);
+    const answers = await inTurn(jobs, LIST_PARTS_AT_ONCE, (attachments) =>
+      extractOnce({ ...options, readings: read, attachments }),
+    );
+    const joined = joinAnswers(answers);
+    // Nothing usable in any part: the picture goes to a model that can see, as below.
+    if (usable(joined) >= 10 || options.signal?.aborted) return { ...joined, readOnDevice };
+    const seen = await extractOnce({ ...options, readings: read });
+    return usable(seen) > usable(joined) ? seen : { ...joined, readOnDevice };
+  }
+
   const first = await extractOnce({ ...options, readings: read, attachments: [...others, ...asText, ...stillPictures] });
   /*
    * Rows it could not use count for nothing here. On 26 September 2026 the
@@ -680,13 +714,65 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
    * transaction", which counted as an answer, and the pictures never went to
    * a model that could look at them.
    */
-  const usable = (r: ExtractResult): number =>
-    r.source !== "model" ? -1 : (r.proposals.length + (r.balances?.length ?? 0)) * 10 + r.refused.length;
   if (usable(first) >= 10 || options.signal?.aborted) {
-    return { ...first, readOnDevice: asText.length };
+    return { ...first, readOnDevice };
   }
   const second = await extractOnce({ ...options, readings: read });
-  return usable(second) > usable(first) ? second : { ...first, readOnDevice: asText.length };
+  return usable(second) > usable(first) ? second : { ...first, readOnDevice };
+}
+
+/** Rows a list is cut into for reading, and how many parts are read at once. */
+const LIST_PART_ROWS = 8;
+const LIST_PARTS_AT_ONCE = 3;
+
+/** How much an answer holds that can be used: a found row counts, a refusal barely does. */
+function usable(r: ExtractResult): number {
+  return r.source !== "model" ? -1 : (r.proposals.length + (r.balances?.length ?? 0)) * 10 + r.refused.length;
+}
+
+/** The fuller of a picture's two readings, which is the one worth cutting into parts. */
+function longest(reading: { readonly plain: string; readonly raised: string }): string {
+  return rowsIn(reading.raised) >= rowsIn(reading.plain) ? reading.raised : reading.plain;
+}
+
+/** `work` over every job, at most `at` running at once, the answers in the jobs' order. */
+async function inTurn<J, R>(jobs: readonly J[], at: number, work: (job: J) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(jobs.length);
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < jobs.length) {
+      const k = next++;
+      out[k] = await work(jobs[k] as J);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(at, jobs.length) }, lane));
+  return out;
+}
+
+/**
+ * The answers for a list's parts, as one answer.
+ *
+ * A part that found nothing says nothing: "Nothing in that looked like a
+ * transaction" about a stretch of dates and headings is not news when the
+ * rest of the list was read. A part that could not be read at all is said,
+ * so a gap in the dates has a reason on screen.
+ */
+export function joinAnswers(answers: readonly ExtractResult[]): ExtractResult {
+  const found = answers.filter((a) => a.source === "model");
+  if (found.length === 0) return answers[0] ?? { proposals: [], refused: [], source: "offline", reason: "Nothing was read." };
+  const proposals = found.flatMap((a) => a.proposals);
+  const balances = found.flatMap((a) => a.balances ?? []);
+  const anything = proposals.length + balances.length > 0;
+  const refused = [
+    ...found.flatMap((a) => (anything && a.proposals.length + (a.balances?.length ?? 0) === 0 ? [] : a.refused)),
+    ...answers.flatMap((a, k) =>
+      a.source === "model"
+        ? []
+        : [{ sourceRef: `part ${k + 1}`, reason: `Part ${k + 1} of ${answers.length} of the list could not be read (${a.reason ?? "no answer"}). Send a screenshot of just those rows to add them.` }],
+    ),
+  ];
+  const model = found.find((a) => a.model)?.model;
+  return { proposals, refused, source: "model", ...(balances.length > 0 ? { balances } : {}), ...(model ? { model } : {}) };
 }
 
 /** One request, with whatever pictures and text it is given. */

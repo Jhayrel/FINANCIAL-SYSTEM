@@ -132,3 +132,203 @@ export function readingFor(name: string, reading: { readonly plain: string; read
     raised.slice(0, each),
   ].join("\n");
 }
+
+/**
+ * Where to cut a tall picture into pieces the reader can take, one row of
+ * pixels each: the emptiest row near every `tile` pixels.
+ *
+ * A stitched screenshot of a wallet's history can be seven screens tall. Read
+ * whole, it is shrunk until the text is a few pixels high; cut blindly, a line
+ * is sliced in half and read as two wrong ones. So each cut goes through the
+ * gap between two lines: the row with the least ink within `search` pixels
+ * above where a piece would end, the lowest of equals so pieces stay large.
+ *
+ * `ink[y]` is how much of row y differs from its own background. Returns the
+ * cut rows, starting with 0 and ending with the height.
+ */
+export function cutRows(ink: readonly number[], tile = 1600, search = 240): number[] {
+  const height = ink.length;
+  const cuts = [0];
+  let top = 0;
+  while (height - top > tile) {
+    const end = top + tile;
+    let best = end;
+    let least = Infinity;
+    for (let y = end; y >= Math.max(top + tile / 2, end - search); y -= 1) {
+      const v = ink[y] ?? 0;
+      if (v < least) {
+        least = v;
+        best = y;
+      }
+    }
+    cuts.push(best);
+    top = best;
+  }
+  cuts.push(height);
+  return cuts;
+}
+
+/** The readings of the pieces of one picture, top to bottom, as one text. */
+export function joinPieces(pieces: readonly string[]): string {
+  const lines: string[] = [];
+  for (const piece of pieces) {
+    for (const line of piece.split("\n")) {
+      // A line read at the very foot of one piece and again at the head of the next is one line.
+      if (line && line !== lines[lines.length - 1]) lines.push(line);
+    }
+  }
+  return lines.join("\n");
+}
+
+export interface Box {
+  readonly top: number;
+  readonly bottom: number;
+  readonly left: number;
+  readonly right: number;
+}
+
+/**
+ * The dark bars a wallet app writes its dates in: white on black, in a pill.
+ *
+ * The reader takes dark text on light and found only four of twelve such
+ * dates on a long Maya history (27 September 2026), and a date is what every
+ * row under it needs. A pill row is told from a line of text by how solid it
+ * is: a run a fifth of the width or more, a third of it dark or more. A
+ * line of text is wide but mostly gaps.
+ */
+export function darkBars(rgba: Uint8ClampedArray, width: number, height: number): Box[] {
+  const rows: ({ left: number; right: number } | null)[] = [];
+  const from = Math.floor(width * 0.1);
+  const to = Math.ceil(width * 0.9);
+  for (let y = 0; y < height; y += 1) {
+    let left = -1;
+    let right = -1;
+    let dark = 0;
+    for (let x = from; x < to; x += 1) {
+      const i = (y * width + x) * 4;
+      if (0.299 * rgba[i]! + 0.587 * rgba[i + 1]! + 0.114 * rgba[i + 2]! < 80) {
+        if (left < 0) left = x;
+        right = x;
+        dark += 1;
+      }
+    }
+    const span = right - left + 1;
+    // Rows through the white letters are only partly dark, so a third is enough; lines of text sit near a tenth.
+    rows.push(left >= 0 && span >= width * 0.2 && dark / span > 0.33 ? { left, right } : null);
+  }
+
+  const bars: Box[] = [];
+  let y = 0;
+  while (y < height) {
+    if (!rows[y]) {
+      y += 1;
+      continue;
+    }
+    const top = y;
+    let left = width;
+    let right = 0;
+    let gap = 0;
+    while (y < height && gap <= 8) {
+      const r = rows[y];
+      if (r) {
+        left = Math.min(left, r.left);
+        right = Math.max(right, r.right);
+        gap = 0;
+      } else gap += 1;
+      y += 1;
+    }
+    const bottom = y - gap;
+    const tall = bottom - top;
+    // A pill's height, not a divider line and not a block of colour.
+    if (tall >= width * 0.015 && tall <= width * 0.12) bars.push({ top, bottom, left, right });
+  }
+  return bars;
+}
+
+/** Each box turned light for dark, so white-on-black text reads as black on white. */
+export function invertBoxes(rgba: Uint8ClampedArray, width: number, boxes: readonly Box[]): void {
+  for (const b of boxes) {
+    for (let y = b.top; y < b.bottom; y += 1) {
+      for (let x = b.left; x <= b.right; x += 1) {
+        const i = (y * width + x) * 4;
+        rgba[i] = 255 - rgba[i]!;
+        rgba[i + 1] = 255 - rgba[i + 1]!;
+        rgba[i + 2] = 255 - rgba[i + 2]!;
+      }
+    }
+  }
+}
+
+const MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+/** A line that dates the rows under it: "September 24, 2026", "24 Sep 2026", "2026-09-24", "Today". */
+const DATE_LINE = new RegExp(
+  `\\b${MONTH}\\.?\\s+\\d{1,2},?\\s+\\d{4}\\b|\\b\\d{1,2}\\s+${MONTH}\\.?,?\\s+\\d{4}\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b|^\\W*(?:today|yesterday)\\W*$`,
+  "i",
+);
+/** A figure in pesos and centavos, which is what closes a row. */
+const ROW_AMOUNT = /\d[\d,]*\.\d{2}(?!\d)/;
+
+/** How many rows of a list the text holds, going by the figures in it. */
+export function rowsIn(text: string): number {
+  return text.split("\n").filter((line) => ROW_AMOUNT.test(line)).length;
+}
+
+/**
+ * A long list, in parts a model can answer whole.
+ *
+ * The owner's Maya history on 27 September 2026 was twenty four rows on one
+ * stitched screenshot. One reply with a row for each runs past what a free
+ * model will write in one go, and a reply cut off halfway is not JSON at
+ * all, so the whole list was lost rather than its tail. In parts of about
+ * `rows` rows each, every reply is short, and the parts are read side by side.
+ *
+ * Cut between rows, never through one (a row ends at its figure), and at a
+ * date line where one is near, so a borrowing and the fees charged on it
+ * stay together. A part that starts in the middle of a day opens with that
+ * day's date line again, because a row with no date above it would be read
+ * as dated today. A short list comes back as it is.
+ */
+export function piecesOf(text: string, rows = 8): string[] {
+  if (rowsIn(text) <= rows + Math.ceil(rows / 2)) return [text];
+
+  // Rows, each ending at its figure and knowing the date it sits under.
+  interface Row { readonly lines: string[]; readonly date: string; readonly opensDay: boolean }
+  const list: Row[] = [];
+  let lines: string[] = [];
+  let date = "";
+  let opensDay = false;
+  for (const line of text.split("\n")) {
+    const dated = DATE_LINE.test(line) && !ROW_AMOUNT.test(line);
+    if (dated) {
+      date = line.trim();
+      opensDay = true;
+    }
+    lines.push(line);
+    if (ROW_AMOUNT.test(line)) {
+      list.push({ lines, date, opensDay });
+      lines = [];
+      opensDay = false;
+    }
+  }
+  // Whatever trails the last figure belongs with the last row.
+  const last = list[list.length - 1];
+  if (last && lines.some((l) => l.trim())) last.lines.push(...lines);
+
+  const parts: string[][] = [];
+  let part: string[] = [];
+  let count = 0;
+  for (const row of list) {
+    const full = count >= rows;
+    const nearlyFull = count >= Math.ceil(rows * 0.75) && row.opensDay;
+    if (count > 0 && (full || nearlyFull)) {
+      parts.push(part);
+      part = [];
+      count = 0;
+    }
+    if (count === 0 && !row.opensDay && row.date) part.push(row.date);
+    part.push(...row.lines);
+    count += 1;
+  }
+  if (part.length > 0) parts.push(part);
+  return parts.map((p) => p.join("\n"));
+}
