@@ -48,6 +48,7 @@ import { redact } from "./aiRedact";
 import { toPesos } from "./money";
 import { costOf, incomeOf } from "./totals";
 import { positionsOf, rowsFor, type Debt } from "./debt";
+import { confidenceWords, explainBasis, forecastYear } from "./forecast";
 import type { IsoDate, Transaction } from "./types";
 
 /**
@@ -263,6 +264,88 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       out.push(
         `${monthName(key)}: spent ${php(m.spent)}, received ${php(m.revenue)}, ${m.count} entries`,
       );
+    }
+  }
+
+  /**
+   * ── Next month, as the Budget screen forecasts it ────────────────────────
+   *
+   * Asked for a recommended budget for next month on 26 September 2026, the
+   * model said "I do not have a recommended budget figure for next month
+   * because no budget amount for the upcoming period is present in the data",
+   * and a minute later, to the same question, invented one from September's
+   * total. Both were the model working without the figure: the app forecasts
+   * every month on the Budget screen (`domain/forecast.ts`) and never sent it.
+   *
+   * Sent now, with its likely range, what it is based on and how steady the
+   * months behind it are, so a recommendation is the app's arithmetic and the
+   * model's words, never the other way round.
+   */
+  const [asOfYear, asOfMonth] = [Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7))];
+  const nextYear = asOfMonth === 12 ? asOfYear + 1 : asOfYear;
+  const nextMonth = asOfMonth === 12 ? 1 : asOfMonth + 1;
+  const forecast = forecastYear(rows, nextYear, nextYear === asOfYear ? asOfMonth : 0, input.credits ?? [], asOf)[nextMonth - 1];
+  const nextName = monthName(`${nextYear}-${String(nextMonth).padStart(2, "0")}`);
+  out.push("");
+  out.push(`## ${nextName}, forecast by the app`);
+  if (forecast && forecast.basis !== "none" && forecast.spending > 0) {
+    out.push(
+      `Spending about ${php(forecast.spending)}, likely between ${php(forecast.low)} and ${php(forecast.high)}. Bills and subscriptions ${php(
+        forecast.billsSubs,
+      )}. Debt payments falling due ${php(forecast.debtService)}. ${explainBasis(forecast.basis, forecast.growth)}. ${confidenceWords(forecast.confidence)}.`,
+    );
+    out.push(
+      `A budget that covers this forecast: ${php(forecast.spending)} for spending and ${php(forecast.billsSubs)} for bills and subscriptions, ${php(
+        forecast.spending + forecast.billsSubs,
+      )} in all. When asked what budget to set, recommend this, say it comes from the forecast, and name the range.`,
+    );
+  } else {
+    out.push("No forecast: the ledger has no months of spending to base one on yet. Say so if asked for a budget.");
+  }
+
+  /**
+   * ── Each item this month, against its own last three months ─────────────
+   *
+   * A figure means nothing without something to measure it against, and
+   * "high" said without one is a word, not a finding. The totals by month
+   * were here; what each kind of spending usually costs was not, so "Treat is
+   * up" could only be said by adding months up, which the model must never
+   * do. Worked out here, per item, with the months it had none.
+   */
+  const monthKey = (back: number): string => {
+    const index = asOfYear * 12 + (asOfMonth - 1) - back;
+    return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`;
+  };
+  const previous = [monthKey(1), monthKey(2), monthKey(3)];
+  const nowRows = rows.filter((t) => monthOf(t.date) === monthKey(0));
+  const nowByItem = tally(nowRows, (t) => t.item).slice(0, TOP_N);
+  if (nowByItem.length > 0) {
+    out.push("");
+    out.push(`## ${monthName(monthKey(0))} so far, each item against its last three months`);
+    out.push(
+      "Use these for any claim that a figure is high, low or unusual, and say what it was compared with. An item with fewer than two of those months behind it has too little history to call anything.",
+    );
+    for (const [name, g] of nowByItem) {
+      const before = previous.map((key) =>
+        rows.filter((t) => monthOf(t.date) === key && (t.item || "(blank)") === name).reduce((sum, t) => sum + spendingOf(t), 0),
+      );
+      const seen = before.filter((v) => v > 0).length;
+      const average = Math.round(before.reduce((a, b) => a + b, 0) / previous.length);
+      out.push(
+        `${name}: ${php(g.amount)} now. ${previous
+          .map((key, i) => `${monthName(key)} ${php(before[i] ?? 0)}`)
+          .join(", ")}, an average of ${php(average)} a month${seen === 0 ? ". New this month" : seen === 1 ? ". Only one of those months had any" : ""}.`,
+      );
+    }
+
+    // What produced the month: its largest single entries, so a total can be explained by its rows.
+    const largest = [...nowRows].filter((t) => spendingOf(t) > 0).sort((a, b) => spendingOf(b) - spendingOf(a)).slice(0, 5);
+    if (largest.length > 0) {
+      out.push("");
+      out.push(`## ${monthName(monthKey(0))}, the largest single entries`);
+      for (const t of largest) {
+        out.push(`#${String(t.recordNumber).padStart(4, "0")} ${t.date} ${t.item || t.category || t.type}: ${php(spendingOf(t))}${t.description.trim() ? `, "${t.description.trim()}"` : ""}`);
+      }
     }
   }
 

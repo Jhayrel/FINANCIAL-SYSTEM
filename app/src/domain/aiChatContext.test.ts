@@ -201,3 +201,47 @@ describe("monthsNamedIn", () => {
     expect(monthsNamedIn("what is my balance", "2026")).toEqual([]);
   });
 });
+
+/**
+ * The reasoning the owner asked for (26 September 2026, "Improving your
+ * system's AI"): every magnitude word needs a baseline the app worked out,
+ * a recommendation needs the app's forecast, and a total needs the rows
+ * that produced it. None of those were sent, so the model either refused
+ * ("no budget amount for the upcoming period is present in the data") or
+ * made a figure up from one month.
+ */
+describe("what the model is given to reason with", () => {
+  const months: Transaction[] = [];
+  let n = 100;
+  for (const [month, food, treat] of [
+    ["05", 200000, 50000],
+    ["06", 220000, 60000],
+    ["07", 210000, 40000],
+    ["08", 230000, 900000],
+  ] as const) {
+    months.push(row({ recordNumber: n++, date: `2026-${month}-10`, item: "Food", amount: food, total: food }));
+    months.push(row({ recordNumber: n++, date: `2026-${month}-12`, item: "Treat", amount: treat, total: treat, description: `treat in ${month}` }));
+  }
+  const text = build("what budget should I set next month?", { transactions: months }).text;
+
+  it("sends next month's forecast, with a budget that covers it", () => {
+    expect(text).toContain("## September 2026, forecast by the app");
+    expect(text).toMatch(/A budget that covers this forecast: PHP [\d,]+\.\d\d for spending/);
+    expect(text).toMatch(/likely between PHP [\d,]+\.\d\d and PHP [\d,]+\.\d\d/);
+  });
+
+  it("sends each item this month against its own last three months", () => {
+    expect(text).toContain("## August 2026 so far, each item against its last three months");
+    expect(text).toContain("Treat: PHP 9,000.00 now. July 2026 PHP 400.00, June 2026 PHP 600.00, May 2026 PHP 500.00, an average of PHP 500.00 a month.");
+  });
+
+  it("names the entries that produced the month", () => {
+    expect(text).toContain("## August 2026, the largest single entries");
+    expect(text).toMatch(/#0107 2026-08-12 Treat: PHP 9,000\.00, "treat in 08"/);
+  });
+
+  it("says an item is new rather than comparing it with nothing", () => {
+    const fresh = build("", { transactions: [...months, row({ recordNumber: 200, date: "2026-08-20", item: "School", amount: 300000, total: 300000 })] }).text;
+    expect(fresh).toMatch(/School: PHP 3,000\.00 now\..*New this month\./);
+  });
+});
