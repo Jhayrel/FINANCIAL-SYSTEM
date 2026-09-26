@@ -184,4 +184,39 @@ describe("the period", () => {
     expect(periodLabel(2026, 9, 9)).toBe("September 2026");
     expect(periodLabel(2026, 9, 1)).toBe("January to September 2026");
   });
+
+  it("names a span across years, either way round", () => {
+    expect(periodLabel(2024, 6, 5, 2026)).toBe("June 2024 to May 2026");
+    expect(periodLabel(2026, 5, 6, 2024)).toBe("June 2024 to May 2026");
+    expect(periodLabel(2025, 1, 12, 2026)).toBe("January 2025 to December 2026");
+  });
+});
+
+describe("a statement across a New Year", () => {
+  // December in the old records, then the handover and the new year's opening on 1 January.
+  const rows = [
+    row({ date: "2025-11-10", type: "Revenue", toWallet: "Cash", amount: 50000, description: "November pay" }),
+    row({ date: "2025-12-05", type: "Spending", fromWallet: "Cash", amount: 10000, description: "December lunch" }),
+    row({ date: "2026-01-01", type: "Spending", category: "Opening", fromWallet: "Cash", amount: 40000, description: "Balance at the end of 2025" }),
+    row({ date: "2026-01-01", type: "Revenue", category: "Opening", toWallet: "Cash", amount: 45000, description: "Transfer of balance 2025" }),
+    row({ date: "2026-01-04", type: "Spending", fromWallet: "Cash", amount: 5000, description: "January load" }),
+  ];
+  const s = buildSheet(rows, { type: "account", year: 2025, fromMonth: 12, toMonth: 1, toYear: 2026 }, reference);
+
+  it("starts from everything before its first month", () => {
+    expect(s.period).toBe("December 2025 to January 2026");
+    expect(s.from).toBe("2025-12-01");
+    expect(s.to).toBe("2026-01-31");
+    expect(s.broughtForward).toBe(50000);
+  });
+
+  it("keeps December's balances, and shows the New Year's opening rows on their day", () => {
+    expect(s.lines.map((l) => [l.date, l.kind, l.balance])).toEqual([
+      ["2025-12-05", "Spending", 40000],
+      ["2026-01-01", "Opening", 0],
+      ["2026-01-01", "Opening", 45000],
+      ["2026-01-04", "Spending", 40000],
+    ]);
+    expect(s.closing).toBe(40000);
+  });
 });

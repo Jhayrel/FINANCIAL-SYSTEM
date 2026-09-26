@@ -294,15 +294,18 @@ def transfer(rid: str, when: str, frm: str, to: str, text: str, amount: int, fee
 
 
 def not_classified_out(rid: str, when: str, acct: str, amt: int, where: str, year: str) -> Row:
+    # Short, because it is printed on every statement; the notes say the rest.
     return Row(rid, when, "Spending", acct, "", "", "Not classified",
-               f"Out of {acct} on the day: spent, or moved to another account; the {year} workbook does not say which",
-               amt, 0, f"{where}. Not counted as spending. Change it to Spending or Transfer if you know which it was.", "Paid")
+               f"Out of {acct}, not recorded what for",
+               amt, 0, f"{where}. Spent, or moved to another account: the {year} workbook does not say which. "
+               "Not counted as spending. Change it to Spending or Transfer if you know which it was.", "Paid")
 
 
 def not_classified_in(rid: str, when: str, acct: str, amt: int, where: str, year: str) -> Row:
     return Row(rid, when, "Transfer", "", acct, "", "Not classified",
-               f"Into {acct} on the day, not in the income records: earned, or moved from another account; the {year} workbook does not say which",
-               amt, 0, f"{where}. Not counted as income. Change it to Revenue or Transfer if you know which it was.", "Received")
+               f"Into {acct}, not recorded where from",
+               amt, 0, f"{where}. Not in the income records: earned, or moved from another account; the {year} workbook "
+               "does not say which. Not counted as income. Change it to Revenue or Transfer if you know which it was.", "Received")
 
 
 def assign_income(arrivals: dict, entries: list, window: tuple[int, int] = (-2, 7)) -> tuple[list, list]:

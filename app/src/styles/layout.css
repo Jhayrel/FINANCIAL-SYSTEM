@@ -1438,6 +1438,18 @@
   min-width: 96px;
 }
 
+/* A month and a year side by side: a statement can run from June 2024 to May 2026. */
+.fms-stmtfield--range {
+  flex: 1.4 1 230px;
+  max-width: 320px;
+}
+
+.fms-stmtpair {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
 /* The second row: who the statement is for, then the two exports, the PDF last so it sits under the right thumb. */
 .fms-stmttools--issue {
   background: var(--surface-sunk);
@@ -1475,7 +1487,8 @@
     padding-right: var(--space-4);
   }
 
-  .fms-stmtfield {
+  .fms-stmtfield,
+  .fms-stmtfield--range {
     max-width: none;
   }
 

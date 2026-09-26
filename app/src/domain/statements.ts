@@ -25,7 +25,7 @@
  */
 
 import type { Centavos } from "./money";
-import { firstOfMonth, getMonth, getYear, lastOfMonth } from "./dates";
+import { firstOfMonth, lastOfMonth } from "./dates";
 import { owedChange, type Debt } from "./debt";
 import { costOf, incomeOf } from "./totals";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
@@ -201,15 +201,50 @@ export function buildStatement(
   debtId?: string,
   scope: StatementScope = {},
 ): Statement {
-  const savings = new Set(reference.savings);
   const lo = Math.min(fromMonth, toMonth);
   const hi = Math.max(fromMonth, toMonth);
+  /*
+   * The last day of the last month, not the first of it. A statement for
+   * January said "1 January to 1 January" while holding the whole month,
+   * and one for January to August said it ended on 1 August with three
+   * more weeks of rows under it.
+   */
+  return buildStatementBetween(transactions, type, firstOfMonth(year, lo), lastOfMonth(year, hi), reference, debtId, scope);
+}
+
+/**
+ * A month in a year, for a statement that runs across years.
+ *
+ * The owner, 26 September 2026: "allow year too like what if january 2025 to
+ * december 2026 or june 2024 to may 2026". A statement was one year's months;
+ * it is now any first month to any last month. Given the wrong way round, the
+ * two ends are swapped rather than giving an empty statement.
+ */
+export interface MonthOfYear {
+  readonly year: number;
+  readonly month: number;
+}
+
+export function rangeOf(from: MonthOfYear, to: MonthOfYear): { from: IsoDate; to: IsoDate } {
+  const key = (m: MonthOfYear): number => m.year * 12 + m.month;
+  const [a, b] = key(from) <= key(to) ? [from, to] : [to, from];
+  return { from: firstOfMonth(a.year, a.month), to: lastOfMonth(b.year, b.month) };
+}
+
+export function buildStatementBetween(
+  transactions: readonly Transaction[],
+  type: StatementType,
+  from: IsoDate,
+  to: IsoDate,
+  reference: ReferenceLists,
+  debtId?: string,
+  scope: StatementScope = {},
+): Statement {
+  const savings = new Set(reference.savings);
 
   const inPeriod = transactions
     .filter((t) => {
-      if (getYear(t.date) !== year) return false;
-      const m = getMonth(t.date);
-      if (m < lo || m > hi) return false;
+      if (t.date < from || t.date > to) return false;
       if (type === "debt" && debtId && t.debtId !== debtId) return false;
       return belongsIn(t, type, savings, scope);
     })
@@ -224,9 +259,8 @@ export function buildStatement(
    */
   let running = 0;
   if (type === "debt" && debtId) {
-    const start = `${year}-${String(lo).padStart(2, "0")}-01`;
     for (const t of transactions) {
-      if (t.debtId !== debtId || t.date >= start) continue;
+      if (t.debtId !== debtId || t.date >= from) continue;
       running += owedChange(t);
     }
   }
@@ -248,21 +282,7 @@ export function buildStatement(
     }
   }
 
-  return {
-    type,
-    rows,
-    from: firstOfMonth(year, lo),
-    /*
-     * The last day of the last month, not the first of it. A statement for
-     * January said "1 January to 1 January" while holding the whole month,
-     * and one for January to August said it ended on 1 August with three
-     * more weeks of rows under it.
-     */
-    to: lastOfMonth(year, hi),
-    totalIn,
-    totalOut,
-    net: totalIn - totalOut,
-  };
+  return { type, rows, from, to, totalIn, totalOut, net: totalIn - totalOut };
 }
 
 // ── Export ─────────────────────────────────────────────────────────────────

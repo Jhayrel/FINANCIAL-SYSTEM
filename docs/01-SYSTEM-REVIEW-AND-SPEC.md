@@ -678,8 +678,15 @@ balance was PHP 3,900.80; the wallets held PHP 3,860.80, which is what the
 app's statement closes on (`statementSheet.ts`, asserted in the migration
 report). #8 and #190 are the same two rows as the `INT-01` finding.
 
-Every statement exports as a PDF laid out as the Excel printed one
-(`pdf/statementPdf.ts`) and as CSV.
+Every statement exports as a PDF (`pdf/statementPdf.ts`) and as CSV.
+
+**Any span of months, across years (2026-09-26).** The Excel's two month
+pickers held one year. A statement now runs from any month of one year to any
+month of another ("June 2024 to May 2026"), ends given the wrong way round
+are swapped, and the balance brought forward is everything before the first
+month. An opening row on the first day folds into that balance; one later in
+the span (a New Year inside it) is listed on its day, so the months before it
+keep the balances they had.
 
 ## 5.11 Write path (Module1)
 

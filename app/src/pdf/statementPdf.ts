@@ -124,8 +124,9 @@ export function wrap(doc: PdfDocument, text: string, font: FontName, size: numbe
   return lines.length ? lines : [""];
 }
 
-/** "Jan 4": the year is the statement's. */
-const shortDate = (iso: string): string => `${MONTH_NAMES_SHORT[getMonth(iso) - 1]} ${getDay(iso)}`;
+/** "Jan 4" when the statement is one year's; "Jan 4, 2025" when it runs across years. */
+const dateOf = (iso: string, withYear: boolean): string =>
+  `${MONTH_NAMES_SHORT[getMonth(iso) - 1]} ${getDay(iso)}${withYear ? `, ${iso.slice(0, 4)}` : ""}`;
 
 /**
  * The grey line under a description: what it was, and where the money went.
@@ -168,15 +169,18 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
     },
   );
 
+  const acrossYears = sheet.from.slice(0, 4) !== sheet.to.slice(0, 4);
+  const dateW = acrossYears ? 66 : DATE_W;
+  const shortDate = (iso: string): string => dateOf(iso, acrossYears);
   const showIn = !!sheet.headings.moneyIn;
   const showOut = !!sheet.headings.moneyOut;
-  const detailsW = CONTENT_W - DATE_W - BALANCE_W - (showIn ? MONEY_W : 0) - (showOut ? MONEY_W : 0);
+  const detailsW = CONTENT_W - dateW - BALANCE_W - (showIn ? MONEY_W : 0) - (showOut ? MONEY_W : 0);
   // The right edge of each money column, less a gutter before the next.
   const x: Columns = {
     date: MARGIN + INSET,
-    details: MARGIN + DATE_W,
-    in: MARGIN + DATE_W + detailsW + MONEY_W - 10,
-    out: MARGIN + DATE_W + detailsW + (showIn ? MONEY_W : 0) + MONEY_W - 10,
+    details: MARGIN + dateW,
+    in: MARGIN + dateW + detailsW + MONEY_W - 10,
+    out: MARGIN + dateW + detailsW + (showIn ? MONEY_W : 0) + MONEY_W - 10,
     balance: MARGIN + CONTENT_W - INSET,
   };
   const bottom = PAGE_H - MARGIN - FOOTER;
@@ -286,31 +290,39 @@ function header(page: PdfPage, doc: PdfDocument, o: StatementPdfOptions): number
     ...(o.issuedTo.trim() ? ([["Issued to", o.issuedTo.trim()]] as [string, string][]) : []),
     ...(o.issuedBy.trim() ? ([["Issued by", o.issuedBy.trim()]] as [string, string][]) : []),
   ];
-  const pad = 20;
+  const pad = 16;
   const blockW = 212;
   const bx = MARGIN + CONTENT_W - pad - blockW;
-  const left = pad + (sheet.subject ? 38 : 20);
-  const right = pad + 10 + (details.length - 1) * 15 + 2;
-  const height = Math.max(left, right) + pad - 2;
-  page.rect(MARGIN, MARGIN, CONTENT_W, height, GREEN);
+  const row = 14;
 
-  // Left: what this is, as large as fits beside the details. Nothing above
-  // it: the owner asked for the logo and the system's name off the top.
+  // The title, as large as fits beside the details. Nothing above it: the
+  // owner asked for the logo and the system's name off the top.
   const title = sheet.title.toUpperCase();
   const room = bx - (MARGIN + pad) - 18;
   const size = Math.min(22, (22 * room) / Math.max(1, doc.width(title, "bold", 22)));
-  page.text(MARGIN + pad, MARGIN + pad + 16, title, { font: "bold", size, color: WHITE });
-  if (sheet.subject) page.text(MARGIN + pad, MARGIN + pad + 34, sheet.subject, { font: "bold", size: 11, color: GREEN_SOFT });
+  const titleBlock = size * 0.75 + (sheet.subject ? 18 : 0);
+  const detailsBlock = (details.length - 1) * row + 8;
 
-  // Right: when, and for whom.
+  // Just tall enough for the taller side, with the other centred against it:
+  // "theres too much space" was the band sized to four lines of details with
+  // the title pinned to the top and nothing under it.
+  const inner = Math.max(titleBlock, detailsBlock);
+  const height = inner + pad * 2;
+  page.rect(MARGIN, MARGIN, CONTENT_W, height, GREEN);
+
+  const titleTop = MARGIN + pad + (inner - titleBlock) / 2;
+  page.text(MARGIN + pad, titleTop + size * 0.75, title, { font: "bold", size, color: WHITE });
+  if (sheet.subject) page.text(MARGIN + pad, titleTop + size * 0.75 + 16, sheet.subject, { font: "bold", size: 10.5, color: GREEN_SOFT });
+
+  const detailsTop = MARGIN + pad + (inner - detailsBlock) / 2;
   details.forEach(([label, value], i) => {
-    const base = MARGIN + pad + 9.8 + i * 15;
+    const base = detailsTop + 7 + i * row;
     page.text(bx, base, label, { size: 7.5, color: GREEN_SOFT });
     const shown = wrap(doc, value, "bold", 8.5, blockW - 64, 1)[0] ?? "";
     page.text(bx + 64, base, shown, { size: 8.5, font: "bold", color: WHITE });
   });
 
-  return MARGIN + height + 14;
+  return MARGIN + height + 12;
 }
 
 /** Where it started, what moved, where it ended: the figures under the band. */
@@ -322,7 +334,10 @@ function summary(page: PdfPage, sheet: StatementSheet, top: number): number {
   if (sheet.headings.moneyOut) boxes.push([sheet.headings.moneyOut, sheet.totalOut]);
   // Where a running balance is carried, where it ended. On a sheet that only
   // adds up (income, bills), the running total is the total already shown.
-  if (sheet.broughtForward !== null) boxes.push([`Closing ${sheet.headings.balance.toLowerCase()}`, sheet.closing]);
+  if (sheet.broughtForward !== null) {
+    const b = sheet.headings.balance;
+    boxes.push([b === "Balance" ? "Closing balance" : `${b} at the end`, sheet.closing]);
+  }
 
   const gap = 8;
   const w = (CONTENT_W - gap * (boxes.length - 1)) / boxes.length;

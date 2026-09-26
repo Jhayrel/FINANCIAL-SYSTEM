@@ -35,7 +35,8 @@ import { transferCost } from "./transfers";
 import { costOf, incomeOf } from "./totals";
 import {
   belongsIn,
-  buildStatement,
+  buildStatementBetween,
+  rangeOf,
   STATEMENT_LABEL,
   type StatementScope,
   type StatementType,
@@ -81,9 +82,12 @@ export interface StatementSheet {
 
 export interface SheetRequest {
   readonly type: StatementType;
+  /** The first month's year. */
   readonly year: number;
   readonly fromMonth: number;
   readonly toMonth: number;
+  /** The last month's year, when the statement runs across years. Defaults to `year`. */
+  readonly toYear?: number | undefined;
   /** Wallet statements. */
   readonly wallet?: string | undefined;
   /** Debt statements. */
@@ -130,11 +134,16 @@ export function kindOf(t: Transaction): string {
   return t.type;
 }
 
-/** "January to September 2026", or "September 2026" for one month. */
-export function periodLabel(year: number, fromMonth: number, toMonth: number): string {
-  const lo = Math.min(fromMonth, toMonth);
-  const hi = Math.max(fromMonth, toMonth);
-  return lo === hi ? `${MONTH_NAMES[lo - 1]} ${year}` : `${MONTH_NAMES[lo - 1]} to ${MONTH_NAMES[hi - 1]} ${year}`;
+/**
+ * "January to September 2026", "September 2026" for one month, and
+ * "June 2024 to May 2026" across years.
+ */
+export function periodLabel(year: number, fromMonth: number, toMonth: number, toYear: number = year): string {
+  const { from, to } = rangeOf({ year, month: fromMonth }, { year: toYear, month: toMonth });
+  const [fy, fm] = [Number(from.slice(0, 4)), Number(from.slice(5, 7))];
+  const [ty, tm] = [Number(to.slice(0, 4)), Number(to.slice(5, 7))];
+  if (fy !== ty) return `${MONTH_NAMES[fm - 1]} ${fy} to ${MONTH_NAMES[tm - 1]} ${ty}`;
+  return fm === tm ? `${MONTH_NAMES[fm - 1]} ${fy}` : `${MONTH_NAMES[fm - 1]} to ${MONTH_NAMES[tm - 1]} ${fy}`;
 }
 
 const isOpening = (t: Transaction): boolean => t.category === "Opening";
@@ -146,8 +155,10 @@ export function buildSheet(
   debts: readonly Debt[] = [],
 ): StatementSheet {
   const { type, year, fromMonth, toMonth } = request;
+  const toYear = request.toYear ?? year;
   const scope: StatementScope = { wallet: request.wallet, debts };
-  const statement = buildStatement(transactions, type, year, fromMonth, toMonth, reference, request.debtId, scope);
+  const range = rangeOf({ year, month: fromMonth }, { year: toYear, month: toMonth });
+  const statement = buildStatementBetween(transactions, type, range.from, range.to, reference, request.debtId, scope);
   const mode = MODE[type];
   const savings = new Set(reference.savings);
 
@@ -169,14 +180,17 @@ export function buildSheet(
     type === "debt" ? (request.debtId ? t.debtId === request.debtId : t.debtId !== undefined) : belongsIn(t, type, savings, scope);
 
   // Where the running column stood when the period began: every row before
-  // it, and the period's own opening rows, which say where it started.
+  // it, and the opening rows on its first day, which say where it started.
+  // An opening row later on (a statement running across a New Year) is a
+  // line of its own, on the day it happened, so the months before it keep
+  // the balances they had.
+  const foldedIn = (t: Transaction): boolean => isOpening(t) && t.date === statement.from;
   let broughtForward: Centavos | null = null;
   if (mode === "held" || mode === "owed") {
     let start = 0;
     for (const t of transactions) {
       const before = t.date < statement.from;
-      const openingInside = isOpening(t) && t.date >= statement.from && t.date <= statement.to;
-      if (!before && !openingInside) continue;
+      if (!before && !foldedIn(t)) continue;
       if (mode === "held") start += heldChange(t);
       else if (inScope(t)) start += owedChange(t);
     }
@@ -190,7 +204,7 @@ export function buildSheet(
   const lines: SheetLine[] = [];
 
   for (const { transaction: t } of statement.rows) {
-    if ((mode === "held" || mode === "owed") && isOpening(t)) continue;
+    if ((mode === "held" || mode === "owed") && foldedIn(t)) continue;
 
     let moneyIn = 0;
     let moneyOut = 0;
@@ -280,7 +294,7 @@ export function buildSheet(
     type,
     title: STATEMENT_LABEL[type],
     subject,
-    period: periodLabel(year, fromMonth, toMonth),
+    period: periodLabel(year, fromMonth, toMonth, toYear),
     from: statement.from,
     to: statement.to,
     headings,

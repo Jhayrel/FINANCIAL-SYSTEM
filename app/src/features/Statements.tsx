@@ -25,7 +25,7 @@ import { formatShort, MONTH_NAMES } from "../domain/dates";
 import type { Debt } from "../domain/debt";
 import { buildSheet, type SheetLine } from "../domain/statementSheet";
 import {
-  buildStatement,
+  buildStatementBetween,
   debtInScope,
   statementFilename,
   statementToCsv,
@@ -76,7 +76,9 @@ export function Statements({
   /** The year it opens on. Any year the ledger covers can be picked. */
   year: number;
 }) {
+  // A statement runs from any month of one year to any month of another.
   const [year, setYear] = useState(initialYear);
+  const [toYear, setToYear] = useState(initialYear);
   /** Newest first. An imported year appears here as soon as its rows do. */
   const years = useMemo(
     () => [...new Set([...yearsCovered(transactions), initialYear])].sort((a, b) => b - a),
@@ -90,12 +92,13 @@ export function Statements({
   const wallets = useMemo(() => {
     const named = new Set<string>([...reference.wallets, ...reference.savings]);
     for (const t of transactions) {
-      if (!t.date.startsWith(String(year))) continue;
+      const y = Number(t.date.slice(0, 4));
+      if (y < Math.min(year, toYear) || y > Math.max(year, toYear)) continue;
       if (t.fromWallet) named.add(t.fromWallet);
       if (t.toWallet) named.add(t.toWallet);
     }
     return [...named];
-  }, [reference, transactions, year]);
+  }, [reference, transactions, year, toYear]);
   const [wallet, setWallet] = useState(reference.wallets[0] ?? "");
   const [debtId, setDebtId] = useState(debts[0]?.id ?? "");
 
@@ -112,9 +115,11 @@ export function Statements({
   const [failed, setFailed] = useState("");
 
   const sheet = useMemo(
-    () => buildSheet(transactions, { type, year, fromMonth: from, toMonth: to, wallet, debtId: debtId || undefined }, reference, debts),
-    [transactions, type, year, from, to, wallet, debtId, reference, debts],
+    () => buildSheet(transactions, { type, year, fromMonth: from, toMonth: to, toYear, wallet, debtId: debtId || undefined }, reference, debts),
+    [transactions, type, year, from, to, toYear, wallet, debtId, reference, debts],
   );
+  const statementNow = () =>
+    buildStatementBetween(transactions, type, sheet.from, sheet.to, reference, debtId || undefined, { wallet, debts });
 
   // Statements that cover a kind of debt say so when there is none of that kind.
   const noDebtsOfKind =
@@ -122,7 +127,7 @@ export function Statements({
     !debts.some((d) => debtInScope(d, type));
 
   const downloadCsv = (): void => {
-    const statement = buildStatement(transactions, type, year, from, to, reference, debtId || undefined, { wallet, debts });
+    const statement = statementNow();
     saveFile(statementFilename(statement, "csv", sheet.subject), statementToCsv(statement), "text/csv;charset=utf-8");
   };
 
@@ -132,7 +137,7 @@ export function Statements({
     try {
       const { statementPdf } = await import("../pdf/statementPdf");
       const bytes = await statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() });
-      const statement = buildStatement(transactions, type, year, from, to, reference, debtId || undefined, { wallet, debts });
+      const statement = statementNow();
       saveFile(statementFilename(statement, "pdf", sheet.subject), bytes as BlobPart, "application/pdf");
     } catch (e) {
       setFailed(
@@ -237,30 +242,31 @@ export function Statements({
             </label>
           )}
 
-          {years.length > 1 && (
-            <label className="fms-stmtfield fms-stmtfield--narrow">
-              <span className="t-label" style={{ color: "var(--ink-2)" }}>Year</span>
-              <Select value={String(year)} onChange={(v) => setYear(Number(v))} options={years.map(String)} />
-            </label>
-          )}
-
-          <label className="fms-stmtfield">
+          <div className="fms-stmtfield fms-stmtfield--range" role="group" aria-label="From">
             <span className="t-label" style={{ color: "var(--ink-2)" }}>From</span>
-            <Select
-              value={MONTH_NAMES[from - 1] ?? ""}
-              onChange={(m) => setFrom(MONTH_NAMES.indexOf(m as (typeof MONTH_NAMES)[number]) + 1)}
-              options={[...MONTH_NAMES]}
-            />
-          </label>
+            <div className="fms-stmtpair">
+              <Select
+                value={MONTH_NAMES[from - 1] ?? ""}
+                onChange={(m) => setFrom(MONTH_NAMES.indexOf(m as (typeof MONTH_NAMES)[number]) + 1)}
+                options={[...MONTH_NAMES]}
+                ariaLabel="From month"
+              />
+              <Select value={String(year)} onChange={(v) => setYear(Number(v))} options={years.map(String)} ariaLabel="From year" />
+            </div>
+          </div>
 
-          <label className="fms-stmtfield">
+          <div className="fms-stmtfield fms-stmtfield--range" role="group" aria-label="To">
             <span className="t-label" style={{ color: "var(--ink-2)" }}>To</span>
-            <Select
-              value={MONTH_NAMES[to - 1] ?? ""}
-              onChange={(m) => setTo(MONTH_NAMES.indexOf(m as (typeof MONTH_NAMES)[number]) + 1)}
-              options={[...MONTH_NAMES]}
-            />
-          </label>
+            <div className="fms-stmtpair">
+              <Select
+                value={MONTH_NAMES[to - 1] ?? ""}
+                onChange={(m) => setTo(MONTH_NAMES.indexOf(m as (typeof MONTH_NAMES)[number]) + 1)}
+                options={[...MONTH_NAMES]}
+                ariaLabel="To month"
+              />
+              <Select value={String(toYear)} onChange={(v) => setToYear(Number(v))} options={years.map(String)} ariaLabel="To year" />
+            </div>
+          </div>
         </div>
 
         <div className="fms-stmttools fms-stmttools--issue">
