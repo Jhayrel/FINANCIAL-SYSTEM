@@ -17,6 +17,7 @@ import type { Transaction } from "./types";
 export type IssueSeverity = "error" | "warning" | "info";
 
 export type IssueCode =
+  | "debt-same-wallet"
   | "total-mismatch"
   | "uncategorised-fee"
   | "fee-row-with-amount"
@@ -182,6 +183,17 @@ export function checkIntegrity(transactions: readonly Transaction[]): Issue[] {
     if (t.type === "Transfer" && t.fromWallet && t.fromWallet === t.toWallet) {
       one(t, "transfer-same-wallet", "warning", `Transfer to the same wallet.`);
     }
+
+    /*
+     * A debt movement out of and into the same wallet moves no money, so the
+     * borrowing never reached the wallet and only the debt went up. Two Maya
+     * Credit borrowings were saved this way on 27 September 2026 ("Maya ->
+     * Maya"), and net worth fell by the whole ₱4,000.00 borrowed. Reported,
+     * never corrected: which side is right is the owner's to say.
+     */
+    if (t.type === "Debt" && t.debtEffect && t.fromWallet && t.fromWallet === t.toWallet) {
+      one(t, "debt-same-wallet", "warning", `A debt movement out of and into ${t.fromWallet}: it moves no money, so the wallet is wrong.`);
+    }
   }
 
   // Record numbers should be unique; the Excel renumbers on every write.
@@ -191,7 +203,14 @@ export function checkIntegrity(transactions: readonly Transaction[]): Issue[] {
     if (list) list.push(t);
     else byNumber.set(t.recordNumber, [t]);
   }
-  for (const [num, list] of byNumber) {
+  for (const [num, all] of byNumber) {
+    /*
+     * A row saved as part of another shares its number on purpose: a
+     * borrowing and the fees added with it, a payment and its interest
+     * (`partOf`). They are one entry, not two using one number.
+     */
+    const ids = new Set(all.map((t) => t.id));
+    const list = all.filter((t) => !(t.partOf && ids.has(t.partOf)));
     if (list.length > 1) {
       issues.push({
         code: "duplicate-record-number",

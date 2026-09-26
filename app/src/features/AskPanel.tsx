@@ -1680,11 +1680,20 @@ export function AskPanel({
       prev.map((t) => {
         if (!isOffer(t) || t.state !== "open") return t;
         const draft = t.proposal.draft;
-        const wants = draft.flow === "Revenue" ? "toWallet" : "fromWallet";
+        /*
+         * The side each card's money moves on. A borrowing lands in a wallet;
+         * putting the wallet on its "from" side as well made "Maya -> Maya",
+         * which moves nothing, and two Maya Credit borrowings were saved that
+         * way on 27 September 2026.
+         */
+        const side = draft.flow === "Debt" ? debtWalletDirection(draft.debtEffect) : draft.flow === "Revenue" ? "in" : "out";
+        if (side === "none") return t;
+        const wants = side === "in" ? "toWallet" : "fromWallet";
         if (draft[wants]) return t;
-        const value = source[wants];
+        const value = source.fromWallet || source.toWallet;
         if (!value) return t;
-        return { ...t, proposal: { ...t.proposal, draft: { ...draft, [wants]: value } } };
+        const other = side === "in" ? "fromWallet" : "toWallet";
+        return { ...t, proposal: { ...t.proposal, draft: { ...draft, [wants]: value, ...(draft.flow === "Debt" ? { [other]: "" } : {}) } } };
       }),
     );
 
@@ -6636,8 +6645,9 @@ function DebtCard({
   const { draft, state } = turn;
   const behalf = draft.behalf;
   const live = debts.filter((d) => !d.archived);
-  const named = draft.fromWallet || draft.toWallet;
   const direction = debtWalletDirection(draft.debtEffect);
+  // The wallet on the side this movement uses: a borrowing's "from" is never shown as where it lands.
+  const named = direction === "in" ? draft.toWallet : direction === "out" ? draft.fromWallet : draft.fromWallet || draft.toWallet;
   const chosen = debts.find((d) => d.id === draft.debtId);
   /*
    * Money lent is owed to you, so before a person is picked the choices are

@@ -827,13 +827,20 @@ export function draftToTransactions(
           : { category: "" as const, item: "" }
       : null;
 
+  /*
+   * A debt movement keeps only the wallet its effect moves money through. A
+   * borrowing saved with a "from" wallet as well as its "to" wallet moved
+   * nothing ("Maya -> Maya", 27 September 2026), whichever screen let the
+   * stray side in.
+   */
+  const debtSide = type === "Debt" && draft.debtEffect ? debtWalletDirection(draft.debtEffect) : null;
   const base: Transaction = {
     id,
     recordNumber,
     date: draft.date,
     type,
-    fromWallet: draft.fromWallet,
-    toWallet: draft.toWallet,
+    fromWallet: debtSide === "in" ? "" : draft.fromWallet,
+    toWallet: debtSide === "out" ? "" : draft.toWallet,
     category: opening
       ? ("Opening" as const)
       : derived
