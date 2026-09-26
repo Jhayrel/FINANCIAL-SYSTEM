@@ -605,15 +605,25 @@ at all.
 
 ### 3.15 A printed statement
 
-The PDF a statement exports (`pdf/statementPdf.ts`) follows the owner's Excel
-layout, asked for on 2026-09-26: a green band with the statement's name in
-capitals, the period and date issued on the left, who it is issued to and by
-on the right, and the system's logo and name. A table with a green heading
-row: Date, Description, Type, Wallet from, Wallet to, then the money columns
-and a running balance, the peso sign at the left of each money cell and the
-figure at the right, a dash for none. "Balance brought forward" first,
-"Totals" last, then **Nothing Follows**. Every page repeats the heading row
-and carries the logo, the name and "Page n of m" at the foot.
+The PDF a statement exports (`pdf/statementPdf.ts`). From the owner's Excel
+it keeps the green band with the statement's name in capitals, the period,
+the date issued and who it is issued to and by, the system's logo and name,
+a green heading row over the table, and **Nothing Follows** at the end.
+
+The first build also copied the Excel's grid: a peso sign and a dash in
+every empty cell, a rule between every column, every cell centred, five text
+columns squeezed until descriptions ran to three lines. The owner, the same
+day: "this is so ugly ... make it work cleaner looks". So the table is a
+statement's, not a sheet's:
+
+| Rule | Why |
+|---|---|
+| Columns are Date, Details, then the money | Details holds the description, with the entry's type and its wallets small and grey beneath, so a row reads in one glance and rarely wraps |
+| Text left, money right, rules only between rows | Column rules and centred text were most of the noise |
+| An empty money cell is empty | The currency is said once, under the table, not in every cell |
+| A summary strip under the band | Brought forward, in, out, and the closing figure in green: the four numbers a reader wants first |
+| Dates as "Jan 4" | A statement covers one year, and the year is in the band |
+| Negative figures in red, with the minus sign | The one place colour carries meaning on the page |
 
 Type is Inter, embedded: Regular and Bold with tabular digits and the peso
 sign (`tools/build_pdf_fonts.py`). The colours are fixed RGB values in that
