@@ -18,6 +18,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Icon, type IconName } from "./Icon";
+import { useBackToClose } from "../data/backButton";
 import { worstLevel, type Alert as Finding, type AlertArea, type AlertLevel } from "../domain/alerts";
 import type { SyncNotice } from "../domain/syncState";
 
@@ -83,6 +84,8 @@ export function Notifications({
   useEffect(() => {
     onOpenChange?.(open);
   }, [open, onOpenChange]);
+  // Back closes the list rather than leaving the app.
+  useBackToClose(open, () => setOpen(false));
   const [seen, setSeen] = useState<ReadonlySet<string>>(readSeen);
   const box = useRef<HTMLDivElement>(null);
 

@@ -30,6 +30,7 @@ import { readIssued, Statements } from "./features/Statements";
 import { Button, Card, EmptyState, Money, Notice } from "./components/primitives";
 import { Notifications } from "./components/Notifications";
 import { holdUpdates, useUpdateAvailable } from "./data/updateCheck";
+import { useBackToClose, useScreenHistory } from "./data/backButton";
 import { Icon, type IconName } from "./components/Icon";
 import { AskPanel } from "./features/AskPanel";
 import { useProposalSink } from "./features/useProposalSink";
@@ -1667,6 +1668,11 @@ export default function App() {
     // Leaving the form ends a correction: coming back to Add is a new entry, not the old row.
     if (id !== "add") setEditing(null);
   };
+
+  // Back goes to the screen before, and closes the More menu or the chat first (data/backButton.ts).
+  useScreenHistory(screen, (id) => go(id as Screen));
+  useBackToClose(moreOpen, () => setMoreOpen(false));
+  useBackToClose(chatOpen, () => setChatOpen(false));
 
   /** Where a finding is dealt with: its rows when it names some, otherwise its screen. */
   const openAlert = (finding: Finding): void => {

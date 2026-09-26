@@ -18,6 +18,8 @@
  */
 
 import { useEffect, useRef, type ReactNode } from "react";
+
+import { useBackToClose } from "../data/backButton";
 import { createPortal } from "react-dom";
 
 import { Icon } from "./Icon";
@@ -39,6 +41,8 @@ export function Sheet({
   const panel = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
+  // Back closes the sheet rather than leaving the app.
+  useBackToClose(true, () => close.current());
 
   useEffect(() => {
     const returnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;

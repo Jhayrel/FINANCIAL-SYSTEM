@@ -148,6 +148,7 @@ import {
 import { chatStore } from "../data/chatStore";
 import { readPicture } from "../data/ocr";
 import { holdUpdates } from "../data/updateCheck";
+import { useBackToClose } from "../data/backButton";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AttachmentNote } from "../domain/aiLog";
 import { clauseFor, verifyReading } from "../domain/verify";
@@ -1002,6 +1003,8 @@ export function AskPanel({
   };
   /** An attachment being looked at full size. Session only, never stored. */
   const [previewing, setPreviewing] = useState<Attachment | null>(null);
+  // Back closes a picture shown full size (data/backButton.ts).
+  useBackToClose(previewing !== null, () => setPreviewing(null));
   /** What has been corrected before, so the same guess is not made twice. */
   /**
    * The corrections, kept as events rather than as a finished lookup.
