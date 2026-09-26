@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildChart, chartLabel, isChartFollowUp, wantsChart, wantsReport } from "./charts";
+import { asksChartColour, buildChart, chartLabel, isChartFollowUp, wantsChart, wantsReport } from "./charts";
 import { totalsFor } from "./totals";
 import type { Transaction } from "./types";
 
@@ -232,6 +232,15 @@ describe("isChartFollowUp", () => {
     expect(isChartFollowUp("by wallet", true)).toBe(true);
   });
 
+  it("reads the short windows and a new shape as another chart", () => {
+    expect(isChartFollowUp("how about this week", true)).toBe(true);
+    expect(isChartFollowUp("today only", true)).toBe(true);
+    expect(isChartFollowUp("last 10 days", true)).toBe(true);
+    expect(isChartFollowUp("since july", true)).toBe(true);
+    expect(isChartFollowUp("as a line", true)).toBe(true);
+    expect(isChartFollowUp("make it a donut", true)).toBe(true);
+  });
+
   it("is nothing without a chart to follow", () => {
     expect(isChartFollowUp("How about this month?", false)).toBe(false);
   });
@@ -252,5 +261,20 @@ describe("isChartFollowUp", () => {
   it("is nothing for a message naming no period", () => {
     expect(isChartFollowUp("thanks", true)).toBe(false);
     expect(isChartFollowUp("", true)).toBe(false);
+  });
+});
+
+describe("asksChartColour", () => {
+  it("reads a request to recolour a chart", () => {
+    expect(asksChartColour("change the colors")).toBe(true);
+    expect(asksChartColour("make it blue")).toBe(true);
+    expect(asksChartColour("can you use different colours for the chart")).toBe(true);
+    expect(asksChartColour("adapt the colors")).toBe(true);
+  });
+
+  it("leaves money and questions about spending alone", () => {
+    expect(asksChartColour("chart my spending this week")).toBe(false);
+    expect(asksChartColour("spent 200 on a blue shirt")).toBe(false);
+    expect(asksChartColour("what does red mean")).toBe(false);
   });
 });

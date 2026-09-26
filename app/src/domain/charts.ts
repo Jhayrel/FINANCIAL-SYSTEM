@@ -25,7 +25,7 @@ import { editsBetween } from "./nearly";
 import { costOf, incomeOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 
-export type ChartBy = "item" | "month" | "wallet" | "category";
+export type ChartBy = "item" | "month" | "wallet" | "category" | "day";
 
 /**
  * How to draw it.
@@ -219,11 +219,13 @@ function kindOf(question: string, by: ChartBy): ChartKind {
      */
     return "pie";
   }
+  // Bars asked for by name are bars, over months and days as well.
+  if (/\b(bars?|bar chart|bar graph|columns?)\b/i.test(question)) return "bars";
   if (/\b(line|trend|over time|curve|movement|progression)\b/i.test(question)) {
-    return by === "month" ? "line" : "bars";
+    return by === "month" || by === "day" ? "line" : "bars";
   }
-  // A question about months is a series whether or not it says so.
-  return by === "month" ? "line" : "bars";
+  // A question about months or days is a series whether or not it says so.
+  return by === "month" || by === "day" ? "line" : "bars";
 }
 
 /** Which grouping the question asked for. Item is the useful default. */
@@ -264,6 +266,9 @@ function dimensionOf(question: string): ChartBy {
    */
   if (comparesMonths(question)) return "month";
 
+  // "daily", "day by day", "per day": one point a day.
+  if (/\b(daily|per day|by day|day by day|each day|every day|day to day)\b/i.test(question)) return "day";
+
   /**
    * "per month", not "this month".
    *
@@ -299,8 +304,17 @@ function dimensionOf(question: string): ChartBy {
   return "item";
 }
 
-/** The window the question asked about, and what to call it. */
-function windowOf(
+/**
+ * Whether a sentence names a window at all, as opposed to leaving
+ * `windowOf` to fall back to this month.
+ */
+export const namesWindow = (question: string): boolean =>
+  /\b(today|yesterday|week|weeks|month|months|year|quarter|q[1-4]|days?|since|ytd|20\d{2}(?:-\d{2}-\d{2})?|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b|\bthe\s+\d{1,2}(?:st|nd|rd|th)\b/i.test(
+    question,
+  );
+
+/** The window the question asked about, and what to call it. The same reading the charts use. */
+export function windowOf(
   question: string,
   asOf: IsoDate,
 ): { readonly from: IsoDate; readonly to: IsoDate; readonly name: string } {
@@ -316,6 +330,118 @@ function windowOf(
    * Counted back from the month it is now, inclusive, so three months in
    * August is June, July and August rather than May to July.
    */
+  const iso = (d: Date): IsoDate => d.toISOString().slice(0, 10);
+  const shift = (from: IsoDate, days: number): IsoDate => {
+    const at = new Date(`${from}T00:00:00Z`);
+    at.setUTCDate(at.getUTCDate() + days);
+    return iso(at);
+  };
+  const lastDay = (ym: string): IsoDate => {
+    const at = new Date(`${ym}-01T00:00:00Z`);
+    at.setUTCMonth(at.getUTCMonth() + 1);
+    at.setUTCDate(0);
+    return iso(at);
+  };
+  const short = (d: IsoDate): string => `${MONTHS[Number(d.slice(5, 7)) - 1]?.slice(0, 3) ?? ""} ${Number(d.slice(8, 10))}`;
+  const monthAt = (word: string): number =>
+    MONTHS.findIndex((m) => m.slice(0, 3).toLowerCase() === word.slice(0, 3).toLowerCase());
+  const MONTH_WORD = String.raw`(january|february|march|april|may|june|july|august|september|sept|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)`;
+
+  /**
+   * ── Any window, said any way ─────────────────────────────────────────────
+   *
+   * The owner, 26 September 2026: "what if I ask today only, or this week,
+   * or a range, all should work". Months, the year and the words for a day
+   * or a week were read; a range of days, a count of days, "since August",
+   * "last year" and one particular date were not, and each fell through to
+   * this month and drew a chart of a different question. Read here, before
+   * the month rules, because every one of them also names a month.
+   */
+  const isoRange = /\b(20\d{2}-\d{2}-\d{2})\s*(?:to|until|till|through|thru|[-\u2010-\u2015])\s*(20\d{2}-\d{2}-\d{2})\b/i.exec(question);
+  if (isoRange?.[1] && isoRange[2]) {
+    const [from, to] = [isoRange[1], isoRange[2]].sort() as [IsoDate, IsoDate];
+    return { from, to, name: `${short(from)} to ${short(to)} ${to.slice(0, 4)}` };
+  }
+
+  // "sep 1 to sep 15", "september 1-15", "sept 1 to 15", "oct 28 to nov 3".
+  const dayRange = new RegExp(
+    String.raw`\b${MONTH_WORD}\s+(\d{1,2})(?:st|nd|rd|th)?\s*(?:to|until|till|through|thru|[-\u2010-\u2015])\s*(?:${MONTH_WORD}\s+)?(\d{1,2})(?:st|nd|rd|th)?\b`,
+    "i",
+  ).exec(question);
+  if (dayRange?.[1] && dayRange[2] && dayRange[4]) {
+    const y = /\b(20\d{2})\b/.exec(question)?.[1] ?? year;
+    const m1 = monthAt(dayRange[1]) + 1;
+    const m2 = dayRange[3] ? monthAt(dayRange[3]) + 1 : m1;
+    const from = `${y}-${String(m1).padStart(2, "0")}-${dayRange[2].padStart(2, "0")}`;
+    const to = `${y}-${String(m2).padStart(2, "0")}-${dayRange[4].padStart(2, "0")}`;
+    const [a, b] = [from, to].sort() as [IsoDate, IsoDate];
+    return { from: a, to: b, name: `${short(a)} to ${short(b)} ${y}` };
+  }
+
+  // "from the 1st to the 15th", this month.
+  const ofThisMonth = /\b(?:from\s+)?the\s+(\d{1,2})(?:st|nd|rd|th)\s*(?:to|until|till|through|[-\u2010-\u2015])\s*(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\b/i.exec(question);
+  if (ofThisMonth?.[1] && ofThisMonth[2]) {
+    const ym = monthOf(asOf);
+    const [a, b] = [`${ym}-${ofThisMonth[1].padStart(2, "0")}`, `${ym}-${ofThisMonth[2].padStart(2, "0")}`].sort() as [IsoDate, IsoDate];
+    return { from: a, to: b, name: `${short(a)} to ${short(b)} ${year}` };
+  }
+
+  // One day: "on sept 20", "sep 20", "2026-09-20".
+  const oneIso = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(question);
+  if (oneIso?.[1]) return { from: oneIso[1], to: oneIso[1], name: short(oneIso[1]) };
+  const oneDay = new RegExp(String.raw`\b${MONTH_WORD}\s+(\d{1,2})(?:st|nd|rd|th)?\b(?!\s*(?:months?|days?|weeks?))`, "i").exec(question);
+  if (oneDay?.[1] && oneDay[2] && Number(oneDay[2]) <= 31) {
+    const y = /\b(20\d{2})\b/.exec(question)?.[1] ?? year;
+    const d = `${y}-${String(monthAt(oneDay[1]) + 1).padStart(2, "0")}-${oneDay[2].padStart(2, "0")}`;
+    return { from: d, to: d, name: short(d) };
+  }
+
+  // "the last 10 days", "past 14 days", "3 days".
+  const days = /\b(?:(?:past|last|previous|recent)\s+)?(\d{1,3})\s*days?\b/i.exec(question);
+  if (days?.[1]) {
+    const n = Math.max(1, Math.min(366, Number(days[1])));
+    return { from: shift(asOf, -(n - 1)), to: asOf, name: `the last ${n} ${n === 1 ? "day" : "days"}` };
+  }
+
+  // "since august", "since sep 5": from then to today.
+  const since = new RegExp(String.raw`\bsince\s+${MONTH_WORD}(?:\s+(\d{1,2})(?:st|nd|rd|th)?)?\b`, "i").exec(question);
+  if (since?.[1]) {
+    const y = /\b(20\d{2})\b/.exec(question)?.[1] ?? year;
+    const from = `${y}-${String(monthAt(since[1]) + 1).padStart(2, "0")}-${(since[2] ?? "1").padStart(2, "0")}`;
+    return { from, to: asOf, name: `${short(from)} to today` };
+  }
+
+  // A quarter: "this quarter", "last quarter", "q3".
+  const quarter = /\b(this|last|previous)\s+quarter\b|\bq([1-4])\b/i.exec(question);
+  if (quarter) {
+    const nowQ = Math.floor((Number(asOf.slice(5, 7)) - 1) / 3) + 1;
+    let q = quarter[2] ? Number(quarter[2]) : nowQ;
+    let y = Number(year);
+    if (quarter[1] && /last|previous/i.test(quarter[1])) {
+      q -= 1;
+      if (q === 0) {
+        q = 4;
+        y -= 1;
+      }
+    }
+    const first = `${y}-${String((q - 1) * 3 + 1).padStart(2, "0")}`;
+    const last = `${y}-${String(q * 3).padStart(2, "0")}`;
+    return { from: `${first}-01`, to: lastDay(last), name: `Q${q} ${y}` };
+  }
+
+  // "last year" is the year before, not this one.
+  if (/\b(last|previous)\s+year\b/i.test(question)) {
+    const y = String(Number(year) - 1);
+    return { from: `${y}-01-01`, to: `${y}-12-31`, name: y };
+  }
+
+  // "last week" is the seven days before these seven.
+  if (/\b(last|previous)\s+week\b/i.test(question) && !/\blast\s+\d/.test(question)) {
+    const from = shift(asOf, -13);
+    const to = shift(asOf, -7);
+    return { from, to, name: `${short(from)} to ${short(to)}` };
+  }
+
   const back = /\b(?:past|last|previous|recent)\s+(\d{1,2})\s*(month|months|week|weeks)\b/i.exec(
     question,
   );
@@ -497,8 +623,18 @@ export function isChartFollowUp(question: string, chartOnScreen: boolean): boole
     MONTHS.some((m) => new RegExp(`\\b${m}\\b`, "i").test(trimmed)) ||
     /\b(this month|last month|this year|last year|the year|ytd|all|everything|per month|monthly|by wallet|by category|by item)\b/i.test(
       trimmed,
+    ) ||
+    // The short windows: "how about this week", "today only", "last 10 days".
+    /\b(today|yesterday|this week|last week|past week|(last|past) \d+ days?|this quarter|last quarter|q[1-4]|since \w+|daily|by day|per day)\b/i.test(
+      trimmed,
     );
-  if (!namesPeriod) return false;
+
+  /*
+   * A new shape for the same chart: "as a line", "make it a donut". Not a
+   * period, but the chart on screen is exactly what it is about.
+   */
+  const namesShape = /\b(as|into|make it|in)( a| an)? (line|donut|doughnut|pie|bars?|bar chart|line chart)\b/i.test(trimmed);
+  if (!namesPeriod && !namesShape) return false;
 
   // "how much did I spend in May" is a question about a figure, not a
   // request to redraw. A follow-up is a fragment, not a sentence.
@@ -571,13 +707,22 @@ function focusOf(question: string, transactions: readonly Transaction[]): Focus 
   };
 }
 
+/** The calendar day after this one. */
+function nextDay(day: IsoDate): IsoDate {
+  const at = new Date(`${day}T00:00:00Z`);
+  at.setUTCDate(at.getUTCDate() + 1);
+  return at.toISOString().slice(0, 10);
+}
+
 export function buildChart(
   question: string,
   transactions: readonly Transaction[],
   asOf: IsoDate,
+  /** Money in or money out, when the caller has decided (income and spending drawn side by side). */
+  only?: "spending" | "revenue",
 ): Chart | null {
   const focus = focusOf(question, transactions);
-  const direction = directionOf(question);
+  const direction = only ?? directionOf(question);
   const valueOf = direction === "revenue" ? revenueOf : spendingOf;
   const word = direction === "revenue" ? "Income" : "Spending";
   /**
@@ -589,15 +734,27 @@ export function buildChart(
    * says whether it is growing, and a wallet goes across items, which says
    * what it was spent on.
    */
-  const asked = dimensionOf(question);
+  const period = windowOf(question, asOf);
+  /** How many days the window covers. The whole ledger is as long as a window gets. */
+  const span =
+    period.from < "1000"
+      ? Number.POSITIVE_INFINITY
+      : Math.round((Date.parse(`${period.to}T00:00:00Z`) - Date.parse(`${period.from}T00:00:00Z`)) / 86_400_000) + 1;
+  /*
+   * A trend over a short window is day by day. "this week's trend" grouped
+   * by month drew one point, which is not a trend.
+   */
+  const asked0 = dimensionOf(question);
+  const asked = asked0 === "month" && span <= 45 && !comparesMonths(question) ? "day" : asked0;
   const by: ChartBy =
     focus.item && asked === "item"
-      ? "month"
+      ? span <= 45
+        ? "day"
+        : "month"
       : focus.wallet && asked === "wallet"
         ? "item"
         : asked;
 
-  const period = windowOf(question, asOf);
 
   /**
    * The side the money actually moved through.
@@ -628,6 +785,8 @@ export function buildChart(
     switch (by) {
       case "month":
         return monthOf(t.date);
+      case "day":
+        return t.date;
       case "wallet":
         // The side the money moved through, so an income chart grouped by
         // wallet does not put every row under "(none)": a Revenue row has no
@@ -653,12 +812,25 @@ export function buildChart(
 
   if (groups.size === 0) return null;
 
+  /*
+   * A quiet day is part of a trend. "this week's spending trend" with one
+   * spending day drew a single dot, because only days with money on them
+   * had a row. Every day of a short window gets one, at zero when nothing
+   * moved, up to today: a day that has not happened yet is not a zero.
+   */
+  if (by === "day" && span <= 62) {
+    const last = period.to < asOf ? period.to : asOf;
+    for (let d = period.from; d <= last; d = nextDay(d)) {
+      if (!groups.has(d)) groups.set(d, { value: 0, count: 0 });
+    }
+  }
+
   const all = [...groups.entries()]
-    // Months read in order; everything else reads largest first.
-    .sort((a, b) => (by === "month" ? a[0].localeCompare(b[0]) : b[1].value - a[1].value));
+    // Months and days read in order; everything else reads largest first.
+    .sort((a, b) => (by === "month" || by === "day" ? a[0].localeCompare(b[0]) : b[1].value - a[1].value));
 
   const total = all.reduce((sum, [, g]) => sum + g.value, 0);
-  const kept = by === "month" ? all : all.slice(0, MOST_ROWS);
+  const kept = by === "month" || by === "day" ? all : all.slice(0, MOST_ROWS);
   const largest = Math.max(...kept.map(([, g]) => g.value), 1);
 
   return {
@@ -681,7 +853,7 @@ export function buildChart(
     by,
     kind: kindOf(question, by),
     rows: kept.map(([label, g]) => ({
-      label: by === "month" ? monthName(label) : label,
+      label: by === "month" ? monthName(label) : by === "day" ? `${MONTHS[Number(label.slice(5, 7)) - 1]?.slice(0, 3) ?? ""} ${Number(label.slice(8, 10))}` : label,
       value: g.value,
       share: g.value / largest,
       count: g.count,
@@ -710,6 +882,7 @@ export const chartLabel = (centavos: number): string =>
  */
 export function chartInWords(chart: Chart): string {
   const top = chart.rows
+    .filter((r) => r.value > 0)
     .slice(0, 5)
     .map((r) => `${r.label} ${chartLabel(r.value)}`)
     .join(", ");
@@ -772,4 +945,34 @@ export function withoutTheFilePart(question: string): string {
    * whatever it feels like.
    */
   return left.length >= 8 ? left : "How is this month going?";
+}
+
+/**
+ * Asking for a chart in other colours: "make it blue", "change the colors".
+ *
+ * A chart's colour is the direction of its money (rule D3): red is money
+ * out, green is money in, and the same hue means the same thing on every
+ * screen and in both themes. Recolouring on request would make a blue bar
+ * mean nothing and a red one mean something else, so the answer says why
+ * and offers what can change: the shape.
+ */
+export function asksChartColour(question: string): boolean {
+  const q = question.toLowerCase();
+  const colourWord = /\b(colou?rs?|colou?red|shades?|palette|theme)\b/.test(q);
+  const hue = /\b(blue|purple|violet|pink|orange|yellow|teal|cyan|black|white|rainbow)\b/.test(q);
+  const change = /\b(change|make|turn|use|switch|different|another|other|new|adapt|set|paint)\b/.test(q);
+  return (colourWord && change) || (hue && /\b(make|turn|paint|in|to)\b/.test(q) && /\b(it|chart|graph|bars?|line|pie|donut)\b/.test(q));
+}
+
+/**
+ * Money in and money out asked for together: "income vs spending", "cash
+ * flow", "in and out". One chart can only be one direction (rule D3: its
+ * colour says which way the money went), so this is drawn as two, each in
+ * its own colour, rather than one of them silently.
+ */
+export function wantsBothDirections(question: string): boolean {
+  const q = question.toLowerCase();
+  const incoming = /\b(income|revenue|earnings|money in|received|allowance|salary)\b/.test(q);
+  const outgoing = /\b(spending|spent|expenses?|money out|outflow)\b/.test(q);
+  return (incoming && outgoing) || /\b(cash ?flow|in and out|ins and outs|coming in and going out)\b/.test(q);
 }
