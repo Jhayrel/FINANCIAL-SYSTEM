@@ -124,7 +124,7 @@ export function Bin({
 
   return (
     <div className="fms-bin">
-      <Card
+      <Card page
         title="Recycle bin"
         subtitle="Deleted transactions stay here until you restore them"
         action={
@@ -252,7 +252,12 @@ export function Bin({
                       </div>
                       <div className="t-micro" style={{ color: "var(--ink-3)" }}>
                         #{String(t.recordNumber).padStart(4, "0")} · {formatShort(t.date)}
-                        {t.deletedAt && ` · deleted ${t.deletedAt.slice(0, 10)}`}
+                        {t.deletedAt && (
+                          <>
+                            {" · "}
+                            <span style={{ whiteSpace: "nowrap" }}>deleted {t.deletedAt.slice(0, 10)}</span>
+                          </>
+                        )}
                       </div>
                     </div>
 

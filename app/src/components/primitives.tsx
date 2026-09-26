@@ -282,6 +282,7 @@ export function Card({
   action,
   children,
   padded = true,
+  page = false,
   style,
 }: {
   title?: ReactNode;
@@ -290,10 +291,18 @@ export function Card({
   children: ReactNode;
   /** Set false when the body is a table that should meet the card edges. */
   padded?: boolean;
+  /**
+   * The screen's own container rather than one card among several.
+   *
+   * On a phone it is the page: no border, edge to edge, and its title, which
+   * the top bar already says, is left out. A card inside a padded page inside
+   * a screen read as a computer's screen shrunk (owner, 26 September 2026).
+   */
+  page?: boolean;
   style?: CSSProperties;
 }) {
   return (
-    <section className="fms-section" style={style}>
+    <section className={page ? "fms-section fms-section--page" : "fms-section"} style={style}>
       {(title || action) && (
         <header className="fms-section-head">
           <div className="fms-section-titles">

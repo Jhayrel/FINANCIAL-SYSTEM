@@ -225,7 +225,7 @@ export function Activity({
         </Alert>
       )}
 
-      <Card
+      <Card page
         title="What happened"
         subtitle="Newest first. Nothing here can be edited or deleted, by you or by anything else."
         action={

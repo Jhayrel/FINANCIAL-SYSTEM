@@ -898,19 +898,52 @@
  * one less than that, which is how the tiles came to read "↑ Spendi" and
  * "↓ Revenu". Two rows of two keeps every word whole.
  */
-@container entry (max-width: 400px) {
+/*
+ * On a phone, one row of five, each a symbol over its name.
+ *
+ * Two and two and one took 200px, a quarter of a phone's screen, before the
+ * first field (owner, 26 September 2026). A phone's own pickers are a row of
+ * icons with a word under each, so this is one: the hint under the name goes,
+ * the symbol goes above it, and Amount is on screen from the first frame.
+ */
+@container entry (max-width: 440px) {
   .fms-flowrow {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
   }
 
   .fms-flowrow > .fms-flowtile,
   .fms-flowrow > .fms-flowtile:nth-child(n + 4) {
     grid-column: auto;
+    align-items: center;
+    min-height: 58px;
+    padding: 6px 2px;
+    text-align: center;
   }
 
-  .fms-flowrow > .fms-flowtile:last-child {
-    grid-column: span 2;
+  .fms-flowtile .fms-flowname {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-size: 12.5px;
+    line-height: 16px;
+    white-space: nowrap;
   }
+
+  .fms-flowtile .fms-flowglyph {
+    margin: 0;
+    font-size: 17px;
+    line-height: 18px;
+  }
+
+  .fms-flowtile .fms-flowhint {
+    display: none;
+  }
+}
+
+.fms-flowglyph {
+  margin-right: 5px;
 }
 
 /* Kept for the legacy screens under features/_legacy. */
@@ -1559,7 +1592,7 @@
   .fms-tab { flex: 0 0 auto; padding: 0 var(--space-3); }
 }
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-tab { min-height: 44px; }
 }
 
@@ -2245,7 +2278,7 @@
 .fms-menu-item[aria-selected="true"] { font-weight: 600; }
 .fms-menu-item + .fms-menu-item { border-top: 1px solid var(--hairline); }
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-menu-item { min-height: 44px; }
 }
 
@@ -3858,7 +3891,7 @@ button.fms-recent-row:disabled {
   font-variant-numeric: tabular-nums;
 }
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-segmented--scroll .fms-seg {
     min-height: 44px;
   }
@@ -4302,6 +4335,17 @@ button.fms-recent-row:disabled {
   background: var(--brand-50);
 }
 
+/* Stacked, the row is one block, so the whole row is marked rather than each field. */
+@container (max-width: 600px) {
+  .fms-rtable tr.fms-budgetplan-on {
+    background: var(--brand-50);
+  }
+
+  .fms-rtable tr.fms-budgetplan-on > td {
+    background: none;
+  }
+}
+
 .fms-monthlink {
   padding: 0;
   border: 0;
@@ -4529,7 +4573,7 @@ button.fms-recent-row:disabled {
   text-decoration-color: currentColor;
 }
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-linkbtn {
     min-height: 44px;
   }
@@ -4649,7 +4693,7 @@ button.fms-recent-row:disabled {
   background: var(--brand-700);
 }
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-period-step {
     width: 44px;
     height: 44px;
@@ -6595,17 +6639,24 @@ textarea.fms-askinput {
  * to what a phone app uses and cards give up a little more of their padding.
  * Fields keep 16px, or iOS zooms the page on every tap into one. Touch
  * targets are untouched: rule D10's 44px still holds on a touch screen.
+ *
+ * The small print went too far (owner, 26 September 2026: "make the font
+ * sized good"): a record number at 10px and a field label at 11px are
+ * smaller than any phone app's own small print. The headings keep their step
+ * down; body text is 14px like a phone app's, and nothing is under 12px.
  */
 @media (max-width: 639px) {
-  .t-body { font-size: 13.5px; line-height: 19px; }
-  .t-display-m { font-size: 15px; line-height: 20px; }
-  .t-caption { font-size: 12px; line-height: 16px; }
-  .t-label { font-size: 11px; line-height: 14px; }
-  .t-micro { font-size: 10px; line-height: 13px; }
-  .t-num-xl { font-size: 22px; line-height: 28px; }
-  .t-num-l { font-size: 16px; line-height: 22px; }
-  .t-num { font-size: 13.5px; }
-  .t-num-s { font-size: 12px; line-height: 16px; }
+  .t-body,
+  .t-body-strong { font-size: 14px; line-height: 20px; }
+  .t-display-m { font-size: 16px; line-height: 22px; }
+  .t-caption { font-size: 13px; line-height: 18px; }
+  .t-label { font-size: 12px; line-height: 16px; }
+  .t-micro { font-size: 12px; line-height: 16px; }
+  .t-th { font-size: 12px; line-height: 16px; }
+  .t-num-xl { font-size: 24px; line-height: 30px; }
+  .t-num-l { font-size: 18px; line-height: 24px; }
+  .t-num { font-size: 14px; }
+  .t-num-s { font-size: 13px; line-height: 18px; }
 
   :is(input, select, textarea).t-body,
   .fms-control {
@@ -6881,7 +6932,7 @@ textarea.fms-askinput {
   overflow-wrap: anywhere;
 }
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-guesschip {
     min-height: 44px;
   }
@@ -7347,7 +7398,7 @@ textarea.fms-askinput {
   color: var(--ink-2);
 }
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-ical-pick,
   .fms-ical-tab {
     min-height: 44px;
@@ -7553,7 +7604,7 @@ textarea.fms-askinput {
   font-weight: 600;
 }
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-segpill {
     min-height: 44px;
   }
@@ -7625,4 +7676,453 @@ textarea.fms-askinput {
 /* A picked range reads as a light wash over the spending shades, not a brown mix. */
 .fms-ical-day.is-in::after {
   background: color-mix(in srgb, var(--brand-700) 12%, transparent);
+}
+
+/* ══ The phone, as a phone (owner, 26 September 2026) ═══════════════════════
+ *
+ * "make sure its not a scaled down version of the pc version": every screen
+ * was a card inside a padded page, every control a desktop's 32px, and every
+ * list row carried its actions as small print. What follows makes the phone
+ * work the way phones do: the screen is the page, a row is tapped for what
+ * can be done with it and held to pick it, the main action is at the bottom
+ * right under the thumb, and nothing to touch is under 44px.
+ */
+
+/* Rule D10 by width too, not only by pointer: a phone-sized window is a phone. */
+@media (max-width: 639px) {
+  .fms-btn--sm,
+  .fms-btn--md {
+    min-height: 44px;
+  }
+
+  .fms-btn--icon.fms-btn--sm,
+  .fms-btn--icon.fms-btn--md {
+    width: 44px;
+  }
+
+  .fms-pill,
+  .fms-tab,
+  .fms-seg {
+    min-height: 44px;
+  }
+
+  .fms-pill {
+    padding: 0 var(--space-4);
+  }
+
+  /* A text button is a button: the words stay small, the target does not. */
+  .fms-linkbtn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /*
+   * A name that opens something (an item on Budget, a month in the year's
+   * table) is 44px to hit without being 44px of layout: the padding reaches
+   * out and the margin gives the space back, so the line it sits on does not
+   * grow.
+   */
+  button.fms-linkish,
+  .fms-monthlink {
+    padding-block: 12px;
+    margin-block: -12px;
+  }
+
+  .fms-pill,
+  .fms-tab {
+    min-width: 44px;
+  }
+
+  /*
+   * The screen's own card is the page.
+   *
+   * The top bar already names the screen, so the card's title and subtitle
+   * ("Database, Every transaction, searchable") are left out, and the rows
+   * run from edge to edge. Visible overflow, because a clipping card stops
+   * the picked-rows bar from staying at the bottom of the screen.
+   */
+  .fms-main .fms-section.fms-section--page {
+    margin-inline: calc(var(--space-3) * -1);
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .fms-main .fms-section--page > .fms-section-head {
+    display: none;
+  }
+}
+
+/* ── Database rows on a phone: tap for the sheet, hold to pick ─────────────── */
+
+.fms-dbrow-tap {
+  display: block;
+  width: 100%;
+  min-height: 64px;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* Holding a row picks it; the phone's own text selection and callout would get there first. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+.fms-dbrow-tap:active {
+  background: var(--surface-hover);
+}
+
+.fms-dbrow-tap:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.fms-dbrow:has(.fms-dbrow-tap) {
+  padding: 0;
+}
+
+.fms-dbrow--warn {
+  background: var(--warn-bg);
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.fms-dbrow--picked {
+  background: var(--brand-100);
+}
+
+.fms-dbrow-issue {
+  margin: var(--space-2) 0 0;
+  color: var(--warn);
+}
+
+.fms-dbcheck {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  border: 2px solid var(--hairline-strong);
+  border-radius: var(--radius-full);
+  color: var(--on-brand);
+}
+
+.fms-dbcheck--on {
+  background: var(--brand-700);
+  border-color: var(--brand-700);
+}
+
+.fms-dbcheck + .fms-dbrow-text {
+  flex: 1 1 7rem;
+}
+
+/* The picked rows' bar: pinned above the phone bar like the Save bar, Move to bin on the right. */
+.fms-selbar {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .fms-selbar {
+    position: sticky;
+    bottom: calc(var(--main-pad-b, 0px) * -1);
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4) calc(var(--space-3) + var(--space-4));
+    background: var(--surface);
+    border-top: 1px solid var(--hairline);
+  }
+
+  .fms-selbar-count {
+    flex: 1 1 auto;
+    display: grid;
+    min-width: 0;
+  }
+
+  .fms-selbar > .fms-btn {
+    min-height: 44px;
+  }
+}
+
+/* ── A sheet from the bottom ─────────────────────────────────────────────── */
+
+.fms-scrim--sheet {
+  z-index: 39;
+}
+
+.fms-rowsheet {
+  position: fixed;
+  inset-inline: max(0px, calc((100vw - 560px) / 2));
+  bottom: 0;
+  z-index: 40;
+  display: grid;
+  gap: var(--space-3);
+  max-height: 88dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  outline: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fms-rowsheet { animation: fms-sheet-in var(--motion-sheet) var(--ease-sheet); }
+}
+
+.fms-rowsheet .fms-sheethandle {
+  margin-bottom: 0;
+}
+
+.fms-rowsheet-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.fms-rowsheet-titles {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fms-rowsheet-sub {
+  margin: 2px 0 0;
+  color: var(--ink-3);
+}
+
+.fms-rowsheet-close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: calc(var(--space-2) * -1) calc(var(--space-2) * -1) 0 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-rowsheet-close:hover {
+  background: var(--surface-hover);
+}
+
+.fms-rowsheet-body {
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* Side by side, the main one last: under the right thumb, and each a full 48px. */
+.fms-rowsheet-actions {
+  position: sticky;
+  bottom: calc((var(--space-4) + env(safe-area-inset-bottom, 0px)) * -1);
+  display: flex;
+  gap: var(--space-2);
+  margin: 0 calc(var(--space-4) * -1);
+  padding: var(--space-3) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-rowsheet-actions > .fms-btn {
+  flex: 1 1 0;
+  min-height: 48px;
+}
+
+.fms-rowfacts {
+  display: grid;
+  margin: 0;
+}
+
+.fms-rowfacts > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-rowfacts dt {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+}
+
+.fms-rowfacts dd {
+  margin: 0;
+  min-width: 0;
+  text-align: right;
+  font-weight: 500;
+}
+
+/* ── The AI tab on a phone: the screen is the conversation ────────────────── */
+
+/* The camera is a phone's: a computer's webcam is no way to read a receipt. */
+.fms-askcamera {
+  display: none;
+}
+
+@media (max-width: 639px), (max-width: 1023px) and (pointer: coarse) {
+  .fms-askcamera {
+    display: grid;
+  }
+}
+
+@media (max-width: 639px) {
+  /*
+   * No card around it and no "Ask" heading over it: the top bar already says
+   * AI assistant. The thread runs edge to edge, and the composer sits on the
+   * surface at the bottom, above the navigation, with Send at the right.
+   */
+  .fms-aiscreen {
+    margin: calc(var(--space-3) * -1);
+    margin-bottom: calc(var(--main-pad-b, 0px) * -1);
+  }
+
+  .fms-aiscreen > .fms-ask {
+    gap: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .fms-aiscreen .fms-askhead {
+    display: none;
+  }
+
+  /* A conversation starts at the bottom, by the composer and the thumb, like every chat. */
+  .fms-aiscreen .fms-thread {
+    padding: var(--space-3);
+    align-content: start;
+    align-content: safe end;
+  }
+
+  .fms-aiscreen .fms-askform {
+    align-items: flex-end;
+    padding: var(--space-2) var(--space-3) calc(var(--space-3) + var(--space-4));
+    background: var(--surface);
+    border-top: 1px solid var(--hairline);
+  }
+
+  .fms-aiscreen .fms-askform > .fms-btn {
+    min-height: 44px;
+    padding-inline: var(--space-4);
+  }
+
+  .fms-aiscreen .fms-askinput {
+    min-height: 44px;
+    padding: 11px var(--space-3);
+    font-size: 16px;
+    line-height: 22px;
+    border-radius: 22px;
+  }
+
+  .fms-aiscreen .fms-attach {
+    border-radius: var(--radius-full);
+  }
+
+  /* The strips around the composer keep the page's own margins. */
+  .fms-aiscreen .fms-ask > :not(.fms-thread):not(.fms-askform) {
+    margin-inline: var(--space-3);
+  }
+
+  /* Clearing the view is a toolbar action: top right, out of the way of the composer. */
+  .fms-aiscreen .fms-ask > .fms-linkish {
+    order: -1;
+    align-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-block: 0;
+  }
+}
+
+/* ── Debt on a phone ─────────────────────────────────────────────────────── */
+
+/*
+ * The card's buttons in two even columns, the main one top right under the
+ * thumb: Record borrowing and Record payment side by side, Add a charge and
+ * Details under them. A wrapping row left the main action at the far left
+ * and the others in whatever order the width allowed.
+ */
+@media (max-width: 639px) {
+  .fms-debtactions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-flow: row dense;
+  }
+
+  .fms-debtactions > .fms-btn--primary {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .fms-debtactions > .fms-debtactions-spacer {
+    display: none;
+  }
+
+  .fms-debtactions > .fms-linkbtn {
+    justify-content: center;
+  }
+}
+
+/* A movement's note is the long field: a line of its own, not a clipped half. */
+@container (max-width: 600px) {
+  .fms-rtable td.fms-debtnotecell {
+    grid-column: 1 / -1;
+    max-width: none;
+    white-space: normal;
+  }
+}
+
+/* ── The Bin on a phone ──────────────────────────────────────────────────── */
+
+/*
+ * The amount beside the name, like every other list, and the two buttons
+ * under it at half the width each: Delete forever on the left, Restore on
+ * the right under the thumb. Restore sat on the left, so the thumb's easy
+ * reach was the one button that cannot be taken back.
+ */
+@media (max-width: 639px) {
+  .fms-binlist .fms-binactions {
+    display: contents;
+  }
+
+  .fms-binlist .fms-dbrow-text {
+    order: 1;
+    flex: 1 1 0;
+  }
+
+  .fms-binlist .fms-binactions > [class^="t-num"] {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .fms-binlist .fms-binactions > .fms-btn {
+    flex: 1 1 40%;
+    margin-top: var(--space-2);
+  }
+
+  .fms-binlist .fms-binactions > .fms-btn--danger {
+    order: 3;
+  }
+
+  .fms-binlist .fms-binactions > .fms-btn--primary {
+    order: 4;
+  }
 }

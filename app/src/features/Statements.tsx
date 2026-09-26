@@ -144,7 +144,7 @@ export function Statements({
 
   return (
     <div className="fms-db">
-      <Card title="Statements" subtitle="Five views over the same ledger" padded={false}>
+      <Card page title="Statements" subtitle="Five views over the same ledger" padded={false}>
         <div className="fms-stmttools">
           <label className="fms-stmtfield">
             <span className="t-label" style={{ color: "var(--ink-2)" }}>Statement type</span>

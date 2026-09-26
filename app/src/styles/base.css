@@ -146,7 +146,7 @@ button { cursor: pointer; }
  * `textarea[class]` because the composer carries a type class, and a bare
  * element selector would lose to it.
  */
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
   textarea[class],
   textarea,

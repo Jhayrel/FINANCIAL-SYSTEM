@@ -1485,12 +1485,12 @@ export function AddTransaction({
                   color: active ? `var(--flow-${f.tone}-text)` : "var(--ink)",
                 }}
               >
-                <span className="t-body-strong">
-                  <span aria-hidden style={{ marginRight: 5 }}>{f.glyph}</span>
+                <span className="t-body-strong fms-flowname">
+                  <span aria-hidden className="fms-flowglyph">{f.glyph}</span>
                   {f.id}
                 </span>
                 <span
-                  className="t-micro"
+                  className="t-micro fms-flowhint"
                   style={{ color: active ? `var(--flow-${f.tone}-text)` : "var(--ink-3)" }}
                 >
                   {f.hint}

@@ -107,6 +107,7 @@ import {
   type Chart,
 } from "../domain/charts";
 import { rampFor } from "../components/charts";
+import { Icon } from "../components/Icon";
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
@@ -1033,6 +1034,8 @@ export function AskPanel({
   }, [uid]);
   const threadRef = useRef<HTMLDivElement>(null);
   const pickerRef = useRef<HTMLInputElement>(null);
+  /** The phone's camera, opened straight to taking a picture (owner, 26 September 2026). */
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   /**
    * Mark a card added once the form saves the row it supplied.
@@ -5022,6 +5025,26 @@ export function AskPanel({
             e.target.value = "";
           }}
         />
+        {/*
+          The camera, on a phone only.
+
+          "in phone only add access to camera like direct to take picture in
+          ai" (owner, 26 September 2026). `capture` opens the camera itself
+          rather than the file picker, so a receipt is one tap and one shot
+          from being read. A computer has no camera worth pointing at a
+          receipt, so the button is not drawn there (layout.css).
+        */}
+        <input
+          ref={cameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={(e) => {
+            void attach(e.target.files);
+            e.target.value = "";
+          }}
+        />
         <button
           type="button"
           className="fms-attach"
@@ -5062,6 +5085,16 @@ export function AskPanel({
           aria-label={attached ? "A note about the attached files" : "Ask a question, or type an entry"}
           disabled={busy}
         />
+        <button
+          type="button"
+          className="fms-attach fms-askcamera"
+          aria-label="Take a photo"
+          title="Take a photo"
+          disabled={busy || files.length >= limits.maxCount}
+          onClick={() => cameraRef.current?.click()}
+        >
+          <Icon name="camera" size={22} />
+        </button>
         {busy ? (
           /*
             A way out of the queue.

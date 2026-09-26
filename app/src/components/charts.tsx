@@ -216,7 +216,7 @@ export function AreaChart({
             {ticks(max).map((t) => (
               <g key={t}>
                 <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--hairline)" strokeWidth="1" />
-                <text x={padL - 8} y={y(t) + 4} textAnchor="end" fill="var(--ink-3)" style={{ fontSize: 11 }}>
+                <text x={padL - 8} y={y(t) + 4} textAnchor="end" fill="var(--ink-3)" className="fms-axislabel">
                   {abbreviate(t)}
                 </text>
               </g>
@@ -244,7 +244,7 @@ export function AreaChart({
             {labels.map((l, i) =>
               // Skip labels rather than rotating them.
               i % every === 0 ? (
-                <text key={l} x={x(i)} y={H - 6} textAnchor="middle" fill="var(--ink-3)" style={{ fontSize: 11 }}>
+                <text key={l} x={x(i)} y={H - 6} textAnchor="middle" fill="var(--ink-3)" className="fms-axislabel">
                   {l}
                 </text>
               ) : null,
@@ -313,7 +313,7 @@ export function BarChart({
             {ticks(max).map((t) => (
               <g key={t}>
                 <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--hairline)" strokeWidth="1" />
-                <text x={padL - 8} y={y(t) + 4} textAnchor="end" fill="var(--ink-3)" style={{ fontSize: 11 }}>
+                <text x={padL - 8} y={y(t) + 4} textAnchor="end" fill="var(--ink-3)" className="fms-axislabel">
                   {abbreviate(t)}
                 </text>
               </g>
@@ -343,7 +343,7 @@ export function BarChart({
                     rx="3"
                   />
                   {i % every === 0 && (
-                    <text x={cx} y={H - 6} textAnchor="middle" fill="var(--ink-3)" style={{ fontSize: 11 }}>
+                    <text x={cx} y={H - 6} textAnchor="middle" fill="var(--ink-3)" className="fms-axislabel">
                       {l}
                     </text>
                   )}

@@ -89,7 +89,7 @@
 .fms-btn--icon.fms-btn--lg { width: 48px; }
 
 /* Rule D10: 44px of target on a touch screen, whatever size the button is drawn. */
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-btn--sm,
   .fms-btn--md {
     min-height: 44px;
@@ -293,7 +293,7 @@
   color: var(--ink);
 }
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-search-input {
     height: 44px;
   }
@@ -350,7 +350,7 @@
 }
 
 /* 24px tall is not a thumb target, so the hit area reaches past the drawing. */
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-switch::after {
     content: "";
     position: absolute;
@@ -713,7 +713,7 @@
   font-weight: 600;
 }
 
-@media (pointer: coarse) {
+@media (pointer: coarse), (max-width: 639px) {
   .fms-pill {
     min-height: 44px;
   }
@@ -976,9 +976,44 @@
     width: 100%;
   }
 
+  /*
+   * Two fields to a line, not one.
+   *
+   * Every cell on its own labelled line made a debt movement six lines tall
+   * ("What, Wallet, Amount, Owed after", then Correct on a seventh), so a
+   * phone showed three movements to a screen (owner, 26 September 2026).
+   * Side by side they take half the height. The row's name heads it on the
+   * left, and its action, the one cell with no label, sits opposite it on
+   * the right, under the thumb.
+   */
   .fms-rtable tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-auto-flow: row dense;
+    gap: 2px var(--space-5);
     padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--hairline);
+  }
+
+  /* The row's name has the first line to itself, unless an action shares it. */
+  .fms-rtable tr > td.fms-rhead {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .fms-rtable tr:has(> td:not([data-label]):not(.fms-rhead)) > td.fms-rhead {
+    grid-column: 1;
+  }
+
+  .fms-rtable tr > td:not([data-label]):not(.fms-rhead) {
+    grid-column: 2;
+    grid-row: 1;
+    justify-content: flex-end;
+  }
+
+  /* A row with no name of its own: its cells start on the first line. */
+  .fms-rtable tr:not(:has(> td.fms-rhead)) > td:not([data-label]) {
+    grid-row: auto;
   }
 
   .fms-rtable tbody tr:last-child {
@@ -987,6 +1022,7 @@
 
   .fms-rtable td,
   .fms-rtable .fms-rnum {
+    width: auto;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -1034,6 +1070,18 @@
   }
 }
 
+/* Too narrow for two: one field to a line again. */
+@container (max-width: 340px) {
+  .fms-rtable tr {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fms-rtable tr > td:not([data-label]):not(.fms-rhead) {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+
 /* ══ Ranking bars, §3.9 ═════════════════════════════════════════════════════ */
 
 .fms-rankhead {
@@ -1055,4 +1103,33 @@
 
 .fms-rankhead > .t-num-s {
   margin-left: auto;
+}
+
+/* Chart axis labels: caption-sized, and at least 12px on a phone (owner, 26 September 2026). */
+.fms-axislabel {
+  font-size: 11px;
+}
+
+@media (max-width: 639px) {
+  .fms-axislabel {
+    font-size: 12px;
+  }
+}
+
+/*
+ * In a narrow card the action stays beside the title, on the right.
+ *
+ * The title's 14rem basis left no room for "Open Budget" beside "August
+ * 2026" on a phone, so the button dropped to a line of its own at the left,
+ * away from the thumb (owner, 26 September 2026). A shorter basis keeps the
+ * two on one line; an action too wide for that still wraps, to the right.
+ */
+@container (max-width: 480px) {
+  .fms-section-titles {
+    flex-basis: 8rem;
+  }
+
+  .fms-section-action {
+    margin-left: auto;
+  }
 }

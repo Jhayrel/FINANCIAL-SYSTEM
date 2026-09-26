@@ -5,7 +5,7 @@
  * sideways on a phone.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   Button,
@@ -21,6 +21,7 @@ import {
 import { SearchInput } from "../components/forms";
 import { Icon } from "../components/Icon";
 import { useConfirm } from "../components/Confirm";
+import { Sheet } from "../components/Sheet";
 import { formatAmount } from "../domain/money";
 import { parentOf, partOf } from "../domain/debt";
 import { DataTable, type Column } from "../components/DataTable";
@@ -113,7 +114,50 @@ export function Database({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [limit, setLimit] = useState(PAGE);
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  /** The row whose sheet is open on a phone. */
+  const [opened, setOpened] = useState<Transaction | null>(null);
   const { confirm, dialog } = useConfirm();
+
+  /**
+   * A long press picks a row, the way every phone list does.
+   *
+   * "Picking several rows at once is on a bigger screen" was the one thing a
+   * phone could not do (owner, 26 September 2026: everything works on the
+   * phone). Holding a row for half a second picks it and starts picking;
+   * after that a tap adds or removes a row, and the bar at the bottom bins
+   * them together. A finger that moves is scrolling, not holding, so it
+   * cancels the press.
+   */
+  const press = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
+  const endPress = (): void => {
+    if (press.current) window.clearTimeout(press.current.timer);
+  };
+  const startPress = (t: Transaction, x: number, y: number): void => {
+    endPress();
+    const state = { timer: 0, x, y, fired: false };
+    state.timer = window.setTimeout(() => {
+      state.fired = true;
+      toggleRow(t.id);
+      try {
+        navigator.vibrate?.(12);
+      } catch {
+        // A phone without vibration still picks the row.
+      }
+    }, 480);
+    press.current = state;
+  };
+  const movePress = (x: number, y: number): void => {
+    const p = press.current;
+    if (p && !p.fired && Math.hypot(x - p.x, y - p.y) > 10) endPress();
+  };
+  /** A tap: the sheet, or while picking, in or out of the pick. A long press has already done its work. */
+  const tapRow = (t: Transaction): void => {
+    const p = press.current;
+    press.current = null;
+    if (p?.fired) return;
+    if (picked.size > 0 && onDeleteMany) toggleRow(t.id);
+    else setOpened(t);
+  };
 
   const toggleRow = (id: string): void =>
     setPicked((prev) => {
@@ -467,6 +511,7 @@ export function Database({
     <div className="fms-db">
       {dialog}
       <Card
+        page
         title="Database"
         subtitle="Every transaction, searchable"
         padded={false}
@@ -515,8 +560,10 @@ export function Database({
           )}
         </div>
 
-        {/* Shown on a phone only: one row at a time there, many at once on a bigger screen. */}
-        <p className="t-micro fms-phone-note">Picking several rows at once is on a bigger screen.</p>
+        {/* Shown on a phone only, until something is picked: how to pick. */}
+        {onDeleteMany && picked.size === 0 && (
+          <p className="t-caption fms-phone-note">Tap a row to correct it or move it to the bin. Hold a row to pick several.</p>
+        )}
 
         {onDeleteMany && chosen.length > 0 && (
           /*
@@ -591,109 +638,75 @@ export function Database({
               />
             </div>
 
-            {/* Phone list */}
-            <ul className="fms-dblist">
+            {/* Phone list: a row is tapped for what can be done with it, and held to pick it. */}
+            <ul className={`fms-dblist${picked.size > 0 ? " fms-dblist--picking" : ""}`}>
               {shown.map((t) => {
                 const issues = issuesById.get(t.id);
+                const isPicked = picked.has(t.id);
                 return (
-                  <li
-                    key={t.id}
-                    className="fms-dbrow"
-                    style={issues ? { background: "var(--warn-bg)", borderLeft: "3px solid var(--warn)" } : undefined}
-                  >
-                    <div className="fms-dbrow-main">
-                      {onDeleteMany && (
-                        <label className="fms-dbpick">
-                          <input
-                            type="checkbox"
-                            checked={picked.has(t.id)}
-                            onChange={() => toggleRow(t.id)}
-                            aria-label={`Select record ${t.recordNumber}`}
-                          />
-                        </label>
-                      )}
-                      {/*
-                        A title that says what the row is. Every transfer read
-                        "Uncategorised", because a transfer has no item, and
-                        the description under it repeated what the title should
-                        have said. The figure takes its flow's colour, so a
-                        transfer is grey (rule D3) rather than red.
-                      */}
-                      <div className="fms-dbrow-text">
-                        <div className="fms-dbrow-title">
-                          <span className="t-body-strong fms-truncate">
-                            {t.item.trim() ||
-                              t.description.trim() ||
-                              (t.type === "Transfer" ? (t.toWallet ? `To ${t.toWallet}` : "Sent to someone") : `${t.type}, no item`)}
+                  <li key={t.id} className={`fms-dbrow${issues ? " fms-dbrow--warn" : ""}${isPicked ? " fms-dbrow--picked" : ""}`}>
+                    <button
+                      type="button"
+                      className="fms-dbrow-tap"
+                      aria-pressed={picked.size > 0 ? isPicked : undefined}
+                      aria-label={`Record ${t.recordNumber}, ${t.item || t.type}, ${formatAmount(t.total)} pesos${picked.size > 0 ? "" : ". Opens what can be done with it."}`}
+                      onPointerDown={(e) => {
+                        if (onDeleteMany && e.pointerType !== "mouse") startPress(t, e.clientX, e.clientY);
+                      }}
+                      onPointerMove={(e) => movePress(e.clientX, e.clientY)}
+                      onPointerUp={endPress}
+                      onPointerCancel={() => {
+                        endPress();
+                        press.current = null;
+                      }}
+                      onContextMenu={(e) => {
+                        // The browser's own long-press menu would cover the row being picked.
+                        if (press.current) e.preventDefault();
+                      }}
+                      onClick={() => tapRow(t)}
+                    >
+                      <div className="fms-dbrow-main">
+                        {picked.size > 0 && (
+                          <span className={`fms-dbcheck${isPicked ? " fms-dbcheck--on" : ""}`} aria-hidden>
+                            {isPicked && <Icon name="check" size={14} />}
                           </span>
-                          {badge(t)}
-                        </div>
-                        {t.item.trim() && t.description.trim() && (
-                          <div className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>
-                            {t.description}
+                        )}
+                        {/*
+                          A title that says what the row is. Every transfer read
+                          "Uncategorised", because a transfer has no item, and
+                          the description under it repeated what the title should
+                          have said. The figure takes its flow's colour, so a
+                          transfer is grey (rule D3) rather than red.
+                        */}
+                        <div className="fms-dbrow-text">
+                          <div className="fms-dbrow-title">
+                            <span className="t-body-strong fms-truncate">{rowTitle(t)}</span>
+                            {badge(t)}
                           </div>
-                        )}
-                        <div className="t-micro fms-truncate" style={{ color: "var(--ink-3)" }}>
-                          #{String(t.recordNumber).padStart(4, "0")} · {formatShort(t.date)} · {walletPath(t)}
+                          {t.item.trim() && t.description.trim() && (
+                            <div className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>
+                              {t.description}
+                            </div>
+                          )}
+                          <div className="t-micro fms-truncate" style={{ color: "var(--ink-3)" }}>
+                            #{String(t.recordNumber).padStart(4, "0")} · {formatShort(t.date)} · {walletPath(t)}
+                          </div>
+                        </div>
+                        <div className="fms-dbrow-figure">
+                          <Money value={t.type === "Revenue" ? t.total : -t.total} signed size="s" tone={toneOf(t)} />
+                          {t.fee > 0 && (
+                            <div className="t-micro" style={{ color: "var(--warn)" }}>
+                              incl. {fmtShort(t.fee)} fee
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <div className="fms-dbrow-figure">
-                        <Money
-                          value={t.type === "Revenue" ? t.total : -t.total}
-                          signed
-                          size="s"
-                          tone={
-                            t.type === "Revenue"
-                              ? "var(--flow-revenue-text)"
-                              : t.type === "Transfer"
-                                ? "var(--ink-2)"
-                                : t.type === "Debt"
-                                  ? "var(--flow-debt-text)"
-                                  : "var(--flow-spending-text)"
-                          }
-                        />
-                        {t.fee > 0 && (
-                          <div className="t-micro" style={{ color: "var(--warn)" }}>
-                            incl. {fmtShort(t.fee)} fee
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {issues?.map((i) => (
-                      <p key={i.code} className="t-micro" style={{ margin: "6px 0 0", color: "var(--warn)" }}>
-                        ⚠ {i.message}
-                      </p>
-                    ))}
-                    {/*
-                      Edit and Delete on the phone too.
-                      They existed only in the desktop table, so on the
-                      primary target (rule D10) the only way to fix a typo in
-                      a saved row was to find a wider screen.
-                    */}
-                    {(onEdit || onDelete) && (
-                      <div className="fms-dbrow-actions">
-                        {onEdit && (
-                          <button
-                            type="button"
-                            className="t-caption fms-linkbtn"
-                            aria-label={`Correct record ${t.recordNumber}`}
-                            onClick={() => onEdit(t)}
-                          >
-                            Correct
-                          </button>
-                        )}
-                        {onDelete && (
-                          <button
-                            type="button"
-                            className="t-caption fms-linkbtn fms-linkbtn--danger"
-                            aria-label={`Move record ${t.recordNumber} to the bin`}
-                            onClick={() => void askDelete(t)}
-                          >
-                            Move to bin
-                          </button>
-                        )}
-                      </div>
-                    )}
+                      {issues?.map((i) => (
+                        <p key={i.code} className="t-micro fms-dbrow-issue">
+                          ⚠ {i.message}
+                        </p>
+                      ))}
+                    </button>
                   </li>
                 );
               })}
@@ -705,11 +718,152 @@ export function Database({
                 </li>
               )}
             </ul>
+
+            {/*
+              What to do with the picked rows, pinned above the phone bar like
+              the Save bar, the main action on the right under the thumb.
+            */}
+            {onDeleteMany && chosen.length > 0 && (
+              <div className="fms-selbar" role="region" aria-label="Picked rows">
+                <span className="fms-selbar-count">
+                  <span className="t-body-strong">{chosen.length} picked</span>
+                  <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                    ₱{formatAmount(chosenTotal)}
+                  </span>
+                </span>
+                <Button onClick={() => setPicked(new Set())}>Cancel</Button>
+                <Button variant="danger" onClick={() => void askDeleteMany(chosen)}>
+                  Move to bin
+                </Button>
+              </div>
+            )}
           </>
         )}
       </Card>
+
+      {opened && (
+        <Sheet
+          title={rowTitle(opened)}
+          subtitle={`#${String(opened.recordNumber).padStart(4, "0")} · ${formatShort(opened.date)}`}
+          onClose={() => setOpened(null)}
+          actions={
+            <>
+              {onDelete && (
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    const t = opened;
+                    setOpened(null);
+                    void askDelete(t);
+                  }}
+                >
+                  Move to bin
+                </Button>
+              )}
+              {onEdit && (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    const t = opened;
+                    setOpened(null);
+                    onEdit(t);
+                  }}
+                >
+                  Correct
+                </Button>
+              )}
+            </>
+          }
+        >
+          <dl className="fms-rowfacts">
+            <div>
+              <dt>Amount</dt>
+              <dd>
+                <Money value={opened.type === "Revenue" ? opened.total : -opened.total} signed tone={toneOf(opened)} />
+              </dd>
+            </div>
+            {opened.fee > 0 && (
+              <div>
+                <dt>Fee</dt>
+                <dd className="fms-proposalmoney">{fmtShort(opened.fee)}</dd>
+              </div>
+            )}
+            <div>
+              <dt>Type</dt>
+              <dd>{badge(opened)}</dd>
+            </div>
+            {walletPath(opened) && (
+              <div>
+                <dt>{opened.fromWallet && opened.toWallet ? "From, to" : opened.toWallet ? "Into" : "From"}</dt>
+                <dd>{walletPath(opened)}</dd>
+              </div>
+            )}
+            {opened.category.trim() && (
+              <div>
+                <dt>Category</dt>
+                <dd>{opened.category}</dd>
+              </div>
+            )}
+            {opened.description.trim() && (
+              <div>
+                <dt>Description</dt>
+                <dd>{opened.description}</dd>
+              </div>
+            )}
+            {opened.status.trim() && (
+              <div>
+                <dt>Status</dt>
+                <dd>{opened.status}</dd>
+              </div>
+            )}
+            {opened.notes.trim() && (
+              <div>
+                <dt>Notes</dt>
+                <dd>{opened.notes}</dd>
+              </div>
+            )}
+          </dl>
+          {issuesById.get(opened.id)?.map((i) => (
+            <p key={i.code} className="t-caption fms-dbrow-issue">
+              ⚠ {i.message}
+            </p>
+          ))}
+          {onDeleteMany && (
+            <Button
+              fullWidth
+              variant="ghost"
+              onClick={() => {
+                toggleRow(opened.id);
+                setOpened(null);
+              }}
+            >
+              Pick this and others
+            </Button>
+          )}
+        </Sheet>
+      )}
     </div>
   );
+}
+
+/** What a row is, in its title: its item, else its description, else what kind of row it is. */
+function rowTitle(t: Transaction): string {
+  return (
+    t.item.trim() ||
+    t.description.trim() ||
+    (t.type === "Transfer" ? (t.toWallet ? `To ${t.toWallet}` : "Sent to someone") : `${t.type}, no item`)
+  );
+}
+
+/** The figure's colour is its flow's: a transfer is grey, debt amber (rule D3). */
+function toneOf(t: Transaction): string {
+  return t.type === "Revenue"
+    ? "var(--flow-revenue-text)"
+    : t.type === "Transfer"
+      ? "var(--ink-2)"
+      : t.type === "Debt"
+        ? "var(--flow-debt-text)"
+        : "var(--flow-spending-text)";
 }
 
 /** "Gcash → Maya", "Maya", "→ Maya". Empty when the row names no wallet. */
