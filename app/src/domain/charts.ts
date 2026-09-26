@@ -156,7 +156,26 @@ const revenueOf = incomeOf;
  * reading as income was backwards.
  */
 function directionOf(question: string): "spending" | "revenue" {
-  if (/\b(income|revenue|earned|earnings|earning|salary|allowance|received|money in|inflow|coming in)\b/i.test(question)) {
+  /*
+   * "positive" is the owner's own word for it.
+   *
+   * On their screen, 26 September 2026: "show my in chart all my
+   * positive spending?" and, under the spending chart that came back,
+   * "//why it didnt show my my positive spending etc". Nothing in the
+   * list said money in, so the chart drew money out and looked like it
+   * had ignored the question.
+   *
+   * The Tagalog words are the ones with only the one meaning.
+   * "natanggap" is received and "pumasok" is came in. Bare "kita" is
+   * left out: it is earnings in one sentence and "see you" in the next,
+   * and a chart drawn from the wrong half of that is worse than a chart
+   * that asked.
+   */
+  if (
+    /\b(income|revenue|earned|earnings|earning|salary|allowance|received|receiving|money in|inflow|coming in|came in|cash in|positive|gain|gains|deposit|deposits|deposited|natanggap|kinita|pumasok)\b/i.test(
+      question,
+    )
+  ) {
     return "revenue";
   }
   return question

@@ -174,7 +174,25 @@ export function AmountInput({
           aria-invalid={invalid || refused || undefined}
           aria-label={ariaLabel}
           placeholder={placeholder}
-          onFocus={() => setFocused(true)}
+          /**
+           * Tapping a money field selects what is in it.
+           *
+           * A fee box holding 0.00 is not empty, it holds zero. Tapping it
+           * put the caret after the last digit, so typing 1.50 made
+           * "0.001.50", which parses to nothing, so the field snapped back
+           * to 0.00 and the figure was gone without a word. Found by typing
+           * a transfer fee on 26 September 2026: it took three attempts to
+           * notice the app was discarding it rather than refusing it.
+           *
+           * Selecting on focus is what every till and banking app does, and
+           * it matters more here than on a desktop: rule D10 makes the phone
+           * the primary target, and placing a caret exactly after "0.00"
+           * with a thumb is not a thing anyone should have to do.
+           */
+          onFocus={(e) => {
+            setFocused(true);
+            e.currentTarget.select();
+          }}
           onChange={(e) => {
             setText(e.target.value);
             const parsed = parseAmount(e.target.value);

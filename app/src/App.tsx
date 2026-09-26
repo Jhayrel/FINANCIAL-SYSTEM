@@ -705,9 +705,24 @@ export default function App() {
     const positions = positionsOf(settings.credits, transactions, asOf);
     const wallets = totalWalletBalance(transactions, reference.wallets);
     const savings = totalSavingsBalance(transactions, reference.savings);
+    const worth = netWorth(wallets, savings, positions);
     return {
-      worth: netWorth(wallets, savings, positions),
-      owed: positions.reduce((a, p) => a + Math.max(0, p.outstanding), 0),
+      worth,
+      /**
+       * What you owe, not what anyone owes you.
+       *
+       * This added up every position, whichever way it pointed. Paying a
+       * friend's PHP 4.00 meal on 26 September 2026 turned "after PHP
+       * 5,000.00 owed" into "after PHP 5,004.00 owed", counting money coming
+       * back to you as a debt of yours.
+       *
+       * Net worth beside it was right the whole time, because `netWorth` has
+       * always kept the two sides apart: it adds receivables and subtracts
+       * payables, and hands back both. So the figure was already worked out
+       * correctly one line above, and this is the one it should always have
+       * used.
+       */
+      owed: worth.payables,
       rows: walletBalances(
         transactions,
         [...reference.wallets, ...reference.savings],
