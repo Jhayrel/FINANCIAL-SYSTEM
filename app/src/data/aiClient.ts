@@ -95,6 +95,12 @@ export interface AskOptions {
    */
   readonly contextText?: string;
   readonly tone: string;
+  /**
+   * The model picked in Settings. The endpoint tries it first when its
+   * provider offers it, and answers from its own list otherwise.
+   */
+  readonly provider?: string;
+  readonly model?: string;
   /** Overridable so tests do not touch the network. */
   readonly fetcher?: typeof fetch;
   readonly timeoutMs?: number;
@@ -248,6 +254,7 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
           .join(String.fromCharCode(10)),
         task,
         tone,
+        ...(options.provider && options.model ? { provider: options.provider, model: options.model } : {}),
       }),
     });
 
@@ -900,5 +907,46 @@ export async function routeMessage(options: {
     return null;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/** What the endpoint can answer with right now, for the model picker in Settings. */
+export interface ModelsOnOffer {
+  readonly groq: readonly string[];
+  readonly openrouter: readonly string[];
+  /** The order the endpoint tries them in when nothing is chosen, `provider:model`. */
+  readonly chain: readonly string[];
+  readonly configured: { readonly groq: boolean; readonly openrouter: boolean };
+}
+
+/**
+ * Ask the endpoint which models the providers offer at this moment.
+ *
+ * The Settings box used to be free text, and whatever was typed there was
+ * never sent, so it could name a model that did not exist and nothing would
+ * say so. The list comes from the providers themselves, the same place the
+ * endpoint builds its chain from. Null when there is no endpoint to ask
+ * (local development) or no session.
+ */
+export async function modelsOnOffer(options: { fetcher?: typeof fetch; token?: () => Promise<string | null> } = {}): Promise<ModelsOnOffer | null> {
+  const auth = await (options.token ?? idToken)();
+  if (!auth) return null;
+  try {
+    const response = await (options.fetcher ?? fetch)(ENDPOINT, { headers: { authorization: `Bearer ${auth}` } });
+    if (!response.ok || !(response.headers.get("content-type") ?? "").includes("application/json")) return null;
+    const body = (await response.json()) as Partial<ModelsOnOffer>;
+    const ids = (value: unknown): string[] =>
+      Array.isArray(value) ? value.filter((id): id is string => typeof id === "string" && !id.startsWith("(")) : [];
+    return {
+      groq: ids(body.groq),
+      openrouter: ids(body.openrouter),
+      chain: ids(body.chain),
+      configured: {
+        groq: Boolean(body.configured?.groq),
+        openrouter: Boolean(body.configured?.openrouter),
+      },
+    };
+  } catch {
+    return null;
   }
 }

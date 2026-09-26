@@ -40,8 +40,15 @@ export interface UseAiInput {
    * accounts every other screen hides.
    */
   readonly reference: ReferenceLists;
-  /** Which toggle in Settings governs this surface. */
-  readonly feature: keyof AppSettings["ai"]["features"];
+  /**
+   * Which toggle in Settings governs this surface.
+   *
+   * `tryout` is the Settings screen's own "Try it", which no surface switch
+   * governs: it was borrowing the Insights switch, so turning that summary off
+   * made "Try it" answer "This surface is switched off" on the one screen
+   * that exists to show whether the AI works.
+   */
+  readonly feature: keyof AppSettings["ai"]["features"] | "tryout";
   /**
    * Which date the summary is about. Defaults to today.
    *
@@ -97,7 +104,7 @@ export function useAi({
    * "off" switched the conversation off for anyone who had ever saved
    * settings, which is everyone.
    */
-  const disabled = !ai.enabled || ai.features[feature] === false;
+  const disabled = !ai.enabled || (feature !== "tryout" && ai.features[feature] === false);
 
   const context = useMemo(
     () =>
@@ -120,8 +127,9 @@ export function useAi({
    * transaction invalidates it and opening the screen again does not.
    */
   const keyFor = useCallback(
-    (task: AiTask): string => cacheKey(task, ai.tone, contextToText(context)),
-    [context, ai.tone],
+    // The model is in the key too: an answer from one model is not shown as the answer of the next one picked.
+    (task: AiTask): string => cacheKey(task, `${ai.tone}|${ai.provider}:${ai.model}`, contextToText(context)),
+    [context, ai.tone, ai.provider, ai.model],
   );
 
   /**
@@ -163,7 +171,7 @@ export function useAi({
 
       setLoading(true);
       try {
-        const fresh = await askAi({ context, task, tone: ai.tone });
+        const fresh = await askAi({ context, task, tone: ai.tone, provider: ai.provider, model: ai.model });
         setAnswer(fresh);
 
         /**
@@ -236,6 +244,8 @@ export function useAi({
         context,
         task,
         tone: ai.tone,
+        provider: ai.provider,
+        model: ai.model,
         ...(chatText ? { contextText: chatText } : {}),
         ...(options.question ? { question: options.question } : {}),
         ...(options.history ? { history: options.history } : {}),

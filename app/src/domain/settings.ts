@@ -26,13 +26,28 @@ export const AI_PROVIDER_LABEL: Record<AiProvider, string> = {
   anthropic: "Anthropic",
 };
 
-/** Sensible defaults per provider, so the model box is never a blank guess. */
+/**
+ * The model each provider starts on: none named, so the endpoint picks.
+ *
+ * These used to be fixed names ("llama-3.3-70b-versatile", "openai/gpt-4o-
+ * mini"). The first was retired by Groq and the second is not free, and
+ * neither was ever sent, so the box showed a model that was not answering.
+ * Empty now means Automatic: the endpoint asks the provider what it has and
+ * uses the best of it. A name chosen in Settings is sent and tried first.
+ */
 export const AI_DEFAULT_MODEL: Record<AiProvider, string> = {
-  groq: "llama-3.3-70b-versatile",
-  openrouter: "openai/gpt-4o-mini",
-  openai: "gpt-4o-mini",
-  anthropic: "claude-3-5-haiku-latest",
+  groq: "",
+  openrouter: "",
+  openai: "",
+  anthropic: "",
 };
+
+/**
+ * The providers the endpoint can call: it holds keys for these two only
+ * (`functions/api/ai.ts`). The other two stay in the type so a document that
+ * names one still loads, and read as "not connected" in Settings.
+ */
+export const AI_CONNECTED_PROVIDERS: readonly AiProvider[] = ["groq", "openrouter"];
 
 export type AiTone = "brief" | "plain" | "detailed";
 
@@ -179,7 +194,8 @@ export function normaliseSettings(raw: unknown): AppSettings {
     ai: {
       enabled: input.ai?.enabled ?? base.ai.enabled,
       provider,
-      model: input.ai?.model?.trim() || AI_DEFAULT_MODEL[provider],
+      // Empty is a choice (Automatic), so it is kept rather than replaced by a name.
+      model: typeof input.ai?.model === "string" ? input.ai.model.trim() : AI_DEFAULT_MODEL[provider],
       tone: input.ai?.tone ?? base.ai.tone,
       features: {
         alerts: input.ai?.features?.alerts ?? base.ai.features.alerts,

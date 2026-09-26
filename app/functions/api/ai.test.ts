@@ -166,3 +166,18 @@ describe("the tone setting in the chat", () => {
     expect(toneFor("chat", "shouty")).toBe(toneFor("chat", "brief"));
   });
 });
+
+/**
+ * Detailed has to be able to win on the panels too.
+ *
+ * The summary was told "three sentences or fewer" and the alerts "one short
+ * paragraph" in their own instructions, so on Insights "detailed" was
+ * outvoted by the task and nothing changed when it was picked.
+ */
+describe("the tone setting on the panels", () => {
+  it("sends a different length for each of the three", () => {
+    const lines = ["brief", "plain", "detailed"].map((t) => toneFor("summary", t));
+    expect(new Set(lines).size).toBe(3);
+    expect(toneFor("summary", "detailed")).toContain("Up to 150 words");
+  });
+});

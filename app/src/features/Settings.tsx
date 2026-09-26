@@ -42,6 +42,8 @@ import { cleanSettings } from "../domain/settingsCleanup";
 import { canSetOpening, ledgerStart, openingRows } from "../domain/opening";
 import { recoverAccounts } from "../domain/recovery";
 import { AiAnswerView } from "../components/AiAnswer";
+import { modelsOnOffer, type ModelsOnOffer } from "../data/aiClient";
+import { modelLabel } from "../domain/modelName";
 import { Rich } from "../components/Rich";
 import { useAi } from "./useAi";
 import {
@@ -63,6 +65,7 @@ import {
 } from "../domain/debtForms";
 import { formatMedium, today } from "../domain/dates";
 import {
+  AI_CONNECTED_PROVIDERS,
   AI_DEFAULT_MODEL,
   AI_PROVIDER_LABEL,
   AI_TONE_HINT,
@@ -2174,6 +2177,86 @@ const AI_FEATURES: { key: keyof AiSettings["features"]; label: string; what: str
 /** Model ids are short; anything longer is a paste accident. */
 const MAX_MODEL_LENGTH = 80;
 
+const AUTOMATIC = "Automatic (the best free one available)";
+
+/**
+ * Which model answers, picked from what the provider offers right now.
+ *
+ * ── Why this is not a text box any more ─────────────────────────────────
+ *
+ * It was a text box, filled by default with a model Groq had retired, and
+ * what was typed in it was never sent: the endpoint built its own list and
+ * used that. So the setting changed nothing, whatever was chosen, and the
+ * owner said so on 26 September 2026 ("make sure it actually works"). The
+ * choice is sent with every question now and tried first, and the list
+ * comes from the providers, so it cannot name a model that is not there.
+ *
+ * Where the list cannot be fetched (no session, or the local dev server,
+ * which has no endpoint) the box is typed into as before.
+ */
+function ModelPicker({
+  provider,
+  model,
+  disabled,
+  onPick,
+}: {
+  provider: AiProvider;
+  model: string;
+  disabled: boolean;
+  onPick: (model: string) => void;
+}) {
+  const [offer, setOffer] = useState<ModelsOnOffer | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void modelsOnOffer().then((found) => {
+      if (live) setOffer(found);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const listed = provider === "groq" ? offer?.groq ?? [] : provider === "openrouter" ? offer?.openrouter ?? [] : [];
+  const chosenIsOffered = model !== "" && listed.includes(model);
+  const answering = chosenIsOffered ? `${provider}:${model}` : offer?.chain[0];
+
+  if (!offer) {
+    return (
+      <Field
+        label="Model"
+        help={
+          offer === undefined
+            ? "Asking the provider what it offers."
+            : "The list of models could not be fetched here. Leave it empty for Automatic, or type a model exactly as the provider spells it."
+        }
+      >
+        <TextInput value={model} disabled={disabled} onChange={onPick} placeholder="Automatic" />
+      </Field>
+    );
+  }
+
+  return (
+    <Field
+      label="Model"
+      help={
+        model !== "" && !chosenIsOffered
+          ? `${model} is not offered by ${AI_PROVIDER_LABEL[provider]} now, so Automatic is answering${answering ? `: ${modelLabel(answering)}` : ""}.`
+          : answering
+            ? `Answering now: ${modelLabel(answering)}. If it is busy the next one on the list answers, and the answer says which.`
+            : "No model is reachable. Check the keys in Cloudflare."
+      }
+    >
+      <Select
+        value={chosenIsOffered ? model : AUTOMATIC}
+        disabled={disabled}
+        onChange={(picked) => onPick(picked === AUTOMATIC ? "" : picked)}
+        options={[AUTOMATIC, ...listed]}
+        searchable={listed.length > 8}
+      />
+    </Field>
+  );
+}
+
 function AiSection({
   settings,
   patch,
@@ -2190,7 +2273,7 @@ function AiSection({
   budgets: Budgets;
   reference: ReferenceLists;
 }) {
-  const tryOut = useAi({ settings, transactions, budgets, reference, feature: "insightSummary" });
+  const tryOut = useAi({ settings, transactions, budgets, reference, feature: "tryout" });
   const ai = settings.ai;
   const setAi = (part: Partial<AiSettings>): void => patch({ ai: { ...ai, ...part } });
   const off = !ai.enabled;
@@ -2302,34 +2385,25 @@ function AiSection({
       <>
       <Group title="Model" hint="Which service answers">
         <div style={{ display: "grid", gap: "var(--space-3)" }}>
-          <Field label="Provider" help="Sets a sensible default model when you switch.">
+          <Field label="Provider" help="The service tried first. The other one is still used when it is busy.">
             <Select
-              value={AI_PROVIDER_LABEL[ai.provider]}
+              value={`${AI_PROVIDER_LABEL[ai.provider]}${AI_CONNECTED_PROVIDERS.includes(ai.provider) ? "" : " (not connected)"}`}
               disabled={off}
               onChange={(label) => {
-                const provider = (Object.keys(AI_PROVIDER_LABEL) as AiProvider[]).find(
-                  (x) => AI_PROVIDER_LABEL[x] === label,
-                );
+                const provider = AI_CONNECTED_PROVIDERS.find((x) => AI_PROVIDER_LABEL[x] === label);
                 if (!provider || provider === ai.provider) return;
                 void ask(
-                  `Switch to ${AI_PROVIDER_LABEL[provider]}?`,
-                  `The model changes to ${AI_DEFAULT_MODEL[provider]}, so anything typed in the model box is replaced. The key for the new provider has to be set in Cloudflare.`,
+                  `Use ${AI_PROVIDER_LABEL[provider]} first?`,
+                  `The model goes back to Automatic, the best free one ${AI_PROVIDER_LABEL[provider]} offers right now. Its key has to be set in Cloudflare.`,
                   "Switch",
                   { provider, model: AI_DEFAULT_MODEL[provider] },
                 );
               }}
-              options={Object.values(AI_PROVIDER_LABEL)}
+              options={AI_CONNECTED_PROVIDERS.map((x) => AI_PROVIDER_LABEL[x])}
             />
           </Field>
 
-          <Field label="Model" help={`Exactly as the provider spells it. Up to ${MAX_MODEL_LENGTH} characters.`}>
-            <TextInput
-              value={ai.model}
-              disabled={off}
-              onChange={(model) => setAi({ model: model.slice(0, MAX_MODEL_LENGTH) })}
-              placeholder={AI_DEFAULT_MODEL[ai.provider]}
-            />
-          </Field>
+          <ModelPicker provider={ai.provider} model={ai.model} disabled={off} onPick={(model) => setAi({ model: model.slice(0, MAX_MODEL_LENGTH) })} />
 
           <Field label="Tone" help={AI_TONE_HINT[ai.tone]}>
             <Select

@@ -118,6 +118,16 @@ interface AskBody {
   readonly task?: unknown;
   readonly tone?: unknown;
   /**
+   * The model picked in Settings, as `provider` and `model`.
+   *
+   * It used to be saved and never sent, so choosing a model in Settings
+   * changed nothing: the owner, 26 September 2026, "make sure it actually
+   * works". Tried first when that provider lists it right now, and ignored
+   * when it does not, so a retired or mistyped name costs nothing.
+   */
+  readonly provider?: unknown;
+  readonly model?: unknown;
+  /**
    * Data URLs, already downscaled and compressed by the browser.
    *
    * Present only for `extract`. The client caps count and size before
@@ -328,7 +338,29 @@ function parseOverride(configured: string): Candidate[] {
     .filter((c) => (c.provider === "groq" || c.provider === "openrouter") && c.model);
 }
 
-async function chainFrom(env: Env): Promise<Candidate[]> {
+/**
+ * The model chosen in Settings, when its provider offers it right now.
+ *
+ * Checked against the provider's own list rather than tried blind: the
+ * default saved in older settings names a model Groq has since retired, and
+ * trying it would spend one failed call on every question before the chain
+ * that works was reached.
+ */
+async function chosenModel(env: Env, chosen?: { provider: string; model: string }): Promise<Candidate | null> {
+  if (!chosen || (chosen.provider !== "groq" && chosen.provider !== "openrouter") || !chosen.model.trim()) return null;
+  const provider = chosen.provider as Provider;
+  const offered = await modelsOf(provider, env);
+  return offered.includes(chosen.model.trim()) ? { provider, model: chosen.model.trim() } : null;
+}
+
+async function chainFrom(env: Env, chosen?: { provider: string; model: string }): Promise<Candidate[]> {
+  // The owner's own pick goes first, then everything else as it was, without it twice.
+  const first = await chosenModel(env, chosen);
+  const rest = await discoveredChain(env);
+  return first ? [first, ...rest.filter((c) => !(c.provider === first.provider && c.model === first.model))] : rest;
+}
+
+async function discoveredChain(env: Env): Promise<Candidate[]> {
   // An explicit override wins outright: it exists to pin a model when
   // discovery picks badly, and second-guessing it would defeat the point.
   const configured = env.AI_MODELS?.trim();
@@ -517,11 +549,21 @@ const narrative = (value: Record<string, unknown>): Answer | null => {
   return text ? { text } : null;
 };
 
+/*
+ * No lengths here: the tone line sets the length (`TONES`).
+ *
+ * The summary said "three sentences or fewer" and the alerts "one short
+ * paragraph", whatever the owner picked in Settings. So "detailed" was
+ * outvoted by the task's own words on every panel and nothing changed when
+ * it was chosen: "make sure it actually works like if I say detailed", 26
+ * September 2026. What each task is for stays here; how much to say is the
+ * owner's setting.
+ */
 const TASK_INSTRUCTIONS: Record<string, string> = {
   summary:
-    "Summarise this month's finances in three sentences or fewer. Lead with the single most important number. Do not give advice unless something is genuinely wrong.",
+    "Summarise this month's finances. Lead with the single most important number. Do not give advice unless something is genuinely wrong.",
   alerts:
-    "Rewrite the flagged items as one short paragraph a person would actually read. Keep every figure exactly as given. Do not add items that are not listed.",
+    "Rewrite the flagged items as prose a person would actually read. Keep every figure exactly as given. Do not add items that are not listed.",
   patterns:
     "Point out at most two things about the spending pattern that the figures support, using the whole span of months provided rather than only the latest. Say which period you looked at. If nothing stands out across that span, say so plainly.",
   /**
@@ -808,8 +850,9 @@ const DEFAULT_MAX_TOKENS = 1500;
 
 const TONES: Record<string, string> = {
   brief: "One line where possible. Numbers first, no preamble.",
-  plain: "A short paragraph in plain language.",
-  detailed: "Explain the reasoning, still under 150 words.",
+  plain: "A short paragraph in plain language, three or four sentences.",
+  detailed:
+    "Explain the reasoning: what each figure is compared against, which entries produced it, and what follows from it. Up to 150 words. When you name more than two items, put each on its own line starting with a hyphen.",
 };
 
 /**
@@ -996,19 +1039,27 @@ const RICH_FORMATTING = [
   "Two pieces of formatting are available to you and you should use them.",
   "Put **double asterisks** around the few words or figures that matter most, and they will be shown in bold. Bold the single figure the answer turns on, and any figure that is surprising, over budget, or the reason for what you are saying. Two or three in an answer is right. Everything bold is the same as nothing bold.",
   "When you list several things, start each one on its own line with a hyphen and a space, and it will be shown as a proper list. Use a list whenever you are naming more than two entries, months, or items, because a list of figures is far easier to read than the same figures inside a sentence.",
-  "Those two are the whole of what is available. Never use backticks, hash marks, headings, tables, links or code blocks: they are not rendered and would reach the screen as punctuation.",
+  "When the order matters, a ranking or steps to take, number them instead: each on its own line starting with 1. then 2. and so on, and the numbers are shown.",
+  "Those are the whole of what is available. Never use backticks, hash marks, headings, tables, links or code blocks: they are not rendered and would reach the screen as punctuation.",
 ].join(" ");
 
 /**
  * The system message for one job.
  *
- * The chat is the only surface that renders structure, so it is the only one
- * invited to produce it.
+ * Every task whose answer is read as prose is shown through `Rich` now, the
+ * chat and the panels alike (Insights, the alerts paragraph, Settings'
+ * try-out), so all of them may use bold and lists. The ones whose answer is
+ * copied into a field or read as data stay plain: a bullet in a description
+ * box is punctuation.
  */
+const PROSE_TASKS = new Set(["chat", "summary", "alerts", "patterns"]);
+
 const systemFor = (task: string): string =>
   task === "chat"
     ? `${SYSTEM_BASE} ${ADVICE_RULES} ${RICH_FORMATTING}`
-    : `${SYSTEM_BASE} ${PLAIN_FORMATTING}`;
+    : PROSE_TASKS.has(task)
+      ? `${SYSTEM_BASE} ${RICH_FORMATTING}`
+      : `${SYSTEM_BASE} ${PLAIN_FORMATTING}`;
 
 /**
  * What the providers actually offer, right now.
@@ -1117,7 +1168,11 @@ export const onRequestPost = async (ctx: {
    * anyway is worse than failing: it answers from the text alone and invents
    * the rest, confidently.
    */
-  const chain = images.length > 0 ? await visionChainFrom(env) : await chainFrom(env);
+  const chosen =
+    typeof body.provider === "string" && typeof body.model === "string"
+      ? { provider: body.provider, model: body.model.slice(0, 120) }
+      : undefined;
+  const chain = images.length > 0 ? await visionChainFrom(env) : await chainFrom(env, chosen);
   if (chain.length === 0) {
     return json(
       {
