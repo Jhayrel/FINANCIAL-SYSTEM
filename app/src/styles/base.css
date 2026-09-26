@@ -13,6 +13,17 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+html {
+  /*
+   * The sizes are the ones written here. Chrome on Android otherwise
+   * "boosts" the text of a block it judges wide, which made some paragraphs
+   * larger than the rest and the page look zoomed in. The phone's own
+   * accessibility text size still applies.
+   */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 html,
 body {
   height: 100%;

@@ -5045,56 +5045,66 @@ export function AskPanel({
             e.target.value = "";
           }}
         />
-        <button
-          type="button"
-          className="fms-attach"
-          aria-label="Attach a photo or a file"
-          title="Attach a photo or a file"
-          disabled={busy || files.length >= limits.maxCount}
-          onClick={() => pickerRef.current?.click()}
-        >
-          +
-        </button>
         {/*
-          A textarea, so several entries fit in one message.
-
-          Enter sends and Shift plus Enter starts a line, which is what every
-          chat does and therefore what the fingers already expect. It grows to
-          a few lines and then scrolls, so a long paste cannot push the
-          composer over the conversation.
+          One field on a phone, the way a phone's chat apps draw it: the text,
+          then attach and the camera inside the same rounded box, and Send
+          beside it. Three separate round buttons left the text so narrow that
+          "Ask, or type an entry" wrapped onto two lines and the composer read
+          as zoomed in (owner, 26 September 2026). On a computer the box is
+          not drawn and the pieces sit in a row as before (layout.css).
         */}
-        <textarea
-          className="t-caption fms-askinput"
-          rows={1}
-          value={draft}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter" || e.shiftKey) return;
-            e.preventDefault();
-            void send();
-          }}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={
-            pending
-              ? pending.blank === "amount"
-                ? "How much?"
-                : "Your answer"
-              : attached
-                ? "Anything to add about these?"
-                : "Ask, or type an entry"
-          }
-          aria-label={attached ? "A note about the attached files" : "Ask a question, or type an entry"}
-          disabled={busy}
-        />
-        <button
-          type="button"
-          className="fms-attach fms-askcamera"
-          aria-label="Take a photo"
-          title="Take a photo"
-          disabled={busy || files.length >= limits.maxCount}
-          onClick={() => cameraRef.current?.click()}
-        >
-          <Icon name="camera" size={22} />
-        </button>
+        <div className="fms-askfield">
+          {/*
+            A textarea, so several entries fit in one message.
+
+            Enter sends and Shift plus Enter starts a line, which is what every
+            chat does and therefore what the fingers already expect. It grows to
+            a few lines and then scrolls, so a long paste cannot push the
+            composer over the conversation.
+          */}
+          <textarea
+            className="t-caption fms-askinput"
+            rows={1}
+            value={draft}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || e.shiftKey) return;
+              e.preventDefault();
+              void send();
+            }}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={
+              pending
+                ? pending.blank === "amount"
+                  ? "How much?"
+                  : "Your answer"
+                : attached
+                  ? "Add a note"
+                  : "Ask, or type an entry"
+            }
+            aria-label={attached ? "A note about the attached files" : "Ask a question, or type an entry"}
+            disabled={busy}
+          />
+          <button
+            type="button"
+            className="fms-attach"
+            aria-label="Attach a photo or a file"
+            title="Attach a photo or a file"
+            disabled={busy || files.length >= limits.maxCount}
+            onClick={() => pickerRef.current?.click()}
+          >
+            +
+          </button>
+          <button
+            type="button"
+            className="fms-attach fms-askcamera"
+            aria-label="Take a photo"
+            title="Take a photo"
+            disabled={busy || files.length >= limits.maxCount}
+            onClick={() => cameraRef.current?.click()}
+          >
+            <Icon name="camera" size={22} />
+          </button>
+        </div>
         {busy ? (
           /*
             A way out of the queue.

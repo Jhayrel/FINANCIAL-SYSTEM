@@ -177,7 +177,8 @@ One face. Self-hosted via `@fontsource` so the PWA keeps its type offline.
 | Card actions | Stay beside the title on the right ("Open Budget"), never on a line of their own at the left. |
 | Touch | Every button, pill, tab and period step is 44px tall at phone width as well as on a coarse pointer; a name that opens something reaches 44px with padding the margin gives back. |
 | Add | The five flows are one row, a symbol over each name, so Amount is on screen from the first frame. Save is the larger button, on the right. |
-| AI tab | The whole screen is the conversation: no card, no "Ask" heading. It starts at the bottom by the composer, which sits on the surface above the navigation with Send on the right. A camera button beside Send opens the camera straight to a picture (`capture="environment"`); it is drawn on phones and touch tablets only. Clear this view is at the top right. |
+| AI tab | The whole screen is the conversation: no card, no "Ask" heading. It starts at the bottom by the composer, which sits on the surface above the navigation: one rounded field holding the text with attach and the camera inside it at the right, and Send beside it. Three separate round buttons left the text so narrow that its placeholder wrapped and the composer read as zoomed in (owner, 2026-09-26). The camera opens straight to a picture (`capture="environment"`) and is drawn on phones and touch tablets only. Clear this view is at the top right. |
+| Pictures | Any size can be attached. A photo is shrunk on the device until it fits its share of what one message may carry (the endpoint takes about 4.5 MB of pictures a request), first by quality and then by size, and nothing is stored. Settings' "Largest picture sent" caps what is sent, not what is picked. A text file is read only as far as it is used. |
 | Bin | The amount beside the name; Delete forever on the left and Restore on the right, half the width each. |
 
 ### 2.4 Radius, borders, elevation

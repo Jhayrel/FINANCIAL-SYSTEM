@@ -7970,6 +7970,15 @@ textarea.fms-askinput {
 
 /* ── The AI tab on a phone: the screen is the conversation ────────────────── */
 
+/* The composer's field is only drawn on a phone; elsewhere its pieces sit in the row, + first. */
+.fms-askfield {
+  display: contents;
+}
+
+.fms-askfield > .fms-attach:not(.fms-askcamera) {
+  order: -1;
+}
+
 /* The camera is a phone's: a computer's webcam is no way to read a receipt. */
 .fms-askcamera {
   display: none;
@@ -8020,20 +8029,63 @@ textarea.fms-askinput {
   }
 
   .fms-aiscreen .fms-askform > .fms-btn {
+    flex: 0 0 auto;
     min-height: 44px;
     padding-inline: var(--space-4);
+    border-radius: 22px;
+    white-space: nowrap;
   }
 
-  .fms-aiscreen .fms-askinput {
-    min-height: 44px;
-    padding: 11px var(--space-3);
-    font-size: 16px;
-    line-height: 22px;
+  /*
+   * One rounded field: the text, then attach and the camera inside it at the
+   * right, the way a phone's own chat apps draw a composer. The glow that
+   * marks the AI's field moves from the text to the whole field.
+   */
+  .fms-aiscreen .fms-askfield {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: flex-end;
+    min-width: 0;
+    padding: 0 2px 0 var(--space-4);
+    background: var(--surface-sunk);
+    border: 1px solid var(--hairline-strong);
     border-radius: 22px;
   }
 
-  .fms-aiscreen .fms-attach {
+  .fms-aiscreen .fms-askfield:focus-within {
+    border-color: var(--brand-600);
+    box-shadow:
+      0 0 0 1px var(--ai-glow-ring),
+      0 0 10px 1px var(--ai-glow-halo-active);
+  }
+
+  .fms-aiscreen .fms-askform .fms-askfield > .fms-askinput,
+  .fms-aiscreen .fms-askform:focus-within .fms-askfield > .fms-askinput {
+    flex: 1 1 auto;
+    min-height: 42px;
+    padding: 10px 0;
+    font-size: 16px;
+    line-height: 22px;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    outline: none;
+  }
+
+  .fms-aiscreen .fms-askfield > .fms-attach {
+    order: 0;
+    width: 40px;
+    height: 42px;
+    border: 0;
     border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--ink-2);
+    font-size: 24px;
+  }
+
+  .fms-aiscreen .fms-askfield > .fms-attach:active:not(:disabled) {
+    background: var(--surface-hover);
   }
 
   /* The strips around the composer keep the page's own margins. */
