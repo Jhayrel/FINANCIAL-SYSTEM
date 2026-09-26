@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { detectIntent, isBudgetCommand, wantsAllBillsPaid , entriesInside, wantsThoseEntries } from "./intent";
+import { allPaidScope, detectIntent, isBudgetCommand, meantInstead, sayInstead, wantsAllBillsPaid , entriesInside, wantsThoseEntries } from "./intent";
 
 describe("detectIntent: entries", () => {
   it("reads the sentence that was answered as a question instead", () => {
@@ -138,6 +138,48 @@ describe("wantsAllBillsPaid", () => {
     for (const text of ["paid 999 wifi bill", "did I pay all my bills?", "paid the electric bill"]) {
       expect(wantsAllBillsPaid(text), text).toBe(false);
     }
+  });
+});
+
+describe("allPaidScope: which ones everything means", () => {
+  it("keeps bills and subscriptions apart", () => {
+    expect(allPaidScope("paid all my subscriptions")).toBe("subscriptions");
+    expect(allPaidScope("I paid all my subscription")).toBe("subscriptions");
+    expect(allPaidScope("paid all my bills")).toBe("bills");
+    expect(allPaidScope("paid all my bills and subscriptions")).toBe("both");
+    expect(allPaidScope("I paid all my dues")).toBe("both");
+  });
+
+  it("asks when the owner's words name neither (27 September 2026)", () => {
+    expect(allPaidScope("I paid all my balances")).toBe("unclear");
+    expect(allPaidScope("nabayaran ko na lahat")).toBe("unclear");
+  });
+
+  it("is nothing for one bill, a figure or a question", () => {
+    expect(allPaidScope("paid 999 wifi bill")).toBeNull();
+    expect(allPaidScope("did I pay all my bills?")).toBeNull();
+    expect(allPaidScope("I paid for food")).toBeNull();
+  });
+});
+
+describe("I mean ...: the last message, corrected", () => {
+  it("reads what was meant", () => {
+    expect(meantInstead("I mean subscription")).toBe("subscription");
+    expect(meantInstead("no, I meant the bills")).toBe("bills");
+    expect(meantInstead("ang ibig kong sabihin ay subscriptions")).toBe("subscriptions");
+    expect(meantInstead("I mean it was a really long thing to say here")).toBeNull();
+    expect(meantInstead("subscription")).toBeNull();
+  });
+
+  it("puts it in place of the word it corrects", () => {
+    expect(sayInstead("I paid all my balances", "subscription")).toBe("I paid all my subscription");
+    expect(sayInstead("paid my credit today", "gcash")).toBe("paid my gcash today");
+    expect(sayInstead("what did I spend", "last week")).toBe("what did I spend, last week");
+  });
+
+  it("turns the owner's pair into the subscriptions it meant", () => {
+    const again = sayInstead("I paid all my balances", meantInstead("I mean subscription") ?? "");
+    expect(allPaidScope(again)).toBe("subscriptions");
   });
 });
 

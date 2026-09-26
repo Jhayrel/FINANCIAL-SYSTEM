@@ -112,7 +112,7 @@ import { Icon } from "../components/Icon";
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
-import { detectIntent, entriesInside, isAdvice, isBudgetCommand, isQuestion, wantsAllBillsPaid, wantsThoseEntries, type Intent } from "../domain/intent";
+import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, isQuestion, meantInstead, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
 import { addressesEveryCard } from "../domain/capture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
@@ -506,7 +506,7 @@ const spokenHistory = (turns: readonly Turn[], most: number) =>
     .filter(isSaid)
     .filter((t) => t.text.trim() !== "")
     .slice(-most)
-    .map((t) => ({ role: t.kind, text: t.text }));
+    .map((t) => ({ role: t.kind, text: t.text.length > 500 ? `${t.text.slice(0, 500)}...` : t.text }));
 
 /**
  * How much of the thread goes back with each question.
@@ -781,7 +781,12 @@ function cardWords(turn: Turn, state: StoredCard["state"]): string {
   return "";
 }
 
-const HISTORY_TURNS = 6;
+/*
+ * Ten turns, each cut at 500 characters. Six lost the thread of an ordinary
+ * back and forth ("can you read your own history, so it feels real", 27
+ * September 2026); the cut keeps a long answer from crowding out the rest.
+ */
+const HISTORY_TURNS = 10;
 
 /** Openers, because a blank box invites nothing. */
 const STARTERS = ["How is this month going?", "What needs attention?"] as const;
@@ -850,6 +855,11 @@ export function AskPanel({
    * for nothing.
    */
   const entriesLeftBehind = useRef<string | null>(null);
+  /**
+   * A message the assistant asked about rather than guessed at ("I paid all
+   * my balances": which ones?). The short reply after it is read into it.
+   */
+  const clarifying = useRef<string | null>(null);
 
   /**
    * What this conversation put in the bin, newest first.
@@ -2965,6 +2975,36 @@ export function AskPanel({
     }
 
     /*
+     * A follow-up that only makes sense with the message before it.
+     *
+     * The owner, 27 September 2026: "I paid all my balances", then "I mean
+     * subscription", answered "I could not find an entry in that". It was
+     * read alone. "I mean X" is the last thing they said with X in place of
+     * the word that was wrong, and so is the short reply to a question the
+     * assistant asked instead of guessing. Not while a card or a question is
+     * waiting: "I mean 300" there is a correction to it, handled below.
+     */
+    const waiting = pending !== null || asking !== null || turns.some((t) => (isOffer(t) || isDebt(t)) && t.state === "open");
+    const clarified = clarifying.current;
+    clarifying.current = null;
+    if (files.length === 0 && !as && !waiting) {
+      const meant = meantInstead(note);
+      const lastSaid = [...turns].reverse().find((t): t is Said => t.kind === "you")?.text ?? "";
+      const reply = note.trim();
+      const shortReply = reply.split(/\s+/).length <= 4 && !/\d/.test(reply) && !isQuestion(reply) ? reply : null;
+      // A question already goes to the model with the conversation, which reads "I mean" better than a swap of words.
+      const previous = clarified ?? (meant && lastSaid && !isQuestion(lastSaid) ? lastSaid : "");
+      const word = meant ?? (clarified ? shortReply : null);
+      if (previous && word) {
+        const both = /^(?:both|all|all of them|lahat|everything)$/i.test(word) ? "bills and subscriptions" : word;
+        const again = sayInstead(previous, both);
+        setDraft("");
+        await send(again);
+        return;
+      }
+    }
+
+    /*
      * An answer to a question about one card of a batch. Read before the
      * router, because "school" or "sent to my friend" means nothing without
      * the question above it; a question or a new entry typed instead is not
@@ -3342,17 +3382,47 @@ export function AskPanel({
      * blank empty and asked "How much was it?", which has no single answer.
      * The open bills are known, and so is what each cost last time.
      */
-    if (files.length === 0 && !as && modelSawEntry && wantsAllBillsPaid(note)) {
+    const paidAll = files.length === 0 && !as ? allPaidScope(note) : null;
+    if (paidAll && (modelSawEntry || routed?.intent === "chat" || routed?.intent === "question")) {
       setDraft("");
       setPending(null);
       say({ kind: "you", text: note });
       log(aiEvent("asked", "add", { text: note }));
-      const open = monthBills(transactions, reference, Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)), asOf).bills.filter(
+      const due = monthBills(transactions, reference, Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)), asOf).bills.filter(
         (b) => b.state !== "paid" && b.amount > 0,
       );
+      /*
+       * "All my balances" names neither list: ask which, with what each one
+       * holds, rather than guess. The short reply is read into this message.
+       */
+      if (paidAll === "unclear") {
+        const names = (category: string): string =>
+          due.filter((b) => b.category === category).map((b) => b.item).join(", ");
+        const owed = debts
+          .filter((d) => !d.archived && d.form !== "pass-through")
+          .map((d) => ({ name: d.name, left: outstandingOf(transactions, d.id) }))
+          .filter((d) => d.left > 0);
+        const options = [
+          names("Bills") ? `your bills still open (${names("Bills")})` : "",
+          names("Subscriptions") ? `your subscriptions still open (${names("Subscriptions")})` : "",
+          ...owed.map((d) => `what you owe on ${d.name} (${formatMoney(d.left)})`),
+        ].filter(Boolean);
+        const reply =
+          options.length === 0
+            ? "Every bill and subscription this month is already recorded as paid, and nothing is owed on a credit line, so there is nothing to add."
+            : `Which ones did you pay: ${options.join("; ")}? Say bills, subscriptions, both${owed[0] ? `, or ${owed[0].name}` : ""}.`;
+        if (options.length > 0) clarifying.current = note;
+        say({ kind: "assistant", text: reply, from: "this device" });
+        log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+        return;
+      }
+      const open = due.filter((b) =>
+        paidAll === "both" ? true : paidAll === "bills" ? b.category === "Bills" : b.category === "Subscriptions",
+      );
+      const which = paidAll === "bills" ? "bill" : paidAll === "subscriptions" ? "subscription" : "bill and subscription";
       const reply =
         open.length === 0
-          ? "Every bill and subscription this month is already recorded as paid, so there is nothing to add."
+          ? `Every ${which} this month is already recorded as paid, so there is nothing to add.`
           : `${open.length === 1 ? "One is" : `${open.length} are`} still open this month, one card each at what it cost last time. Change an amount before adding it if it was different.`;
       say({ kind: "assistant", text: reply, from: "this device", ephemeral: true });
       for (const bill of open) {

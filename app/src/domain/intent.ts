@@ -233,6 +233,61 @@ export function wantsAllBillsPaid(text: string): boolean {
   return /\b(?:paid|pay|settled|done with)\b.*\b(?:all|every|each)\b.*\b(?:bills?|subscriptions?|subs)\b/i.test(said);
 }
 
+/**
+ * Which ones "paid all my ..." means.
+ *
+ * "bills" and "subscriptions" are two lists in Settings, and "paid all my
+ * subscriptions" made a card for every open bill too. "I paid all my
+ * balances" (27 September 2026) names neither, and was answered as something
+ * else entirely: it is `unclear`, and the assistant asks which. Null when the
+ * message is not about paying everything at all.
+ */
+export type AllPaid = "bills" | "subscriptions" | "both" | "unclear";
+
+export function allPaidScope(text: string): AllPaid | null {
+  const said = text.trim();
+  if (!said || said.length > 80 || said.endsWith("?") || /\d/.test(said)) return null;
+  if (!/\b(?:paid|pay|payed|settled|done with|nabayaran|binayaran)\b/i.test(said)) return null;
+  if (!/\b(?:all|every|each|lahat)\b/i.test(said)) return null;
+  const bills = /\bbills?\b/i.test(said);
+  const subs = /\b(?:subscriptions?|subs)\b/i.test(said);
+  if (bills && subs) return "both";
+  if (bills) return "bills";
+  if (subs) return "subscriptions";
+  if (/\b(?:dues|monthlies|monthly)\b/i.test(said)) return "both";
+  if (/\b(?:balances?|everything|all of (?:it|them)|lahat)\b/i.test(said)) return "unclear";
+  return null;
+}
+
+/**
+ * "I mean subscription": the last message again, with this in place of what
+ * it got wrong. The words after "I mean", or null when it is not one.
+ */
+export function meantInstead(text: string): string | null {
+  const said = text.trim().replace(/[.!]+$/, "");
+  const m = /^(?:no[,.]?\s+|sorry[,.]?\s+|oh[,.]?\s+)?(?:i\s+mean(?:t)?|what\s+i\s+mean(?:t)?\s+(?:is|was)|i'?m\s+talking\s+about|i\s+was\s+talking\s+about|ang\s+ibig\s+kong\s+sabihin(?:\s+ay)?)\s+(?:the\s+|my\s+|ang\s+)?(.{1,40})$/i.exec(said);
+  const meant = m?.[1]?.trim();
+  if (!meant || meant.split(/\s+/).length > 4) return null;
+  return meant;
+}
+
+/**
+ * The earlier message said again, with what was meant in place of the word
+ * that was wrong: "I paid all my balances" and "subscription" is "I paid all
+ * my subscription". The word replaced is the one after "all" or "my", where
+ * the thing paid or bought is named; failing that, the meaning is added on.
+ */
+export function sayInstead(previous: string, meant: string): string {
+  const all = /\b((?:all|every|each|lahat)\s+(?:of\s+)?(?:my\s+|the\s+|ng\s+)?)([a-z][\w-]*)/i;
+  if (all.test(previous)) return previous.replace(all, (_, lead: string) => `${lead}${meant}`);
+  const mine = [...previous.matchAll(/\bmy\s+([a-z][\w-]*)/gi)].pop();
+  if (mine?.index !== undefined) {
+    const at = mine.index + mine[0].length - (mine[1]?.length ?? 0);
+    return `${previous.slice(0, at)}${meant}${previous.slice(at + (mine[1]?.length ?? 0))}`;
+  }
+  return `${previous.replace(/[.!]+$/, "")}, ${meant}`;
+}
+
 export function isQuestion(text: string): boolean {
   /**
    * Leading punctuation is not part of the question.
