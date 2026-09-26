@@ -10,6 +10,7 @@ import "./styles/layout.css";
 import "./styles/components.css";
 
 import App from "./App";
+import { AppBoundary } from "./components/AppBoundary";
 import { initTheme } from "./theme";
 
 initTheme();
@@ -19,6 +20,8 @@ if (!root) throw new Error("#root not found");
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <AppBoundary>
+      <App />
+    </AppBoundary>
   </StrictMode>,
 );

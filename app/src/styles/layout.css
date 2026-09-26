@@ -8578,3 +8578,24 @@ textarea.fms-askinput {
 .fms-cleanlist > li:last-child {
   border-bottom: 0;
 }
+
+/*
+ * What stopped, when a whole part of the app failed (components/AppBoundary).
+ * Plain and readable at any width, the details wrapping rather than running
+ * off a phone, so they can be read out or copied.
+ */
+.fms-appstop {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 680px;
+  margin: var(--space-4) auto;
+  padding: 0 var(--space-4);
+  color: var(--ink);
+}
+
+.fms-appstop-details {
+  margin: 0;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -36,6 +36,7 @@ import { AskPanel } from "./features/AskPanel";
 import { useProposalSink } from "./features/useProposalSink";
 import { useReportScreenFallback } from "./features/screenReport";
 import { ScreenBoundary } from "./components/ScreenBoundary";
+import { AppBoundary } from "./components/AppBoundary";
 import { changedSections } from "./domain/settingsDiff";
 import { refusalWords, syncWords, type Problem } from "./domain/syncState";
 import { useMediaQuery } from "./features/useMediaQuery";
@@ -180,6 +181,8 @@ const FIXTURE_AS_OF = "2026-08-29";
 export default function App() {
   const cloud = useCloud();
   const [screen, setScreen] = useState<Screen>("dashboard");
+  /** `go`, for the Back button, whose hook runs before `go` is defined (see useScreenHistory below). */
+  const goRef = useRef<(id: Screen) => void>(() => {});
   const [dbFilter, setDbFilter] = useState<"all" | "flagged">("all");
   /** A search another screen opened the Database with, such as a kind of spending on Budget. */
   const [dbQuery, setDbQuery] = useState<{ query: string; at: number } | null>(null);
@@ -1625,6 +1628,21 @@ export default function App() {
   // With Firebase configured, nothing renders until the owner is signed in,
   // the rules would deny every read anyway, so a half-rendered app would only
   // show empty screens and permission errors.
+  /*
+   * Back goes to the screen before, and closes the More menu or the chat
+   * first (data/backButton.ts).
+   *
+   * Here, above every early return, and never below one. These three were
+   * first placed after the sign-in gate: the first render returned the sign
+   * in page before reaching them, the next one called them, React stopped on
+   * the changed number of hooks, and the owner's PC showed a black window
+   * (27 September 2026). The local copy has no sign-in, so it never showed.
+   * `go` is defined below the gate, so it is reached through a ref.
+   */
+  useScreenHistory(screen, (id) => goRef.current(id as Screen));
+  useBackToClose(moreOpen, () => setMoreOpen(false));
+  useBackToClose(chatOpen, () => setChatOpen(false));
+
   if (cloud.configured && cloud.auth.status !== "ready") {
     return <SignIn auth={cloud.auth} onSignIn={cloud.signIn} onSignOut={cloud.signOut} />;
   }
@@ -1669,10 +1687,7 @@ export default function App() {
     if (id !== "add") setEditing(null);
   };
 
-  // Back goes to the screen before, and closes the More menu or the chat first (data/backButton.ts).
-  useScreenHistory(screen, (id) => go(id as Screen));
-  useBackToClose(moreOpen, () => setMoreOpen(false));
-  useBackToClose(chatOpen, () => setChatOpen(false));
+  goRef.current = go;
 
   /** Where a finding is dealt with: its rows when it names some, otherwise its screen. */
   const openAlert = (finding: Finding): void => {
@@ -2209,18 +2224,21 @@ export default function App() {
               >
                 <Icon name="close" size={20} />
               </button>
-              <AskPanel
-                sink={sink}
-                deleted={deleted}
-                debts={settings.credits}
-                lastSaved={lastSaved}
-                uid={cloud.uid ?? null}
-                settings={settings}
-                transactions={transactions}
-                budgets={budgets}
-                reference={reference}
-                asOf={asOf}
-              />
+              {/* The assistant failing closes the assistant, not the app. */}
+              <AppBoundary what="The AI assistant" onClose={() => setChatOpen(false)}>
+                <AskPanel
+                  sink={sink}
+                  deleted={deleted}
+                  debts={settings.credits}
+                  lastSaved={lastSaved}
+                  uid={cloud.uid ?? null}
+                  settings={settings}
+                  transactions={transactions}
+                  budgets={budgets}
+                  reference={reference}
+                  asOf={asOf}
+                />
+              </AppBoundary>
             </div>
           )}
           <button
