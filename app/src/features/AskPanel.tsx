@@ -139,6 +139,7 @@ import {
 import {
   classifyItem,
   extractProposals,
+  itemsLastUsed,
   downSentence,
   routeMessage,
   type Intent as Routed,
@@ -173,7 +174,10 @@ import {
   namesBudgetCommand,
   planBudget,
   proposedBudgetIn,
+  proposedMonthIn,
   readBudgetAsk,
+  namesMoneyFigure,
+  saysMoneyMoved,
   spanIn,
   type BudgetAsk,
   type BudgetPlan,
@@ -1526,6 +1530,12 @@ export function AskPanel({
     return open.length;
   };
 
+  /** When each item was last used, so the reader is told which ones are years old (aiClient.ts). */
+  const lastUsed = useMemo(() => itemsLastUsed(transactions), [transactions]);
+
+  /** The wallet a card moves money through, for the record: the one it goes into, for income. */
+  const walletOf = (d: Draft): string => (d.flow === "Revenue" ? d.toWallet : d.fromWallet);
+
   /** The card a correction would apply to: the last one still open. */
   const openCard = (): { index: number; turn: Offered } | null => {
     for (let i = turns.length - 1; i >= 0; i--) {
@@ -2106,6 +2116,7 @@ export function AskPanel({
           reference,
           asOf,
           signal: control.signal,
+          lastUsed,
         }),
       "Still reading it",
     );
@@ -2476,7 +2487,7 @@ export function AskPanel({
       setBusy(true);
       const read = await during(
         "Reading what you sent",
-        () => extractProposals({ note, attachments: sent, reference, asOf, signal: control.signal }),
+        () => extractProposals({ note, attachments: sent, reference, asOf, signal: control.signal, lastUsed }),
         "Still reading it",
       ).finally(() => {
         stopper.current = null;
@@ -2798,10 +2809,10 @@ export function AskPanel({
       return -1;
     })();
     const lastBudget = lastBudgetAt >= 0 ? (turns[lastBudgetAt] as Budgeting) : undefined;
-    /** A figure of money in the message, leaving out years, days and counts of months. */
-    const namesFigure = /(?:₱|php\s*)?\d[\d,]{2,}(?:\.\d+)?|\b\d+(?:\.\d+)?\s*k\b/i.test(
-      ruled.replace(/\b20\d{2}\b/g, " ").replace(/\b\d{1,2}\s+months?\b/gi, " "),
-    );
+    /** A figure of money in the message, leaving out dates and counts of months (budgetAsk.ts). */
+    const namesFigure = namesMoneyFigure(ruled);
+    /** Money moving, in the owner's words: an entry, never a budget (budgetAsk.ts). */
+    const movesMoney = saysMoneyMoved(ruled);
     /** The span a message names, laid over an ask, so "September to December" moves a card rather than making a new one. */
     const over = (ask: BudgetAsk, s: NonNullable<typeof span>): BudgetAsk => {
       const { toMonth: _dropped, ...rest } = ask;
@@ -2838,7 +2849,32 @@ export function AskPanel({
      * question is theirs, and nothing here takes it from them.
      */
     const noCardWaiting = !pending && !turns.some((t) => (isOffer(t) || isDebt(t)) && t.state === "open");
-    const yesToBudget = couldBudget && noCardWaiting && confirmsProposal(ruled) && proposedBudgetIn(lastAnswer) !== null;
+    /*
+     * Unless the proposal is the last thing said.
+     *
+     * 26 September 2026, 01:41 and again at 01:50: "ok add it", straight
+     * after "PHP 41,694.36 is a recommended budget for next month", did
+     * nothing both times, because a Debt card from 01:20 was still open
+     * further up. "it" is the last thing said, and a card twenty minutes up
+     * the conversation is not that.
+     */
+    const lastTurn = turns[turns.length - 1];
+    const answerIsLast = lastTurn?.kind === "assistant" && "text" in lastTurn && lastTurn.text === lastAnswer;
+    const yesToBudget = couldBudget && (noCardWaiting || answerIsLast) && confirmsProposal(ruled) && proposedBudgetIn(lastAnswer) !== null;
+    /*
+     * "Can you recommend budget?", answered with what to cut and no budget
+     * figure, then "Add it" (04:11 that day). There is nothing to add, so it
+     * asks for the figure, offering the forecast, rather than saying nothing.
+     */
+    const askedBefore = [...turns].reverse().find((t) => t.kind === "you");
+    const yesAfterBudgetTalk =
+      couldBudget &&
+      !yesToBudget &&
+      answerIsLast &&
+      confirmsProposal(ruled) &&
+      askedBefore !== undefined &&
+      "text" in askedBefore &&
+      /\b(budget|buget|budjet|bugdet|limit)\b/i.test(askedBefore.text);
 
     /*
      * "how about add it to september to december", "make it long term",
@@ -2847,7 +2883,7 @@ export function AskPanel({
      * that"). The card is planned again over the months named, and the old
      * one, if still open, is put aside so only one waits to be applied.
      */
-    if (!budgetAsk && couldBudget && noCardWaiting && lastBudget?.ask && span && !namesFigure && ruled.split(/\s+/).length <= 16) {
+    if (!budgetAsk && couldBudget && noCardWaiting && lastBudget?.ask && span && !namesFigure && !movesMoney && ruled.split(/\s+/).length <= 16) {
       budgetAsk = over(lastBudget.ask, span);
       if (lastBudget.state === "open") decide(lastBudgetAt, "discarded");
     }
@@ -2857,7 +2893,7 @@ export function AskPanel({
        * "use the forecast", "the recommended one": the figure is the app's own
        * forecast for the month, or the one the answer above recommended.
        */
-      const target = span ?? (() => {
+      const target = span ?? proposedMonthIn(recentProposal?.text ?? lastAnswer, asOf) ?? (() => {
         const next = Number(asOf.slice(5, 7)) === 12 ? { year: Number(asOf.slice(0, 4)) + 1, month: 1 } : { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) + 1 };
         const now = { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) };
         return { ...(/\bnext month\b/i.test(recentProposal?.text ?? lastAnswer) || /\bnext month\b/i.test(ruled) ? next : now), scope: "month" as const };
@@ -2876,7 +2912,7 @@ export function AskPanel({
      * it gets the reply below saying what to type, rather than falling
      * through to the model to be answered with a yes it cannot honour.
      */
-    if (budgetAsk || saysBudget || (files.length === 0 && !as && modelSawEntry && isBudgetCommand(ruled))) {
+    if (budgetAsk || saysBudget || yesAfterBudgetTalk || (files.length === 0 && !as && modelSawEntry && isBudgetCommand(ruled))) {
       setDraft("");
       say({ kind: "you", text: note });
       log(aiEvent("asked", "add", { text: note }));
@@ -3889,8 +3925,9 @@ export function AskPanel({
             log(
               aiEvent("edited", "add", {
                 field: "several",
-                proposed: `${c.turn.proposal.draft.date} ${c.turn.proposal.draft.fromWallet}`,
-                corrected: `${c.change.draft.date} ${c.change.draft.fromWallet}`,
+                // The wallet the money moved through: the one it went into, for income.
+                proposed: `${c.turn.proposal.draft.date} ${walletOf(c.turn.proposal.draft)}`,
+                corrected: `${c.change.draft.date} ${walletOf(c.change.draft)}`,
                 entry: `${c.change.draft.date} ${c.change.draft.flow} ${c.change.draft.item}`,
               }),
             );
@@ -3921,73 +3958,88 @@ export function AskPanel({
         }
       }
 
-      const card = openCard();
-      if (card) {
-        const change = amend(card.turn.proposal.draft, note, reference, asOf);
-        if (change) {
-          setDraft("");
-          /**
-           * The old card goes, and the corrected one arrives at the bottom.
-           *
-           * Changing the card in place worked and looked like nothing had
-           * happened: the card sits above the message that changed it, so
-           * the one field that moved was off screen. Leaving a collapsed
-           * stub behind was not much better, because two versions of one
-           * entry on screen is one more than there are. So the order reads
-           * as the conversation did:
-           *
-           *   what you said, then the entry as it now stands.
-           */
-          /**
-           * The training signal.
-           *
-           * What was proposed and what it became, as a pair. Read back by
-           * `correctionsFrom`, so telling it once that a word means Food is
-           * enough: it does not ask a second time. This is the whole of what
-           * "learning" means here, and it is a table of your own corrections
-           * in your own database.
-           */
-          const was = card.turn.proposal.draft;
-          const now = change.draft;
-
-          /**
-           * Learned under the words that produced the card, not the value it
-           * guessed.
-           *
-           * Keying on the guess taught "gas is Food" after one correction,
-           * and applying that would have turned every future Gas entry into
-           * Food. What the correction actually says is that the sentence
-           * meant Food, so the sentence is the key, and a phrase that is
-           * itself one of the owner's item names is never learned from.
-           */
-          // The item and the wallets are learned when the card is saved (`learnFrom`), so only a saved correction teaches.
-          if (was.amount !== now.amount || was.date !== now.date) {
-            log(
-              aiEvent("edited", "add", {
-                field: was.amount !== now.amount ? "amount" : "date",
-                proposed: was.amount !== now.amount ? formatMoney(was.amount ?? 0) : was.date,
-                corrected: was.amount !== now.amount ? formatMoney(now.amount ?? 0) : now.date,
-              }),
-            );
-          }
-
-          setTurns((prev) => [
-            ...prev.filter((_, i) => i !== card.index),
-            { kind: "you", text: note },
-            {
-              kind: "proposal",
-              proposal: {
-                ...card.turn.proposal,
-                draft: change.draft,
-                adjustments: [...card.turn.proposal.adjustments, change.what],
-              },
-              state: "open",
-              // The same card, corrected, so it keeps its id.
-              cardId: card.turn.cardId,
-            },
-          ]);
-          return;
+      /*
+       * The newest card first, then the ones above it.
+       *
+       * "Fix the entry its not subscription" on 26 September 2026 had two
+       * cards open: the purchase, filed as a subscription, and the refund
+       * under it. Only the newest was tried, a refund cannot stop being a
+       * subscription, and nothing happened. A correction goes to the newest
+       * card it can apply to, so "make it 300" still means the one in front
+       * of you and a correction only one card fits finds that card.
+       */
+      const card = (() => {
+        const open = turns.flatMap((t, index) => (isOffer(t) && t.state === "open" ? [{ index, turn: t }] : [])).reverse();
+        for (const c of open) {
+          const found = amend(c.turn.proposal.draft, note, reference, asOf);
+          if (found) return { ...c, change: found };
         }
+        return null;
+      })();
+      if (card) {
+        const change = card.change;
+        setDraft("");
+        /**
+         * The old card goes, and the corrected one arrives at the bottom.
+         *
+         * Changing the card in place worked and looked like nothing had
+         * happened: the card sits above the message that changed it, so
+         * the one field that moved was off screen. Leaving a collapsed
+         * stub behind was not much better, because two versions of one
+         * entry on screen is one more than there are. So the order reads
+         * as the conversation did:
+         *
+         *   what you said, then the entry as it now stands.
+         */
+        /**
+         * The training signal.
+         *
+         * What was proposed and what it became, as a pair. Read back by
+         * `correctionsFrom`, so telling it once that a word means Food is
+         * enough: it does not ask a second time. This is the whole of what
+         * "learning" means here, and it is a table of your own corrections
+         * in your own database.
+         */
+        const was = card.turn.proposal.draft;
+        const now = change.draft;
+
+        /**
+         * Learned under the words that produced the card, not the value it
+         * guessed.
+         *
+         * Keying on the guess taught "gas is Food" after one correction,
+         * and applying that would have turned every future Gas entry into
+         * Food. What the correction actually says is that the sentence
+         * meant Food, so the sentence is the key, and a phrase that is
+         * itself one of the owner's item names is never learned from.
+         */
+        // The item and the wallets are learned when the card is saved (`learnFrom`), so only a saved correction teaches.
+        if (was.amount !== now.amount || was.date !== now.date) {
+          log(
+            aiEvent("edited", "add", {
+              field: was.amount !== now.amount ? "amount" : "date",
+              proposed: was.amount !== now.amount ? formatMoney(was.amount ?? 0) : was.date,
+              corrected: was.amount !== now.amount ? formatMoney(now.amount ?? 0) : now.date,
+            }),
+          );
+        }
+
+        setTurns((prev) => [
+          ...prev.filter((_, i) => i !== card.index),
+          { kind: "you", text: note },
+          {
+            kind: "proposal",
+            proposal: {
+              ...card.turn.proposal,
+              draft: change.draft,
+              adjustments: [...card.turn.proposal.adjustments, change.what],
+            },
+            state: "open",
+            // The same card, corrected, so it keeps its id.
+            cardId: card.turn.cardId,
+          },
+        ]);
+        return;
       }
     }
     if (files.length > 0) setPending(null);

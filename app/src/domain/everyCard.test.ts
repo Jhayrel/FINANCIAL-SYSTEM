@@ -159,3 +159,76 @@ describe("fixing a typo you can see on the card", () => {
     expect(amend(blank, "new laptop not lkaptop", reference, ASOF)).toBeNull();
   });
 });
+
+/**
+ * 26 September 2026: an online purchase and the refund from work, read as
+ * two cards, the purchase filed under the 2022 subscription item "Other
+ * online payments".
+ *
+ *   "All maya and also its not subscription"    (only the wallet changed)
+ *   "Fix the entry its not subscription fix it"  (nothing happened)
+ */
+describe("it is not a subscription", () => {
+  const lists: ReferenceLists = {
+    ...reference,
+    subscriptions: ["Netflix", "Other online payments"],
+    bills: ["Globe"],
+    spendingTypes: [
+      { name: "Food", remark: "Meals, snacks, drinks" },
+      { name: "Online Buy", remark: "" },
+    ],
+  };
+  const bought: Draft = {
+    ...emptyDraft(ASOF),
+    flow: "Spending",
+    category: "Subscriptions",
+    item: "Other online payments",
+    description: "Online purchase",
+    fromWallet: "Gcash",
+    amount: 72345,
+    date: "2026-09-15",
+  };
+  const refunded: Draft = {
+    ...emptyDraft(ASOF),
+    flow: "Revenue",
+    category: "Revenue",
+    item: "Allowance",
+    description: "Reimbursed by work",
+    amount: 72345,
+    date: "2026-09-15",
+  };
+
+  it("moves the card to spending and finds the item again", () => {
+    const change = amend(bought, "Fix the entry its not subscription fix it", lists, ASOF)!;
+    expect(change.draft).toMatchObject({ category: "Spending", item: "Online Buy", fromWallet: "Gcash" });
+    expect(change.what).toBe("Spending, not a subscription: Online Buy.");
+  });
+
+  it("changes the wallet named in the same sentence as well", () => {
+    expect(addressesEveryCard("All maya and also its not subscription")).toBe(true);
+    const change = amend(bought, "All maya and also its not subscription", lists, ASOF)!;
+    expect(change.draft).toMatchObject({ category: "Spending", item: "Online Buy", fromWallet: "Maya" });
+  });
+
+  it("puts the income card into Maya and leaves its category alone", () => {
+    const change = amend(refunded, "All maya and also its not subscription", lists, ASOF)!;
+    expect(change.draft).toMatchObject({ category: "Revenue", toWallet: "Maya", item: "Allowance" });
+  });
+
+  it("reads the typo in the wallet sentence the same way", () => {
+    expect(amend(refunded, "Change all waller to maya only", lists, ASOF)!.draft.toWallet).toBe("Maya");
+    expect(amend(bought, "Change all waller to maya only", lists, ASOF)!.draft.fromWallet).toBe("Maya");
+  });
+
+  it("does the same for a bill, and leaves the item empty when nothing fits", () => {
+    const bill: Draft = { ...bought, category: "Bills", item: "Globe", description: "Globe" };
+    const change = amend(bill, "its not a bill", lists, ASOF)!;
+    expect(change.draft).toMatchObject({ category: "Spending", item: "" });
+    expect(change.what).toBe("Spending, not a bill. Pick the item.");
+  });
+
+  it("leaves a card alone when it was never in that group", () => {
+    const food: Draft = { ...bought, category: "Spending", item: "Food" };
+    expect(amend(food, "its not subscription", lists, ASOF)).toBeNull();
+  });
+});

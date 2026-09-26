@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { compactContext, firstInWaves, shortReason, SHRINK_TO, toneFor } from "./ai";
+import { compactContext, firstInWaves, shortReason, SHRINK_TO, systemFor, toneFor } from "./ai";
 
 /** A context shaped like the real one: worked-out figures, then the rows. */
 function contextOf(rows: number): string {
@@ -221,3 +221,32 @@ describe("asking several models at once", () => {
   });
 });
 
+
+/**
+ * "What can you recommend?", 26 September 2026, answered with "I cannot
+ * recommend investments, stocks, or coins". The system message told every
+ * task not to recommend, and the chat obeyed it over its own instruction.
+ */
+describe("who may advise", () => {
+  it("lets the conversation recommend from their own figures", () => {
+    const chat = systemFor("chat");
+    expect(chat).not.toContain("Do not recommend");
+    expect(chat).not.toContain("Never advise");
+    expect(chat).toContain("so recommend");
+    expect(chat).toContain("which stock, coin, fund or other investment");
+  });
+
+  it("keeps the panels to the facts", () => {
+    for (const task of ["summary", "alerts", "patterns", "extract"]) {
+      expect(systemFor(task), task).toContain("Do not recommend");
+      expect(systemFor(task), task).toContain("Never advise");
+    }
+  });
+
+  it("changes nothing else the two share", () => {
+    const shared = "Repeat figures exactly; never round or estimate";
+    expect(systemFor("chat")).toContain(shared);
+    expect(systemFor("summary")).toContain(shared);
+    expect(systemFor("chat")).toContain("Never use an em dash");
+  });
+});

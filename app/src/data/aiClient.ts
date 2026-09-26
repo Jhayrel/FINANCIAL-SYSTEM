@@ -529,6 +529,36 @@ export interface ExtractOptions {
    * the request, and only one of them is a decision the owner made.
    */
   readonly signal?: AbortSignal;
+  /** The last day each item was used, from `itemsLastUsed`, so an old item is marked as old. */
+  readonly lastUsed?: ReadonlyMap<string, IsoDate>;
+}
+
+/** The last day each item appears in the ledger. */
+export function itemsLastUsed(transactions: readonly Transaction[]): Map<string, IsoDate> {
+  const last = new Map<string, IsoDate>();
+  for (const t of transactions) {
+    if (!t.item) continue;
+    const seen = last.get(t.item);
+    if (!seen || t.date > seen) last.set(t.item, t.date);
+  }
+  return last;
+}
+
+/**
+ * An item's name for the reader, marked when it has not been used for a year.
+ *
+ * On 26 September 2026 "I paid 723.45 in online" came back as the
+ * subscription "Other online payments", a line of the 2022 workbook's GCash
+ * table that the migration brought into the lists. The word "online" matched
+ * it, and nothing told the model it had not been used in four years while
+ * Online Buy was used every week. An item never used yet is left unmarked:
+ * that is one the owner has only just added.
+ */
+export function itemForReader(name: string, lastUsed: ReadonlyMap<string, IsoDate> | undefined, asOf: IsoDate): string {
+  const seen = lastUsed?.get(name);
+  if (!seen) return name;
+  const yearAgo = `${Number(asOf.slice(0, 4)) - 1}${asOf.slice(4)}`;
+  return seen < yearAgo ? `${name} (old, last used ${seen.slice(0, 4)})` : name;
 }
 
 export interface ExtractResult {
@@ -563,8 +593,9 @@ function extractContext(options: ExtractOptions): string {
    * belongs to, and the owner's own note beside each spending type says what
    * counts as it, which is the thing worth reading before choosing.
    */
+  const aged = (name: string): string => itemForReader(name, options.lastUsed, asOf);
   const spendingTypes = reference.spendingTypes.map((t) =>
-    t.remark ? `${t.name} (${t.remark})` : t.name,
+    t.remark ? `${aged(t.name)} (${t.remark})` : aged(t.name),
   );
 
   const files = attachments
@@ -578,9 +609,10 @@ function extractContext(options: ExtractOptions): string {
     "",
     "The only items allowed, and which category each one belongs to:",
     `Category "Spending": ${spendingTypes.join(", ") || "none"}`,
-    `Category "Bills": ${reference.bills.join(", ") || "none"}`,
-    `Category "Subscriptions": ${reference.subscriptions.join(", ") || "none"}`,
-    `Category "Revenue" (income only): ${reference.revenueCategories.join(", ") || "none"}`,
+    `Category "Bills": ${reference.bills.map(aged).join(", ") || "none"}`,
+    `Category "Subscriptions": ${reference.subscriptions.map(aged).join(", ") || "none"}`,
+    `Category "Revenue" (income only): ${reference.revenueCategories.map(aged).join(", ") || "none"}`,
+    "An item marked old has not been used for over a year. Choose it only when what they said names it; a word in common is not enough.",
     "",
     // Redacted even though the endpoint never logs: a key pasted here would
     // otherwise reach the provider, which is a place this app cannot reach.

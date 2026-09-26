@@ -63,9 +63,46 @@ function figure(text: string): Centavos | null {
  */
 const MONTH_TOKEN = String.raw`(january|february|march|april|may|june|july|august|september|sept|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)`;
 
+/** Edits between two short words: letters added, dropped or changed. */
+function distance(a: string, b: string): number {
+  let row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      next[j] = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    row = next;
+  }
+  return row[b.length]!;
+}
+
+const LONG_MONTHS = ["january", "february", "august", "september", "october", "november", "december"];
+
+/**
+ * The month and verb misspellings that came in, read as the word.
+ *
+ * "how about add it to sseptember to december" (26 September 2026) was read
+ * as December alone, and "chnage the budget last month" as no request at
+ * all. A long month name is matched within an edit or two, but only a word
+ * that starts with the same letter, so "remember" never becomes December.
+ */
+export function respell(text: string): string {
+  return text
+    .replace(/\b(chnage|chnge|cahnge|chane|chage|chang|chaneg)\b/gi, "change")
+    .replace(/\b(udpate|updte|upadte|updat)\b/gi, "update")
+    .replace(/\b[a-z]{5,11}\b/gi, (word) => {
+      const lower = word.toLowerCase();
+      if (LONG_MONTHS.includes(lower)) return word;
+      const near = LONG_MONTHS.find(
+        (m) => m[0] === lower[0] && distance(lower, m) <= (m.length >= 7 && lower.length >= 7 ? 2 : 1),
+      );
+      return near ?? word;
+    });
+}
+
 /** "may" the verb, which is not the month: "it may be", "I may need". */
 const notTheMonth = (text: string): string =>
-  text.replace(/\bmay\b(?=\s+(?:be|have|need|not|also|still|want|help|go|get|use|spend|pay|buy|i|we|you|it|as|want)\b)/gi, "might");
+  respell(text).replace(/\bmay\b(?=\s+(?:be|have|need|not|also|still|want|help|go|get|use|spend|pay|buy|i|we|you|it|as|want)\b)/gi, "might");
 
 function monthIn(raw: string, asOf: IsoDate): { year: number; month: number } {
   const text = notTheMonth(raw);
@@ -197,7 +234,7 @@ export function spanIn(said: string, asOf: IsoDate): BudgetSpan | null {
  * for the figure rather than saying nothing.
  */
 export function namesBudgetCommand(said: string): boolean {
-  const text = said.replace(/\b(buget|budjet|bugdet|budgt|budet|bujet|budgets?)\b/gi, "budget");
+  const text = respell(said).replace(/\b(buget|budjet|bugdet|budgt|budet|bujet|budgets?)\b/gi, "budget");
   if (!/\b(budget|limit|cap)\b/i.test(text)) return false;
 
   /*
@@ -241,6 +278,23 @@ export function confirmsProposal(said: string): boolean {
  * one it means, and nothing else here counts.
  */
 export function proposedBudgetIn(text: string): Centavos | null {
+  return proposalIn(text)?.value ?? null;
+}
+
+/**
+ * The month a proposal is for, when the sentence that proposes it names one.
+ *
+ * "I recommend a budget of PHP 9,000.00 for October 2026" was applied to the
+ * running month, because only "next month" was looked for. Read from the
+ * proposing sentence alone, so a month the answer mentions elsewhere ("you
+ * spent this in September") is not taken for it.
+ */
+export function proposedMonthIn(text: string, asOf: IsoDate): BudgetSpan | null {
+  const found = proposalIn(text);
+  return found?.sentence ? spanIn(found.sentence, asOf) : null;
+}
+
+function proposalIn(text: string): { readonly value: Centavos; readonly sentence: string } | null {
   const MONEY = String.raw`(?:₱|php\s*)?\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|(?:₱|php\s*)\d+(?:\.\d{1,2})?`;
 
   /*
@@ -270,7 +324,7 @@ export function proposedBudgetIn(text: string): Centavos | null {
         const before = sentence.slice(Math.max(0, (m.index ?? 0) - 28), m.index ?? 0);
         if (PAST.test(before)) continue;
         const value = figure(m[0]);
-        if (value !== null && value > 0) return value;
+        if (value !== null && value > 0) return { value, sentence };
       }
     }
   }
@@ -298,7 +352,7 @@ export function proposedBudgetIn(text: string): Centavos | null {
     const found = pattern.exec(text);
     if (found?.[1]) {
       const value = figure(found[1]);
-      if (value !== null && value > 0) return value;
+      if (value !== null && value > 0) return { value, sentence: sentences.find((x) => x.includes(found[1]!.replace(/\*/g, ""))) ?? "" };
     }
   }
   return null;
@@ -307,7 +361,7 @@ export function proposedBudgetIn(text: string): Centavos | null {
 /** Read a budget request, or return null when the sentence is not one. */
 export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: IsoDate): BudgetAsk | null {
   // "add buget same as last month": the misspellings that came in, read as the word.
-  const text = said.replace(/\b(buget|budjet|bugdet|budgt|budet|bujet|budgets?)\b/gi, "budget");
+  const text = respell(said).replace(/\b(buget|budjet|bugdet|budgt|budet|bujet|budgets?)\b/gi, "budget");
   if (!/\b(budget|limit|cap)\b/i.test(text) || !(SET.test(text) || /\badd\b/i.test(text))) return null;
   const span = spanIn(text, asOf);
   const { year, month } = span ?? monthIn(text, asOf);
@@ -445,3 +499,33 @@ function planRange(ask: BudgetAsk, budgets: Budgets, start: ReturnType<typeof bu
   const changes = revisions.map((r, i) => revisionSummary(ask.year, written[i] ?? ask.month, r));
   return { year: ask.year, outcome, words, changes };
 }
+
+/**
+ * A figure of money in a message, once its dates are gone.
+ *
+ * Years, days of a month ("September 13", "13 Sept", "9/13") and counts of
+ * months ("for 3 months") are taken out first; any number left counts. It
+ * needed three digits, so "the amount is 4.25" read as no figure at all, and
+ * a sentence about cash back became a budget change (26 September 2026).
+ */
+export function namesMoneyFigure(text: string): boolean {
+  const left = text
+    .replace(/\b20\d{2}\b/g, " ")
+    .replace(/\b\d{1,2}\s+months?\b/gi, " ")
+    .replace(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(st|nd|rd|th)?\b/gi, " ")
+    .replace(/\b\d{1,2}(st|nd|rd|th)?\s+(of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b/gi, " ")
+    .replace(/\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g, " ");
+  return /(?:₱|php\s*)?\d[\d,]*(?:\.\d+)?|\b\d+(?:\.\d+)?\s*k\b/i.test(left);
+}
+
+/**
+ * Money moving, in the owner's words: an entry or a question about one,
+ * never a budget. Received, paid, spent, bought, cash back, sent, a
+ * withdrawal, a reimbursement, a loan.
+ */
+export function saysMoneyMoved(text: string): boolean {
+  return /\b(re?cei?e?ve?d?|recieved|got|paid|pay|spent|spend|bought|buy|purchased?|cash ?back|sent|send|transferr?ed|withdr[ae]w\w*|deposit\w*|earned|salary|allowance|reimburs\w*|refund\w*|borrowed|lent|loan)\b/i.test(
+    text,
+  );
+}
+

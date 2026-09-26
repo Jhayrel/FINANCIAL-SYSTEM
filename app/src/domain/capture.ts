@@ -397,6 +397,35 @@ export function amend(
     if (match.item) return { draft: { ...draft, item: match.item }, what: `Item set to ${match.item}.` };
   }
 
+  /*
+   * "its not subscription", "not a bill": the card is in the wrong group.
+   *
+   * 26 September 2026, with an online purchase filed as the 2022
+   * subscription item "Other online payments":
+   *
+   *   "All maya and also its not subscription"   (the wallet changed, nothing else)
+   *   "Fix the entry its not subscription fix it" (nothing happened at all)
+   *
+   * The card moves to ordinary spending, and the item is found again among
+   * the spending items from what the card already says. Checked before the
+   * length cap, and the rest of the sentence is still read, so a wallet
+   * named alongside it changes too.
+   */
+  const notGroup = /\b(?:it'?s\s+|its\s+|is\s+)?not\s+(?:a\s+|an\s+|the\s+|my\s+)?(subscriptions?|subs?|bills?)\b/i.exec(trimmed);
+  if (notGroup?.[1] && draft.flow === "Spending") {
+    const group = /^bill/i.test(notGroup[1]) ? "Bills" : "Subscriptions";
+    if (draft.category === group) {
+      const regrouped = spendingInstead(draft, reference);
+      const rest = trimmed
+        .replace(notGroup[0], " ")
+        .replace(/\b(fix|the|entry|it|this|that|and|also|please|pls)\b/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const more = rest ? amend(regrouped.draft, rest, reference, asOf) : null;
+      return more ? { draft: more.draft, what: `${regrouped.what} ${more.what}` } : regrouped;
+    }
+  }
+
   if (trimmed.length > 60) return null;
 
   const accounts = [...reference.wallets, ...reference.savings];
@@ -675,6 +704,33 @@ export function matchItem(
 
   // 5. Genuinely new. Kept, tidied, and flagged.
   return { item: tidy(said), matched: false };
+}
+
+/**
+ * A bill or subscription card moved to ordinary spending.
+ *
+ * The item is found again among the spending items, from the description
+ * first and then the item it had. A shared word is enough for a guess the
+ * owner is about to look at: "Other online payments" and "Online Buy" share
+ * "online". Nothing shared leaves the item empty for them to pick, never an
+ * item made up from the old name.
+ */
+function spendingInstead(draft: Draft, reference: ReferenceLists): Amendment {
+  const known = itemsFor("Spending", "Spending", reference);
+  const direct = [draft.description, draft.item]
+    .map((text) => matchItem(text, "Spending", "Spending", reference))
+    .find((m) => m.matched && known.includes(m.item));
+  const words = `${draft.description} ${draft.item}`
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 3);
+  const shared = known.find((name) => name.toLowerCase().split(/[^a-z0-9]+/).some((w) => words.includes(w)));
+  const item = direct?.item ?? shared ?? "";
+  const was = draft.category === "Bills" ? "a bill" : "a subscription";
+  return {
+    draft: { ...draft, category: "Spending", item },
+    what: item ? `Spending, not ${was}: ${item}.` : `Spending, not ${was}. Pick the item.`,
+  };
 }
 
 /** The flows, categories and statuses, which are field values and not things. */
