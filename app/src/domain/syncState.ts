@@ -97,3 +97,28 @@ export function syncWords({ online, pending, error }: SyncInput): SyncNotice | n
 
   return null;
 }
+
+/**
+ * Why kept entries did not reach the database, from what it answered.
+ *
+ * The notice used to say the same three sentences whatever happened, and one
+ * of them was a guess ("if the rules in Firebase are older than this app").
+ * When the database gave a reason it was thrown away, so the owner could not
+ * tell a rules problem from a signed-out tab from a bug. It says what the
+ * database said now, and what to do about that one.
+ */
+export function refusalWords(error: string | null, count: number): string {
+  const them = count === 1 ? "it" : "them";
+  const kept = `${count === 1 ? "It is" : "They are"} kept on this device, so nothing is lost.`;
+  if (!error) return `The database refused ${them}. ${kept}`;
+  if (/permission|insufficient/i.test(error)) {
+    return `The database's rules refused ${them}. Publish the latest firestore.rules in the Firebase console, check you are signed in as the owner, then press Try again. ${kept}`;
+  }
+  if (/unauthenticated|unauthorized|sign.?in|auth/i.test(error)) {
+    return `You are signed out, so the database would not take ${them}. Sign in again, then press Try again. ${kept}`;
+  }
+  if (/offline|unavailable|network|deadline/i.test(error)) {
+    return `The connection dropped before ${them} arrived. Press Try again once you are back online. ${kept}`;
+  }
+  return `The database answered: ${error.replace(/\.+$/, "")}. ${kept}`;
+}

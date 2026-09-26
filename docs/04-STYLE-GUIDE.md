@@ -400,9 +400,9 @@ All badges: `micro`, 22px tall, 8px horizontal padding, never interactive unless
 
 ### 3.7 Warnings, alerts, toasts, dialogs
 
-**Inline alert** (inside a form or card): 1px border in the status colour, status wash, `radius-md`, 12px padding, 16px status icon, `body` text, optional action link. Used for the entry-form warnings.
+**Inline alert** (inside a form or card): `--surface-sunk` panel, 1px `--hairline`, `radius-md`, 12px padding, an 18px status icon in the status colour, the title in `body-strong` ink, one or two lines of `caption` in `--ink-2`, actions at the end of the line. **The icon is the only coloured thing**, and its shape says the status too (tick, triangle, bar, i), so it reads without colour. No wash, no coloured border, no coloured rule, no status word in front of the title: each of those was built and rejected (20 and 26 September 2026: "looked generated", "a shape cut out and fitted in"). The status word is kept for screen readers only.
 
-**Page banner**: full width above content, same colours, dismissible only if informational. Overdue debt is persistent.
+**Page banner**: none. Nothing that announces itself sits in the page flow, because a notice arriving there moves everything under it (26 September 2026, the owner's "pop up"). What used to be a banner is a notice.
 
 **Notifications**: every finding lives behind a bell at the top right of every screen, not as a stack of boxes on the Dashboard.
 
@@ -412,7 +412,7 @@ All badges: `micro`, 22px tall, 8px horizontal padding, never interactive unless
 - **Where "seen" is kept:** in the browser only.
 - **The assistant's paragraph:** sits under the list while AI is on.
 
-**Toast**: bottom-centre on phone, bottom-right on desktop. `--surface`, `--shadow-overlay`, `radius-md`, max 2 lines, auto-dismiss 6s, pauses on hover. Carries at most one action (`Undo`). Never stack more than 3.
+**Notices** (toasts, a newer version, a change that did not save, the connection): one stack, fixed **under the top bar at the right** on a desktop and across the width under the bar on a phone. The bottom is where the work is: the Save bar, the chat's composer, the AI button and the phone's tab bar, and a notice at the bottom covered one of them whichever corner it took. The top right is beside the bell, where the owner asked notifications to live. A notice is the inline alert's parts on a card: `--surface`, 1px `--hairline`, `radius-md`, `--shadow-overlay`, a close button (44px to hit) in the corner. A one-line toast keeps its button on the same line. Toasts go after 6s, and the clock stops while the notice is pointed at or focused. Carries at most two actions. Never more than three toasts at once, newest at the bottom.
 
 **Confirm dialog**: for anything irreversible. Title states the action (`Delete record #0442?`), body states the consequence and where it goes (`It moves to the bin and can be restored.`), buttons `Cancel` (secondary) and the verb (`Delete`, danger). **Permanent deletion requires typing the record number to confirm.**
 

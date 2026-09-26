@@ -17,12 +17,12 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { worstLevel, type Alert as Finding, type AlertArea, type AlertLevel } from "../domain/alerts";
 
 const SEEN_KEY = "fms.notify.seen";
 
-const GLYPH: Record<AlertLevel, string> = { over: "!", warn: "!", info: "i" };
+const GLYPH: Record<AlertLevel, IconName> = { over: "statusOver", warn: "statusWarn", info: "statusInfo" };
 
 /** What tapping a finding does, said on the finding. */
 const GO: Record<AlertArea, string> = {
@@ -150,8 +150,8 @@ export function Notifications({
                       onOpen(a);
                     }}
                   >
-                    <span aria-hidden className="t-micro fms-notify-glyph" style={{ background: `var(--${a.level})` }}>
-                      {GLYPH[a.level]}
+                    <span aria-hidden className="fms-notify-glyph" style={{ color: `var(--${a.level})` }}>
+                      <Icon name={GLYPH[a.level]} size={18} />
                     </span>
                     <span className="fms-notify-text">
                       <span className="t-body-strong">

@@ -27,7 +27,7 @@ import { DebtScreen } from "./features/DebtScreen";
 import { Insights } from "./features/Insights";
 import { Settings } from "./features/Settings";
 import { Statements } from "./features/Statements";
-import { Alert, Button, Card, EmptyState, Money, Toast } from "./components/primitives";
+import { Button, Card, EmptyState, Money, Notice } from "./components/primitives";
 import { Notifications } from "./components/Notifications";
 import { useUpdateAvailable } from "./data/updateCheck";
 import { Icon, type IconName } from "./components/Icon";
@@ -36,7 +36,7 @@ import { useProposalSink } from "./features/useProposalSink";
 import { useReportScreenFallback } from "./features/screenReport";
 import { ScreenBoundary } from "./components/ScreenBoundary";
 import { changedSections } from "./domain/settingsDiff";
-import { syncWords } from "./domain/syncState";
+import { refusalWords, syncWords } from "./domain/syncState";
 import { useMediaQuery } from "./features/useMediaQuery";
 import { aiSurfaceOn } from "./domain/aiSurface";
 import type { Draft } from "./domain/entry";
@@ -187,8 +187,30 @@ export default function App() {
    * form goes back to being a new entry.
    */
   const [editing, setEditing] = useState<Transaction | null>(null);
-  /** A short confirmation, and at most one thing to do next (style guide §3.7). */
-  const [toast, setToast] = useState<{ text: string; action?: { label: string; run: () => void } } | null>(null);
+  /**
+   * Short confirmations, each with at most one thing to do next (style guide §3.7).
+   *
+   * A list rather than one slot. With one slot every flash set a six second
+   * timer that cleared whatever was showing when it fired, so a second
+   * confirmation arriving four seconds after the first was wiped two seconds
+   * later by the first one's timer. Each notice now keeps its own clock
+   * (`Notice`), paused while it is pointed at, and at most three show.
+   */
+  const [toasts, setToasts] = useState<{ id: number; text: string; action?: { label: string; run: () => void } }[]>([]);
+  const toastSeq = useRef(0);
+  /** The newer version's notice, closed for this tab. It comes back on the next visit if still true. */
+  const [updateClosed, setUpdateClosed] = useState(false);
+  /** The top bar's height, so the notices start just under it at every width. */
+  const topbarRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const bar = topbarRef.current;
+    if (!bar || typeof ResizeObserver === "undefined") return;
+    const measure = (): void => document.documentElement.style.setProperty("--fms-topbar-h", `${Math.round(bar.getBoundingClientRect().bottom)}px`);
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(bar);
+    return () => watch.disconnect();
+  }, []);
   /** Where to go once the Add form saves, when a screen sent it there ("Record payment"). */
   const [returnTo, setReturnTo] = useState<Screen | null>(null);
   /** Bumped on every recorded event, so the Activity screen refetches. */
@@ -750,9 +772,11 @@ export default function App() {
   );
 
   const flash = (message: string, action?: { label: string; run: () => void }): void => {
-    setToast(action ? { text: message, action } : { text: message });
-    window.setTimeout(() => setToast(null), 6000);
+    toastSeq.current += 1;
+    const id = toastSeq.current;
+    setToasts((prev) => [...prev, action ? { id, text: message, action } : { id, text: message }].slice(-3));
   };
+  const closeToast = (id: number): void => setToasts((prev) => prev.filter((t) => t.id !== id));
 
   /**
    * Whether this ledger renumbers on every write.
@@ -1591,7 +1615,7 @@ export default function App() {
 
       {/* Scrolling content column */}
       <div className="fms-content">
-        <header className="fms-topbar safe-t">
+        <header className="fms-topbar safe-t" ref={topbarRef}>
           <div className="fms-topbar-titles">
             <h1 className="t-display-m" style={{ margin: 0 }}>{title}</h1>
             <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
@@ -1646,102 +1670,6 @@ export default function App() {
                 : ""
           }`}
         >
-        {/*
-          Notices float over the page; they never move it.
-
-          These sat at the top of `main`, in the flow, so the moment one
-          appeared the whole screen jumped down by its height and
-          everything the owner was looking at moved. Two at once moved it
-          twice. That, rather than the colours, is what they kept calling
-          a pop up: the page shifting under them while they were reading
-          it, on 26 September 2026 for the third time.
-
-          Fixed to the bottom, over the page, with a measure that keeps
-          the buttons beside the sentence instead of a screen's width
-          away from it. Nothing behind them changes size or position, and
-          the pane is `pointer-events: none` so the page underneath stays
-          clickable everywhere a notice is not.
-        */}
-        <div className="fms-notices">
-          {updateReady && (
-            <>
-              <Alert
-                status="info"
-                title="A newer version of the app is ready"
-                action={
-                  <Button size="sm" variant="primary" onClick={() => window.location.reload()}>
-                    Reload
-                  </Button>
-                }
-              >
-                This tab is still running the version it opened with, so recent fixes are not on
-                screen yet. A half-typed entry on the Add screen is kept.
-              </Alert>
-            </>
-          )}
-          {(() => {
-            // Offline, slow or refused, said once (domain/syncState.ts). Only a signed-in app talks to a database.
-            const sync = syncWords({
-              online: cloud.uid ? online : true,
-              pending: cloud.uid && (slow || !online) ? pending : 0,
-              // The kept rows say it better than the general notice, and say what to do with them.
-              error: unsaved.length > 0 ? syncError : (writeError ?? syncError),
-            });
-            return sync || unsaved.length > 0 ? (
-              <div style={{ display: "grid", gap: "var(--space-3)" }} role="status" aria-live="polite">
-                {/*
-                  The rows themselves, kept, rather than "add it again" with
-                  nothing left on screen to add again from.
-                */}
-                {unsaved.length > 0 && (
-                  <Alert
-                    status="over"
-                    title={`${unsaved.length} ${unsaved.length === 1 ? "entry is" : "entries are"} not in the database`}
-                    action={
-                      <span style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
-                        <Button size="sm" variant="primary" onClick={retryUnsaved}>
-                          Try again
-                        </Button>
-                        <Button size="sm" onClick={() => keepUnsaved([])}>
-                          Dismiss
-                        </Button>
-                      </span>
-                    }
-                  >
-                    <span style={{ display: "block" }}>
-                      The database refused {unsaved.length === 1 ? "it" : "them"}. They are kept on this device, so nothing is lost.
-                      If the rules in Firebase are older than this app, publish firestore.rules in the Firebase console, then press Try
-                      again.
-                    </span>
-                    <ul style={{ margin: "var(--space-2) 0 0", paddingLeft: "var(--space-4)" }}>
-                      {unsaved.slice(0, 6).map((t) => (
-                        <li key={t.id} className="t-caption">
-                          {unsavedLine(t)}
-                        </li>
-                      ))}
-                      {unsaved.length > 6 && <li className="t-caption">and {unsaved.length - 6} more</li>}
-                    </ul>
-                  </Alert>
-                )}
-                {sync && (
-                <Alert
-                  status={sync.level}
-                  title={sync.title}
-                  action={
-                    writeError ? (
-                      <Button size="sm" onClick={() => setWriteError(null)}>
-                        Dismiss
-                      </Button>
-                    ) : undefined
-                  }
-                >
-                  {sync.detail}
-                </Alert>
-                )}
-              </div>
-            ) : null;
-          })()}
-        </div>
           <ScreenBoundary key={screen} where={title} onHome={() => go("dashboard")}>
           {screen === "dashboard" && (
             <Dashboard
@@ -2100,28 +2028,92 @@ export default function App() {
         </>
       )}
 
-      {toast && (
-        <div className="fms-toastwrap">
-          <Toast
+      {/*
+        Every notice that floats, in one stack under the top bar (§3.7,
+        layout.css `.fms-notices`). None of them sits in the page, so the page
+        never moves when one arrives or goes: the owner's "pop up" was the
+        screen jumping down under them, 26 September 2026.
+      */}
+      <div className="fms-notices" aria-live="polite">
+        {updateReady && !updateClosed && (
+          <Notice
+            status="info"
+            title="A newer version of the app is ready"
+            onDismiss={() => setUpdateClosed(true)}
             action={
-              toast.action ? (
+              <Button size="sm" variant="primary" onClick={() => window.location.reload()}>
+                Reload
+              </Button>
+            }
+          >
+            Reload to use it. A half-typed entry on the Add screen is kept.
+          </Notice>
+        )}
+        {unsaved.length > 0 && (
+          <Notice
+            status="over"
+            title={`${unsaved.length} ${unsaved.length === 1 ? "entry was" : "entries were"} not saved`}
+            action={
+              <>
+                <Button size="sm" variant="primary" onClick={retryUnsaved}>
+                  Try again
+                </Button>
+                <Button size="sm" onClick={() => keepUnsaved([])}>
+                  Discard {unsaved.length === 1 ? "it" : "them"}
+                </Button>
+              </>
+            }
+          >
+            {refusalWords(writeError, unsaved.length)}
+            <ul>
+              {unsaved.slice(0, 3).map((t) => (
+                <li key={t.id}>{unsavedLine(t)}</li>
+              ))}
+              {unsaved.length > 3 && <li>and {unsaved.length - 3} more</li>}
+            </ul>
+          </Notice>
+        )}
+        {(() => {
+          // Offline, slow or refused, said once (domain/syncState.ts). Only a signed-in app talks to a database.
+          if (unsaved.length > 0) return null;
+          const sync = syncWords({
+            online: cloud.uid ? online : true,
+            pending: cloud.uid && (slow || !online) ? pending : 0,
+            error: writeError ?? syncError,
+          });
+          return sync ? (
+            <Notice
+              status={sync.level}
+              title={sync.title}
+              {...(writeError ? { onDismiss: () => setWriteError(null) } : {})}
+            >
+              {sync.detail}
+            </Notice>
+          ) : null;
+        })()}
+        {toasts.map((t) => (
+          <Notice
+            key={t.id}
+            status="ok"
+            title={t.text}
+            timeout={6000}
+            onDismiss={() => closeToast(t.id)}
+            action={
+              t.action ? (
                 <Button
                   size="sm"
-                  variant="ghost"
                   onClick={() => {
-                    toast.action?.run();
-                    setToast(null);
+                    t.action?.run();
+                    closeToast(t.id);
                   }}
                 >
-                  {toast.action.label}
+                  {t.action.label}
                 </Button>
               ) : undefined
             }
-          >
-            {toast.text}
-          </Toast>
-        </div>
-      )}
+          />
+        ))}
+      </div>
     </div>
   );
 }

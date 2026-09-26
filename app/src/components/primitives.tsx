@@ -17,6 +17,7 @@
 import { useEffect, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
 
 import { formatAmount, type Centavos } from "../domain/money";
+import { Icon, type IconName } from "./Icon";
 
 /** U+2212 MINUS SIGN, never a hyphen: style guide §2.2. */
 const MINUS = "−";
@@ -437,6 +438,7 @@ export function ProgressBar({
  * who cannot separate the two colours it was a dot. The word carries it
  * instead, and the rule beside it carries the colour.
  */
+/** Said to a screen reader in front of the title: the icon carries it for the eye. */
 const ALERT_WORD: Record<Status, string> = {
   ok: "Done",
   over: "Problem",
@@ -445,6 +447,35 @@ const ALERT_WORD: Record<Status, string> = {
   none: "Note",
 };
 
+const STATUS_ICON: Record<Status, IconName> = {
+  ok: "statusOk",
+  over: "statusOver",
+  warn: "statusWarn",
+  info: "statusInfo",
+  none: "statusInfo",
+};
+
+/**
+ * A note inside a screen: §3.7, inline alert.
+ *
+ * ── The fourth look, and why it is this one ──────────────────────────────
+ *
+ * It has been a washed box with a coloured border ("looked generated", 20
+ * September 2026), then a 2px rule with a status word in front of the title,
+ * then the same on two lines ("a shape cut out and fitted in", 26 September
+ * 2026, twice). Each of those made the notice louder than the page it sat
+ * on: colour across its whole area, or a coloured word shouting the category
+ * before the sentence said anything.
+ *
+ * It is now what the rest of the app is made of. A quiet panel on the sunk
+ * surface with a hairline, the corner radius every input has, and the status
+ * in one place only, a small icon in the status colour whose shape also says
+ * it (a tick, a triangle, a bar, an i), so it reads without colour too. The
+ * title and the sentence are ordinary ink. Nothing about it says "alert"
+ * except what it says.
+ *
+ * The status word is still there for a screen reader, in front of the title.
+ */
 export function Alert({
   status = "info",
   title,
@@ -456,65 +487,130 @@ export function Alert({
   children: ReactNode;
   action?: ReactNode;
 }) {
-  /**
-   * ── Why the kicker and the buttons share the title's line ───────────────
-   *
-   * This had four bands stacked down the page: the status word on its own
-   * line, the title under it, the sentence under that, and the buttons under
-   * that again behind a space-3 margin. Two notices on one screen were eight
-   * bands of chrome above the thing you opened the app to do, and the owner
-   * said so on 26 September 2026: it read as a shape cut out and fitted in
-   * rather than part of the page.
-   *
-   * Nothing is removed. The status word goes inline in front of the title,
-   * where it reads as what it is, a label on that sentence, and the buttons
-   * sit at the far end of the same line, which is where the eye already is
-   * once the title has been read. Four bands become two and the notice
-   * becomes a rule with a line of text beside it, which is the same 2px ink
-   * rule the ledger rows are separated by (rule D2).
-   *
-   * The row wraps, so on a phone the buttons drop under the title rather
-   * than squeezing it, and the 44px targets of rule D10 are untouched.
-   */
-  const head = (
-    <div className="fms-alert-head">
-      {title ? (
-        <p className="t-body-strong fms-alert-title">
-          <span className="t-label fms-alert-kicker">{ALERT_WORD[status]}</span>
-          {title}
-        </p>
-      ) : (
-        <span className="t-label fms-alert-kicker">{ALERT_WORD[status]}</span>
-      )}
-      {action && <div className="fms-alert-action">{action}</div>}
-    </div>
-  );
-
   return (
     <div
       role={status === "over" ? "alert" : "status"}
       className="fms-alert"
-      style={{ "--alert-rule": `var(--${status})` } as CSSProperties}
+      style={{ "--alert-tone": `var(--${status})` } as CSSProperties}
     >
-      {head}
-      <div className="t-caption fms-alert-text">{children}</div>
+      <span className="fms-alert-icon" aria-hidden>
+        <Icon name={STATUS_ICON[status]} size={18} />
+      </span>
+      <div className="fms-alert-body">
+        {title ? (
+          <p className="t-body-strong fms-alert-title">
+            <span className="sr-only">{ALERT_WORD[status]}: </span>
+            {title}
+          </p>
+        ) : (
+          <span className="sr-only">{ALERT_WORD[status]}: </span>
+        )}
+        <div className="t-caption fms-alert-text">{children}</div>
+      </div>
+      {action && <div className="fms-alert-action">{action}</div>}
     </div>
   );
 }
 
-/** Toast: §3.7. Max two lines, one action. */
+/**
+ * A notice over the page: §3.7, toast, and every notice that floats.
+ *
+ * One object for all of them: "Saved. Record #0442." with Undo, the newer
+ * version waiting, a change the database refused, the connection going.
+ * They were three different things drawn three different ways, one of them a
+ * band across the top of the page that pushed everything down.
+ *
+ * A card like the other cards: the surface, a hairline, the overlay shadow
+ * a floating thing is allowed (§2.4), the status icon, the title, one line
+ * under it, and at most a couple of buttons. It can always be closed.
+ *
+ * `timeout` makes it go by itself, and the clock stops while the pointer is
+ * on it or it has focus (§3.7: "pauses on hover"), so a notice being read or
+ * reached for is never taken away mid-reach.
+ */
+export function Notice({
+  status = "info",
+  title,
+  children,
+  action,
+  onDismiss,
+  timeout,
+}: {
+  status?: Status;
+  title: ReactNode;
+  children?: ReactNode;
+  action?: ReactNode;
+  onDismiss?: () => void;
+  /** Milliseconds before it goes by itself. Absent: it stays until closed. */
+  timeout?: number;
+}) {
+  const held = useRef(false);
+  const left = useRef(timeout ?? 0);
+  const dismiss = useRef(onDismiss);
+  dismiss.current = onDismiss;
+
+  useEffect(() => {
+    if (!timeout) return;
+    let last = Date.now();
+    const tick = window.setInterval(() => {
+      const now = Date.now();
+      if (!held.current) left.current -= now - last;
+      last = now;
+      if (left.current <= 0) {
+        window.clearInterval(tick);
+        dismiss.current?.();
+      }
+    }, 250);
+    return () => window.clearInterval(tick);
+  }, [timeout]);
+
+  const hold = (on: boolean) => () => {
+    held.current = on;
+  };
+
+  return (
+    <div
+      role={status === "over" ? "alert" : "status"}
+      // A one-line confirmation keeps its button on the same line, the way a toast reads.
+      className={`fms-notice${children ? "" : " fms-notice--line"}`}
+      style={{ "--alert-tone": `var(--${status})` } as CSSProperties}
+      onPointerEnter={hold(true)}
+      onPointerLeave={hold(false)}
+      onFocus={hold(true)}
+      onBlur={hold(false)}
+    >
+      <span className="fms-alert-icon" aria-hidden>
+        <Icon name={STATUS_ICON[status]} size={18} />
+      </span>
+      <div className="fms-notice-body">
+        <p className="t-body-strong fms-notice-title">
+          <span className="sr-only">{ALERT_WORD[status]}: </span>
+          {title}
+        </p>
+        {children && <div className="t-caption fms-notice-text">{children}</div>}
+        {action && <div className="fms-notice-actions">{action}</div>}
+      </div>
+      {onDismiss && (
+        <button type="button" className="fms-notice-close" aria-label="Close this notice" onClick={onDismiss}>
+          <Icon name="close" size={16} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Toast: §3.7. A notice that goes by itself after six seconds. */
 export function Toast({
   children,
   action,
+  onDismiss,
 }: {
   children: ReactNode;
   action?: ReactNode;
+  onDismiss?: () => void;
 }) {
   return (
-    <div role="status" className="fms-toast">
-      <span className="t-body fms-toast-text">{children}</span>
-      {action}
-    </div>
+    <Notice status="ok" title={children} action={action} {...(onDismiss ? { onDismiss, timeout: 6000 } : {})} />
   );
 }
 

@@ -479,89 +479,183 @@
   }
 }
 
-/* ══ Alerts and toasts, §3.7 ════════════════════════════════════════════════ */
+/* ══ Alerts and notices, §3.7 ═══════════════════════════════════════════════ */
 
 /*
- * A notice, ruled rather than boxed.
+ * A note inside a screen.
  *
- * It used to be a tinted card: a wash of the status colour, a border mixed
- * from the same colour, a round badge with a glyph in it, and rounded
- * corners. Four ways of saying one thing, and stacked two deep at the top of
- * a screen they were the loudest objects in the app. The owner's verdict on
- * 20 September 2026 was that it looked generated, and it did.
+ * Three looks came before this one: a washed box ("looked generated", 20
+ * September 2026), then a 2px rule with a coloured status word in front of
+ * the title, then the same squeezed onto two lines ("a shape cut out and
+ * fitted in", 26 September 2026). Each made the notice louder than the page
+ * around it.
  *
- * It is now what every other block here is (rule D2): square, on the surface
- * it already sits on, separated by a 2px rule. The status is carried by the
- * rule and by a word, not by a wash, so colour still means something (rule
- * D3) and the meaning survives without it. Every status colour clears 4.5:1
- * on --surface and on --paper in both themes, asserted in contrast.test.ts.
+ * It is built from what the rest of the app is built from: the sunk surface
+ * an inset panel uses, a hairline, the radius of an input, ordinary ink for
+ * the words. The status lives in one place, a small icon in its colour whose
+ * shape says it too, so colour still means something (rule D3) and the
+ * meaning survives without it. Every status colour clears 4.5:1 on
+ * --surface-sunk and --surface in both themes (contrast.test.ts).
  */
 .fms-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2) var(--space-3);
   min-width: 0;
-  padding: var(--space-2) 0 var(--space-2) var(--space-3);
-  /*
-   * The fallback is not decoration. The status sets --alert-rule inline, and
-   * a var() with nothing behind it makes the whole declaration invalid, so a
-   * notice rendered without one lost its rule and read as loose text.
-   */
-  border-left: 2px solid var(--alert-rule, var(--ink-3));
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-3);
+  background: var(--surface-sunk);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
 }
 
-/*
- * The title's line: the status word, the title, and whatever you can do
- * about it, left to right. It wraps, so a phone puts the buttons underneath
- * instead of crushing the title.
- */
-.fms-alert-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2) var(--space-3);
-  flex-wrap: wrap;
+.fms-alert-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: var(--alert-tone, var(--ink-3));
+}
+
+.fms-alert-body {
+  /* Wide enough to read before the actions wrap underneath. */
+  flex: 1 1 220px;
   min-width: 0;
 }
 
 .fms-alert-title {
   margin: 0;
   min-width: 0;
-}
-
-/* Inline in front of the title, so it labels the sentence rather than sitting above it. */
-.fms-alert-kicker {
-  color: var(--alert-rule, var(--ink-2));
-  margin-right: var(--space-2);
+  color: var(--ink);
 }
 
 /* An error message can quote a path or an id with no spaces in it. */
 .fms-alert-text {
   color: var(--ink-2);
-  margin-top: var(--space-1);
+  line-height: 1.5;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.fms-alert-title + .fms-alert-text {
+  margin-top: 2px;
 }
 
 .fms-alert-action {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-2);
   flex: 0 0 auto;
+  margin-left: auto;
+  align-self: center;
 }
 
-.fms-toast {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-4);
-  max-width: 100%;
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
+/*
+ * A notice over the page: toasts, the newer version, a change the database
+ * refused, the connection.
+ *
+ * A card like any other card, raised because it floats (§2.4, overlay): the
+ * surface, a hairline, the icon, the title, a line under it, the buttons
+ * under that, and a close button in the corner. The same parts as the note
+ * above, so the two read as one family.
+ */
+.fms-notice {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3) calc(var(--space-8) + var(--space-2)) var(--space-3) var(--space-3);
   background: var(--surface);
   border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-overlay);
 }
 
-.fms-toast-text {
+.fms-notice-body {
+  flex: 1 1 auto;
   min-width: 0;
+}
+
+.fms-notice-title {
+  margin: 0;
+  color: var(--ink);
   overflow-wrap: anywhere;
+}
+
+.fms-notice-text {
+  margin-top: 2px;
+  color: var(--ink-2);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.fms-notice-text ul {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+}
+
+.fms-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+/* One line and a button: the title and Undo share the line, centred on the icon. */
+.fms-notice--line {
+  align-items: center;
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.fms-notice--line .fms-notice-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.fms-notice--line .fms-notice-title {
+  flex: 1 1 12rem;
+}
+
+.fms-notice--line .fms-notice-actions {
+  margin-top: 0;
+}
+
+.fms-notice--line .fms-notice-close {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* 44px to hit (rule D10), drawn as a small quiet cross in the corner. */
+.fms-notice-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color var(--motion-hover) var(--ease-out);
+}
+
+.fms-notice-close:hover {
+  color: var(--ink);
+}
+
+.fms-notice-close:focus-visible {
+  outline: 2px solid var(--brand-500);
+  outline-offset: -6px;
 }
 
 /* ══ Filter pills and tabs, §3.8 ════════════════════════════════════════════ */
@@ -961,61 +1055,4 @@
 
 .fms-rankhead > .t-num-s {
   margin-left: auto;
-}
-
-/*
- * ══ Notices, floating ══════════════════════════════════════════════════════
- *
- * The update notice and the database ones used to sit at the top of the page,
- * in the flow. The moment one appeared the whole screen jumped down by its
- * height and whatever the owner was reading moved; two at once moved it
- * twice. That is what they kept calling a pop up, three times over.
- *
- * They float now. Nothing behind them moves, and the pane itself takes no
- * clicks, so only the notice is clickable and the page underneath is
- * untouched everywhere else.
- *
- * Bottom left on a wide screen, because the right is where the assistant and
- * its button live and the bottom right is where a notice would cover them.
- */
-.fms-notices {
-  position: fixed;
-  /* Clear of the fixed 240px sidebar in .fms-app. */
-  left: calc(240px + var(--space-5));
-  right: var(--space-5);
-  bottom: var(--space-5);
-  z-index: 60;
-  display: grid;
-  gap: var(--space-3);
-  /* A measure, so the buttons sit beside the sentence and not a screen away. */
-  max-width: 560px;
-  pointer-events: none;
-}
-
-/* The notices themselves do take clicks. */
-.fms-notices > * {
-  pointer-events: auto;
-  background: var(--surface);
-  border: 1px solid var(--hairline);
-  border-left-width: 2px;
-  box-shadow: var(--shadow-overlay);
-  padding: var(--space-3) var(--space-4);
-}
-
-.fms-notices .fms-alert {
-  border: 0;
-  border-left: 2px solid var(--alert-rule, var(--ink-3));
-  box-shadow: none;
-  background: transparent;
-  padding: var(--space-1) 0 var(--space-1) var(--space-3);
-}
-
-/* A phone has no rail beside it, and the notice spans the screen. */
-@media (max-width: 1023px) {
-  .fms-notices {
-    left: var(--space-4);
-    right: var(--space-4);
-    bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
-    max-width: none;
-  }
 }

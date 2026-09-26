@@ -38,7 +38,11 @@ export type IconName =
   | "ai"
   | "chevronLeft"
   | "chevronRight"
-  | "bell";
+  | "bell"
+  | "statusOk"
+  | "statusWarn"
+  | "statusOver"
+  | "statusInfo";
 
 const SHAPES: Record<IconName, ReactNode> = {
   dashboard: (
@@ -134,6 +138,35 @@ const SHAPES: Record<IconName, ReactNode> = {
     <>
       <path d="M6.75 16.5v-5.25a5.25 5.25 0 0 1 10.5 0v5.25l1.5 1.5H5.25z" />
       <path d="M10.25 20.25a1.9 1.9 0 0 0 3.5 0" />
+    </>
+  ),
+  /*
+   * What a notice is about, by shape as well as colour, so the status reads
+   * without colour too (§5): a tick, a triangle, a circle with a bar, and a
+   * circle with an i.
+   */
+  statusOk: (
+    <>
+      <circle cx="12" cy="12" r="8.25" />
+      <path d="M8.5 12.25l2.4 2.4 4.6-4.9" />
+    </>
+  ),
+  statusWarn: (
+    <>
+      <path d="M10.4 4.6a1.85 1.85 0 0 1 3.2 0l6.6 11.7a1.85 1.85 0 0 1-1.6 2.75H5.4a1.85 1.85 0 0 1-1.6-2.75z" />
+      <path d="M12 9.5v3.75M12 16h.01" />
+    </>
+  ),
+  statusOver: (
+    <>
+      <circle cx="12" cy="12" r="8.25" />
+      <path d="M12 7.75v5M12 16h.01" />
+    </>
+  ),
+  statusInfo: (
+    <>
+      <circle cx="12" cy="12" r="8.25" />
+      <path d="M12 11v5M12 8h.01" />
     </>
   ),
 };

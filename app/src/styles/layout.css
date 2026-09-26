@@ -293,23 +293,48 @@
 }
 
 /*
- * Toasts sit bottom right on a desktop and bottom centre, above the
- * navigation, on a phone (§3.7). Never wider than the screen.
+ * Every floating notice, in one stack: under the top bar, at the right
+ * (§3.7).
+ *
+ * ── Why here and not at the bottom ──────────────────────────────────────
+ *
+ * The bottom of the screen is where the work is. The Save bar, the chat's
+ * composer and its Send button, the AI button, and on a phone the tab bar
+ * and the Add button all live there, and a notice at the bottom sat on top
+ * of one of them whichever corner it took: bottom right covered the chat,
+ * bottom left the form. The top right has nothing to cover but the corner
+ * of a card, and it is where the bell is, which is where the owner asked
+ * for notifications to live (2026-09-15). A notice about something that
+ * needs attention now sits beside the list of things that need attention.
+ *
+ * Fixed, so the page never moves when one arrives: `--fms-topbar-h` is the
+ * top bar's measured height, set by App, so the stack starts just under it
+ * at every width and with any title length. Newest at the bottom, three at
+ * most. The stack itself takes no clicks, only the notices in it.
  */
-.fms-toastwrap {
+.fms-notices {
   position: fixed;
-  /* Beside the floating AI button, not over it. */
-  right: calc(var(--space-6) + 56px + var(--space-3));
-  bottom: var(--space-6);
-  z-index: 30;
+  top: calc(var(--fms-topbar-h, 72px) + var(--space-3));
+  right: var(--space-6);
+  z-index: 60;
   display: flex;
-  justify-content: flex-end;
-  width: min(440px, calc(100vw - var(--space-8)));
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(400px, calc(100vw - var(--space-8)));
   pointer-events: none;
 }
 
-.fms-toastwrap > * {
+.fms-notices > * {
   pointer-events: auto;
+}
+
+/* A phone gives it the width of the screen, inside the page's own margins. */
+@media (max-width: 639px) {
+  .fms-notices {
+    left: var(--space-3);
+    right: var(--space-3);
+    width: auto;
+  }
 }
 
 /* ══ Dashboard ══════════════════════════════════════════════════════════════ */
@@ -1265,15 +1290,6 @@
 
   .fms-topbar {
     padding: var(--space-3) var(--space-5);
-  }
-
-  .fms-toastwrap {
-    left: 50%;
-    right: auto;
-    transform: translateX(-50%);
-    justify-content: center;
-    bottom: calc(80px + env(safe-area-inset-bottom, 0px));
-    width: calc(100vw - var(--space-8));
   }
 
   /* The side panel stacks BELOW the form: on a small screen you came here to
@@ -5496,16 +5512,19 @@ textarea.fms-askinput {
   outline-offset: -2px;
 }
 
+/*
+ * The same status icon a notice carries, in the finding's colour, outline
+ * only. It was a filled coloured disc with "!" or "i" typed in it: the badge
+ * look the owner called generated, and a different mark from every other
+ * notice in the app.
+ */
 .fms-notify-glyph {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
   width: 20px;
   height: 20px;
-  margin-top: 1px;
-  border-radius: var(--radius-full);
-  color: var(--surface);
-  font-weight: 700;
+  margin-top: 0;
 }
 
 .fms-notify-text {
@@ -5549,7 +5568,8 @@ textarea.fms-askinput {
 @media (max-width: 639px) {
   .fms-notify-panel {
     position: fixed;
-    top: calc(env(safe-area-inset-top, 0px) + 60px);
+    /* Just under the top bar, whatever its height (measured by App). */
+    top: calc(var(--fms-topbar-h, 60px) + var(--space-2));
     left: var(--space-3);
     right: var(--space-3);
     width: auto;
