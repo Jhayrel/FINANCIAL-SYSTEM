@@ -162,9 +162,23 @@ One face. Self-hosted via `@fontsource` so the PWA keeps its type offline.
 
 **List screens move their rows, not their heading** (owner, 2026-09-15). From 1024px the Database, Statements, the Bin and Activity are exactly one screen tall: the title, search, filters and column headings stay put and only the rows scroll. Tables inside cards on a scrolling page (Budget, Debt, Insights) keep their column headings pinned to the top of the page while they are in view.
 
-**Every screen works on a phone** (owner, 2026-09-15, replacing the same day's "a phone is for adding and for the summary"). Below 1024px the bar holds Dashboard, Database, Add, Budget and the assistant, and the top bar's ⋯ opens Debt, Insights, Statements, the Bin, Activity and Settings. Nothing says "on a bigger screen": the owner found that anything crucial waiting for a desk, or a link from one screen landing on a note, broke the app on the phone. The Database corrects and bins one row at a time there (picking several at once is the one desk-only action), and Budget sets the month's budget and limits and shows the year's tables, one card under another.
+**Every screen works on a phone** (owner, 2026-09-15, replacing the same day's "a phone is for adding and for the summary"). Below 1024px the bar holds Dashboard, Database, Add, Budget and the assistant, and the top bar's ⋯ opens Debt, Insights, Statements, the Bin, Activity and Settings. Nothing says "on a bigger screen": the owner found that anything crucial waiting for a desk, or a link from one screen landing on a note, broke the app on the phone. On the Database a row is tapped for what can be done with it and held to pick several (owner, 2026-09-26: there is no desk-only action left), and Budget sets the month's budget and limits and shows the year's tables, one card under another.
 
-**A phone has its own sizes.** Below 640px the type and spacing come down a step: hero figure 26px, card titles 16px, captions 12px, 12px of page and card padding, a 52px bar with a 48px Add. Fields stay 16px so iOS does not zoom.
+**A phone has its own sizes.** Below 640px the headings and spacing come down a step: hero figure 24px, card titles 16px, 12px of page and card padding, a 52px bar with a 48px Add. The small print does not: body text is 14px, captions 13px, and nothing is under 12px (owner, 2026-09-26, "make the font sized good", after record numbers had reached 10px). Fields stay 16px so iOS does not zoom.
+
+**The phone, as a phone** (owner, 2026-09-26: "make sure it's not a scaled down version of the pc version"). Below 640px:
+
+| Part | Spec |
+|---|---|
+| A screen's own card | Is the page. `Card page` has no border, radius or shadow, runs edge to edge, and leaves out its title, which the top bar already says. Cards that are one group among several (the Dashboard's, Budget's) stay cards. |
+| List rows | Tapped, not decorated. A Database row opens a sheet with its details and its actions; no Correct or Move to bin links under every row. Holding a row for half a second picks it and starts picking, a tap then adds or removes a row, and a bar pinned above the navigation says how many and what they total, with Cancel and Move to bin. |
+| Sheets and bars | Actions side by side along the bottom at 48px, the main one on the right under the thumb (Correct, Restore, Record payment, Save). A confirmation that removes something keeps the dialog's stacked layout. |
+| Stacked tables | Two fields to a line, label and figure in each half. The row's name heads it; its one action (Correct) sits opposite the name on the right. A long field (a note) takes a line of its own. |
+| Card actions | Stay beside the title on the right ("Open Budget"), never on a line of their own at the left. |
+| Touch | Every button, pill, tab and period step is 44px tall at phone width as well as on a coarse pointer; a name that opens something reaches 44px with padding the margin gives back. |
+| Add | The five flows are one row, a symbol over each name, so Amount is on screen from the first frame. Save is the larger button, on the right. |
+| AI tab | The whole screen is the conversation: no card, no "Ask" heading. It starts at the bottom by the composer, which sits on the surface above the navigation with Send on the right. A camera button beside Send opens the camera straight to a picture (`capture="environment"`); it is drawn on phones and touch tablets only. Clear this view is at the top right. |
+| Bin | The amount beside the name; Delete forever on the left and Restore on the right, half the width each. |
 
 ### 2.4 Radius, borders, elevation
 
@@ -244,7 +258,7 @@ On a touch screen every field is 16px, so iOS does not zoom the page, and the ph
 **Rules**
 - One primary per screen region. Two primaries side by side is a bug.
 - Destructive actions are never primary-filled. Danger variant + confirmation.
-- Order: primary rightmost on desktop, full-width stacked on phone with primary on top.
+- Order: primary rightmost on desktop. On a phone, a sheet or a bar puts its buttons side by side with the main one on the right under the thumb; a dialog confirming something destructive stacks them full width with the confirmation on top.
 - Label is a verb: `Save transaction`, not `Submit`, `OK`, or `Yes`.
 - Minimum 44px touch target on phone even at `sm` (pad the hit area, not the visual).
 
@@ -348,7 +362,7 @@ Desktop is a real table. Phone is a stacked list of rows, never a horizontally s
 
 **Sort**: click header, chevron in `--ink-3`, active column header in `--ink`. One sort at a time.
 
-**Row actions**: ghost icon buttons, revealed on hover on desktop, always visible on phone. Overflow into a `⋯` menu past two actions.
+**Row actions**: ghost icon buttons, revealed on hover on desktop. On a phone the row itself is the button: a tap opens its sheet, a hold picks it. Overflow into a `⋯` menu past two actions.
 
 **Pagination**: `Showing 1–50 of 440` on the left, page controls right. Or `Show 100 more` for append-style lists. Virtualise past 200 rows.
 
@@ -440,7 +454,7 @@ All badges: `micro`, 22px tall, 8px horizontal padding, never interactive unless
 
 **Phone bottom nav**: 5 items max, 56px + safe area, `--surface`, 1px top hairline. Icon 24px + `micro` label. Active in `--brand-700`. The centre slot is a raised circular **＋** in `--brand-700`, 56px, `--shadow-raised`, the most-used action gets the best position. With four items (AI switched off) there is no centre slot: the four share the bar equally and Add is a level 56×32 pill in `--brand-700` with its label under it, like the others.
 
-**Phone "More" sheet**: the top bar's ⋯ button opens a sheet listing every screen the bar has no room for, 48px rows, icon + label, the Bin with its count. **Every screen works on a phone**, and nothing says "on a bigger screen": Budget's planner, limits and year tables, the Dashboard's year charts, Statements and Activity included. A link from one screen to another (Open Insights, a statement from Debt, a notification into Activity) always lands somewhere usable. The one exception is picking several Database rows at once, which a phone does one row at a time.
+**Phone "More" sheet**: the top bar's ⋯ button opens a sheet listing every screen the bar has no room for, 48px rows, icon + label, the Bin with its count. **Every screen works on a phone**, and nothing says "on a bigger screen": Budget's planner, limits and year tables, the Dashboard's year charts, Statements and Activity included. A link from one screen to another (Open Insights, a statement from Debt, a notification into Activity) always lands somewhere usable. Picking several Database rows at once is done by holding a row (2026-09-26).
 
 **Moving to the bin says Undo**: the toast after binning a row carries Undo, which restores it, for the tap meant for the row beside it.
 
