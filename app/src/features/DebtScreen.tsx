@@ -629,6 +629,8 @@ function History({
       subtitle={`Every movement, newest first, with what was ${owed ? "owed" : "owed to you"} after it. Interest and fees show inside the movement they came with.`}
       padded={false}
     >
+      {/* One height with one row or fifty: the rows scroll inside it (layout.css, `.fms-tablebox`). */}
+      <div className="fms-tablebox">
       {rows.length === 0 ? (
         <EmptyState message="Nothing recorded against it yet. Borrowing, charges and payments show here once they are added." />
       ) : (
@@ -689,6 +691,7 @@ function History({
           </table>
         </div>
       )}
+      </div>
     </Card>
   );
 }

@@ -666,6 +666,12 @@
   min-width: 0;
 }
 
+/* With nothing in it there is no side panel, so the card takes the panel's column too. */
+.fms-bin:not(:has(> .fms-binrail)) > .fms-section,
+.fms-activity:not(:has(> .fms-actrail)) > .fms-section {
+  grid-column: 1 / -1;
+}
+
 .fms-binsum {
   display: grid;
   margin: 0;
@@ -2375,24 +2381,37 @@
   }
 
   /*
-   * As tall as its rows, and no taller than the screen.
+   * One height, whatever is in it.
    *
-   * These grew to fill the screen, so a search that found three rows drew
-   * three rows and then a card of nothing to the bottom of the window. They
-   * shrink now, and only start scrolling once the rows reach the bottom.
+   * These filled the screen once, then were made to shrink to their rows,
+   * so a filter that found four rows drew a short card with the page's
+   * background under it, and the card jumped in size with every filter. The
+   * owner, 26 September 2026: "all table, it should be the same height even
+   * if it's not full or empty or full". So the card is always the screen's
+   * height. The rows scroll inside it, the footer stays at its foot, and a
+   * short list leaves the table's own surface under its last row rather than
+   * the page's.
    */
   .fms-db > section,
   .fms-db > section > div:last-child,
   .fms-db .fms-tablewrap,
   .fms-db .fms-tablewrap > div {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
   }
 
   /* The one scrolling region on the screen. */
   .fms-db .scroll-slim {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
+  }
+
+  /* Nothing found: said in the middle of the same card, not in a smaller one. */
+  .fms-db > section > div:last-child > .fms-empty {
+    flex: 1 1 auto;
+    display: grid;
+    place-content: center;
+    justify-items: center;
   }
 
   /*
@@ -3377,17 +3396,35 @@
     grid-template-rows: auto minmax(0, 1fr);
   }
 
+  /*
+   * The screen's height, empty or full, like the Database (see "One height,
+   * whatever is in it" there). An empty bin was a short card at the top of
+   * an empty page, and the same card was a whole screen tall with a hundred
+   * rows in it.
+   */
   .fms-bin > .fms-section,
   .fms-activity > .fms-section {
     display: flex;
     flex-direction: column;
-    align-self: start;
-    max-height: 100%;
+    align-self: stretch;
+    height: 100%;
     min-height: 0;
   }
 
+  .fms-bin > .fms-section > .fms-section-flush > .fms-empty,
+  .fms-activity > .fms-section > .fms-section-flush > .fms-empty,
+  .fms-bin > .fms-section > div:last-child > .fms-empty,
+  .fms-activity > .fms-section > div:last-child > .fms-empty {
+    flex: 1 1 auto;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+  }
+
   .fms-bin > .fms-section > .fms-section-flush,
-  .fms-activity > .fms-section > .fms-section-flush {
+  .fms-activity > .fms-section > .fms-section-flush,
+  .fms-bin > .fms-section > .fms-section-body,
+  .fms-activity > .fms-section > .fms-section-body {
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
@@ -3463,6 +3500,40 @@
 @media (max-width: 639px) {
   .fms-main .fms-rtable thead th {
     top: calc(var(--space-3) * -1);
+  }
+}
+
+/*
+ * A table inside a page keeps one height, full or empty.
+ *
+ * The owner, 26 September 2026: "all table, it should be the same height
+ * even if it's not full or empty or full". A debt with one movement drew a
+ * card a few lines tall and a debt with forty drew one three screens long,
+ * so the page below it moved with every entry. The box is one height; the
+ * rows scroll inside it under their headings, and an empty one says so in
+ * the middle of the same space. A phone keeps its stacked list, which is
+ * read by scrolling the page.
+ */
+@media (min-width: 640px) {
+  .fms-tablebox {
+    display: flex;
+    flex-direction: column;
+    height: min(480px, 60vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--hairline-strong) transparent;
+  }
+
+  .fms-tablebox > .fms-empty {
+    flex: 1 1 auto;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+  }
+
+  .fms-main .fms-tablebox .fms-rtable thead th {
+    top: 0;
   }
 }
 
