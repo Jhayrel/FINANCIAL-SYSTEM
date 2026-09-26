@@ -57,3 +57,20 @@ describe("the checks on a borrowing and its fees", () => {
     expect(broken[0]!.fromWallet).toBe("Maya");
   });
 });
+
+describe("money sent out with a fee", () => {
+  it("is not flagged when it is filed as the Add form files it, Money Send", () => {
+    const sent = draftToTransactions(
+      { ...emptyDraft("2026-05-04"), flow: "Transfer", fromWallet: "Gcash", toWallet: "", amount: 400000, fee: 1500, status: "Transferred" },
+      3610,
+      "s1",
+    );
+    expect(sent[0]).toMatchObject({ category: "Spending", item: "Money Send" });
+    expect(checkIntegrity(sent).filter((i) => i.code === "uncategorised-fee")).toHaveLength(0);
+  });
+
+  it("still flags a fee on a move between two of the owner's accounts with no fee label", () => {
+    const moved = [{ ...draftToTransactions({ ...emptyDraft("2026-09-01"), flow: "Transfer", fromWallet: "Gcash", toWallet: "Maya", amount: 500472, fee: 1000 }, 3782, "m1")[0]!, category: "", item: "" }];
+    expect(checkIntegrity(moved as never).filter((i) => i.code === "uncategorised-fee")).toHaveLength(1);
+  });
+});

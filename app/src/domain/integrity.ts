@@ -92,7 +92,14 @@ export function checkIntegrity(transactions: readonly Transaction[]): Issue[] {
      * being counted as an expense.
      */
     if (t.type === "Transfer" && t.fee > 0) {
-      if (t.category !== "Spending" || !isFeeItem(t.item)) {
+      /*
+       * Money that left the accounts is filed as Money Send, fee and all:
+       * that is what `draftToTransactions` writes, and the whole row counts
+       * as spending (CLAUDE.md, "Transfers are derived"). Only a move between
+       * the owner's own accounts needs Transaction Fee to show its cost.
+       */
+      const sentOut = !t.toWallet.trim() && t.item.trim().toLowerCase() === "money send";
+      if (t.category !== "Spending" || !(isFeeItem(t.item) || sentOut)) {
         one(
           t,
           "uncategorised-fee",
