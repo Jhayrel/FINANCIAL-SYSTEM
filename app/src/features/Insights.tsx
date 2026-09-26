@@ -381,6 +381,7 @@ export function Insights({
         safe ? `Safe to spend ${formatMoney(safe.perDay)} a day (${formatMoney(safe.safe)}), set by the ${safe.limitedBy}.` : "",
         ...healthLines,
       ],
+      range: { from: sel.start, to: sel.end },
     }),
     [name, year, phaseWords, brief, sel.start, sel.end, when, report, safe, healthLines],
   );

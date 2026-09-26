@@ -98,6 +98,8 @@ import {
   chartLabel,
   isChartFollowUp,
   asksChartColour,
+  namesWindow,
+  pointsAtScreen,
   asksForProse,
   wantsChart,
   wantsStatement,
@@ -3569,7 +3571,21 @@ export function AskPanel({
           ? `${note} ${shown.title}`
           : note;
 
-      const asked = routed?.period ? `${carried} ${routed.period}` : carried;
+      /*
+       * "chart what I picked" on Insights is the calendar's pick, not this
+       * month. Only when the message names no window of its own: "chart
+       * this week" means this week wherever it is asked.
+       */
+      const pick = currentScreen()?.range;
+      const onPick =
+        pick !== undefined &&
+        pointsAtScreen(ruled, turns.some(isChart)) &&
+        !namesWindow(ruled.replace(/\b(picked|selected|highlighted|those|these)\s+days?\b/gi, " "));
+      const asked = onPick
+        ? `${note} ${pick.from === pick.to ? pick.from : `${pick.from} to ${pick.to}`}`
+        : routed?.period
+          ? `${carried} ${routed.period}`
+          : carried;
       /*
        * Money in and money out together ("income vs spending", "cash flow")
        * is two charts, each in its own colour, rather than one of them.

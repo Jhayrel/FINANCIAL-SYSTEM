@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asksChartColour, buildChart, chartLabel, isChartFollowUp, wantsChart, wantsReport } from "./charts";
+import { asksChartColour, buildChart, pointsAtScreen, chartLabel, isChartFollowUp, wantsChart, wantsReport } from "./charts";
 import { totalsFor } from "./totals";
 import type { Transaction } from "./types";
 
@@ -276,5 +276,22 @@ describe("asksChartColour", () => {
     expect(asksChartColour("chart my spending this week")).toBe(false);
     expect(asksChartColour("spent 200 on a blue shirt")).toBe(false);
     expect(asksChartColour("what does red mean")).toBe(false);
+  });
+});
+
+describe("pointsAtScreen", () => {
+  it("reads a pick on the calendar, chart or no chart", () => {
+    expect(pointsAtScreen("chart what I picked", true)).toBe(true);
+    expect(pointsAtScreen("chart the selected days", false)).toBe(true);
+    expect(pointsAtScreen("graph the range", true)).toBe(true);
+  });
+
+  it("takes a bare this to mean the screen only before any chart", () => {
+    expect(pointsAtScreen("chart this", false)).toBe(true);
+    expect(pointsAtScreen("chart this", true)).toBe(false);
+  });
+
+  it("is nothing for a chart that points at nothing", () => {
+    expect(pointsAtScreen("chart my spending", false)).toBe(false);
   });
 });

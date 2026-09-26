@@ -23,6 +23,11 @@ export interface ScreenReport {
   readonly screen: string;
   /** What is on it, one fact a line. */
   readonly lines: readonly string[];
+  /**
+   * The days the screen is showing, when it picks days (Insights). "chart
+   * what I picked" is drawn over these rather than over this month.
+   */
+  readonly range?: { readonly from: string; readonly to: string };
 }
 
 const MOST_LINES = 40;

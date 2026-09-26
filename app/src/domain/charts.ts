@@ -948,6 +948,21 @@ export function withoutTheFilePart(question: string): string {
 }
 
 /**
+ * A chart of what the screen is showing: "chart what I picked", "chart this".
+ *
+ * On Insights the calendar picks the days, and "chart what I picked" drew
+ * this month, because the pick was only ever sent as words for the model.
+ * A pointing word means the pick. A bare "this" or "it" only counts when no
+ * chart is in the conversation yet, since after one it means that chart.
+ */
+export function pointsAtScreen(question: string, chartShown: boolean): boolean {
+  if (/\b(picked|selected|selection|highlighted|(the|my|this|that) range|(on )?the (screen|calendar))\b/i.test(question)) {
+    return true;
+  }
+  return !chartShown && /\b(this|that|these|those|it)\b/i.test(question);
+}
+
+/**
  * Asking for a chart in other colours: "make it blue", "change the colors".
  *
  * A chart's colour is the direction of its money (rule D3): red is money
