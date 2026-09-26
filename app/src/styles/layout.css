@@ -1428,8 +1428,33 @@
   max-width: 260px;
 }
 
+.fms-stmtfield--wide {
+  flex: 2 1 220px;
+  max-width: 320px;
+}
+
+.fms-stmtfield--narrow {
+  flex: 0 1 110px;
+  min-width: 96px;
+}
+
+/* The second row: who the statement is for, then the two exports, the PDF last so it sits under the right thumb. */
+.fms-stmttools--issue {
+  background: var(--surface-sunk);
+}
+
 .fms-stmtexport {
   margin-left: auto;
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* A phone row: what moved, then the balance under it. */
+.fms-stmtfigure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
 }
 
 .fms-stmtsummary {
@@ -1459,7 +1484,11 @@
   }
 
   .fms-stmtexport > .fms-btn {
-    width: 100%;
+    flex: 1 1 0;
+  }
+
+  .fms-stmtexport > .fms-btn--primary {
+    flex: 2 1 0;
   }
 }
 
@@ -8355,4 +8384,36 @@ textarea.fms-askinput {
       var(--shadow-overlay),
       0 0 0 100vmax rgba(16, 24, 16, 0.4);
   }
+}
+
+/* ── Start clean from a file (Settings, Restore) ─────────────────────────── */
+
+.fms-cleanplan {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-cleanlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--hairline);
+}
+
+.fms-cleanlist > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-cleanlist > li:last-child {
+  border-bottom: 0;
 }

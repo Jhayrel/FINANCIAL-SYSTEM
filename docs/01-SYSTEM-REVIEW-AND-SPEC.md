@@ -652,10 +652,34 @@ Bills: most recent non-zero month, **never forecast below it**.
 | Type | Includes |
 |---|---|
 | Account Statement | Everything in range |
-| Revenue Sheet | `type='Revenue'` |
-| Expense Sheet | `type='Spending'` + Transfer rows with `category='Spending'` and `item='Transaction Fee'` + `Debt/interest` + `Debt/fee` |
+| Revenue Sheet | `incomeOf(t) > 0` *(was `type='Revenue'`, see below)* |
+| Expense Sheet | `costOf(t) > 0` *(was Spending + fee rows + interest, see below)* |
 | Savings Sheet | Rows whose from/to wallet is a known savings wallet |
 | **Debt Statement** *(new)* | All rows with a `debtId`, grouped by debt, with a running outstanding column |
+| **Wallet Statement** *(new, 2026-09-26)* | Rows touching one wallet, with that wallet's balance |
+| **Bills and subscriptions** *(new, 2026-09-26)* | Spending in `Bills` or `Subscriptions` |
+| **Transfers** *(new, 2026-09-26)* | Transfer rows, with what each moved and what it cost |
+| **Everything borrowed** *(new, 2026-09-26)* | Rows of every payable debt except on-behalf ones, with the total owed |
+| **Credit cards and lines** *(new, 2026-09-26)* | Rows of payable credit lines only |
+| **Everything lent** *(new, 2026-09-26)* | Rows of every receivable, with what is still owed to you |
+| **On behalf** *(new, 2026-09-26)* | Rows of pass-through debts |
+
+**Changed 2026-09-26, at the owner's request for statements that are right.**
+The revenue sheet listed opening balances as income, which rule Y1 says they
+are not. The expense sheet listed a transfer between two of the owner's own
+wallets at its whole amount, so a PHP 15.00 fee on a PHP 9,000.00 withdrawal
+was PHP 9,015.00 of expense. Both now use the app's one definition of income
+and of cost, so a sheet's total is the total every other screen shows.
+
+**The Excel's own account statement is off by PHP 40.00 for 2026.** It leaves
+out every transfer whose category is blank (66 rows), and three of those carry
+fees: records #8, #190 and #451, PHP 15.00 + 15.00 + 10.00. Its closing
+balance was PHP 3,900.80; the wallets held PHP 3,860.80, which is what the
+app's statement closes on (`statementSheet.ts`, asserted in the migration
+report). #8 and #190 are the same two rows as the `INT-01` finding.
+
+Every statement exports as a PDF laid out as the Excel printed one
+(`pdf/statementPdf.ts`) and as CSV.
 
 ## 5.11 Write path (Module1)
 

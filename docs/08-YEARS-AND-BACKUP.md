@@ -219,3 +219,27 @@ to zero before the current ledger begins.
 5. A debt repaid inside the history shows nothing outstanding.
 
 If any fails, the builder writes its report and no backup file.
+
+---
+
+## Y6. Starting clean from a file clears test rows without deleting them.
+
+Settings, Data, Restore, "Start clean from this file" (`planStartClean` in
+`domain/backup.ts`). Added 2026-09-26, when the owner asked for the test
+data in the live system, and everything in the Bin, to be removed.
+
+| Part | What happens |
+|---|---|
+| Rows the file has | The ledger becomes exactly these. One already here with the same content keeps its id |
+| Rows here the file lacks | Marked `discardedAt` and kept in the database. Shown on no screen, in no total |
+| The Bin | Cleared the same way, except rows the file's own bin holds |
+| Settings, budgets, AI, theme | Kept. The file's accounts and debts are added by name |
+| Accounts and debts nothing uses | Archived, not removed, so one switch in Settings brings one back |
+| Before it runs | A backup of everything as it stands downloads, so restoring it undoes the step |
+
+The database rules refuse every delete (`allow delete: if false`), and that
+stays. `discardedAt` is the only new thing, and the rules accept it as an
+optional string. "Replace everything" uses the same mark for the rows the file
+does not have: before this it wrote the file's rows and left the old ones in
+the database, so the next snapshot brought them all back.
+

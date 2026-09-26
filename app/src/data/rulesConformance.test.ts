@@ -61,6 +61,7 @@ function refusals(d: Record<string, unknown>): string[] {
     out.push("debt");
   }
   if ("deletedAt" in d && typeof d.deletedAt !== "string") out.push("deletedAt");
+  if ("discardedAt" in d && typeof d.discardedAt !== "string") out.push("discardedAt");
   if ("entrySource" in d && !["manual", "ai"].includes(d.entrySource as string)) out.push("entrySource");
   if ("partOf" in d && (!str(d.partOf, 200) || (d.partOf as string).length === 0)) out.push("partOf");
   if (Object.keys(d).some((k) => SECRET.includes(k))) out.push("secret");

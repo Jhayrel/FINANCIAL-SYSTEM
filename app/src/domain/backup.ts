@@ -441,6 +441,136 @@ export function restore(
 const identity = (t: Transaction): string =>
   [t.date, t.type, t.total, t.fromWallet, t.toWallet, t.item, t.description.trim()].join(" ");
 
+// ── Starting clean ─────────────────────────────────────────────────────────
+
+/**
+ * What "start clean from this file" will do, worked out before anything is
+ * written, so the screen can show it and the owner can say no.
+ *
+ * ── Why it exists ─────────────────────────────────────────────────────────
+ *
+ * The owner, 26 September 2026: "remove the old test data ... some of the
+ * data in the current system is fake only test", and of the Bin, "those all
+ * are test data". The real record is the Excel. Neither restore did the job:
+ * merge keeps every test row, and replace wrote the file's rows but could not
+ * remove anything from the database, whose rules refuse every delete, so the
+ * next snapshot brought the test rows straight back.
+ *
+ * ── What it does ───────────────────────────────────────────────────────────
+ *
+ * The ledger becomes exactly the file's rows. A row already here with the
+ * same content keeps its id, so its document is reused rather than doubled.
+ * Every other row here, and everything in the Bin the file does not also
+ * have in its bin, is set aside: marked `discardedAt` in the database, where
+ * it stays, and shown on no screen and in no total. Nothing is deleted.
+ *
+ * Settings are kept (the AI choices, the theme, the budgets). The file's
+ * accounts and debts are added by name, and an account or debt that no row
+ * uses any more and the file does not name is archived, not removed, so the
+ * test ones leave the screens and anything archived by mistake is one switch
+ * away in Settings.
+ */
+export interface CleanPlan {
+  readonly transactions: readonly Transaction[];
+  readonly deleted: readonly DeletedTransaction[];
+  readonly settings: AppSettings;
+  readonly budgets: Budgets;
+  readonly preferences: Preferences;
+  readonly migrations: Migrations;
+  /** File rows matched to a row already here. */
+  readonly kept: number;
+  /** File rows not here before. */
+  readonly added: number;
+  /** Live rows here that the file does not have. */
+  readonly setAside: readonly Transaction[];
+  /** Bin rows cleared. */
+  readonly binCleared: readonly DeletedTransaction[];
+  /** Every document id to mark discarded: set aside, and cleared from the bin. */
+  readonly discard: readonly string[];
+  readonly archivedAccounts: readonly string[];
+  readonly archivedDebts: readonly string[];
+}
+
+export function planStartClean(backup: Backup, current: RestoreCurrent): CleanPlan {
+  const b = backup.data;
+
+  // Debts by name: a file's debt whose name is already here takes this id, so its rows point at it.
+  const debtIdFor = new Map<string, string>();
+  for (const d of b.settings.credits) {
+    const same = current.settings.credits.find((c) => c.name.trim().toLowerCase() === d.name.trim().toLowerCase());
+    if (same && same.id !== d.id) debtIdFor.set(d.id, same.id);
+  }
+
+  const available = new Map<string, Transaction[]>();
+  for (const t of current.transactions) {
+    const key = identity(t);
+    available.set(key, [...(available.get(key) ?? []), t]);
+  }
+
+  let kept = 0;
+  const usedIds = new Set<string>();
+  const transactions = b.transactions.map((t) => {
+    const row = t.debtId && debtIdFor.has(t.debtId) ? { ...t, debtId: debtIdFor.get(t.debtId)! } : t;
+    const match = available.get(identity(row))?.shift();
+    if (match) {
+      kept += 1;
+      usedIds.add(match.id);
+      return { ...row, id: match.id };
+    }
+    return row;
+  });
+
+  const finalIds = new Set([...transactions.map((t) => t.id), ...b.deleted.map((t) => t.id)]);
+  const setAside = current.transactions.filter((t) => !usedIds.has(t.id));
+  const binCleared = current.deleted.filter((t) => !b.deleted.some((d) => d.id === t.id));
+  // A document the file's own row now writes over is not discarded: it is that row.
+  const discard = [...setAside, ...binCleared].map((t) => t.id).filter((id) => !finalIds.has(id));
+
+  // Accounts and debts: this device's, plus the file's missing ones.
+  const byName = <T extends { name: string }>(a: readonly T[], extra: readonly T[]): T[] => {
+    const have = new Set(a.map((x) => x.name.trim().toLowerCase()));
+    return [...a, ...extra.filter((x) => !have.has(x.name.trim().toLowerCase()))];
+  };
+  const named = new Set(transactions.flatMap((t) => [t.fromWallet, t.toWallet]).filter(Boolean).map((w) => w.toLowerCase()));
+  const fileAccounts = new Set(b.settings.accounts.map((a) => a.name.trim().toLowerCase()));
+  const archivedAccounts: string[] = [];
+  const accounts = byName(current.settings.accounts, b.settings.accounts).map((a) => {
+    const key = a.name.trim().toLowerCase();
+    const inUse = named.has(key) || fileAccounts.has(key) || current.settings.accounts.some((g) => g.parentId === a.id && named.has(g.name.toLowerCase()));
+    if (inUse || a.archived) return a;
+    archivedAccounts.push(a.name);
+    return { ...a, archived: true };
+  });
+
+  const debtRows = new Set(transactions.map((t) => t.debtId).filter(Boolean));
+  const fileDebts = new Set(b.settings.credits.map((d) => d.name.trim().toLowerCase()));
+  const archivedDebts: string[] = [];
+  const credits = byName(current.settings.credits, b.settings.credits).map((d) => {
+    if (d.archived || debtRows.has(d.id) || fileDebts.has(d.name.trim().toLowerCase())) return d;
+    archivedDebts.push(d.name);
+    return { ...d, archived: true };
+  });
+
+  return {
+    transactions,
+    deleted: b.deleted,
+    settings: { ...current.settings, accounts, credits },
+    budgets: current.budgets,
+    preferences: current.preferences,
+    migrations: {
+      debt: current.migrations.debt || b.migrations.debt,
+      opening: current.migrations.opening || b.migrations.opening,
+    },
+    kept,
+    added: transactions.length - kept,
+    setAside,
+    binCleared,
+    discard,
+    archivedAccounts,
+    archivedDebts,
+  };
+}
+
 function mergeBin(
   current: readonly DeletedTransaction[],
   incoming: readonly DeletedTransaction[],

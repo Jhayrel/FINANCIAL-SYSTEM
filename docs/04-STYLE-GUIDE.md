@@ -603,6 +603,24 @@ Why it matters: one unchanging "Thinking" for fifteen seconds says nothing,
 and the honest question a reader asks of it is whether anything is happening
 at all.
 
+### 3.15 A printed statement
+
+The PDF a statement exports (`pdf/statementPdf.ts`) follows the owner's Excel
+layout, asked for on 2026-09-26: a green band with the statement's name in
+capitals, the period and date issued on the left, who it is issued to and by
+on the right, and the system's logo and name. A table with a green heading
+row: Date, Description, Type, Wallet from, Wallet to, then the money columns
+and a running balance, the peso sign at the left of each money cell and the
+figure at the right, a dash for none. "Balance brought forward" first,
+"Totals" last, then **Nothing Follows**. Every page repeats the heading row
+and carries the logo, the name and "Page n of m" at the foot.
+
+Type is Inter, embedded: Regular and Bold with tabular digits and the peso
+sign (`tools/build_pdf_fonts.py`). The colours are fixed RGB values in that
+one file, the one place outside `tokens.css` that holds colour, because paper
+has no dark theme: a statement printed at night must look like one printed at
+noon (an exception to D1, recorded here rather than made quietly).
+
 ## 4. Content & voice
 
 | Rule | Example |

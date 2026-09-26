@@ -127,6 +127,7 @@ export function toDocument(t: Transaction, deletedAt?: string): DocumentData {
 
 function fromDocument(snap: QueryDocumentSnapshot<DocumentData>): Transaction & {
   deletedAt?: string;
+  discardedAt?: string;
 } {
   const d = snap.data();
   return {
@@ -152,6 +153,9 @@ function fromDocument(snap: QueryDocumentSnapshot<DocumentData>): Transaction & 
     ...(typeof d.deletedAt === "string" && d.deletedAt.length > 0
       ? { deletedAt: d.deletedAt }
       : {}),
+    ...(typeof d.discardedAt === "string" && d.discardedAt.length > 0
+      ? { discardedAt: d.discardedAt }
+      : {}),
   };
 }
 
@@ -174,6 +178,18 @@ export interface LedgerStore {
   restore(id: string): Promise<void>;
   /** One atomic write for a whole-ledger rewrite (a rename, a migration). */
   saveMany(transactions: readonly Transaction[]): Promise<void>;
+  /**
+   * Start clean from a file (`planStartClean`): write its rows as live, its
+   * bin as binned, and mark every other document `discardedAt`. Nothing is
+   * deleted; the rules refuse that. Resolves with how many documents the
+   * rules would not let this mark, which stay where they were.
+   */
+  startClean(
+    live: readonly Transaction[],
+    binned: readonly DeletedTransaction[],
+    discard: readonly string[],
+    at: string,
+  ): Promise<{ readonly notDiscarded: number }>;
 }
 
 export function firestoreLedger(uid: string): LedgerStore {
@@ -189,10 +205,13 @@ export function firestoreLedger(uid: string): LedgerStore {
 
           for (const snap of qs.docs) {
             const row = fromDocument(snap);
+            // Set aside by starting clean: kept in the database, shown nowhere.
+            if (row.discardedAt) continue;
             if (row.deletedAt) {
-              binned.push({ ...row, deletedAt: row.deletedAt });
+              const { discardedAt: _gone, ...rest } = row;
+              binned.push({ ...rest, deletedAt: row.deletedAt });
             } else {
-              const { deletedAt: _drop, ...rest } = row;
+              const { deletedAt: _drop, discardedAt: _gone, ...rest } = row;
               live.push(rest);
             }
           }
@@ -256,6 +275,44 @@ export function firestoreLedger(uid: string): LedgerStore {
         }
       }
       if (refused.length > 0) throw new RowsNotSaved(refused, reason);
+    },
+
+    async startClean(live, binned, discard, at) {
+      type Write = { id: string; data: DocumentData; row?: Transaction };
+      const writes: Write[] = [
+        // A document reused from the Bin or from an earlier discard comes back live.
+        ...live.map((t) => ({ id: t.id, data: { ...toDocument(t), deletedAt: deleteField(), discardedAt: deleteField() }, row: t })),
+        ...binned.map((t) => ({ id: t.id, data: { ...toDocument(t, t.deletedAt), discardedAt: deleteField() }, row: t })),
+        ...discard.map((id) => ({ id, data: { discardedAt: at } })),
+      ];
+
+      const refused: Transaction[] = [];
+      let notDiscarded = 0;
+      let reason = "";
+      const one = async (w: Write): Promise<void> => {
+        try {
+          await setDoc(doc(txCollection(db, uid), w.id), w.data, { merge: true });
+        } catch (e) {
+          reason = reasonOf(e);
+          if (w.row) refused.push(w.row);
+          else notDiscarded += 1;
+        }
+      };
+
+      for (let i = 0; i < writes.length; i += 450) {
+        const chunk = writes.slice(i, i + 450);
+        const batch = writeBatch(db);
+        for (const w of chunk) batch.set(doc(txCollection(db, uid), w.id), w.data, { merge: true });
+        try {
+          await batch.commit();
+        } catch (e) {
+          reason = reasonOf(e);
+          // One at a time, so a document the rules refuse holds up only itself.
+          for (const w of chunk) await one(w);
+        }
+      }
+      if (refused.length > 0) throw new RowsNotSaved(refused, reason);
+      return { notDiscarded };
     },
   };
 }

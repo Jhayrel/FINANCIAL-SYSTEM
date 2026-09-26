@@ -26,7 +26,7 @@ import { Database } from "./features/Database";
 import { DebtScreen } from "./features/DebtScreen";
 import { Insights } from "./features/Insights";
 import { Settings } from "./features/Settings";
-import { Statements } from "./features/Statements";
+import { readIssued, Statements } from "./features/Statements";
 import { Button, Card, EmptyState, Money, Notice } from "./components/primitives";
 import { Notifications } from "./components/Notifications";
 import { useUpdateAvailable } from "./data/updateCheck";
@@ -56,10 +56,12 @@ import { formatMedium, getYear, today } from "./domain/dates";
 import { systemToCsv } from "./domain/csv";
 import type { ExportAsk } from "./domain/exportAsk";
 import { buildStatement, statementFilename, statementToCsv } from "./domain/statements";
+import { buildSheet } from "./domain/statementSheet";
 import { browserSettingsStore, type SettingsStore } from "./data/settingsStore";
 import {
   checksum,
   createBackup,
+  planStartClean,
   restore,
   type Backup,
   type BackupData,
@@ -90,6 +92,7 @@ import {
   budgetChanged,
   created as createdEvent,
   restored as restoredEvent,
+  settingsChanged,
   updated as updatedEvent,
   BY_OWNER,
   type ActivityEvent,
@@ -1190,13 +1193,14 @@ export default function App() {
   };
 
   /** Download a blob without leaving the page. */
-  const download = (name: string, body: string, mime: string): void => {
+  const download = (name: string, body: BlobPart, mime: string): void => {
     const url = URL.createObjectURL(new Blob([body], { type: mime }));
     const a = document.createElement("a");
     a.href = url;
     a.download = name;
     a.click();
-    URL.revokeObjectURL(url);
+    // Revoked a moment later: a phone can still be reading it when click() returns.
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
   };
 
   /**
@@ -1255,8 +1259,13 @@ export default function App() {
     );
   };
 
-  const handleRestoreBackup = (backup: Backup, mode: RestoreMode): void => {
-    const result = restore(backup, systemState(), mode);
+  const handleRestoreBackup = (backup: Backup, mode: RestoreMode | "clean"): void => {
+    if (mode === "clean") {
+      void handleStartClean(backup);
+      return;
+    }
+    const before = systemState();
+    const result = restore(backup, before, mode);
     setTransactions([...result.transactions]);
     setDeleted([...result.deleted]);
     setBudgets(result.budgets);
@@ -1265,13 +1274,55 @@ export default function App() {
     setPreference(result.preferences.theme);
 
     // Firestore is the source of truth when connected, so the restored ledger
-    // has to reach it or the next snapshot would undo the restore.
-    push((l) => l.saveMany(result.transactions));
+    // has to reach it or the next snapshot would undo the restore. A replace
+    // also sets aside every row the file does not have: the rules refuse a
+    // delete, so without that the next snapshot brought them all back.
+    if (mode === "replace") {
+      const keep = new Set([...result.transactions, ...result.deleted].map((t) => t.id));
+      const discard = [...before.transactions, ...before.deleted].map((t) => t.id).filter((id) => !keep.has(id));
+      push((l) => l.startClean(result.transactions, result.deleted, discard, new Date().toISOString()).then(() => undefined));
+    } else {
+      push((l) => l.saveMany(result.transactions));
+    }
 
     flash(
       mode === "replace"
         ? `Replaced everything. ${result.added.toLocaleString()} transactions restored.`
         : `Merged. ${result.added.toLocaleString()} added, ${result.kept.toLocaleString()} kept.`,
+    );
+  };
+
+  /**
+   * Start clean from a file: the ledger becomes the file's rows, and every
+   * test row and everything in the Bin leaves every screen (`planStartClean`).
+   *
+   * A backup of everything as it stands is downloaded first, so the step can
+   * be undone by restoring it. Nothing is deleted from the database: the rows
+   * cleared are marked `discardedAt` and kept.
+   */
+  const handleStartClean = async (backup: Backup): Promise<void> => {
+    await handleBackup();
+    const plan = planStartClean(backup, systemState());
+    setTransactions([...plan.transactions]);
+    setDeleted([...plan.deleted]);
+    setSettings(plan.settings);
+    const at = new Date().toISOString();
+    push((l) =>
+      l.startClean(plan.transactions, plan.deleted, plan.discard, at).then((r) => {
+        if (r.notDiscarded > 0) {
+          flash(
+            `${r.notDiscarded.toLocaleString()} old ${r.notDiscarded === 1 ? "row was" : "rows were"} refused by the database rules and still show. Publish firestore.rules in the Firebase console, then start clean again.`,
+          );
+        }
+      }),
+    );
+    record(
+      settingsChanged(
+        `Started clean from a backup file: ${plan.transactions.length.toLocaleString()} rows, ${plan.setAside.length.toLocaleString()} test rows and ${plan.binCleared.length.toLocaleString()} bin rows cleared`,
+      ),
+    );
+    flash(
+      `Started clean. ${plan.transactions.length.toLocaleString()} rows from the file; ${(plan.setAside.length + plan.binCleared.length).toLocaleString()} test and bin rows cleared. A backup of what was here downloaded first.`,
     );
   };
 
@@ -1321,20 +1372,37 @@ export default function App() {
       return;
     }
 
-    const statement = buildStatement(
-      transactions,
-      ask.type ?? "account",
-      ask.year,
-      ask.fromMonth ?? 1,
-      ask.toMonth ?? 12,
-      reference,
-    );
-    download(statementFilename(statement), statementToCsv(statement), "text/csv;charset=utf-8");
-    flash(
-      statement.rows.length === 0
-        ? "That period has no entries, so the sheet has only its headings."
-        : `Saved ${statement.rows.length.toLocaleString()} ${statement.rows.length === 1 ? "entry" : "entries"} as a spreadsheet.`,
-    );
+    const type = ask.type ?? "account";
+    const fromMonth = ask.fromMonth ?? 1;
+    const toMonth = ask.toMonth ?? 12;
+    const statement = buildStatement(transactions, type, ask.year, fromMonth, toMonth, reference, undefined, {
+      debts: settings.credits,
+    });
+    const count = statement.rows.length;
+    if (ask.format === "csv") {
+      download(statementFilename(statement), statementToCsv(statement), "text/csv;charset=utf-8");
+      flash(
+        count === 0
+          ? "That period has no entries, so the sheet has only its headings."
+          : `Saved ${count.toLocaleString()} ${count === 1 ? "entry" : "entries"} as a spreadsheet.`,
+      );
+      return;
+    }
+
+    // The same PDF the Statements screen makes, with the name it last used.
+    const sheet = buildSheet(transactions, { type, year: ask.year, fromMonth, toMonth }, reference, settings.credits);
+    const issued = readIssued();
+    void import("./pdf/statementPdf")
+      .then(({ statementPdf }) => statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() }))
+      .then((bytes) => {
+        download(statementFilename(statement, "pdf"), bytes as BlobPart, "application/pdf");
+        flash(
+          count === 0
+            ? "That period has no entries, so the statement says so and nothing follows."
+            : `Saved the statement as a PDF: ${sheet.lines.length.toLocaleString()} ${sheet.lines.length === 1 ? "entry" : "entries"}.`,
+        );
+      })
+      .catch((e: unknown) => flash(`The PDF could not be made (${(e as Error).message}). Statements on the menu can save the same rows as CSV.`));
   };
 
   const handleExport = (): void => {

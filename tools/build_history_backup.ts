@@ -6,6 +6,13 @@
  * the repository: this is the owner's financial history and is never
  * committed.
  *
+ * When history.json also holds the current year's rows (`--y2026`), it writes
+ * DIR/fms-clean-start.json as well: the history and the current year
+ * together, for Settings, Data, Restore, "Start clean from this file". The
+ * current year's rows go through the same one-time migrations the app runs
+ * on its seed (the debt migration, then the opening one), so each matches the
+ * row the app already holds for it and keeps its id.
+ *
  * Run from app/, so the app's own code builds and checks the file:
  *
  *   npx vite-node ../tools/build_history_backup.ts DIR
@@ -34,7 +41,10 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { createBackup, restore, validateBackup } from "../app/src/domain/backup";
+import { createBackup, planStartClean, restore, validateBackup } from "../app/src/domain/backup";
+import { applyDebtMigration, planDebtMigration } from "../app/src/domain/debtMigration";
+import { applyOpeningMigration, planOpeningMigration } from "../app/src/domain/year";
+import { buildSheet } from "../app/src/domain/statementSheet";
 import { defaultSettings } from "../app/src/domain/settings";
 import { allWalletBalances } from "../app/src/domain/balances";
 import { costOf, incomeOf } from "../app/src/domain/totals";
@@ -347,10 +357,85 @@ say(`- Merged into the 2026 records from your backup (${current.length} rows): $
 say(`- Every account's balance today: ${moved.length ? "MOVES" : "unchanged, to the centavo"}.`);
 say(`- Findings the review list will show for migrated rows: ${newIssues.length ? [...byCode].map(([c, n]) => `${c} (${n}): ${newIssues.find((i) => i.code === c)!.message.replace(/\.$/, "")}`).join("; ") : "none"}.`);
 
+// ── A clean start: the history and the current year, as one ledger ─────────
+
+let clean: ReturnType<typeof createBackup> | null = null;
+if (current.length > 0) {
+  const year = current.map((t) => t.date.slice(0, 4)).sort().at(-1)!;
+  // Exactly what App.tsx does to its seed before the first render.
+  const plan = planDebtMigration(current, "Maya Credit", { debtId: "maya-credit", counterparty: "Maya", wallet: "Maya" });
+  const withDebt = applyDebtMigration(current, plan);
+  const migrated = applyOpeningMigration(withDebt, planOpeningMigration(withDebt)).map((t) => ({
+    ...t,
+    id: t.id.replace(/^x/, `xl${year}-`),
+  }));
+
+  const together = [...all, ...migrated]
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) =>
+      a.t.date === b.t.date
+        ? (a.t.id.startsWith("hist-close-") ? -1 : b.t.id.startsWith("hist-close-") ? 1 : a.i - b.i)
+        : a.t.date < b.t.date ? -1 : 1,
+    )
+    .map(({ t }, i) => ({ ...t, recordNumber: i + 1 }));
+
+  const cleanNamed = new Set(together.flatMap((t) => [t.fromWallet, t.toWallet]).filter(Boolean));
+  // An account only the old years used comes in retired: counted, kept, not on the dashboard.
+  const usedNow = (name: string): boolean => migrated.some((t) => t.fromWallet === name || t.toWallet === name);
+  const cleanAccounts: Account[] = [...cleanNamed].sort().map((name) => ({
+    id: `hist-acct-${slug(name)}`,
+    name,
+    ...(KNOWN[name] ??
+      (/^maya (bank|goal)/i.test(name)
+        ? { kind: "savings" as const, archived: !usedNow(name) }
+        : /reserve|hidden cash/i.test(name)
+          ? { kind: "reserve" as const, archived: !usedNow(name), channel: "cash" as const }
+          : { kind: "spending" as const, archived: !usedNow(name) })),
+  }));
+  clean = createBackup(
+    {
+      transactions: together,
+      deleted: [],
+      budgets: {},
+      settings: { ...settings, accounts: cleanAccounts, credits: [...credits, plan.debt] },
+      preferences: { theme: "system" },
+      migrations: { debt: true, opening: true },
+    },
+    new Date().toISOString(),
+  );
+
+  // Checks. The file validates; every balance from the current year on is
+  // the current year's own; and starting clean on top of the current year
+  // plus rows that are not in the file clears exactly those rows.
+  const v = validateBackup(JSON.parse(JSON.stringify(clean)));
+  if (!v.ok) failures.push(`The clean-start file does not validate: ${v.problems.map((p) => p.message).join("; ")}`);
+  const own = allWalletBalances(migrated);
+  const joined = allWalletBalances(together);
+  const differs = [...new Set([...own.keys(), ...joined.keys()])].filter((a) => (own.get(a) ?? 0) !== (joined.get(a) ?? 0));
+  if (differs.length) failures.push(`The clean-start file moves ${differs.join(", ")} away from the ${year} records`);
+
+  const fake: Transaction = { ...migrated[0]!, id: "test-row", date: `${year}-09-20`, description: "test", amount: 4700000, fee: 0, total: 4700000, category: "Revenue", type: "Revenue", fromWallet: "", toWallet: "Gcash" };
+  const cleanPlan = planStartClean(clean, { ...base, transactions: [...migrated, fake], settings: { ...defaultSettings(), credits: [plan.debt] } });
+  if (cleanPlan.kept !== migrated.length) failures.push(`Starting clean matched ${cleanPlan.kept} of the ${migrated.length} ${year} rows already in the app`);
+  if (cleanPlan.setAside.length !== 1 || cleanPlan.setAside[0]!.id !== "test-row") failures.push("Starting clean did not clear exactly the row that is not in the file");
+
+  const sheet = buildSheet(together, { type: "account", year: Number(year), fromMonth: 1, toMonth: 12 }, { wallets: [], savings: [], bills: [], subscriptions: [], revenueCategories: [], spendingTypes: [] });
+  const held = [...own.values()].reduce((a, b) => a + b, 0);
+  if (sheet.closing !== held) failures.push(`The ${year} account statement closes at ${peso(sheet.closing)}, not the ${peso(held)} the wallets hold`);
+
+  say();
+  say(`## Starting clean`);
+  say();
+  say(`- fms-clean-start.json: ${together.length.toLocaleString()} rows, the history above and the ${migrated.length} rows of ${year}.`);
+  say(`- ${year} opens with ${peso(sheet.broughtForward ?? 0)} brought forward and its account statement closes at ${peso(sheet.closing)}, which is what the wallets hold: ${[...own.entries()].filter(([, b]) => b !== 0).map(([a, b]) => `${a} ${peso(b)}`).join(", ")}.`);
+  say(`- Starting clean on top of the ${year} rows plus a test row keeps all ${cleanPlan.kept} and clears only the test row.`);
+}
+
 writeFileSync(join(dir, "report.md"), lines.join("\n"), "utf8");
 if (failures.length) {
   console.error(lines.join("\n"));
   process.exit(1);
 }
 writeFileSync(join(dir, "fms-history-2023-2025.json"), JSON.stringify(backup, null, 2), "utf8");
+if (clean) writeFileSync(join(dir, "fms-clean-start.json"), JSON.stringify(clean, null, 2), "utf8");
 console.log(lines.join("\n"));

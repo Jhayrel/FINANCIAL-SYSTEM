@@ -40,18 +40,25 @@ export interface ExportAsk {
   /** Statements only, 1 to 12. */
   readonly fromMonth?: number;
   readonly toMonth?: number;
+  /**
+   * Statements only. A PDF laid out as the owner's Excel printed one, unless
+   * a spreadsheet was asked for by name.
+   */
+  readonly format?: "pdf" | "csv";
   /** What was asked for, in words, for the reply. */
   readonly said: string;
 }
 
 /** Asking for a file at all. Without one of these, nothing here applies. */
-const EXPORTING = /\b(export|exports|exported|download|save|backup|back\s?up|csv|spreadsheet|excel|copy|file)\b/i;
+const EXPORTING = /\b(export|exports|exported|download|save|backup|back\s?up|csv|spreadsheet|excel|copy|file|pdf|print|document)\b/i;
 
 /** Words that mean the whole thing rather than a period. */
 const EVERYTHING = /\b(everything|all|whole|entire|full|complete|lahat)\b/i;
 
 const BACKUP = /\b(backup|back\s?up|restore|json)\b/i;
 const CSV = /\b(csv|spreadsheet|excel|sheet)\b/i;
+/** A statement comes out as a PDF unless one of these asks for a spreadsheet. "Sheet" alone does not: "expense sheet" is a statement's name. */
+const AS_SPREADSHEET = /\b(csv|spreadsheet|excel)\b/i;
 
 const STATEMENTS: Readonly<Record<string, StatementType>> = {
   account: "account",
@@ -60,10 +67,17 @@ const STATEMENTS: Readonly<Record<string, StatementType>> = {
   income: "revenue",
   expense: "expense",
   spending: "expense",
+  bills: "bills",
+  subscriptions: "bills",
+  transfers: "transfers",
+  transfer: "transfers",
   savings: "savings",
+  borrowed: "borrowed",
+  utang: "borrowed",
+  lent: "lent",
+  credit: "credit",
   debt: "debt",
   loan: "debt",
-  credit: "debt",
 };
 
 const MONTHS = [
@@ -114,6 +128,7 @@ export function readExportAsk(said: string, asOf: IsoDate): ExportAsk | null {
       year,
       fromMonth: from,
       toMonth: to,
+      format: AS_SPREADSHEET.test(text) ? "csv" : "pdf",
       said: text,
     };
   }
@@ -148,16 +163,18 @@ export function exportWords(ask: ExportAsk, asOf: IsoDate): string {
     return "The whole system as a spreadsheet: every entry, the bin, the budgets and the lists, each on its own sheet.";
   }
 
-  const sheet =
-    ask.type === "revenue"
-      ? "what came in"
-      : ask.type === "expense"
-        ? "what went out"
-        : ask.type === "savings"
-          ? "everything touching a savings account"
-          : ask.type === "debt"
-            ? "every debt movement, with a running balance"
-            : "every entry in the period";
+  const SHEET: Partial<Record<StatementType, string>> = {
+    revenue: "what came in",
+    expense: "what went out",
+    bills: "every bill and subscription paid",
+    transfers: "every transfer, with what each cost",
+    savings: "everything touching a savings account",
+    debt: "every debt movement, with a running balance",
+    borrowed: "every loan and credit line you owe, with the total owed",
+    credit: "the credit lines, with the total owed",
+    lent: "money you lent, with what is still owed to you",
+  };
+  const sheet = SHEET[ask.type ?? "account"] ?? "every entry in the period, with the balance after each";
 
   const period =
     ask.fromMonth === ask.toMonth && ask.fromMonth !== undefined
@@ -166,5 +183,5 @@ export function exportWords(ask: ExportAsk, asOf: IsoDate): string {
 
   const now = getYear(asOf) === ask.year && ask.fromMonth === getMonth(asOf) ? ", so far" : "";
 
-  return `A statement for ${period}${now}: ${sheet}, as a spreadsheet.`;
+  return `A statement for ${period}${now}: ${sheet}, as ${ask.format === "csv" ? "a spreadsheet" : "a PDF"}.`;
 }

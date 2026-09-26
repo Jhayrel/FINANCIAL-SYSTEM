@@ -131,6 +131,9 @@ service cloud.firestore {
              ))
           // Present means binned; absent means live. Nothing else.
           && (!('deletedAt' in d) || d.deletedAt is string)
+          // Set aside by "Start clean from this file": still here, shown on
+          // no screen. The owner's way to clear test rows without a delete.
+          && (!('discardedAt' in d) || d.discardedAt is string)
           // Who filled this row in. Optional, because every row written before
           // the assistant existed has no opinion on the matter, and rejecting
           // those would make the whole history unwritable.

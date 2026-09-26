@@ -36,7 +36,7 @@ import {
 import { walletBalance } from "../domain/balances";
 import type { Alert as Finding } from "../domain/alerts";
 import { describeClose, planGoalClose } from "../domain/goalClose";
-import { validateBackup, type Backup, type RestoreMode, type Validation } from "../domain/backup";
+import { planStartClean, validateBackup, type Backup, type RestoreMode, type Validation } from "../domain/backup";
 import { formatBytes, measureStorage } from "../domain/storage";
 import { cleanSettings } from "../domain/settingsCleanup";
 import { canSetOpening, ledgerStart, openingRows } from "../domain/opening";
@@ -146,7 +146,7 @@ export function Settings({
   onRenameItem: (from: string, to: string) => void;
   onExport: () => void;
   onBackup: () => void;
-  onRestore: (backup: Backup, mode: RestoreMode) => void;
+  onRestore: (backup: Backup, mode: RestoreMode | "clean") => void;
   /** Closing a goal writes real rows, so Settings needs a way to add them. */
   onAddTransactions: (rows: Transaction[]) => void;
   /** Who is signed in right now, if anyone. Shown so setup can be finished. */
@@ -2612,7 +2612,7 @@ function DataSection({
   quota: number;
   onExport: () => void;
   onBackup: () => void;
-  onRestore: (backup: Backup, mode: RestoreMode) => void;
+  onRestore: (backup: Backup, mode: RestoreMode | "clean") => void;
   onChangeSettings: (next: AppSettings) => void;
   signedInUid?: string | undefined;
   ledgerSource?: "seed" | "live" | undefined;
@@ -2723,6 +2723,37 @@ function DataSection({
       setReading(false);
       if (file.current) file.current.value = "";
     }
+  };
+
+  /** What starting clean would do, worked out before anything is written. */
+  const cleanPlan = useMemo(
+    () =>
+      picked?.ok && picked.backup
+        ? planStartClean(picked.backup, {
+            transactions,
+            deleted: deleted.map((t) => ({ ...t, deletedAt: (t as { deletedAt?: string }).deletedAt ?? "" })),
+            budgets: budgets as Budgets,
+            settings,
+            preferences: { theme: "system" },
+            migrations: { debt: true, opening: true },
+          })
+        : null,
+    [picked, transactions, deleted, budgets, settings],
+  );
+  const [showSetAside, setShowSetAside] = useState(false);
+
+  const startClean = async (): Promise<void> => {
+    if (!picked?.backup || !cleanPlan) return;
+    const p = cleanPlan;
+    const ok = await confirm({
+      title: "Start clean from this file?",
+      body: `Your ledger becomes the file's ${p.transactions.length.toLocaleString()} rows. ${p.setAside.length.toLocaleString()} ${p.setAside.length === 1 ? "row" : "rows"} here that the file does not have, and ${p.binCleared.length.toLocaleString()} in the Bin, are cleared from every screen and total. They stay in the database and nothing is deleted. A backup of everything as it is now downloads first, so this can be undone by restoring it.`,
+      confirmLabel: "Start clean",
+      tone: "danger",
+    });
+    if (!ok) return;
+    onRestore(picked.backup, "clean");
+    setPicked(null);
   };
 
   const apply = async (mode: RestoreMode): Promise<void> => {
@@ -2993,6 +3024,75 @@ function DataSection({
                   Merge adds only what is missing and is safe to run twice. Replace swaps the lot,
                   so download a backup first.
                 </p>
+
+                {cleanPlan && (
+                  <div className="fms-cleanplan">
+                    <h3 className="t-body-strong" style={{ margin: 0 }}>Start clean from this file</h3>
+                    <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+                      For clearing test data. Your ledger becomes exactly the file&apos;s rows, and
+                      everything else leaves every screen and total. Settings, budgets, AI choices
+                      and the theme stay as they are.
+                    </p>
+                    <dl className="fms-deflist">
+                      <dt className="t-body">Rows in the file</dt>
+                      <dd className="t-num-s" style={{ margin: 0 }}>{cleanPlan.transactions.length.toLocaleString()}</dd>
+                      <dt className="t-body">Already here, kept as they are</dt>
+                      <dd className="t-num-s" style={{ margin: 0 }}>{cleanPlan.kept.toLocaleString()}</dd>
+                      <dt className="t-body">Added from the file</dt>
+                      <dd className="t-num-s" style={{ margin: 0 }}>{cleanPlan.added.toLocaleString()}</dd>
+                      <dt className="t-body">Here but not in the file: cleared</dt>
+                      <dd className="t-num-s" style={{ margin: 0, color: cleanPlan.setAside.length ? "var(--over)" : undefined }}>
+                        {cleanPlan.setAside.length.toLocaleString()}
+                      </dd>
+                      <dt className="t-body">In the Bin: cleared</dt>
+                      <dd className="t-num-s" style={{ margin: 0, color: cleanPlan.binCleared.length ? "var(--over)" : undefined }}>
+                        {cleanPlan.binCleared.length.toLocaleString()}
+                      </dd>
+                      {(cleanPlan.archivedAccounts.length > 0 || cleanPlan.archivedDebts.length > 0) && (
+                        <>
+                          <dt className="t-body">Archived, since nothing uses them</dt>
+                          <dd className="t-body" style={{ margin: 0 }}>
+                            {[...cleanPlan.archivedAccounts, ...cleanPlan.archivedDebts].join(", ")}
+                          </dd>
+                        </>
+                      )}
+                    </dl>
+
+                    {cleanPlan.setAside.length > 0 && (
+                      <>
+                        <Button variant="ghost" size="sm" onClick={() => setShowSetAside((v) => !v)}>
+                          {showSetAside ? "Hide the rows it clears" : `See the ${cleanPlan.setAside.length.toLocaleString()} rows it clears`}
+                        </Button>
+                        {showSetAside && (
+                          <ul className="fms-cleanlist">
+                            {cleanPlan.setAside.slice(0, 200).map((t) => (
+                              <li key={t.id}>
+                                <span className="t-num-s" style={{ color: "var(--ink-3)" }}>{t.date}</span>
+                                <span className="t-caption fms-truncate">{t.description || t.item || t.type}</span>
+                                <span className="t-num-s">{formatMoney(t.total)}</span>
+                              </li>
+                            ))}
+                            {cleanPlan.setAside.length > 200 && (
+                              <li className="t-caption" style={{ color: "var(--ink-3)" }}>
+                                and {(cleanPlan.setAside.length - 200).toLocaleString()} more
+                              </li>
+                            )}
+                          </ul>
+                        )}
+                      </>
+                    )}
+
+                    <div>
+                      <Button variant="danger" onClick={() => void startClean()}>
+                        Start clean from this file
+                      </Button>
+                    </div>
+                    <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+                      Nothing is deleted: the database refuses deletes by design. Cleared rows are
+                      marked and kept, and a backup of everything as it is now downloads first.
+                    </p>
+                  </div>
+                )}
               </>
             )}
           </div>

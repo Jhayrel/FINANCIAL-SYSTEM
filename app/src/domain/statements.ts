@@ -1,82 +1,171 @@
 /**
  * Statements: spec rule 5.10, ported from VBA Module5.
  *
- * Five views over the same ledger. Four are the Excel's; the Debt statement
- * is new, and is the most useful of them: a running outstanding column is
- * the only way to see how a balance actually moved.
+ * Views over the same ledger. Four are the Excel's; the rest are new. The
+ * Debt statement came first and is the most useful of them: a running
+ * outstanding column is the only way to see how a balance actually moved.
+ *
+ * ── The ones added on 26 September 2026 ────────────────────────────────────
+ *
+ * The owner asked for "more option in the statement like credit or loan, all
+ * borrowed". So a statement can now be one wallet, the bills and
+ * subscriptions, the transfers, everything borrowed, only the credit lines,
+ * everything lent, or what was handled on someone's behalf. Each is a filter
+ * here and a running column in `statementSheet.ts`.
+ *
+ * ── Income and spending mean what they mean everywhere else ──────────────
+ *
+ * The revenue and expense sheets used their own filters, and both disagreed
+ * with the rest of the app. The revenue sheet listed opening balances as
+ * income (rule Y1 says they are not). The expense sheet listed a transfer
+ * between two of the owner's own wallets at its whole amount when only its
+ * fee is a cost, so a PHP 15.00 fee on a PHP 9,000.00 withdrawal was PHP
+ * 9,015.00 of "expense". They now use `incomeOf` and `costOf`, the one
+ * definition each, so a sheet's total is the total every other screen shows.
  */
 
 import type { Centavos } from "./money";
 import { firstOfMonth, getMonth, getYear, lastOfMonth } from "./dates";
-import { owedChange } from "./debt";
-import { retainedAsIncome, writtenOffAsSpending } from "./totals";
+import { owedChange, type Debt } from "./debt";
+import { costOf, incomeOf } from "./totals";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export type StatementType =
   | "account"
+  | "wallet"
   | "revenue"
   | "expense"
+  | "bills"
+  | "transfers"
   | "savings"
-  | "debt";
+  | "debt"
+  | "borrowed"
+  | "credit"
+  | "lent"
+  | "onbehalf";
+
+/** In the order a picker offers them: money first, then what is owed. */
+export const STATEMENT_TYPES: readonly StatementType[] = [
+  "account",
+  "wallet",
+  "revenue",
+  "expense",
+  "bills",
+  "transfers",
+  "savings",
+  "debt",
+  "borrowed",
+  "credit",
+  "lent",
+  "onbehalf",
+];
 
 export const STATEMENT_LABEL: Record<StatementType, string> = {
   account: "Account statement",
+  wallet: "Wallet statement",
   revenue: "Revenue sheet",
   expense: "Expense sheet",
+  bills: "Bills and subscriptions",
+  transfers: "Transfers",
   savings: "Savings sheet",
   debt: "Debt statement",
+  borrowed: "Everything borrowed",
+  credit: "Credit cards and lines",
+  lent: "Everything lent",
+  onbehalf: "On behalf",
 };
 
 export const STATEMENT_HINT: Record<StatementType, string> = {
-  account: "Everything in the period",
-  revenue: "Money in from outside",
-  expense: "Money out, including transfer fees and debt interest",
-  savings: "Anything touching a savings account",
-  debt: "Every debt row, with a running balance",
+  account: "Everything in the period, with what you held after each row",
+  wallet: "One wallet, with its balance after each row",
+  revenue: "Income only: not opening balances, not borrowing",
+  expense: "What counts as spending, including transfer fees and debt interest",
+  bills: "Every bill and subscription paid",
+  transfers: "Money moved between wallets or sent out, with what each cost",
+  savings: "Anything touching a savings account, with what savings held",
+  debt: "One debt, with what is owed after each row",
+  borrowed: "Every loan and credit line you owe, with the total owed",
+  credit: "Credit cards and credit lines only, with the total owed",
+  lent: "Money you lent, with what is still owed to you",
+  onbehalf: "Money paid or held for someone else",
 };
 
-const FEE_ITEM = "transaction fee";
+/** A statement that follows one wallet or one debt needs it named. */
+export const needsWallet = (type: StatementType): boolean => type === "wallet";
+export const needsDebt = (type: StatementType): boolean => type === "debt";
+
+/** Which debts a debt statement covers. Absent `form` is a credit line: rows written before forms existed. */
+export function debtInScope(debt: Debt, type: StatementType): boolean {
+  const form = debt.form ?? "credit-line";
+  switch (type) {
+    case "borrowed":
+      return debt.kind === "payable" && form !== "pass-through";
+    case "credit":
+      return debt.kind === "payable" && form === "credit-line";
+    case "lent":
+      return debt.kind === "receivable" && form !== "pass-through";
+    case "onbehalf":
+      return form === "pass-through";
+    default:
+      return false;
+  }
+}
+
+export interface StatementScope {
+  /** Wallet statements: the wallet. */
+  readonly wallet?: string | undefined;
+  /** The debts the settings hold, for the statements that cover several. */
+  readonly debts?: readonly Debt[] | undefined;
+}
 
 /**
  * Whether a row belongs in a statement.
  *
- * The expense filter is the interesting one: it includes Spending rows, the
- * transfer fees that are genuinely expense, and debt interest, but never
- * repaid principal, which is balance-sheet movement rather than cost.
+ * The expense filter is the interesting one: it is what `costOf` counts, so
+ * transfer fees and debt interest are in and repaid principal, which is
+ * balance-sheet movement rather than cost, is not.
  */
 export function belongsIn(
   t: Transaction,
   type: StatementType,
   savingsWallets: ReadonlySet<string>,
+  scope: StatementScope = {},
 ): boolean {
   switch (type) {
     case "account":
       return true;
 
+    case "wallet":
+      return !!scope.wallet && (t.fromWallet === scope.wallet || t.toWallet === scope.wallet);
+
     case "revenue":
       // Retained on someone's behalf is income, and is on this statement.
-      return t.type === "Revenue" || retainedAsIncome(t);
+      return incomeOf(t) > 0;
 
     case "expense":
-      if (t.type === "Spending") return true;
-      if (
-        t.type === "Transfer" &&
-        t.category === "Spending" &&
-        t.item.trim().toLowerCase() === FEE_ITEM
-      ) {
-        return true;
-      }
       // Written off on someone's behalf is spending, and is on this statement.
-      return (
-        (t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge")) ||
-        writtenOffAsSpending(t)
-      );
+      return costOf(t) > 0;
+
+    case "bills":
+      return t.type === "Spending" && (t.category === "Bills" || t.category === "Subscriptions");
+
+    case "transfers":
+      return t.type === "Transfer" && t.category !== "Opening";
 
     case "savings":
       return savingsWallets.has(t.fromWallet) || savingsWallets.has(t.toWallet);
 
     case "debt":
       return t.debtId !== undefined;
+
+    case "borrowed":
+    case "credit":
+    case "lent":
+    case "onbehalf": {
+      if (t.debtId === undefined) return false;
+      const debt = scope.debts?.find((d) => d.id === t.debtId);
+      return !!debt && debtInScope(debt, type);
+    }
   }
 }
 
@@ -110,6 +199,7 @@ export function buildStatement(
   toMonth: number,
   reference: ReferenceLists,
   debtId?: string,
+  scope: StatementScope = {},
 ): Statement {
   const savings = new Set(reference.savings);
   const lo = Math.min(fromMonth, toMonth);
@@ -121,7 +211,7 @@ export function buildStatement(
       const m = getMonth(t.date);
       if (m < lo || m > hi) return false;
       if (type === "debt" && debtId && t.debtId !== debtId) return false;
-      return belongsIn(t, type, savings);
+      return belongsIn(t, type, savings, scope);
     })
     .sort((a, b) =>
       a.date === b.date ? a.recordNumber - b.recordNumber : a.date.localeCompare(b.date),
@@ -237,6 +327,12 @@ export function statementToCsv(statement: Statement): string {
 }
 
 /** Filename for a downloaded statement. */
-export function statementFilename(statement: Statement): string {
-  return `${STATEMENT_LABEL[statement.type].toLowerCase().replace(/\s+/g, "-")}-${statement.from.slice(0, 7)}-to-${statement.to.slice(0, 7)}.csv`;
+export function statementFilename(statement: Statement, extension: "csv" | "pdf" = "csv", subject = ""): string {
+  const name = [STATEMENT_LABEL[statement.type], subject]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `${name}-${statement.from.slice(0, 7)}-to-${statement.to.slice(0, 7)}.${extension}`;
 }
