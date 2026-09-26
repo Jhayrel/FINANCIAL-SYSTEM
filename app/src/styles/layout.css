@@ -5606,6 +5606,16 @@ textarea.fms-askinput {
 }
 
 /*
+ * Four choices on a phone are two rows of two. Three and then one left
+ * "Waived" alone on a row of its own, which read as a separate control.
+ */
+@media (max-width: 479px) {
+  .fms-debteffects .fms-choicerow:has(> :nth-child(4):last-child) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/*
  * What the chosen movement means, in the card's own quiet voice.
  *
  * It was `--ink-3` on a tinted note, which on the amber selection read as a
@@ -6366,13 +6376,27 @@ textarea.fms-askinput {
  * whose money this is was the least readable thing on the card.
  */
 @media (max-width: 719px) {
+  /*
+   * No wrapping once stacked: a wrapping column split the fees row back into
+   * two columns, its label on the left and the box pushed past the card's
+   * right edge (26 September 2026).
+   */
   .fms-debtpick {
     align-items: stretch;
     flex-direction: column;
+    flex-wrap: nowrap;
   }
 
+  /*
+   * Its own height, not the row's. `flex: 1 1 120px` gives a picker its
+   * width beside a label; stacked in a column the same 120px became its
+   * height, and every picker on a phone's debt card was three fields tall
+   * (26 September 2026).
+   */
   .fms-debtpick > select,
-  .fms-debtpick > input {
+  .fms-debtpick > input,
+  .fms-debtpick > .fms-debtinterest {
+    flex: 0 0 auto;
     width: 100%;
   }
 }

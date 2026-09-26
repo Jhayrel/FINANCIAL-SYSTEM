@@ -582,7 +582,14 @@ function readDebt(
  */
 export function foldCharges(proposals: readonly Proposal[]): Proposal[] {
   const out = [...proposals];
-  const at = (p: Proposal): string => p.draft.notes.replace(/^at /, "");
+  /*
+   * The time on the clock face: a model writes 07:57 PM as 19:57 on one row
+   * and 07:57 on the next, and those are the same minute.
+   */
+  const at = (p: Proposal): string => {
+    const t = /(\d{1,2}):(\d{2})/.exec(p.draft.notes);
+    return t ? `${Number(t[1]) % 12}:${t[2]}` : "";
+  };
   const draws = (p: Proposal) =>
     out.filter(
       (d) =>
@@ -597,16 +604,20 @@ export function foldCharges(proposals: readonly Proposal[]): Proposal[] {
     if (charge.draft.flow !== "Debt" || charge.draft.debtEffect !== "charge" || !charge.draft.debtId) continue;
     const sameDay = draws(charge);
     const timed = at(charge) ? sameDay.filter((d) => at(d) === at(charge)) : [];
-    const target = timed.length === 1 ? timed[0] : !at(charge) && sameDay.length === 1 ? sameDay[0] : undefined;
+    const untimed = sameDay.length === 1 && (!at(charge) || !at(sameDay[0]!)) ? sameDay[0] : undefined;
+    const target = timed.length === 1 ? timed[0] : untimed;
     if (!target) continue;
     const index = out.indexOf(target);
     const added = charge.draft.amount ?? 0;
     out[index] = {
       ...target,
       draft: { ...target.draft, charges: (target.draft.charges ?? 0) + added },
+      // A fee whose amount had to be put right makes the whole borrowing one to check.
+      confidence: charge.confidence === "low" ? "low" : target.confidence,
       adjustments: [
         ...target.adjustments,
         `${pesos(added)} of fees${charge.draft.description ? ` (${charge.draft.description})` : ""} charged on the same borrowing, added to it.`,
+        ...charge.adjustments.filter((a) => a.startsWith("Read as")),
       ],
     };
     out.splice(out.indexOf(charge), 1);
@@ -666,6 +677,8 @@ export function readProposals(
   value: unknown,
   reference: ReferenceLists,
   asOf: IsoDate,
+  /** What the owner said, and what the device read off the pictures, for the checks after the model. */
+  context: ReadContext = {},
 ): ProposalRead {
   const list = Array.isArray(value)
     ? value
@@ -699,5 +712,123 @@ export function readProposals(
     else proposals.push(read);
   }
 
-  return { proposals: foldTransferFees(foldCharges(proposals)), refused, balances };
+  /*
+   * The system's check, after the model's reading: amounts against the
+   * text the device read, then a credit line's own screen filed on that
+   * line, then fees folded into what they were charged on.
+   */
+  const checked = checkAgainstReadings(proposals, context.readings ?? []);
+  const filed = onCreditLine(checked, context.note ?? "", reference);
+  return { proposals: foldTransferFees(foldCharges(filed)), refused, balances };
+}
+
+export interface ReadContext {
+  readonly note?: string;
+  /** The text the device read off the pictures, both readings of each. */
+  readonly readings?: readonly string[];
+}
+
+/** Every amount printed with its two decimals in the readings, in centavos. */
+function amountsIn(readings: readonly string[]): Set<number> {
+  const found = new Set<number>();
+  for (const text of readings) {
+    for (const m of text.matchAll(/\d{1,3}(?:,\d{3})+\.\d{2}|\d+\.\d{2}/g)) {
+      const [pesos = "0", cents = "0"] = m[0].replace(/,/g, "").split(".");
+      found.add(Number(pesos) * 100 + Number(cents));
+    }
+  }
+  return found;
+}
+
+/**
+ * An amount the picture does not show, put right from what it does show.
+ *
+ * 26 September 2026: a Maya credit screen's "DST -₱1.23" came back as a
+ * ₱123.00 charge. The point was lost in one reading, and the model trusted
+ * that one. Money on these screens always has its two decimals, so an amount
+ * that appears nowhere in the readings, whose digits are exactly those of one
+ * that does, is that one. Only when there is exactly one such figure, and the
+ * card says so and drops to low confidence, so the owner looks.
+ */
+export function checkAgainstReadings(proposals: readonly Proposal[], readings: readonly string[]): Proposal[] {
+  if (readings.length === 0) return [...proposals];
+  const shown = amountsIn(readings);
+  if (shown.size === 0) return [...proposals];
+  return proposals.map((p) => {
+    const amount = p.draft.amount;
+    if (amount === null || shown.has(amount)) return p;
+    const digits = String(amount % 100 === 0 ? amount / 100 : amount);
+    const matches = [...shown].filter((v) => v !== amount && String(v) === digits);
+    if (matches.length !== 1) return p;
+    const right = matches[0]!;
+    return {
+      ...p,
+      draft: { ...p.draft, amount: right },
+      confidence: "low",
+      adjustments: [...p.adjustments, `Read as ${pesos(amount)}, but the picture shows ${pesos(right)}. Using ${pesos(right)}: check it.`],
+    };
+  });
+}
+
+/** A lender's own fee, by the names these screens use. */
+const LENDER_FEE_WORDS = /\b(service fee|dst|documentary|stamp|interest|penalty|late fee|processing fee|finance charge|fee applied)\b/i;
+
+/**
+ * A credit line's own screen, filed on that line.
+ *
+ * 26 September 2026, "Maya credit" with a screenshot of Maya Credit's
+ * transactions: "Transferred money to My Wallet -₱2,000.00" came back as a
+ * transfer out of Maya to nowhere, and a fee with no credit line, so nothing
+ * could fold and the owner got six cards and two that could not be saved.
+ * On that screen the money going to "My Wallet" is borrowing into the
+ * wallet, and every fee is the lender's charge on it.
+ *
+ * Only when the line is certain: named in what the owner said, or the only
+ * line any of the rows is on.
+ */
+export function onCreditLine(proposals: readonly Proposal[], note: string, reference: ReferenceLists): Proposal[] {
+  const credits = reference.credits ?? [];
+  if (credits.length === 0) return [...proposals];
+  const escape = (x: string): string => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const named = credits.filter((c) => new RegExp(`\\b${escape(c)}\\b`, "i").test(note));
+  const onRows = [...new Set(proposals.filter((p) => p.draft.flow === "Debt" && p.draft.item && credits.includes(p.draft.item)).map((p) => p.draft.item))];
+  const line = named.length === 1 ? named[0]! : named.length === 0 && onRows.length === 1 ? onRows[0]! : "";
+  if (!line) return [...proposals];
+
+  const accounts = [...reference.wallets, ...reference.savings];
+  // "Maya Credit" lends into "Maya": the longest account named inside the line's own name.
+  const home = [...accounts].sort((a, b) => b.length - a.length).find((a) => new RegExp(`\\b${escape(a)}\\b`, "i").test(line)) ?? "";
+  const debtId = makeDebtId(line);
+  const timeOf = (p: Proposal): string => {
+    if (p.draft.notes.startsWith("at ")) return p.draft.notes;
+    const t = /\b(\d{1,2}:\d{2})\b/.exec(`${p.sourceRef} ${p.draft.description}`);
+    return t ? `at ${t[1]!.padStart(5, "0")}` : p.draft.notes;
+  };
+
+  return proposals.map((p) => {
+    const d = p.draft;
+    const words = `${d.item} ${d.description} ${p.sourceRef}`;
+
+    if (d.flow === "Transfer" && /\bmy wallet\b|transferred money|cash ?out|borrow/i.test(words) && (!d.toWallet || d.toWallet === home || d.toWallet === d.fromWallet)) {
+      const into = home || d.fromWallet;
+      return {
+        ...p,
+        draft: { ...d, flow: "Debt", debtEffect: "draw", debtId, item: line, fromWallet: "", toWallet: into, category: "", status: "Received", fee: 0, notes: timeOf(p) },
+        adjustments: [...p.adjustments, `On ${line}'s own screen, money sent to your wallet is borrowing: into ${into || "your wallet"}, owed to ${line}.`],
+      };
+    }
+
+    if ((d.flow === "Spending" || (d.flow === "Debt" && !d.debtId)) && LENDER_FEE_WORDS.test(words)) {
+      return {
+        ...p,
+        draft: { ...d, flow: "Debt", debtEffect: "charge", debtId, item: line, fromWallet: "", toWallet: "", category: "", status: "", fee: 0, notes: timeOf(p) },
+        adjustments: d.flow === "Spending" ? [...p.adjustments, `A fee on ${line}'s screen is the lender's charge, added to what you owe.`] : p.adjustments,
+      };
+    }
+
+    if (d.flow === "Debt" && !d.debtId) {
+      return { ...p, draft: { ...d, debtId, item: line, notes: timeOf(p) } };
+    }
+    return p;
+  });
 }

@@ -539,6 +539,8 @@ export interface ExtractOptions {
    * picture goes to a vision model as before.
    */
   readonly readPicture?: (dataUrl: string) => Promise<{ readonly plain: string; readonly raised: string } | null>;
+  /** Set here, not by callers: what the device read, for checking the model's amounts against. */
+  readonly readings?: readonly string[];
 }
 
 /** The last day each item appears in the ledger. */
@@ -670,7 +672,8 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
   if (asText.length === 0 || options.signal?.aborted) return extractOnce(options);
 
   const others = options.attachments.filter((a) => !(a.kind === "image" && a.dataUrl));
-  const first = await extractOnce({ ...options, attachments: [...others, ...asText, ...stillPictures] });
+  const read = readings.flatMap((r) => (r ? [r.plain, r.raised] : []));
+  const first = await extractOnce({ ...options, readings: read, attachments: [...others, ...asText, ...stillPictures] });
   /*
    * Rows it could not use count for nothing here. On 26 September 2026 the
    * text route returned one refused row, "Nothing in that looked like a
@@ -682,7 +685,7 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
   if (usable(first) >= 10 || options.signal?.aborted) {
     return { ...first, readOnDevice: asText.length };
   }
-  const second = await extractOnce(options);
+  const second = await extractOnce({ ...options, readings: read });
   return usable(second) > usable(first) ? second : { ...first, readOnDevice: asText.length };
 }
 
@@ -755,7 +758,10 @@ async function extractOnce(options: ExtractOptions): Promise<ExtractResult> {
       return empty(message);
     }
 
-    const read = readProposals(payload.data, options.reference, options.asOf);
+    const read = readProposals(payload.data, options.reference, options.asOf, {
+      note: options.note,
+      readings: options.readings ?? [],
+    });
 
     return {
       proposals: read.proposals,
