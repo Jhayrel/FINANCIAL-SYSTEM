@@ -2172,6 +2172,8 @@ export function AskPanel({
           )
         : folded,
     };
+    /** Read on this device and then by a text model, said wherever the answer is (data/aiClient.ts). */
+    const route = result.readOnDevice ? ", read on this device" : "";
 
     /**
      * The photo, as a description of itself.
@@ -2190,7 +2192,12 @@ export function AskPanel({
         bytes: f.bytes,
         details: summariseFile(drafts),
       }));
-      log(aiEvent("uploaded", "add", { text: note, files: notes, model: result.model ?? "" }));
+      /*
+       * Which route read it, in the record and on the answer: the device and
+       * then a text model, or a model that looked at the picture itself. The
+       * next "not working" can then be traced to the step that failed.
+       */
+      log(aiEvent("uploaded", "add", { text: note, files: notes, model: `${result.model ?? ""}${route}` }));
 
       /**
        * The same description, onto the message, so it survives a refresh.
@@ -2283,7 +2290,7 @@ export function AskPanel({
           sent.length > 0
             ? "No transaction was readable in that. A clearer photo of the amount and the date usually works."
             : "I could not find an entry in that. Say it with the amount and the wallet, or use the form beside this.",
-        from: sent.length > 0 ? modelLabel(result.model ?? "") || "the provider" : "this device",
+        from: sent.length > 0 ? `${modelLabel(result.model ?? "") || "the provider"}${route}` : "this device",
       });
       return false;
     }
@@ -2361,7 +2368,7 @@ export function AskPanel({
           result.proposals.length === 1
             ? "One entry. Check it, then add it."
             : `${result.proposals.length} entries. Check each one, then add it.`,
-        from: modelLabel(result.model ?? "") || "the provider",
+        from: `${modelLabel(result.model ?? "") || "the provider"}${route}`,
       });
     }
 
