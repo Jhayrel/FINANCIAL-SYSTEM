@@ -962,3 +962,60 @@
 .fms-rankhead > .t-num-s {
   margin-left: auto;
 }
+
+/*
+ * ══ Notices, floating ══════════════════════════════════════════════════════
+ *
+ * The update notice and the database ones used to sit at the top of the page,
+ * in the flow. The moment one appeared the whole screen jumped down by its
+ * height and whatever the owner was reading moved; two at once moved it
+ * twice. That is what they kept calling a pop up, three times over.
+ *
+ * They float now. Nothing behind them moves, and the pane itself takes no
+ * clicks, so only the notice is clickable and the page underneath is
+ * untouched everywhere else.
+ *
+ * Bottom left on a wide screen, because the right is where the assistant and
+ * its button live and the bottom right is where a notice would cover them.
+ */
+.fms-notices {
+  position: fixed;
+  /* Clear of the fixed 240px sidebar in .fms-app. */
+  left: calc(240px + var(--space-5));
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 60;
+  display: grid;
+  gap: var(--space-3);
+  /* A measure, so the buttons sit beside the sentence and not a screen away. */
+  max-width: 560px;
+  pointer-events: none;
+}
+
+/* The notices themselves do take clicks. */
+.fms-notices > * {
+  pointer-events: auto;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-left-width: 2px;
+  box-shadow: var(--shadow-overlay);
+  padding: var(--space-3) var(--space-4);
+}
+
+.fms-notices .fms-alert {
+  border: 0;
+  border-left: 2px solid var(--alert-rule, var(--ink-3));
+  box-shadow: none;
+  background: transparent;
+  padding: var(--space-1) 0 var(--space-1) var(--space-3);
+}
+
+/* A phone has no rail beside it, and the notice spans the screen. */
+@media (max-width: 1023px) {
+  .fms-notices {
+    left: var(--space-4);
+    right: var(--space-4);
+    bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+    max-width: none;
+  }
+}

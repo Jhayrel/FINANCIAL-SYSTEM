@@ -1646,8 +1646,25 @@ export default function App() {
                 : ""
           }`}
         >
+        {/*
+          Notices float over the page; they never move it.
+
+          These sat at the top of `main`, in the flow, so the moment one
+          appeared the whole screen jumped down by its height and
+          everything the owner was looking at moved. Two at once moved it
+          twice. That, rather than the colours, is what they kept calling
+          a pop up: the page shifting under them while they were reading
+          it, on 26 September 2026 for the third time.
+
+          Fixed to the bottom, over the page, with a measure that keeps
+          the buttons beside the sentence instead of a screen's width
+          away from it. Nothing behind them changes size or position, and
+          the pane is `pointer-events: none` so the page underneath stays
+          clickable everywhere a notice is not.
+        */}
+        <div className="fms-notices">
           {updateReady && (
-            <div style={{ marginBottom: "var(--space-4)" }}>
+            <>
               <Alert
                 status="info"
                 title="A newer version of the app is ready"
@@ -1660,7 +1677,7 @@ export default function App() {
                 This tab is still running the version it opened with, so recent fixes are not on
                 screen yet. A half-typed entry on the Add screen is kept.
               </Alert>
-            </div>
+            </>
           )}
           {(() => {
             // Offline, slow or refused, said once (domain/syncState.ts). Only a signed-in app talks to a database.
@@ -1671,7 +1688,7 @@ export default function App() {
               error: unsaved.length > 0 ? syncError : (writeError ?? syncError),
             });
             return sync || unsaved.length > 0 ? (
-              <div style={{ marginBottom: "var(--space-4)", display: "grid", gap: "var(--space-3)" }} role="status" aria-live="polite">
+              <div style={{ display: "grid", gap: "var(--space-3)" }} role="status" aria-live="polite">
                 {/*
                   The rows themselves, kept, rather than "add it again" with
                   nothing left on screen to add again from.
@@ -1724,6 +1741,7 @@ export default function App() {
               </div>
             ) : null;
           })()}
+        </div>
           <ScreenBoundary key={screen} where={title} onHome={() => go("dashboard")}>
           {screen === "dashboard" && (
             <Dashboard
