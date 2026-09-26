@@ -245,3 +245,31 @@ describe("what the model is given to reason with", () => {
     expect(fresh).toMatch(/School: PHP 3,000\.00 now\..*New this month\./);
   });
 });
+
+describe("any window, and what if", () => {
+  const days: Transaction[] = [];
+  for (let d = 1; d <= 30; d += 1) {
+    days.push(row({ recordNumber: 300 + d, date: `2026-08-${String(d).padStart(2, "0")}`, item: d % 2 ? "Food" : "Treat", amount: 10_000, total: 10_000 }));
+  }
+
+  it("works out a range of days the question names", () => {
+    const text = build("how much did I spend from aug 1 to aug 10?", { transactions: days }).text;
+    expect(text).toContain("## The window asked about: Aug 1 to Aug 10 2026 (2026-08-01 to 2026-08-10)");
+    expect(text).toContain("Spent PHP 1,000.00, received PHP 0.00, 10 entries.");
+  });
+
+  it("works out a count of days", () => {
+    const text = build("what did I spend in the last 5 days", { transactions: days }).text;
+    expect(text).toContain("## The window asked about: the last 5 days");
+  });
+
+  it("says what is left after a purchase that has not happened", () => {
+    const text = build("what if I buy a 25k phone?", { transactions: days }).text;
+    expect(text).toContain("## What if PHP 25,000.00 is spent now");
+    expect(text).toMatch(/Net worth after debt: PHP [\d,.-]+ before, PHP [\d,.-]+ after\./);
+  });
+
+  it("adds nothing for a question that is not a what if", () => {
+    expect(build("how is this month going", { transactions: days }).text).not.toContain("## What if");
+  });
+});

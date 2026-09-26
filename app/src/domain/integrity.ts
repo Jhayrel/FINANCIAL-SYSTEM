@@ -232,3 +232,36 @@ export function summarise(issues: readonly Issue[]): IntegritySummary {
 export function actionableIssues(issues: readonly Issue[]): Issue[] {
   return issues.filter((i) => i.severity !== "info");
 }
+
+/**
+ * "Show me and delete those wrong transactions."
+ *
+ * The owner, 21 September 2026: asked the chat to find the bad entries, got
+ * a list that matched on the word "transactions", binned it, and said "it
+ * just show me random things. I like the ai to find the bad transactions".
+ * The app already knows which rows are wrong in a way it can say: the checks
+ * above, the same ones that fill "Needs review" in the Database. So that is
+ * the list, each row with the check that caught it, worst first.
+ */
+export function flaggedRows(
+  transactions: readonly Transaction[],
+): { readonly row: Transaction; readonly why: readonly string[] }[] {
+  const byId = new Map(transactions.map((t) => [t.id, t] as const));
+  const found = new Map<string, string[]>();
+  for (const issue of actionableIssues(checkIntegrity(transactions))) {
+    for (const id of issue.ids) {
+      if (!byId.has(id)) continue;
+      found.set(id, [...(found.get(id) ?? []), issue.message]);
+    }
+  }
+  return [...found.entries()].map(([id, why]) => ({ row: byId.get(id) as Transaction, why }));
+}
+
+/** Asking for the wrong rows as a set, rather than for one row by its description. */
+export function asksForWrongRows(said: string): boolean {
+  return (
+    /\b(wrong|bad|incorrect|mistaken|faulty|suspicious|weird|odd|flagged|problem|problematic|erroneous|broken|messy|mali|maling)\s+(?:\w+\s+)?(transactions|entries|rows|records|data|ones|inputs)\b/i.test(said) ||
+    /\b(needs?|need to)\s+review\b|\bwhat(?:'s| is) wrong with my (?:data|entries|transactions|ledger)\b/i.test(said) ||
+    /\b(find|show|check|list|look for)\b[^.?!]*\b(mistakes|errors|problems)\b/i.test(said)
+  );
+}

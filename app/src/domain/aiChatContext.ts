@@ -49,6 +49,8 @@ import { toPesos } from "./money";
 import { costOf, incomeOf } from "./totals";
 import { positionsOf, rowsFor, type Debt } from "./debt";
 import { confidenceWords, explainBasis, forecastYear } from "./forecast";
+import { namesWindow, windowOf } from "./charts";
+import { figuresIn } from "./money";
 import type { IsoDate, Transaction } from "./types";
 
 /**
@@ -415,6 +417,64 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     out.push("");
     out.push("## The last fortnight, day by day");
     out.push(...daily);
+  }
+
+  /**
+   * ── The window the question names, whatever it is ──────────────────────
+   *
+   * "what if I ask today only, or this week, or a range" (26 September
+   * 2026). Today, the week and the months were worked out; "Sep 1 to 15",
+   * "the last 10 days" and "since August" were not, and the model would have
+   * had to add rows up to answer, which it must never do. The same reading
+   * the charts use, so a chart and an answer about one window always agree.
+   */
+  if (question && namesWindow(question)) {
+    const w = windowOf(question, asOf);
+    const inWindow = rows.filter((t) => t.date >= w.from && t.date <= w.to);
+    if (inWindow.length > 0) {
+      const spent = inWindow.reduce((sum, t) => sum + spendingOf(t), 0);
+      const got = inWindow.reduce((sum, t) => sum + revenueOf(t), 0);
+      out.push("");
+      out.push(`## The window asked about: ${w.name}${w.from > "1000" && w.to < "9000" ? ` (${w.from} to ${w.to})` : ""}`);
+      out.push(`Spent ${php(spent)}, received ${php(got)}, ${inWindow.length} entries. Use these for anything about this window.`);
+      for (const [name, g] of tally(inWindow, (t) => t.item).slice(0, 8)) {
+        out.push(`${name}: ${php(g.amount)} over ${g.count} entries`);
+      }
+    }
+  }
+
+  /**
+   * ── What if: the figures after a purchase that has not happened ─────────
+   *
+   * "can I buy a 25k phone", "what if I spend 10000 tonight". Answering
+   * needs what would be left, and that is subtraction, which the model must
+   * not do. So the app does it: the month's budget, what is left of it a day,
+   * and net worth, each after the amount named.
+   */
+  const hypothetical = /\b(what if|if i|can i (?:afford|buy|spend|pay|get)|should i (?:buy|spend|get|pay)|afford)\b/i.test(question);
+  const amounts = hypothetical
+    ? figuresIn(question.replace(/\b20\d{2}\b/g, " ").replace(/(\d+(?:\.\d+)?)\s*k\b/gi, (_m, n: string) => String(Math.round(Number(n) * 1000))))
+    : [];
+  const what = amounts.length > 0 ? Math.max(...amounts) : 0;
+  if (what > 0) {
+    const snap = input.snapshot;
+    out.push("");
+    out.push(`## What if ${php(what)} is spent now`);
+    out.push("Worked out by the app. Quote these rather than subtracting anything yourself.");
+    if (snap.month.budget !== null && snap.month.remaining !== null) {
+      const after = snap.month.remaining - what;
+      out.push(
+        `${snap.month.name}'s budget: ${php(snap.month.remaining)} left before, ${after < 0 ? `${php(-after)} over` : `${php(after)} left`} after.${
+          snap.month.daysLeft > 0 && after > 0 ? ` That is ${php(Math.floor(after / snap.month.daysLeft))} a day for the ${snap.month.daysLeft} days left.` : ""
+        }`,
+      );
+    }
+    out.push(`Net worth after debt: ${php(snap.netWorth)} before, ${php(snap.netWorth - what)} after.`);
+    for (const b of snap.balances) {
+      if (new RegExp(`\\b${b.account.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(question.toLowerCase())) {
+        out.push(`${b.account}: ${php(b.balance)} before, ${php(b.balance - what)} after.`);
+      }
+    }
   }
 
   // ── Breakdowns for the months that matter ────────────────────────────────
