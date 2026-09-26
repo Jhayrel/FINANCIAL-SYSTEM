@@ -134,6 +134,31 @@ export function Investigate({
     if (ok) onBin(row.id);
   };
 
+  /**
+   * Both ways of dealing with a row the investigation named.
+   *
+   * Every finding that points at one record used to offer exactly one thing
+   * to do with it: "Correct #0432", or for a duplicate, "Move to the bin".
+   * Which one you were given depended on what the investigation thought was
+   * wrong, not on what you wanted to do about it, and the owner asked for
+   * both on 21 September 2026: "add an option where I can delete it here or
+   * edit".
+   *
+   * The correction opens the row in the Add form, so nothing is changed
+   * without being looked at. The bin asks first and is restorable, matching
+   * every other delete in the app.
+   */
+  const rowActions = (row: Transaction) => (
+    <span className="fms-findrow-actions">
+      <Button size="sm" onClick={() => onEditRow(row)}>
+        Correct {number(row)}
+      </Button>
+      <Button size="sm" variant="ghost" tone="danger" onClick={() => void bin(row)}>
+        Move to the bin
+      </Button>
+    </span>
+  );
+
   const actionFor = (clue: Clue) => {
     const choices = result ? choicesForClue(clue, result.account, result.asOf, interestItem) : [];
     switch (clue.kind) {
@@ -150,24 +175,10 @@ export function Investigate({
           </span>
         ) : null;
       case "wrong-account":
-        return (
-          <Button size="sm" onClick={() => onEditRow(clue.row)}>
-            Correct {number(clue.row)}
-          </Button>
-        );
       case "duplicate":
-        return (
-          <Button size="sm" onClick={() => void bin(clue.row)}>
-            Move {number(clue.row)} to the bin
-          </Button>
-        );
       case "amount-differs":
       case "not-on-statement":
-        return (
-          <Button size="sm" onClick={() => onEditRow(clue.row)}>
-            Correct {number(clue.row)}
-          </Button>
-        );
+        return rowActions(clue.row);
       case "together":
         return (
           <span className="fms-findrow-actions">

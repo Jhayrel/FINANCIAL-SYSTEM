@@ -272,3 +272,65 @@ export function repeatsWithin(drafts: readonly Draft[]): ReadonlyMap<number, num
 
   return repeats;
 }
+
+/**
+ * One warning, standing for every match that gives the same reasons.
+ *
+ * ── Why this exists ────────────────────────────────────────────────────────
+ *
+ * The owner sent the same paragraph three times while testing, so the ledger
+ * holds three identical rows: #0560, #0564 and #0567, all "lunch at the
+ * canteen", all PHP 250.00, all out of Cash on the same day. The fourth card
+ * matched all three, and the card printed the whole warning once per match:
+ * three headlines, three row lines, and the same five reasons written out
+ * three times. Eighteen lines saying one thing.
+ *
+ * A warning that long is a warning nobody finishes reading, and the record
+ * shows this one being overridden 31 times. The reasons are identical
+ * because the rows are identical, so they are said once and the record
+ * numbers are listed.
+ */
+export interface DuplicateGroup {
+  readonly headline: string;
+  /** The rows this covers, strongest first. Never empty. */
+  readonly rows: readonly Duplicate[];
+  /** Why, written once for all of them. */
+  readonly evidence: readonly string[];
+}
+
+/** "#0567", "#0567 and #0564", "#0567, #0564 and #0560". */
+function listNumbers(rows: readonly Duplicate[]): string {
+  const numbers = rows.map((d) => `#${String(d.row.recordNumber).padStart(4, "0")}`);
+  if (numbers.length <= 1) return numbers[0] ?? "";
+  return `${numbers.slice(0, -1).join(", ")} and ${numbers[numbers.length - 1]}`;
+}
+
+/** Plain words up to the three the card will ever show. */
+const HOW_MANY: Readonly<Record<number, string>> = { 2: "twice", 3: "three times" };
+
+export function groupDuplicates(matches: readonly Duplicate[]): readonly DuplicateGroup[] {
+  const byReason = new Map<string, Duplicate[]>();
+
+  for (const match of matches) {
+    // The same reasons and the same certainty is the same warning.
+    const key = `${match.certainty}|${match.evidence.join("|")}`;
+    const group = byReason.get(key);
+    if (group) group.push(match);
+    else byReason.set(key, [match]);
+  }
+
+  return [...byReason.values()].map((rows) => {
+    const first = rows[0] as Duplicate;
+    if (rows.length === 1) {
+      return { headline: duplicateHeadline(first), rows, evidence: first.evidence };
+    }
+
+    const times = HOW_MANY[rows.length] ?? `${rows.length} times`;
+    const headline =
+      first.certainty === "same"
+        ? `Already in the ledger ${times}, as ${listNumbers(rows)}.`
+        : `${rows.length} rows in the ledger look like this: ${listNumbers(rows)}.`;
+
+    return { headline, rows, evidence: first.evidence };
+  });
+}

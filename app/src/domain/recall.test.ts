@@ -266,7 +266,7 @@ describe("words that name no entry", () => {
   it("never matches a row on a word like the, for or with", () => {
     for (const found of findRows(polite, ledger, "2026-09-20")) {
       for (const why of found.why) {
-        expect(why, `${found.row.item}: ${why}`).not.toMatch(/(the|for|with|that|was|and)/i);
+        expect(why, `${found.row.item}: ${why}`).not.toMatch(/\b(the|for|with|that|was|and)\b/i);
       }
     }
   });

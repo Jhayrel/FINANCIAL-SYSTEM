@@ -126,6 +126,7 @@ import { exportWords, readExportAsk, type ExportAsk } from "../domain/exportAsk"
 import { readInvestigateAsk, type InvestigateAsk } from "../domain/investigateAsk";
 import {
   duplicateHeadline,
+  groupDuplicates,
   duplicatesOf,
   repeatsWithin,
   type Duplicate,
@@ -140,7 +141,7 @@ import {
 import { chatStore } from "../data/chatStore";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AttachmentNote } from "../domain/aiLog";
-import { verifyReading } from "../domain/verify";
+import { clauseFor, verifyReading } from "../domain/verify";
 import { carded, cardsIn, drawn, drew, proposed, said, type StoredCard } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
@@ -1238,6 +1239,48 @@ export function AskPanel({
     setTurns((prev) => prev.map((t, i) => (i === index && isOffer(t) ? change(t) : t)));
   };
 
+  /**
+   * Throw away every open card, and mean it.
+   *
+   * ── Why this is a function and not three copies of one line ─────────────
+   *
+   * Discarding a card one at a time went through `settle`, which calls
+   * `recordCard` and writes the new state to the database. Discarding all of
+   * them did not: all three bulk paths, the button and the two typed
+   * commands, only called `setTurns`. The cards went grey on screen and
+   * nothing was written, so the next refresh loaded them back from the
+   * database exactly as they were, still open.
+   *
+   * The owner hit this on 21 September 2026: "I dicarded them all then
+   * refresh then they are back." Work thrown away that reappears is worse
+   * than work that was never thrown away, because the second time you are
+   * not sure whether you already dealt with it.
+   *
+   * The button also logged nothing, so a batch thrown away never reached the
+   * record the coderview calls "the list to fix next". Every discard is a
+   * rejection now, however many went at once.
+   */
+  const discardEveryOpen = (said?: string): number => {
+    const open = turns.filter((t): t is Offered => isOffer(t) && t.state === "open");
+
+    for (const card of open) {
+      const d = card.proposal.draft;
+      log(
+        aiEvent("rejected", "add", {
+          entry: `${d.date} ${d.flow} ${d.item} ${formatMoney(d.amount ?? 0)}`,
+          ...(said ? { text: said } : {}),
+        }),
+      );
+      // The write that was missing. Without it the card comes back.
+      recordCard({ ...card, state: "discarded" });
+    }
+
+    setTurns((prev) =>
+      prev.map((t) => (isOffer(t) && t.state === "open" ? { ...t, state: "discarded" } : t)),
+    );
+    return open.length;
+  };
+
   /** The card a correction would apply to: the last one still open. */
   const openCard = (): { index: number; turn: Offered } | null => {
     for (let i = turns.length - 1; i >= 0; i--) {
@@ -1453,7 +1496,10 @@ export function AskPanel({
      */
     const checked = verifyReading(
       draft,
-      proposal.said ?? hint,
+      // The clause this row came from, not the whole message. A card the
+      // model returned carries no `said`, so it is worked out from the
+      // amount; see `clauseFor`.
+      proposal.said ?? clauseFor(hint, draft.amount, reference),
       reference,
       asOf,
       proposal.confidence,
@@ -2707,19 +2753,7 @@ export function AskPanel({
     if (openCards.length > 0 && files.length === 0 && !as && wantsDiscardOpen(note)) {
       setDraft("");
       say({ kind: "you", text: note });
-      for (const card of openCards) {
-        if (isOffer(card)) {
-          log(
-            aiEvent("rejected", "add", {
-              entry: `${card.proposal.draft.date} ${card.proposal.draft.flow} ${card.proposal.draft.item}`,
-              text: note,
-            }),
-          );
-        }
-      }
-      setTurns((prev) =>
-        prev.map((t) => (isOffer(t) && t.state === "open" ? { ...t, state: "discarded" } : t)),
-      );
+      discardEveryOpen(note);
       say({
         kind: "assistant",
         text:
@@ -2790,18 +2824,7 @@ export function AskPanel({
     if (openCards.length > 0 && files.length === 0 && !as && wantsDiscardAll(note)) {
       setDraft("");
       say({ kind: "you", text: note });
-      for (const card of openCards) {
-        if (isOffer(card)) {
-          log(
-            aiEvent("rejected", "add", {
-              entry: `${card.proposal.draft.date} ${card.proposal.draft.flow} ${card.proposal.draft.item}`,
-            }),
-          );
-        }
-      }
-      setTurns((prev) =>
-        prev.map((t) => (isOffer(t) && t.state === "open" ? { ...t, state: "discarded" } : t)),
-      );
+      discardEveryOpen(note);
       say({
         kind: "assistant",
         text: `Thrown away, all ${openCards.length} of them. Nothing was added to the ledger, so there is nothing to undo.`,
@@ -3974,10 +3997,9 @@ export function AskPanel({
     );
   };
 
-  const discardOpen = (): void =>
-    setTurns((prev) =>
-      prev.map((t) => (isOffer(t) && t.state === "open" ? { ...t, state: "discarded" } : t)),
-    );
+  const discardOpen = (): void => {
+    discardEveryOpen();
+  };
 
   const attached = files.length > 0;
   const weight = totalBytes(files);
@@ -4986,15 +5008,23 @@ function ProposalCard({
 
       {!settled && repeatOfCard === undefined && alreadyInLedger.length > 0 && (
         <div className="fms-dupe">
-          {alreadyInLedger.map((match) => (
-            <div key={match.row.id}>
-              <p className="t-micro fms-dupehead">{duplicateHeadline(match)}</p>
+          {/*
+            Three identical rows are one warning, not three.
+
+            The reasons are printed once per group rather than once per row:
+            when the matched rows are identical, so are their reasons, and
+            the card was repeating five lines three times over. See
+            `groupDuplicates`.
+          */}
+          {groupDuplicates(alreadyInLedger).map((group) => (
+            <div key={group.rows.map((d) => d.row.id).join()}>
+              <p className="t-micro fms-dupehead">{group.headline}</p>
               <p className="t-micro fms-dupeline">
-                {match.row.date} {match.row.item || match.row.type}
-                {match.row.description ? `, ${match.row.description}` : ""}
+                {group.rows[0]!.row.date} {group.rows[0]!.row.item || group.rows[0]!.row.type}
+                {group.rows[0]!.row.description ? `, ${group.rows[0]!.row.description}` : ""}
               </p>
               <ul className="fms-dupewhy">
-                {match.evidence.map((line) => (
+                {group.evidence.map((line) => (
                   <li key={line} className="t-micro fms-dupeline">
                     {line}
                   </li>

@@ -32,6 +32,7 @@
  */
 
 import { itemsFor, needs, type Draft, type FieldName } from "./entry";
+import { numbersInWords } from "./numberWords";
 import { matchExact, type Confidence } from "./proposal";
 import type { IsoDate, ReferenceLists } from "./types";
 
@@ -74,6 +75,35 @@ function flatten(text: string): string {
 function names(sentence: string, name: string): boolean {
   const flat = flatten(name).trim();
   return flat !== "" && sentence.includes(` ${flat} `);
+}
+
+/**
+ * Somewhere you went, rather than something you bought.
+ *
+ * "School" is one of the owner's spending types and also an ordinary place.
+ * "On the way to school I bought breakfast for a hundred and twenty pesos"
+ * is a Food row, and the card told them "You named School but this was read
+ * as Food. Check the item." The sentence does contain the word. It is not
+ * naming the expense with it.
+ *
+ * A short list, and deliberately short. "to school", "at school", "from
+ * school" are places. "in school fees" and "for school" are purchases, so
+ * "in", "for", "on" and the Tagalog "sa" are all left out: "nagbayad ako sa
+ * school" really is a school expense, and losing that to catch this would be
+ * the worse trade.
+ */
+const WENT_THERE = /\b(?:to|at|from|near|outside|inside|toward|towards|past|around)$/;
+
+/** The name appears, and at least once as a thing bought rather than a place. */
+function namesAPurchase(sentence: string, name: string): boolean {
+  const flat = flatten(name).trim();
+  if (flat === "") return false;
+  const needle = ` ${flat} `;
+
+  for (let at = sentence.indexOf(needle); at !== -1; at = sentence.indexOf(needle, at + 1)) {
+    if (!WENT_THERE.test(sentence.slice(0, at + 1).trimEnd())) return true;
+  }
+  return false;
 }
 
 /**
@@ -128,6 +158,76 @@ const pesos = (centavos: number): string =>
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+
+/**
+ * A message in the pieces one row could have come from.
+ *
+ * Deliberately not `splitEntries`, which decides how many cards a message
+ * makes and is tuned for the short way the owner types entries. This is the
+ * other job: a paragraph written in full sentences, already turned into
+ * cards by the model, being cut up only so each card can be checked against
+ * its own words. Cutting too finely here costs nothing, because a piece that
+ * holds no figure is never chosen.
+ *
+ * What it splits on, and what it will not:
+ *
+ *   - A full stop, question mark or exclamation followed by a space. The
+ *     point inside "1,000.00" is followed by a digit, so it survives.
+ *   - A comma followed by a space. The comma inside "1,000" is not.
+ *   - "then".
+ *   - "and", but only where a figure follows it. "a hundred and twenty" is
+ *     one number and splitting it would turn PHP 120.00 into PHP 100.00,
+ *     which is the whole reason this is not a plain split on the word.
+ */
+function clausesIn(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .flatMap((part) => part.split(/,\s+/))
+    .flatMap((part) => part.split(/\s+then\s+/i))
+    .flatMap((part) => part.split(/\s+and\s+(?=(?:₱|php\s*)?\d)/i))
+    .map((part) => part.trim())
+    .filter((part) => part.length > 2);
+}
+
+/**
+ * The part of a message this row came from.
+ *
+ * ── Why a card cannot be checked against the whole paragraph ──────────────
+ *
+ * Every check below asks a question about "the sentence": did you write a
+ * bigger figure than this, did you name a different wallet, did you name a
+ * different item. All three assume the words describe this row and no other.
+ *
+ * A paragraph describes several. The owner wrote, on 20 September 2026:
+ * "On the way to school I bought breakfast for a hundred and twenty pesos
+ * using that cash, and at lunch I spent two hundred and fifty more at the
+ * canteen." Two rows, one message. Both cards were checked against the whole
+ * of it, so both carried "You named School but this was read as Food. Check
+ * the item." Neither was about school. The word belonged to a clause that
+ * was not theirs, and on a paragraph of four clauses nearly every card
+ * collects a warning that belongs to a different one.
+ *
+ * So the row is matched to its own clause by its amount, in digits or in
+ * words. When exactly one clause holds the figure, that clause is the
+ * sentence. When none does, or several do, this returns nothing at all and
+ * the sentence checks are skipped: a question asked of the wrong words is
+ * worse than no question, because it teaches the owner to ignore the line.
+ */
+export function clauseFor(said: string, amount: number | null, reference?: ReferenceLists): string {
+  const text = said.trim();
+  if (text === "") return "";
+
+  const parts = clausesIn(text);
+  // One clause, or nothing to match on: the message is the sentence, as before.
+  if (parts.length <= 1 || amount === null || amount <= 0) return text;
+
+  const holds = (part: string): boolean =>
+    figuresIn(part, reference).includes(amount) ||
+    numbersInWords(part).some((n) => n * 100 === amount);
+
+  const found = parts.filter(holds);
+  return found.length === 1 ? (found[0] as string) : "";
+}
 
 /**
  * Check a reading against the sentence that produced it.
@@ -214,7 +314,7 @@ export function verifyReading(
    */
   if (sentence !== "" && draft.flow !== "") {
     const known = itemsFor(draft.flow, draft.category, reference);
-    const spoken = known.filter((name) => names(flat, name));
+    const spoken = known.filter((name) => namesAPurchase(flat, name));
     const chosen = matchExact(draft.item, known);
 
     if (spoken.length === 1) {
