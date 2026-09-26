@@ -22,7 +22,7 @@ import {
 import { AmountInput, Select, TextInput } from "../components/forms";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
-import { choicesFor, debtDue, effectsFor, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionsOf } from "../domain/debt";
+import { choicesFor, debtDue, effectsFor, interestOnTop, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionsOf } from "../domain/debt";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, partWords, type BehalfSide } from "../domain/debtWords";
 import { formatMoney, type Centavos } from "../domain/money";
 import {
@@ -1017,7 +1017,16 @@ export function AddTransaction({
         ? -(check.repaymentSplit?.principal ?? amount)
         : owedChange({ debtEffect: draft.debtEffect, amount }) +
           (draft.debtEffect === "draw" ? Math.max(0, draft.charges ?? 0) : 0);
-    return { name: selectedDebt.name, owed: selectedDebt.kind === "payable", before, after: before + change };
+    return {
+      name: selectedDebt.name,
+      owed: selectedDebt.kind === "payable",
+      before,
+      after: before + change,
+      /** What of a payment is interest, which counts as spending and not against the balance. */
+      interest: draft.debtEffect === "repay" ? (check.repaymentSplit?.interest ?? 0) : 0,
+      /** The payment as it would be with the stated interest on top, when that is the likelier reading. */
+      onTop: draft.debtEffect === "repay" ? interestOnTop(amount, before, draft.interest) : null,
+    };
   })();
 
   /**
@@ -1134,9 +1143,27 @@ export function AddTransaction({
     });
   }
   if (check.repaymentSplit && check.repaymentSplit.interest > 0 && check.repaymentSplit.principal > 0) {
+    const clears = debtAfter !== null && debtAfter.after === 0;
     checks.push({
       key: "split",
-      text: `Saved as one payment in two linked rows: ${formatMoney(check.repaymentSplit.principal)} off what you owe, and ${formatMoney(check.repaymentSplit.interest)} interest, which counts as spending.`,
+      text: clears
+        ? `Pays off ${debtAfter?.name ?? "the debt"}: ${formatMoney(check.repaymentSplit.principal)} clears what you owe, and the other ${formatMoney(check.repaymentSplit.interest)} is interest, which counts as spending.`
+        : `Saved as one payment in two linked rows: ${formatMoney(check.repaymentSplit.principal)} off what you owe, and ${formatMoney(check.repaymentSplit.interest)} interest, which counts as spending.`,
+    });
+  }
+  if (debtAfter?.onTop) {
+    const total = debtAfter.onTop;
+    checks.push({
+      key: "on-top",
+      text: `${formatMoney(draft.amount ?? 0)} is everything owed, so with ${formatMoney(draft.interest ?? 0)} of it interest, ${formatMoney(draft.interest ?? 0)} stays owed. If the interest was on top, you paid ${formatMoney(total)}.`,
+      action: (
+        <>
+          {" "}
+          <button type="button" className="t-caption fms-linkbtn" onClick={() => set("amount", total)}>
+            Make it {formatMoney(total)}
+          </button>
+        </>
+      ),
     });
   }
 
@@ -2081,7 +2108,31 @@ export function AddTransaction({
           moves. The same figures the Budget screen shows, before saving
           rather than after.
         */}
-        {impact && (
+        {impact && draft.flow === "Debt" ? (
+          /*
+           * A debt's interest or fees, measured against the month quietly.
+           *
+           * This was the budget panel as it is for a purchase, so paying off
+           * a credit line in a month already over its budget showed the whole
+           * overrun in red beside the payment, as if clearing a debt were
+           * overspending. The interest does count as spending and is said so,
+           * in ordinary ink, with the month's position after it.
+           */
+          <div className="fms-impact">
+            <div className="t-label" style={{ color: "var(--ink-2)" }}>
+              {MONTH_NAMES[impact.month - 1]} spending
+            </div>
+            <p className="t-caption" style={{ color: "var(--ink-2)" }}>
+              {formatMoney(impact.cost)} of this is {draft.debtEffect === "draw" ? "fees" : "interest"}, and counts as{" "}
+              {MONTH_NAMES[impact.month - 1]} spending.{" "}
+              {impact.budget > 0
+                ? impact.leftAfter < 0
+                  ? `The month is ${formatMoney(-impact.leftAfter)} past its ${formatMoney(impact.budget)} budget with it.`
+                  : `${formatMoney(impact.leftAfter)} of the ${formatMoney(impact.budget)} budget is left after it.`
+                : ""}
+            </p>
+          </div>
+        ) : impact && (
           <div
             className={
               impact.budget > 0 && impact.leftAfter < 0 ? "fms-impact is-over" : "fms-impact"
@@ -2163,6 +2214,22 @@ export function AddTransaction({
             {debtAfter.after < 0 && (
               <p className="t-caption" style={{ color: "var(--over)" }}>
                 Below zero after this: more {debtAfter.owed ? "paid back than was borrowed" : "collected than was lent"}.
+              </p>
+            )}
+            {/*
+              The extra on a payment is interest, said here beside the debt
+              it belongs to, as what it is. It is not an overpayment and not a
+              budget problem: the owner, 26 September 2026, "only show the
+              over in the credit, as its interest".
+            */}
+            {debtAfter.owed && debtAfter.before > 0 && debtAfter.after === 0 && (
+              <p className="t-caption" style={{ color: "var(--ink-2)" }}>
+                Paid off{debtAfter.interest > 0 ? `, with ${formatMoney(debtAfter.interest)} of interest on top` : ""}.
+              </p>
+            )}
+            {debtAfter.owed && debtAfter.after > 0 && debtAfter.interest > 0 && (
+              <p className="t-caption" style={{ color: "var(--ink-2)" }}>
+                {formatMoney(debtAfter.interest)} of this is interest, so it does not come off what you owe.
               </p>
             )}
           </div>

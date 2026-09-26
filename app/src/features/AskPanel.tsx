@@ -151,7 +151,7 @@ import { figuresIn } from "../domain/money";
 import { transactionToDraft } from "../domain/entry";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
-import { choicesFor, effectsFor, type Debt, type DebtEffect } from "../domain/debt";
+import { choicesFor, effectsFor, interestOnTop, outstandingOf, type Debt, type DebtEffect } from "../domain/debt";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, type BehalfSide } from "../domain/debtWords";
 import { debtCardIntro } from "../domain/debtSentence";
 import { fillDebt, personDebt } from "../domain/debtFill";
@@ -6533,6 +6533,22 @@ function DebtCard({
                 : "From the bill or the app. Blank if none."}
             </span>
           </div>
+          {/*
+            Exactly what is owed, with interest as well: the interest was most
+            likely on top. See `interestOnTop` for the payment that left PHP
+            500.00 owed on a credit line the owner had just paid off.
+          */}
+          {(() => {
+            const total = draft.debtId ? interestOnTop(draft.amount, outstandingOf(transactions, draft.debtId), draft.interest) : null;
+            return total ? (
+              <p className="t-micro fms-proposalnote">
+                {formatMoney(draft.amount ?? 0)} is everything owed, so {formatMoney(draft.interest ?? 0)} would stay owed. If the interest was on top, you paid {formatMoney(total)}.{" "}
+                <button type="button" className="t-micro fms-linkish" onClick={() => onChange({ ...draft, amount: total })}>
+                  Make it {formatMoney(total)}
+                </button>
+              </p>
+            ) : null;
+          })()}
         </div>
       )}
 

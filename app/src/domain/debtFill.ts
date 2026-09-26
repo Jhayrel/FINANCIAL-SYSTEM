@@ -152,7 +152,12 @@ export function fillDebt(
   if (debt && next.amount === null && (next.debtEffect === "repay" || next.debtEffect === "collect")) {
     const position = positionOf(debt, transactions, asOf);
     const due = debtDue(position, transactions, asOf);
-    const whole = /\b(full|fully|all of it|paid off|pay off|whole|everything|settled?)\b/i.test(text);
+    /*
+     * "I already paid my balance" is the whole of it, like "paid off". It was
+     * read as the instalment due, which on a credit line happened to be the
+     * same figure, and on a loan would not have been.
+     */
+    const whole = /\b(full|fully|all of it|paid off|pay off|whole|everything|settled?|(?:my|the) (?:whole |remaining |outstanding )?balance|cleared?|zero)\b/i.test(text);
     const figure = whole ? position.outstanding : due.amountDue;
     if (figure > 0) {
       next = { ...next, amount: figure };

@@ -25,6 +25,7 @@ import { walletBalance } from "./balances";
 import {
   debtDue,
   interestOf,
+  interestOnTop,
   movementsOf,
   outstandingOf,
   paymentOf,
@@ -329,5 +330,32 @@ describe("the previews beside the form, while a payment is corrected", () => {
 
   it("counts nothing when none of the payment was interest", () => {
     expect(entryImpact(payment(), ledger, {}, "2026-09-10")).toBeNull();
+  });
+});
+
+/**
+ * 26 September 2026. PHP 5,000.00 owed on Maya Credit, paid off, with PHP
+ * 500.00 of interest typed into "Interest included". By rule D2 that reads
+ * as PHP 4,500.00 off the balance, and PHP 500.00 stayed owed on a debt the
+ * owner had just cleared. The rule stands; the form offers the total.
+ */
+describe("interest on top of a payment of everything owed", () => {
+  it("offers the total when the payment is exactly what is owed", () => {
+    expect(interestOnTop(500_000, 500_000, 50_000)).toBe(550_000);
+  });
+
+  it("says nothing for a part payment, where interest inside it is the usual case", () => {
+    expect(interestOnTop(100_000, 500_000, 12_000)).toBeNull();
+  });
+
+  it("says nothing without interest, or with nothing owed", () => {
+    expect(interestOnTop(500_000, 500_000, 0)).toBeNull();
+    expect(interestOnTop(500_000, 500_000, null)).toBeNull();
+    expect(interestOnTop(500_000, 0, 50_000)).toBeNull();
+  });
+
+  it("leaves the documented split alone", () => {
+    expect(splitRepayment(500_000, 500_000, 50_000)).toEqual({ principal: 450_000, interest: 50_000 });
+    expect(splitRepayment(550_000, 500_000, 50_000)).toEqual({ principal: 500_000, interest: 50_000 });
   });
 });

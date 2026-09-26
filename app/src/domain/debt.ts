@@ -427,6 +427,33 @@ export function splitRepayment(
   return { principal, interest: payment - principal };
 }
 
+/**
+ * A payment of exactly what is owed with interest stated too: the interest was
+ * probably on top of it, not inside it.
+ *
+ * ── The case this is for, 26 September 2026 ──────────────────────────────
+ *
+ * PHP 5,000.00 owed on a credit line. The owner paid it off, and the lender
+ * wanted PHP 500.00 more for it. The card filled PHP 5,000.00 (what was due)
+ * and PHP 500.00 went into "Interest included", which by rule D2 means the
+ * PHP 5,000.00 held the interest: PHP 4,500.00 off the balance, and PHP 500.00
+ * still owed on a debt the owner had just cleared. "I credit and when I paid
+ * I need to pay extra to pay my credit": the extra is on top.
+ *
+ * The rule is not changed: stated interest is inside the payment, and that is
+ * right for the common case of paying part of a bill. This only notices the
+ * one shape where "on top" is far likelier, and the form offers the total as
+ * a one-tap correction rather than applying it.
+ */
+export function interestOnTop(
+  amount: Centavos | null,
+  outstanding: Centavos,
+  interest: Centavos | null | undefined,
+): Centavos | null {
+  if (amount === null || !interest || interest <= 0 || outstanding <= 0) return null;
+  return amount === outstanding ? amount + interest : null;
+}
+
 // ── One movement, two rows ────────────────────────────────────────────────
 
 /**

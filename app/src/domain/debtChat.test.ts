@@ -225,3 +225,17 @@ describe("a draw comes from the credit line, not from a wallet", () => {
     expect(checkDraft(forgiven, ledger, reference, debts).ok).toBe(true);
   });
 });
+
+/** "I already paid my balance in maya credit" is the whole of what is owed. */
+describe("paying the balance", () => {
+  it("fills everything owed when the sentence says balance", async () => {
+    const { fillDebt } = await import("./debtFill");
+    const { emptyDraft, withDebtEffect } = await import("./entry");
+    const debt = { id: "maya-credit", name: "Maya Credit", kind: "payable", wallet: "Maya", counterparty: "Maya", archived: false, interestRate: 0, interestType: "none", openedDate: "2026-08-30", notes: "" } as const;
+    const draw = { id: "t1", recordNumber: 542, date: "2026-09-20", type: "Debt", fromWallet: "", toWallet: "Maya", category: "", item: "", description: "", amount: 500000, fee: 0, total: 500000, notes: "", status: "", debtId: "maya-credit", debtEffect: "draw" } as const;
+    const draft = { ...withDebtEffect({ ...emptyDraft("2026-09-26"), flow: "Debt" }, "repay"), debtId: "maya-credit" };
+    const filled = fillDebt(draft, "i already paid my balance in maya credit last week", [debt as never], [draw as never], ["Maya"], "2026-09-26");
+    expect(filled.draft.amount).toBe(500000);
+    expect(filled.notes.join(" ")).toContain("everything still owed");
+  });
+});

@@ -690,19 +690,23 @@ export function checkDraft(
     if (draft.debtEffect === "repay" && amount > 0 && !(stated !== null && stated > amount)) {
       const split = splitRepayment(amount, outstanding, stated);
       repaymentSplit = split;
-      /** The part above what is owed, which is interest whatever was stated. */
-      const over = split.interest - Math.max(0, Math.min(stated ?? 0, amount));
       if (outstanding <= 0 && split.principal === 0 && (stated ?? 0) < amount) {
         warnings.push({
           field: "amount",
           message: `Nothing is owed on ${debt?.name ?? "this debt"}, so all ${money(amount)} would be recorded as interest. If you borrowed first, record that borrowing before this payment.`,
         });
-      } else if (over > 0) {
-        warnings.push({
-          field: "amount",
-          message: `Only ${money(Math.max(0, outstanding))} is owed, so ${money(split.principal)} of this pays it down and the other ${money(split.interest)} is recorded as interest.`,
-        });
       }
+      /*
+       * Paying more than is owed is not a warning any more.
+       *
+       * On a credit line it is the usual case: the balance and the lender's
+       * interest go out together. It was listed under "Before you save" as
+       * something to check, and said a second time by the line that explains
+       * the split, and the owner read it as the app calling the payment
+       * wrong: "why it show the over?? I credit and when I paid I need to
+       * pay extra", 26 September 2026. The split line says it once, as what
+       * will happen: the balance cleared, and the rest is interest.
+       */
     }
 
     // Collecting or forgiving more than is outstanding takes it below zero.
