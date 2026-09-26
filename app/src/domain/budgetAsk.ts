@@ -16,13 +16,13 @@
  */
 
 import { budgetForMonth, budgetForYear } from "./budget";
-import { revisionSummary, saveLimit, saveTracks, type SaveOutcome } from "./budgetLock";
+import { monthLock, revisionSummary, saveLimit, saveTracks, type SaveOutcome } from "./budgetLock";
 import type { PlanScope } from "./budgetView";
 import { MONTH_NAMES } from "./dates";
 import { formatMoney, type Centavos } from "./money";
 import type { Budgets, IsoDate, ReferenceLists } from "./types";
 
-export type BudgetAsk =
+export type BudgetAsk = (
   | {
       readonly kind: "tracks";
       readonly year: number;
@@ -39,7 +39,11 @@ export type BudgetAsk =
       readonly name: string;
       readonly value: Centavos;
       readonly scope: PlanScope;
-    };
+    }
+) & {
+  /** The last month of a range ("September to December"), written month by month. */
+  readonly toMonth?: number | undefined;
+};
 
 const SET = /\b(set|make|change|update|increase|raise|lower|reduce|put|copy|use|same|limit|cap)\b/i;
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
@@ -52,14 +56,26 @@ function figure(text: string): Centavos | null {
   return value;
 }
 
-function monthIn(text: string, asOf: IsoDate): { year: number; month: number } {
+/**
+ * A month named in words, whole or cut to three letters, and nothing that
+ * merely starts like one: "decide" is not December and "separate" is not
+ * September, which the first version of this read them as.
+ */
+const MONTH_TOKEN = String.raw`(january|february|march|april|may|june|july|august|september|sept|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)`;
+
+/** "may" the verb, which is not the month: "it may be", "I may need". */
+const notTheMonth = (text: string): string =>
+  text.replace(/\bmay\b(?=\s+(?:be|have|need|not|also|still|want|help|go|get|use|spend|pay|buy|i|we|you|it|as|want)\b)/gi, "might");
+
+function monthIn(raw: string, asOf: IsoDate): { year: number; month: number } {
+  const text = notTheMonth(raw);
   const year = Number(asOf.slice(0, 4));
   const now = Number(asOf.slice(5, 7));
   if (/\bnext month\b/i.test(text)) return now === 12 ? { year: year + 1, month: 1 } : { year, month: now + 1 };
   if (/\blast month\b/i.test(text) && !/\b(same|as|copy|like)\b.*\blast month\b/i.test(text)) {
     return now === 1 ? { year: year - 1, month: 12 } : { year, month: now - 1 };
   }
-  const named = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b(?:\s+(20\d{2}))?/i.exec(text.replace(/\blast month\b/gi, " "));
+  const named = new RegExp(String.raw`\b${MONTH_TOKEN}\b(?:\s+(20\d{2}))?`, "i").exec(text.replace(/\blast month\b/gi, " "));
   if (named?.[1]) return { year: named[2] ? Number(named[2]) : year, month: MONTHS.indexOf(named[1].slice(0, 3).toLowerCase()) + 1 };
   return { year, month: now };
 }
@@ -68,6 +84,94 @@ function scopeIn(text: string): PlanScope {
   if (/\b(whole|all|entire)\s+year\b|\bevery month (of|in) \d{4}\b/i.test(text)) return "year";
   if (/\b(rest of the year|from now on|every month|each month|onwards|until december)\b/i.test(text)) return "rest";
   return "month";
+}
+
+/** Which months a budget sentence covers. */
+export interface BudgetSpan {
+  readonly year: number;
+  readonly month: number;
+  /** The last month of a range, when the sentence named one ("September to December"). */
+  readonly toMonth?: number;
+  readonly scope: PlanScope;
+  /**
+   * Whether the sentence itself said when it starts. "make it long term" does
+   * not, so a card it moves keeps its own first month rather than jumping to
+   * this one.
+   */
+  readonly anchored?: boolean;
+}
+
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+};
+
+const MONTH_WORD = MONTH_TOKEN;
+
+/**
+ * The months a sentence means, when it means more than one or names any.
+ *
+ * ── Why spans ─────────────────────────────────────────────────────────────
+ *
+ * The owner, 26 September 2026, after a budget card for October: "how about
+ * add it to september to december", and then "in applying budget it should
+ * know even if like long term". The reader knew one month, "the rest of the
+ * year" and "the whole year", and a range was read as nothing at all, so the
+ * sentence fell to the entry reader. It reads these now:
+ *
+ *   "september to december", "from oct until dec", "oct-dec"    a range
+ *   "for the next 3 months", "for three months"                a count
+ *   "long term", "from now on", "every month", "for good"      to December
+ *   "the whole year", "all of 2026"                            the year
+ *
+ * Null when the sentence names no month and no span, so the caller can tell
+ * "for October" from saying nothing about when.
+ */
+export function spanIn(said: string, asOf: IsoDate): BudgetSpan | null {
+  const text = notTheMonth(said).toLowerCase();
+  const year = Number(asOf.slice(0, 4));
+  const now = Number(asOf.slice(5, 7));
+  const monthNumber = (word: string): number => MONTHS.indexOf(word.slice(0, 3).toLowerCase()) + 1;
+
+  const range = new RegExp(String.raw`\b${MONTH_WORD}\b(?:\s+(20\d{2}))?\s*(?:to|until|till|through|thru|up to|[-\u2010-\u2015])\s*\b${MONTH_WORD}\b`, "i").exec(text);
+  if (range?.[1] && range[3]) {
+    const from = monthNumber(range[1]);
+    const to = monthNumber(range[3]);
+    const inYear = range[2] ? Number(range[2]) : year;
+    // A range that runs past December stops at December: a budget belongs to its year.
+    return to > from ? { year: inYear, month: from, toMonth: to, scope: "month", anchored: true } : { year: inYear, month: from, scope: "rest", anchored: true };
+  }
+
+  if (/\b(whole|all|entire)\s+year\b|\ball of 20\d{2}\b|\bevery month (of|in) 20\d{2}\b/.test(text)) {
+    return { year, month: 1, scope: "year", anchored: true };
+  }
+
+  const start = (): { year: number; month: number } => monthIn(said, asOf);
+  const anchored = new RegExp(String.raw`\b${MONTH_WORD}\b|\b(this|next|last) month\b`, "i").test(text);
+
+  const count = /\b(?:for\s+)?(?:the\s+)?(next|coming|following)?\s*(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+months?\b/.exec(text);
+  if (count?.[2]) {
+    const n = NUMBER_WORDS[count[2]] ?? Number(count[2]);
+    if (n >= 1 && n <= 12) {
+      const first = count[1] ? (now === 12 ? { year: year + 1, month: 1 } : { year, month: now + 1 }) : start();
+      const last = Math.min(12, first.month + n - 1);
+      const isAnchored = Boolean(count[1]) || anchored;
+      return last > first.month ? { ...first, toMonth: last, scope: "month", anchored: isAnchored } : { ...first, scope: "month", anchored: isAnchored };
+    }
+  }
+
+  // "from october on", "starting october": that month and every one after it.
+  if (new RegExp(String.raw`\b(?:from|starting|beginning)\s+(?:in\s+)?${MONTH_WORD}\b(?:\s+on(?:wards?)?\b)?`, "i").test(text) && !/\b(?:to|until|till|through)\b/.test(text)) {
+    return { ...start(), scope: "rest", anchored: true };
+  }
+
+  if (/\b(long[- ]?term|from now on|onwards?|moving forward|going forward|for good|permanently|every month|each month|monthly from now|rest of (?:the )?year|until december|till december|to december|all (?:the )?(?:remaining|coming|next) months)\b/.test(text)) {
+    return { ...start(), scope: "rest", anchored };
+  }
+
+  if (anchored) {
+    return { ...start(), scope: "month", anchored: true };
+  }
+  return null;
 }
 
 /**
@@ -138,6 +242,39 @@ export function confirmsProposal(said: string): boolean {
  */
 export function proposedBudgetIn(text: string): Centavos | null {
   const MONEY = String.raw`(?:₱|php\s*)?\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|(?:₱|php\s*)\d+(?:\.\d{1,2})?`;
+
+  /*
+   * By sentence first: the sentence that recommends, and the first figure in
+   * it that is not about what already happened.
+   *
+   * "Recommended budget next month is PHP 8,814.58, based on the August 2026
+   * spending total. September was over by PHP 33,494.36 against a PHP 7,700
+   * budget" (26 September 2026). The patterns below read "a PHP 7,700
+   * budget" from the second sentence, and "add it" made a card for PHP
+   * 7,700.00. The recommendation is the sentence that says it recommends;
+   * a figure after "over by", "spent" or "against" in it is context, not the
+   * proposal. Strong words first across the whole answer ("recommend",
+   * "suggest"), then the weaker "a budget of", so an answer that mentions
+   * the old budget before recommending a new one still reads the new one.
+   */
+  const plain = text.replace(/\*\*|__/g, "");
+  const sentences = plain.split(/(?<=[.!?])\s+|\n+/);
+  const STRONG = /\b(recommend(?:ed|s|ation)?|suggest(?:ed|s|ion)?|propos(?:e|ed|al)|should set|would set|i'?d set|aim for|realistic|reasonable|sensible)\b/i;
+  const WEAK = /\bbudget\s+(?:of|for next month|next month)\b|\bnext month'?s budget\b/i;
+  const PAST = /(over|exceeded|short|deficit|shortfall|spent|against|was|were|used|already)[^.]{0,18}$/i;
+  const money = new RegExp(MONEY, "gi");
+  for (const cue of [STRONG, WEAK]) {
+    for (const sentence of sentences) {
+      if (!cue.test(sentence)) continue;
+      for (const m of sentence.matchAll(money)) {
+        const before = sentence.slice(Math.max(0, (m.index ?? 0) - 28), m.index ?? 0);
+        if (PAST.test(before)) continue;
+        const value = figure(m[0]);
+        if (value !== null && value > 0) return value;
+      }
+    }
+  }
+
   // The bold markers are optional: the model uses them sometimes and not others.
   const B = String.raw`\*{0,2}`;
   /*
@@ -172,26 +309,32 @@ export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: Iso
   // "add buget same as last month": the misspellings that came in, read as the word.
   const text = said.replace(/\b(buget|budjet|bugdet|budgt|budet|bujet|budgets?)\b/gi, "budget");
   if (!/\b(budget|limit|cap)\b/i.test(text) || !(SET.test(text) || /\badd\b/i.test(text))) return null;
-  const { year, month } = monthIn(text, asOf);
-  const scope = scopeIn(text);
+  const span = spanIn(text, asOf);
+  const { year, month } = span ?? monthIn(text, asOf);
+  const scope = span?.scope ?? scopeIn(text);
+  const toMonth = span?.toMonth;
 
   if (/\b(same|copy|use)\b.*\b(as|from)?\s*last month('?s)?\b/i.test(text) && !/\d/.test(text.replace(/20\d{2}/g, ""))) {
-    return { kind: "copy", year, month, scope };
+    return { kind: "copy", year, month, scope, ...(toMonth ? { toMonth } : {}) };
   }
 
   const kinds = [...reference.spendingTypes.map((t) => t.name)].sort((a, b) => b.length - a.length);
   const flat = ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
   const kind = kinds.find((k) => flat.includes(` ${k.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `));
-  const withoutDates = text.replace(/\b20\d{2}\b/g, " ");
+  // Dates and counts of months are not the figure: "for the next 3 months" is not PHP 3.00.
+  const withoutDates = text
+    .replace(/\b20\d{2}\b/g, " ")
+    .replace(/\b\d{1,2}\s+months?\b/gi, " ")
+    .replace(new RegExp(String.raw`\b${MONTH_TOKEN}\s+\d{1,2}\b`, "gi"), " ");
   const value = figure(withoutDates);
 
   if (/\b(limit|cap)\b/i.test(text) && kind) {
     if (value === null && !/\b(remove|clear|no limit|delete)\b/i.test(text)) return null;
-    return { kind: "limit", year, month, name: kind, value: value ?? 0, scope };
+    return { kind: "limit", year, month, name: kind, value: value ?? 0, scope, ...(toMonth ? { toMonth } : {}) };
   }
   if (value === null) return null;
-  if (/\b(bills?|subscriptions?|subs)\b/i.test(text)) return { kind: "tracks", year, month, billsSubs: value, scope };
-  return { kind: "tracks", year, month, spending: value, scope };
+  if (/\b(bills?|subscriptions?|subs)\b/i.test(text)) return { kind: "tracks", year, month, billsSubs: value, scope, ...(toMonth ? { toMonth } : {}) };
+  return { kind: "tracks", year, month, spending: value, scope, ...(toMonth ? { toMonth } : {}) };
 }
 
 export interface BudgetPlan {
@@ -207,6 +350,18 @@ export interface BudgetPlan {
 export function planBudget(ask: BudgetAsk, budgets: Budgets, asOf: IsoDate, at: string): BudgetPlan {
   const plan = budgetForYear(budgets, ask.year);
   const name = `${MONTH_NAMES[ask.month - 1] ?? ""} ${ask.year}`;
+
+  /*
+   * A span that starts in a month already closed, or runs over several, is
+   * written month by month: the closed ones are left as they were and said
+   * so (rule B6), and the rest take the change. Through `saveTracks` with
+   * "rest", a closed first month refused the whole change instead, so "from
+   * August on" in late September changed nothing at all.
+   */
+  const firstClosed = monthLock(ask.year, ask.month, asOf).state === "closed";
+  const last = ask.toMonth && ask.toMonth > ask.month ? ask.toMonth : ask.scope === "rest" && firstClosed ? 12 : null;
+  if (last !== null) return planRange(ask, budgets, plan, last, asOf, at);
+
   const span = ask.scope === "month" ? name : ask.scope === "rest" ? `${name} to December` : `every month of ${ask.year} still ahead`;
   let outcome: SaveOutcome;
   let words: string;
@@ -216,14 +371,7 @@ export function planBudget(ask: BudgetAsk, budgets: Budgets, asOf: IsoDate, at: 
     words = ask.value > 0 ? `${ask.name} limited to ${formatMoney(ask.value)} a month, ${span}.` : `The limit on ${ask.name} removed, ${span}.`;
   } else {
     const current = budgetForMonth(budgets, ask.year, ask.month);
-    let value = current;
-    if (ask.kind === "copy") {
-      const prevYear = ask.month === 1 ? ask.year - 1 : ask.year;
-      const prevMonth = ask.month === 1 ? 12 : ask.month - 1;
-      value = budgetForMonth(budgets, prevYear, prevMonth);
-    } else {
-      value = { spending: ask.spending ?? current.spending, billsSubs: ask.billsSubs ?? current.billsSubs };
-    }
+    const value = valueFor(ask, budgets, ask.month);
     outcome = saveTracks(plan, ask.year, ask.month, value, ask.scope, asOf, at);
     words =
       ask.kind === "copy"
@@ -234,5 +382,66 @@ export function planBudget(ask: BudgetAsk, budgets: Budgets, asOf: IsoDate, at: 
   }
 
   const changes = outcome.revisions.map((r, i) => revisionSummary(ask.year, outcome.written[i] ?? ask.month, r));
+  return { year: ask.year, outcome, words, changes };
+}
+
+/** The two tracks one month would take under this ask. */
+function valueFor(ask: BudgetAsk, budgets: Budgets, month: number): { spending: Centavos; billsSubs: Centavos } {
+  const current = budgetForMonth(budgets, ask.year, month);
+  if (ask.kind === "copy") {
+    const prevYear = ask.month === 1 ? ask.year - 1 : ask.year;
+    const prevMonth = ask.month === 1 ? 12 : ask.month - 1;
+    return budgetForMonth(budgets, prevYear, prevMonth);
+  }
+  if (ask.kind === "tracks") return { spending: ask.spending ?? current.spending, billsSubs: ask.billsSubs ?? current.billsSubs };
+  return current;
+}
+
+/** "September to December": each month on its own, closed ones left alone. */
+function planRange(ask: BudgetAsk, budgets: Budgets, start: ReturnType<typeof budgetForYear>, last: number, asOf: IsoDate, at: string): BudgetPlan {
+  let plan = start;
+  const written: number[] = [];
+  const skipped: number[] = [];
+  const revisions: SaveOutcome["revisions"][number][] = [];
+
+  for (let m = ask.month; m <= last; m += 1) {
+    if (monthLock(ask.year, m, asOf).state === "closed") {
+      skipped.push(m);
+      continue;
+    }
+    const out =
+      ask.kind === "limit"
+        ? saveLimit(plan, ask.year, m, ask.name, ask.value, "month", asOf, at)
+        : saveTracks(plan, ask.year, m, valueFor(ask, budgets, m), "month", asOf, at);
+    if (out.refused) {
+      skipped.push(m);
+      continue;
+    }
+    plan = out.plan;
+    written.push(...out.written);
+    revisions.push(...out.revisions);
+  }
+
+  const from = MONTH_NAMES[ask.month - 1] ?? "";
+  const to = MONTH_NAMES[last - 1] ?? "";
+  const span = `${from} to ${to} ${ask.year}`;
+  const value = valueFor(ask, budgets, ask.month);
+  const words =
+    ask.kind === "limit"
+      ? ask.value > 0
+        ? `${ask.name} limited to ${formatMoney(ask.value)} a month, ${span}.`
+        : `The limit on ${ask.name} removed, ${span}.`
+      : ask.kind === "copy"
+        ? `${span}: the same budget as ${MONTH_NAMES[(ask.month + 10) % 12] ?? "the month before"}, ${formatMoney(value.spending)} for spending and ${formatMoney(value.billsSubs)} for bills and subscriptions each month.`
+        : `${span}: ${formatMoney(value.spending)} for spending and ${formatMoney(value.billsSubs)} for bills and subscriptions each month.`;
+  const allClosed = written.length === 0 && skipped.length > 0 && skipped.every((m) => monthLock(ask.year, m, asOf).state === "closed");
+  const outcome: SaveOutcome = {
+    plan,
+    written,
+    skipped,
+    revisions,
+    ...(allClosed ? { refused: `Every month from ${from} to ${to} ${ask.year} is closed. Closed months are corrected one at a time on the Budget screen, with a reason.` } : {}),
+  };
+  const changes = revisions.map((r, i) => revisionSummary(ask.year, written[i] ?? ask.month, r));
   return { year: ask.year, outcome, words, changes };
 }

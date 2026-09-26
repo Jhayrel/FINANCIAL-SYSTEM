@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { confirmsProposal, namesBudgetCommand, proposedBudgetIn, readBudgetAsk } from "./budgetAsk";
+import { confirmsProposal, namesBudgetCommand, planBudget, proposedBudgetIn, readBudgetAsk, spanIn } from "./budgetAsk";
 import { REFERENCE, TODAY } from "./eval/corpus";
 
 describe("a budget command with no figure of its own", () => {
@@ -109,5 +109,70 @@ describe("a yes to the budget just proposed", () => {
   it("makes the same request a named one would", () => {
     const ask = readBudgetAsk("set the budget next month ₱41,694.36", REFERENCE, TODAY);
     expect(ask).toMatchObject({ kind: "tracks", spending: 4_169_436 });
+  });
+});
+
+/**
+ * 26 September 2026, straight after the card for October: "how about add it
+ * to september to december", then "in applying budget it should know even if
+ * like long term". A range was read as nothing, so it fell to the entry
+ * reader. And "add it" had made a card for PHP 7,700.00, the budget the
+ * answer mentioned, not the PHP 8,814.58 it recommended.
+ */
+describe("budgets over more than one month", () => {
+  const AS_OF = "2026-09-26";
+
+  it("reads the recommendation, not the old budget the answer mentions after it", () => {
+    const answer =
+      "Recommended budget next month is **PHP 8,814.58**, based on the August 2026 spending total. September was **over by PHP 33,494.36** against a PHP 7,700 budget, so using the most recent month where spending stayed lower provides a realistic target.";
+    expect(proposedBudgetIn(answer)).toBe(881_458);
+  });
+
+  it("reads a range of months", () => {
+    expect(spanIn("how about add it to september to december", AS_OF)).toEqual({ year: 2026, month: 9, toMonth: 12, scope: "month", anchored: true });
+    expect(spanIn("oct-nov", AS_OF)).toEqual({ year: 2026, month: 10, toMonth: 11, scope: "month", anchored: true });
+    expect(spanIn("from october until december 2026", AS_OF)).toMatchObject({ month: 10, toMonth: 12 });
+  });
+
+  it("reads a count of months", () => {
+    expect(spanIn("for the next 3 months", AS_OF)).toEqual({ year: 2026, month: 10, toMonth: 12, scope: "month", anchored: true });
+    expect(spanIn("for two months", AS_OF)).toEqual({ year: 2026, month: 9, toMonth: 10, scope: "month", anchored: false });
+  });
+
+  it("says when a span leaves its start unsaid, so a card keeps its own", () => {
+    expect(spanIn("make it long term", AS_OF)).toMatchObject({ scope: "rest", anchored: false });
+    expect(spanIn("from october on", AS_OF)).toMatchObject({ scope: "rest", month: 10, anchored: true });
+  });
+
+  it("reads long term as the rest of the year", () => {
+    for (const said of ["long term", "from now on", "every month", "for good", "rest of the year", "long-term please"]) {
+      expect(spanIn(said, AS_OF)?.scope, said).toBe("rest");
+    }
+  });
+
+  it("does not take a word that only starts like a month", () => {
+    expect(spanIn("I cannot decide, separate it", AS_OF)).toBeNull();
+    expect(spanIn("it may be too low", AS_OF)).toBeNull();
+    expect(spanIn("set it for may", AS_OF)).toMatchObject({ month: 5 });
+  });
+
+  it("says nothing when no month or span is named", () => {
+    expect(spanIn("make it higher", AS_OF)).toBeNull();
+  });
+
+  it("plans a range month by month, leaving closed months alone", () => {
+    const ask = readBudgetAsk("set my budget to 8814.58 from august to december", REFERENCE, AS_OF);
+    expect(ask).toMatchObject({ kind: "tracks", month: 8, toMonth: 12, spending: 881_458 });
+    const plan = planBudget(ask!, {}, AS_OF, "2026-09-26T00:00:00.000Z");
+    expect(plan.outcome.refused).toBeUndefined();
+    expect(plan.outcome.written).toEqual([9, 10, 11, 12]);
+    expect(plan.outcome.skipped).toEqual([8]);
+    expect(plan.outcome.plan.spending.slice(8)).toEqual([881_458, 881_458, 881_458, 881_458]);
+    expect(plan.words).toBe("August to December 2026: ₱8,814.58 for spending and ₱0.00 for bills and subscriptions each month.");
+  });
+
+  it("does not read the count of months as the figure", () => {
+    const ask = readBudgetAsk("set budget 9000 for the next 3 months", REFERENCE, AS_OF);
+    expect(ask).toMatchObject({ spending: 900_000, month: 10, toMonth: 12 });
   });
 });
