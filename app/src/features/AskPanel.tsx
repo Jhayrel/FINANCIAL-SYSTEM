@@ -163,7 +163,13 @@ import type { Provenance } from "../domain/activity";
 import { imageLimits, type AppSettings } from "../domain/settings";
 import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
 import { changeWords, planEdit, readEditAsk, type EditPlan } from "../domain/chatChanges";
-import { planBudget, readBudgetAsk, type BudgetPlan } from "../domain/budgetAsk";
+import {
+  namesBudgetCommand,
+  planBudget,
+  proposedBudgetIn,
+  readBudgetAsk,
+  type BudgetPlan,
+} from "../domain/budgetAsk";
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 
 /**
@@ -2425,8 +2431,45 @@ export function AskPanel({
      * everything but Settings, so the change is worked out with the Budget
      * screen's own rules and shown on a card to apply.
      */
-    const budgetAsk = files.length === 0 && !as && !isNoteLine && sink.canBudget ? readBudgetAsk(note, reference, asOf) : null;
-    if (budgetAsk || (files.length === 0 && !as && modelSawEntry && isBudgetCommand(note))) {
+    const couldBudget = files.length === 0 && !as && !isNoteLine && sink.canBudget;
+    let budgetAsk = couldBudget ? readBudgetAsk(note, reference, asOf) : null;
+
+    /**
+     * "add that budget", with the figure sitting in the answer above it.
+     *
+     * `readBudgetAsk` wants a figure in the sentence, and this sentence has
+     * none, because it was already said one message ago. That is how anyone
+     * would ask, and on 21 September 2026 it produced the worst exchange in
+     * the log: no card was made, so the model answered the request itself
+     * with "Yes, the entries will be added to your budget", and then "the
+     * budget still not change".
+     *
+     * Only a figure the answer called a budget is taken, never just the
+     * first number in it, and the month is carried across when the answer
+     * named one and the request did not. Nothing is saved either way: it
+     * becomes the same card with the same button as any other budget
+     * change, which is what the owner asked for ("the ai can add budget but
+     * It need my approval").
+     */
+    if (!budgetAsk && couldBudget && namesBudgetCommand(note)) {
+      const said = [...turns].reverse().find((t) => t.kind === "assistant");
+      const lastAnswer = said && "text" in said ? said.text : "";
+      const proposed = proposedBudgetIn(lastAnswer);
+      if (proposed !== null) {
+        const month = /\b(this|next|last)\s+month\b/i.test(note)
+          ? ""
+          : /\bnext month\b/i.test(lastAnswer)
+            ? " next month"
+            : "";
+        budgetAsk = readBudgetAsk(`${note}${month} ${formatMoney(proposed)}`, reference, asOf);
+      }
+    }
+    /*
+     * A budget request with no figure anywhere reaches the same branch, so
+     * it gets the reply below saying what to type, rather than falling
+     * through to the model to be answered with a yes it cannot honour.
+     */
+    if (budgetAsk || (couldBudget && namesBudgetCommand(note)) || (files.length === 0 && !as && modelSawEntry && isBudgetCommand(note))) {
       setDraft("");
       say({ kind: "you", text: note });
       log(aiEvent("asked", "add", { text: note }));

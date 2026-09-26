@@ -70,6 +70,73 @@ function scopeIn(text: string): PlanScope {
   return "month";
 }
 
+/**
+ * A budget command that names no figure of its own.
+ *
+ * ── The conversation this comes from, 21 September 2026 ────────────────────
+ *
+ *   "so based on my spending and current balance what do you propose??"
+ *   ... a budget is proposed ...
+ *   "ok thanks. can you add those to my budget?"
+ *   "Yes, the entries will be added to your budget."
+ *   "so is it added?"
+ *   "Yes, the app will add those budget entries when you press the button."
+ *   "the budget still not change"
+ *
+ * `readBudgetAsk` wants a figure and the sentence has none, because the
+ * figure is in the answer above it, which is how anyone would say this. So
+ * it returned null, no card was made, and the model filled the silence with
+ * a yes.
+ *
+ * This is the first half of the gate, without the figure: enough to know
+ * the owner is asking for the budget to change, so the app can go and look
+ * for the figure rather than saying nothing.
+ */
+export function namesBudgetCommand(said: string): boolean {
+  const text = said.replace(/\b(buget|budjet|bugdet|budgt|budet|bujet|budgets?)\b/gi, "budget");
+  if (!/\b(budget|limit|cap)\b/i.test(text)) return false;
+
+  /*
+   * Asking for advice about the budget is not asking for it to change.
+   * "should I raise my budget?" wants an answer; "can you set my budget?"
+   * wants a card. The verbs of degree, raise and lower and increase, are
+   * left out on purpose: they nearly always come with a figure, which
+   * `readBudgetAsk` already handles, and without one they are usually a
+   * question about whether to.
+   */
+  if (/\b(should|shall|would|might|worth it|do you think|is it|are you able)\b/i.test(text)) return false;
+
+  return /\b(add|set|change|update|copy|make|put|apply|use|same)\b/i.test(text);
+}
+
+/**
+ * The budget an answer proposed, when it named one.
+ *
+ * Only a figure the sentence itself calls a budget. An answer about the
+ * month is full of figures, the overage and the daily rate and last month's
+ * total, and picking the first of them would set a budget to a number
+ * nobody proposed. "a budget of PHP 53,710.80 for next month" says which
+ * one it means, and nothing else here counts.
+ */
+export function proposedBudgetIn(text: string): Centavos | null {
+  const MONEY = String.raw`(?:₱|php\s*)?\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|(?:₱|php\s*)\d+(?:\.\d{1,2})?`;
+  // The bold markers are optional: the model uses them sometimes and not others.
+  const B = String.raw`\*{0,2}`;
+  const patterns = [
+    new RegExp(String.raw`budget(?:\s+of)?\s+(?:is\s+|at\s+|to\s+|would\s+be\s+)?${B}(${MONEY})`, "i"),
+    new RegExp(String.raw`${B}(${MONEY})${B}\s+(?:a\s+month\s+|for\s+next\s+month\s+|per\s+month\s+)?(?:as\s+(?:a|the|your)\s+)?budget`, "i"),
+  ];
+
+  for (const pattern of patterns) {
+    const found = pattern.exec(text);
+    if (found?.[1]) {
+      const value = figure(found[1]);
+      if (value !== null && value > 0) return value;
+    }
+  }
+  return null;
+}
+
 /** Read a budget request, or return null when the sentence is not one. */
 export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: IsoDate): BudgetAsk | null {
   // "add buget same as last month": the misspellings that came in, read as the word.
