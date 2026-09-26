@@ -164,13 +164,16 @@ import { imageLimits, type AppSettings } from "../domain/settings";
 import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
 import { changeWords, planEdit, readEditAsk, type EditPlan } from "../domain/chatChanges";
 import {
+  confirmsProposal,
   namesBudgetCommand,
   planBudget,
   proposedBudgetIn,
   readBudgetAsk,
+  type BudgetAsk,
   type BudgetPlan,
 } from "../domain/budgetAsk";
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
+import { budgetForYear } from "../domain/budget";
 
 /**
  * What the panel is allowed to do with a proposal.
@@ -248,6 +251,13 @@ interface Changing {
   readonly kind: "change";
   readonly plan: EditPlan;
   readonly state: "open" | "applied" | "discarded";
+  /** Stable across a refresh. See `DebtChoice.cardId`. Given by `say` when missing. */
+  readonly cardId?: string;
+  /**
+   * Came back from the record: the row ids and the fields that change, read
+   * against the ledger as it is now rather than as it was when this was said.
+   */
+  readonly restored?: StoredChange;
 }
 
 /** A budget about to change. */
@@ -255,6 +265,11 @@ interface Budgeting {
   readonly kind: "budget";
   readonly plan: BudgetPlan;
   readonly state: "open" | "applied" | "discarded";
+  /** What was asked, so an open card that comes back is worked out again against today's budget. */
+  readonly ask?: BudgetAsk;
+  readonly cardId?: string;
+  /** Came back from the record. An open one is planned again before it can be applied. */
+  readonly restored?: boolean;
 }
 
 /** A file the owner asked for, waiting to be saved. */
@@ -262,6 +277,19 @@ interface Exporting {
   readonly kind: "export";
   readonly ask: ExportAsk;
   readonly state: "open" | "applied" | "discarded";
+  readonly cardId?: string;
+}
+
+/** A change card as it is kept: ids and fields, never whole rows. */
+interface StoredChange {
+  readonly rows: readonly {
+    readonly id: string;
+    /** The changed fields as they were. */
+    readonly b: Partial<Transaction>;
+    /** The changed fields as they will be. */
+    readonly a: Partial<Transaction>;
+  }[];
+  readonly refused: readonly { readonly id: string; readonly reason: string }[];
 }
 
 interface Said {
@@ -284,8 +312,10 @@ interface Said {
    * lines were being stored and the cards were not, so a reload brought back
    * a conversation full of instructions pointing at nothing.
    *
-   * They are still said, still read back to the model as history, and simply
-   * never written down.
+   * They were said, read back to the model as history, and never written
+   * down. Every card is kept now, so these are written like any other line
+   * and come back beside the card they point at. The flag stays as a label
+   * on the line; nothing reads it to leave a line out any more.
    */
   readonly ephemeral?: boolean;
   /** Assistant turns: which model, or that this device wrote it. */
@@ -324,6 +354,15 @@ interface Found {
   readonly sweep?: boolean;
   /** Ids already acted on, so a button does not offer the same row twice. */
   readonly done: readonly string[];
+  readonly cardId?: string;
+  /**
+   * Came back from the record: which rows, and why each matched.
+   *
+   * The rows are looked up in the ledger and the bin when the list is drawn,
+   * not when it is loaded, because the conversation comes back before the
+   * ledger has finished arriving, and a list resolved then would be empty.
+   */
+  readonly restored?: readonly { readonly id: string; readonly why: readonly string[] }[];
 }
 
 /** A chart the owner asked to see. */
@@ -466,6 +505,7 @@ const CARD_WORD: Record<string, string> = {
   used: "Sent to the form",
   discarded: "Discarded",
   settled: "Added",
+  applied: "Applied",
 };
 
 /**
@@ -491,6 +531,71 @@ const newCardId = (): string => {
  */
 function turnFromCard(card: StoredCard): Turn {
   const draft = card.draft as unknown as Draft;
+  const data = (card.data ?? {}) as Record<string, unknown>;
+  const settled = (state: StoredCard["state"]): "open" | "applied" | "discarded" =>
+    state === "open" ? "open" : state === "discarded" ? "discarded" : "applied";
+  const list = <T,>(value: unknown): readonly T[] => (Array.isArray(value) ? (value as T[]) : []);
+
+  if (card.kind === "found") {
+    const shared = list<string>(data["why"]);
+    const restored = list<{ id: string; why?: readonly string[] }>(data["rows"])
+      .filter((r) => r && typeof r.id === "string")
+      .map((r) => ({ id: r.id, why: r.why ? list<string>(r.why) : shared }));
+    const action = data["action"];
+    return {
+      kind: "found",
+      action: action === "edit" || action === "restore" || action === "bin" ? action : "bin",
+      candidates: [],
+      done: list<string>(data["done"]),
+      ...(data["alsoBin"] === true ? { alsoBin: true } : {}),
+      ...(data["sweep"] === true ? { sweep: true } : {}),
+      cardId: card.id,
+      restored,
+    };
+  }
+
+  if (card.kind === "change") {
+    return {
+      kind: "change",
+      plan: { rows: [], refused: [] },
+      state: settled(card.state),
+      cardId: card.id,
+      restored: {
+        rows: list<StoredChange["rows"][number]>(data["rows"]).filter((r) => r && typeof r.id === "string"),
+        refused: list<StoredChange["refused"][number]>(data["refused"]).filter((r) => r && typeof r.id === "string"),
+      },
+    };
+  }
+
+  if (card.kind === "budget") {
+    const ask = data["ask"] as BudgetAsk | undefined;
+    const year = typeof ask?.year === "number" ? ask.year : new Date().getFullYear();
+    const skipped = typeof data["skipped"] === "number" ? data["skipped"] : 0;
+    return {
+      kind: "budget",
+      plan: {
+        year,
+        outcome: {
+          plan: budgetForYear({}, year),
+          written: [],
+          skipped: Array.from({ length: skipped }, (_, i) => i + 1),
+          revisions: [],
+        },
+        words: typeof data["words"] === "string" ? data["words"] : "A change to the budget.",
+        changes: list<string>(data["changes"]),
+      },
+      state: settled(card.state),
+      ...(ask ? { ask } : {}),
+      cardId: card.id,
+      restored: true,
+    };
+  }
+
+  if (card.kind === "export") {
+    const ask = data["ask"] as ExportAsk | undefined;
+    if (!ask || typeof ask.kind !== "string") return { kind: "assistant", text: "A file was offered here.", from: "this device" };
+    return { kind: "export", ask, state: settled(card.state), cardId: card.id };
+  }
 
   if (card.kind === "debt") {
     return {
@@ -519,6 +624,128 @@ function turnFromCard(card: StoredCard): Turn {
     cardId: card.id,
     ...(card.recordNumber === undefined ? {} : { recordNumber: card.recordNumber }),
   };
+}
+
+/** The fields of a row that a change touches, before and after. */
+function changedFields(before: Transaction, after: Transaction): { b: Partial<Transaction>; a: Partial<Transaction> } {
+  const b: Record<string, unknown> = {};
+  const a: Record<string, unknown> = {};
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const key of keys) {
+    const was = (before as unknown as Record<string, unknown>)[key];
+    const now = (after as unknown as Record<string, unknown>)[key];
+    if (JSON.stringify(was) === JSON.stringify(now)) continue;
+    b[key] = was ?? null;
+    a[key] = now ?? null;
+  }
+  return { b: b as Partial<Transaction>, a: a as Partial<Transaction> };
+}
+
+/**
+ * How many rows a kept list may name.
+ *
+ * A message is held to 4,000 characters by the rule, and a row id with its
+ * JSON around it is about thirty. A sweep of more than this still says how
+ * many it was in the sentence above it, and still moves every one of them.
+ */
+const MOST_KEPT_ROWS = 100;
+
+/** A card as it goes into the record. Null for a turn that is not a card. */
+function storedFrom(turn: Turn): StoredCard | null {
+  if (isOffer(turn)) {
+    return {
+      id: turn.cardId,
+      kind: "proposal",
+      state: turn.state,
+      draft: turn.proposal.draft as unknown as Record<string, unknown>,
+      sourceRef: turn.proposal.sourceRef,
+      confidence: turn.proposal.confidence,
+      adjustments: turn.proposal.adjustments,
+      ...(turn.proposal.said ? { said: turn.proposal.said } : {}),
+      ...(turn.recordNumber === undefined ? {} : { recordNumber: turn.recordNumber }),
+    };
+  }
+  if (isDebt(turn)) {
+    return { id: turn.cardId, kind: "debt", state: turn.state, draft: turn.draft as unknown as Record<string, unknown> };
+  }
+  if (!("cardId" in turn) || !turn.cardId) return null;
+
+  if (isFound(turn)) {
+    const rows =
+      turn.candidates.length > 0
+        ? turn.candidates.map((c) => ({ id: c.row.id, why: c.why }))
+        : (turn.restored ?? []);
+    const whys = new Set(rows.map((r) => r.why.join(", ")));
+    const shared = whys.size === 1 ? rows[0]?.why : undefined;
+    const kept = rows.slice(0, MOST_KEPT_ROWS);
+    return {
+      id: turn.cardId,
+      kind: "found",
+      state: kept.length > 0 && kept.every((r) => turn.done.includes(r.id)) ? "applied" : "open",
+      draft: {},
+      data: {
+        action: turn.action,
+        rows: kept.map((r) => (shared ? { id: r.id } : { id: r.id, why: r.why })),
+        ...(shared ? { why: shared } : {}),
+        done: turn.done.filter((id) => kept.some((r) => r.id === id)),
+        ...(turn.alsoBin ? { alsoBin: true } : {}),
+        ...(turn.sweep ? { sweep: true } : {}),
+      },
+    };
+  }
+
+  if (isChanging(turn)) {
+    const change: StoredChange =
+      turn.plan.rows.length > 0 || turn.plan.refused.length > 0
+        ? {
+            rows: turn.plan.rows.map((r) => ({ id: r.before.id, ...changedFields(r.before, r.after) })),
+            refused: turn.plan.refused.map((r) => ({ id: r.row.id, reason: r.reason })),
+          }
+        : (turn.restored ?? { rows: [], refused: [] });
+    return { id: turn.cardId, kind: "change", state: turn.state, draft: {}, data: { ...change } };
+  }
+
+  if (isBudgeting(turn)) {
+    return {
+      id: turn.cardId,
+      kind: "budget",
+      state: turn.state,
+      draft: {},
+      data: {
+        ...(turn.ask ? { ask: turn.ask } : {}),
+        words: turn.plan.words,
+        changes: turn.plan.changes,
+        skipped: turn.plan.outcome.skipped.length,
+      },
+    };
+  }
+
+  if (isExporting(turn)) {
+    return { id: turn.cardId, kind: "export", state: turn.state, draft: {}, data: { ask: turn.ask } };
+  }
+
+  return null;
+}
+
+/** What a card says in words, for anyone reading the record without the card. */
+function cardWords(turn: Turn, state: StoredCard["state"]): string {
+  if (isOffer(turn)) {
+    const d = turn.proposal.draft;
+    return `${CARD_WORD[state]}: ${d.date} ${d.flow} ${d.item} ${formatMoney(d.amount ?? 0)}`;
+  }
+  if (isDebt(turn)) return `${CARD_WORD[state]}: ${turn.draft.date} Debt ${formatMoney(turn.draft.amount ?? 0)}`;
+  if (isFound(turn)) {
+    const n = turn.candidates.length || turn.restored?.length || 0;
+    const verb = turn.action === "edit" ? "to correct" : turn.action === "restore" ? "to restore" : "to move to the bin";
+    return `${n} ${n === 1 ? "entry" : "entries"} found ${verb}.`;
+  }
+  if (isChanging(turn)) {
+    const words = turn.plan.rows.map(changeWords).join("; ");
+    return `${state === "applied" ? "Changed" : state === "discarded" ? "Left as it was" : "A change to saved entries"}${words ? `: ${words}` : "."}`;
+  }
+  if (isBudgeting(turn)) return `${state === "applied" ? "Budget set" : state === "discarded" ? "Budget left as it was" : "Budget change"}: ${turn.plan.words}`;
+  if (isExporting(turn)) return `${state === "applied" ? "File saved" : state === "discarded" ? "File not saved" : "File offered"}: ${turn.ask.said}`;
+  return "";
 }
 
 const HISTORY_TURNS = 6;
@@ -988,37 +1215,16 @@ export function AskPanel({
    */
   const lastRecorded = useRef(new Map<string, string>());
 
-  const recordCard = (turn: Offered | DebtChoice): void => {
-    const card = isOffer(turn)
-      ? {
-          id: turn.cardId,
-          kind: "proposal" as const,
-          state: turn.state,
-          draft: turn.proposal.draft as unknown as Record<string, unknown>,
-          sourceRef: turn.proposal.sourceRef,
-          confidence: turn.proposal.confidence,
-          adjustments: turn.proposal.adjustments,
-          ...(turn.proposal.said ? { said: turn.proposal.said } : {}),
-          ...(turn.recordNumber === undefined ? {} : { recordNumber: turn.recordNumber }),
-        }
-      : {
-          id: turn.cardId,
-          kind: "debt" as const,
-          state: turn.state,
-          draft: turn.draft as unknown as Record<string, unknown>,
-        };
+  const recordCard = (turn: Offered | DebtChoice | Found | Changing | Budgeting | Exporting): void => {
+    const card = storedFrom(turn);
+    if (!card) return;
 
     const signature = JSON.stringify(card);
     if (lastRecorded.current.get(card.id) === signature) return;
     lastRecorded.current.set(card.id, signature);
 
-    const d = isOffer(turn) ? turn.proposal.draft : turn.draft;
-    const what = isOffer(turn)
-      ? `${d.date} ${d.flow} ${d.item} ${formatMoney(d.amount ?? 0)}`
-      : `${d.date} Debt ${formatMoney(d.amount ?? 0)}`;
-
     void chatStore(uid)
-      .record(proposed(card, `${CARD_WORD[card.state]}: ${what}`))
+      .record(proposed(card, cardWords(turn, card.state)))
       .catch(() => {});
   };
 
@@ -1063,7 +1269,12 @@ export function AskPanel({
     setLearnedEvents((prev) => [...prev, ...lessons]);
   };
 
-  const say = (turn: Turn): void => {
+  const say = (given: Turn): void => {
+    // Every card gets an id it keeps across a refresh, so its later states replay onto it.
+    const turn: Turn =
+      (isFound(given) || isChanging(given) || isBudgeting(given) || isExporting(given)) && !given.cardId
+        ? { ...given, cardId: newCardId() }
+        : given;
     if (isOffer(turn) && !firstRead.current.has(turn.cardId)) firstRead.current.set(turn.cardId, turn.proposal.draft);
     setTurns((prev) => [...prev, turn]);
     // Only what was said is kept. A card and a found list are decisions in
@@ -1108,13 +1319,21 @@ export function AskPanel({
      * carrying the same card id, and the last one wins. Append only is what
      * makes it a record, so it stays append only.
      */
-    if (isOffer(turn) || isDebt(turn)) {
+    if (isOffer(turn) || isDebt(turn) || isFound(turn) || isChanging(turn) || isBudgeting(turn) || isExporting(turn)) {
       recordCard(turn);
       return;
     }
 
-    // A change or budget card is not kept: what it did is written as a message when it is applied.
-    if (isFound(turn) || isChanging(turn) || isBudgeting(turn) || isExporting(turn) || turn.ephemeral) return;
+    /*
+     * A line said beside a card or a question is kept too.
+     *
+     * These were left out because the card they pointed at was not kept, and
+     * a reload brought back "Apply it on the card" with no card under it.
+     * Every card is kept now, so the line and its card come back together,
+     * and leaving the line out was the other half of the same gap: "How much
+     * was it?" and "I could not find an entry in that" were on screen, and
+     * gone after a refresh (the owner, 26 September 2026).
+     */
 
     /**
      * A message carrying photos waits until it knows what they were.
@@ -1297,12 +1516,72 @@ export function AskPanel({
   };
 
   /** Mark one found row as dealt with, so its button does not offer twice. */
-  const settleFound = (index: number, ...ids: readonly string[]): void =>
+  const settleFound = (index: number, ...ids: readonly string[]): void => {
+    const was = turns[index];
+    // Kept, like a card's state, so a row binned from this list is not offered again after a refresh.
+    if (was && isFound(was)) recordCard({ ...was, done: [...was.done, ...ids] });
     setTurns((prev) =>
       prev.map((t, i) =>
         i === index && isFound(t) ? { ...t, done: [...t.done, ...ids] } : t,
       ),
     );
+  };
+
+  /**
+   * A change, budget or file card decided, on screen and in the record.
+   *
+   * Written from `turns` rather than inside the updater, for the reason given
+   * at `settle`: an updater must be pure.
+   */
+  const decide = (index: number, state: "applied" | "discarded"): void => {
+    const was = turns[index];
+    if (was && (isChanging(was) || isBudgeting(was) || isExporting(was))) recordCard({ ...was, state });
+    setTurns((prev) =>
+      prev.map((t, i) => (i === index && (isChanging(t) || isBudgeting(t) || isExporting(t)) ? { ...t, state } : t)),
+    );
+  };
+
+  /**
+   * A card that came back from the record, read against the ledger as it is now.
+   *
+   * Only the ids and the changed fields are kept, so the rows are looked up
+   * here, when the card is drawn, rather than when the conversation loaded:
+   * the conversation arrives before the ledger does, and a list resolved at
+   * load time came back empty. A row that has since gone from both the
+   * ledger and the bin simply drops out of the card.
+   */
+  const current = (turn: Turn): Turn => {
+    if (isFound(turn) && turn.restored && turn.candidates.length === 0) {
+      const everywhere = new Map<string, Transaction>();
+      for (const row of deleted) everywhere.set(row.id, row);
+      for (const row of transactions) everywhere.set(row.id, row);
+      const candidates = turn.restored.flatMap(({ id, why }, n) => {
+        const row = everywhere.get(id);
+        return row ? [{ row, score: 100 - n, why: [...why] }] : [];
+      });
+      return { ...turn, candidates };
+    }
+    if (isChanging(turn) && turn.restored && turn.plan.rows.length === 0 && turn.plan.refused.length === 0) {
+      const byId = new Map(transactions.map((t) => [t.id, t] as const));
+      const rows = turn.restored.rows.flatMap(({ id, b, a }) => {
+        const row = byId.get(id);
+        return row ? [{ before: { ...row, ...b } as Transaction, after: { ...row, ...a } as Transaction }] : [];
+      });
+      const refused = turn.restored.refused.flatMap(({ id, reason }) => {
+        const row = byId.get(id);
+        return row ? [{ row, reason }] : [];
+      });
+      return { ...turn, plan: { rows, refused } };
+    }
+    if (isBudgeting(turn) && turn.restored && turn.state === "open" && turn.ask) {
+      // Planned again against today's budget: the month may have closed, or the change been made since.
+      const plan = planBudget(turn.ask, budgets, asOf, new Date().toISOString());
+      if (plan.outcome.refused) return { ...turn, plan: { ...turn.plan, words: `${turn.plan.words} ${plan.outcome.refused}` }, state: "discarded" };
+      if (plan.outcome.written.length === 0) return { ...turn, state: "applied" };
+      return { ...turn, plan };
+    }
+    return turn;
+  };
 
   const replaceProposal = (index: number, proposal: Proposal): void =>
     setTurns((prev) =>
@@ -2451,9 +2730,18 @@ export function AskPanel({
      * change, which is what the owner asked for ("the ai can add budget but
      * It need my approval").
      */
-    if (!budgetAsk && couldBudget && namesBudgetCommand(note)) {
+    const lastAnswer = (() => {
       const said = [...turns].reverse().find((t) => t.kind === "assistant");
-      const lastAnswer = said && "text" in said ? said.text : "";
+      return said && "text" in said ? said.text : "";
+    })();
+    /*
+     * "ok add it", straight after an answer that proposed a budget, is the
+     * same request without the word. Only then: a yes after a card or a
+     * question is theirs, and nothing here takes it from them.
+     */
+    const yesToBudget =
+      couldBudget && !pending && !turns.some((t) => (isOffer(t) || isDebt(t)) && t.state === "open") && confirmsProposal(note) && proposedBudgetIn(lastAnswer) !== null;
+    if (!budgetAsk && couldBudget && (namesBudgetCommand(note) || yesToBudget)) {
       const proposed = proposedBudgetIn(lastAnswer);
       if (proposed !== null) {
         const month = /\b(this|next|last)\s+month\b/i.test(note)
@@ -2461,7 +2749,9 @@ export function AskPanel({
           : /\bnext month\b/i.test(lastAnswer)
             ? " next month"
             : "";
-        budgetAsk = readBudgetAsk(`${note}${month} ${formatMoney(proposed)}`, reference, asOf);
+        // "ok add it" never says "budget", so the request is put in the words the reader knows.
+        const asked = namesBudgetCommand(note) ? note : "set the budget";
+        budgetAsk = readBudgetAsk(`${asked}${month} ${formatMoney(proposed)}`, reference, asOf);
       }
     }
     /*
@@ -2493,7 +2783,7 @@ export function AskPanel({
         return;
       }
       say({ kind: "assistant", text: `Here is the change. ${plan.words} Apply it on the card.`, from: "this device", ephemeral: true });
-      say({ kind: "budget", plan, state: "open" });
+      say({ kind: "budget", plan, state: "open", ask: budgetAsk });
       log(aiEvent("proposed", "add", { entry: plan.words, text: note }));
       return;
     }
@@ -2655,7 +2945,7 @@ export function AskPanel({
     if (askedToExport) {
       const words = exportWords(askedToExport, asOf);
       say({ kind: "assistant", text: words, from: "this device" });
-      setTurns((prev) => [...prev, { kind: "export", ask: askedToExport, state: "open" }]);
+      say({ kind: "export", ask: askedToExport, state: "open" });
       log(aiEvent("answered", "statements", { text: words, model: "this device" }));
       return;
     }
@@ -4148,8 +4438,9 @@ export function AskPanel({
           </div>
         )}
 
-        {turns.map((turn, i) =>
-          isChanging(turn) ? (
+        {turns.map((raw, i) => {
+          const turn = current(raw);
+          return isChanging(turn) ? (
             <ChangeCard
               key={i}
               turn={turn}
@@ -4159,10 +4450,10 @@ export function AskPanel({
                   .map((r) => `#${String(r.before.recordNumber).padStart(4, "0")} ${changeWords(r)}`)
                   .join("; ")}.`;
                 log(aiEvent("accepted", "add", { entry: done }));
-                setTurns((prev) => prev.map((t, j) => (j === i && isChanging(t) ? { ...t, state: "applied" } : t)));
+                decide(i, "applied");
                 say({ kind: "assistant", text: done, from: "this device" });
               }}
-              onDiscard={() => setTurns((prev) => prev.map((t, j) => (j === i && isChanging(t) ? { ...t, state: "discarded" } : t)))}
+              onDiscard={() => decide(i, "discarded")}
               onOpen={(row) => sink.use(transactionToDraft(row))}
             />
           ) : isBudgeting(turn) ? (
@@ -4172,10 +4463,10 @@ export function AskPanel({
               onApply={() => {
                 sink.budget(turn.plan.year, turn.plan.outcome.plan, turn.plan.changes);
                 log(aiEvent("accepted", "add", { entry: turn.plan.words }));
-                setTurns((prev) => prev.map((t, j) => (j === i && isBudgeting(t) ? { ...t, state: "applied" } : t)));
+                decide(i, "applied");
                 say({ kind: "assistant", text: `Set. ${turn.plan.words}`, from: "this device" });
               }}
-              onDiscard={() => setTurns((prev) => prev.map((t, j) => (j === i && isBudgeting(t) ? { ...t, state: "discarded" } : t)))}
+              onDiscard={() => decide(i, "discarded")}
             />
           ) : isExporting(turn) ? (
             <ExportCard
@@ -4184,9 +4475,9 @@ export function AskPanel({
               onSave={() => {
                 sink.exportFile(turn.ask);
                 log(aiEvent("accepted", "statements", { entry: turn.ask.said }));
-                setTurns((prev) => prev.map((t, j) => (j === i && isExporting(t) ? { ...t, state: "applied" } : t)));
+                decide(i, "applied");
               }}
-              onDiscard={() => setTurns((prev) => prev.map((t, j) => (j === i && isExporting(t) ? { ...t, state: "discarded" } : t)))}
+              onDiscard={() => decide(i, "discarded")}
             />
           ) : isDebt(turn) ? (
             <DebtCard
@@ -4401,8 +4692,8 @@ export function AskPanel({
                 </p>
               )}
             </div>
-          ),
-        )}
+          );
+        })}
 
         {busy && (
           <div className="fms-working" role="status" aria-live="polite">

@@ -110,6 +110,24 @@ export function namesBudgetCommand(said: string): boolean {
 }
 
 /**
+ * A short yes to whatever was just proposed: "ok add it", "yes apply that".
+ *
+ * On 26 September 2026 the answer above was "PHP 41,694.36 is the
+ * recommended budget for next month", the owner said "ok add it", and the
+ * chat replied "I could not find an entry in that" and asked how much it
+ * was. The sentence never says "budget", because it did not need to: the
+ * thing to add was the last thing said. This is only half the gate. The
+ * caller also needs the answer above it to have proposed a budget, so a yes
+ * after anything else is left alone.
+ */
+export function confirmsProposal(said: string): boolean {
+  const text = said.trim().toLowerCase().replace(/[.!?,]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!text || /\d/.test(text) || text.split(" ").length > 7) return false;
+  if (/\b(no|not|don'?t|dont|never|wait|stop|cancel|hindi|huwag|wag)\b/.test(text)) return false;
+  return /^(?:(?:ok(?:ay)?|yes|yeah|yep|sure|sige|oo|go|please|pls|then|now|so|alright|fine)\s+)*(?:(?:please|pls)\s+)?(?:add|set|apply|use|do|save|put|make)\s+(?:it|that|this|those|them|the\s+budget|that\s+one)(?:\s+(?:please|pls|now|in|then|for\s+me|to\s+my\s+budget))*$|^(?:yes|yeah|yep|sige|oo|go\s+ahead|do\s+it)(?:\s+(?:please|pls|go\s+ahead|do\s+it))*$/.test(text);
+}
+
+/**
  * The budget an answer proposed, when it named one.
  *
  * Only a figure the sentence itself calls a budget. An answer about the
@@ -122,7 +140,19 @@ export function proposedBudgetIn(text: string): Centavos | null {
   const MONEY = String.raw`(?:₱|php\s*)?\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|(?:₱|php\s*)\d+(?:\.\d{1,2})?`;
   // The bold markers are optional: the model uses them sometimes and not others.
   const B = String.raw`\*{0,2}`;
+  /*
+   * The recommending words first, because they are the proposal. "PHP
+   * 41,694.36 is the recommended budget for next month" was the answer on
+   * 26 September 2026, and neither pattern below it read that: a word stood
+   * between the figure and "budget". Read first, they also win over an
+   * earlier figure the answer merely mentions ("your budget of PHP 7,700.00
+   * was exceeded... the recommended budget is PHP 9,000.00").
+   */
+  const PROPOSING = String.raw`(?:recommended|suggested|proposed|realistic|reasonable|sensible|new|better)`;
   const patterns = [
+    new RegExp(String.raw`${B}(${MONEY})${B}\s+(?:is|would\s+be|as)\s+(?:a|the|your|my)?\s*${PROPOSING}\s+(?:monthly\s+)?budget`, "i"),
+    new RegExp(String.raw`${PROPOSING}\s+(?:monthly\s+)?budget(?:\s+for\s+(?:next|the\s+next|this|each)\s+month)?\s*(?:of|is|at|to|would\s+be|:)?\s*${B}(${MONEY})`, "i"),
+    new RegExp(String.raw`(?:recommend|suggest|propose)\s+(?:a\s+|the\s+)?(?:monthly\s+)?(?:budget\s+(?:of\s+)?)?${B}(${MONEY})`, "i"),
     new RegExp(String.raw`budget(?:\s+of)?\s+(?:is\s+|at\s+|to\s+|would\s+be\s+)?${B}(${MONEY})`, "i"),
     new RegExp(String.raw`${B}(${MONEY})${B}\s+(?:a\s+month\s+|for\s+next\s+month\s+|per\s+month\s+)?(?:as\s+(?:a|the|your)\s+)?budget`, "i"),
   ];

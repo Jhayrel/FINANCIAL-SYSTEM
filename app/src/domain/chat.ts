@@ -107,9 +107,22 @@ export interface ChatMessage {
  */
 export interface StoredCard {
   readonly id: string;
-  /** An ordinary entry, or the two-choice debt card. */
-  readonly kind: "proposal" | "debt";
-  readonly state: "open" | "added" | "used" | "discarded" | "settled";
+  /**
+   * An ordinary entry, the two-choice debt card, or one of the four cards
+   * that act on what is already saved.
+   *
+   * ── Why the last four are kept now ─────────────────────────────────────
+   *
+   * A list of rows to bin, a change to saved entries, a budget change and a
+   * file to save were never written, on the reasoning that what they did is
+   * written as a message once it is done. So an open one was simply gone
+   * after a refresh, and the line above it ("Here is the change. Apply it on
+   * the card.") pointed at nothing. The owner, 26 September 2026: "some part
+   * is disappearing, it should stay". They come back now, in the state they
+   * ended in, like every other card.
+   */
+  readonly kind: "proposal" | "debt" | "found" | "change" | "budget" | "export";
+  readonly state: "open" | "added" | "used" | "discarded" | "settled" | "applied";
   readonly draft: Record<string, unknown>;
   readonly sourceRef?: string;
   readonly confidence?: string;
@@ -117,22 +130,38 @@ export interface StoredCard {
   readonly said?: string;
   /** The number the row was actually given, once it has one. */
   readonly recordNumber?: number;
+  /**
+   * What the four cards that act on saved rows need to come back.
+   *
+   * Row ids and the fields that change, never whole rows: the rows are in
+   * the ledger already, and a copy of them here would be a second ledger
+   * that goes stale the moment either is edited.
+   */
+  readonly data?: Record<string, unknown>;
 }
 
 /** A message is a sentence, not a document. */
 export const MAX_TEXT = 4000;
 
 /**
- * How long the line under a message may be.
+ * How long the line under a message may be, as stored.
  *
  * It said where the words came from, a model name or "this device", so 80
  * characters was plenty. It also carries why nothing answered, and on 20
  * September 2026 that read "Every model in the chain failed. Tried:
- * openai/gpt-oss-120b too large, then reje": cut mid-word, with the part
- * naming the cause missing. A diagnosis worth keeping is worth keeping
- * whole, and it is one line of small type.
+ * openai/gpt-oss-120b too large, then reje", cut mid-word, so this was
+ * raised to 240.
+ *
+ * ── Why it is 80 again ────────────────────────────────────────────────────
+ *
+ * `firestore.rules` takes 80 (`validChatMessage`), and was never raised with
+ * it. So every message whose line ran past 80 was refused at the database:
+ * on screen for the session, and gone after a refresh, which is exactly the
+ * failure message the owner most needed to see again. The whole reason stays
+ * on screen for the session and in the AI log, which takes 120 for a model
+ * name and 2,000 for text; the stored copy is shortened on a word.
  */
-export const MAX_FROM = 240;
+export const MAX_FROM = 80;
 
 /** Cut on a word, never through one, and say that it was cut. */
 function shorten(text: string, max: number): string {
@@ -258,7 +287,7 @@ export function carded(message: ChatMessage): StoredCard | null {
   if (!message.card) return null;
   try {
     const value = JSON.parse(message.card) as StoredCard;
-    return value && typeof value.id === "string" && value.draft ? value : null;
+    return value && typeof value.id === "string" && (value.draft || value.data) ? value : null;
   } catch {
     return null;
   }

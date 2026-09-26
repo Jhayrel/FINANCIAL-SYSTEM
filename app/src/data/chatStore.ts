@@ -20,8 +20,18 @@ import { byOldest, type ChatMessage } from "../domain/chat";
  *
  * Enough to pick up where you left off, not so much that opening the screen
  * reads a year of conversation. The rest stays in the database.
+ *
+ * ── Why 60 was not enough ─────────────────────────────────────────────────
+ *
+ * A card writes a message when it appears and another every time it
+ * changes, so one entry offered, corrected and added is three or four
+ * messages, and a statement read into eight cards is thirty. Sixty messages
+ * was often a dozen turns, and everything older than that was simply not on
+ * screen after a refresh: the owner's "some part is disappearing", 26
+ * September 2026. One person's conversation at this size is a few hundred
+ * small documents, which is a trivial read.
  */
-const PAGE = 60;
+const PAGE = 400;
 
 const path = (uid: string): string => `users/${uid}/chat`;
 

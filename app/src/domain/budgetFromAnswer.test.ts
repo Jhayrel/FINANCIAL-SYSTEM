@@ -9,7 +9,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import { namesBudgetCommand, proposedBudgetIn } from "./budgetAsk";
+import { confirmsProposal, namesBudgetCommand, proposedBudgetIn, readBudgetAsk } from "./budgetAsk";
+import { REFERENCE, TODAY } from "./eval/corpus";
 
 describe("a budget command with no figure of its own", () => {
   const COMMANDS = [
@@ -72,5 +73,41 @@ describe("the budget an answer proposed", () => {
 
   it("has nothing to say about an answer with no figures", () => {
     expect(proposedBudgetIn("I cannot tell from what is here.")).toBeNull();
+  });
+});
+
+/**
+ * 26 September 2026. The answer was "PHP 41,694.36 is the recommended
+ * budget for next month", the owner said "ok add it", and the chat replied
+ * "I could not find an entry in that" and asked how much it was.
+ */
+describe("a yes to the budget just proposed", () => {
+  it("reads the figure when a word stands between it and the budget", () => {
+    const answer =
+      "**PHP 41,694.36** is the recommended budget for next month. It matches the amount spent in September, which is higher than July (PHP 15,127.00).";
+    expect(proposedBudgetIn(answer)).toBe(4_169_436);
+    expect(proposedBudgetIn("PHP 41,694.36 is a recommended budget for next month, matching what you spent.")).toBe(4_169_436);
+  });
+
+  it("prefers the recommended figure to one the answer only mentions", () => {
+    const answer = "Your September budget of PHP 7,700.00 was exceeded. The recommended budget for next month is PHP 9,000.00.";
+    expect(proposedBudgetIn(answer)).toBe(900_000);
+  });
+
+  for (const said of ["ok add it", "ok add it please", "yes add that", "sige add it", "apply it", "yes", "go ahead", "please set it"]) {
+    it(`hears "${said}" as a yes`, () => {
+      expect(confirmsProposal(said)).toBe(true);
+    });
+  }
+
+  for (const said of ["ok", "no don't add it", "add it to gcash 500", "how much is it", "what do you think about adding it to my savings next week"]) {
+    it(`does not hear "${said}" as a yes`, () => {
+      expect(confirmsProposal(said)).toBe(false);
+    });
+  }
+
+  it("makes the same request a named one would", () => {
+    const ask = readBudgetAsk("set the budget next month ₱41,694.36", REFERENCE, TODAY);
+    expect(ask).toMatchObject({ kind: "tracks", spending: 4_169_436 });
   });
 });
