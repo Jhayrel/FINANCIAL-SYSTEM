@@ -22,6 +22,8 @@ import { SearchInput } from "../components/forms";
 import { Icon } from "../components/Icon";
 import { useConfirm } from "../components/Confirm";
 import { Sheet } from "../components/Sheet";
+import { FilterChip } from "../components/FilterChip";
+import { useMediaQuery } from "./useMediaQuery";
 import { formatAmount } from "../domain/money";
 import { parentOf, partOf } from "../domain/debt";
 import { DataTable, type Column } from "../components/DataTable";
@@ -116,6 +118,7 @@ export function Database({
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
   /** The row whose sheet is open on a phone. */
   const [opened, setOpened] = useState<Transaction | null>(null);
+  const phone = useMediaQuery("(max-width: 639px)");
   const { confirm, dialog } = useConfirm();
 
   /**
@@ -521,8 +524,47 @@ export function Database({
           <SearchInput
             value={query}
             onChange={(v) => { setQuery(v); setLimit(PAGE); }}
-            placeholder="Search words, #0442, >1000, <100, P500"
+            placeholder={phone ? "Search, #0442, >1000" : "Search words, #0442, >1000, <100, P500"}
           />
+
+          {/*
+            The filters on a phone: one row of dropdowns, not two rows of
+            pills running off the edge (owner, 26 September 2026: "the filter
+            I dont like it, make it cleaner"). Each opens the phone's own
+            picker; one that is set is marked, and Clear puts them all back.
+          */}
+          <div className="fms-dbfilterrow" role="group" aria-label="Filters">
+            <FilterChip
+              label="Type"
+              value={filter}
+              on={filter !== "all"}
+              options={FILTERS.map((f) => ({
+                id: f.id,
+                label: f.id === "all" ? "All types" : f.id === "flagged" && flaggedCount > 0 ? `${f.label} (${flaggedCount})` : f.label,
+              }))}
+              onChange={(id) => { setFilter(id as FilterId); setLimit(PAGE); }}
+            />
+            <FilterChip
+              label="Date"
+              value={period}
+              on={period !== "all"}
+              options={PERIODS}
+              onChange={(id) => { setPeriod(id as Period); setLimit(PAGE); }}
+            />
+            {years.length > 1 && (
+              <FilterChip
+                label="Year"
+                value={String(year)}
+                on={year !== "all"}
+                options={[
+                  { id: "all", label: "All years" },
+                  ...[...years].reverse().map((y) => ({ id: String(y), label: String(y) })),
+                ]}
+                onChange={(id) => { setYear(id === "all" ? "all" : Number(id)); setLimit(PAGE); }}
+              />
+            )}
+          </div>
+
           <SegmentedControl
             label="Type"
             scroll
@@ -560,9 +602,24 @@ export function Database({
           )}
         </div>
 
-        {/* Shown on a phone only, until something is picked: how to pick. */}
-        {onDeleteMany && picked.size === 0 && (
-          <p className="t-caption fms-phone-note">Tap a row to correct it or move it to the bin. Hold a row to pick several.</p>
+        {/* Shown on a phone only: how many, and how to pick several. */}
+        {picked.size === 0 && (
+          <div className="t-micro fms-phone-note">
+            <span>
+              {rows.length.toLocaleString()} {rows.length === 1 ? "entry" : "entries"}
+              {rows.length !== transactions.length && ` of ${transactions.length.toLocaleString()}`}
+              {onDeleteMany && " · hold a row to pick several"}
+            </span>
+            {(filter !== "all" || period !== "all" || year !== "all") && (
+              <button
+                type="button"
+                className="t-caption fms-linkbtn fms-filterclear"
+                onClick={() => { setFilter("all"); setPeriod("all"); setYear("all"); setLimit(PAGE); }}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
         )}
 
         {onDeleteMany && chosen.length > 0 && (

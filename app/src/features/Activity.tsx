@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Icon, type IconName } from "../components/Icon";
 import { Alert, Button, Card, EmptyState, Placeholder } from "../components/primitives";
+import { FilterChip } from "../components/FilterChip";
 import { activityStore } from "../data/activityStore";
 import type { ActivityEvent, Actor } from "../domain/activity";
 import { factChanges, readRow } from "../domain/activityRead";
@@ -239,6 +240,23 @@ export function Activity({
       >
         {total > 0 && !failed && (
           <div className="fms-acttools">
+            {/* On a phone: one row of dropdowns, like the Database's. */}
+            <div className="fms-dbfilterrow" role="group" aria-label="Filters">
+              <FilterChip
+                label="Who did it"
+                value={who}
+                on={who !== "all"}
+                options={WHO}
+                onChange={(id) => setWho(id as Who)}
+              />
+              <FilterChip
+                label="What kind of change"
+                value={kind}
+                on={kind !== "all"}
+                options={KIND.map((k) => ({ id: k.id, label: `${k.id === "all" ? "All changes" : k.label} (${kindCounts[k.id]})` }))}
+                onChange={(id) => setKind(id as Kind)}
+              />
+            </div>
             <Segments label="Who did it" options={WHO} value={who} onChange={setWho} />
             <Segments
               label="What kind of change"

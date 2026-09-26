@@ -3614,9 +3614,10 @@
 }
 
 /*
- * On a phone a row can be corrected or binned; picking many at once is for a
- * bigger screen. Correcting a wrong entry was switched off on a phone, the one
- * device the owner has with them when they notice the mistake.
+ * Below a desktop a row is corrected, binned and picked from the list itself
+ * (tap for its sheet, hold to pick), so the table's checkboxes and the bar
+ * above it are not drawn. Correcting a wrong entry was once switched off on
+ * a phone, the one device the owner has with them when they notice it.
  */
 @media (max-width: 1023px) {
   .fms-phone-note {
@@ -8176,5 +8177,182 @@ textarea.fms-askinput {
 
   .fms-binlist .fms-binactions > .fms-btn--primary {
     order: 4;
+  }
+}
+
+/* ── The Database's filters on a phone: one row of dropdowns ─────────────── */
+
+.fms-dbfilterrow {
+  display: none;
+}
+
+@media (max-width: 639px) {
+  .fms-db .fms-dbtools > .fms-pills,
+  .fms-acttools > .fms-segmented {
+    display: none;
+  }
+
+  .fms-dbfilterrow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .fms-filterchip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    color: var(--ink-2);
+  }
+
+  /*
+   * The select is the chip, so the whole of it opens the phone's picker. 16px,
+   * or iOS zooms the page when it opens; the chevron is drawn over it and lets
+   * the tap through.
+   */
+  .fms-filterchip > select {
+    appearance: none;
+    -webkit-appearance: none;
+    height: 40px;
+    max-width: 100%;
+    margin: 0;
+    padding: 0 34px 0 var(--space-4);
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--radius-full);
+    background: var(--surface);
+    color: inherit;
+    font: inherit;
+    font-size: 16px;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+
+  .fms-filterchip > svg {
+    position: absolute;
+    right: 12px;
+    pointer-events: none;
+  }
+
+  .fms-filterchip > select:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* Set away from its default: marked, so a filtered list never passes for the whole ledger. */
+  .fms-filterchip.is-on {
+    color: var(--ink);
+  }
+
+  .fms-filterchip.is-on > select {
+    background: var(--brand-100);
+    border-color: var(--brand-600);
+    font-weight: 600;
+  }
+
+  /* The count and the hint: one quiet line, no rule under it, Clear filters at its end. */
+  .fms-db .fms-phone-note {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4) var(--space-1);
+    border-bottom: 0;
+  }
+
+  .fms-db .fms-phone-note > .fms-filterclear {
+    flex: 0 0 auto;
+    min-height: 0;
+    padding-block: 12px;
+    margin-block: -12px;
+    color: var(--ink-2);
+  }
+}
+
+/* ── Strips that scroll sideways: a fade where there is more ─────────────── */
+
+/*
+ * A strip wider than the phone (Settings' sections, the months, the pills)
+ * ended in half a word, "gories 14" at one edge and "Nov D" at the other,
+ * which read as a broken layout (owner, 26 September 2026). Each edge now
+ * fades out while there is more to scroll that way, and stays sharp at the
+ * end of the strip, so a cut word says "there is more" rather than "this is
+ * broken". Driven by the strip's own scroll position, with no script: a
+ * browser that cannot do that shows the strip as before, and a strip that
+ * fits never fades.
+ */
+@property --fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes fms-scroll-fade {
+  from { --fade-start: 0px; --fade-end: 32px; }
+  8% { --fade-start: 24px; --fade-end: 32px; }
+  92% { --fade-start: 24px; --fade-end: 32px; }
+  to { --fade-start: 24px; --fade-end: 0px; }
+}
+
+@supports (animation-timeline: scroll()) {
+  @media (max-width: 1023px) {
+    .fms-pills--scroll,
+    .fms-tabs,
+    .fms-segmented--scroll,
+    .fms-period-months,
+    .fms-ical-quick,
+    .fms-ical-tabs {
+      mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        black var(--fade-start),
+        black calc(100% - var(--fade-end)),
+        transparent 100%
+      );
+      animation: fms-scroll-fade linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+}
+
+/*
+ * An AI card's buttons on a phone: the main one on the right, under the thumb.
+ *
+ * Every card puts its main action first ("Add to ledger", then "Edit first",
+ * then "Discard"), which on a phone left it at the far left and Discard
+ * under the right thumb. Reversed, and each an equal share of the width.
+ */
+@media (max-width: 639px) {
+  .fms-proposalactions {
+    flex-direction: row-reverse;
+    flex-wrap: wrap-reverse;
+    justify-content: flex-start;
+  }
+
+  .fms-proposalactions > .fms-btn {
+    flex: 1 1 0;
+    min-width: max-content;
+  }
+}
+
+/*
+ * The bell's list on a phone: the page behind it dims, like every other
+ * sheet, so the list does not read as one more card lying over the page.
+ * A tap outside closes it (Notifications.tsx).
+ */
+@media (max-width: 639px) {
+  .fms-notify-panel {
+    max-height: calc(100dvh - var(--fms-topbar-h, 72px) - 96px);
+    box-shadow:
+      var(--shadow-overlay),
+      0 0 0 100vmax rgba(16, 24, 16, 0.4);
   }
 }

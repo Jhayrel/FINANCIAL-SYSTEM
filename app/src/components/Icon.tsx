@@ -40,6 +40,7 @@ export type IconName =
   | "ai"
   | "chevronLeft"
   | "chevronRight"
+  | "chevronDown"
   | "bell"
   | "statusOk"
   | "statusWarn"
@@ -142,6 +143,7 @@ const SHAPES: Record<IconName, ReactNode> = {
   // Steps between years. Drawn, not typed: ‹ and › come out a different size in every font.
   chevronLeft: <path d="M14.5 6l-6 6 6 6" />,
   chevronRight: <path d="M9.5 6l6 6-6 6" />,
+  chevronDown: <path d="M6 9.5l6 6 6-6" />,
   // What needs attention, in the top bar.
   bell: (
     <>
