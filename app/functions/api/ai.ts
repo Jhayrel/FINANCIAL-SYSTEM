@@ -470,14 +470,31 @@ async function visionChainFrom(env: Env): Promise<Candidate[]> {
     visionModelsOf("groq", env),
     visionModelsOf("openrouter", env),
   ]);
+  return visionChain(groq, openrouter);
+}
 
+/**
+ * The vision models to try, alternating providers, six at most.
+ *
+ * Three from each used to be the rule, so with no Groq vision model the
+ * chain was three OpenRouter ones, and the router that had been moved to the
+ * end fell off it: on 26 September 2026 two were rate limited, one timed
+ * out, and there was nothing left. A provider with fewer now leaves its
+ * places to the other, and the router is always the last one tried.
+ */
+export function visionChain(groq: readonly string[], openrouter: readonly string[]): Candidate[] {
+  const total = PER_PROVIDER * 2;
+  const router = openrouter.includes(OPENROUTER_ROUTER);
+  const own = openrouter.filter((m) => m !== OPENROUTER_ROUTER);
+  const room = total - (router ? 1 : 0);
   const chain: Candidate[] = [];
-  for (let i = 0; i < PER_PROVIDER; i++) {
+  for (let i = 0; chain.length < room && (i < groq.length || i < own.length); i += 1) {
     const g = groq[i];
-    const o = openrouter[i];
-    if (g) chain.push({ provider: "groq", model: g });
-    if (o) chain.push({ provider: "openrouter", model: o });
+    const o = own[i];
+    if (g && chain.length < room) chain.push({ provider: "groq", model: g });
+    if (o && chain.length < room) chain.push({ provider: "openrouter", model: o });
   }
+  if (router) chain.push({ provider: "openrouter", model: OPENROUTER_ROUTER });
   return chain;
 }
 
@@ -633,6 +650,12 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
    */
   extract: [
     "Read every distinct transaction in what you are given and output one proposal for each.",
+    /*
+     * Text the device read from a picture (src/data/ocr.ts, 26 September
+     * 2026). A wallet app's list reads as a label line then an item and
+     * amount line, under a date that covers every row until the next one.
+     */
+    "Some of what you are given may be text the owner's device read from a screenshot or photo, marked as read on this device. Treat it exactly as you would the picture. In a wallet app's list, a date line applies to every row under it until the next date; a row is a label such as Fee applied or Transferred money to, with its time, then the item and its amount on the next line. A minus before an amount means money out. Fees shown as their own rows (a service fee, DST) are their own proposals unless the owner says to combine them.",
     "Work it out before you fill anything in. In reasoning, say in one sentence what was bought or received, which of their lists that belongs to, and which wallet it moved through. Then fill the fields to match what you just said.",
     "The item and the category go together. You are given their items grouped under the category each one belongs to: an item from the Bills group means the category is Bills, from the Subscriptions group means Subscriptions, from the Spending group means Spending. Never file a bill under Spending because it looked like an expense. The note in brackets after a spending type is their own description of what counts as it, so read it.",
     "Use ordinary knowledge about what things are. A fast food chain is a meal, a petrol station is fuel, a streaming service is a subscription, a telco is a bill. Match that to their list.",

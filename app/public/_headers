@@ -1,0 +1,5 @@
+# The picture reader's engine and English data (tools/ocrAssets.ts), about
+# 7 MB. The path carries the version, so a file there never changes: kept
+# for a year, and a phone downloads them once rather than on every picture.
+/ocr/*
+  Cache-Control: public, max-age=31536000, immutable

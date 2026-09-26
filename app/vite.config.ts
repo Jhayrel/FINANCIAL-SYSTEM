@@ -6,6 +6,8 @@ import tailwindcss from "@tailwindcss/vite";
 
 // Dev only, and removed with Coderview. See tools/coderviewSink.ts.
 import { coderviewSink } from "./tools/coderviewSink";
+// The picture reader's files, hosted here rather than fetched from a CDN.
+import { ocrAssets } from "./tools/ocrAssets";
 
 /**
  * Which commit this bundle was built from.
@@ -34,7 +36,7 @@ const buildStamp = (): string => {
 };
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), coderviewSink()],
+  plugins: [react(), tailwindcss(), coderviewSink(), ocrAssets()],
 
   define: {
     __BUILD_COMMIT__: JSON.stringify(buildStamp()),
@@ -53,6 +55,8 @@ export default defineConfig({
          */
         manualChunks(id) {
           if (!id.includes("node_modules")) return undefined;
+          // The picture reader, loaded only when a picture is attached (data/ocr.ts).
+          if (id.includes("tesseract") || id.includes("wasm-feature-detect")) return "ocr";
           if (id.includes("firebase") || id.includes("@firebase")) return "firebase";
           if (id.includes("recharts") || id.includes("d3-")) return "charts";
           return "vendor";

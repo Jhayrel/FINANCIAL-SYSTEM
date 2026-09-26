@@ -49,9 +49,21 @@ It does five jobs:
 |---|---|
 | Answer questions about the figures | `chat` task, `domain/aiChatContext.ts` |
 | Read a sentence into a proposed row | `extract` task, `domain/readEntry.ts` |
-| Read a photo or file into proposed rows | `extract` task with images |
+| Read a photo or file into proposed rows | read on the device (`data/ocr.ts`), then the `extract` task as text; images only as the fallback |
 | Draw a chart | `domain/charts.ts`, no model involved |
 | Find a row to bin or restore | `domain/recall.ts` |
+
+**Pictures are read on the device first** (26 September 2026). Read, then
+analyse, then check, in the owner's order: the device reads the picture's text
+twice (as it is, and with the contrast raised), in about a second on a laptop,
+and the fast text models turn that text into rows. The free vision models are
+few, slow and rationed, and they were failing the owner's wallet screenshots
+with "nothing readable" and 429s. A picture with too little text still goes to
+a vision model, and so do all of them if the text finds nothing, so reading on
+the device can only add a faster answer. The reader (tesseract.js, Apache 2.0)
+and its English data are copied from `node_modules` into the build under
+`/ocr/v7/` by `tools/ocrAssets.ts` and served from this site: no CDN, no
+third-party script. When it works, the picture never leaves the device.
 
 **The safety model has not changed and must not.** The assistant returns text.
 It holds no Firestore handle. Every row reaches the ledger through

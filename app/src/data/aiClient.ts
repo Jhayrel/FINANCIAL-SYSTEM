@@ -45,6 +45,8 @@ import type { AiTask } from "../domain/aiOffline";
 import { plainText } from "../domain/aiText";
 import { idToken } from "./auth";
 import { redact } from "../domain/aiRedact";
+import { readingFor } from "../domain/ocrText";
+import { readPicture } from "./ocr";
 import { readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
 import type { Attachment } from "./attachments";
 import type { IsoDate } from "../domain/types";
@@ -531,6 +533,12 @@ export interface ExtractOptions {
   readonly signal?: AbortSignal;
   /** The last day each item was used, from `itemsLastUsed`, so an old item is marked as old. */
   readonly lastUsed?: ReadonlyMap<string, IsoDate>;
+  /**
+   * Reads a picture's text on this device (`data/ocr.ts`). Replaceable for
+   * tests; left out where there is no page to draw on, and then every
+   * picture goes to a vision model as before.
+   */
+  readonly readPicture?: (dataUrl: string) => Promise<{ readonly plain: string; readonly raised: string } | null>;
 }
 
 /** The last day each item appears in the ledger. */
@@ -571,6 +579,8 @@ export interface ExtractResult {
   readonly model?: string;
   /** Why nothing came back. Present only when source is "offline". */
   readonly reason?: string;
+  /** How many pictures were read on this device and sent as text. */
+  readonly readOnDevice?: number;
 }
 
 /**
@@ -631,6 +641,46 @@ function extractContext(options: ExtractOptions): string {
  * presses the button. See `domain/proposal.ts`.
  */
 export async function extractProposals(options: ExtractOptions): Promise<ExtractResult> {
+  const pictures = options.attachments.filter((a) => a.kind === "image" && a.dataUrl);
+  const reader = options.readPicture ?? (typeof document === "undefined" ? undefined : readPicture);
+  if ((options.attempt ?? 0) > 0 || !reader || pictures.length === 0) return extractOnce(options);
+
+  /*
+   * Read, then analyse, then check: the owner's order.
+   *
+   * Each picture is read here first. One that reads well goes on as its
+   * text, to the fast text models; one that does not stays a picture, for a
+   * model that can see. If the text finds nothing at all, the pictures go
+   * to the vision models after all, so reading here can only ever add a
+   * faster answer, never lose one.
+   */
+  const room = Math.floor(10_000 / pictures.length);
+  const readings = await Promise.all(pictures.map((p) => reader(p.dataUrl as string).catch(() => null)));
+  const asText: Attachment[] = [];
+  const stillPictures: Attachment[] = [];
+  pictures.forEach((picture, i) => {
+    const reading = readings[i];
+    const text = reading ? readingFor(picture.name, reading, room) : null;
+    if (text) {
+      asText.push({ id: picture.id, name: `${picture.name}, read on this device`, kind: "text", bytes: text.length, text: redact(text) });
+    } else {
+      stillPictures.push(picture);
+    }
+  });
+  if (asText.length === 0 || options.signal?.aborted) return extractOnce(options);
+
+  const others = options.attachments.filter((a) => !(a.kind === "image" && a.dataUrl));
+  const first = await extractOnce({ ...options, attachments: [...others, ...asText, ...stillPictures] });
+  const found = first.proposals.length + first.refused.length + (first.balances?.length ?? 0);
+  if ((first.source === "model" && found > 0) || options.signal?.aborted) {
+    return { ...first, readOnDevice: asText.length };
+  }
+  const second = await extractOnce(options);
+  return second.source === "model" || first.source !== "model" ? second : first;
+}
+
+/** One request, with whatever pictures and text it is given. */
+async function extractOnce(options: ExtractOptions): Promise<ExtractResult> {
   const doFetch = options.fetcher ?? fetch;
   const attempt = options.attempt ?? 0;
   const empty = (reason: string): ExtractResult => ({
@@ -693,7 +743,7 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
        */
       if (attempt + 1 < TRIES && worthRetrying(response.status, message)) {
         await wait(PAUSE_MS[attempt + 1] ?? 2000);
-        return extractProposals({ ...options, attempt: attempt + 1 });
+        return extractOnce({ ...options, attempt: attempt + 1 });
       }
       return empty(message);
     }

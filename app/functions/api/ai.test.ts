@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { compactContext, emptyRead, firstInWaves, shortReason, SHRINK_TO, systemFor, toneFor } from "./ai";
+import { compactContext, emptyRead, firstInWaves, shortReason, SHRINK_TO, systemFor, toneFor, visionChain } from "./ai";
 
 /** A context shaped like the real one: worked-out figures, then the rows. */
 function contextOf(rows: number): string {
@@ -270,5 +270,30 @@ describe("a picture read as empty", () => {
       return "rows";
     });
     expect(answer).toBe("rows");
+  });
+});
+
+/**
+ * 26 September 2026, 23:27: "Every model in the chain failed. Tried: gemma
+ * rejected (429), qwen rejected (429), dots timed out." Three models, all
+ * OpenRouter, and the router had fallen off the end.
+ */
+describe("the vision models to try", () => {
+  const or = ["a:free", "b:free", "c:free", "d:free", "e:free", "f:free", "g:free", "openrouter/free"];
+
+  it("fills Groq's places from OpenRouter when Groq has none, and keeps the router last", () => {
+    const chain = visionChain([], or).map((c) => c.model);
+    expect(chain).toEqual(["a:free", "b:free", "c:free", "d:free", "e:free", "openrouter/free"]);
+  });
+
+  it("alternates when both have models", () => {
+    const chain = visionChain(["g1", "g2", "g3", "g4"], or).map((c) => `${c.provider}:${c.model}`);
+    expect(chain.slice(0, 4)).toEqual(["groq:g1", "openrouter:a:free", "groq:g2", "openrouter:b:free"]);
+    expect(chain).toHaveLength(6);
+    expect(chain[5]).toBe("openrouter:openrouter/free");
+  });
+
+  it("is empty only when neither provider has a model", () => {
+    expect(visionChain([], [])).toEqual([]);
   });
 });

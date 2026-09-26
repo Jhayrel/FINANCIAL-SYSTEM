@@ -146,6 +146,7 @@ import {
   type Intent as Routed,
 } from "../data/aiClient";
 import { chatStore } from "../data/chatStore";
+import { readPicture } from "../data/ocr";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AttachmentNote } from "../domain/aiLog";
 import { clauseFor, verifyReading } from "../domain/verify";
@@ -1711,6 +1712,14 @@ export function AskPanel({
     );
 
     if (attachments.length > 0) setFiles((prev) => [...prev, ...attachments]);
+    /*
+     * Read now, on this device, while the note is still being typed: by the
+     * time Send is pressed the text is ready and only the AI step is left
+     * (data/ocr.ts). Nothing is sent anywhere by this.
+     */
+    for (const a of attachments) {
+      if (a.kind === "image" && a.dataUrl) void readPicture(a.dataUrl);
+    }
     for (const r of rejected) {
       say({ kind: "assistant", text: `${r.name}: ${r.reason}`, from: "this device" });
     }
