@@ -617,7 +617,7 @@ const REPEAT_FLOOR: Centavos = 50_000;
 const BORROWING_FLOOR: Centavos = 5_000;
 
 /** The worst level present, or null when there is nothing to say. */
-export function worstLevel(alerts: readonly Alert[]): AlertLevel | null {
+export function worstLevel(alerts: readonly Pick<Alert, "level">[]): AlertLevel | null {
   if (alerts.some((a) => a.level === "over")) return "over";
   if (alerts.some((a) => a.level === "warn")) return "warn";
   if (alerts.length > 0) return "info";

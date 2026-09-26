@@ -42,6 +42,12 @@
    */
   --scrim: #0c0f0cb8;
   --on-scrim: #f4f7f4;
+  /*
+   * Behind the picture viewer, solid. Through the lighter scrim the
+   * page's own title showed behind the file name and made both unreadable
+   * (26 September 2026). The same in both themes, so it is set once here.
+   */
+  --viewer: #0c0f0c;
 
   /* ── Ink ──────────────────────────────────────────────────────────────── */
   --ink: #141a15;

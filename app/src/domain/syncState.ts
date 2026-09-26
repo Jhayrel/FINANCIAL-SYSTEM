@@ -14,12 +14,24 @@
  * taking a while, and a save the database refused.
  */
 
+/**
+ * What the app was doing when the database said no.
+ *
+ * On 26 September 2026 the owner saw "A change did not save ... add it again"
+ * with no way to tell which change: an entry, a setting, a budget, or a read
+ * that was never a change at all. Each one now says what it was, and whether
+ * the entries are affected, because that is the first thing anyone asks.
+ */
+export type Problem = "entries" | "settings" | "budget" | "settings-read" | "ledger-read" | "activity" | "upload";
+
 export interface SyncInput {
   readonly online: boolean;
   /** Writes sent that the database has not confirmed yet. */
   readonly pending: number;
   /** The last write the database refused, if any. */
   readonly error: string | null;
+  /** What was being saved or read. Left out, it is read as an entry. */
+  readonly what?: Problem;
 }
 
 export interface SyncNotice {
@@ -58,18 +70,31 @@ export function connectionWords({ signedIn, online, pending }: ConnectionInput):
   return { tone: "ok", text: "Connected to the database" };
 }
 
-export function syncWords({ online, pending, error }: SyncInput): SyncNotice | null {
+/** The title, the level, and what is and is not affected, for each kind of refusal. */
+const PROBLEM: Record<Problem, { readonly level: SyncNotice["level"]; readonly title: string; readonly tail: string }> = {
+  entries: { level: "over", title: "An entry did not save", tail: "Add it again once this is put right. Everything saved before it is safe." },
+  settings: { level: "over", title: "A settings change did not save", tail: "Your entries are saving normally. Make the change again once this is put right." },
+  budget: { level: "over", title: "A budget change did not save", tail: "Your entries are saving normally. Set it again once this is put right." },
+  "settings-read": { level: "warn", title: "Your settings could not be loaded", tail: "The app is using the copy on this device, and your entries are safe." },
+  "ledger-read": { level: "over", title: "The ledger could not be loaded", tail: "What is on screen is the copy on this device. Nothing is lost." },
+  activity: { level: "info", title: "The activity trail is not recording", tail: "Your entries, settings and budget save normally." },
+  upload: { level: "over", title: "The upload did not finish", tail: "Nothing already in the database was changed. Try again once this is put right." },
+};
+
+/** Why, in one sentence, from what the database answered. */
+function causeOf(error: string): string {
+  if (/permission|insufficient/i.test(error)) {
+    return "The rules published in Firebase are older than this app: publish the latest firestore.rules in the Firebase console.";
+  }
+  if (/unauthenticated|unauthorized|sign.?in|auth/i.test(error)) return "You are signed out: sign in again as the owner.";
+  if (/offline|unavailable|network|deadline/i.test(error)) return "The connection dropped before it arrived.";
+  return `The database answered: ${error.replace(/\.+$/, "")}.`;
+}
+
+export function syncWords({ online, pending, error, what = "entries" }: SyncInput): SyncNotice | null {
   if (error) {
-    const signIn = /permission|insufficient|unauthenticated|unauthorized|auth/i.test(error);
-    return {
-      level: "over",
-      title: "A change did not save",
-      detail: `${
-        signIn
-          ? "The database refused it. Either you are signed out, so sign in again as the owner, or the database's rules are older than this version of the app, so publish the latest firestore.rules in the Firebase console."
-          : `The database answered: ${error.replace(/\.+$/, "")}.`
-      } That change is not in the database, so add it again once this is put right. Everything saved before it is safe.`,
-    };
+    const kind = PROBLEM[what];
+    return { level: kind.level, title: kind.title, detail: `${causeOf(error)} ${kind.tail}` };
   }
 
   if (!online) {

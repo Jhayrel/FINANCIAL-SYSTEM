@@ -36,7 +36,7 @@ import { useProposalSink } from "./features/useProposalSink";
 import { useReportScreenFallback } from "./features/screenReport";
 import { ScreenBoundary } from "./components/ScreenBoundary";
 import { changedSections } from "./domain/settingsDiff";
-import { refusalWords, syncWords } from "./domain/syncState";
+import { refusalWords, syncWords, type Problem } from "./domain/syncState";
 import { useMediaQuery } from "./features/useMediaQuery";
 import { aiSurfaceOn } from "./domain/aiSurface";
 import type { Draft } from "./domain/entry";
@@ -394,7 +394,7 @@ export default function App() {
       // Not marked loaded, so nothing is saved over what could not be read.
       if (cancelled) return;
       setSettingsFailed(true);
-      setSyncError(`Your settings could not be read: ${(e as Error).message}`);
+      setSyncError({ what: "settings-read", message: (e as Error).message });
     });
     return () => { cancelled = true; };
   }, [store]);
@@ -416,10 +416,10 @@ export default function App() {
     lastSynced.current = settings;
     if (store.savePart && was) {
       const part = changedSections(was, settings);
-      if (Object.keys(part).length > 0) track(store.savePart(part, settings));
+      if (Object.keys(part).length > 0) track(store.savePart(part, settings), "settings");
       return;
     }
-    track(store.save(settings));
+    track(store.save(settings), "settings");
     // `track` only counts and reports; it is not an input to what is saved.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, settings, loadedStore]);
@@ -466,7 +466,10 @@ export default function App() {
     });
   }, [store, loadedStore]);
 
-  const [syncError, setSyncError] = useState<string | null>(null);
+  /** A read or background write the database refused, and what it was (domain/syncState.ts). */
+  const [syncError, setSyncError] = useState<{ readonly what: Problem; readonly message: string } | null>(null);
+  /** Closed by the owner: out of the corner, still listed under the bell until it is put right. */
+  const [problemClosed, setProblemClosed] = useState<string | null>(null);
   /**
    * Where the rows on screen came from.
    *
@@ -514,13 +517,14 @@ export default function App() {
           seeding = true;
           void seedIfEmpty(uid, seed.transactions, settingsRef.current)
             .then((r) => { if (r.seeded) flash(`Uploaded ${r.count} transactions to Firebase.`); })
-            .catch((e: Error) => setSyncError(e.message));
+            .catch((e: Error) => setSyncError({ what: "upload", message: e.message }));
           return;
         }
         setTransactions([...snap.transactions]);
         setDeleted([...snap.deleted]);
         setLedgerSource("live");
-        setSyncError(null);
+        // A live update answers a failed read or upload of the ledger, and nothing else.
+        setSyncError((was) => (was && (was.what === "ledger-read" || was.what === "upload") ? null : was));
 
         /**
          * The row being corrected went to the bin on another device.
@@ -540,7 +544,7 @@ export default function App() {
       (e) => {
         // An answer, if a refusal: the screens stop waiting and the error says why.
         setLedgerHeard(true);
-        setSyncError(e.message);
+        setSyncError({ what: "ledger-read", message: e.message });
       },
     );
 
@@ -592,11 +596,13 @@ export default function App() {
    * moment a refused write is rolled back, so a refusal reported there was
    * gone before it could be read.
    */
-  const [writeError, setWriteError] = useState<string | null>(null);
-  const track = (write: Promise<unknown>): void => {
+  const [writeError, setWriteError] = useState<{ readonly what: Problem; readonly message: string } | null>(null);
+  const track = (write: Promise<unknown>, what: Problem): void => {
     setPending((count) => count + 1);
     write
-      .catch((e: Error) => setWriteError(e.message))
+      // A later save of the same kind arriving means the cause was put right.
+      .then(() => setWriteError((was) => (was?.what === what ? null : was)))
+      .catch((e: Error) => setWriteError({ what, message: e.message }))
       .finally(() => setPending((count) => Math.max(0, count - 1)));
   };
 
@@ -646,6 +652,7 @@ export default function App() {
         }
         throw e;
       }),
+      "entries",
     );
   };
 
@@ -666,6 +673,7 @@ export default function App() {
           }
           throw e;
         }),
+      "entries",
     );
   };
 
@@ -705,6 +713,21 @@ export default function App() {
   }, [waiting, online]);
 
   /**
+   * Offline, slow or refused, said once (domain/syncState.ts), for the corner
+   * and for the bell alike. Only a signed-in app talks to a database.
+   */
+  const problem = writeError ?? syncError;
+  const sync = syncWords({
+    online: cloud.uid ? online : true,
+    pending: cloud.uid && (slow || !online) ? pending : 0,
+    error: problem?.message ?? null,
+    ...(problem ? { what: problem.what } : {}),
+  });
+  const syncKey = sync ? `${sync.title}|${problem?.message ?? ""}` : null;
+  /** The bell's list is open: the corner stays clear so the two never overlap. */
+  const [bellOpen, setBellOpen] = useState(false);
+
+  /**
    * Write the audit event beside the data write.
    *
    * Deliberately not awaited and deliberately not able to fail the caller. A
@@ -728,11 +751,8 @@ export default function App() {
          */
         if (activityWarned.current) return;
         activityWarned.current = true;
-        setSyncError(
-          /permission|insufficient/i.test(e.message)
-            ? "The activity trail is not recording: your database has not been given its rules yet. Your entries are saving normally. Run: firebase deploy --only firestore:rules"
-            : `The activity trail is not recording: ${e.message}. Your entries are saving normally.`,
-        );
+        // Never over a refusal that matters more: the trail is a record, not the ledger.
+        setSyncError((was) => was ?? { what: "activity", message: e.message });
       });
     }
     setActivityKey((n) => n + 1);
@@ -1193,7 +1213,7 @@ export default function App() {
         if (uid) {
           for (const key of moved.years) {
             const plan = moved.budgets[key];
-            if (plan) track(saveBudget(uid, key, plan));
+            if (plan) track(saveBudget(uid, key, plan), "budget");
           }
         }
       }
@@ -1238,7 +1258,7 @@ export default function App() {
     const key = String(year);
     setBudgets((prev) => ({ ...prev, [key]: next }));
     if (cloud.uid) {
-      track(saveBudget(cloud.uid, key, next));
+      track(saveBudget(cloud.uid, key, next), "budget");
     }
     // Each change to a month's budget is on the trail, like a change to a row.
     if (changes.length > 0) record(...changes.map((c) => budgetChanged(c)));
@@ -1376,7 +1396,7 @@ export default function App() {
     // next load brought the old one back. The file's years are written now.
     for (const year of plan.budgetYears) {
       const budget = plan.budgets[year];
-      if (budget) track(saveBudget(uid, year, budget));
+      if (budget) track(saveBudget(uid, year, budget), "budget");
     }
     const at = new Date().toISOString();
     setCleaning({ done: 0, total: plan.discard.length + plan.transactions.length + plan.deleted.length });
@@ -1416,7 +1436,7 @@ export default function App() {
       setSyncError(null);
       flash(`Uploaded ${transactions.length.toLocaleString()} transactions and every setting.`);
     } catch (e) {
-      setSyncError((e as Error).message);
+      setSyncError({ what: "upload", message: (e as Error).message });
     } finally {
       setUploading(false);
     }
@@ -1796,6 +1816,8 @@ export default function App() {
             <Notifications
               alerts={alerts}
               onOpen={openAlert}
+              status={unsaved.length === 0 ? sync : null}
+              onOpenChange={setBellOpen}
               footer={
                 alerts.length > 0 && aiSurfaceOn(settings.ai, "alerts") ? (
                   <AlertsSummary
@@ -2212,7 +2234,7 @@ export default function App() {
         never moves when one arrives or goes: the owner's "pop up" was the
         screen jumping down under them, 26 September 2026.
       */}
-      <div className="fms-notices" aria-live="polite">
+      <div className="fms-notices" aria-live="polite" hidden={bellOpen}>
         {cleaning && (
           <Notice
             status="info"
@@ -2251,7 +2273,7 @@ export default function App() {
               </>
             }
           >
-            {refusalWords(writeError, unsaved.length, unsaved)}
+            {refusalWords(writeError?.message ?? null, unsaved.length, unsaved)}
             <ul>
               {unsaved.slice(0, 3).map((t) => (
                 <li key={t.id}>{unsavedLine(t)}</li>
@@ -2260,24 +2282,11 @@ export default function App() {
             </ul>
           </Notice>
         )}
-        {(() => {
-          // Offline, slow or refused, said once (domain/syncState.ts). Only a signed-in app talks to a database.
-          if (unsaved.length > 0) return null;
-          const sync = syncWords({
-            online: cloud.uid ? online : true,
-            pending: cloud.uid && (slow || !online) ? pending : 0,
-            error: writeError ?? syncError,
-          });
-          return sync ? (
-            <Notice
-              status={sync.level}
-              title={sync.title}
-              {...(writeError ? { onDismiss: () => setWriteError(null) } : {})}
-            >
-              {sync.detail}
-            </Notice>
-          ) : null;
-        })()}
+        {unsaved.length === 0 && sync && syncKey !== problemClosed && (
+          <Notice status={sync.level} title={sync.title} onDismiss={() => setProblemClosed(syncKey)}>
+            {sync.detail}
+          </Notice>
+        )}
         {toasts.map((t) => (
           <Notice
             key={t.id}

@@ -66,6 +66,7 @@
  */
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { Button } from "../components/primitives";
 import {
@@ -185,6 +186,7 @@ import {
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { budgetForYear } from "../domain/budget";
 import { MONTH_NAMES } from "../domain/dates";
+import { discardedWords } from "../domain/discarded";
 import { forecastYear } from "../domain/forecast";
 import { withCommandWordsFixed } from "../domain/typos";
 import { asksForWrongRows, flaggedRows } from "../domain/integrity";
@@ -458,6 +460,19 @@ const isDebt = (t: Turn): t is DebtChoice => t.kind === "debt";
 const isChanging = (t: Turn): t is Changing => t.kind === "change";
 const isBudgeting = (t: Turn): t is Budgeting => t.kind === "budget";
 const isExporting = (t: Turn): t is Exporting => t.kind === "export";
+
+/**
+ * A card still waiting, as it reads once it is thrown away; null for anything else.
+ *
+ * A debt card has no "discarded": it is settled, which is how pressing its
+ * own close button leaves it.
+ */
+function closedCard(t: Turn): Offered | DebtChoice | Changing | Budgeting | Exporting | null {
+  if (isOffer(t)) return t.state === "open" ? { ...t, state: "discarded" } : null;
+  if (isDebt(t)) return t.state === "open" ? { ...t, state: "settled" } : null;
+  if (isChanging(t) || isBudgeting(t) || isExporting(t)) return t.state === "open" ? { ...t, state: "discarded" } : null;
+  return null;
+}
 
 /**
  * A turn that is actually words, said by one of us.
@@ -1509,25 +1524,35 @@ export function AskPanel({
    * record the coderview calls "the list to fix next". Every discard is a
    * rejection now, however many went at once.
    */
+  /*
+   * Every kind of card, not only entries.
+   *
+   * 26 September 2026: "when I discard all or discard something then I
+   * refresh some of them returning back". Only entry cards were written as
+   * thrown away. A debt, budget, change or file card still open was set
+   * aside on screen and nowhere else, so it came back open on the next load.
+   */
   const discardEveryOpen = (said?: string): number => {
-    const open = turns.filter((t): t is Offered => isOffer(t) && t.state === "open");
-
-    for (const card of open) {
-      const d = card.proposal.draft;
-      log(
-        aiEvent("rejected", "add", {
-          entry: `${d.date} ${d.flow} ${d.item} ${formatMoney(d.amount ?? 0)}`,
-          ...(said ? { text: said } : {}),
-        }),
-      );
+    let count = 0;
+    for (const t of turns) {
+      const closed = closedCard(t);
+      if (!closed) continue;
+      count += 1;
+      if (isOffer(t)) {
+        const d = t.proposal.draft;
+        log(
+          aiEvent("rejected", "add", {
+            entry: `${d.date} ${d.flow} ${d.item} ${formatMoney(d.amount ?? 0)}`,
+            ...(said ? { text: said } : {}),
+          }),
+        );
+      }
       // The write that was missing. Without it the card comes back.
-      recordCard({ ...card, state: "discarded" });
+      recordCard(closed);
     }
 
-    setTurns((prev) =>
-      prev.map((t) => (isOffer(t) && t.state === "open" ? { ...t, state: "discarded" } : t)),
-    );
-    return open.length;
+    setTurns((prev) => prev.map((t) => closedCard(t) ?? t));
+    return count;
   };
 
   /** When each item was last used, so the reader is told which ones are years old (aiClient.ts). */
@@ -3921,6 +3946,17 @@ export function AskPanel({
         if (changed.length > 0) {
           setDraft("");
           const touched = new Set(changed.map((c) => c.index));
+          /*
+           * Written, so a refresh brings back the card as corrected. "Change
+           * all waller to maya only" changed five cards on screen and none in
+           * the record, and the next load showed them without a wallet.
+           */
+          for (const c of changed) {
+            recordCard({
+              ...c.turn,
+              proposal: { ...c.turn.proposal, draft: c.change.draft, adjustments: [...c.turn.proposal.adjustments, c.change.what] },
+            });
+          }
           for (const c of changed) {
             log(
               aiEvent("edited", "add", {
@@ -3979,6 +4015,11 @@ export function AskPanel({
       if (card) {
         const change = card.change;
         setDraft("");
+        // Written, like the cards above, so the correction survives a refresh.
+        recordCard({
+          ...card.turn,
+          proposal: { ...card.turn.proposal, draft: change.draft, adjustments: [...card.turn.proposal.adjustments, change.what] },
+        });
         /**
          * The old card goes, and the corrected one arrives at the bottom.
          *
@@ -5021,32 +5062,42 @@ export function AskPanel({
         written anywhere, which is the whole point of describing photos
         rather than storing them.
       */}
-      {previewing?.dataUrl && (
-        <div
-          className="fms-lightbox"
-          role="dialog"
-          aria-modal="true"
-          aria-label={previewing.name}
-          onClick={() => setPreviewing(null)}
-        >
-          <button
-            type="button"
-            className="fms-lightboxclose"
-            aria-label="Close"
+      {previewing?.dataUrl &&
+        /*
+         * On the page itself, not inside the chat. Drawn inside it, "fixed"
+         * was measured from the chat panel rather than the screen, and on a
+         * phone the picture ran off the right edge with its caption over the
+         * composer (26 September 2026). A bar with the name and the way out,
+         * then a frame the picture is fitted inside, whatever its shape.
+         */
+        createPortal(
+          <div
+            className="fms-lightbox"
+            role="dialog"
+            aria-modal="true"
+            aria-label={previewing.name}
             onClick={() => setPreviewing(null)}
           >
-            ×
-          </button>
-          <img
-            src={previewing.dataUrl}
-            alt={previewing.name}
-            onClick={(e) => e.stopPropagation()}
-          />
-          <p className="t-micro fms-lightboxname">
-            {previewing.name}, {formatBytes(previewing.bytes)}. This picture is not saved anywhere.
-          </p>
-        </div>
-      )}
+            <div className="fms-lightboxbar" onClick={(e) => e.stopPropagation()}>
+              <p className="fms-lightboxname">
+                <span className="t-body-strong">{previewing.name}</span>
+                <span className="t-micro">{formatBytes(previewing.bytes)}. This picture is not saved anywhere.</span>
+              </p>
+              <button
+                type="button"
+                className="fms-lightboxclose"
+                aria-label="Close"
+                onClick={() => setPreviewing(null)}
+              >
+                <Icon name="close" size={22} />
+              </button>
+            </div>
+            <div className="fms-lightboxframe">
+              <img src={previewing.dataUrl} alt={previewing.name} onClick={(e) => e.stopPropagation()} />
+            </div>
+          </div>,
+          document.body,
+        )}
 
       {pending && (
         <div className="fms-intent">
@@ -5225,6 +5276,13 @@ export function AskPanel({
              * not a fact about the money, so it has no business in the
              * database.
              */
+            /*
+             * What is still open is thrown away first, in the record. The
+             * mark is per device, so a card left open behind it came back on
+             * the phone after being cleared on the laptop, and after a
+             * refresh wherever the mark was lost (26 September 2026).
+             */
+            discardEveryOpen("Clear this view");
             markCleared();
             setTurns([]);
           }}
@@ -5353,9 +5411,14 @@ function ProposalCard({
    * replaced by what happened to it.
    */
   if (state === "discarded") {
+    // What it was, not only that it went (domain/discarded.ts).
+    const gone = discardedWords(draft);
     return (
-      <div ref={hostRef} className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
-        Discarded.
+      <div ref={hostRef} className="fms-turn fms-discarded">
+        <span className="t-caption">
+          <span className="t-body-strong">Discarded, not added:</span> {gone.what}
+        </span>
+        {gone.detail && <span className="t-micro">{gone.detail}</span>}
       </div>
     );
   }

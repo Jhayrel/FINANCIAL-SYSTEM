@@ -19,6 +19,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Icon, type IconName } from "./Icon";
 import { worstLevel, type Alert as Finding, type AlertArea, type AlertLevel } from "../domain/alerts";
+import type { SyncNotice } from "../domain/syncState";
 
 const SEEN_KEY = "fms.notify.seen";
 
@@ -58,19 +59,37 @@ export function Notifications({
   alerts,
   onOpen,
   footer,
+  status = null,
+  onOpenChange,
 }: {
   alerts: readonly Finding[];
   /** Go where the finding can be dealt with. */
   onOpen: (finding: Finding) => void;
   /** Under the list, such as the assistant's summary of it. */
   footer?: ReactNode;
+  /**
+   * Saving: offline, slow, or refused (domain/syncState.ts).
+   *
+   * The same notice that floats in the corner. On 26 September 2026 it
+   * floated over this list and hid its first line, so while the list is open
+   * the corner stays clear and the notice is read here instead. Closing it in
+   * the corner does not lose it: it stays here until it is put right.
+   */
+  status?: SyncNotice | null;
+  /** Told when the list opens and closes, so the corner can make way. */
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
   const [seen, setSeen] = useState<ReadonlySet<string>>(readSeen);
   const box = useRef<HTMLDivElement>(null);
 
   const unseen = alerts.filter((a) => !seen.has(a.id));
-  const worst = worstLevel(unseen);
+  // A problem with saving counts until it is put right, seen or not.
+  const worst = worstLevel(status && status.level !== "info" ? [...unseen, { level: status.level }] : unseen);
+  const count = unseen.length + (status && status.level !== "info" ? 1 : 0);
 
   // Opening the list is looking at it. Only the findings there now are kept.
   useEffect(() => {
@@ -115,9 +134,9 @@ export function Notifications({
         onClick={() => setOpen((o) => !o)}
       >
         <Icon name="bell" size={22} />
-        {unseen.length > 0 && worst && (
+        {count > 0 && worst && (
           <span aria-hidden className="t-micro fms-notify-count" style={{ background: `var(--${worst})` }}>
-            {unseen.length > 9 ? "9+" : unseen.length}
+            {count > 9 ? "9+" : count}
           </span>
         )}
       </button>
@@ -132,6 +151,20 @@ export function Notifications({
               </span>
             )}
           </div>
+
+          {status && (
+            <div className="fms-notify-status" role="status">
+              <span aria-hidden className="fms-notify-glyph" style={{ color: `var(--${status.level === "info" ? "ink-3" : status.level})` }}>
+                <Icon name={GLYPH[status.level]} size={18} />
+              </span>
+              <span className="fms-notify-text">
+                <span className="t-body-strong">{status.title}</span>
+                <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                  {status.detail}
+                </span>
+              </span>
+            </div>
+          )}
 
           {alerts.length === 0 ? (
             <p className="t-caption fms-notify-empty">

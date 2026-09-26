@@ -328,6 +328,11 @@
   pointer-events: auto;
 }
 
+/* Out of the way while the bell's list is open: the list shows the same notice (components/Notifications.tsx). */
+.fms-notices[hidden] {
+  display: none;
+}
+
 /* A phone gives it the width of the screen, inside the page's own margins. */
 @media (max-width: 639px) {
   .fms-notices {
@@ -5256,6 +5261,18 @@ textarea.fms-askinput {
   color: var(--over);
 }
 
+/* A card thrown away: what it was, quietly, so the conversation still says what went. */
+.fms-discarded {
+  display: grid;
+  gap: 2px;
+  color: var(--ink-3);
+}
+
+.fms-discarded .t-body-strong {
+  color: var(--ink-2);
+  font-size: inherit;
+}
+
 /* ── Looking at one full size ─────────────────────────────────────────────
    Over everything, dismissed by the X, by the backdrop, or by Escape. The
    picture is in memory for this session and is never written anywhere. */
@@ -5264,32 +5281,45 @@ textarea.fms-askinput {
   position: fixed;
   inset: 0;
   z-index: 100;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-5);
-  background: var(--scrim);
+  padding: max(var(--space-3), env(safe-area-inset-top)) var(--space-3) max(var(--space-3), env(safe-area-inset-bottom));
+  background: var(--viewer);
 }
 
-.fms-lightbox img {
-  max-width: min(92vw, 1100px);
-  max-height: 78vh;
-  object-fit: contain;
-  background: var(--surface);
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--radius-md);
+/* The name and the way out, above the picture rather than on it. */
+.fms-lightboxbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.fms-lightboxname {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  color: var(--on-scrim);
+}
+
+.fms-lightboxname > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fms-lightboxclose {
-  position: absolute;
-  top: var(--space-4);
-  right: var(--space-4);
+  flex: 0 0 auto;
   width: 44px;
   height: 44px;
   display: grid;
   place-items: center;
-  font-size: 22px;
-  line-height: 1;
   background: var(--surface);
   border: 1px solid var(--hairline-strong);
   border-radius: var(--radius-md);
@@ -5301,10 +5331,32 @@ textarea.fms-askinput {
   border-color: var(--brand-600);
 }
 
-.fms-lightboxname {
-  margin: 0;
-  color: var(--on-scrim);
-  text-align: center;
+/*
+ * What is left of the screen, with the picture fitted inside it: as large as
+ * it can be without being cut, centred, whatever its shape. A tall phone
+ * screenshot fits by height, a wide receipt by width.
+ */
+.fms-lightboxframe {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.fms-lightboxframe img {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
 }
 
 /* ── Working ──────────────────────────────────────────────────────────────
@@ -5687,6 +5739,15 @@ textarea.fms-askinput {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* Saving, at the top of the list: the notice from the corner, read here while the list is open. */
+.fms-notify-status {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-sunk);
 }
 
 .fms-notify-list > li + li {

@@ -453,7 +453,13 @@ async function visionModelsOf(provider: Provider, env: Env): Promise<string[]> {
     .map((m) => m.id as string)
     .sort((a, b) => score(a) - score(b));
 
-  if (provider === "openrouter") models.unshift(OPENROUTER_ROUTER);
+  /*
+   * Last, not first. The router picks whichever free model it likes, and on
+   * 26 September 2026 it answered every screenshot in four to nine seconds
+   * with nothing found: a model that could not see the picture, beating the
+   * ones that could. It stays as the fallback it is good for.
+   */
+  if (provider === "openrouter") models.push(OPENROUTER_ROUTER);
 
   VISION_CACHE.set(provider, { at: Date.now(), models });
   return models;
@@ -1267,6 +1273,10 @@ export const onRequestPost = async (ctx: {
     .filter(Boolean)
     .join("\n\n");
 
+  /** The first "nothing in this picture", in case nobody reads anything. */
+  let nothingFound: Response | null = null;
+  let emptyReads = 0;
+
   /*
    * One candidate, start to finish: its answer, a repaired answer, a smaller
    * request after a refusal for size, or null with the reason recorded.
@@ -1282,6 +1292,21 @@ export const onRequestPost = async (ctx: {
       }
 
       const first = readAnswer(raw, spec);
+      /*
+       * Found nothing in a picture: kept, but not the winner.
+       *
+       * The quickest reply to a picture is often from a model that could not
+       * read it, and "nothing found" counted as an answer, so it beat the
+       * models that were still reading. It is returned only if no model in
+       * the chain reads anything at all.
+       */
+      if (first && images.length > 0 && emptyRead(first)) {
+        nothingFound ??= json({ ...first, model: label, attempts });
+        attempts.push({ model: candidate.model, reason: "read nothing" });
+        emptyReads += 1;
+        // Three models that could see it and found nothing: it is not there.
+        return emptyReads >= 3 ? nothingFound : null;
+      }
       if (first) return json({ ...first, model: label, attempts });
 
       /**
@@ -1367,6 +1392,7 @@ export const onRequestPost = async (ctx: {
    */
   const winner = await firstInWaves(chain, images.length > 0 ? 3 : 2, attempt);
   if (winner) return winner;
+  if (nothingFound) return nothingFound;
 
   /*
    * Nothing is broken when every refusal was about size. The owner sent more
@@ -1386,6 +1412,12 @@ export const onRequestPost = async (ctx: {
     502,
   );
 };
+
+/** A reading of a picture that found nothing: no rows, and so no balances either. */
+export function emptyRead(answer: Answer): boolean {
+  if (!Array.isArray(answer.data)) return false;
+  return answer.data.length === 0;
+}
 
 /**
  * Get the answer out of whatever came back.

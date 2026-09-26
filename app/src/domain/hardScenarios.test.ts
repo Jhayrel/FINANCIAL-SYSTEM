@@ -169,11 +169,11 @@ describe("the connection cuts off", () => {
     expect(syncWords({ online: true, pending: 1, error: null })?.title).toBe("Saving 1 change");
   });
 
-  it("says plainly that a refused change did not save, and what to do", () => {
+  it("says plainly that a refused entry did not save, and what to do", () => {
     const notice = syncWords({ online: true, pending: 0, error: "Missing or insufficient permissions." });
-    expect(notice?.level).toBe("over");
-    expect(notice?.detail).toContain("sign in again");
-    expect(notice?.detail).toContain("add it again");
+    expect(notice).toMatchObject({ level: "over", title: "An entry did not save" });
+    expect(notice?.detail).toContain("publish the latest firestore.rules");
+    expect(notice?.detail).toContain("Add it again");
   });
 });
 

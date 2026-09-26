@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { compactContext, firstInWaves, shortReason, SHRINK_TO, systemFor, toneFor } from "./ai";
+import { compactContext, emptyRead, firstInWaves, shortReason, SHRINK_TO, systemFor, toneFor } from "./ai";
 
 /** A context shaped like the real one: worked-out figures, then the rows. */
 function contextOf(rows: number): string {
@@ -248,5 +248,27 @@ describe("who may advise", () => {
     expect(systemFor("chat")).toContain(shared);
     expect(systemFor("summary")).toContain(shared);
     expect(systemFor("chat")).toContain("Never use an em dash");
+  });
+});
+
+/**
+ * 26 September 2026, 15:07: three screenshots, each answered in four to nine
+ * seconds by openrouter/free with nothing found, because a reply that found
+ * nothing counted as the first good answer and won the race.
+ */
+describe("a picture read as empty", () => {
+  it("is told apart from one that found rows", () => {
+    expect(emptyRead({ text: "0 found", data: [] })).toBe(true);
+    expect(emptyRead({ text: "1 found", data: [{ flow: "Spending" }] })).toBe(false);
+    expect(emptyRead({ text: "a sentence" })).toBe(false);
+  });
+
+  it("loses the race to a slower model that reads it", async () => {
+    const answer = await firstInWaves(["blind", "slow reader"], 3, async (name: string) => {
+      if (name === "blind") return null; // what an empty read now returns while others run
+      await new Promise((r) => setTimeout(r, 30));
+      return "rows";
+    });
+    expect(answer).toBe("rows");
   });
 });
