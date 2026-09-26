@@ -154,7 +154,14 @@ export function checkIntegrity(transactions: readonly Transaction[]): Issue[] {
      * balance owed changes and no money moves. Flagging them as broken put a
      * warning on every written-off advance and every fee on a credit line.
      */
-    const movesNoWallet = t.type === "Debt" && (t.debtEffect === "charge" || t.debtEffect === "writeoff");
+    /*
+     * So does what a debt stood at when the records begin: borrowed before the
+     * first row, so no wallet received it inside the ledger. Filed Opening, as a
+     * wallet's starting balance is (docs/08, rule Y1).
+     */
+    const movesNoWallet =
+      t.type === "Debt" &&
+      (t.debtEffect === "charge" || t.debtEffect === "writeoff" || (t.debtEffect === "draw" && t.category === "Opening"));
     if (!t.fromWallet && !t.toWallet && !movesNoWallet) {
       one(t, "no-wallet", "error", `No wallet on either side, so it affects no balance.`);
     }

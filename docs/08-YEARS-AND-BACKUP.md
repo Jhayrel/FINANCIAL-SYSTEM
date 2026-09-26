@@ -165,3 +165,57 @@ the month is closed while it does.
 
 The record is stored with the year's budget (`revisions`, up to 30 changes a
 month) and travels in a backup with it.
+
+---
+
+## Y5. Years kept in older workbooks come in as a backup, merged.
+
+Before this system, each year was kept in a workbook of its own, each laid out
+differently. `tools/migrate_history.py` reads them (read only, never saved)
+and `tools/build_history_backup.ts` turns what it read into a backup file the
+app merges through Settings, Data, Restore, "Merge into what I have". Both
+write only outside the repository: the output is the owner's history and is
+never committed.
+
+| Layout | How it becomes rows |
+|---|---|
+| A calendar grid per account, one figure a day | One row per account per day. Money out of one account and the same money into another on the same day is paired as one transfer |
+| Month sheets of daily totals, with transfers, income and bills listed apart | Daily totals per account; the listed transfers, income and bills as their own rows |
+| Itemised lists of spending, revenue, transfers and bills | One row per line, with an item chosen only when the description says so plainly |
+
+### What is never guessed
+
+- **A daily figure that could be spending or a move between accounts** is kept
+  as it was, on its day, filed `Not classified`. It moves the balance exactly as
+  the workbook did and counts as neither spending nor income until the owner
+  reclassifies it.
+- **Income listed without the account it landed in** is labelled only on money
+  that arrived in an account within two days before or a week after. Only money
+  that arrived is ever labelled, so no balance can move by it; what finds no
+  arrival is reported, not placed.
+- **A spending line that reads like money moved or invested** stays spending,
+  as the workbook counted it, and its notes say so.
+- **Money borrowed before the records began** is only seen being repaid. The
+  debt opens with an `Opening` draw of what the repayments add up to, with no
+  wallet, since the money arrived before the ledger did. `checkIntegrity` does
+  not flag that row for having no wallet (`debtOpening.test.ts`).
+
+### Joining the years
+
+No old workbook started where the one before it ended. So at every year end,
+each account's closing balance is handed over in one `Opening` row on
+1 January, the mirror of the opening rows the next year starts with (rule Y1).
+Each year then shows exactly its own workbook's figures, and the history nets
+to zero before the current ledger begins.
+
+### What must hold before the file is written
+
+1. Every figure the workbooks show about themselves (balances, month totals,
+   annual totals) is reproduced to the centavo.
+2. The file validates as a backup.
+3. Merging it into the current ledger adds every row, and merging it again
+   adds none.
+4. Every account's balance today is unchanged, to the centavo.
+5. A debt repaid inside the history shows nothing outstanding.
+
+If any fails, the builder writes its report and no backup file.
