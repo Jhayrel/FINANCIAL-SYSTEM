@@ -45,7 +45,7 @@ import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
 import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
-import { isPartOf, netWorth, partOf, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
+import { isPartOf, netWorth, parentOf, partOf, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
@@ -956,6 +956,23 @@ export default function App() {
     if (from !== "add" && from !== "ai") setReturnTo(from);
   };
 
+  /**
+   * The restore handlers as of the latest render, for Undo.
+   *
+   * ── Why Undo on a binned row did nothing ─────────────────────────────────
+   *
+   * The notice's button held the `handleRestore` of the render that binned
+   * the row, and that one looked for the row in the bin as it was before the
+   * row went in. So Undo found nothing and restored nothing: 93 records, 92
+   * after binning one, still 92 after Undo. The button calls through this
+   * ref, which always holds the current handlers, so the bin it searches is
+   * the bin as it is when the button is pressed.
+   */
+  const latest = useRef<{ handleRestore: (id: string) => void; handleRestoreMany: (ids: readonly string[]) => void }>({
+    handleRestore: () => {},
+    handleRestoreMany: () => {},
+  });
+
   /** Soft delete: the row moves to the bin, never out of existence. */
   const handleDelete = (id: string): void => {
     const row = transactions.find((t) => t.id === id);
@@ -968,8 +985,8 @@ export default function App() {
      * and still taken from the wallet. They left the wallet together, so they
      * go to the bin together, and come back together (see `handleRestore`).
      */
-    // A borrowing goes with the fees added on it, the same way.
-    const part = partOf(row, transactions);
+    // A borrowing goes with the fees added on it, the same way, and a part binned by itself takes its movement.
+    const part = partOf(row, transactions) ?? parentOf(row, transactions);
     if (part) {
       handleDeleteMany([id, part.id]);
       return;
@@ -990,7 +1007,7 @@ export default function App() {
     // Undo, for the tap that was meant for the row beside it.
     flash(`Moved record #${String(row.recordNumber).padStart(4, "0")} to the bin.`, {
       label: "Undo",
-      run: () => handleRestore(id),
+      run: () => latest.current.handleRestore(id),
     });
   };
 
@@ -1005,11 +1022,11 @@ export default function App() {
    * message rather than six.
    */
   const handleDeleteMany = (ids: readonly string[]): void => {
-    // Each payment's interest with it, as in `handleDelete`.
+    // Each payment's interest with it, and each interest row's payment, as in `handleDelete`.
     const wanted = new Set(ids);
     for (const t of transactions) {
       if (wanted.has(t.id)) {
-        const part = partOf(t, transactions);
+        const part = partOf(t, transactions) ?? parentOf(t, transactions);
         if (part) wanted.add(part.id);
       }
     }
@@ -1025,10 +1042,17 @@ export default function App() {
       for (const t of rows) await l.bin(t.id, at);
     });
     record(...rows.map((t) => binnedEvent(t)));
+    /*
+     * Undo here too. A payment and its interest went through this path with
+     * no Undo on the notice, unlike every other row, and so did a selection
+     * binned from the Database or the chat (style guide §3.8: moving to the
+     * bin says Undo).
+     */
     flash(
       rows.length === 1
         ? `Moved record #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")} to the bin.`
-        : `Moved ${rows.length} records to the bin. They are restorable.`,
+        : `Moved ${rows.length} records to the bin.`,
+      { label: "Undo", run: () => latest.current.handleRestoreMany(rows.map((t) => t.id)) },
     );
   };
 
@@ -1074,6 +1098,8 @@ export default function App() {
         : `Restored ${rows.length} records.`,
     );
   };
+
+  latest.current = { handleRestore, handleRestoreMany };
 
   /**
    * Rename an account or an item everywhere it appears.
@@ -2064,7 +2090,7 @@ export default function App() {
               </>
             }
           >
-            {refusalWords(writeError, unsaved.length)}
+            {refusalWords(writeError, unsaved.length, unsaved)}
             <ul>
               {unsaved.slice(0, 3).map((t) => (
                 <li key={t.id}>{unsavedLine(t)}</li>

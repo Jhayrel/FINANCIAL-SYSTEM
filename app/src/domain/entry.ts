@@ -393,6 +393,25 @@ export function checkDraft(
   }
 
   /**
+   * Longer than the database will take, said before the save.
+   *
+   * The same reasoning as the money bound above: `validTransaction` refuses
+   * an item over 80 characters, a description over 500 and notes over 1,000,
+   * and a refusal after the form has cleared reads as "the database refused
+   * it" with nothing to say why. A receipt read by the assistant can easily
+   * produce a long description. The form says which field and how long.
+   */
+  for (const [field, value, most, name] of [
+    ["item", draft.item, 80, "The item"],
+    ["description", draft.description, 500, "The description"],
+    ["notes", draft.notes, 1000, "The notes"],
+  ] as const) {
+    if (value.length > most) {
+      errors.push({ field, message: `${name} is ${value.length} characters, and the database takes ${most}. Shorten it.` });
+    }
+  }
+
+  /**
    * A debt movement has one wallet, and which one depends on the effect.
    *
    * ── The refusal this fixes ────────────────────────────────────────────

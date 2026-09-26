@@ -19,10 +19,17 @@ import type { Transaction } from "../domain/types";
 import { toDocument } from "./firestoreLedger";
 import { choicesForClue, draftForClue, type Clue } from "../domain/investigate";
 import { readProposals } from "../domain/proposal";
-import { loadFixture } from "../fixtures/load";
+import { REFERENCE as INVENTED_REFERENCE } from "../domain/eval/corpus";
+import { fixtureExists, loadFixture } from "../fixtures/load";
 
 const RULES = readFileSync(resolve(__dirname, "../../../firestore.rules"), "utf8");
-const REFERENCE = loadFixture().reference;
+/*
+ * The owner's lists when the fixture is on this disk, and the invented ones
+ * of the same shape when it is not. Only the shape matters to the rules, and
+ * without this the one test that says whether a save will be refused could
+ * not run anywhere the private ledger is absent.
+ */
+const REFERENCE = fixtureExists() ? loadFixture().reference : INVENTED_REFERENCE;
 
 const TYPES = ["Revenue", "Spending", "Transfer", "Debt"];
 const CATEGORIES = ["Revenue", "Spending", "Bills", "Subscriptions", "Transfer", "Opening", ""];

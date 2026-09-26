@@ -107,11 +107,25 @@ export function syncWords({ online, pending, error }: SyncInput): SyncNotice | n
  * tell a rules problem from a signed-out tab from a bug. It says what the
  * database said now, and what to do about that one.
  */
-export function refusalWords(error: string | null, count: number): string {
+export function refusalWords(
+  error: string | null,
+  count: number,
+  /**
+   * The kept rows, when the caller has them, so a refusal the rules explain
+   * can name its cause. A lender's charge (`debtEffect: "charge"`) was added
+   * to the rules on 17 September 2026, and rules published before then
+   * refuse every one: no row of that kind has ever reached the owner's
+   * database, which is the tell.
+   */
+  rows: readonly { readonly debtEffect?: string | undefined }[] = [],
+): string {
   const them = count === 1 ? "it" : "them";
   const kept = `${count === 1 ? "It is" : "They are"} kept on this device, so nothing is lost.`;
   if (!error) return `The database refused ${them}. ${kept}`;
   if (/permission|insufficient/i.test(error)) {
+    if (rows.some((r) => r.debtEffect === "charge")) {
+      return `The rules published in Firebase are older than this app and do not know a charge added to a debt. Publish the latest firestore.rules in the Firebase console, then press Try again. ${kept}`;
+    }
     return `The database's rules refused ${them}. Publish the latest firestore.rules in the Firebase console, check you are signed in as the owner, then press Try again. ${kept}`;
   }
   if (/unauthenticated|unauthorized|sign.?in|auth/i.test(error)) {

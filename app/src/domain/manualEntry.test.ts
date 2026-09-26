@@ -109,3 +109,20 @@ describe("a row with no item", () => {
     expect(check(moved).warnings.map((w) => w.field)).not.toContain("item");
   });
 });
+
+/**
+ * A field longer than the database takes is refused at the write, after the
+ * form has cleared, as "the database refused it". The form says so first.
+ */
+describe("fields the database would refuse for length", () => {
+  const base = { ...emptyDraft("2026-09-20"), flow: "Spending" as const, category: "Spending" as const, item: "Food", fromWallet: "Cash", amount: 10_000 };
+
+  it("stops a description over 500 characters, and says how long it is", () => {
+    const check = checkDraft({ ...base, description: "x".repeat(501) }, [], reference);
+    expect(check.errors.map((e) => e.message)).toContain("The description is 501 characters, and the database takes 500. Shorten it.");
+  });
+
+  it("lets one of exactly 500 through", () => {
+    expect(checkDraft({ ...base, description: "x".repeat(500) }, [], reference).errors).toEqual([]);
+  });
+});
