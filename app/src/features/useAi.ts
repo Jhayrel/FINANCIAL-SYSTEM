@@ -20,6 +20,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { askAi, type AiAnswer, type AiTask } from "../data/aiClient";
 import { buildContext, contextToText } from "../domain/aiContext";
 import { buildChatContext } from "../domain/aiChatContext";
+import { untracedNote } from "../domain/aiFigures";
+import { formatMoney } from "../domain/money";
 import { cacheKey, readCache, writeCache } from "../domain/aiCache";
 import { offlineAnswer } from "../domain/aiOffline";
 import { today } from "../domain/dates";
@@ -230,7 +232,7 @@ export function useAi({
             }).text
           : undefined;
 
-      return askAi({
+      const answered = await askAi({
         context,
         task,
         tone: ai.tone,
@@ -238,6 +240,30 @@ export function useAi({
         ...(options.question ? { question: options.question } : {}),
         ...(options.history ? { history: options.history } : {}),
       });
+
+      /**
+       * Every peso figure in the reply, checked back against the figures it
+       * was sent.
+       *
+       * The rule the whole app runs on is that the model never does
+       * arithmetic: the domain code works out every total and hands it over,
+       * and the model chooses which one matters. Nothing enforced that, and
+       * on 20 September 2026 an answer about a debt stated PHP 4,111.21,
+       * PHP 811.21 and PHP 1,708.79, none of which existed anywhere. The
+       * real answer, PHP 5,000.00, was in the context it had been given.
+       *
+       * Only a model answer is checked. An answer from this device was
+       * computed from the ledger, so tracing it back to the ledger proves
+       * nothing.
+       *
+       * Nothing is rewritten. The untraced figures are named underneath, in
+       * the same way every integrity check in this app reports and leaves
+       * the deciding to the owner. See `domain/aiFigures.ts`.
+       */
+      if (answered.source !== "model") return answered;
+
+      const note = untracedNote(answered.text, chatText ?? contextToText(context), formatMoney);
+      return note === "" ? answered : { ...answered, text: [answered.text, note].join("\n\n") };
     },
     [context, disabled, ai.enabled, ai.tone, transactions, asOf],
   );
