@@ -89,3 +89,53 @@ describe("readRich: nothing to show", () => {
     expect(readRich("\n\n  \n")).toEqual([]);
   });
 });
+
+/**
+ * 26 September 2026: "the ai bold text and bullet points and numbering is not
+ * working, it just says **". A numbered list became a bulleted one, so a
+ * ranking lost its order marks, and a heading or a single-asterisk emphasis
+ * left its marks in the text.
+ */
+describe("readRich: numbers, headings and emphasis", () => {
+  it("keeps a numbered list numbered", () => {
+    const blocks = readRich("The biggest three:\n1. Treat PHP 21,354.00\n2. Food PHP 5,633.00\n3. School PHP 4,800.00");
+    expect(blocks.map((b) => b.kind)).toEqual(["paragraph", "list"]);
+    const list = blocks[1];
+    expect(list?.kind === "list" && list.ordered).toBe(true);
+    expect(list?.kind === "list" && list.start).toBeUndefined();
+    expect(text(list!)).toBe("Treat PHP 21,354.00 | Food PHP 5,633.00 | School PHP 4,800.00");
+  });
+
+  it("keeps the first number when it is not 1", () => {
+    const list = readRich("3) Gas\n4) Parking")[0];
+    expect(list?.kind === "list" && list.start).toBe(3);
+  });
+
+  it("does not run bullets and numbers into one list", () => {
+    const blocks = readRich("- Food\n- Gas\n1. Save first\n2. Then spend");
+    expect(blocks.map((b) => (b.kind === "list" ? (b.ordered ? "ol" : "ul") : "p"))).toEqual(["ul", "ol"]);
+  });
+
+  it("reads a heading as a bold line, with no hash marks", () => {
+    const blocks = readRich("## Where it went\nMostly on food.");
+    expect(blocks[0]).toEqual({ kind: "paragraph", spans: [{ text: "Where it went", bold: true }] });
+    expect(text(blocks[1]!)).toBe("Mostly on food.");
+  });
+
+  it("drops the marks of single emphasis and keeps the words", () => {
+    expect(text(readRich("That is *well* over, and _much_ more than July.")[0]!)).toBe(
+      "That is well over, and much more than July.",
+    );
+  });
+
+  it("reads bold inside a numbered item", () => {
+    const list = readRich("1. **Treat** rose by **PHP 19,714.00**")[0];
+    expect(list?.kind === "list" && list.items[0]?.filter((s) => s.bold).map((s) => s.text)).toEqual(["Treat", "PHP 19,714.00"]);
+  });
+
+  it("leaves a name with underscores in it alone", () => {
+    expect(text(readRich("The answer came from gpt_oss_120b and _was_ short.")[0]!)).toBe(
+      "The answer came from gpt_oss_120b and was short.",
+    );
+  });
+});

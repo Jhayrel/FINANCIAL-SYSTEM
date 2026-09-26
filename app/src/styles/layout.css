@@ -4831,6 +4831,33 @@ textarea.fms-askinput {
   background: var(--ink-3);
 }
 
+/*
+ * A numbered list shows its numbers, in the ink of a caption and in tabular
+ * figures so "9." and "10." line up. The dot a bulleted item carries is
+ * not drawn here: the number is the mark.
+ */
+.fms-richlist--ordered {
+  counter-reset: fms-rich;
+  padding-left: calc(var(--space-4) + var(--space-1));
+}
+
+.fms-richlist--ordered li {
+  counter-increment: fms-rich;
+}
+
+.fms-richlist--ordered li::before {
+  content: counter(fms-rich) ".";
+  left: calc((var(--space-4) + var(--space-1)) * -1);
+  top: 0;
+  width: var(--space-4);
+  height: auto;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 /* Bold is a weight, never a colour: flow colour means direction of money. */
 .fms-rich strong {
   font-weight: 650;

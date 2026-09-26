@@ -42,6 +42,7 @@ import { cleanSettings } from "../domain/settingsCleanup";
 import { canSetOpening, ledgerStart, openingRows } from "../domain/opening";
 import { recoverAccounts } from "../domain/recovery";
 import { AiAnswerView } from "../components/AiAnswer";
+import { Rich } from "../components/Rich";
 import { useAi } from "./useAi";
 import {
   clearConfig,
@@ -3240,9 +3241,20 @@ function AiHistoryGroup({ uid }: { uid: string | null }) {
                 */}
                 <div className="fms-actmain">
                   <div className="fms-acthead">
-                    <span className="t-caption fms-actsummary" style={{ whiteSpace: "pre-wrap" }}>
-                      {m.text}
-                    </span>
+                    {/*
+                      An answer is read through `Rich`, as the chat reads it:
+                      the record keeps the model's marks, and printed raw
+                      they showed here as "**PHP 41,694.36**".
+                    */}
+                    {m.role === "assistant" ? (
+                      <div className="fms-actsummary">
+                        <Rich text={m.text} />
+                      </div>
+                    ) : (
+                      <span className="t-caption fms-actsummary" style={{ whiteSpace: "pre-wrap" }}>
+                        {m.text}
+                      </span>
+                    )}
                     <span className="t-micro fms-actwhen">
                       {new Date(m.at).toLocaleString("en-PH")}
                     </span>
@@ -3450,15 +3462,22 @@ function AiLearningGroup({
                 */}
                 <div className="fms-actmain">
                   <div className="fms-acthead">
-                    <span className="t-caption fms-actsummary">
-                      {e.action === "edited" && e.field
-                        ? `Corrected the ${e.field}: ${e.proposed} became ${e.corrected}`
-                        : e.action === "uploaded"
-                          ? (e.files ?? [])
-                              .map((f) => `${f.name} (${f.kind}): ${f.details}`)
-                              .join(" · ")
-                          : (e.text ?? e.entry ?? e.action)}
-                    </span>
+                    {e.action === "answered" && e.text ? (
+                      // What the model said, read as the chat reads it, never with its marks showing.
+                      <div className="fms-actsummary">
+                        <Rich text={e.text} />
+                      </div>
+                    ) : (
+                      <span className="t-caption fms-actsummary">
+                        {e.action === "edited" && e.field
+                          ? `Corrected the ${e.field}: ${e.proposed} became ${e.corrected}`
+                          : e.action === "uploaded"
+                            ? (e.files ?? [])
+                                .map((f) => `${f.name} (${f.kind}): ${f.details}`)
+                                .join(" · ")
+                            : (e.text ?? e.entry ?? e.action)}
+                      </span>
+                    )}
                     <span className="t-micro fms-actwhen">{new Date(e.at).toLocaleString("en-PH")}</span>
                   </div>
                   <div className="fms-actmeta t-micro">

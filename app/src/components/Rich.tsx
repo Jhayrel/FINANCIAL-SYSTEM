@@ -35,15 +35,33 @@ export function Rich({ text, size = "t-caption" }: { text: string; size?: "t-cap
     <div className="fms-rich">
       {blocks.map((block, i) =>
         block.kind === "list" ? (
-          <ul key={i} className="fms-richlist">
-            {block.items.map((item, j) => (
-              <li key={j} className={size}>
-                {item.map((span, k) =>
-                  span.bold ? <strong key={k}>{span.text}</strong> : <span key={k}>{span.text}</span>,
-                )}
-              </li>
-            ))}
-          </ul>
+          block.ordered ? (
+            // Numbered as the model numbered it: a ranking keeps its order and its numbers.
+            <ol
+              key={i}
+              className="fms-richlist fms-richlist--ordered"
+              // The counter starts where the model's numbering did ("3." after a paragraph).
+              {...(block.start ? { start: block.start, style: { counterReset: `fms-rich ${block.start - 1}` } } : {})}
+            >
+              {block.items.map((item, j) => (
+                <li key={j} className={size}>
+                  {item.map((span, k) =>
+                    span.bold ? <strong key={k}>{span.text}</strong> : <span key={k}>{span.text}</span>,
+                  )}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <ul key={i} className="fms-richlist">
+              {block.items.map((item, j) => (
+                <li key={j} className={size}>
+                  {item.map((span, k) =>
+                    span.bold ? <strong key={k}>{span.text}</strong> : <span key={k}>{span.text}</span>,
+                  )}
+                </li>
+              ))}
+            </ul>
+          )
         ) : (
           <p key={i} className={size} style={{ margin: 0 }}>
             {block.spans.map((span, k) =>

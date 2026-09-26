@@ -289,16 +289,21 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
      * text, not Markdown, so those marks would reach the screen literally.
      */
     /**
-     * Cleaned either way, rendered differently.
+     * Cleaned, with its structure kept for the renderer.
      *
-     * Every surface but the chat renders one string into one element, so the
-     * marks are stripped for those. The chat parses them into real emphasis
-     * and real list items (`domain/richText.ts`), which is what the rule was
-     * protecting: no asterisk reaches the screen in either case.
+     * The chat parsed emphasis and lists into real elements and every other
+     * surface had them stripped, because those surfaces printed one string
+     * into one element. They do not any more: every answer from here is shown
+     * through `AiAnswerView` or the chat, and both render it with `Rich`. So a
+     * summary on Insights, the alerts paragraph and the Settings try-out keep
+     * their bold, their bullets and their numbers too (the owner, 26
+     * September 2026: "in other parts of the system the bold text and bullet
+     * points and numbering is not working"). No asterisk reaches the screen
+     * either way: `Rich` parses the marks, it never prints them.
      */
     const text =
       typeof payload.text === "string"
-        ? plainText(payload.text, { keepStructure: task === "chat" })
+        ? plainText(payload.text, { keepStructure: true })
         : "";
     if (!text) return fallback("The model returned nothing.");
 
