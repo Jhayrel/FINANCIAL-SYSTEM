@@ -11,18 +11,25 @@
 import type { AiAnswer } from "../data/aiClient";
 import { modelLabel } from "../domain/modelName";
 import { describeAge } from "../domain/aiCache";
+import { Rich } from "./Rich";
 
 export function AiAnswerView({ answer }: { answer: AiAnswer }) {
   const fromModel = answer.source === "model";
 
   return (
     <div>
-      <p
-        className="t-body"
-        style={{ margin: 0, whiteSpace: "pre-wrap", color: "var(--ink)" }}
-      >
-        {answer.text}
-      </p>
+      {/*
+        Through `Rich`, so the structure the model wrote survives.
+
+        This printed the text raw, and every screen that shows a model
+        answer goes through here, so the owner read "**Check for any large
+        Gcash outflows**" with the asterisks in it on 26 September 2026. The
+        chat had parsed the same markers since it was built; nothing else
+        did.
+      */}
+      <div style={{ color: "var(--ink)" }}>
+        <Rich text={answer.text} size="t-body" />
+      </div>
 
       <p
         className="t-caption"

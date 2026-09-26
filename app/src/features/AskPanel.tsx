@@ -78,7 +78,7 @@ import {
   type Blank,
 } from "../domain/capture";
 import { readEntry, splitEntries } from "../domain/readEntry";
-import { readRich } from "../domain/richText";
+import { Rich } from "../components/Rich";
 import {
   saysLatestIsWrong,
   detectRecall,
@@ -4632,51 +4632,6 @@ export function AskPanel({
   );
 }
 
-/**
- * An answer, with the structure it was written with.
- *
- * Parsed rather than stripped, then rendered as real elements: no asterisk
- * reaches the screen, which is what the no-Markdown rule was protecting, and
- * a four month comparison gets a line per month instead of one long sentence.
- * Nothing here builds HTML from the model's text: `readRich` returns data and
- * this turns it into React elements.
- */
-function Rich({ text }: { text: string }) {
-  const blocks = readRich(text);
-
-  // Nothing parsed: show it exactly as it came, rather than nothing at all.
-  if (blocks.length === 0) {
-    return (
-      <p className="t-caption" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-        {text}
-      </p>
-    );
-  }
-
-  return (
-    <div className="fms-rich">
-      {blocks.map((block, i) =>
-        block.kind === "list" ? (
-          <ul key={i} className="fms-richlist">
-            {block.items.map((item, j) => (
-              <li key={j} className="t-caption">
-                {item.map((span, k) =>
-                  span.bold ? <strong key={k}>{span.text}</strong> : <span key={k}>{span.text}</span>,
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p key={i} className="t-caption" style={{ margin: 0 }}>
-            {block.spans.map((span, k) =>
-              span.bold ? <strong key={k}>{span.text}</strong> : <span key={k}>{span.text}</span>,
-            )}
-          </p>
-        ),
-      )}
-    </div>
-  );
-}
 
 /**
  * One proposed row, as the form it is.

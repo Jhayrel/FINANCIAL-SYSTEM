@@ -22,6 +22,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Button, Card, Money } from "../components/primitives";
+import { Rich } from "../components/Rich";
 import { AmountInput, Field } from "../components/forms";
 import { Select } from "../components/Select";
 import { useConfirm } from "../components/Confirm";
@@ -355,9 +356,9 @@ export function Investigate({
             {onAsk && result.gap !== 0 && (
               <div className="fms-find-ask">
                 {aiAnswer ? (
-                  <p className="t-body" style={{ margin: 0 }}>
-                    {aiAnswer}
-                  </p>
+                  // Through `Rich`, so the bold and the bullets the model
+                  // writes arrive as bold and bullets rather than asterisks.
+                  <Rich text={aiAnswer} size="t-body" />
                 ) : (
                   <span className="t-caption" style={{ color: "var(--ink-3)" }}>
                     The figures above are already worked out. The assistant can say which of them to check first.

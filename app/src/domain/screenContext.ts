@@ -72,6 +72,28 @@ export function aboutTheScreen(question: string): boolean {
     return true;
   }
 
+  /*
+   * Being told to look, which is pointing without a pointing word.
+   *
+   * The owner, 21 and 23 September 2026: "but look at my budget 2026"
+   * and "read the output" both came back as charts, and underneath the
+   * first they wrote "// you give me a chart instead of seing my screen".
+   * Neither sentence contains this, these or that, so neither counted as
+   * being about the screen, though both are plainly an instruction to
+   * look at it.
+   *
+   * "look at" and "see" only count with my, the, or a screen word after
+   * them: "look at May" is about the ledger and stays there.
+   */
+  if (
+    /\b(?:look at|see|read|check|tignan|tingnan)\s+(?:mo|niyo|nyo|po)?\s*(?:my|the|this|ang|yung|itong)\s+(?:screen|page|output|panel|card|chart|list|table|form|dashboard|numbers?|figures?|budget|insights?|result)\b/i.test(
+      text,
+    ) ||
+    /\b(?:see|read|check|look at)\s+(?:my|the)\s+(?:screen|output)\b/i.test(text)
+  ) {
+    return true;
+  }
+
   // Pointing words, which mean nothing without the screen.
   /*
    * "This month" is not this screen.
