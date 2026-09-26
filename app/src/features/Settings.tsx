@@ -2476,7 +2476,7 @@ function AiSection({
             />
           </label>
           <label className="t-caption" style={{ color: "var(--ink-2)" }}>
-            Largest file, in MB
+            Largest picture sent, in MB
             <input
               className="t-body fms-input"
               type="number"
@@ -2493,9 +2493,9 @@ function AiSection({
           </label>
         </div>
         <p className="t-caption" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-3)" }}>
-          Pictures are downscaled and re-encoded on this device before anything is sent, so a phone
-          photo usually arrives well under the limit. Five is what the free vision models accept in
-          one request.
+          A photo of any size can be attached. It is shrunk on this device until it fits before
+          anything is sent, and nothing is stored: it is read and let go. Five is what the free vision
+          models accept in one request.
         </p>
       </Group>
 

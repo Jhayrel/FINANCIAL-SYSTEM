@@ -27,14 +27,26 @@ describe("checkFile", () => {
     if (!result.ok) expect(result.reason).toContain("JPEG");
   });
 
-  it("refuses a file over the size cap, naming the size and the limit", () => {
-    const result = checkFile(file({ size: 6_200_000 }), 0);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toContain("5.9 MB");
-      expect(result.reason).toContain("4.0 MB");
-      expect(result.reason).toContain("not sent");
-    }
+  /*
+   * The owner's 4.6 to 4.9 MB phone photos were refused against a 4.0 MB
+   * limit (26 September 2026), though every one would have been shrunk to
+   * about 1.5 MB before it was sent, and nothing is stored. The limit is on
+   * what is sent, after shrinking, so no original size is refused here.
+   */
+  it("accepts a photo of any size, since it is shrunk before it is sent", () => {
+    expect(checkFile(file({ size: 4_900_000 }), 0).ok).toBe(true);
+    expect(checkFile(file({ size: 48_000_000 }), 0).ok).toBe(true);
+    expect(checkFile(file({ size: 48_000_000 }), 0, { maxSizeMB: 1 }).ok).toBe(true);
+  });
+
+  it("accepts a text file of any size, since only its beginning is read", () => {
+    expect(checkFile(file({ name: "a-year.csv", type: "text/csv", size: 90_000_000 }), 0).ok).toBe(true);
+  });
+
+  it("keeps five pictures together under what the endpoint takes", () => {
+    // functions/api/ai.ts takes 6,000,000 characters of base64, four for every three bytes.
+    expect(Math.ceil((LIMITS.totalBytes * 4) / 3)).toBeLessThan(6_000_000);
+    expect(LIMITS.targetBytes).toBeLessThanOrEqual(LIMITS.totalBytes);
   });
 
   it("accepts a file exactly on the cap", () => {
@@ -81,15 +93,14 @@ describe("checkFile honours the limits from Settings", () => {
     if (!refused.ok) expect(refused.reason).toContain("3 files");
   });
 
-  it("uses a smaller size when one is set, and names it", () => {
-    const refused = checkFile(file({ size: 2_500_000 }), 0, { maxSizeMB: 2 });
-    expect(refused.ok).toBe(false);
-    if (!refused.ok) expect(refused.reason).toContain("2.0 MB");
-  });
-
-  it("falls back to the defaults when Settings says nothing", () => {
-    expect(checkFile(file({ size: 3_000_000 }), 0, {}).ok).toBe(true);
-    expect(checkFile(file({ size: 5_000_000 }), 0, {}).ok).toBe(false);
+  /*
+   * The size in Settings caps what is sent, once shrunk (`readFiles`), not
+   * what is picked: a photo bigger than it is shrunk to fit it rather than
+   * refused (owner, 26 September 2026: "just allow all file sizes").
+   */
+  it("does not refuse a photo for being bigger than the size set", () => {
+    expect(checkFile(file({ size: 2_500_000 }), 0, { maxSizeMB: 2 }).ok).toBe(true);
+    expect(checkFile(file({ size: 5_000_000 }), 0, {}).ok).toBe(true);
   });
 });
 

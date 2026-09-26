@@ -25,14 +25,26 @@ import { redact } from "../domain/aiRedact";
 export const LIMITS = {
   /** Matches what the free vision models accept in one request. */
   maxCount: 5,
-  /** Refused above this, before anything is sent. */
+  /** The most one picture may weigh once shrunk, which is what is sent. Settings can lower it. */
   maxBytes: 4 * 1024 * 1024,
   /** Compressed down to about this. Receipts stay legible well below it. */
   targetBytes: 1_500_000,
-  /** Longest edge after downscaling. */
+  /**
+   * What one message's pictures may weigh together once shrunk.
+   *
+   * The endpoint takes 6,000,000 characters of pictures per request
+   * (functions/api/ai.ts, MAX_IMAGE_CHARS), and base64 is four characters
+   * for every three bytes, so 4.5 MB. This leaves room for the data URL
+   * headers. Five photos at 1.5 MB each were 7.5 MB and refused there.
+   */
+  totalBytes: 4_200_000,
+  /** Longest edge after downscaling, then smaller steps if a picture still does not fit. */
   maxEdge: 1568,
+  edges: [1568, 1280, 1024, 800],
   /** A text file is context, and context is bounded like all the rest. */
   maxTextChars: 12_000,
+  /** How much of a text file is read: enough for maxTextChars in any encoding. */
+  textReadBytes: 64 * 1024,
 } as const;
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
@@ -91,6 +103,14 @@ export function formatBytes(bytes: number): string {
  * Pure and separate from the reading so it can be tested without a browser,
  * and so the message says what happened and what to do (rule D8) rather than
  * the file simply not appearing.
+ *
+ * ── No size is refused here ────────────────────────────────────────────────
+ *
+ * A 4.9 MB phone photo was refused with "the limit is 4.0 MB, try a smaller
+ * photo" (owner, 26 September 2026), though it would have been shrunk to
+ * about 1.5 MB before sending, and nothing is ever stored: the file is read
+ * and let go. The limit belongs to what is sent, so it is applied after the
+ * shrinking, in `readFiles`. A text file is only read as far as it is used.
  */
 export function checkFile(
   file: { readonly name: string; readonly type: string; readonly size: number },
@@ -99,7 +119,6 @@ export function checkFile(
   limits: { readonly maxCount?: number; readonly maxSizeMB?: number } = {},
 ): { readonly ok: true } | { readonly ok: false; readonly reason: string } {
   const maxCount = limits.maxCount ?? LIMITS.maxCount;
-  const maxBytes = (limits.maxSizeMB ?? LIMITS.maxBytes / (1024 * 1024)) * 1024 * 1024;
 
   if (alreadyAttached >= maxCount) {
     return {
@@ -115,13 +134,6 @@ export function checkFile(
     return {
       ok: false,
       reason: "Only JPEG, PNG and WebP pictures, and CSV or text files, can be read.",
-    };
-  }
-
-  if (file.size > maxBytes) {
-    return {
-      ok: false,
-      reason: `It is ${formatBytes(file.size)} and the limit is ${formatBytes(maxBytes)}. It was not sent. Try a smaller photo.`,
     };
   }
 
@@ -158,42 +170,52 @@ export function digestOf(content: string): string {
 }
 
 /**
- * Downscale and re-encode, stepping the quality down until it fits.
+ * Downscale and re-encode, stepping the quality and then the size down until it fits.
  *
  * A screenshot that is already small keeps its original bytes: re-encoding a
  * crisp PNG of text as JPEG makes it blurrier and no smaller.
  *
- * The caller has already read the file, so the data URL is passed in rather
- * than read a second time: a phone photo is megabytes and reading it twice is
- * twice the wait for no gain.
+ * The picture is decoded from an object URL, not a data URL, so a 20 MB
+ * photo is never turned into a 27 million character string just to be drawn
+ * smaller. Null when even the smallest step is over `target`, which only a
+ * message already full of pictures can cause.
  */
-async function shrink(file: File, original: string): Promise<{ dataUrl: string; bytes: number }> {
-  if (file.size <= LIMITS.targetBytes && file.type === "image/png") {
-    return { dataUrl: original, bytes: file.size };
+async function shrink(file: File, target: number): Promise<{ dataUrl: string; bytes: number } | null> {
+  if (file.size <= target && file.type === "image/png") {
+    return { dataUrl: await asDataUrl(file), bytes: file.size };
   }
 
-  const image = await load(original);
-  const longest = Math.max(image.width, image.height);
-  const scale = longest > LIMITS.maxEdge ? LIMITS.maxEdge / longest : 1;
+  const url = URL.createObjectURL(file);
+  try {
+    const image = await load(url);
+    const longest = Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height);
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) return null;
 
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(image.width * scale));
-  canvas.height = Math.max(1, Math.round(image.height * scale));
+    let drawn = "";
+    for (const edge of LIMITS.edges) {
+      const scale = longest > edge ? edge / longest : 1;
+      const width = Math.max(1, Math.round((image.naturalWidth || image.width) * scale));
+      const height = Math.max(1, Math.round((image.naturalHeight || image.height) * scale));
+      // A picture already under this edge is the same drawing again: no smaller, no point.
+      if (`${width}x${height}` === drawn) continue;
+      drawn = `${width}x${height}`;
+      canvas.width = width;
+      canvas.height = height;
+      context.drawImage(image, 0, 0, width, height);
 
-  const context = canvas.getContext("2d");
-  if (!context) return { dataUrl: original, bytes: file.size };
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-  // Down from good to acceptable. Receipt text survives 0.6 comfortably; a
-  // fifth pass would trade legibility for bytes that are already spent.
-  for (const quality of [0.82, 0.72, 0.62, 0.5]) {
-    const encoded = canvas.toDataURL("image/jpeg", quality);
-    const bytes = Math.round((encoded.length - encoded.indexOf(",") - 1) * 0.75);
-    if (bytes <= LIMITS.targetBytes) return { dataUrl: encoded, bytes };
+      // Down from good to acceptable. Receipt text survives 0.6 comfortably.
+      for (const quality of [0.82, 0.72, 0.62, 0.5]) {
+        const encoded = canvas.toDataURL("image/jpeg", quality);
+        const bytes = Math.round((encoded.length - encoded.indexOf(",") - 1) * 0.75);
+        if (bytes <= target) return { dataUrl: encoded, bytes };
+      }
+    }
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
   }
-
-  const last = canvas.toDataURL("image/jpeg", 0.5);
-  return { dataUrl: last, bytes: Math.round((last.length - last.indexOf(",") - 1) * 0.75) };
 }
 
 const asDataUrl = (file: Blob): Promise<string> =>
@@ -241,10 +263,24 @@ export async function readFiles(
   const seen = new Map<string, string>();
   for (const a of existing) if (a.digest) seen.set(a.digest, a.name);
 
+  /*
+   * What the pictures may weigh, shared out.
+   *
+   * Each picture gets its share of what the message has left, so five photos
+   * fit together where five at full size would be refused by the endpoint.
+   * Settings can lower the most any one picture weighs; nothing raises it past
+   * what the endpoint takes.
+   */
+  const perPicture = Math.min(LIMITS.targetBytes, (limits.maxSizeMB ?? LIMITS.maxBytes / (1024 * 1024)) * 1024 * 1024);
+  let budget = LIMITS.totalBytes - existing.filter((a) => a.kind === "image").reduce((sum, a) => sum + a.bytes, 0);
+  let picturesLeft = files.filter((f) => isImageType(f.type)).length;
+
   for (const file of files) {
+    const image = isImageType(file.type);
     const check = checkFile(file, alreadyAttached + attachments.length, limits);
     if (!check.ok) {
       rejected.push({ name: file.name, reason: check.reason });
+      if (image) picturesLeft -= 1;
       continue;
     }
 
@@ -252,43 +288,63 @@ export async function readFiles(
     const id = `a-${Date.now()}-${counter}`;
 
     try {
-      const image = isImageType(file.type);
-      const content = image ? await asDataUrl(file) : redact(await file.text());
+      if (image) {
+        const share = Math.min(perPicture, Math.floor(budget / Math.max(1, picturesLeft)));
+        picturesLeft -= 1;
+        const shrunk = share >= 40_000 ? await shrink(file, share) : null;
+        if (!shrunk) {
+          rejected.push({
+            name: file.name,
+            reason: "This message has no room left for another picture. Send what is attached, then attach this one.",
+          });
+          continue;
+        }
+        // The fingerprint of what is sent: the same photo shrinks to the same bytes.
+        const digest = digestOf(shrunk.dataUrl);
+        const twin = seen.get(digest);
+        if (twin !== undefined) {
+          rejected.push({ name: file.name, reason: twinReason(twin, file.name) });
+          continue;
+        }
+        seen.set(digest, file.name);
+        budget -= shrunk.bytes;
+        attachments.push({ id, name: file.name, kind: "image", bytes: shrunk.bytes, dataUrl: shrunk.dataUrl, digest });
+        continue;
+      }
+
+      // Only as much as is used is read, so a file of any size opens at once.
+      const content = redact(await file.slice(0, LIMITS.textReadBytes).text());
       const digest = digestOf(content);
 
       const twin = seen.get(digest);
       if (twin !== undefined) {
-        rejected.push({
-          name: file.name,
-          reason:
-            twin === file.name
-              ? "It is the same file as the one already attached, so it was not added twice."
-              : `It is the same file as ${twin}, already attached, so it was not added twice.`,
-        });
+        rejected.push({ name: file.name, reason: twinReason(twin, file.name) });
         continue;
       }
       seen.set(digest, file.name);
 
-      if (image) {
-        const { dataUrl, bytes } = await shrink(file, content);
-        attachments.push({ id, name: file.name, kind: "image", bytes, dataUrl, digest });
-      } else {
-        const text = content.slice(0, LIMITS.maxTextChars);
-        attachments.push({
-          id,
-          name: file.name,
-          kind: "text",
-          bytes: text.length,
-          text,
-          digest,
-        });
-      }
+      const text = content.slice(0, LIMITS.maxTextChars);
+      attachments.push({
+        id,
+        name: file.name,
+        kind: "text",
+        bytes: text.length,
+        text,
+        digest,
+      });
     } catch {
       rejected.push({ name: file.name, reason: "It could not be opened on this device." });
     }
   }
 
   return { attachments, rejected };
+}
+
+/** Why a second copy of a file was not added. */
+function twinReason(twin: string, name: string): string {
+  return twin === name
+    ? "It is the same file as the one already attached, so it was not added twice."
+    : `It is the same file as ${twin}, already attached, so it was not added twice.`;
 }
 
 /** What the whole message will weigh, for the readout under the composer. */
