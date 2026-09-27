@@ -43,6 +43,7 @@ import { formatMoney as fmt, type Centavos } from "./money";
 import type { DebtEffect, IsoDate, Transaction } from "./types";
 import { loanSchedule, type CounterpartyKind, type DebtForm } from "./debtForms";
 import type { LimitCounts, LimitStep } from "./creditLimit";
+import type { Draft } from "./entry";
 
 /** Re-exported so debt consumers import from one place. */
 export type { DebtEffect } from "./types";
@@ -488,6 +489,33 @@ export function unpaidCharges(transactions: readonly Transaction[], debtId: stri
 }
 
 /**
+ * What is owed on a line, in the two parts the owner thinks of it in: what
+ * was borrowed, and the interest and fees the lender added to it. The owner,
+ * 27 September 2026, of a PHP 4,302.06 Maya Credit payment the assistant
+ * would not break down: "that should be 4000 and others".
+ */
+export interface OwedParts {
+  readonly owed: Centavos;
+  /** Interest and fees the lender added, still inside what is owed. */
+  readonly fees: Centavos;
+  readonly borrowed: Centavos;
+}
+
+export function owedParts(transactions: readonly Transaction[], debtId: string, asOf?: IsoDate): OwedParts {
+  const rows = asOf === undefined ? transactions : transactions.filter((t) => t.date <= asOf);
+  const owed = Math.max(0, outstandingOf(rows, debtId));
+  const fees = Math.min(owed, unpaidCharges(rows, debtId, asOf));
+  return { owed, fees, borrowed: owed - fees };
+}
+
+/** What a payment of `amount` covers, the lender's interest and fees first, and what is left owed. */
+export function paymentCovers(amount: Centavos, parts: OwedParts): { readonly fees: Centavos; readonly borrowed: Centavos; readonly left: Centavos } {
+  const fees = Math.min(Math.max(0, amount), parts.fees);
+  const borrowed = Math.min(Math.max(0, amount - fees), parts.borrowed);
+  return { fees, borrowed, left: Math.max(0, parts.owed - fees - borrowed) };
+}
+
+/**
  * Interest stated on a payment that is really the lender's fees, already
  * owed.
  *
@@ -516,6 +544,53 @@ export function feesAsInterest(
   if (amount === null || !interest || interest <= 0 || unpaid <= 0 || interest > unpaid) return null;
   const typedApart = amount + interest === outstanding;
   return { amount: typedApart ? outstanding : amount, exact: typedApart || interest === unpaid };
+}
+
+/**
+ * A payment typed the owner's way: what came off what was borrowed as the
+ * amount, and the interest and fees as interest.
+ *
+ * ── The owner's words, 27 September 2026 ─────────────────────────────────
+ *
+ * Maya Credit owed PHP 4,302.06: PHP 4,000.00 borrowed and PHP 302.06 of
+ * interest and fees Maya added when it was borrowed, already saved as
+ * charges. "That should be 4000 only in the amount and the interest is
+ * 302.06 ... it should know what is interest." Read as interest inside the
+ * PHP 4,000.00, only PHP 3,697.94 came off and PHP 604.12 looked owed.
+ *
+ * When the interest stated is the interest and fees already in what is owed,
+ * it is not new interest and it is not inside the amount: the payment is the
+ * two together, one movement that clears both, and the interest and fees
+ * stay counted once, as the charges they already are. Returned as the draft
+ * to save: the whole payment as the amount, no interest. When the amount
+ * alone already covers what is owed, the interest was inside it. Any other
+ * payment comes back as it went in, so interest billed on top of what is owed
+ * (never added as a charge) is read as it always was, rule 5.6.2.
+ */
+export function withFeesPaid(draft: Draft, transactions: readonly Transaction[]): Draft {
+  if (draft.flow !== "Debt" || draft.debtEffect !== "repay" || !draft.debtId) return draft;
+  const stated = draft.interest ?? 0;
+  const amount = draft.amount ?? 0;
+  if (stated <= 0 || amount <= 0) return draft;
+  const others = draft.id ? transactions.filter((t) => t.id !== draft.id) : transactions;
+  const owed = outstandingOf(others, draft.debtId);
+  const unpaid = unpaidCharges(others, draft.debtId, draft.date || undefined);
+  if (unpaid <= 0 || stated > unpaid) return draft;
+  return { ...draft, amount: amount + stated <= owed ? amount + stated : amount, interest: null };
+}
+
+/**
+ * A payment of what a line owes, shown the owner's way before it is saved:
+ * what was borrowed as the amount and the interest and fees as interest
+ * (PHP 4,000.00 + PHP 302.06 for PHP 4,302.06). Only a payment of the whole
+ * of it, or with no amount yet, and only when interest and fees are in what
+ * is owed; `withFeesPaid` makes it one payment again when it is saved.
+ */
+export function asAmountAndFees(draft: Draft, transactions: readonly Transaction[]): Draft {
+  if (draft.flow !== "Debt" || draft.debtEffect !== "repay" || !draft.debtId || (draft.interest ?? 0) > 0) return draft;
+  const parts = owedParts(transactions, draft.debtId, draft.date || undefined);
+  if (parts.fees <= 0 || (draft.amount !== null && draft.amount !== parts.owed)) return draft;
+  return { ...draft, amount: parts.borrowed, interest: parts.fees };
 }
 
 /** A payment whose interest was the lender's fees already owed, found in the ledger. */

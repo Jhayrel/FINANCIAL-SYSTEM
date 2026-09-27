@@ -48,7 +48,7 @@ import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
 import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
-import { isPartOf, netWorth, parentOf, partOf, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
+import { asAmountAndFees, isPartOf, netWorth, parentOf, partOf, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
@@ -1770,7 +1770,8 @@ export default function App() {
     // A write-off moves no money, so it names no wallet.
     const side = debtWalletDirection(effect);
     setIncoming({
-      draft: {
+      // A payment of what the line owes, filled in as what was borrowed plus its interest and fees.
+      draft: asAmountAndFees({
         ...emptyDraft(asOf),
         flow: "Debt",
         debtId: debt.id,
@@ -1779,7 +1780,7 @@ export default function App() {
         fromWallet: side === "out" ? debt.wallet : "",
         toWallet: side === "in" ? debt.wallet : "",
         amount,
-      },
+      }, transactions),
       at: Date.now(),
     });
     go("add");

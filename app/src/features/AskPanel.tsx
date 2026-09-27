@@ -164,7 +164,7 @@ import { figuresIn } from "../domain/money";
 import { transactionToDraft } from "../domain/entry";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
-import { choicesFor, effectsFor, interestOnTop, outstandingOf, unpaidCharges, type Debt, type DebtEffect } from "../domain/debt";
+import { choicesFor, effectsFor, interestOnTop, outstandingOf, asAmountAndFees, owedParts, type Debt, type DebtEffect } from "../domain/debt";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, type BehalfSide } from "../domain/debtWords";
 import { debtCardIntro } from "../domain/debtSentence";
 import { splitsWhose } from "../domain/behalfFor";
@@ -217,8 +217,8 @@ export interface ProposalSink {
     readonly unusual?: number | undefined;
     /** A debt payment's two parts, what lowers the balance and what is interest. */
     readonly split?: { readonly principal: number; readonly interest: number } | undefined;
-    /** Interest stated on a payment that is the lender's fees, already owed, and the payment put right. */
-    readonly feesTwice?: { readonly unpaid: number; readonly amount: number } | undefined;
+    /** What was borrowed plus the interest and fees already owed, read as one payment (`withFeesPaid`). */
+    readonly feesPaid?: { readonly fees: number; readonly total: number } | undefined;
   };
   /** Put it in the form, for a correction before saving. */
   readonly use: (draft: Draft) => void;
@@ -4864,8 +4864,15 @@ export function AskPanel({
            * chosen rather than inferred, so they are offered as buttons and
            * the rest of the row is already filled in.
            */
-          const card = debtCard(local.draft, note);
-          const intro = debtCardIntro(card.turn.draft, local.interestUnstated ?? false, debts, local.passThrough);
+          // A payment of what the line owes, filled in as what was borrowed plus its interest and fees.
+          const card = debtCard(asAmountAndFees(local.draft, transactions), note);
+          const intro = debtCardIntro(
+            card.turn.draft,
+            local.interestUnstated ?? false,
+            debts,
+            local.passThrough,
+            card.turn.draft.debtId ? owedParts(transactions, card.turn.draft.debtId, asOf) : undefined,
+          );
           say({
             kind: "assistant",
             text:
@@ -7615,9 +7622,8 @@ function DebtCard({
     : [];
   const borrowing = !behalf && draft.debtEffect === "draw" && chosen?.form !== "pass-through";
   const paying = !behalf && draft.debtEffect === "repay" && chosen?.form !== "pass-through";
-  /** What is owed, and how much of it is the lender's fees, which a payment clears first. */
-  const owedNow = paying && draft.debtId ? outstandingOf(transactions, draft.debtId) : 0;
-  const fees = paying && draft.debtId ? unpaidCharges(transactions, draft.debtId, draft.date) : 0;
+  const parts = paying && draft.debtId ? owedParts(transactions, draft.debtId, draft.date) : null;
+
 
   /*
    * The wallet a line uses, when nothing was said: Maya for Maya Credit.
@@ -7899,7 +7905,7 @@ function DebtCard({
       {paying && (
         <div className="fms-debtpick">
           <label className="t-micro fms-pfieldlabel" htmlFor={`debt-interest-${turn.cardId}`}>
-            Interest included
+            {parts && parts.fees > 0 ? "Interest and fees" : "Interest included"}
           </label>
           <div className="fms-debtinterest">
             <AmountInput
@@ -7909,35 +7915,19 @@ function DebtCard({
               ariaLabel="Interest included in the payment"
             />
             <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-              {check.split && check.split.interest > 0 && check.split.principal > 0 && !check.feesTwice
-                ? `${formatMoney(check.split.principal)} off the balance, ${formatMoney(check.split.interest)} interest.`
-                : fees > 0
-                  ? `${formatMoney(fees)} of fees is already in what you owe and this payment clears it. Only interest on top of that goes here.`
-                  : "From the bill or the app. Blank if none."}
+              {check.feesPaid && parts
+                ? `One payment of ${formatMoney(check.feesPaid.total)}: ${formatMoney(check.feesPaid.total - check.feesPaid.fees)} off what you borrowed and ${formatMoney(check.feesPaid.fees)} of the interest and fees ${chosen?.counterparty || chosen?.name || "the lender"} already added, counted once. ${check.feesPaid.total >= parts.owed ? `${chosen?.name ?? "It"} is cleared.` : `${formatMoney(parts.owed - check.feesPaid.total)} still owed after it.`}`
+                : check.split && check.split.interest > 0 && check.split.principal > 0
+                  ? `${formatMoney(check.split.principal)} off the balance, ${formatMoney(check.split.interest)} interest.`
+                  : parts && parts.fees > 0
+                    ? `${chosen?.counterparty || chosen?.name || "The lender"} added ${formatMoney(parts.fees)} when you borrowed. Put it here, and what you borrowed (${formatMoney(parts.borrowed)}) as the amount.`
+                    : "From the bill or the app. Blank if none."}
             </span>
           </div>
-          {/*
-            The lender's fees, already owed, typed again as interest: the
-            PHP 302.06 on Maya Credit that left PHP 604.12 owed after it was
-            paid off (27 September 2026). One tap counts them once.
-          */}
-          {check.feesTwice && (
-            <p className="t-micro fms-proposalnote">
-              <button
-                type="button"
-                className="t-micro fms-linkish"
-                onClick={() => onChange({ ...draft, amount: check.feesTwice!.amount, interest: null })}
-              >
-                Pay {formatMoney(check.feesTwice.amount)}, no interest
-              </button>
-            </p>
-          )}
-          {!check.feesTwice && fees > 0 && !(draft.interest && draft.interest > 0) && (draft.amount ?? 0) > 0 && (
-            <p className="t-micro" style={{ margin: 0, color: "var(--ink-2)" }}>
-              Covers {formatMoney(Math.min(draft.amount ?? 0, fees))} of fees already added
-              {(draft.amount ?? 0) > fees ? `, then ${formatMoney(Math.min((draft.amount ?? 0) - fees, Math.max(0, owedNow - fees)))} of what you borrowed` : ""}.{" "}
-              {(draft.amount ?? 0) >= owedNow ? `Clears ${chosen?.name ?? "it"}.` : `${formatMoney(owedNow - (draft.amount ?? 0))} still owed after it.`}
-            </p>
+          {parts && parts.fees > 0 && !check.feesPaid && !(draft.interest === parts.fees && draft.amount === parts.borrowed) && (
+            <button type="button" className="t-micro fms-linkish" onClick={() => onChange({ ...draft, amount: parts.borrowed, interest: parts.fees })}>
+              Fill in {formatMoney(parts.borrowed)} + {formatMoney(parts.fees)}
+            </button>
           )}
           {/*
             Exactly what is owed, with interest as well: the interest was most
@@ -7945,7 +7935,7 @@ function DebtCard({
             500.00 owed on a credit line the owner had just paid off.
           */}
           {(() => {
-            const total = draft.debtId && !check.feesTwice ? interestOnTop(draft.amount, outstandingOf(transactions, draft.debtId), draft.interest) : null;
+            const total = draft.debtId && !check.feesPaid ? interestOnTop(draft.amount, outstandingOf(transactions, draft.debtId), draft.interest) : null;
             return total ? (
               <p className="t-micro fms-proposalnote">
                 {formatMoney(draft.amount ?? 0)} is everything owed, so {formatMoney(draft.interest ?? 0)} would stay owed. If the interest was on top, you paid {formatMoney(total)}.{" "}

@@ -37,6 +37,7 @@ import {
   debtPace,
   duesWithin,
   feesCountedTwice,
+  owedParts,
   movementsOf,
   owedChange,
   paymentsFiledAsSpending,
@@ -387,6 +388,8 @@ function DebtCard({
   const canLimit = takesLimit(debt);
   const schedule = form === "term-loan" ? loanSchedule(position, asOf) : null;
   const pace = debtPace(position, transactions, asOf);
+  /** What is owed in its two parts, what was borrowed and the interest and fees the lender added (`owedParts`). */
+  const split = owedParts(transactions, debt.id, asOf);
   /** Payments saved with the lender's fees counted again as interest (`feesCountedTwice`). */
   const twice = through || debt.kind !== "payable" ? [] : feesCountedTwice(transactions, debt.id);
 
@@ -567,7 +570,15 @@ function DebtCard({
           {!through && (
             <Fact
               label={owed ? "To pay" : "To collect"}
-              note={settled ? "Nothing" : due.basis === "schedule" ? "This instalment" : "Everything owed now"}
+              note={
+                settled
+                  ? "Nothing"
+                  : due.basis === "schedule"
+                    ? "This instalment"
+                    : split.fees > 0
+                      ? `${formatMoney(split.borrowed)} borrowed + ${formatMoney(split.fees)} interest and fees`
+                      : "Everything owed now"
+              }
             >
               <Money value={settled ? 0 : due.amountDue || position.outstanding} size="m" />
             </Fact>
@@ -624,7 +635,8 @@ function DebtCard({
                     {n(t.followUp)} ({formatMoney(t.followUp.amount)}, paid on that figure) if that payment did not really happen. Then
                   </>
                 ) : null}{" "}
-                open {n(t.payment)} and save it as {formatMoney(meant)} with Interest included blank: the form offers it in one tap.
+                open {n(t.payment)} and save it again: {formatMoney(meant - t.interest.amount)} with {formatMoney(t.interest.amount)} of interest and fees now reads as one payment of{" "}
+                {formatMoney(meant)}.
               </p>
               <div className="fms-debttwice-actions">
                 {t.followUp && (

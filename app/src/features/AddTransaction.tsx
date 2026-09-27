@@ -22,7 +22,7 @@ import {
 import { AmountInput, Select, TextInput } from "../components/forms";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
-import { choicesFor, debtDue, effectsFor, interestOnTop, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionsOf, unpaidCharges } from "../domain/debt";
+import { choicesFor, debtDue, effectsFor, interestOnTop, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionsOf, unpaidCharges, withFeesPaid } from "../domain/debt";
 import { creditRoom, limitOn, takesLimit, usedAfterOne, usedOn } from "../domain/creditLimit";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, partWords, type BehalfSide } from "../domain/debtWords";
 import { formatMoney, type Centavos } from "../domain/money";
@@ -321,6 +321,7 @@ export function AddTransaction({
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
     setDraft((d) => ({ ...d, [key]: value }));
+
 
   /**
    * The autofill pass. Runs itself, fills only what is empty.
@@ -1066,7 +1067,7 @@ export function AddTransaction({
       /** What of a payment is interest, which counts as spending and not against the balance. */
       interest: draft.debtEffect === "repay" ? (check.repaymentSplit?.interest ?? 0) : 0,
       /** The payment as it would be with the stated interest on top, when that is the likelier reading. */
-      onTop: draft.debtEffect === "repay" && !check.feesTwice ? interestOnTop(amount, before, draft.interest) : null,
+      onTop: draft.debtEffect === "repay" && !check.feesPaid ? interestOnTop(amount, before, draft.interest) : null,
       /** The lender's fees still inside what is owed, which a payment clears first. */
       fees: draft.debtEffect === "repay" ? unpaidCharges(base, selectedDebt.id, draft.date || asOf) : 0,
     };
@@ -1185,6 +1186,7 @@ export function AddTransaction({
       text: `Saved as one borrowing in two linked rows: ${formatMoney(draft.amount)} received, and ${formatMoney(draft.charges ?? 0)} of fees added to what you owe, which counts as spending today.`,
     });
   }
+  // Not while the interest typed is the fees already owed: the split it describes is the mistake.
   if (check.repaymentSplit && check.repaymentSplit.interest > 0 && check.repaymentSplit.principal > 0) {
     const clears = debtAfter !== null && debtAfter.after === 0;
     checks.push({
@@ -1194,36 +1196,29 @@ export function AddTransaction({
         : `Saved as one payment in two linked rows: ${formatMoney(check.repaymentSplit.principal)} off what you owe, and ${formatMoney(check.repaymentSplit.interest)} interest, which counts as spending.`,
     });
   }
-  /*
-   * What a payment covers, when the lender's fees are inside what is owed:
-   * the fees first, then what was borrowed. The owner, 27 September 2026:
-   * the PHP 302.06 of fees had nowhere to show except "Interest included",
-   * and putting it there counted it twice.
+  /**
+   * What is owed on the line a payment is typed against, in its two parts:
+   * what was borrowed, and the interest and fees the lender already added.
+   * Null for anything else, and for a line with no interest or fees in it.
    */
-  if (debtAfter && draft.debtEffect === "repay" && debtAfter.fees > 0 && !check.feesTwice && !(draft.interest && draft.interest > 0) && (draft.amount ?? 0) > 0) {
-    const paid = draft.amount ?? 0;
-    const fees = Math.min(paid, debtAfter.fees);
-    const borrowed = Math.min(paid - fees, Math.max(0, debtAfter.before - debtAfter.fees));
+  const owedSplit =
+    debtAfter && draft.debtEffect === "repay" && debtAfter.fees > 0
+      ? { owed: debtAfter.before, fees: debtAfter.fees, borrowed: debtAfter.before - debtAfter.fees }
+      : null;
+
+  /*
+   * What was borrowed as the amount and the interest and fees as interest:
+   * the owner's way of saying one payment (`withFeesPaid`). Said back as one
+   * payment, with what it clears (27 September 2026: "that should be 4000
+   * only in the amount and the interest is 302.06").
+   */
+  if (check.feesPaid && debtAfter) {
+    const paid = check.feesPaid;
     checks.push({
-      key: "covers",
-      text: `Covers ${formatMoney(fees)} of fees ${debtAfter.name} already added${borrowed > 0 ? `, then ${formatMoney(borrowed)} of what you borrowed` : ""}. ${
-        debtAfter.after <= 0 ? `Clears ${debtAfter.name}.` : `${formatMoney(debtAfter.after)} still owed after it.`
-      } The fees are already counted as spending, so nothing goes in Interest included.`,
-    });
-  }
-  if (check.feesTwice) {
-    const fix = check.feesTwice;
-    checks.push({
-      key: "fees-twice",
-      text: `Count the ${formatMoney(fix.unpaid)} of fees once.`,
-      action: (
-        <>
-          {" "}
-          <button type="button" className="t-caption fms-linkbtn" onClick={() => setDraft((d) => ({ ...d, amount: fix.amount, interest: null }))}>
-            Pay {formatMoney(fix.amount)}, no interest
-          </button>
-        </>
-      ),
+      key: "fees-paid",
+      text: `One payment of ${formatMoney(paid.total)}: ${formatMoney(paid.total - paid.fees)} off what you borrowed and ${formatMoney(paid.fees)} of the interest and fees ${
+        selectedDebt?.counterparty || debtAfter.name
+      } already added, counted once. ${debtAfter.after <= 0 ? `${debtAfter.name} is cleared.` : `${formatMoney(debtAfter.after)} still owed after it.`}`,
     });
   }
   if (debtAfter?.onTop) {
@@ -1279,7 +1274,8 @@ export function AddTransaction({
      * of arriving at it.
      */
     /** What the Status box showed is what is saved (see `effectiveStatus`). */
-    const final: Draft = effectiveStatus && !effective.status ? { ...effective, status: effectiveStatus as Draft["status"] } : effective;
+    // A payment typed as what was borrowed plus the interest and fees already owed is saved as the one payment it is (`withFeesPaid`).
+    const final: Draft = withFeesPaid(effectiveStatus && !effective.status ? { ...effective, status: effectiveStatus as Draft["status"] } : effective, transactions);
     // Someone new is saved in the same tap, before the row that names them.
     if (provisional && onAddDebt) onAddDebt(provisional);
 
@@ -1776,14 +1772,14 @@ export function AddTransaction({
 
               {paying && (
                 <Field
-                  label="Interest included"
+                  label={owedSplit ? "Interest and fees" : "Interest included"}
                   half
                   error={interestError}
                   hint={
                     interestError
                       ? undefined
-                      : debtAfter && debtAfter.fees > 0
-                        ? `${formatMoney(debtAfter.fees)} of fees is already in what you owe and this payment clears it. Only interest on top of that goes here.`
+                      : owedSplit
+                        ? `${selectedDebt?.counterparty || selectedDebt?.name || "The lender"} added ${formatMoney(owedSplit.fees)} when you borrowed. Put it here, and what you borrowed (${formatMoney(owedSplit.borrowed)}) as the amount: one payment of ${formatMoney(owedSplit.owed)}.`
                         : "From the bill or app. Blank if none."
                   }
                 >
@@ -1795,6 +1791,15 @@ export function AddTransaction({
                       ariaLabel="Interest included in the payment"
                     />
                   </div>
+                  {owedSplit && !(draft.interest === owedSplit.fees && draft.amount === owedSplit.borrowed) && (
+                    <button
+                      type="button"
+                      className="t-caption fms-linkbtn"
+                      onClick={() => setDraft((d) => ({ ...d, amount: owedSplit.borrowed, interest: owedSplit.fees }))}
+                    >
+                      Fill in {formatMoney(owedSplit.borrowed)} + {formatMoney(owedSplit.fees)}
+                    </button>
+                  )}
                 </Field>
               )}
 
@@ -2237,7 +2242,7 @@ export function AddTransaction({
                 : ""}
             </p>
           </div>
-        ) : impact && (
+        ) : impact && draft.flow !== "Debt" && (
           <div
             className={
               impact.budget > 0 && impact.leftAfter < 0 ? "fms-impact is-over" : "fms-impact"
@@ -2332,15 +2337,9 @@ export function AddTransaction({
                 Paid off{debtAfter.interest > 0 ? `, with ${formatMoney(debtAfter.interest)} of interest on top` : ""}.
               </p>
             )}
-            {debtAfter.owed && debtAfter.after > 0 && debtAfter.interest > 0 && !check.feesTwice && (
+            {debtAfter.owed && debtAfter.after > 0 && debtAfter.interest > 0 && (
               <p className="t-caption" style={{ color: "var(--ink-2)" }}>
                 {formatMoney(debtAfter.interest)} of this is interest, so it does not come off what you owe.
-              </p>
-            )}
-            {/* The fees typed again as interest: the figure above is what that mistake would leave, not what is owed. */}
-            {check.feesTwice && (
-              <p className="t-caption" style={{ color: "var(--over)" }}>
-                Not really owed: that is the {formatMoney(check.feesTwice.unpaid)} of fees counted twice. Pay {formatMoney(check.feesTwice.amount)} with no interest and it is cleared.
               </p>
             )}
             {debtAfter.room && (

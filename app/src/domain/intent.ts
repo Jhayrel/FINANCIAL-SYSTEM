@@ -249,6 +249,12 @@ export function allPaidScope(text: string): AllPaid | null {
   if (!said || said.length > 80 || said.endsWith("?") || /\d/.test(said)) return null;
   if (!/\b(?:paid|pay|payed|settled|done with|nabayaran|binayaran)\b/i.test(said)) return null;
   if (!/\b(?:all|every|each|lahat)\b/i.test(said)) return null;
+  /*
+   * "I paid my debt all of it": a debt named is the debt, not a question of
+   * which list. It was asked "bills, subscriptions, both, or Maya Credit?"
+   * and answered again (owner, 27 September 2026).
+   */
+  if (/\b(?:debts?|credit|loans?|utang|owed?)\b/i.test(said) && !/\b(?:bills?|subscriptions?|subs)\b/i.test(said)) return null;
   const bills = /\bbills?\b/i.test(said);
   const subs = /\b(?:subscriptions?|subs)\b/i.test(said);
   if (bills && subs) return "both";

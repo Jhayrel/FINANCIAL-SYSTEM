@@ -435,10 +435,18 @@ export function uncategorisedCount(
   from.setDate(from.getDate() - windowDays);
   const start = from.toISOString().slice(0, 10);
 
+  /*
+   * Only rows that are grouped by what they were: spending by its category,
+   * income by its item. A transfer or a debt movement has no category by
+   * design, and counting them told the owner 13 rows were missing from the
+   * category totals when one was (27 September 2026).
+   */
   return transactions.filter((t) => {
+    if (t.date < start || t.date > asOf) return false;
+    if (t.type === "Revenue") return t.category !== "Opening" && !t.item.trim();
+    if (t.type !== "Spending") return false;
     const c = t.category.trim().toLowerCase();
-    const blank = !c || c === "unknown" || c === "uncategorised" || c === "uncategorized";
-    return blank && t.date >= start && t.date <= asOf;
+    return !c || c === "unknown" || c === "uncategorised" || c === "uncategorized";
   }).length;
 }
 

@@ -145,15 +145,15 @@ describe("fees the lender adds to what is owed", () => {
   });
 
   /*
-   * Stopped, not only warned, when it is plainly the same money: the owner
-   * saved a payment this way on 27 September 2026 past the warning, and the
-   * fees were counted twice (feesTwice.test.ts).
+   * Interest stated on a payment that is the charges already recorded is
+   * those charges, paid beside the amount: one payment that clears both
+   * (owner, 27 September 2026, feesTwice.test.ts).
    */
-  it("stops interest stated on a payment when it is the charges already recorded, and offers the fix", () => {
+  it("reads interest that is the charges already recorded as paid with the amount, once", () => {
     const ledger = save([opening], draft({ debtEffect: "draw", toWallet: "Maya", amount: 100000, charges: 7000 }));
-    const check = checkDraft(draft({ debtEffect: "repay", fromWallet: "Maya", amount: 107000, interest: 7000 }), ledger, reference, [line]);
-    expect(check.errors.some((e) => e.field === "interest")).toBe(true);
-    expect(check.feesTwice).toEqual({ unpaid: 7000, amount: 107000 });
+    const check = checkDraft(draft({ debtEffect: "repay", fromWallet: "Maya", amount: 100000, interest: 7000 }), ledger, reference, [line]);
+    expect(check.ok).toBe(true);
+    expect(check.feesPaid).toEqual({ fees: 7000, total: 107000 });
   });
 
   it("shows a borrowing and its fees as one movement in the history", () => {

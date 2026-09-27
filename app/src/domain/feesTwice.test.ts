@@ -12,7 +12,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import { feesAsInterest, feesCountedTwice, outstandingOf, unpaidCharges, type Debt } from "./debt";
+import { asAmountAndFees, feesAsInterest, feesCountedTwice, outstandingOf, owedParts, paymentCovers, unpaidCharges, withFeesPaid, type Debt } from "./debt";
+import { debtCardIntro } from "./debtSentence";
 import { checkDraft, draftToTransactions, emptyDraft, type Draft } from "./entry";
 import { REFERENCE } from "./eval/corpus";
 import { totalsFor } from "./totals";
@@ -106,21 +107,35 @@ describe("fees typed again as interest", () => {
     expect(feesAsInterest(300000, 324100, 30000, 24100)).toBeNull();
   });
 
-  it("stop the save, and the check carries the correction", () => {
-    const check = checkDraft(payment({ amount: 300000, interest: 24100 }), owed, REFERENCE, [line], "2026-09-27");
-    expect(check.ok).toBe(false);
-    expect(check.errors.map((e) => e.message).join(" ")).toContain("₱241.00 of fees is already in the ₱3,241.00 owed on Pay Later");
-    expect(check.feesTwice).toEqual({ unpaid: 24100, amount: 324100 });
+  it("typed the owner's way, what was borrowed plus the interest and fees, are one payment that clears the line", () => {
+    const typed = payment({ amount: 300000, interest: 24100 });
+    const check = checkDraft(typed, owed, REFERENCE, [line], "2026-09-27");
+    expect(check.ok).toBe(true);
+    expect(check.feesPaid).toEqual({ fees: 24100, total: 324100 });
+    expect(check.repaymentSplit).toEqual({ principal: 324100, interest: 0 });
+    const saved = withFeesPaid(typed, owed);
+    expect(saved).toMatchObject({ amount: 324100, interest: null });
+    const rows = [...owed, ...draftToTransactions(saved, 99, "p", check.repaymentSplit)];
+    expect(outstandingOf(rows, "line")).toBe(0);
+    // The interest and fees stay counted once, as the charges they already were.
+    expect(totalsFor(rows).interest).toBe(24100);
   });
 
-  it("save a clean payoff once corrected: nothing owed, the fees counted once", () => {
-    const fixed = payment({ amount: 324100, interest: null });
-    const check = checkDraft(fixed, owed, REFERENCE, [line], "2026-09-27");
-    expect(check.ok).toBe(true);
-    expect(check.feesTwice).toBeUndefined();
-    const rows = [...owed, ...draftToTransactions(fixed, 99, "p", check.repaymentSplit)];
-    expect(outstandingOf(rows, "line")).toBe(0);
-    expect(totalsFor(rows).interest).toBe(24100);
+  it("with the whole balance as the amount, the interest was inside it", () => {
+    expect(withFeesPaid(payment({ amount: 324100, interest: 24100 }), owed)).toMatchObject({ amount: 324100, interest: null });
+  });
+
+  it("leave interest billed on top alone, where none was added to what is owed", () => {
+    const plain = [row({ date: "2026-07-29", toWallet: "Maya", amount: 250000, total: 250000, debtEffect: "draw" })];
+    const typed = payment({ amount: 268879, interest: 18879 });
+    expect(withFeesPaid(typed, plain)).toBe(typed);
+  });
+
+  it("are filled in that way when a payment of the whole balance is offered", () => {
+    expect(asAmountAndFees(payment({ amount: 324100 }), owed)).toMatchObject({ amount: 300000, interest: 24100 });
+    expect(asAmountAndFees(payment({ amount: null }), owed)).toMatchObject({ amount: 300000, interest: 24100 });
+    // A part payment is left as typed.
+    expect(asAmountAndFees(payment({ amount: 100000 }), owed)).toMatchObject({ amount: 100000 });
   });
 });
 
@@ -149,5 +164,30 @@ describe("a payment already saved that way", () => {
       row({ id: "aug-interest", recordNumber: 60, date: "2026-08-03", fromWallet: "Maya", amount: 18879, total: 18879, debtEffect: "interest", partOf: "aug" }),
     ];
     expect(feesCountedTwice(real, "line")).toEqual([]);
+  });
+});
+
+describe("what is owed, said in its parts", () => {
+  it("splits what is owed into what was borrowed and the interest and fees", () => {
+    expect(owedParts(owed, "line")).toEqual({ owed: 324100, fees: 24100, borrowed: 300000 });
+  });
+
+  it("says what a payment covers, the interest and fees first", () => {
+    const parts = owedParts(owed, "line");
+    expect(paymentCovers(324100, parts)).toEqual({ fees: 24100, borrowed: 300000, left: 0 });
+    // Typed as what was borrowed: the interest and fees come out first, and that much is still owed.
+    expect(paymentCovers(300000, parts)).toEqual({ fees: 24100, borrowed: 275900, left: 24100 });
+  });
+
+  it("is said in the chat instead of asked for", () => {
+    const intro = debtCardIntro(payment({ amount: 324100 }), true, [line], null, owedParts(owed, "line"));
+    expect(intro).toContain("**Pay Later** is owed **₱3,241.00**: **₱3,000.00** you borrowed and **₱241.00** of interest and fees Lender already added.");
+    expect(intro).toContain("clears both");
+    expect(intro).not.toContain("Put how much");
+    const typedBorrowed = debtCardIntro(payment({ amount: 300000 }), true, [line], null, owedParts(owed, "line"));
+    expect(typedBorrowed).toContain("it is one payment of **₱3,241.00**");
+    const filled = debtCardIntro(payment({ amount: 300000, interest: 24100 }), true, [line], null, owedParts(owed, "line"));
+    expect(filled).toContain("one payment of **₱3,241.00**");
+    expect(filled).toContain("It clears Pay Later.");
   });
 });

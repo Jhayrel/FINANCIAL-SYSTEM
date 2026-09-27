@@ -18,7 +18,7 @@
 import { useEffect, useMemo, useRef } from "react";
 
 import type { Provenance } from "../domain/activity";
-import type { Debt } from "../domain/debt";
+import { withFeesPaid, type Debt } from "../domain/debt";
 import type { ExportAsk } from "../domain/exportAsk";
 import {
   checkDraft,
@@ -106,7 +106,7 @@ export function useProposalSink(input: SinkInput): ProposalSink {
           warnings: c.warnings.map((w) => w.message),
           unusual: c.unusual?.times,
           split: c.repaymentSplit,
-          ...(c.feesTwice ? { feesTwice: c.feesTwice } : {}),
+          ...(c.feesPaid ? { feesPaid: c.feesPaid } : {}),
         };
       },
       use: (d) => handlers.current.onUse(d),
@@ -146,7 +146,7 @@ export function useProposalSink(input: SinkInput): ProposalSink {
         const number = nextRecordNumber + taken.current;
         taken.current += 1;
         handlers.current.onSave(
-          draftToTransactions(d, number, `t-${Date.now()}-${proposed}`, c.repaymentSplit),
+          draftToTransactions(withFeesPaid(d, transactions), number, `t-${Date.now()}-${proposed}`, c.repaymentSplit),
           // Recorded as the assistant's, because it was: the owner approved
           // it, but they did not type it, and six months from now that is the
           // difference worth being able to look up.

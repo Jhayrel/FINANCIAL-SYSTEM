@@ -36,7 +36,7 @@
 import { walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { billStatuses, overdue, STOPPED_AFTER_DAYS, upcoming } from "./bills";
-import { debtDue, incomeQuality, positionsOf, unpaidCharges, type Debt } from "./debt";
+import { debtDue, incomeQuality, netWorth, positionsOf, unpaidCharges, type Debt } from "./debt";
 import { creditRoom, limitSteps } from "./creditLimit";
 import { addDays, daysBetween, getMonth, getYear, monthName } from "./dates";
 import { financeAlerts, burnRate, daysLeft, dailyAllowance } from "./alerts";
@@ -200,9 +200,19 @@ export function buildContext(input: ContextInput): AiContext {
       .filter((a) => a.kind !== "goal")
       .map((a) => ({ account: a.name, balance: pesos(walletBalance(transactions, a.name)) })),
 
+    /*
+     * The Dashboard's figure, by the Dashboard's function (rule 5.6.3):
+     * what is owed to the owner is added, not taken away. This subtracted
+     * every debt whichever way it pointed, so the day a father owed the owner
+     * for his phone plan, the assistant would have quoted a net worth lower
+     * than the Dashboard by twice what he owed.
+     */
     netWorth: pesos(
-      live.reduce((sum, a) => sum + walletBalance(transactions, a.name), 0) -
-        positions.reduce((sum, p) => sum + Math.max(0, p.outstanding), 0),
+      netWorth(
+        live.filter((a) => reference.wallets.includes(a.name)).reduce((sum, a) => sum + walletBalance(transactions, a.name), 0),
+        live.filter((a) => !reference.wallets.includes(a.name)).reduce((sum, a) => sum + walletBalance(transactions, a.name), 0),
+        positions,
+      ).total,
     ),
 
     income: {
@@ -389,7 +399,7 @@ export function contextToText(c: AiContext): string {
               (d.limitHistory ?? []).length > 1 ? `. Limit over time: ${(d.limitHistory ?? []).map((h) => `${php(h.limit)} from ${h.from}`).join(", ")}` : ""
             }`;
       const fees = d.feesInBalance
-        ? ` (${php(d.borrowedInBalance ?? 0)} borrowed and ${php(d.feesInBalance)} of fees the lender already added; paying ${php(d.outstanding)} clears both, and the fees are already counted, so none of it is new interest)`
+        ? ` (${php(d.borrowedInBalance ?? 0)} borrowed and ${php(d.feesInBalance)} of interest and fees the lender already added; paying ${php(d.outstanding)} clears both, and the interest and fees are already counted, so none of it is new interest)`
         : "";
       lines.push(`${d.name} (${d.kind}): ${php(d.outstanding)}${fees}${due}${limit}`);
     }

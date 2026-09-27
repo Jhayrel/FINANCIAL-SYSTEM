@@ -6598,6 +6598,51 @@ textarea.fms-askinput {
   gap: var(--space-2);
 }
 
+/*
+ * What a debt payment pays: what was borrowed, the interest and fees already
+ * added, and the total, ruled like every other table here (rule D2), money
+ * right-aligned in the figures face (rule D4).
+ */
+.fms-paysplit-list {
+  display: grid;
+  margin: 0;
+  min-width: 0;
+}
+
+.fms-paysplit-list > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 4px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-paysplit-list dt {
+  color: var(--ink-2);
+  min-width: 0;
+}
+
+.fms-paysplit-list dd {
+  margin: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.fms-paysplit-list > .fms-paysplit-total {
+  border-top: 2px solid var(--ink);
+}
+
+.fms-paysplit-list > .fms-paysplit-total dt {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.fms-paysplit {
+  display: grid;
+  gap: var(--space-1);
+}
+
 /* The credit limit, set or changed on the card (DebtScreen `LimitQuick`). */
 .fms-limitquick {
   display: grid;

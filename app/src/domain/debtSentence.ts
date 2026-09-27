@@ -48,7 +48,7 @@
  * A sentence with both a payment and a borrowing in it is left alone too.
  */
 
-import type { Debt, DebtEffect } from "./debt";
+import type { Debt, DebtEffect, OwedParts } from "./debt";
 import type { Draft } from "./entry";
 import { formatMoney, type Centavos } from "./money";
 import { effectLabel, effectMeaning } from "./debtWords";
@@ -366,6 +366,8 @@ export function debtCardIntro(
   interestUnstated: boolean,
   debts: readonly Debt[],
   passThrough?: "held" | "fronted" | null,
+  /** What the line is owed, in its parts (`owedParts`), so a payment is broken down rather than asked about. */
+  owed?: OwedParts,
 ): string {
   const line = debts.find((d) => d.id === draft.debtId)?.name;
   if (draft.behalf) {
@@ -428,6 +430,35 @@ export function debtCardIntro(
     );
   } else if (draft.debtEffect === "charge" && draft.amount !== null) {
     parts.push(`No money moved: what you owe goes up by **${formatMoney(draft.amount)}**, and it counts as spending today.`);
+  } else if (draft.debtEffect === "repay" && owed && owed.fees > 0 && line) {
+    /*
+     * The interest and fees are already in what is owed, so they are known:
+     * said, never asked for. The owner, 27 September 2026, after being told
+     * to put the interest in by hand: "the ai doesnt know what is the
+     * interest and the amount need to pay ... thats should be 4000 and
+     * others".
+     */
+    const lender = debts.find((d) => d.id === draft.debtId)?.counterparty || line;
+    parts.push(
+      `**${line}** is owed **${formatMoney(owed.owed)}**: **${formatMoney(owed.borrowed)}** you borrowed and **${formatMoney(owed.fees)}** of interest and fees ${lender} already added.`,
+    );
+    const paid = draft.amount ?? 0;
+    const stated = draft.interest ?? 0;
+    if (stated > 0 && stated <= owed.fees) {
+      const total = paid + stated <= owed.owed ? paid + stated : paid;
+      parts.push(
+        `The card has **${formatMoney(total - stated)}** off what you borrowed and **${formatMoney(stated)}** of interest and fees: one payment of **${formatMoney(total)}**, the interest and fees counted once. ${
+          total >= owed.owed ? `It clears ${line}.` : `${formatMoney(owed.owed - total)} is still owed after it.`
+        }`,
+      );
+    } else if (paid >= owed.owed) {
+      parts.push(`Paying **${formatMoney(paid)}** clears both. The ${formatMoney(owed.fees)} is already counted as interest and fees, so it is not added again.`);
+    } else if (paid === owed.borrowed) {
+      parts.push(`The card has ${formatMoney(paid)}, what you borrowed. Put the ${formatMoney(owed.fees)} of interest and fees beside it and it is one payment of **${formatMoney(owed.owed)}**: the card offers it in one tap.`);
+    } else if (paid > 0) {
+      const fees = Math.min(paid, owed.fees);
+      parts.push(`It covers ${formatMoney(fees)} of interest and fees first${paid > fees ? `, then ${formatMoney(paid - fees)} of what you borrowed` : ""}, and ${formatMoney(owed.owed - paid)} is still owed after it.`);
+    }
   } else if (draft.debtEffect === "repay" && (draft.interest ?? null) !== null) {
     parts.push(`**${formatMoney(draft.interest ?? 0)}** of it is interest, so only the rest lowers what you owe.`);
   } else if (interestUnstated) {

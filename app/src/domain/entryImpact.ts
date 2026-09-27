@@ -18,7 +18,7 @@ import { assessMonth, budgetForMonth } from "./budget";
 import { monthLock, type MonthLock } from "./budgetLock";
 import { categoryLimits } from "./budgetView";
 import { firstOfMonth, getMonth, getYear, lastOfMonth } from "./dates";
-import { outstandingOf, partOf, splitRepayment } from "./debt";
+import { outstandingOf, partOf, splitRepayment, withFeesPaid } from "./debt";
 import { draftToTransactions, type Draft } from "./entry";
 import type { Centavos } from "./money";
 import { costOf, monthTotals, spendingAttribution, UNCATEGORISED } from "./totals";
@@ -86,11 +86,13 @@ export function entryImpact(
    * repayment row that cost nothing, so ₱120.00 of interest went into the
    * month's spending without a word here.
    */
+  // Interest and fees already owed, typed beside what was borrowed, are one payment and cost nothing new (`withFeesPaid`).
+  const paid = withFeesPaid(draft, transactions);
   const split =
-    draft.flow === "Debt" && draft.debtEffect === "repay" && draft.debtId
-      ? splitRepayment(draft.amount, outstandingOf(others, draft.debtId), draft.interest)
+    paid.flow === "Debt" && paid.debtEffect === "repay" && paid.debtId && paid.amount !== null
+      ? splitRepayment(paid.amount, outstandingOf(others, paid.debtId), paid.interest)
       : undefined;
-  const rows = draftToTransactions(draft, 0, draft.id ?? "draft-preview", split);
+  const rows = draftToTransactions(paid, 0, draft.id ?? "draft-preview", split);
   const cost = rows.reduce((sum, r) => sum + costOf(r), 0);
   const main = rows.find((r) => costOf(r) > 0) ?? rows[0];
   if (!main || cost <= 0) return null;

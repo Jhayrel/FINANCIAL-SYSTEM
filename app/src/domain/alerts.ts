@@ -548,6 +548,12 @@ export function financeAlerts(input: AlertInput): Alert[] {
 
   // ── Extra zeros ──────────────────────────────────────────────────────────
   for (const found of unusualRows(transactions, asOf)) {
+    /*
+     * Money held or paid for someone else is theirs, not a figure of the
+     * owner's own to measure against: an aunt's PHP 25,000.00 for a funeral
+     * read as ten times the owner's largest borrowing (27 September 2026).
+     */
+    if (found.row.debtId && debts.find((d) => d.id === found.row.debtId)?.form === "pass-through") continue;
     const number = `#${String(found.row.recordNumber).padStart(4, "0")}`;
     out.push({
       id: `unusual-${found.row.id}`,
@@ -632,7 +638,13 @@ export function financeAlerts(input: AlertInput): Alert[] {
    */
   const byNumber = new Map<number, Transaction[]>();
   for (const t of transactions) {
-    if (t.id.endsWith("-interest")) continue;
+    /*
+     * A movement's part shares its number by design: a payment's interest,
+     * and a borrowing's fees. The fees were left in, and every Maya Credit
+     * borrowing with fees read as two devices saving at once (27 September
+     * 2026, records #3821 and #3822).
+     */
+    if (t.partOf || t.id.endsWith("-interest") || t.id.endsWith("-charge")) continue;
     byNumber.set(t.recordNumber, [...(byNumber.get(t.recordNumber) ?? []), t]);
   }
   for (const [number, rows] of byNumber) {
