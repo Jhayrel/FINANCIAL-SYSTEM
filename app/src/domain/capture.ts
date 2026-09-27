@@ -852,7 +852,7 @@ const SENT_AWAY =
  * amount; once is just the last time, and guessing from one row is how a
  * wrong figure gets saved because someone answered "the usual".
  */
-function usualAmountFor(draft: Draft, transactions: readonly Transaction[]): number | null {
+export function usualAmountFor(draft: Draft, transactions: readonly Transaction[]): number | null {
   const item = draft.item.trim().toLowerCase();
   if (!item || !draft.flow) return null;
 

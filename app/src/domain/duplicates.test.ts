@@ -238,3 +238,26 @@ describe("a transfer is identified by both of its ends", () => {
     expect(duplicatesOf(away, [moved({})])).toEqual([]);
   });
 });
+
+describe("the same money filed as another kind (27 September 2026)", () => {
+  // Maya's "Withdrawal from 00201002 SF LA UNION", PHP 2.00: in the ledger as Unknown spending, read again as a withdrawal to Cash.
+  const ledger = [row({ id: "u", recordNumber: 3798, date: "2026-09-12", type: "Spending", category: "Spending", item: "Unknown", fromWallet: "Maya", toWallet: "", amount: 200, total: 200, description: "Unknown spending" })];
+
+  it("is found, out of the same wallet the same day", () => {
+    const found = duplicatesOf(draft({ date: "2026-09-12", flow: "Transfer", category: "Transfer", fromWallet: "Maya", toWallet: "Cash", amount: 200, description: "Withdrawal from 00201002 SF LA UNION" }), ledger);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.evidence.join(" ")).toContain("out of Maya");
+    expect(found[0]?.evidence.join(" ")).toContain("filed as Spending, Unknown");
+  });
+
+  it("is not found for money going the other way, or from another wallet", () => {
+    expect(duplicatesOf(draft({ date: "2026-09-12", flow: "Revenue", category: "Revenue", toWallet: "Maya", amount: 200 }), ledger)).toHaveLength(0);
+    expect(duplicatesOf(draft({ date: "2026-09-12", flow: "Transfer", category: "Transfer", fromWallet: "Gcash", toWallet: "Cash", amount: 200 }), ledger)).toHaveLength(0);
+  });
+
+  it("names the wallet when the same row sits in another one", () => {
+    const cashBack = [row({ id: "c", recordNumber: 3803, date: "2026-09-13", type: "Revenue", category: "Revenue", item: "Random", fromWallet: "", toWallet: "Cash", amount: 425, total: 425, description: "maya cash back" })];
+    const found = duplicatesOf(draft({ date: "2026-09-13", flow: "Revenue", category: "Revenue", item: "Random", toWallet: "Maya", amount: 425, description: "Cash back" }), cashBack);
+    expect(found[0]?.evidence.join(" ")).toContain("That one is into Cash, this one into Maya");
+  });
+});

@@ -72,6 +72,7 @@ import { Button } from "../components/primitives";
 import {
   amend,
   applyReply,
+  usualAmountFor,
   leftoverFigure,
   detectAlsoIn,
   matchItem,
@@ -2045,6 +2046,28 @@ export function AskPanel({
      * list, beats asking the owner a question they already answered.
      */
     let ready = filled;
+
+    /*
+     * A bill at a fraction of what it costs is not that bill. Maya's "Globe
+     * ₱50.00" was filed as Globe at Home Wifi, which is ₱999.00 every month
+     * (27 September 2026): it was load. Filed as the bill it would have
+     * marked the month's wifi paid. Left for the owner to say what it was.
+     */
+    const billed = ready.draft;
+    if ((billed.category === "Bills" || billed.category === "Subscriptions") && billed.item.trim() && billed.amount !== null) {
+      const usual = usualAmountFor(billed, transactions);
+      if (usual !== null && usual >= billed.amount * 3) {
+        ready = {
+          ...ready,
+          draft: { ...billed, item: "", category: "Spending" },
+          confidence: "low",
+          adjustments: [
+            ...ready.adjustments,
+            `${formatMoney(billed.amount)} is far below what ${billed.item} costs (usually ${formatMoney(usual)}), so it was not filed as that ${billed.category === "Bills" ? "bill" : "subscription"}. Say what it was for.`,
+          ],
+        };
+      }
+    }
 
     /**
      * Whatever else is missing, work out what the thing was.

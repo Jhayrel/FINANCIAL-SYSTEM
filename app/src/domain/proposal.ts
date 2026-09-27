@@ -367,7 +367,22 @@ function readOne(
         : "Bills"
       : null;
 
-  const category = filed ?? readCategory(flow, str(value["category"]));
+  /*
+   * A category's name given as the item: "Subscriptions" for Microsoft 365
+   * (27 September 2026), saved as a Spending item called Subscriptions. The
+   * name says the category; the item is the one on that list the words
+   * name, or left for the owner.
+   */
+  const categoryNamed = /^(bills?|subscriptions?)$/i.exec(str(value["item"]).trim());
+  const byName = categoryNamed && flow === "Spending" ? (/^bill/i.test(categoryNamed[1] ?? "") ? "Bills" : "Subscriptions") : null;
+  const category = filed ?? byName ?? readCategory(flow, str(value["category"]));
+  if (byName) {
+    const words = str(value["description"]).toLowerCase();
+    const list = byName === "Bills" ? reference.bills : reference.subscriptions;
+    const named = list.find((name) => name.toLowerCase().split(/\s+/).filter((w) => w.length > 2).some((w) => words.includes(w)));
+    value = { ...value, item: named ?? "" };
+  }
+  if (/^(spending|revenue|income|transfer)$/i.test(str(value["item"]).trim())) value = { ...value, item: "" };
 
   /**
    * An item that is not on the list is kept, not dropped.

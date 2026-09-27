@@ -171,6 +171,13 @@ export interface ListRecovery {
   readonly recovered: number;
 }
 
+/** The day `days` before an ISO date, as an ISO date. */
+function isoDaysBefore(iso: string, days: number): string {
+  const at = new Date(`${iso}T00:00:00Z`);
+  at.setUTCDate(at.getUTCDate() - days);
+  return at.toISOString().slice(0, 10);
+}
+
 const DERIVED_ITEMS = new Set(["money send", "transaction fee", "transfer of balance", "opening balance"]);
 
 export function recoverLists(
@@ -188,7 +195,14 @@ export function recoverLists(
   const since = latest ? `${Number(latest.slice(0, 4)) - 1}${latest.slice(4)}` : "";
   const skip = new Set([...DERIVED_ITEMS, ...creditNames.map((n) => n.trim().toLowerCase())]);
 
-  const namesFor = (keep: (t: Transaction) => boolean): string[] => {
+  /*
+   * A bill or subscription is current when it was paid in the last three
+   * months: a one-year window brought back Globe Postpaid, last paid in
+   * October 2025, and the Dashboard called it past due (27 September 2026).
+   */
+  const recentSince = latest ? isoDaysBefore(latest, 92) : "";
+
+  const namesFor = (keep: (t: Transaction) => boolean, from = since): string[] => {
     const lastSeen = new Map<string, string>();
     for (const t of live) {
       if (!keep(t) || skip.has(t.item.trim().toLowerCase())) continue;
@@ -196,14 +210,16 @@ export function recoverLists(
       const was = lastSeen.get(name);
       if (!was || t.date > was) lastSeen.set(name, t.date);
     }
-    const recent = [...lastSeen].filter(([, date]) => date >= since);
+    const recent = [...lastSeen].filter(([, date]) => date >= from);
     const pool = recent.length > 0 ? recent : [...lastSeen];
     return pool.sort((a, b) => (a[1] === b[1] ? a[0].localeCompare(b[0]) : a[1] < b[1] ? 1 : -1)).map(([name]) => name);
   };
 
-  const bills = current.bills.length > 0 ? current.bills : namesFor((t) => t.type === "Spending" && t.category === "Bills");
+  const bills = current.bills.length > 0 ? current.bills : namesFor((t) => t.type === "Spending" && t.category === "Bills", recentSince);
   const subscriptions =
-    current.subscriptions.length > 0 ? current.subscriptions : namesFor((t) => t.type === "Spending" && t.category === "Subscriptions");
+    current.subscriptions.length > 0
+      ? current.subscriptions
+      : namesFor((t) => t.type === "Spending" && t.category === "Subscriptions", recentSince);
   const revenueCategories =
     current.revenueCategories.length > 0 ? current.revenueCategories : namesFor((t) => t.type === "Revenue" && t.category === "Revenue");
   const spendingTypes =

@@ -142,3 +142,25 @@ describe("a receipt in another currency (21 September 2026)", () => {
     expect(read.proposals[0]?.draft.amount).toBe(15406);
   });
 });
+
+describe("a category's name given as the item (27 September 2026)", () => {
+  const withSubs: ReferenceLists = { ...reference, subscriptions: ["Spotify", "Microsoft Office 365"], bills: ["Globe at Home Wifi"] };
+
+  it("files Microsoft 365 as the subscription it is", () => {
+    const read = readProposals(
+      { proposals: [{ flow: "Spending", category: "Spending", item: "Subscriptions", fromWallet: "Maya", amountPesos: 239, date: "2026-09-21", description: "Microsoft*Microsoft 365 P" }] },
+      withSubs,
+      "2026-09-27",
+    );
+    expect(read.proposals[0]?.draft).toMatchObject({ category: "Subscriptions", item: "Microsoft Office 365" });
+  });
+
+  it("leaves the item for the owner when the words name none on the list", () => {
+    const read = readProposals(
+      { proposals: [{ flow: "Spending", category: "Spending", item: "Bills", fromWallet: "Maya", amountPesos: 50, date: "2026-09-11", description: "Payment" }] },
+      withSubs,
+      "2026-09-27",
+    );
+    expect(read.proposals[0]?.draft).toMatchObject({ category: "Bills", item: "" });
+  });
+});

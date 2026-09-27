@@ -135,10 +135,30 @@ export function duplicatesOf(
     if (!live(row)) continue;
     if (options.ignoreId && row.id === options.ignoreId) continue;
     if (row.amount !== amount) continue;
-    // PHP 300 received and PHP 300 spent are two rows, not one row twice.
-    if (flow && row.type !== flow) continue;
-
     const apart = Math.abs(daysBetween(draft.date, row.date));
+    // PHP 300 received and PHP 300 spent are two rows, not one row twice.
+    if (flow && row.type !== flow) {
+      /*
+       * Unless it is the same money filed as another kind: the same amount
+       * out of the same wallet, or into it, within a day. Maya's "Withdrawal
+       * from 00201002 SF LA UNION" of PHP 2.00 was in the ledger as Unknown
+       * spending and went in again as a withdrawal to Cash (27 September
+       * 2026), because a withdrawal and a spending were never compared.
+       */
+      const wallet = sameMoneyOtherKind(draft, row);
+      if (!wallet || apart > 1) continue;
+      found.push({
+        row,
+        certainty: "close",
+        evidence: [
+          `Both ${formatMoney(amount)} ${wallet}, ${apart === 0 ? "the same day" : "a day apart"}.`,
+          `That one is filed as ${row.type}${row.item ? `, ${row.item}` : ""}; this one as ${flow}. If it is the same money, keep one and fix its kind there.`,
+        ],
+        score: apart === 0 ? 5 : 4,
+      });
+      continue;
+    }
+
     const sameDescription = agree(draft.description, row.description) && apart <= SAME_WORDS_DAYS;
 
     // Far apart, with nothing in common but a figure. Every month has a 300.
@@ -199,6 +219,14 @@ export function duplicatesOf(
       score += 2;
     }
 
+    // The same row in another wallet is the case that moves a balance: say which side is wrong to check.
+    if (!sameWallets && (sameDescription || sameItem)) {
+      const where = (from: string, to: string): string => (to ? `into ${to}` : from ? `out of ${from}` : "with no wallet");
+      evidence.push(
+        `That one is ${where(row.fromWallet, row.toWallet)}, this one ${where(draft.fromWallet, draft.toWallet)}. If it is the same money, one of them has the wrong wallet.`,
+      );
+    }
+
     if (draft.fee !== 0 && draft.fee === row.fee) {
       evidence.push(`The same ${formatMoney(row.fee)} fee.`);
       score += 1;
@@ -225,6 +253,18 @@ export function duplicatesOf(
   return found
     .sort((a, b) => b.score - a.score || b.row.recordNumber - a.row.recordNumber)
     .slice(0, options.most ?? 3);
+}
+
+/**
+ * The wallet two rows of different kinds both move money through, in words,
+ * or "" when they do not: out of it for both, or into it for both.
+ */
+function sameMoneyOtherKind(draft: Draft, row: Transaction): string {
+  const draftIn = draft.flow === "Revenue" || (draft.flow === "Transfer" && !draft.fromWallet.trim()) || (draft.flow === "Debt" && !draft.fromWallet.trim() && Boolean(draft.toWallet.trim()));
+  const rowIn = row.type === "Revenue" || (!row.fromWallet.trim() && Boolean(row.toWallet.trim()));
+  if (!draftIn && !rowIn && draft.fromWallet.trim() && same(draft.fromWallet, row.fromWallet)) return `out of ${row.fromWallet}`;
+  if (draftIn && rowIn && draft.toWallet.trim() && same(draft.toWallet, row.toWallet)) return `into ${row.toWallet}`;
+  return "";
 }
 
 /**
