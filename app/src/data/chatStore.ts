@@ -10,7 +10,7 @@
  * record of it failed would be reporting the wrong problem.
  */
 
-import { collection, doc, getDocs, getDocsFromCache, limit, orderBy, query, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, getDocsFromCache, limit, onSnapshot, orderBy, query, setDoc } from "firebase/firestore";
 
 import { firestore } from "./firebase";
 import { byOldest, type ChatMessage } from "../domain/chat";
@@ -38,6 +38,9 @@ const path = (uid: string): string => `users/${uid}/chat`;
 /** A session's messages when there is nowhere to write them. */
 const memory: ChatMessage[] = [];
 
+/** Messages this page wrote, so the live listener can tell another device's from its own. */
+const writtenHere = new Set<string>();
+
 export interface ChatStore {
   record(message: ChatMessage): Promise<void>;
   recent(): Promise<ChatMessage[]>;
@@ -47,6 +50,14 @@ export interface ChatStore {
    * screen opens; `recent` then brings anything newer.
    */
   cached(): Promise<ChatMessage[]>;
+  /**
+   * The conversation as it changes on another device: the phone sees what
+   * was said on the PC as it is said (the owner, 27 September 2026: "sync it
+   * live to my phone and it should work live and fast"). Called with the
+   * whole recent conversation whenever a message this page did not write
+   * arrives from the server. Returns the way to stop listening.
+   */
+  watch(onRemote: (all: ChatMessage[]) => void): () => void;
 }
 
 export function chatStore(uid: string | null): ChatStore {
@@ -62,6 +73,9 @@ export function chatStore(uid: string | null): ChatStore {
       async cached() {
         return [...memory].sort(byOldest);
       },
+      watch() {
+        return () => {};
+      },
     };
   }
 
@@ -71,6 +85,7 @@ export function chatStore(uid: string | null): ChatStore {
     async record(message) {
       if (!db) return;
       const { id, ...fields } = message;
+      writtenHere.add(id);
       // Firestore rejects undefined, and `from` is genuinely absent on your
       // own messages rather than empty.
       const document = Object.fromEntries(
@@ -89,6 +104,34 @@ export function chatStore(uid: string | null): ChatStore {
       return snapshot.docs
         .map((d) => ({ id: d.id, ...d.data() }) as ChatMessage)
         .sort(byOldest);
+    },
+
+    watch(onRemote) {
+      if (!db) return () => {};
+      /*
+       * The first answer from the server is what `recent` already showed;
+       * after that, a message added that this page did not write is another
+       * device's, and the conversation is handed over whole.
+       */
+      let baseline = false;
+      return onSnapshot(
+        query(collection(db, path(uid)), orderBy("at", "desc"), limit(PAGE)),
+        // With the moment the cached copy is confirmed by the server, which is the baseline; without it the first message from the other device was taken for it.
+        { includeMetadataChanges: true },
+        (snapshot) => {
+          if (snapshot.metadata.fromCache) return;
+          if (!baseline) {
+            baseline = true;
+            return;
+          }
+          const remote = snapshot
+            .docChanges()
+            .some((c) => c.type === "added" && !writtenHere.has(c.doc.id) && !c.doc.metadata.hasPendingWrites);
+          if (!remote) return;
+          onRemote(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as ChatMessage).sort(byOldest));
+        },
+        () => {},
+      );
     },
 
     async cached() {

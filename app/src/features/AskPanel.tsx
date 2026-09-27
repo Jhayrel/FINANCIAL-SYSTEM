@@ -189,7 +189,7 @@ import {
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { budgetForYear } from "../domain/budget";
 import { MONTH_NAMES } from "../domain/dates";
-import { alikeKey, answerCard, cardQuestion, confirmsIncome, looksLikeAnswer, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
+import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
 import { forecastYear } from "../domain/forecast";
 import { withCommandWordsFixed } from "../domain/typos";
@@ -562,6 +562,53 @@ const newCardId = (): string => {
  * Everything missing falls back to something safe rather than throwing, since
  * one bad card must not take the whole conversation down with it.
  */
+/**
+ * The conversation as stored, back into turns: the said lines in order, and
+ * each card once, where it first appeared, in the state it ended in.
+ */
+function rebuildThread(all: readonly ChatMessage[], since: string | null): Turn[] {
+  const history = since ? all.filter((m) => m.at > since) : [...all];
+
+  /**
+   * Cards come back where they were, in the state they ended in.
+   *
+   * A card that changed wrote a second message with the same id, so
+   * the final state is worked out first and the card is then emitted
+   * once, at its first appearance. Without that, a card added after
+   * three corrections would come back four times.
+   */
+  const final = cardsIn(history);
+  const rebuilt: Turn[] = [];
+  const done = new Set<string>();
+
+  for (const m of history) {
+    const chart = drawn(m) as Chart | null;
+    if (chart) {
+      rebuilt.push({ kind: "chart", chart });
+      continue;
+    }
+
+    // `carded` rather than JSON.parse: a malformed card must lose
+    // that one card, not the whole conversation.
+    const here = carded(m);
+    const stored = here ? final.get(here.id) : undefined;
+    if (stored) {
+      if (done.has(stored.id)) continue;
+      done.add(stored.id);
+      rebuilt.push(turnFromCard(stored));
+      continue;
+    }
+
+    rebuilt.push({
+      kind: m.role,
+      text: m.text,
+      ...(m.from ? { from: m.from } : {}),
+      ...(m.files && m.files.length > 0 ? { described: m.files } : {}),
+    });
+  }
+  return rebuilt;
+}
+
 function turnFromCard(card: StoredCard): Turn {
   const draft = card.draft as unknown as Draft;
   const data = (card.data ?? {}) as Record<string, unknown>;
@@ -1456,52 +1503,31 @@ export function AskPanel({
    * seconds after every refresh (the owner, 26 September 2026).
    */
   const shownHistory = useRef<Turn[] | null>(null);
+  /**
+   * The conversation as another device left it, waiting for this one to be
+   * free: never over an answer on its way, a question waiting for its reply,
+   * or a card being asked about (data/chatStore.ts, `watch`).
+   */
+  const remoteThread = useRef<Turn[] | null>(null);
+  const idle = useRef(true);
+  idle.current = !busy && pending === null && asking === null;
+  const takeRemote = (): void => {
+    const next = remoteThread.current;
+    if (!next || !idle.current) return;
+    remoteThread.current = null;
+    shownHistory.current = next;
+    setTurns(next);
+  };
+  useEffect(() => {
+    takeRemote();
+    // Only when this device becomes free.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, pending, asking]);
   useEffect(() => {
     let live = true;
     const since = clearedAt();
 
-    const rebuild = (all: readonly ChatMessage[]): Turn[] => {
-      const history = since ? all.filter((m) => m.at > since) : [...all];
-
-      /**
-       * Cards come back where they were, in the state they ended in.
-       *
-       * A card that changed wrote a second message with the same id, so
-       * the final state is worked out first and the card is then emitted
-       * once, at its first appearance. Without that, a card added after
-       * three corrections would come back four times.
-       */
-      const final = cardsIn(history);
-      const rebuilt: Turn[] = [];
-      const done = new Set<string>();
-
-      for (const m of history) {
-        const chart = drawn(m) as Chart | null;
-        if (chart) {
-          rebuilt.push({ kind: "chart", chart });
-          continue;
-        }
-
-        // `carded` rather than JSON.parse: a malformed card must lose
-        // that one card, not the whole conversation.
-        const here = carded(m);
-        const stored = here ? final.get(here.id) : undefined;
-        if (stored) {
-          if (done.has(stored.id)) continue;
-          done.add(stored.id);
-          rebuilt.push(turnFromCard(stored));
-          continue;
-        }
-
-        rebuilt.push({
-          kind: m.role,
-          text: m.text,
-          ...(m.from ? { from: m.from } : {}),
-          ...(m.files && m.files.length > 0 ? { described: m.files } : {}),
-        });
-      }
-      return rebuilt;
-    };
+    const rebuild = (all: readonly ChatMessage[]): Turn[] => rebuildThread(all, since);
 
     // Worked out once, outside the updater: React may call an updater twice.
     const show = (all: readonly ChatMessage[]): void => {
@@ -1521,8 +1547,17 @@ export function AskPanel({
       .finally(() => {
         void store.recent().then(show).catch(() => {});
       });
+    // Said on the other device: shown here as it is said.
+    const stop = store.watch((all) => {
+      if (!live) return;
+      const rebuilt = rebuild(all);
+      if (rebuilt.length === 0) return;
+      remoteThread.current = rebuilt;
+      takeRemote();
+    });
     return () => {
       live = false;
+      stop();
     };
   }, [uid]);
 
@@ -2158,7 +2193,29 @@ export function AskPanel({
     }
 
     const before = shown.proposal.draft;
-    let filled = answerCard(before, asking.blank, note, reference, transactions, creditLines);
+    /*
+     * The model reads the answer, with the row and the question it answers;
+     * the device holds it to the row and applies it (domain/cardQuestions.ts).
+     * The rules below it are what is left when no model can be reached.
+     */
+    let filled: Draft | null = null;
+    let readBy = "this device";
+    if (!ai.disabled) {
+      const read = await extractProposals({
+        note: cardAnswerNote(before, asking.text, note),
+        attachments: [],
+        reference,
+        asOf,
+        lastUsed,
+      });
+      const first = read.source === "model" ? read.proposals[0] : undefined;
+      if (first) {
+        filled = keepTheMoney(before, first.draft);
+        readBy = modelLabel(read.model ?? "") || "the model";
+      }
+    }
+    const byModel = filled !== null;
+    filled ??= answerCard(before, asking.blank, note, reference, transactions, creditLines);
     if (!filled) return false;
     // Answered: money in is not asked about again for being money in.
     const cards = asking.cards.map((c) => (c.cardId === card.cardId ? { ...c, confirm: false } : c));
@@ -2176,14 +2233,14 @@ export function AskPanel({
       if (closed) recordCard(closed);
       recordCard(debt);
       setTurns((prev) => prev.map((t) => (isOffer(t) && t.cardId === card.cardId ? debt : t)));
-      say({ kind: "assistant", ephemeral: true, text: whatChanged(before, filled), from: "this device" });
+      say({ kind: "assistant", ephemeral: true, text: whatChanged(before, filled), from: readBy });
       askFrom(cards, asking.at + 1, new Map(), asking.skipped);
       return true;
     }
 
     // Not one of their kinds by name: a model says which one it is, as for a single entry.
     const flow = filled.flow;
-    if (asking.blank === "item" && flow === before.flow && (flow === "Spending" || flow === "Revenue") && !ai.disabled) {
+    if (!byModel && asking.blank === "item" && flow === before.flow && (flow === "Spending" || flow === "Revenue") && !ai.disabled) {
       if (!matchItem(note, flow, filled.category, reference, learnedItems).matched) {
         const known = itemsFor(flow, filled.category, reference);
         const withNotes = known.map((name) => ({
@@ -2205,15 +2262,16 @@ export function AskPanel({
      * five. Only rows with the same kind and the same words, waiting on the
      * same blank.
      */
+    const answered = filled;
     const sameAs = alikeKey(before);
     const alike = sameAs
       ? asking.cards.slice(asking.at + 1).flatMap((c) => {
           const t = turns.find((u): u is Offered => isOffer(u) && u.cardId === c.cardId);
           if (!t || t.state !== "open" || alikeKey(t.proposal.draft) !== sameAs) return [];
           if (cardQuestion(t.proposal.draft, reference, 1, 1)?.blank !== asking.blank) return [];
-          const done = answerCard(t.proposal.draft, asking.blank, note, reference, transactions);
-          if (!done) return [];
-          return [{ turn: t, draft: done.flow === filled.flow && !done.item && filled.item ? { ...done, item: filled.item } : done }];
+          // The same answer, held to this row's own day, amount and words.
+          const row = t.proposal.draft;
+          return [{ turn: t, draft: keepTheMoney(row, { ...answered, description: row.description }) }];
         })
       : [];
 
@@ -2242,7 +2300,7 @@ export function AskPanel({
       what || "That did not change the card, so it stays as it is. Fix it on the card if it needs it.",
       others > 0 ? `The same for the ${others === 1 ? "other row" : `other ${others} rows`} like it.` : "",
     ].filter(Boolean).join(" ");
-    say({ kind: "assistant", ephemeral: true, text: told, from: "this device" });
+    say({ kind: "assistant", ephemeral: true, text: told, from: readBy });
 
     // The same card again when the answer opened a new blank (a transfer from which account); the next when not.
     const again = cardQuestion(filled, reference, asking.at + 1, cards.length);
@@ -3093,7 +3151,8 @@ export function AskPanel({
      * absent.
      */
     let routed: { intent: Routed; target: string; period: string } | null = null;
-    if (files.length === 0 && !as && !ai.disabled) {
+    // A "//" line is a note to the developer: nothing to route, and nothing to wait on a model for.
+    if (files.length === 0 && !as && !ai.disabled && !/^\s*\/\//.test(note)) {
       setBusy(true);
       try {
         setStage("Reading what you asked");
@@ -3891,6 +3950,7 @@ export function AskPanel({
       !startsAfresh &&
       files.length === 0 &&
       !as &&
+      !isNoteLine &&
       (routed === null || saysAnswer || saysCorrection)
     ) {
       setDraft("");

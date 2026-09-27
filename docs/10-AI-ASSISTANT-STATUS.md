@@ -110,6 +110,18 @@ back into them.
   accounts; "my own" or "from my gcash" turns money in into a transfer. One
   answer covers the rows like it (the same kind and words), so five cash backs
   are one question
+- The answer to a card's question is read by the model, with the row and the
+  question it answers (`cardAnswerNote`), and held to the row's day, amount and
+  wallet (`keepTheMoney`); the rules read it only when no model answers. A
+  "//" line is a note, never an answer
+- Add all leaves a card already in the ledger, a repeat of a card above it,
+  or one with a question open, and offers to discard just the copies
+- Each picture and each part of a long list is its own request. A borrowing
+  on a credit line's screen and the same money received in the wallet's list
+  is booked once, as the borrowing (`pairBorrowings`). A foreign currency
+  amount is never pesos: the card asks what it cost
+- The conversation is live across devices (`chatStore.watch`): what is said
+  on the PC shows on the phone, when the phone is not in the middle of one
 
 ### The conversation
 - Answers with real structure: bold and bullets, parsed and rendered as

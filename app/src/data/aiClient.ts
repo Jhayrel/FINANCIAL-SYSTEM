@@ -47,7 +47,7 @@ import { idToken } from "./auth";
 import { redact } from "../domain/aiRedact";
 import { dropRepeats, piecesOf, readingFor, rowsIn } from "../domain/ocrText";
 import { readPicture } from "./ocr";
-import { readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
+import { pairBorrowings, readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
 import type { Attachment } from "./attachments";
 import type { IsoDate } from "../domain/types";
 
@@ -700,25 +700,30 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
   const read = readings.flatMap((r) => (r ? [r.plain, r.raised] : []));
   const readOnDevice = pictures.length - stillPictures.length;
 
-  if (parts.length > 0) {
-    /*
-     * Each part on its own, three at a time, and the answers put back in
-     * order. Everything that is not a part (another picture, a file) goes
-     * with the first request, so nothing is read twice.
-     */
-    const jobs: Attachment[][] = parts.map((part, k) => (k === 0 ? [...others, ...asText, part] : [part]));
-    if (stillPictures.length > 0) jobs.push(stillPictures);
+  /*
+   * Each part of a long list, and each picture, is its own request, three at
+   * a time, and the answers are put back in order. A picture is never read in
+   * with another: sent together, the Maya Credit screen's fees were read onto
+   * a Maya withdrawal three rows away (27 September 2026). What one picture
+   * shows and another repeats is matched afterwards (pairBorrowings). Files
+   * the owner attached go with the first request, so nothing is read twice.
+   */
+  const jobs: Attachment[][] = [...parts.map((part) => [part]), ...asText.map((text) => [text])];
+  if (jobs[0]) jobs[0] = [...others, ...jobs[0]];
+  if (stillPictures.length > 0) jobs.push(stillPictures);
+
+  if (jobs.length > 1) {
     const answers = await inTurn(jobs, LIST_PARTS_AT_ONCE, (attachments) =>
       extractOnce({ ...options, readings: read, attachments }),
     );
     const joined = joinAnswers(answers);
-    // Nothing usable in any part: the picture goes to a model that can see, as below.
+    // Nothing usable in any of them: the pictures go to a model that can see, as below.
     if (usable(joined) >= 10 || options.signal?.aborted) return { ...joined, readOnDevice, repeated };
     const seen = await extractOnce({ ...options, readings: read });
     return usable(seen) > usable(joined) ? seen : { ...joined, readOnDevice, repeated };
   }
 
-  const first = await extractOnce({ ...options, readings: read, attachments: [...others, ...asText, ...stillPictures] });
+  const first = await extractOnce({ ...options, readings: read, attachments: jobs[0] ?? [...others, ...stillPictures] });
   /*
    * Rows it could not use count for nothing here. On 26 September 2026 the
    * text route returned one refused row, "Nothing in that looked like a
@@ -771,7 +776,8 @@ async function inTurn<J, R>(jobs: readonly J[], at: number, work: (job: J) => Pr
 export function joinAnswers(answers: readonly ExtractResult[]): ExtractResult {
   const found = answers.filter((a) => a.source === "model");
   if (found.length === 0) return answers[0] ?? { proposals: [], refused: [], source: "offline", reason: "Nothing was read." };
-  const proposals = found.flatMap((a) => a.proposals);
+  // One borrowing on the credit line's screen and in the wallet's list, read in separate parts, is one (pairBorrowings).
+  const proposals = pairBorrowings(found.flatMap((a) => a.proposals));
   const balances = found.flatMap((a) => a.balances ?? []);
   const anything = proposals.length + balances.length > 0;
   const refused = [

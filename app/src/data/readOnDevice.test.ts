@@ -50,12 +50,16 @@ describe("a picture read on the device", () => {
     expect(result.readOnDevice).toBe(1);
   });
 
-  it("a picture with too little in it still goes as a picture", async () => {
+  it("a picture with too little in it still goes as a picture, in its own request", async () => {
     const fetcher = vi.fn(async () => reply([row]));
     await extractProposals({ note: "", attachments: [maya, sunset], reference, asOf: "2026-09-26", fetcher: fetcher as unknown as typeof fetch, token, readPicture });
-    const body = bodyOf(fetcher);
-    expect(body.images).toEqual(["data:image/jpeg;base64,s1"]);
-    expect(body.context).toContain("maya.jpg");
+    // Each picture is read on its own (27 September 2026), so one's fees never land on the other's rows.
+    const bodies = fetcher.mock.calls.map((_, k) => bodyOf(fetcher, k));
+    const asPicture = bodies.find((b) => b.images.length > 0);
+    const asText = bodies.find((b) => b.images.length === 0);
+    expect(asPicture?.images).toEqual(["data:image/jpeg;base64,s1"]);
+    expect(asPicture?.context).not.toContain("Read on this device from the picture maya.jpg");
+    expect(asText?.context).toContain("maya.jpg");
   });
 
   it("when the text finds nothing, the pictures go to a vision model after all", async () => {

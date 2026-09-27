@@ -282,6 +282,21 @@ function readOne(
   }
   if (amount === null && printed !== null) amount = printed;
 
+  /*
+   * Another currency is not pesos. A receipt in US dollars ($154.06, 21
+   * September 2026) was booked as PHP 154.06, and a peso figure for it is
+   * only on the owner's statement, never on the receipt. The amount is left
+   * for them to give, with the foreign figure named, so the card asks.
+   */
+  const foreign = /(?:US\$|\$|USD|€|EUR|£|GBP|¥|JPY|SGD|S\$|AUD|A\$|CAD|HKD|₩|KRW)/i.exec(`${str(value["amountText"])} ${str(value["currency"])}`);
+  if (foreign && !/₱|PHP|pesos?/i.test(str(value["amountText"]))) {
+    adjustments.push(
+      `The amount is in another currency (${str(value["amountText"]) || foreign[0]}). Say what it cost in pesos: the figure on your bank or wallet statement.`,
+    );
+    amount = null;
+    confidenceCap = "low";
+  }
+
   /**
    * A missing amount used to end here.
    *
@@ -719,7 +734,7 @@ export function readProposals(
    */
   const checked = checkAgainstReadings(proposals, context.readings ?? []);
   const filed = onCreditLine(checked, context.note ?? "", reference);
-  return { proposals: foldTransferFees(foldCharges(filed)), refused, balances };
+  return { proposals: pairBorrowings(foldTransferFees(foldCharges(filed))), refused, balances };
 }
 
 export interface ReadContext {
@@ -768,6 +783,47 @@ export function checkAgainstReadings(proposals: readonly Proposal[], readings: r
       adjustments: [...p.adjustments, `Read as ${pesos(amount)}, but the picture shows ${pesos(right)}. Using ${pesos(right)}: check it.`],
     };
   });
+}
+
+/**
+ * One borrowing, seen from both ends.
+ *
+ * 27 September 2026: the owner sent Maya Credit's screen and Maya's own
+ * history together. Each PHP 2,000.00 borrowing is on both: "Transferred
+ * money to My Wallet" on the credit line, "Received money from Maya Credit"
+ * in the wallet. The first became the borrowing; the second, its name not
+ * legible, became PHP 2,000.00 of income ("Reimbursed from work", "Cash
+ * back"). The money arrived once. Money in to the wallet a draw lands in,
+ * for the draw's amount, within a day of it, is that draw, and only the
+ * draw is kept. One draw takes one such row, the nearest in date.
+ */
+export function pairBorrowings(proposals: readonly Proposal[]): Proposal[] {
+  const out = [...proposals];
+  const days = (a: string, b: string): number => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000;
+  for (const draw of proposals) {
+    const d = draw.draft;
+    if (d.flow !== "Debt" || d.debtEffect !== "draw" || d.amount === null || !d.toWallet) continue;
+    const twins = out
+      .filter((p) => {
+        const t = p.draft;
+        const intoSame = t.toWallet === d.toWallet;
+        const moneyIn = t.flow === "Revenue" || (t.flow === "Transfer" && !t.fromWallet);
+        return p !== draw && moneyIn && intoSame && t.amount === d.amount && days(t.date, d.date) <= 1;
+      })
+      .sort((a, b) => days(a.draft.date, d.date) - days(b.draft.date, d.date));
+    const twin = twins[0];
+    if (!twin) continue;
+    out.splice(out.indexOf(twin), 1);
+    const at = out.indexOf(draw);
+    out[at] = {
+      ...draw,
+      adjustments: [
+        ...draw.adjustments,
+        `Also in ${d.toWallet}'s own history as money received (${twin.draft.description || "no name read"}): the same ${pesos(d.amount)}, booked once, as borrowing.`,
+      ],
+    };
+  }
+  return out;
 }
 
 /** A lender's own fee, by the names these screens use. */

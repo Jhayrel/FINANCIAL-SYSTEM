@@ -246,3 +246,24 @@ export const abs = (c: Centavos): Centavos => Math.abs(c);
 
 /** Convenience for tests and fixtures: pesos(5795.74) === 579574 */
 export const pesos = toCentavos;
+
+const MONTHS_NOT_MAY =
+  "january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec";
+
+/**
+ * A sentence with its dates taken out, so a day is not read as an amount.
+ *
+ * "I received maya cash back in September 13 2026 the amount is 4.25"
+ * (27 September 2026) was read as PHP 13.00 on one side and checked against
+ * "PHP 2,026.00" on the other, and the card said both. A day written with its
+ * month is a date: "September 13", "13 September", "Sep 13th". "May" is a
+ * month only with a year or an ordinal beside it, because in Tagalog "may 30
+ * pa ako" is "I still have 30".
+ */
+export function withoutDays(text: string): string {
+  const day = "(?:[12]\\d|3[01]|0?[1-9])(?:st|nd|rd|th)?";
+  return text
+    .replace(new RegExp(`\\b(?:${MONTHS_NOT_MAY})\\.?\\s+${day}\\b(?:,?\\s+(?:19|20)\\d{2}\\b)?`, "gi"), " ")
+    .replace(new RegExp(`\\b${day}\\s+(?:of\\s+)?(?:${MONTHS_NOT_MAY}|may)\\b\\.?(?:,?\\s+(?:19|20)\\d{2}\\b)?`, "gi"), " ")
+    .replace(new RegExp(`\\bmay\\s+(?:[12]\\d|3[01]|0?[1-9])(?:(?:st|nd|rd|th)\\b|,?\\s+(?:19|20)\\d{2}\\b)`, "gi"), " ");
+}

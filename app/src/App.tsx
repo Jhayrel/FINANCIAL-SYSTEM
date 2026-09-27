@@ -37,6 +37,7 @@ import { useProposalSink } from "./features/useProposalSink";
 import { useReportScreenFallback } from "./features/screenReport";
 import { ScreenBoundary } from "./components/ScreenBoundary";
 import { AppBoundary } from "./components/AppBoundary";
+import { recoverLists } from "./domain/recovery";
 import { changedSections } from "./domain/settingsDiff";
 import { refusalWords, syncWords, type Problem } from "./domain/syncState";
 import { useMediaQuery } from "./features/useMediaQuery";
@@ -787,13 +788,29 @@ export default function App() {
       ),
     ];
 
+    /*
+     * A list that is empty in Settings is read from the entries meanwhile.
+     *
+     * 27 September 2026: all four were empty after a restore from files that
+     * had none, and the assistant was told there were no kinds, so its
+     * questions offered nothing and answers like "//fix this" became items.
+     * The entries still name every kind. Nothing is saved by this; Settings,
+     * Data, Rebuild categories saves them (domain/recovery.ts).
+     */
+    const anyEmpty =
+      settings.bills.length === 0 ||
+      settings.subscriptions.length === 0 ||
+      settings.revenueCategories.length === 0 ||
+      settings.spendingTypes.length === 0;
+    const lists = anyEmpty ? recoverLists(transactions, settings, settings.credits.map((c) => c.name)) : settings;
+
     return {
       wallets: namesOf(["spending"]),
       savings: namesOf(["savings", "goal", "reserve"]),
-      bills: settings.bills,
-      subscriptions: settings.subscriptions,
-      revenueCategories: settings.revenueCategories,
-      spendingTypes: settings.spendingTypes,
+      bills: lists.bills,
+      subscriptions: lists.subscriptions,
+      revenueCategories: lists.revenueCategories,
+      spendingTypes: lists.spendingTypes,
       /**
        * The credit lines, so the reader knows they are not accounts.
        *
@@ -804,7 +821,7 @@ export default function App() {
        */
       credits: settings.credits.filter((c) => !c.archived).map((c) => c.name),
     };
-  }, [settings]);
+  }, [settings, transactions]);
 
   const view = useMemo(() => {
     const positions = positionsOf(settings.credits, transactions, asOf);

@@ -34,6 +34,7 @@ import { makeDebtId } from "./debt";
 import { inferFromHistory, itemFromHistory } from "./infer";
 import { centavosInWords } from "./numberWords";
 import { readMoney } from "./proposal";
+import { withoutDays } from "./money";
 import type { IsoDate, ReferenceLists, Transaction, TransactionStatus } from "./types";
 
 export interface ReadEntry {
@@ -271,7 +272,7 @@ function flowOf(text: string): Flow | null {
 const SHOP_NUMBERS = /\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]?11|711|24[\s/-]?7)\b/gi;
 
 function amountIn(text: string): number | null {
-  let withoutDates = text.replace(SHOP_NUMBERS, " ").replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
+  let withoutDates = withoutDays(text.replace(SHOP_NUMBERS, " ")).replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
 
   /**
    * A year beside a month is a date, not two thousand pesos.
@@ -376,7 +377,13 @@ function dateIn(text: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
  * Longest name first, so "Maya Bank (Personal savings)" is not beaten by
  * "Maya". Word-boundary anchored, so "Cash" does not match "cashier".
  */
-function walletIn(text: string, accounts: readonly string[]): string {
+function walletIn(said: string, accounts: readonly string[]): string {
+  /*
+   * "maya cash back" is money into Maya, not into Cash (27 September 2026:
+   * the card said "Cash rather than Maya: that is the account your message
+   * named"). A cash back and a cash-in name a kind of money, not the wallet.
+   */
+  const text = said.replace(/\bcash[\s-]?(?:back|in)\b/gi, " ");
   const lower = text.toLowerCase();
 
   /**

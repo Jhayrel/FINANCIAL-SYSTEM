@@ -70,6 +70,8 @@ export const STOP_ASKING = /^\s*(?:stop|done|that'?s all|enough|no more|stop ask
 export function looksLikeAnswer(note: string, blank: Blank): boolean {
   const text = note.trim();
   if (!text) return false;
+  // "//fix this" is the owner's note to the developer, never an answer: it was booked as an item name.
+  if (text.startsWith("//")) return false;
   if (SKIP_CARD.test(text) || STOP_ASKING.test(text)) return true;
   if (/\?\s*$/.test(text)) return false;
   if (/^(?:what|how|why|when|where|who|which|can|could|should|would|will|is|are|do|does|did|show|chart|graph|delete|remove|bin|restore|export|download|undo|add all|save all)\b/i.test(text)) return false;
@@ -252,4 +254,54 @@ export function whatChanged(before: Draft, after: Draft): string {
   if (after.amount !== before.amount && after.amount !== null) said.push(`Amount ${formatMoney(after.amount)}.`);
   if (after.description !== before.description && after.description) said.push(`Description: ${after.description}.`);
   return said.join(" ");
+}
+
+/**
+ * An answer to a card's question, for the model to read.
+ *
+ * The owner, 27 September 2026: "use ai in questions not device like ai ->
+ * device". The rules here read "school" well and "I credit it" not at all:
+ * it became an item called "I credit it". So the answer goes to the model
+ * with the row it is about and the question it answers, as one sentence to
+ * read into one row (`extractProposals`), and the device checks and applies
+ * what comes back (`keepTheMoney`). These rules are what is left when no
+ * model can be reached.
+ */
+export function cardAnswerNote(draft: Draft, question: string, reply: string): string {
+  const wallet =
+    draft.flow === "Revenue" || (draft.flow === "Transfer" && !draft.fromWallet)
+      ? draft.toWallet && ` It came into ${draft.toWallet}.`
+      : draft.fromWallet && ` It went out of ${draft.fromWallet}.`;
+  const filed = [draft.flow, draft.item].filter(Boolean).join(", ");
+  return [
+    `One row from the owner's history, as it was read: ${rowWords(draft)}${filed ? `, read as ${filed}` : ""}.${wallet || ""}`,
+    `The question was: ${question.replace(/^\(\d+ of \d+\)\s*/, "").replace(/\s*Say skip to leave one for its card, or stop\.$/, "")}`,
+    `The owner answered: "${reply.trim()}"`,
+    "Give that one row again as the answer says, and nothing else. Keep its date, its amount and its wallet unless the answer changes them. Borrowed on a credit line is flow Debt, debtEffect borrowed, into the wallet it came into. Money from another of their own accounts is a Transfer from that account into this wallet. Money sent or given to a person is a Transfer with toWallet empty. An answer naming what it was for picks the item from their lists.",
+  ].join("\n");
+}
+
+/**
+ * The model's reading of an answer, held to the row it answers.
+ *
+ * An answer about what a payment was for is never a reason for its amount
+ * or its day to move, so both are the card's. A side the model left blank
+ * keeps the card's wallet, and a transfer from a wallet into itself loses
+ * its source so the card asks which account it came from.
+ */
+export function keepTheMoney(before: Draft, after: Draft): Draft {
+  const incoming = after.flow === "Revenue" || (after.flow === "Debt" && (after.debtEffect === "draw" || after.debtEffect === "collect"));
+  const wasIncoming = before.flow === "Revenue" || (before.flow === "Transfer" && !before.fromWallet && Boolean(before.toWallet));
+  let next: Draft = { ...after, date: before.date, amount: before.amount };
+  if (incoming && !next.toWallet) next = { ...next, toWallet: before.toWallet };
+  if (!incoming && after.flow !== "Transfer" && !next.fromWallet) next = { ...next, fromWallet: before.fromWallet };
+  if (after.flow === "Transfer") {
+    // Money in that became a transfer arrives where it arrived; money out leaves where it left.
+    if (wasIncoming && !next.toWallet) next = { ...next, toWallet: before.toWallet };
+    if (!wasIncoming && !next.fromWallet) next = { ...next, fromWallet: before.fromWallet };
+    if (next.fromWallet && next.fromWallet === next.toWallet) next = { ...next, fromWallet: wasIncoming ? "" : next.fromWallet, toWallet: wasIncoming ? next.toWallet : "" };
+    // A transfer to nobody named is money that left the accounts, which is what the model is told an empty toWallet means.
+    if (!wasIncoming && !next.toWallet) next = { ...next, sentOut: true };
+  }
+  return next;
 }

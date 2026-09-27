@@ -92,3 +92,53 @@ describe("a borrowing with nowhere to land", () => {
     expect(read.proposals[0]!.draft).toMatchObject({ flow: "Debt", debtEffect: "draw", toWallet: "Maya", item: "Maya Credit" });
   });
 });
+
+/**
+ * The same two borrowings in Maya's own history, sent with the credit screen
+ * (27 September 2026): "Received money from Maya Credit" read as
+ * "\viavag creqiy" and came back as income, PHP 4,000.00 of it.
+ */
+describe("a borrowing seen on both screens is one borrowing", () => {
+  const walletSide = [
+    { flow: "Revenue", item: "Random", toWallet: "Maya", amountPesos: 2000, date: "2026-09-20", description: "Reimbursed from work" },
+    { flow: "Revenue", item: "Random", toWallet: "Maya", amountPesos: 2000, date: "2026-09-18", description: "Received money from \\viavag creqiy" },
+    { flow: "Transfer", fromWallet: "Maya", toWallet: "Cash", amountPesos: 516, date: "2026-09-24", description: "Withdrawal from St.Louis College" },
+  ];
+  const read = readProposals({ proposals: [...fromModel, ...walletSide] }, reference, "2026-09-26", { note: "Maya credit", readings });
+
+  it("keeps the two draws and drops the income they were read as", () => {
+    const debt = read.proposals.filter((p) => p.draft.flow === "Debt");
+    expect(debt).toHaveLength(2);
+    expect(read.proposals.filter((p) => p.draft.flow === "Revenue")).toHaveLength(0);
+    expect(debt.every((p) => p.adjustments.some((a) => a.includes("booked once, as borrowing")))).toBe(true);
+  });
+
+  it("leaves the withdrawal alone, with no lender fee on it", () => {
+    const out = read.proposals.find((p) => p.draft.description.includes("St.Louis"));
+    expect(out?.draft.fee).toBe(0);
+    expect(out?.draft.amount).toBe(51600);
+  });
+});
+
+describe("a receipt in another currency (21 September 2026)", () => {
+  it("is never booked as pesos, and the card asks what it cost", () => {
+    const read = readProposals(
+      { proposals: [{ flow: "Spending", item: "Food", fromWallet: "Cash", amountText: "$154.06", amountPesos: 154.06, date: "2026-09-21", description: "East Repair Inc." }] },
+      reference,
+      "2026-09-26",
+    );
+    const card = read.proposals[0];
+    expect(card?.draft.amount).toBeNull();
+    expect(card?.confidence).toBe("low");
+    expect(card?.adjustments.join(" ")).toContain("Say what it cost in pesos");
+  });
+
+  it("leaves a peso receipt alone", () => {
+    const read = readProposals(
+      { proposals: [{ flow: "Spending", item: "Food", fromWallet: "Cash", amountText: "₱154.06", amountPesos: 154.06, date: "2026-09-21" }] },
+      reference,
+      "2026-09-26",
+    );
+    expect(read.proposals[0]?.draft.amount).toBe(15406);
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { alikeKey, answerCard, cardQuestion, confirmsIncome, looksLikeAnswer, rowWords, SKIP_CARD, STOP_ASKING, whatChanged } from "./cardQuestions";
+import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, rowWords, SKIP_CARD, STOP_ASKING, whatChanged } from "./cardQuestions";
 import { checkDraft, emptyDraft, type Draft } from "./entry";
 import type { ReferenceLists } from "./types";
 
@@ -116,6 +116,11 @@ describe("what counts as the answer", () => {
     expect(looksLikeAnswer("I paid 300 for food cash", "item")).toBe(false);
   });
 
+  it("never takes a note to the developer as an answer (27 September 2026)", () => {
+    expect(looksLikeAnswer("//fix this", "item")).toBe(false);
+    expect(looksLikeAnswer("// the question are off", "item")).toBe(false);
+  });
+
   it("takes a figure when the question was how much", () => {
     expect(looksLikeAnswer("about 500", "amount")).toBe(true);
   });
@@ -177,5 +182,30 @@ describe("money in that was borrowed (27 September 2026)", () => {
 
   it("stays income when it was", () => {
     expect(answerCard(misread, "item", "allowance", reference, [], lines)).toMatchObject({ flow: "Revenue", item: "Allowance" });
+  });
+});
+
+describe("an answer, read by the model and held to its row", () => {
+  it("tells the model the row, the question and the answer", () => {
+    const note = cardAnswerNote(received, '(2 of 7) ₱723.45 in, Received money from J. Cruz, 15 Sep. What was it? Allowance, or say "my own". Say skip to leave one for its card, or stop.', "I credit it");
+    expect(note).toContain("₱723.45 in, Received money from J. Cruz, 15 Sep, read as Revenue.");
+    expect(note).toContain("It came into Maya.");
+    expect(note).toContain('The owner answered: "I credit it"');
+    expect(note).not.toContain("Say skip");
+  });
+
+  it("never lets an answer move the amount or the day", () => {
+    const model: Draft = { ...received, flow: "Debt", debtEffect: "draw", item: "Maya Credit", amount: 999, date: "2026-09-27", toWallet: "" };
+    expect(keepTheMoney(received, model)).toMatchObject({ amount: 72345, date: "2026-09-15", toWallet: "Maya", flow: "Debt" });
+  });
+
+  it("keeps the wallet a payment left, and books a transfer to nobody as money sent out", () => {
+    const model: Draft = { ...paid, flow: "Transfer", category: "Transfer", fromWallet: "", toWallet: "" };
+    expect(keepTheMoney(paid, model)).toMatchObject({ fromWallet: "Maya", toWallet: "", sentOut: true });
+  });
+
+  it("does not make a transfer from Maya into Maya", () => {
+    const model: Draft = { ...received, flow: "Transfer", category: "Transfer", fromWallet: "Maya", toWallet: "Maya" };
+    expect(keepTheMoney(received, model)).toMatchObject({ fromWallet: "", toWallet: "Maya" });
   });
 });

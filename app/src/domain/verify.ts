@@ -33,6 +33,7 @@
 
 import { itemsFor, needs, type Draft, type FieldName } from "./entry";
 import { numbersInWords } from "./numberWords";
+import { withoutDays } from "./money";
 import { matchExact, type Confidence } from "./proposal";
 import type { IsoDate, ReferenceLists } from "./types";
 
@@ -132,7 +133,11 @@ export function centavosIn(token: string): number | null {
  * items with a number in it ("Microsoft Office 365").
  */
 function figuresIn(said: string, reference?: ReferenceLists): number[] {
-  let text = said.replace(/\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]?11|711|24[\s/-]?7)\b/gi, " ");
+  // Dates are not amounts ("September 13 2026"), and neither is a year beside a month.
+  let text = withoutDays(said)
+    .replace(/\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]?11|711|24[\s/-]?7)\b/gi, " ")
+    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, " ")
+    .replace(/\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b([^₱\d]{0,12})\b(?:19|20)\d{2}\b/gi, "$1$2 ");
   if (reference) {
     const numbered = [
       ...reference.bills,
