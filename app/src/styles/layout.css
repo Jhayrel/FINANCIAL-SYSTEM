@@ -2816,19 +2816,6 @@
   }
 }
 
-/*
- * Cards to check: the assistant gets the room on a computer. With a batch of
- * cards open, each showing every field and a copy beside the row it repeats,
- * the column the chat was given (360px at 1440px) wrapped every date in two
- * (owner, 27 September 2026: "more detailed it pc ... i dont like this looks
- * in pc"). The form keeps a 420px floor and the balances stay in view.
- */
-@media (min-width: 1440px) {
-  .fms-entry:not(.fms-entry--nochat):has(.fms-batchbar, .fms-proposal:not(.fms-proposal--settled)) {
-    grid-template-columns: minmax(420px, 1fr) 240px minmax(400px, 1.3fr);
-  }
-}
-
 .fms-recent {
   display: grid;
   align-content: start;
