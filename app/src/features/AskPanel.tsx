@@ -120,6 +120,7 @@ import { formatMoney } from "../domain/money";
 import { describeFile, summariseFile } from "../domain/photoNote";
 import { reconcile } from "../domain/reconcile";
 import { readAgainst, statementAccount } from "../domain/statement";
+import { ownNamesIn, senseStatementRows } from "../domain/statementSense";
 import { walletBalance } from "../domain/balances";
 import {
   draftForClue,
@@ -191,7 +192,7 @@ import {
 } from "../domain/budgetAsk";
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { budgetForYear } from "../domain/budget";
-import { MONTH_NAMES } from "../domain/dates";
+import { formatMedium, MONTH_NAMES } from "../domain/dates";
 import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
 import { forecastYear } from "../domain/forecast";
@@ -853,6 +854,7 @@ export function AskPanel({
   deleted,
   debts,
   formDraft,
+  ownerName = "",
 }: {
   settings: AppSettings;
   transactions: readonly Transaction[];
@@ -884,6 +886,8 @@ export function AskPanel({
    * was about to be saved.
    */
   formDraft?: Draft | undefined;
+  /** The name the owner signed in with, which is how their bank prints them on a statement. */
+  ownerName?: string;
 }) {
   /**
    * Gated on its own setting, not on the Insights panel's.
@@ -1052,6 +1056,9 @@ export function AskPanel({
     readonly skipped: ReadonlySet<string>;
     /** The question, shown above the box while it waits. */
     readonly text: string;
+    /** Its answers, as buttons, and which question of how many it is. */
+    readonly choices: readonly string[];
+    readonly count: string;
   } | null>(null);
   /** A file is over the panel right now. */
   const [dragging, setDragging] = useState(false);
@@ -1653,6 +1660,16 @@ export function AskPanel({
   /** When each item was last used, so the reader is told which ones are years old (aiClient.ts). */
   const lastUsed = useMemo(() => itemsLastUsed(transactions), [transactions]);
 
+  /**
+   * The owner's own name, as a statement prints it: the one they signed in
+   * with, and any they have filed as their own before. "Received money from"
+   * it is money moved between their accounts (domain/statementSense.ts).
+   */
+  const ownNames = useMemo(
+    () => [...(ownerName.trim() && !ownerName.includes("@") ? [ownerName.trim()] : []), ...ownNamesIn(transactions)],
+    [ownerName, transactions],
+  );
+
   /** The wallet a card moves money through, for the record: the one it goes into, for income. */
   const walletOf = (d: Draft): string => (d.flow === "Revenue" ? d.toWallet : d.fromWallet);
 
@@ -2168,13 +2185,11 @@ export function AskPanel({
       const draft = known.get(card.cardId) ?? shown?.proposal.draft ?? card.draft;
       const q = cardQuestion(draft, reference, i + 1, cards.length, card.confirm ? { lines: creditLines.map((l) => l.name) } : undefined);
       if (!q) continue;
-      setAsking({ cards, at: i, blank: q.blank, skipped, text: q.text });
-      say({
-        kind: "assistant",
-        ephemeral: true,
-        text: i === 0 ? `${q.text} Say skip to leave one for its card, or stop.` : q.text,
-        from: "this device",
-      });
+      /*
+       * Asked once, in the bar above the box, with its answers as buttons.
+       * It was said in the thread as well, the same words twice on screen.
+       */
+      setAsking({ cards, at: i, blank: q.blank, skipped, text: q.text, choices: q.choices, count: q.count });
       return;
     }
     setAsking(null);
@@ -2505,6 +2520,7 @@ export function AskPanel({
           asOf,
           signal: control.signal,
           lastUsed,
+          ownNames,
         }),
       "Still reading it",
     );
@@ -2784,7 +2800,7 @@ export function AskPanel({
         ? readEntry(note, transactions, reference, asOf)
         : null;
 
-    const checked = result.proposals.map((proposal, i) => {
+    const onDevice = result.proposals.map((proposal, i) => {
       const reading = readings[i];
       const base = reading
         ? {
@@ -2803,6 +2819,18 @@ export function AskPanel({
         ? base
         : { ...base, draft: agreed.draft, adjustments: [...base.adjustments, ...agreed.notes] };
     });
+
+    /*
+     * What the statement's own words and the ledger say about each row: the
+     * owner's own name is a transfer between their accounts, a payment to a
+     * lender they owe is a payment on that line, and "Withdrawal from" is
+     * cash taken out (27 September 2026: "it cant recognized the transfer
+     * from gcash earlier, it doenst recognized the debt being paid").
+     */
+    const checked =
+      sent.length > 0
+        ? senseStatementRows(onDevice, { account, readings: result.readings ?? [], ownNames, debts, transactions, reference })
+        : onDevice;
 
     const odd = readings.filter((r) => r.note.includes("but reads as")).length;
     if (odd > 0) {
@@ -2838,6 +2866,8 @@ export function AskPanel({
      */
     const toAsk = batch
       ? made
+          // A row already in the ledger is not asked about: its card says which row it is.
+          .filter((c) => duplicatesOf(c.draft, transactions).length === 0)
           .map((c) => (sent.length > 0 && confirmsIncome(c.draft) ? { ...c, confirm: true } : c))
           .filter((c) => cardQuestion(c.draft, reference, 1, 1, c.confirm ? { lines: [] } : undefined) !== null)
       : [];
@@ -2845,7 +2875,7 @@ export function AskPanel({
       say({
         kind: "assistant",
         ephemeral: true,
-        text: `${toAsk.length === 1 ? "One of them needs" : `${toAsk.length} of them need`} something only you know. I will ask about ${toAsk.length === 1 ? "it" : "each one"} in turn.`,
+        text: `${toAsk.length === 1 ? "One card needs" : `${toAsk.length} cards need`} an answer from you: ${toAsk.length === 1 ? "the question is" : "the questions are"} above the box.`,
         from: "this device",
       });
       askFrom(toAsk, 0);
@@ -2858,7 +2888,7 @@ export function AskPanel({
        * waiting for a wallet, and the owner went looking for a picker that
        * was already filled in.
        */
-      const missing = result.proposals
+      const missing = checked
         .map((p) => nextQuestion(p.draft, reference)?.blank)
         .filter((b): b is NonNullable<typeof b> => Boolean(b));
 
@@ -5107,19 +5137,22 @@ export function AskPanel({
     return byTurn;
   }, [turns, sink.nextRecordNumber]);
 
-  const repeatOfCard = useMemo(() => {
+  const { repeatOfCard, repeatTwinAt } = useMemo(() => {
     const indexes: number[] = [];
     turns.forEach((t, i) => {
       if (isOffer(t) && t.state === "open") indexes.push(i);
     });
     const drafts = indexes.map((i) => (turns[i] as Offered).proposal.draft);
     const byTurn = new Map<number, Draft>();
+    const twinAt = new Map<number, number>();
     for (const [later, earlier] of repeatsWithin(drafts)) {
       const at = indexes[later];
       const twin = drafts[earlier];
+      const twinIndex = indexes[earlier];
       if (at !== undefined && twin) byTurn.set(at, twin);
+      if (at !== undefined && twinIndex !== undefined) twinAt.set(at, twinIndex);
     }
-    return byTurn;
+    return { repeatOfCard: byTurn, repeatTwinAt: twinAt };
   }, [turns]);
 
   /**
@@ -5133,42 +5166,56 @@ export function AskPanel({
    * the ledger, a repeat of a card above it, or a card with a question still
    * open is left for its own buttons. A card with extra zeros never was.
    */
-  const heldBack = (t: Offered, i: number): "check" | "ledger" | "repeat" | "question" | null => {
-    const c = sink.check(t.proposal.draft);
-    if (!c.ok || c.unusual !== undefined) return "check";
+  const heldBack = (t: Offered, i: number): Exclude<Standing, "ready"> | null => {
+    // A copy first: whatever else is wrong with it, the answer is the same (skip it or add it anyway).
     if (alreadyInLedger.has(i)) return "ledger";
     if (repeatOfCard.has(i)) return "repeat";
     if (nextQuestion(t.proposal.draft, reference) !== null) return "question";
+    const c = sink.check(t.proposal.draft);
+    if (!c.ok || c.unusual !== undefined) return "check";
     return null;
   };
-  const waiting = { ledger: 0, repeat: 0, question: 0 };
-  let readyCount = 0;
-  turns.forEach((t, i) => {
-    if (!isOffer(t) || t.state !== "open") return;
-    const why = heldBack(t, i);
-    if (why === null) readyCount += 1;
-    else if (why !== "check") waiting[why] += 1;
-  });
-  const heldWords = [
-    waiting.ledger > 0 ? `${waiting.ledger} already in your ledger` : "",
-    waiting.repeat > 0 ? `${waiting.repeat} repeated in the picture` : "",
-    waiting.question > 0 ? `${waiting.question} waiting for your answer` : "",
-  ].filter(Boolean);
 
-  /** Discard the cards that are already in the ledger or repeat a card above: the copies, and only those. */
-  const discardCopies = (): void => {
-    const copies = new Set<number>();
+  /**
+   * Where each open card stands, and its number in the list.
+   *
+   * 27 September 2026, the owner, of "Add the 2 ready", "Discard the 4
+   * copies" and "Discard all 7": "they are so misleading fix it make it
+   * connect". The bar counted cards the owner could not find: which two were
+   * ready, which four were copies of what. Every open card now carries its
+   * number and its standing, in the bar's own words, and the bar names the
+   * cards each button acts on.
+   */
+  const openIndexes: number[] = [];
+  turns.forEach((t, i) => {
+    if (isOffer(t) && t.state === "open") openIndexes.push(i);
+  });
+  const standing = new Map<number, Standing>();
+  for (const i of openIndexes) standing.set(i, heldBack(turns[i] as Offered, i) ?? "ready");
+  const placeOf = new Map(openIndexes.map((i, k) => [i, k + 1]));
+  const groups = STANDING_ORDER.map((key) => ({ key, cards: openIndexes.filter((i) => standing.get(i) === key) })).filter((g) => g.cards.length > 0);
+
+  /** The number of the card the question bar is asking about, in the same count as the cards and the batch bar. */
+  const askedPlace = openCount > 1 && askedCard ? placeOf.get(turns.findIndex((t) => isOffer(t) && t.cardId === askedCard)) : undefined;
+
+  /** Bring a card into view and put the focus on it, so the bar's "card 4" is one tap from card 4. */
+  const jumpTo = (index: number): void => {
+    const thread = threadRef.current;
+    const el = cardElements.current.get(index);
+    if (!thread || !el) return;
+    thread.scrollTop = Math.max(0, thread.scrollTop + topWithin(el, thread) - 8);
+    el.focus({ preventScroll: true });
+  };
+
+  /** Close the given cards without adding them: the copies, when the owner says skip them. */
+  const skipCards = (indexes: readonly number[]): void => {
+    const skipped = new Set(indexes);
     turns.forEach((t, i) => {
-      if (!isOffer(t) || t.state !== "open") return;
-      const why = heldBack(t, i);
-      if (why === "ledger" || why === "repeat") copies.add(i);
-    });
-    turns.forEach((t, i) => {
-      if (!copies.has(i) || !isOffer(t)) return;
+      if (!skipped.has(i) || !isOffer(t) || t.state !== "open") return;
       const closed = closedCard(t);
       if (closed) recordCard(closed);
     });
-    setTurns((prev) => prev.map((t, i) => (copies.has(i) ? closedCard(t) ?? t : t)));
+    setTurns((prev) => prev.map((t, i) => (skipped.has(i) && isOffer(t) && t.state === "open" ? closedCard(t) ?? t : t)));
   };
 
   /**
@@ -5182,7 +5229,7 @@ export function AskPanel({
     // afterwards showed every card in the batch the same figure.
     const given = new Map<number, number | null>();
     turns.forEach((t, i) => {
-      if (isOffer(t) && t.state === "open" && heldBack(t, i) === null) {
+      if (isOffer(t) && t.state === "open" && standing.get(i) === "ready") {
         given.set(
           i,
           sink.add(t.proposal.draft, {
@@ -5276,30 +5323,38 @@ export function AskPanel({
       */}
       {openCount > 1 && (
         <div className="fms-batchbar">
-          <span className="t-caption fms-batchbar-count">
-            {openCount} suggested, {readyCount} ready
-            {heldWords.length > 0 ? `. Left for you: ${heldWords.join(", ")}.` : ""}
-          </span>
-          <Button size="sm" variant="primary" disabled={readyCount === 0 || busy} onClick={addReady}>
-            Add {readyCount === openCount ? "all" : `the ${readyCount} ready`}
-          </Button>
-          {waiting.ledger + waiting.repeat > 0 && (
-            <Button size="sm" disabled={busy} onClick={discardCopies}>
-              Discard the {waiting.ledger + waiting.repeat} {waiting.ledger + waiting.repeat === 1 ? "copy" : "copies"}
+          <div className="fms-batchbar-head">
+            <span className="t-body-strong">{openCount} cards to check</span>
+            {/*
+              Throwing them all away is a quiet button, not a link, and it
+              says how many it throws away: every open card, the ready ones
+              included.
+            */}
+            <Button size="sm" tone="danger" disabled={busy} onClick={discardOpen}>
+              {`Discard all ${openCount}`}
             </Button>
-          )}
-          {/*
-            Throwing the rest away is a button, not a hyperlink.
-
-            It was underlined grey text beside a filled green button: two
-            languages in one row, with the destructive one dressed as a link
-            and easy to hit by mistake. It is a quiet button now, the same
-            kind of object as the one beside it, and it says how many it will
-            throw away rather than "the rest".
-          */}
-          <Button size="sm" tone="danger" disabled={busy} onClick={discardOpen}>
-            {`Discard all ${openCount}`}
-          </Button>
+          </div>
+          {groups.map((g) => {
+            const places = g.cards.map((i) => placeOf.get(i) ?? 0);
+            const many = g.cards.length > 1;
+            const action =
+              g.key === "ready"
+                ? { label: many ? `Add these ${g.cards.length}` : "Add it", press: addReady, primary: true }
+                : g.key === "ledger" || g.key === "repeat"
+                  ? { label: many ? `Skip these ${g.cards.length}` : "Skip it", press: () => skipCards(g.cards), primary: false }
+                  : { label: `Go to card ${places[0]}`, press: () => jumpTo(g.cards[0]!), primary: false };
+            return (
+              <div key={g.key} className="fms-batchgroup">
+                <button type="button" className="fms-batchgroup-what" onClick={() => jumpTo(g.cards[0]!)} title="Show the first of these">
+                  <span className="t-caption fms-batchgroup-label">{STANDING_WORDS[g.key]}</span>
+                  <span className="t-micro fms-batchgroup-cards">{cardsWord(places)}</span>
+                </button>
+                <Button size="sm" {...(action.primary ? { variant: "primary" as const } : {})} disabled={busy} onClick={action.press}>
+                  {action.label}
+                </Button>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -5439,6 +5494,11 @@ export function AskPanel({
               hostRef={(el) => keepCard(i, el)}
               alreadyInLedger={alreadyInLedger.get(i) ?? []}
               repeatOfCard={repeatOfCard.get(i)}
+              place={
+                openCount > 1 && standing.has(i)
+                  ? { at: placeOf.get(i) ?? 0, of: openCount, standing: standing.get(i)!, twin: placeOf.get(repeatTwinAt.get(i) ?? -1) }
+                  : undefined
+              }
               recordNumber={
                 turn.recordNumber ?? predictedNumber.get(i) ?? sink.nextRecordNumber
               }
@@ -5685,15 +5745,33 @@ export function AskPanel({
         */}
       {asking && !pending && (
         <div className="fms-askq" role="status" aria-live="polite">
-          <p className="t-body">{asking.text}</p>
-          <div className="fms-askq-actions">
-            <button type="button" className="fms-btn" disabled={busy} onClick={() => void send("skip")}>
-              Skip this one
-            </button>
-            <button type="button" className="fms-btn" disabled={busy} onClick={() => void send("stop")}>
-              Stop asking
-            </button>
+          <div className="fms-askq-head">
+            <span className="t-label" style={{ color: "var(--ink-2)" }}>
+              {asking.count ? `Question ${asking.count}` : "One question"}
+              {askedPlace ? `, about card ${askedPlace}` : ""}
+            </span>
+            <span className="fms-askq-skip">
+              <button type="button" className="t-caption fms-linkbtn" disabled={busy} onClick={() => void send("skip")}>
+                Skip
+              </button>
+              <button type="button" className="t-caption fms-linkbtn" disabled={busy} onClick={() => void send("stop")}>
+                Stop asking
+              </button>
+            </span>
           </div>
+          <p className="t-body-strong fms-askq-text">{asking.text}</p>
+          {asking.choices.length > 0 && (
+            <div className="fms-askq-choices" role="group" aria-label="Answers">
+              {asking.choices.map((choice) => (
+                <button key={choice} type="button" className="fms-choice t-body" disabled={busy} onClick={() => void send(choice)}>
+                  {choice}
+                </button>
+              ))}
+            </div>
+          )}
+          <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+            Or type the answer below.
+          </span>
         </div>
       )}
 
@@ -5924,6 +6002,36 @@ export function AskPanel({
  * reflects the ledger as it stands rather than as it stood when the model
  * answered.
  */
+/**
+ * A blank the card already names in its "Still needs" line, said again in
+ * red underneath: "Still needs one thing: the wallet it went to" and then
+ * "Pick the wallet the money lands in." (owner, 27 September 2026: "fix the
+ * ui its ugly"). The line says it once, and the question above the box asks.
+ */
+const RESTATES_BLANK: ReadonlySet<string> = new Set([
+  "Pick the wallet the money lands in.",
+  "Pick the wallet the money leaves.",
+  "Pick a date.",
+]);
+
+/** Where an open card stands: what the batch bar groups it under, in the same words on the card. */
+type Standing = "ready" | "question" | "check" | "ledger" | "repeat";
+const STANDING_ORDER: readonly Standing[] = ["ready", "question", "check", "ledger", "repeat"];
+const STANDING_WORDS: Readonly<Record<Standing, string>> = {
+  ready: "Ready to add",
+  question: "Needs your answer",
+  check: "Needs a fix on the card",
+  ledger: "Already in your ledger",
+  repeat: "Same as a card above",
+};
+
+/** "card 4", "cards 1 and 2", "cards 3, 5, 6 and 7", and past six "cards 1, 2, 3, 4, 5 and 9 more". */
+function cardsWord(places: readonly number[]): string {
+  if (places.length === 1) return `card ${places[0]}`;
+  if (places.length > 6) return `cards ${places.slice(0, 5).join(", ")} and ${places.length - 5} more`;
+  return `cards ${places.slice(0, -1).join(", ")} and ${places[places.length - 1]}`;
+}
+
 function ProposalCard({
   offered,
   sink,
@@ -5931,6 +6039,7 @@ function ProposalCard({
   hostRef,
   alreadyInLedger,
   repeatOfCard,
+  place,
   recordNumber,
   onChange,
   onChangeAll,
@@ -5956,6 +6065,8 @@ function ProposalCard({
   recordNumber: number;
   /** The entry an earlier card already holds, when this one repeats it. */
   repeatOfCard?: Draft | undefined;
+  /** Its number among the open cards, and where it stands, in the batch bar's words. Absent for a card on its own. */
+  place?: { readonly at: number; readonly of: number; readonly standing: Standing; readonly twin?: number | undefined } | undefined;
   onChange: (draft: Draft) => void;
   /** Absent when this is the only open card, so there is nothing to apply it to. */
   onChangeAll?: ((draft: Draft) => void) | undefined;
@@ -5986,6 +6097,8 @@ function ProposalCard({
    * first tap now only says the figure was read; the second adds it.
    */
   const [sure, setSure] = useState(false);
+  /** A card already in the ledger shows as one line until the owner asks to see all of it. */
+  const [unfolded, setUnfolded] = useState(false);
   const cardTotal = (draft.amount ?? 0) + draft.fee;
   const askFirst = check.unusual !== undefined && !sure;
   const addLabel = askFirst
@@ -6087,53 +6200,133 @@ function ProposalCard({
         ? "fairly clear"
         : "hard to read";
 
+  /** The summary's words: which kind, what it was, and the facts worth a glance. */
+  const flowTone = flow === "Revenue" ? "revenue" : flow === "Transfer" ? "transfer" : flow === "Debt" ? "debt" : "spending";
+  const kindWord = draft.behalf ? "On behalf" : flow;
+  const listed = draft.category === "Bills" || draft.category === "Subscriptions" ? `${draft.category === "Bills" ? "Bill" : "Subscription"}: ` : "";
+  const what =
+    flow === "Transfer"
+      ? `${draft.fromWallet || "?"} to ${moneySend ? "someone else" : draft.toWallet || "?"}`
+      : flow === "Debt"
+        ? draft.item || "Debt"
+        : draft.item.trim()
+          ? `${listed}${draft.item}`
+          : flow === "Revenue"
+            ? "What was it?"
+            : "What was it for?";
+  const whatMissing = (flow === "Spending" || flow === "Revenue") && !draft.item.trim();
+  const walletShown = flow === "Revenue" ? draft.toWallet : flow === "Transfer" ? "" : draft.fromWallet;
+  const meta = [
+    flow === "Transfer" ? "" : walletShown ? `${flow === "Revenue" ? "Into" : "From"} ${walletShown}` : "No wallet yet",
+    formatMedium(draft.date),
+    draft.fee > 0 ? `${formatMoney(draft.fee)} fee` : "",
+    state === "added" ? `Added as #${String(recordNumber).padStart(4, "0")}` : state === "used" ? "In the form" : "",
+    !settled && confidence !== "clear" ? confidence : "",
+  ].filter(Boolean);
+  /** The wallet read is in doubt: a statement's own account, or a name that is not one of yours. */
+  const walletDoubt = proposal.adjustments.some((a) => /reads as|not one of your accounts|which wallet|statement/i.test(a));
+
+  /** Its number and standing, in the batch bar's words, so "cards 3, 5 and 6" in the bar is these cards. */
+  const placeLine = place ? (
+    <p className="t-micro fms-cardplace">
+      <span className="t-body-strong">
+        Card {place.at} of {place.of}
+      </span>
+      {" · "}
+      {place.standing === "repeat" && place.twin ? `Same as card ${place.twin}` : STANDING_WORDS[place.standing]}
+    </p>
+  ) : null;
+
+  const summaryTop = (
+    <div className="fms-proposalsum-top">
+      <span className={`fms-proposalkind fms-proposalkind--${flowTone}`}>{kindWord}</span>
+      <span className="t-body-strong fms-proposalsum-what" style={whatMissing ? { color: "var(--over)" } : undefined}>
+        {what}
+      </span>
+      {draft.amount === null ? (
+        <span className="t-body-strong" style={{ color: "var(--over)" }}>
+          No amount
+        </span>
+      ) : (
+        <span className="t-body-strong fms-proposalmoney">{formatMoney(draft.amount)}</span>
+      )}
+    </div>
+  );
+
+  /*
+   * Already got this one: one line, not a new entry.
+   *
+   * The owner, 27 September 2026, of a Maya history where four of seven rows
+   * were already saved: "it cant recognized the data that allready added. it
+   * just give me the entry". Each of those was a full card with a warning at
+   * the bottom, the same as a new one. Now it says which row it is, first,
+   * and the card behind it is one tap away. Nothing is decided for the
+   * owner: "Add anyway" is right there for the second coffee of the day.
+   */
+  const copyOf = alreadyInLedger[0];
+  if (!settled && !unfolded && (copyOf || repeatOfCard)) {
+    const number = (n: number): string => `#${String(n).padStart(4, "0")}`;
+    const where = (from: string, to: string): string => (from && to ? `${from} to ${to}` : to ? `into ${to}` : from ? `out of ${from}` : "");
+    const line = copyOf
+      ? `${copyOf.certainty === "same" ? "Saved as" : "Looks like"} ${number(copyOf.row.recordNumber)}, ${formatMedium(copyOf.row.date)}: ${[
+          copyOf.row.item || copyOf.row.type,
+          copyOf.row.description.trim().toLowerCase() === (copyOf.row.item || copyOf.row.type).toLowerCase() ? "" : copyOf.row.description,
+          where(copyOf.row.fromWallet, copyOf.row.toWallet),
+        ]
+          .filter(Boolean)
+          .join(", ")}.${alreadyInLedger.length > 1 ? ` Also like ${alreadyInLedger.slice(1).map((d) => number(d.row.recordNumber)).join(" and ")}.` : ""}`
+      : `A card above already says this${place?.twin ? ` (card ${place.twin})` : ""}: the same day, amount and kind.`;
+    const otherKind = copyOf && copyOf.row.type !== flow;
+    return (
+      <div ref={hostRef} tabIndex={-1} className="fms-proposal fms-proposal--copy">
+        {placeLine ?? <p className="t-micro fms-cardplace">{copyOf ? "Already in your ledger" : "Same as a card above"}</p>}
+        <div className="fms-proposalsum">
+          {summaryTop}
+          <p className="t-caption fms-proposalsum-meta">{[formatMedium(draft.date), draft.description].filter(Boolean).join(" · ")}</p>
+        </div>
+        <p className="t-caption fms-copyline">{line}</p>
+        {otherKind && (
+          <p className="t-micro fms-proposalnote">
+            It is filed there as {copyOf.row.type}
+            {copyOf.row.item ? `, ${copyOf.row.item}` : ""}, and this reads as {flow}. If the kind there is wrong, open {number(copyOf.row.recordNumber)} in the Database and fix it there.
+          </p>
+        )}
+        <div className="fms-proposalactions">
+          <Button size="sm" onClick={onDiscard}>
+            Skip it
+          </Button>
+          <Button size="sm" disabled={!check.ok} onClick={pressAdd}>
+            {check.ok ? "Add anyway" : "Add anyway (fix it first)"}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setUnfolded(true)}>
+            Show the card
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div ref={hostRef} className={settled ? "fms-proposal fms-proposal--settled" : "fms-proposal"}>
-      <div className="fms-proposalhead">
-        <span className="t-label" style={{ color: "var(--ink-2)" }}>
-          {state === "added" ? "Added" : state === "used" ? "In the form" : "New entry"}
-        </span>
-        <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-          {settled ? "" : confidence}
-        </span>
+    <div ref={hostRef} tabIndex={-1} className={settled ? "fms-proposal fms-proposal--settled" : "fms-proposal"}>
+      {!settled && placeLine}
+      {/*
+        What it is, in three lines: the kind, what it was and the amount;
+        the description; the wallet, the day and anything unusual.
+
+        It was ten labelled fields in a grid (record number, type, date, from
+        wallet, category, item, amount, fee, description, status), a phone
+        screen for one entry, and the owner said it was too crowded to read
+        on a phone (27 September 2026). The names are the form's and the
+        database's; only the ones that say something are shown.
+      */}
+      <div className="fms-proposalsum">
+        {summaryTop}
+        {draft.description.trim() && <p className="t-caption fms-proposalsum-desc">{draft.description}</p>}
+        <p className="t-caption fms-proposalsum-meta">{meta.join(" · ")}</p>
+        {draft.notes && <p className="t-caption fms-proposalsum-desc">{draft.notes}</p>}
       </div>
 
-      {/*
-        The same fields, in the same order, under the same names the form and
-        the database use. An earlier version called `description` "Note",
-        which is a different column: the ledger has both, and a card that
-        renames one of them is teaching the wrong thing about the data.
-      */}
-      <dl className="fms-proposalfields">
-        <Field label="Record number" value={String(recordNumber).padStart(4, "0")} mono />
-        <Field label="Type" value={flow} />
-        <Field label="Date" value={draft.date} mono />
-        {flow !== "Revenue" && <Field label="From wallet" value={draft.fromWallet} required />}
-        {flow !== "Spending" &&
-          (moneySend ? (
-            // Blank on purpose: the money left the accounts, so there is no
-            // destination to pick and marking it required reads as an error.
-            <Field label="To wallet" value="Someone else" />
-          ) : (
-            <Field label="To wallet" value={draft.toWallet} required={flow === "Transfer"} />
-          ))}
-        <Field label="Category" value={draft.category} />
-        {(flow === "Spending" || flow === "Revenue") && (
-          <Field label="Item" value={draft.item} required />
-        )}
-        <Field
-          label="Amount"
-          value={draft.amount === null ? "" : formatMoney(draft.amount)}
-          required
-          mono
-        />
-        <Field label="Fee" value={formatMoney(draft.fee)} mono />
-        <Field label="Description" value={draft.description} />
-        {draft.notes && <Field label="Notes" value={draft.notes} />}
-        <Field label="Status" value={draft.status} />
-      </dl>
-
-      {!settled && (
+      {!settled && flow !== "Transfer" && (walletDoubt || !draft[walletField]) && (
         <div className="fms-proposalpick">
           <label className="t-micro fms-pfieldlabel" htmlFor={pickerId}>
             {walletLabel}
@@ -6239,7 +6432,7 @@ function ProposalCard({
         </div>
       )}
 
-      {check.problems.map((p) => (
+      {check.problems.filter((p) => !RESTATES_BLANK.has(p)).map((p) => (
         <p key={p} className="t-micro fms-proposalnote fms-proposalnote--stop">
           {p}
         </p>

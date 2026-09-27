@@ -347,10 +347,24 @@ function readOne(
 
   const toWallet =
     flow === "Spending" ? "" : matchExact(str(value["toWallet"]), accounts);
-  if (flow !== "Spending" && !toWallet && str(value["toWallet"])) {
+  /*
+   * A transfer to a place that is not one of the owner's accounts left
+   * them: "to PNB (business)" on 27 September 2026, after PNB became the
+   * business's bank, was asked "which one did it go into?" with a list of
+   * the owner's own accounts, none of them right. Named by the model, or in
+   * its description as "to <somewhere>", it is money sent to someone else.
+   */
+  const outsideName =
+    flow === "Transfer" && !toWallet
+      ? str(value["toWallet"]) || (/\bto\s+([a-z][\w .&()'-]{1,40})/i.exec(str(value["description"]))?.[1]?.trim() ?? "")
+      : "";
+  const leftAccounts = outsideName !== "" && !matchExact(outsideName, accounts) && !accounts.some((a) => outsideName.toLowerCase().startsWith(a.toLowerCase()));
+  if (flow !== "Spending" && !toWallet && str(value["toWallet"]) && !leftAccounts) {
     adjustments.push(
       `"${str(value["toWallet"])}" is not one of your accounts, so the destination is left for you to pick.`,
     );
+  } else if (leftAccounts) {
+    adjustments.push(`${outsideName} is not one of your accounts, so this left them: money sent to someone else.`);
   }
 
   /**
@@ -413,7 +427,7 @@ function readOne(
     (matchExact(str(value["status"]), [...STATUSES]) as TransactionStatus) ||
     DEFAULT_STATUS[flow];
 
-  const draft: Draft = {
+  let draft: Draft = {
     flow,
     date,
     fromWallet,
@@ -425,7 +439,9 @@ function readOne(
     fee,
     notes: "",
     status,
+    ...(leftAccounts ? { sentOut: true } : {}),
   };
+  if (leftAccounts && !draft.description) draft = { ...draft, description: `To ${outsideName}` };
 
   return {
     draft,

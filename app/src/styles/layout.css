@@ -3143,32 +3143,57 @@
  * brand rule on its left say it is the assistant waiting, the same as a
  * pending entry; the two answers that need no typing sit under it.
  */
+/*
+ * One question about a card, above the box: which one of how many, the
+ * question, and its answers as buttons to tap (owner, 27 September 2026:
+ * "fix the ui its ugly ... look what to answer?"). The answers used to be
+ * written out as a sentence, the question was said twice, and Skip and Stop
+ * were two grey slabs. Skip and Stop are quiet links on the heading line.
+ */
 .fms-askq {
   flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
+  display: grid;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3);
   border: 1px solid var(--hairline-strong);
-  border-left: 2px solid var(--brand-600);
+  border-radius: var(--radius-lg);
   background: var(--surface);
-  max-height: 30vh;
+  max-height: 40vh;
   overflow-y: auto;
 }
 
-.fms-askq > p {
+.fms-askq-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.fms-askq-skip {
+  display: inline-flex;
+  gap: var(--space-3);
+}
+
+.fms-askq-text {
   margin: 0;
   color: var(--ink);
 }
 
-.fms-askq-actions {
-  display: flex;
-  flex-wrap: wrap;
+.fms-askq-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 132px), 1fr));
   gap: var(--space-2);
 }
 
-.fms-askq-actions > .fms-btn {
-  min-height: 44px;
+.fms-askq-choices > .fms-choice {
+  color: var(--ink);
+}
+
+@media (hover: hover) {
+  .fms-askq-choices > .fms-choice:hover {
+    border-color: var(--ink-3);
+    background: var(--surface-hover);
+  }
 }
 
 /* ── Attachments ─────────────────────────────────────────────────────────── */
@@ -3246,6 +3271,78 @@
   gap: var(--space-2);
   padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--hairline);
+}
+
+/*
+ * A suggested entry, summed up: the kind, what it was and the amount on one
+ * line, the description under it, the wallet and the day under that (owner,
+ * 27 September 2026: "its too crowded I can even see in phone").
+ */
+.fms-proposalsum {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-proposalsum-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-proposalsum-what {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.fms-proposalsum-desc,
+.fms-proposalsum-meta {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fms-proposalsum-desc {
+  color: var(--ink-2);
+}
+
+.fms-proposalsum-meta {
+  color: var(--ink-3);
+}
+
+/* The kind, in the colour of which way the money went (rule D3). */
+.fms-proposalkind {
+  flex: none;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.fms-proposalkind--spending {
+  background: var(--flow-spending-bg);
+  color: var(--flow-spending-text);
+}
+
+.fms-proposalkind--revenue {
+  background: var(--flow-revenue-bg);
+  color: var(--flow-revenue-text);
+}
+
+.fms-proposalkind--transfer {
+  background: var(--flow-transfer-bg);
+  color: var(--flow-transfer-text);
+}
+
+.fms-proposalkind--debt {
+  background: var(--flow-debt-bg);
+  color: var(--flow-debt-text);
 }
 
 /*
@@ -4853,15 +4950,15 @@ button.fms-recent-row:disabled {
  * The bar for a batch.
  *
  * Above the thread rather than inside it, so it holds still while eight cards
- * scroll under it: the count and the button are what you came back to, and
- * hunting for them among the cards is the mess this replaces.
+ * scroll under it. One line per group of cards, naming the cards it holds
+ * ("cards 3, 5, 6 and 7") beside the one button that acts on them, so every
+ * button says which cards it touches (owner, 27 September 2026: "they are so
+ * misleading fix it make it connect").
  */
 .fms-batchbar {
   flex: 0 0 auto;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
+  display: grid;
+  gap: var(--space-1);
   /*
    * Ruled, like every other block here, rather than a rounded green panel
    * (rules D2 and D3). The rule is the brand green because this is the thing
@@ -4872,26 +4969,91 @@ button.fms-recent-row:disabled {
   color: var(--ink);
 }
 
-/* The count holds the left, the two buttons sit together on the right. */
-.fms-batchbar-count {
-  margin-right: auto;
+.fms-batchbar-head,
+.fms-batchgroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-batchbar-head {
+  justify-content: space-between;
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* The group's name and its cards: a tap shows the first of them. */
+.fms-batchgroup-what {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  align-content: center;
+  column-gap: var(--space-2);
+  min-width: 0;
+  min-height: 32px;
+  padding: 0;
+  text-align: left;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* A finger needs the full 44px (rule D10); a pointer does not. */
+@media (pointer: coarse) {
+  .fms-batchgroup-what {
+    min-height: 44px;
+  }
+}
+
+.fms-batchgroup-what:hover .fms-batchgroup-cards {
+  text-decoration: underline;
+}
+
+.fms-batchgroup-label {
+  color: var(--ink);
+}
+
+.fms-batchgroup-cards {
+  color: var(--ink-3);
+}
+
+.fms-batchgroup > .fms-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* A card's number and standing, in the bar's words. */
+.fms-cardplace {
+  margin: 0;
+  color: var(--ink-3);
+}
+
+.fms-cardplace .t-body-strong {
   color: var(--ink-2);
+  font-size: inherit;
+}
+
+/* The card the bar or a question pointed at. */
+.fms-proposal:focus {
+  outline: 2px solid var(--brand-600);
+  outline-offset: 2px;
 }
 
 /*
- * On a phone the count takes its own line and the buttons share the one
- * under it. Pushed apart at 390px they each wrapped, so the bar was three
- * rows and 112px tall before a single card.
+ * A card already in the ledger, folded to what it matches. A hairline frame
+ * rather than the brand one: it is not a new entry waiting to be added.
  */
-@media (max-width: 479px) {
-  .fms-batchbar-count {
-    flex-basis: 100%;
-    margin-right: 0;
-  }
+.fms-proposal--copy {
+  gap: var(--space-2);
+  border-color: var(--hairline-strong);
+}
 
-  .fms-batchbar > .fms-btn {
-    flex: 1 1 0;
-  }
+.fms-copyline {
+  margin: 0;
+  color: var(--ink);
 }
 
 /*

@@ -1989,6 +1989,7 @@ export default function App() {
                 budgets={budgets}
                 reference={reference}
                 asOf={asOf}
+                ownerName={cloud.auth.status === "ready" ? cloud.auth.name : ""}
               />
             </div>
           )}
@@ -2258,6 +2259,7 @@ export default function App() {
                   budgets={budgets}
                   reference={reference}
                   asOf={asOf}
+                  ownerName={cloud.auth.status === "ready" ? cloud.auth.name : ""}
                 />
               </AppBoundary>
             </div>

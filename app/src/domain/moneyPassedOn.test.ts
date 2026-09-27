@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import { walletBalance } from "./balances";
 import { behalfFor, namesPerson, splitsWhose } from "./behalfFor";
+import { cardQuestion } from "./cardQuestions";
 import { outstandingOf } from "./debt";
 import { draftToTransactions, emptyDraft, type Draft } from "./entry";
 import { REFERENCE } from "./eval/corpus";
@@ -128,6 +129,22 @@ describe("reading money passed on", () => {
       TODAY,
     );
     expect(proposals[0]?.draft.debtId).toBe(aunt.id);
+  });
+
+  it("reads a transfer to a place that is not one of your accounts as sent out, and asks nothing", () => {
+    for (const row of [
+      { flow: "Transfer", fromWallet: "Gcash", toWallet: "PNB", amountPesos: 5000, feePesos: 10 },
+      { flow: "Transfer", fromWallet: "Gcash", toWallet: "", amountPesos: 5000, feePesos: 10, description: "to PNB (business)" },
+    ]) {
+      const { proposals } = readProposals({ proposals: [row] }, reference, TODAY);
+      const d = proposals[0]!.draft;
+      expect(d).toMatchObject({ flow: "Transfer", sentOut: true, toWallet: "", fromWallet: "Gcash", amount: 500000, fee: 1000 });
+      expect(cardQuestion(d, reference, 1, 1)).toBeNull();
+    }
+    // One of their own accounts stays theirs.
+    const own = readProposals({ proposals: [{ flow: "Transfer", fromWallet: "Gcash", toWallet: "Maya", amountPesos: 9980, feePesos: 10 }] }, reference, TODAY);
+    expect(own.proposals[0]?.draft).toMatchObject({ toWallet: "Maya" });
+    expect(own.proposals[0]?.draft.sentOut).toBeUndefined();
   });
 
   it("never files income under a credit line's name", () => {

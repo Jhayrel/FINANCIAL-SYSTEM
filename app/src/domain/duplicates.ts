@@ -207,8 +207,16 @@ export function duplicatesOf(
      * what makes this work for Spending, where the destination is always
      * blank on both sides.
      */
-    const sameFrom = same(draft.fromWallet, row.fromWallet);
-    const sameTo = same(draft.toWallet, row.toWallet);
+    /*
+     * A transfer whose other end is still to be said ("my own", from a
+     * statement that shows only its own side) agrees at that end with any
+     * account, so long as the end it does name agrees.
+     */
+    const open = flow === "Transfer" && !draft.sentOut;
+    const fromOpen = open && !draft.fromWallet.trim() && draft.toWallet.trim() !== "";
+    const toOpen = open && !draft.toWallet.trim() && draft.fromWallet.trim() !== "" && row.toWallet.trim() !== "";
+    const sameFrom = fromOpen || same(draft.fromWallet, row.fromWallet);
+    const sameTo = toOpen || same(draft.toWallet, row.toWallet);
     const sameWallets = sameFrom && sameTo;
 
     if (sameWallets) {
@@ -258,12 +266,19 @@ export function duplicatesOf(
 /**
  * The wallet two rows of different kinds both move money through, in words,
  * or "" when they do not: out of it for both, or into it for both.
+ *
+ * A transfer moves money at both of its ends, and either end can be the one
+ * a statement shows. The owner sent ₱9,980.00 from GCash to Maya and logged
+ * it; Maya's own history then showed it as "Received money from" their own
+ * name, read as income into Maya, and it was offered as a new entry because
+ * a transfer only ever counted as money out (27 September 2026). Into Maya is
+ * into Maya, whichever kind of row says so.
  */
 function sameMoneyOtherKind(draft: Draft, row: Transaction): string {
-  const draftIn = draft.flow === "Revenue" || (draft.flow === "Transfer" && !draft.fromWallet.trim()) || (draft.flow === "Debt" && !draft.fromWallet.trim() && Boolean(draft.toWallet.trim()));
-  const rowIn = row.type === "Revenue" || (!row.fromWallet.trim() && Boolean(row.toWallet.trim()));
-  if (!draftIn && !rowIn && draft.fromWallet.trim() && same(draft.fromWallet, row.fromWallet)) return `out of ${row.fromWallet}`;
-  if (draftIn && rowIn && draft.toWallet.trim() && same(draft.toWallet, row.toWallet)) return `into ${row.toWallet}`;
+  const draftOut = draft.flow === "Revenue" ? "" : draft.fromWallet.trim();
+  const draftIn = draft.flow === "Spending" ? "" : draft.toWallet.trim();
+  if (draftOut && same(draftOut, row.fromWallet)) return `out of ${row.fromWallet}`;
+  if (draftIn && same(draftIn, row.toWallet)) return `into ${row.toWallet}`;
   return "";
 }
 

@@ -542,6 +542,8 @@ export interface ExtractOptions {
   readonly readPicture?: (dataUrl: string, key?: string) => Promise<{ readonly plain: string; readonly raised: string } | null>;
   /** Set here, not by callers: what the device read, for checking the model's amounts against. */
   readonly readings?: readonly string[];
+  /** The owner's own name as a bank prints it: money from or to it is between their own accounts. */
+  readonly ownNames?: readonly string[];
 }
 
 /** The last day each item appears in the ledger. */
@@ -586,6 +588,8 @@ export interface ExtractResult {
   readonly readOnDevice?: number;
   /** Rows a stitched screenshot showed twice, read once (`dropRepeats`). */
   readonly repeated?: number;
+  /** What the device read off the pictures, for the checks after the model (`statementSense`). */
+  readonly readings?: readonly string[];
 }
 
 /**
@@ -625,6 +629,8 @@ function extractContext(options: ExtractOptions): string {
     `Today is ${asOf}.`,
     `Their wallets: ${[...reference.wallets, ...reference.savings].join(", ") || "none set up yet"}`,
     `Their credit lines, loans and people they hold or send money for: ${(reference.credits ?? []).join(", ") || "none"}`,
+    // Their own name on a statement is them: "Received money from" it is a transfer from another of their accounts. Only with a statement attached, which carries the name anyway.
+    ...((options.ownNames ?? []).length > 0 && attachments.length > 0 ? [`Their own name, as a bank prints it: ${(options.ownNames ?? []).join(", ")}. Money from or to this name is between their own accounts: flow Transfer, never Revenue or Spending.`] : []),
     // Who a payment can be for, and which side: Father's plan paid for him is OnBehalf, not a bill.
     ...((reference.onBehalf ?? []).length > 0
       ? [
@@ -731,9 +737,9 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
     );
     const joined = joinAnswers(answers);
     // Nothing usable in any of them: the pictures go to a model that can see, as below.
-    if (usable(joined) >= 10 || options.signal?.aborted) return { ...joined, readOnDevice, repeated };
+    if (usable(joined) >= 10 || options.signal?.aborted) return { ...joined, readOnDevice, repeated, readings: read };
     const seen = await extractOnce({ ...options, readings: read });
-    return usable(seen) > usable(joined) ? seen : { ...joined, readOnDevice, repeated };
+    return usable(seen) > usable(joined) ? { ...seen, readings: read } : { ...joined, readOnDevice, repeated, readings: read };
   }
 
   const first = await extractOnce({ ...options, readings: read, attachments: jobs[0] ?? [...others, ...stillPictures] });
@@ -744,10 +750,10 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
    * a model that could look at them.
    */
   if (usable(first) >= 10 || options.signal?.aborted) {
-    return { ...first, readOnDevice, repeated };
+    return { ...first, readOnDevice, repeated, readings: read };
   }
   const second = await extractOnce({ ...options, readings: read });
-  return usable(second) > usable(first) ? second : { ...first, readOnDevice, repeated };
+  return usable(second) > usable(first) ? { ...second, readings: read } : { ...first, readOnDevice, repeated, readings: read };
 }
 
 /** Rows a list is cut into for reading, and how many parts are read at once. */

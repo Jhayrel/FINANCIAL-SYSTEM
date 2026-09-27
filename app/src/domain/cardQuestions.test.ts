@@ -41,16 +41,36 @@ describe("the question about one card", () => {
     expect(rowWords(paid)).toBe("₱1,018.00 out, TANQUI SFLU, 20 Sep");
     const q = cardQuestion(paid, reference, 2, 5);
     expect(q?.blank).toBe("item");
-    expect(q?.text).toContain("(2 of 5) ₱1,018.00 out, TANQUI SFLU, 20 Sep.");
-    expect(q?.text).toContain("Food, School");
-    expect(q?.text).toContain("sent to someone");
+    expect(q?.count).toBe("2 of 5");
+    expect(q?.text).toBe("₱1,018.00 out, TANQUI SFLU, 20 Sep. What was it for?");
+    expect(q?.choices).toEqual(expect.arrayContaining(["Food", "School", "Sent to someone"]));
   });
 
   it("offers income kinds, and 'my own', for money in", () => {
     const q = cardQuestion(received, reference, 1, 1);
     expect(q?.text).toContain("₱723.45 in, Received money from J. Cruz, 15 Sep.");
-    expect(q?.text).toContain("Allowance, Random");
-    expect(q?.text).toContain("my own");
+    expect(q?.count).toBe("");
+    expect(q?.choices).toEqual(expect.arrayContaining(["Allowance", "Random", "From my own account"]));
+  });
+
+  /*
+   * Every button is an answer the card takes, typed or tapped (27 September
+   * 2026: the answers were a sentence of account names and "what to answer?").
+   */
+  it("takes each of its own buttons as the answer", () => {
+    const spent = cardQuestion(paid, reference, 1, 1)!;
+    for (const choice of spent.choices) {
+      expect(looksLikeAnswer(choice, spent.blank), choice).toBe(true);
+      expect(answerCard(paid, spent.blank, choice, reference), choice).not.toBeNull();
+    }
+    const out: Draft = { ...emptyDraft("2026-09-27"), flow: "Transfer", fromWallet: "Gcash", amount: 500000, fee: 1000, description: "to PNB (business)" };
+    const where = cardQuestion(out, reference, 1, 1)!;
+    expect(where.text).toBe("₱5,000.00 out, to PNB (business), 27 Sep. Where did it go?");
+    expect(where.choices[0]).toBe("Someone else");
+    expect(where.choices).not.toContain("Gcash");
+    const gone = answerCard(out, "toWallet", "Someone else", reference);
+    expect(gone).toMatchObject({ flow: "Transfer", sentOut: true, toWallet: "" });
+    expect(answerCard(out, "toWallet", "Maya", reference)?.toWallet).toBe("Maya");
   });
 
   it("asks nothing about a card that is complete", () => {
@@ -164,8 +184,12 @@ describe("money in that was borrowed (27 September 2026)", () => {
     expect(confirmsIncome(misread)).toBe(true);
     expect(cardQuestion(misread, reference, 1, 2)).toBeNull();
     const q = cardQuestion(misread, reference, 1, 2, { lines: ["Maya Credit"] });
-    expect(q?.text).toContain("filed as Allowance for now");
-    expect(q?.text).toContain('"borrowed on Maya Credit"');
+    expect(q?.text).toContain("Filed as Allowance for now");
+    expect(q?.choices).toContain("Borrowed on Maya Credit");
+    expect(answerCard(misread, "item", "Borrowed on Maya Credit", reference, [], [{ id: "maya-credit", name: "Maya Credit", wallet: "Maya" }])).toMatchObject({
+      flow: "Debt",
+      debtEffect: "draw",
+    });
   });
 
   it("small cash backs are not asked about", () => {

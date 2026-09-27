@@ -261,12 +261,12 @@ export function invertBoxes(rgba: Uint8ClampedArray, width: number, boxes: reado
 
 const MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
 /** A line that dates the rows under it: "September 24, 2026", "24 Sep 2026", "2026-09-24", "Today". */
-const DATE_LINE = new RegExp(
+export const DATE_LINE = new RegExp(
   `\\b${MONTH}\\.?\\s+\\d{1,2},?\\s+\\d{4}\\b|\\b\\d{1,2}\\s+${MONTH}\\.?,?\\s+\\d{4}\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b|^\\W*(?:today|yesterday)\\W*$`,
   "i",
 );
 /** A figure in pesos and centavos, which is what closes a row. */
-const ROW_AMOUNT = /\d[\d,]*\.\d{2}(?!\d)/;
+export const ROW_AMOUNT = /\d[\d,]*\.\d{2}(?!\d)/;
 
 /** How many rows of a list the text holds, going by the figures in it. */
 export function rowsIn(text: string): number {

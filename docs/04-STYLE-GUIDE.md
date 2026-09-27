@@ -610,6 +610,24 @@ Why it matters: one unchanging "Thinking" for fifteen seconds says nothing,
 and the honest question a reader asks of it is whether anything is happening
 at all.
 
+### 3.14a Suggested entries, several at once
+
+A statement or a pasted list becomes several cards. Every button names the
+cards it acts on, and every card says which group it is in, in the same words.
+
+| Rule | Spec |
+|---|---|
+| Card number | Each open card in a batch opens with "Card 3 of 7" and its standing: Ready to add, Needs your answer, Needs a fix on the card, Already in your ledger, or Same as card 2. |
+| Batch bar | One line per group: its name, the cards in it ("cards 3, 5, 6 and 7"), and the one button that acts on them (Add these 2, Skip these 4, Go to card 4). A tap on the name shows the first of those cards and outlines it. "Discard all 7" sits on the bar's first line and says it takes every open card, ready ones included. |
+| Already in your ledger | Folded to one line naming the saved row ("Saved as #0412, September 26, 2026: Food, corner store, out of Maya."), with Skip it, Add anyway, and Show the card. Never a full new entry. A row filed there as another kind says so and says where to fix it. |
+| Questions | The question bar says which card it is about ("Question 1 of 2, about card 4"). A card already in the ledger is never asked about. |
+| Never | A count with nothing to point at: "4 copies" of what, "2 ready" which ones. |
+
+Why it matters: the owner, 27 September 2026, of "Add the 2 ready", "Discard
+the 4 copies" and "Discard all 7": "they are so misleading fix it make it
+connect". Four of the seven were already saved and each still looked like a
+new entry.
+
 ### 3.15 A printed statement
 
 The PDF a statement exports (`pdf/statementPdf.ts`). From the owner's Excel

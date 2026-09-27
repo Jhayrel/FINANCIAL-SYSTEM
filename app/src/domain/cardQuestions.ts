@@ -118,27 +118,65 @@ export function cardQuestion(
   of: number,
   /** Ask about money in even when its kind is filled (`confirmsIncome`), naming these lines as answers. */
   confirm?: { readonly lines: readonly string[] },
-): { readonly blank: Blank; readonly text: string } | null {
+): CardAsk | null {
   const asked = nextQuestion(draft, reference) ?? (confirm && confirmsIncome(draft) ? { blank: "item" as const, question: "" } : null);
   if (!asked) return null;
-  const head = `(${at} of ${of}) ${rowWords(draft)}.`;
+  /*
+   * One short question, and the answers as buttons.
+   *
+   * The owner, 27 September 2026, on "(1 of 1) ₱5,000.00 out, to PNB
+   * (business), 27 Sep. And which one did it go into? Cash, Gcash, Maya,
+   * Allowance (Reserve), Extra Cash, Maya Bank (Personal savings), Reserved
+   * Fund. Say "someone else" if it left your accounts": "fix the ui its
+   * ugly ... look what to answer?". The list is buttons now, and the words
+   * still work typed.
+   */
+  const head = rowWords(draft);
+  const count = of > 1 ? `${at} of ${of}` : "";
+  const accounts = [...reference.wallets, ...reference.savings];
   if (asked.blank === "item" && draft.flow === "Spending") {
-    const kinds = reference.spendingTypes.slice(0, 5).map((t) => t.name);
     return {
       blank: "item",
-      text: `${head} What was it for? ${kinds.length > 0 ? `${kinds.join(", ")} or another of yours` : "Say what it was"}, or say "sent to someone" if it went to a person.`,
+      count,
+      text: `${head}. What was it for?`,
+      choices: [...reference.spendingTypes.slice(0, 6).map((t) => t.name), "Sent to someone"],
     };
   }
   if (asked.blank === "item" && draft.flow === "Revenue") {
-    const kinds = reference.revenueCategories.slice(0, 5);
     const lines = confirm?.lines ?? [];
-    const filed = draft.item.trim() ? ` It is filed as ${draft.item} for now.` : "";
+    const filed = draft.item.trim() ? ` Filed as ${draft.item} for now.` : "";
     return {
       blank: "item",
-      text: `${head}${filed} What was it? ${kinds.length > 0 ? `${kinds.join(", ")}` : "Say what it was"}${lines.length > 0 ? `, "borrowed on ${lines[0]}"` : ""}, or say "my own" if it came from another of your accounts.`,
+      count,
+      text: `${head}.${filed} What was it?`,
+      choices: [...reference.revenueCategories.slice(0, 5), ...(lines[0] ? [`Borrowed on ${lines[0]}`] : []), "From my own account"],
     };
   }
-  return { blank: asked.blank, text: `${head} ${asked.question}` };
+  if (asked.blank === "toWallet" && draft.flow === "Transfer") {
+    return {
+      blank: "toWallet",
+      count,
+      text: `${head}. Where did it go?`,
+      choices: ["Someone else", ...accounts.filter((a) => a !== draft.fromWallet)],
+    };
+  }
+  if (asked.blank === "toWallet") {
+    return { blank: "toWallet", count, text: `${head}. Which account did it land in?`, choices: accounts };
+  }
+  if (asked.blank === "fromWallet") {
+    return { blank: "fromWallet", count, text: `${head}. Which account paid?`, choices: accounts.filter((a) => a !== draft.toWallet) };
+  }
+  return { blank: asked.blank, count, text: `${head}. ${asked.question}`, choices: [] };
+}
+
+/** A question about one card: the words, the answers to tap, and which of how many it is. */
+export interface CardAsk {
+  readonly blank: Blank;
+  readonly text: string;
+  /** Each a reply `answerCard` reads, shown as a button. */
+  readonly choices: readonly string[];
+  /** "2 of 5", or empty for a single card. */
+  readonly count: string;
 }
 
 /** "from my own account", "that's mine": money from another of their own accounts. */
