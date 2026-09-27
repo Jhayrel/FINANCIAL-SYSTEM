@@ -478,9 +478,11 @@ function readBehalfRow(
     ...(said ? { behalf: said.side } : { behalf: "owed" as const }),
     ...(person ? { debtId: makeDebtId(person) } : {}),
   };
+  // A fee the owner paid to send it: theirs, on the row that moved the money out.
+  const sendFee = readMoney(value["feePesos"]) ?? 0;
   const withWallet: Draft = said
     ? said.effect === "lend" || said.effect === "repay"
-      ? { ...base, debtEffect: said.effect, fromWallet: wallet }
+      ? { ...base, debtEffect: said.effect, fromWallet: wallet, fee: sendFee > 0 ? sendFee : 0 }
       : said.effect === "writeoff"
         ? { ...base, debtEffect: said.effect }
         : { ...base, debtEffect: said.effect, toWallet: wallet }
@@ -561,7 +563,14 @@ function readDebt(
     return { draft: { ...base, debtEffect: "charge" }, confidence, sourceRef, adjustments };
   }
   if (said === "repay") {
-    return { draft: { ...base, debtEffect: "repay", fromWallet: wallet, status: "Paid" }, confidence, sourceRef, adjustments };
+    // The fee the sending app charged, paid on top from the same wallet: the owner's transfer fee, not interest.
+    const sendFee = readMoney(value["feePesos"]) ?? 0;
+    return {
+      draft: { ...base, debtEffect: "repay", fromWallet: wallet, status: "Paid", fee: sendFee > 0 ? sendFee : 0 },
+      confidence,
+      sourceRef,
+      adjustments,
+    };
   }
   if (said === "writeoff") {
     return { draft: { ...base, debtEffect: "writeoff" }, confidence, sourceRef, adjustments };
@@ -677,7 +686,10 @@ export function foldTransferFees(proposals: readonly Proposal[]): Proposal[] {
       ((d.flow === "Debt" && (d.debtEffect === "charge" || d.debtEffect === "fee") && /\bfee\b/i.test(words) && !LENDER_FEE.test(words)) ||
         (d.flow === "Spending" && /\b(transaction|withdraw\w*|transfer|atm|cash ?out) fee\b/i.test(words)));
     if (!isFee) continue;
-    const open = out.filter((t) => t.draft.flow === "Transfer" && t.draft.fee === 0 && t.draft.date === d.date);
+    // A transfer, or money sent for a debt or for someone: each can carry the fee it cost to send.
+    const sends = (x: Draft): boolean =>
+      x.flow === "Transfer" || (x.flow === "Debt" && (x.debtEffect === "repay" || x.debtEffect === "lend"));
+    const open = out.filter((t) => t !== fee && sends(t.draft) && t.draft.fee === 0 && t.draft.date === d.date);
     const target = open.length === 1 ? open[0] : undefined;
     if (!target) continue;
     const added = d.amount ?? 0;
@@ -688,7 +700,12 @@ export function foldTransferFees(proposals: readonly Proposal[]): Proposal[] {
           ? {
               ...t,
               draft: { ...t.draft, fee: added },
-              adjustments: [...t.adjustments, `${pesos(added)} fee on this ${/withdraw/i.test(t.draft.description) || t.draft.status === "Withdrawn" ? "withdrawal" : "transfer"}, from the same message.`],
+              adjustments: [
+                ...t.adjustments,
+                `${pesos(added)} fee on this ${
+                  t.draft.flow === "Debt" ? "payment" : /withdraw/i.test(t.draft.description) || t.draft.status === "Withdrawn" ? "withdrawal" : "transfer"
+                }, from the same message.`,
+              ],
             }
           : t,
       );
@@ -749,7 +766,28 @@ export function readProposals(
    */
   const checked = checkAgainstReadings(proposals, context.readings ?? []);
   const filed = onCreditLine(checked, context.note ?? "", reference);
-  return { proposals: pairBorrowings(foldTransferFees(foldCharges(filed))), refused, balances };
+  return { proposals: pairBorrowings(foldTransferFees(foldCharges(notIncomeKinds(filed, reference)))), refused, balances };
+}
+
+/**
+ * A credit line or a person's name is never a kind of income.
+ *
+ * 27 September 2026: a mother's ₱40,000 came back as Revenue with the item
+ * "Maya Credit". Borrowed money is not income and the mother is not a line
+ * of credit; the item is cleared so the card asks what it was.
+ */
+function notIncomeKinds(proposals: readonly Proposal[], reference: ReferenceLists): Proposal[] {
+  const names = new Set((reference.credits ?? []).map((c) => c.trim().toLowerCase()));
+  return proposals.map((p) =>
+    p.draft.flow === "Revenue" && names.has(p.draft.item.trim().toLowerCase())
+      ? {
+          ...p,
+          draft: { ...p.draft, item: "" },
+          confidence: "low",
+          adjustments: [...p.adjustments, `${p.draft.item} is a credit line or a person, not a kind of income, so say what this was.`],
+        }
+      : p,
+  );
 }
 
 export interface ReadContext {

@@ -104,16 +104,25 @@ export function totalsFor(transactions: readonly Transaction[]): MonthTotals {
      * interest whenever a repayment is split.
      */
     if (t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge")) {
-      interest += t.total;
+      interest += t.amount;
     }
+    /*
+     * A transfer fee on a debt payment or on money passed on for someone,
+     * paid from the owner's own wallet (27 September 2026: "what if thats
+     * transaction fee and I paid it my self"). It is theirs, a fee like any
+     * transfer's, and never part of what is owed or of the other person's
+     * money. No row before this date carries one, so no figure moves.
+     */
+    if (t.type === "Debt" && t.fee > 0) fees += t.fee;
 
     // On someone's behalf: written off is spending, retained is income.
+    // The amount: any fee on the row is already counted with the fees above.
     if (writtenOffAsSpending(t)) {
-      if (t.category === "Bills") bills += t.total;
-      else if (t.category === "Subscriptions") subscriptions += t.total;
-      else spending += t.total;
+      if (t.category === "Bills") bills += t.amount;
+      else if (t.category === "Subscriptions") subscriptions += t.amount;
+      else spending += t.amount;
     }
-    if (retainedAsIncome(t)) revenue += t.total;
+    if (retainedAsIncome(t)) revenue += t.amount;
   }
 
   return {
@@ -179,8 +188,10 @@ export function costOf(t: Transaction): Centavos {
 
   // Interest, fees and charges are expense; repaying principal is not (rule 5.2).
   // A charge added to the balance is spending on the day it is added.
-  if (t.type === "Debt" && (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge")) {
-    return t.total;
+  if (t.type === "Debt") {
+    // The fee paid to send it is the owner's own cost, whatever the movement.
+    const cost = t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge" ? t.amount : 0;
+    return cost + (writtenOffAsSpending(t) ? t.amount : 0) + Math.max(0, t.fee);
   }
 
   if (writtenOffAsSpending(t)) return t.total;

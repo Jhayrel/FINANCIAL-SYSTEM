@@ -20,7 +20,9 @@
  * thing make it theirs.
  */
 
+import { owedChange } from "./debt";
 import { readBehalf } from "./debtSentence";
+import { formatMoney } from "./money";
 import type { Centavos } from "./money";
 import type { BehalfPerson, DebtEffect, IsoDate, Transaction } from "./types";
 
@@ -51,10 +53,18 @@ const wordsOf = (text: string): string[] =>
 
 /** Every word that names this person: their name, and what the family calls them. */
 function callsFor(name: string): Set<string> {
-  const own = wordsOf(name);
+  const own = wordsOf(name).filter((w) => !NOT_A_NAME.has(w));
   const kin = KIN.find((group) => own.some((w) => group.includes(w)));
   return new Set([...own, ...(kin ?? [])]);
 }
+
+/**
+ * Words in a person's entry that are not them.
+ *
+ * The owner's entry for their aunt is "Tita Joan's money", and "money" is in
+ * half of every sentence about money: "my money" was read as naming her.
+ */
+const NOT_A_NAME = new Set(["money", "cash", "fund", "funds", "share", "the", "of", "for", "my", "and", "ni", "kay", "ng", "sa", "pera"]);
 
 /** Whether the sentence names them. "my father's", "fathers", "papa" and "Father" all do. */
 export function namesPerson(text: string, name: string): boolean {
@@ -135,6 +145,20 @@ export function behalfFor(
     };
   }
 
+  /*
+   * Money of theirs still held, and money going out to them: passing it on.
+   * "I gave tita joan her 25000 from gcash" (27 September 2026) came back
+   * as money sent away, with ₱25,000.00 of hers still showing as held. Only
+   * on the held side: money coming in from someone who owes you can just as
+   * well be an allowance, so that side waits for the words or the thing.
+   */
+  if (named && named.side === "held" && direction === "out") {
+    const held = transactions.filter((t) => t.debtId === named.id && t.date <= asOf).reduce((sum, t) => sum + owedChange(t), 0);
+    if (held > 0) {
+      return { person: named, effect: "repay", because: `${named.name}: ${formatMoney(held)} of theirs is still with you, so this passes it on.` };
+    }
+  }
+
   const skip = new Set([...PLAIN, ...ignore.flatMap(wordsOf), ...people.flatMap((p) => [...callsFor(p.name)])]);
   const words = [...new Set(wordsOf(text))].filter((w) => w.length >= 4 && !/^\d/.test(w) && !skip.has(w));
   if (words.length === 0) return null;
@@ -165,4 +189,31 @@ export function behalfFor(
     };
   }
   return null;
+}
+
+/**
+ * One transfer that is part someone else's money and part the owner's.
+ *
+ * The owner, 27 September 2026: "30000 send to other bank ... that includes
+ * the 5k too of my allowance and 25k of my tita's money". A sentence like
+ * that names a person and the owner's own money, with two figures or more
+ * besides the fee. It is two entries, and the card for one debt movement
+ * would have filed all of it as the aunt's.
+ */
+export function splitsWhose(text: string): boolean {
+  const figure = String.raw`(?:₱|php|p)?\s*\d[\d,]*(?:\.\d+)?\s*k?`;
+  const withoutFee = text
+    .replace(new RegExp(String.raw`\b(?:fee|charge)s?\s*(?:of\s*|is\s*|na\s*)?${figure}`, "gi"), " ")
+    .replace(new RegExp(String.raw`${figure}\s*(?:pesos?\s*)?(?:fee|charge)s?\b`, "gi"), " ");
+  const figures = new Set(
+    (withoutFee.match(/\d[\d,]*(?:\.\d+)?\s*k?\b/gi) ?? [])
+      .map((m) => {
+        const k = /k\s*$/i.test(m);
+        const v = Number(m.replace(/[^\d.]/g, ""));
+        return k ? v * 1000 : v;
+      })
+      .filter((v) => Number.isFinite(v) && v >= 100),
+  );
+  const own = /\b(?:mine|my (?:own )?(?:allowance|money|share|part|savings|budget)|akin|sa akin|for me|for myself)\b/i.test(text);
+  return figures.size >= 2 && own;
 }

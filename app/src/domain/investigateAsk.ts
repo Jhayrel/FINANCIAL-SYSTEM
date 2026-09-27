@@ -14,6 +14,7 @@
  */
 
 import { addDays } from "./dates";
+import { shortNameOf } from "./readEntry";
 import type { Centavos } from "./money";
 import type { IsoDate } from "./types";
 
@@ -92,6 +93,9 @@ function accountIn(text: string, accounts: readonly string[]): string {
   for (const name of [...accounts].sort((a, b) => b.length - a.length)) {
     const needle = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     if (needle && flat.includes(` ${needle} `)) return name;
+    // "maya bank" for "Maya Bank (Personal savings)", not the wallet "Maya" inside it.
+    const short = shortNameOf(name, accounts);
+    if (short && (flat.includes(` ${short} `) || flat.includes(` ${short}s `))) return name;
   }
   return "";
 }
@@ -118,7 +122,18 @@ export function readInvestigateAsk(
   // "maya app says 30,000 but here it says 50,000": two figures set against each other.
   const contrasted = account !== "" && figures.length >= 2 && HERE.test(text) && /\b(app|bank|says|shows|balance|only|but)\b/i.test(text);
 
-  if (!mismatch && !counted && !contrasted) return null;
+  /*
+   * "My new balance in maya bank is 1533.83 can you look because there's
+   * some interest added" (27 September 2026): a balance said for an account
+   * is a request to compare it, with no word of a mismatch needed. It was
+   * read as a debt movement of ₱1,533.83 on Maya Credit instead.
+   */
+  const claimed =
+    account !== "" &&
+    figures.length === 1 &&
+    /\b(?:my|the)\b[^.]{0,40}\bbalance\b[^.]{0,40}?\b(?:is|now|are|=)\b|\bbalance\b[^.]{0,30}\b(?:look|check|compare|see)\b|\b(?:look|check|compare)\b[^.]{0,40}\bbalance\b/i.test(text);
+
+  if (!mismatch && !counted && !contrasted && !claimed) return null;
   // "where did I spend the most" names no account and no figure: not this.
   if (!account && figures.length === 0 && !/\b(reconcile|investigate|mismatch|discrepanc\w*|doesn'?t match|hindi match)\b/i.test(text)) {
     return null;
@@ -132,7 +147,17 @@ export function readInvestigateAsk(
     const ledgerFigure = figures.find((f) => Math.abs(f.value - ledger) <= 100);
     // Failing that, the one said to be this app's: "here it says 50,000", read before the figure only.
     const hereFigure = ledgerFigure ?? figures.find((f) => HERE.test(text.slice(Math.max(0, f.index - 30), f.index)));
-    const actual = (hereFigure ? figures.find((f) => f !== hereFigure) : undefined) ?? figures[0]!;
+    /*
+     * Of the rest, the one nearest the ledger's. A balance is near what the
+     * ledger says; a difference is small. "₱6.25 interest was added
+     * (1,533.83 - 1,527.58)" took ₱6.25 for the balance of the account.
+     */
+    const others = hereFigure ? figures.filter((f) => f !== hereFigure && f.value !== hereFigure.value) : [];
+    const nearest =
+      ledgerFigure && others.length > 1
+        ? [...others].sort((a, b) => Math.abs(a.value - ledger) - Math.abs(b.value - ledger))[0]
+        : others[0];
+    const actual = nearest ?? figures[0]!;
     return { account, actual: actual.value, gap: null, ...(matchedOn ? { matchedOn } : {}) };
   }
 

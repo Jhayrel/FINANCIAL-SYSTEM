@@ -24,7 +24,7 @@
 
 import type { Debt } from "./debt";
 import type { Centavos } from "./money";
-import { costOf } from "./totals";
+import { costOf, writtenOffAsSpending } from "./totals";
 import type { RankedAmount, Transaction } from "./types";
 
 /**
@@ -38,7 +38,13 @@ import type { RankedAmount, Transaction } from "./types";
 export function kindOf(t: Transaction, debts: readonly Debt[] = []): string {
   if (t.type === "Transfer") return t.toWallet.trim() ? "Transaction Fee" : "Money Send";
   if (t.type === "Debt") {
-    return `Interest and fees, ${debts.find((d) => d.id === t.debtId)?.name ?? "a debt"}`;
+    // Money advanced for someone and written off is spending on what it bought.
+    if (writtenOffAsSpending(t)) return t.item.trim() || "No item";
+    if (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge") {
+      return `Interest and fees, ${debts.find((d) => d.id === t.debtId)?.name ?? "a debt"}`;
+    }
+    // Only the fee to send a payment, or to pass money on, cost anything.
+    return "Transaction Fee";
   }
   return t.item.trim() || (t.category === "Spending" ? "No item" : t.category);
 }

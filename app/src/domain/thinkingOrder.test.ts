@@ -71,8 +71,13 @@ describe("the four steps are named, and in order", () => {
    * above the analyse step. The credit line and the effect are not in a
    * sentence, and reading either wrong turns borrowing into income.
    */
+  /*
+   * Also past it since 27 September 2026: one transfer that is part someone
+   * else's money and part the owner's (`splitsWhose`), and a long message
+   * (`isEssay`), which are several entries the model is asked to split.
+   */
   it("decides debt before the model is asked anything", () => {
-    expect(at("if (local.readsAsDebt && !severalParts && !isQuestion(note))")).toBeLessThan(
+    expect(at("if (local.readsAsDebt && !severalParts && !isQuestion(note) && !splitsWhose(note) && !essay)")).toBeLessThan(
       at("const found = await readAttached(note);"),
     );
   });
@@ -100,7 +105,7 @@ describe("the four steps are named, and in order", () => {
    * give.
    */
   it("does not open a debt card for a question about borrowing", () => {
-    expect(source).toContain("if (local.readsAsDebt && !severalParts && !isQuestion(note))");
+    expect(source).toContain("if (local.readsAsDebt && !severalParts && !isQuestion(note) && !splitsWhose(note) && !essay)");
   });
 
   /** The message is echoed once, by the analyse step, and not again below. */

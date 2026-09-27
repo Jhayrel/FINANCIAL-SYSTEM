@@ -423,9 +423,32 @@ function walletIn(said: string, accounts: readonly string[]): string {
 
     const flattened = bare(account);
     if (flattened && flat.includes(` ${flattened} `)) return account;
+
+    /*
+     * The name without its brackets: "maya bank" and "maya banks" for "Maya
+     * Bank (Personal savings)". Said that way on 27 September 2026 it fell
+     * through to "Maya", and a savings balance was compared with the wallet.
+     * Only a name of two words or more, and only one no other account has.
+     */
+    const short = shortNameOf(account, accounts);
+    if (short && (flat.includes(` ${short} `) || flat.includes(` ${short}s `))) return account;
   }
 
   return "";
+}
+
+/**
+ * An account's name without its bracketed part, when that is how it is said:
+ * "maya bank" for "Maya Bank (Personal savings)". Empty when the short name
+ * is one word or belongs to another account too.
+ */
+export function shortNameOf(account: string, accounts: readonly string[]): string {
+  const bare = (v: string): string => v.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!/\(.+\)/.test(account)) return "";
+  const short = bare(account.replace(/\(.*?\)/g, " "));
+  if (!short.includes(" ")) return "";
+  const clash = accounts.some((other) => other !== account && (bare(other) === short || bare(other.replace(/\(.*?\)/g, " ")) === short));
+  return clash ? "" : short;
 }
 
 /**
@@ -571,7 +594,17 @@ export function readEntry(
    * Taken out before the test rather than excepted after it, so "I paid the
    * interest on maya credit" is still debt: only the exact phrase goes.
    */
-  const earnsInterest = INTEREST_EARNED.test(text) && !/\b(credit|loan|utang|debt|owe)\b/i.test(text);
+  /*
+   * Interest on one of the owner's savings accounts, or said to be income.
+   * "Add the interest to my maya bank" and "its revenue interest" (27
+   * September 2026) were read as debt on Maya Credit, the only credit line,
+   * because "interest" is a debt word and nothing else was.
+   */
+  const namesSavings = walletIn(text, reference.savings) !== "";
+  const earnsInterest =
+    (INTEREST_EARNED.test(text) ||
+      (/\binterest\b/i.test(text) && (namesSavings || /\b(?:revenue|income|added|earned|credited|kita)\b/i.test(text)))) &&
+    !/\b(credit|loan|utang|debt|owe)\b/i.test(text);
   const withoutIncome = (earnsInterest ? text.replace(/\b(bank )?interest\b/gi, " ") : text).replace(/\bbank interest\b/gi, " ");
 
   /** Money passing through for someone else, which is debt in the ledger's terms. */
@@ -617,11 +650,18 @@ export function readEntry(
      * doubt about it. See `debtSentence.ts`.
      */
     const debtSaid = readsAsDebt && !behalf ? readDebtSentence(text, amountIn, readMoney) : null;
+    /*
+     * The fee the app charged to send it ("25000 to tita from gcash with 10
+     * fee"): the owner's own transfer fee, put on the movement once its
+     * effect says money left a wallet. A lender's fee (service, late, stamp)
+     * is a charge on the debt instead, and `readDebtSentence` has it.
+     */
+    const sent = LENDER_FEE.test(text) ? { fee: 0, rest: text } : feeIn(text);
     const filled: Draft = readsAsDebt
       ? {
           ...emptyDraft(dateIn(text, asOf).date),
           flow: "Debt",
-          amount: debtSaid?.amount ?? amountIn(text),
+          amount: debtSaid?.amount ?? amountIn(sent.rest),
           ...(debtSaid?.interest != null ? { interest: debtSaid.interest } : {}),
           ...(debtSaid?.charges != null ? { charges: debtSaid.charges } : {}),
           /*
@@ -658,7 +698,9 @@ export function readEntry(
       : emptyDraft(asOf);
     // The wallet goes on the side the effect moves money through.
     const effect = behalf?.effect ?? debtSaid?.effect;
-    const partial = effect ? withDebtEffect(filled, effect) : filled;
+    const moved = effect ? withDebtEffect(filled, effect) : filled;
+    const partial =
+      sent.fee > 0 && (moved.debtEffect === "repay" || moved.debtEffect === "lend") ? { ...moved, fee: sent.fee } : moved;
 
     return {
       draft: partial,
@@ -912,6 +954,9 @@ export function readEntry(
  * both would otherwise have their fee read as the amount. Removing the words
  * that named it is what keeps the two figures apart.
  */
+/** Fees a lender adds to a debt, which are charges on it and never a fee for sending money. */
+const LENDER_FEE = /\b(?:service|dst|stamp|documentary|interest|penalty|late|processing|finance charge)\b/i;
+
 function feeIn(text: string): { fee: number; rest: string } {
   const patterns = [
     // "15 fee", "15 pesos fee", "15 charge"

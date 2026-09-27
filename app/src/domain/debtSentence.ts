@@ -299,7 +299,7 @@ const RETAIN =
  * gift of the owner's own money, and "her" there is who got it.
  */
 const RELEASE =
-  /\b(?:gave|give|handed|passed|sent|forwarded|returned)\s+(?:to\s+)?(?:my |the |our )?[a-z]+\s+(?:his|her|their)\s+(?:money|share|payment|cash|funds?|₱|php|\d)|\b(?:remitted|forwarded|handed over|passed on|turned over)\b/i;
+  /\b(?:gave|give|handed|passed|sent|forwarded|returned)\s+(?:to\s+)?(?:my |the |our )?(?:[a-z]+\s+){1,3}(?:his|her|their)\s+(?:money|share|payment|cash|funds?|₱|php|\d)|\b(?:remitted|forwarded|handed over|passed on|turned over)\b/i;
 
 /** Holding someone's money: "I hold 1000 for my brother", "keeping 500 for mama". */
 const HOLDING = /\b(?:hold|holding|safekeep\w*|keeping|itinatago)\b[^.]{0,30}?\bfor\s+(?:my |her |his |the |our )?[a-z]+/i;

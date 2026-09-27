@@ -265,8 +265,9 @@ export function allPaidScope(text: string): AllPaid | null {
  */
 export function meantInstead(text: string): string | null {
   const said = text.trim().replace(/[.!]+$/, "");
-  const m = /^(?:no[,.]?\s+|sorry[,.]?\s+|oh[,.]?\s+)?(?:i\s+mean(?:t)?|what\s+i\s+mean(?:t)?\s+(?:is|was)|i'?m\s+talking\s+about|i\s+was\s+talking\s+about|ang\s+ibig\s+kong\s+sabihin(?:\s+ay)?)\s+(?:the\s+|my\s+|ang\s+)?(.{1,40})$/i.exec(said);
-  const meant = m?.[1]?.trim();
+  const m = /^(?:no[,.]?\s+|sorry[,.]?\s+|oh[,.]?\s+)?(?:i\s+mean(?:t)?|what\s+i\s+mean(?:t)?\s+(?:is|was)|i'?m\s+talking\s+about|i\s+was\s+talking\s+about|i\s+am\s+talking\s+about|(?:i'?m|i\s+am|i\s+was)\s+referring\s+to|ang\s+ibig\s+kong\s+sabihin(?:\s+ay)?)\s+(?:the\s+|my\s+|ang\s+)?(.{1,40})$/i.exec(said);
+  // "I am referring to maya bank not maya": what was meant, without what was not.
+  const meant = m?.[1]?.replace(/[\s,]+(?:not|hindi)\s+(?:the\s+|my\s+)?.+$/i, "").trim();
   if (!meant || meant.split(/\s+/).length > 4) return null;
   return meant;
 }
@@ -277,7 +278,16 @@ export function meantInstead(text: string): string | null {
  * my subscription". The word replaced is the one after "all" or "my", where
  * the thing paid or bought is named; failing that, the meaning is added on.
  */
-export function sayInstead(previous: string, meant: string): string {
+export function sayInstead(previous: string, meant: string, notMeant?: string | null): string {
+  /*
+   * The word said to be wrong, where the earlier message has it on its own:
+   * "maya" becomes "maya bank", and a "maya" already inside "maya bank" is
+   * left as it is.
+   */
+  if (notMeant && !new RegExp(`\\b${escapeRe(meant)}\\b`, "i").test(previous)) {
+    const wrong = new RegExp(`\\b${escapeRe(notMeant)}\\b`, "i");
+    if (wrong.test(previous)) return previous.replace(wrong, meant);
+  }
   const all = /\b((?:all|every|each|lahat)\s+(?:of\s+)?(?:my\s+|the\s+|ng\s+)?)([a-z][\w-]*)/i;
   if (all.test(previous)) return previous.replace(all, (_, lead: string) => `${lead}${meant}`);
   const mine = [...previous.matchAll(/\bmy\s+([a-z][\w-]*)/gi)].pop();
@@ -344,3 +354,41 @@ export function wantsThoseEntries(text: string): boolean {
     text,
   );
 }
+
+/**
+ * A message that explains rather than states.
+ *
+ * The owner, 27 September 2026, wrote two careful messages about their
+ * mother's ₱40,000: several paragraphs, a dozen figures, what was theirs and
+ * what was a plan. The device's shortcuts read single sentences, and they
+ * read these by their words: one as "check my GCash balance" because it said
+ * the wallet and a figure, the other as "set September's bills budget to
+ * ₱40,000". A message like that is for the model, which reads it whole; only
+ * its first line is offered to the shortcuts, since a balance question with
+ * the history pasted under it starts the same way.
+ */
+export function isEssay(text: string): boolean {
+  const figures = new Set(
+    (text.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((x) => x.replace(/,/g, "")).filter((x) => Number(x) >= 100),
+  );
+  const lines = text.split(/\n+/).filter((l) => l.trim()).length;
+  return text.length > 320 || lines >= 5 || figures.size >= 4;
+}
+
+/**
+ * The entry an answer worked out, on its own line: "Entry: Revenue PHP 6.25,
+ * Bank interest, into Maya Bank (Personal savings)". The chat is told to end
+ * such an answer with one (ai.ts), and the panel offers it as a card.
+ */
+export function entryLineIn(text: string): string {
+  const found = /^\s*(?:[-*]\s*)?\**entry\**\s*:\s*(.+?)\s*$/im.exec(text);
+  return found?.[1]?.replace(/\*\*/g, "").trim() ?? "";
+}
+
+/** What a correction says was not meant: "maya" in "I am referring to maya bank not maya". */
+export function notMeantIn(text: string): string | null {
+  const m = /[\s,]+(?:not|hindi)\s+(?:the\s+|my\s+)?([a-z][\w ()-]{0,30}?)\s*[.!]?\s*$/i.exec(text.trim());
+  return m?.[1]?.trim() || null;
+}
+
+const escapeRe = (v: string): string => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

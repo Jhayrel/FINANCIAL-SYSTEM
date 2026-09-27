@@ -773,9 +773,23 @@ export function AddTransaction({
     submitted ? check.errors.find((e) => e.field === field)?.message : undefined;
 
   /** A debt payment, which is the one movement that can carry interest inside it. */
-  const paying = draft.flow === "Debt" && draft.debtEffect === "repay" && debts.find((d) => d.id === draft.debtId)?.form !== "pass-through";
+  /*
+   * Not On behalf, whether or not the person is picked yet. "Released" is a
+   * repayment underneath, and before a person was chosen nothing said it was
+   * theirs, so "Interest included" showed and then vanished on picking Tita
+   * (owner, 27 September 2026: "it dissapear when theres entry").
+   */
+  const passingThrough = Boolean(draft.behalf) || debts.find((d) => d.id === draft.debtId)?.form === "pass-through";
+  const paying = draft.flow === "Debt" && draft.debtEffect === "repay" && !passingThrough;
   /** A borrowing, which can carry fees the lender added on top of it. */
-  const borrowing = draft.flow === "Debt" && draft.debtEffect === "draw" && debts.find((d) => d.id === draft.debtId)?.form !== "pass-through";
+  const borrowing = draft.flow === "Debt" && draft.debtEffect === "draw" && !passingThrough;
+  /**
+   * Money leaving a wallet for a debt or for someone: a payment sent, money
+   * lent or advanced, someone's money passed on. The app that sent it may
+   * charge a fee, paid from the owner's own money (owner, 27 September 2026:
+   * "what if thats transaction fee and I paid it my self").
+   */
+  const sendsMoney = draft.flow === "Debt" && (draft.debtEffect === "repay" || draft.debtEffect === "lend");
   const chargesError = borrowing
     ? (submitted || (draft.charges ?? null) !== null
         ? check.errors.find((e) => e.field === "charges")?.message
@@ -1666,7 +1680,7 @@ export function AddTransaction({
               <Field
                 label={paying ? "Amount paid" : "Amount"}
                 required
-                half={draft.flow === "Transfer" || paying}
+                half={draft.flow === "Transfer" || sendsMoney}
                 error={errorFor("amount")}
               >
                 <div className="fms-amounthero">
@@ -1739,6 +1753,30 @@ export function AddTransaction({
                       onChange={(v) => set("interest", v)}
                       invalid={Boolean(interestError)}
                       ariaLabel="Interest included in the payment"
+                    />
+                  </div>
+                </Field>
+              )}
+
+              {sendsMoney && (
+                <Field
+                  label="Fee"
+                  half
+                  error={errorFor("fee")}
+                  hint={
+                    errorFor("fee")
+                      ? undefined
+                      : passingThrough
+                        ? "Paid from your own money, so it is your transfer fee. If it came out of their money, add it to the amount."
+                        : "What the app charged to send it, on top. Your transfer fee, not interest."
+                  }
+                >
+                  <div className="fms-amounthero fms-amounthero--quiet">
+                    <AmountInput
+                      value={draft.fee}
+                      onChange={(v) => set("fee", v ?? 0)}
+                      invalid={Boolean(errorFor("fee"))}
+                      ariaLabel="Fee paid to send it"
                     />
                   </div>
                 </Field>

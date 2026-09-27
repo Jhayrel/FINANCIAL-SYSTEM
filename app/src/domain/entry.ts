@@ -861,6 +861,12 @@ export function draftToTransactions(
    * stray side in.
    */
   const debtSide = type === "Debt" && draft.debtEffect ? debtWalletDirection(draft.debtEffect) : null;
+  /*
+   * A fee only where money left a wallet: sending a payment, or passing
+   * money on. On a movement that brought money in, or moved none, there is
+   * no wallet for it to leave, so it would be counted and never paid.
+   */
+  const fee = type === "Debt" && debtSide !== "out" ? 0 : draft.fee;
   const base: Transaction = {
     id,
     recordNumber,
@@ -878,8 +884,8 @@ export function draftToTransactions(
     item: opening ? "Opening balance" : derived ? derived.item : draft.item,
     description: draft.description,
     amount,
-    fee: draft.fee,
-    total: amount + draft.fee,
+    fee,
+    total: amount + fee,
     notes: draft.notes,
     status: draft.status,
     debtId: draft.debtId,
@@ -924,9 +930,14 @@ export function draftToTransactions(
      * repayment row beside it was saved before, which is a row that says
      * nothing happened.
      */
-    if (split.principal === 0) return [interest];
+    /*
+     * A transfer fee paid from the owner's own wallet stays on the payment
+     * (the principal row, or the interest row when there is no principal):
+     * it left the wallet with it and is the owner's own cost, not interest.
+     */
+    if (split.principal === 0) return [{ ...interest, fee, total: split.interest + fee }];
     return [
-      { ...base, amount: split.principal, fee: 0, total: split.principal, debtEffect: "repay" },
+      { ...base, amount: split.principal, fee, total: split.principal + fee, debtEffect: "repay" },
       /**
        * The link. The interest row names the payment it was part of, so the
        * database holds that the two went out together, not just that they

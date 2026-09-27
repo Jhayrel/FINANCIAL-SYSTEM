@@ -113,7 +113,7 @@ import { Icon } from "../components/Icon";
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
-import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, isQuestion, meantInstead, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
+import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isQuestion, meantInstead, notMeantIn, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
 import { addressesEveryCard } from "../domain/capture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
@@ -165,6 +165,8 @@ import type { Proposal } from "../domain/proposal";
 import { choicesFor, effectsFor, interestOnTop, outstandingOf, type Debt, type DebtEffect } from "../domain/debt";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, type BehalfSide } from "../domain/debtWords";
 import { debtCardIntro } from "../domain/debtSentence";
+import { splitsWhose } from "../domain/behalfFor";
+import { entryLineIn } from "../domain/intent";
 import { fillDebt, personDebt } from "../domain/debtFill";
 import { foldInterest } from "../domain/interestFold";
 import { saysWhen } from "../domain/when";
@@ -3059,6 +3061,25 @@ export function AskPanel({
     const from = answer.source === "model" ? model : (answer.reason ?? model);
     say({ kind: "assistant", text: answer.text, from });
     log(aiEvent("answered", "add", { text: answer.text, model }));
+    /*
+     * An entry the answer worked out, offered as a card at once.
+     *
+     * 27 September 2026: the model found ₱6.25 of interest on Maya Bank and
+     * answered "I cannot add it from here; press the Add entry button", and
+     * "add it" then found nothing. It now ends such an answer with an
+     * "Entry:" line (ai.ts), read here by the same rules as a typed one.
+     */
+    if (answer.source === "model") await offerFromAnswer(answer.text);
+  };
+
+  /** The "Entry:" line of an answer, as a card. False when there is none, or it reads as nothing. */
+  const offerFromAnswer = async (text: string): Promise<boolean> => {
+    const line = entryLineIn(text);
+    if (!line) return false;
+    const read = readEntry(line, transactions, reference, asOf);
+    if (read.draft.amount === null || (!read.worthOffering && !read.readsAsDebt)) return false;
+    await offer({ draft: read.draft, confidence: "medium", sourceRef: "answer", adjustments: ["Worked out in the answer above."], said: line }, line);
+    return true;
   };
 
   const send = async (typed?: string, as?: Intent): Promise<void> => {
@@ -3068,6 +3089,13 @@ export function AskPanel({
      * read (`domain/typos.ts`). What is shown and stored is always `note`.
      */
     const ruled = withCommandWordsFixed(note);
+    /*
+     * A long message is read whole by the model; the shortcuts below see only
+     * its first line (`isEssay`), so a paragraph about a ₱40,000 arrival is
+     * not taken for a balance check or a budget.
+     */
+    const essay = files.length === 0 && isEssay(note);
+    const lead = essay ? (ruled.split(/\n/).find((l) => l.trim()) ?? ruled) : ruled;
     if (busy) return;
     if (!note && files.length === 0) return;
     setStage("");
@@ -3085,6 +3113,21 @@ export function AskPanel({
       setDraft("");
       await send(message, "log");
       return;
+    }
+
+    /*
+     * "Add it", about the entry the last answer worked out ("Entry:" line).
+     * Its card is offered with the answer; this brings it back after a
+     * discard, or on a device that read the answer before this existed.
+     */
+    if (files.length === 0 && !as && wantsThoseEntries(note)) {
+      const answered = [...turns].reverse().find((t) => t.kind === "assistant" && entryLineIn(t.text));
+      if (answered && answered.kind === "assistant") {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        if (await offerFromAnswer(answered.text)) return;
+      }
     }
 
     /*
@@ -3110,7 +3153,7 @@ export function AskPanel({
       const word = meant ?? (clarified ? shortReply : null);
       if (previous && word) {
         const both = /^(?:both|all|all of them|lahat|everything)$/i.test(word) ? "bills and subscriptions" : word;
-        const again = sayInstead(previous, both);
+        const again = sayInstead(previous, both, notMeantIn(note));
         setDraft("");
         await send(again);
         return;
@@ -3241,9 +3284,9 @@ export function AskPanel({
      * screen's own rules and shown on a card to apply.
      */
     const couldBudget = files.length === 0 && !as && !isNoteLine && sink.canBudget;
-    let budgetAsk = couldBudget ? readBudgetAsk(ruled, reference, asOf) : null;
-    const span = couldBudget ? spanIn(ruled, asOf) : null;
-    const saysBudget = couldBudget && (namesBudgetCommand(ruled) || routed?.intent === "budget");
+    let budgetAsk = couldBudget ? readBudgetAsk(lead, reference, asOf) : null;
+    const span = couldBudget ? spanIn(lead, asOf) : null;
+    const saysBudget = couldBudget && (namesBudgetCommand(lead) || (!essay && routed?.intent === "budget"));
 
     /**
      * "add that budget", with the figure sitting in the answer above it.
@@ -3636,8 +3679,8 @@ export function AskPanel({
     const findable = [...reference.wallets, ...reference.savings];
     const askedToFind = as
       ? null
-      : readInvestigateAsk(ruled, findable, (account) => walletBalance(transactions, account), asOf) ??
-        (routed?.intent === "investigate"
+      : readInvestigateAsk(lead, findable, (account) => walletBalance(transactions, account), asOf) ??
+        (!essay && routed?.intent === "investigate"
           ? (readInvestigateAsk(`${note} doesn't match`, findable, (account) => walletBalance(transactions, account), asOf) ?? {
               account: "",
               actual: null,
@@ -4764,7 +4807,12 @@ export function AskPanel({
          * runs first and returns: by the time the router's answer is looked
          * at, the card is already up.
          */
-        if (local.readsAsDebt && !severalParts && !isQuestion(note)) {
+        /*
+         * Part someone else's money and part the owner's, in one transfer, is
+         * two entries: the model is taught to split it (ai.ts), and this card
+         * would have filed the lot as theirs. See `splitsWhose`.
+         */
+        if (local.readsAsDebt && !severalParts && !isQuestion(note) && !splitsWhose(note) && !essay) {
           say({ kind: "you", text: note });
           /**
            * Finished here, not by being sent to the form.
@@ -7494,6 +7542,32 @@ function DebtCard({
               </p>
             ) : null;
           })()}
+        </div>
+      )}
+
+      {/*
+        The fee the app charged to send it, from the owner's own money: on a
+        payment, on money lent or advanced, on someone's money passed on.
+        Their transfer fee, never interest and never the other person's.
+      */}
+      {(draft.debtEffect === "repay" || draft.debtEffect === "lend") && (
+        <div className="fms-debtpick">
+          <label className="t-micro fms-pfieldlabel" htmlFor={`debt-fee-${turn.cardId}`}>
+            Fee
+          </label>
+          <div className="fms-debtinterest">
+            <AmountInput
+              id={`debt-fee-${turn.cardId}`}
+              value={draft.fee > 0 ? draft.fee : null}
+              onChange={(v) => onChange({ ...draft, fee: v ?? 0 })}
+              ariaLabel="Fee paid to send it"
+            />
+            <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+              {draft.fee > 0 && draft.amount !== null
+                ? `${formatMoney(draft.amount + draft.fee)} leaves ${draft.fromWallet || "the wallet"}, ${formatMoney(draft.fee)} of it your transfer fee.`
+                : "Paid from your own money to send it. Blank if none."}
+            </span>
+          </div>
         </div>
       )}
 
