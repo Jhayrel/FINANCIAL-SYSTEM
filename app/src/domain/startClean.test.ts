@@ -159,3 +159,38 @@ describe("the four lists (27 September 2026)", () => {
     expect(plan.settings.spendingTypes).toEqual([{ name: "Gas", remark: "Fuel" }]);
   });
 });
+
+describe("accounts and debts as the file sets them up (27 September 2026)", () => {
+  const here = {
+    ...current,
+    settings: {
+      ...current.settings,
+      accounts: [
+        { id: "dev-savings", name: "Maya Bank (Personal savings)", kind: "savings" as const, archived: false },
+        { id: "dev-drone", name: "Maya Bank (Drone)", kind: "savings" as const, archived: false },
+        { id: "dev-pnb", name: "PNB", kind: "spending" as const, archived: true },
+      ],
+    },
+  };
+  const file = createBackup(
+    {
+      ...here,
+      settings: {
+        ...here.settings,
+        accounts: [
+          { id: "file-savings", name: "Maya Bank (Personal savings)", kind: "savings" as const, archived: false },
+          { id: "file-drone", name: "Maya Bank (Drone)", kind: "goal" as const, archived: true, parentId: "file-savings" },
+          { id: "file-pnb", name: "PNB", kind: "savings" as const, archived: true },
+        ],
+      },
+    },
+    "2026-09-27T00:00:00Z",
+  );
+
+  it("takes the file's kind, closing and parent, and keeps this device's ids", () => {
+    const plan = planStartClean(file, here);
+    const drone = plan.settings.accounts.find((a) => a.name === "Maya Bank (Drone)");
+    expect(drone).toMatchObject({ id: "dev-drone", kind: "goal", archived: true, parentId: "dev-savings" });
+    expect(plan.settings.accounts.find((a) => a.name === "PNB")).toMatchObject({ id: "dev-pnb", kind: "savings" });
+  });
+});

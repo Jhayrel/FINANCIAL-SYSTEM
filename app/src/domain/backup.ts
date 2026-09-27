@@ -559,26 +559,49 @@ export function planStartClean(backup: Backup, current: RestoreCurrent): CleanPl
   // A document the file's own row now writes over is not discarded: it is that row.
   const discard = [...setAside, ...binCleared].map((t) => t.id).filter((id) => !finalIds.has(id));
 
-  // Accounts and debts: this device's, plus the file's missing ones.
+  // Accounts and debts: every one on either side, set up as the file says.
   const byName = <T extends { name: string }>(a: readonly T[], extra: readonly T[]): T[] => {
     const have = new Set(a.map((x) => x.name.trim().toLowerCase()));
     return [...a, ...extra.filter((x) => !have.has(x.name.trim().toLowerCase()))];
   };
+  /*
+   * An account or a debt the file also has is set up as the file says: its
+   * kind, whether it is closed, the goal it sits under. Only its id stays
+   * this device's, so the rows and goals that point at it still do. The
+   * owner, 27 September 2026, closed four accounts, made five savings into
+   * goals under Maya Bank and PNB an old savings account, in a file meant
+   * to start clean from, and this device's own copies used to win.
+   */
+  const asFileSays = <T extends { id: string; name: string }>(here: readonly T[], file: readonly T[]): T[] => {
+    const inFile = new Map(file.map((x) => [x.name.trim().toLowerCase(), x]));
+    return here.map((x) => {
+      const said = inFile.get(x.name.trim().toLowerCase());
+      return said ? { ...said, id: x.id } : x;
+    });
+  };
+  const idHere = new Map(
+    b.settings.accounts.flatMap((f) => {
+      const same = current.settings.accounts.find((a) => a.name.trim().toLowerCase() === f.name.trim().toLowerCase());
+      return same ? [[f.id, same.id] as const] : [];
+    }),
+  );
   const named = new Set(transactions.flatMap((t) => [t.fromWallet, t.toWallet]).filter(Boolean).map((w) => w.toLowerCase()));
   const fileAccounts = new Set(b.settings.accounts.map((a) => a.name.trim().toLowerCase()));
   const archivedAccounts: string[] = [];
-  const accounts = byName(current.settings.accounts, b.settings.accounts).map((a) => {
-    const key = a.name.trim().toLowerCase();
-    const inUse = named.has(key) || fileAccounts.has(key) || current.settings.accounts.some((g) => g.parentId === a.id && named.has(g.name.toLowerCase()));
-    if (inUse || a.archived) return a;
-    archivedAccounts.push(a.name);
-    return { ...a, archived: true };
-  });
+  const accounts = byName(asFileSays(current.settings.accounts, b.settings.accounts), b.settings.accounts)
+    .map((a) => (a.parentId && idHere.has(a.parentId) ? { ...a, parentId: idHere.get(a.parentId)! } : a))
+    .map((a) => {
+      const key = a.name.trim().toLowerCase();
+      const inUse = named.has(key) || fileAccounts.has(key) || current.settings.accounts.some((g) => g.parentId === a.id && named.has(g.name.toLowerCase()));
+      if (inUse || a.archived) return a;
+      archivedAccounts.push(a.name);
+      return { ...a, archived: true };
+    });
 
   const debtRows = new Set(transactions.map((t) => t.debtId).filter(Boolean));
   const fileDebts = new Set(b.settings.credits.map((d) => d.name.trim().toLowerCase()));
   const archivedDebts: string[] = [];
-  const credits = byName(current.settings.credits, b.settings.credits).map((d) => {
+  const credits = byName(asFileSays(current.settings.credits, b.settings.credits), b.settings.credits).map((d) => {
     if (d.archived || debtRows.has(d.id) || fileDebts.has(d.name.trim().toLowerCase())) return d;
     archivedDebts.push(d.name);
     return { ...d, archived: true };
