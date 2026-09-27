@@ -42,6 +42,7 @@ import {
 import { formatMoney as fmt, type Centavos } from "./money";
 import type { DebtEffect, IsoDate, Transaction } from "./types";
 import { loanSchedule, type CounterpartyKind, type DebtForm } from "./debtForms";
+import type { LimitCounts, LimitStep } from "./creditLimit";
 
 /** Re-exported so debt consumers import from one place. */
 export type { DebtEffect } from "./types";
@@ -75,6 +76,14 @@ export interface Debt {
    * because both answer "how big is this arrangement".
    */
   readonly creditLimit?: Centavos | undefined;
+  /**
+   * A credit line's limit over time, oldest first; `creditLimit` is the
+   * latest. Lenders raise a limit as it is used well (owner, 2026-09-27).
+   * See `domain/creditLimit.ts`.
+   */
+  readonly limits?: readonly LimitStep[] | undefined;
+  /** What the lender counts against the limit. Absent: everything owed (rule D3). */
+  readonly limitCounts?: LimitCounts | undefined;
   /**
    * What kind of arrangement it is. See `domain/debtForms.ts`. Absent on rows
    * written before the distinction existed, which are all credit lines.

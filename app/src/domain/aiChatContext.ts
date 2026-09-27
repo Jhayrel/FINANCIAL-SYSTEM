@@ -47,7 +47,8 @@ import { addDays, dayOfWeek, formatMedium } from "./dates";
 import { redact } from "./aiRedact";
 import { toPesos } from "./money";
 import { costOf, incomeOf } from "./totals";
-import { positionsOf, rowsFor, type Debt } from "./debt";
+import { debtDue, positionsOf, rowsFor, type Debt } from "./debt";
+import { creditRoom, limitSteps } from "./creditLimit";
 import { confidenceWords, explainBasis, forecastYear } from "./forecast";
 import { namesWindow, windowOf } from "./charts";
 import { figuresIn } from "./money";
@@ -564,11 +565,25 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
           p.writtenOff,
         )}. ${p.transactionCount} movements, ${p.repaymentCount} of them repayments.`,
       );
-      if (p.daysToDue !== undefined && p.daysToDue !== null) {
+      // The next payment as the Debt screen works it out, not only a fixed date nothing sets.
+      const due = debtDue(p, rows, asOf);
+      if (p.outstanding > 0 && due.nextDue && due.daysToDue !== undefined) {
         out.push(
-          p.daysToDue < 0
-            ? `Overdue by ${Math.abs(p.daysToDue)} days.`
-            : `Due in ${p.daysToDue} days.`,
+          `Next payment ${php(due.amountDue || p.outstanding)} due ${due.nextDue}: ${
+            due.daysToDue < 0 ? `${Math.abs(due.daysToDue)} days late` : due.daysToDue === 0 ? "today" : `in ${due.daysToDue} days`
+          }.`,
+        );
+      }
+      // Its limit, for a credit line whose lender sets one (domain/creditLimit.ts).
+      const room = creditRoom(p.debt, rows, asOf);
+      if (room) {
+        const steps = limitSteps(p.debt);
+        out.push(
+          `Credit limit ${php(room.limit)}, counting ${room.counts === "borrowed" ? "only what was borrowed" : "everything owed, fees too"}: ${php(
+            room.used,
+          )} used, ${php(room.available)} left to borrow${room.over > 0 ? `, ${php(room.over)} past the limit` : room.state === "reached" ? ", limit reached" : room.state === "near" ? ", close to the limit" : ""}.${
+            steps.length > 1 ? ` The limit over time: ${steps.map((st) => `${php(st.amount)} from ${st.from}`).join(", ")}.` : ""
+          }`,
         );
       }
 

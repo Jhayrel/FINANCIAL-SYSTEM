@@ -406,6 +406,10 @@ A rail beside it holds your money (net worth, then each account, with Low and Be
 
 A due day, limit or term is set under Details. "Record payment" opens the Add form filled in. The history covers every year.
 
+**A credit line's limit** (owner, 2026-09-27: "only in certain bank", and "it grows over time"). Only a credit line owed to a lender takes one; a personal loan, a business loan and On behalf never do. Details holds the limit, the day it changed and what the lender counts against it ("Everything owed, fees too", the default, or "Only what was borrowed"), and lists each step with Remove. Raising it adds a step, so earlier borrowing is judged by the limit it had. The card shows **Left to borrow** beside what is owed, with a bar in the debt colour (a limit used is not a gain, so never green), a "Limit reached" or "Past the limit" pill beside the due pill, and one warning line that names the limit and the next payment together. The summary strip adds Left to borrow and Next payment, and shows Owed to you and Net only when something is owed to you. The history gains a Left to borrow column and a shaded Limit row wherever the lender changed it.
+
+**The history on a phone** is a list, not a stacked table: what it was and the amount on the first line; the date and wallet with what was owed after on the second; the fees or interest inside it with what was left to borrow on the third; the note on its own line, two lines at most. The row is tapped to correct it. It swaps in when the card is under 720px wide (`@container`).
+
 ### 3.6 Badges, chips, tags
 
 | Type | Shape | Use |

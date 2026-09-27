@@ -384,11 +384,20 @@ export function ProgressBar({
   /** 0 to 1 through the period; draws the pace tick. */
   pace,
   height = 8,
+  tone,
+  label,
 }: {
   value: Centavos;
   max: Centavos;
   pace?: number;
   height?: number;
+  /**
+   * The fill, for a bar that is not a budget. A credit limit used is not a
+   * gain, so it fills in the debt colour rather than green.
+   */
+  tone?: string;
+  /** What the bar measures, read out after the figures: "of the limit used". */
+  label?: string;
 }) {
   const over = max > 0 && value > max;
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
@@ -407,7 +416,7 @@ export function ProgressBar({
       role="img"
       aria-label={
         max > 0
-          ? `${formatAmount(value)} of ${formatAmount(max)} used`
+          ? `${formatAmount(value)} of ${formatAmount(max)} ${label ?? "used"}`
           : "No budget set"
       }
     >
@@ -416,7 +425,7 @@ export function ProgressBar({
           width: `${pct}%`,
           height: "100%",
           borderRadius: "var(--radius-full)",
-          background: over ? "var(--over)" : "var(--ok)",
+          background: over ? "var(--over)" : (tone ?? "var(--ok)"),
           transition: "width var(--motion-sheet) var(--ease-out)",
         }}
       />

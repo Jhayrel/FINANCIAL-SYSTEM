@@ -23,6 +23,7 @@ import { AmountInput, Select, TextInput } from "../components/forms";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
 import { choicesFor, debtDue, effectsFor, interestOnTop, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionsOf } from "../domain/debt";
+import { creditRoom, limitOn, takesLimit, usedAfterOne, usedOn } from "../domain/creditLimit";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, partWords, type BehalfSide } from "../domain/debtWords";
 import { formatMoney, type Centavos } from "../domain/money";
 import {
@@ -964,12 +965,16 @@ export function AddTransaction({
             }
             options={debtOptions.map((d) => d.name)}
             details={Object.fromEntries(
-              debtOptions.map((d) => [
-                d.name,
-                `${formatMoney(outstandingOf(transactions, d.id))} ${
-                  d.form === "pass-through" ? (d.kind === "payable" ? "held" : "owed to you") : d.kind === "payable" ? "owed" : "owed to you"
-                }`,
-              ]),
+              debtOptions.map((d) => {
+                // A limited line says what is left to borrow too, so a borrowing past it is seen before it is typed.
+                const room = creditRoom(d, transactions, draft.date || asOf);
+                return [
+                  d.name,
+                  `${formatMoney(outstandingOf(transactions, d.id))} ${
+                    d.form === "pass-through" ? (d.kind === "payable" ? "held" : "owed to you") : d.kind === "payable" ? "owed" : "owed to you"
+                  }${room ? `, ${formatMoney(room.available)} left to borrow` : ""}`,
+                ];
+              }),
             )}
             placeholder={draft.behalf ? "Pick a person" : "Pick a debt"}
             ariaLabel={draft.behalf ? "Which person" : "Which debt"}
@@ -1017,9 +1022,31 @@ export function AddTransaction({
         ? -(check.repaymentSplit?.principal ?? amount)
         : owedChange({ debtEffect: draft.debtEffect, amount }) +
           (draft.debtEffect === "draw" ? Math.max(0, draft.charges ?? 0) : 0);
+    /*
+     * The limit, for a credit line whose lender sets one: what is left to
+     * borrow before this and after it, judged by the limit of its day.
+     */
+    const limit = takesLimit(selectedDebt) ? limitOn(selectedDebt, draft.date || asOf) : null;
+    const moves = draft.debtEffect === "draw" || draft.debtEffect === "repay" || draft.debtEffect === "charge" || draft.debtEffect === "writeoff";
+    const room =
+      limit !== null && moves
+        ? {
+            limit,
+            leftBefore: limit - usedOn(selectedDebt, base, draft.date || asOf),
+            leftAfter:
+              limit -
+              usedAfterOne(selectedDebt, base, {
+                date: draft.date || asOf,
+                effect: draft.debtEffect as "draw" | "repay" | "charge" | "writeoff",
+                amount: draft.debtEffect === "repay" ? (check.repaymentSplit?.principal ?? amount) : amount,
+                charges: draft.debtEffect === "draw" ? (draft.charges ?? 0) : 0,
+              }),
+          }
+        : null;
     return {
       name: selectedDebt.name,
       owed: selectedDebt.kind === "payable",
+      room,
       before,
       after: before + change,
       /** What of a payment is interest, which counts as spending and not against the balance. */
@@ -2231,6 +2258,31 @@ export function AddTransaction({
               <p className="t-caption" style={{ color: "var(--ink-2)" }}>
                 {formatMoney(debtAfter.interest)} of this is interest, so it does not come off what you owe.
               </p>
+            )}
+            {debtAfter.room && (
+              <>
+                <div className="t-label" style={{ color: "var(--ink-2)", marginTop: "var(--space-2)" }}>
+                  Left to borrow, of the {formatMoney(debtAfter.room.limit)} limit
+                </div>
+                <div className="fms-afterbal">
+                  <Money value={Math.max(0, debtAfter.room.leftBefore)} size="s" tone="var(--ink-3)" />
+                  <span aria-hidden style={{ color: "var(--ink-3)" }}>→</span>
+                  <Money
+                    value={Math.max(0, debtAfter.room.leftAfter)}
+                    size="m"
+                    tone={debtAfter.room.leftAfter <= 0 ? "var(--ink-3)" : undefined}
+                  />
+                </div>
+                {debtAfter.room.leftAfter < 0 ? (
+                  <p className="t-caption" style={{ color: "var(--over)" }}>
+                    {formatMoney(-debtAfter.room.leftAfter)} past the limit after this.
+                  </p>
+                ) : debtAfter.room.leftAfter === 0 && debtAfter.room.leftBefore > 0 ? (
+                  <p className="t-caption" style={{ color: "var(--warn)" }}>
+                    This uses up the limit: nothing more can be borrowed until it is paid down.
+                  </p>
+                ) : null}
+              </>
             )}
           </div>
         )}

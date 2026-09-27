@@ -32,6 +32,7 @@ import { allWalletBalances, walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { overdue, upcoming, type BillStatus } from "./bills";
 import { basisWords, debtDue, debtNamedBy, paymentsFiledAsSpending, positionsOf, type Debt } from "./debt";
+import { creditRoom, roomWords } from "./creditLimit";
 import { addDays, daysBetween, daysInMonth, formatMedium, getMonth, getYear, monthName } from "./dates";
 import { unusualRows } from "./unusual";
 import { actionableIssues, checkIntegrity } from "./integrity";
@@ -313,6 +314,44 @@ export function financeAlerts(input: AlertInput): Alert[] {
         due.amountDue < p.outstanding ? `, of ${money(p.outstanding)} outstanding` : ""
       }.`,
       weight: late ? 95 : 65,
+    });
+  }
+
+  /**
+   * A credit line at or near its limit, with the payment that frees it.
+   *
+   * The owner, 27 September 2026: the assistant and the notifications should
+   * say "you reach your credit limit and the deadline is nearing". Only lines
+   * whose lender sets a limit (`creditLimit.ts`); the due date comes from the
+   * same `debtDue` the card uses, so the two never disagree.
+   */
+  for (const p of positionsOf(live, transactions, asOf)) {
+    const room = creditRoom(p.debt, transactions, asOf);
+    if (!room || room.state === "ok") continue;
+    const due = debtDue(p, transactions, asOf);
+    const when =
+      due.nextDue && due.daysToDue !== undefined && p.outstanding > 0
+        ? ` ${money(due.amountDue || p.outstanding)} is due ${formatMedium(due.nextDue)}, ${
+            due.daysToDue < 0
+              ? `${Math.abs(due.daysToDue)} day${due.daysToDue === -1 ? "" : "s"} late`
+              : due.daysToDue === 0
+                ? "today"
+                : `in ${due.daysToDue} day${due.daysToDue === 1 ? "" : "s"}`
+          }.`
+        : "";
+    const soon = due.daysToDue !== undefined && due.daysToDue <= 7;
+    out.push({
+      id: `limit-${p.debt.id}`,
+      level: room.state === "over" ? "over" : room.state === "reached" || soon ? "warn" : "info",
+      area: "debt",
+      title:
+        room.state === "over"
+          ? `${p.debt.name} is past its limit${soon ? " and a payment is due" : ""}`
+          : room.state === "reached"
+            ? `${p.debt.name} has reached its limit${soon ? " and a payment is due" : ""}`
+            : `${p.debt.name} is close to its limit`,
+      detail: `${roomWords(room)}.${when}`,
+      weight: room.state === "over" ? 90 : room.state === "reached" ? (soon ? 85 : 70) : 45,
     });
   }
 

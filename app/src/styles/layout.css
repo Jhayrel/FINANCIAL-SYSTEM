@@ -6175,17 +6175,17 @@ textarea.fms-askinput {
   box-shadow: var(--shadow-card);
 }
 
-/* The figure on the row's bottom line, so a label that wraps does not lift its neighbour's. */
+/*
+ * Label, figure, and what the figure is measured by, from the top, so the
+ * figures of a row stay level whether or not each has a line under it.
+ * The labels are kept to one line at phone width.
+ */
 .fms-debtfig {
   display: grid;
-  grid-template-rows: 1fr auto;
-  align-items: end;
+  grid-template-rows: auto auto 1fr;
+  align-content: start;
   gap: 2px;
   min-width: 0;
-}
-
-.fms-debtfig > :first-child {
-  align-self: start;
 }
 
 /* One debt takes the whole row; two share it, level with each other. */
@@ -6348,9 +6348,164 @@ textarea.fms-askinput {
 }
 
 .fms-debtnotecell {
-  max-width: 280px;
+  max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The limit pill and the due pill, side by side in the card's header. */
+.fms-debtpills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+/* What a summary figure is measured by, under it. */
+.fms-debtfig-caption {
+  min-width: 0;
+}
+
+/* The limit in Details: the figure, the day it changed and what counts, then its steps. */
+.fms-debtlimit {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fms-debtlimit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.fms-debtlimit-row > .fms-debtfield {
+  flex: 1 1 200px;
+}
+
+.fms-debtsteps {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--hairline);
+  max-width: 480px;
+}
+
+.fms-debtstep {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+/*
+ * A debt's history: a table where the card is wide, a list where it is not.
+ *
+ * The stacked table put five labelled fields under every movement, a phone
+ * screen for three payments, and the owner asked for it fixed (27 September
+ * 2026). The list gives each movement two lines: what it was and the
+ * amount, then the date, wallet and note with what it left owed. The row is
+ * the button that corrects it.
+ */
+.fms-debthist-list {
+  display: none;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-debthist-date {
+  width: 112px;
+}
+
+.fms-debthist-limit > td {
+  background: var(--surface-sunk);
+}
+
+@container (max-width: 720px) {
+  .fms-debthist-table {
+    display: none;
+  }
+
+  .fms-debthist-list {
+    display: block;
+  }
+}
+
+.fms-debthist-item {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-debthist-list > li:last-child > .fms-debthist-item,
+.fms-debthist-list > li.fms-debthist-item:last-child {
+  border-bottom: 0;
+}
+
+.fms-debthist-item--limit {
+  background: var(--surface-sunk);
+  cursor: default;
+}
+
+@media (hover: hover) {
+  button.fms-debthist-item:hover {
+    background: var(--surface-hover);
+  }
+}
+
+.fms-debthist-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  color: var(--ink-3);
+}
+
+.fms-debthist-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--ink-3);
+}
+
+/* The sentence under the debts, and the way to Settings beside it. */
+.fms-debtfoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-3);
+  margin: 0;
+  color: var(--ink-3);
+}
+
+.fms-debthist-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fms-debthist-after {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  flex: none;
   white-space: nowrap;
 }
 

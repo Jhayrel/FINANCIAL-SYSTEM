@@ -36,7 +36,8 @@
 import { walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { billStatuses, overdue, upcoming } from "./bills";
-import { incomeQuality, positionsOf, type Debt } from "./debt";
+import { debtDue, incomeQuality, positionsOf, type Debt } from "./debt";
+import { creditRoom, limitSteps } from "./creditLimit";
 import { addDays, getMonth, getYear, monthName } from "./dates";
 import { financeAlerts, burnRate, daysLeft, dailyAllowance } from "./alerts";
 import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
@@ -101,6 +102,16 @@ export interface AiContext {
     readonly kind: string;
     readonly outstanding: number;
     readonly daysToDue: number | null;
+    /** The next payment the Debt screen shows, and how much. */
+    readonly nextDue?: string | null;
+    readonly amountDue?: number | null;
+    /** A credit line's limit and what is left under it, when its lender sets one. */
+    readonly limit?: number | null;
+    readonly used?: number | null;
+    readonly leftToBorrow?: number | null;
+    readonly limitState?: string | null;
+    readonly limitCounts?: string | null;
+    readonly limitHistory?: readonly { readonly from: string; readonly limit: number }[];
   }[];
   readonly goals: readonly {
     readonly name: string;
@@ -207,12 +218,24 @@ export function buildContext(input: ContextInput): AiContext {
       dueSoon: upcoming(bills, 14).map((b) => b.item),
     },
 
-    debts: positions.map((p) => ({
-      name: p.debt.name,
-      kind: p.debt.kind === "payable" ? "I owe" : "owed to me",
-      outstanding: pesos(p.outstanding),
-      daysToDue: p.daysToDue ?? null,
-    })),
+    debts: positions.map((p) => {
+      const due = debtDue(p, transactions, asOf);
+      const room = creditRoom(p.debt, transactions, asOf);
+      return {
+        name: p.debt.name,
+        kind: p.debt.kind === "payable" ? "I owe" : "owed to me",
+        outstanding: pesos(p.outstanding),
+        daysToDue: p.outstanding > 0 ? (due.daysToDue ?? null) : null,
+        nextDue: p.outstanding > 0 ? (due.nextDue ?? null) : null,
+        amountDue: p.outstanding > 0 && due.nextDue ? pesos(due.amountDue || p.outstanding) : null,
+        limit: room ? pesos(room.limit) : null,
+        used: room ? pesos(room.used) : null,
+        leftToBorrow: room ? pesos(room.available) : null,
+        limitState: room ? { ok: "room left", near: "close to the limit", reached: "limit reached", over: "past the limit" }[room.state] : null,
+        limitCounts: room ? (room.counts === "borrowed" ? "only what was borrowed counts" : "everything owed counts, fees too") : null,
+        limitHistory: limitSteps(p.debt).map((st) => ({ from: st.from, limit: pesos(st.amount) })),
+      };
+    }),
 
     goals: accounts
       .filter((a) => a.kind === "goal" && !a.archived)
@@ -340,8 +363,19 @@ export function contextToText(c: AiContext): string {
     lines.push("");
     lines.push("## Debt");
     for (const d of c.debts) {
-      const due = d.daysToDue === null ? "" : `, due in ${d.daysToDue} days`;
-      lines.push(`${d.name} (${d.kind}): ${php(d.outstanding)}${due}`);
+      const due =
+        d.nextDue == null || d.daysToDue === null
+          ? ""
+          : `, next payment ${d.amountDue == null ? "" : `${php(d.amountDue)} `}due ${d.nextDue} (${
+              d.daysToDue < 0 ? `${Math.abs(d.daysToDue)} days late` : d.daysToDue === 0 ? "today" : `in ${d.daysToDue} days`
+            })`;
+      const limit =
+        d.limit == null
+          ? ""
+          : `. Credit limit ${php(d.limit)} (${d.limitCounts}): ${php(d.used ?? 0)} used, ${php(d.leftToBorrow ?? 0)} left to borrow, ${d.limitState}${
+              (d.limitHistory ?? []).length > 1 ? `. Limit over time: ${(d.limitHistory ?? []).map((h) => `${php(h.limit)} from ${h.from}`).join(", ")}` : ""
+            }`;
+      lines.push(`${d.name} (${d.kind}): ${php(d.outstanding)}${due}${limit}`);
     }
   }
 

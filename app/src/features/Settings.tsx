@@ -55,6 +55,7 @@ import {
   saveOwnerUid,
 } from "../data/firebaseConfig";
 import { makeDebtId, outstandingOf, positionsOf, type Debt, type DebtKind } from "../domain/debt";
+import { creditRoom } from "../domain/creditLimit";
 import {
   DEBT_FORM_LABEL,
   debtExplanation,
@@ -384,6 +385,15 @@ function SettingsRail({
       if (c.kind === "payable") owed += amount;
       else owedToYou += amount;
       lines.push({ label: c.kind === "payable" ? c.name : `${c.name}, owed to you`, value: amount });
+      // A line whose lender sets a limit: what is left under it (creditLimit.ts).
+      const room = creditRoom(c, transactions, today());
+      if (room) {
+        lines.push({
+          label: `${c.name}, left to borrow`,
+          value: room.available,
+          tone: room.state === "ok" ? undefined : room.state === "over" ? "var(--over)" : "var(--warn)",
+        });
+      }
     }
     lines.push({ label: "You owe in all", value: owed, tone: owed > 0 ? "var(--flow-debt-text)" : undefined });
     if (owedToYou > 0) lines.push({ label: "Owed to you in all", value: owedToYou });

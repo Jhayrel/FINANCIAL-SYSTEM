@@ -13,6 +13,7 @@
 import { walletBalance } from "./balances";
 import type { Debt, DebtEffect } from "./debt";
 import { debtNamedBy, effectsFor, outstandingOf, partOf, splitRepayment } from "./debt";
+import { limitOn, takesLimit, usedOn } from "./creditLimit";
 import { daysBetween, formatMedium, getMonth, getYear, monthName, today } from "./dates";
 import { formatMoney as money, type Centavos } from "./money";
 import { kindKey, unusualAgainst, type Unusual } from "./unusual";
@@ -738,15 +739,26 @@ export function checkDraft(
       });
     }
 
-    if (draft.debtEffect === "draw" && debt?.creditLimit) {
-      // The fees count against the limit too: the lender adds them to what is used.
-      const used = amount + Math.max(0, charges ?? 0);
-      const available = debt.creditLimit - outstanding;
-      if (used > available) {
-        warnings.push({
-          field: "amount",
-          message: `This goes ${money(used - available)} over the ${money(debt.creditLimit)} limit on ${debt.name}.`,
-        });
+    /*
+     * Rule D3, against the limit the line had on the day, counting what its
+     * lender counts (`creditLimit.ts`). By default the fees count too: the
+     * lender adds them to what is used.
+     */
+    if (draft.debtEffect === "draw" && debt && takesLimit(debt)) {
+      const on = draft.date || asOf;
+      const limit = limitOn(debt, on);
+      if (limit !== null) {
+        const before = usedOn(debt, others, on);
+        const adds = amount + ((debt.limitCounts ?? "owed") === "owed" ? Math.max(0, charges ?? 0) : 0);
+        const over = before + adds - limit;
+        if (over > 0) {
+          warnings.push({
+            field: "amount",
+            message: `This goes ${money(over)} over the ${money(limit)} limit on ${debt.name}${
+              before >= limit ? ", which was already used up" : `, which had ${money(limit - before)} left`
+            }. The lender may refuse it: check the amount, or raise the limit under Details on the Debt screen.`,
+          });
+        }
       }
     }
 

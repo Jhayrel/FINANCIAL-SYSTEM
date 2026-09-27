@@ -617,7 +617,7 @@ Wallet balances are **unchanged** by this migration — only classification move
 |---|---|
 | D1 | A `Debt` transaction **must** carry `debtId` and `debtEffect`. Reject the save otherwise. |
 | D2 | `repay` may not exceed `outstanding`. Excess auto-splits into an `interest` row, shown before saving. The owner may also state how much of a payment was interest, read off the lender's bill (added 2026-09-17: no rate is ever assumed, since every lender counts it differently). That part is booked as `interest` and the rest as `repay`, still capped at `outstanding`. The interest row carries `partOf`, the id of its payment row, and the two are shown, binned and restored as one payment. |
-| D3 | `draw` may not exceed `creditLimit − outstanding` when a limit is set. Warn, allow override. |
+| D3 | `draw` may not exceed `creditLimit − outstanding` when a limit is set. Warn, allow override. *Extended 2026-09-27 at the owner's request, default unchanged:* only a credit line owed to a lender takes a limit; the limit is a dated list of steps and a draw is judged by the step of its day; each line may say its lender counts only what was borrowed (payments clear fees first), because the owner's ledger shows their lender lending ₱2,000.00 with ₱2,151.03 owed on a ₱4,000.00 limit. See `domain/creditLimit.ts`. |
 | D4 | A debt auto-closes to `settled` when `outstanding` reaches 0. Reopens on a new draw. |
 | D5 | Interest on `monthly_pct` accrues on the **last day of the month** on the closing balance. Never compound silently — post a visible `interest` row. |
 | D6 | Debt due within 7 days → Finance Alert. Overdue → persistent banner. |

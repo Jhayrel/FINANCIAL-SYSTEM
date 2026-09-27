@@ -27,6 +27,7 @@ import { walletBalance } from "./balances";
 import { addDays, daysBetween } from "./dates";
 import type { Debt, DebtPosition } from "./debt";
 import { incomeQuality, totalPayables } from "./debt";
+import { creditRoom } from "./creditLimit";
 import { formatMoney, type Centavos } from "./money";
 import { costOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
@@ -53,6 +54,11 @@ export interface MoneyHealth {
   readonly runwayMonths: number | null;
   /** What is owed against a year of true income. */
   readonly debtToIncome: Ratio;
+  /**
+   * Credit in use against the limits lenders set, over the lines that have
+   * one (`creditLimit.ts`). Null when no line has a limit.
+   */
+  readonly creditUse: Ratio | null;
   /** Spending on kinds marked discretionary, against spending on kinds that carry a mark. */
   readonly discretionary: Ratio;
   /** Kinds of spending with no mark yet, so the share above can be read honestly. */
@@ -118,6 +124,17 @@ export function moneyHealth(input: {
 
   // ── What is owed, against a year of earning ──────────────────────────────
   const debtToIncome = ratio(totalPayables(positions), yearIncome);
+  const rooms = positions
+    .filter((p) => !p.debt.archived)
+    .map((p) => creditRoom(p.debt, transactions, asOf))
+    .filter((r) => r !== null);
+  const creditUse =
+    rooms.length > 0
+      ? ratio(
+          rooms.reduce((sum, r) => sum + r.used, 0),
+          rooms.reduce((sum, r) => sum + r.limit, 0),
+        )
+      : null;
 
   // ── How much of the spending was not essential ───────────────────────────
   let marked = 0;
@@ -155,6 +172,7 @@ export function moneyHealth(input: {
     putAside,
     runwayMonths,
     debtToIncome,
+    creditUse,
     discretionary: ratio(discretionary, marked),
     untagged,
     straightOut,
@@ -200,6 +218,15 @@ export function healthWords(health: MoneyHealth, months = WINDOW_MONTHS): string
 
   if (health.debtToIncome.value !== null && health.debtToIncome.of > 0) {
     out.push(`What you owe is ${pct(health.debtToIncome.value)} of a year of income.`);
+  }
+
+  if (health.creditUse && health.creditUse.value !== null) {
+    const left = health.creditUse.from - health.creditUse.of;
+    out.push(
+      `You are using ${formatMoney(health.creditUse.of)} of the ${formatMoney(health.creditUse.from)} your lenders allow (${pct(
+        health.creditUse.value,
+      )}), ${left > 0 ? `${formatMoney(left)} left to borrow` : left === 0 ? "nothing left to borrow" : `${formatMoney(-left)} past it`}.`,
+    );
   }
 
   if (health.discretionary.value !== null) {
