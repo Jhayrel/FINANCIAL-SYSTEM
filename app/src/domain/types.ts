@@ -213,6 +213,22 @@ export interface ReferenceLists {
    * and a sentence naming one is about debt.
    */
   readonly credits?: readonly string[];
+  /**
+   * The people money is paid or held for (On behalf), with their side.
+   *
+   * Named apart from the credit lines because naming one is not debt by
+   * itself: "papa gave me 1000 allowance" is income even when Father is on
+   * the list. What makes a sentence theirs is in `behalfFor.ts`.
+   */
+  readonly onBehalf?: readonly BehalfPerson[];
+}
+
+/** Someone the owner pays for or holds money for: a `pass-through` debt. */
+export interface BehalfPerson {
+  readonly id: string;
+  readonly name: string;
+  /** `owed`: you pay for them and they pay you back. `held`: their money sits with you. */
+  readonly side: "owed" | "held";
 }
 
 // ── Budgets (BUDGETING sheet) ──────────────────────────────────────────────

@@ -20,6 +20,7 @@
  * in the reply, and the card shows it before anything is saved.
  */
 
+import { namesPerson } from "./behalfFor";
 import { debtDue, makeDebtId, positionOf, type Debt, type DebtEffect } from "./debt";
 import { withDebtEffect, type Draft } from "./entry";
 import { formatMoney } from "./money";
@@ -113,7 +114,13 @@ export function fillDebt(
       ? live.find((d) => {
           const name = d.name.trim().toLowerCase();
           const said = person.toLowerCase();
-          return name === said || name.split(/[^a-z0-9]+/).includes(said) || said.split(" ").includes(name);
+          return (
+            name === said ||
+            name.split(/[^a-z0-9]+/).includes(said) ||
+            said.split(" ").includes(name) ||
+            // "papa" is Father: what the family calls them names them too.
+            (d.counterpartyType === "person" && namesPerson(person, d.name))
+          );
         })
       : undefined;
 

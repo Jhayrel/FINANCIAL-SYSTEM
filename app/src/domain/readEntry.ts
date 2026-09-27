@@ -30,6 +30,7 @@ import { daysBackIn, itemHintIn } from "./filipino";
 import { emptyDraft, itemsFor, withDebtEffect, type Draft, type Flow } from "./entry";
 import { payBackClauseAt, readBehalf, readDebtSentence, readPassThrough } from "./debtSentence";
 import type { Blank } from "./capture";
+import { behalfFor } from "./behalfFor";
 import { makeDebtId } from "./debt";
 import { inferFromHistory, itemFromHistory } from "./infer";
 import { centavosInWords } from "./numberWords";
@@ -95,7 +96,7 @@ const SPENT =
  * separately below.
  */
 const GOT =
-  /\b(received|receive|recieved|recieve|recived|recive|got|earned|earn|earnd|easrn|earnt|collected|refunded|allowance|salary|paid me|sent me|gave me|credited to|natanggap|nakatanggap|tinanggap|nakuha|kumita|sahod|binigyan ako|pinadalhan ako)\b/i;
+  /\b(received|receive|recieved|recieve|recived|recive|got|earned|earn|earnd|easrn|earnt|collected|refunded|allowance|salary|paid me|pays me|sent me|send me|sends me|gave me|give me|gives me|credited to|natanggap|nakatanggap|tinanggap|nakuha|kumita|sahod|binigyan ako|pinadalhan ako)\b/i;
 
 /**
  * Money moved, or sent away.
@@ -542,9 +543,21 @@ export function readEntry(
    * owner's accounts. Naming one is naming debt, and debt is the one thing
    * this file refuses to turn into a row.
    */
+  const people = reference.onBehalf ?? [];
   const creditNamed = (reference.credits ?? []).find(
-    (name) => name.trim() !== "" && namesCredit(text, name),
+    (name) => name.trim() !== "" && !people.some((p) => p.name === name) && namesCredit(text, name),
   );
+
+  /**
+   * Someone else's money, known from the ledger. "paid globe postpaid 599"
+   * is Father's when his rows are the ones that name Globe Postpaid now,
+   * and naming him alone ("papa gave me 1000 allowance") is still income.
+   * See `behalfFor.ts`.
+   */
+  const forSomeone = behalfFor(text, transactions, people, asOf, amountIn(text), [
+    ...reference.wallets,
+    ...reference.savings,
+  ]);
 
   /**
    * "Bank interest" is income, and it contains a debt word.
@@ -564,7 +577,9 @@ export function readEntry(
   /** Money passing through for someone else, which is debt in the ledger's terms. */
   const passing = readPassThrough(text);
   /** On someone's behalf, and what happened: advance, write off, held, released, retained. */
-  const behalf = readBehalf(text);
+  const behalf = forSomeone
+    ? { side: forSomeone.person.side, effect: forSomeone.effect }
+    : readBehalf(text);
 
   const readsAsDebt =
     DEBT.test(withoutIncome) || creditNamed !== undefined || CREDITED_MYSELF.test(text) || passing !== null || behalf !== null;
@@ -634,6 +649,11 @@ export function readEntry(
            * does is a separate field and is still always chosen.
            */
           ...(creditNamed ? { debtId: makeDebtId(creditNamed) } : {}),
+          /*
+           * Theirs, and what it was: "Globe Postpaid" stays on the row, so
+           * the next one is known as his too.
+           */
+          ...(forSomeone ? { debtId: forSomeone.person.id, description: thingIn(text, transactions, forSomeone.person.name) } : {}),
         }
       : emptyDraft(asOf);
     // The wallet goes on the side the effect moves money through.
@@ -642,7 +662,11 @@ export function readEntry(
 
     return {
       draft: partial,
-      because: creditNamed ? [`Filed against ${creditNamed}, which the message named.`] : [],
+      because: forSomeone
+        ? [forSomeone.because]
+        : creditNamed
+          ? [`Filed against ${creditNamed}, which the message named.`]
+          : [],
       worthOffering: false,
       settled: [],
       readsAsDebt,
@@ -1018,6 +1042,12 @@ export function splitEntries(text: string): string[] {
  * Matched on whole words with the punctuation flattened, the same way an
  * account is, so "Maya Credit", "maya credit" and "maya-credit" are one name.
  */
+/** The item a sentence about someone else's money names, for the row's description: never the person. */
+function thingIn(text: string, transactions: readonly Transaction[], person: string): string {
+  const found = itemFromHistory(text, transactions.filter((t) => t.type === "Spending" && t.item.trim().toLowerCase() !== person.trim().toLowerCase()));
+  return found?.how === "named" ? found.item : "";
+}
+
 function namesCredit(text: string, name: string): boolean {
   const flat = (v: string): string => ` ${v.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
   return flat(text).includes(flat(name));

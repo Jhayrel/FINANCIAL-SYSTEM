@@ -620,6 +620,14 @@ function extractContext(options: ExtractOptions): string {
     `Today is ${asOf}.`,
     `Their wallets: ${[...reference.wallets, ...reference.savings].join(", ") || "none set up yet"}`,
     `Their credit lines, loans and people they hold or send money for: ${(reference.credits ?? []).join(", ") || "none"}`,
+    // Who a payment can be for, and which side: Father's plan paid for him is OnBehalf, not a bill.
+    ...((reference.onBehalf ?? []).length > 0
+      ? [
+          `People they pay for or hold money for (flow OnBehalf, never their own spending or income): ${(reference.onBehalf ?? [])
+            .map((p) => `${p.name} (${p.side === "owed" ? "they pay for them and are paid back" : "they hold this person's money"})`)
+            .join(", ")}`,
+        ]
+      : []),
     "",
     "The only items allowed, and which category each one belongs to:",
     `Category "Spending": ${spendingTypes.join(", ") || "none"}`,
