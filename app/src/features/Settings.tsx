@@ -113,6 +113,10 @@ const TABS: { id: Tab; label: string }[] = [
 const KINDS: AccountKind[] = ["spending", "reserve", "savings", "goal"];
 const GROUPS: AccountKind[] = ["spending", "reserve", "savings"];
 
+/** A day of the month, or none: the billing and due days in Credit and loans. */
+const NO_DAY = "None";
+const DAY_CHOICES = [NO_DAY, ...Array.from({ length: 31 }, (_, i) => String(i + 1))];
+
 export function Settings({
   settings,
   transactions,
@@ -2020,6 +2024,14 @@ function CreditLines({
   const update = (id: string, part: Partial<Debt>): void =>
     onChange(credits.map((c) => (c.id === id ? { ...c, ...part } : c)));
 
+  /** A day of the month set or cleared, with the cleared field left out (Firestore refuses `undefined`). */
+  const setDay = (c: Debt, key: "billingDay" | "dueDay", value: string): void => {
+    const { [key]: _old, ...rest } = c;
+    onChange(credits.map((x) => (x.id === c.id ? (value === NO_DAY ? (rest as Debt) : { ...rest, [key]: Number(value) }) : x)));
+  };
+  /** A line a lender bills: a credit line or a loan from an institution, not a person or money held for one. */
+  const billed = (c: Debt): boolean => c.kind === "payable" && c.form !== "pass-through" && c.form !== "informal" && c.counterpartyType !== "person";
+
   const confirmUpdate = async (
     c: Debt,
     part: Partial<Debt>,
@@ -2063,6 +2075,8 @@ function CreditLines({
               <th>Name</th>
               <th style={{ width: 165 }}>Form</th>
               <th style={{ width: 165 }}>Account</th>
+              <th style={{ width: 118 }}>Billing day</th>
+              <th style={{ width: 118 }}>Due day</th>
               <th className="fms-th-right fms-shrink">Outstanding</th>
               <th className="fms-shrink" />
             </tr>
@@ -2114,6 +2128,32 @@ function CreditLines({
                       }}
                       options={banks.includes(c.wallet) ? banks : [c.wallet, ...banks]}
                     />
+                  </td>
+                  {/*
+                    The billing day and the due day, on a line a lender bills:
+                    each lender sets its own, so nothing is assumed (owner,
+                    27 September 2026: "Maya credit my personal billing date
+                    is 6 of the months. every bank is different").
+                  */}
+                  <td data-label={billed(c) ? "Billing day" : undefined}>
+                    {billed(c) && (
+                      <Select
+                        value={c.billingDay ? String(c.billingDay) : NO_DAY}
+                        ariaLabel={`Billing day for ${c.name}`}
+                        onChange={(v) => setDay(c, "billingDay", v)}
+                        options={DAY_CHOICES}
+                      />
+                    )}
+                  </td>
+                  <td data-label={billed(c) ? "Due day" : undefined}>
+                    {billed(c) && (
+                      <Select
+                        value={c.dueDay ? String(c.dueDay) : NO_DAY}
+                        ariaLabel={`Payment due day for ${c.name}`}
+                        onChange={(v) => setDay(c, "dueDay", v)}
+                        options={DAY_CHOICES}
+                      />
+                    )}
                   </td>
                   <td className="fms-td-right">
                     <Money

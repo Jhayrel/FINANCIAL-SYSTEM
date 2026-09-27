@@ -437,7 +437,20 @@ function DebtCard({
       });
     }
     if (!settled && due.nextDue && (due.basis === "last-payment" || due.basis === "borrowed")) {
-      notes.push({ key: "basis", text: `The date is ${basisWords(due.basis)}. Set the real due day under Details to make it exact.` });
+      notes.push({
+        key: "basis",
+        text: `The date is ${basisWords(due.basis)}. Set its billing day or due day under Details, or in Settings under Credit and loans, to make it exact.`,
+      });
+    }
+    // The bill, on a line with a billing day: what it holds, and when the next one closes.
+    if (!settled && due.bill) {
+      notes.push({
+        key: "bill",
+        text:
+          due.bill.billed > 0 && due.bill.last
+            ? `The bill of ${formatMedium(due.bill.last)} is ${formatMoney(due.bill.billed)}${due.nextDue ? `, due ${formatMedium(due.nextDue)}` : ""}. Anything borrowed after it goes on the bill of ${formatMedium(due.bill.next)}.`
+            : `Nothing was left owed on the last bill${due.bill.last ? ` (${formatMedium(due.bill.last)})` : ""}. What you owe now goes on the bill of ${formatMedium(due.bill.next)}.`,
+      });
     }
     if (!settled && !due.nextDue && form !== "informal") {
       notes.push({ key: "noday", text: "Set a due day under Details and this says when the next payment is due." });
@@ -575,6 +588,8 @@ function DebtCard({
                   ? "Nothing"
                   : due.basis === "schedule"
                     ? "This instalment"
+                    : due.bill && due.bill.billed > 0 && due.bill.last
+                      ? `The bill of ${formatMedium(due.bill.last)}`
                     : split.fees > 0
                       ? `${formatMoney(split.borrowed)} borrowed + ${formatMoney(split.fees)} interest and fees`
                       : "Everything owed now"
@@ -824,6 +839,7 @@ function DebtDetails({
   const form = debt.form ?? "credit-line";
   const limited = takesLimit(debt);
   const [day, setDay] = useState(debt.dueDay ? String(debt.dueDay) : NO_DAY);
+  const [billing, setBilling] = useState(debt.billingDay ? String(debt.billingDay) : NO_DAY);
   const [steps, setSteps] = useState<readonly LimitStep[]>(() => limitSteps(debt));
   const last = steps.length > 0 ? steps[steps.length - 1]!.amount : null;
   const [limit, setLimit] = useState<Centavos | null>(limited ? last : (debt.creditLimit ?? null));
@@ -836,6 +852,7 @@ function DebtDetails({
     let next: Debt = {
       ...debt,
       dueDay: day === NO_DAY ? undefined : Number(day),
+      billingDay: billing === NO_DAY ? undefined : Number(billing),
       termMonths: form === "term-loan" ? (term === NO_TERM ? undefined : Number(term)) : debt.termMonths,
     };
     if (limited) {
@@ -863,6 +880,15 @@ function DebtDetails({
         </span>
         <Select value={day} onChange={setDay} options={DAYS} ariaLabel={`Due day for ${debt.name}`} />
       </label>
+
+      {debt.kind === "payable" && form !== "pass-through" && form !== "informal" && (
+        <label className="fms-debtfield">
+          <span className="t-label" style={{ color: "var(--ink-2)" }}>
+            Billing day
+          </span>
+          <Select value={billing} onChange={setBilling} options={DAYS} ariaLabel={`Billing day for ${debt.name}`} />
+        </label>
+      )}
 
       {limited && (
         <div className="fms-debtlimit">

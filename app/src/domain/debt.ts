@@ -67,6 +67,15 @@ export interface Debt {
    * past the end of a short month means that month's last day.
    */
   readonly dueDay?: number | undefined;
+  /**
+   * The day of the month the lender closes the bill, 1 to 31: what is owed
+   * then is the bill, and what is borrowed after it goes on the next one.
+   * Every lender sets its own and some let the owner choose, so there is no
+   * default (owner, 27 September 2026: "Maya credit my personal billing date
+   * is 6 of the months. every bank is different"). Without a due day, the
+   * next payment is taken to be due by the next billing day.
+   */
+  readonly billingDay?: number | undefined;
   /** Wallet the money moves through. */
   readonly wallet: string;
   readonly interestType: InterestType;
@@ -920,7 +929,7 @@ export function paymentsFiledAsSpending(
 
 // ── When the next payment falls due ────────────────────────────────────────
 
-export type DueBasis = "due-day" | "schedule" | "last-payment" | "borrowed" | "none";
+export type DueBasis = "due-day" | "billing" | "schedule" | "last-payment" | "borrowed" | "none";
 
 export interface DebtDue {
   readonly position: DebtPosition;
@@ -942,6 +951,11 @@ export interface DebtDue {
     | undefined;
   /** When the balance now owed began: the first movement after it was last at zero. */
   readonly since?: IsoDate | undefined;
+  /**
+   * The bill, on a line with a billing day: the last billing day, what was
+   * owed on it and is not yet paid, and the next billing day.
+   */
+  readonly bill?: { readonly last?: IsoDate | undefined; readonly billed: Centavos; readonly next: IsoDate } | undefined;
 }
 
 /**
@@ -1036,6 +1050,30 @@ export function debtDue(
   const anchor = paidSince?.date ?? since;
   if (!anchor) return none;
 
+  /*
+   * A billing day: the bill is what was owed when it closed, less what has
+   * been paid since, due on the due day after it. Borrowed after it, it goes
+   * on the next bill. With no due day, it is due by the next billing day.
+   */
+  const billing = debt.billingDay;
+  if (billing !== undefined && billing >= 1 && billing <= 31) {
+    const thisMonth = onDay(getYear(asOf), getMonth(asOf), billing);
+    const lastBill = thisMonth <= asOf ? thisMonth : onDay(getYear(addMonths(asOf, -1)), getMonth(addMonths(asOf, -1)), billing);
+    const nextBill = nextOnDay(asOf, billing);
+    let owedAtBill = 0;
+    let paidAfter = 0;
+    for (const t of rows) {
+      if (t.date <= lastBill) owedAtBill += owedChange(t);
+      else if (t.debtEffect === paying || t.debtEffect === "writeoff") paidAfter += t.amount;
+    }
+    const billed = Math.max(0, owedAtBill - paidAfter);
+    const bill = { last: lastBill, billed, next: nextBill };
+    const due = debt.dueDay && debt.dueDay >= 1 && debt.dueDay <= 31 ? debt.dueDay : undefined;
+    if (billed > 0 && due !== undefined) return { ...withDate(nextOnDay(lastBill, due), "billing", billed), bill };
+    if (billed > 0) return { ...withDate(nextBill, "billing", position.outstanding), bill };
+    return { ...withDate(due !== undefined ? nextOnDay(nextBill, due) : nextBill, "billing", position.outstanding), bill };
+  }
+
   const day = debt.dueDay ?? (debt.dueDate ? getDay(debt.dueDate) : undefined);
   if (day !== undefined && day >= 1 && day <= 31) {
     let next = nextOnDay(anchor, day);
@@ -1070,6 +1108,8 @@ export function basisWords(basis: DueBasis): string {
       return "the loan's schedule";
     case "due-day":
       return "its due day";
+    case "billing":
+      return "its billing day";
     default:
       return "";
   }

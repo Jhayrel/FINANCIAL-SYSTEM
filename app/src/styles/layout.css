@@ -1982,6 +1982,17 @@
   .fms-table--wide td { border-bottom: 0; padding: 2px 0; }
   .fms-table--wide td.fms-td-right { text-align: left; }
   .fms-table--wide td.fms-cell-flex { max-width: none; }
+  /* A cell whose value does not say what it is names its column once stacked: "6" alone is not a billing day. */
+  .fms-table--wide td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin: var(--space-1) 0 2px;
+    color: var(--ink-3);
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 500;
+  }
+  .fms-table--wide td:empty { display: none; }
   .fms-table--wide .fms-shrink,
   .fms-table--wide th { white-space: normal; }
   .fms-table--wide .fms-rowactions {

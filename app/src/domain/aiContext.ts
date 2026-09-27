@@ -118,6 +118,11 @@ export interface AiContext {
     readonly feesInBalance?: number | null;
     /** Of what is owed, what was borrowed: the rest of it. */
     readonly borrowedInBalance?: number | null;
+    /** The day of the month the lender bills, and the due day, as the owner set them. */
+    readonly billingDay?: number | null;
+    readonly dueDay?: number | null;
+    /** The last bill and what is left of it, and when the next one closes. */
+    readonly bill?: { readonly last: string | null; readonly billed: number; readonly next: string } | null;
   }[];
   readonly goals: readonly {
     readonly name: string;
@@ -257,6 +262,9 @@ export function buildContext(input: ContextInput): AiContext {
         limitHistory: limitSteps(p.debt).map((st) => ({ from: st.from, limit: pesos(st.amount) })),
         feesInBalance: fees > 0 ? pesos(fees) : null,
         borrowedInBalance: fees > 0 ? pesos(p.outstanding - fees) : null,
+        billingDay: p.debt.billingDay ?? null,
+        dueDay: p.debt.dueDay ?? null,
+        bill: due.bill ? { last: due.bill.last ?? null, billed: pesos(due.bill.billed), next: due.bill.next } : null,
       };
     }),
 
@@ -401,7 +409,14 @@ export function contextToText(c: AiContext): string {
       const fees = d.feesInBalance
         ? ` (${php(d.borrowedInBalance ?? 0)} borrowed and ${php(d.feesInBalance)} of interest and fees the lender already added; paying ${php(d.outstanding)} clears both, and the interest and fees are already counted, so none of it is new interest)`
         : "";
-      lines.push(`${d.name} (${d.kind}): ${php(d.outstanding)}${fees}${due}${limit}`);
+      const billing = d.billingDay
+        ? `. Billed on day ${d.billingDay} of each month${d.dueDay ? `, due on day ${d.dueDay}` : ", due by the next billing day"}${
+            d.bill ? `: the bill of ${d.bill.last ?? "last month"} has ${php(d.bill.billed)} left to pay, and the next bill closes ${d.bill.next}` : ""
+          }`
+        : d.dueDay
+          ? `. Due on day ${d.dueDay} of each month`
+          : "";
+      lines.push(`${d.name} (${d.kind}): ${php(d.outstanding)}${fees}${due}${billing}${limit}`);
     }
   }
 
