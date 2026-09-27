@@ -68,7 +68,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { Button } from "../components/primitives";
+import { Button, Money } from "../components/primitives";
 import {
   amend,
   applyReply,
@@ -120,6 +120,7 @@ import { formatMoney } from "../domain/money";
 import { describeFile, summariseFile } from "../domain/photoNote";
 import { reconcile } from "../domain/reconcile";
 import { readAgainst, statementAccount } from "../domain/statement";
+import { useMediaQuery } from "./useMediaQuery";
 import { ownNamesIn, senseStatementRows } from "../domain/statementSense";
 import { walletBalance } from "../domain/balances";
 import {
@@ -163,7 +164,7 @@ import { figuresIn } from "../domain/money";
 import { transactionToDraft } from "../domain/entry";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
-import { choicesFor, effectsFor, interestOnTop, outstandingOf, type Debt, type DebtEffect } from "../domain/debt";
+import { choicesFor, effectsFor, interestOnTop, outstandingOf, unpaidCharges, type Debt, type DebtEffect } from "../domain/debt";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, type BehalfSide } from "../domain/debtWords";
 import { debtCardIntro } from "../domain/debtSentence";
 import { splitsWhose } from "../domain/behalfFor";
@@ -216,6 +217,8 @@ export interface ProposalSink {
     readonly unusual?: number | undefined;
     /** A debt payment's two parts, what lowers the balance and what is interest. */
     readonly split?: { readonly principal: number; readonly interest: number } | undefined;
+    /** Interest stated on a payment that is the lender's fees, already owed, and the payment put right. */
+    readonly feesTwice?: { readonly unpaid: number; readonly amount: number } | undefined;
   };
   /** Put it in the form, for a correction before saving. */
   readonly use: (draft: Draft) => void;
@@ -898,6 +901,14 @@ export function AskPanel({
    * model" while the model was perfectly available.
    */
   const ai = useAi({ settings, transactions, budgets, reference, feature: "chat", asOf });
+
+  /**
+   * A computer's screen, where a card shows every field and a copy is set
+   * beside the row it repeats. The phone keeps the three line summary: the
+   * owner asked for both, "the ui in phone and pc should be different. more
+   * detailed it pc" (27 September 2026).
+   */
+  const wide = useMediaQuery("(min-width: 1024px)");
 
   const [turns, setTurns] = useState<Turn[]>([]);
 
@@ -5322,7 +5333,7 @@ export function AskPanel({
         cards scroll under it.
       */}
       {openCount > 1 && (
-        <div className="fms-batchbar">
+        <div className={wide ? "fms-batchbar fms-batchbar--wide" : "fms-batchbar"}>
           <div className="fms-batchbar-head">
             <span className="t-body-strong">{openCount} cards to check</span>
             {/*
@@ -5334,6 +5345,7 @@ export function AskPanel({
               {`Discard all ${openCount}`}
             </Button>
           </div>
+          <div className="fms-batchgroups">
           {groups.map((g) => {
             const places = g.cards.map((i) => placeOf.get(i) ?? 0);
             const many = g.cards.length > 1;
@@ -5344,17 +5356,56 @@ export function AskPanel({
                   ? { label: many ? `Skip these ${g.cards.length}` : "Skip it", press: () => skipCards(g.cards), primary: false }
                   : { label: `Go to card ${places[0]}`, press: () => jumpTo(g.cards[0]!), primary: false };
             return (
-              <div key={g.key} className="fms-batchgroup">
-                <button type="button" className="fms-batchgroup-what" onClick={() => jumpTo(g.cards[0]!)} title="Show the first of these">
-                  <span className="t-caption fms-batchgroup-label">{STANDING_WORDS[g.key]}</span>
-                  <span className="t-micro fms-batchgroup-cards">{cardsWord(places)}</span>
-                </button>
-                <Button size="sm" {...(action.primary ? { variant: "primary" as const } : {})} disabled={busy} onClick={action.press}>
-                  {action.label}
-                </Button>
+              <div key={g.key} className="fms-batchset">
+                <div className="fms-batchgroup">
+                  <button type="button" className="fms-batchgroup-what" onClick={() => jumpTo(g.cards[0]!)} title="Show the first of these">
+                    <span className="t-caption fms-batchgroup-label">{STANDING_WORDS[g.key]}</span>
+                    <span className="t-micro fms-batchgroup-cards">{cardsWord(places)}</span>
+                  </button>
+                  <Button size="sm" {...(action.primary ? { variant: "primary" as const } : {})} disabled={busy} onClick={action.press}>
+                    {action.label}
+                  </Button>
+                </div>
+                {/*
+                  On a computer, each card in the group as a row: its number,
+                  day, words, kind and amount, and for a copy the row it
+                  repeats. A row shows its card.
+                */}
+                {wide && (
+                  <ul className="fms-batchrows">
+                    {g.cards.map((i) => {
+                      const t = turns[i] as Offered;
+                      const d = t.live ?? t.proposal.draft;
+                      const match = alreadyInLedger.get(i)?.[0];
+                      const kind = d.flow || "Spending";
+                      const tone = kind === "Revenue" ? "revenue" : kind === "Transfer" ? "transfer" : kind === "Debt" ? "debt" : "spending";
+                      return (
+                        <li key={i}>
+                          <button type="button" className="fms-batchrow" onClick={() => jumpTo(i)}>
+                            <span className="t-micro fms-batchrow-n">{placeOf.get(i)}</span>
+                            <span className="t-micro fms-batchrow-date">{shortDay(d.date)}</span>
+                            <span className="t-caption fms-batchrow-what">
+                              {d.description || d.item || kind}
+                              {match && <span className="fms-batchrow-match"> = #{String(match.row.recordNumber).padStart(4, "0")}</span>}
+                            </span>
+                            <span className={`fms-proposalkind fms-proposalkind--${tone} fms-batchrow-kind`}>{d.behalf ? "On behalf" : kind}</span>
+                            {d.amount === null ? (
+                              <span className="t-caption" style={{ color: "var(--over)" }}>
+                                No amount
+                              </span>
+                            ) : (
+                              <Money value={d.amount} size="s" className="fms-batchrow-money" />
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
             );
           })}
+          </div>
         </div>
       )}
 
@@ -5494,6 +5545,7 @@ export function AskPanel({
               hostRef={(el) => keepCard(i, el)}
               alreadyInLedger={alreadyInLedger.get(i) ?? []}
               repeatOfCard={repeatOfCard.get(i)}
+              wide={wide}
               place={
                 openCount > 1 && standing.has(i)
                   ? { at: placeOf.get(i) ?? 0, of: openCount, standing: standing.get(i)!, twin: placeOf.get(repeatTwinAt.get(i) ?? -1) }
@@ -6014,6 +6066,15 @@ const RESTATES_BLANK: ReadonlySet<string> = new Set([
   "Pick a date.",
 ]);
 
+/** One labelled field on a card, on a computer's screen. `money` renders as money (rule D4). */
+interface Detail {
+  readonly label: string;
+  readonly value: string;
+  readonly money?: number;
+  readonly missing?: boolean;
+  readonly full?: boolean;
+}
+
 /** Where an open card stands: what the batch bar groups it under, in the same words on the card. */
 type Standing = "ready" | "question" | "check" | "ledger" | "repeat";
 const STANDING_ORDER: readonly Standing[] = ["ready", "question", "check", "ledger", "repeat"];
@@ -6024,6 +6085,12 @@ const STANDING_WORDS: Readonly<Record<Standing, string>> = {
   ledger: "Already in your ledger",
   repeat: "Same as a card above",
 };
+
+/** "Sep 26": the day of a row in the batch bar's list, where the year is the same for all of them. */
+function shortDay(date: string): string {
+  const month = Number(date.slice(5, 7));
+  return `${(MONTH_NAMES[month - 1] ?? "").slice(0, 3)} ${Number(date.slice(8, 10))}`;
+}
 
 /** "card 4", "cards 1 and 2", "cards 3, 5, 6 and 7", and past six "cards 1, 2, 3, 4, 5 and 9 more". */
 function cardsWord(places: readonly number[]): string {
@@ -6040,6 +6107,7 @@ function ProposalCard({
   alreadyInLedger,
   repeatOfCard,
   place,
+  wide = false,
   recordNumber,
   onChange,
   onChangeAll,
@@ -6067,6 +6135,8 @@ function ProposalCard({
   repeatOfCard?: Draft | undefined;
   /** Its number among the open cards, and where it stands, in the batch bar's words. Absent for a card on its own. */
   place?: { readonly at: number; readonly of: number; readonly standing: Standing; readonly twin?: number | undefined } | undefined;
+  /** A computer's screen: every field labelled, and a copy set beside the row it repeats. */
+  wide?: boolean;
   onChange: (draft: Draft) => void;
   /** Absent when this is the only open card, so there is nothing to apply it to. */
   onChangeAll?: ((draft: Draft) => void) | undefined;
@@ -6226,6 +6296,51 @@ function ProposalCard({
   /** The wallet read is in doubt: a statement's own account, or a name that is not one of yours. */
   const walletDoubt = proposal.adjustments.some((a) => /reads as|not one of your accounts|which wallet|statement/i.test(a));
 
+  /**
+   * Every field worth reading, labelled, for a screen with room for them.
+   * The phone shows the same facts as one line under the headline.
+   */
+  const pad = (n: number): string => `#${String(n).padStart(4, "0")}`;
+  const details: readonly Detail[] = [
+    { label: "Date", value: formatMedium(draft.date) },
+    { label: "Status", value: draft.status || "Not set" },
+    ...(flow === "Transfer"
+      ? [
+          { label: "From", value: draft.fromWallet || "Not picked", missing: !draft.fromWallet },
+          { label: "To", value: moneySend ? "Someone else" : draft.toWallet || "Not picked", missing: !moneySend && !draft.toWallet },
+        ]
+      : flow === "Debt"
+        ? [
+            { label: draft.behalf ? "For" : "Line", value: draft.item || "Not picked", missing: !draft.item && !draft.debtId },
+            { label: "Movement", value: draft.debtEffect ? effectLabel(draft.debtEffect) : "Not said", missing: !draft.debtEffect },
+            ...(draft.fromWallet ? [{ label: "From", value: draft.fromWallet }] : []),
+            ...(draft.toWallet ? [{ label: "Into", value: draft.toWallet }] : []),
+          ]
+        : [
+            { label: flow === "Revenue" ? "Into" : "From", value: walletShown || "Not picked", missing: !walletShown },
+            { label: "Category", value: draft.category || flow },
+            { label: "Item", value: draft.item.trim() || "Not picked", missing: !draft.item.trim() },
+          ]),
+    { label: "Fee", value: "", money: draft.fee },
+    ...(draft.fee > 0 && draft.amount !== null ? [{ label: "Total", value: "", money: draft.amount + draft.fee }] : []),
+    { label: state === "added" ? "Added as" : "Saves as", value: state === "used" ? "In the form" : pad(recordNumber) },
+    ...(!settled ? [{ label: "Reading", value: confidence }] : []),
+    ...(draft.description.trim() ? [{ label: "Description", value: draft.description, full: true }] : []),
+    ...(draft.notes ? [{ label: "Notes", value: draft.notes, full: true }] : []),
+  ];
+  const detailGrid = (
+    <dl className="fms-pdetails">
+      {details.map((d) => (
+        <div key={d.label} className={d.full ? "fms-pdetail fms-pdetail--full" : "fms-pdetail"}>
+          <dt className="t-micro">{d.label}</dt>
+          <dd className="t-caption" style={d.missing ? { color: "var(--over)" } : undefined}>
+            {d.money !== undefined ? <Money value={d.money} size="s" /> : d.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+
   /** Its number and standing, in the batch bar's words, so "cards 3, 5 and 6" in the bar is these cards. */
   const placeLine = place ? (
     <p className="t-micro fms-cardplace">
@@ -6277,14 +6392,68 @@ function ProposalCard({
           .join(", ")}.${alreadyInLedger.length > 1 ? ` Also like ${alreadyInLedger.slice(1).map((d) => number(d.row.recordNumber)).join(" and ")}.` : ""}`
       : `A card above already says this${place?.twin ? ` (card ${place.twin})` : ""}: the same day, amount and kind.`;
     const otherKind = copyOf && copyOf.row.type !== flow;
+    /*
+     * On a computer, this card and the row it repeats side by side, field by
+     * field, with what differs marked: which of them is right is then a
+     * glance, not a sentence to unpick.
+     */
+    const theirs = copyOf
+      ? { title: `${number(copyOf.row.recordNumber)} in your ledger`, date: copyOf.row.date, kind: copyOf.row.type, item: copyOf.row.item, from: copyOf.row.fromWallet, to: copyOf.row.toWallet, amount: copyOf.row.amount, fee: copyOf.row.fee, description: copyOf.row.description }
+      : repeatOfCard
+        ? { title: place?.twin ? `Card ${place.twin}` : "The card above", date: repeatOfCard.date, kind: repeatOfCard.flow || "Spending", item: repeatOfCard.item, from: repeatOfCard.fromWallet, to: repeatOfCard.toWallet, amount: repeatOfCard.amount ?? 0, fee: repeatOfCard.fee, description: repeatOfCard.description }
+        : null;
+    const kindOfRow = (kind: string, item: string): string => (item ? `${kind}, ${item}` : kind);
+    const compare = theirs
+      ? [
+          { label: "Date", mine: formatMedium(draft.date), other: formatMedium(theirs.date) },
+          { label: "Kind", mine: kindOfRow(flow, draft.item), other: kindOfRow(theirs.kind, theirs.item) },
+          { label: "Wallet", mine: where(draft.fromWallet, moneySend ? "someone else" : draft.toWallet) || "Not picked", other: where(theirs.from, theirs.to) || "None" },
+          { label: "Amount", mine: formatMoney(draft.amount ?? 0), other: formatMoney(theirs.amount), money: [draft.amount ?? 0, theirs.amount] as const },
+          { label: "Fee", mine: formatMoney(draft.fee), other: formatMoney(theirs.fee), money: [draft.fee, theirs.fee] as const },
+          { label: "Description", mine: draft.description || "None", other: theirs.description || "None" },
+        ]
+      : [];
     return (
       <div ref={hostRef} tabIndex={-1} className="fms-proposal fms-proposal--copy">
         {placeLine ?? <p className="t-micro fms-cardplace">{copyOf ? "Already in your ledger" : "Same as a card above"}</p>}
         <div className="fms-proposalsum">
           {summaryTop}
-          <p className="t-caption fms-proposalsum-meta">{[formatMedium(draft.date), draft.description].filter(Boolean).join(" · ")}</p>
+          {!wide && <p className="t-caption fms-proposalsum-meta">{[formatMedium(draft.date), draft.description].filter(Boolean).join(" · ")}</p>}
         </div>
-        <p className="t-caption fms-copyline">{line}</p>
+        {wide && theirs ? (
+          <table className="fms-cmp">
+            <thead>
+              <tr>
+                <th scope="col" className="t-micro">
+                  <span className="sr-only">Field</span>
+                </th>
+                <th scope="col" className="t-micro">
+                  This card
+                </th>
+                <th scope="col" className="t-micro">
+                  {theirs.title}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {compare.map((r) => {
+                const differs = r.mine.toLowerCase() !== r.other.toLowerCase();
+                return (
+                  <tr key={r.label} className={differs ? "fms-cmp-diff" : undefined}>
+                    <th scope="row" className="t-micro">
+                      {r.label}
+                      {differs && <span className="fms-cmp-flag">differs</span>}
+                    </th>
+                    <td className="t-caption">{r.money ? <Money value={r.money[0]} size="s" /> : r.mine}</td>
+                    <td className="t-caption">{r.money ? <Money value={r.money[1]} size="s" /> : r.other}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <p className="t-caption fms-copyline">{line}</p>
+        )}
         {otherKind && (
           <p className="t-micro fms-proposalnote">
             It is filed there as {copyOf.row.type}
@@ -6321,9 +6490,15 @@ function ProposalCard({
       */}
       <div className="fms-proposalsum">
         {summaryTop}
-        {draft.description.trim() && <p className="t-caption fms-proposalsum-desc">{draft.description}</p>}
-        <p className="t-caption fms-proposalsum-meta">{meta.join(" · ")}</p>
-        {draft.notes && <p className="t-caption fms-proposalsum-desc">{draft.notes}</p>}
+        {wide ? (
+          detailGrid
+        ) : (
+          <>
+            {draft.description.trim() && <p className="t-caption fms-proposalsum-desc">{draft.description}</p>}
+            <p className="t-caption fms-proposalsum-meta">{meta.join(" · ")}</p>
+            {draft.notes && <p className="t-caption fms-proposalsum-desc">{draft.notes}</p>}
+          </>
+        )}
       </div>
 
       {!settled && flow !== "Transfer" && (walletDoubt || !draft[walletField]) && (
@@ -7440,6 +7615,21 @@ function DebtCard({
     : [];
   const borrowing = !behalf && draft.debtEffect === "draw" && chosen?.form !== "pass-through";
   const paying = !behalf && draft.debtEffect === "repay" && chosen?.form !== "pass-through";
+  /** What is owed, and how much of it is the lender's fees, which a payment clears first. */
+  const owedNow = paying && draft.debtId ? outstandingOf(transactions, draft.debtId) : 0;
+  const fees = paying && draft.debtId ? unpaidCharges(transactions, draft.debtId, draft.date) : 0;
+
+  /*
+   * The wallet a line uses, when nothing was said: Maya for Maya Credit.
+   * The card left "Paid from" on Pick one, in red, for a payment whose line
+   * only ever moves money through one wallet (27 September 2026).
+   */
+  const lineWallet = chosen?.wallet && wallets.includes(chosen.wallet) ? chosen.wallet : "";
+  useEffect(() => {
+    if (state !== "open" || !lineWallet || direction === "none" || named) return;
+    onChange(direction === "in" ? { ...draft, toWallet: lineWallet, fromWallet: "" } : { ...draft, fromWallet: lineWallet, toWallet: "" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.debtId, direction, lineWallet, state]);
 
   /** Who can be picked: people on this side for On behalf; banks, credit lines and loans otherwise. */
   const options = live.filter(
@@ -7573,6 +7763,11 @@ function DebtCard({
               </option>
             ))}
           </select>
+          {state === "open" && named !== "" && named === lineWallet && (
+            <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+              The wallet {chosen?.name} uses. Change it if the money {direction === "in" ? "went" : "came from"} somewhere else.
+            </span>
+          )}
         </div>
       )}
 
@@ -7714,18 +7909,43 @@ function DebtCard({
               ariaLabel="Interest included in the payment"
             />
             <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-              {check.split && check.split.interest > 0 && check.split.principal > 0
+              {check.split && check.split.interest > 0 && check.split.principal > 0 && !check.feesTwice
                 ? `${formatMoney(check.split.principal)} off the balance, ${formatMoney(check.split.interest)} interest.`
-                : "From the bill or the app. Blank if none."}
+                : fees > 0
+                  ? `${formatMoney(fees)} of fees is already in what you owe and this payment clears it. Only interest on top of that goes here.`
+                  : "From the bill or the app. Blank if none."}
             </span>
           </div>
+          {/*
+            The lender's fees, already owed, typed again as interest: the
+            PHP 302.06 on Maya Credit that left PHP 604.12 owed after it was
+            paid off (27 September 2026). One tap counts them once.
+          */}
+          {check.feesTwice && (
+            <p className="t-micro fms-proposalnote">
+              <button
+                type="button"
+                className="t-micro fms-linkish"
+                onClick={() => onChange({ ...draft, amount: check.feesTwice!.amount, interest: null })}
+              >
+                Pay {formatMoney(check.feesTwice.amount)}, no interest
+              </button>
+            </p>
+          )}
+          {!check.feesTwice && fees > 0 && !(draft.interest && draft.interest > 0) && (draft.amount ?? 0) > 0 && (
+            <p className="t-micro" style={{ margin: 0, color: "var(--ink-2)" }}>
+              Covers {formatMoney(Math.min(draft.amount ?? 0, fees))} of fees already added
+              {(draft.amount ?? 0) > fees ? `, then ${formatMoney(Math.min((draft.amount ?? 0) - fees, Math.max(0, owedNow - fees)))} of what you borrowed` : ""}.{" "}
+              {(draft.amount ?? 0) >= owedNow ? `Clears ${chosen?.name ?? "it"}.` : `${formatMoney(owedNow - (draft.amount ?? 0))} still owed after it.`}
+            </p>
+          )}
           {/*
             Exactly what is owed, with interest as well: the interest was most
             likely on top. See `interestOnTop` for the payment that left PHP
             500.00 owed on a credit line the owner had just paid off.
           */}
           {(() => {
-            const total = draft.debtId ? interestOnTop(draft.amount, outstandingOf(transactions, draft.debtId), draft.interest) : null;
+            const total = draft.debtId && !check.feesTwice ? interestOnTop(draft.amount, outstandingOf(transactions, draft.debtId), draft.interest) : null;
             return total ? (
               <p className="t-micro fms-proposalnote">
                 {formatMoney(draft.amount ?? 0)} is everything owed, so {formatMoney(draft.interest ?? 0)} would stay owed. If the interest was on top, you paid {formatMoney(total)}.{" "}

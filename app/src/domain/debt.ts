@@ -463,6 +463,103 @@ export function interestOnTop(
   return amount === outstanding ? amount + interest : null;
 }
 
+/**
+ * The lender's fees still inside what is owed.
+ *
+ * Charges added since the balance was last cleared, less what payments have
+ * covered since, fees first: a lender takes its fees out of a payment before
+ * it touches what was borrowed. Maya Credit on 27 September 2026 held
+ * PHP 4,000.00 borrowed and PHP 302.06 of fees added with the two borrowings,
+ * so PHP 302.06 of the PHP 4,302.06 owed was fees.
+ */
+export function unpaidCharges(transactions: readonly Transaction[], debtId: string, before?: IsoDate): Centavos {
+  const rows = transactions
+    .filter((t) => t.debtId === debtId && (before === undefined || t.date <= before))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.recordNumber - b.recordNumber));
+  let owed = 0;
+  let fees = 0;
+  for (const t of rows) {
+    if (t.debtEffect === "charge") fees += t.amount;
+    else if (t.debtEffect === "repay" || t.debtEffect === "writeoff") fees = Math.max(0, fees - t.amount);
+    owed += owedChange(t);
+    if (owed <= 0) fees = 0;
+  }
+  return Math.max(0, Math.min(fees, owed));
+}
+
+/**
+ * Interest stated on a payment that is really the lender's fees, already
+ * owed.
+ *
+ * ── The case this is for, 27 September 2026 ──────────────────────────────
+ *
+ * PHP 4,302.06 owed on Maya Credit: PHP 4,000.00 borrowed and PHP 302.06 of
+ * fees the lender added when it was borrowed, each already saved as a
+ * charge. The owner paid PHP 4,302.06 and entered PHP 4,000.00 with
+ * PHP 302.06 as "Interest included". The fees were counted a second time,
+ * as interest, only PHP 3,697.94 came off the balance, and the Debt screen
+ * said PHP 604.12 was still owed on a line the owner had just cleared: "why
+ * I still have 600+ its confusing".
+ *
+ * Rule 5.6.2 is unchanged: interest stated on a payment is inside it and is
+ * spending. This only catches stated interest that the fees already owed
+ * account for, which can never be new interest, and returns the payment put
+ * right: the whole of it off the balance, and the amount the owner meant
+ * when the two they typed make up what was owed.
+ */
+export function feesAsInterest(
+  amount: Centavos | null,
+  outstanding: Centavos,
+  interest: Centavos | null | undefined,
+  unpaid: Centavos,
+): { readonly amount: Centavos; readonly exact: boolean } | null {
+  if (amount === null || !interest || interest <= 0 || unpaid <= 0 || interest > unpaid) return null;
+  const typedApart = amount + interest === outstanding;
+  return { amount: typedApart ? outstanding : amount, exact: typedApart || interest === unpaid };
+}
+
+/** A payment whose interest was the lender's fees already owed, found in the ledger. */
+export interface FeesCountedTwice {
+  /** The payment, saved as what came off the balance. */
+  readonly payment: Transaction;
+  /** The interest saved with it, which was the fees. */
+  readonly interest: Transaction;
+  /** What the owner paid in all: the payment and its interest. */
+  readonly paid: Centavos;
+  /** What the Debt screen went on to say was still owed. */
+  readonly leftShown: Centavos;
+  /** A later payment of exactly that figure, which paid a balance that was never owed. */
+  readonly followUp?: Transaction | undefined;
+}
+
+/**
+ * Payments already saved with the lender's fees counted again as interest
+ * (`feesAsInterest`), for the Debt screen to report. Nothing is changed: the
+ * owner opens the rows and corrects them.
+ */
+export function feesCountedTwice(transactions: readonly Transaction[], debtId: string): FeesCountedTwice[] {
+  const rows = transactions
+    .filter((t) => t.debtId === debtId)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.recordNumber - b.recordNumber));
+  const found: FeesCountedTwice[] = [];
+  rows.forEach((payment, i) => {
+    if (payment.debtEffect !== "repay") return;
+    const interest = interestOf(payment, transactions);
+    if (!interest || interest.amount <= 0) return;
+    const prior = rows.slice(0, i).filter((t) => t.id !== interest.id);
+    const owed = outstandingOf(prior, debtId);
+    const unpaid = unpaidCharges(prior, debtId);
+    const paid = payment.amount + interest.amount;
+    if (!feesAsInterest(paid, owed, interest.amount, unpaid)?.exact) return;
+    const leftShown = owed - payment.amount;
+    const followUp = rows
+      .slice(i + 1)
+      .find((t) => t.debtEffect === "repay" && t.id !== payment.id && t.amount === leftShown && Math.abs(daysBetween(payment.date, t.date)) <= 7);
+    found.push({ payment, interest, paid, leftShown, followUp });
+  });
+  return found;
+}
+
 // ── One movement, two rows ────────────────────────────────────────────────
 
 /**

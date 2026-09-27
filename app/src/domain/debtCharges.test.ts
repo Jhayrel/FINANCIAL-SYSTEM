@@ -144,10 +144,16 @@ describe("fees the lender adds to what is owed", () => {
     expect(check.warnings.map((w) => w.message).join(" ")).toContain("over the ₱5,000.00 limit");
   });
 
-  it("warns when interest is stated on a payment that already has its charges recorded", () => {
+  /*
+   * Stopped, not only warned, when it is plainly the same money: the owner
+   * saved a payment this way on 27 September 2026 past the warning, and the
+   * fees were counted twice (feesTwice.test.ts).
+   */
+  it("stops interest stated on a payment when it is the charges already recorded, and offers the fix", () => {
     const ledger = save([opening], draft({ debtEffect: "draw", toWallet: "Maya", amount: 100000, charges: 7000 }));
     const check = checkDraft(draft({ debtEffect: "repay", fromWallet: "Maya", amount: 107000, interest: 7000 }), ledger, reference, [line]);
-    expect(check.warnings.some((w) => w.field === "interest")).toBe(true);
+    expect(check.errors.some((e) => e.field === "interest")).toBe(true);
+    expect(check.feesTwice).toEqual({ unpaid: 7000, amount: 107000 });
   });
 
   it("shows a borrowing and its fees as one movement in the history", () => {

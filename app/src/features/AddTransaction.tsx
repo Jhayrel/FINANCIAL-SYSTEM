@@ -22,7 +22,7 @@ import {
 import { AmountInput, Select, TextInput } from "../components/forms";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
-import { choicesFor, debtDue, effectsFor, interestOnTop, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionsOf } from "../domain/debt";
+import { choicesFor, debtDue, effectsFor, interestOnTop, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionsOf, unpaidCharges } from "../domain/debt";
 import { creditRoom, limitOn, takesLimit, usedAfterOne, usedOn } from "../domain/creditLimit";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, partWords, type BehalfSide } from "../domain/debtWords";
 import { formatMoney, type Centavos } from "../domain/money";
@@ -1066,7 +1066,9 @@ export function AddTransaction({
       /** What of a payment is interest, which counts as spending and not against the balance. */
       interest: draft.debtEffect === "repay" ? (check.repaymentSplit?.interest ?? 0) : 0,
       /** The payment as it would be with the stated interest on top, when that is the likelier reading. */
-      onTop: draft.debtEffect === "repay" ? interestOnTop(amount, before, draft.interest) : null,
+      onTop: draft.debtEffect === "repay" && !check.feesTwice ? interestOnTop(amount, before, draft.interest) : null,
+      /** The lender's fees still inside what is owed, which a payment clears first. */
+      fees: draft.debtEffect === "repay" ? unpaidCharges(base, selectedDebt.id, draft.date || asOf) : 0,
     };
   })();
 
@@ -1190,6 +1192,38 @@ export function AddTransaction({
       text: clears
         ? `Pays off ${debtAfter?.name ?? "the debt"}: ${formatMoney(check.repaymentSplit.principal)} clears what you owe, and the other ${formatMoney(check.repaymentSplit.interest)} is interest, which counts as spending.`
         : `Saved as one payment in two linked rows: ${formatMoney(check.repaymentSplit.principal)} off what you owe, and ${formatMoney(check.repaymentSplit.interest)} interest, which counts as spending.`,
+    });
+  }
+  /*
+   * What a payment covers, when the lender's fees are inside what is owed:
+   * the fees first, then what was borrowed. The owner, 27 September 2026:
+   * the PHP 302.06 of fees had nowhere to show except "Interest included",
+   * and putting it there counted it twice.
+   */
+  if (debtAfter && draft.debtEffect === "repay" && debtAfter.fees > 0 && !check.feesTwice && !(draft.interest && draft.interest > 0) && (draft.amount ?? 0) > 0) {
+    const paid = draft.amount ?? 0;
+    const fees = Math.min(paid, debtAfter.fees);
+    const borrowed = Math.min(paid - fees, Math.max(0, debtAfter.before - debtAfter.fees));
+    checks.push({
+      key: "covers",
+      text: `Covers ${formatMoney(fees)} of fees ${debtAfter.name} already added${borrowed > 0 ? `, then ${formatMoney(borrowed)} of what you borrowed` : ""}. ${
+        debtAfter.after <= 0 ? `Clears ${debtAfter.name}.` : `${formatMoney(debtAfter.after)} still owed after it.`
+      } The fees are already counted as spending, so nothing goes in Interest included.`,
+    });
+  }
+  if (check.feesTwice) {
+    const fix = check.feesTwice;
+    checks.push({
+      key: "fees-twice",
+      text: `Count the ${formatMoney(fix.unpaid)} of fees once.`,
+      action: (
+        <>
+          {" "}
+          <button type="button" className="t-caption fms-linkbtn" onClick={() => setDraft((d) => ({ ...d, amount: fix.amount, interest: null }))}>
+            Pay {formatMoney(fix.amount)}, no interest
+          </button>
+        </>
+      ),
     });
   }
   if (debtAfter?.onTop) {
@@ -1745,7 +1779,13 @@ export function AddTransaction({
                   label="Interest included"
                   half
                   error={interestError}
-                  hint={interestError ? undefined : "From the bill or app. Blank if none."}
+                  hint={
+                    interestError
+                      ? undefined
+                      : debtAfter && debtAfter.fees > 0
+                        ? `${formatMoney(debtAfter.fees)} of fees is already in what you owe and this payment clears it. Only interest on top of that goes here.`
+                        : "From the bill or app. Blank if none."
+                  }
                 >
                   <div className="fms-amounthero fms-amounthero--quiet">
                     <AmountInput
@@ -2292,9 +2332,15 @@ export function AddTransaction({
                 Paid off{debtAfter.interest > 0 ? `, with ${formatMoney(debtAfter.interest)} of interest on top` : ""}.
               </p>
             )}
-            {debtAfter.owed && debtAfter.after > 0 && debtAfter.interest > 0 && (
+            {debtAfter.owed && debtAfter.after > 0 && debtAfter.interest > 0 && !check.feesTwice && (
               <p className="t-caption" style={{ color: "var(--ink-2)" }}>
                 {formatMoney(debtAfter.interest)} of this is interest, so it does not come off what you owe.
+              </p>
+            )}
+            {/* The fees typed again as interest: the figure above is what that mistake would leave, not what is owed. */}
+            {check.feesTwice && (
+              <p className="t-caption" style={{ color: "var(--over)" }}>
+                Not really owed: that is the {formatMoney(check.feesTwice.unpaid)} of fees counted twice. Pay {formatMoney(check.feesTwice.amount)} with no interest and it is cleared.
               </p>
             )}
             {debtAfter.room && (

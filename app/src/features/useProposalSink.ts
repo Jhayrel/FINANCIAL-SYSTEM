@@ -106,6 +106,7 @@ export function useProposalSink(input: SinkInput): ProposalSink {
           warnings: c.warnings.map((w) => w.message),
           unusual: c.unusual?.times,
           split: c.repaymentSplit,
+          ...(c.feesTwice ? { feesTwice: c.feesTwice } : {}),
         };
       },
       use: (d) => handlers.current.onUse(d),

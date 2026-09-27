@@ -548,6 +548,8 @@ Interest paid from a wallet is **excluded**: it is expense, not principal. Payin
 
 A **charge** is included (amended 2026-09-17): the lender added it to the balance, it is owed, and it is what the lender's own app shows as outstanding. The historical ledger has no charge rows, so every pinned figure (Maya Credit ₱2,950.00, net worth ₱4,690.03) is unchanged.
 
+A payment clears the charges first (noted 2026-09-27, rule unchanged). Charges are already spending and already owed, so they can never also be the interest stated on the payment that clears them: that would count the same fees twice and leave them owed. On 27 September 2026 the owner paid ₱4,302.06 (₱4,000.00 borrowed and ₱302.06 of fees, both on the line) and entered ₱4,000.00 with ₱302.06 as interest, and the Debt screen showed ₱604.12 still owed. The form and the assistant now stop a payment whose stated interest is exactly the unpaid charges, offer the corrected payment in one tap, and the Debt screen reports any payment already saved that way with the rows to correct (`debt.ts`: `unpaidCharges`, `feesAsInterest`, `feesCountedTwice`). Interest billed on top of what is owed is still stated as before.
+
 ### 5.6.3 Net worth — the figure the Excel never had
 
 ```

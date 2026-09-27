@@ -2816,6 +2816,19 @@
   }
 }
 
+/*
+ * Cards to check: the assistant gets the room on a computer. With a batch of
+ * cards open, each showing every field and a copy beside the row it repeats,
+ * the column the chat was given (360px at 1440px) wrapped every date in two
+ * (owner, 27 September 2026: "more detailed it pc ... i dont like this looks
+ * in pc"). The form keeps a 420px floor and the balances stay in view.
+ */
+@media (min-width: 1440px) {
+  .fms-entry:not(.fms-entry--nochat):has(.fms-batchbar, .fms-proposal:not(.fms-proposal--settled)) {
+    grid-template-columns: minmax(420px, 1fr) 240px minmax(400px, 1.3fr);
+  }
+}
+
 .fms-recent {
   display: grid;
   align-content: start;
@@ -5025,6 +5038,187 @@ button.fms-recent-row:disabled {
   white-space: nowrap;
 }
 
+/*
+ * On a computer (1024px and wider), each card in a group as a row the eye can
+ * run down: number, day, words, kind, amount. Capped, so a list of twenty
+ * four still leaves the cards room; it scrolls inside itself.
+ */
+.fms-batchbar--wide .fms-batchgroups {
+  max-height: min(40vh, 340px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.fms-batchgroups {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.fms-batchrows {
+  display: grid;
+  margin: 0 0 var(--space-1);
+  padding: 0;
+  list-style: none;
+}
+
+.fms-batchrow {
+  display: grid;
+  grid-template-columns: 2ch 6ch minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 0;
+  text-align: left;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  cursor: pointer;
+}
+
+.fms-batchrow:hover .fms-batchrow-what {
+  text-decoration: underline;
+}
+
+.fms-batchrow-n {
+  color: var(--ink-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.fms-batchrow-date {
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.fms-batchrow-what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fms-batchrow-match {
+  color: var(--ink-3);
+}
+
+.fms-batchrow-kind {
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.fms-batchrow-money {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* The assistant measures itself, so its cards fit the column they are in, not the window. */
+.fms-ask {
+  container-type: inline-size;
+  container-name: ask;
+}
+
+/* A narrow column (the pop-up chat, a 1280px screen): one field a row, and the list rows lose the day. */
+@container ask (max-width: 440px) {
+  .fms-pdetails {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fms-batchrow {
+    grid-template-columns: 2ch minmax(0, 1fr) auto auto;
+  }
+
+  .fms-batchrow-date {
+    display: none;
+  }
+}
+
+/*
+ * A card's fields, labelled, on a computer. Two pairs a row, the description
+ * across the whole width, ruled with hairlines like every other table here
+ * (rule D2).
+ */
+.fms-pdetails {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--space-4);
+  margin: var(--space-2) 0 0;
+}
+
+.fms-pdetail {
+  display: grid;
+  grid-template-columns: 9ch minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: var(--space-2);
+  min-width: 0;
+  padding: 3px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-pdetail--full {
+  grid-column: 1 / -1;
+}
+
+.fms-pdetail dt {
+  color: var(--ink-3);
+}
+
+.fms-pdetail dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * A copy beside the row it repeats, on a computer: field by field, with the
+ * fields that differ marked in words, not only in colour.
+ */
+.fms-cmp {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.fms-cmp th,
+.fms-cmp td {
+  padding: 3px var(--space-2) 3px 0;
+  text-align: left;
+  vertical-align: baseline;
+  border-top: 1px solid var(--hairline);
+  overflow-wrap: anywhere;
+}
+
+.fms-cmp thead th {
+  color: var(--ink-2);
+  font-weight: 600;
+  border-top: 0;
+  border-bottom: 2px solid var(--ink);
+}
+
+.fms-cmp thead th:first-child {
+  width: 12ch;
+}
+
+.fms-cmp tbody th {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.fms-cmp td {
+  color: var(--ink);
+}
+
+.fms-cmp-flag {
+  display: block;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.fms-cmp-diff td {
+  font-weight: 600;
+}
+
 /* A card's number and standing, in the bar's words. */
 .fms-cardplace {
   margin: 0;
@@ -6399,6 +6593,54 @@ textarea.fms-askinput {
 }
 
 .fms-debthero-owed,
+/*
+ * Fees counted twice on a payment (DebtScreen, `feesCountedTwice`): a warning
+ * in words with the rows to open, ruled in the warning colour rather than
+ * boxed (rule D2).
+ */
+.fms-debttwice {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2) 0 var(--space-2) var(--space-3);
+  border-left: 2px solid var(--warn);
+}
+
+.fms-debttwice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* The credit limit, set or changed on the card (DebtScreen `LimitQuick`). */
+.fms-limitquick {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.fms-limitquick-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.fms-limitquick-row > .fms-debtfield {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.fms-limitquick-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.fms-limitquick-open {
+  justify-self: start;
+  align-self: flex-start;
+  min-height: 32px;
+}
+
 .fms-debthero-side {
   display: grid;
   gap: var(--space-1);

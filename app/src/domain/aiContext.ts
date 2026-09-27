@@ -36,7 +36,7 @@
 import { walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { billStatuses, overdue, STOPPED_AFTER_DAYS, upcoming } from "./bills";
-import { debtDue, incomeQuality, positionsOf, type Debt } from "./debt";
+import { debtDue, incomeQuality, positionsOf, unpaidCharges, type Debt } from "./debt";
 import { creditRoom, limitSteps } from "./creditLimit";
 import { addDays, daysBetween, getMonth, getYear, monthName } from "./dates";
 import { financeAlerts, burnRate, daysLeft, dailyAllowance } from "./alerts";
@@ -114,6 +114,10 @@ export interface AiContext {
     readonly limitState?: string | null;
     readonly limitCounts?: string | null;
     readonly limitHistory?: readonly { readonly from: string; readonly limit: number }[];
+    /** Of what is owed, the fees the lender already added: a payment clears them, never as new interest. */
+    readonly feesInBalance?: number | null;
+    /** Of what is owed, what was borrowed: the rest of it. */
+    readonly borrowedInBalance?: number | null;
   }[];
   readonly goals: readonly {
     readonly name: string;
@@ -227,6 +231,7 @@ export function buildContext(input: ContextInput): AiContext {
     debts: positions.map((p) => {
       const due = debtDue(p, transactions, asOf);
       const room = creditRoom(p.debt, transactions, asOf);
+      const fees = p.outstanding > 0 && p.debt.kind === "payable" ? unpaidCharges(transactions, p.debt.id, asOf) : 0;
       return {
         name: p.debt.name,
         kind: p.debt.kind === "payable" ? "I owe" : "owed to me",
@@ -240,6 +245,8 @@ export function buildContext(input: ContextInput): AiContext {
         limitState: room ? { ok: "room left", near: "close to the limit", reached: "limit reached", over: "past the limit" }[room.state] : null,
         limitCounts: room ? (room.counts === "borrowed" ? "only what was borrowed counts" : "everything owed counts, fees too") : null,
         limitHistory: limitSteps(p.debt).map((st) => ({ from: st.from, limit: pesos(st.amount) })),
+        feesInBalance: fees > 0 ? pesos(fees) : null,
+        borrowedInBalance: fees > 0 ? pesos(p.outstanding - fees) : null,
       };
     }),
 
@@ -381,7 +388,10 @@ export function contextToText(c: AiContext): string {
           : `. Credit limit ${php(d.limit)} (${d.limitCounts}): ${php(d.used ?? 0)} used, ${php(d.leftToBorrow ?? 0)} left to borrow, ${d.limitState}${
               (d.limitHistory ?? []).length > 1 ? `. Limit over time: ${(d.limitHistory ?? []).map((h) => `${php(h.limit)} from ${h.from}`).join(", ")}` : ""
             }`;
-      lines.push(`${d.name} (${d.kind}): ${php(d.outstanding)}${due}${limit}`);
+      const fees = d.feesInBalance
+        ? ` (${php(d.borrowedInBalance ?? 0)} borrowed and ${php(d.feesInBalance)} of fees the lender already added; paying ${php(d.outstanding)} clears both, and the fees are already counted, so none of it is new interest)`
+        : "";
+      lines.push(`${d.name} (${d.kind}): ${php(d.outstanding)}${fees}${due}${limit}`);
     }
   }
 

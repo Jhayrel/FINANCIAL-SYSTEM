@@ -12,7 +12,7 @@
 
 import { walletBalance } from "./balances";
 import type { Debt, DebtEffect } from "./debt";
-import { debtNamedBy, effectsFor, outstandingOf, partOf, splitRepayment } from "./debt";
+import { debtNamedBy, effectsFor, feesAsInterest, outstandingOf, partOf, splitRepayment, unpaidCharges } from "./debt";
 import { limitOn, takesLimit, usedOn } from "./creditLimit";
 import { stopOf } from "./bills";
 import { daysBetween, formatMedium, getMonth, getYear, monthName, today } from "./dates";
@@ -339,6 +339,12 @@ export interface EntryCheck {
   readonly debtPayment?: { readonly debtId: string; readonly name: string } | undefined;
   /** Far larger than any row of its kind before. The form asks before saving it. */
   readonly unusual?: Unusual | undefined;
+  /**
+   * Interest stated on a payment that is the lender's fees already owed
+   * (`feesAsInterest`): the fees, and the payment put right. The form
+   * offers it as one tap.
+   */
+  readonly feesTwice?: { readonly unpaid: Centavos; readonly amount: Centavos } | undefined;
 }
 
 export function checkDraft(
@@ -352,6 +358,7 @@ export function checkDraft(
   const errors: EntryIssue[] = [];
   const warnings: EntryIssue[] = [];
   let repaymentSplit: { principal: Centavos; interest: Centavos } | undefined;
+  let feesTwice: { unpaid: Centavos; amount: Centavos } | undefined;
 
   if (!draft.flow) {
     return { ok: false, errors: [{ field: "flow", message: "Pick what kind of transaction this is." }], warnings: [] };
@@ -778,25 +785,27 @@ export function checkDraft(
     }
 
     /**
-     * Interest stated on a payment when the lender's charges are already in
-     * the balance. The payment clears those charges, so stating them again as
-     * interest would count the same fees as spending twice and leave them
-     * owed besides.
+     * Interest stated on a payment when the lender's fees are already in the
+     * balance (`feesAsInterest`). The payment clears those fees, so stating
+     * them again as interest counts the same money as spending twice and
+     * leaves it owed besides. When the figures say plainly that it is the
+     * same money, it stops the save and the form offers the correction; a
+     * smaller overlap is a warning, since a bill can carry new interest too.
      */
     if (draft.debtEffect === "repay" && (stated ?? 0) > 0) {
-      const charged = others
-        .filter((t) => t.debtId === draft.debtId && t.debtEffect === "charge")
-        .reduce((sum, t) => sum + t.amount, 0);
-      if (charged > 0) {
-        warnings.push({
-          field: "interest",
-          message: `${money(charged)} of charges are already recorded on ${debt?.name ?? "this debt"} and this payment clears them. Only put interest here that was never recorded as a charge.`,
-        });
+      const unpaid = unpaidCharges(others, draft.debtId, draft.date || asOf);
+      const same = feesAsInterest(amount, outstanding, stated, unpaid);
+      if (same) {
+        feesTwice = { unpaid, amount: same.amount };
+        const text = `${money(unpaid)} of fees is already in the ${money(outstanding)} owed on ${debt?.name ?? "this debt"}, added when it was borrowed. This payment clears it, so it is not interest: leave Interest included blank${
+          same.amount !== amount ? ` and put the whole ${money(same.amount)} in Amount` : ""
+        }. Saved as it is, ${money(stated ?? 0)} would be counted twice and still show as owed.`;
+        (same.exact ? errors : warnings).push({ field: "interest", message: text });
       }
     }
   }
 
-  return { ok: errors.length === 0, errors, warnings, repaymentSplit, debtPayment, unusual };
+  return { ok: errors.length === 0, errors, warnings, repaymentSplit, debtPayment, unusual, ...(feesTwice ? { feesTwice } : {}) };
 }
 
 // ── Commit ─────────────────────────────────────────────────────────────────

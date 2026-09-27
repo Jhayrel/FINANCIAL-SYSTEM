@@ -36,6 +36,7 @@ import {
   debtDue,
   debtPace,
   duesWithin,
+  feesCountedTwice,
   movementsOf,
   owedChange,
   paymentsFiledAsSpending,
@@ -216,6 +217,8 @@ export function DebtScreen({
         onUpdateDebt(next);
         setEditId(null);
       }}
+      onOpenRow={onEditRow}
+      onFind={onShowRows}
     />
   );
 
@@ -351,6 +354,8 @@ function DebtCard({
   onRecord,
   onEdit,
   onSave,
+  onOpenRow,
+  onFind,
 }: {
   due: DebtDue;
   transactions: readonly Transaction[];
@@ -366,6 +371,10 @@ function DebtCard({
   onRecord: (effect: DebtEffect, amount: Centavos | null) => void;
   onEdit: () => void;
   onSave: (next: Debt) => void;
+  /** A saved row into the Add form, to correct it. */
+  onOpenRow: (row: Transaction) => void;
+  /** The Database, searched for these words. */
+  onFind: (query: string) => void;
 }) {
   const { position } = due;
   const { debt } = position;
@@ -378,6 +387,8 @@ function DebtCard({
   const canLimit = takesLimit(debt);
   const schedule = form === "term-loan" ? loanSchedule(position, asOf) : null;
   const pace = debtPace(position, transactions, asOf);
+  /** Payments saved with the lender's fees counted again as interest (`feesCountedTwice`). */
+  const twice = through || debt.kind !== "payable" ? [] : feesCountedTwice(transactions, debt.id);
 
   const state: { status: Status; words: string } = settled
     ? { status: "ok", words: through ? "Settled" : owed ? "Paid off" : "Paid back" }
@@ -522,15 +533,14 @@ function DebtCard({
                   {formatMedium(room.lastChange.from)}
                 </span>
               )}
+              <LimitQuick debt={debt} asOf={asOf} current={room.limit} onSave={onSave} />
             </div>
-          ) : canLimit && !settled ? (
+          ) : canLimit ? (
             <div className="fms-debthero-side">
               <span className="t-label" style={{ color: "var(--ink-2)" }}>
                 Credit limit
               </span>
-              <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                None set. If {debt.counterparty || debt.name} gives you a limit, set it under Details and this shows what is left to borrow.
-              </span>
+              <LimitQuick debt={debt} asOf={asOf} current={null} onSave={onSave} />
             </div>
           ) : schedule ? (
             <div className="fms-debthero-side">
@@ -590,6 +600,46 @@ function DebtCard({
           </Fact>
         </dl>
 
+        {/*
+          The lender's fees counted twice: once when they were added, and
+          again as interest on the payment that cleared them. It moved the
+          owner's Maya Credit to PHP 604.12 owed after they had paid it off
+          (27 September 2026). Reported with the rows to open, never
+          corrected for them.
+        */}
+        {twice.map((t) => {
+          const n = (row: Transaction): string => `#${String(row.recordNumber).padStart(4, "0")}`;
+          const meant = t.paid + t.interest.amount === t.leftShown + t.payment.amount ? t.paid + t.interest.amount : t.paid;
+          return (
+            <div key={t.payment.id} className="fms-debttwice" role="note">
+              <p className="t-caption" style={{ margin: 0 }}>
+                <span className="t-body-strong">{formatMoney(t.interest.amount)} was counted twice</span> on {formatMedium(t.payment.date)}. It is the fees{" "}
+                {debt.name} added when you borrowed, already in what you owed, and {n(t.payment)} saved it again as interest. That is why{" "}
+                {formatMoney(t.leftShown)} looked owed after you paid.
+              </p>
+              <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+                To put it right{t.followUp ? ", first bin " : ": "}
+                {t.followUp ? (
+                  <>
+                    {n(t.followUp)} ({formatMoney(t.followUp.amount)}, paid on that figure) if that payment did not really happen. Then
+                  </>
+                ) : null}{" "}
+                open {n(t.payment)} and save it as {formatMoney(meant)} with Interest included blank: the form offers it in one tap.
+              </p>
+              <div className="fms-debttwice-actions">
+                {t.followUp && (
+                  <Button size="sm" onClick={() => onFind(n(t.followUp!))}>
+                    Show {n(t.followUp)}
+                  </Button>
+                )}
+                <Button size="sm" onClick={() => onOpenRow(t.payment)}>
+                  Correct {n(t.payment)}
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+
         {notes.length > 0 && (
           <ul className="fms-debtnotes">
             {notes.map((n) => (
@@ -633,6 +683,106 @@ const TERMS = [NO_TERM, "3", "6", "9", "12", "18", "24", "36", "48", "60"];
 /** Firestore refuses `undefined` in a document, so a cleared field is left out. */
 function withoutBlanks(debt: Debt): Debt {
   return Object.fromEntries(Object.entries(debt).filter(([, v]) => v !== undefined)) as unknown as Debt;
+}
+
+/**
+ * The credit limit, set or changed on the card itself.
+ *
+ * It lived under Details, and the owner never found it: on 27 September 2026,
+ * with the limit feature live, their Maya Credit still had none, the card
+ * said nothing about one, and they wrote "you didnt fix the debt". A line
+ * that takes a limit now asks for it where the figures are, and a line that
+ * has one offers "Limit changed?" for the day the lender raises it. The
+ * first limit counts from the day the line opened; a change counts from the
+ * day it is said to have happened. Every step stays in Details, with its
+ * date, to correct.
+ */
+function LimitQuick({
+  debt,
+  asOf,
+  current,
+  onSave,
+}: {
+  debt: Debt;
+  asOf: string;
+  /** The limit now, or null when none is set. */
+  current: Centavos | null;
+  onSave: (next: Debt) => void;
+}) {
+  const [open, setOpen] = useState(current === null);
+  const [amount, setAmount] = useState<Centavos | null>(current);
+  const [from, setFrom] = useState(asOf);
+  const first = current === null;
+  // A line set up without a real opening day counts its first limit from today.
+  const opened = debt.openedDate && debt.openedDate >= "2000-01-01" && debt.openedDate <= asOf ? debt.openedDate : asOf;
+  const since = first ? opened : from || asOf;
+  const ready = amount !== null && amount > 0 && amount !== current;
+
+  if (!open) {
+    return (
+      <button type="button" className="t-caption fms-linkish fms-limitquick-open" onClick={() => setOpen(true)}>
+        Limit changed?
+      </button>
+    );
+  }
+
+  return (
+    <div className="fms-limitquick">
+      {first && (
+        <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+          Not set. Put in what {debt.counterparty || debt.name} lets you borrow, and this shows what is left, and warns you before you reach it.
+        </span>
+      )}
+      <div className="fms-limitquick-row">
+        <label className="fms-debtfield">
+          <span className="t-label" style={{ color: "var(--ink-2)" }}>
+            {first ? "What they let you borrow" : "New limit"}
+          </span>
+          <AmountInput value={amount} onChange={setAmount} ariaLabel={`${first ? "Credit limit" : "New limit"} for ${debt.name}`} />
+        </label>
+        {!first && (
+          <label className="fms-debtfield">
+            <span className="t-label" style={{ color: "var(--ink-2)" }}>
+              Changed on
+            </span>
+            <input type="date" className="t-body fms-control" value={from} max={asOf} onChange={(e) => setFrom(e.target.value)} />
+          </label>
+        )}
+      </div>
+      <div className="fms-limitquick-actions">
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={!ready}
+          onClick={() => {
+            if (!ready) return;
+            onSave(withLimit(debt, amount, since));
+            setOpen(false);
+          }}
+        >
+          {first ? "Set limit" : "Save new limit"}
+        </Button>
+        {!first && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setAmount(current);
+              setFrom(asOf);
+              setOpen(false);
+            }}
+          >
+            Cancel
+          </Button>
+        )}
+      </div>
+      {first && (
+        <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+          Counted from {formatMedium(since)}{since === debt.openedDate ? ", when it opened" : ""}. When {debt.counterparty || "the lender"} raises it, say so here and the old limit is kept for the months it applied.
+        </span>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -808,6 +958,8 @@ type HistoryLine =
       readonly owedAfter: Centavos;
       /** Left under the limit after it, negative when past it; null without a limit. */
       readonly leftAfter: Centavos | null;
+      /** Of a payment, how much cleared fees the lender had already added. */
+      readonly feesCovered?: Centavos;
     }
   | { readonly kind: "limit"; readonly key: string; readonly date: string; readonly step: LimitStep; readonly before: Centavos | null };
 
@@ -842,12 +994,22 @@ function History({
     // Where each row falls, so a movement reads what was used after the later of its two rows.
     const order = new Map([...used.keys()].map((id, i) => [id, i]));
     let balance = 0;
+    /*
+     * The lender's fees still owed, which a payment clears before what was
+     * borrowed (`unpaidCharges`), so a payment can say what it covered: the
+     * owner's PHP 302.06 of fees had nowhere to show but "interest".
+     */
+    let fees = 0;
     const moves: HistoryLine[] = movementsOf(rows).map((m) => {
+      for (const t of m.part ? [m.row, m.part] : [m.row]) if (t.debtEffect === "charge") fees += t.amount;
+      const feesCovered = m.row.debtEffect === "repay" || m.row.debtEffect === "writeoff" ? Math.min(fees, m.row.amount) : 0;
+      fees -= feesCovered;
       balance += owedChange(m.row) + (m.part ? owedChange(m.part) : 0);
+      if (balance <= 0) fees = 0;
       const lastId = m.part && (order.get(m.part.id) ?? -1) > (order.get(m.row.id) ?? -1) ? m.part.id : m.row.id;
       const after = used.get(lastId) ?? 0;
       const limit = limitOn(debt, m.row.date);
-      return { kind: "move", key: m.row.id, date: m.row.date, m, owedAfter: balance, leftAfter: limit === null ? null : limit - after };
+      return { kind: "move", key: m.row.id, date: m.row.date, m, owedAfter: balance, leftAfter: limit === null ? null : limit - after, feesCovered };
     });
     const changes: HistoryLine[] = steps.map((step, i) => ({
       kind: "limit",
@@ -871,7 +1033,12 @@ function History({
   };
   const partText = (line: Extract<HistoryLine, { kind: "move" }>): string => {
     const { m } = line;
-    if (!m.part) return "";
+    const covered = line.feesCovered ?? 0;
+    if (!m.part) {
+      return covered > 0 && m.row.debtEffect === "repay"
+        ? `${covered < m.row.amount ? `${formatMoney(m.row.amount - covered)} of what you borrowed, ` : ""}${formatMoney(covered)} of fees already added`
+        : "";
+    }
     return m.row.debtEffect === "draw"
       ? `${formatMoney(m.row.amount)} received, ${formatMoney(m.part.amount)} ${partWords(m.row.debtEffect)}`
       : `${formatMoney(m.row.amount)} off the balance, ${formatMoney(m.part.amount)} ${partWords(m.row.debtEffect)}`;
@@ -942,7 +1109,7 @@ function History({
                         <td>
                           <span className="fms-debtwhat">
                             <StatusPill status={line.m.row.debtEffect ? EFFECT_STATUS[line.m.row.debtEffect] : "none"}>{what(line)}</StatusPill>
-                            {line.m.part && (
+                            {partText(line) && (
                               <span className="t-micro" style={{ color: "var(--ink-3)" }}>
                                 {partText(line)}
                               </span>
@@ -1008,7 +1175,7 @@ function History({
                           <Money value={line.owedAfter} size="s" tone={line.owedAfter > 0 && owed ? "var(--flow-debt-text)" : undefined} />
                         </span>
                       </span>
-                      {(line.m.part || line.leftAfter !== null) && (
+                      {(partText(line) || line.leftAfter !== null) && (
                         <span className="fms-debthist-line t-caption">
                           <span className="fms-debthist-meta">{partText(line)}</span>
                           {line.leftAfter !== null && <span className="fms-debthist-after">Left {left(line.leftAfter)}</span>}
