@@ -13,9 +13,18 @@
  *
  * Run from app/:
  *
- *   npx vite-node ../tools/resolve_snapshot.ts IN.json OUT_DIR
+ *   npx vite-node ../tools/resolve_snapshot.ts IN.json OUT_DIR [LISTS.json]
  *
  * IN.json: { live: Transaction[], settings, budgets }.
+ * LISTS.json, optional: { bills, subscriptions, revenueCategories, spendingTypes },
+ * the owner's own lists with the notes beside each spending type, taken from an
+ * older export when the live settings have lost them.
+ *
+ * The four lists are part of the proof. The first snapshot (26 September
+ * 2026) was written with all four empty, because the settings it was given
+ * had already lost them to an earlier import, and nothing here looked. A list
+ * the input has empty is taken from LISTS.json, or else read back out of the
+ * ledger (`recoverLists`), and the file is refused if any is still empty.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -26,10 +35,11 @@ import { allWalletBalances } from "../app/src/domain/balances";
 import { positionsOf } from "../app/src/domain/debt";
 import { actionableIssues, checkIntegrity, type Issue } from "../app/src/domain/integrity";
 import { normaliseSettings } from "../app/src/domain/settings";
+import { recoverLists } from "../app/src/domain/recovery";
 import { costOf, incomeOf } from "../app/src/domain/totals";
 import type { Transaction } from "../app/src/domain/types";
 
-const [input, out] = process.argv.slice(2);
+const [input, out, listsFile] = process.argv.slice(2);
 if (!input || !out) throw new Error("usage: vite-node ../tools/resolve_snapshot.ts IN.json OUT_DIR");
 
 const dump = JSON.parse(readFileSync(input, "utf8")) as {
@@ -96,7 +106,22 @@ for (const issue of issues) {
 const after = before.map((t) => fixes.get(t.id) ?? t);
 
 // ── The proof ────────────────────────────────────────────────────────────
-const settings = normaliseSettings(dump.settings);
+const given = normaliseSettings(dump.settings);
+const lists = listsFile
+  ? (JSON.parse(readFileSync(listsFile, "utf8")) as Pick<typeof given, "bills" | "subscriptions" | "revenueCategories" | "spendingTypes">)
+  : null;
+const pick = <T,>(here: readonly T[], from: readonly T[] | undefined): readonly T[] => (here.length > 0 ? here : from ?? []);
+const withLists = {
+  ...given,
+  bills: pick(given.bills, lists?.bills),
+  subscriptions: pick(given.subscriptions, lists?.subscriptions),
+  revenueCategories: pick(given.revenueCategories, lists?.revenueCategories),
+  spendingTypes: pick(given.spendingTypes, lists?.spendingTypes),
+};
+const rebuilt = recoverLists(after, withLists, given.credits.map((c) => c.name));
+const { recovered: _recovered, ...rebuiltLists } = rebuilt;
+const settings = { ...withLists, ...rebuiltLists };
+if (rebuilt.recovered > 0) notes.push(`${rebuilt.recovered} category names read back out of the ledger, for lists the input had empty.`);
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 const byYear = (rows: readonly Transaction[], f: (t: Transaction) => number): Record<string, number> => {
   const out: Record<string, number> = {};
@@ -110,6 +135,10 @@ const proofs: [string, boolean][] = [
   ["income, year by year", same(byYear(before, incomeOf), byYear(after, incomeOf))],
   ["every debt's position", same(positionsOf(settings.credits, before, asOf), positionsOf(settings.credits, after, asOf))],
   ["the same rows, the same ids", same(before.map((t) => t.id), after.map((t) => t.id))],
+  [
+    "every category list present",
+    settings.bills.length > 0 && settings.subscriptions.length > 0 && settings.revenueCategories.length > 0 && settings.spendingTypes.length > 0,
+  ],
 ];
 const left = actionableIssues(checkIntegrity(after));
 proofs.push(["no finding left to review", left.length === 0 && unresolved.length === 0]);

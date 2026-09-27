@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { binarize, cutRows, darkBars, invertBoxes, joinPieces, piecesOf, readingFor, rowsIn, tidyReading, worthSending } from "./ocrText";
+import { binarize, cutRows, darkBars, dropRepeats, invertBoxes, joinPieces, piecesOf, readingFor, rowsIn, tidyReading, worthSending } from "./ocrText";
 
 describe("the clean-up before reading", () => {
   it("turns grey text on white black, and the white around it white", () => {
@@ -157,5 +157,59 @@ describe("piecesOf: a long list in parts", () => {
     const parts = piecesOf(text, 8);
     expect(parts.length).toBe(3);
     for (const p of parts) expect(p.split("\n")[0]).toBe("September 24, 2026");
+  });
+});
+
+describe("dropRepeats: a stitched screenshot read once", () => {
+  // The shape of the owner's Maya capture: 13, 12 and 11 September shown twice.
+  const overlap = [
+    "September 13, 2026",
+    "Received money from 08:49 PM",
+    "Maya ₱4.25",
+    "Purchased (Updated) on 08:36 PM",
+    "JOLLIBEE JB0892 -₱425.00",
+    "September 12, 2026",
+    "Purchased on 09:15 PM",
+    "Globe - ₱999.00",
+    "September 11, 2026",
+    "September 13, 2026",
+    "Maya ₱4.25",
+    "Purchased (Updated) on 08:36 PM",
+    "JOLLIBEE JB0892 - ₱425.00",
+    "September 12, 2026",
+    "Purchased on 09:15 PM",
+    "Globe - ₱999.00",
+    "September 11, 2026",
+    "Purchased on 12:28 PM",
+    "Globe - ₱50.00",
+  ].join("\n");
+
+  it("keeps each row once, and the rows only it has", () => {
+    const { text, dropped } = dropRepeats(overlap);
+    expect(dropped).toBe(3);
+    expect(text.match(/4\.25/g)).toHaveLength(1);
+    expect(text.match(/JOLLIBEE/g)).toHaveLength(1);
+    expect(text.match(/999\.00/g)).toHaveLength(1);
+    expect(text).toContain("Globe - ₱50.00");
+    // The Globe 50 still sits under 11 September.
+    const lines = text.split("\n");
+    const at = lines.indexOf("Globe - ₱50.00");
+    expect(lines.slice(0, at).reverse().find((l) => /September/.test(l))).toBe("September 11, 2026");
+  });
+
+  it("keeps two payments that differ only in their time", () => {
+    const twice = [
+      "September 20, 2026",
+      "Withdrawal from 07:31 PM",
+      "TANQUI SFLU - ₱1,018.00",
+      "Withdrawal from 06:48 PM",
+      "TANQUI SFLU - ₱1,018.00",
+    ].join("\n");
+    expect(dropRepeats(twice).dropped).toBe(0);
+  });
+
+  it("keeps the same row on two different days", () => {
+    const days = ["September 20, 2026", "Withdrawal from 07:31 PM", "TANQUI SFLU - ₱1,018.00", "September 18, 2026", "Withdrawal from 07:31 PM", "TANQUI SFLU - ₱1,018.00"].join("\n");
+    expect(dropRepeats(days).dropped).toBe(0);
   });
 });

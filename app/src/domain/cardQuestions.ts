@@ -24,6 +24,35 @@ import type { ReferenceLists, Transaction } from "./types";
 export interface CardToAsk {
   readonly cardId: string;
   readonly draft: Draft;
+  /**
+   * Money in off a picture that is worth a question even with its kind
+   * filled in (`confirmsIncome`). Cleared once it is answered.
+   */
+  readonly confirm?: boolean;
+}
+
+/** A credit line an answer can name: "borrowed on Maya Credit". */
+export interface LineToName {
+  readonly id: string;
+  readonly name: string;
+  /** The wallet it pays into, which picks the line when the answer names none. */
+  readonly wallet?: string | undefined;
+}
+
+/**
+ * Money in, read off a picture, big enough to ask about.
+ *
+ * 27 September 2026: two Maya Credit borrowings of PHP 2,000.00 each came
+ * off the owner's Maya history as income, "Received money from \viavag
+ * creqiy", because the picture's lettering did not read. Filed as Random,
+ * nothing asked about them, and PHP 4,000.00 of debt became PHP 4,000.00 of
+ * income. Only the owner knows what arrived: pay, an allowance, a borrowing,
+ * or their own money from another account. From PHP 500.00 up, it is asked.
+ */
+export const ASK_ABOUT_INCOME_FROM = 50_000;
+
+export function confirmsIncome(draft: Draft): boolean {
+  return draft.flow === "Revenue" && draft.amount !== null && draft.amount >= ASK_ABOUT_INCOME_FROM;
 }
 
 /** Leave this card for its pickers and go on. */
@@ -85,8 +114,10 @@ export function cardQuestion(
   reference: ReferenceLists,
   at: number,
   of: number,
+  /** Ask about money in even when its kind is filled (`confirmsIncome`), naming these lines as answers. */
+  confirm?: { readonly lines: readonly string[] },
 ): { readonly blank: Blank; readonly text: string } | null {
-  const asked = nextQuestion(draft, reference);
+  const asked = nextQuestion(draft, reference) ?? (confirm && confirmsIncome(draft) ? { blank: "item" as const, question: "" } : null);
   if (!asked) return null;
   const head = `(${at} of ${of}) ${rowWords(draft)}.`;
   if (asked.blank === "item" && draft.flow === "Spending") {
@@ -98,9 +129,11 @@ export function cardQuestion(
   }
   if (asked.blank === "item" && draft.flow === "Revenue") {
     const kinds = reference.revenueCategories.slice(0, 5);
+    const lines = confirm?.lines ?? [];
+    const filed = draft.item.trim() ? ` It is filed as ${draft.item} for now.` : "";
     return {
       blank: "item",
-      text: `${head} What was it? ${kinds.length > 0 ? `${kinds.join(", ")}` : "Say what it was"}, or say "my own" if it came from another of your accounts.`,
+      text: `${head}${filed} What was it? ${kinds.length > 0 ? `${kinds.join(", ")}` : "Say what it was"}${lines.length > 0 ? `, "borrowed on ${lines[0]}"` : ""}, or say "my own" if it came from another of your accounts.`,
     };
   }
   return { blank: asked.blank, text: `${head} ${asked.question}` };
@@ -108,6 +141,9 @@ export function cardQuestion(
 
 /** "from my own account", "that's mine": money from another of their own accounts. */
 const OWN = /\b(?:my own|mine|myself|own account|my other account|sarili ko|akin yan|akin iyon)\b/i;
+/** Words for money that was borrowed rather than earned. */
+const BORROWED = /\b(?:borrow(?:ed)?|loan|utang|inutang|hiniram|credit line|cash ?loan)\b/i;
+
 /** Words for money handed to someone rather than spent on something. */
 const SENT = /\b(?:sent|send|padala|pinadala|gave|given|transfer(?:red)?|money send)\b/i;
 
@@ -135,10 +171,37 @@ export function answerCard(
   reply: string,
   reference: ReferenceLists,
   transactions: readonly Transaction[] = [],
+  lines: readonly LineToName[] = [],
 ): Draft | null {
   const text = reply.trim();
   if (!text) return null;
   const accounts = [...reference.wallets, ...reference.savings];
+
+  /*
+   * Money in that was borrowed: a draw on the line named, or the one line
+   * that pays into this wallet, or the only line there is.
+   */
+  if (draft.flow === "Revenue" && lines.length > 0) {
+    const named = walletInside(text, lines.map((l) => l.name));
+    if (named || BORROWED.test(text)) {
+      const line =
+        lines.find((l) => l.name === named) ??
+        (lines.length === 1 ? lines[0] : lines.find((l) => l.wallet === draft.toWallet));
+      if (line) {
+        return {
+          ...draft,
+          flow: "Debt",
+          category: "",
+          item: line.name,
+          debtId: line.id,
+          debtEffect: "draw",
+          status: "Received",
+          fromWallet: "",
+        };
+      }
+    }
+  }
+
   const wallet = walletInside(text, accounts);
 
   if (draft.flow === "Spending" && SENT.test(text)) {
@@ -172,6 +235,9 @@ export function answerCard(
 
 /** What an answer changed on a card, in one line; empty when nothing did. */
 export function whatChanged(before: Draft, after: Draft): string {
+  if (after.flow === "Debt" && before.flow !== "Debt") {
+    return `Booked as borrowing on ${after.item}${after.toWallet ? ` into ${after.toWallet}` : ""}, which is owed, not income. Add the fees the lender charged on it on the card.`;
+  }
   if (after.flow === "Transfer" && before.flow !== "Transfer") {
     if (after.sentOut) return "Booked as money sent out of your accounts, so all of it counts as spent.";
     const from = after.fromWallet ? ` from ${after.fromWallet}` : "";

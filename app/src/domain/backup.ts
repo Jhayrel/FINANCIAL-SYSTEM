@@ -397,11 +397,24 @@ export function restore(
   const b = backup.data;
 
   if (mode === "replace") {
+    /*
+     * A list the file has as empty is a file that lost it, not an instruction
+     * to empty this device's: two files written by this repository's own
+     * tools carried empty lists, and this is how the owner's categories went.
+     */
+    const keep = <T,>(file: readonly T[], here: readonly T[]): readonly T[] => (file.length > 0 ? file : here);
     return {
       transactions: b.transactions,
       deleted: b.deleted,
       budgets: b.budgets,
-      settings: { ...b.settings, version: SETTINGS_VERSION },
+      settings: {
+        ...b.settings,
+        bills: keep(b.settings.bills, current.settings.bills),
+        subscriptions: keep(b.settings.subscriptions, current.settings.subscriptions),
+        revenueCategories: keep(b.settings.revenueCategories, current.settings.revenueCategories),
+        spendingTypes: keep(b.settings.spendingTypes, current.settings.spendingTypes),
+        version: SETTINGS_VERSION,
+      },
       preferences: b.preferences,
       migrations: b.migrations,
       added: b.transactions.length,
@@ -571,10 +584,29 @@ export function planStartClean(backup: Backup, current: RestoreCurrent): CleanPl
     return { ...d, archived: true };
   });
 
+  /*
+   * The four lists: this device's, plus the file's names it lacks. Taking
+   * only this device's meant a file could never put back a list that had
+   * been emptied here, which is how the owner's categories stayed gone
+   * (27 September 2026). A name already here keeps its note.
+   */
+  const strings = (a: readonly string[], extra: readonly string[]): string[] => {
+    const have = new Set(a.map((x) => x.trim().toLowerCase()));
+    return [...a, ...extra.filter((x) => !have.has(x.trim().toLowerCase()))];
+  };
+
   return {
     transactions,
     deleted: b.deleted,
-    settings: { ...current.settings, accounts, credits },
+    settings: {
+      ...current.settings,
+      accounts,
+      credits,
+      bills: strings(current.settings.bills, b.settings.bills),
+      subscriptions: strings(current.settings.subscriptions, b.settings.subscriptions),
+      revenueCategories: strings(current.settings.revenueCategories, b.settings.revenueCategories),
+      spendingTypes: byName(current.settings.spendingTypes, b.settings.spendingTypes),
+    },
     budgets: { ...current.budgets, ...b.budgets },
     budgetYears: Object.keys(b.budgets).sort(),
     preferences: current.preferences,

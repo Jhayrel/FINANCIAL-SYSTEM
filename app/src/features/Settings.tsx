@@ -40,7 +40,7 @@ import { planStartClean, validateBackup, type Backup, type RestoreMode, type Val
 import { formatBytes, measureStorage } from "../domain/storage";
 import { cleanSettings } from "../domain/settingsCleanup";
 import { canSetOpening, ledgerStart, openingRows } from "../domain/opening";
-import { recoverAccounts } from "../domain/recovery";
+import { recoverAccounts, recoverLists } from "../domain/recovery";
 import { AiAnswerView } from "../components/AiAnswer";
 import { modelsOnOffer, type ModelsOnOffer } from "../data/aiClient";
 import { modelLabel } from "../domain/modelName";
@@ -2692,6 +2692,38 @@ function DataSection({
     return report.recovered > 0 ? report : null;
   }, [transactions, settings.accounts]);
 
+  /*
+   * The same for the four lists: offered only when one of them is empty and
+   * the ledger names items for it (domain/recovery.ts, recoverLists).
+   */
+  const listRecovery = useMemo(() => {
+    const anyEmpty =
+      settings.bills.length === 0 ||
+      settings.subscriptions.length === 0 ||
+      settings.revenueCategories.length === 0 ||
+      settings.spendingTypes.length === 0;
+    if (!anyEmpty || transactions.length === 0) return null;
+    const report = recoverLists(transactions, settings, settings.credits.map((c) => c.name));
+    return report.recovered > 0 ? report : null;
+  }, [transactions, settings]);
+
+  const runListRecovery = async (): Promise<void> => {
+    if (!listRecovery) return;
+    const ok = await confirm({
+      title: `Rebuild ${listRecovery.recovered.toLocaleString()} categories?`,
+      body: `Spending types: ${listRecovery.spendingTypes.map((t) => t.name).join(", ") || "kept"}. Bills: ${listRecovery.bills.join(", ") || "none"}. Subscriptions: ${listRecovery.subscriptions.join(", ") || "none"}. Income: ${listRecovery.revenueCategories.join(", ") || "none"}. Only lists that are empty now are filled, from the items your entries of the last year use. No entry is touched. The notes beside spending types come back blank; a backup file restores them.`,
+      confirmLabel: "Rebuild categories",
+    });
+    if (!ok) return;
+    onChangeSettings({
+      ...settings,
+      bills: [...listRecovery.bills],
+      subscriptions: [...listRecovery.subscriptions],
+      revenueCategories: [...listRecovery.revenueCategories],
+      spendingTypes: listRecovery.spendingTypes.map((t) => ({ ...t })),
+    });
+  };
+
   const runRecovery = async (): Promise<void> => {
     if (!recovery) return;
 
@@ -2812,6 +2844,25 @@ function DataSection({
             <span className="t-caption" style={{ color: "var(--ink-3)" }}>
               Adds nothing to the ledger and changes no amount. It only names the accounts the
               transactions already refer to.
+            </span>
+          </div>
+        </Group>
+      )}
+
+      {listRecovery && (
+        <Group title="Rebuild categories" hint="A category list is empty" wide>
+          <Alert status="warn" title="Your entries use categories the settings do not list">
+            {listRecovery.recovered.toLocaleString()} spending types, bills, subscriptions and income
+            kinds are named by your entries but missing from Settings, so the assistant is told there are
+            none, its questions offer no kinds, and bills due are worked out from nothing. The entries are
+            intact. Rebuilding reads the names back out of them.
+          </Alert>
+          <div className="fms-addrow">
+            <Button variant="primary" onClick={() => void runListRecovery()}>
+              Rebuild {listRecovery.recovered.toLocaleString()} categories
+            </Button>
+            <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+              Fills only the lists that are empty, and changes no entry or amount.
             </span>
           </div>
         </Group>

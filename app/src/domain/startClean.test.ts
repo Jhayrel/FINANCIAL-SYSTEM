@@ -130,3 +130,32 @@ describe("starting clean from a file", () => {
     expect(again.discard).toEqual([]);
   });
 });
+
+describe("the four lists (27 September 2026)", () => {
+  const emptyLists = { ...current, settings: { ...current.settings, bills: [], subscriptions: [], revenueCategories: [], spendingTypes: [] } };
+  const withLists = createBackup({
+    ...emptyLists,
+    settings: {
+      ...emptyLists.settings,
+      bills: ["Globe at Home Wifi"],
+      subscriptions: ["Spotify"],
+      revenueCategories: ["Allowance"],
+      spendingTypes: [{ name: "Food", remark: "Meals, snacks, drinks" }],
+    },
+  }, "2026-09-27T00:00:00Z");
+
+  it("puts back lists this device lost, notes included", () => {
+    const plan = planStartClean(withLists, emptyLists);
+    expect(plan.settings.bills).toEqual(["Globe at Home Wifi"]);
+    expect(plan.settings.subscriptions).toEqual(["Spotify"]);
+    expect(plan.settings.revenueCategories).toEqual(["Allowance"]);
+    expect(plan.settings.spendingTypes).toEqual([{ name: "Food", remark: "Meals, snacks, drinks" }]);
+  });
+
+  it("never empties this device's lists with a file that has none", () => {
+    const here = { ...current, settings: { ...current.settings, bills: ["Wifi"], spendingTypes: [{ name: "Gas", remark: "Fuel" }] } };
+    const plan = planStartClean(createBackup(emptyLists, "2026-09-27T00:00:00Z"), here);
+    expect(plan.settings.bills).toEqual(["Wifi"]);
+    expect(plan.settings.spendingTypes).toEqual([{ name: "Gas", remark: "Fuel" }]);
+  });
+});

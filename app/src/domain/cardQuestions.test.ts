@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { alikeKey, answerCard, cardQuestion, looksLikeAnswer, rowWords, SKIP_CARD, STOP_ASKING, whatChanged } from "./cardQuestions";
+import { alikeKey, answerCard, cardQuestion, confirmsIncome, looksLikeAnswer, rowWords, SKIP_CARD, STOP_ASKING, whatChanged } from "./cardQuestions";
 import { checkDraft, emptyDraft, type Draft } from "./entry";
 import type { ReferenceLists } from "./types";
 
@@ -147,5 +147,35 @@ describe("a row that became a transfer in", () => {
     expect(cardQuestion(mine, reference, 1, 1)?.blank).toBe("fromWallet");
     const from = answerCard(mine, "fromWallet", "gcash", reference);
     expect(from).toMatchObject({ flow: "Transfer", fromWallet: "Gcash", toWallet: "Maya" });
+  });
+});
+
+describe("money in that was borrowed (27 September 2026)", () => {
+  // The owner's two Maya Credit borrowings, read off the Maya history as income with a name that did not read.
+  const misread: Draft = { ...received, date: "2026-09-20", item: "Allowance", description: "Received money from \\viavag creqiy", amount: 200000 };
+  const lines = [{ id: "maya-credit", name: "Maya Credit", wallet: "Maya" }];
+
+  it("is asked about even with its kind filled in, and offers the borrowing", () => {
+    expect(confirmsIncome(misread)).toBe(true);
+    expect(cardQuestion(misread, reference, 1, 2)).toBeNull();
+    const q = cardQuestion(misread, reference, 1, 2, { lines: ["Maya Credit"] });
+    expect(q?.text).toContain("filed as Allowance for now");
+    expect(q?.text).toContain('"borrowed on Maya Credit"');
+  });
+
+  it("small cash backs are not asked about", () => {
+    expect(confirmsIncome({ ...misread, amount: 425 })).toBe(false);
+  });
+
+  it("becomes a draw on the line, into the wallet it landed in", () => {
+    for (const reply of ["borrowed on maya credit", "maya credit", "utang yan"]) {
+      const done = answerCard(misread, "item", reply, reference, [], lines);
+      expect(done, reply).toMatchObject({ flow: "Debt", debtEffect: "draw", debtId: "maya-credit", item: "Maya Credit", toWallet: "Maya", fromWallet: "", status: "Received" });
+    }
+    expect(whatChanged(misread, answerCard(misread, "item", "maya credit", reference, [], lines)!)).toContain("borrowing on Maya Credit into Maya");
+  });
+
+  it("stays income when it was", () => {
+    expect(answerCard(misread, "item", "allowance", reference, [], lines)).toMatchObject({ flow: "Revenue", item: "Allowance" });
   });
 });

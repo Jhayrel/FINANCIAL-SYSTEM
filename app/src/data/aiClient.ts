@@ -45,7 +45,7 @@ import type { AiTask } from "../domain/aiOffline";
 import { plainText } from "../domain/aiText";
 import { idToken } from "./auth";
 import { redact } from "../domain/aiRedact";
-import { piecesOf, readingFor, rowsIn } from "../domain/ocrText";
+import { dropRepeats, piecesOf, readingFor, rowsIn } from "../domain/ocrText";
 import { readPicture } from "./ocr";
 import { readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
 import type { Attachment } from "./attachments";
@@ -583,6 +583,8 @@ export interface ExtractResult {
   readonly reason?: string;
   /** How many pictures were read on this device and sent as text. */
   readonly readOnDevice?: number;
+  /** Rows a stitched screenshot showed twice, read once (`dropRepeats`). */
+  readonly repeated?: number;
 }
 
 /**
@@ -658,7 +660,16 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
    */
   const room = Math.floor(10_000 / pictures.length);
   // Under its fingerprint, so a reading of the full-size original made at attach time is found (data/ocr.ts).
-  const readings = await Promise.all(pictures.map((p) => reader(p.dataUrl as string, p.digest).catch(() => null)));
+  const raw = await Promise.all(pictures.map((p) => reader(p.dataUrl as string, p.digest).catch(() => null)));
+  // A scroll capture repeats the rows where two screens overlap: each is read once.
+  let repeated = 0;
+  const readings = raw.map((r) => {
+    if (!r) return null;
+    const plain = dropRepeats(r.plain);
+    const raised = dropRepeats(r.raised);
+    repeated += Math.max(plain.dropped, raised.dropped);
+    return { plain: plain.text, raised: raised.text };
+  });
   const asText: Attachment[] = [];
   const stillPictures: Attachment[] = [];
   /** A long list's parts, each its own request (`piecesOf`). */
@@ -702,9 +713,9 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
     );
     const joined = joinAnswers(answers);
     // Nothing usable in any part: the picture goes to a model that can see, as below.
-    if (usable(joined) >= 10 || options.signal?.aborted) return { ...joined, readOnDevice };
+    if (usable(joined) >= 10 || options.signal?.aborted) return { ...joined, readOnDevice, repeated };
     const seen = await extractOnce({ ...options, readings: read });
-    return usable(seen) > usable(joined) ? seen : { ...joined, readOnDevice };
+    return usable(seen) > usable(joined) ? seen : { ...joined, readOnDevice, repeated };
   }
 
   const first = await extractOnce({ ...options, readings: read, attachments: [...others, ...asText, ...stillPictures] });
@@ -715,10 +726,10 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
    * a model that could look at them.
    */
   if (usable(first) >= 10 || options.signal?.aborted) {
-    return { ...first, readOnDevice };
+    return { ...first, readOnDevice, repeated };
   }
   const second = await extractOnce({ ...options, readings: read });
-  return usable(second) > usable(first) ? second : { ...first, readOnDevice };
+  return usable(second) > usable(first) ? second : { ...first, readOnDevice, repeated };
 }
 
 /** Rows a list is cut into for reading, and how many parts are read at once. */

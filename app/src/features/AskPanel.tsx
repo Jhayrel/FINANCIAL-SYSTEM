@@ -189,7 +189,7 @@ import {
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { budgetForYear } from "../domain/budget";
 import { MONTH_NAMES } from "../domain/dates";
-import { alikeKey, answerCard, cardQuestion, looksLikeAnswer, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk } from "../domain/cardQuestions";
+import { alikeKey, answerCard, cardQuestion, confirmsIncome, looksLikeAnswer, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
 import { forecastYear } from "../domain/forecast";
 import { withCommandWordsFixed } from "../domain/typos";
@@ -1607,6 +1607,11 @@ export function AskPanel({
     return count;
   };
 
+  /** The credit lines an answer can name ("borrowed on Maya Credit"): not the people money is held for. */
+  const creditLines: readonly LineToName[] = debts
+    .filter((d) => !d.archived && d.form !== "pass-through")
+    .map((d) => ({ id: d.id, name: d.name, wallet: d.wallet }));
+
   /** When each item was last used, so the reader is told which ones are years old (aiClient.ts). */
   const lastUsed = useMemo(() => itemsLastUsed(transactions), [transactions]);
 
@@ -2101,7 +2106,7 @@ export function AskPanel({
       const shown = turns.find((t): t is Offered => isOffer(t) && t.cardId === card.cardId);
       if (shown && shown.state !== "open") continue;
       const draft = known.get(card.cardId) ?? shown?.proposal.draft ?? card.draft;
-      const q = cardQuestion(draft, reference, i + 1, cards.length);
+      const q = cardQuestion(draft, reference, i + 1, cards.length, card.confirm ? { lines: creditLines.map((l) => l.name) } : undefined);
       if (!q) continue;
       setAsking({ cards, at: i, blank: q.blank, skipped, text: q.text });
       say({
@@ -2153,8 +2158,28 @@ export function AskPanel({
     }
 
     const before = shown.proposal.draft;
-    let filled = answerCard(before, asking.blank, note, reference, transactions);
+    let filled = answerCard(before, asking.blank, note, reference, transactions, creditLines);
     if (!filled) return false;
+    // Answered: money in is not asked about again for being money in.
+    const cards = asking.cards.map((c) => (c.cardId === card.cardId ? { ...c, confirm: false } : c));
+
+    /*
+     * Borrowed, not earned: the card becomes a debt card in its place, with
+     * the line and the wallet filled and the lender's fees left to add. The
+     * old card is closed and recorded, so it does not come back on refresh.
+     */
+    if (filled.flow === "Debt") {
+      setDraft("");
+      say({ kind: "you", text: note });
+      const { turn: debt } = debtCard(filled, note);
+      const closed = closedCard(shown);
+      if (closed) recordCard(closed);
+      recordCard(debt);
+      setTurns((prev) => prev.map((t) => (isOffer(t) && t.cardId === card.cardId ? debt : t)));
+      say({ kind: "assistant", ephemeral: true, text: whatChanged(before, filled), from: "this device" });
+      askFrom(cards, asking.at + 1, new Map(), asking.skipped);
+      return true;
+    }
 
     // Not one of their kinds by name: a model says which one it is, as for a single entry.
     const flow = filled.flow;
@@ -2220,10 +2245,10 @@ export function AskPanel({
     say({ kind: "assistant", ephemeral: true, text: told, from: "this device" });
 
     // The same card again when the answer opened a new blank (a transfer from which account); the next when not.
-    const again = cardQuestion(filled, reference, asking.at + 1, asking.cards.length);
+    const again = cardQuestion(filled, reference, asking.at + 1, cards.length);
     const stuck = again !== null && again.blank === asking.blank;
     const known = new Map<string, Draft>([[card.cardId, filled], ...alike.map((a) => [a.turn.cardId, a.draft] as const)]);
-    askFrom(asking.cards, stuck ? asking.at + 1 : asking.at, known, asking.skipped);
+    askFrom(cards, stuck ? asking.at + 1 : asking.at, known, asking.skipped);
     return true;
   };
 
@@ -2239,7 +2264,7 @@ export function AskPanel({
     if (!shown || shown.state === "open") return;
     const more = asking.cards.slice(asking.at + 1).some((c) => {
       const t = turns.find((u): u is Offered => isOffer(u) && u.cardId === c.cardId);
-      return t?.state === "open" && !asking.skipped.has(c.cardId) && cardQuestion(t.proposal.draft, reference, 1, 1) !== null;
+      return t?.state === "open" && !asking.skipped.has(c.cardId) && cardQuestion(t.proposal.draft, reference, 1, 1, c.confirm ? { lines: [] } : undefined) !== null;
     });
     if (more) askFrom(asking.cards, asking.at + 1, new Map(), asking.skipped);
     else setAsking(null);
@@ -2611,9 +2636,12 @@ export function AskPanel({
         kind: "assistant",
         ephemeral: true,
         text:
-          result.proposals.length === 1
+          (result.proposals.length === 1
             ? "One entry. Check it, then add it."
-            : `${result.proposals.length} entries. Check each one, then add it.`,
+            : `${result.proposals.length} entries. Check each one, then add it.`) +
+          (result.repeated
+            ? ` The picture shows ${result.repeated === 1 ? "one row" : `${result.repeated} rows`} twice, where the screenshot was stitched together, and each was read once.`
+            : ""),
         from: `${modelLabel(result.model ?? "") || "the provider"}${route}`,
       });
     }
@@ -2725,7 +2753,11 @@ export function AskPanel({
      * something. The owner, 27 September 2026: "it should ask following
      * question like the entry on this have send money to?".
      */
-    const toAsk = batch ? made.filter((c) => cardQuestion(c.draft, reference, 1, 1) !== null) : [];
+    const toAsk = batch
+      ? made
+          .map((c) => (sent.length > 0 && confirmsIncome(c.draft) ? { ...c, confirm: true } : c))
+          .filter((c) => cardQuestion(c.draft, reference, 1, 1, c.confirm ? { lines: [] } : undefined) !== null)
+      : [];
     if (toAsk.length > 0) {
       say({
         kind: "assistant",
@@ -4875,14 +4907,9 @@ export function AskPanel({
     }
   };
 
-  /** Cards still waiting on a decision, and how many of those could save. */
+  /** Cards still waiting on a decision. */
   const open = turns.filter((t): t is Offered => isOffer(t) && t.state === "open");
   const openCount = open.length;
-  // A card with extra zeros is never "ready": it is added on its own, after a second tap.
-  const readyCount = open.filter((t) => {
-    const c = sink.check(t.proposal.draft);
-    return c.ok && c.unusual === undefined;
-  }).length;
 
   /**
    * Have I got this one already.
@@ -4965,6 +4992,55 @@ export function AskPanel({
   }, [turns]);
 
   /**
+   * Why Add all leaves a card for the owner, or null when it takes it.
+   *
+   * 27 September 2026: a Maya history of 29 cards was added with one press
+   * of Add all, and 13 of them were already in the ledger, 6 were the
+   * stitched screenshot repeating itself, and 8 were still waiting on a
+   * question. Maya went from PHP 369.96 to minus PHP 3,311.55. Each of those
+   * cards said so on its face; Add all did not read it. Now a card already in
+   * the ledger, a repeat of a card above it, or a card with a question still
+   * open is left for its own buttons. A card with extra zeros never was.
+   */
+  const heldBack = (t: Offered, i: number): "check" | "ledger" | "repeat" | "question" | null => {
+    const c = sink.check(t.proposal.draft);
+    if (!c.ok || c.unusual !== undefined) return "check";
+    if (alreadyInLedger.has(i)) return "ledger";
+    if (repeatOfCard.has(i)) return "repeat";
+    if (nextQuestion(t.proposal.draft, reference) !== null) return "question";
+    return null;
+  };
+  const waiting = { ledger: 0, repeat: 0, question: 0 };
+  let readyCount = 0;
+  turns.forEach((t, i) => {
+    if (!isOffer(t) || t.state !== "open") return;
+    const why = heldBack(t, i);
+    if (why === null) readyCount += 1;
+    else if (why !== "check") waiting[why] += 1;
+  });
+  const heldWords = [
+    waiting.ledger > 0 ? `${waiting.ledger} already in your ledger` : "",
+    waiting.repeat > 0 ? `${waiting.repeat} repeated in the picture` : "",
+    waiting.question > 0 ? `${waiting.question} waiting for your answer` : "",
+  ].filter(Boolean);
+
+  /** Discard the cards that are already in the ledger or repeat a card above: the copies, and only those. */
+  const discardCopies = (): void => {
+    const copies = new Set<number>();
+    turns.forEach((t, i) => {
+      if (!isOffer(t) || t.state !== "open") return;
+      const why = heldBack(t, i);
+      if (why === "ledger" || why === "repeat") copies.add(i);
+    });
+    turns.forEach((t, i) => {
+      if (!copies.has(i) || !isOffer(t)) return;
+      const closed = closedCard(t);
+      if (closed) recordCard(closed);
+    });
+    setTurns((prev) => prev.map((t, i) => (copies.has(i) ? closedCard(t) ?? t : t)));
+  };
+
+  /**
    * Add every card that would save, and leave the rest showing.
    *
    * One pass over the list rather than one setState per card, so eight rows
@@ -4975,8 +5051,7 @@ export function AskPanel({
     // afterwards showed every card in the batch the same figure.
     const given = new Map<number, number | null>();
     turns.forEach((t, i) => {
-      const ready = isOffer(t) && t.state === "open" ? sink.check(t.proposal.draft) : null;
-      if (isOffer(t) && ready?.ok && ready.unusual === undefined) {
+      if (isOffer(t) && t.state === "open" && heldBack(t, i) === null) {
         given.set(
           i,
           sink.add(t.proposal.draft, {
@@ -5072,10 +5147,16 @@ export function AskPanel({
         <div className="fms-batchbar">
           <span className="t-caption fms-batchbar-count">
             {openCount} suggested, {readyCount} ready
+            {heldWords.length > 0 ? `. Left for you: ${heldWords.join(", ")}.` : ""}
           </span>
           <Button size="sm" variant="primary" disabled={readyCount === 0 || busy} onClick={addReady}>
             Add {readyCount === openCount ? "all" : `the ${readyCount} ready`}
           </Button>
+          {waiting.ledger + waiting.repeat > 0 && (
+            <Button size="sm" disabled={busy} onClick={discardCopies}>
+              Discard the {waiting.ledger + waiting.repeat} {waiting.ledger + waiting.repeat === 1 ? "copy" : "copies"}
+            </Button>
+          )}
           {/*
             Throwing the rest away is a button, not a hyperlink.
 
@@ -5086,7 +5167,7 @@ export function AskPanel({
             throw away rather than "the rest".
           */}
           <Button size="sm" tone="danger" disabled={busy} onClick={discardOpen}>
-            {openCount === readyCount ? `Discard all ${openCount}` : "Discard the rest"}
+            {`Discard all ${openCount}`}
           </Button>
         </div>
       )}

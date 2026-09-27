@@ -332,3 +332,62 @@ export function piecesOf(text: string, rows = 8): string[] {
   if (part.length > 0) parts.push(part);
   return parts.map((p) => p.join("\n"));
 }
+
+const MONTHS_LONG = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/** A date line as YYYY-MM-DD when it reads as one, else its own letters. */
+function dayOf(line: string): string {
+  const named = new RegExp(`\\b(${MONTH})\\.?\\s+(\\d{1,2}),?\\s+(\\d{4})\\b`, "i").exec(line);
+  if (named?.[1] && named[2] && named[3]) {
+    const month = MONTHS_LONG.indexOf(named[1].slice(0, 3).toLowerCase()) + 1;
+    return `${named[3]}-${String(month).padStart(2, "0")}-${named[2].padStart(2, "0")}`;
+  }
+  return line.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * A stitched screenshot's rows, each once.
+ *
+ * The owner's Maya history on 27 September 2026 was a scroll capture that
+ * showed 13, 12 and 11 September twice, where two captures overlapped. Read
+ * as it was, the same Jollibee lunch, the same cash back and the same Globe
+ * bill each became two cards, and the model dated the second copy by the
+ * wrong heading. A row here is its label, its time, its name and its amount
+ * under the day it sits in; the same row under the same day a second time is
+ * the overlap, not a second payment. Two payments of the same amount to the
+ * same place on the same day differ in their time, so they stay.
+ */
+export function dropRepeats(text: string): { readonly text: string; readonly dropped: number } {
+  const lines = text.split("\n");
+  const kept: string[] = [];
+  const seen = new Set<string>();
+  let day = "";
+  let pending: string[] = [];
+  let dropped = 0;
+  const squash = (l: string): string => l.toLowerCase().replace(/[^a-z0-9.:]/g, "");
+  for (const line of lines) {
+    if (DATE_LINE.test(line) && !ROW_AMOUNT.test(line)) day = dayOf(line);
+    pending.push(line);
+    if (!ROW_AMOUNT.test(line)) continue;
+    // The row: what came since the last figure, less any date line, which says where it sits rather than what it is.
+    const rows = pending.filter((l) => !(DATE_LINE.test(l) && !ROW_AMOUNT.test(l))).map(squash).filter(Boolean);
+    const body = rows.join("|");
+    const key = `${day}|${body}`;
+    // Where two captures meet, a row can lose its label line; with no time to tell it apart, its name and amount decide.
+    const named = `${day}|${rows[rows.length - 1] ?? ""}`;
+    const timed = /\d{1,2}:\d{2}/.test(body);
+    const repeat = body !== "" && (seen.has(key) || (!timed && seen.has(named)));
+    seen.add(named);
+    if (repeat) {
+      dropped += 1;
+      // Keep a date line it carried, so the rows after it still sit under the right day.
+      kept.push(...pending.filter((l) => DATE_LINE.test(l) && !ROW_AMOUNT.test(l)));
+    } else {
+      seen.add(key);
+      kept.push(...pending);
+    }
+    pending = [];
+  }
+  kept.push(...pending);
+  return { text: kept.join("\n"), dropped };
+}

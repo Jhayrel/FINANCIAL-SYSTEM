@@ -139,3 +139,83 @@ export function recoverAccounts(
         : `Rebuilt ${accounts.length} accounts from ${transactions.length} transactions. Names and balances are exact. Kinds are inferred from the names, and goal targets, deadlines and archived flags cannot be recovered this way: restore a backup for those.`,
   };
 }
+
+// ── The category lists ─────────────────────────────────────────────────────
+
+/**
+ * Rebuilding Bills, Subscriptions, income kinds and spending types.
+ *
+ * 27 September 2026: the owner's four lists were empty. A migration file and
+ * then a snapshot, both written by tools in this repository, carried empty
+ * lists, and a restore that took the file's lists as they were left the app
+ * with none. Every item was still in the ledger, so the reader filed Jollibee
+ * as Food off the rows, but the questions offered no kinds, the AI was told
+ * "none" for every list, and bills due were worked out from nothing.
+ *
+ * The same insight as the accounts above: an item exists because rows name
+ * it. A category's items are the ones its rows used, most recent first, over
+ * the last year of the ledger so a kind unused since 2022 does not come back.
+ * What a row cannot say is the note beside a spending type ("Meals, snacks,
+ * drinks"): those come back blank, and a backup file restores them.
+ *
+ * Money Send and Transaction Fee are left out: they are worked out from where
+ * a transfer went (CLAUDE.md, "Transfers are derived"), never picked. So is
+ * a name that is a credit line, and the opening balances.
+ */
+export interface ListRecovery {
+  readonly bills: readonly string[];
+  readonly subscriptions: readonly string[];
+  readonly revenueCategories: readonly string[];
+  readonly spendingTypes: readonly { readonly name: string; readonly remark: string }[];
+  /** How many names came back across the lists that were empty. */
+  readonly recovered: number;
+}
+
+const DERIVED_ITEMS = new Set(["money send", "transaction fee", "transfer of balance", "opening balance"]);
+
+export function recoverLists(
+  transactions: readonly Transaction[],
+  current: {
+    readonly bills: readonly string[];
+    readonly subscriptions: readonly string[];
+    readonly revenueCategories: readonly string[];
+    readonly spendingTypes: readonly { readonly name: string; readonly remark: string }[];
+  },
+  creditNames: readonly string[] = [],
+): ListRecovery {
+  const live = transactions.filter((t) => t.item.trim() && !("deletedAt" in t && (t as { deletedAt?: unknown }).deletedAt));
+  const latest = live.reduce((max, t) => (t.date > max ? t.date : max), "");
+  const since = latest ? `${Number(latest.slice(0, 4)) - 1}${latest.slice(4)}` : "";
+  const skip = new Set([...DERIVED_ITEMS, ...creditNames.map((n) => n.trim().toLowerCase())]);
+
+  const namesFor = (keep: (t: Transaction) => boolean): string[] => {
+    const lastSeen = new Map<string, string>();
+    for (const t of live) {
+      if (!keep(t) || skip.has(t.item.trim().toLowerCase())) continue;
+      const name = t.item.trim();
+      const was = lastSeen.get(name);
+      if (!was || t.date > was) lastSeen.set(name, t.date);
+    }
+    const recent = [...lastSeen].filter(([, date]) => date >= since);
+    const pool = recent.length > 0 ? recent : [...lastSeen];
+    return pool.sort((a, b) => (a[1] === b[1] ? a[0].localeCompare(b[0]) : a[1] < b[1] ? 1 : -1)).map(([name]) => name);
+  };
+
+  const bills = current.bills.length > 0 ? current.bills : namesFor((t) => t.type === "Spending" && t.category === "Bills");
+  const subscriptions =
+    current.subscriptions.length > 0 ? current.subscriptions : namesFor((t) => t.type === "Spending" && t.category === "Subscriptions");
+  const revenueCategories =
+    current.revenueCategories.length > 0 ? current.revenueCategories : namesFor((t) => t.type === "Revenue" && t.category === "Revenue");
+  const spendingTypes =
+    current.spendingTypes.length > 0
+      ? current.spendingTypes
+      : namesFor((t) => t.type === "Spending" && t.category === "Spending").map((name) => ({ name, remark: "" }));
+
+  const recovered =
+    (current.bills.length > 0 ? 0 : bills.length) +
+    (current.subscriptions.length > 0 ? 0 : subscriptions.length) +
+    (current.revenueCategories.length > 0 ? 0 : revenueCategories.length) +
+    (current.spendingTypes.length > 0 ? 0 : spendingTypes.length);
+
+  return { bills, subscriptions, revenueCategories, spendingTypes, recovered };
+}
