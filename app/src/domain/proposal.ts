@@ -32,6 +32,7 @@
  * compares the ledger with, so it is returned beside the rows, never as one.
  */
 
+import { namesPerson } from "./behalfFor";
 import { makeDebtId } from "./debt";
 import { parseAmount, type Centavos } from "./money";
 import type { Draft, Flow } from "./entry";
@@ -462,7 +463,14 @@ function readBehalfRow(
   if (!ISO.test(date)) date = asOf;
   const accounts = [...reference.wallets, ...reference.savings];
   const wallet = matchExact(str(value["fromWallet"]), accounts) || matchExact(str(value["toWallet"]), accounts);
-  const person = matchExact(str(value["debt"]), [...(reference.credits ?? [])]);
+  /*
+   * The person as the model wrote them, or as they are called: "Tita" for
+   * the owner's "Tita Joan's money" (27 September 2026), which matched
+   * nothing and would have made a second entry for the same aunt.
+   */
+  const person =
+    matchExact(str(value["debt"]), [...(reference.credits ?? [])]) ||
+    (str(value["debt"]) ? ((reference.onBehalf ?? []).find((p) => namesPerson(str(value["debt"]), p.name))?.name ?? "") : "");
   const base: Draft = {
     flow: "Debt",
     date,

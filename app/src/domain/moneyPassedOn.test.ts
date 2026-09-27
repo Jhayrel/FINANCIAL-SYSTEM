@@ -121,6 +121,15 @@ describe("reading money passed on", () => {
     expect(proposals[0]?.draft).toMatchObject({ behalf: "held", debtEffect: "repay", fee: 1000 });
   });
 
+  it("knows her by what the model calls her, not only by her full entry", () => {
+    const { proposals } = readProposals(
+      { proposals: [{ flow: "OnBehalf", debtEffect: "released", debt: "Tita Ana", fromWallet: "Gcash", amountPesos: 25000 }] },
+      reference,
+      TODAY,
+    );
+    expect(proposals[0]?.draft.debtId).toBe(aunt.id);
+  });
+
   it("never files income under a credit line's name", () => {
     const { proposals } = readProposals({ proposals: [{ flow: "Revenue", item: "Maya Credit", toWallet: "Gcash", amountPesos: 40000 }] }, reference, TODAY);
     expect(proposals[0]?.draft.item).toBe("");
