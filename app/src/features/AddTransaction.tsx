@@ -22,7 +22,7 @@ import {
 import { AmountInput, Select, TextInput } from "../components/forms";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
-import { choicesFor, debtDue, effectsFor, interestOnTop, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionsOf, unpaidCharges, withFeesPaid } from "../domain/debt";
+import { billClosingFor, choicesFor, debtDue, effectsFor, interestOnTop, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionOf, positionsOf, unpaidCharges, withFeesPaid } from "../domain/debt";
 import { creditRoom, limitOn, takesLimit, usedAfterOne, usedOn } from "../domain/creditLimit";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, partWords, type BehalfSide } from "../domain/debtWords";
 import { formatMoney, type Centavos } from "../domain/money";
@@ -1070,7 +1070,29 @@ export function AddTransaction({
       onTop: draft.debtEffect === "repay" && !check.feesPaid ? interestOnTop(amount, before, draft.interest) : null,
       /** The lender's fees still inside what is owed, which a payment clears first. */
       fees: draft.debtEffect === "repay" ? unpaidCharges(base, selectedDebt.id, draft.date || asOf) : 0,
+      bill: billLine(),
     };
+
+    /*
+     * On a line with a billing day, which bill this is on: a borrowing or a
+     * charge goes on the bill that closes next, a payment goes against the
+     * bill already closed (owner, 27 September 2026: "make it work thru out
+     * the system like make sure it work ai, add").
+     */
+    function billLine(): string | null {
+      const billing = selectedDebt?.billingDay;
+      if (!selectedDebt || billing === undefined || billing < 1 || billing > 31) return null;
+      if (draft.debtEffect === "draw" || draft.debtEffect === "charge") {
+        return `Goes on the bill that closes ${formatMedium(billClosingFor(draft.date || asOf, billing))}.`;
+      }
+      if (draft.debtEffect !== "repay") return null;
+      const bill = debtDue(positionOf(selectedDebt, base, asOf), base, asOf).bill;
+      if (!bill || bill.billed <= 0 || !bill.last) return null;
+      const paid = check.repaymentSplit?.principal ?? amount;
+      return `The bill that closed ${formatMedium(bill.last)} has ${formatMoney(bill.billed)} left to pay. ${
+        paid >= bill.billed ? "This pays it." : `${formatMoney(bill.billed - paid)} of it is still left after this.`
+      }`;
+    }
   })();
 
   /**
@@ -2366,6 +2388,11 @@ export function AddTransaction({
                   </p>
                 ) : null}
               </>
+            )}
+            {debtAfter.bill && (
+              <p className="t-caption" style={{ color: "var(--ink-2)", margin: "var(--space-2) 0 0" }}>
+                {debtAfter.bill}
+              </p>
             )}
           </div>
         )}

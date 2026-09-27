@@ -30,8 +30,8 @@
 import { formatMoney, type Centavos } from "./money";
 import { allWalletBalances } from "./balances";
 import { MONTH_NAMES } from "./dates";
-import { owedChange, type Debt } from "./debt";
-import { transferCost } from "./transfers";
+import { owedChange, type Debt, type DebtEffect } from "./debt";
+import { effectLabel } from "./debtWords";
 import { costOf, incomeOf } from "./totals";
 import {
   belongsIn,
@@ -111,21 +111,96 @@ const MODE: Record<StatementType, Mode> = {
   onbehalf: "owed",
 };
 
-const EFFECT_WORD: Record<string, string> = {
-  draw: "Borrowed",
-  charge: "Charge",
-  repay: "Repaid",
-  interest: "Interest",
-  fee: "Fee",
-  writeoff: "Written off",
-  lend: "Lent",
-  collect: "Collected",
+/*
+ * ── The Type column, named for what each row is ─────────────────────────
+ *
+ * The owner, 27 September 2026, on three statements: "it say barrowed to my
+ * on behalf like thats wrong ... use proper naming like transaction fee,
+ * credit etc.. revenue". Every debt movement read Borrowed, Repaid, Lent or
+ * Collected whatever the debt was, so money held for a relative read as
+ * borrowing, a fee between two of the owner's own accounts read as a
+ * Transfer, and money sent to someone else read as a Transfer too. Each row
+ * is now named by what it is, in the words the rest of the app uses:
+ *
+ *   Transfer          between your own accounts
+ *   Transaction Fee   the fee on one, where only the fee moved money
+ *   Money Send        money that left your accounts (`transfers.ts`)
+ *   Credit ...        a credit line: drawn, payment, fees added, interest
+ *   Loan ...          a bank loan: received, payment, fees added, interest
+ *   ... (on behalf)   Held, Released, Retained, Advance, Reimbursed, Write off
+ */
+
+/** Debt movements on a credit line, a bank loan, and a loan between people. */
+const DEBT_WORDS: Record<"credit" | "loan" | "personal" | "owedToYou", Record<DebtEffect, string>> = {
+  credit: {
+    draw: "Credit drawn",
+    repay: "Credit payment",
+    charge: "Credit fees added",
+    interest: "Credit interest",
+    fee: "Credit fee",
+    writeoff: "Credit waived",
+    lend: "Lent",
+    collect: "Paid back to you",
+  },
+  loan: {
+    draw: "Loan received",
+    repay: "Loan payment",
+    charge: "Loan fees added",
+    interest: "Loan interest",
+    fee: "Loan fee",
+    writeoff: "Loan waived",
+    lend: "Lent",
+    collect: "Paid back to you",
+  },
+  personal: {
+    draw: "Borrowed",
+    repay: "Repaid",
+    charge: "Charge added",
+    interest: "Interest",
+    fee: "Fee",
+    writeoff: "Waived",
+    lend: "Lent",
+    collect: "Paid back to you",
+  },
+  owedToYou: {
+    draw: "Borrowed",
+    repay: "Repaid",
+    charge: "Charge added",
+    interest: "Interest",
+    fee: "Fee",
+    writeoff: "Given up",
+    lend: "Lent",
+    collect: "Paid back to you",
+  },
 };
 
-/** The Type column. */
-export function kindOf(t: Transaction): string {
-  if (t.type === "Debt") return EFFECT_WORD[t.debtEffect ?? ""] ?? "Debt";
-  if (t.category === "Opening") return "Opening";
+/** A debt movement's name, by the debt it moved. */
+function debtKind(effect: DebtEffect | undefined, debt: Debt | undefined): string {
+  if (!effect) return "Debt";
+  if (!debt) return DEBT_WORDS.personal[effect];
+  // A debt saved before it had a form is a credit line, as it is everywhere else (`debt.form ?? "credit-line"`).
+  const form = debt.form ?? "credit-line";
+  if (form === "pass-through") return `${effectLabel(effect, debt)} (on behalf)`;
+  if (debt.kind === "receivable") return DEBT_WORDS.owedToYou[effect];
+  if (form === "term-loan") return DEBT_WORDS.loan[effect];
+  if (form === "credit-line" && debt.counterpartyType !== "person") return DEBT_WORDS.credit[effect];
+  return DEBT_WORDS.personal[effect];
+}
+
+/**
+ * The Type column.
+ *
+ * `onlyFee` is for a transfer between the owner's own accounts on a sheet
+ * that shows only what it cost: the expense sheet, or the account statement,
+ * where both ends are counted and the fee is all that left.
+ */
+export function kindOf(t: Transaction, debts: readonly Debt[] = [], onlyFee = false): string {
+  if (t.category === "Opening") return "Opening balance";
+  if (t.type === "Debt") return debtKind(t.debtEffect, debts.find((d) => d.id === t.debtId));
+  if (t.type === "Transfer") {
+    if (!t.toWallet.trim()) return "Money Send";
+    return onlyFee || (t.amount === 0 && t.fee > 0) ? "Transaction Fee" : "Transfer";
+  }
   if (t.type === "Spending") {
     if (t.category === "Bills") return "Bill";
     if (t.category === "Subscriptions") return "Subscription";
@@ -201,6 +276,8 @@ export function buildSheet(
   let totalIn = 0;
   let totalOut = 0;
   let interest = 0;
+  let sentOut = 0;
+  let sentCount = 0;
   const lines: SheetLine[] = [];
 
   for (const { transaction: t } of statement.rows) {
@@ -212,7 +289,7 @@ export function buildSheet(
       case "held": {
         const d = heldChange(t);
         if (d > 0) moneyIn = d;
-        else moneyOut = -d;
+        else if (d < 0) moneyOut = -d;
         running += d;
         break;
       }
@@ -226,9 +303,16 @@ export function buildSheet(
         running += moneyOut;
         break;
       case "transfers":
+        // What moved, and its fee. Money sent to someone else is spending in
+        // full (`transfers.ts`), and is said apart under the table rather
+        // than added to the fees as if it were one.
         moneyIn = t.amount;
-        moneyOut = transferCost(t);
+        moneyOut = t.fee;
         running += moneyOut;
+        if (!t.toWallet.trim()) {
+          sentOut += t.amount;
+          sentCount += 1;
+        }
         break;
       case "owed": {
         const d = owedChange(t);
@@ -246,16 +330,28 @@ export function buildSheet(
     totalIn += moneyIn;
     totalOut += moneyOut;
 
-    const named = mode === "owed" && type !== "debt" ? debtName.get(t.debtId ?? "") : undefined;
-    const text = t.description.trim() || t.item.trim() || kindOf(t);
+    const onlyFee =
+      t.type === "Transfer" && !!t.toWallet.trim() && (mode === "cost" || (mode === "held" && moneyIn === 0 && moneyOut > 0 && moneyOut === t.fee));
+    const kind = kindOf(t, debts, onlyFee);
+    const owner = debtName.get(t.debtId ?? "");
+    const named = mode === "owed" && type !== "debt" ? owner : undefined;
+    let text = t.description.trim() || t.item.trim() || owner || kind;
+    // On a sheet of money held, a lender's fee or a waiver moves what is owed and no money: said, since its columns are blank.
+    if (mode === "held" && t.type === "Debt" && moneyIn === 0 && moneyOut === 0 && owedChange(t) !== 0) {
+      const d = owedChange(t);
+      const whose = debts.find((x) => x.id === t.debtId)?.kind === "receivable" ? "what is owed to you" : "what you owe";
+      text = `${text} (${formatMoney(Math.abs(d))} ${d > 0 ? "added to" : "taken off"} ${whose}, no money moved)`;
+    }
+    // Income saved with its wallet on the other side still arrived in it, as its balance counts it.
+    const arrived = t.type === "Revenue" && !t.toWallet.trim() && !!t.fromWallet.trim();
     lines.push({
       id: t.id,
       recordNumber: t.recordNumber,
       date: t.date,
-      description: named ? `${named}: ${text}` : text,
-      kind: kindOf(t),
-      fromWallet: t.fromWallet,
-      toWallet: t.toWallet,
+      description: named && named !== text ? `${named}: ${text}` : text,
+      kind,
+      fromWallet: arrived ? "" : t.fromWallet,
+      toWallet: arrived ? t.fromWallet : t.toWallet,
       moneyIn,
       moneyOut,
       balance: running,
@@ -263,6 +359,11 @@ export function buildSheet(
   }
 
   const notes: string[] = [];
+  if (sentOut > 0) {
+    notes.push(
+      `${sentCount === 1 ? "One of these" : `${sentCount} of these`}, ${formatMoney(sentOut)} in all, left your accounts for someone else (Money Send). That money counts as spending in full, not only its fee. Every other row moved between your own accounts, where only the fee is spending.`,
+    );
+  }
   if (interest > 0) {
     notes.push(
       `Of what was paid, ${formatMoney(interest)} was interest and fees. It was paid from a wallet and was never part of what is owed, so it does not lower the running figure.`,
@@ -284,7 +385,7 @@ export function buildSheet(
         : mode === "cost" || mode === "bills"
           ? { moneyIn: "", moneyOut: "Expense", balance: "Total so far" }
           : mode === "transfers"
-            ? { moneyIn: "Moved", moneyOut: "Cost", balance: "Cost so far" }
+            ? { moneyIn: "Moved", moneyOut: "Fees", balance: "Fees so far" }
             : owedWords();
 
   const subject =

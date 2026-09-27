@@ -9,7 +9,9 @@
 
 import { describe, expect, it } from "vitest";
 
-import { debtDue, positionOf, type Debt } from "./debt";
+import { financeAlerts } from "./alerts";
+import { billClosingFor, billWords, debtDue, positionOf, type Debt } from "./debt";
+import { BILL_DAY_CHOICES, choiceOfDay, dayOfChoice, ordinalDay } from "./debtWords";
 import type { Transaction } from "./types";
 
 const line: Debt = {
@@ -91,5 +93,55 @@ describe("no billing day", () => {
     const due = dueOf(plain as Debt, [draw("2026-09-18", 200000)], "2026-09-27");
     expect(due.basis).toBe("borrowed");
     expect(due.bill).toBeUndefined();
+  });
+});
+
+describe("the bill a movement goes on", () => {
+  it("is the first closing on or after its day", () => {
+    expect(billClosingFor("2026-09-18", 6)).toBe("2026-10-06");
+    expect(billClosingFor("2026-09-06", 6)).toBe("2026-09-06");
+    expect(billClosingFor("2026-09-05", 6)).toBe("2026-09-06");
+    // A closing day past the end of a short month is its last day.
+    expect(billClosingFor("2026-02-10", 31)).toBe("2026-02-28");
+    expect(billClosingFor("2026-12-20", 6)).toBe("2027-01-06");
+  });
+
+  it("is said with the payment it is due for", () => {
+    const withDue: Debt = { ...line, dueDay: 20 };
+    const rows = [draw("2026-08-29", 100000), draw("2026-09-18", 200000)];
+    expect(billWords(dueOf(withDue, rows, "2026-09-27"))).toBe(", for the bill that closed September 6, 2026");
+    expect(billWords(dueOf(withDue, [draw("2026-09-18", 200000)], "2026-09-27"))).toBe(", for the bill that closes October 6, 2026");
+  });
+});
+
+describe("the bill closing soon", () => {
+  const alertsOn = (debt: Debt, rows: Transaction[], asOf: string) =>
+    financeAlerts({ transactions: rows, accounts: [], budgets: {}, debts: [debt], bills: [], lowBalanceThreshold: 0, asOf });
+
+  it("is a nudge when a separate payment day follows it", () => {
+    const withDue: Debt = { ...line, dueDay: 20 };
+    const found = alertsOn(withDue, [draw("2026-09-18", 200000)], "2026-10-04").find((a) => a.id.startsWith("bill-line"));
+    expect(found?.title).toBe("Pay Later's bill closes in 2 days");
+    expect(found?.detail).toContain("₱2,000.00 borrowed since the last bill goes on the bill of October 6, 2026");
+  });
+
+  it("is not raised without a payment day, where closing is the due date and already said", () => {
+    expect(alertsOn(line, [draw("2026-09-18", 200000)], "2026-10-04").some((a) => a.id.startsWith("bill-line"))).toBe(false);
+  });
+});
+
+describe("the two days, as they are picked", () => {
+  it("read the way a bill says them", () => {
+    expect([1, 2, 3, 4, 6, 11, 12, 13, 21, 22, 23, 31].map(ordinalDay)).toEqual([
+      "1st", "2nd", "3rd", "4th", "6th", "11th", "12th", "13th", "21st", "22nd", "23rd", "31st",
+    ]);
+    expect(BILL_DAY_CHOICES).toHaveLength(32);
+  });
+
+  it("go back to the day they name, or to none", () => {
+    expect(dayOfChoice("6th")).toBe(6);
+    expect(dayOfChoice("Not set")).toBeUndefined();
+    expect(choiceOfDay(21)).toBe("21st");
+    expect(choiceOfDay(undefined)).toBe("Not set");
   });
 });

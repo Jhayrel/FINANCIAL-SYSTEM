@@ -31,7 +31,7 @@
 import { allWalletBalances, walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { overdue, STOPPED_AFTER_DAYS, upcoming, type BillStatus } from "./bills";
-import { basisWords, debtDue, debtNamedBy, paymentsFiledAsSpending, positionsOf, type Debt } from "./debt";
+import { basisWords, billWords, debtDue, debtNamedBy, paymentsFiledAsSpending, positionsOf, type Debt } from "./debt";
 import { creditRoom, roomWords } from "./creditLimit";
 import { addDays, daysBetween, daysInMonth, formatMedium, getMonth, getYear, monthName } from "./dates";
 import { unusualRows } from "./unusual";
@@ -328,10 +328,38 @@ export function financeAlerts(input: AlertInput): Alert[] {
         : days === 0
           ? `${p.debt.name} is due today`
           : `${p.debt.name} is due in ${days} day${days === 1 ? "" : "s"}`,
-      detail: `Due ${formatMedium(due.nextDue)}${worked}. ${money(due.amountDue)} ${owed ? "to pay" : "to collect"}${
+      detail: `Due ${formatMedium(due.nextDue)}${worked}${billWords(due)}. ${money(due.amountDue)} ${owed ? "to pay" : "to collect"}${
         due.amountDue < p.outstanding ? `, of ${money(p.outstanding)} outstanding` : ""
       }.`,
       weight: late ? 95 : 65,
+    });
+  }
+
+  /**
+   * A bill about to close, on a line with a billing day and a separate day
+   * the payment is due: what is owed now goes on it, and anything borrowed
+   * after it waits for the next one. Only a nudge; nothing is late yet.
+   * Without a separate payment day, closing is the due date, and the alert
+   * above already says so.
+   */
+  for (const p of positionsOf(live, transactions, asOf)) {
+    if (p.debt.kind !== "payable" || p.outstanding <= 0 || !p.debt.dueDay) continue;
+    const due = debtDue(p, transactions, asOf);
+    if (!due.bill) continue;
+    const days = daysBetween(asOf, due.bill.next);
+    if (days < 0 || days > 3) continue;
+    const onIt = p.outstanding - due.bill.billed;
+    if (onIt <= 0) continue;
+    out.push({
+      id: `bill-${p.debt.id}-${due.bill.next}`,
+      level: "info",
+      area: "debt",
+      title:
+        days === 0
+          ? `${p.debt.name}'s bill closes today`
+          : `${p.debt.name}'s bill closes in ${days} day${days === 1 ? "" : "s"}`,
+      detail: `${money(onIt)} borrowed since the last bill goes on the bill of ${formatMedium(due.bill.next)}. Anything borrowed after it goes on the next one.`,
+      weight: 30,
     });
   }
 

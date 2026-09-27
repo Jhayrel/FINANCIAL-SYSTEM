@@ -165,7 +165,7 @@ export function Statements({
     {
       key: "type",
       header: "Type",
-      width: "112px",
+      width: "156px",
       hideBelow: "md",
       render: (l) => <span className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>{l.kind}</span>,
     },

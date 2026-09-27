@@ -629,6 +629,21 @@ the 4 copies" and "Discard all 7": "they are so misleading fix it make it
 connect". Four of the seven were already saved and each still looked like a
 new entry.
 
+### 3.14b Debts, however many
+
+The Debt screen has to read as well with five lenders as with one. The owner,
+27 September 2026, of a card whose credit limit form took half its width:
+"this would be so clutter and messy if theres another banks".
+
+| Rule | Spec |
+|---|---|
+| One row each | With more than one debt, every debt is one row in "Your debts": name and form, owed now, left to borrow (blank for a loan with no limit), next payment, to pay, and its state as a pill. Only the row picked opens below as the full card, with its history. With one debt, the card alone. |
+| Said once | The pill says how late or how soon. The date beside it does not say it again. |
+| Asked for in a line | A missing credit limit is one line with a Set limit link. The form opens only when asked for. |
+| Top aligned | The figure owed and the limit beside it start level at the top of the card. |
+| Phone | A row is two lines: name and what is owed, then the next payment and the pill. |
+| The two days | Named as a bill reads: Bill closes (the billing or statement date) and Payment due, as 6th and 20th, with one sentence under the pickers saying which is which. |
+
 ### 3.15 A printed statement
 
 The PDF a statement exports (`pdf/statementPdf.ts`). From the owner's Excel
@@ -651,6 +666,8 @@ statement's, not a sheet's:
 | Dates as "Jan 4" | A statement covers one year, and the year is in the band |
 | Negative figures in red, with the minus sign | The one place colour carries meaning on the page |
 | Nothing above the title, no logo on any page | The owner, later the same day: "remove the logo ... keep it clean". The system's name stays in the small print at the foot |
+| Each row named for what it is | Revenue, Spending, Bill, Subscription, Transfer, Transaction Fee (where only the fee moved), Money Send (money that left your accounts), Credit drawn, Credit payment, Credit fees added, Credit interest, Loan received, Loan payment, and on-behalf movements as Held, Released, Retained, Advance, Reimbursed or Write off "(on behalf)". The owner, 27 September 2026: "it say barrowed to my on behalf like thats wrong ... use proper naming like transaction fee, credit etc.. revenue" |
+| Transfers: fees apart from money sent | The Transfers statement's columns are Moved, Fees and Fees so far. Money sent to someone else is said under the table, never added to the fees as one "Cost" |
 
 Type is Inter, embedded: Regular and Bold with tabular digits and the peso
 sign (`tools/build_pdf_fonts.py`). The colours are fixed RGB values in that

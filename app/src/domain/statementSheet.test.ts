@@ -124,10 +124,16 @@ describe("the income and expense sheets use the one definition of each", () => {
     expect(s.lines.map((l) => [l.kind, l.moneyOut])).toEqual([["Bill", 99900]]);
   });
 
-  it("shows what each transfer moved and what it cost", () => {
+  it("shows what each transfer moved and its fee, with money sent to someone else said apart", () => {
     const s = buildSheet(ledger, { type: "transfers", year: 2026, fromMonth: 1, toMonth: 12 }, reference);
-    expect(s.lines.map((l) => [l.moneyIn, l.moneyOut])).toEqual([[200000, 1500], [50000, 50000]]);
-    expect(s.headings).toEqual({ moneyIn: "Moved", moneyOut: "Cost", balance: "Cost so far" });
+    // The owner, 27 September 2026: money sent to a person was added to the fees as one "Cost".
+    expect(s.lines.map((l) => [l.kind, l.moneyIn, l.moneyOut])).toEqual([
+      ["Transfer", 200000, 1500],
+      ["Money Send", 50000, 0],
+    ]);
+    expect(s.headings).toEqual({ moneyIn: "Moved", moneyOut: "Fees", balance: "Fees so far" });
+    expect(s.totalOut).toBe(1500);
+    expect(s.notes[0]).toContain("One of these, ₱500.00 in all, left your accounts for someone else (Money Send)");
   });
 });
 
@@ -213,10 +219,73 @@ describe("a statement across a New Year", () => {
   it("keeps December's balances, and shows the New Year's opening rows on their day", () => {
     expect(s.lines.map((l) => [l.date, l.kind, l.balance])).toEqual([
       ["2025-12-05", "Spending", 40000],
-      ["2026-01-01", "Opening", 0],
-      ["2026-01-01", "Opening", 45000],
+      ["2026-01-01", "Opening balance", 0],
+      ["2026-01-01", "Opening balance", 45000],
       ["2026-01-04", "Spending", 40000],
     ]);
     expect(s.closing).toBe(40000);
+  });
+});
+
+describe("every row named for what it is", () => {
+  // The owner, 27 September 2026: "it say barrowed to my on behalf like thats wrong ... use proper naming like transaction fee, credit etc.. revenue".
+  const credit: Debt = {
+    id: "credit", name: "Pay Later", kind: "payable", counterparty: "Lender", counterpartyType: "institution", openedDate: "2026-01-01",
+    wallet: "Maya", interestType: "none", interestRate: 0, form: "credit-line", notes: "", archived: false,
+  };
+  const held: Debt = { ...credit, id: "held", name: "Aunt's money", form: "pass-through", counterparty: "Aunt", counterpartyType: "person" };
+  const advanced: Debt = { ...held, id: "advanced", name: "Father", kind: "receivable" };
+  const debts = [credit, held, advanced];
+  const rows = [
+    row({ date: "2026-09-01", type: "Revenue", toWallet: "Gcash", amount: 1500000, description: "Allowance" }),
+    row({ date: "2026-09-02", type: "Transfer", fromWallet: "Gcash", toWallet: "Maya", amount: 500000, fee: 1000, description: "To Maya" }),
+    row({ date: "2026-09-03", type: "Transfer", fromWallet: "Cash", toWallet: "", amount: 100000, description: "To a classmate" }),
+    row({ date: "2026-09-18", type: "Debt", debtId: "credit", debtEffect: "draw", toWallet: "Maya", amount: 200000, description: "Borrowed" }),
+    row({ date: "2026-09-18", type: "Debt", debtId: "credit", debtEffect: "charge", amount: 15103, description: "Fees" }),
+    row({ date: "2026-09-27", type: "Debt", debtId: "credit", debtEffect: "repay", fromWallet: "Maya", amount: 215103 }),
+    row({ date: "2026-09-27", type: "Debt", debtId: "held", debtEffect: "draw", toWallet: "Gcash", amount: 2500000, description: "Kept for a relative" }),
+    row({ date: "2026-09-27", type: "Debt", debtId: "held", debtEffect: "repay", fromWallet: "Gcash", amount: 2500000, description: "Passed on" }),
+    row({ date: "2026-09-27", type: "Debt", debtId: "advanced", debtEffect: "lend", fromWallet: "Maya", amount: 59800, description: "His phone plan" }),
+    row({ date: "2026-09-27", type: "Debt", debtId: "advanced", debtEffect: "collect", toWallet: "Cash", amount: 9400 }),
+    row({ date: "2026-09-27", type: "Revenue", fromWallet: "Maya", amount: 76, description: "Cash back" }),
+  ];
+  const s = buildSheet(rows, { type: "account", year: 2026, fromMonth: 9, toMonth: 9 }, reference, debts);
+  const byText = (text: string) => s.lines.find((l) => l.description.startsWith(text));
+
+  it("says money held or paid for someone is on their behalf, never borrowing or lending", () => {
+    expect(byText("Kept for a relative")?.kind).toBe("Held (on behalf)");
+    expect(byText("Passed on")?.kind).toBe("Released (on behalf)");
+    expect(byText("His phone plan")?.kind).toBe("Advance (on behalf)");
+    // No description: named after who it is for, not after the movement.
+    expect(byText("Father")?.kind).toBe("Reimbursed (on behalf)");
+  });
+
+  it("calls a credit line's movements credit, and says its fees moved no money", () => {
+    expect(byText("Borrowed")?.kind).toBe("Credit drawn");
+    expect(byText("Fees")?.kind).toBe("Credit fees added");
+    expect(byText("Fees")?.description).toBe("Fees (₱151.03 added to what you owe, no money moved)");
+    expect(byText("Pay Later")?.kind).toBe("Credit payment");
+  });
+
+  it("names a line saved before debts had a form as the credit line it is", () => {
+    const { form: _f, counterpartyType: _c, ...older } = credit;
+    const sheet = buildSheet(rows, { type: "account", year: 2026, fromMonth: 9, toMonth: 9 }, reference, [older as Debt, held, advanced]);
+    expect(sheet.lines.find((l) => l.description === "Borrowed")?.kind).toBe("Credit drawn");
+  });
+
+  it("calls a fee between your own accounts a Transaction Fee, and money that left a Money Send", () => {
+    expect(byText("To Maya")).toMatchObject({ kind: "Transaction Fee", moneyOut: 1000 });
+    expect(byText("To a classmate")).toMatchObject({ kind: "Money Send", moneyOut: 100000 });
+    // On the wallet it left, the same transfer is a transfer.
+    const gcash = buildSheet(rows, { type: "wallet", wallet: "Gcash", year: 2026, fromMonth: 9, toMonth: 9 }, reference, debts);
+    expect(gcash.lines.find((l) => l.description === "To Maya")).toMatchObject({ kind: "Transfer", moneyOut: 501000 });
+  });
+
+  it("shows income arriving in its wallet, however the wallet was saved", () => {
+    expect(byText("Cash back")).toMatchObject({ kind: "Revenue", fromWallet: "", toWallet: "Maya", moneyIn: 76 });
+  });
+
+  it("keeps the figures: the names changed, not the money", () => {
+    expect(s.closing).toBe(1500000 - 1000 - 100000 + 200000 - 215103 - 59800 + 9400 + 76);
   });
 });

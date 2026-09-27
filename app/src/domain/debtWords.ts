@@ -140,3 +140,45 @@ export function effectInline(effect: DebtEffect, debt?: Shape): string {
 export function partWords(effect: DebtEffect | undefined): string {
   return effect === "draw" ? "fees added" : "interest";
 }
+
+/**
+ * The two days a lender's month turns on, named the way a bill reads.
+ *
+ * They were "Billing day" and "Due day", and the owner, 27 September 2026:
+ * "whats the difference in due day and billing day? thats confusing". The
+ * first is when the lender adds up what you owe into a bill; the second is
+ * the last day to pay that bill. Every screen says them the same way.
+ */
+export const BILL_CLOSES = "Bill closes";
+export const PAYMENT_DUE = "Payment due";
+
+/** The two days, explained once, under wherever they are set. */
+export const BILL_DAYS_EXPLAINED =
+  "Bill closes: the day each month the lender adds up what you owe into a bill (its app may call it the billing or statement date). " +
+  "Payment due: the last day to pay that bill. Anything borrowed after the bill closes goes on the next one. " +
+  "If your lender gives you only one date, set Payment due.";
+
+/** A day of the month as a bill says it: 1st, 2nd, 6th, 21st. */
+export function ordinalDay(day: number): string {
+  const tens = day % 100;
+  if (tens >= 11 && tens <= 13) return `${day}th`;
+  const last = day % 10;
+  return `${day}${last === 1 ? "st" : last === 2 ? "nd" : last === 3 ? "rd" : "th"}`;
+}
+
+/** No day set, in a list of days. */
+export const NO_BILL_DAY = "Not set";
+
+/** The choices for either day: not set, then 1st to 31st. */
+export const BILL_DAY_CHOICES: readonly string[] = [NO_BILL_DAY, ...Array.from({ length: 31 }, (_, i) => ordinalDay(i + 1))];
+
+/** A choice back to its day, or undefined for not set. */
+export function dayOfChoice(choice: string): number | undefined {
+  const n = Number.parseInt(choice, 10);
+  return Number.isInteger(n) && n >= 1 && n <= 31 ? n : undefined;
+}
+
+/** A day to its choice. */
+export function choiceOfDay(day: number | undefined): string {
+  return day !== undefined && day >= 1 && day <= 31 ? ordinalDay(day) : NO_BILL_DAY;
+}

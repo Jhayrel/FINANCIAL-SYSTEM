@@ -2006,6 +2006,32 @@
   .fms-table--wide .fms-rowactions > button { flex: 1 1 auto; min-width: 0; }
 }
 
+/*
+ * Credit and loans, stacked on a laptop-width card: each debt's four pickers
+ * two to a row under their names, not four full-width boxes down the page
+ * (owner, 27 September 2026: "this is so messy"). What is outstanding is
+ * already under the name, so the stacked row does not say it twice.
+ */
+@container (min-width: 440px) and (max-width: 880px) {
+  .fms-credittable tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-1) var(--space-3);
+    align-items: end;
+  }
+
+  .fms-credittable tbody td.fms-cell-flex,
+  .fms-credittable tbody td:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (max-width: 880px) {
+  .fms-credittable td.fms-credittable-owed {
+    display: none;
+  }
+}
+
 /* ══ Buttons ════════════════════════════════════════════════════════════════
    In components.css, with the other shared controls. They were split between
    inline styles in primitives.tsx and hover rules here, and the inline
@@ -6551,6 +6577,121 @@ textarea.fms-askinput {
 }
 
 /*
+ * Every debt in one list, a row each, with only the chosen one open below
+ * as its card (DebtScreen `DebtRows`). A card for every line stacked the
+ * page a screen per bank; the owner, 27 September 2026, "this would be so
+ * clutter and messy if theres another banks". Ruled with hairlines like
+ * every other list (rule D2), money in the figures face (rule D4).
+ */
+.fms-debtrows {
+  display: grid;
+}
+
+.fms-debtrows-head,
+.fms-debtrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 0.9fr)) minmax(0, 1.2fr) minmax(0, 0.9fr) 132px;
+  align-items: center;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-2) var(--space-2);
+}
+
+.fms-debtrows-head {
+  color: var(--ink-2);
+  padding-top: 0;
+}
+
+.fms-debtrow {
+  width: 100%;
+  min-height: 56px;
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--motion-hover) var(--ease-out);
+}
+
+.fms-debtrow:hover {
+  background: var(--surface-hover);
+}
+
+/* The one open below: marked by the brand rule down its edge, not a fill that reads as a status. */
+.fms-debtrow[aria-pressed="true"] {
+  background: var(--surface-hover);
+  box-shadow: inset 2px 0 0 var(--brand-500);
+}
+
+.fms-debtrow:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.fms-debtrow > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-debtrow-num {
+  justify-items: end;
+  text-align: right;
+}
+
+.fms-debtrow-state {
+  justify-items: end;
+}
+
+/* Each figure says what it is only where the column heads are hidden. */
+.fms-debtrow-label {
+  display: none;
+  color: var(--ink-3);
+}
+
+/*
+ * A narrow card, a phone or a split window: the name and what is owed on
+ * the first line, when the next payment is due and its state under them.
+ */
+@container (max-width: 719px) {
+  .fms-debtrows-head {
+    display: none;
+  }
+
+  .fms-debtrow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "name owed"
+      "when state";
+    row-gap: var(--space-1);
+    padding: var(--space-3) var(--space-2);
+  }
+
+  .fms-debtrow-name { grid-area: name; }
+  .fms-debtrow-owed { grid-area: owed; }
+  .fms-debtrow-when { grid-area: when; }
+  .fms-debtrow-state { grid-area: state; align-self: center; }
+
+  .fms-debtrow > .fms-debtrow-room,
+  .fms-debtrow > .fms-debtrow-pay {
+    display: none;
+  }
+
+  .fms-debtrow > .fms-debtrow-when {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: var(--space-2);
+  }
+
+  .fms-debtrow-when > .fms-debtrow-label {
+    display: inline;
+  }
+}
+
+/*
  * A debt is an ordinary card (`Card`, `.fms-section`).
  *
  * It had its own box with a 3px amber rail down a rounded edge and uppercase
@@ -6576,12 +6717,12 @@ textarea.fms-askinput {
   align-content: start;
 }
 
-/* What is owed now, and beside it the limit or the schedule. */
+/* What is owed now, and beside it the limit or the schedule, both from the top. */
 .fms-debthero {
   display: grid;
   gap: var(--space-4) var(--space-6);
   grid-template-columns: minmax(0, 1fr);
-  align-items: end;
+  align-items: start;
 }
 
 @container (min-width: 560px) {
@@ -6590,7 +6731,6 @@ textarea.fms-askinput {
   }
 }
 
-.fms-debthero-owed,
 /*
  * Fees counted twice on a payment (DebtScreen, `feesCountedTwice`): a warning
  * in words with the rows to open, ruled in the warning colour rather than
@@ -6609,52 +6749,20 @@ textarea.fms-askinput {
   gap: var(--space-2);
 }
 
-/*
- * What a debt payment pays: what was borrowed, the interest and fees already
- * added, and the total, ruled like every other table here (rule D2), money
- * right-aligned in the figures face (rule D4).
- */
-.fms-paysplit-list {
-  display: grid;
-  margin: 0;
-  min-width: 0;
-}
-
-.fms-paysplit-list > div {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: var(--space-3);
-  padding: 4px 0;
-  border-top: 1px solid var(--hairline);
-}
-
-.fms-paysplit-list dt {
-  color: var(--ink-2);
-  min-width: 0;
-}
-
-.fms-paysplit-list dd {
-  margin: 0;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.fms-paysplit-list > .fms-paysplit-total {
-  border-top: 2px solid var(--ink);
-}
-
-.fms-paysplit-list > .fms-paysplit-total dt {
-  color: var(--ink);
-  font-weight: 600;
-}
-
-.fms-paysplit {
-  display: grid;
-  gap: var(--space-1);
-}
-
 /* The credit limit, set or changed on the card (DebtScreen `LimitQuick`). */
+.fms-limitline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+}
+
+/* The first limit, asked for under the figure: as wide as an amount needs, not the card. */
+.fms-limitquick--first {
+  max-width: 420px;
+}
+
 .fms-limitquick {
   display: grid;
   gap: var(--space-2);
@@ -6684,6 +6792,7 @@ textarea.fms-askinput {
   min-height: 32px;
 }
 
+.fms-debthero-owed,
 .fms-debthero-side {
   display: grid;
   gap: var(--space-1);

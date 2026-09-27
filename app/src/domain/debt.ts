@@ -33,6 +33,7 @@ import {
   addMonths,
   daysBetween,
   daysInMonth,
+  formatMedium,
   getDay,
   getMonth,
   getYear,
@@ -1097,6 +1098,28 @@ export function duesWithin(dues: readonly DebtDue[], days = 7): DebtDue[] {
     .sort((a, b) => (a.daysToDue ?? 0) - (b.daysToDue ?? 0));
 }
 
+/**
+ * The bill a movement on this day goes on: the first day the bill closes on
+ * or after it. Borrowed on the day it closes, it is on that bill, the same
+ * cut `debtDue` makes.
+ */
+export function billClosingFor(date: IsoDate, billingDay: number): IsoDate {
+  const same = onDay(getYear(date), getMonth(date), billingDay);
+  return same >= date ? same : monthAfter(date, billingDay);
+}
+
+/**
+ * Which bill a payment is for, on a line with a billing day: ", for the bill
+ * that closed September 6, 2026", or the one still to close. Empty on a line
+ * without one.
+ */
+export function billWords(due: DebtDue): string {
+  if (!due.bill) return "";
+  return due.bill.billed > 0 && due.bill.last
+    ? `, for the bill that closed ${formatMedium(due.bill.last)}`
+    : `, for the bill that closes ${formatMedium(due.bill.next)}`;
+}
+
 /** "going by the last payment", for a date that was worked out rather than set. */
 export function basisWords(basis: DueBasis): string {
   switch (basis) {
@@ -1107,9 +1130,9 @@ export function basisWords(basis: DueBasis): string {
     case "schedule":
       return "the loan's schedule";
     case "due-day":
-      return "its due day";
+      return "the day its payment is due";
     case "billing":
-      return "its billing day";
+      return "the day its bill closes";
     default:
       return "";
   }
