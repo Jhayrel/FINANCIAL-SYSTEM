@@ -30,15 +30,23 @@ import {
   doc,
   getDoc,
   getDocFromCache,
+  getDocs,
+  getDocsFromCache,
   onSnapshot,
+  query,
+  serverTimestamp,
   setDoc,
+  Timestamp,
+  where,
   writeBatch,
   type DocumentData,
   type Firestore,
   type QueryDocumentSnapshot,
+  type QuerySnapshot,
 } from "firebase/firestore";
 
 import { firestore } from "./firebase";
+import { countReads, countWrites, noteError } from "./usage";
 import { assertNoSecrets, normaliseSettings, type AppSettings } from "../domain/settings";
 import type { SettingsStore } from "./settingsStore";
 import type {
@@ -160,6 +168,72 @@ function fromDocument(snap: QueryDocumentSnapshot<DocumentData>): Transaction & 
   };
 }
 
+// ── Reading only what changed ─────────────────────────────────────────────
+
+/*
+ * The whole ledger was read from the server every time the app opened: about
+ * 3,800 documents, plus the conversation twice and the assistant's record,
+ * so eight or nine openings across a phone and a computer used the 50,000
+ * reads a free project gets a day. The owner hit 48,000 on 28 September 2026.
+ *
+ * Now every write stamps `editedAt` with the server's time, and opening the
+ * app reads only the rows edited since this device last read the whole
+ * ledger (a day of overlap, for clocks that disagree). The screen is drawn
+ * from this device's own copy, which Firestore keeps on the device and which
+ * costs nothing to read; the server read only brings that copy up to date.
+ *
+ * The whole ledger is read again when this device has no copy, when its
+ * copy holds fewer rows than the last whole read did (a cleared browser, a
+ * cache that dropped rows), and once a week regardless, so a copy can never
+ * quietly drift from the database. Rows are never deleted (the rules forbid
+ * it), so a copy with at least as many rows as the database had, plus every
+ * row edited since, is the whole ledger.
+ */
+const SYNC_KEY = (uid: string): string => `fms.ledgerSync.${uid}`;
+const FULL_EVERY_MS = 7 * 24 * 60 * 60 * 1000;
+const OVERLAP_MS = 24 * 60 * 60 * 1000;
+
+interface SyncMark {
+  /** When this device last read the whole ledger from the server, by its own clock. */
+  readonly fullAt: number;
+  /** How many documents that read returned. */
+  readonly count: number;
+}
+
+function readMark(uid: string): SyncMark | null {
+  try {
+    const raw = localStorage.getItem(SYNC_KEY(uid));
+    const m = raw ? (JSON.parse(raw) as SyncMark) : null;
+    return m && Number.isFinite(m.fullAt) && Number.isFinite(m.count) ? m : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeMark(uid: string, mark: SyncMark): void {
+  try {
+    localStorage.setItem(SYNC_KEY(uid), JSON.stringify(mark));
+  } catch {
+    // Not remembered: the next opening reads the whole ledger again, which is correct, only dearer.
+  }
+}
+
+/** Whether the copy on this device can be trusted as the whole ledger. */
+export function needsFullRead(mark: SyncMark | null, cached: number, now: number): boolean {
+  if (!mark) return true;
+  if (now - mark.fullAt > FULL_EVERY_MS) return true;
+  return cached < mark.count;
+}
+
+/** What a server snapshot cost: all of it the first time, only what changed after that. */
+function billed(qs: QuerySnapshot<DocumentData>, first: boolean): number {
+  if (qs.metadata.fromCache) return 0;
+  return first ? qs.size : qs.docChanges().length;
+}
+
+/** The server's time on every write, so another device can ask for what changed. */
+const stamped = (d: DocumentData): DocumentData => ({ ...d, editedAt: serverTimestamp() });
+
 // ── Ledger ─────────────────────────────────────────────────────────────────
 
 export interface LedgerSnapshot {
@@ -199,9 +273,12 @@ export function firestoreLedger(uid: string): LedgerStore {
 
   return {
     subscribe(onChange, onError) {
-      return onSnapshot(
-        txCollection(db, uid),
-        (qs) => {
+      let stopped = false;
+      let ready = false;
+      let latest: QuerySnapshot<DocumentData> | null = null;
+      const stops: (() => void)[] = [];
+
+      const emit = (qs: QuerySnapshot<DocumentData>): void => {
           const live: Transaction[] = [];
           const binned: DeletedTransaction[] = [];
 
@@ -223,27 +300,115 @@ export function firestoreLedger(uid: string): LedgerStore {
           live.sort(byDateThenRecord);
           binned.sort(byDateThenRecord);
           onChange({ transactions: live, deleted: binned });
-        },
-        (e) => onError(e as Error),
+      };
+
+      /*
+       * The ledger as this device holds it, which is what the screen shows.
+       * It follows every write made here and every row the server sends
+       * below, at no cost. Held back until the copy is known to be whole, so
+       * an empty or partial copy is never shown as the ledger.
+       */
+      stops.push(
+        onSnapshot(
+          txCollection(db, uid),
+          { source: "cache" },
+          (qs) => {
+            latest = qs;
+            if (ready) emit(qs);
+          },
+          (e) => onError(e as Error),
+        ),
       );
+
+      const show = (): void => {
+        ready = true;
+        if (latest && !stopped) emit(latest);
+      };
+
+      void (async () => {
+        let cached = 0;
+        try {
+          cached = (await getDocsFromCache(txCollection(db, uid))).size;
+        } catch {
+          cached = 0;
+        }
+        if (stopped) return;
+
+        const mark = readMark(uid);
+        if (needsFullRead(mark, cached, Date.now())) {
+          try {
+            const all = await getDocs(txCollection(db, uid));
+            countReads(all.metadata.fromCache ? 0 : all.size);
+            if (!all.metadata.fromCache) writeMark(uid, { fullAt: Date.now(), count: all.size });
+          } catch (e) {
+            noteError(e, "reads");
+            onError(e as Error);
+            /*
+             * A copy is shown after a failed read only when it is known to be
+             * whole: as many rows as the last whole read found. A partial one
+             * shown as the ledger would be wrong totals, and the repair that
+             * runs on load (`misdatedOpenings`) would act on it.
+             */
+            if (!mark || cached < mark.count) return;
+          }
+        }
+        if (stopped) return;
+        show();
+
+        // From here on, only what is edited: here, on another device, or in the console.
+        const since = Timestamp.fromMillis((readMark(uid)?.fullAt ?? Date.now()) - OVERLAP_MS);
+        let first = true;
+        stops.push(
+          onSnapshot(
+            query(txCollection(db, uid), where("editedAt", ">", since)),
+            (qs) => {
+              countReads(billed(qs, first));
+              if (!qs.metadata.fromCache) first = false;
+            },
+            (e) => {
+              noteError(e, "reads");
+              onError(e as Error);
+            },
+          ),
+        );
+      })();
+
+      return () => {
+        stopped = true;
+        for (const stop of stops) stop();
+      };
     },
 
     async save(t) {
       try {
-        await setDoc(doc(txCollection(db, uid), t.id), toDocument(t), { merge: true });
+        await setDoc(doc(txCollection(db, uid), t.id), stamped(toDocument(t)), { merge: true });
+        countWrites(1);
       } catch (e) {
+        noteError(e, "writes");
         throw new RowsNotSaved([t], reasonOf(e));
       }
     },
 
     async bin(id, at) {
-      await setDoc(doc(txCollection(db, uid), id), { deletedAt: at }, { merge: true });
+      try {
+        await setDoc(doc(txCollection(db, uid), id), stamped({ deletedAt: at }), { merge: true });
+        countWrites(1);
+      } catch (e) {
+        noteError(e, "writes");
+        throw e;
+      }
     },
 
     async restore(id) {
       // deleteField, not an empty string: the rules read "deletedAt present"
       // as binned, and "" would still be present.
-      await setDoc(doc(txCollection(db, uid), id), { deletedAt: deleteField() }, { merge: true });
+      try {
+        await setDoc(doc(txCollection(db, uid), id), stamped({ deletedAt: deleteField() }), { merge: true });
+        countWrites(1);
+      } catch (e) {
+        noteError(e, "writes");
+        throw e;
+      }
     },
 
     async saveMany(transactions) {
@@ -255,11 +420,13 @@ export function firestoreLedger(uid: string): LedgerStore {
         const chunk = transactions.slice(i, i + 450);
         const batch = writeBatch(db);
         for (const t of chunk) {
-          batch.set(doc(txCollection(db, uid), t.id), toDocument(t), { merge: true });
+          batch.set(doc(txCollection(db, uid), t.id), stamped(toDocument(t)), { merge: true });
         }
         try {
           await batch.commit();
+          countWrites(chunk.length);
         } catch (e) {
+          noteError(e, "writes");
           reason = reasonOf(e);
           // One at a time, so a row the rules refuse loses only itself.
           if (chunk.length === 1) {
@@ -268,7 +435,8 @@ export function firestoreLedger(uid: string): LedgerStore {
           }
           for (const t of chunk) {
             try {
-              await setDoc(doc(txCollection(db, uid), t.id), toDocument(t), { merge: true });
+              await setDoc(doc(txCollection(db, uid), t.id), stamped(toDocument(t)), { merge: true });
+              countWrites(1);
             } catch (one) {
               reason = reasonOf(one);
               refused.push(t);
@@ -302,7 +470,8 @@ export function firestoreLedger(uid: string): LedgerStore {
       let reason = "";
       const one = async (w: Write): Promise<void> => {
         try {
-          await setDoc(doc(txCollection(db, uid), w.id), w.data, { merge: true });
+          await setDoc(doc(txCollection(db, uid), w.id), stamped(w.data), { merge: true });
+          countWrites(1);
         } catch (e) {
           reason = reasonOf(e);
           if (w.row) refused.push(w.row);
@@ -315,10 +484,12 @@ export function firestoreLedger(uid: string): LedgerStore {
       for (let i = 0; i < writes.length; i += 200) {
         const chunk = writes.slice(i, i + 200);
         const batch = writeBatch(db);
-        for (const w of chunk) batch.set(doc(txCollection(db, uid), w.id), w.data, { merge: true });
+        for (const w of chunk) batch.set(doc(txCollection(db, uid), w.id), stamped(w.data), { merge: true });
         try {
           await batch.commit();
+          countWrites(chunk.length);
         } catch (e) {
+          noteError(e, "writes");
           reason = reasonOf(e);
           // One at a time, so a document the rules refuse holds up only itself.
           for (const w of chunk) await one(w);
@@ -434,6 +605,7 @@ export function firestoreSettingsStore(uid: string): SettingsStore {
 
     subscribe(onChange) {
       return onSnapshot(settingsDoc(db, uid), (snap) => {
+        if (!snap.metadata.fromCache) countReads(1);
         if (snap.exists() && !snap.metadata.hasPendingWrites) {
           onChange(normaliseSettings(snap.data()));
         }
@@ -453,6 +625,7 @@ export function subscribeBudgets(
   return onSnapshot(
     collection(db, `${userRoot(uid)}/budgets`),
     (qs) => {
+      if (!qs.metadata.fromCache) countReads(qs.docChanges().length || qs.size);
       const out: Record<string, BudgetYear> = {};
       for (const snap of qs.docs) {
         const year = toBudgetYear(snap.data());
@@ -460,7 +633,10 @@ export function subscribeBudgets(
       }
       onChange(out);
     },
-    (e) => onError?.(e as Error),
+    (e) => {
+      noteError(e, "reads");
+      onError?.(e as Error);
+    },
   );
 }
 

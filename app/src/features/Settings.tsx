@@ -22,6 +22,8 @@ import {
 import { Icon } from "../components/Icon";
 import { AmountInput, Field, Select, Switch, TextInput } from "../components/forms";
 import { useConfirm, type ConfirmRequest } from "../components/Confirm";
+import { FREE_READS, FREE_WRITES, resetsAt, usageLevel } from "../data/usage";
+import { useUsage } from "./useUsage";
 import {
   canArchive,
   goalProgress,
@@ -135,7 +137,10 @@ export function Settings({
   onUpload,
   alerts,
   asOf,
+  openTab,
 }: {
+  /** A tab to open on, from a link elsewhere: the database-use notice opens Data. */
+  openTab?: { readonly tab: string; readonly at: number } | undefined;
   settings: AppSettings;
   transactions: readonly Transaction[];
   /** Derived from settings in App, passed in so it is derived exactly once. */
@@ -164,7 +169,10 @@ export function Settings({
   /** Today, as every other screen reads it. */
   asOf?: string | undefined;
 }) {
-  const [tab, setTab] = useState<Tab>("accounts");
+  const [tab, setTab] = useState<Tab>(() => (TABS.some((t) => t.id === openTab?.tab) ? (openTab?.tab as Tab) : "accounts"));
+  useEffect(() => {
+    if (openTab && TABS.some((t) => t.id === openTab.tab)) setTab(openTab.tab as Tab);
+  }, [openTab]);
   const tabStrip = useRef<HTMLDivElement>(null);
 
   /**
@@ -538,6 +546,56 @@ function Group({
       </header>
       {children}
     </section>
+  );
+}
+
+// ── Database use today ────────────────────────────────────────────────────
+
+/**
+ * How much of Firestore's free day this device has used.
+ *
+ * The owner, 28 September 2026, from the Firebase console, at 48,000 of the
+ * 50,000 reads a free project gets a day: "in settings under data add a pop
+ * up when firestore limit is reached also a notification too". The popup
+ * and the notification are raised in App.tsx; this is where the figures
+ * live. Counted on this device (`data/usage.ts`), so the phone and the
+ * computer each say what they used; only a refusal from Firestore is the
+ * whole project's.
+ */
+function DatabaseUse() {
+  const usage = useUsage();
+  const level = usageLevel(usage);
+  const bar = (used: number, of: number, label: string) => (
+    <div className="fms-usage-row">
+      <div className="fms-usage-head">
+        <span className="t-body">{label}</span>
+        <span className="t-num-s" style={{ color: "var(--ink-2)" }}>
+          {used.toLocaleString()} <span style={{ color: "var(--ink-3)" }}>of {of.toLocaleString()}</span>
+        </span>
+      </div>
+      <ProgressBar value={Math.min(used, of)} max={of} tone={used >= of * 0.8 ? "var(--warn)" : "var(--brand-600)"} label={`${label} used today`} />
+    </div>
+  );
+  return (
+    <Group title="Database use today" hint={`Firestore's free allowance, which starts again at ${resetsAt()} your time`} wide>
+      {level === "over" && (
+        <Alert status="over" title={`Firestore refused ${usage.exhaustedWhat ?? "a request"} for being over today's free limit`}>
+          Entries made now stay on this device and are saved when the allowance starts again at {resetsAt()}. Nothing is lost.
+          To stop it happening, keep one tab of the app open instead of reopening it, or move the project to the Blaze plan in the
+          Firebase console, which bills only past the free amounts.
+        </Alert>
+      )}
+      <div className="fms-usage">
+        {bar(usage.reads, FREE_READS, "Reads on this device")}
+        {bar(usage.writes, FREE_WRITES, "Writes on this device")}
+      </div>
+      <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-3)" }}>
+        Counted here as Firestore bills it: every document read from the server, and nothing from this device's own copy. Your
+        phone and this computer each count their own, so the project's total is the two together; the Firebase console shows it
+        under Firestore, Usage. Opening the app now reads only what changed since this device last read the ledger, and the whole
+        ledger once a week.
+      </p>
+    </Group>
   );
 }
 
@@ -3139,6 +3197,8 @@ function DataSection({
       )}
 
       <Tidy settings={settings} onChange={onChangeSettings} />
+
+      <DatabaseUse />
 
       <Group
         title="Storage"

@@ -25,7 +25,10 @@ import { editsBetween } from "./nearly";
 import { costOf, incomeOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 
-export type ChartBy = "item" | "month" | "wallet" | "category" | "day";
+export type ChartBy = "item" | "month" | "wallet" | "category" | "day" | "week" | "year";
+
+/** A grouping that is a series over time, drawn in calendar order rather than by size. */
+export const overTime = (by: ChartBy): boolean => by === "month" || by === "day" || by === "week" || by === "year";
 
 /**
  * How to draw it.
@@ -222,10 +225,10 @@ function kindOf(question: string, by: ChartBy): ChartKind {
   // Bars asked for by name are bars, over months and days as well.
   if (/\b(bars?|bar chart|bar graph|columns?)\b/i.test(question)) return "bars";
   if (/\b(line|trend|over time|curve|movement|progression)\b/i.test(question)) {
-    return by === "month" || by === "day" ? "line" : "bars";
+    return overTime(by) ? "line" : "bars";
   }
   // A question about months or days is a series whether or not it says so.
-  return by === "month" || by === "day" ? "line" : "bars";
+  return overTime(by) ? "line" : "bars";
 }
 
 /** Which grouping the question asked for. Item is the useful default. */
@@ -268,6 +271,10 @@ function dimensionOf(question: string): ChartBy {
 
   // "daily", "day by day", "per day": one point a day.
   if (/\b(daily|per day|by day|day by day|each day|every day|day to day)\b/i.test(question)) return "day";
+
+  // "weekly", "by week": one point a week. "yearly", "by year": one a year.
+  if (/\b(weekly|per week|by week|week by week|each week|every week)\b/i.test(question)) return "week";
+  if (/\b(yearly|per year|by year|year by year|each year|every year|annually|year on year|year over year)\b/i.test(question)) return "year";
 
   /**
    * "per month", not "this month".
@@ -357,6 +364,37 @@ export function windowOf(
    * this month and drew a chart of a different question. Read here, before
    * the month rules, because every one of them also names a month.
    */
+  /*
+   * Across years: "dec 2025 to feb 2026", "march 2024 to june 2025", and
+   * "2024 to 2025". Each fell through to this month (27 September 2026).
+   */
+  const monthYearRange = new RegExp(
+    String.raw`\b${MONTH_WORD}\s+(20\d{2})\s*(?:to|until|till|through|thru|and|[-\u2010-\u2015])\s*${MONTH_WORD}\s+(20\d{2})\b`,
+    "i",
+  ).exec(question);
+  if (monthYearRange?.[1] && monthYearRange[2] && monthYearRange[3] && monthYearRange[4]) {
+    const a = `${monthYearRange[2]}-${String(monthAt(monthYearRange[1]) + 1).padStart(2, "0")}`;
+    const b = `${monthYearRange[4]}-${String(monthAt(monthYearRange[3]) + 1).padStart(2, "0")}`;
+    const [first, last] = [a, b].sort() as [string, string];
+    return { from: `${first}-01`, to: lastDay(last), name: `${monthName(first)} to ${monthName(last)}` };
+  }
+  const yearRange = /\b(20\d{2})\s*(?:to|until|till|through|thru|and|[-\u2010-\u2015])\s*(20\d{2})\b/i.exec(question);
+  if (yearRange?.[1] && yearRange[2] && !new RegExp(String.raw`\b${MONTH_WORD}\b`, "i").test(question)) {
+    const [a, b] = [yearRange[1], yearRange[2]].sort() as [string, string];
+    return { from: `${a}-01-01`, to: `${b}-12-31`, name: `${a} to ${b}` };
+  }
+
+  /*
+   * "since august 15" is from then to today. It was read as the one day,
+   * August 15, because the one-day rule below comes first.
+   */
+  const sinceEarly = new RegExp(String.raw`\bsince\s+${MONTH_WORD}(?:\s+(\d{1,2})(?:st|nd|rd|th)?)?\b`, "i").exec(question);
+  if (sinceEarly?.[1]) {
+    const y = /\b(20\d{2})\b/.exec(question)?.[1] ?? year;
+    const from = `${y}-${String(monthAt(sinceEarly[1]) + 1).padStart(2, "0")}-${(sinceEarly[2] ?? "1").padStart(2, "0")}`;
+    return { from, to: asOf, name: `${short(from)} to today` };
+  }
+
   const isoRange = /\b(20\d{2}-\d{2}-\d{2})\s*(?:to|until|till|through|thru|[-\u2010-\u2015])\s*(20\d{2}-\d{2}-\d{2})\b/i.exec(question);
   if (isoRange?.[1] && isoRange[2]) {
     const [from, to] = [isoRange[1], isoRange[2]].sort() as [IsoDate, IsoDate];
@@ -416,7 +454,8 @@ export function windowOf(
   if (quarter) {
     const nowQ = Math.floor((Number(asOf.slice(5, 7)) - 1) / 3) + 1;
     let q = quarter[2] ? Number(quarter[2]) : nowQ;
-    let y = Number(year);
+    // "q2 2025" is that year's, not this one's.
+    let y = Number(/\b(20\d{2})\b/.exec(question)?.[1] ?? year);
     if (quarter[1] && /last|previous/i.test(quarter[1])) {
       q -= 1;
       if (q === 0) {
@@ -442,11 +481,18 @@ export function windowOf(
     return { from, to, name: `${short(from)} to ${short(to)}` };
   }
 
-  const back = /\b(?:past|last|previous|recent)\s+(\d{1,2})\s*(month|months|week|weeks)\b/i.exec(
+  const back = /\b(?:past|last|previous|recent)\s+(\d{1,2})\s*(month|months|week|weeks|year|years)\b/i.exec(
     question,
   );
   if (back?.[1]) {
     const n = Math.max(1, Math.min(36, Number(back[1])));
+    // "past 2 years": the twenty-four months to this one, inclusive.
+    if (/year/i.test(back[2] ?? "")) {
+      const start = new Date(`${asOf.slice(0, 7)}-01T00:00:00Z`);
+      start.setUTCMonth(start.getUTCMonth() - (n * 12 - 1));
+      const from = `${start.toISOString().slice(0, 7)}-01`;
+      return { from, to: lastDay(asOf.slice(0, 7)), name: `${monthName(from.slice(0, 7))} to ${monthName(asOf.slice(0, 7))}` };
+    }
     if (/week/i.test(back[2] ?? "")) {
       const to = asOf;
       const from = new Date(`${asOf}T00:00:00Z`);
@@ -462,7 +508,7 @@ export function windowOf(
     const from = `${start.toISOString().slice(0, 7)}-01`;
     return {
       from,
-      to: `${asOf.slice(0, 7)}-31`,
+      to: lastDay(asOf.slice(0, 7)),
       name:
         n === 1
           ? monthName(asOf.slice(0, 7))
@@ -495,12 +541,12 @@ export function windowOf(
     const start = new Date(`${asOf.slice(0, 7)}-01T00:00:00Z`);
     start.setUTCMonth(start.getUTCMonth() - 1);
     const ym = start.toISOString().slice(0, 7);
-    return { from: `${ym}-01`, to: `${ym}-31`, name: monthName(ym) };
+    return { from: `${ym}-01`, to: lastDay(ym), name: monthName(ym) };
   }
 
   if (/\b(this month|current month)\b/i.test(question)) {
     const ym = monthOf(asOf);
-    return { from: `${ym}-01`, to: `${ym}-31`, name: monthName(ym) };
+    return { from: `${ym}-01`, to: lastDay(ym), name: monthName(ym) };
   }
 
   if (/\byesterday\b/i.test(question)) {
@@ -547,7 +593,7 @@ export function windowOf(
       const to = `${y}-${String(last.index + 1).padStart(2, "0")}`;
       return {
         from: `${from}-01`,
-        to: `${to}-31`,
+        to: lastDay(to),
         name: `${monthName(from)} to ${monthName(to)}`,
       };
     }
@@ -557,7 +603,18 @@ export function windowOf(
   if (named >= 0) {
     const y = /\b(20\d{2})\b/.exec(question)?.[1] ?? year;
     const mm = String(named + 1).padStart(2, "0");
-    return { from: `${y}-${mm}-01`, to: `${y}-${mm}-31`, name: monthName(`${y}-${mm}`) };
+    return { from: `${y}-${mm}-01`, to: lastDay(`${y}-${mm}`), name: monthName(`${y}-${mm}`) };
+  }
+
+  // A year on its own, "2025" or "in 2024", is that whole year. It drew this month.
+  const bareYear = /\b(20\d{2})\b/.exec(question);
+  if (bareYear?.[1]) {
+    return { from: `${bareYear[1]}-01-01`, to: `${bareYear[1]}-12-31`, name: bareYear[1] };
+  }
+
+  // "by year", "yearly": one point a year needs every year there is.
+  if (dimensionOf(question) === "year" && !/\b(this|last|previous)\s+year\b/i.test(question)) {
+    return { from: "0000-01-01", to: "9999-12-31", name: "the whole ledger" };
   }
 
   if (/\b(year|annual|this year|ytd)\b/i.test(question)) {
@@ -569,12 +626,20 @@ export function windowOf(
   }
 
   // Month by month only makes sense across more than one month.
-  if (dimensionOf(question) === "month") {
+  const grouping = dimensionOf(question);
+  if (grouping === "month") {
     return { from: `${year}-01-01`, to: `${year}-12-31`, name: year };
+  }
+  // Week by week, the last twelve weeks; year by year, every year there is.
+  if (grouping === "week") {
+    return { from: shift(asOf, -83), to: asOf, name: "the last 12 weeks" };
+  }
+  if (grouping === "year") {
+    return { from: "0000-01-01", to: "9999-12-31", name: "the whole ledger" };
   }
 
   const month = monthOf(asOf);
-  return { from: `${month}-01`, to: `${month}-31`, name: monthName(month) };
+  return { from: `${month}-01`, to: lastDay(month), name: monthName(month) };
 }
 
 /**
@@ -621,7 +686,7 @@ export function isChartFollowUp(question: string, chartOnScreen: boolean): boole
     // escape, so a single one builds a regex that matches a control
     // character and never a word boundary.
     MONTHS.some((m) => new RegExp(`\\b${m}\\b`, "i").test(trimmed)) ||
-    /\b(this month|last month|this year|last year|the year|ytd|all|everything|per month|monthly|by wallet|by category|by item)\b/i.test(
+    /\b(this month|last month|this year|last year|the year|ytd|all|everything|per month|monthly|by wallet|by category|by item|weekly|by week|per week|yearly|by year|per year|20\d{2}|(last|past) \d+ (months?|weeks?|years?))\b/i.test(
       trimmed,
     ) ||
     // The short windows: "how about this week", "today only", "last 10 days".
@@ -641,6 +706,27 @@ export function isChartFollowUp(question: string, chartOnScreen: boolean): boole
   return !/\b(how much|how many|what|why|when|who|which|did|do|does|is|are|was|were)\b/i.test(
     trimmed,
   );
+}
+
+/** Asking for a pie or a donut. */
+export const asksPie = (question: string): boolean => /\b(pie|donut|doughnut|circle)\b/i.test(question);
+
+/** Saying the chart should run over time, in the owner's own words: "by month", "daily". */
+export const saysOverTime = (question: string): boolean =>
+  /\b(monthly|per month|by month|each month|month by month|daily|per day|by day|each day|day by day|trend|over time)\b/i.test(question);
+
+/**
+ * "gas only", "just food", "only treats": the chart on screen, narrowed.
+ *
+ * The owner, 27 September 2026, straight after a chart of September's
+ * spending: "gas only". It was read as an entry, and the card asked how much
+ * it was. A few words with "only" or "just" in them, after a chart, are
+ * about that chart; the caller checks that a chart is what was last shown.
+ */
+export function narrowsChart(question: string): boolean {
+  const trimmed = question.trim().replace(/[.!?]+$/, "");
+  if (!trimmed || trimmed.split(/\s+/).length > 4) return false;
+  return /\b(only|just|lang)\b/i.test(trimmed) && !/\d/.test(trimmed);
 }
 
 /** True when the message is asking for the written version. */
@@ -705,6 +791,14 @@ function focusOf(question: string, transactions: readonly Transaction[]): Focus 
       transactions.flatMap((t) => [t.fromWallet, t.toWallet]),
     ),
   };
+}
+
+/** The Monday a day's week starts on, which names the week. */
+function weekOf(day: IsoDate): IsoDate {
+  const at = new Date(`${day}T00:00:00Z`);
+  const back = (at.getUTCDay() + 6) % 7;
+  at.setUTCDate(at.getUTCDate() - back);
+  return at.toISOString().slice(0, 10);
 }
 
 /** The calendar day after this one. */
@@ -787,6 +881,10 @@ export function buildChart(
         return monthOf(t.date);
       case "day":
         return t.date;
+      case "week":
+        return weekOf(t.date);
+      case "year":
+        return t.date.slice(0, 4);
       case "wallet":
         // The side the money moved through, so an income chart grouped by
         // wallet does not put every row under "(none)": a Revenue row has no
@@ -827,10 +925,32 @@ export function buildChart(
 
   const all = [...groups.entries()]
     // Months and days read in order; everything else reads largest first.
-    .sort((a, b) => (by === "month" || by === "day" ? a[0].localeCompare(b[0]) : b[1].value - a[1].value));
+    .sort((a, b) => (overTime(by) ? a[0].localeCompare(b[0]) : b[1].value - a[1].value));
 
   const total = all.reduce((sum, [, g]) => sum + g.value, 0);
-  const kept = by === "month" || by === "day" ? all : all.slice(0, MOST_ROWS);
+  const kind = kindOf(question, by);
+  /*
+   * A pie is the whole, so what does not get a slice of its own goes into
+   * one "Other" slice rather than being left off. Leaving it off drew a
+   * circle that did not close and shares that did not add up to the total
+   * printed in its middle (owner, 27 September 2026: "fix pie layout ...
+   * dont work that accurate").
+   */
+  const PIE_SLICES = 7;
+  let kept: [string, { value: number; count: number }][] =
+    overTime(by) ? all : all.slice(0, MOST_ROWS);
+  let folded = 0;
+  if (kind === "pie" && all.length > PIE_SLICES) {
+    const rest = all.slice(PIE_SLICES - 1);
+    kept = [
+      ...all.slice(0, PIE_SLICES - 1),
+      [
+        `Other (${rest.length})`,
+        { value: rest.reduce((s, [, g]) => s + g.value, 0), count: rest.reduce((s, [, g]) => s + g.count, 0) },
+      ],
+    ];
+    folded = rest.length;
+  }
   const largest = Math.max(...kept.map(([, g]) => g.value), 1);
 
   return {
@@ -851,15 +971,23 @@ export function buildChart(
       period.name
     }`,
     by,
-    kind: kindOf(question, by),
+    kind,
     rows: kept.map(([label, g]) => ({
-      label: by === "month" ? monthName(label) : by === "day" ? `${MONTHS[Number(label.slice(5, 7)) - 1]?.slice(0, 3) ?? ""} ${Number(label.slice(8, 10))}` : label,
+      label:
+        by === "month"
+          ? monthName(label)
+          : by === "day"
+            ? `${MONTHS[Number(label.slice(5, 7)) - 1]?.slice(0, 3) ?? ""} ${Number(label.slice(8, 10))}`
+            : by === "week"
+              ? `Week of ${MONTHS[Number(label.slice(5, 7)) - 1]?.slice(0, 3) ?? ""} ${Number(label.slice(8, 10))}`
+              : label,
       value: g.value,
       share: g.value / largest,
       count: g.count,
     })),
     total,
-    othersCount: all.length - kept.length,
+    // What an "Other" slice holds is in the chart, so nothing is left off.
+    othersCount: folded > 0 ? 0 : all.length - kept.length,
     direction,
   };
 }

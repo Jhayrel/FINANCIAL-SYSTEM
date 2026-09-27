@@ -10,9 +10,10 @@
  * record of it failed would be reporting the wrong problem.
  */
 
-import { collection, doc, getDocs, getDocsFromCache, limit, onSnapshot, orderBy, query, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, getDocsFromCache, limit, onSnapshot, orderBy, query, setDoc, where } from "firebase/firestore";
 
 import { firestore } from "./firebase";
+import { countReads, noteError } from "./usage";
 import { byOldest, type ChatMessage } from "../domain/chat";
 
 /**
@@ -40,6 +41,20 @@ const memory: ChatMessage[] = [];
 
 /** Messages this page wrote, so the live listener can tell another device's from its own. */
 const writtenHere = new Set<string>();
+
+/*
+ * Read from the server once a session, not every time a panel opens.
+ *
+ * Each chat panel read the last 400 messages when it mounted, and its live
+ * listener read the same 400 again, so opening Add or the assistant cost
+ * 800 reads every time, and the free allowance is 50,000 a day (the owner
+ * reached 48,000 on 28 September 2026). The first read of a session goes to
+ * the server; after that the copy on the device is read, which is free, and
+ * the listener brings only messages newer than the session.
+ */
+const readThisSession = new Set<string>();
+/** Five minutes back, for a device whose clock runs behind. */
+const SESSION_FROM = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
 export interface ChatStore {
   record(message: ChatMessage): Promise<void>;
@@ -98,12 +113,28 @@ export function chatStore(uid: string | null): ChatStore {
       if (!db) return [];
       // Newest first from the database, because that is what an index can do
       // cheaply, then flipped: a conversation reads oldest first.
-      const snapshot = await getDocs(
-        query(collection(db, path(uid)), orderBy("at", "desc"), limit(PAGE)),
-      );
-      return snapshot.docs
-        .map((d) => ({ id: d.id, ...d.data() }) as ChatMessage)
-        .sort(byOldest);
+      const newest = query(collection(db, path(uid)), orderBy("at", "desc"), limit(PAGE));
+      if (readThisSession.has(uid)) {
+        try {
+          const cached = await getDocsFromCache(newest);
+          if (cached.size > 0) return cached.docs.map((d) => ({ id: d.id, ...d.data() }) as ChatMessage).sort(byOldest);
+        } catch {
+          // Nothing cached after all: ask the server below.
+        }
+      }
+      try {
+        const snapshot = await getDocs(newest);
+        if (!snapshot.metadata.fromCache) {
+          countReads(snapshot.size);
+          readThisSession.add(uid);
+        }
+        return snapshot.docs
+          .map((d) => ({ id: d.id, ...d.data() }) as ChatMessage)
+          .sort(byOldest);
+      } catch (e) {
+        noteError(e, "reads");
+        throw e;
+      }
     },
 
     watch(onRemote) {
@@ -113,24 +144,28 @@ export function chatStore(uid: string | null): ChatStore {
        * after that, a message added that this page did not write is another
        * device's, and the conversation is handed over whole.
        */
-      let baseline = false;
+      /*
+       * Only what is said from now on: the conversation up to now is what
+       * `recent` read. A message another device adds lands in the copy on
+       * this device, and the whole recent conversation is then read from
+       * that copy, which is free.
+       */
+      let first = true;
       return onSnapshot(
-        query(collection(db, path(uid)), orderBy("at", "desc"), limit(PAGE)),
-        // With the moment the cached copy is confirmed by the server, which is the baseline; without it the first message from the other device was taken for it.
-        { includeMetadataChanges: true },
+        query(collection(db, path(uid)), where("at", ">", SESSION_FROM), orderBy("at", "asc")),
         (snapshot) => {
           if (snapshot.metadata.fromCache) return;
-          if (!baseline) {
-            baseline = true;
-            return;
-          }
+          countReads(first ? snapshot.size : snapshot.docChanges().length);
+          first = false;
           const remote = snapshot
             .docChanges()
             .some((c) => c.type === "added" && !writtenHere.has(c.doc.id) && !c.doc.metadata.hasPendingWrites);
           if (!remote) return;
-          onRemote(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as ChatMessage).sort(byOldest));
+          void getDocsFromCache(query(collection(db, path(uid)), orderBy("at", "desc"), limit(PAGE)))
+            .then((all) => onRemote(all.docs.map((d) => ({ id: d.id, ...d.data() }) as ChatMessage).sort(byOldest)))
+            .catch(() => {});
         },
-        () => {},
+        (e) => noteError(e, "reads"),
       );
     },
 

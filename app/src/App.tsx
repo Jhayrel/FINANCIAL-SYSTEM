@@ -88,6 +88,9 @@ import { defaultSettings, isBlankSettings, type AppSettings } from "./domain/set
 import { Activity } from "./features/Activity";
 import { activityStore } from "./data/activityStore";
 import { chatStore } from "./data/chatStore";
+import { FREE_READS, resetsAt, usageLevel } from "./data/usage";
+import { useUsage } from "./features/useUsage";
+import { useConfirm } from "./components/Confirm";
 import { aiLogStore } from "./data/aiLogStore";
 import { manualCorrections } from "./domain/aiLog";
 import {
@@ -861,7 +864,69 @@ export default function App() {
    * Everything worth a look, worst first: the bell on every screen and the
    * Dashboard's short list read this one list, so the two cannot disagree.
    */
-  const alerts = useMemo(
+  /*
+   * Firestore's free day, as a notification, a toast and a popup (owner,
+   * 28 September 2026: "add a pop up when firestore limit is reached also a
+   * notification too"). Near it on this device's own count, a notification
+   * and one toast a day; refused by Firestore for being over it, a
+   * notification and one popup a day. Both open Settings on Data.
+   */
+  const usage = useUsage();
+  const usageAt = usageLevel(usage);
+  const [settingsOpenTab, setSettingsOpenTab] = useState<{ tab: string; at: number } | undefined>(undefined);
+  const usageAlert: Finding | null = useMemo(
+    () =>
+    usageAt === "ok"
+      ? null
+      : {
+          id: `firestore-usage-${usage.day}`,
+          level: usageAt === "over" ? "over" : "warn",
+          area: "settings",
+          title: usageAt === "over" ? "The database's free limit for today is used up" : "The database's free limit for today is nearly used",
+          detail:
+            usageAt === "over"
+              ? `Firestore refused ${usage.exhaustedWhat ?? "a request"}. Entries are kept on this device and saved when it starts again at ${resetsAt()}.`
+              : `This device has read ${usage.reads.toLocaleString()} of the ${FREE_READS.toLocaleString()} documents Firestore allows free each day. It starts again at ${resetsAt()}.`,
+          weight: usageAt === "over" ? 100 : 60,
+        },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [usageAt, usage.day, usage.reads, usage.exhaustedWhat],
+  );
+  const { confirm: confirmUsage, dialog: usageDialog } = useConfirm();
+  useEffect(() => {
+    if (usageAt === "ok") return;
+    const key = `fms.usageSaid.${usage.day}.${usageAt}`;
+    try {
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, "1");
+    } catch {
+      // Without storage it may be said again after a reload, which is the safer mistake.
+    }
+    if (usageAt === "near") {
+      flash(`The database's free reads for today are nearly used on this device: ${usage.reads.toLocaleString()} of ${FREE_READS.toLocaleString()}.`, {
+        label: "See it",
+        run: () => {
+          go("settings");
+          setSettingsOpenTab({ tab: "data", at: Date.now() });
+        },
+      });
+      return;
+    }
+    void confirmUsage({
+      title: "Today's free database limit is used up",
+      body: `Firestore has refused ${usage.exhaustedWhat ?? "a request"} because the project used its free allowance for today. Anything you add is kept on this device and saved when the allowance starts again at ${resetsAt()}. Nothing is lost. Settings, Data shows what this device used.`,
+      confirmLabel: "Open Settings, Data",
+      cancelLabel: "Close",
+    }).then((ok) => {
+      if (!ok) return;
+      go("settings");
+      setSettingsOpenTab({ tab: "data", at: Date.now() });
+    });
+    // `go` and `flash` are stable for this; the level and the day decide it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usageAt, usage.day]);
+
+  const financeFindings = useMemo(
     () =>
       financeAlerts({
         transactions,
@@ -874,6 +939,7 @@ export default function App() {
       }),
     [transactions, settings.accounts, settings.credits, settings.lowBalanceThreshold, budgets, reference, asOf],
   );
+  const alerts = useMemo(() => (usageAlert ? [usageAlert, ...financeFindings] : financeFindings), [usageAlert, financeFindings]);
 
   const flash = (message: string, action?: { label: string; run: () => void }): void => {
     toastSeq.current += 1;
@@ -1712,6 +1778,11 @@ export default function App() {
 
   /** Where a finding is dealt with: its rows when it names some, otherwise its screen. */
   const openAlert = (finding: Finding): void => {
+    if (finding.id.startsWith("firestore-usage")) {
+      go("settings");
+      setSettingsOpenTab({ tab: "data", at: Date.now() });
+      return;
+    }
     if (finding.query) {
       go("database");
       setDbFilter("all");
@@ -2121,6 +2192,7 @@ export default function App() {
               budgets={budgets}
               alerts={alerts}
               asOf={asOf}
+              openTab={settingsOpenTab}
               storeName={store.name}
               quota={cloud.uid ? FIRESTORE_QUOTA : BROWSER_QUOTA}
               onBackup={handleBackup}
@@ -2342,6 +2414,7 @@ export default function App() {
             {sync.detail}
           </Notice>
         )}
+        {usageDialog}
         {toasts.map((t) => (
           <Notice
             key={t.id}

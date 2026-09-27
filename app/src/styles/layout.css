@@ -5878,9 +5878,18 @@ textarea.fms-askinput {
   min-width: 0;
 }
 
+/* Beside the ring when there is room, under it when there is not. */
+@container (min-width: 400px) {
+  .fms-pie {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-5);
+  }
+}
+
 .fms-piesvg {
-  width: 132px;
-  height: 132px;
+  width: 160px;
+  height: 160px;
   flex: 0 0 auto;
 }
 
@@ -5914,6 +5923,11 @@ textarea.fms-askinput {
 .fms-linelegend {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 3px var(--space-4);
+}
+
+/* A pie's legend is one column: every slice a line, its share and figure on the right. */
+.fms-pie > .fms-pielegend {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .fms-pielegend li,
@@ -9345,4 +9359,25 @@ textarea.fms-askinput {
   color: var(--ink-2);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* ── Database use today (Settings, Data) ─────────────────────────────────── */
+
+.fms-usage {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  margin-top: var(--space-3);
+}
+
+.fms-usage-row {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fms-usage-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
 }

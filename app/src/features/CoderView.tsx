@@ -102,6 +102,8 @@ interface Dumped {
   readonly docs: readonly { readonly id: string; readonly data: Record<string, unknown> }[];
   /** Why this one is missing, when it is. */
   readonly failed?: string;
+  /** Said above the documents, when they came from somewhere other than a fresh read. */
+  readonly note?: string;
 }
 
 /**
@@ -123,16 +125,53 @@ async function readAll(uid: string, name: string): Promise<Dumped> {
       docs: snapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> })),
     };
   } catch (e) {
+    /*
+     * The error as Firestore gave it, code and all. Every refusal used to
+     * read "the rules for this collection are not deployed", and on 27
+     * September 2026 it said so of transactions and budgets while the app,
+     * under the same rule, was reading both. A guessed cause sends the fix
+     * the wrong way; the real one says where to look.
+     */
+    const code = (e as { code?: unknown }).code;
     const why = e instanceof Error ? e.message : String(e);
     return {
       name,
       docs: [],
-      failed: /permission|insufficient/i.test(why)
-        ? `Denied. The rules for this collection are not deployed: npx firebase deploy --only firestore:rules`
-        : why,
+      failed: `Refused${typeof code === "string" ? ` (${code})` : ""}: ${why}${
+        code === "permission-denied" ? " If the app itself cannot read it either, the rules need deploying: npx firebase deploy --only firestore:rules" : ""
+      }`,
     };
   }
 }
+
+/**
+ * A collection the app already holds, in place of a read that failed.
+ *
+ * The ledger and the budgets are loaded by the app's own listeners before
+ * this screen opens, so a refused read here need not leave the file without
+ * them: the copy the app is working from is exactly what a diagnosis needs,
+ * and the header says where it came from and why.
+ */
+function orLocal(dump: Dumped, local: LocalData): Dumped {
+  if (!dump.failed) return dump;
+  const note = `The fresh read failed, so this is the copy the app loaded and is showing. ${dump.failed}`;
+  if (dump.name === "transactions" && local.transactions.length > 0) {
+    return { name: dump.name, note, docs: local.transactions.map((v) => ({ id: idOf(v), data: v as Record<string, unknown> })) };
+  }
+  if (dump.name === "budgets" && Object.keys(local.budgets).length > 0) {
+    return {
+      name: dump.name,
+      note,
+      docs: Object.entries(local.budgets).map(([year, budget]) => ({ id: year, data: budget as Record<string, unknown> })),
+    };
+  }
+  return dump;
+}
+
+const idOf = (v: unknown): string => {
+  const record = v as { id?: unknown };
+  return typeof record.id === "string" ? record.id : "(no id)";
+};
 
 /**
  * The training view: what it has learned, and what it is still getting wrong.
@@ -443,6 +482,7 @@ function render(uid: string, dumps: readonly Dumped[]): string {
       lines.push(`  ${dump.failed}`, "");
       continue;
     }
+    if (dump.note) lines.push(`  ${dump.note}`, "");
     if (dump.docs.length === 0) {
       lines.push("  (empty)", "");
       continue;
@@ -553,7 +593,7 @@ export function CoderView({ uid, local }: { uid: string | null; local: LocalData
         setWrongBuild(true);
         return;
       }
-      const dumps = await Promise.all(COLLECTIONS.map((name) => readAll(uid, name)));
+      const dumps = (await Promise.all(COLLECTIONS.map((name) => readAll(uid, name)))).map((d) => orLocal(d, local));
 
       /**
        * `users/{uid}` itself, in its own try, and this is load-bearing.

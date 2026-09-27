@@ -104,6 +104,10 @@ import {
   pointsAtScreen,
   asksForProse,
   wantsChart,
+  overTime,
+  asksPie,
+  narrowsChart,
+  saysOverTime,
   wantsStatement,
   withoutTheFilePart,
   type Chart,
@@ -133,6 +137,7 @@ import {
 } from "../domain/investigate";
 import { exportWords, readExportAsk, type ExportAsk } from "../domain/exportAsk";
 import { readInvestigateAsk, type InvestigateAsk } from "../domain/investigateAsk";
+import { affordAnswer, goesByBalance, isAffordQuestion, readAffordAsk } from "../domain/affordAsk";
 import {
   duplicateHeadline,
   groupDuplicates,
@@ -1145,7 +1150,7 @@ export function AskPanel({
   useEffect(() => {
     let live = true;
     aiLogStore(uid)
-      .recent()
+      .recentOnce()
       .then((events) => {
         if (live) setLearnedEvents(events);
       })
@@ -2655,6 +2660,16 @@ export function AskPanel({
 
     if (result.proposals.length === 0 && result.refused.length === 0) {
       /*
+       * No entry, no figure, nothing done in the past tense: a question
+       * worded as a statement, answered as one. The owner, 27 September
+       * 2026, "I need gas for tommorrow ... I cannot travel if I dont have
+       * gas", was told there was no entry in it and asked how much it was.
+       */
+      if (sent.length === 0 && note.trim() && !/\d/.test(note) && detectIntent(note) === "ask") {
+        await askQuestion(note, false);
+        return true;
+      }
+      /*
        * Say so either way.
        *
        * With a photo it explained itself; with a sentence it returned in
@@ -3314,6 +3329,34 @@ export function AskPanel({
       log(aiEvent("asked", "add", { text: note }));
       log(aiEvent("answered", "add", { text: "Settings are changed on the Settings screen.", model: "this device" }));
       return;
+    }
+
+    /**
+     * "Can I afford it?", answered from what is held (`affordAsk.ts`).
+     *
+     * The owner, 27 September 2026, asked it eight ways in fifteen minutes
+     * and got "How much was it?" six times and a budget answer twice, a yes
+     * and a no a minute apart. It is answered here, on the device, from the
+     * wallets less what is still due, with the budget said apart. "Based on
+     * balance not budget" and "I am asking" after one are the same question
+     * again, about the same things.
+     */
+    if (files.length === 0 && !as && !isNoteLine && !essay) {
+      const earlier = [...turns]
+        .reverse()
+        .slice(0, 8)
+        .find((t) => t.kind === "you" && isAffordQuestion(t.text));
+      const again = !isAffordQuestion(lead) && goesByBalance(lead) && earlier?.kind === "you" ? earlier.text : null;
+      if (isAffordQuestion(lead) || again) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const asked = readAffordAsk(again ? `${again} ${lead}` : lead, transactions, reference, asOf);
+        const reply = affordAnswer(asked, { transactions, reference, budgets, debts, asOf });
+        say({ kind: "assistant", text: reply, from: "this device" });
+        log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+        return;
+      }
     }
 
     /**
@@ -4137,7 +4180,14 @@ export function AskPanel({
       return;
     }
 
-    const followUp = isChartFollowUp(ruled, turns.some(isChart));
+    /*
+     * "gas only" straight after a chart narrows that chart, whatever the
+     * router made of it: on 27 September 2026 it became an entry card
+     * asking how much the gas was.
+     */
+    const lastShown = [...turns].reverse().find((t) => t.kind !== "you");
+    const narrows = files.length === 0 && !as && lastShown !== undefined && isChart(lastShown) && narrowsChart(ruled);
+    const followUp = isChartFollowUp(ruled, turns.some(isChart)) || narrows;
     const saysChart = routed?.intent === "chart";
 
     /**
@@ -4173,6 +4223,7 @@ export function AskPanel({
       !aboutADebt &&
       !wantsWords &&
       (saysChart ||
+        narrows ||
         (routed === null && (wantsChart(note) || followUp)) ||
         // The model said prose; a chart is on screen and this names a period.
         (modelGaveUp && followUp) ||
@@ -4200,7 +4251,16 @@ export function AskPanel({
        * is exactly what `windowOf` reads, so the window survives and only
        * what the new message says changes.
        */
-      const shown = [...turns].reverse().find(isChart)?.chart;
+      const shownChart = [...turns].reverse().find(isChart)?.chart;
+      /*
+       * A pie is a split of the whole, so "show me a chart like pie" after a
+       * chart of the months is the same window split by item, not the months
+       * as slices, unless the new message itself says by month or by day.
+       */
+      const shown =
+        shownChart && asksPie(ruled) && !saysOverTime(ruled)
+          ? { ...shownChart, title: shownChart.title.replace(/\bby (?:month|day)\b/i, "by item") }
+          : shownChart;
       const carried =
         shown && !/\b(20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|month|year|week|today|yesterday|all|everything|days?|since|quarter|q[1-4])\b/i.test(
           ruled,
@@ -7194,7 +7254,7 @@ function ChartView({ chart }: { chart: Chart }) {
              */
             const average = chart.total / Math.max(chart.rows.length, 1);
             // Days are a series too: shaded by rank they would read as a ranking.
-            const months = chart.by === "month" || chart.by === "day";
+            const months = overTime(chart.by);
             const strength = months ? monthStrength(r.value, average) : 1;
             const colour = months
               ? toneOf(chart)
@@ -7235,8 +7295,8 @@ function ChartView({ chart }: { chart: Chart }) {
         {chart.othersCount > 0
           ? `The ${chart.rows.length} largest, with ${chart.othersCount} smaller left off. Totals worked out on this device.`
           : "Totals worked out on this device, from your entries."}
-        {chart.kind === "bars" && (chart.by === "month" || chart.by === "day")
-          ? ` Full colour marks the ${chart.by === "day" ? "days" : "months"} above the average of ${chartLabel(Math.round(chart.total / Math.max(chart.rows.length, 1)))}.`
+        {chart.kind === "bars" && overTime(chart.by)
+          ? ` Full colour marks the ${chart.by === "day" ? "days" : chart.by === "week" ? "weeks" : chart.by === "year" ? "years" : "months"} above the average of ${chartLabel(Math.round(chart.total / Math.max(chart.rows.length, 1)))}.`
           : ""}
       </p>
     </div>
@@ -7306,10 +7366,17 @@ function PieView({
   pin: (i: number) => void;
   leave: () => void;
 }) {
-  const size = 132;
-  const radius = 52;
+  /*
+   * Room in the hole for the total: at 132 the figure ran over the ring
+   * (owner, 27 September 2026: "fix pie layout and ui its ugly"). A thin gap
+   * of the card's own colour between slices, so neighbours of one hue read
+   * as two.
+   */
+  const size = 160;
+  const radius = 64;
   const centre = size / 2;
   const circumference = 2 * Math.PI * radius;
+  const GAP = chart.rows.length > 1 ? 1.5 : 0;
 
   let offset = 0;
   const slices = chart.rows.map((r, i) => {
@@ -7317,7 +7384,7 @@ function PieView({
     const slice = {
       label: r.label,
       value: r.value,
-      dash: fraction * circumference,
+      dash: Math.max(0, fraction * circumference - GAP),
       offset,
       // Largest strongest, then stepping toward grey, in the colour of the
       // money (`rampFor`). Fading one hue over a dark background turned the
@@ -7343,7 +7410,7 @@ function PieView({
               fill="none"
               stroke={s.colour}
               strokeOpacity={at === null || at === i ? 1 : 0.55}
-              strokeWidth={at === i ? 26 : 22}
+              strokeWidth={at === i ? 22 : 18}
               strokeDasharray={`${s.dash} ${circumference - s.dash}`}
               strokeDashoffset={-s.offset}
               onMouseEnter={() => point(i)}
@@ -7352,11 +7419,12 @@ function PieView({
             />
           ))}
         </g>
-        <text x={centre} y={centre - 2} className="fms-pietotal" textAnchor="middle">
-          {chartLabel(chart.total).replace("PHP ", "")}
+        {/* The slice being read, or the total: whole pesos past ten thousand, so the figure fits the hole. */}
+        <text x={centre} y={centre + 1} className="fms-pietotal" textAnchor="middle">
+          {pieFigure(at !== null ? (slices[at]?.value ?? chart.total) : chart.total)}
         </text>
-        <text x={centre} y={centre + 14} className="fms-pieunit" textAnchor="middle">
-          PHP in total
+        <text x={centre} y={centre + 17} className="fms-pieunit" textAnchor="middle">
+          {at !== null ? `${slices[at]?.percent ?? 0}% of the total` : "PHP in total"}
         </text>
       </svg>
 
@@ -7383,6 +7451,19 @@ function PieView({
       </ul>
     </div>
   );
+}
+
+/** A month label, shortened when the year goes without saying: "January 2026" to "Jan". */
+function shortLabel(label: string, sameYear: boolean): string {
+  if (!sameYear) return label;
+  const m = /^([A-Za-z]{3})[a-z]*\s+\d{4}$/.exec(label);
+  return m?.[1] ?? label;
+}
+
+/** A figure for the middle of a donut: centavos below ten thousand pesos, whole pesos above. */
+function pieFigure(centavos: number): string {
+  const text = chartLabel(centavos).replace("PHP ", "");
+  return centavos >= 1_000_000 ? text.replace(/\.\d{2}$/, "") : text;
 }
 
 /**
@@ -7438,6 +7519,9 @@ function LineView({
   }));
 
   const line = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  // "January 2026" to "Jan" when every point is in one year: the title already says which.
+  const years = new Set(points.map((p) => /\b(\d{4})$/.exec(p.label)?.[1] ?? ""));
+  const sameYear = years.size === 1 && !years.has("");
   const firstX = points[0]?.x ?? pad;
   const lastX = points[points.length - 1]?.x ?? width - pad;
   const area = `${firstX.toFixed(1)},${bottom} ${line} ${lastX.toFixed(1)},${bottom}`;
@@ -7517,7 +7601,7 @@ function LineView({
               onBlur={leave}
               onClick={() => pin(i)}
             >
-              <span className="fms-pielabel">{p.label}</span>
+              <span className="fms-pielabel" title={p.label}>{shortLabel(p.label, sameYear)}</span>
               <span className="fms-piefigure fms-proposalmoney">{chartLabel(p.value)}</span>
             </button>
           </li>

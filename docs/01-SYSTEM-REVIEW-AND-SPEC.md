@@ -430,6 +430,8 @@ users/{uid}/meta/settings          { theme, defaultWallet, firstDayOfMonth }
 
 **Whole ledger in memory is the correct call at this size.** 440 records now, ~650/year, so ten years is well under a megabyte. Every figure is computed client-side with the same semantics as the Excel, works offline, and needs no server logic that could drift.
 
+**Reading only what changed** (added 2026-09-28). With the older years imported the ledger is about 3,800 rows, and reading all of it every time the app opened, with the conversation read twice and the assistant's record once per chat panel, used 48,000 of the 50,000 reads a free (Spark) project gets a day. Every transaction write now stamps `editedAt` with the server's time. The screen is drawn from the copy Firestore keeps on the device (a cache-only listener, free to read), and opening the app asks the server only for rows edited since this device last read the whole ledger, with a day of overlap. The whole ledger is read again when the device has no copy, when its copy holds fewer rows than that read found, and once a week. A partial copy is never shown as the ledger: a failed read shows the copy only when it is known to be whole. The conversation and the assistant's record are read from the server once a session. This device's reads and writes are counted as Firestore bills them and shown in Settings, Data; near four fifths of the allowance the bell says so and a toast offers the figures, and a refusal from Firestore for being over it raises a popup once a day (`data/usage.ts`).
+
 ## 4.5 Reference lists (from CATEGORIES)
 
 | List | Source | Count | Notes |
@@ -1318,6 +1320,8 @@ Browser  →  functions/api/ai.ts  →  provider
 | Hard timeout | 4s. Slow provider must never block entry |
 | Failover | Groq → OpenRouter → local generator |
 | Degradation | Silent. If AI fails you see the rule output and nothing looks broken |
+| Can I afford it | Answered on the device (`domain/affordAsk.ts`), from the spending wallets less the bills and debt payments still due this month, against what the thing usually costs (the middle of the last ninety days' purchases). The budget is said apart, as the budget: whether the money is there and whether it was planned for are different questions, and saying one as the other gave a yes and a no a minute apart (owner, 2026-09-27). A question worded as a statement ("so with my current balance, what can I afford") is recognised anywhere in the sentence and is never read as an entry |
+| Charts | Any window (a day, a week, a month, a quarter, a year, "2024 to 2025", "dec 2025 to feb 2026", "since august 15"), grouped by item, category, wallet, day, week, month or year. A pie is a whole: past seven slices the rest fold into Other, and a pie asked for after a chart over time splits the same window by item. "gas only" after a chart narrows it |
 | Key location | Cloudflare env secret only. Never client, never DB, never a cell |
 
 ---

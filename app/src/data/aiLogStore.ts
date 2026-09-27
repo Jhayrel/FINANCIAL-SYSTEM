@@ -14,6 +14,7 @@
 import { collection, doc, getDocs, limit, orderBy, query, setDoc } from "firebase/firestore";
 
 import { firestore } from "./firebase";
+import { countReads, noteError } from "./usage";
 import { byNewest, type AiEvent } from "../domain/aiLog";
 
 /** Enough to learn from and to scan. The rest stays in the database. */
@@ -75,7 +76,17 @@ const explain = (e: unknown): string => {
 export interface AiLogStore {
   record(event: AiEvent): Promise<void>;
   recent(): Promise<AiEvent[]>;
+  /**
+   * The same, read from the server once a session. Each chat panel read
+   * the last 400 events every time it opened, for the corrections it learns
+   * from; they change only when the owner corrects a card, and those are
+   * added to what the panel holds as they happen.
+   */
+  recentOnce(): Promise<AiEvent[]>;
 }
+
+/** The session's one read, per account. */
+const onceBy = new Map<string, Promise<AiEvent[]>>();
 
 export function aiLogStore(uid: string | null): AiLogStore {
   if (!uid) {
@@ -86,6 +97,9 @@ export function aiLogStore(uid: string | null): AiLogStore {
         writes += 1;
       },
       async recent() {
+        return [...memory].sort(byNewest);
+      },
+      async recentOnce() {
         return [...memory].sort(byNewest);
       },
     };
@@ -125,10 +139,28 @@ export function aiLogStore(uid: string | null): AiLogStore {
 
     async recent() {
       if (!db) return [];
-      const snapshot = await getDocs(
-        query(collection(db, path(uid)), orderBy("at", "desc"), limit(PAGE)),
-      );
-      return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as AiEvent).sort(byNewest);
+      try {
+        const snapshot = await getDocs(
+          query(collection(db, path(uid)), orderBy("at", "desc"), limit(PAGE)),
+        );
+        if (!snapshot.metadata.fromCache) countReads(snapshot.size);
+        return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as AiEvent).sort(byNewest);
+      } catch (e) {
+        noteError(e, "reads");
+        throw e;
+      }
+    },
+
+    recentOnce() {
+      const held = onceBy.get(uid);
+      if (held) return held;
+      const read = this.recent().catch((e: unknown) => {
+        // A failed read is tried again next time rather than remembered as empty.
+        onceBy.delete(uid);
+        throw e;
+      });
+      onceBy.set(uid, read);
+      return read;
     },
   };
 }

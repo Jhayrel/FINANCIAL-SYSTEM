@@ -80,17 +80,66 @@ export function Statements({
   /** The year it opens on. Any year the ledger covers can be picked. */
   year: number;
 }) {
-  // A statement runs from any month of one year to any month of another.
-  const [year, setYear] = useState(initialYear);
-  const [toYear, setToYear] = useState(initialYear);
+  /*
+   * Only the months the ledger has. Every month of every year was offered,
+   * so a statement could be asked for a period with nothing in it and came
+   * back empty, with its CSV switched off (owner, 27 September 2026: "show
+   * onlt the available date, like match it with the database"). Now each
+   * year lists the months it has rows in, a later end cannot be put before
+   * the start, and it opens on the months this year has so far.
+   */
+  const monthsByYear = useMemo(() => {
+    const out = new Map<number, Set<number>>();
+    for (const t of transactions) {
+      const y = Number(t.date.slice(0, 4));
+      const m = Number(t.date.slice(5, 7));
+      if (!Number.isInteger(y) || m < 1 || m > 12) continue;
+      out.set(y, (out.get(y) ?? new Set()).add(m));
+    }
+    return out;
+  }, [transactions]);
   /** Newest first. An imported year appears here as soon as its rows do. */
-  const years = useMemo(
-    () => [...new Set([...yearsCovered(transactions), initialYear])].sort((a, b) => b - a),
-    [transactions, initialYear],
-  );
+  const years = useMemo(() => {
+    const list = [...new Set([...yearsCovered(transactions), ...monthsByYear.keys()])].sort((a, b) => b - a);
+    return list.length > 0 ? list : [initialYear];
+  }, [transactions, monthsByYear, initialYear]);
+  const monthsOf = (y: number): number[] => {
+    const set = monthsByYear.get(y);
+    return set && set.size > 0 ? [...set].sort((a, b) => a - b) : [];
+  };
+  const openYear = years.includes(initialYear) ? initialYear : (years[0] ?? initialYear);
+  const [year, setYearState] = useState(openYear);
+  const [toYear, setToYearState] = useState(openYear);
   const [type, setType] = useState<StatementType>("account");
-  const [from, setFrom] = useState(1);
-  const [to, setTo] = useState(12);
+  const [from, setFrom] = useState(() => monthsOf(openYear)[0] ?? 1);
+  const [to, setTo] = useState(() => monthsOf(openYear).at(-1) ?? 12);
+
+  // The months each picker offers: those with rows, and never an end before the start.
+  const fromMonths = monthsOf(year);
+  const toMonths = monthsOf(toYear).filter((m) => toYear > year || m >= from);
+  const toYears = years.filter((y) => y >= year);
+  const nearest = (list: readonly number[], want: number, fallback: number): number =>
+    list.includes(want) ? want : (list.find((m) => m >= want) ?? list.at(-1) ?? fallback);
+
+  const setYear = (y: number): void => {
+    setYearState(y);
+    const nextFrom = nearest(monthsOf(y), from, 1);
+    setFrom(nextFrom);
+    // The end follows when it would fall before the new start.
+    if (toYear < y || (toYear === y && to < nextFrom)) {
+      setToYearState(y);
+      setTo(monthsOf(y).at(-1) ?? 12);
+    }
+  };
+  const setFromMonth = (m: number): void => {
+    setFrom(m);
+    if (toYear === year && to < m) setTo(nearest(monthsOf(toYear), m, m));
+  };
+  const setToYear = (y: number): void => {
+    setToYearState(y);
+    const allowed = monthsOf(y).filter((m) => y > year || m >= from);
+    setTo(allowed.includes(to) ? to : (allowed.at(-1) ?? 12));
+  };
 
   // Every wallet the settings list or the year's rows name, the everyday ones first.
   const wallets = useMemo(() => {
@@ -251,8 +300,8 @@ export function Statements({
             <div className="fms-stmtpair">
               <Select
                 value={MONTH_NAMES[from - 1] ?? ""}
-                onChange={(m) => setFrom(MONTH_NAMES.indexOf(m as (typeof MONTH_NAMES)[number]) + 1)}
-                options={[...MONTH_NAMES]}
+                onChange={(m) => setFromMonth(MONTH_NAMES.indexOf(m as (typeof MONTH_NAMES)[number]) + 1)}
+                options={fromMonths.map((m) => MONTH_NAMES[m - 1]!)}
                 ariaLabel="From month"
               />
               <Select value={String(year)} onChange={(v) => setYear(Number(v))} options={years.map(String)} ariaLabel="From year" />
@@ -265,10 +314,10 @@ export function Statements({
               <Select
                 value={MONTH_NAMES[to - 1] ?? ""}
                 onChange={(m) => setTo(MONTH_NAMES.indexOf(m as (typeof MONTH_NAMES)[number]) + 1)}
-                options={[...MONTH_NAMES]}
+                options={toMonths.map((m) => MONTH_NAMES[m - 1]!)}
                 ariaLabel="To month"
               />
-              <Select value={String(toYear)} onChange={(v) => setToYear(Number(v))} options={years.map(String)} ariaLabel="To year" />
+              <Select value={String(toYear)} onChange={(v) => setToYear(Number(v))} options={toYears.map(String)} ariaLabel="To year" />
             </div>
           </div>
         </div>

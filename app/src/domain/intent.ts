@@ -93,6 +93,7 @@ export function detectIntent(text: string): Intent {
   // An explicit question is a question, whatever else is in it.
   if (trimmed.endsWith("?")) return "ask";
   if (ASKING.test(trimmed)) return "ask";
+  if (ASKING_ANYWHERE.test(trimmed)) return "ask";
 
   /*
    * An intention is not an entry.
@@ -304,6 +305,18 @@ export function sayInstead(previous: string, meant: string, notMeant?: string | 
   return `${previous.replace(/[.!]+$/, "")}, ${meant}`;
 }
 
+/**
+ * Asking whether there is money for something, or saying it was a question.
+ *
+ * The owner, 27 September 2026: "so with my current balance, what can I
+ * afford", "I need gas for tommorrow can I affored it? with my current
+ * balance not with the budget", "I am asking not adding ledger". None opens
+ * with a question word, so each went to the entry reader, found nothing, and
+ * was asked "How much was it?", six times over (`affordAsk.ts`).
+ */
+const ASKING_ANYWHERE =
+  /\b(?:afford|affored|aford|kaya ko ba|do i have enough|what can i (?:buy|get|spend|afford)|how much (?:can|could|should) i|can i spare|i am asking|i'?m asking|just asking|not adding|it'?s a question|this is a question|based on (?:my )?(?:current )?balance|not (?:with |on )?(?:the |my )?budget)\b|\bcan i\s*\??\s*$/i;
+
 export function isQuestion(text: string): boolean {
   /**
    * Leading punctuation is not part of the question.
@@ -319,7 +332,8 @@ export function isQuestion(text: string): boolean {
     trimmed.endsWith("?") ||
     ASKING.test(trimmed) ||
     REQUESTING.test(trimmed) ||
-    ADVICE.test(trimmed)
+    ADVICE.test(trimmed) ||
+    ASKING_ANYWHERE.test(trimmed)
   );
 }
 
