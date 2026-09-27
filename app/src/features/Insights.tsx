@@ -756,6 +756,7 @@ export function Insights({
         <Investigate
           transactions={transactions}
           reference={reference}
+          accounts={settings.accounts}
           asOf={asOf}
           onAdd={onAdd}
           onEditRow={onEditRow}

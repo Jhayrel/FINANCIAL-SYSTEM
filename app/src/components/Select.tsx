@@ -44,8 +44,12 @@ import {
 import { createPortal } from "react-dom";
 
 const CONTROL_HEIGHT = 44;
-/** Roughly seven rows before it scrolls. */
-const MAX_MENU_HEIGHT = 264;
+/**
+ * Roughly nine rows before it scrolls, room for a wallet list with its
+ * headings. At seven the Add form's wallets scrolled with two still hidden,
+ * and the menu is never taller than the room it has anyway.
+ */
+const MAX_MENU_HEIGHT = 360;
 /** Room for the search box above the rows. */
 const SEARCH_HEIGHT = 52;
 /** Wide enough for the longest account name, narrow enough to stay a menu. */

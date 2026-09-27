@@ -9,7 +9,7 @@
  * rules live in `domain/entry.ts`; this file renders and decides nothing.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Alert,
@@ -49,6 +49,7 @@ import type { Provenance } from "../domain/activity";
 import type { CategoryResult } from "../data/aiClient";
 import { predictAmount, steadyValue, type DueBill } from "../domain/predict";
 import { monthBills } from "../domain/budgetView";
+import { accountGroups } from "../domain/accounts";
 import { addDays, formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { duplicateHeadline, duplicatesOf } from "../domain/duplicates";
 import { draftChanges } from "../domain/draftChanges";
@@ -674,23 +675,20 @@ export function AddTransaction({
 
   const guess = useMemo(() => predictAmount(transactions, draft), [transactions, draft]);
 
-  /** Every wallet a row can use, once each, with what it holds today. */
+  /**
+   * Every wallet a row can use, once each, with what it holds today, under
+   * the heading Settings gives it: Spending, Reserve, Savings or Goal. A row
+   * being corrected keeps a wallet deactivated since it was saved, under
+   * "Not active".
+   */
   const walletChoices = useMemo(() => {
-    const seen = new Set<string>();
-    const out: { name: string; balance: Centavos | null; group: string }[] = [];
-    const add = (raw: string, group: string): void => {
-      const name = raw.trim();
-      if (!name || seen.has(name)) return;
-      seen.add(name);
-      out.push({ name, balance: balances.find((b) => b.name === name)?.balance ?? null, group });
-    };
-    for (const w of reference.wallets) add(w, "Wallets");
-    for (const w of reference.savings) add(w, "Savings");
-    // A row being corrected keeps a wallet deactivated since it was saved.
-    add(draft.fromWallet, "Not active");
-    add(draft.toWallet, "Not active");
-    return out;
-  }, [reference, balances, draft.fromWallet, draft.toWallet]);
+    const { options, groups } = accountGroups(
+      [...reference.wallets, ...reference.savings, draft.fromWallet, draft.toWallet],
+      settings.accounts,
+      reference,
+    );
+    return options.map((name) => ({ name, balance: balances.find((b) => b.name === name)?.balance ?? null, group: groups[name] ?? "" }));
+  }, [reference, settings.accounts, balances, draft.fromWallet, draft.toWallet]);
 
   /**
    * One wallet field and the list it opens.
@@ -702,6 +700,23 @@ export function AddTransaction({
    * the right, below zero in red, the usual one tagged, spending and savings
    * under their own headings, and a search box once there are more than eight.
    */
+  /** The side panel's balances, under the same headings. */
+  const sideGroups = useMemo(() => {
+    const { options, groups } = accountGroups(
+      balances.map((b) => b.name),
+      settings.accounts,
+      reference,
+    );
+    const byHeading = new Map<string, WalletBalance[]>();
+    for (const name of options) {
+      const row = balances.find((b) => b.name === name);
+      if (!row) continue;
+      const heading = groups[name] ?? "";
+      byHeading.set(heading, [...(byHeading.get(heading) ?? []), row]);
+    }
+    return [...byHeading];
+  }, [balances, settings.accounts, reference]);
+
   const walletSelect = (usual: string | undefined, exclude?: string) => {
     const list = walletChoices.filter((w) => w.name !== exclude);
     const kinds = new Set(list.map((w) => w.group));
@@ -2415,23 +2430,17 @@ export function AddTransaction({
           </div>
         )}
 
-        <div className="t-label" style={{ color: "var(--ink-2)", marginBottom: "var(--space-2)" }}>
-          Wallets
-        </div>
-        {balances.filter((w) => !w.isSavings).map((w) => (
-          <BalanceRow key={w.name} wallet={w} />
-        ))}
-
-        {balances.some((w) => w.isSavings) && (
-          <>
-            <div className="t-label" style={{ color: "var(--ink-2)", margin: "var(--space-4) 0 var(--space-2)" }}>
-              Savings
+        {/* Under the headings Settings gives each account, the same as the wallet list above. */}
+        {sideGroups.map(([heading, list], i) => (
+          <Fragment key={heading}>
+            <div className="t-label" style={{ color: "var(--ink-2)", margin: i === 0 ? "0 0 var(--space-2)" : "var(--space-4) 0 var(--space-2)" }}>
+              {heading}
             </div>
-            {balances.filter((w) => w.isSavings).map((w) => (
+            {list.map((w) => (
               <BalanceRow key={w.name} wallet={w} />
             ))}
-          </>
-        )}
+          </Fragment>
+        ))}
 
         {debts.some((d) => !d.archived && d.form !== "pass-through") && (
           <>

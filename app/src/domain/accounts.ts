@@ -293,6 +293,49 @@ export function canArchive(
 export const activeAccounts = (accounts: readonly Account[]): Account[] =>
   accounts.filter((a) => !a.archived);
 
+/**
+ * The heading each account sits under in a picker, the same four Settings
+ * lists them under, in the same order: Spending, Reserve, Savings, Goal.
+ *
+ * The Add form's wallet list put every reserve under "Savings", because the
+ * form only knew the old wallet-or-savings split, while Settings called the
+ * same accounts Reserve (owner, 27 September 2026: "fix all the filters and
+ * dropdown in the system", with the two screens side by side). A name no
+ * active account has, such as one archived since a row was saved, sits
+ * under "Not active" at the end.
+ */
+export const INACTIVE_GROUP = "Not active";
+const PICKER_ORDER: readonly AccountKind[] = ["spending", "reserve", "savings", "goal"];
+
+export function accountGroups(
+  names: readonly string[],
+  accounts: readonly Account[],
+  /** The wallet and savings lists, for a name with no account of its own (data from before accounts had kinds). */
+  lists: { readonly wallets: readonly string[]; readonly savings: readonly string[] } = { wallets: [], savings: [] },
+): { readonly options: string[]; readonly groups: Record<string, string> } {
+  const kindOf = new Map<string, AccountKind>();
+  for (const w of lists.wallets) kindOf.set(w, "spending");
+  for (const w of lists.savings) kindOf.set(w, "savings");
+  for (const a of accounts) {
+    if (a.archived) kindOf.delete(a.name);
+    else kindOf.set(a.name, a.kind);
+  }
+  const seen = new Set<string>();
+  const unique = names.map((n) => n.trim()).filter((n) => n && !seen.has(n) && (seen.add(n), true));
+  const rank = (n: string): number => {
+    const kind = kindOf.get(n);
+    return kind === undefined ? PICKER_ORDER.length : PICKER_ORDER.indexOf(kind);
+  };
+  // A stable sort keeps each group in the order it was given.
+  const options = unique.map((n, i) => ({ n, i })).sort((x, y) => rank(x.n) - rank(y.n) || x.i - y.i).map((x) => x.n);
+  const groups: Record<string, string> = {};
+  for (const n of options) {
+    const kind = kindOf.get(n);
+    groups[n] = kind === undefined ? INACTIVE_GROUP : KIND_LABEL[kind];
+  }
+  return { options, groups };
+}
+
 /** Archived accounts, for the "Inactive" section in Settings. */
 export const inactiveAccounts = (accounts: readonly Account[]): Account[] =>
   accounts.filter((a) => a.archived);

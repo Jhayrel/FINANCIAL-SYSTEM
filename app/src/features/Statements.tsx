@@ -22,6 +22,7 @@ import { Select } from "../components/Select";
 import { TextInput } from "../components/forms";
 import { DataTable, type Column } from "../components/DataTable";
 import { formatShort, MONTH_NAMES } from "../domain/dates";
+import { accountGroups, type Account } from "../domain/accounts";
 import type { Debt } from "../domain/debt";
 import { buildSheet, type SheetLine } from "../domain/statementSheet";
 import {
@@ -67,11 +68,14 @@ function saveFile(name: string, data: BlobPart, type: string): void {
 export function Statements({
   transactions,
   reference,
+  accounts = [],
   debts,
   year: initialYear,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
+  /** Settings' accounts, so the wallet list sits under the same headings as there. */
+  accounts?: readonly Account[];
   debts: readonly Debt[];
   /** The year it opens on. Any year the ledger covers can be picked. */
   year: number;
@@ -97,8 +101,8 @@ export function Statements({
       if (t.fromWallet) named.add(t.fromWallet);
       if (t.toWallet) named.add(t.toWallet);
     }
-    return [...named];
-  }, [reference, transactions, year, toYear]);
+    return accountGroups([...named], accounts, reference);
+  }, [reference, accounts, transactions, year, toYear]);
   const [wallet, setWallet] = useState(reference.wallets[0] ?? "");
   const [debtId, setDebtId] = useState(debts[0]?.id ?? "");
 
@@ -224,10 +228,10 @@ export function Statements({
             />
           </label>
 
-          {type === "wallet" && wallets.length > 0 && (
+          {type === "wallet" && wallets.options.length > 0 && (
             <label className="fms-stmtfield">
               <span className="t-label" style={{ color: "var(--ink-2)" }}>Wallet</span>
-              <Select value={wallet} onChange={setWallet} options={wallets} />
+              <Select value={wallet} onChange={setWallet} options={wallets.options} groups={wallets.groups} ariaLabel="Which wallet" />
             </label>
           )}
 

@@ -2000,6 +2000,8 @@ export default function App() {
               transactions={transactions}
               initialFilter={dbFilter}
               debts={settings.credits}
+              reference={reference}
+              accounts={settings.accounts}
               initialQuery={dbQuery?.query}
               onDelete={handleDelete}
               onDeleteMany={handleDeleteMany}
@@ -2094,6 +2096,7 @@ export default function App() {
             <Statements
               transactions={transactions}
               reference={reference}
+              accounts={settings.accounts}
               debts={settings.credits}
               year={getYear(asOf)}
             />

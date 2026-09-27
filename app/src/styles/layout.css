@@ -9089,23 +9089,51 @@ textarea.fms-askinput {
   }
 }
 
-/* ── The Database's filters on a phone: one row of dropdowns ─────────────── */
+/* ── The Database's filters: one row of dropdowns, phone and computer ────── */
 
 .fms-dbfilterrow {
-  display: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/*
+ * On a computer each filter is the app's own dropdown in the shape the
+ * filters have always had: a pill, as wide as its words, marked in the brand
+ * colour while it narrows the list.
+ */
+.fms-filterselect {
+  display: inline-flex;
+  min-width: 132px;
+  max-width: 240px;
+}
+
+.fms-filterselect > .fms-select {
+  height: 40px;
+  min-height: 40px;
+  border-radius: var(--radius-full);
+  padding-left: var(--space-4);
+  color: var(--ink-2);
+}
+
+.fms-filterselect.is-on > .fms-select {
+  background: var(--brand-100);
+  border-color: var(--brand-600);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.fms-dbfilterrow > .fms-filterclear {
+  min-height: 40px;
+  padding: 0 var(--space-2);
+  color: var(--ink-2);
 }
 
 @media (max-width: 639px) {
   .fms-db .fms-dbtools > .fms-pills,
   .fms-acttools > .fms-segmented {
     display: none;
-  }
-
-  .fms-dbfilterrow {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2);
   }
 
   .fms-filterchip {

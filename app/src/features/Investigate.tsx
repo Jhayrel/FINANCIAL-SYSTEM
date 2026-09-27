@@ -26,6 +26,7 @@ import { Rich } from "../components/Rich";
 import { AmountInput, Field } from "../components/forms";
 import { Select } from "../components/Select";
 import { useConfirm } from "../components/Confirm";
+import { accountGroups, type Account } from "../domain/accounts";
 import { walletBalance } from "../domain/balances";
 import type { Draft } from "../domain/entry";
 import { getYear } from "../domain/dates";
@@ -58,6 +59,7 @@ let kept: Asked | null = null;
 export function Investigate({
   transactions,
   reference,
+  accounts: settingsAccounts = [],
   asOf,
   onAdd,
   onEditRow,
@@ -66,6 +68,8 @@ export function Investigate({
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
+  /** Settings' accounts, so the list sits under the same headings as there. */
+  accounts?: readonly Account[];
   asOf: IsoDate;
   /** The Add form with this entry filled in, to check and save. */
   onAdd: (draft: Draft) => void;
@@ -80,7 +84,11 @@ export function Investigate({
    */
   onAsk?: ((finding: string) => Promise<string>) | undefined;
 }) {
-  const accounts = useMemo(() => [...reference.wallets, ...reference.savings], [reference]);
+  const grouped = useMemo(
+    () => accountGroups([...reference.wallets, ...reference.savings], settingsAccounts, reference),
+    [reference, settingsAccounts],
+  );
+  const accounts = grouped.options;
   const [aiAnswer, setAiAnswer] = useState("");
   const [asking, setAsking] = useState(false);
   const [asked, setAsked] = useState<Asked>(
@@ -208,6 +216,7 @@ export function Investigate({
               value={account}
               onChange={(v) => change({ account: v })}
               options={accounts}
+              groups={grouped.groups}
               details={Object.fromEntries(accounts.map((a) => [a, formatMoney(walletBalance(transactions, a))]))}
               ariaLabel="Which account"
             />

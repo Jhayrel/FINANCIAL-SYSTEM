@@ -13,7 +13,6 @@ import {
   CountChip,
   FlowBadge,
   Money,
-  SegmentedControl,
   StatusPill,
   EmptyState,
   type Flow as FlowTone,
@@ -31,7 +30,8 @@ import { formatShort, getYear } from "../domain/dates";
 import { inPeriod, matchesSearch, parseSearch, PERIODS, type Period } from "../domain/search";
 import { yearsCovered } from "../domain/year";
 import { checkIntegrity, type Issue } from "../domain/integrity";
-import type { Transaction, TransactionType } from "../domain/types";
+import type { ReferenceLists, Transaction, TransactionType } from "../domain/types";
+import { accountGroups, type Account } from "../domain/accounts";
 import type { Debt } from "../domain/debt";
 import { ON_BEHALF } from "../domain/debtWords";
 
@@ -78,10 +78,15 @@ export function Database({
   onEdit,
   asOf,
   debts = [],
+  reference,
+  accounts = [],
 }: {
   transactions: readonly Transaction[];
   /** The debts and people, to tell an On behalf row from a Debt row. */
   debts?: readonly Debt[];
+  /** The wallet and savings lists, and Settings' accounts, for the Wallet filter's headings. */
+  reference?: Pick<ReferenceLists, "wallets" | "savings"> | undefined;
+  accounts?: readonly Account[];
   initialFilter?: FilterId;
   /** Words to search for on arrival, from a link on another screen. */
   initialQuery?: string | undefined;
@@ -102,6 +107,21 @@ export function Database({
   /** A year is a filter on one continuous ledger (docs/08, rule Y1). */
   const [year, setYear] = useState<number | "all">("all");
   const years = useMemo(() => yearsCovered(transactions), [transactions]);
+  /** One wallet's rows, money in or out of it. */
+  const [wallet, setWallet] = useState<string>("all");
+  const walletChoices = useMemo(() => {
+    const named: string[] = [...(reference?.wallets ?? []), ...(reference?.savings ?? [])];
+    for (const t of transactions) named.push(t.fromWallet, t.toWallet);
+    return accountGroups(named, accounts, reference);
+  }, [transactions, reference, accounts]);
+  const filtered = filter !== "all" || period !== "all" || year !== "all" || wallet !== "all";
+  const clearFilters = (): void => {
+    setFilter("all");
+    setPeriod("all");
+    setYear("all");
+    setWallet("all");
+    setLimit(PAGE);
+  };
   /**
    * Newest entry first, by record number rather than by date.
    *
@@ -262,6 +282,7 @@ export function Database({
       if (filter !== "all" && filter !== "flagged" && filter !== "behalf" && t.type !== filter) return false;
       if (!inPeriod(t.date, period, asOf)) return false;
       if (year !== "all" && getYear(t.date) !== year) return false;
+      if (wallet !== "all" && t.fromWallet !== wallet && t.toWallet !== wallet) return false;
       return matchesSearch(t, terms);
     });
 
@@ -281,7 +302,7 @@ export function Database({
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, query, filter, period, year, asOf, issuesById, sortKey, sortDir, behalfIds]);
+  }, [transactions, query, filter, period, year, wallet, asOf, issuesById, sortKey, sortDir, behalfIds]);
 
   const shown = rows.slice(0, limit);
   const flaggedCount = issuesById.size;
@@ -528,10 +549,13 @@ export function Database({
           />
 
           {/*
-            The filters on a phone: one row of dropdowns, not two rows of
-            pills running off the edge (owner, 26 September 2026: "the filter
-            I dont like it, make it cleaner"). Each opens the phone's own
-            picker; one that is set is marked, and Clear puts them all back.
+            The filters: one row of dropdowns, on a phone and on a computer
+            alike. A phone had them (owner, 26 September 2026: "the filter I
+            dont like it, make it cleaner"); a computer kept a row of pills
+            for the type, another for the date and another for every year of
+            imported history, until the owner, 27 September 2026: "fix all
+            the filters and dropdown in the system". One that is set is
+            marked, and Clear filters puts them all back.
           */}
           <div className="fms-dbfilterrow" role="group" aria-label="Filters">
             <FilterChip
@@ -563,43 +587,24 @@ export function Database({
                 onChange={(id) => { setYear(id === "all" ? "all" : Number(id)); setLimit(PAGE); }}
               />
             )}
+            {walletChoices.options.length > 1 && (
+              <FilterChip
+                label="Wallet"
+                value={wallet}
+                on={wallet !== "all"}
+                options={[
+                  { id: "all", label: "All wallets" },
+                  ...walletChoices.options.map((w) => ({ id: w, label: w, group: walletChoices.groups[w] })),
+                ]}
+                onChange={(id) => { setWallet(id); setLimit(PAGE); }}
+              />
+            )}
+            {filtered && !phone && (
+              <button type="button" className="t-caption fms-linkbtn fms-filterclear" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
           </div>
-
-          <SegmentedControl
-            label="Type"
-            scroll
-            options={FILTERS.map((f) => ({
-              id: f.id,
-              label: f.id === "flagged" && flaggedCount > 0 ? `${f.label} (${flaggedCount})` : f.label,
-            }))}
-            value={filter}
-            onChange={(id) => { setFilter(id); setLimit(PAGE); }}
-          />
-          {/* The workbook's one-tap searches: today, yesterday, the last 7 days, this month. */}
-          <SegmentedControl
-            label="Date"
-            scroll
-            options={PERIODS}
-            value={period}
-            onChange={(id) => { setPeriod(id); setLimit(PAGE); }}
-          />
-          {/*
-            Once the ledger spans more than one year, which it does the moment
-            an older year is imported. Before that it would be one pill that
-            filters nothing.
-          */}
-          {years.length > 1 && (
-            <SegmentedControl
-              label="Year"
-              scroll
-              options={[
-                { id: "all", label: "All years" },
-                ...[...years].reverse().map((y) => ({ id: String(y), label: String(y) })),
-              ]}
-              value={String(year)}
-              onChange={(id) => { setYear(id === "all" ? "all" : Number(id)); setLimit(PAGE); }}
-            />
-          )}
         </div>
 
         {/* Shown on a phone only: how many, and how to pick several. */}
@@ -610,11 +615,11 @@ export function Database({
               {rows.length !== transactions.length && ` of ${transactions.length.toLocaleString()}`}
               {onDeleteMany && " · hold a row to pick several"}
             </span>
-            {(filter !== "all" || period !== "all" || year !== "all") && (
+            {filtered && (
               <button
                 type="button"
                 className="t-caption fms-linkbtn fms-filterclear"
-                onClick={() => { setFilter("all"); setPeriod("all"); setYear("all"); setLimit(PAGE); }}
+                onClick={clearFilters}
               >
                 Clear filters
               </button>
@@ -750,7 +755,7 @@ export function Database({
                           </div>
                         </div>
                         <div className="fms-dbrow-figure">
-                          <Money value={t.type === "Revenue" ? t.total : -t.total} signed size="s" tone={toneOf(t)} />
+                          <Money value={flowSign(t) === 0 ? t.total : flowSign(t) * t.total} signed={flowSign(t) !== 0} size="s" tone={toneOf(t)} />
                           {t.fee > 0 && (
                             <div className="t-micro" style={{ color: "var(--warn)" }}>
                               incl. {fmtShort(t.fee)} fee
@@ -836,7 +841,7 @@ export function Database({
             <div>
               <dt>Amount</dt>
               <dd>
-                <Money value={opened.type === "Revenue" ? opened.total : -opened.total} signed tone={toneOf(opened)} />
+                <Money value={flowSign(opened) === 0 ? opened.total : flowSign(opened) * opened.total} signed={flowSign(opened) !== 0} tone={toneOf(opened)} />
               </dd>
             </div>
             {opened.fee > 0 && (
@@ -913,6 +918,23 @@ function rowTitle(t: Transaction): string {
 }
 
 /** The figure's colour is its flow's: a transfer is grey, debt amber (rule D3). */
+/**
+ * Which way a row moved your money: into a wallet (+), out of one (−), or
+ * between two of your own, or none at all, with no sign.
+ *
+ * Every row but income was signed minus, so money borrowed into a wallet
+ * read "Shop credit, Borrowed, −₱500.00" and a loan released read
+ * −₱10,000.00, the opposite of what happened to the wallet.
+ */
+function flowSign(t: Transaction): 1 | -1 | 0 {
+  if (t.type === "Revenue") return 1;
+  const from = t.fromWallet.trim() !== "";
+  const to = t.toWallet.trim() !== "";
+  if (to && !from) return 1;
+  if (from && !to) return -1;
+  return 0;
+}
+
 function toneOf(t: Transaction): string {
   return t.type === "Revenue"
     ? "var(--flow-revenue-text)"

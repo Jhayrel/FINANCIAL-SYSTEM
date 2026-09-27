@@ -644,6 +644,16 @@ The Debt screen has to read as well with five lenders as with one. The owner,
 | Phone | A row is two lines: name and what is owed, then the next payment and the pill. |
 | The two days | Named as a bill reads: Bill closes (the billing or statement date) and Payment due, as 6th and 20th, with one sentence under the pickers saying which is which. |
 
+### 3.14c Filters and account pickers
+
+| Rule | Spec |
+|---|---|
+| One row of filters | A list's filters are one row of dropdown pills (Type, Date, Year, Wallet), on a phone and on a computer, with Clear filters at the end once any is set. A computer opens the app's own list; a phone opens its own picker. Never a row of pills per filter. |
+| Set is marked | A filter away from its default is filled in the brand colour, so a filtered list never passes for the whole ledger. |
+| Account headings | Every list of accounts sits under the headings Settings uses, in its order: Spending, Reserve, Savings, Goal, then Not active (`accountGroups`). The owner, 27 September 2026, with reserves under "Savings" in the Add form and under "Reserve" in Settings: "fix all the filters and dropdown in the system". |
+| Room before scrolling | A dropdown shows about nine rows before it scrolls, never more than the room it has. |
+| Signs | In a list, money into a wallet is +, out of one is −, and a move between two of your own, or a row that moves no money, has no sign. |
+
 ### 3.15 A printed statement
 
 The PDF a statement exports (`pdf/statementPdf.ts`). From the owner's Excel
