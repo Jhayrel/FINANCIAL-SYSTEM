@@ -19,7 +19,7 @@
 
 import { addDays, addMonths, daysBetween, daysInMonth, getDay, getMonth, getYear, today } from "./dates";
 import type { Centavos } from "./money";
-import type { IsoDate, ReferenceLists, Transaction } from "./types";
+import type { IsoDate, ReferenceLists, StoppedItem, Transaction } from "./types";
 
 /** Payments needed before a rhythm is read from them rather than assumed. */
 const RHYTHM_FROM = 3;
@@ -59,6 +59,19 @@ export interface BillStatus {
   /** Typical amount across every payment seen. */
   readonly averageAmount: Centavos;
   readonly timesPaid: number;
+  /**
+   * The day the owner stopped paying it, when they have and nothing was paid
+   * since. A stopped item has no next date and is never due or past due.
+   */
+  readonly stopped?: IsoDate | undefined;
+  /** The first payment after a stop: it is running again from that day. */
+  readonly resumed?: IsoDate | undefined;
+}
+
+/** The stop the owner set on an item, matched without regard to case. */
+export function stopOf(item: string, stopped: readonly StoppedItem[] | undefined): StoppedItem | undefined {
+  const key = item.trim().toLowerCase();
+  return (stopped ?? []).find((s) => s.name.trim().toLowerCase() === key);
 }
 
 /** The days between payments, when they are regular enough to call a rhythm. */
@@ -164,7 +177,15 @@ export function billStatuses(
     const dates = payments.map((p) => p.date);
     const every = rhythmDays(dates);
     const monthly = every === null || keepsDayOfMonth(dates);
-    const nextDue = last ? (monthly ? addMonths(last.date, 1) : addDays(last.date, every)) : undefined;
+    /*
+     * Stopped, unless it was paid after the day it stopped: paying again is
+     * starting again, worked out from the rows rather than stored.
+     */
+    const stop = stopOf(item, reference.stopped);
+    const after = stop ? payments.find((p) => p.date > stop.since) : undefined;
+    const stoppedOn = stop && !after && stop.since <= asOf ? stop.since : undefined;
+    const nextDue =
+      last && !stoppedOn ? (monthly ? addMonths(last.date, 1) : addDays(last.date, every)) : undefined;
 
     out.push({
       item,
@@ -182,6 +203,8 @@ export function billStatuses(
           ? Math.round(payments.reduce((a, p) => a + p.amount, 0) / payments.length)
           : 0,
       timesPaid: payments.length,
+      ...(stoppedOn ? { stopped: stoppedOn } : {}),
+      ...(after ? { resumed: after.date } : {}),
     });
   }
 

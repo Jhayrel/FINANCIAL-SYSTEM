@@ -6354,6 +6354,14 @@ textarea.fms-askinput {
   white-space: nowrap;
 }
 
+/* A bill or subscription: its name, and under it when it was last paid or stopped. */
+.fms-recurring-name,
+.fms-recurring-about {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 /* The limit pill and the due pill, side by side in the card's header. */
 .fms-debtpills {
   display: inline-flex;

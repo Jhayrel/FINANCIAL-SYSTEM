@@ -629,6 +629,8 @@ export function planStartClean(backup: Backup, current: RestoreCurrent): CleanPl
       subscriptions: strings(current.settings.subscriptions, b.settings.subscriptions),
       revenueCategories: strings(current.settings.revenueCategories, b.settings.revenueCategories),
       spendingTypes: byName(current.settings.spendingTypes, b.settings.spendingTypes),
+      // A bill stopped on either side stays stopped; a file from before stops existed has none.
+      stopped: byName(current.settings.stopped ?? [], b.settings.stopped ?? []),
     },
     budgets: { ...current.budgets, ...b.budgets },
     budgetYears: Object.keys(b.budgets).sort(),
@@ -679,5 +681,6 @@ function mergeSettings(current: AppSettings, incoming: AppSettings): AppSettings
     subscriptions: strings(current.subscriptions, incoming.subscriptions),
     revenueCategories: strings(current.revenueCategories, incoming.revenueCategories),
     spendingTypes: byName([...current.spendingTypes], [...incoming.spendingTypes]),
+    stopped: byName([...(current.stopped ?? [])], [...(incoming.stopped ?? [])]),
   };
 }

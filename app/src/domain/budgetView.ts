@@ -297,6 +297,8 @@ export function monthBills(
   const neverPaid: string[] = [];
 
   for (const b of billStatuses(transactions, reference, at)) {
+    // Stopped: not expected any more, though a payment made this month still counts as paid.
+    if (b.stopped && !b.paidThisMonth) continue;
     if (b.timesPaid === 0) {
       neverPaid.push(b.item);
       continue;

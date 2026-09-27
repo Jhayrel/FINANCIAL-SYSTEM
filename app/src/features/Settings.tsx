@@ -64,7 +64,7 @@ import {
   headline,
   type DebtForm,
 } from "../domain/debtForms";
-import { formatMedium, today } from "../domain/dates";
+import { daysBetween, formatMedium, today } from "../domain/dates";
 import {
   AI_CONNECTED_PROVIDERS,
   AI_DEFAULT_MODEL,
@@ -85,7 +85,9 @@ import { activityStore } from "../data/activityStore";
 import { correctionsFrom, type AiEvent } from "../domain/aiLog";
 import type { ChatMessage } from "../domain/chat";
 import { setPreference as setThemePreference } from "../theme";
-import type { Budgets, ReferenceLists, SpendingType, Transaction } from "../domain/types";
+import type { Budgets, ReferenceLists, SpendingType, StoppedItem, Transaction } from "../domain/types";
+import { billStatuses, STOPPED_AFTER_DAYS, type BillStatus } from "../domain/bills";
+import { behalfFor } from "../domain/behalfFor";
 
 type Tab =
   | "accounts"
@@ -1459,21 +1461,82 @@ function CategoriesSection({
   patch: (part: Partial<AppSettings>) => void;
   onRenameItem: (from: string, to: string) => void;
 }) {
+  /*
+   * Where each bill and subscription stands: last paid, and stopped or not.
+   * The owner, 27 September 2026, on a cancelled Google Drive: "is there an
+   * option to close this or say I stop paying ... or if I want to start
+   * paying again". Stopping keeps the name and its history and takes it off
+   * everything that expects it; paying again, or Start again, brings it back.
+   */
+  const statuses = useMemo(() => {
+    const reference = {
+      wallets: [],
+      savings: [],
+      bills: settings.bills,
+      subscriptions: settings.subscriptions,
+      revenueCategories: [],
+      spendingTypes: [],
+      stopped: settings.stopped,
+    };
+    return new Map(billStatuses(transactions, reference, today()).map((b) => [b.item.trim().toLowerCase(), b]));
+  }, [transactions, settings.bills, settings.subscriptions, settings.stopped]);
+
+  /*
+   * A bill whose latest payments were made for someone else, On behalf: the
+   * owner's father's Globe Postpaid, 27 September 2026. It is not theirs to
+   * expect, so the row says whose it is (`behalfFor.ts`).
+   */
+  const theirs = useMemo(() => {
+    const people = settings.credits
+      .filter((c) => !c.archived && c.form === "pass-through")
+      .map((c) => ({ id: c.id, name: c.name, side: c.kind === "receivable" ? ("owed" as const) : ("held" as const) }));
+    const out = new Map<string, string>();
+    if (people.length === 0) return out;
+    for (const name of [...settings.bills, ...settings.subscriptions]) {
+      const found = behalfFor(name, transactions, people, today(), null);
+      if (found) out.set(name.trim().toLowerCase(), found.person.name);
+    }
+    return out;
+  }, [transactions, settings.bills, settings.subscriptions, settings.credits]);
+
+  const stop = (name: string): void =>
+    patch({ stopped: [...settings.stopped.filter((x) => !sameName(x.name, name)), { name, since: today() }] });
+  const start = (name: string): void => patch({ stopped: settings.stopped.filter((x) => !sameName(x.name, name)) });
+  const forget = (name: string): StoppedItem[] => settings.stopped.filter((x) => !sameName(x.name, name));
+
   return (
     <>
       <StringList
         title="Bills"
         singular="Bill"
-        hint="Recurring. Predicted one month after the last payment."
+        hint="Recurring. Predicted one month after the last payment. Stop one you no longer pay: its history stays."
         values={settings.bills}
         onChange={(bills) => patch({ bills })}
+        recurring={{
+          statuses,
+          theirs,
+          other: { title: "Subscriptions", values: settings.subscriptions },
+          onStop: stop,
+          onStart: start,
+          onKeepHere: (name) => patch({ subscriptions: settings.subscriptions.filter((x) => !sameName(x, name)) }),
+          onRemove: (name, bills) => patch({ bills, stopped: forget(name) }),
+        }}
       />
       <StringList
         title="Subscriptions"
         singular="Subscription"
-        hint="Same prediction, separate budget line"
+        hint="Same prediction, separate budget line. Stop one you cancelled: its history stays."
         values={settings.subscriptions}
         onChange={(subscriptions) => patch({ subscriptions })}
+        recurring={{
+          statuses,
+          theirs,
+          other: { title: "Bills", values: settings.bills },
+          onStop: stop,
+          onStart: start,
+          onKeepHere: (name) => patch({ bills: settings.bills.filter((x) => !sameName(x, name)) }),
+          onRemove: (name, subscriptions) => patch({ subscriptions, stopped: forget(name) }),
+        }}
       />
       <StringList
         title="Revenue categories"
@@ -1492,18 +1555,38 @@ function CategoriesSection({
   );
 }
 
+/** Two names for one thing, whatever their case or spacing. */
+const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** What a bill or subscription list can do beyond adding and removing. */
+interface Recurring {
+  readonly statuses: ReadonlyMap<string, BillStatus>;
+  /** Items now paid for someone else, On behalf, by name: whose they are. */
+  readonly theirs: ReadonlyMap<string, string>;
+  /** The other list, so a name in both is caught. */
+  readonly other: { readonly title: string; readonly values: readonly string[] };
+  readonly onStop: (name: string) => void;
+  readonly onStart: (name: string) => void;
+  /** Take it out of the other list, keeping it in this one. */
+  readonly onKeepHere: (name: string) => void;
+  /** Removed from this list, with any stop on it forgotten. */
+  readonly onRemove: (name: string, values: string[]) => void;
+}
+
 function StringList({
   title,
   singular,
   hint,
   values,
   onChange,
+  recurring,
 }: {
   title: string;
   singular: string;
   hint: string;
   values: readonly string[];
   onChange: (values: string[]) => void;
+  recurring?: Recurring;
 }) {
   const [adding, setAdding] = useState("");
   const { confirm, dialog } = useConfirm();
@@ -1518,12 +1601,99 @@ function StringList({
   const remove = async (v: string): Promise<void> => {
     const ok = await confirm({
       title: `Remove \u201c${v}\u201d?`,
-      body: `It disappears from the ${singular.toLowerCase()} list and stops being predicted. Transactions already filed under it keep the name and still count.`,
+      body: `It disappears from the ${singular.toLowerCase()} list and stops being predicted. Transactions already filed under it keep the name and still count.${
+        recurring ? " To keep it listed but no longer expected, press Stop instead." : ""
+      }`,
       confirmLabel: "Remove",
       tone: "danger",
     });
-    if (ok) onChange(values.filter((x) => x !== v));
+    if (!ok) return;
+    const left = values.filter((x) => x !== v);
+    if (recurring) recurring.onRemove(v, left);
+    else onChange(left);
   };
+
+  const statusOf = (v: string): BillStatus | undefined => recurring?.statuses.get(v.trim().toLowerCase());
+  const running = recurring ? values.filter((v) => !statusOf(v)?.stopped) : values;
+  const stopped = recurring ? values.filter((v) => statusOf(v)?.stopped) : [];
+
+  /** When it was last paid, and anything worth knowing about it. */
+  const aboutIt = (v: string): React.ReactNode => {
+    const b = statusOf(v);
+    if (!recurring || !b) return null;
+    const inOther = recurring.other.values.some((x) => sameName(x, v));
+    const last = b.lastPaid ? `Last paid ${formatMedium(b.lastPaid)}, ${formatMoney(b.lastAmount)}` : "Never paid";
+    return (
+      <span className="fms-recurring-about">
+        <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+          {b.stopped ? `Stopped ${formatMedium(b.stopped)}. ${last}` : b.resumed ? `${last}. Paid again after it was stopped, so it is running` : last}
+        </span>
+        {!b.stopped && recurring.theirs.has(v.trim().toLowerCase()) ? (
+          <span className="t-caption" style={{ color: "var(--warn)" }}>
+            Paid for {recurring.theirs.get(v.trim().toLowerCase())} now, On behalf, so it is not yours to expect. Remove it from this list.
+          </span>
+        ) : (
+          !b.stopped &&
+          b.lastPaid !== undefined &&
+          daysBetween(b.lastPaid, today()) > STOPPED_AFTER_DAYS && (
+            <span className="t-caption" style={{ color: "var(--warn)" }}>
+              Not paid in over three months. If you no longer pay it, press Stop.
+            </span>
+          )
+        )}
+        {inOther && (
+          <span className="t-caption" style={{ color: "var(--warn)" }}>
+            Also under {recurring.other.title}, so it is counted in both.{" "}
+            <button type="button" className="t-caption fms-linkbtn" onClick={() => recurring.onKeepHere(v)}>
+              Keep it only here
+            </button>
+          </span>
+        )}
+      </span>
+    );
+  };
+
+  const rows = (list: readonly string[], halted: boolean) => (
+    <table className="fms-table">
+      <thead>
+        <tr>
+          <th>{halted ? `Stopped ${singular.toLowerCase()}s` : singular}</th>
+          <th className="fms-shrink" />
+        </tr>
+      </thead>
+      <tbody>
+        {list.map((v) => (
+          <tr key={v}>
+            <td>
+              <span className="fms-recurring-name">
+                <span className="t-body" style={halted ? { color: "var(--ink-2)" } : undefined}>
+                  {v}
+                </span>
+                {aboutIt(v)}
+              </span>
+            </td>
+            <td>
+              <span className="fms-rowactions">
+                {recurring &&
+                  (halted ? (
+                    <Button size="sm" ariaLabel={`Start paying ${v} again`} onClick={() => recurring.onStart(v)}>
+                      Start again
+                    </Button>
+                  ) : (
+                    <Button size="sm" ariaLabel={`Stop ${v}: no longer paid`} onClick={() => recurring.onStop(v)}>
+                      Stop
+                    </Button>
+                  ))}
+                <Button size="sm" variant="danger" ariaLabel={`Remove ${v}`} onClick={() => void remove(v)}>
+                  Remove
+                </Button>
+              </span>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 
   return (
     <Group title={title} hint={hint} action={<CountChip>{values.length}</CountChip>}>
@@ -1533,28 +1703,17 @@ function StringList({
           No {title.toLowerCase()} yet.
         </p>
       ) : (
-        <table className="fms-table">
-          <thead>
-            <tr>
-              <th>{singular}</th>
-              <th className="fms-shrink" />
-            </tr>
-          </thead>
-          <tbody>
-            {values.map((v) => (
-              <tr key={v}>
-                <td><span className="t-body">{v}</span></td>
-                <td>
-                  <span className="fms-rowactions">
-                    <Button size="sm" variant="danger" ariaLabel={`Remove ${v}`} onClick={() => void remove(v)}>
-                      Remove
-                    </Button>
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <>
+          {running.length > 0 && rows(running, false)}
+          {stopped.length > 0 && (
+            <>
+              <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-3)" }}>
+                Not expected any more. Their history stays, and paying one again, or Start again, brings it back.
+              </p>
+              {rows(stopped, true)}
+            </>
+          )}
+        </>
       )}
 
       <div className="fms-addrow">

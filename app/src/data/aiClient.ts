@@ -50,6 +50,7 @@ import { readPicture } from "./ocr";
 import { pairBorrowings, readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
 import type { Attachment } from "./attachments";
 import type { IsoDate } from "../domain/types";
+import { stopOf } from "../domain/bills";
 
 export type { AiTask };
 
@@ -607,7 +608,11 @@ function extractContext(options: ExtractOptions): string {
    * belongs to, and the owner's own note beside each spending type says what
    * counts as it, which is the thing worth reading before choosing.
    */
-  const aged = (name: string): string => itemForReader(name, options.lastUsed, asOf);
+  const aged = (name: string): string => {
+    // A bill or subscription they stopped paying says so, like an old one.
+    const stop = stopOf(name, reference.stopped);
+    return stop ? `${name} (stopped ${stop.since})` : itemForReader(name, options.lastUsed, asOf);
+  };
   const spendingTypes = reference.spendingTypes.map((t) =>
     t.remark ? `${aged(t.name)} (${t.remark})` : aged(t.name),
   );
@@ -634,7 +639,7 @@ function extractContext(options: ExtractOptions): string {
     `Category "Bills": ${reference.bills.map(aged).join(", ") || "none"}`,
     `Category "Subscriptions": ${reference.subscriptions.map(aged).join(", ") || "none"}`,
     `Category "Revenue" (income only): ${reference.revenueCategories.map(aged).join(", ") || "none"}`,
-    "An item marked old has not been used for over a year. Choose it only when what they said names it; a word in common is not enough.",
+    "An item marked old has not been used for over a year, and one marked stopped is a bill or subscription they stopped paying. Choose either only when what they said names it; a word in common is not enough.",
     "",
     // Redacted even though the endpoint never logs: a key pasted here would
     // otherwise reach the provider, which is a place this app cannot reach.

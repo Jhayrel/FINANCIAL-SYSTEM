@@ -30,7 +30,7 @@
 
 import { allWalletBalances, walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
-import { overdue, upcoming, type BillStatus } from "./bills";
+import { overdue, STOPPED_AFTER_DAYS, upcoming, type BillStatus } from "./bills";
 import { basisWords, debtDue, debtNamedBy, paymentsFiledAsSpending, positionsOf, type Debt } from "./debt";
 import { creditRoom, roomWords } from "./creditLimit";
 import { addDays, daysBetween, daysInMonth, formatMedium, getMonth, getYear, monthName } from "./dates";
@@ -198,15 +198,33 @@ export function financeAlerts(input: AlertInput): Alert[] {
   }
 
   // ── Bills ────────────────────────────────────────────────────────────────
-  const late = overdue(bills);
+  /*
+   * Past due, told apart from long gone. Netflix, last paid in January 2025,
+   * was "past due" in September 2026 beside a Google Drive payment a month
+   * late: one needs paying and the other was cancelled long ago. A bill
+   * unpaid for three months is asked about rather than called late.
+   */
+  const lapsed = (b: BillStatus): boolean => b.lastPaid !== undefined && daysBetween(b.lastPaid, asOf) > STOPPED_AFTER_DAYS;
+  const late = overdue(bills).filter((b) => !lapsed(b));
   if (late.length > 0) {
     out.push({
       id: "bills-overdue",
       level: "over",
       area: "bills",
       title: `${late.length} bill${late.length === 1 ? "" : "s"} past due`,
-      detail: `${late.map((b) => b.item).join(", ")}. Predicted due before today and not yet paid.`,
+      detail: `${late.map((b) => b.item).join(", ")}. Predicted due before today and not yet paid. Stopped paying one? Press Stop beside it in Settings, under Categories, and it is no longer expected.`,
       weight: 85,
+    });
+  }
+  const gone = overdue(bills).filter(lapsed);
+  if (gone.length > 0) {
+    out.push({
+      id: "bills-lapsed",
+      level: "warn",
+      area: "bills",
+      title: `${gone.length === 1 ? `${gone[0]!.item} looks` : `${gone.length} bills look`} stopped`,
+      detail: `${gone.map((b) => `${b.item}, last paid ${formatMedium(b.lastPaid!)}`).join("; ")}. If you no longer pay ${gone.length === 1 ? "it" : "them"}, press Stop in Settings, under Categories, and ${gone.length === 1 ? "it is" : "they are"} no longer expected.`,
+      weight: 50,
     });
   }
 

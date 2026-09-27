@@ -14,6 +14,7 @@ import { walletBalance } from "./balances";
 import type { Debt, DebtEffect } from "./debt";
 import { debtNamedBy, effectsFor, outstandingOf, partOf, splitRepayment } from "./debt";
 import { limitOn, takesLimit, usedOn } from "./creditLimit";
+import { stopOf } from "./bills";
 import { daysBetween, formatMedium, getMonth, getYear, monthName, today } from "./dates";
 import { formatMoney as money, type Centavos } from "./money";
 import { kindKey, unusualAgainst, type Unusual } from "./unusual";
@@ -656,6 +657,20 @@ export function checkDraft(
       warnings.push({
         field: "date",
         message: `This is dated ${formatMedium(draft.date)}, more than a year ago. Is the year right?`,
+      });
+    }
+  }
+
+  /*
+   * A payment for a bill or subscription the owner stopped. Not refused:
+   * paying again is how it starts again (`bills.ts`), so the card says so.
+   */
+  if (draft.flow === "Spending" && (draft.category === "Bills" || draft.category === "Subscriptions") && draft.item) {
+    const stop = stopOf(draft.item, reference.stopped);
+    if (stop && (draft.date || asOf) > stop.since) {
+      warnings.push({
+        field: "item",
+        message: `You stopped ${draft.item} on ${formatMedium(stop.since)}. Saving this counts it as running again, expected every month from now.`,
       });
     }
   }

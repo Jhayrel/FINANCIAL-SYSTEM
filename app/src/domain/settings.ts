@@ -15,7 +15,7 @@
 import type { Account } from "./accounts";
 import type { Debt } from "./debt";
 import type { Centavos } from "./money";
-import type { SpendingType } from "./types";
+import type { SpendingType, StoppedItem } from "./types";
 
 export type AiProvider = "groq" | "openrouter" | "openai" | "anthropic";
 
@@ -141,6 +141,8 @@ export interface AppSettings {
    * through, so a Debt transaction can be attributed without guessing.
    */
   readonly credits: readonly Debt[];
+  /** Bills and subscriptions no longer paid, and since when (`bills.ts`). */
+  readonly stopped: readonly StoppedItem[];
   readonly ai: AiSettings;
   readonly theme: ThemePreference;
   /** Warn when a spending wallet drops below this. */
@@ -159,6 +161,7 @@ export function defaultSettings(): AppSettings {
     revenueCategories: [],
     spendingTypes: [],
     credits: [],
+    stopped: [],
     ai: DEFAULT_AI,
     theme: "system",
     lowBalanceThreshold: 50000,
@@ -191,6 +194,12 @@ export function normaliseSettings(raw: unknown): AppSettings {
       : base.revenueCategories,
     spendingTypes: Array.isArray(input.spendingTypes) ? input.spendingTypes : base.spendingTypes,
     credits: Array.isArray(input.credits) ? input.credits : base.credits,
+    stopped: Array.isArray(input.stopped)
+      ? input.stopped.filter(
+          (x): x is StoppedItem =>
+            Boolean(x) && typeof x.name === "string" && x.name.trim() !== "" && typeof x.since === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x.since),
+        )
+      : base.stopped,
     ai: {
       enabled: input.ai?.enabled ?? base.ai.enabled,
       provider,

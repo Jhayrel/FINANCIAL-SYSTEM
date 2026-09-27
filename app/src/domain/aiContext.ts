@@ -35,10 +35,10 @@
 
 import { walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
-import { billStatuses, overdue, upcoming } from "./bills";
+import { billStatuses, overdue, STOPPED_AFTER_DAYS, upcoming } from "./bills";
 import { debtDue, incomeQuality, positionsOf, type Debt } from "./debt";
 import { creditRoom, limitSteps } from "./creditLimit";
-import { addDays, getMonth, getYear, monthName } from "./dates";
+import { addDays, daysBetween, getMonth, getYear, monthName } from "./dates";
 import { financeAlerts, burnRate, daysLeft, dailyAllowance } from "./alerts";
 import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
 import { toPesos } from "./money";
@@ -96,6 +96,8 @@ export interface AiContext {
   readonly bills: {
     readonly overdue: readonly string[];
     readonly dueSoon: readonly string[];
+    /** Stopped by the owner: not expected, and not to be called due. */
+    readonly stopped?: readonly string[];
   };
   readonly debts: readonly {
     readonly name: string;
@@ -214,8 +216,12 @@ export function buildContext(input: ContextInput): AiContext {
       .map((r) => ({ category: r.name, amount: pesos(r.amount) })),
 
     bills: {
-      overdue: overdue(bills).map((b) => b.item),
+      // Past due, not long gone: a bill unpaid for three months is more likely cancelled than late.
+      overdue: overdue(bills)
+        .filter((b) => !b.lastPaid || daysBetween(b.lastPaid, asOf) <= STOPPED_AFTER_DAYS)
+        .map((b) => b.item),
       dueSoon: upcoming(bills, 14).map((b) => b.item),
+      stopped: bills.filter((b) => b.stopped).map((b) => `${b.item} (since ${b.stopped})`),
     },
 
     debts: positions.map((p) => {
@@ -389,11 +395,12 @@ export function contextToText(c: AiContext): string {
     }
   }
 
-  if (c.bills.overdue.length > 0 || c.bills.dueSoon.length > 0) {
+  if (c.bills.overdue.length > 0 || c.bills.dueSoon.length > 0 || (c.bills.stopped ?? []).length > 0) {
     lines.push("");
     lines.push("## Bills");
     if (c.bills.overdue.length > 0) lines.push(`Past due: ${c.bills.overdue.join(", ")}`);
     if (c.bills.dueSoon.length > 0) lines.push(`Due within two weeks: ${c.bills.dueSoon.join(", ")}`);
+    if ((c.bills.stopped ?? []).length > 0) lines.push(`Stopped paying, no longer expected: ${(c.bills.stopped ?? []).join(", ")}`);
   }
 
   if (c.comparison.length > 1) {

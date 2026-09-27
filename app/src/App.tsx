@@ -820,6 +820,7 @@ export default function App() {
        * naming debt.
        */
       credits: settings.credits.filter((c) => !c.archived).map((c) => c.name),
+      stopped: settings.stopped,
       onBehalf: settings.credits
         .filter((c) => !c.archived && c.form === "pass-through")
         .map((c) => ({ id: c.id, name: c.name, side: c.kind === "receivable" ? ("owed" as const) : ("held" as const) })),

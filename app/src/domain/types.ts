@@ -221,6 +221,19 @@ export interface ReferenceLists {
    * the list. What makes a sentence theirs is in `behalfFor.ts`.
    */
   readonly onBehalf?: readonly BehalfPerson[];
+  /** Bills and subscriptions the owner stopped paying, and since when. See `bills.ts`. */
+  readonly stopped?: readonly StoppedItem[];
+}
+
+/**
+ * A bill or subscription the owner stopped paying (owner, 2026-09-27: "google
+ * drive subscription is now canceled ... is there an option to close this").
+ * It stays in its list, so its history keeps its name, and is no longer
+ * expected. A payment after `since` means it is running again.
+ */
+export interface StoppedItem {
+  readonly name: string;
+  readonly since: IsoDate;
 }
 
 /** Someone the owner pays for or holds money for: a `pass-through` debt. */

@@ -592,6 +592,8 @@ From the review of 2026-09-16. Every one of these is worked out from figures the
 
 **Bills** are expected a month after the last payment when they keep to a day of the month, and on their own rhythm when they do not (four-weekly stays four-weekly). Either way the date comes from the most recent payment alone, so a skipped cycle leaves no backlog.
 
+**A bill or subscription can be stopped** (owner, 2026-09-27: a cancelled Google Drive "is there an option to close this or say I stop paying"). Settings, Categories: each row says when it was last paid and has Stop beside Remove. A stopped one moves under its list's "Stopped" heading with Start again; its name and history stay, and it leaves every place that expects it (the bell, the Add form's due chips, the month's bills, the assistant). A payment after the day it stopped starts it again by itself, and the form says so before saving. A row also says when it is in both lists (with "Keep it only here"), when it has not been paid in three months ("press Stop"), and when its payments are now made for someone else, On behalf. The bell tells a bill three months unpaid ("looks stopped") apart from one past due.
+
 ### 3.14 What the assistant is doing
 
 One word for whatever is actually running, beside the three dots.
