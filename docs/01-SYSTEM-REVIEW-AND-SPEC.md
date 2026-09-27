@@ -1179,6 +1179,12 @@ The **＋** is a raised circular button in `--forest-700`, centre of the bottom 
 
 ## 7.2 Dashboard
 
+Every chart on it reads a month by pointing and opens it in Insights by
+selecting it; a kind of spending opens Insights on its own entries for the
+month, and one in the year's top spending for the year (owner, 2026-09-27).
+When nothing is left to pay, the box names what was paid instead of standing
+empty.
+
 ```
 ┌────────────────────────────────────────────────┐
 │ NET WORTH                        29 Aug 2026   │
@@ -1284,9 +1290,20 @@ Debt detail = the card from 6.6.6 plus a full transaction history with a **runni
 
 ## 7.6 Insights
 
-Month calendar (spend intensity per day, tap for that day's rows), two-track budget vs actual, the rule-based text report from Module10, and an AI summary **layered on top** of the rule output — never instead of it.
+Month calendar (spend intensity per day, tap for that day's rows), two-track budget vs actual, the rule-based text report from Module10, and an AI summary **layered on top** of the rule output, never instead of it.
 
-**New block — Income Quality:**
+**Any period, and every part follows it** (owner, 2026-09-27: "I can't even
+use range properly if I want to see data of the year", "if I want to navigate
+2024 March"). The screen reads one window, chosen as a month of any year, a
+whole year, or any two dates, and narrowed further by a pick on the calendar
+or the chart. Where it went, where it came from, the entries, budget against
+spending and the bills all read that window, with the same definitions every
+screen uses (`costOf`, `incomeOf`, `costByKind`, `budgetSummary`), so the
+trend, the kinds and the budget months each add up to the same "went out".
+Checked across all five years of the owner's ledger. See
+`domain/insightWindow.ts` and style guide 3.9.
+
+**Income Quality** (on the Dashboard):
 
 ```
 CASH IN THIS YEAR         ₱245,715.96
@@ -1295,6 +1312,16 @@ CASH IN THIS YEAR         ₱245,715.96
   Opening balance           ₱2,475.89   ← not income
   Self-moves                  ₱500.00   ← not income
 ```
+
+**Money held for someone is not borrowing** (2026-09-27, following rule
+5.6.1, "On behalf", apart from Debt). The Borrowed line counted every debt
+draw, so ₱25,000.00 held for someone read as borrowing in 2026 beside a cash-in
+figure it was never part of. The Dashboard now shows the parts of cash in as
+one bar and lines that add up to it (true income, borrowing filed as revenue,
+opening balance, self-moves), and beside it, under a dashed rule, what was
+borrowed on credit and loans and what was held for others. `incomeQuality`
+itself is unchanged, and so is every figure the tests pin: cash in and true
+income do not move, only which line the held money is named on.
 
 ## 7.7 Budget
 

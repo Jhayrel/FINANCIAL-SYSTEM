@@ -25,7 +25,14 @@
  * quality, then the two charts.
  *
  * The month's figures are `domain/monthPlan.ts`, the brief Insights reads, so
- * the two screens cannot disagree. Net worth stays broken into its parts (spec
+ * the two screens cannot disagree.
+ *
+ * ── Every chart opens what it shows ───────────────────────────────────────
+ *
+ * The owner, 27 September 2026: make the dashboard's charts interactable.
+ * Pointing at a month on either chart reads it out, and clicking it opens
+ * that month in Insights. A kind of spending, here or in the year's top
+ * spending, opens Insights on its own entries for the month or the year. Net worth stays broken into its parts (spec
  * 7.2) and counts every debt, archived ones included: money still owed is owed
  * whether or not the line is still in use.
  */
@@ -45,6 +52,7 @@ import { formatMoney, type Centavos } from "../domain/money";
 import { isOpenBill, monthBrief } from "../domain/monthPlan";
 import { monthlyTotalsForYear, spendingRanking, totalSpending } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction, WalletBalance } from "../domain/types";
+import type { InsightsAt } from "./Insights";
 import { useReportScreen } from "./screenReport";
 
 type Place = "budget" | "insights" | "debt";
@@ -76,6 +84,7 @@ export function Dashboard({
   onRecordBill,
   onRecordDebt,
   onGo,
+  onOpenInsights,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -92,6 +101,8 @@ export function Dashboard({
   /** The Add form with this debt movement filled in. */
   onRecordDebt: (debtId: string, effect: DebtEffect, amount: Centavos | null) => void;
   onGo: (place: Place) => void;
+  /** Insights on a month, a year, or a kind of spending's entries. */
+  onOpenInsights?: ((at: InsightsAt) => void) | undefined;
 }) {
   const year = getYear(asOf);
   const month = getMonth(asOf);
@@ -104,13 +115,32 @@ export function Dashboard({
   const v = useMemo(() => {
     const range = { start: `${year}-01-01`, end: `${year}-12-31` };
     const perMonth = monthlyTotalsForYear(transactions, year);
+    /*
+     * Money held or paid for someone else is not borrowing (spec 5.6.1, "On
+     * behalf", apart from Debt). It was counted with the credit lines, so
+     * PHP 25,000.00 held for a relative read as "Borrowed" beside a cash-in
+     * figure it was never part of. It is left out of that line and said on
+     * its own.
+     */
+    const behalf = new Set(debts.filter((d) => d.form === "pass-through").map((d) => d.id));
+    const isBehalf = (t: Transaction): boolean => t.type === "Debt" && t.debtId !== undefined && behalf.has(t.debtId);
+    const quality = incomeQuality(transactions.filter((t) => !isBehalf(t)), debts, range);
+    const inRevenue = quality.cashIn - quality.trueIncome - quality.openingBalance - quality.selfMoves;
+    const heldForOthers = transactions
+      .filter((t) => isBehalf(t) && t.debtEffect === "draw" && t.date >= range.start && t.date <= range.end)
+      .reduce((sum, t) => sum + t.amount, 0);
     return {
       worth: netWorth(
         totalWalletBalance(transactions, reference.wallets),
         totalSavingsBalance(transactions, reference.savings),
         positionsOf(debts, transactions, asOf),
       ),
-      income: incomeQuality(transactions, debts, range),
+      income: quality,
+      /** Borrowing filed as revenue: part of cash in. */
+      borrowedInRevenue: inRevenue,
+      /** Borrowing recorded as debt: beside cash in, not part of it. */
+      borrowedAsDebt: quality.borrowed - inRevenue,
+      heldForOthers,
       annual: totalSpending(transactions, range),
       ranking: spendingRanking(transactions, reference.spendingTypes, range).slice(0, 6),
       spendSeries: perMonth.map((m) => m.total),
@@ -152,7 +182,6 @@ export function Dashboard({
   ].sort((a, b) => (a.days ?? 99) - (b.days ?? 99));
 
   const paidBills = brief.bills.bills.filter((b) => b.state === "paid");
-  const kindMax = Math.max(1, ...brief.kinds.map((k) => k.amount));
 
   useReportScreen(
     () => ({
@@ -341,10 +370,25 @@ export function Dashboard({
           }
         >
           {upcoming.length === 0 ? (
-            <p className="t-body" style={{ margin: 0, color: "var(--ink-2)" }}>
-              Nothing left to pay in {name}.
-              {brief.bills.bills.length === 0 && " Bills and subscriptions show here once one has been paid."}
-            </p>
+            <>
+              <p className="t-body" style={{ margin: 0, color: "var(--ink-2)" }}>
+                Nothing left to pay in {name}.
+                {brief.bills.bills.length === 0 && " Bills and subscriptions show here once one has been paid."}
+              </p>
+              {/* What was paid, so the box says what it covered rather than standing empty. */}
+              {paidBills.length > 0 && (
+                <div className="fms-paidlist">
+                  <div className="t-label" style={{ color: "var(--ink-2)" }}>
+                    Paid in {name}
+                  </div>
+                  <div className="fms-month-lines" style={{ marginTop: 0 }}>
+                    {paidBills.map((b) => (
+                      <Line key={b.item} label={b.paidOn ? `${b.item}, ${shortDay(b.paidOn)}` : b.item} value={b.amount} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <ul className="fms-duelist">
               {upcoming.map((u) => (
@@ -430,29 +474,24 @@ export function Dashboard({
               Nothing spent in {name} yet.
             </p>
           ) : (
-            <ol className="fms-kinds">
-              {brief.kinds.map((k) => {
+            <RankBars
+              rows={brief.kinds.map((k) => {
                 const diff = k.amount - k.lastMonth;
-                return (
-                  <li key={k.name} className="fms-kind">
-                    <div className="fms-rankhead">
-                      <span className="t-body fms-rankname">{k.name}</span>
-                      <Money value={k.amount} size="s" />
-                    </div>
-                    <div className="fms-budgetcat-bar" aria-hidden>
-                      <span style={{ width: `${Math.max(2, Math.round((k.amount / kindMax) * 100))}%` }} />
-                    </div>
-                    <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-                      {k.lastMonth === 0
-                        ? `None in ${previous}`
-                        : diff === 0
-                          ? `The same as ${previous}`
-                          : `${formatMoney(Math.abs(diff))} ${diff > 0 ? "more" : "less"} than ${previous}`}
-                    </span>
-                  </li>
-                );
+                return {
+                  name: k.name,
+                  amount: k.amount,
+                  hint:
+                    k.lastMonth === 0
+                      ? `None in ${previous}`
+                      : diff === 0
+                        ? `No change from ${previous}`
+                        : `${formatMoney(Math.abs(diff))} ${diff > 0 ? "more" : "less"} than ${previous}`,
+                };
               })}
-            </ol>
+              {...(onOpenInsights
+                ? { onPick: (kind: string) => onOpenInsights({ period: { kind: "month", year, month }, focus: { name: kind, flow: "out" } }) }
+                : {})}
+            />
           )}
         </Card>
       </div>
@@ -462,38 +501,103 @@ export function Dashboard({
       {
         <>
           <div className="fms-home-top">
-            <Card title="Top spending" subtitle={`${year} so far`} action={<CountChip>{formatMoney(v.annual)}</CountChip>}>
-              <RankBars rows={v.ranking} />
+            <Card title="Top spending" subtitle={`${year} so far. Select one for its entries.`} action={<CountChip>{formatMoney(v.annual)}</CountChip>}>
+              <RankBars
+                rows={v.ranking}
+                total={v.annual}
+                {...(onOpenInsights
+                  ? { onPick: (kind: string) => onOpenInsights({ period: { kind: "year", year }, focus: { name: kind, flow: "out" } }) }
+                  : {})}
+              />
             </Card>
           </div>
           <div className="fms-home-income">
-            <Card title="Income quality" subtitle="What the revenue line is really made of">
-              <div className="fms-month-lines" style={{ marginTop: 0 }}>
-                <Line label="Cash in this year" value={v.income.cashIn} strong />
-                <Line label="True income" value={v.income.trueIncome} tone="var(--flow-revenue-text)" />
-                <Line label="Borrowed, not income" value={v.income.borrowed} tone={v.income.borrowed > 0 ? "var(--flow-debt-text)" : undefined} quiet={v.income.borrowed === 0} />
-                <Line label="Opening balance, not income" value={v.income.openingBalance} quiet />
-                <Line label="Self-moves, not income" value={v.income.selfMoves} quiet />
+            <Card title="Income quality" subtitle={`What came in during ${year}, and how much of it is really income`}>
+              <div className="fms-incomehead">
+                <Money value={v.income.cashIn} size="l" />
+                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                  Cash in on the revenue line
+                </span>
               </div>
+              {/*
+                One bar, the parts of cash in side by side: how much of what
+                came in was earned. The lines under it add up to the figure
+                above; what was borrowed as debt, or held for someone, is
+                beside it and said apart.
+              */}
+              {v.income.cashIn > 0 && (
+                <div className="fms-split" aria-hidden>
+                  {[
+                    { value: v.income.trueIncome, colour: "var(--flow-revenue)" },
+                    { value: v.borrowedInRevenue, colour: "var(--flow-debt)" },
+                    { value: v.income.openingBalance, colour: "var(--hairline-strong)" },
+                    { value: v.income.selfMoves, colour: "var(--ink-3)" },
+                  ]
+                    .filter((p) => p.value > 0)
+                    .map((p) => (
+                      <span key={p.colour} style={{ flexGrow: p.value, background: p.colour }} />
+                    ))}
+                </div>
+              )}
+              <div className="fms-month-lines">
+                <Line label={<Keyed colour="var(--flow-revenue)">True income</Keyed>} value={v.income.trueIncome} tone="var(--flow-revenue-text)" strong />
+                {v.borrowedInRevenue > 0 && (
+                  <Line label={<Keyed colour="var(--flow-debt)">Borrowed, filed as revenue</Keyed>} value={v.borrowedInRevenue} tone="var(--flow-debt-text)" />
+                )}
+                <Line label={<Keyed colour="var(--hairline-strong)">Opening balance, not income</Keyed>} value={v.income.openingBalance} quiet />
+                <Line label={<Keyed colour="var(--ink-3)">Self-moves, not income</Keyed>} value={v.income.selfMoves} quiet />
+              </div>
+              <div className="fms-month-lines fms-income-beside">
+                <Line
+                  label="Borrowed on credit and loans"
+                  value={v.borrowedAsDebt}
+                  tone={v.borrowedAsDebt > 0 ? "var(--flow-debt-text)" : undefined}
+                  quiet={v.borrowedAsDebt === 0}
+                />
+                {v.heldForOthers > 0 && <Line label={`Held ${ON_BEHALF.toLowerCase()} of others`} value={v.heldForOthers} quiet />}
+              </div>
+              <p className="t-micro" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-3)" }}>
+                {v.heldForOthers > 0
+                  ? "Neither is in cash in: borrowing is owed back, and money held for someone is theirs."
+                  : "Not in cash in: borrowing is owed back."}
+              </p>
             </Card>
           </div>
           <div className="fms-home-rev">
-            <Card title="Revenue and spending" subtitle={`January to ${name} ${year}`}>
+            <Card title="Revenue and spending" subtitle={`January to ${name} ${year}. Select a month to open it.`}>
               <AreaChart
                 labels={MONTH_NAMES_SHORT.slice(0, month)}
+                titles={MONTH_NAMES_SHORT.slice(0, month).map((_, i) => `${monthName(i + 1)} ${year}`)}
                 series={[
                   { name: "Revenue", values: v.revSeries.slice(0, month), colour: "var(--flow-revenue)" },
                   { name: "Spending", values: v.spendSeries.slice(0, month), colour: "var(--flow-spending)" },
                 ]}
+                note={(i) => {
+                  const kept = (v.revSeries[i] ?? 0) - (v.spendSeries[i] ?? 0);
+                  return `${kept < 0 ? "More out than in by" : "Kept"} ${formatMoney(Math.abs(kept))}`;
+                }}
+                {...(onOpenInsights
+                  ? {
+                      onPick: (i: number) => onOpenInsights({ period: { kind: "month", year, month: i + 1 } }),
+                      pickLabel: (i: number) => `Open ${monthName(i + 1)} in Insights`,
+                    }
+                  : {})}
               />
             </Card>
           </div>
           <div className="fms-home-bva">
-            <Card title="Budget vs actual" subtitle="Red where the month went over">
+            <Card title="Budget vs actual" subtitle="Red where the month went over. Select a month to open it.">
               <BarChart
                 labels={MONTH_NAMES_SHORT.slice(0, month)}
+                titles={MONTH_NAMES_SHORT.slice(0, month).map((_, i) => `${monthName(i + 1)} ${year}`)}
                 budget={v.budgetSeries.slice(0, month)}
                 actual={v.spendSeries.slice(0, month)}
+                {...(onOpenInsights
+                  ? {
+                      onPick: (i: number) => onOpenInsights({ period: { kind: "month", year, month: i + 1 } }),
+                      pickLabel: (i: number) => `Open ${monthName(i + 1)} in Insights`,
+                    }
+                  : {})}
               />
             </Card>
           </div>
@@ -525,6 +629,16 @@ function Line({
       </span>
       <Money value={value} size="s" signed={signed} tone={tone ?? (quiet ? "var(--ink-3)" : undefined)} />
     </div>
+  );
+}
+
+/** A line's label with the colour of its part of the bar above. */
+function Keyed({ colour, children }: { colour: string; children: ReactNode }) {
+  return (
+    <span className="fms-keyed">
+      <span aria-hidden style={{ background: colour }} />
+      {children}
+    </span>
   );
 }
 

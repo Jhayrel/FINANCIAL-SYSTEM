@@ -7193,31 +7193,97 @@ textarea.fms-askinput {
 
 /* ══ Find a difference ═══════════════════════════════════════════════════════ */
 
-/* The question beside the answer on a wide card, the answer under it on a narrow one. */
+/*
+ * The question on top, in one row where there is room, and the answer under
+ * it. The side-by-side version squeezed five stacked fields into a column a
+ * third of the card wide (owner, 27 September 2026: "make it more cleaner").
+ */
 .fms-find {
   display: grid;
-  gap: var(--space-5);
+  gap: var(--space-4);
   grid-template-columns: minmax(0, 1fr);
-}
-
-@container (min-width: 880px) {
-  .fms-find:has(> .fms-find-result) {
-    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-    align-items: start;
-  }
 }
 
 .fms-find-form {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-width: 0;
+}
+
+.fms-find-row {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
+}
+
+.fms-find-row .fms-field {
+  min-width: 0;
+}
+
+@container (min-width: 330px) {
+  .fms-find-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fms-find-row > :first-child,
+  .fms-find-row > .fms-find-go {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (min-width: 820px) {
+  .fms-find-row {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .fms-find-row > :first-child,
+  .fms-find-row > .fms-find-go {
+    grid-column: auto;
+  }
+}
+
+.fms-find-says {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.fms-find-says strong {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.fms-find-toggle {
+  justify-self: start;
+  min-height: 32px;
+  text-align: left;
+}
+
+.fms-find-more {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: minmax(0, 1fr);
+  padding: var(--space-3) 0 0;
+  border-top: 1px solid var(--hairline);
+}
+
+@container (min-width: 720px) {
+  .fms-find-more {
+    grid-template-columns: minmax(0, 14rem) minmax(0, 1fr);
+    align-items: start;
+  }
 }
 
 .fms-find-go {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-start;
   gap: var(--space-2);
+}
+
+/* Beside the fields, the buttons sit on the fields' own line. */
+.fms-find-go > * {
+  flex: 0 0 auto;
 }
 
 /* The way out of an answer, under it. */
@@ -7258,6 +7324,8 @@ textarea.fms-askinput {
   display: grid;
   gap: var(--space-3);
   min-width: 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--hairline);
 }
 
 .fms-find-figs {
@@ -9380,4 +9448,238 @@ textarea.fms-askinput {
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-3);
+}
+
+/* ══ Insights: one period, chosen three ways ═════════════════════════════════
+   The period bar (a month, a year, or any two dates), and the chart that
+   stands in the calendar's place for a year or a range. See Insights.tsx and
+   domain/insightWindow.ts. */
+
+.fms-iperiod {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+.fms-iperiod > .fms-pills {
+  flex: 0 0 auto;
+}
+
+.fms-iperiod-pick {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+.fms-iperiod-pick > .fms-period {
+  width: 100%;
+}
+
+/* Years as one strip: a few of them, each wide enough to read at a glance. */
+.fms-iperiod-years .fms-period-month {
+  flex: 0 1 88px;
+  min-width: 64px;
+}
+
+.fms-irange {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+.fms-irange-dates {
+  display: flex;
+  gap: var(--space-2);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.fms-irange-field {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-irange-field > .t-label {
+  color: var(--ink-2);
+}
+
+.fms-irange-field > .fms-control {
+  width: 11.5rem;
+  max-width: 100%;
+  height: 40px;
+}
+
+.fms-irange-presets {
+  flex: 1 1 260px;
+  margin: 0;
+  min-width: 0;
+}
+
+@media (max-width: 639px) {
+  .fms-iperiod > .fms-pills,
+  .fms-iperiod-pick {
+    flex: 1 1 100%;
+  }
+
+  .fms-irange-dates {
+    flex: 1 1 100%;
+  }
+
+  .fms-irange-field {
+    flex: 1 1 0;
+  }
+
+  .fms-irange-field > .fms-control {
+    width: 100%;
+    height: 44px;
+  }
+}
+
+/* The chart in the calendar's place: the same frame, the chart filling it. */
+.fms-ical-chartbox {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: var(--space-3);
+}
+
+.fms-ical-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-ical-stats > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  align-content: start;
+}
+
+.fms-ical-stats .t-label {
+  color: var(--ink-2);
+}
+
+.fms-ical-stats .fms-linkbtn {
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+@container (max-width: 420px) {
+  .fms-ical-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.fms-ical-headlinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  justify-content: flex-end;
+}
+
+.fms-ical-lead {
+  margin: 0 0 var(--space-2);
+  color: var(--ink-3);
+}
+
+/* The kind or source whose entries are shown, and the way back to all of them. */
+.fms-ical-focus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--ink-2);
+  background: var(--surface-sunk);
+  color: var(--ink-2);
+}
+
+/* Three figures over the budget chart. */
+.fms-spanfigs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--hairline);
+}
+
+@container (max-width: 380px) {
+  .fms-spanfigs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ══ Dashboard: income quality as one bar, and what was paid ════════════════ */
+
+/* The parts of cash in, side by side, a 2px surface gap between them. */
+.fms-split {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  margin: var(--space-3) 0 var(--space-1);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: var(--surface-sunk);
+}
+
+.fms-split > span {
+  flex-basis: 0;
+  min-width: 3px;
+}
+
+.fms-keyed {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-keyed > span {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+}
+
+/* Beside cash in, not part of it: a rule above says so before the words do. */
+.fms-income-beside {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--hairline-strong);
+}
+
+.fms-paidlist {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.fms-incomehead {
+  display: grid;
+  gap: 2px;
+}
+
+/* Brought into view when Insights opens on a kind's entries: clear of the top bar. */
+.fms-ical-panel {
+  scroll-margin-top: var(--space-4);
+}
+
+@media (max-width: 1023px) {
+  .fms-ical-panel {
+    scroll-margin-top: 76px;
+  }
 }

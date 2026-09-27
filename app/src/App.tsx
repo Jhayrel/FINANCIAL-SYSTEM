@@ -24,7 +24,7 @@ import { Dashboard } from "./features/Dashboard";
 import { AlertsSummary } from "./features/AlertsSummary";
 import { Database } from "./features/Database";
 import { DebtScreen } from "./features/DebtScreen";
-import { Insights } from "./features/Insights";
+import { Insights, type InsightsAt } from "./features/Insights";
 import { Settings } from "./features/Settings";
 import { readIssued, Statements } from "./features/Statements";
 import { Button, Card, EmptyState, Money, Notice } from "./components/primitives";
@@ -190,6 +190,8 @@ export default function App() {
   const [dbFilter, setDbFilter] = useState<"all" | "flagged">("all");
   /** A search another screen opened the Database with, such as a kind of spending on Budget. */
   const [dbQuery, setDbQuery] = useState<{ query: string; at: number } | null>(null);
+  /** Where Insights opens when another screen sends the owner there: a month, a year, a kind's entries. */
+  const [insightsAt, setInsightsAt] = useState<{ to: InsightsAt; at: number } | null>(null);
   /**
    * The row the Add screen is editing, if any.
    *
@@ -1768,6 +1770,7 @@ export default function App() {
     // A search a link opened the Database with ends when you go elsewhere,
     // and so does a pending return to the screen that sent you to Add.
     setDbQuery(null);
+    setInsightsAt(null);
     setReturnTo(null);
     setMoreOpen(false);
     // Leaving the form ends a correction: coming back to Add is a new entry, not the old row.
@@ -2004,6 +2007,10 @@ export default function App() {
                 recordDebt(settings.credits.find((d) => d.id === debtId), effect, amount, "dashboard")
               }
               onGo={(place) => go(place)}
+              onOpenInsights={(to) => {
+                go("insights");
+                setInsightsAt({ to, at: Date.now() });
+              }}
             />
           )}
           {screen === "add" && (
@@ -2100,6 +2107,8 @@ export default function App() {
           )}
           {screen === "insights" && (
             <Insights
+              key={insightsAt?.at ?? 0}
+              initial={insightsAt?.to}
               transactions={transactions}
               reference={reference}
               budgets={budgets}

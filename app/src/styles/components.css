@@ -1105,6 +1105,242 @@
   margin-left: auto;
 }
 
+/*
+ * ── Reading a chart ─────────────────────────────────────────────────────────
+ *
+ * The card beside the crosshair (components/charts.tsx). It floats inside the
+ * chart's own box, so pointing never moves the page, and it takes no pointer
+ * events apart from its buttons, so the chart under it keeps reading.
+ */
+.fms-plot {
+  position: relative;
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.fms-plot:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.fms-plotbox {
+  position: relative;
+}
+
+.fms-charttip {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  max-width: min(240px, calc(100% - 8px));
+  padding: var(--space-3);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+  pointer-events: none;
+}
+
+.fms-charttip button {
+  pointer-events: auto;
+}
+
+.fms-charttip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--ink);
+}
+
+.fms-charttip-close {
+  width: 24px;
+  height: 24px;
+  margin: -4px -6px -4px 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--ink-3);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fms-charttip-close:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
+.fms-charttip-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.fms-charttip-line.is-strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.fms-charttip-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fms-charttip-key {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+}
+
+.fms-charttip-money {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.fms-charttip-note {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.fms-charttip-go {
+  justify-self: start;
+  min-height: 32px;
+  margin-top: 2px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fms-charttip-go:hover {
+  background: var(--surface-sunk);
+}
+
+@media (pointer: coarse) {
+  .fms-charttip-go {
+    min-height: 44px;
+  }
+
+  .fms-charttip-close {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+/* A legend that switches its series on and off. */
+.fms-legendtoggle {
+  display: inline-flex;
+  white-space: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  margin: 0 calc(-1 * var(--space-2));
+  border: 0;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-legendtoggle:hover {
+  background: var(--surface-sunk);
+}
+
+.fms-legendtoggle[aria-pressed="false"] {
+  color: var(--ink-3);
+  text-decoration: line-through;
+}
+
+.fms-legendtoggle[aria-pressed="false"] > span {
+  opacity: 0.35;
+}
+
+@media (pointer: coarse) {
+  .fms-legendtoggle {
+    min-height: 44px;
+  }
+}
+
+/* Ranking bars: a quiet list, and a list of buttons when a row opens something. */
+.fms-rankbars {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fms-rankbars.is-pickable {
+  gap: 2px;
+}
+
+.fms-rankrow {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+button.fms-rankrow {
+  width: 100%;
+  padding: var(--space-2);
+  margin: 0 calc(-1 * var(--space-2));
+  width: calc(100% + 2 * var(--space-2));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.fms-rankrow:hover {
+  background: var(--surface-hover);
+}
+
+button.fms-rankrow[aria-pressed="true"] {
+  background: var(--surface-sunk);
+  box-shadow: inset 2px 0 0 var(--ink-2);
+}
+
+.fms-ranktrack {
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunk);
+  overflow: hidden;
+}
+
+button.fms-rankrow[aria-pressed="true"] .fms-ranktrack,
+button.fms-rankrow:hover .fms-ranktrack {
+  background: var(--surface);
+}
+
+.fms-rankshare {
+  display: inline-block;
+  min-width: 3.2em;
+  margin-left: var(--space-2);
+  color: var(--ink-3);
+  text-align: right;
+}
+
+.fms-rankhint {
+  color: var(--ink-3);
+}
+
 /* Chart axis labels: caption-sized, and at least 12px on a phone (owner, 26 September 2026). */
 .fms-axislabel {
   font-size: 11px;

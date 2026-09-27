@@ -487,7 +487,7 @@ Charts explain, they don't decorate. Every chart answers one question stated in 
 | Grid | Horizontal lines only, 1px `--hairline`. **No vertical gridlines.** |
 | Axes | Labels in `caption` `--ink-3`. Y-axis abbreviated (`52k`). X-axis skips labels rather than rotating. |
 | Axis lines | None, the gridline at zero is the baseline. |
-| Tooltip | `--surface`, `--shadow-raised`, `radius-md`, 12px padding. Series name, exact **unabbreviated** money, date. Follows cursor on desktop, tap-to-pin on phone. |
+| Tooltip | `--surface`, `--shadow-raised`, `radius-md`, 12px padding. Series name, exact **unabbreviated** money, date. Beside the point being read on desktop, tap-to-pin on phone. See "Pointing at a chart" below. |
 | Legend | Below the chart, left-aligned, `caption`, 8px dot. Omitted for single-series. |
 | Animation | 400ms on mount only. Never on data update, never looping. |
 | Empty | `No data for this period.` centred in `--ink-3`, axes still drawn. |
@@ -508,6 +508,29 @@ slice, a legend row, the band above a month), so the figures are reachable by
 keyboard and named to a screen reader instead of being hover only. A series of
 one month is drawn in the middle with no line through it: a single point has
 no slope to show, and one drawn against the left edge reads as a fault.
+
+**Pointing at a chart on a screen** (owner, 2026-09-27: "make the dashboard
+interactable the charts"). Every line, area and bar chart reads out the point
+under the pointer: a 1px `--ink-3` crosshair and a ringed dot on each line, or
+a `--surface-sunk` band behind a month's bars, and a small card beside it with
+the full name of the point ("March 2026", not "Mar"), each series' exact
+figure and a line of what follows from them ("Kept ₱7,751.00", "₱1,652.00 over
+the pace"). The card sits on the side of the crosshair with more room, inside
+the chart's own box, so it never covers the point and never moves the page.
+
+| Input | Reads | Opens |
+|---|---|---|
+| Mouse | Hover | Click, at once, where the chart opens anything (a month opens in Insights; a point on the Insights chart narrows the screen to it) |
+| Touch | Tap pins the card, a second tap on the same point lets it go | The card's own button ("Open May in Insights"), so a first tap is always a reading and never a jump |
+| Keyboard | The chart is one tab stop; arrows move, Home and End jump | Enter; Escape lets go |
+
+A legend with two or more series switches each one off and on, so income can
+be hidden to read a month of daily spending at its own scale; one always stays
+on. A series that has not happened yet stops at today rather than dropping to
+zero. A reference line (a budget pace) is dashed, 1.5px, with no fill under it.
+Ranking bars that open something are whole-row buttons with a hover wash and
+the picked row marked by a 2px rule on its left; each shows its share of the
+whole.
 
 **Types and when to use them**
 
@@ -530,10 +553,13 @@ no slope to show, and one drawn against the left edge reads as a fault.
 
 | Part | Spec |
 |---|---|
+| Period | One bar above everything (owner, 2026-09-27: "I can't even use range properly if I want to see data of the year"). **Month**: the year steps and the month strip, any month of any year the ledger or a budget reaches. **Year**: a strip of those years. **Range**: From and To dates, and Last 7 days, Last 30 days, Last 3, 6 and 12 months, This year so far, All of last year, Next 30 days. Switching between them keeps what is being looked at. Every part of the screen reads the period, or the pick inside it when there is one (`domain/insightWindow.ts`). |
+| Year and range | The calendar's place is taken by a chart of what went out and came in, by day up to two months, by week up to half a year, by month beyond, with the busiest, quietest and average point under it. Selecting a point narrows everything to it, and a whole month picked this way can be opened on the calendar. Under the frame: budget against spending month by month (a month opens on the calendar) and the bills paid, by name. |
 | Picking | "One day" or "A range". In a range the first tap sets one end and the second the other, in either order; Shift-click extends on a desktop. Quick picks: Today, This week, Last 7 days, Next 7 days, Month so far (or Whole month for a past one). |
 | Frame | **One height that never changes** (owner, 2026-09-16: "set a maximum container so no adjusting"): 560px for the calendar and its panel side by side from 1024px, the panel 480px stacked under the calendar below that. A month is always six week rows. What a pick holds scrolls inside the panel; nothing on the page moves when a day is tapped. |
 | Days | Five heat steps of spending red (14%, 26%, 38%, 50% over the sunk surface), a 6px green dot when money came in, today's number in a filled brand circle. Only a real pick is tinted, with its two ends outlined; the month shown by default is not marked. Days ahead are plain with a hairline and can be picked. The amount in each day hides when the card is under 460px wide. Arrow keys move a day, or a week up and down. |
-| What was picked | Its own panel. Three figures: went out, came in, and either expected ahead, the month to that day, or the heaviest day. Then three tabs, each disabled when it has nothing: **Where it went** (every kind with its share, past eight folded into one line, and a total equal to "went out"), **Entries** (grouped by day with each day's spending, every row with Correct), **Still ahead** (bills monthly, debt payments from the Debt screen's dates, usual spending marked "about", Pay now on a bill, and what those days allow at today's safe amount, or that nothing is safe when the budget is spent). A range can cross months and years. |
+| What was picked | Its own panel. Three figures: went out, came in, and either expected ahead, the month to that day, what was kept over several days (with the heaviest day under it), or the heaviest day. Then four tabs, each disabled when it has nothing: **Where it went** (every kind with its share and its change against the period before: the month before, the same days of the month before for a month so far, the same part of last year for a year so far, otherwise the same number of days before; the total equals "went out"), **Came from** (income by source, starting balances left out), **Entries** (grouped by day with each day's spending, every row with Correct), **Still ahead** (bills monthly, debt payments from the Debt screen's dates, usual spending marked "about", Pay now on a bill, and what those days allow at today's safe amount, or that nothing is safe when the budget is spent). Selecting a kind or a source opens Entries on its rows alone, with the way back to all of them above. A range can cross months and years. |
+| Month cards | Under the frame for a month: the month in brief, **Spending through the month** (what went out added up day by day, against a dashed straight line to the month's budget; a day opens on the calendar), what is safe to spend or how the month ended, the bills, and how the money is doing. |
 
 **The assistant knows the screen it was opened from.** Every screen reports a few plain lines of what it shows (the month and its figures on Dashboard, the picked range on Insights, the half-typed entry on Add, the search on Database). "What do you think" is answered about that, not about the whole ledger. The report is text, rebuilt from the same figures the screen draws, and never includes settings the assistant has no reason to see.
 
@@ -653,6 +679,18 @@ The Debt screen has to read as well with five lenders as with one. The owner,
 | Account headings | Every list of accounts sits under the headings Settings uses, in its order: Spending, Reserve, Savings, Goal, then Not active (`accountGroups`). The owner, 27 September 2026, with reserves under "Savings" in the Add form and under "Reserve" in Settings: "fix all the filters and dropdown in the system". |
 | Room before scrolling | A dropdown shows about nine rows before it scrolls, never more than the room it has. |
 | Signs | In a list, money into a wallet is +, out of one is −, and a move between two of your own, or a row that moves no money, has no sign. |
+
+### 3.14d Find a difference
+
+The three things always asked sit in one row on a wide card (account, what it
+really holds, the day) with Find it beside them, two to a row on a phone. The
+line under them says what the ledger holds that day and how far apart the two
+are before anything is pressed. The account list shows each balance on that
+same day, so the two figures always agree. The last day the account matched
+and a pasted history only narrow the search, so they are folded under one
+link until wanted, and open by themselves when either holds something. The
+answer goes under the question, full width, not beside it in a third of the
+card (owner, 2026-09-27: "clean the UI of the Find a difference").
 
 ### 3.15 A printed statement
 

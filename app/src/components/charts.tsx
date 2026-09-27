@@ -17,11 +17,37 @@
  * squashed flat. Each chart now measures its box and draws at that size, so a
  * label is 11px on every screen and the number of month labels follows the
  * room there is for them.
+ *
+ * ── Read by pointing, opened by clicking ──────────────────────────────────
+ *
+ * The owner, 27 September 2026: make the charts interactable. A chart says
+ * the shape and hides the figures, so every line and bar chart now reads out
+ * the point under the pointer: a crosshair and a dot on the line, a band
+ * behind the bars, and a small card beside it with each figure in full.
+ *
+ * A phone has no hover, so a tap does what pointing does and the card stays
+ * until the next tap. Where a chart can open what it shows (a month on the
+ * Dashboard opens that month in Insights), a click on a computer opens it at
+ * once and the card on a phone carries the same action as a button, so the
+ * first tap is always a reading and never a surprise jump. The arrow keys
+ * move the reading along and Enter opens it.
+ *
+ * The card sits on the side of the crosshair with more room, so it never
+ * covers the point it is describing and never runs off the chart.
  */
 
-import { useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 
-import { formatAmount, toPesos, type Centavos } from "../domain/money";
+import { formatAmount, formatMoney, toPesos, type Centavos } from "../domain/money";
 import type { Flow } from "./primitives";
 
 /** Axis labels only: never in a table. §2.2 */
@@ -161,25 +187,209 @@ export function Sparkline({
   );
 }
 
+// ── Reading a point ────────────────────────────────────────────────────────
+
+/** What a pointer, a tap or a key is reading on a chart, and whether a tap pinned it. */
+function useReading(count: number) {
+  const [at, setAt] = useState<number | null>(null);
+  const [pinned, setPinned] = useState(false);
+  const touch = useRef(false);
+
+  const clamp = (i: number): number => Math.max(0, Math.min(count - 1, i));
+  return {
+    at: at !== null && at < count ? at : null,
+    pinned,
+    touch,
+    hover: (i: number): void => {
+      if (!pinned) setAt(clamp(i));
+    },
+    tap: (i: number): void => {
+      const next = clamp(i);
+      if (pinned && at === next) {
+        setPinned(false);
+        setAt(null);
+        return;
+      }
+      setPinned(true);
+      setAt(next);
+    },
+    leave: (): void => {
+      if (!pinned) setAt(null);
+    },
+    step: (by: number): void => {
+      setPinned(true);
+      setAt((prev) => clamp(prev === null ? (by > 0 ? 0 : count - 1) : prev + by));
+    },
+    clear: (): void => {
+      setPinned(false);
+      setAt(null);
+    },
+  };
+}
+
+type Reading = ReturnType<typeof useReading>;
+
+export interface TipLine {
+  readonly label: string;
+  readonly value: Centavos;
+  /** The mark's own colour, beside the words: the words stay in ink. */
+  readonly colour?: string | undefined;
+  readonly strong?: boolean | undefined;
+  readonly signed?: boolean | undefined;
+}
+
+/**
+ * The card beside the crosshair: a title, each figure in full, and what the
+ * point opens, when it opens anything.
+ */
+function ChartTip({
+  x,
+  width,
+  top,
+  title,
+  lines,
+  note,
+  action,
+  onAction,
+  onClose,
+}: {
+  x: number;
+  width: number;
+  top: number;
+  title: string;
+  lines: readonly TipLine[];
+  note?: string | null | undefined;
+  action?: string | undefined;
+  onAction?: (() => void) | undefined;
+  onClose?: (() => void) | undefined;
+}) {
+  // The side with more room, so the card never covers the point it describes.
+  const right = x > width / 2;
+  const style = right ? { right: Math.max(4, width - x + 12) } : { left: Math.min(width - 4, x + 12) };
+  return (
+    <div className="fms-charttip" style={{ ...style, top }} role="status" aria-live="polite">
+      <div className="fms-charttip-head">
+        <span className="t-label">{title}</span>
+        {onClose && (
+          <button type="button" className="fms-charttip-close" aria-label="Close the reading" onClick={onClose}>
+            ×
+          </button>
+        )}
+      </div>
+      {lines.map((l) => (
+        <div key={l.label} className={l.strong ? "fms-charttip-line is-strong" : "fms-charttip-line"}>
+          <span className="fms-charttip-name">
+            {l.colour && <span aria-hidden className="fms-charttip-key" style={{ background: l.colour }} />}
+            {l.label}
+          </span>
+          <span className="fms-charttip-money">
+            {l.signed && l.value > 0 ? "+" : ""}
+            {formatMoney(l.value)}
+          </span>
+        </div>
+      ))}
+      {note && <div className="fms-charttip-note">{note}</div>}
+      {action && onAction && (
+        <button type="button" className="fms-charttip-go" onClick={onAction}>
+          {action}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The pointer handlers every plotted chart shares.
+ *
+ * A mouse reads on move and opens on click. A finger reads on tap, and the
+ * card it pins carries the action: `touch` remembers which the last press
+ * was, because a tap also fires a click and must not open anything by itself.
+ */
+function pointerHandlers(
+  reading: Reading,
+  indexAt: (px: number) => number,
+  onPick: ((i: number) => void) | undefined,
+) {
+  const where = (e: PointerEvent<SVGRectElement>): number => {
+    const box = (e.currentTarget.ownerSVGElement ?? e.currentTarget).getBoundingClientRect();
+    return indexAt(e.clientX - box.left);
+  };
+  return {
+    onPointerDown: (e: PointerEvent<SVGRectElement>) => {
+      reading.touch.current = e.pointerType !== "mouse";
+    },
+    onPointerMove: (e: PointerEvent<SVGRectElement>) => {
+      if (e.pointerType === "mouse") reading.hover(where(e));
+    },
+    onPointerLeave: (e: PointerEvent<SVGRectElement>) => {
+      if (e.pointerType === "mouse") reading.leave();
+    },
+    onClick: (e: React.MouseEvent<SVGRectElement>) => {
+      const box = (e.currentTarget.ownerSVGElement ?? e.currentTarget).getBoundingClientRect();
+      const i = indexAt(e.clientX - box.left);
+      if (!reading.touch.current && onPick) onPick(i);
+      else reading.tap(i);
+    },
+  };
+}
+
+/** Left and right read along, Home and End jump, Enter opens, Escape lets go. */
+function keyHandler(reading: Reading, count: number, onPick: ((i: number) => void) | undefined) {
+  return (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") reading.step(1);
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") reading.step(-1);
+    else if (e.key === "Home") reading.step(-count);
+    else if (e.key === "End") reading.step(count);
+    else if (e.key === "Escape") reading.clear();
+    else if (e.key === "Enter" && reading.at !== null && onPick) onPick(reading.at);
+    else return;
+    e.preventDefault();
+  };
+}
+
+/** A label at the very edge anchors inward, so "Aug" is never cut to "Au". */
+const anchorAt = (x: number, width: number): "start" | "middle" | "end" =>
+  x < 18 ? "start" : x > width - 18 ? "end" : "middle";
+
 // ── Area / line chart, §3.9 ───────────────────────────────────────────────
 
 export interface Series {
   name: string;
   values: readonly Centavos[];
   colour: string;
+  /** A reference line, such as a budget pace: dashed, with no fill under it. */
+  guide?: boolean | undefined;
 }
 
 export function AreaChart({
   labels,
   series,
   height,
+  titles,
+  onPick,
+  pickLabel,
+  note,
+  hidden: initiallyHidden,
 }: {
   labels: readonly string[];
   series: readonly Series[];
-  height?: number;
+  height?: number | undefined;
+  /** The full name of each point for the reading: "March 2026" where the axis says "Mar". */
+  titles?: readonly string[] | undefined;
+  /** What a click on a point opens. */
+  onPick?: ((index: number) => void) | undefined;
+  /** The words on the button that opens it: "Open March". */
+  pickLabel?: ((index: number) => string) | undefined;
+  /** One more line under the figures: "Kept ₱1,200.00". */
+  note?: ((index: number) => string | null) | undefined;
+  /** Series switched off to begin with; the legend switches them back on. */
+  hidden?: readonly string[] | undefined;
 }) {
   const gid = useId();
   const [box, width] = useWidth<HTMLDivElement>();
+  const [off, setOff] = useState<ReadonlySet<string>>(() => new Set(initiallyHidden ?? []));
+  const reading = useReading(labels.length);
 
   const W = Math.max(width, 1);
   const H = height ?? heightFor(width);
@@ -190,75 +400,160 @@ export function AreaChart({
   const innerW = Math.max(1, W - padL - padR);
   const innerH = H - padB - padT;
 
+  const shown = series.filter((s) => !off.has(s.name));
   const all = series.flatMap((s) => s.values);
-  const max = Math.max(1, ...all);
-  const step = labels.length > 1 ? innerW / (labels.length - 1) : innerW;
+  const max = Math.max(1, ...shown.flatMap((s) => s.values));
+  const single = labels.length < 2;
+  const step = single ? 0 : innerW / (labels.length - 1);
   const every = Math.max(1, Math.ceil(labels.length / Math.max(1, Math.floor(innerW / LABEL_ROOM))));
 
   const y = (v: number) => padT + innerH - (v / max) * innerH;
-  const x = (i: number) => padL + i * step;
+  const x = (i: number) => (single ? padL + innerW / 2 : padL + i * step);
+  const indexAt = (px: number): number => (single ? 0 : Math.round((px - padL) / step));
+
+  const at = reading.at;
+  const toggle = (name: string): void =>
+    setOff((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      // One series always stays on: an empty chart reads as no data.
+      else if (series.length - next.size > 1) next.add(name);
+      return next;
+    });
 
   return (
-    <div ref={box} style={{ minWidth: 0 }}>
+    <div
+      ref={box}
+      className="fms-plot"
+      style={{ minWidth: 0 }}
+      tabIndex={labels.length > 0 ? 0 : -1}
+      aria-label={`${series.map((s) => s.name).join(" and ")} chart. Left and right arrows read each point${onPick ? ", Enter opens it" : ""}.`}
+      onKeyDown={keyHandler(reading, labels.length, onPick)}
+    >
       <ChartFrame height={H} empty={all.length === 0}>
         {width === 0 ? (
           <div style={{ height: H }} />
         ) : (
-          <svg
-            viewBox={`0 0 ${W} ${H}`}
-            width={W}
-            height={H}
-            role="img"
-            aria-label={`${series.map((s) => s.name).join(" and ")} over ${labels.length} periods`}
-            style={{ display: "block" }}
-          >
-            {/* Horizontal gridlines only. No vertical grid, no axis lines. */}
-            {ticks(max).map((t) => (
-              <g key={t}>
-                <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--hairline)" strokeWidth="1" />
-                <text x={padL - 8} y={y(t) + 4} textAnchor="end" fill="var(--ink-3)" className="fms-axislabel">
-                  {abbreviate(t)}
-                </text>
-              </g>
-            ))}
-
-            {series.map((s, si) => {
-              const pts = s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
-              const area = `${padL},${y(0)} ${pts} ${x(s.values.length - 1)},${y(0)}`;
-              return (
-                <g key={s.name}>
-                  <polygon points={area} fill={s.colour} opacity="0.12" />
-                  <polyline
-                    points={pts}
-                    fill="none"
-                    stroke={s.colour}
-                    strokeWidth="2"
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                    style={{ animation: `fms-draw 400ms var(--ease-out) ${si * 60}ms both` }}
-                  />
+          <div className="fms-plotbox">
+            <svg
+              viewBox={`0 0 ${W} ${H}`}
+              width={W}
+              height={H}
+              role="img"
+              aria-label={`${series.map((s) => s.name).join(" and ")} over ${labels.length} periods`}
+              style={{ display: "block" }}
+            >
+              {/* Horizontal gridlines only. No vertical grid, no axis lines. */}
+              {ticks(max).map((t) => (
+                <g key={t}>
+                  <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--hairline)" strokeWidth="1" />
+                  <text x={padL - 8} y={y(t) + 4} textAnchor="end" fill="var(--ink-3)" className="fms-axislabel">
+                    {abbreviate(t)}
+                  </text>
                 </g>
-              );
-            })}
+              ))}
 
-            {labels.map((l, i) =>
-              // Skip labels rather than rotating them.
-              i % every === 0 ? (
-                <text key={l} x={x(i)} y={H - 6} textAnchor="middle" fill="var(--ink-3)" className="fms-axislabel">
-                  {l}
-                </text>
-              ) : null,
+              {shown.map((s, si) => {
+                const pts = s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+                const area = `${x(0)},${y(0)} ${pts} ${x(s.values.length - 1)},${y(0)}`;
+                return (
+                  <g key={s.name}>
+                    {!single && !s.guide && <polygon points={area} fill={s.colour} opacity="0.12" />}
+                    {!single && (
+                      <polyline
+                        points={pts}
+                        fill="none"
+                        stroke={s.colour}
+                        strokeWidth={s.guide ? 1.5 : 2}
+                        strokeDasharray={s.guide ? "5 4" : undefined}
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                        style={{ animation: `fms-draw 400ms var(--ease-out) ${si * 60}ms both` }}
+                      />
+                    )}
+                    {single && <circle cx={x(0)} cy={y(s.values[0] ?? 0)} r="4" fill={s.colour} />}
+                  </g>
+                );
+              })}
+
+              {/* The point being read: a hairline down the full height, a ringed dot on each line. */}
+              {at !== null && (
+                <g aria-hidden>
+                  <line x1={x(at)} x2={x(at)} y1={padT} y2={padT + innerH} stroke="var(--ink-3)" strokeWidth="1" />
+                  {shown
+                    .filter((s) => at < s.values.length)
+                    .map((s) => (
+                      <circle
+                        key={s.name}
+                        cx={x(at)}
+                        cy={y(s.values[at] ?? 0)}
+                        r="4.5"
+                        fill={s.colour}
+                        stroke="var(--surface)"
+                        strokeWidth="2"
+                      />
+                    ))}
+                </g>
+              )}
+
+              {labels.map((l, i) =>
+                // Skip labels rather than rotating them.
+                i % every === 0 ? (
+                  <text
+                    key={`${l}-${i}`}
+                    x={x(i)}
+                    y={H - 6}
+                    textAnchor={anchorAt(x(i), W)}
+                    fill={at === i ? "var(--ink)" : "var(--ink-3)"}
+                    className="fms-axislabel"
+                  >
+                    {l}
+                  </text>
+                ) : null,
+              )}
+
+              {/* The whole plot is the target, so anywhere above a point reads it. */}
+              {labels.length > 0 && (
+                <rect
+                  x={padL - (single ? innerW / 2 : step / 2)}
+                  y={0}
+                  width={innerW + (single ? innerW : step)}
+                  height={H}
+                  fill="transparent"
+                  style={{ cursor: onPick ? "pointer" : "crosshair", touchAction: "pan-y" }}
+                  {...pointerHandlers(reading, indexAt, onPick)}
+                />
+              )}
+            </svg>
+            {at !== null && (
+              <ChartTip
+                x={x(at)}
+                width={W}
+                top={padT}
+                title={titles?.[at] ?? labels[at] ?? ""}
+                // A series that stops early (spending so far, in a month still going) says nothing past its end.
+                lines={shown
+                  .filter((s) => at < s.values.length)
+                  .map((s) => ({ label: s.name, value: s.values[at] ?? 0, colour: s.colour }))}
+                note={note?.(at)}
+                action={onPick && (reading.pinned || reading.touch.current) ? (pickLabel?.(at) ?? "Open") : undefined}
+                onAction={onPick ? () => onPick(at) : undefined}
+                onClose={reading.pinned ? reading.clear : undefined}
+              />
             )}
-          </svg>
+          </div>
         )}
       </ChartFrame>
 
-      <Legend items={series.map((s) => ({ label: s.name, colour: s.colour }))} />
+      <Legend
+        items={series.map((s) => ({ label: s.name, colour: s.colour }))}
+        {...(series.length > 1 ? { off, onToggle: toggle } : {})}
+      />
       {series.map((s) => (
         <HiddenTable
           key={`${gid}-${s.name}`}
           caption={s.name}
-          rows={s.values.map((v, i) => ({ label: labels[i] ?? String(i), value: v }))}
+          rows={s.values.map((v, i) => ({ label: titles?.[i] ?? labels[i] ?? String(i), value: v }))}
         />
       ))}
     </div>
@@ -272,13 +567,22 @@ export function BarChart({
   budget,
   actual,
   height,
+  titles,
+  onPick,
+  pickLabel,
 }: {
   labels: readonly string[];
   budget: readonly Centavos[];
   actual: readonly Centavos[];
-  height?: number;
+  height?: number | undefined;
+  /** The full name of each month for the reading. */
+  titles?: readonly string[] | undefined;
+  /** What a click on a month opens. */
+  onPick?: ((index: number) => void) | undefined;
+  pickLabel?: ((index: number) => string) | undefined;
 }) {
   const [box, width] = useWidth<HTMLDivElement>();
+  const reading = useReading(labels.length);
 
   const W = Math.max(width, 1);
   const H = height ?? heightFor(width);
@@ -295,75 +599,140 @@ export function BarChart({
   const every = Math.max(1, Math.ceil(labels.length / Math.max(1, Math.floor(innerW / LABEL_ROOM))));
 
   const y = (v: number) => padT + innerH - (v / max) * innerH;
+  const indexAt = (px: number): number => Math.floor((px - padL) / slot);
+  const at = reading.at;
+
+  const tipFor = (i: number): { lines: TipLine[]; note: string | null } => {
+    const b = budget[i] ?? 0;
+    const a = actual[i] ?? 0;
+    return {
+      lines: [
+        { label: "Budget", value: b, colour: "var(--hairline-strong)" },
+        { label: "Spent", value: a, colour: a > b && b > 0 ? "var(--over)" : "var(--brand-700)" },
+      ],
+      note: b <= 0 ? "No budget set" : a > b ? `${formatMoney(a - b)} over` : `${formatMoney(b - a)} left`,
+    };
+  };
 
   return (
-    <div ref={box} style={{ minWidth: 0 }}>
+    <div
+      ref={box}
+      className="fms-plot"
+      style={{ minWidth: 0 }}
+      tabIndex={labels.length > 0 ? 0 : -1}
+      aria-label={`Budget and spending chart. Left and right arrows read each month${onPick ? ", Enter opens it" : ""}.`}
+      onKeyDown={keyHandler(reading, labels.length, onPick)}
+    >
       <ChartFrame height={H} empty={labels.length === 0}>
         {width === 0 ? (
           <div style={{ height: H }} />
         ) : (
-          <svg
-            viewBox={`0 0 ${W} ${H}`}
-            width={W}
-            height={H}
-            role="img"
-            aria-label="Budget versus actual spending by month"
-            style={{ display: "block" }}
-          >
-            {ticks(max).map((t) => (
-              <g key={t}>
-                <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--hairline)" strokeWidth="1" />
-                <text x={padL - 8} y={y(t) + 4} textAnchor="end" fill="var(--ink-3)" className="fms-axislabel">
-                  {abbreviate(t)}
-                </text>
-              </g>
-            ))}
+          <div className="fms-plotbox">
+            <svg
+              viewBox={`0 0 ${W} ${H}`}
+              width={W}
+              height={H}
+              role="img"
+              aria-label="Budget versus actual spending by month"
+              style={{ display: "block" }}
+            >
+              {/* The month being read, as a quiet band behind its two bars. */}
+              {at !== null && (
+                <rect
+                  aria-hidden
+                  x={padL + slot * at + 1}
+                  y={padT}
+                  width={Math.max(0, slot - 2)}
+                  height={innerH}
+                  fill="var(--surface-sunk)"
+                />
+              )}
 
-            {labels.map((l, i) => {
-              const cx = padL + slot * i + slot / 2;
-              const b = budget[i] ?? 0;
-              const a = actual[i] ?? 0;
-              const over = a > b && b > 0;
-              return (
-                <g key={l}>
-                  <rect
-                    x={cx - barW - 2}
-                    y={y(b)}
-                    width={barW}
-                    height={Math.max(0, y(0) - y(b))}
-                    fill="var(--hairline)"
-                    rx="3"
-                  />
-                  <rect
-                    x={cx + 2}
-                    y={y(a)}
-                    width={barW}
-                    height={Math.max(0, y(0) - y(a))}
-                    fill={over ? "var(--over)" : "var(--brand-700)"}
-                    rx="3"
-                  />
-                  {i % every === 0 && (
-                    <text x={cx} y={H - 6} textAnchor="middle" fill="var(--ink-3)" className="fms-axislabel">
-                      {l}
-                    </text>
-                  )}
+              {ticks(max).map((t) => (
+                <g key={t}>
+                  <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--hairline)" strokeWidth="1" />
+                  <text x={padL - 8} y={y(t) + 4} textAnchor="end" fill="var(--ink-3)" className="fms-axislabel">
+                    {abbreviate(t)}
+                  </text>
                 </g>
-              );
-            })}
-          </svg>
+              ))}
+
+              {labels.map((l, i) => {
+                const cx = padL + slot * i + slot / 2;
+                const b = budget[i] ?? 0;
+                const a = actual[i] ?? 0;
+                const over = a > b && b > 0;
+                return (
+                  <g key={`${l}-${i}`}>
+                    <rect
+                      x={cx - barW - 2}
+                      y={y(b)}
+                      width={barW}
+                      height={Math.max(0, y(0) - y(b))}
+                      fill="var(--hairline)"
+                      rx="3"
+                    />
+                    <rect
+                      x={cx + 2}
+                      y={y(a)}
+                      width={barW}
+                      height={Math.max(0, y(0) - y(a))}
+                      fill={over ? "var(--over)" : "var(--brand-700)"}
+                      rx="3"
+                    />
+                    {i % every === 0 && (
+                      <text
+                        x={cx}
+                        y={H - 6}
+                        textAnchor={anchorAt(cx, W)}
+                        fill={at === i ? "var(--ink)" : "var(--ink-3)"}
+                        className="fms-axislabel"
+                      >
+                        {l}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+
+              {labels.length > 0 && (
+                <rect
+                  x={padL}
+                  y={0}
+                  width={innerW}
+                  height={H}
+                  fill="transparent"
+                  style={{ cursor: onPick ? "pointer" : "default", touchAction: "pan-y" }}
+                  {...pointerHandlers(reading, indexAt, onPick)}
+                />
+              )}
+            </svg>
+            {at !== null && (
+              <ChartTip
+                x={padL + slot * at + slot / 2}
+                width={W}
+                top={padT}
+                title={titles?.[at] ?? labels[at] ?? ""}
+                {...tipFor(at)}
+                action={onPick && (reading.pinned || reading.touch.current) ? (pickLabel?.(at) ?? "Open") : undefined}
+                onAction={onPick ? () => onPick(at) : undefined}
+                onClose={reading.pinned ? reading.clear : undefined}
+              />
+            )}
+          </div>
         )}
       </ChartFrame>
 
       <Legend
         items={[
           { label: "Budget", colour: "var(--hairline)" },
-          { label: "Actual", colour: "var(--brand-700)" },
+          { label: "Spent", colour: "var(--brand-700)" },
           { label: "Over budget", colour: "var(--over)" },
         ]}
       />
       <HiddenTable
-        caption="Actual spending by month"
-        rows={labels.map((l, i) => ({ label: l, value: actual[i] ?? 0 }))}
+        caption="Spending by month"
+        rows={labels.map((l, i) => ({ label: titles?.[i] ?? l, value: actual[i] ?? 0 }))}
       />
     </div>
   );
@@ -376,6 +745,8 @@ export interface RankRow {
   name: string;
   value?: Centavos;
   amount?: Centavos;
+  /** A line under the bar: "₱83.00 more than July". */
+  hint?: string | undefined;
 }
 
 const rowValue = (r: RankRow): Centavos => r.value ?? r.amount ?? 0;
@@ -431,37 +802,67 @@ export function RankBars({
   rows,
   max: explicitMax,
   flow = "spending",
+  onPick,
+  active,
+  total,
 }: {
   rows: readonly RankRow[];
   max?: Centavos;
   /** What the rows are: money out, money in, moved, or owed. */
   flow?: Flow;
+  /** Makes each row a button: what a click on it opens or narrows to. */
+  onPick?: ((name: string) => void) | undefined;
+  /** The row picked, drawn as picked. */
+  active?: string | null | undefined;
+  /** The whole the rows are part of, for each row's share. */
+  total?: Centavos | undefined;
 }) {
   const max = explicitMax ?? Math.max(1, ...rows.map(rowValue));
 
   return (
-    <div style={{ display: "grid", gap: "var(--space-3)", minWidth: 0 }}>
-      {rows.map((r, i) => (
-        <div key={r.name} style={{ minWidth: 0 }}>
-          <div className="fms-rankhead">
-            <span className="t-body fms-rankname">{r.name}</span>
-            <span className="t-num-s" style={{ color: "var(--ink-2)" }}>
-              <span className="peso">₱</span>
-              {formatAmount(rowValue(r))}
-            </span>
+    <div className={onPick ? "fms-rankbars is-pickable" : "fms-rankbars"}>
+      {rows.map((r, i) => {
+        const value = rowValue(r);
+        const share = total && total > 0 ? Math.round((value * 100) / total) : null;
+        const body = (
+          <>
+            <div className="fms-rankhead">
+              <span className="t-body fms-rankname">{r.name}</span>
+              <span className="t-num-s" style={{ color: "var(--ink-2)" }}>
+                <span className="peso">₱</span>
+                {formatAmount(value)}
+                {share !== null && <span className="t-micro fms-rankshare">{share < 1 ? "<1%" : `${share}%`}</span>}
+              </span>
+            </div>
+            <div className="fms-ranktrack">
+              <div
+                style={{
+                  width: `${Math.max(value > 0 ? 1.5 : 0, (value / max) * 100)}%`,
+                  height: "100%",
+                  borderRadius: "var(--radius-full)",
+                  background: rankShade(flow, i, rows.length),
+                }}
+              />
+            </div>
+            {r.hint && <span className="t-micro fms-rankhint">{r.hint}</span>}
+          </>
+        );
+        return onPick ? (
+          <button
+            key={r.name}
+            type="button"
+            className="fms-rankrow"
+            aria-pressed={active === r.name}
+            onClick={() => onPick(r.name)}
+          >
+            {body}
+          </button>
+        ) : (
+          <div key={r.name} className="fms-rankrow">
+            {body}
           </div>
-          <div style={{ height: 8, background: "var(--surface-sunk)", borderRadius: "var(--radius-full)", overflow: "hidden" }}>
-            <div
-              style={{
-                width: `${(rowValue(r) / max) * 100}%`,
-                height: "100%",
-                borderRadius: "var(--radius-full)",
-                background: rankShade(flow, i, rows.length),
-              }}
-            />
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -543,12 +944,18 @@ export function DonutChart({
 function Legend({
   items,
   vertical = false,
+  off,
+  onToggle,
 }: {
   items: readonly { label: string; colour: string; value?: string }[];
   vertical?: boolean;
+  /** Series switched off, when the legend switches them. */
+  off?: ReadonlySet<string> | undefined;
+  onToggle?: ((label: string) => void) | undefined;
 }) {
   return (
     <ul
+      className="fms-legend"
       style={{
         listStyle: "none",
         margin: `var(--space-3) 0 0`,
@@ -560,21 +967,43 @@ function Legend({
         minWidth: 0,
       }}
     >
-      {items.map((i) => (
-        <li key={i.label} className="t-caption" style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", color: "var(--ink-2)", minWidth: 0 }}>
+      {items.map((i) => {
+        const key = (
           <span
             aria-hidden
             style={{ width: 8, height: 8, borderRadius: "var(--radius-full)", background: i.colour, flex: "0 0 auto" }}
           />
-          {i.label}
-          {i.value && (
-            <span className="t-num-s" style={{ color: "var(--ink-3)" }}>
-              <span className="peso">₱</span>
-              {i.value}
-            </span>
-          )}
-        </li>
-      ))}
+        );
+        const value = i.value && (
+          <span className="t-num-s" style={{ color: "var(--ink-3)" }}>
+            <span className="peso">₱</span>
+            {i.value}
+          </span>
+        );
+        return (
+          <li key={i.label} className="t-caption" style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", color: "var(--ink-2)", minWidth: 0 }}>
+            {onToggle ? (
+              // A series can be switched off to read the other at its own scale.
+              <button
+                type="button"
+                className="t-caption fms-legendtoggle"
+                aria-pressed={!off?.has(i.label)}
+                title={off?.has(i.label) ? `Show ${i.label}` : `Hide ${i.label}`}
+                onClick={() => onToggle(i.label)}
+              >
+                {key}
+                {i.label}
+              </button>
+            ) : (
+              <>
+                {key}
+                {i.label}
+                {value}
+              </>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

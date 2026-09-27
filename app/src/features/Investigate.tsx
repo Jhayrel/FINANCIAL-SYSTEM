@@ -99,6 +99,9 @@ export function Investigate({
   );
   const { account, actual, date, matchedOn, history, ran } = asked;
   const { confirm, dialog } = useConfirm();
+  /** The two optional fields, folded until wanted; open whenever either holds something. */
+  const [more, setMore] = useState<boolean | null>(null);
+  const moreOpen = more ?? (Boolean(matchedOn) || Boolean(history.trim()));
 
   // Kept whenever it changes, so leaving for the Add form and coming back finds it again.
   useEffect(() => {
@@ -110,7 +113,8 @@ export function Investigate({
     setAsked((prev) => ({ ...prev, ...next, ran: next.ran ?? false }));
   };
 
-  const recordedNow = account ? walletBalance(transactions.filter((t) => t.date <= date), account) : 0;
+  const upToDate = useMemo(() => transactions.filter((t) => t.date <= date), [transactions, date]);
+  const recordedNow = account ? walletBalance(upToDate, account) : 0;
   const lines = useMemo(() => readHistory(history, getYear(date)), [history, date]);
   const interestItem = reference.revenueCategories.find((c) => /interest/i.test(c)) ?? "";
 
@@ -206,82 +210,112 @@ export function Investigate({
   return (
     <Card
       title="Find a difference"
-      subtitle="When an account holds a different amount than the ledger says, this finds where it went"
+      subtitle="An account holds a different amount than the ledger says? This finds where the difference went."
     >
       {dialog}
       <div className="fms-find">
+        {/*
+          One row, the three things always asked: which account, what it
+          really holds, and on which day (owner, 27 September 2026: "clean the
+          UI of the Find a difference"). The two that only narrow the search
+          are folded under it until wanted, and open by themselves when
+          either already has something in it.
+        */}
         <div className="fms-find-form">
-          <Field label="Account">
-            <Select
-              value={account}
-              onChange={(v) => change({ account: v })}
-              options={accounts}
-              groups={grouped.groups}
-              details={Object.fromEntries(accounts.map((a) => [a, formatMoney(walletBalance(transactions, a))]))}
-              ariaLabel="Which account"
-            />
-          </Field>
-          <Field label="It really holds" help={`The ledger says ${formatMoney(recordedNow)} on that day.`}>
-            <AmountInput
-              value={actual}
-              onChange={(v) => change({ actual: v })}
-              ariaLabel="What the account really holds"
-            />
-          </Field>
-          <Field label="On">
-            <input
-              type="date"
-              value={date}
-              max={asOf}
-              onChange={(e) => change({ date: e.target.value || asOf })}
-              aria-label="The day the balance was read"
-              className="t-body fms-control"
-            />
-          </Field>
-          <Field
-            label="Last matched on"
-            optional
-            help={
-              matchedOn
-                ? "Only what was recorded after that day is searched, however many entries came before."
-                : "The last day the account and the ledger agreed, if you know it. It narrows the search to what came after."
-            }
-          >
-            <input
-              type="date"
-              value={matchedOn}
-              max={date}
-              onChange={(e) => change({ matchedOn: e.target.value })}
-              aria-label="The last day the balance matched"
-              className="t-body fms-control"
-            />
-          </Field>
-          <Field
-            label="Its history"
-            optional
-            help={
-              history.trim()
-                ? `${lines.length} ${lines.length === 1 ? "line" : "lines"} read. Lines without a date or a figure are skipped.`
-                : "Copy the transaction list from the bank or wallet app, one movement a line. For screenshots, send them to the chat instead."
-            }
-          >
-            <textarea
-              value={history}
-              onChange={(e) => change({ history: e.target.value })}
-              rows={4}
-              spellCheck={false}
-              placeholder={"Sep 3  Cinema  -5,000\nSep 6  Travel booking  15,000\nSep 7  Received from client  +12,500"}
-              className="t-body fms-paste"
-            />
-          </Field>
-          <div className="fms-find-go">
-            <Button variant="primary" onClick={run} disabled={!account || actual === null}>
-              Find it
-            </Button>
-            <Button onClick={clear} disabled={actual === null && !history && !matchedOn && date === asOf}>
-              Clear
-            </Button>
+          <div className="fms-find-row">
+            <Field label="Account">
+              <Select
+                value={account}
+                onChange={(v) => change({ account: v })}
+                options={accounts}
+                groups={grouped.groups}
+                // What each held on the day asked about, the same figure as the line under the fields.
+                details={Object.fromEntries(accounts.map((a) => [a, formatMoney(walletBalance(upToDate, a))]))}
+                ariaLabel="Which account"
+              />
+            </Field>
+            <Field label="It really holds">
+              <AmountInput value={actual} onChange={(v) => change({ actual: v })} ariaLabel="What the account really holds" />
+            </Field>
+            <Field label="On">
+              <input
+                type="date"
+                value={date}
+                max={asOf}
+                onChange={(e) => change({ date: e.target.value || asOf })}
+                aria-label="The day the balance was read"
+                className="t-body fms-control"
+              />
+            </Field>
+            <div className="fms-find-go">
+              <Button variant="primary" onClick={run} disabled={!account || actual === null}>
+                Find it
+              </Button>
+              <Button variant="ghost" onClick={clear} disabled={actual === null && !history && !matchedOn && date === asOf}>
+                Clear
+              </Button>
+            </div>
           </div>
+
+          <p className="t-caption fms-find-says">
+            The ledger says <strong>{formatMoney(recordedNow)}</strong> for {account || "this account"} on that day
+            {actual !== null && actual !== recordedNow
+              ? `: ${formatMoney(Math.abs(recordedNow - actual))} ${recordedNow > actual ? "more" : "less"} than it really holds.`
+              : actual !== null
+                ? ", the same as it really holds."
+                : "."}
+          </p>
+
+          <button
+            type="button"
+            className="t-caption fms-linkbtn fms-find-toggle"
+            aria-expanded={moreOpen}
+            onClick={() => setMore(!moreOpen)}
+          >
+            {moreOpen ? "Hide the last day it matched and its history" : "Narrow it: the last day it matched, or paste its history"}
+            {!moreOpen && (matchedOn || history.trim()) ? " (filled in)" : ""}
+          </button>
+
+          {moreOpen && (
+            <div className="fms-find-more">
+              <Field
+                label="Last matched on"
+                optional
+                help={
+                  matchedOn
+                    ? "Only what was recorded after that day is searched."
+                    : "The last day the account and the ledger agreed, if you know it."
+                }
+              >
+                <input
+                  type="date"
+                  value={matchedOn}
+                  max={date}
+                  onChange={(e) => change({ matchedOn: e.target.value })}
+                  aria-label="The last day the balance matched"
+                  className="t-body fms-control"
+                />
+              </Field>
+              <Field
+                label="Its history"
+                optional
+                help={
+                  history.trim()
+                    ? `${lines.length} ${lines.length === 1 ? "line" : "lines"} read. Lines without a date or a figure are skipped.`
+                    : "Copied from the bank or wallet app, one movement a line. Screenshots go to the chat instead."
+                }
+              >
+                <textarea
+                  value={history}
+                  onChange={(e) => change({ history: e.target.value })}
+                  rows={3}
+                  spellCheck={false}
+                  placeholder={"Sep 3  Cinema  -5,000\nSep 6  Travel booking  15,000\nSep 7  Received from client  +12,500"}
+                  className="t-body fms-paste"
+                />
+              </Field>
+            </div>
+          )}
         </div>
 
         {result && summary && (
