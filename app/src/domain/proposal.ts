@@ -38,6 +38,7 @@ import { parseAmount, type Centavos } from "./money";
 import type { Draft, Flow } from "./entry";
 import { itemsFor } from "./entry";
 import { nearestName } from "./nearly";
+import type { ReceiptCheck } from "./receipt";
 import type { IsoDate, ReferenceLists, TransactionCategory, TransactionStatus } from "./types";
 
 export type Confidence = "high" | "medium" | "low";
@@ -788,7 +789,7 @@ export function readProposals(
    * text the device read, then a credit line's own screen filed on that
    * line, then fees folded into what they were charged on.
    */
-  const checked = checkAgainstReadings(proposals, context.readings ?? []);
+  const checked = checkReceipts(checkAgainstReadings(proposals, context.readings ?? []), context.receipts ?? [], reference.wallets, asOf);
   const filed = onCreditLine(checked, context.note ?? "", reference);
   return { proposals: pairBorrowings(foldTransferFees(foldCharges(notIncomeKinds(filed, reference)))), refused, balances };
 }
@@ -818,6 +819,92 @@ export interface ReadContext {
   readonly note?: string;
   /** The text the device read off the pictures, both readings of each. */
   readonly readings?: readonly string[];
+  /** Receipts in those pictures, checked by their arithmetic (`domain/receipt.ts`). */
+  readonly receipts?: readonly ReceiptCheck[];
+}
+
+/**
+ * A receipt's card, held to the receipt's own arithmetic.
+ *
+ * The model is told the total the device worked out (`receiptNote`), and
+ * this is the check that it listened. 28 September 2026: a receipt for
+ * 109.00 paid with 200.00 in cash. The figures a model lands on instead are
+ * always the same few: the cash handed over, the change, or the VATable
+ * sales and the VAT as two rows. Each is one the receipt printed as
+ * something other than what was spent, so a card showing one of them is
+ * moved to the total, and says so. A card already on the total is left as
+ * the model read it; only the tax parts and the cash beside it go.
+ *
+ * Only a receipt whose checks agreed (confidence medium or high) moves a
+ * card, and only when the card's figure is one that receipt printed.
+ */
+export function checkReceipts(
+  proposals: readonly Proposal[],
+  receipts: readonly ReceiptCheck[],
+  wallets: readonly string[],
+  asOf: IsoDate,
+): Proposal[] {
+  let out = [...proposals];
+  for (const r of receipts) {
+    if (r.confidence === "low") continue;
+    const wrong = new Set(r.notTheTotal);
+    const paidFor = (p: Proposal): boolean => p.draft.flow !== "Revenue" && p.draft.flow !== "Transfer";
+    const why = (amount: Centavos): string =>
+      amount === r.tendered
+        ? "the money handed over"
+        : amount === r.change
+          ? "the change"
+          : amount === r.vat
+            ? "the VAT"
+            : amount === r.vatable
+              ? "the VATable sales"
+              : "a part of the total";
+
+    let kept = out.find((p) => paidFor(p) && p.draft.amount === r.total);
+    if (!kept) {
+      const off = out.filter((p) => paidFor(p) && p.draft.amount !== null && wrong.has(p.draft.amount));
+      const first = off[0];
+      if (!first || first.draft.amount === null) continue;
+      const moved: Proposal = {
+        ...first,
+        draft: { ...first.draft, amount: r.total },
+        confidence: first.confidence === "high" ? "medium" : first.confidence,
+        adjustments: [
+          ...first.adjustments,
+          `Read as ${pesos(first.draft.amount)}, which is ${why(first.draft.amount)}. The receipt's total is ${pesos(r.total)} (${r.evidence.join("; ")}), so that is used.`,
+        ],
+      };
+      out = out.map((p) => (p === first ? moved : p));
+      kept = moved;
+    }
+
+    // The rest of the same receipt's printed parts, on the same day, are the total again in pieces.
+    const day = kept.draft.date;
+    const parts = out.filter(
+      (p) => p !== kept && paidFor(p) && p.draft.date === day && p.draft.amount !== null && wrong.has(p.draft.amount),
+    );
+    let fixed: Proposal = parts.length === 0 ? kept : {
+      ...kept,
+      adjustments: [
+        ...kept.adjustments,
+        ...parts.map((p) => `Left out ${pesos(p.draft.amount ?? 0)}, ${why(p.draft.amount ?? 0)}: it is part of this receipt, not a second purchase.`),
+      ],
+    };
+
+    // How it was paid, and when, as printed, where the model left them open.
+    const wallet = r.paidWith && r.paidWith !== "card" ? wallets.find((w) => w.trim().toLowerCase() === r.paidWith) ?? "" : "";
+    if (wallet && !fixed.draft.fromWallet && fixed.draft.flow !== "Debt") {
+      fixed = { ...fixed, draft: { ...fixed.draft, fromWallet: wallet }, adjustments: [...fixed.adjustments, `Paid from ${wallet}, as the receipt shows.`] };
+    }
+    if (r.date && !r.dateAmbiguous && fixed.draft.date === asOf && r.date !== asOf) {
+      fixed = { ...fixed, draft: { ...fixed.draft, date: r.date }, adjustments: [...fixed.adjustments, `Dated ${r.date}, as printed on the receipt.`] };
+    }
+
+    const gone = new Set(parts);
+    const before = kept;
+    out = out.filter((p) => !gone.has(p)).map((p) => (p === before ? fixed : p));
+  }
+  return out;
 }
 
 /** Every amount printed with its two decimals in the readings, in centavos. */

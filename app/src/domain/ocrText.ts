@@ -85,7 +85,15 @@ export function tidyReading(text: string): string {
     .split(/\r?\n/)
     .map((line) =>
       line
-        .replace(/(^|[\s(:-])(?:PHP|Php|php|[P£$€¥₱]{1,2})\s?(?=\d)/g, "$1₱")
+        // Any mix of case: a receipt photo's "Total pHP 109.00" (28 September 2026).
+        .replace(/(^|[\s(:-])(?:[Pp][Hh][Pp]|[P£$€¥₱]{1,2})\s?(?=\d)/g, "$1₱")
+        /*
+         * A label run into its figure, "CASH200.00" and "VAT AMT11.68" on the
+         * same receipt: the thermal print leaves no gap the reader can see.
+         * Split only before a figure with its two decimals, so a code such
+         * as SH01 or 50ML is left alone.
+         */
+        .replace(/([A-Za-z])(?=\d[\d,]*\.\d{2}(?!\d))/g, "$1 ")
         .replace(/[|¦]/g, " ")
         .replace(/\s{2,}/g, " ")
         .trim(),

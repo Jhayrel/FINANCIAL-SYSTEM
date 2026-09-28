@@ -126,10 +126,21 @@ export function readPicture(dataUrl: string, key?: string): Promise<Reading | nu
   return remember(key ?? dataUrl, readOnce(dataUrl));
 }
 
-/** Wide enough for the reader, narrow enough to be quick: a phone screenshot as it is. */
-const MAX_WIDTH = 1240;
+/**
+ * Wide enough for the reader, narrow enough to be quick: a phone screenshot
+ * as it is, and a photo large enough for a receipt's small print.
+ *
+ * It was 1,240. The owner's receipt photo of 28 September 2026 read at that
+ * width turned 97.32 into 91.32 and lost the subtotal; at 1,600 every figure
+ * on it was right, for about the same time (1.1 against 1.1 seconds on a
+ * laptop, measured). A screenshot is narrower than either and is never
+ * enlarged, so only photos read differently.
+ */
+const MAX_WIDTH = 1600;
 /** The height of one piece: about one screen of a phone's history. */
 const PIECE = 1600;
+/** Taller than this many widths is a screenshot or a scroll capture, and is read in pieces. */
+const TALL = 1.9;
 
 async function readOnce(src: string): Promise<Reading | null> {
   let limitMs = 12_000;
@@ -155,7 +166,13 @@ async function readOnce(src: string): Promise<Reading | null> {
 
     // Where to cut: the emptiest row near each screen's worth.
     let cuts = [0, height];
-    if (height > PIECE) {
+    /*
+     * Only a picture much taller than it is wide is cut: a phone screenshot
+     * or a stitched history. A camera photo of a receipt is at most 16:9, and
+     * cut in two it lost every figure between SUBTOTAL and CHANGE, because
+     * the cut went through them (28 September 2026). Whole, it read right.
+     */
+    if (height > PIECE && height > width * TALL) {
       const px = pixels.data;
       const ink: number[] = new Array(height);
       for (let y = 0; y < height; y += 1) {
@@ -172,7 +189,7 @@ async function readOnce(src: string): Promise<Reading | null> {
     }
     const pieces = cuts.length - 1;
     // A long history gets more time, and only the reading that caught every line on a wallet screen.
-    limitMs = 8_000 + pieces * 3_000;
+    limitMs = 10_000 + pieces * 3_500;
     const both = pieces <= 2;
 
     const scheduler = await starting;
