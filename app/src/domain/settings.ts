@@ -73,6 +73,8 @@ export interface AiSettings {
     readonly capture?: boolean;
     /** Wording the note after spending is saved (`domain/spendNote.ts`). The note itself does not need the model. */
     readonly notes?: boolean;
+    /** Explaining the Budget screen's forecast in words, when asked (`features/Outlook.tsx`). The forecast itself does not need the model. */
+    readonly forecast?: boolean;
   };
   /**
    * What a message may carry.
@@ -226,6 +228,7 @@ export function normaliseSettings(raw: unknown): AppSettings {
         chat: input.ai?.features?.chat ?? base.ai.features.chat ?? true,
         capture: input.ai?.features?.capture ?? base.ai.features.capture ?? true,
         notes: input.ai?.features?.notes ?? base.ai.features.notes ?? true,
+        forecast: input.ai?.features?.forecast ?? base.ai.features.forecast ?? true,
       },
     },
     theme: input.theme ?? base.theme,

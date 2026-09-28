@@ -16,6 +16,9 @@
  *
  *   1. The months it reads are the six before the one being planned, skipping
  *      any with nothing recorded, and reaching back up to a year to find three.
+ *      The month still running counts only once three quarters of it has
+ *      passed: on the 3rd it holds three days, and read as a month it would
+ *      pull every item's usual month down.
  *   2. Each item gets its own usual month: the median of what it cost in each
  *      of those months, counting a month without it as nothing. A median is
  *      what a normal month looks like; a mean lets one Shopee order of
@@ -153,6 +156,12 @@ export interface AdviceInput {
   readonly income?: Centavos | null;
   /** What they want kept back to save, out of that income. */
   readonly keep?: Centavos | null;
+  /**
+   * The month to read back from, when not the month planned. The months
+   * ahead are all read from the same recent months (`outlook.ts`), so
+   * December is not planned from fewer months than October.
+   */
+  readonly readBefore?: { readonly year: number; readonly month: number };
 }
 
 export function budgetAdvice(input: AdviceInput): BudgetAdvice {
@@ -168,11 +177,15 @@ export function budgetAdvice(input: AdviceInput): BudgetAdvice {
     else byMonth.set(k, [t]);
   }
   const read: string[] = [];
+  const anchor = input.readBefore ?? { year, month };
+  const thisMonth = asOf.slice(0, 7);
+  const thisMonthCounts = Number(asOf.slice(8, 10)) * 4 >= daysInMonth(Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7))) * 3;
   for (let n = 1; n <= REACH && read.length < WINDOW; n += 1) {
-    const m = back(year, month, n);
+    const m = back(anchor.year, anchor.month, n);
     const k = key(m.year, m.month);
     // A month still to come has nothing to say about a normal one.
-    if (k > asOf.slice(0, 7)) continue;
+    if (k > thisMonth) continue;
+    if (k === thisMonth && !thisMonthCounts) continue;
     if ((byMonth.get(k) ?? []).length > 0) read.push(k);
     if (n >= WINDOW && read.length >= ENOUGH) break;
   }

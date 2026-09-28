@@ -49,7 +49,7 @@ import { conversationBlock } from "../domain/memory";
 import { dayInFileName, dropRepeats, piecesOf, readingFor, rowsIn } from "../domain/ocrText";
 import { readReceipt, receiptNote, type ReceiptCheck } from "../domain/receipt";
 import { interestNote, readInterestCredit, type InterestCredit } from "../domain/interestCredit";
-import { acceptableWording, type SpendNote } from "../domain/spendNote";
+import { acceptableWording, onlyTheirFigures, type SpendNote } from "../domain/spendNote";
 import { readPicture } from "./ocr";
 import { pairBorrowings, readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
 import type { Attachment } from "./attachments";
@@ -1217,24 +1217,25 @@ export async function modelsOnOffer(options: { fetcher?: typeof fetch; token?: (
 }
 
 /**
- * A note after spending, in the model's words, or null for the device's.
+ * Figures the app worked out, in the model's words, or null for the device's.
  *
- * The model is given the note's facts and nothing else: no balances, no
- * rows, no history. Its words are kept only when every figure in them is one
- * of the facts and they do not preach (`spendNote.ts`, `acceptableWording`),
- * and only when they come back quickly: a note that arrives long after the
- * save is about something the owner has moved on from.
+ * The model is given the facts and nothing else: no balances, no rows, no
+ * history. What comes back is kept only when `accept` passes it (every
+ * figure one of the facts', no preaching) and it comes back in time.
  */
-export async function phraseNote(
-  note: SpendNote,
+async function wordFacts(
+  task: "note" | "outlook",
+  facts: readonly string[],
+  deviceText: string,
+  accept: (text: string) => boolean,
   options: {
     readonly provider?: string;
     readonly model?: string;
     readonly fetcher?: typeof fetch;
     readonly token?: () => Promise<string | null>;
     readonly timeoutMs?: number;
-  } = {},
-): Promise<string | null> {
+  },
+): Promise<{ text: string; model: string } | null> {
   const auth = await (options.token ?? idToken)().catch(() => null);
   if (!auth) return null;
   const controller = new AbortController();
@@ -1245,20 +1246,38 @@ export async function phraseNote(
       signal: controller.signal,
       headers: { "content-type": "application/json", authorization: `Bearer ${auth}` },
       body: JSON.stringify({
-        task: "note",
+        task,
         tone: "brief",
-        question: "Word this note.",
-        context: ["The facts:", ...note.facts, "", "The note as the app would say it:", note.text].join(String.fromCharCode(10)),
+        question: task === "note" ? "Word this note." : "Explain these figures.",
+        context: ["The facts:", ...facts, "", "As the app would say it:", deviceText].join(String.fromCharCode(10)),
         ...(options.provider && options.model ? { provider: options.provider, model: options.model } : {}),
       }),
     });
     if (!response.ok || !(response.headers.get("content-type") ?? "").includes("application/json")) return null;
     const payload = (await response.json()) as OkPayload;
     const text = typeof payload.text === "string" ? plainText(payload.text).replace(/\s+/g, " ").trim() : "";
-    return text && acceptableWording(text, note) ? text : null;
+    return text && accept(text) ? { text, model: typeof payload.model === "string" ? payload.model : "" } : null;
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** A note after spending, in the model's words, or null for the device's (`spendNote.ts`). */
+export async function phraseNote(
+  note: SpendNote,
+  options: { readonly provider?: string; readonly model?: string; readonly fetcher?: typeof fetch; readonly token?: () => Promise<string | null>; readonly timeoutMs?: number } = {},
+): Promise<string | null> {
+  const got = await wordFacts("note", note.facts, note.text, (t) => acceptableWording(t, note), options);
+  return got?.text ?? null;
+}
+
+/** The months ahead explained by the model, or null for the device's words (`outlook.ts`). */
+export async function explainOutlook(
+  facts: readonly string[],
+  deviceText: string,
+  options: { readonly provider?: string; readonly model?: string; readonly fetcher?: typeof fetch; readonly token?: () => Promise<string | null>; readonly timeoutMs?: number } = {},
+): Promise<{ text: string; model: string } | null> {
+  return wordFacts("outlook", facts, deviceText, (t) => onlyTheirFigures(t, facts, 900), { timeoutMs: 20_000, ...options });
 }

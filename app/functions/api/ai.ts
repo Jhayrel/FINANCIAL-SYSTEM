@@ -207,7 +207,7 @@ const EXPENDABLE: readonly RegExp[] = [
   // Only the smallest retries reach these: what the question named goes last.
   /^Bills$/i,
   /^The ledger$/i,
-  /, forecast by the app$/i,
+  /^The months ahead, as the app plans them$/i,
   /^Today and the days before it/i,
   /, spending by item$/i,
   /^Every year in the ledger/i,
@@ -737,6 +737,13 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
    * owner, 28 September 2026: "dont make those pushy what if its food or
    * gas ... that is not in the budget but its need?"
    */
+  /*
+   * The months ahead on the Budget screen (client: `domain/outlook.ts`). The
+   * owner, 28 September 2026: the forecast should be "the realistic basis for
+   * alloting budget ... make it ai powered".
+   */
+  outlook:
+    "Explain these planning figures to the owner in three to five short sentences, as a friend who keeps their books: what a usual month costs and what it usually brings in, whether each month's budget is realistic against the usual month, and what to plan for. Use only the figures given, exactly as written, and never add, subtract or invent one. A usual month leaves one-offs out, so say plainly that a month with a one-off costs more, using the figure given for that. Calm and practical: no scolding, no exclamation marks, no emoji. Do not mention the app, a model or yourself.",
   note:
     "Word this note about a purchase just saved, in one or two short sentences, as a friend who keeps their books would say it to them. Use only the figures given, exactly as written, and add none. Calm and plain: no scolding, no guilt, no warnings, no commands, no should or must, no exclamation marks, no emoji. A need (food, fuel, health, school, bills, home needs) is never judged: say it is counted, and at most mention where the month's wants have room if that is given. For a want, say the fact and leave the choice to them. Do not mention the app, a model or yourself.",
   patterns:
@@ -956,6 +963,13 @@ const TASKS: Record<string, TaskSpec> = {
     shape: '{"summary": "your answer as plain sentences"}',
     parse: narrative,
     toned: true,
+    proseIsFine: true,
+  },
+  outlook: {
+    instruction: TASK_INSTRUCTIONS["outlook"] ?? "",
+    shape: '{"summary": "three to five short sentences"}',
+    parse: narrative,
+    maxTokens: 400,
     proseIsFine: true,
   },
   note: {

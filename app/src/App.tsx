@@ -2312,6 +2312,14 @@ export default function App() {
               transactions={transactions}
               budgets={budgets}
               debts={settings.credits}
+              stopped={settings.stopped}
+              ai={
+                aiSurfaceOn(settings.ai, "forecast") && online
+                  ? settings.ai.model
+                    ? { provider: settings.ai.provider, model: settings.ai.model }
+                    : {}
+                  : undefined
+              }
               reference={reference}
               asOf={asOf}
               onReplaceYear={handleBudgetYear}

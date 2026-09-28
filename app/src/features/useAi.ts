@@ -251,6 +251,8 @@ export function useAi({
               credits: settings.credits,
               // Each month against its own budget, for "have I kept to my budget".
               budgets,
+              // The months ahead leave out what was stopped, as the Budget screen does.
+              stopped: settings.stopped,
               ...(options.screen ? { screen: options.screen } : {}),
             }).text
           : undefined;

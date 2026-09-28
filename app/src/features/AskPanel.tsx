@@ -207,7 +207,7 @@ import { formatMedium, MONTH_NAMES } from "../domain/dates";
 import { chatHistory, earlierSessions, keepInMind } from "../domain/memory";
 import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, pendingChoices, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
-import { forecastYear } from "../domain/forecast";
+import { outlookFor } from "../domain/outlook";
 import { withCommandWordsFixed } from "../domain/typos";
 import { asksForWrongRows, flaggedRows } from "../domain/integrity";
 
@@ -1856,13 +1856,17 @@ export function AskPanel({
   /** The budget question just asked, so the next message can answer it. */
   const budgetQuestion = useRef<{ year: number; month: number; toMonth?: number; scope: "month" | "rest" | "year" } | null>(null);
 
-  /** What the Budget screen forecasts for a month: the figure "use the forecast" means. */
+  /**
+   * What the Budget screen's forecast plans for a month: the figure "use the
+   * forecast" means. The same usual month (`domain/outlook.ts`), read from
+   * the same months, so the chat and the screen give one figure.
+   */
   const forecastFor = (year: number, month: number): { spending: number; billsSubs: number } | null => {
     const nowYear = Number(asOf.slice(0, 4));
     // A month already running or over has no forecast, only what it spent.
     if (year * 12 + month <= nowYear * 12 + Number(asOf.slice(5, 7))) return null;
-    const f = forecastYear(transactions, year, year === nowYear ? Number(asOf.slice(5, 7)) : year > nowYear ? 0 : 12, debts, asOf)[month - 1];
-    return f && f.spending > 0 ? { spending: f.spending, billsSubs: f.billsSubs } : null;
+    const o = outlookFor(transactions, budgets, year, month, asOf, { stopped: settings.stopped ?? [], debts, readBefore: nextOf(asOf) });
+    return o.read.length > 0 && o.total > 0 ? { spending: o.spending, billsSubs: o.billsSubs } : null;
   };
 
   const replaceProposal = (index: number, proposal: Proposal): void =>
@@ -4106,7 +4110,7 @@ export function AskPanel({
         const reply = [
           `What should the budget be for ${name}${span?.toMonth ? ` to ${MONTH_NAMES[span.toMonth - 1] ?? ""}` : ""}?`,
           recentProposal ? `The last figure recommended here was **${formatMoney(recentProposal.value)}**: say "use that".` : "",
-          f ? `The app forecasts ${forecastName} at about **${formatMoney(f.spending)}** for spending and ${formatMoney(f.billsSubs)} for bills: say "use the forecast".` : "",
+          f ? `The forecast plans ${forecastName} as your usual month: **${formatMoney(f.spending)}** for spending and ${formatMoney(f.billsSubs)} for bills and subscriptions. Say "use the forecast".` : "",
           `Or give a figure and the months: "set October to December to 9000", "limit food to 3000 from now on".`,
           pending ? "The entry I asked about is still waiting for its answer." : "",
         ]

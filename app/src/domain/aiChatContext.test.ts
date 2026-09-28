@@ -279,10 +279,11 @@ describe("what the model is given to reason with", () => {
   }
   const text = build("what budget should I set next month?", { transactions: months }).text;
 
-  it("sends next month's forecast, with a budget that covers it", () => {
-    expect(text).toContain("## September 2026, forecast by the app");
-    expect(text).toMatch(/A budget that covers this forecast: PHP [\d,]+\.\d\d for spending/);
-    expect(text).toMatch(/likely between PHP [\d,]+\.\d\d and PHP [\d,]+\.\d\d/);
+  it("sends the months ahead as the Budget screen plans them", () => {
+    expect(text).toContain("## The months ahead, as the app plans them");
+    expect(text).toMatch(/September to November 2026, each: a usual month PHP [\d,]+\.\d\d \(spending PHP [\d,]+\.\d\d/);
+    expect(text).toContain("When asked what budget to set for one of these months, recommend its usual month");
+    expect(text).not.toContain("forecast by the app");
   });
 
   it("sends each item this month against its own last three months", () => {

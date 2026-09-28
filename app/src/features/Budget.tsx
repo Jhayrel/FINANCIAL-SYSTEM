@@ -86,7 +86,8 @@ import {
   type PlanSuggestions,
 } from "../domain/budgetView";
 import type { Debt } from "../domain/debt";
-import { cashFlow, confidenceWords, explainBasis, forecastYear } from "../domain/forecast";
+import { cashFlow } from "../domain/forecast";
+import type { MonthOutlook } from "../domain/outlook";
 import { getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
 import type {
@@ -98,6 +99,7 @@ import type {
   Transaction,
 } from "../domain/types";
 import { pickableYears } from "../domain/year";
+import { Outlook } from "./Outlook";
 import { useReportScreen } from "./screenReport";
 
 const TRACKS = [
@@ -110,6 +112,8 @@ const TOP_CATEGORIES = 8;
 
 /** A difference worth a look: at least ₱500.00 above the usual, and half as much again. */
 const NOTABLE = 50000;
+
+const NO_STOPPED: readonly { readonly name: string; readonly since: string }[] = [];
 
 /** A sentence under a control, saying what a save did or why it did not. */
 interface Note {
@@ -159,10 +163,16 @@ export function Budget({
   onReplaceYear,
   onRecordBill,
   onShowRows,
+  stopped = NO_STOPPED,
+  ai,
 }: {
   transactions: readonly Transaction[];
   budgets: Budgets;
   debts: readonly Debt[];
+  /** Bills and subscriptions stopped in Settings: the forecast leaves them out. */
+  stopped?: readonly { readonly name: string; readonly since: string }[] | undefined;
+  /** The model, when AI is on and may explain the forecast. */
+  ai?: { readonly provider?: string; readonly model?: string } | undefined;
   reference: ReferenceLists;
   asOf: string;
   /** A year's plan, written once, with a sentence for each change it holds. */
@@ -197,10 +207,9 @@ export function Budget({
       rows,
       totals: budgetYearTotals(rows),
       plan: budgetForYear(budgets, year),
-      forecast: year === asOfYear ? forecastYear(transactions, year, asOfMonth, debts, asOf) : [],
       flow: cashFlow(transactions, year),
     };
-  }, [transactions, budgets, debts, year, asOfYear, asOfMonth]);
+  }, [transactions, budgets, year]);
 
   /** Months with anything recorded or budgeted: the picker shows the rest quieter. */
   const active = useMemo(
@@ -319,6 +328,33 @@ export function Budget({
             ? `Saved. ${name} through December are set to ${total} each.`
             : `Saved. Every month of ${year} still ahead is set to ${total}.`;
     return commit(saveTracks(y.plan, year, month, value, scope, asOf, now(), reason), done, setNote);
+  };
+
+  /**
+   * A month ahead set to its usual month, from the forecast. The month may be
+   * in next year, so its own year's plan is the one written.
+   */
+  const useOutlook = (o: MonthOutlook): Note => {
+    const outcome = saveTracks(
+      budgetForYear(budgets, o.year),
+      o.year,
+      o.month,
+      { spending: o.spending, billsSubs: o.billsSubs },
+      "month",
+      asOf,
+      now(),
+    );
+    if (outcome.refused) return { text: outcome.refused, over: true };
+    if (outcome.written.length === 0) return { text: "Nothing changed: those are already the figures.", over: false };
+    onReplaceYear(
+      o.year,
+      outcome.plan,
+      outcome.revisions.map((r, i) => revisionSummary(o.year, outcome.written[i] ?? o.month, r)),
+    );
+    return {
+      text: `Saved. ${o.name} is set to ${formatMoney(o.total)}: ${formatMoney(o.spending)} for spending and ${formatMoney(o.billsSubs)} for bills and subscriptions.`,
+      over: false,
+    };
   };
 
   const undo = (): void => {
@@ -823,6 +859,18 @@ export function Budget({
               </div>
             </Card>
 
+            {year >= asOfYear && (
+              <Outlook
+                transactions={transactions}
+                budgets={budgets}
+                asOf={asOf}
+                debts={debts}
+                stopped={stopped}
+                ai={ai}
+                onUse={useOutlook}
+              />
+            )}
+
             {monthsSoFar > 0 && (
               <>
                 <div className="fms-budgetcharts">
@@ -834,50 +882,6 @@ export function Budget({
                     />
                   </Card>
 
-                  {y.forecast.some((f) => !f.isActual) && (
-                    <Card title="Forecast" subtitle="Estimates for the months still ahead" padded={false}>
-                      <div className="fms-rtable-wrap">
-                        <table className="fms-rtable">
-                          <thead>
-                            <tr>
-                              <th className="t-th">Month</th>
-                              <th className="t-th fms-rnum">Spending</th>
-                              <th className="t-th fms-rnum">Bills</th>
-                              <th className="t-th fms-rnum">Total</th>
-                              <th className="t-th">Basis</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {y.forecast
-                              .filter((f) => !f.isActual)
-                              .map((f) => (
-                                <tr key={f.month}>
-                                  <td className="t-body fms-rhead">{monthLabel(f.month)}</td>
-                                  <td className="fms-rnum" data-label="Spending">
-                                    <Money value={f.spending} size="s" />
-                                    {f.high > f.low && (
-                                      <div className="t-micro" style={{ color: "var(--ink-3)" }}>
-                                        {formatMoney(f.low)} to {formatMoney(f.high)}
-                                      </div>
-                                    )}
-                                  </td>
-                                  <td className="fms-rnum" data-label="Bills">
-                                    <Money value={f.billsSubs} size="s" />
-                                  </td>
-                                  <td className="fms-rnum" data-label="Total">
-                                    <Money value={f.total} size="s" />
-                                  </td>
-                                  <td className="t-micro" data-label="Basis" style={{ color: "var(--ink-3)" }}>
-                                    {explainBasis(f.basis, f.growth)}
-                                    {f.basis !== "none" && <div>{confidenceWords(f.confidence)}</div>}
-                                  </td>
-                                </tr>
-                              ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </Card>
-                  )}
                 </div>
 
                 <Card

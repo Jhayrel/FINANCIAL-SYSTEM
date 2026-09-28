@@ -2474,6 +2474,7 @@ const clampLow = (v: Centavos | null): Centavos =>
 const AI_FEATURES: { key: keyof AiSettings["features"]; label: string; what: string }[] = [
   { key: "alerts", label: "Finance alerts", what: "Sums up the flagged items on the Dashboard" },
   { key: "notes", label: "Budget notes", what: "Words the note after spending; off, the app words it itself" },
+  { key: "forecast", label: "Forecast", what: "Explains the Budget screen's forecast when you ask; off, the app explains it itself" },
   { key: "insightSummary", label: "Insight summary", what: "Describes the month on the Insights screen" },
   {
     key: "descriptions",

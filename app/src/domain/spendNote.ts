@@ -195,3 +195,17 @@ export function acceptableWording(words: string, note: SpendNote): boolean {
   }
   return true;
 }
+
+/**
+ * Every figure in `text` is one of the facts', and it is not too long: the
+ * check any wording by the model must pass before it replaces the device's.
+ */
+export function onlyTheirFigures(text: string, facts: readonly string[], most: number): boolean {
+  const t = text.trim();
+  if (t.length === 0 || t.length > most) return false;
+  const allowed = new Set([...facts.join(" ").matchAll(/(\d[\d,]*(?:\.\d+)?)/g)].map((m) => (m[1] ?? "").replace(/,/g, "")));
+  for (const m of t.matchAll(/(\d[\d,]*(?:\.\d+)?)/g)) {
+    if (!allowed.has((m[1] ?? "").replace(/,/g, ""))) return false;
+  }
+  return true;
+}

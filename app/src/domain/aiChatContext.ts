@@ -49,8 +49,8 @@ import { toCentavos, toPesos } from "./money";
 import { costOf, incomeOf } from "./totals";
 import { debtDue, positionsOf, rowsFor, type Debt } from "./debt";
 import { creditRoom, limitSteps } from "./creditLimit";
-import { confidenceWords, explainBasis, forecastYear } from "./forecast";
 import { assessMonthFor, budgetForMonth } from "./budget";
+import { outlookAhead, outlookFacts } from "./outlook";
 import { moneyFlow, flowWords } from "./moneyFlow";
 import { whyOver } from "./budgetAdvice";
 import { namesWindow, windowOf } from "./charts";
@@ -219,6 +219,8 @@ export interface ChatContextInput {
    * from each month against its own budget, not from this month alone.
    */
   readonly budgets?: Budgets | undefined;
+  /** Bills and subscriptions stopped in Settings, which the months ahead leave out. */
+  readonly stopped?: readonly { readonly name: string; readonly since: IsoDate }[] | undefined;
   /**
    * What the owner has open while asking (`domain/screenContext.ts`), put
    * first so "what do you think" is about the screen they are looking at.
@@ -340,39 +342,33 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   }
 
   /**
-   * ── Next month, as the Budget screen forecasts it ────────────────────────
+   * ── The months ahead, as the Budget screen plans them ────────────────────
    *
    * Asked for a recommended budget for next month on 26 September 2026, the
    * model said "I do not have a recommended budget figure for next month
    * because no budget amount for the upcoming period is present in the data",
    * and a minute later, to the same question, invented one from September's
-   * total. Both were the model working without the figure: the app forecasts
-   * every month on the Budget screen (`domain/forecast.ts`) and never sent it.
+   * total. Both were the model working without the figure.
    *
-   * Sent now, with its likely range, what it is based on and how steady the
-   * months behind it are, so a recommendation is the app's arithmetic and the
-   * model's words, never the other way round.
+   * On 28 September the forecast it was then given was replaced: a weighted
+   * three months with a trend on top turned one big order into every month
+   * after it. What is sent now is the Budget screen's own forecast
+   * (`domain/outlook.ts`): the owner's usual month for each of the next
+   * three, what usually comes in, the debt due, the budget already set, and
+   * what last year's same month held. The chat, the Budget screen and "use
+   * the forecast" read the same figures, so none of them can disagree.
    */
   const [asOfYear, asOfMonth] = [Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7))];
-  const nextYear = asOfMonth === 12 ? asOfYear + 1 : asOfYear;
-  const nextMonth = asOfMonth === 12 ? 1 : asOfMonth + 1;
-  const forecast = forecastYear(rows, nextYear, nextYear === asOfYear ? asOfMonth : 0, input.credits ?? [], asOf)[nextMonth - 1];
-  const nextName = monthName(`${nextYear}-${String(nextMonth).padStart(2, "0")}`);
+  const ahead = outlookAhead(rows, input.budgets ?? {}, asOf, 3, { stopped: input.stopped ?? [], debts: input.credits ?? [] });
   out.push("");
-  out.push(`## ${nextName}, forecast by the app`);
-  if (forecast && forecast.basis !== "none" && forecast.spending > 0) {
+  out.push("## The months ahead, as the app plans them");
+  if (ahead[0] && ahead[0].read.length > 0 && ahead[0].total > 0) {
+    for (const fact of outlookFacts(ahead, php)) out.push(fact);
     out.push(
-      `Spending about ${php(forecast.spending)}, likely between ${php(forecast.low)} and ${php(forecast.high)}. Bills and subscriptions ${php(
-        forecast.billsSubs,
-      )}. Debt payments falling due ${php(forecast.debtService)}. ${explainBasis(forecast.basis, forecast.growth)}. ${confidenceWords(forecast.confidence)}.`,
-    );
-    out.push(
-      `A budget that covers this forecast: ${php(forecast.spending)} for spending and ${php(forecast.billsSubs)} for bills and subscriptions, ${php(
-        forecast.spending + forecast.billsSubs,
-      )} in all. When asked what budget to set, recommend this, say it comes from the forecast, and name the range.`,
+      `When asked what budget to set for one of these months, recommend its usual month (spending and bills and subscriptions, as above), say it is the app's plan from the usual month, and mention the figure for a month where a one-off comes up. Debt payments due are money needed on top, not part of the budget.`,
     );
   } else {
-    out.push("No forecast: the ledger has no months of spending to base one on yet. Say so if asked for a budget.");
+    out.push("No plan: the ledger has no months of spending to base one on yet. Say so if asked for a budget.");
   }
 
   /**

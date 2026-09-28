@@ -10218,3 +10218,60 @@ textarea.fms-askinput {
     gap: 4px;
   }
 }
+
+/* ══ Forecast on the Budget screen ══════════════════════════════════════════
+   Three figures, the months ahead, one line of basis, and the explanation.
+   See features/Outlook.tsx. */
+
+.fms-outlook-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-outlook-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-outlook .fms-outlook-use {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.fms-outlook-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-outlook-words {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-outlook-by {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+@container (max-width: 600px) {
+  .fms-outlook-stats {
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+  }
+}
