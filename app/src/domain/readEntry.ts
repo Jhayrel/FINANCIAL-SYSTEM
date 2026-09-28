@@ -334,6 +334,17 @@ function amountIn(text: string): number | null {
   if (match?.[1]) return readMoney(match[1]);
 
   /*
+   * One digit, when it is the only figure and is not counting something.
+   *
+   * A stray "1" is not an amount ("1 kilo", "2 pcs", "3 days ago"), which is
+   * why two digits were required. But "6 unknown spending" and "5 pesos
+   * candy" are six and five pesos, and on 28 September 2026 the first was
+   * met with "How much was it?" about a sentence that began with how much.
+   */
+  const lone = [...withoutDates.matchAll(/(?:₱|php\s*)?\b(\d)\b(?!\s*(?:(?:kilos?|kg|g|grams?|pcs|pieces?|pc|x|times?|days?|weeks?|months?|years?|hours?|hrs?|mins?|minutes?|liters?|litres?|l|ml|am|pm|o'?clock|people|persons?|of)\b|[/:]))/gi)];
+  if (lone.length === 1 && lone[0]?.[1] && !/\d{2,}/.test(withoutDates)) return Number(lone[0][1]) * 100;
+
+  /*
    * Written out, when nothing was typed in digits.
    *
    * The owner writes properly when the message is long: "I withdrew a

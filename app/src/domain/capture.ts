@@ -172,6 +172,30 @@ export function nextQuestion(
  * perfectly well, so the field is looked for inside it rather than required
  * to be the whole of it.
  */
+/**
+ * A reply that points at the answer instead of giving it.
+ *
+ * 28 September 2026: a receipt's card asked "What was it for?", the owner
+ * answered "Read it", and the card came back with the item "Read it" and an
+ * offer to add it as a new spending type. "look at the product name", "you
+ * know it", "same as the receipt" are the same kind of reply. What the thing
+ * was is then worked out from what the card already says it was.
+ */
+export const POINTS_ELSEWHERE =
+  /^\s*(?:(?:please|pls|just|ok|okay)\s+)?(?:read|look|check|see|scan|refer)\b|\b(?:the\s+)?(?:receipt|picture|photo|screenshot|image|product\s+name)\b|^\s*(?:you\s+know(?:\s+it)?|same|same\s+as\s+(?:before|above|the\s+\w+)|it(?:'s|\s+is)?\s+(?:there|on\s+it)|idk|i\s+don'?t\s+know|ewan|basta)\s*[.!]*\s*$/i;
+
+/**
+ * Asking for the last picture to be read again, without attaching it:
+ * "Read it", "read the receipt", "look at the product name", "again".
+ *
+ * 28 September 2026: each of those went to the chat, which said it "cannot
+ * read a physical receipt" or described one it had never been given.
+ */
+const READ_AGAIN =
+  /\b(?:read|re-?read|look\s+at|check|scan|see)\b[^?]*\b(?:receipt|picture|photo|screenshot|image|statement|product\s+name|it\s+again|this\s+again|again)\b|^\s*(?:(?:please\s+)?read\s+(?:it|this|that)|again|try\s+again|read\s+again)\s*[.!]*\s*$/i;
+
+export const asksToReadAgain = (note: string): boolean => READ_AGAIN.test(note) && note.trim().split(/\s+/).length <= 14;
+
 export function applyReply(
   draft: Draft,
   blank: Blank,
@@ -250,6 +274,8 @@ export function applyReply(
       }
       const match = matchItem(rest, draft.flow as Flow, draft.category, reference);
       if (match.matched) return { ...next, item: match.item };
+      // "read it", "look at the receipt": pointing at the answer, not giving one. Never an item's name.
+      if (POINTS_ELSEWHERE.test(rest)) return { ...next, item: "" };
       // A sentence that names none of their kinds is what it was for, kept as the description; the card offers the kinds.
       if (rest.split(/\s+/).length > 3) {
         return { ...next, item: "", description: next.description.trim() ? next.description : rest };

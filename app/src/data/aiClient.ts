@@ -969,9 +969,9 @@ export async function classifyItem(
 
   const nl = String.fromCharCode(10);
   const context = [
-    `They bought: ${redact(said)}`,
+    `What it was, in their words: ${redact(said)}`,
     "",
-    "Their spending types, and what each one covers:",
+    "Their items, and what each one covers:",
     ...allowed.map((a) => (a.remark ? `${a.name}: ${a.remark}` : a.name)),
   ].join(nl);
 

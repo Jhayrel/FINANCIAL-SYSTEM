@@ -118,7 +118,8 @@ import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isQuestion, meantInstead, notMeantIn, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
-import { addressesEveryCard } from "../domain/capture";
+import { addressesEveryCard, asksToReadAgain, POINTS_ELSEWHERE } from "../domain/capture";
+import { asksWhetherAdded, inLedgerOrNot } from "../domain/checkPicture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
 import { describeFile, summariseFile } from "../domain/photoNote";
@@ -1838,6 +1839,18 @@ export function AskPanel({
    * so this notices out loud and leaves the decision alone.
    */
   const sentBefore = useRef(new Map<string, string>());
+  /**
+   * The pictures last sent, this session, for reading again when asked.
+   *
+   * 28 September 2026: "Read it", "Read the receipt" and "look at the
+   * receipt" were each sent with no picture attached, reached the chat, and
+   * were told it "cannot read a physical receipt", or were given a receipt
+   * that was never there. The picture was a message above. Kept in memory
+   * only, like every picture: nothing is stored.
+   */
+  const lastPictures = useRef<readonly Attachment[]>([]);
+  /** The last message was those pictures, so a bare "again" means them. */
+  const lastWasPicture = useRef(false);
 
   const attach = async (given: ArrayLike<File> | null): Promise<void> => {
     if (!given || given.length === 0) return;
@@ -2449,17 +2462,25 @@ export function AskPanel({
      * every field before anything is saved.
      */
     if (pending.blank === "item" && complete.flow) {
-      const local = matchItem(reply, complete.flow, complete.category, reference, learnedItems);
-      if (!local.matched && !ai.disabled) {
+      /*
+       * "read it", "look at the product name": what it was is what the card
+       * already says, from the receipt or the message, not the reply.
+       */
+      const pointing = POINTS_ELSEWHERE.test(reply);
+      const about = pointing ? [complete.description, pending.said].filter((s) => s.trim()).join(". ") || reply : reply;
+      const local = matchItem(about, complete.flow, complete.category, reference, learnedItems);
+      if (local.matched && pointing) {
+        complete = { ...complete, item: local.item };
+      } else if (!local.matched && !ai.disabled) {
         const known = itemsFor(complete.flow, complete.category, reference);
         const withNotes = known.map((name) => ({
           name,
           remark: reference.spendingTypes.find((t) => t.name === name)?.remark ?? "",
         }));
-        const guessed = await classifyItem(reply, withNotes);
+        const guessed = await classifyItem(about, withNotes);
         if (guessed) {
           complete = { ...complete, item: guessed.item };
-          because.push(`"${reply.trim()}" reads as ${guessed.item}, going by what it is.`);
+          because.push(`"${about.trim().slice(0, 60)}" reads as ${guessed.item}, going by what it is.`);
         }
       }
 
@@ -2505,9 +2526,13 @@ export function AskPanel({
   };
 
   /** Read the attached files into proposals. Returns false when there were none. */
-  const readAttached = async (note: string): Promise<boolean> => {
-    const sent = files;
-    setFiles([]);
+  const readAttached = async (note: string, again?: readonly Attachment[]): Promise<boolean> => {
+    const sent = again ? [...again] : files;
+    if (!again) setFiles([]);
+    // Kept for "read it again" and "look at the receipt", which name no file (see READ_AGAIN).
+    const pictures = sent.filter((a) => a.kind === "image" && a.dataUrl);
+    if (pictures.length > 0) lastPictures.current = pictures;
+    lastWasPicture.current = pictures.length > 0;
 
     // Remembered on the way out, so the next message can recognise them.
     const clock = new Date().toTimeString().slice(0, 5);
@@ -2669,6 +2694,13 @@ export function AskPanel({
         await askQuestion(note, false);
         return true;
       }
+      /*
+       * The model found nothing, but the rules here can: let them, without
+       * saying first that nothing was found. "6 unknown spending" was told
+       * "I could not find an entry in that" and then, a moment later by the
+       * rules, "How much was it?" (28 September 2026). One message, one reply.
+       */
+      if (sent.length === 0 && readEntry(note, transactions, reference, asOf).worthOffering) return false;
       /*
        * Say so either way.
        *
@@ -2853,10 +2885,26 @@ export function AskPanel({
      * cash taken out (27 September 2026: "it cant recognized the transfer
      * from gcash earlier, it doenst recognized the debt being paid").
      */
-    const checked =
+    const sensed =
       sent.length > 0
         ? senseStatementRows(onDevice, { account, readings: result.readings ?? [], ownNames, debts, transactions, reference })
         : onDevice;
+    // A row with no money in it is not a row: a PHP 0.00 card came off a Maya history (28 September 2026).
+    const checked = sent.length > 0 ? sensed.filter((p) => p.draft.amount !== 0) : sensed;
+
+    /*
+     * "Can you check only if this is added?": a question about the picture,
+     * answered from the ledger, with cards for the missing rows only
+     * (domain/checkPicture.ts).
+     */
+    if (sent.length > 0 && asksWhetherAdded(note)) {
+      const verdict = inLedgerOrNot(checked.map((p) => p.draft), transactions);
+      say({ kind: "assistant", text: verdict.words, from: "this device" });
+      log(aiEvent("answered", "add", { text: verdict.words, model: "this device" }));
+      const missing = verdict.missing.map((i) => checked[i]).filter((p): p is Proposal => p !== undefined);
+      for (const proposal of missing) await offer(proposal, note, true, missing.length > 1, []);
+      return true;
+    }
 
     const odd = readings.filter((r) => r.note.includes("but reads as")).length;
     if (odd > 0) {
@@ -3272,6 +3320,62 @@ export function AskPanel({
      * then the local rules run exactly as they did. Wrong sometimes beats
      * absent.
      */
+    /*
+     * A reply to the question under a card goes to that card, first.
+     *
+     * 28 September 2026, a receipt's card asking "What was it for?": "Cash,
+     * i purchase it for my room" became a new entry asking how much it was,
+     * "Reed defuser wood and santal" was answered by the chat as a question,
+     * and "cash" was answered with the balance of the Cash wallet. Each went
+     * to the router, which read it without the question beside it. A short
+     * reply that is not itself a question is the answer to the one on
+     * screen; a whole new entry with its own figure still starts afresh,
+     * further down.
+     */
+    const answersPending =
+      pending !== null &&
+      files.length === 0 &&
+      !as &&
+      !wantsDiscardOpen(note) &&
+      looksLikeAnswer(note, pending.blank) &&
+      !(pending.blank === "amount" && note.trim().split(/\s+/).length >= 4 && readEntry(note, transactions, reference, asOf).draft.flow !== "");
+    if (answersPending) {
+      setDraft("");
+      setBusy(true);
+      try {
+        await during("Checking your answer", () => answerPending(note), "Still checking it");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    /*
+     * "read it", "read it again", "look at the receipt": the last picture,
+     * read again, with whatever else was said as its context.
+     */
+    const bareAgain = /^\s*(?:again|try\s+again|read\s+again)\s*[.!]*\s*$/i.test(note);
+    const againWasPicture = lastWasPicture.current;
+    lastWasPicture.current = false;
+    if (
+      pending === null &&
+      files.length === 0 &&
+      !as &&
+      asksToReadAgain(note) &&
+      (!bareAgain || againWasPicture) &&
+      note.trim().split(/\s+/).length <= 14 &&
+      lastPictures.current.length > 0
+    ) {
+      setDraft("");
+      setBusy(true);
+      try {
+        await during("Reading the picture again", () => readAttached(note, lastPictures.current), "Still reading it");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     let routed: { intent: Routed; target: string; period: string } | null = null;
     // A "//" line is a note to the developer: nothing to route, and nothing to wait on a model for.
     if (files.length === 0 && !as && !ai.disabled && !/^\s*\/\//.test(note)) {
@@ -3754,6 +3858,10 @@ export function AskPanel({
     const askedToExport = as ? null : readExportAsk(ruled, asOf) ?? (routed?.intent === "export" ? readExportAsk(`export ${ruled}`, asOf) : null);
     if (askedToExport) {
       const words = exportWords(askedToExport, asOf);
+      // Said and cleared like every other message: it stayed in the box, unsent-looking (28 September 2026).
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
       say({ kind: "assistant", text: words, from: "this device" });
       say({ kind: "export", ask: askedToExport, state: "open" });
       log(aiEvent("answered", "statements", { text: words, model: "this device" }));
@@ -4215,7 +4323,14 @@ export function AskPanel({
      * 2026). The router calling it a chart is understandable, since it names
      * a comparison and a grouping; the sentence still says what it wants.
      */
-    const wantsWords = asksForProse(note);
+    /*
+     * And a question asked as a question, with no word for a chart in it and
+     * no chart to follow up, is answered in words: "so since starting I didnt
+     * have good budgeting?" was routed to a chart of September (28
+     * September 2026).
+     */
+    const plainQuestion = /\?\s*$/.test(note) && !wantsChart(note) && !followUp && !narrows;
+    const wantsWords = asksForProse(note) || plainQuestion;
 
     if (
       files.length === 0 &&
@@ -4261,12 +4376,23 @@ export function AskPanel({
         shownChart && asksPie(ruled) && !saysOverTime(ruled)
           ? { ...shownChart, title: shownChart.title.replace(/\bby (?:month|day)\b/i, "by item") }
           : shownChart;
-      const carried =
-        shown && !/\b(20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|month|year|week|today|yesterday|all|everything|days?|since|quarter|q[1-4])\b/i.test(
-          ruled,
-        )
+      const namesPeriod = /\b(20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|month|year|week|today|yesterday|all|everything|days?|since|quarter|q[1-4])\b/i.test(
+        ruled,
+      );
+      /*
+       * A follow-up that names only a new period keeps what the chart was:
+       * its grouping and its direction, which are the part of the title
+       * before the comma ("Spending by month", then ", 2026"). "show me
+       * trend this year" then "2025" drew 2025 by item (28 September 2026).
+       */
+      const saysGrouping = /\b(?:by|per)\s+(?:items?|months?|days?|weeks?|wallets?|accounts?|categor(?:y|ies)|years?)\b|\b(?:monthly|daily|weekly|yearly|trend|over time|pie|donut|bars?|line)\b/i.test(ruled);
+      const carried = !shown
+        ? note
+        : !namesPeriod
           ? `${note} ${shown.title}`
-          : note;
+          : followUp && !saysGrouping
+            ? `${note} ${shown.title.split(",")[0] ?? ""}`
+            : note;
 
       /*
        * "chart what I picked" on Insights is the calendar's pick, not this

@@ -667,7 +667,7 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "Work it out before you fill anything in. In reasoning, say in one sentence what was bought or received, which of their lists that belongs to, and which wallet it moved through. Then fill the fields to match what you just said.",
     "The item and the category go together. You are given their items grouped under the category each one belongs to: an item from the Bills group means the category is Bills, from the Subscriptions group means Subscriptions, from the Spending group means Spending. Never file a bill under Spending because it looked like an expense. The note in brackets after a spending type is their own description of what counts as it, so read it.",
     "Use ordinary knowledge about what things are. A fast food chain is a meal, a petrol station is fuel, a streaming service is a subscription, a telco is a bill. Match that to their list.",
-    "If nothing on their list genuinely fits, leave item empty rather than choosing the nearest one. An empty field is one they fill in a second; a wrong one is a wrong figure filed under the wrong heading.",
+    "Choose the item whose note covers the kind of thing it was, reading the thing for what it is: a scented air freshener, a diffuser, soap or a broom is a home item; a charger or earphones is an online or gadget buy if bought online; medicine is health; a fare or a ride is travel. Leave item empty only when the message does not say what the money was for at all, or when nothing on their list is that kind of thing; never choose an item for a coincidence of wording. An empty field is one they fill in a second; a wrong one is a wrong figure filed under the wrong heading.",
     "Wallets: use only their names. Money to a person, or to an account that is not theirs, is a Transfer with toWallet left empty, which is what means it left their accounts.",
     "Every amount in this app is Philippine pesos. An amount in another currency ($, US$, USD, €, £, ¥) is never pesos and is never converted: put it in amountText with its currency sign exactly as printed, leave amountPesos empty, and say the foreign amount in description, so the owner is asked what it cost in pesos.",
     "Put the amount twice: amountText exactly as written, character for character including any comma or currency sign, and amountPesos as a plain number. The two must agree. If no amount is stated, leave both empty and they will be asked for it.",
@@ -776,6 +776,14 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "how did august compare with july: chart, period july to august.",
     "nagbayad ako ng tricycle 500 kanina cash: entry.",
   ].join(" "),
+  /*
+   * Which of their items a thing is. It had no instruction at all until 28
+   * September 2026, only the list and the words, and it returned nothing
+   * for "a scented air freshener", so the card asked "What was it for?"
+   * about a purchase that had just said what it was for.
+   */
+  classify:
+    "Say which one of the items listed this is, reading the thing for what it is and using the note beside each item, which is the owner's own description of what counts as it. A scented air freshener, a reed diffuser, soap or a broom is a home item; a meal, a snack or a drink is food; medicine is health; a fare or a ride is travel; a telco plan is their internet or phone bill. The words may be misspelled or misread off a receipt: read through that. Copy the item's name exactly as listed. Leave item empty only when the words say nothing about what it was (read it, look at the receipt, the usual, idk) or when nothing on the list is that kind of thing; never pick one for a coincidence of wording. Money received is matched to their income items the same way.",
   categorise:
     "Choose the one category that fits this transaction, copied exactly from the allowed list. Prefer the pattern in the past examples, which are this person's own labels. If nothing fits well, choose the last category in the list rather than inventing one.",
 };
