@@ -526,3 +526,55 @@ export function adviceMonthIn(said: string, asOf: IsoDate): { year: number; mont
   if (/\bbudget\b[^.?!]{0,40}\bthis month\b|\bthis month'?s budget\b/.test(text)) return { year, month: now };
   return null;
 }
+
+/**
+ * Why a month is over its budget, item by item against the usual month.
+ *
+ * "why is this month over the budget" was answered from the month's total
+ * alone. What makes a month over is the items that ran above their normal:
+ * each item this month against its median over the six months before it,
+ * the same usual month the recommendation uses, so the two always agree.
+ */
+export function whyOver(
+  transactions: readonly Transaction[],
+  budget: { readonly spending: Centavos; readonly billsSubs: Centavos },
+  year: number,
+  month: number,
+  asOf: IsoDate,
+): string[] {
+  const rows = transactions.filter((t) => !(t as Transaction & { deletedAt?: string }).deletedAt);
+  const key = `${year}-${String(month).padStart(2, "0")}`;
+  const inMonth = rows.filter((t) => t.date.startsWith(key));
+  const totals = totalsFor(inMonth);
+  const spent = totals.spending + totals.fees + totals.interest;
+  const bills = totals.bills + totals.subscriptions;
+  const total = budget.spending + budget.billsSubs;
+  if (total === 0) return [];
+  const usual = budgetAdvice({ transactions: rows, year, month, asOf });
+  const usualOf = new Map([...usual.items, ...usual.sometimes.map((l) => ({ ...l, amount: 0 }))].map((l) => [l.name.toLowerCase(), l.amount]));
+  const range = { start: makeDate(year, month, 1), end: makeDate(year, month, daysInMonth(year, month)) };
+  const now = [...spendingAttribution(inMonth, range)].filter(([n]) => !/^transaction fee$/i.test(n));
+  const lines: string[] = [];
+  const over = spent + bills - total;
+  lines.push(
+    `Budget ${money(total)} (spending ${money(budget.spending)}, bills and subscriptions ${money(budget.billsSubs)}); spent ${money(spent + bills)}, ${over > 0 ? `over by ${money(over)}` : `${money(-over)} left`}.`,
+  );
+  lines.push(
+    `Spending part: ${money(spent)} of ${money(budget.spending)}, ${spent > budget.spending ? `over by ${money(spent - budget.spending)}` : `${money(budget.spending - spent)} left`}. Bills and subscriptions part: ${money(bills)} of ${money(budget.billsSubs)}, ${bills > budget.billsSubs ? `over by ${money(bills - budget.billsSubs)}` : `${money(budget.billsSubs - bills)} left`}.`,
+  );
+  const above = now
+    .map(([n, amount]) => ({ n, amount, usual: usualOf.get(n.toLowerCase()) ?? 0 }))
+    .filter((r) => r.amount > r.usual)
+    .sort((a, b) => b.amount - b.usual - (a.amount - a.usual));
+  if (above.length > 0) {
+    lines.push(`Items above their usual month (the median of ${monthsRead(usual.read)}), most above first:`);
+    for (const r of above.slice(0, 8)) lines.push(`- ${r.n}: ${money(r.amount)}, usually ${money(r.usual)}, ${money(r.amount - r.usual)} more`);
+  }
+  if (totals.interest > 0) lines.push(`- Debt interest and charges: ${money(totals.interest)}, usually ${money(usual.interest)}`);
+  const below = now.map(([n, amount]) => ({ n, amount, usual: usualOf.get(n.toLowerCase()) ?? 0 })).filter((r) => r.amount < r.usual);
+  const missing = usual.items.filter((l) => !now.some(([n]) => n.toLowerCase() === l.name.toLowerCase()));
+  if (below.length + missing.length > 0) {
+    lines.push(`Below their usual month: ${[...below.map((r) => `${r.n} ${money(r.amount)} (usually ${money(r.usual)})`), ...missing.map((l) => `${l.name} nothing (usually ${money(l.amount)})`)].slice(0, 8).join(", ")}.`);
+  }
+  return lines;
+}

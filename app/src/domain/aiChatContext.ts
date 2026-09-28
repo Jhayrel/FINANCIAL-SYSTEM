@@ -50,7 +50,9 @@ import { costOf, incomeOf } from "./totals";
 import { debtDue, positionsOf, rowsFor, type Debt } from "./debt";
 import { creditRoom, limitSteps } from "./creditLimit";
 import { confidenceWords, explainBasis, forecastYear } from "./forecast";
-import { assessMonthFor } from "./budget";
+import { assessMonthFor, budgetForMonth } from "./budget";
+import { moneyFlow, flowWords } from "./moneyFlow";
+import { whyOver } from "./budgetAdvice";
 import { namesWindow, windowOf } from "./charts";
 import { figuresIn } from "./money";
 import type { Budgets, IsoDate, Transaction } from "./types";
@@ -511,6 +513,74 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     }
   }
 
+  /*
+   * ── Where the money came from and went ──────────────────────────────────
+   *
+   * "where do the funds even coming from?" was answered with three income
+   * rows that did not add up to the total it quoted, and "no credit entries
+   * this month" beside two Maya Credit draws (28 September 2026). Every
+   * movement into and out of the spending wallets, grouped by what it was,
+   * worked out here so the parts add up (`moneyFlow.ts`). For the window the
+   * question names, or this month.
+   */
+  {
+    const pool = input.snapshot.balances.filter((b) => (b.kind ?? "spending") === "spending").map((b) => b.account);
+    const w = question && namesWindow(question) ? windowOf(question, asOf) : null;
+    const month = monthOf(asOf);
+    const from = w && w.from > "1000" ? w.from : `${month}-01`;
+    const to = w && w.to < "9000" ? (w.to > asOf ? asOf : w.to) : asOf;
+    if (pool.length > 0) {
+      const flow = moneyFlow(rows, pool, from, to, input.credits ?? []);
+      if (flow.totalIn + flow.totalOut > 0) {
+        out.push("");
+        out.push(`## Where the money came from and went: ${w && w.from > "1000" ? w.name : monthName(month)} (${from} to ${to})`);
+        out.push(...flowWords(flow, php));
+      }
+    }
+
+    /*
+     * ── Why a month is over its budget ────────────────────────────────────
+     * Each item against its usual month, the same median the budget advice
+     * uses (`budgetAdvice.ts`, `whyOver`). For this month, or the one named.
+     */
+    const named = monthsNamedIn(question, year);
+    const target = named.length === 1 && named[0] ? named[0] : month;
+    const [ty, tm] = [Number(target.slice(0, 4)), Number(target.slice(5, 7))];
+    if (input.budgets && ty && tm) {
+      const budget = budgetForMonth(input.budgets, ty, tm);
+      const why = whyOver(rows, budget, ty, tm, asOf);
+      if (why.length > 0) {
+        out.push("");
+        out.push(`## ${monthName(target)} against its budget, and why`);
+        out.push(...why);
+      }
+    }
+  }
+
+  /*
+   * ── Bills and subscriptions, month by month ─────────────────────────────
+   * "billing history": what was paid for each, when, for the last twelve
+   * months. Trimmed early unless the question is about bills.
+   */
+  {
+    const since = `${Number(year) - 1}-${asOf.slice(5, 7)}-01`;
+    const paid = rows
+      .filter((t) => t.type === "Spending" && (t.category === "Bills" || t.category === "Subscriptions") && t.date >= since && t.date <= asOf)
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
+    if (paid.length > 0) {
+      const aboutBills = /\b(bills?|billing|subscriptions?|subs|wifi|internet|postpaid|prepaid|netflix|spotify|office|drive|utilit\w*|electric\w*|water|due)\b/i.test(question);
+      const byItem = new Map<string, Transaction[]>();
+      for (const t of paid) byItem.set(t.item.trim() || t.category, [...(byItem.get(t.item.trim() || t.category) ?? []), t]);
+      out.push("");
+      out.push(aboutBills ? "## Bills and subscriptions, paid month by month (asked about)" : "## Bills and subscriptions, paid month by month");
+      for (const [item, list] of byItem) {
+        out.push(`${item} (${list[0]?.category ?? ""}): ${list.slice(0, 12).map((t) => `${formatMedium(t.date)} ${php(t.total)} from ${t.fromWallet || "?"}`).join("; ")}.`);
+      }
+      const stopped = input.snapshot.bills.stopped ?? [];
+      if (stopped.length > 0) out.push(`Marked stopped in Settings, no longer expected: ${stopped.join(", ")}.`);
+    }
+  }
+
   /**
    * ── What if: the figures after a purchase that has not happened ─────────
    *
@@ -625,7 +695,13 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   if (credits.length > 0) {
     const positions = positionsOf(credits, rows, asOf);
     out.push("");
-    out.push("## Debt, every movement");
+    /*
+     * The credit history is the first thing trimmed when a request must
+     * shrink, unless the question is about credit: then it is kept whole
+     * (`functions/api/ai.ts`, EXPENDABLE matches only this heading).
+     */
+    const aboutCredit = /\b(credits?|debts?|loans?|utang|borrow\w*|owe|owed|owing|lend\w*|lent|interest|pay ?back|repay\w*|on behalf|held for|charges?)\b/i.test(question);
+    out.push(aboutCredit ? "## Credit history, every movement (asked about)" : "## Debt, every movement");
     out.push(
       "outstanding = drawn + charged - repaid - written off. A charge is a fee, tax or interest the lender added to what is owed: it is spending on the day it was added, and the payment that clears it is not spending again. Interest paid from a wallet is spending and never reduces what is owed. A debt marked on behalf is money advanced for someone or held for someone: it is not a loan, and none of it is income or spending until it is written off (then spending) or retained (then income).",
     );

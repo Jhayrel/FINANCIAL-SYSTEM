@@ -121,7 +121,7 @@ import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, i
 import { addressesEveryCard, asksToReadAgain, asksToRename, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
 import { asksWhetherAdded, inLedgerOrNot } from "../domain/checkPicture";
 import { modelLabel } from "../domain/modelName";
-import { formatMoney } from "../domain/money";
+import { formatMoney, type Centavos } from "../domain/money";
 import { describeFile, summariseFile } from "../domain/photoNote";
 import { reconcile } from "../domain/reconcile";
 import { readAgainst, statementAccount } from "../domain/statement";
@@ -4120,7 +4120,8 @@ export function AskPanel({
         log(aiEvent("answered", "add", { text: "Budget already set.", model: "this device" }));
         return;
       }
-      say({ kind: "assistant", text: `Here is the change. ${plan.words} Apply it on the card.`, from: "this device", ephemeral: true });
+      // The figures are on the card, as a table; said once is enough.
+      say({ kind: "assistant", text: "Here is the change. Check the figures on the card, then press Apply.", from: "this device", ephemeral: true });
       say({ kind: "budget", plan, state: "open", ask: budgetAsk });
       log(aiEvent("proposed", "add", { entry: plan.words, text: note }));
       return;
@@ -6215,7 +6216,7 @@ export function AskPanel({
                 sink.budget(turn.plan.year, turn.plan.outcome.plan, turn.plan.changes);
                 log(aiEvent("accepted", "add", { entry: turn.plan.words }));
                 decide(i, "applied");
-                say({ kind: "assistant", text: `Set. ${turn.plan.words}`, from: "this device" });
+                say({ kind: "assistant", text: `Budget set: ${budgetBlocks(turn.plan).map((b) => b.label).join(", ") || turn.plan.words}. The Budget screen shows it now.`, from: "this device" });
               }}
               onDiscard={() => decide(i, "discarded")}
             />
@@ -7688,9 +7689,60 @@ function ExportCard({ turn, onSave, onDiscard }: { turn: Exporting; onSave: () =
   );
 }
 
+/**
+ * One block of a budget change: a month, or several changed the same way.
+ *
+ * The card was a sentence, "November 2026: ₱12,750.00 for spending and
+ * ₱1,522.00 for bills and subscriptions, was ₱0.00 and ₱0.00", and the owner
+ * said it was confusing (28 September 2026). It is a table now: each part,
+ * what it is and what it becomes, the total, and the difference.
+ */
+interface BudgetBlock {
+  readonly label: string;
+  readonly rows: readonly { readonly name: string; readonly was: Centavos; readonly now: Centavos }[];
+  readonly total?: { readonly was: Centavos; readonly now: Centavos };
+}
+
+function budgetBlocks(plan: BudgetPlan): BudgetBlock[] {
+  const { written, revisions } = plan.outcome;
+  const shown: { month: number; key: string; block: Omit<BudgetBlock, "label"> }[] = [];
+  revisions.forEach((r, i) => {
+    const month = written[i];
+    if (month === undefined) return;
+    const block: Omit<BudgetBlock, "label"> =
+      r.what === "limit"
+        ? { rows: [{ name: `${r.name ?? "Limit"} limit`, was: r.wasLimit ?? 0, now: r.limit ?? 0 }] }
+        : {
+            rows: [
+              { name: "Spending", was: r.wasSpending ?? 0, now: r.spending ?? 0 },
+              { name: "Bills and subscriptions", was: r.wasBillsSubs ?? 0, now: r.billsSubs ?? 0 },
+            ],
+            total: { was: (r.wasSpending ?? 0) + (r.wasBillsSubs ?? 0), now: (r.spending ?? 0) + (r.billsSubs ?? 0) },
+          };
+    shown.push({ month, key: JSON.stringify(block), block });
+  });
+  // Months in a row that change the same way are one block: "October to December 2026, each month".
+  const blocks: BudgetBlock[] = [];
+  for (let i = 0; i < shown.length; ) {
+    let j = i;
+    while (j + 1 < shown.length && shown[j + 1]?.key === shown[i]?.key && (shown[j + 1]?.month ?? 0) === (shown[j]?.month ?? 0) + 1) j += 1;
+    const first = shown[i];
+    const last = shown[j];
+    if (!first || !last) break;
+    const label =
+      first.month === last.month
+        ? `${MONTH_NAMES[first.month - 1] ?? ""} ${plan.year}`
+        : `${MONTH_NAMES[first.month - 1] ?? ""} to ${MONTH_NAMES[last.month - 1] ?? ""} ${plan.year}, each month`;
+    blocks.push({ label, ...first.block });
+    i = j + 1;
+  }
+  return blocks;
+}
+
 function BudgetCard({ turn, onApply, onDiscard }: { turn: Budgeting; onApply: () => void; onDiscard: () => void }) {
   const { plan, state } = turn;
-  const skipped = plan.outcome.skipped.length;
+  const blocks = budgetBlocks(plan);
+  const skipped = plan.outcome.skipped;
   return (
     <div className="fms-proposal">
       <div className="fms-proposalhead">
@@ -7701,23 +7753,58 @@ function BudgetCard({ turn, onApply, onDiscard }: { turn: Budgeting; onApply: ()
           {state === "applied" ? "set" : state === "discarded" ? "left as it was" : "nothing is changed yet"}
         </span>
       </div>
-      <p className="t-body" style={{ margin: 0 }}>
-        {plan.words}
-      </p>
-      <ul className="fms-changelist">
-        {plan.changes.map((line) => (
-          <li key={line} className="fms-changerow">
-            <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-              {line}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {skipped > 0 && (
+      {blocks.length === 0 ? (
+        // A card stored before the table, or one with nothing to change: its words.
+        <p className="t-body" style={{ margin: 0 }}>
+          {plan.words}
+        </p>
+      ) : (
+        blocks.map((b) => (
+          <div key={b.label} className="fms-budgettable" role="group" aria-label={`Budget for ${b.label}`}>
+            <div className="fms-budgettable-row fms-budgettable-head">
+              <span className="t-body" style={{ fontWeight: 600 }}>
+                {b.label}
+              </span>
+              <span className="t-micro">
+                Now
+              </span>
+              <span className="t-micro">
+                {state === "applied" ? "Set to" : "New"}
+              </span>
+            </div>
+            {b.rows.map((r) => (
+              <div key={r.name} className="fms-budgettable-row">
+                <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                  {r.name}
+                </span>
+                <Money value={r.was} size="s" tone="var(--ink-3)" />
+                <Money value={r.now} size="s" tone={r.now === r.was ? "var(--ink-2)" : "var(--ink)"} />
+              </div>
+            ))}
+            {b.total && (
+              <div className="fms-budgettable-row fms-budgettable-total">
+                <span className="t-caption" style={{ fontWeight: 600 }}>
+                  Total
+                </span>
+                <Money value={b.total.was} size="s" tone="var(--ink-3)" />
+                <Money value={b.total.now} size="s" />
+              </div>
+            )}
+            {b.total && b.total.now !== b.total.was && (
+              <p className="t-micro fms-budgettable-diff">
+                {b.total.now > b.total.was ? "Up" : "Down"} <Money value={Math.abs(b.total.now - b.total.was)} size="s" tone="var(--ink-2)" />
+                {b.label.endsWith("each month") ? " a month" : ""}
+              </p>
+            )}
+          </div>
+        ))
+      )}
+      {skipped.length > 0 && (
         <p className="t-micro fms-proposalnote fms-proposalnote--warn">
-          {skipped === 1 ? "One month is" : `${skipped} months are`} already over and left as planned.
+          Left as it was, already over: {skipped.map((m) => `${MONTH_NAMES[m - 1] ?? ""} ${plan.year}`).join(", ")}.
         </p>
       )}
+      {plan.outcome.refused && <p className="t-micro fms-proposalnote fms-proposalnote--warn">{plan.outcome.refused}</p>}
       {state === "open" && (
         <div className="fms-proposalactions">
           <Button size="sm" variant="primary" onClick={onApply}>

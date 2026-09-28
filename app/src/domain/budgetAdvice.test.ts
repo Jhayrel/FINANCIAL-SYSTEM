@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, median, savingsGoalIn } from "./budgetAdvice";
+import { whyOver, adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, median, savingsGoalIn } from "./budgetAdvice";
 import { proposedBudgetIn, proposedMonthIn } from "./budgetAsk";
 import type { Transaction } from "./types";
 
@@ -213,5 +213,19 @@ describe("a budget asked for at length", () => {
     expect(a.fit?.room).toBe(290_000);
     expect(a.fit?.keep).toBe(100_000);
     expect(adviceWords(a)).toContain("with PHP 1,000.00 kept to save");
+  });
+});
+
+describe("why a month is over its budget", () => {
+  it("names the items above their usual month, and the two parts", () => {
+    const withSpike = [...ledger, spend("2026-10-05", "Food", 3_000), spend("2026-10-06", "Treat", 5_000)];
+    const lines = whyOver(withSpike, { spending: 300_000, billsSubs: 150_000 }, 2026, 10, "2026-10-20");
+    expect(lines[0]).toBe("Budget PHP 4,500.00 (spending PHP 3,000.00, bills and subscriptions PHP 1,500.00); spent PHP 8,000.00, over by PHP 3,500.00.");
+    expect(lines.join("\n")).toContain("- Treat: PHP 5,000.00, usually PHP 700.00, PHP 4,300.00 more");
+    expect(lines.join("\n")).toContain("- Food: PHP 3,000.00, usually PHP 1,550.00, PHP 1,450.00 more");
+  });
+
+  it("says nothing for a month with no budget", () => {
+    expect(whyOver(ledger, { spending: 0, billsSubs: 0 }, 2026, 9, "2026-09-28")).toEqual([]);
   });
 });

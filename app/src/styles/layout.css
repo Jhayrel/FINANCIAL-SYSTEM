@@ -7297,6 +7297,51 @@ textarea.fms-askinput {
   justify-self: start;
 }
 
+/*
+ * A budget change as a table: each part, what it is now and what it becomes.
+ * The sentence it replaced read "was ₱0.00 and ₱0.00" at the end, and the
+ * owner could not tell which figure was which (28 September 2026).
+ */
+.fms-budgettable {
+  display: grid;
+  gap: 0;
+  padding-top: var(--space-2);
+}
+
+.fms-budgettable + .fms-budgettable {
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-budgettable-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  column-gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-1) 0;
+}
+
+.fms-budgettable-row > :nth-child(n + 2) {
+  justify-self: end;
+  text-align: right;
+  min-width: 7.5ch;
+}
+
+.fms-budgettable-head > :nth-child(n + 2) {
+  color: var(--ink-3);
+}
+
+.fms-budgettable-total {
+  border-top: 1px solid var(--hairline);
+  margin-top: var(--space-1);
+}
+
+.fms-budgettable-diff {
+  margin: 0;
+  color: var(--ink-3);
+  text-align: right;
+}
+
 /* ══ Find a difference ═══════════════════════════════════════════════════════ */
 
 /*
