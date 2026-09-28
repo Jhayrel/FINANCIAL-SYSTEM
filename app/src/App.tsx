@@ -58,7 +58,7 @@ import { debtWalletDirection, emptyDraft, insertChronologically } from "./domain
 import { formatMedium, getYear, today } from "./domain/dates";
 import { systemToCsv } from "./domain/csv";
 import type { ExportAsk } from "./domain/exportAsk";
-import { buildStatement, statementFilename, statementToCsv } from "./domain/statements";
+import { buildStatementBetween, rangeOf, statementFilename, statementToCsv } from "./domain/statements";
 import { buildSheet } from "./domain/statementSheet";
 import { browserSettingsStore, type SettingsStore } from "./data/settingsStore";
 import {
@@ -1566,7 +1566,10 @@ export default function App() {
     const type = ask.type ?? "account";
     const fromMonth = ask.fromMonth ?? 1;
     const toMonth = ask.toMonth ?? 12;
-    const statement = buildStatement(transactions, type, ask.year, fromMonth, toMonth, reference, undefined, {
+    // Across years when asked: "january 2025 to june 2026" is eighteen months, not one year's six.
+    const toYear = ask.toYear ?? ask.year;
+    const span = rangeOf({ year: ask.year, month: fromMonth }, { year: toYear, month: toMonth });
+    const statement = buildStatementBetween(transactions, type, span.from, span.to, reference, undefined, {
       debts: settings.credits,
     });
     const count = statement.rows.length;
@@ -1581,7 +1584,7 @@ export default function App() {
     }
 
     // The same PDF the Statements screen makes, with the name it last used.
-    const sheet = buildSheet(transactions, { type, year: ask.year, fromMonth, toMonth }, reference, settings.credits);
+    const sheet = buildSheet(transactions, { type, year: ask.year, fromMonth, toMonth, toYear }, reference, settings.credits);
     const issued = readIssued();
     void import("./pdf/statementPdf")
       .then(({ statementPdf }) => statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() }))

@@ -21,6 +21,7 @@
  */
 
 import { getMonth, getYear, monthName } from "./dates";
+import { spanIn } from "./periodIn";
 import type { StatementType } from "./statements";
 import type { IsoDate } from "./types";
 
@@ -41,6 +42,11 @@ export interface ExportAsk {
   readonly fromMonth?: number;
   readonly toMonth?: number;
   /**
+   * Statements only: the year the last month is in, when it is not `year`.
+   * "january 2025 to june 2026" runs across two.
+   */
+  readonly toYear?: number;
+  /**
    * Statements only. A PDF laid out as the owner's Excel printed one, unless
    * a spreadsheet was asked for by name.
    */
@@ -50,7 +56,8 @@ export interface ExportAsk {
 }
 
 /** Asking for a file at all. Without one of these, nothing here applies. */
-const EXPORTING = /\b(export|exports|exported|download|save|backup|back\s?up|csv|spreadsheet|excel|copy|file|pdf|print|document)\b/i;
+// A statement is always a file here, so asking for one is asking for a file.
+const EXPORTING = /\b(export|exports|exported|download|save|backup|back\s?up|csv|spreadsheet|excel|copy|file|pdf|print|document|statement|statements)\b/i;
 
 /** Words that mean the whole thing rather than a period. */
 const EVERYTHING = /\b(everything|all|whole|entire|full|complete|lahat)\b/i;
@@ -118,6 +125,25 @@ export function readExportAsk(said: string, asOf: IsoDate): ExportAsk | null {
     return { kind: "backup", year, said: text };
   }
 
+  /*
+   * A range of months, across years if it says so. "january 2026 to june
+   * 2026" made a statement for January alone: the first month named was
+   * taken as the whole period (28 September 2026).
+   */
+  const span = spanIn(text, asOf);
+  if (span && (month !== null || type !== null || /\b20\d{2}\b/.test(text))) {
+    return {
+      kind: "statement",
+      type: type ?? "account",
+      year: Number(span.from.slice(0, 4)),
+      fromMonth: Number(span.from.slice(5, 7)),
+      toMonth: Number(span.to.slice(5, 7)),
+      toYear: Number(span.to.slice(0, 4)),
+      format: AS_SPREADSHEET.test(text) ? "csv" : "pdf",
+      said: text,
+    };
+  }
+
   // A named month or a named sheet makes it a statement for that period.
   if (month !== null || type !== null) {
     const from = month ?? 1;
@@ -176,12 +202,16 @@ export function exportWords(ask: ExportAsk, asOf: IsoDate): string {
   };
   const sheet = SHEET[ask.type ?? "account"] ?? "every entry in the period, with the balance after each";
 
+  const toYear = ask.toYear ?? ask.year;
+  const whole = ask.fromMonth === 1 && ask.toMonth === 12 && toYear === ask.year;
   const period =
-    ask.fromMonth === ask.toMonth && ask.fromMonth !== undefined
+    ask.fromMonth === ask.toMonth && ask.fromMonth !== undefined && toYear === ask.year
       ? `${monthName(ask.fromMonth)} ${ask.year}`
-      : `${ask.year}`;
+      : whole || ask.fromMonth === undefined || ask.toMonth === undefined
+        ? `${ask.year}`
+        : `${monthName(ask.fromMonth)} ${ask.year} to ${monthName(ask.toMonth)} ${toYear}`;
 
-  const now = getYear(asOf) === ask.year && ask.fromMonth === getMonth(asOf) ? ", so far" : "";
+  const now = getYear(asOf) === toYear && (ask.toMonth ?? 12) === getMonth(asOf) ? ", so far" : "";
 
   return `A statement for ${period}${now}: ${sheet}, as ${ask.format === "csv" ? "a spreadsheet" : "a PDF"}.`;
 }

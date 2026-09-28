@@ -20,6 +20,7 @@
  * wrong bar is a wrong figure drawn large.
  */
 
+import { spanIn } from "./periodIn";
 import { toPesos } from "./money";
 import { editsBetween } from "./nearly";
 import { costOf, incomeOf } from "./totals";
@@ -423,6 +424,15 @@ export function windowOf(
     const [a, b] = [`${ym}-${ofThisMonth[1].padStart(2, "0")}`, `${ym}-${ofThisMonth[2].padStart(2, "0")}`].sort() as [IsoDate, IsoDate];
     return { from: a, to: b, name: `${short(a)} to ${short(b)} ${year}` };
   }
+
+  /*
+   * Any other range, said any other way: "march 2026 to today", "from may
+   * to now", "jan 5 to feb 10 2026" (domain/periodIn.ts). Before the rules
+   * for one day, because each end of a range is one: "march 2026 to today"
+   * drew today alone (28 September 2026).
+   */
+  const span = spanIn(question, asOf);
+  if (span) return span;
 
   // One day: "on sept 20", "sep 20", "2026-09-20".
   const oneIso = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(question);
@@ -1009,12 +1019,17 @@ export const chartLabel = (centavos: number): string =>
  * it can answer a follow-up from, where a picture is not.
  */
 export function chartInWords(chart: Chart): string {
-  const top = chart.rows
-    .filter((r) => r.value > 0)
-    .slice(0, 5)
-    .map((r) => `${r.label} ${chartLabel(r.value)}`)
-    .join(", ");
-  const rest = chart.othersCount > 0 ? `, and ${chart.othersCount} more` : "";
+  /*
+   * A trend is read in order, so its periods are all said, a year's worth at
+   * most; a split says its largest five. Either way every row not said is
+   * counted: "show me trend this year" listed January to May and stopped,
+   * with nothing to say four more months were drawn (28 September 2026).
+   */
+  const shown = chart.rows.filter((r) => r.value > 0);
+  const said = shown.slice(0, overTime(chart.by) ? 12 : 5);
+  const top = said.map((r) => `${r.label} ${chartLabel(r.value)}`).join(", ");
+  const left = shown.length - said.length + chart.othersCount;
+  const rest = left > 0 ? `, and ${left} more` : "";
   return `${top}${rest}. Total ${chartLabel(chart.total)}.`;
 }
 
