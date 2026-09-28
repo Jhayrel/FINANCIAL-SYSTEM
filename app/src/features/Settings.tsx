@@ -103,15 +103,16 @@ type Tab =
   | "appearance"
   | "data";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "accounts", label: "Accounts" },
-  { id: "goals", label: "Goals" },
-  { id: "credit", label: "Credit and loans" },
-  { id: "categories", label: "Categories" },
-  { id: "alerts", label: "Alerts" },
-  { id: "ai", label: "AI" },
-  { id: "appearance", label: "Appearance" },
-  { id: "data", label: "Data" },
+/** `short` is the name on a phone, where all eight sit in a grid of four across. */
+const TABS: { id: Tab; label: string; short: string }[] = [
+  { id: "accounts", label: "Accounts", short: "Accounts" },
+  { id: "goals", label: "Goals", short: "Goals" },
+  { id: "credit", label: "Credit and loans", short: "Credit" },
+  { id: "categories", label: "Categories", short: "Categories" },
+  { id: "alerts", label: "Alerts", short: "Alerts" },
+  { id: "ai", label: "AI", short: "AI" },
+  { id: "appearance", label: "Appearance", short: "Theme" },
+  { id: "data", label: "Data", short: "Data" },
 ];
 
 const KINDS: AccountKind[] = ["spending", "reserve", "savings", "goal"];
@@ -222,10 +223,14 @@ export function Settings({
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={`fms-tab ${tab === t.id ? "t-body-strong" : "t-body"}`}
+            aria-label={t.label}
           >
-            {t.label}
+            <span className="fms-tab-long">{t.label}</span>
+            <span className="fms-tab-short" aria-hidden>
+              {t.short}
+            </span>
             {counts[t.id] > 0 && (
-              <span className="t-micro" style={{ marginLeft: 6, opacity: 0.75 }}>
+              <span className="t-micro fms-tab-count" style={{ marginLeft: 6, opacity: 0.75 }}>
                 {counts[t.id]}
               </span>
             )}

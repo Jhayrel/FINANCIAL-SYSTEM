@@ -2010,7 +2010,7 @@ export default function App() {
             <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
               {ready ? (
                 <>
-                  {transactions.length.toLocaleString()} records · net worth{" "}
+                  <span className="fms-topbar-count">{transactions.length.toLocaleString()} records · </span>net worth{" "}
                   <Money value={view.worth.total} size="s" />
                 </>
               ) : (

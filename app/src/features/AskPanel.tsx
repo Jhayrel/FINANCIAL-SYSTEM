@@ -472,6 +472,10 @@ interface Offered {
 type Turn = Said | Offered | Found | Drawn | DebtChoice | Changing | Budgeting | Exporting;
 
 const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
+
+/** A card read off a picture or a statement, rather than from something typed. */
+const readOffPicture = (p: Proposal): boolean =>
+  !p.said || /\b(image|picture|photo|screenshot|receipt|statement|part \d)/i.test(p.sourceRef);
 const isFound = (t: Turn): t is Found => t.kind === "found";
 const isChart = (t: Turn): t is Drawn => t.kind === "chart";
 const isDebt = (t: Turn): t is DebtChoice => t.kind === "debt";
@@ -5528,7 +5532,7 @@ export function AskPanel({
     const found = new Map<number, readonly Duplicate[]>();
     turns.forEach((t, i) => {
       if (!isOffer(t) || t.state !== "open") return;
-      const matches = duplicatesOf(t.proposal.draft, transactions);
+      const matches = duplicatesOf(t.proposal.draft, transactions, { typed: !readOffPicture(t.proposal) });
       if (matches.length > 0) found.set(i, matches);
     });
     return found;
@@ -6746,7 +6750,7 @@ function ProposalCard({
    * there??"). A picture can be hard to read; a sentence can only leave the
    * reading unsure. Nothing is said when it is sure.
    */
-  const fromPicture = !proposal.said || /\b(image|picture|photo|screenshot|receipt|statement|part \d)/i.test(proposal.sourceRef);
+  const fromPicture = readOffPicture(proposal);
   const confidence =
     proposal.confidence === "high"
       ? "clear"

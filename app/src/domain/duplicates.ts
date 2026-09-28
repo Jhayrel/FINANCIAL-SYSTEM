@@ -127,8 +127,21 @@ const live = (t: Transaction): boolean =>
 export function duplicatesOf(
   draft: Draft,
   transactions: readonly Transaction[],
-  options: { readonly ignoreId?: string | undefined; readonly most?: number } = {},
+  options: {
+    readonly ignoreId?: string | undefined;
+    readonly most?: number;
+    /**
+     * Typed rather than read off a picture. A typed entry's date is the day
+     * it happened, so another row a day or two away is another purchase:
+     * "gas 300" today was reported as yesterday's ₱300.00 of gas (28
+     * September 2026), which is a routine, not a repeat. A picture's rows are
+     * dated by reading a screen, which is where the wider window is for.
+     */
+    readonly typed?: boolean;
+  } = {},
 ): readonly Duplicate[] {
+  const nearby = options.typed ? 0 : NEARBY_DAYS;
+  const otherKindDays = options.typed ? 0 : 2;
   const amount = draft.amount;
   // Nothing to anchor on. A blank amount is a card that is not finished, and
   // zero matches half the ledger's fee column.
@@ -172,7 +185,7 @@ export function duplicatesOf(
       const noWallet = !draft.fromWallet.trim() && !draft.toWallet.trim();
       const distinctive = amount % 100 !== 0 || amount >= 100_000;
       const wallet = sameMoneyOtherKind(draft, row) || (noWallet && distinctive && apart <= 1 ? "with no account named on this card" : "");
-      if (!wallet || apart > 2) continue;
+      if (!wallet || apart > otherKindDays) continue;
       found.push({
         row,
         certainty: "close",
@@ -188,7 +201,7 @@ export function duplicatesOf(
     const sameDescription = agree(draft.description, row.description) && apart <= SAME_WORDS_DAYS;
 
     // Far apart, with nothing in common but a figure. Every month has a 300.
-    if (apart > NEARBY_DAYS && !sameDescription) continue;
+    if (apart > nearby && !sameDescription) continue;
 
     const evidence: string[] = [`Both ${figure}.`];
     let score = 3;
@@ -284,7 +297,7 @@ export function duplicatesOf(
     found.push({ row, certainty, evidence, score });
   }
 
-  if (found.length === 0) {
+  if (found.length === 0 && !options.typed) {
     const parts = partsOf(draft, transactions, options.ignoreId);
     if (parts) return [parts];
   }

@@ -1644,6 +1644,42 @@
   .fms-tab { min-height: 44px; }
 }
 
+.fms-tab-short {
+  display: none;
+}
+
+/*
+ * Settings on a phone: all eight sections at once, four across and two down,
+ * by their short names. The single scrolling line hid Alerts, AI, Appearance
+ * and Data past the edge of a 360px screen (28 September 2026), and a section
+ * nobody can see is a section nobody opens.
+ */
+@media (max-width: 639px) {
+  .fms-settings > .fms-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    overflow: visible;
+    padding: 0;
+    mask-image: none;
+  }
+
+  .fms-settings > .fms-tabs > .fms-tab {
+    min-width: 0;
+    padding: 0 4px;
+    font-size: 13px;
+  }
+
+  .fms-settings > .fms-tabs .fms-tab-long,
+  .fms-settings > .fms-tabs .fms-tab-count {
+    display: none;
+  }
+
+  .fms-settings > .fms-tabs .fms-tab-short {
+    display: inline;
+  }
+}
+
 /* The one scrolling region on the screen. */
 .fms-panel-scroll {
   min-height: 0;
@@ -4257,7 +4293,8 @@ button.fms-recent-row:disabled {
   color: var(--ink-3);
 }
 
-.fms-actmeta > span + span::before {
+/* Between the words only: the badge is its own pill, and a dot after it began the next line on a phone. */
+.fms-actmeta > span:not(.fms-actor) + span::before {
   content: "·";
   margin-right: var(--space-2);
 }
@@ -8081,6 +8118,8 @@ textarea.fms-askinput {
 .fms-ical-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* The weekday letters as tall as they are; only the days are 46px. */
+  grid-template-rows: auto;
   grid-auto-rows: 46px;
   gap: 3px;
 }
@@ -8568,6 +8607,8 @@ textarea.fms-askinput {
 .fms-select-detail {
   flex: 0 0 auto;
   margin-left: var(--space-2);
+  /* Clear of the arrow: on a phone's narrower padding "₱18,300.00" ran into it. */
+  margin-right: var(--space-2);
   color: var(--ink-3);
   white-space: nowrap;
 }
@@ -9831,14 +9872,25 @@ textarea.fms-askinput {
     padding-block: 6px;
   }
 
-  /* Database: three filters on one row, each an equal share of it. */
+  /*
+   * Filters: two to a row, each half the width. One row of equal shares cut
+   * four filters to "All ...", "An..." on a 360px phone (28 September 2026):
+   * a ledger with several years has a Year filter as well as Type, Date and
+   * Wallet.
+   */
   .fms-dbfilterrow {
-    flex-wrap: nowrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
 
   .fms-dbfilterrow > .fms-filterchip {
-    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  /* An odd one out takes the whole row rather than half of it. */
+  .fms-dbfilterrow > .fms-filterchip:last-of-type:nth-of-type(odd) {
+    grid-column: 1 / -1;
   }
 
   .fms-filterchip > select {
@@ -9855,13 +9907,32 @@ textarea.fms-askinput {
     padding: var(--space-2) var(--space-3);
   }
 
-  /* Settings: an account's type and its actions share a line under its name. */
+  /*
+   * Settings: an account's type and its actions share a line under its name.
+   * Three columns, so the name is not held to the width left over by the two
+   * buttons below it: in two, the right column was as wide as Rename and
+   * Deactivate, and "Allowance (Reserve)" read "Allowance (Res..." beside a
+   * ₱0.00 (28 September 2026).
+   */
+  .fms-acctable tr {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .fms-acctable tr > td:first-child {
+    grid-column: 1 / 3;
+  }
+
+  .fms-acctable tr > td:first-child + td.fms-td-right {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
   .fms-acctable tr > td:nth-child(3) {
     grid-column: 1;
   }
 
   .fms-acctable tr > td:nth-child(4) {
-    grid-column: 2;
+    grid-column: 2 / 4;
   }
 
   .fms-acctable .fms-rowactions {
@@ -9899,5 +9970,79 @@ textarea.fms-askinput {
     min-height: 44px;
     padding-block: 0;
     margin-block: 0;
+  }
+}
+
+/*
+ * Insights on a phone, 28 September 2026, at 360px: the quick picks ran off
+ * the right edge ("Next 7 da..."), the fourth tab under the period sat past
+ * it ("Still ahead" at 334 to 421), and "Heaviest day Sep 15" read
+ * "Heaviest day S...". Everything wraps instead of hiding, and last in the
+ * file so the fading edge set for a scrolling row does not apply.
+ */
+@media (max-width: 639px) {
+  .fms-ical-quick {
+    flex-wrap: wrap;
+    overflow: visible;
+    mask-image: none;
+  }
+
+  .fms-ical-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+    mask-image: none;
+  }
+
+  .fms-ical-tabs > .fms-ical-tab {
+    justify-content: center;
+    min-height: 40px;
+  }
+
+  .fms-ical-fig > .t-caption {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  /*
+   * The twelve months, all at once, six to a row. As one scrolling line,
+   * January to May sat hidden to the left of a 360px screen whenever
+   * September was picked (Budget and Insights).
+   */
+  .fms-period-months {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    overflow: visible;
+    mask-image: none;
+  }
+
+  .fms-period-month {
+    min-width: 0;
+    min-height: 40px;
+    padding: 0;
+  }
+}
+
+/*
+ * The smallest phones, 320 to 359px wide.
+ *
+ * The line under the screen's name wrapped to two ("279 records · net
+ * worth", then the figure), making the top bar taller on every screen; the
+ * count goes and net worth stays. The five kinds on Add each had about 56px,
+ * and "Spending" and "On behalf" touched their edges.
+ */
+@media (max-width: 359px) {
+  .fms-topbar-count {
+    display: none;
+  }
+
+  .fms-flowtile .fms-flowname {
+    font-size: 11px;
+    letter-spacing: -0.01em;
+  }
+
+  .fms-flowrow {
+    gap: 4px;
   }
 }

@@ -665,7 +665,7 @@ export function AddTransaction({
   const dupe = useMemo(
     () =>
       draft.flow
-        ? duplicatesOf(draft, transactions, { ignoreId: draft.id ?? editing?.id, most: 1 })[0]
+        ? duplicatesOf(draft, transactions, { ignoreId: draft.id ?? editing?.id, most: 1, typed: true })[0]
         : undefined,
     [draft, transactions, editing],
   );

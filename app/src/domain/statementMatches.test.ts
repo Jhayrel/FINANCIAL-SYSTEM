@@ -72,3 +72,15 @@ describe("a bank's history, against what was logged by hand", () => {
     expect(duplicatesOf(card("Spending", "2026-09-27", "", "", 50000), ledger)).toEqual([]);
   });
 });
+
+describe("something typed, against yesterday's", () => {
+  it("is a routine, not a repeat, when it is another day", () => {
+    const gas = row(9001, "2026-09-27", "Spending", "Cash", "", 30000, 0, { item: "Gas" });
+    const typed = card("Spending", "2026-09-28", "Cash", "", 30000, "Gas");
+    expect(duplicatesOf(typed, [gas], { typed: true })).toEqual([]);
+    // The same day still says so.
+    expect(duplicatesOf({ ...typed, date: "2026-09-27" }, [gas], { typed: true })).toHaveLength(1);
+    // Read off a picture, a day out is still worth a look.
+    expect(duplicatesOf(typed, [gas])).toHaveLength(1);
+  });
+});
