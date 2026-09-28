@@ -9756,3 +9756,135 @@ textarea.fms-askinput {
     display: none;
   }
 }
+
+
+/* ══ A phone, sized as a phone ═══════════════════════════════════════════════
+   Owner, 28 September 2026: "in phone all parts the ui is too large, make
+   them suitable for phone, also the spacing in add". The spacing scale steps
+   down in tokens.css; these are the parts whose size was their own.
+   Touch targets stay 44px (rule D10) and fields stay 16px so iOS does not
+   zoom; what comes down is empty space and the size of things that are
+   only read. */
+@media (max-width: 639px) {
+  /*
+   * A label sits on its field. The "Use Food" link beside a label is 44px to
+   * hit, and it made the label's line 44px tall, so every label floated
+   * 30px above its field. The padding still reaches 44px; the margin gives
+   * the line back.
+   */
+  .fms-field-head {
+    align-items: center;
+  }
+
+  .fms-field-head .fms-field-label {
+    margin-bottom: 0;
+  }
+
+  .fms-field-head > .fms-linkbtn {
+    min-height: 0;
+    padding-block: 14px;
+    margin-block: -14px;
+  }
+
+  .fms-fields {
+    row-gap: var(--space-3);
+  }
+
+  .fms-field {
+    gap: 4px;
+  }
+
+  /* Still the largest thing on the form, at a phone's size. */
+  .fms-amounthero .fms-input--amount {
+    height: 48px;
+    font-size: 22px;
+  }
+
+  .fms-flowrow {
+    margin-bottom: var(--space-3);
+  }
+
+  /* Today, Yesterday and the date field on one line. */
+  .fms-datechip {
+    padding: 0 var(--space-3);
+  }
+
+  .fms-datechips-input {
+    flex: 1 1 8rem;
+  }
+
+  /* The top bar: the title and the line under it, no taller than its 44px buttons need. */
+  .fms-topbar {
+    padding-block: 6px;
+  }
+
+  /* Database: three filters on one row, each an equal share of it. */
+  .fms-dbfilterrow {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .fms-dbfilterrow > .fms-filterchip {
+    flex: 1 1 0;
+  }
+
+  .fms-filterchip > select {
+    width: 100%;
+    padding: 0 26px 0 var(--space-3);
+  }
+
+  .fms-filterchip > svg {
+    right: 8px;
+  }
+
+  .fms-dbrow-tap {
+    min-height: 56px;
+    padding: var(--space-2) var(--space-3);
+  }
+
+  /* Settings: an account's type and its actions share a line under its name. */
+  .fms-acctable tr > td:nth-child(3) {
+    grid-column: 1;
+  }
+
+  .fms-acctable tr > td:nth-child(4) {
+    grid-column: 2;
+  }
+
+  .fms-acctable .fms-rowactions {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .fms-acctable .fms-rowactions > button {
+    min-width: 0;
+    padding-inline: var(--space-3);
+  }
+
+  .fms-table tr {
+    padding: var(--space-2) 0;
+  }
+}
+
+/*
+ * A small link in a line of words keeps its 44px to hit and gives the space
+ * back, the way a label's "Use Food" does: "Set a limit" under each kind on
+ * Budget, "Set limit" and "Open Credit and loans" on Debt each made their
+ * line 44px tall. A link standing in a row of buttons is left at its height,
+ * so it still lines up with them.
+ */
+@media (max-width: 639px) {
+  .fms-linkbtn.t-caption,
+  .fms-budgetcat-foot .fms-linkbtn {
+    min-height: 0;
+    padding-block: 14px;
+    margin-block: -14px;
+  }
+
+  .fms-debtactions > .fms-linkbtn,
+  .fms-rowactions > .fms-linkbtn {
+    min-height: 44px;
+    padding-block: 0;
+    margin-block: 0;
+  }
+}

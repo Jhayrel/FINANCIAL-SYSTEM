@@ -312,3 +312,25 @@
 
   color-scheme: dark;
 }
+
+/*
+ * A phone's spacing, one step tighter (owner, 28 September 2026: "in phone
+ * all parts the ui is too large, make them suitable for phone").
+ *
+ * Every gap and padding in the app is one of these tokens, so a phone gets
+ * its own scale here rather than a rule per screen: 16px of standard gap
+ * becomes 12px, the 20px and 24px between cards and groups become 16px, and
+ * the large breaks come down with them. The 4px, 8px and 12px steps stay,
+ * because they are what separates a label from its field and the words in a
+ * chip. Touch targets are sized in pixels, not with these, so rule D10's
+ * 44px is untouched.
+ */
+@media (max-width: 639px) {
+  :root {
+    --space-4: 12px;
+    --space-5: 16px;
+    --space-6: 16px;
+    --space-8: 24px;
+    --space-12: 32px;
+  }
+}

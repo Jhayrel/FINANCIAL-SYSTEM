@@ -649,7 +649,7 @@ function AccountsSection({
         hint="Every place your money sits, grouped by what it is for"
         action={<CountChip>{accounts.filter((a) => a.kind !== "goal" && !a.archived).length}</CountChip>}
       >
-        <table className="fms-table">
+        <table className="fms-table fms-acctable">
           <thead>
             <tr>
               <th>Account</th>
