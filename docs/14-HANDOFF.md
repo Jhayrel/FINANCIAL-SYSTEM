@@ -92,6 +92,30 @@ would read it as the owner's ledger. The app scrolls inside its own frame, so
 a tall viewport (390 by 2200) shows a whole screen in one picture. AI is off
 in a local copy: Settings, the AI tab, "Turn on AI".
 
+### Walking the app against a real database, locally
+
+Everything that writes (add, correct, bin, restore, transfer, a chat card,
+a delete asked in words, restoring a backup, budgets) was checked on
+28 September against the Firebase emulator, not by reading code. How:
+
+1. `firebase-tools` emulators for `firestore` and `auth`, project
+   `demo-fms`, with the repository's `firestore.rules` copied in.
+2. Create the owner in the auth emulator with the uid the rules name
+   (`POST 127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/demo-fms/accounts`
+   with `Authorization: Bearer owner` and a `localId`).
+3. A temporary, never committed, five-line patch to `src/data/firebase.ts`:
+   `connectFirestoreEmulator` and `connectAuthEmulator` when
+   `VITE_USE_EMULATOR` is set, and a `window.__testSignIn` that signs in
+   with email and password. Revert it with `git checkout` before any commit.
+4. Run Vite with `VITE_USE_EMULATOR=1`, `VITE_OWNER_UID` and six dummy
+   `VITE_FIREBASE_*` values, seed with an **invented** backup made by
+   `createBackup` and restored through Settings, Data, and read what landed
+   with the emulator's REST API (`Authorization: Bearer owner` bypasses
+   the rules).
+
+Phones are `isMobile` and `hasTouch` in Playwright; tap, do not click, or a
+scroll closes the app's menus. The page scrolls inside `.fms-main`.
+
 ### Reading a picture the way the phone does
 
 With the dev server running, `page.evaluate` can `import("/src/data/ocr.ts")`
@@ -224,6 +248,37 @@ fixed and tested. All pushed.
 | "revenue 14 pesos change of the electric bill payment cash" with a card open changed that card's wallet and made no card | A whole new entry is its own row | `2620184` |
 | A single entry's question had only a text box | Its answers are buttons, as the batch questions have | `2620184` |
 
+### 2026-09-28, evening: a real database, the second dump, the phone
+
+The owner asked whether everything works "from add or ai to the database
+to deleting, editing, adding, moving", and for the phone to be clean at
+any size. All pushed.
+
+| Found | Now | Commit |
+|---|---|---|
+| Tapping Save right after typing did nothing on a phone: the bottom bar came back under the finger and moved Save 52px mid-tap | The bar returns a moment after typing stops | `68d9466` |
+| Restoring a backup with Replace or Merge never saved its budget | Saved, as Start clean did | `68d9466` |
+| With no model, "delete the breakfast I just added" became the answer to "What was it for?"; a blank item warned that "" is not one of your spending types | Instructions are never answers; no warning for no item | `68d9466` |
+| "breakfast", "fuel", "air freshener" were not known on the device | English words find the owner's own items | `68d9466` |
+| Bank histories re-sent: 7 of 11 rows already logged came back as new | Matched on totals with fees, across kinds, within two days, and as parts (30,010 is 5,010 plus 25,000); one transfer answers both its ends | `4f9bc03` |
+| A history list's rows dated by the heading below them | Dated on the device by the heading above; Today is the picture's day | `4f9bc03` |
+| A receipt sent twice showed every field twice, and read as the description doubled | Only what differs; one line when nothing does | `4f9bc03` |
+| "whats my balance actual usable" counted savings | Usable, reserve and savings are told apart | `4f9bc03` |
+| The assistant forgot everything after Clear this view | Earlier sessions go with each question (`domain/memory.ts`) | `4f9bc03` |
+| "by year" after an income chart drew spending; "trend of income" after a spending chart drew both | A follow-up keeps its direction; a new one replaces it | `4f9bc03` |
+| A pie in the chat column read "Onlin...", "Mone..." | The legend goes under the ring unless there is room, and wraps | `4f9bc03` |
+| "statement september 1 to 19" was made for September so far | Statements take days | `4f9bc03` |
+| Maya Credit with Bill closes and Payment due both the 6th | Settings says what that means: due the 6th of the month after the bill | `4f9bc03` |
+| Phone at 320 to 430px: filters cut to "All ...", Settings sections hidden past the edge, account names cut, Insights picks and tabs past the edge, months hidden, a stray dot in Activity | Every screen re-checked at 320, 360, 390 and 430, light and dark: nothing past an edge | `c722623` |
+| "Gas 300" typed today was "already in your ledger" because of yesterday's | Typed entries match the same day only | `c722623` |
+
+Verified in the running app against the emulator: add, correct, bin and
+restore (a soft delete, `deletedAt` set and cleared), a transfer with a
+fee (stored as Spending / Transaction Fee, net worth down by the fee
+alone), a chat card (`entrySource: ai`), a delete asked in words,
+Replace and Merge restores, statement CSV and PDF (closing balance equal
+to net worth), full backup and CSV, Insights, Investigate.
+
 Checked against the dump but already fixed on 09-27: "can I afford it"
 questions (`affordAsk.ts`), charts per year and as a pie.
 
@@ -258,19 +313,22 @@ bill) to Revenue themselves; nothing in the app changed it.
 2. **"whats that selected?"** about a pie slice the owner had tapped: the
    chat is not told which slice is picked. It needs the chart's picked row
    passed up from `components/charts.tsx` into the question's context.
-3. **A receipt's printed date** is often lost: the date line sits at the
+3. **The real due date for Maya Credit.** The app now says what "both the
+   6th" means; whether Maya's own due date is another day only its app can
+   say. If it is, the owner sets Payment due to it.
+4. **A receipt's printed date** is often lost: the date line sits at the
    curled bottom of the photo and the device does not read it. The card is
    then dated today, which is right for a receipt photographed the same day
    and wrong otherwise. The card says where its date came from only when it
    was read.
-4. **A receipt with several purchases for different people or budgets** is
+5. **A receipt with several purchases for different people or budgets** is
    read as one purchase unless the owner asks for the items separately.
-5. **Remove `?coderview`** once the assistant's faults it shows are fixed:
+6. **Remove `?coderview`** once the assistant's faults it shows are fixed:
    six steps in `11-CODERVIEW-IS-TEMPORARY.md`, including the rules block and
    a redeploy.
-6. **Archiving a transaction** needs the owner's decision first
+7. **Archiving a transaction** needs the owner's decision first
    (`10-AI-ASSISTANT-STATUS.md` §3.2).
-7. **Learning from corrections is narrow on purpose** (same file, §3.1).
+8. **Learning from corrections is narrow on purpose** (same file, §3.1).
 
 ---
 
