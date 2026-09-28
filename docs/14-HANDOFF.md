@@ -197,15 +197,50 @@ The owner's receipt of that day, the one that prompted the work, reads as
 109.00 with four checks agreeing, paid in cash. Its readings are in
 `receipt.test.ts`.
 
+### 2026-09-28, later: the coderview dump, read through
+
+The owner sent a full coderview dump and asked for "the reasoning, the
+logic ... all" to be fixed, then for charts, statements and the chat to
+work "to all kind of scenario", then for the Activity screen and a loading
+screen. Every fault below was found in that dump or on screen, reproduced,
+fixed and tested. All pushed.
+
+| What went wrong | What happens now | Commit |
+|---|---|---|
+| A habit guess ("the wallet you usually use") overruled what was said, and a card could say Revenue with a spending category | What the message says wins; the category always fits the kind; a guessed wallet only fills a blank and says so | `f9ad3a1` |
+| "Hard to read" on cards typed by hand | "unsure, check it", and only for a picture | `f9ad3a1` |
+| A receipt's card asked "What was it for?" about a reed diffuser | The item is chosen from what was bought; the `classify` instruction the server was missing is written | `9f20be5` |
+| Free models printed their own reasoning as the answer ("We need to answer the question...") | Thinking is removed before an answer is shown | `27552ae` |
+| Activity showed its filters twice on a computer | One row | `bf3eb98` |
+| "trend march 2026 to today" drew today; a statement for "january 2026 to june 2026" came out January only | `domain/periodIn.ts` reads a range said any way, and charts and statements both use it | `170a8ff` |
+| Replies to a card's question ("Cash, i purchase it for my room", "Reed defuser wood and santal", "cash") went to the router and became new entries or balance answers; "Read it" became an item; the chat said it "cannot read a receipt" | A reply goes to the card that asked; "read it" and "look at the receipt" read the last picture again; the chat knows the app reads pictures; "can you check if this is added" answers from the ledger by record number | `2ddb5de` |
+| The composer kept the typed text after an export | Cleared | `2ddb5de` |
+| The Dashboard waited behind one line of text | Each screen waits behind its own outline (`components/LoadingScreen.tsx`), ticking off Accounts, Entries and Budget. Style guide 2.5 and 3.10 changed at the owner's instruction | `7f11c6f` |
+| "Change the title" found three saved rows to correct | It asks what the title should say and puts the reply on the card: the one asking, the one open, or the one just discarded | `eaedb8b` |
+| "Its 109" while a card asked what it was for became a new entry, then a leaked chain of thought | The amount on that card changes and the question stays | `eaedb8b` |
+| Card answers logged the whole row as a correction, and "2026-09-15 Revenue" was learned as a phrase meaning the item "//fix this"; "fee" and "moved into" were learned as wallets | Values only; lessons skip row summaries, figures and "//" notes, and never key on how money moved | `eaedb8b` |
+| "summary per year" was answered "I only have monthly figures"; "since starting I didn't have good budgeting?" was answered from September and drawn as a chart | The chat gets every year's totals and every month against its own budget; a judging question is never a chart follow-up | `a9ebebc` |
+| With no model, "6 pesos unknown spending cash" got "The AI model is not working" and no card | The device reads it | `2620184` |
+| "revenue 14 pesos change of the electric bill payment cash" with a card open changed that card's wallet and made no card | A whole new entry is its own row | `2620184` |
+| A single entry's question had only a text box | Its answers are buttons, as the batch questions have | `2620184` |
+
+Checked against the dump but already fixed on 09-27: "can I afford it"
+questions (`affordAsk.ts`), charts per year and as a pie.
+
+The owner corrected record #3846 (the PHP 14.00 change from the electric
+bill) to Revenue themselves; nothing in the app changed it.
+
 ---
 
 ## 6. What the owner has to do
 
-1. **Publish the new rules.** Firestore does not read the file from GitHub.
+1. **Publish the rules whenever `firestore.rules` changes.** The owner
+   published the 28 September rules that day. Firestore does not read the
+   file from GitHub.
    Firebase console, Firestore Database, Rules, paste the whole of
    `firestore.rules`, Publish. Or
    `npx firebase-tools deploy --only firestore:rules --project financial-system-c2997`.
-   Until then the old rules are still the ones running.
+   Until then the previous rules are the ones running.
 2. **Reload the app on the phone** after a deploy: tap Reload on the "newer
    version" notice, or leave the app for a minute and come back.
 3. **Rotate the AI keys** if that has not been done since they were exposed
@@ -215,20 +250,21 @@ The owner's receipt of that day, the one that prompted the work, reads as
 
 ## 7. Open, in order of what matters
 
-1. **"Fix the reasoning."** The owner asked this with the coderview dump as
-   evidence, and the dump was empty, so the assistant's reasoning has not
-   been looked at yet. The next dump, now that the screen finishes, is the
-   material: read "Thrown away, and never corrected" and "Said, and nothing
-   happened" first (`12-DEBUGGING-FROM-THE-RECORD.md` §1 says how).
-2. **A receipt's printed date** is often lost: the date line sits at the
+1. **Nothing above was seen working against a live model.** The container
+   cannot reach the providers or the deployed site, so every fix is proved
+   by tests and by the device path on a local copy. The next coderview dump
+   is the check: read "Thrown away, and never corrected" and "Said, and
+   nothing happened" first (`12-DEBUGGING-FROM-THE-RECORD.md` §1 says how).
+2. **"whats that selected?"** about a pie slice the owner had tapped: the
+   chat is not told which slice is picked. It needs the chart's picked row
+   passed up from `components/charts.tsx` into the question's context.
+3. **A receipt's printed date** is often lost: the date line sits at the
    curled bottom of the photo and the device does not read it. The card is
    then dated today, which is right for a receipt photographed the same day
    and wrong otherwise. The card says where its date came from only when it
    was read.
-3. **A receipt with several purchases for different people or budgets** is
+4. **A receipt with several purchases for different people or budgets** is
    read as one purchase unless the owner asks for the items separately.
-4. **The question box under the chat** was tightened on 09-28 but has not
-   been seen on screen with a question in it.
 5. **Remove `?coderview`** once the assistant's faults it shows are fixed:
    six steps in `11-CODERVIEW-IS-TEMPORARY.md`, including the rules block and
    a redeploy.
