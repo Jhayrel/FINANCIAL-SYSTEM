@@ -855,7 +855,21 @@ export function buildChart(
    * A trend over a short window is day by day. "this week's trend" grouped
    * by month drew one point, which is not a trend.
    */
-  const asked0 = dimensionOf(question);
+  const said0 = dimensionOf(question);
+  /*
+   * Year by year inside one year is one point, and so is no chart at all.
+   * "spending only" after "by year" carried a window of March to today and
+   * drew "Spending by year, 2026 PHP 203,045.56" (28 September 2026). Inside
+   * one calendar year the years are its months.
+   */
+  const oneYear = period.from > "1000" && period.from.slice(0, 4) === period.to.slice(0, 4);
+  /*
+   * Income against spending, with no grouping said, is month against month.
+   * "compare income vs spending this year" drew each by item, two lists of
+   * different things that cannot be compared (28 September 2026).
+   */
+  const sideBySide = only !== undefined && said0 === "item" && span > 45 && !/\b(?:by|per)\s+items?\b|\bitems?\b|\bwhat\b/i.test(question);
+  const asked0: ChartBy = (said0 === "year" && oneYear) || sideBySide ? "month" : said0;
   const asked = asked0 === "month" && span <= 45 && !comparesMonths(question) ? "day" : asked0;
   const by: ChartBy =
     focus.item && asked === "item"

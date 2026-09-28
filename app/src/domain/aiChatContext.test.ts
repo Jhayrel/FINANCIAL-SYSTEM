@@ -327,4 +327,29 @@ describe("any window, and what if", () => {
   it("adds nothing for a question that is not a what if", () => {
     expect(build("how is this month going", { transactions: days }).text).not.toContain("## What if");
   });
+
+  it("works in centavos, so the figures after are the figures before less the purchase", () => {
+    // No accounts in this ledger, so net worth is nothing before and the phone after.
+    const text = build("what if I buy a 25k phone?", { transactions: days }).text;
+    expect(text).toContain("Net worth after debt: PHP 0.00 before, PHP -25,000.00 after.");
+  });
+
+  /*
+   * 28 September 2026: a budget left of PHP -6,580.71, in pesos, less
+   * 800,000 centavos reached the formatter as a fraction of a centavo and
+   * threw. The question was never sent, and nothing was said, five times.
+   */
+  it("never throws on a budget left in pesos and centavos", () => {
+    const set: Budgets = { "2026": { spending: [0, 0, 0, 0, 0, 0, 0, 130_000, 0, 0, 0, 0], billsSubs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] } };
+    const odd = [...days, row({ recordNumber: 399, date: "2026-08-31", item: "Food", amount: 71, total: 71 })];
+    const snapshot = buildContext({ transactions: odd, accounts: [], budgets: set, credits: [], reference, lowBalanceThreshold: 0, asOf: "2026-08-31" });
+    const build2 = (question: string) => buildChatContext({ snapshot, transactions: odd, asOf: "2026-08-31", question, budgets: set }).text;
+    expect(() => build2("what if I spend 8000 tonight?")).not.toThrow();
+    expect(build2("what if I spend 8000 tonight?")).toContain("August 2026's budget: PHP 1,700.71 over before, PHP 9,700.71 over after.");
+  });
+
+  it("does not read money coming in as money spent", () => {
+    const text = build("what budget do you recommend for October if I only expect 8000 allowance?", { transactions: days }).text;
+    expect(text).not.toContain("## What if");
+  });
 });

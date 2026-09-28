@@ -117,9 +117,23 @@ function monthIn(text: string): number | null {
  * how a statement comes out anyway. Only a request with no period in it, or
  * one that says everything, asks for the whole ledger.
  */
+/** Words that ask for a file whatever else is said. */
+const FILE_WORDS = /\b(export|exports|exported|download|backup|back\s?up|csv|spreadsheet|excel|pdf|statement|statements)\b/i;
+/**
+ * "save", "copy", "print", "file" and "document" ask for a file only with
+ * something to put in it.
+ *
+ * 28 September 2026: "which 2 items should I cut first and how much would I
+ * save?" was offered the whole system as a spreadsheet, and never answered.
+ * Saving money is not saving a file.
+ */
+const FILE_OBJECT =
+  /\b(save|copy|print|file|document)\b[^.?!]{0,30}\b(data|ledger|entries|transactions|records|history|file|files|csv|pdf|spreadsheet|excel|sheet|statement|backup|everything|all of it|chat|conversation)\b|\b(save|copy|print)\s+(?:it|this|that|them)\s+as\b/i;
+
 export function readExportAsk(said: string, asOf: IsoDate): ExportAsk | null {
   const text = said.trim();
   if (!text || !EXPORTING.test(text)) return null;
+  if (!FILE_WORDS.test(text) && !FILE_OBJECT.test(text)) return null;
 
   // "Save 500 on food" is an entry, not an export: a figure with a verb of
   // spending beside it is never a request for a file.

@@ -45,7 +45,7 @@
 import { contextToText, phpFigure, type AiContext } from "./aiContext";
 import { addDays, dayOfWeek, formatMedium } from "./dates";
 import { redact } from "./aiRedact";
-import { toPesos } from "./money";
+import { toCentavos, toPesos } from "./money";
 import { costOf, incomeOf } from "./totals";
 import { debtDue, positionsOf, rowsFor, type Debt } from "./debt";
 import { creditRoom, limitSteps } from "./creditLimit";
@@ -519,28 +519,49 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
    * not do. So the app does it: the month's budget, what is left of it a day,
    * and net worth, each after the amount named.
    */
-  const hypothetical = /\b(what if|if i|can i (?:afford|buy|spend|pay|get)|should i (?:buy|spend|get|pay)|afford)\b/i.test(question);
+  /*
+   * Money coming in is not a purchase. "if I only expect 8000 allowance"
+   * says "if i" and holds a figure, and was worked out as PHP 8,000.00 spent.
+   */
+  const incomeTalk =
+    /\b(expect\w*|allowance|salary|sahod|income|earn\w*|receiv\w*|get paid|coming in)\b/i.test(question) &&
+    !/\b(buy|spend|afford|pay for|purchase)\b/i.test(question);
+  const hypothetical = !incomeTalk && /\b(what if|if i|can i (?:afford|buy|spend|pay|get)|should i (?:buy|spend|get|pay)|afford)\b/i.test(question);
   const amounts = hypothetical
     ? figuresIn(question.replace(/\b20\d{2}\b/g, " ").replace(/(\d+(?:\.\d+)?)\s*k\b/gi, (_m, n: string) => String(Math.round(Number(n) * 1000))))
     : [];
   const what = amounts.length > 0 ? Math.max(...amounts) : 0;
   if (what > 0) {
     const snap = input.snapshot;
+    /*
+     * The snapshot is in pesos and `what` is centavos.
+     *
+     * 28 September 2026: "what budget do you recommend for October if I only
+     * expect 8000 allowance?" reads as a what if ("if i"), and the budget
+     * left, PHP -6,580.71 in pesos, less 800,000 centavos went to `php` as
+     * a fraction of a centavo. It threw, the question was never sent, and
+     * nothing was said, five times. Every figure is brought back to
+     * centavos first, and the arithmetic stays in centavos.
+     */
+    const cents = (p: number): number => toCentavos(p);
     out.push("");
     out.push(`## What if ${php(what)} is spent now`);
     out.push("Worked out by the app. Quote these rather than subtracting anything yourself.");
     if (snap.month.budget !== null && snap.month.remaining !== null) {
-      const after = snap.month.remaining - what;
+      const left = cents(snap.month.remaining);
+      const after = left - what;
       out.push(
-        `${snap.month.name}'s budget: ${php(snap.month.remaining)} left before, ${after < 0 ? `${php(-after)} over` : `${php(after)} left`} after.${
+        `${snap.month.name}'s budget: ${left < 0 ? `${php(-left)} over` : `${php(left)} left`} before, ${after < 0 ? `${php(-after)} over` : `${php(after)} left`} after.${
           snap.month.daysLeft > 0 && after > 0 ? ` That is ${php(Math.floor(after / snap.month.daysLeft))} a day for the ${snap.month.daysLeft} days left.` : ""
         }`,
       );
     }
-    out.push(`Net worth after debt: ${php(snap.netWorth)} before, ${php(snap.netWorth - what)} after.`);
+    const worth = cents(snap.netWorth);
+    out.push(`Net worth after debt: ${php(worth)} before, ${php(worth - what)} after.`);
     for (const b of snap.balances) {
       if (new RegExp(`\\b${b.account.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(question.toLowerCase())) {
-        out.push(`${b.account}: ${php(b.balance)} before, ${php(b.balance - what)} after.`);
+        const had = cents(b.balance);
+        out.push(`${b.account}: ${php(had)} before, ${php(had - what)} after.`);
       }
     }
   }

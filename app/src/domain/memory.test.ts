@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ChatMessage } from "./chat";
-import { earlierSessions } from "./memory";
+import { chatHistory, conversationBlock, earlierSessions } from "./memory";
 
 const m = (at: string, role: "you" | "assistant", text: string): ChatMessage => ({ id: at, at, role, text });
 
@@ -36,5 +36,36 @@ describe("what was said in earlier sessions", () => {
     const text = earlierSessions(many, [], 30, 1_000);
     expect(text.length).toBeLessThanOrEqual(1_000);
     expect(text.split("\n").length).toBeGreaterThan(3);
+  });
+});
+
+describe("the conversation sent with a question", () => {
+  const long = `I recommend a budget of PHP 14,322.00 for October 2026. ${"- Food: PHP 1,450.00\n".repeat(80)}`;
+
+  /*
+   * 28 September 2026: every turn was cut to 500 characters, so "tell me
+   * the separation of that budget" was sent a quarter of the answer it was
+   * about.
+   */
+  it("keeps the newest turns whole and shortens the older ones", () => {
+    const said = [
+      { role: "you" as const, text: "x".repeat(900) },
+      { role: "assistant" as const, text: "y".repeat(900) },
+      { role: "you" as const, text: "what budget do you recommend?" },
+      { role: "assistant" as const, text: long },
+      { role: "you" as const, text: "tell me whats the separation of that budget?" },
+    ];
+    const history = chatHistory(said, 12, 4);
+    expect(history[0]?.text.length).toBeLessThanOrEqual(403);
+    expect(history[3]?.text.length).toBeGreaterThan(1_500);
+    expect(history[4]?.text).toBe("tell me whats the separation of that budget?");
+  });
+
+  it("puts this conversation last, and keeps it before earlier sessions when short of room", () => {
+    const block = conversationBlock("2026-09-27 you: old thing", [{ role: "you", text: "new thing" }]);
+    expect(block.indexOf("Earlier sessions")).toBeLessThan(block.indexOf("Earlier in this conversation:"));
+    const tight = conversationBlock("2026-09-27 you: old thing ".repeat(50), [{ role: "you", text: "new thing" }], 300);
+    expect(tight).toContain("Earlier in this conversation:\nyou: new thing");
+    expect(tight.length).toBeLessThanOrEqual(300);
   });
 });

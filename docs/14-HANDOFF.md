@@ -285,6 +285,37 @@ questions (`affordAsk.ts`), charts per year and as a pie.
 The owner corrected record #3846 (the PHP 14.00 change from the electric
 bill) to Revenue themselves; nothing in the app changed it.
 
+### 2026-09-28, night: the third dump, a realistic budget, a memory that holds
+
+The owner's test run of hard questions, then: "fix the ai and the logic
+of clear this view", "I ask it for budget recommendation for next month
+based on my current spending and the separation, it didnt answer it
+right", and "make an algorithm that works everything from free ai so
+that it wont get lost or forget".
+
+The rule this round settled on: **what the ledger can answer exactly is
+answered on the device, and what goes to a free model travels with the
+conversation where trimming cannot reach it.**
+
+| Found | Now |
+|---|---|
+| "what budget do you recommend for October if I only expect 8000 allowance?" asked five times, never answered | It read as a what if ("if i"), the what-if section subtracted centavos from pesos, the formatter threw, and the dropped promise said nothing. Units fixed; income wording is not a purchase; any fault now says so and is logged |
+| "realistic budget next month" answered from July alone; "the separation of that" answered about September | `domain/budgetAdvice.ts`: each item's median month over the six before, bills still running at their last amount, stopped ones and one-offs named and left out, held to an income when one is said, wants cut by the same share before any need. "set it" makes one card with both parts |
+| The conversation was appended below the entries, and a model refusing the size had it cut first | Sent as its own `conversation` field; the server keeps it beside the figures and shortens it from the oldest end (`fitConversation`). The newest four turns go whole, not cut to 500 characters |
+| At 18,000 characters the figures were cut from the end, losing the window asked about and the years | `compactContext` drops whole sections, least needed first (flags, the debt log, day by day), and says which |
+| Stop said "Stopped" and the answer arrived anyway; Clear this view left a pending question and an in-flight answer behind | Both abort the request and drop a late answer; Clear forgets the waiting entry, the card question, the rename, the last recommendation |
+| "how much would I save?" offered a spreadsheet | "save", "copy", "print" ask for a file only with something to put in it |
+| "pie" and "spending only" after "by year" went back to the first chart's window, one point | The router's period is used only when the message names one; year by year inside one year is month by month |
+| "compare income vs spending this year" drew two lists of items | Month against month |
+| "so is it an option or not?" after the device's yes went to the model and came back no | The device answers the same decision again (`followsUpDecision`) |
+| "how much did I spend on food in August" was a model's sum | `domain/spendAsk.ts`: the charts' window and `costOf`, in English, Tagalog and phone typos; an item not on the list still goes to the model |
+
+Verified against the emulator with a deliberately slow fake model: the
+recommendation and its split, "set it" to one card held to a stated
+income, a spend answer, no file for "how much would I save", Stop and
+Clear dropping answers that land after them, and the request carrying
+`conversation` apart from `context`.
+
 ---
 
 ## 6. What the owner has to do
@@ -305,7 +336,10 @@ bill) to Revenue themselves; nothing in the app changed it.
 
 ## 7. Open, in order of what matters
 
-1. **Nothing above was seen working against a live model.** The container
+1. **Nothing above was seen working against a live model.** This includes
+   the 28 September night round: whether the free models use the separate
+   `conversation` field as well as they used the appended one is for the
+   next dump to show. The container
    cannot reach the providers or the deployed site, so every fix is proved
    by tests and by the device path on a local copy. The next coderview dump
    is the check: read "Thrown away, and never corrected" and "Said, and

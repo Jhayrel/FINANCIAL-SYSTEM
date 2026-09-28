@@ -81,6 +81,8 @@ export interface UseAi {
       screen?: string;
       /** What was said before this conversation (`domain/memory.ts`). */
       earlier?: string;
+      /** Stop and Clear this view call it off. */
+      signal?: AbortSignal;
     },
   ) => Promise<AiAnswer>;
   readonly clear: () => void;
@@ -206,6 +208,8 @@ export function useAi({
         history?: readonly { role: "you" | "assistant"; text: string }[];
         screen?: string;
         earlier?: string;
+        /** Stop and Clear this view call it off. */
+        signal?: AbortSignal;
       } = {},
     ): Promise<AiAnswer> => {
       // Switched off means nothing is sent, not that nothing comes back.
@@ -255,6 +259,7 @@ export function useAi({
         ...(options.question ? { question: options.question } : {}),
         ...(options.history ? { history: options.history } : {}),
         ...(options.earlier ? { earlier: options.earlier } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
       });
 
       /**
@@ -278,10 +283,16 @@ export function useAi({
        */
       if (answered.source !== "model") return answered;
 
-      const note = untracedNote(answered.text, chatText ?? contextToText(context), formatMoney);
+      /*
+       * The conversation counts as a source: a figure the device worked out a
+       * message ago ("I recommend a budget of PHP 14,322.00") is traceable
+       * when the model repeats it.
+       */
+      const said = [options.earlier ?? "", ...(options.history ?? []).map((h) => h.text)].join("\n");
+      const note = untracedNote(answered.text, [chatText ?? contextToText(context), said].join("\n"), formatMoney);
       return note === "" ? answered : { ...answered, text: [answered.text, note].join("\n\n") };
     },
-    [context, disabled, ai.enabled, ai.tone, transactions, asOf],
+    [context, disabled, ai.enabled, ai.tone, ai.provider, ai.model, transactions, asOf, budgets, settings.credits],
   );
 
   const clear = useCallback(() => setAnswer(null), []);

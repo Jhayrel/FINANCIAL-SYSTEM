@@ -49,6 +49,19 @@ const GO_BY =
 
 export const isAffordQuestion = (text: string): boolean => AFFORD.test(text);
 
+/**
+ * "so is it an option or not?", "yes or no?", "but I'm over budget right?"
+ * straight after an affordability answer: the same decision, asked again.
+ *
+ * 28 September 2026: the device said yes from the wallets, the next two went
+ * to the model, and it answered "No, it is not an option" to the same
+ * question. The call is the device's, so the device makes it again, the same
+ * way, with the budget said apart as before.
+ */
+const DECISION =
+  /^\s*(?:so|but|then|ok(?:ay)?|and|wait)?[\s,]*(?:is (?:it|that) (?:an? )?(?:option|ok(?:ay)?|possible|fine|good|a yes|a no)|yes or no|can i or not|so can i|or not|what'?s the (?:answer|verdict|call)|should i or not|(?:but )?i'?m over (?:the |my )?budget|(?:but )?what about (?:the |my )?budget|is it yes|is it no|so yes|so no)\b[^.]{0,40}\??\s*$/i;
+export const followsUpDecision = (text: string): boolean => DECISION.test(text.trim()) && text.trim().split(/\s+/).length <= 12;
+
 /** A follow-up that only makes sense with an affordability question before it. */
 export const goesByBalance = (text: string): boolean => GO_BY.test(text);
 

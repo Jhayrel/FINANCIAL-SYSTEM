@@ -45,6 +45,7 @@ import type { AiTask } from "../domain/aiOffline";
 import { plainText } from "../domain/aiText";
 import { idToken } from "./auth";
 import { redact } from "../domain/aiRedact";
+import { conversationBlock } from "../domain/memory";
 import { dayInFileName, dropRepeats, piecesOf, readingFor, rowsIn } from "../domain/ocrText";
 import { readReceipt, receiptNote, type ReceiptCheck } from "../domain/receipt";
 import { readPicture } from "./ocr";
@@ -91,6 +92,8 @@ export interface AskOptions {
   readonly history?: readonly { readonly role: "you" | "assistant"; readonly text: string }[];
   /** What was said in earlier sessions, dated lines (`domain/memory.ts`). */
   readonly earlier?: string;
+  /** Called off by the owner: Stop, or Clear this view. */
+  readonly signal?: AbortSignal;
   /**
    * A context built somewhere other than `contextToText`.
    *
@@ -231,6 +234,19 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  if (options.signal?.aborted) controller.abort();
+  options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
+
+  /*
+   * The conversation in its own field, apart from the figures.
+   *
+   * Appended to the figures, it sat below the entries, and a model that
+   * refused the size had the figures cut from the end: the conversation went
+   * first, and the assistant lost what it had said a message ago ("I am
+   * asking about the first you said", 28 September 2026). The server keeps
+   * it whole beside the figures, newest lines first when it must shorten it.
+   */
+  const conversation = conversationBlock(options.earlier ? redact(options.earlier) : "", options.history ?? []);
 
   try {
     const response = await doFetch(ENDPOINT, {
@@ -250,15 +266,8 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
          * answered with one paragraph, 20 September 2026.
          */
         ...(options.question ? { question: options.question } : {}),
-        context: [
-          options.contextText ?? contextToText(context),
-          options.earlier ? ["", "Earlier sessions, oldest first:", redact(options.earlier)].join(String.fromCharCode(10)) : "",
-          options.history?.length
-            ? ["", "Earlier in this conversation:", ...options.history.map((h) => `${h.role}: ${h.text}`)].join(String.fromCharCode(10))
-            : "",
-        ]
-          .filter(Boolean)
-          .join(String.fromCharCode(10)),
+        context: options.contextText ?? contextToText(context),
+        ...(conversation ? { conversation } : {}),
         task,
         tone,
         ...(options.provider && options.model ? { provider: options.provider, model: options.model } : {}),
@@ -328,6 +337,7 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
+    if (options.signal?.aborted) return fallback("Stopped before the answer came.");
     return fallback(
       message.toLowerCase().includes("abort")
         ? "The model took too long to answer."

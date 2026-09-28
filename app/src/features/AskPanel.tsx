@@ -138,7 +138,7 @@ import {
 } from "../domain/investigate";
 import { exportWords, readExportAsk, type ExportAsk } from "../domain/exportAsk";
 import { readInvestigateAsk, type InvestigateAsk } from "../domain/investigateAsk";
-import { affordAnswer, goesByBalance, isAffordQuestion, readAffordAsk } from "../domain/affordAsk";
+import { affordAnswer, followsUpDecision, goesByBalance, isAffordQuestion, readAffordAsk } from "../domain/affordAsk";
 import {
   duplicateHeadline,
   groupDuplicates,
@@ -197,10 +197,12 @@ import {
   type BudgetAsk,
   type BudgetPlan,
 } from "../domain/budgetAsk";
+import { readSpendAsk, spendAnswer } from "../domain/spendAsk";
+import { adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, type BudgetAdvice } from "../domain/budgetAdvice";
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { budgetForYear } from "../domain/budget";
 import { formatMedium, MONTH_NAMES } from "../domain/dates";
-import { earlierSessions } from "../domain/memory";
+import { chatHistory, earlierSessions } from "../domain/memory";
 import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, pendingChoices, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
 import { forecastYear } from "../domain/forecast";
@@ -1092,12 +1094,24 @@ export function AskPanel({
    * provider's queue.
    */
   const stopper = useRef<AbortController | null>(null);
+  /**
+   * Counts Stop and Clear this view, so an answer to something called off is
+   * dropped when it lands rather than shown.
+   *
+   * 28 September 2026: "why that number?" was stopped at 08:53:48, said
+   * "Stopped. Nothing was saved.", and its answer appeared anyway at
+   * 08:54:20, under a question asked after it. Stop only aborted picture
+   * reads; a chat question ran on regardless.
+   */
+  const generation = useRef(0);
 
   /** Abandon whatever is in flight and hand the box back. */
   const stop = (): void => {
+    generation.current += 1;
     stopper.current?.abort();
     stopper.current = null;
     setBusy(false);
+    setStage("");
     say({
       kind: "assistant",
       ephemeral: true,
@@ -1678,11 +1692,52 @@ export function AskPanel({
     return count;
   };
 
+  /**
+   * Everything the conversation was holding, let go with it.
+   *
+   * 28 September 2026: "Clear this view" emptied the screen and nothing
+   * else. A question still in flight answered into the empty view, an entry
+   * still waiting on "which wallet?" took the next message as its answer, and
+   * "set it" could reach a recommendation no longer on screen. A cleared
+   * view is a new conversation, so nothing from before it is waited on.
+   */
+  const forgetConversation = (): void => {
+    generation.current += 1;
+    stopper.current?.abort();
+    stopper.current = null;
+    setBusy(false);
+    setStage("");
+    setPending(null);
+    setAsking(null);
+    entriesLeftBehind.current = null;
+    clarifying.current = null;
+    binnedHere.current = [];
+    lastAdvice.current = null;
+    budgetQuestion.current = null;
+    renaming.current = null;
+    lastPictures.current = [];
+    lastWasPicture.current = false;
+  };
+
   /** The credit lines an answer can name ("borrowed on Maya Credit"): not the people money is held for. */
   const creditLines: readonly LineToName[] = debts
     .filter((d) => !d.archived && d.form !== "pass-through")
     .map((d) => ({ id: d.id, name: d.name, wallet: d.wallet }));
 
+  /** Every item name the ledger and the lists use, for "how much did I spend on food" (`spendAsk.ts`). */
+  const knownItems = useMemo(
+    () => [
+      ...new Set(
+        [
+          ...transactions.map((t) => t.item.trim()),
+          ...reference.spendingTypes.map((s) => (typeof s === "string" ? s : s.name).trim()),
+          ...reference.bills,
+          ...reference.subscriptions,
+        ].filter((name) => name !== ""),
+      ),
+    ],
+    [transactions, reference],
+  );
   /** When each item was last used, so the reader is told which ones are years old (aiClient.ts). */
   const lastUsed = useMemo(() => itemsLastUsed(transactions), [transactions]);
 
@@ -1794,6 +1849,8 @@ export function AskPanel({
     return m === 12 ? { year: y + 1, month: 1 } : { year: y, month: m + 1 };
   };
 
+  /** The last budget this device recommended, so "set it" takes both parts and "the separation" shows them. */
+  const lastAdvice = useRef<{ advice: BudgetAdvice; text: string } | null>(null);
   /** The budget question just asked, so the next message can answer it. */
   const budgetQuestion = useRef<{ year: number; month: number; toMonth?: number; scope: "month" | "rest" | "year" } | null>(null);
 
@@ -3185,9 +3242,13 @@ export function AskPanel({
   /** Ask a question about the figures. */
   const askQuestion = async (question: string, echo = true): Promise<void> => {
     if (echo) say({ kind: "you", text: question });
+    const asked = generation.current;
+    const control = new AbortController();
+    stopper.current = control;
 
-    const history = spokenHistory(turns, HISTORY_TURNS);
-    const earlier = earlierSessions(savedChat.current, [...history.map((h) => h.text), question]);
+    // The newest turns whole, so a follow-up is sent what it follows (domain/memory.ts).
+    const history = chatHistory(turns.filter(isSaid).map((t) => ({ role: t.kind, text: t.text })));
+    const earlier = earlierSessions(savedChat.current, [...history.map((h) => h.text.replace(/\.\.\.$/, "")), question]);
 
     // What the owner has open, so "what do you think" is about that screen (domain/screenContext.ts).
     const answer = await during(
@@ -3206,9 +3267,16 @@ export function AskPanel({
            * field on the Add form.
            */
           screen: aboutTheScreen(question) ? screenText(currentScreen()) : "",
+          signal: control.signal,
         }),
       "Still waiting on the model",
     );
+    if (stopper.current === control) stopper.current = null;
+    // Stopped, or the view cleared, while it was on its way: it is not said.
+    if (generation.current !== asked) {
+      log(aiEvent("answered", "add", { text: `Not shown, stopped before it arrived: ${answer.text.slice(0, 160)}`, model: "this device" }));
+      return;
+    }
 
     /**
      * A failed answer says so, and says why underneath.
@@ -3243,7 +3311,34 @@ export function AskPanel({
     return true;
   };
 
+  /**
+   * Every message gets a reply, even when the code under it fails.
+   *
+   * 28 September 2026: "what budget do you recommend for October if I only
+   * expect 8000 allowance?" threw while its figures were being put together,
+   * the promise was dropped, and the box simply came back empty, five times.
+   * A fault now says so, in the conversation and in the record, where the
+   * Coder view can find it.
+   */
   const send = async (typed?: string, as?: Intent): Promise<void> => {
+    try {
+      await sendNow(typed, as);
+    } catch (error) {
+      if (stopper.current) stopper.current = null;
+      setBusy(false);
+      setStage("");
+      const what = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      say({
+        kind: "assistant",
+        text: "That one could not be answered: the app hit a fault working it out, so nothing was sent and nothing was saved. Ask it another way, and the fault is kept in the Coder view so it can be fixed.",
+        from: "this device",
+      });
+      log(aiEvent("answered", "add", { text: `Fault: ${what}`.slice(0, 400), model: "this device" }));
+    }
+  };
+
+  const sendNow = async (typed?: string, as?: Intent): Promise<void> => {
+    const began = generation.current;
     const note = (typed ?? draft).trim();
     /**
      * The sentence with its command words spelled right, for the rules to
@@ -3566,6 +3661,8 @@ export function AskPanel({
       } finally {
         setBusy(false);
       }
+      // Stopped, or the view cleared, while it was being read: nothing more happens.
+      if (generation.current !== began) return;
     }
 
     /**
@@ -3622,13 +3719,88 @@ export function AskPanel({
         .reverse()
         .slice(0, 8)
         .find((t) => t.kind === "you" && isAffordQuestion(t.text));
-      const again = !isAffordQuestion(lead) && goesByBalance(lead) && earlier?.kind === "you" ? earlier.text : null;
+      /** The last thing asked, when it was that question, so "so is it an option?" is it again. */
+      const lastAsked = [...turns].reverse().slice(0, 4).find((t) => t.kind === "you");
+      const decidedJustNow = lastAsked?.kind === "you" && isAffordQuestion(lastAsked.text) ? lastAsked.text : null;
+      const again =
+        !isAffordQuestion(lead) && goesByBalance(lead) && earlier?.kind === "you"
+          ? earlier.text
+          : !isAffordQuestion(lead) && decidedJustNow && followsUpDecision(lead)
+            ? decidedJustNow
+            : null;
       if (isAffordQuestion(lead) || again) {
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", "add", { text: note }));
         const asked = readAffordAsk(again ? `${again} ${lead}` : lead, transactions, reference, asOf);
         const reply = affordAnswer(asked, { transactions, reference, budgets, debts, asOf });
+        say({ kind: "assistant", text: reply, from: "this device" });
+        log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+        return;
+      }
+    }
+
+    /**
+     * "What budget do you recommend?", worked out here (`budgetAdvice.ts`).
+     *
+     * 28 September 2026: asked five times with an income figure and never
+     * answered, then answered from July alone, then its "separation" was
+     * answered about September. A recommendation is arithmetic over the
+     * ledger, so the device does it, the same way each time, with the split
+     * under it and the months it read named. "set it" then puts both parts
+     * on one card, and "the separation of that" shows the parts again.
+     */
+    if (files.length === 0 && !as && !isNoteLine && !essay) {
+      const advised = lastAdvice.current;
+      const stillHere = advised !== null && turns.some((t) => t.kind === "assistant" && "text" in t && t.text === advised.text);
+      const income = expectedIncomeIn(ruled);
+      const splitAgain = stillHere && asksForTheSplit(ruled) && !isAffordQuestion(lead) && ruled.split(/\s+/).length <= 16;
+      // "what if I get 10000 instead": the same month again, held to the new figure.
+      const newIncome = stillHere && income !== null && !asksBudgetAdvice(ruled) && ruled.split(/\s+/).length <= 14 && !saysMoneyMoved(ruled);
+      if (asksBudgetAdvice(ruled) || splitAgain || newIncome) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "budget", { text: note }));
+        const named = spanIn(lead, asOf);
+        const next = nextOf(asOf);
+        const target =
+          named && named.anchored !== false
+            ? { year: named.year, month: named.month }
+            : (splitAgain || newIncome) && advised
+              ? { year: advised.advice.year, month: advised.advice.month }
+              : { year: next.year, month: next.month };
+        const held = income ?? (splitAgain && advised?.advice.fit ? advised.advice.fit.income : null);
+        const advice = budgetAdvice({
+          transactions,
+          year: target.year,
+          month: target.month,
+          asOf,
+          stopped: settings.stopped ?? [],
+          debts,
+          income: held,
+        });
+        const text = adviceWords(advice);
+        lastAdvice.current = { advice, text };
+        say({ kind: "assistant", text, from: "this device" });
+        log(aiEvent("answered", "budget", { text, model: "this device" }));
+        return;
+      }
+    }
+
+    /*
+     * "how much did I spend on food in August", "magkano nagastos ko sa
+     * pagkain nung august": a filter and a sum, done here (`spendAsk.ts`).
+     * A free model loses the rows first when a request is trimmed, and must
+     * not add up figures anyway. Anything it cannot place exactly, an item
+     * not on the list or a question about the future, goes on to the model.
+     */
+    if (files.length === 0 && !as && !isNoteLine && !essay && !wantsChart(note)) {
+      const spent = readSpendAsk(ruled, knownItems, asOf);
+      if (spent) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const reply = spendAnswer(spent, transactions, asOf);
         say({ kind: "assistant", text: reply, from: "this device" });
         log(aiEvent("answered", "add", { text: reply, model: "this device" }));
         return;
@@ -3766,6 +3938,27 @@ export function AskPanel({
       if (lastBudget.state === "open") decide(lastBudgetAt, "discarded");
     }
 
+    /*
+     * "set it" after the device's own recommendation: both parts, as worked
+     * out. The figure in the sentence is the total, and setting that as the
+     * spending line would count the bills twice.
+     */
+    const advisedLast = lastAdvice.current;
+    if (
+      !budgetAsk &&
+      couldBudget &&
+      advisedLast &&
+      recentProposal?.text === advisedLast.text &&
+      !namesFigure &&
+      (yesToBudget || saysBudget || confirmsProposal(ruled) || /\b(use|set|apply|add)\b[^.]{0,20}\b(that|it|this|recommend\w*|suggest\w*|what you said)\b/i.test(ruled))
+    ) {
+      const a = advisedLast.advice;
+      const spendingAt = a.fit && !a.fit.fits ? a.fit.spending : a.spending;
+      budgetAsk = over(
+        { kind: "tracks", year: a.year, month: a.month, spending: spendingAt, billsSubs: a.billsSubs, scope: "month" },
+        span ?? { year: a.year, month: a.month, scope: "month", anchored: true },
+      );
+    }
     if (!budgetAsk && couldBudget && (saysBudget || yesToBudget)) {
       /*
        * "use the forecast", "the recommended one": the figure is the app's own
@@ -4604,7 +4797,13 @@ export function AskPanel({
         !namesWindow(ruled.replace(/\b(picked|selected|highlighted|those|these)\s+days?\b/gi, " "));
       const asked = onPick
         ? `${note} ${pick.from === pick.to ? pick.from : `${pick.from} to ${pick.to}`}`
-        : routed?.period
+        : /*
+           * The router's period only when this message names one, or no chart
+           * is on screen to follow. It reads the history too, and handed "pie"
+           * and "spending only" the window of the first chart, three charts
+           * back (28 September 2026).
+           */
+          routed?.period && (namesPeriod || !shown)
           ? `${carried} ${routed.period}`
           : carried;
       /*
@@ -6484,6 +6683,7 @@ export function AskPanel({
              * refresh wherever the mark was lost (26 September 2026).
              */
             discardEveryOpen("Clear this view");
+            forgetConversation();
             markCleared();
             setTurns([]);
           }}

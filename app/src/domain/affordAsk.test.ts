@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { affordAnswer, goesByBalance, isAffordQuestion, readAffordAsk, usualCost } from "./affordAsk";
+import { affordAnswer, followsUpDecision, goesByBalance, isAffordQuestion, readAffordAsk, usualCost } from "./affordAsk";
 import { detectIntent, isQuestion } from "./intent";
 import type { Budgets, ReferenceLists, Transaction } from "./types";
 
@@ -142,5 +142,21 @@ describe("the answer goes by what is held, and says the budget apart", () => {
   it("adds up two things named together", () => {
     const text = affordAnswer(readAffordAsk("can I afford gas and food?", rows, reference, TODAY), input);
     expect(text).toContain("Gas usually costs you ₱200.00, and Food usually costs you ₱125.00, so together about ₱325.00");
+  });
+});
+
+/*
+ * 28 September 2026: the device said yes from the wallets, then "but I'm
+ * over budget right?" and "so is it an option or not?" went to the model,
+ * which answered "No, it is not an option". The same decision is the
+ * device's to make again.
+ */
+describe("asking the same decision again", () => {
+  it.each(["so is it an option or not?", "yes or no?", "but I'm over budget right?", "so can I", "is that a yes?"])("is a follow-up: %s", (q) => {
+    expect(followsUpDecision(q)).toBe(true);
+  });
+
+  it.each(["what budget do you recommend for October?", "how much did I spend on food", "is it raining"])("is not: %s", (q) => {
+    expect(followsUpDecision(q)).toBe(false);
   });
 });

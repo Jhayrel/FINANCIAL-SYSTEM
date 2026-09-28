@@ -65,6 +65,22 @@ describe("what is not a request for a file", () => {
     expect(ask("what is my maya balance")).toBeNull();
   });
 
+  /*
+   * 28 September 2026: offered the whole system as a spreadsheet, and never
+   * answered. Saving money is not saving a file.
+   */
+  it("saving money", () => {
+    expect(ask("which 2 items should I cut first and how much would I save?")).toBeNull();
+    expect(ask("how can I save more money")).toBeNull();
+    expect(ask("copy that")).toBeNull();
+  });
+
+  it("while a file named plainly still is one", () => {
+    expect(ask("save everything")?.kind).toBe("csv");
+    expect(ask("copy my data")?.kind).toBe("csv");
+    expect(ask("download my ledger")?.kind).toBe("csv");
+  });
+
   it("nothing at all", () => {
     expect(ask("")).toBeNull();
     expect(ask("   ")).toBeNull();

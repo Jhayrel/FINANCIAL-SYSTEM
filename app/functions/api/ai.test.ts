@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { compactContext, emptyRead, firstInWaves, shortReason, SHRINK_TO, systemFor, toneFor, usefulRead, visionChain } from "./ai";
+import { compactContext, emptyRead, fitConversation, firstInWaves, shortReason, SHRINK_TO, systemFor, toneFor, usefulRead, visionChain } from "./ai";
 
 /** A context shaped like the real one: worked-out figures, then the rows. */
 function contextOf(rows: number): string {
@@ -83,6 +83,79 @@ describe("cutting a context to size", () => {
     const cut = compactContext(noEntries, 1_000);
     expect(cut.length).toBeLessThanOrEqual(1_000);
     expect(cut).toContain("## September 2026");
+  });
+});
+
+describe("cutting by section, least needed first", () => {
+  /*
+   * 28 September 2026: the owner's context was 78 KB, the 18,000 character
+   * retry cut it from the end, and "The window asked about" and the year
+   * totals were the part that went. Whole low-value sections go first now.
+   */
+  const bulky = [
+    "Date: 2026-09-28. Currency: Philippine Peso.",
+    "",
+    "## September 2026",
+    "Spent PHP 19,580.71, received PHP 21,791.45.",
+    "",
+    "## Accounts, by what each is for",
+    "Usable now: Cash PHP 854.00, Maya PHP 3,944.95.",
+    "",
+    "## Already flagged by the app",
+    ...Array.from({ length: 200 }, (_, i) => `[warn] Flag ${i}. Something the app noticed about record ${i}.`),
+    "",
+    "## Debt, every movement",
+    ...Array.from({ length: 80 }, (_, i) => `2026-09-${String((i % 28) + 1).padStart(2, "0")} Maya Credit draw PHP ${100 + i}.00`),
+    "",
+    "## Every year in the ledger",
+    "2022: spent PHP 120,000.00. 2023: spent PHP 180,000.00.",
+    "",
+    "## The window asked about: 2022 to today (2022-01-01 to 2026-09-28)",
+    "Spent PHP 900,000.00, received PHP 924,245.46, 3,900 entries.",
+  ].join("\n");
+  const context = `${bulky}\n\n## Entries\n${Array.from({ length: 2000 }, (_, i) => `2026-09-01 | Spending | Item ${i} | PHP 1.00`).join("\n")}`;
+
+  it("drops the flags before the window asked about, and only what it must", () => {
+    const cut = compactContext(context, 6_000);
+    expect(cut.length).toBeLessThanOrEqual(6_000);
+    expect(cut).toContain("## The window asked about: 2022 to today");
+    expect(cut).toContain("## Every year in the ledger");
+    expect(cut).toContain("## Accounts, by what each is for");
+    expect(cut).not.toContain("## Already flagged by the app");
+    // The flags were enough: the debt log fits once they are gone, so it stays.
+    expect(cut).toContain("## Debt, every movement");
+    expect(cut).toContain("(Left out to fit: Already flagged by the app. Say so if the answer needs them.)");
+  });
+
+  it("keeps the question's own window even at the smallest size", () => {
+    const cut = compactContext(context, SHRINK_TO[SHRINK_TO.length - 1]!);
+    expect(cut).toContain("## The window asked about");
+    expect(cut).toContain("## September 2026");
+  });
+});
+
+describe("the conversation, apart from the figures", () => {
+  const conversation = [
+    "Earlier sessions, oldest first:",
+    ...Array.from({ length: 40 }, (_, i) => `2026-09-2${i % 8} you: an older thing said, number ${i}`),
+    "",
+    "Earlier in this conversation:",
+    "you: what's your realistic budget recommendation next month?",
+    "assistant: I recommend a budget of PHP 14,322.00 for October 2026: PHP 12,800.00 for spending and PHP 1,522.00 for bills and subscriptions.",
+    "you: tell me whats the separation of that budget?",
+  ].join("\n");
+
+  it("is left alone when it fits", () => {
+    expect(fitConversation(conversation, 16_000)).toBe(conversation);
+  });
+
+  it("keeps this conversation, newest lines, before anything from earlier sessions", () => {
+    const cut = fitConversation(conversation, 500);
+    expect(cut.length).toBeLessThanOrEqual(500);
+    expect(cut).toContain("Earlier in this conversation:");
+    expect(cut).toContain("I recommend a budget of PHP 14,322.00 for October 2026");
+    expect(cut).toContain("you: tell me whats the separation of that budget?");
+    expect(cut).not.toContain("number 0");
   });
 });
 
