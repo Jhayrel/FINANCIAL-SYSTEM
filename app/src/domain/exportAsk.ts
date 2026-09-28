@@ -21,6 +21,7 @@
  */
 
 import { getMonth, getYear, monthName } from "./dates";
+import { describeRange } from "./dayRange";
 import { spanIn } from "./periodIn";
 import type { StatementType } from "./statements";
 import type { IsoDate } from "./types";
@@ -51,6 +52,13 @@ export interface ExportAsk {
    * a spreadsheet was asked for by name.
    */
   readonly format?: "pdf" | "csv";
+  /**
+   * Statements only: the first and last day, when the period is not whole
+   * months. "september 1 to 19" was made as September so far (28 September
+   * 2026).
+   */
+  readonly fromDate?: IsoDate;
+  readonly toDate?: IsoDate;
   /** What was asked for, in words, for the reply. */
   readonly said: string;
 }
@@ -132,6 +140,9 @@ export function readExportAsk(said: string, asOf: IsoDate): ExportAsk | null {
    */
   const span = spanIn(text, asOf);
   if (span && (month !== null || type !== null || /\b20\d{2}\b/.test(text))) {
+    const lastOf = (iso: string): string => new Date(Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)), 0)).toISOString().slice(0, 10);
+    // Up to today counts as whole months, said "so far": the statement runs to the end of this one.
+    const wholeMonths = span.from.endsWith("-01") && (span.to === lastOf(span.to) || span.to === asOf);
     return {
       kind: "statement",
       type: type ?? "account",
@@ -139,6 +150,7 @@ export function readExportAsk(said: string, asOf: IsoDate): ExportAsk | null {
       fromMonth: Number(span.from.slice(5, 7)),
       toMonth: Number(span.to.slice(5, 7)),
       toYear: Number(span.to.slice(0, 4)),
+      ...(wholeMonths ? {} : { fromDate: span.from, toDate: span.to > asOf ? asOf : span.to }),
       format: AS_SPREADSHEET.test(text) ? "csv" : "pdf",
       said: text,
     };
@@ -201,6 +213,10 @@ export function exportWords(ask: ExportAsk, asOf: IsoDate): string {
     lent: "money you lent, with what is still owed to you",
   };
   const sheet = SHEET[ask.type ?? "account"] ?? "every entry in the period, with the balance after each";
+
+  if (ask.fromDate && ask.toDate) {
+    return `A statement for ${describeRange({ start: ask.fromDate, end: ask.toDate })}: ${sheet}, as ${ask.format === "csv" ? "a spreadsheet" : "a PDF"}.`;
+  }
 
   const toYear = ask.toYear ?? ask.year;
   const whole = ask.fromMonth === 1 && ask.toMonth === 12 && toYear === ask.year;

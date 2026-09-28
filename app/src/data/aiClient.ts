@@ -45,7 +45,7 @@ import type { AiTask } from "../domain/aiOffline";
 import { plainText } from "../domain/aiText";
 import { idToken } from "./auth";
 import { redact } from "../domain/aiRedact";
-import { dropRepeats, piecesOf, readingFor, rowsIn } from "../domain/ocrText";
+import { dayInFileName, dropRepeats, piecesOf, readingFor, rowsIn } from "../domain/ocrText";
 import { readReceipt, receiptNote, type ReceiptCheck } from "../domain/receipt";
 import { readPicture } from "./ocr";
 import { pairBorrowings, readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
@@ -89,6 +89,8 @@ export interface AskOptions {
    */
   readonly question?: string;
   readonly history?: readonly { readonly role: "you" | "assistant"; readonly text: string }[];
+  /** What was said in earlier sessions, dated lines (`domain/memory.ts`). */
+  readonly earlier?: string;
   /**
    * A context built somewhere other than `contextToText`.
    *
@@ -250,6 +252,7 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
         ...(options.question ? { question: options.question } : {}),
         context: [
           options.contextText ?? contextToText(context),
+          options.earlier ? ["", "Earlier sessions, oldest first:", redact(options.earlier)].join(String.fromCharCode(10)) : "",
           options.history?.length
             ? ["", "Earlier in this conversation:", ...options.history.map((h) => `${h.role}: ${h.text}`)].join(String.fromCharCode(10))
             : "",
@@ -545,6 +548,8 @@ export interface ExtractOptions {
   readonly readings?: readonly string[];
   /** Set here, not by callers: receipts in the pictures, checked by their arithmetic, for checking the model's cards against. */
   readonly receipts?: readonly ReceiptCheck[];
+  /** Set here, not by callers: the day each reading's picture was taken, from its file name. */
+  readonly readingDays?: readonly string[];
   /** The owner's own name as a bank prints it: money from or to it is between their own accounts. */
   readonly ownNames?: readonly string[];
 }
@@ -725,6 +730,11 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
 
   const others = options.attachments.filter((a) => !(a.kind === "image" && a.dataUrl));
   const read = readings.flatMap((r) => (r ? [r.plain, r.raised] : []));
+  // The day each picture was taken, for "Today" in a history list (domain/ocrText.ts, `rowDatesIn`).
+  const readDays = readings.flatMap((r, i) => {
+    const day = dayInFileName(pictures[i]?.name ?? "") ?? options.asOf;
+    return r ? [day, day] : [];
+  });
   const readOnDevice = pictures.length - stillPictures.length;
 
   /*
@@ -741,16 +751,16 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
 
   if (jobs.length > 1) {
     const answers = await inTurn(jobs, LIST_PARTS_AT_ONCE, (attachments) =>
-      extractOnce({ ...options, readings: read, receipts: found, attachments }),
+      extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, attachments }),
     );
     const joined = joinAnswers(answers);
     // Nothing usable in any of them: the pictures go to a model that can see, as below.
     if (usable(joined) >= 10 || options.signal?.aborted) return { ...joined, readOnDevice, repeated, readings: read };
-    const seen = await extractOnce({ ...options, readings: read, receipts: found });
+    const seen = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found });
     return usable(seen) > usable(joined) ? { ...seen, readings: read } : { ...joined, readOnDevice, repeated, readings: read };
   }
 
-  const first = await extractOnce({ ...options, readings: read, receipts: found, attachments: jobs[0] ?? [...others, ...stillPictures] });
+  const first = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, attachments: jobs[0] ?? [...others, ...stillPictures] });
   /*
    * Rows it could not use count for nothing here. On 26 September 2026 the
    * text route returned one refused row, "Nothing in that looked like a
@@ -760,7 +770,7 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
   if (usable(first) >= 10 || options.signal?.aborted) {
     return { ...first, readOnDevice, repeated, readings: read };
   }
-  const second = await extractOnce({ ...options, readings: read, receipts: found });
+  const second = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found });
   return usable(second) > usable(first) ? { ...second, readings: read } : { ...first, readOnDevice, repeated, readings: read };
 }
 
@@ -891,6 +901,7 @@ async function extractOnce(options: ExtractOptions): Promise<ExtractResult> {
     const read = readProposals(payload.data, options.reference, options.asOf, {
       note: options.note,
       readings: options.readings ?? [],
+      readingDays: options.readingDays ?? [],
       receipts: options.receipts ?? [],
     });
 

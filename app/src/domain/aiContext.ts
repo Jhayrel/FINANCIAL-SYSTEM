@@ -82,7 +82,12 @@ export interface AiContext {
     readonly yesterday: { readonly spent: number };
     readonly lastSevenDays: { readonly spent: number };
   };
-  readonly balances: readonly { readonly account: string; readonly balance: number }[];
+  /**
+   * Every account with what it is for. "so whats my balance actual usable"
+   * was answered with savings added in (28 September 2026): the list had no
+   * way to say which account was which.
+   */
+  readonly balances: readonly { readonly account: string; readonly balance: number; readonly kind?: "spending" | "reserve" | "savings" | undefined }[];
   readonly netWorth: number;
   readonly income: {
     readonly cashIn: number;
@@ -203,7 +208,11 @@ export function buildContext(input: ContextInput): AiContext {
 
     balances: live
       .filter((a) => a.kind !== "goal")
-      .map((a) => ({ account: a.name, balance: pesos(walletBalance(transactions, a.name)) })),
+      .map((a) => ({
+        account: a.name,
+        balance: pesos(walletBalance(transactions, a.name)),
+        kind: a.kind === "goal" ? undefined : a.kind,
+      })),
 
     /*
      * The Dashboard's figure, by the Dashboard's function (rule 5.6.3):
@@ -374,9 +383,24 @@ export function contextToText(c: AiContext): string {
   lines.push(`The last seven days, today included: spent ${php(c.recent.lastSevenDays.spent)}.`);
 
   lines.push("");
-  lines.push("## Accounts");
-  for (const b of c.balances) lines.push(`${b.account}: ${php(b.balance)}`);
+  lines.push("## Accounts, by what each is for");
+  const groups: readonly [string, readonly string[], string][] = [
+    ["spending", ["spending"], "Usable now, the spending wallets"],
+    ["reserve", ["reserve"], "Set aside, reserve accounts"],
+    ["savings", ["savings"], "Savings"],
+  ];
+  const kindOf = (b: AiContext["balances"][number]): string => b.kind ?? "spending";
+  for (const [, kinds, title] of groups) {
+    const these = c.balances.filter((b) => kinds.includes(kindOf(b)));
+    if (these.length === 0) continue;
+    const sum = Math.round(these.reduce((total, b) => total + b.balance * 100, 0)) / 100;
+    lines.push(`${title}: ${php(sum)} in all`);
+    for (const b of these) lines.push(`- ${b.account}: ${php(b.balance)}`);
+  }
   lines.push(`Net worth after debt: ${php(c.netWorth)}`);
+  lines.push(
+    "What they can use or spend is the usable figure. Reserve and savings are theirs but set aside: name them apart and never add them into what is usable unless they ask to count them. Net worth is everything, less what is owed, and is never what they can spend.",
+  );
 
   lines.push("");
   lines.push("## Income this year");

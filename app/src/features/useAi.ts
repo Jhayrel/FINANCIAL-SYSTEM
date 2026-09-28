@@ -79,6 +79,8 @@ export interface UseAi {
       history?: readonly { role: "you" | "assistant"; text: string }[];
       /** What is on screen while asking (`domain/screenContext.ts`). */
       screen?: string;
+      /** What was said before this conversation (`domain/memory.ts`). */
+      earlier?: string;
     },
   ) => Promise<AiAnswer>;
   readonly clear: () => void;
@@ -203,6 +205,7 @@ export function useAi({
         question?: string;
         history?: readonly { role: "you" | "assistant"; text: string }[];
         screen?: string;
+        earlier?: string;
       } = {},
     ): Promise<AiAnswer> => {
       // Switched off means nothing is sent, not that nothing comes back.
@@ -251,6 +254,7 @@ export function useAi({
         ...(chatText ? { contextText: chatText } : {}),
         ...(options.question ? { question: options.question } : {}),
         ...(options.history ? { history: options.history } : {}),
+        ...(options.earlier ? { earlier: options.earlier } : {}),
       });
 
       /**

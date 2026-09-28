@@ -200,6 +200,7 @@ import {
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { budgetForYear } from "../domain/budget";
 import { formatMedium, MONTH_NAMES } from "../domain/dates";
+import { earlierSessions } from "../domain/memory";
 import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, pendingChoices, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
 import { forecastYear } from "../domain/forecast";
@@ -1530,6 +1531,8 @@ export function AskPanel({
    * seconds after every refresh (the owner, 26 September 2026).
    */
   const shownHistory = useRef<Turn[] | null>(null);
+  /** Every saved message, cleared or not, for what earlier sessions said (`domain/memory.ts`). */
+  const savedChat = useRef<readonly ChatMessage[]>([]);
   /**
    * The conversation as another device left it, waiting for this one to be
    * free: never over an answer on its way, a question waiting for its reply,
@@ -1559,6 +1562,7 @@ export function AskPanel({
     // Worked out once, outside the updater: React may call an updater twice.
     const show = (all: readonly ChatMessage[]): void => {
       if (!live) return;
+      savedChat.current = all;
       const rebuilt = rebuild(all);
       if (rebuilt.length === 0) return;
       const was = shownHistory.current;
@@ -1577,6 +1581,7 @@ export function AskPanel({
     // Said on the other device: shown here as it is said.
     const stop = store.watch((all) => {
       if (!live) return;
+      savedChat.current = all;
       const rebuilt = rebuild(all);
       if (rebuilt.length === 0) return;
       remoteThread.current = rebuilt;
@@ -3178,6 +3183,7 @@ export function AskPanel({
     if (echo) say({ kind: "you", text: question });
 
     const history = spokenHistory(turns, HISTORY_TURNS);
+    const earlier = earlierSessions(savedChat.current, [...history.map((h) => h.text), question]);
 
     // What the owner has open, so "what do you think" is about that screen (domain/screenContext.ts).
     const answer = await during(
@@ -3186,6 +3192,7 @@ export function AskPanel({
         ai.ask("chat", {
           question,
           history,
+          earlier,
           /*
            * Only when the question points at it.
            *
@@ -4555,13 +4562,31 @@ export function AskPanel({
        * trend this year" then "2025" drew 2025 by item (28 September 2026).
        */
       const saysGrouping = /\b(?:by|per)\s+(?:items?|months?|days?|weeks?|wallets?|accounts?|categor(?:y|ies)|years?)\b|\b(?:monthly|daily|weekly|yearly|trend|over time|pie|donut|bars?|line)\b/i.test(ruled);
-      const carried = !shown
+      const namesDirection = /\b(income|incomes|revenue|earn(?:ed|ings|s)?|received|came in|money in|spend(?:ing|s)?|spent|expenses?|money out|went out|cash ?flow|vs|versus)\b/i.test(ruled);
+      /*
+       * The title carried over keeps its window and grouping, never its
+       * direction when the message names one: "show my trend of income"
+       * after a spending chart carried "Spending by item" and drew both
+       * (28 September 2026).
+       */
+      const title = !shown ? "" : namesDirection ? shown.title.replace(/^(?:spending|income)\s+/i, "") : shown.title;
+      const carriedTitle = !shown
         ? note
         : !namesPeriod
-          ? `${note} ${shown.title}`
+          ? `${note} ${title}`
           : followUp && !saysGrouping
-            ? `${note} ${shown.title.split(",")[0] ?? ""}`
+            ? `${note} ${title.split(",")[0] ?? ""}`
             : note;
+      /*
+       * And its direction, whatever else changes. "show my trend of income"
+       * then "by year" drew spending by year (28 September 2026): the new
+       * grouping replaced the title, and with it the word income. Only for a
+       * chart drawn in the last few turns, and only when the message names
+       * neither direction itself.
+       */
+      const recentChart = turns.slice(-6).some(isChart);
+      const carried =
+        shown && recentChart && !namesDirection && carriedTitle === note && chartDirection(shown) === "revenue" ? `${note} income` : carriedTitle;
 
       /*
        * "chart what I picked" on Insights is the calendar's pick, not this
@@ -6872,6 +6897,8 @@ function ProposalCard({
           { label: "Description", mine: draft.description || "None", other: theirs.description || "None" },
         ]
       : [];
+    const differing = compare.filter((r) => r.mine.toLowerCase() !== r.other.toLowerCase());
+    const splitMatch = Boolean(copyOf?.also?.length);
     return (
       <div ref={hostRef} tabIndex={-1} className="fms-proposal fms-proposal--copy">
         {placeLine ?? <p className="t-micro fms-cardplace">{copyOf ? "Already in your ledger" : "Same as a card above"}</p>}
@@ -6879,7 +6906,13 @@ function ProposalCard({
           {summaryTop}
           {!wide && <p className="t-caption fms-proposalsum-meta">{[formatMedium(draft.date), draft.description].filter(Boolean).join(" · ")}</p>}
         </div>
-        {wide && theirs ? (
+        {/*
+          Only what differs. With every field side by side, a receipt sent
+          twice showed "Reed diffuser" beside "reed diffuser" and read as the
+          description written twice (28 September 2026). When nothing
+          differs, one line says so; a line matched by two rows names both.
+        */}
+        {wide && theirs && !splitMatch && differing.length > 0 ? (
           <table className="fms-cmp">
             <thead>
               <tr>
@@ -6895,13 +6928,12 @@ function ProposalCard({
               </tr>
             </thead>
             <tbody>
-              {compare.map((r) => {
-                const differs = r.mine.toLowerCase() !== r.other.toLowerCase();
+              {differing.map((r) => {
                 return (
-                  <tr key={r.label} className={differs ? "fms-cmp-diff" : undefined}>
+                  <tr key={r.label} className="fms-cmp-diff">
                     <th scope="row" className="t-micro">
                       {r.label}
-                      {differs && <span className="fms-cmp-flag">differs</span>}
+                      <span className="fms-cmp-flag">differs</span>
                     </th>
                     <td className="t-caption">{r.money ? <Money value={r.money[0]} size="s" /> : r.mine}</td>
                     <td className="t-caption">{r.money ? <Money value={r.money[1]} size="s" /> : r.other}</td>
@@ -6911,9 +6943,18 @@ function ProposalCard({
             </tbody>
           </table>
         ) : (
-          <p className="t-caption fms-copyline">{line}</p>
+          <p className="t-caption fms-copyline">
+            {splitMatch && copyOf
+              ? `${duplicateHeadline(copyOf)} ${copyOf.evidence[0] ?? ""}`
+              : theirs && differing.length === 0
+                ? `${line} Everything on this card matches it.`
+                : line}
+          </p>
         )}
-        {otherKind && (
+        {wide && theirs && !splitMatch && differing.length > 0 && differing.length < compare.length && (
+          <p className="t-micro fms-proposalnote">The {compare.length - differing.length === 1 ? "other field matches" : `other ${compare.length - differing.length} fields match`}.</p>
+        )}
+        {otherKind && !splitMatch && (
           <p className="t-micro fms-proposalnote">
             It is filed there as {copyOf.row.type}
             {copyOf.row.item ? `, ${copyOf.row.item}` : ""}, and this reads as {flow}. If the kind there is wrong, open {number(copyOf.row.recordNumber)} in the Database and fix it there.

@@ -30,6 +30,7 @@
 import { formatMoney, type Centavos } from "./money";
 import { allWalletBalances } from "./balances";
 import { MONTH_NAMES } from "./dates";
+import { describeRange } from "./dayRange";
 import { owedChange, type Debt, type DebtEffect } from "./debt";
 import { effectLabel } from "./debtWords";
 import { costOf, incomeOf } from "./totals";
@@ -92,6 +93,12 @@ export interface SheetRequest {
   readonly wallet?: string | undefined;
   /** Debt statements. */
   readonly debtId?: string | undefined;
+  /**
+   * Days rather than whole months: "september 1 to 19". When both are set
+   * they are the period, and the months above only name its first year.
+   */
+  readonly fromDate?: IsoDate | undefined;
+  readonly toDate?: IsoDate | undefined;
 }
 
 type Mode = "held" | "income" | "cost" | "bills" | "transfers" | "owed";
@@ -232,7 +239,8 @@ export function buildSheet(
   const { type, year, fromMonth, toMonth } = request;
   const toYear = request.toYear ?? year;
   const scope: StatementScope = { wallet: request.wallet, debts };
-  const range = rangeOf({ year, month: fromMonth }, { year: toYear, month: toMonth });
+  const byDays = request.fromDate && request.toDate ? { from: request.fromDate, to: request.toDate } : null;
+  const range = byDays ?? rangeOf({ year, month: fromMonth }, { year: toYear, month: toMonth });
   const statement = buildStatementBetween(transactions, type, range.from, range.to, reference, request.debtId, scope);
   const mode = MODE[type];
   const savings = new Set(reference.savings);
@@ -395,7 +403,7 @@ export function buildSheet(
     type,
     title: STATEMENT_LABEL[type],
     subject,
-    period: periodLabel(year, fromMonth, toMonth, toYear),
+    period: byDays ? describeRange({ start: byDays.from, end: byDays.to }) : periodLabel(year, fromMonth, toMonth, toYear),
     from: statement.from,
     to: statement.to,
     headings,

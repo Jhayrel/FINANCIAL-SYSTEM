@@ -83,3 +83,38 @@ describe("a statement asked for in words", () => {
     expect(readExportAsk("export my september spending as csv", TODAY)).toMatchObject({ fromMonth: 9, toMonth: 9, format: "csv" });
   });
 });
+
+describe("days of one month", () => {
+  it.each([
+    ["can you issue me a account statement september 1 to 19", "2026-09-01", "2026-09-19"],
+    ["statement sept 1-19, 2026", "2026-09-01", "2026-09-19"],
+    ["statement 5 to 12 august", "2026-08-05", "2026-08-12"],
+    ["statement december 1 to 15", "2025-12-01", "2025-12-15"],
+  ])("%s", (said, from, to) => {
+    expect(spanIn(said, TODAY)).toMatchObject({ from, to });
+  });
+
+  it("makes a statement for those days, and says them", () => {
+    const ask = readExportAsk("can you issue me a account statement september 1 to 19", TODAY);
+    expect(ask).toMatchObject({ kind: "statement", fromDate: "2026-09-01", toDate: "2026-09-19" });
+    expect(ask ? exportWords(ask, TODAY) : "").toContain("September 1 to 19, 2026");
+  });
+
+  it("leaves a month and a year alone", () => {
+    expect(spanIn("january 2026 to june 2026", TODAY)).toMatchObject({ from: "2026-01-01", to: "2026-06-30" });
+    expect(spanIn("trend march 2026 to today", TODAY)).toMatchObject({ from: "2026-03-01", to: TODAY });
+  });
+});
+
+describe("a statement sheet for days", () => {
+  it("holds only those days and names them", async () => {
+    const { buildSheet } = await import("./statementSheet");
+    const t = (n: number, date: string) =>
+      ({ id: `t${n}`, recordNumber: n, date, type: "Spending", fromWallet: "Cash", toWallet: "", category: "Spending", item: "Food", description: "", amount: 10000, fee: 0, total: 10000, notes: "", status: "Paid" }) as never;
+    const rows = [t(1, "2026-08-31"), t(2, "2026-09-01"), t(3, "2026-09-19"), t(4, "2026-09-20")];
+    const reference = { wallets: ["Cash"], savings: [], bills: [], subscriptions: [], revenueCategories: [], spendingTypes: [{ name: "Food", remark: "" }] };
+    const sheet = buildSheet(rows, { type: "account", year: 2026, fromMonth: 9, toMonth: 9, fromDate: "2026-09-01", toDate: "2026-09-19" }, reference as never);
+    expect(sheet.period).toBe("September 1 to 19, 2026");
+    expect(sheet.lines.map((l) => (l as { date?: string }).date).filter(Boolean)).toEqual(["2026-09-01", "2026-09-19"]);
+  });
+});

@@ -58,7 +58,7 @@ import {
   saveOwnerUid,
 } from "../data/firebaseConfig";
 import { makeDebtId, outstandingOf, positionsOf, type Debt, type DebtKind } from "../domain/debt";
-import { BILL_CLOSES, BILL_DAY_CHOICES, BILL_DAYS_EXPLAINED, choiceOfDay, dayOfChoice, PAYMENT_DUE } from "../domain/debtWords";
+import { BILL_CLOSES, BILL_DAY_CHOICES, BILL_DAYS_EXPLAINED, choiceOfDay, dayOfChoice, PAYMENT_DUE, sameDayNote } from "../domain/debtWords";
 import { creditRoom } from "../domain/creditLimit";
 import {
   DEBT_FORM_LABEL,
@@ -2266,6 +2266,16 @@ function CreditLines({
                 })}
               </tbody>
             </table>
+            {days &&
+              rows
+                .filter((c) => !c.archived)
+                .map((c) => sameDayNote(c.name, c.billingDay, c.dueDay))
+                .filter(Boolean)
+                .map((note) => (
+                  <p key={note} className="t-caption" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-2)" }}>
+                    {note}
+                  </p>
+                ))}
             {days && (
               <p className="t-caption" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-3)" }}>
                 {BILL_DAYS_EXPLAINED}

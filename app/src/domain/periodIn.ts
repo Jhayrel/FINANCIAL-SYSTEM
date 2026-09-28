@@ -165,8 +165,35 @@ const JOIN = /^\s*,?\s*(?:to|until|till|til|through|thru|up\s+to|up\s+until|upto
  * "from X onwards" run to today.
  */
 export function spanIn(text: string, asOf: IsoDate): Span | null {
-  const points = pointsIn(text, asOf);
   const thisYear = Number(asOf.slice(0, 4));
+
+  /*
+   * Days of one month, the month said once: "september 1 to 19", "sept
+   * 1-19, 2026", "1 to 19 september". The second end is a bare number, which
+   * no reader of points takes for a date on its own (28 September 2026: "an
+   * account statement september 1 to 19" was made for September so far).
+   */
+  const run = String.raw`\s*(?:to|until|till|thru|through|-|[\u2010-\u2015]|~|hanggang)\s*`;
+  const monthFirst = new RegExp(String.raw`\b${MONTH}\.?\s+(\d{1,2})(?:st|nd|rd|th)?${run}(\d{1,2})(?:st|nd|rd|th)?\b(?!\s*(?:${MONTH.slice(1, -1)})\b)(?:,?\s+(20\d{2}))?`, "i").exec(text);
+  const dayFirst = new RegExp(String.raw`\b(\d{1,2})(?:st|nd|rd|th)?${run}(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?${MONTH}\b(?:,?\s+(20\d{2}))?`, "i").exec(text);
+  const days = monthFirst
+    ? { month: monthOf(monthFirst[1] ?? ""), a: Number(monthFirst[2]), b: Number(monthFirst[3]), year: monthFirst[4] ? Number(monthFirst[4]) : null }
+    : dayFirst
+      ? { month: monthOf(dayFirst[3] ?? ""), a: Number(dayFirst[1]), b: Number(dayFirst[2]), year: dayFirst[4] ? Number(dayFirst[4]) : null }
+      : null;
+  if (days && days.month > 0 && days.a >= 1 && days.b >= 1 && days.a <= 31 && days.b <= 31 && days.a !== days.b) {
+    // No year said: the most recent such month that has begun.
+    let year = days.year ?? thisYear;
+    if (days.year === null && `${year}-${pad(days.month)}-01` > asOf) year -= 1;
+    const [lo, hi] = days.a < days.b ? [days.a, days.b] : [days.b, days.a];
+    const end = lastDay(year, days.month);
+    const from = `${year}-${pad(days.month)}-${pad(Math.min(lo, end))}`;
+    const to = `${year}-${pad(days.month)}-${pad(Math.min(hi, end))}`;
+    const short = (MONTHS[days.month - 1] ?? "").slice(0, 3);
+    return { from, to, name: `${short} ${Number(from.slice(8, 10))} to ${Number(to.slice(8, 10))}, ${year}` };
+  }
+
+  const points = pointsIn(text, asOf);
 
   for (let i = 0; i + 1 < points.length; i += 1) {
     const a = points[i];

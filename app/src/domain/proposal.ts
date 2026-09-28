@@ -38,6 +38,7 @@ import { parseAmount, type Centavos } from "./money";
 import type { Draft, Flow } from "./entry";
 import { itemsFor } from "./entry";
 import { nearestName } from "./nearly";
+import { rowDatesIn } from "./ocrText";
 import type { ReceiptCheck } from "./receipt";
 import type { IsoDate, ReferenceLists, TransactionCategory, TransactionStatus } from "./types";
 
@@ -789,7 +790,12 @@ export function readProposals(
    * text the device read, then a credit line's own screen filed on that
    * line, then fees folded into what they were charged on.
    */
-  const checked = checkReceipts(checkAgainstReadings(proposals, context.readings ?? []), context.receipts ?? [], reference.wallets, asOf);
+  const checked = checkReceipts(
+    datesFromHeadings(checkAgainstReadings(proposals, context.readings ?? []), context.readings ?? [], context.readingDays ?? [], asOf),
+    context.receipts ?? [],
+    reference.wallets,
+    asOf,
+  );
   const filed = onCreditLine(checked, context.note ?? "", reference);
   return { proposals: pairBorrowings(foldTransferFees(foldCharges(notIncomeKinds(filed, reference)))), refused, balances };
 }
@@ -821,6 +827,8 @@ export interface ReadContext {
   readonly readings?: readonly string[];
   /** Receipts in those pictures, checked by their arithmetic (`domain/receipt.ts`). */
   readonly receipts?: readonly ReceiptCheck[];
+  /** The day each reading's picture was taken, in the same order as `readings`. */
+  readonly readingDays?: readonly string[];
 }
 
 /**
@@ -945,6 +953,57 @@ export function checkAgainstReadings(proposals: readonly Proposal[], readings: r
       draft: { ...p.draft, amount: right },
       confidence: "low",
       adjustments: [...p.adjustments, `Read as ${pesos(amount)}, but the picture shows ${pesos(right)}. Using ${pesos(right)}: check it.`],
+    };
+  });
+}
+
+/**
+ * A history list's rows, dated by the heading above each one (`rowDatesIn`).
+ *
+ * The model is shown the headings and still dated each group by the heading
+ * below it (28 September 2026). The device reads the same text in order, so
+ * a row's figure finds its heading without any judgment. Applied only where
+ * both readings of a picture agree on the day, and only to a day that is not
+ * after today; the card says what changed.
+ */
+export function datesFromHeadings(
+  proposals: readonly Proposal[],
+  readings: readonly string[],
+  days: readonly string[],
+  asOf: IsoDate,
+): Proposal[] {
+  if (readings.length === 0) return [...proposals];
+  // Every figure's days, in order, from each reading; a picture's two readings must agree.
+  const perReading = readings.map((text, i) => rowDatesIn(text, days[i] || asOf));
+  const byAmount = new Map<number, string[]>();
+  const disputed = new Set<number>();
+  for (let i = 0; i < perReading.length; i += 2) {
+    const a = perReading[i] ?? [];
+    const b = perReading[i + 1] ?? [];
+    const fuller = b.filter((r) => r.date).length > a.filter((r) => r.date).length ? b : a;
+    const other = fuller === a ? b : a;
+    for (const row of fuller) {
+      if (!row.date) continue;
+      const elsewhere = other.filter((r) => r.amount === row.amount && r.date);
+      if (elsewhere.length > 0 && !elsewhere.some((r) => r.date === row.date)) disputed.add(row.amount);
+      byAmount.set(row.amount, [...(byAmount.get(row.amount) ?? []), row.date]);
+    }
+  }
+  const used = new Map<number, number>();
+  return proposals.map((p) => {
+    const amount = p.draft.amount;
+    if (amount === null || disputed.has(amount)) return p;
+    // The same figure under several headings is taken in order, one row each.
+    const dates = byAmount.get(amount) ?? byAmount.get(amount + p.draft.fee) ?? [];
+    const key = byAmount.has(amount) ? amount : amount + p.draft.fee;
+    const k = used.get(key) ?? 0;
+    const date = dates[k];
+    used.set(key, k + 1);
+    if (!date || date === p.draft.date || date > asOf) return p;
+    return {
+      ...p,
+      draft: { ...p.draft, date },
+      adjustments: [...p.adjustments, `Dated ${date} by the heading above it in the picture; it was read as ${p.draft.date}.`],
     };
   });
 }

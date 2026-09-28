@@ -75,6 +75,12 @@ export interface Duplicate {
   readonly evidence: readonly string[];
   /** Ranking only. Never shown: a number is not evidence. */
   readonly score: number;
+  /**
+   * The other rows, when one line on a statement is two rows here: the
+   * ₱30,010.00 GCash sent to PNB was logged as ₱5,010.00 of the owner's own
+   * and ₱25,000.00 held for a relative. `row` is the largest of them.
+   */
+  readonly also?: readonly Transaction[];
 }
 
 const clean = (value: string | undefined): string =>
@@ -134,8 +140,20 @@ export function duplicatesOf(
   for (const row of transactions) {
     if (!live(row)) continue;
     if (options.ignoreId && row.id === options.ignoreId) continue;
-    if (row.amount !== amount) continue;
+    /*
+     * The figure a statement shows is what left the account, fee and all.
+     * "BAUANG CROSSING -1,518.00" is the ledger's withdrawal of ₱1,500.00
+     * with its ₱18.00 fee, and "Sent GCash to Maya -9,990.00" is ₱9,980.00
+     * with ₱10.00 (28 September 2026): compared on the amount alone, neither
+     * was found. Either side's total counts, as well as its amount.
+     */
+    const byTotal =
+      row.amount !== amount && (row.total === amount || row.total === amount + draft.fee || (draft.fee > 0 && row.amount === amount + draft.fee));
+    if (row.amount !== amount && !byTotal) continue;
     const apart = Math.abs(daysBetween(draft.date, row.date));
+    const figure = byTotal
+      ? `${formatMoney(row.amount)} plus its ${formatMoney(row.fee)} fee there, ${formatMoney(row.total)} in all`
+      : formatMoney(amount);
     // PHP 300 received and PHP 300 spent are two rows, not one row twice.
     if (flow && row.type !== flow) {
       /*
@@ -145,13 +163,21 @@ export function duplicatesOf(
        * spending and went in again as a withdrawal to Cash (27 September
        * 2026), because a withdrawal and a spending were never compared.
        */
-      const wallet = sameMoneyOtherKind(draft, row);
-      if (!wallet || apart > 1) continue;
+      /*
+       * Two days either way: a list's rows are dated by headings that are
+       * easy to misread by one group (28 September 2026). A card that names
+       * no account at all ("Bills Payment for Maya Bank", read with neither
+       * end) still compares, on a figure no ordinary purchase shares.
+       */
+      const noWallet = !draft.fromWallet.trim() && !draft.toWallet.trim();
+      const distinctive = amount % 100 !== 0 || amount >= 100_000;
+      const wallet = sameMoneyOtherKind(draft, row) || (noWallet && distinctive && apart <= 1 ? "with no account named on this card" : "");
+      if (!wallet || apart > 2) continue;
       found.push({
         row,
         certainty: "close",
         evidence: [
-          `Both ${formatMoney(amount)} ${wallet}, ${apart === 0 ? "the same day" : "a day apart"}.`,
+          `Both ${figure} ${wallet}, ${apart === 0 ? "the same day" : apart === 1 ? "a day apart" : "two days apart"}.`,
           `That one is filed as ${row.type}${row.item ? `, ${row.item}` : ""}; this one as ${flow}. If it is the same money, keep one and fix its kind there.`,
         ],
         score: apart === 0 ? 5 : 4,
@@ -164,7 +190,7 @@ export function duplicatesOf(
     // Far apart, with nothing in common but a figure. Every month has a 300.
     if (apart > NEARBY_DAYS && !sameDescription) continue;
 
-    const evidence: string[] = [`Both ${formatMoney(amount)}.`];
+    const evidence: string[] = [`Both ${figure}.`];
     let score = 3;
 
     if (apart === 0) {
@@ -258,9 +284,66 @@ export function duplicatesOf(
     found.push({ row, certainty, evidence, score });
   }
 
+  if (found.length === 0) {
+    const parts = partsOf(draft, transactions, options.ignoreId);
+    if (parts) return [parts];
+  }
+
   return found
     .sort((a, b) => b.score - a.score || b.row.recordNumber - a.row.recordNumber)
     .slice(0, options.most ?? 3);
+}
+
+/**
+ * One statement line that is two or three rows here.
+ *
+ * "Sent GCash to Philippine N... -30,010.00" was logged as ₱5,010.00 sent to
+ * the owner's business account and ₱25,000.00 of a relative's money passed
+ * on; "Send Money +40,000.00" as ₱15,000.00 of allowance and ₱25,000.00 held
+ * for the funeral (27 September 2026). The statement shows one movement and
+ * the ledger rightly shows its parts. Rows through the same account, the
+ * same way, within a day, that add up to the line to the centavo.
+ */
+function partsOf(draft: Draft, transactions: readonly Transaction[], ignoreId?: string): Duplicate | null {
+  const amount = draft.amount;
+  if (amount === null || amount <= 0) return null;
+  const out = draft.flow !== "Revenue" ? draft.fromWallet.trim() : "";
+  const into = draft.flow !== "Spending" && !out ? draft.toWallet.trim() : "";
+  if (!out && !into) return null;
+  const wallet = out || into;
+  const figureOf = (t: Transaction): number => (out ? t.total : t.amount);
+  const near = transactions
+    .filter((t) => live(t) && t.id !== ignoreId && Math.abs(daysBetween(draft.date, t.date)) <= 1)
+    .filter((t) => (out ? same(t.fromWallet, wallet) : same(t.toWallet, wallet)) && figureOf(t) > 0 && figureOf(t) < amount)
+    .slice(0, 16);
+  const targets = [amount, amount + draft.fee];
+  let best: Transaction[] | null = null;
+  for (let i = 0; i < near.length && !best; i += 1) {
+    for (let j = i + 1; j < near.length && !best; j += 1) {
+      const a = near[i]!;
+      const b = near[j]!;
+      if (targets.includes(figureOf(a) + figureOf(b))) best = [a, b];
+      for (let k = j + 1; k < near.length && !best; k += 1) {
+        const c = near[k]!;
+        if (targets.includes(figureOf(a) + figureOf(b) + figureOf(c))) best = [a, b, c];
+      }
+    }
+  }
+  if (!best) return null;
+  const parts = [...best].sort((a, b) => figureOf(b) - figureOf(a));
+  const [row, ...also] = parts;
+  if (!row) return null;
+  const numbered = (t: Transaction): string => `#${String(t.recordNumber).padStart(4, "0")} (${formatMoney(figureOf(t))})`;
+  return {
+    row,
+    also,
+    certainty: "close",
+    evidence: [
+      `${parts.map(numbered).join(" and ")} come to ${formatMoney(amount)} ${out ? `out of ${wallet}` : `into ${wallet}`}, ${parts.every((t) => t.date === draft.date) ? "the same day" : "within a day"}.`,
+      "The statement shows one movement; the ledger has it in parts.",
+    ],
+    score: 4,
+  };
 }
 
 /**
@@ -290,6 +373,10 @@ function sameMoneyOtherKind(draft: Draft, row: Transaction): string {
  */
 export function duplicateHeadline(match: Duplicate): string {
   const number = `#${String(match.row.recordNumber).padStart(4, "0")}`;
+  if (match.also && match.also.length > 0) {
+    const all = [match.row, ...match.also].map((t) => `#${String(t.recordNumber).padStart(4, "0")}`);
+    return `This looks like ${all.slice(0, -1).join(", ")} and ${all[all.length - 1]} together, already in the ledger.`;
+  }
   return match.certainty === "same"
     ? `This is already in the ledger as ${number}.`
     : `This looks like ${number}, which is already in the ledger.`;

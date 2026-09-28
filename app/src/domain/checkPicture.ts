@@ -49,10 +49,18 @@ export function inLedgerOrNot(drafts: readonly Draft[], transactions: readonly T
   const used = new Set<string>();
   drafts.forEach((d, index) => {
     if (d.amount === null || d.amount === 0) return;
-    // One ledger row answers for one picture row: two lunches of the same price are two.
-    const match = duplicatesOf(d, transactions).find((m) => !used.has(m.row.id));
+    /*
+     * One ledger row answers for one picture row: two lunches of the same
+     * price are two. A transfer has two ends, and each can appear once: GCash
+     * showing ₱9,990.00 sent and Maya showing ₱9,980.00 received are the one
+     * transfer #3830 (28 September 2026).
+     */
+    const side = d.flow === "Revenue" || (!d.fromWallet.trim() && d.toWallet.trim()) ? "in" : "out";
+    const key = (t: Transaction): string => (t.type === "Transfer" ? `${t.id}|${side}` : t.id);
+    const match = duplicatesOf(d, transactions).find((m) => !used.has(key(m.row)) && !(m.also ?? []).some((t) => used.has(key(t))));
     if (match) {
-      used.add(match.row.id);
+      used.add(key(match.row));
+      for (const t of match.also ?? []) used.add(key(t));
       already.push({ index, record: match.row.recordNumber });
     } else {
       missing.push(index);

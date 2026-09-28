@@ -5940,8 +5940,10 @@ textarea.fms-askinput {
   min-width: 0;
 }
 
-/* Beside the ring when there is room, under it when there is not. */
-@container (min-width: 400px) {
+/* Beside the ring when there is room, under it when there is not. At 400px
+   the legend beside a 160px ring had about 60px for a name, and "Online Buy"
+   read "Onlin..." (28 September 2026): the names need the width more. */
+@container (min-width: 560px) {
   .fms-pie {
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
@@ -6012,12 +6014,17 @@ textarea.fms-askinput {
   background: var(--brand-600);
 }
 
+/* A long name wraps to a second line rather than losing its end. */
 .fms-pielabel {
+  display: -webkit-box;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   color: var(--ink-2);
+  text-align: left;
 }
 
 .fms-piefigure {

@@ -1581,7 +1581,8 @@ export default function App() {
     const toMonth = ask.toMonth ?? 12;
     // Across years when asked: "january 2025 to june 2026" is eighteen months, not one year's six.
     const toYear = ask.toYear ?? ask.year;
-    const span = rangeOf({ year: ask.year, month: fromMonth }, { year: toYear, month: toMonth });
+    // Days, when the period is not whole months ("september 1 to 19").
+    const span = ask.fromDate && ask.toDate ? { from: ask.fromDate, to: ask.toDate } : rangeOf({ year: ask.year, month: fromMonth }, { year: toYear, month: toMonth });
     const statement = buildStatementBetween(transactions, type, span.from, span.to, reference, undefined, {
       debts: settings.credits,
     });
@@ -1597,7 +1598,7 @@ export default function App() {
     }
 
     // The same PDF the Statements screen makes, with the name it last used.
-    const sheet = buildSheet(transactions, { type, year: ask.year, fromMonth, toMonth, toYear }, reference, settings.credits);
+    const sheet = buildSheet(transactions, { type, year: ask.year, fromMonth, toMonth, toYear, fromDate: ask.fromDate, toDate: ask.toDate }, reference, settings.credits);
     const issued = readIssued();
     void import("./pdf/statementPdf")
       .then(({ statementPdf }) => statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() }))

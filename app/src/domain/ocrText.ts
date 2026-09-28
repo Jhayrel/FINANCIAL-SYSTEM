@@ -354,6 +354,67 @@ function dayOf(line: string): string {
 }
 
 /**
+ * The day a picture was taken, from its file name: `Screenshot_20260927_173618_Maya.jpg`.
+ * Null when the name carries no date a phone would write.
+ */
+export function dayInFileName(name: string): string | null {
+  const m = /(20\d{2})(\d{2})(\d{2})/.exec(name);
+  if (!m?.[1] || !m[2] || !m[3]) return null;
+  const iso = `${m[1]}-${m[2]}-${m[3]}`;
+  const at = Date.parse(`${iso}T00:00:00Z`);
+  return Number.isNaN(at) || new Date(at).toISOString().slice(0, 10) !== iso ? null : iso;
+}
+
+export interface DatedRow {
+  /** The row's figure, in centavos. */
+  readonly amount: number;
+  /** The day of the heading above it, or "" when no heading came before it. */
+  readonly date: string;
+}
+
+/**
+ * Every row of a history list with the day of the heading above it.
+ *
+ * 28 September 2026, the owner's Maya history: the rows under "Today" came
+ * back dated the 26th, those under "September 26, 2026" the 24th, and those
+ * under "September 24, 2026" the 23rd. Each group had the date of the heading
+ * below it. A heading dates the rows under it, until the next heading, and
+ * "Today" is the day the picture was taken: its "As of" line says so when it
+ * has one, else the file name, else the day it was read.
+ */
+export function rowDatesIn(text: string, takenOn: string): DatedRow[] {
+  const shift = (iso: string, days: number): string => {
+    const at = new Date(`${iso}T00:00:00Z`);
+    at.setUTCDate(at.getUTCDate() + days);
+    return at.toISOString().slice(0, 10);
+  };
+  let today = takenOn;
+  let current = "";
+  const rows: DatedRow[] = [];
+  for (const line of text.split("\n")) {
+    const hasAmount = ROW_AMOUNT.test(line);
+    if (/\bas\s+of\b/i.test(line) && !hasAmount) {
+      const said = dayOf(line);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(said)) today = said;
+      continue;
+    }
+    if (DATE_LINE.test(line) && !hasAmount) {
+      const word = line.trim().toLowerCase().replace(/[^a-z]/g, "");
+      const said = dayOf(line);
+      current = word === "today" ? today : word === "yesterday" ? shift(today, -1) : /^\d{4}-\d{2}-\d{2}$/.test(said) ? said : current;
+      continue;
+    }
+    if (!hasAmount) continue;
+    const figures = [...line.matchAll(/\d[\d,]*\.\d{2}(?!\d)/g)];
+    const last = figures[figures.length - 1]?.[0];
+    if (!last) continue;
+    const [whole, cents] = last.replace(/,/g, "").split(".");
+    rows.push({ amount: Number(whole) * 100 + Number(cents), date: current });
+  }
+  return rows;
+}
+
+/**
  * A stitched screenshot's rows, each once.
  *
  * The owner's Maya history on 27 September 2026 was a scroll capture that

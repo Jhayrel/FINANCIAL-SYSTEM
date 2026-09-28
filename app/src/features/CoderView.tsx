@@ -58,6 +58,7 @@ import { firestore } from "../data/firebase";
 import { activityStore } from "../data/activityStore";
 import { chatStore } from "../data/chatStore";
 import { aiLogStore } from "../data/aiLogStore";
+import { correctionsFrom, type AiEvent } from "../domain/aiLog";
 import { Alert, Button } from "../components/primitives";
 
 /**
@@ -242,13 +243,12 @@ function scoreAi(docs: readonly { readonly data: Record<string, unknown> }[]): s
   const rate = decided > 0 ? `${Math.round((accepted / decided) * 100)}%` : "n/a";
 
   /**
-   * What it carries between sessions.
-   *
-   * The same shape `correctionsFrom` builds, worked out here so the file can
-   * be read on its own without running the app. Later corrections replace
-   * earlier ones, and a mapping onto itself teaches nothing and is dropped.
+   * What it carries between sessions, by the reader the assistant uses
+   * (`correctionsFrom`). A copy of it here kept listing row summaries and
+   * "//fix this" notes as lessons after the reader had learned to skip them
+   * (28 September 2026), so the file showed lessons the app no longer used.
    */
-  const learned = new Map<string, string>();
+  const learned = correctionsFrom(events as unknown as AiEvent[], "item");
   const pairs: string[] = [];
   const byField = new Map<string, number>();
 
@@ -263,9 +263,6 @@ function scoreAi(docs: readonly { readonly data: Record<string, unknown> }[]): s
         to || "(blank)"
       }`,
     );
-    if (field === "item" && from && to && from.toLowerCase() !== to.toLowerCase()) {
-      learned.set(from.toLowerCase(), to);
-    }
   }
 
   /**

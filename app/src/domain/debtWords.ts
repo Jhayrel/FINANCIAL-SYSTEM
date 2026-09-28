@@ -158,6 +158,22 @@ export const BILL_DAYS_EXPLAINED =
   "Payment due: the last day to pay that bill. Anything borrowed after the bill closes goes on the next one. " +
   "If your lender gives you only one date, set Payment due.";
 
+/**
+ * The same day in both, said plainly, or "" when they differ.
+ *
+ * The owner, 28 September 2026, with Maya Credit set to the 6th for both:
+ * "are you sure about this 2x". It is read one way: what is borrowed before
+ * a bill closes on the 6th goes on that bill, and the bill is due on the 6th
+ * of the month after it, a month to pay. Whether that is the lender's rule
+ * only its own app can say, so the note says what the app will do and where
+ * to check.
+ */
+export function sameDayNote(name: string, billingDay: number | undefined, dueDay: number | undefined): string {
+  if (!billingDay || billingDay !== dueDay) return "";
+  const day = ordinalDay(billingDay);
+  return `${name}: both are the ${day}. What you borrow before a bill closes on the ${day} is due on the ${day} of the month after, so the app expects a month to pay each bill. Check the due date in the lender's app: if it is another day, set Payment due to it; if the ${day} is the due date and there is no separate billing date, set Bill closes to Not set.`;
+}
+
 /** A day of the month as a bill says it: 1st, 2nd, 6th, 21st. */
 export function ordinalDay(day: number): string {
   const tens = day % 100;
