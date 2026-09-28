@@ -118,7 +118,7 @@ import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isQuestion, meantInstead, notMeantIn, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
-import { addressesEveryCard, asksToReadAgain, POINTS_ELSEWHERE } from "../domain/capture";
+import { addressesEveryCard, asksToReadAgain, asksToRename, POINTS_ELSEWHERE, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
 import { asksWhetherAdded, inLedgerOrNot } from "../domain/checkPicture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
@@ -1687,9 +1687,6 @@ export function AskPanel({
     [ownerName, transactions],
   );
 
-  /** The wallet a card moves money through, for the record: the one it goes into, for income. */
-  const walletOf = (d: Draft): string => (d.flow === "Revenue" ? d.toWallet : d.fromWallet);
-
   /** The card a correction would apply to: the last one still open. */
   const openCard = (): { index: number; turn: Offered } | null => {
     for (let i = turns.length - 1; i >= 0; i--) {
@@ -1697,6 +1694,20 @@ export function AskPanel({
       if (turn && isOffer(turn) && turn.state === "open") return { index: i, turn };
     }
     return null;
+  };
+
+  /**
+   * The card at `index`, changed, arriving again at the bottom under what was
+   * said, as the corrections further down do: the same card, keeping its id.
+   */
+  const reviseCard = (index: number, turn: Offered, draft: Draft, what: string, said: string): void => {
+    const proposal = { ...turn.proposal, draft, adjustments: [...turn.proposal.adjustments, what] };
+    recordCard({ ...turn, proposal, state: "open", live: undefined });
+    setTurns((prev) => [
+      ...prev.filter((_, i) => i !== index),
+      { kind: "you", text: said },
+      { kind: "proposal", proposal, state: "open", cardId: turn.cardId },
+    ]);
   };
 
   /** Mark one found row as dealt with, so its button does not offer twice. */
@@ -1851,6 +1862,11 @@ export function AskPanel({
   const lastPictures = useRef<readonly Attachment[]>([]);
   /** The last message was those pictures, so a bare "again" means them. */
   const lastWasPicture = useRef(false);
+  /**
+   * "Change the title" was asked with no words after it: the next message is
+   * the title, for the entry waiting on a question or for this card.
+   */
+  const renaming = useRef<"pending" | { readonly cardId: string } | null>(null);
 
   const attach = async (given: ArrayLike<File> | null): Promise<void> => {
     if (!given || given.length === 0) return;
@@ -2356,14 +2372,22 @@ export function AskPanel({
     );
     setTurns((prev) => prev.map((t) => (isOffer(t) ? updated.get(t.cardId) ?? t : t)));
     for (const turn of updated.values()) recordCard(turn);
-    log(
-      aiEvent("edited", "add", {
-        field: asking.blank,
-        proposed: `${before.date} ${before.flow} ${before.item}`,
-        corrected: `${filled.date} ${filled.flow} ${filled.item}`,
-        entry: `${filled.date} ${filled.flow} ${filled.item} ${formatMoney(filled.amount ?? 0)}`,
-      }),
-    );
+    /*
+     * The field's own values, as every other correction is written. The whole
+     * row went here once, and "2026-09-15 Revenue" was learned as a phrase
+     * meaning the item "2026-09-15 Revenue //fix this".
+     */
+    const valueOf = (d: Draft): string => (asking.blank === "amount" ? (d.amount === null ? "" : formatMoney(d.amount)) : d[asking.blank]);
+    if (valueOf(before) !== valueOf(filled)) {
+      log(
+        aiEvent("edited", "add", {
+          field: asking.blank,
+          proposed: valueOf(before),
+          corrected: valueOf(filled),
+          entry: `${filled.date} ${filled.flow} ${filled.item} ${formatMoney(filled.amount ?? 0)}`,
+        }),
+      );
+    }
     const others = changes.length - (updated.has(card.cardId) ? 1 : 0);
     const told = [
       what || "That did not change the card, so it stays as it is. Fix it on the card if it needs it.",
@@ -2416,6 +2440,27 @@ export function AskPanel({
       );
       fromMessage = leftoverFigure(pending.said, taken);
       if (fromMessage !== null) filled = { ...pending.draft, amount: fromMessage };
+    }
+    /*
+     * A wallet, when the question was what it was for: "cash", 28 September
+     * 2026, twice. Kept on the entry, and the question asked again, rather
+     * than the same question with nothing said about the answer.
+     */
+    if (!filled && pending.blank === "item" && (pending.draft.flow === "Spending" || pending.draft.flow === "Revenue")) {
+      const wallet = walletInside(reply, [...reference.wallets, ...reference.savings]);
+      const rest = wallet
+        ? reply
+            .toLowerCase()
+            .replace(wallet.toLowerCase(), " ")
+            .replace(/\b(?:from|using|via|thru|in|into|to|sa|gamit|my|the|wallet|account|only|lang|po)\b|[^a-z0-9]+/g, " ")
+            .trim()
+        : "x";
+      if (wallet && !rest) {
+        const side = pending.draft.flow === "Revenue" ? "toWallet" : "fromWallet";
+        setPending({ ...pending, draft: { ...pending.draft, [side]: wallet } });
+        say({ kind: "assistant", text: `${side === "toWallet" ? "Into" : "From"} ${wallet}. What was it for?`, from: "this device" });
+        return;
+      }
     }
     if (!filled) {
       say({
@@ -3321,6 +3366,92 @@ export function AskPanel({
      * absent.
      */
     /*
+     * "Change the title", and then the words.
+     *
+     * 28 September 2026: a receipt's card had been read with the title "Read
+     * it" and discarded, and "Change the title" went to the finder for saved
+     * rows, which came back with three entries to correct. It was about the
+     * card: the one waiting on a question, the one open, or the one just
+     * discarded, which comes back for it. Nothing is guessed. The question is
+     * what it should say, and the next message is the title.
+     */
+    const renameFor = renaming.current;
+    renaming.current = null;
+    if (
+      renameFor &&
+      files.length === 0 &&
+      !as &&
+      !/^\s*\/\//.test(note) &&
+      !isQuestion(note) &&
+      !wantsDiscardOpen(note) &&
+      !SKIP_CARD.test(note) &&
+      note.trim().split(/\s+/).length <= 24
+    ) {
+      const title = titleFrom(note);
+      const done = `Title set to "${title}".`;
+      if (title && renameFor === "pending" && pending) {
+        const renamed = { ...pending.draft, description: title };
+        setDraft("");
+        say({ kind: "you", text: note });
+        setPending({ ...pending, draft: renamed });
+        const still = nextQuestion(renamed, reference, pending.settled);
+        say({ kind: "assistant", text: still ? `${done} ${still.question}` : done, from: "this device" });
+        log(aiEvent("asked", "add", { text: note }));
+        log(aiEvent("answered", "add", { text: done, model: "this device" }));
+        return;
+      }
+      if (title && renameFor !== "pending") {
+        const index = turns.findIndex((t) => isOffer(t) && t.state === "open" && t.cardId === renameFor.cardId);
+        const turn = turns[index];
+        if (turn && isOffer(turn)) {
+          setDraft("");
+          reviseCard(index, turn, { ...(turn.live ?? turn.proposal.draft), description: title }, done, note);
+          log(aiEvent("asked", "add", { text: note }));
+          log(aiEvent("answered", "add", { text: done, model: "this device" }));
+          return;
+        }
+      }
+    }
+    if (files.length === 0 && !as && asksToRename(note)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      const reads = (d: Draft): string => (d.description.trim() ? ` It reads "${d.description.trim()}" now.` : "");
+      let reply = "";
+      if (pending) {
+        renaming.current = "pending";
+        reply = `What should the title say?${reads(pending.draft)}`;
+      } else {
+        const shown = openCard();
+        // The card discarded a moment ago, when none is open: the rename is about it.
+        const lastCard = shown
+          ? null
+          : turns
+              .map((t, index) => ({ t, index }))
+              .slice(-8)
+              .reverse()
+              .find(({ t }) => isOffer(t));
+        const discarded = lastCard && isOffer(lastCard.t) && lastCard.t.state === "discarded" ? { index: lastCard.index, turn: lastCard.t } : null;
+        if (shown) {
+          renaming.current = { cardId: shown.turn.cardId };
+          reply = `What should the title say?${reads(shown.turn.live ?? shown.turn.proposal.draft)}`;
+        } else if (discarded) {
+          const back: Offered = { ...discarded.turn, state: "open", live: undefined };
+          recordCard(back);
+          setTurns((prev) => prev.map((t, i) => (i === discarded.index ? back : t)));
+          renaming.current = { cardId: back.cardId };
+          reply = `The card you discarded is open again above. What should its title say?${reads(back.proposal.draft)}`;
+        } else {
+          reply =
+            "There is no card open to rename. For a saved entry, name the day, the item or the amount, or give the record number, and I will find it for you to correct.";
+        }
+      }
+      say({ kind: "assistant", text: reply, from: "this device" });
+      log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+      return;
+    }
+
+    /*
      * A reply to the question under a card goes to that card, first.
      *
      * 28 September 2026, a receipt's card asking "What was it for?": "Cash,
@@ -3348,6 +3479,35 @@ export function AskPanel({
         setBusy(false);
       }
       return;
+    }
+
+    /*
+     * A correction to the entry the question is about, while the question
+     * waits: "Its 109", when a receipt read ₱108.00 and asked what it was for.
+     * 28 September 2026 it was read as a new entry with no wallet, then by the
+     * chat, which printed its own reasoning. Only a reply worded as a
+     * correction, and only a change `amend` can name; the question stays.
+     */
+    if (
+      pending !== null &&
+      files.length === 0 &&
+      !as &&
+      !/^\s*\/\//.test(note) &&
+      !isQuestion(note) &&
+      WORDED_AS_CORRECTION.test(note) &&
+      note.trim().split(/\s+/).length <= 10
+    ) {
+      const change = amend(pending.draft, note, reference, asOf);
+      const still = change ? nextQuestion(change.draft, reference, pending.settled) : null;
+      if (change && still) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        setPending({ ...pending, draft: change.draft, blank: still.blank });
+        say({ kind: "assistant", text: `${change.what} ${still.question}`, from: "this device" });
+        log(aiEvent("asked", "add", { text: note }));
+        log(aiEvent("answered", "add", { text: change.what, model: "this device" }));
+        return;
+      }
     }
 
     /*
@@ -4708,16 +4868,21 @@ export function AskPanel({
               proposal: { ...c.turn.proposal, draft: c.change.draft, adjustments: [...c.turn.proposal.adjustments, c.change.what] },
             });
           }
+          /*
+           * Each field that moved, with its own values, as the single card's
+           * correction below writes it. "several" with a date and a wallet
+           * joined into one string recorded eight changes on 26 September
+           * 2026 whose before and after read the same. Wallets and items are
+           * learned when the card is saved (`learnFrom`).
+           */
           for (const c of changed) {
-            log(
-              aiEvent("edited", "add", {
-                field: "several",
-                // The wallet the money moved through: the one it went into, for income.
-                proposed: `${c.turn.proposal.draft.date} ${walletOf(c.turn.proposal.draft)}`,
-                corrected: `${c.change.draft.date} ${walletOf(c.change.draft)}`,
-                entry: `${c.change.draft.date} ${c.change.draft.flow} ${c.change.draft.item}`,
-              }),
-            );
+            const was = c.turn.proposal.draft;
+            const now = c.change.draft;
+            const entry = `${now.date} ${now.flow} ${now.item}`;
+            if (was.date !== now.date) log(aiEvent("edited", "add", { field: "date", proposed: was.date, corrected: now.date, entry }));
+            if (was.amount !== now.amount) {
+              log(aiEvent("edited", "add", { field: "amount", proposed: formatMoney(was.amount ?? 0), corrected: formatMoney(now.amount ?? 0), entry }));
+            }
           }
           setTurns((prev) => [
             ...prev.filter((_, i) => !touched.has(i)),

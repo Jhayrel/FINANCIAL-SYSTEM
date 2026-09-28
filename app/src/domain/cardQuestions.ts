@@ -15,7 +15,7 @@
  */
 
 import { MONTH_NAMES } from "./dates";
-import { applyReply, nextQuestion, walletInside, type Blank } from "./capture";
+import { applyReply, asksToRename, NAMES_A_FIELD, nextQuestion, walletInside, type Blank } from "./capture";
 import type { Draft } from "./entry";
 import { formatMoney } from "./money";
 import type { ReferenceLists, Transaction } from "./types";
@@ -74,6 +74,8 @@ export function looksLikeAnswer(note: string, blank: Blank): boolean {
   if (text.startsWith("//")) return false;
   if (SKIP_CARD.test(text) || STOP_ASKING.test(text)) return true;
   if (/\?\s*$/.test(text)) return false;
+  // "Change the title", "edit the date": an instruction about the card, not the answer to its question.
+  if (NAMES_A_FIELD.test(text) || asksToRename(text)) return false;
   if (/^(?:what|how|why|when|where|who|which|can|could|should|would|will|is|are|do|does|did|show|chart|graph|delete|remove|bin|restore|export|download|undo|add all|save all)\b/i.test(text)) return false;
   if (blank !== "amount" && /\d[\d,]*(?:\.\d+)?/.test(text.replace(/\b20\d{2}\b/g, ""))) return false;
   return text.split(/\s+/).length <= 12;
@@ -182,7 +184,8 @@ export interface CardAsk {
 /** "from my own account", "that's mine": money from another of their own accounts. */
 const OWN = /\b(?:my own|mine|myself|own account|my other account|sarili ko|akin yan|akin iyon)\b/i;
 /** Words for money that was borrowed rather than earned. */
-const BORROWED = /\b(?:borrow(?:ed)?|loan|utang|inutang|hiniram|credit line|cash ?loan)\b/i;
+// "I credit it" is how the owner says it: 27 September 2026 it became an income item by that name.
+const BORROWED = /\b(?:borrow(?:ed)?|loan|utang|inutang|hiniram|credit line|cash ?loan|i\s+credit(?:ed)?|credit(?:ed)?\s+(?:it|this|that))\b/i;
 
 /** Words for money handed to someone rather than spent on something. */
 const SENT = /\b(?:sent|send|padala|pinadala|gave|given|transfer(?:red)?|money send)\b/i;

@@ -196,6 +196,49 @@ const READ_AGAIN =
 
 export const asksToReadAgain = (note: string): boolean => READ_AGAIN.test(note) && note.trim().split(/\s+/).length <= 14;
 
+/**
+ * "Change the title", with nothing after it: the words come next.
+ *
+ * 28 September 2026, a receipt's card had been read with the description
+ * "Read it" and discarded. "Change the title" was then sent to the finder
+ * for saved rows and came back as three entries to correct. It was about
+ * the card, and it had not said what the title should be yet, so the
+ * answer is a question: what should it say.
+ */
+const RENAME =
+  /^\s*(?:(?:please|pls|can\s+you|could\s+you|kindly)\s+)?(?:change|edit|fix|rename|update|correct|redo)\s+(?:the\s+|its\s+|it'?s\s+|this\s+|that\s+|my\s+)?(?:title|description|desc|name|label|product\s+name|details?)(?:\s+(?:of\s+)?(?:it|this|that|the\s+(?:card|entry|receipt)))?\s*(?:please|pls)?\s*[.!?]*\s*$|^\s*(?:the\s+)?(?:title|description|name|label)\s+(?:is\s+)?(?:wrong|incorrect|not\s+right|mali)\s*[.!]*\s*$|^\s*wrong\s+(?:title|description|name|label)\s*[.!]*\s*$|^\s*(?:please\s+)?rename\s+(?:it|this|that)(?:\s+please)?\s*[.!?]*\s*$/i;
+
+export const asksToRename = (note: string): boolean => RENAME.test(note);
+
+/**
+ * A reply naming a field of the entry as the thing to change: "change the
+ * date", "edit the amount". An instruction about the card, never the answer
+ * to its question: "Change the title" was about to become an item's name.
+ */
+export const NAMES_A_FIELD =
+  /^\s*(?:(?:please|pls|can\s+you|could\s+you)\s+)?(?:change|edit|fix|rename|update|correct|set)\s+(?:the\s+|its\s+|it'?s\s+|this\s+|that\s+)?(?:title|description|desc|name|label|note|details?|date|amount|price|total|wallet|account|fee)\b/i;
+
+/**
+ * The words a reply gives for the title, once "what should it say" was
+ * asked: "it's Reed diffuser" and "call it Reed diffuser" are both
+ * "Reed diffuser".
+ */
+export function titleFrom(reply: string): string {
+  return reply
+    .trim()
+    .replace(/^(?:(?:it'?s|its|it\s+is|it\s+should\s+be|should\s+be|make\s+it|call\s+it|name\s+it|title:?|description:?|to)\s+)+/i, "")
+    .replace(/^["'“”]+|["'“”.!]+$/g, "")
+    .trim()
+    .slice(0, 160);
+}
+
+/**
+ * Worded as a correction to the entry already on screen, rather than as a
+ * new one: "its 109", "no, it was yesterday", "make it gcash".
+ */
+export const WORDED_AS_CORRECTION =
+  /^\s*(?:no[,.!]?\s+|actually[,]?\s+|wait[,]?\s+|sorry[,]?\s+)*(?:it'?s|its|it\s+(?:is|was)|that'?s|that\s+(?:is|was)|make\s+it|should\s+be|the\s+(?:amount|total|price|date|title|description|name|wallet|fee)\s+(?:is|was|should\s+be))\b/i;
+
 export function applyReply(
   draft: Draft,
   blank: Blank,
@@ -410,7 +453,9 @@ export function amend(
    * belongs to the description, not to the entry.
    */
   const described =
-    /^(?:please\s+)?(?:change|set|make|update|put|edit|rename)?\s*(?:the\s+|its\s+|it'?s\s+)?(?:description|desc|note|details?|label)\s*(?:to|as|into|:|=|should be|is)\s+(.{1,160})$/i.exec(trimmed);
+    /^(?:please\s+)?(?:change|set|make|update|put|edit|rename)?\s*(?:the\s+|its\s+|it'?s\s+)?(?:description|desc|note|details?|label|title|product\s+name)\s*(?:to|as|into|:|=|should be|is)\s+(.{1,160})$/i.exec(trimmed) ??
+    // "call it Reed diffuser", "rename it to Reed diffuser", "title it ..."
+    /^(?:please\s+)?(?:call|name|rename|title|label)\s+(?:it|this|that)\s+(?:to\s+|as\s+)?(.{1,160})$/i.exec(trimmed);
   if (described?.[1]) {
     const words = described[1].trim().replace(/^["'“”]+|["'“”.]+$/g, "").trim();
     if (words) return { draft: { ...draft, description: words }, what: `Description set to "${words}".` };

@@ -76,9 +76,12 @@ const INSTRUCTION =
  *
  * `capture.ts` already refuses these as item names for the same reason. A
  * search is the other half of the same idea.
+ *
+ * The name of a field says what to change, not which row: "Change the
+ * title" (28 September 2026) found rows by the word "title".
  */
 const OUR_OWN_WORDS =
-  /\b(spending|spend|revenue|income|transfer|transfers|debt|opening|paid|done|received|transferred|withdrawn|wrong|mistake|error|wallet|wallets|account|accounts|amount|total|item|items|category|categories)\b/gi;
+  /\b(spending|spend|revenue|income|transfer|transfers|debt|opening|paid|done|received|transferred|withdrawn|wrong|mistake|error|wallet|wallets|account|accounts|amount|total|item|items|category|categories|title|description|desc|label)\b/gi;
 
 /**
  * Day words, once the day has been read out of them.

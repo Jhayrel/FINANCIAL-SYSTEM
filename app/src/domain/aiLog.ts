@@ -158,6 +158,9 @@ export function aiEvent(
  * the last thing you said a word meant is what it means. Keyed on what was
  * proposed, lowercased, because that is what will be proposed again.
  */
+/** A row summary, a record number, a figure in pesos or a "//" note, where a field's value should be. */
+const NOT_A_VALUE = /^\s*(?:#\s*\d+\b|\d{4}-\d{2}-\d{2}\b|\/\/)|\u20b1|\/\//i;
+
 export function correctionsFrom(
   events: readonly AiEvent[],
   field: string,
@@ -205,6 +208,13 @@ export function correctionsFrom(
     const from = e.proposed?.trim().toLowerCase();
     const to = e.corrected?.trim();
     if (!from || !to) continue;
+    /*
+     * Not a value: a whole row written where a field belonged
+     * ("2026-09-15 Revenue //fix this", from a card's answer, 27 September
+     * 2026), or a note to the developer. Kept as a lesson, the first taught
+     * every sentence with "revenue" in it to file under that row.
+     */
+    if (NOT_A_VALUE.test(from) || NOT_A_VALUE.test(to)) continue;
 
     /**
      * A correction teaches nothing when it maps one real value onto another.
