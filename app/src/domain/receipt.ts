@@ -63,6 +63,8 @@ interface Figure {
   readonly item: boolean;
   /** The last figure on its line, which on an item line is the line's own total. */
   readonly last: boolean;
+  /** On an item line, what was bought, as read: its own words, or the line above when it has none. */
+  readonly name: string;
 }
 
 export interface ReceiptCheck {
@@ -90,6 +92,12 @@ export interface ReceiptCheck {
   /** True when the date could be read two ways (09/08: month first is used, as on Philippine receipts). */
   readonly dateAmbiguous?: boolean;
   readonly time?: string;
+  /**
+   * What was bought, as the device read it, misread letters and all
+   * ("bY lt FUSER HOMI oun WOOD AND ANTAL" for a reed diffuser, oud wood and
+   * santal). The model is told to read through the misreadings.
+   */
+  readonly bought: readonly string[];
 }
 
 /**
@@ -136,6 +144,17 @@ function wordsOf(line: string): string {
 
 const hasLetters = (words: string): boolean => /[a-z]{3,}/.test(words);
 
+/** A line's words as printed, without its figures, codes or stray marks. */
+function plainWords(line: string): string {
+  return line
+    .replace(FIGURE, " ")
+    .replace(/\b\d{5,}\b/g, " ")
+    .replace(/[^A-Za-z0-9&%/.' -]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60);
+}
+
 /** Every figure in the text, with what the words around it say. */
 function figuresOf(text: string): Figure[] {
   const lines = text.split(/\r?\n/);
@@ -172,6 +191,7 @@ function figuresOf(text: string): Figure[] {
         negative: Boolean(m[1]),
         item: i < end && role === null && (hasLetters(words[i] ?? "") || hasLetters(words[i - 1] ?? "")),
         last: k === found.length - 1,
+        name: plainWords(hasLetters(words[i] ?? "") ? line : (lines[i - 1] ?? "")),
       });
     });
   });
@@ -446,6 +466,26 @@ export function readReceipt(readings: readonly string[], asOf: IsoDate): Receipt
   // A tendered figure that is not the total, with change given, is the cash handed over.
   if (changes.some((c) => c > 0)) for (const v of tenders) if (v !== best.total) notTheTotal.add(v);
 
+  /*
+   * What was bought: each item line once. Two readings garble one line in
+   * different places ("DIFFUSER ... OUD" in one, "FUSER ... WOOD" in the
+   * other), so they are paired by where the line sits rather than by its
+   * words, and both go to the model, which reads through them better
+   * together than either alone.
+   */
+  const lists = texts
+    .map((t) => figuresOf(t).filter((f) => f.item && f.last && f.value > 0 && /[A-Za-z]{3,}/.test(f.name)).map((f) => f.name))
+    .filter((l) => l.length > 0)
+    .sort((a, b) => b.length - a.length);
+  const bought = (lists[0] ?? []).map((name, k) => {
+    const readings = [name];
+    for (const other of lists.slice(1)) {
+      const alt = other.length === lists[0]?.length ? other[k] : undefined;
+      if (alt && !readings.some((r) => r.toLowerCase() === alt.toLowerCase())) readings.push(alt);
+    }
+    return readings.join(" / ");
+  });
+
   const dated = dateOf(joined, asOf);
   const time = timeOf(joined);
   const paidWith = paidWithOf(joined);
@@ -464,6 +504,7 @@ export function readReceipt(readings: readonly string[], asOf: IsoDate): Receipt
     ...(paidWith ? { paidWith } : {}),
     ...(dated ? { date: dated.date, ...(dated.ambiguous ? { dateAmbiguous: true } : {}) } : {}),
     ...(time ? { time } : {}),
+    bought: bought.slice(0, 6),
   };
 }
 
@@ -504,5 +545,10 @@ export function receiptNote(check: ReceiptCheck): string {
     );
   }
   if (check.time) parts.push(`The printed time is ${check.time}.`);
+  if (check.bought.length > 0) {
+    parts.push(
+      `What was bought, one line per item as the device read it, with letters it may have misread (a slash separates two readings of the same line): ${check.bought.map((b) => `"${b}"`).join(", ")}. Read through the misreadings as a person reading a smudged receipt would (FUSER or DIIFUSER is diffuser, SANTAL is sandalwood), then choose item from their list by what that thing is, and write it plainly in description. A receipt says what was bought, so leave item empty only when nothing on their list is that kind of thing.`,
+    );
+  }
   return parts.join(" ");
 }

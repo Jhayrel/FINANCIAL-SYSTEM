@@ -120,6 +120,36 @@ describe("the owner's receipt, as the phone read it", () => {
     expect(readReceipt([garbled, at1240], TODAY)?.confidence).toBe("high");
   });
 
+  it("says what was bought, as read, so the model can choose the item (28 September 2026)", () => {
+    // The card came back asking "What was it for?": the product line reaches the model misread.
+    const check = readReceipt([at1600], TODAY);
+    expect(check?.bought).toEqual(["bY lt FUSER HOMI oun WOOD AND ANTAL"]);
+    const note = check ? receiptNote(check) : "";
+    expect(note).toContain('"bY lt FUSER HOMI oun WOOD AND ANTAL"');
+    expect(note).toContain("Read through the misreadings");
+    expect(note).toContain("leave item empty only when nothing on their list is that kind of thing");
+  });
+
+  it("lists each bought line once across two readings, with both readings of it", () => {
+    const bought = readReceipt([at1240, at1600], TODAY)?.bought ?? [];
+    expect(bought).toEqual(["io DIFFUSER nOML OUD Woub ANG HANTAL / bY lt FUSER HOMI oun WOOD AND ANTAL"]);
+  });
+
+  it("names every item on a longer tape, and no totals or tax lines", () => {
+    const text = [
+      "SAVEMORE MART",
+      "BREAD LOAF 65.00",
+      "FRESH MILK 1L 98.50",
+      "EGGS 12PCS 115.00",
+      "SUBTOTAL 278.50",
+      "TOTAL 278.50",
+      "CASH 300.00",
+      "CHANGE 21.50",
+      "VAT 29.84",
+    ].join("\n");
+    expect(readReceipt([text], TODAY)?.bought).toEqual(["BREAD LOAF", "FRESH MILK 1L", "EGGS 12PCS"]);
+  });
+
   it("tells the model the total and what the other figures are", () => {
     const check = readReceipt([at1600], TODAY);
     const note = check ? receiptNote(check) : "";
