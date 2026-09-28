@@ -62,7 +62,7 @@
   display: grid;
   align-content: start;
   gap: 2px;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
@@ -117,6 +117,64 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The balances under the menu, on a computer (owner, 28 September 2026:
+ * "add my wallets etc here like make it clean ui"). The menu keeps its
+ * height; the balances take what is left and scroll on their own when an
+ * owner has more accounts than the window has room for.
+ */
+.fms-sidewallets {
+  /* Grows into what the menu leaves, and gives way first when the window is short. */
+  flex: 1 1 0;
+  min-height: 96px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  margin-top: var(--space-4);
+  padding: var(--space-4) var(--space-2) 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-sideusable {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+}
+
+.fms-sidegroup + .fms-sidegroup,
+.fms-sideusable + .fms-sidegroup {
+  margin-top: var(--space-3);
+}
+
+.fms-sidegroup-head {
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-bottom: 2px;
+}
+
+.fms-siderow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: var(--space-2);
+  padding: 3px 0;
+}
+
+.fms-sidename {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fms-sidelow {
+  margin-left: var(--space-1);
+  padding: 0 4px;
+  color: var(--warn);
+  background: var(--warn-bg);
   white-space: nowrap;
 }
 

@@ -49,7 +49,7 @@ import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
 import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
-import { asAmountAndFees, isPartOf, netWorth, parentOf, partOf, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
+import { asAmountAndFees, isPartOf, netWorth, outstandingOf, parentOf, partOf, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
@@ -84,7 +84,7 @@ import {
 import { mergeUnsaved, readUnsaved, unsavedLine, withoutSaved, writeUnsaved } from "./domain/unsaved";
 import { useCloud } from "./data/useCloud";
 import { SignIn } from "./features/SignIn";
-import { migrateAccounts, renameAccount, renameItem, type Account } from "./domain/accounts";
+import { accountGroups, KIND_LABEL, migrateAccounts, renameAccount, renameItem, type Account } from "./domain/accounts";
 import { defaultSettings, isBlankSettings, type AppSettings } from "./domain/settings";
 import { Activity } from "./features/Activity";
 import { activityStore } from "./data/activityStore";
@@ -868,6 +868,32 @@ export default function App() {
       ),
     };
   }, [transactions, settings.credits, reference]);
+
+  /**
+   * The balances in the sidebar, on a computer.
+   *
+   * The space under the menu was empty (owner, 28 September 2026: "add my
+   * wallets etc here like make it clean ui"). It holds what can be used now,
+   * each account under the heading Settings gives it, and what is owed.
+   * Accounts at nothing outside the spending wallets fold into one quiet
+   * line, so three empty reserves do not push the rest out of sight.
+   */
+  const side = useMemo(() => {
+    const { options, groups } = accountGroups(view.rows.map((r) => r.name), settings.accounts, reference);
+    const byHeading = new Map<string, { name: string; balance: number }[]>();
+    for (const name of options) {
+      const row = view.rows.find((r) => r.name === name);
+      if (!row) continue;
+      const heading = groups[name] ?? "";
+      byHeading.set(heading, [...(byHeading.get(heading) ?? []), { name, balance: row.balance }]);
+    }
+    const usable = view.rows.filter((r) => reference.wallets.includes(r.name)).reduce((sum, r) => sum + r.balance, 0);
+    const owed = settings.credits
+      .filter((d) => !d.archived && d.form !== "pass-through")
+      .map((d) => ({ id: d.id, name: d.name, receivable: d.kind === "receivable", amount: outstandingOf(transactions, d.id) }))
+      .filter((d) => d.amount !== 0);
+    return { groups: [...byHeading], usable, owed };
+  }, [view.rows, settings.accounts, settings.credits, reference, transactions]);
 
   /**
    * Everything worth a look, worst first: the bell on every screen and the
@@ -1990,6 +2016,59 @@ export default function App() {
             </button>
           ))}
         </nav>
+
+        {ready && (
+          <section className="fms-sidewallets" aria-label="Balances">
+            <div className="fms-sideusable">
+              <span className="t-label" style={{ color: "var(--ink-2)" }}>Usable now</span>
+              <Money value={side.usable} size="m" tone={side.usable < 0 ? "var(--over)" : undefined} />
+            </div>
+            {side.groups.map(([heading, list]) => {
+              const spending = heading === KIND_LABEL.spending;
+              const shown = spending ? list : list.filter((w) => w.balance !== 0);
+              const empty = spending ? [] : list.filter((w) => w.balance === 0);
+              return (
+                <div key={heading} className="fms-sidegroup">
+                  <div className="t-micro fms-sidegroup-head">{heading}</div>
+                  {shown.map((w) => {
+                    const low = spending && w.balance >= 0 && settings.lowBalanceThreshold > 0 && w.balance < settings.lowBalanceThreshold;
+                    return (
+                      <div key={w.name} className="fms-siderow">
+                        <span className="t-caption fms-sidename" title={w.name}>
+                          {w.name}
+                          {low && <span className="t-micro fms-sidelow">low</span>}
+                        </span>
+                        <Money value={w.balance} size="s" tone={w.balance < 0 ? "var(--over)" : w.balance === 0 ? "var(--ink-3)" : undefined} />
+                      </div>
+                    );
+                  })}
+                  {empty.length > 0 && (
+                    <div className="fms-siderow" title={empty.map((w) => w.name).join(", ")}>
+                      <span className="t-caption fms-sidename" style={{ color: "var(--ink-3)" }}>
+                        {empty.length === 1 ? empty[0]?.name : shown.length === 0 ? `${empty.length} accounts, all empty` : `${empty.length} more, empty`}
+                      </span>
+                      <Money value={0} size="s" tone="var(--ink-3)" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {side.owed.length > 0 && (
+              <div className="fms-sidegroup">
+                <div className="t-micro fms-sidegroup-head">Owed</div>
+                {side.owed.map((d) => (
+                  <div key={d.id} className="fms-siderow">
+                    <span className="t-caption fms-sidename" title={d.name}>
+                      {d.name}
+                      {d.receivable && <span style={{ color: "var(--ink-3)" }}> · to you</span>}
+                    </span>
+                    <Money value={d.amount} size="s" tone={d.receivable ? undefined : "var(--flow-debt-text)"} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
         <div className="fms-networth">
           <div className="t-label" style={{ color: "var(--ink-2)" }}>Net worth</div>
