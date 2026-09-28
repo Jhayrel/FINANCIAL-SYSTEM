@@ -62,6 +62,7 @@ export function Notifications({
   footer,
   status = null,
   onOpenChange,
+  settled = true,
 }: {
   alerts: readonly Finding[];
   /** Go where the finding can be dealt with. */
@@ -79,6 +80,11 @@ export function Notifications({
   status?: SyncNotice | null;
   /** Told when the list opens and closes, so the corner can make way. */
   onOpenChange?: (open: boolean) => void;
+  /**
+   * False while the ledger is still arriving. The list is empty then, and
+   * opening it must not record "nothing seen" over what was seen before.
+   */
+  settled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -96,11 +102,11 @@ export function Notifications({
 
   // Opening the list is looking at it. Only the findings there now are kept.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !settled) return;
     const ids = alerts.map((a) => a.id);
     setSeen(new Set(ids));
     writeSeen(ids);
-  }, [open, alerts]);
+  }, [open, alerts, settled]);
 
   useEffect(() => {
     if (!open) return;

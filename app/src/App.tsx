@@ -155,6 +155,12 @@ const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean }[] = 
 const BAR: readonly Screen[] = ["dashboard", "database", "add", "budget"];
 const BAR_WITH_AI: readonly Screen[] = ["dashboard", "database", "add", "budget", "ai"];
 
+/** Whether this device last saw the chat on, for the moment before the settings arrive. */
+const CHAT_SEEN_KEY = "fms.chatOn";
+
+/** The bell while the ledger is still arriving: one array, so its identity never changes. */
+const NO_FINDINGS: readonly Finding[] = [];
+
 /** "amount and wallet": what a correction changed, for the message that confirms it. */
 function changedWords(was: Transaction, now: Transaction): string {
   const fields: readonly (readonly [keyof Transaction, string])[] = [
@@ -1651,8 +1657,33 @@ export default function App() {
     return { screen: label, lines };
   }, [screen, dbFilter, dbQuery, deleted.length, transactions.length, settings]);
 
-  /** Every AI surface goes when AI or its chat is off (domain/aiSurface.ts). */
-  const chatOn = aiSurfaceOn(settings.ai, "chat");
+  /**
+   * Every AI surface goes when AI or its chat is off (domain/aiSurface.ts).
+   *
+   * Until the owner's own settings arrive, `settings` holds the defaults,
+   * and the default is AI off. So on every refresh the AI button and tab
+   * vanished for a moment and came back, and a phone on the AI tab was sent
+   * to the Dashboard in between (owner, 28 September 2026: "the ai turns off
+   * a bit"). Until the settings are known, the switch as this device last
+   * saw it is used instead, and it is remembered each time they are.
+   */
+  const settingsKnown = !cloud.uid || loadedStore === store || settingsFailed;
+  const [chatLastSeen] = useState(() => {
+    try {
+      return window.localStorage.getItem(CHAT_SEEN_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const chatOn = settingsKnown ? aiSurfaceOn(settings.ai, "chat") : chatLastSeen;
+  useEffect(() => {
+    if (!settingsKnown) return;
+    try {
+      window.localStorage.setItem(CHAT_SEEN_KEY, chatOn ? "1" : "0");
+    } catch {
+      // Not remembered: the next refresh waits for the settings, as before.
+    }
+  }, [settingsKnown, chatOn]);
 
   /**
    * Keep the screen one this device actually offers.
@@ -1664,6 +1695,8 @@ export default function App() {
    * opens it. Above the sign-in return, like every hook here.
    */
   useEffect(() => {
+    // Not before the settings say whether AI is on: the defaults say it is off.
+    if (!settingsKnown) return;
     if (screen === "ai" && (!chatOn || !compact)) {
       setScreen("dashboard");
       if (chatOn) {
@@ -1673,7 +1706,7 @@ export default function App() {
       return;
     }
     // Every other screen works at every width, so there is nowhere else to send it.
-  }, [screen, compact, chatOn]);
+  }, [screen, compact, chatOn, settingsKnown]);
 
   /** Escape closes the floating chat, unless a picture or a dialog is open over it. */
   useEffect(() => {
@@ -1934,13 +1967,22 @@ export default function App() {
           </div>
           <div className="fms-topbar-actions">
             {/* What needs attention, on every screen (components/Notifications.tsx). */}
+            {/*
+              Findings only once everything has arrived. Worked out from half a
+              load (the accounts but no entries yet), every wallet read as empty
+              and every bill as unpaid, and the bell counted them on every
+              refresh (owner, 28 September 2026: "everytime you refresh theres 2
+              in the notification"). Opening the list then marked only those as
+              seen, so the real ones came back as new.
+            */}
             <Notifications
-              alerts={alerts}
+              alerts={ready ? alerts : NO_FINDINGS}
+              settled={ready}
               onOpen={openAlert}
               status={unsaved.length === 0 ? sync : null}
               onOpenChange={setBellOpen}
               footer={
-                alerts.length > 0 && aiSurfaceOn(settings.ai, "alerts") ? (
+                ready && alerts.length > 0 && aiSurfaceOn(settings.ai, "alerts") ? (
                   <AlertsSummary
                     settings={settings}
                     transactions={transactions}
