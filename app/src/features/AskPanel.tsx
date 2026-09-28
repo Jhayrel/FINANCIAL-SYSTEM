@@ -2840,7 +2840,7 @@ export function AskPanel({
 
       if (!oneSentence) return base;
 
-      const agreed = reconcile(base.draft, oneSentence);
+      const agreed = reconcile(base.draft, oneSentence, reference);
       return agreed.notes.length === 0
         ? base
         : { ...base, draft: agreed.draft, adjustments: [...base.adjustments, ...agreed.notes] };
@@ -6384,12 +6384,20 @@ function ProposalCard({
    * the ledger actually reads and leaves the destination blank.
    */
   const needsDestination = flow === "Transfer" && !moneySend && draft.toWallet.trim() === "";
+  /*
+   * How sure the reading is, in words that fit where it came from. "Hard to
+   * read" was printed on a card for the typed words "6 peosos unknown
+   * spending" (owner, 28 September 2026: "whats the 'Hard to read' in
+   * there??"). A picture can be hard to read; a sentence can only leave the
+   * reading unsure. Nothing is said when it is sure.
+   */
+  const fromPicture = !proposal.said || /\b(image|picture|photo|screenshot|receipt|statement|part \d)/i.test(proposal.sourceRef);
   const confidence =
     proposal.confidence === "high"
       ? "clear"
       : proposal.confidence === "medium"
-        ? "fairly clear"
-        : "hard to read";
+        ? fromPicture ? "mostly clear in the picture" : "fairly sure"
+        : fromPicture ? "hard to make out in the picture" : "unsure, check it";
 
   /** The summary's words: which kind, what it was, and the facts worth a glance. */
   const flowTone = flow === "Revenue" ? "revenue" : flow === "Transfer" ? "transfer" : flow === "Debt" ? "debt" : "spending";
@@ -6445,7 +6453,7 @@ function ProposalCard({
     { label: "Fee", value: "", money: draft.fee },
     ...(draft.fee > 0 && draft.amount !== null ? [{ label: "Total", value: "", money: draft.amount + draft.fee }] : []),
     { label: state === "added" ? "Added as" : "Saves as", value: state === "used" ? "In the form" : pad(recordNumber) },
-    ...(!settled ? [{ label: "Reading", value: confidence }] : []),
+    ...(!settled && confidence !== "clear" ? [{ label: "Check", value: confidence }] : []),
     ...(draft.description.trim() ? [{ label: "Description", value: draft.description, full: true }] : []),
     ...(draft.notes ? [{ label: "Notes", value: draft.notes, full: true }] : []),
   ];

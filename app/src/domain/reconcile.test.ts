@@ -142,3 +142,91 @@ describe("when it stands well back", () => {
     expect(draft.fromWallet).toBe("Gcash");
   });
 });
+
+/**
+ * 28 September 2026. Two cards that said something untrue about the owner's
+ * own words, and one that saved a row whose kind and category disagreed.
+ */
+describe("a guess from habit never overrules what was said", () => {
+  const history = [
+    {
+      id: "t1",
+      recordNumber: 1,
+      date: "2026-09-01",
+      type: "Spending" as const,
+      fromWallet: "Cash",
+      toWallet: "",
+      category: "Bills" as const,
+      item: "Electric bill",
+      description: "Electric bill payment",
+      amount: 150000,
+      fee: 0,
+      total: 150000,
+      notes: "",
+      status: "Paid" as const,
+    },
+    {
+      id: "t2",
+      recordNumber: 2,
+      date: "2026-09-02",
+      type: "Spending" as const,
+      fromWallet: "Cash",
+      toWallet: "",
+      category: "Spending" as const,
+      item: "Unknown",
+      description: "unknown spending",
+      amount: 600,
+      fee: 0,
+      total: 600,
+      notes: "",
+      status: "Paid" as const,
+    },
+  ];
+  const withHistory: ReferenceLists = {
+    ...reference,
+    bills: ["Electric bill"],
+    revenueCategories: ["Allowance", "Random"],
+    spendingTypes: [...reference.spendingTypes, { name: "Unknown", remark: "" }],
+  };
+  const read = (text: string) => readEntry(text, history, withHistory, "2026-09-28");
+
+  it("revenue said in words stays revenue, with its income kind", () => {
+    const said = "revenue 14 pesos change of the electric bill payment";
+    const model = modelSaid({ flow: "Revenue", category: "Revenue", item: "Random", fromWallet: "", toWallet: "Cash", amount: 1400 });
+    const { draft, notes } = reconcile(model, read(said), withHistory);
+    expect(draft.flow).toBe("Revenue");
+    expect(draft.category).toBe("Revenue");
+    expect(draft.item).toBe("Random");
+    expect(notes.join(" ")).not.toContain("rather than Revenue");
+  });
+
+  it("a wallet found in the history fills a blank and says it was guessed", () => {
+    const model = modelSaid({ flow: "Spending", category: "Spending", item: "Unknown", fromWallet: "", amount: 600 });
+    const { draft, notes } = reconcile(model, read("6 peosos unknown spending"), withHistory);
+    expect(draft.fromWallet).toBe("Cash");
+    expect(notes.join(" ")).toContain("the wallet you usually use for this");
+    expect(notes.join(" ")).not.toContain("your message named");
+  });
+
+  it("a wallet found in the history never replaces one the model gave", () => {
+    const model = modelSaid({ flow: "Spending", category: "Spending", item: "Unknown", fromWallet: "Gcash", amount: 600 });
+    const { draft } = reconcile(model, read("6 peosos unknown spending"), withHistory);
+    expect(draft.fromWallet).toBe("Gcash");
+  });
+
+  it("a flow the words do change takes a category that fits it, and drops an item that does not", () => {
+    const model = modelSaid({ flow: "Revenue", category: "Revenue", item: "Allowance", toWallet: "Cash", fromWallet: "" });
+    const { draft } = reconcile(model, read("I paid 500 for food from cash"), withHistory);
+    expect(draft.flow).toBe("Spending");
+    expect(draft.category).toBe("Spending");
+    // Allowance is income, so it goes; the sentence's own "food" takes its place.
+    expect(draft.item).toBe("Food");
+  });
+
+  it("an income kind is never carried into spending when the words give nothing instead", () => {
+    const model = modelSaid({ flow: "Revenue", category: "Revenue", item: "Allowance", toWallet: "Cash", fromWallet: "" });
+    const { draft } = reconcile(model, read("I paid 500 from cash"), withHistory);
+    expect(draft.flow).toBe("Spending");
+    expect(draft.item).toBe("");
+  });
+});

@@ -64,6 +64,19 @@ export interface ReadEntry {
   readonly interestUnstated?: boolean | undefined;
   /** Money passing through for someone else, when the sentence says so. */
   readonly passThrough?: "held" | "fronted" | null | undefined;
+  /**
+   * Which fields the sentence said in so many words, as opposed to what was
+   * filled in from the ledger's habits.
+   *
+   * 28 September 2026: "6 peosos unknown spending" came back "Cash, which
+   * your message named". It named no wallet; Cash was the usual one for
+   * Unknown, found in the history. And "revenue 14 pesos change of the
+   * electric bill payment" was turned into Spending because "electric bill"
+   * is an item in the history, over the model reading Revenue and the owner
+   * saying "revenue". A guess from habit may fill a blank; it may not
+   * overrule anything.
+   */
+  readonly named?: { readonly flow: boolean; readonly fromWallet: boolean; readonly toWallet: boolean } | undefined;
 }
 
 /**
@@ -96,7 +109,7 @@ const SPENT =
  * separately below.
  */
 const GOT =
-  /\b(received|receive|recieved|recieve|recived|recive|got|earned|earn|earnd|easrn|earnt|collected|refunded|allowance|salary|paid me|pays me|sent me|send me|sends me|gave me|give me|gives me|credited to|natanggap|nakatanggap|tinanggap|nakuha|kumita|sahod|binigyan ako|pinadalhan ako)\b/i;
+  /\b(revenue|income|sukli|cash ?back|cashback|refund|refunded|received|receive|recieved|recieve|recived|recive|got|earned|earn|earnd|easrn|earnt|collected|allowance|salary|paid me|pays me|sent me|send me|sends me|gave me|give me|gives me|credited to|natanggap|nakatanggap|tinanggap|nakuha|kumita|sahod|binigyan ako|pinadalhan ako)\b/i;
 
 /**
  * Money moved, or sent away.
@@ -1002,6 +1015,11 @@ export function readEntry(
     worthOffering,
     settled,
     readsAsDebt: false,
+    named: {
+      flow: flowOf(text) !== null || earnsInterest,
+      fromWallet: base.fromWallet !== "",
+      toWallet: base.toWallet !== "",
+    },
   };
 }
 

@@ -402,6 +402,30 @@ export function checkDraft(
   }
 
   /**
+   * A kind and a category that disagree.
+   *
+   * 28 September 2026: "revenue 14 pesos change of the electric bill payment"
+   * was saved as Spending filed under Revenue. Every total that splits by
+   * category then read it one way and every total that splits by kind the
+   * other. Blank stays allowed, because 64 of the imported rows have none.
+   */
+  const CATEGORIES_OF: Partial<Record<Flow, readonly string[]>> = {
+    Spending: ["Spending", "Bills", "Subscriptions", ""],
+    Revenue: ["Revenue", ""],
+    Transfer: ["Transfer", ""],
+  };
+  const fits = CATEGORIES_OF[draft.flow];
+  if (fits && !fits.includes(draft.category)) {
+    errors.push({
+      field: "category",
+      message:
+        draft.flow === "Spending"
+          ? `Spending cannot be filed under ${draft.category}. Pick Spending, Bills or Subscriptions, or change the kind to ${draft.category}.`
+          : `${draft.flow} is filed under ${draft.flow}, not ${draft.category}. Change the category, or change the kind.`,
+    });
+  }
+
+  /**
    * Longer than the database will take, said before the save.
    *
    * The same reasoning as the money bound above: `validTransaction` refuses
