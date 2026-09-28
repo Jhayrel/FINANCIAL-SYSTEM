@@ -94,6 +94,34 @@ describe("the facts whose absence made the answers useless", () => {
     expect(text).toContain("August 2026");
   });
 
+  it('carries every year added up, so "summary per year" is the app\'s sum', () => {
+    const older = [
+      row({ recordNumber: 90, date: "2025-11-02", item: "Food", amount: 10000, total: 10000 }),
+      row({ recordNumber: 91, date: "2025-12-02", item: "Food", amount: 30000, total: 30000 }),
+    ];
+    const { text } = build("summary per year", { transactions: [...older, ...ledger] });
+    expect(text).toContain("## Every year in the ledger");
+    expect(text).toMatch(/^2025 \(November 2025 to December 2025 only\): spent PHP 400\.00,.*over 2 months$/m);
+    expect(text).toMatch(/^2026 \(to date, /m);
+    // One year only: the months already say it.
+    expect(build("summary per year").text).not.toContain("## Every year in the ledger");
+  });
+
+  it("carries each month against its own budget, and the record for the year", () => {
+    const snapshot = buildContext({ transactions: ledger, accounts: [], budgets, credits: [], reference, lowBalanceThreshold: 0, asOf: "2026-08-31" });
+    const set: Budgets = {
+      "2026": {
+        spending: [0, 0, 0, 0, 100000, 0, 0, 100000, 0, 0, 0, 0],
+        billsSubs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      },
+    };
+    const older = [row({ recordNumber: 90, date: "2025-12-02", item: "Food", amount: 10000, total: 10000 })];
+    const { text } = buildChatContext({ snapshot, transactions: [...older, ...ledger], asOf: "2026-08-31", question: "have I kept to my budget since I started", budgets: set });
+    expect(text).toMatch(/^May 2026: spent PHP 5,500\.00,.*, budget PHP 1,000\.00, over by PHP 4,500\.00$/m);
+    expect(text).toMatch(/^2026 \(to date, .*, \d+ of 2 budgeted months within budget$/m);
+    expect(text).toMatch(/^2025 .*, no budget set in any month$/m);
+  });
+
   it('carries a category breakdown for a month the question names', () => {
     const { text } = build("what happened in May");
     expect(text).toContain("May 2026, spending by item");

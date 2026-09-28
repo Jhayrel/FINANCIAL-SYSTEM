@@ -50,9 +50,10 @@ import { costOf, incomeOf } from "./totals";
 import { debtDue, positionsOf, rowsFor, type Debt } from "./debt";
 import { creditRoom, limitSteps } from "./creditLimit";
 import { confidenceWords, explainBasis, forecastYear } from "./forecast";
+import { assessMonthFor } from "./budget";
 import { namesWindow, windowOf } from "./charts";
 import { figuresIn } from "./money";
-import type { IsoDate, Transaction } from "./types";
+import type { Budgets, IsoDate, Transaction } from "./types";
 
 /**
  * The ceiling on the ledger half, in bytes.
@@ -212,6 +213,11 @@ export interface ChatContextInput {
    */
   readonly credits?: readonly Debt[];
   /**
+   * Every month's budget, so "did I budget well since I started" is answered
+   * from each month against its own budget, not from this month alone.
+   */
+  readonly budgets?: Budgets | undefined;
+  /**
    * What the owner has open while asking (`domain/screenContext.ts`), put
    * first so "what do you think" is about the screen they are looking at.
    */
@@ -260,12 +266,73 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     byMonth.set(key, found);
   }
 
+  /*
+   * Each month against its own budget, where one was set: "so since starting
+   * I didnt have good budgeting?", 28 September 2026, was answered from
+   * September alone. The figure set against the budget is the Budget
+   * screen's (`assessMonthFor`), which counts fees and interest with spending.
+   */
+  const budgetKept = new Map<string, { within: number; over: number }>();
+  const budgetWords = (key: string): string => {
+    if (!input.budgets) return "";
+    const [y, mo] = [Number(key.slice(0, 4)), Number(key.slice(5, 7))];
+    const a = assessMonthFor(rows, input.budgets, y, mo).combined;
+    if (a.budget <= 0) return "";
+    const tally = budgetKept.get(key.slice(0, 4)) ?? { within: 0, over: 0 };
+    if (a.spent > a.budget) tally.over += 1;
+    else tally.within += 1;
+    budgetKept.set(key.slice(0, 4), tally);
+    return a.spent > a.budget
+      ? `, budget ${php(a.budget)}, over by ${php(a.spent - a.budget)}`
+      : `, budget ${php(a.budget)}, within it by ${php(a.budget - a.spent)}`;
+  };
+
   if (byMonth.size > 0) {
     out.push("");
     out.push("## Every month in the ledger");
     for (const [key, m] of [...byMonth.entries()].sort()) {
       out.push(
-        `${monthName(key)}: spent ${php(m.spent)}, received ${php(m.revenue)}, ${m.count} entries`,
+        `${monthName(key)}: spent ${php(m.spent)}, received ${php(m.revenue)}, ${m.count} entries${budgetWords(key)}`,
+      );
+    }
+  }
+
+  /*
+   * ── Every year, added up ─────────────────────────────────────────────────
+   *
+   * "summary per year", 27 September 2026, was answered "I do not have a
+   * yearly total; the ledger only provides monthly figures", followed by a
+   * list of months. The sums are the app's, from the months above, so a
+   * year's figure is never the model's own addition. A year the ledger only
+   * partly covers says so, and its monthly average is over the months it has.
+   */
+  const byYear = new Map<string, { spent: number; revenue: number; count: number; months: string[] }>();
+  for (const [key, m] of byMonth) {
+    const y = key.slice(0, 4);
+    const found = byYear.get(y) ?? { spent: 0, revenue: 0, count: 0, months: [] };
+    found.spent += m.spent;
+    found.revenue += m.revenue;
+    found.count += m.count;
+    found.months.push(key);
+    byYear.set(y, found);
+  }
+  const budgetYear = (y: string): string => {
+    const k = budgetKept.get(y);
+    if (!k) return input.budgets ? ", no budget set in any month" : "";
+    return `, ${k.within} of ${k.within + k.over} budgeted ${k.within + k.over === 1 ? "month" : "months"} within budget`;
+  };
+  if (byYear.size > 1) {
+    out.push("");
+    out.push("## Every year in the ledger");
+    for (const [y, t] of [...byYear.entries()].sort()) {
+      const months = [...t.months].sort();
+      const first = months[0] ?? "";
+      const last = months[months.length - 1] ?? "";
+      const part =
+        y === year ? ` (to date, ${monthName(first)} to ${monthName(last)})` : months.length < 12 ? ` (${monthName(first)} to ${monthName(last)} only)` : "";
+      const net = t.revenue - t.spent;
+      out.push(
+        `${y}${part}: spent ${php(t.spent)}, received ${php(t.revenue)}, ${net >= 0 ? "kept" : "spent more than received by"} ${php(Math.abs(net))}, ${t.count} entries, spent ${php(Math.round(t.spent / Math.max(1, months.length)))} a month on average over ${months.length} ${months.length === 1 ? "month" : "months"}${budgetYear(y)}`,
       );
     }
   }

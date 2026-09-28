@@ -236,6 +236,8 @@ export function useAi({
               // about how it got there, which is every question anyone asks
               // about a credit line.
               credits: settings.credits,
+              // Each month against its own budget, for "have I kept to my budget".
+              budgets,
               ...(options.screen ? { screen: options.screen } : {}),
             }).text
           : undefined;

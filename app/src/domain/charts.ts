@@ -700,9 +700,11 @@ export function isChartFollowUp(question: string, chartOnScreen: boolean): boole
       trimmed,
     ) ||
     // The short windows: "how about this week", "today only", "last 10 days".
-    /\b(today|yesterday|this week|last week|past week|(last|past) \d+ days?|this quarter|last quarter|q[1-4]|since \w+|daily|by day|per day)\b/i.test(
+    /\b(today|yesterday|this week|last week|past week|(last|past) \d+ days?|this quarter|last quarter|q[1-4]|daily|by day|per day)\b/i.test(
       trimmed,
-    );
+    ) ||
+    // "since march", "since 2025", "since last month": not "since starting", which names no period.
+    /\bsince\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|20\d{2}\b|last\b|the\s+\d|\d)/i.test(trimmed);
 
   /*
    * A new shape for the same chart: "as a line", "make it a donut". Not a
@@ -713,7 +715,12 @@ export function isChartFollowUp(question: string, chartOnScreen: boolean): boole
 
   // "how much did I spend in May" is a question about a figure, not a
   // request to redraw. A follow-up is a fragment, not a sentence.
-  return !/\b(how much|how many|what|why|when|who|which|did|do|does|is|are|was|were)\b/i.test(
+  /*
+   * "so since starting I didnt have good budgeting?", 28 September 2026, was
+   * drawn as September's chart: "didnt" is not "did", and a sentence that
+   * judges the figures is a question about them.
+   */
+  return !/\b(how much|how many|what|why|when|who|which|did|didn'?t|do|does|doesn'?t|don'?t|is|isn'?t|are|was|wasn'?t|were|have|has|had|haven'?t|should|could|would|good|bad|better|worse)\b/i.test(
     trimmed,
   );
 }
