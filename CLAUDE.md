@@ -88,6 +88,7 @@ desktop and phone.
 4. `docs/07-WRITING-RULES.md`: binding rules for every word that ships.
 5. `docs/08-YEARS-AND-BACKUP.md`: the ledger is continuous and a backup is the whole system.
 6. `docs/09-AUTO-PUSH.md`: push without being asked, and the checks that make that safe.
+7. `docs/14-HANDOFF.md`: what has happened, how to work here, and what is open. Start here when picking the project up cold.
 
 **Read both before writing or changing any calculation or any UI.** Do not re-derive
 rules from scratch. Do not "improve" a formula because it looks wrong, several are

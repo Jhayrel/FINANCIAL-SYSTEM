@@ -1,0 +1,246 @@
+# Handoff: everything a new session needs
+
+**Written 2026-09-28, at commit `e595864` plus this file.** For a fresh Claude
+session, or anyone, picking this project up cold. It says what the project
+is, how to work in it without breaking anything, what has happened, and what
+is left. The detail behind each change is in its commit message; this is
+the map.
+
+---
+
+## 1. Read these first, in this order
+
+1. [`CLAUDE.md`](../CLAUDE.md): the guardrails. Binding. `MY THINGS/` is
+   read only, forever. No secrets anywhere. Money is integer centavos.
+2. [`04-STYLE-GUIDE.md`](04-STYLE-GUIDE.md): the design contract. Binding.
+3. [`01-SYSTEM-REVIEW-AND-SPEC.md`](01-SYSTEM-REVIEW-AND-SPEC.md) (Part 6 is
+   obsolete) and [`SYSTEM-ANALYSIS.md`](SYSTEM-ANALYSIS.md): the rules.
+4. [`07-WRITING-RULES.md`](07-WRITING-RULES.md): no em dash, anywhere,
+   including replies to the owner.
+5. [`08-YEARS-AND-BACKUP.md`](08-YEARS-AND-BACKUP.md) and
+   [`09-AUTO-PUSH.md`](09-AUTO-PUSH.md): the ledger is continuous; push
+   without being asked, after the checks.
+6. [`10-AI-ASSISTANT-STATUS.md`](10-AI-ASSISTANT-STATUS.md): how the
+   assistant is built and the mistakes already made.
+7. This file.
+
+Before the first write in a session, `CLAUDE.md` §7 asks for a one line
+acknowledgement to the owner.
+
+---
+
+## 2. The project in one paragraph
+
+A single owner's personal finance system, moved from an Excel workbook with
+VBA to a web app for phone and computer. React 19, Vite, TypeScript strict,
+Firestore for data, Firebase Auth locked to one uid, Cloudflare Pages for
+hosting (`financial-system-96l.pages.dev`, built from `main`), and a Pages
+Function (`app/functions/api/ai.ts`) that calls free AI models with keys held
+as Cloudflare environment secrets (`GROQ_API_KEY`, `OPENROUTER_API_KEY`;
+names only, never values). The phone is the primary target. The owner
+writes in English and Tagalog, is direct, tests on a real phone, and sends
+screenshots and `?coderview` dumps as evidence.
+
+---
+
+## 3. How to work here safely
+
+### Checks before any push
+
+```bash
+cd app
+npx tsc -b            # never --noEmit: it skips functions/ (CLAUDE.md §6)
+npx vitest run
+npx vite build
+```
+
+**Known baseline on a machine without the private fixture:** 43 test files
+fail to load with "Fixture missing" (they need `app/src/fixtures/
+excel-fixture.json`, the real ledger, which is gitignored and must never be
+committed), and one test, `pickableYears.test.ts` "brings imported history in
+with nothing to switch on", fails on untouched code. Anything beyond that is
+new and yours. Compare against a baseline run of the untouched commit rather
+than trusting a count: a `git worktree` of `HEAD` with `node_modules`
+symlinked in works.
+
+### Pushing
+
+`main` deploys to production on every push. The working branch for a Claude
+session is named by the harness (this one was `claude/cool-cori-ttbz0w`);
+commit there, push it, and push the same commit to `main`:
+
+```bash
+git push -u origin <branch> && git push origin <branch>:main
+```
+
+Then run the check in `CLAUDE.md` §6 and report its output with the hash.
+Never force push, never `git add -f`, and look at `git status --porcelain`
+for `*.xlsm`, `MY THINGS/`, `.env`, `fixtures/*.json` and coderview dumps
+before every commit. Commit messages: Conventional Commits, the reasoning in
+the body, the attribution lines the harness gives at the end.
+
+### Seeing the phone screens without the owner's data
+
+The app runs locally against `app/src/fixtures/excel-fixture.json`. Without
+it, it shows "No ledger loaded". For screenshots, write an **invented**
+ledger to that path (same shape: `transactions`, `deleted`, `budgets`,
+`reference`), start `npx vite --port 5173`, drive Chromium with Playwright
+(`/opt/node22/lib/node_modules/playwright`, browser at
+`/opt/pw-browsers/chromium`) at 390 by 844 with `isMobile` and `hasTouch`,
+and **delete the invented file before running the tests**, because the tests
+would read it as the owner's ledger. The app scrolls inside its own frame, so
+a tall viewport (390 by 2200) shows a whole screen in one picture. AI is off
+in a local copy: Settings, the AI tab, "Turn on AI".
+
+### Reading a picture the way the phone does
+
+With the dev server running, `page.evaluate` can `import("/src/data/ocr.ts")`
+and call `readPicture(dataUrl)`: the same engine, the same clean-up and the
+same two readings as the phone. That is how the receipt fix below was found
+and checked. Keep pictures in the scratchpad, never in the repo.
+
+### Checking the database rules for real
+
+`tools/rules-check.mjs` runs `firestore.rules` in Google's emulator: 33
+checks. Instructions are in its header and in
+[`06-FIREBASE.md`](06-FIREBASE.md) §3. Needs Java, which this environment
+has.
+
+### Traps already fallen into
+
+- **Backslashes through a Bash heredoc** vanish from regexes. Use the Write
+  and Edit tools for anything with a regex. The audit command is in
+  `10-AI-ASSISTANT-STATUS.md` §4.
+- **Em dashes** in test data count: `writing.test.ts` scans every source
+  file, including OCR text pasted into a test. Even its escape sequence in a test string is
+  caught.
+- **Hooks after an early return** in `App.tsx` blacked out the app once.
+  Hooks go above every return.
+- **A fixture that has never had the shape real data has** passes while the
+  feature is broken. Several faults in `12-DEBUGGING-FROM-THE-RECORD.md`
+  hid that way.
+
+---
+
+## 4. Where things live
+
+| Path | What |
+|---|---|
+| `app/src/App.tsx` | Screens, navigation, the save paths, the `?coderview` route |
+| `app/src/features/*.tsx` | One file per screen. `AskPanel.tsx` (8,000 lines) is the assistant |
+| `app/src/domain/` | Pure logic, no React or Firebase: money, totals, debt, budgets, reading entries |
+| `app/src/domain/receipt.ts` | A shop receipt checked by its own arithmetic (2026-09-28) |
+| `app/src/domain/proposal.ts` | What a model read, turned into cards, and the checks after it |
+| `app/src/domain/ocrText.ts`, `app/src/data/ocr.ts` | Reading a picture on the device (tesseract.js, served from this site) |
+| `app/src/data/aiClient.ts` | Every call to the AI endpoint |
+| `app/src/data/firestoreLedger.ts` | Every Firestore read and write of the ledger, settings and budgets |
+| `app/functions/api/ai.ts` | The Pages Function: every AI task and its instruction |
+| `app/src/styles/tokens.css` | Colours and spacing, light and dark (one dark block, rule D6) |
+| `app/src/styles/layout.css` | Every screen's layout. Phone rules are `@media (max-width: 639px)` |
+| `firestore.rules` | The database's rules. Deployed by hand (see §6) |
+| `tools/` | Fixture extraction, history migration, the rules check |
+
+---
+
+## 5. What has happened
+
+### Before this repository's history (to 2026-09-15)
+
+The Excel was reverse engineered (`SYSTEM-ANALYSIS.md`), the web app built
+with parity tests against the 440 row ledger, Firestore and sign-in wired,
+the design rebuilt after the first look was rejected, and the assistant
+added. 2026-08-30 to 09-01 were mostly money bugs found through
+`?coderview`: see `13-ACCOMPLISHMENTS.md` and
+`12-DEBUGGING-FROM-THE-RECORD.md`. On 09-15 the assistant moved into one
+panel shown beside Add, as a floating chat, or as its own phone tab.
+
+### 2026-09-26 (31 commits)
+
+The phone made a phone rather than a shrunk desktop; Back goes back; filters
+as one row; charts over any window; the chat able to do everything the app
+does except Settings; statements as PDFs in the owner's layout over any
+span; the 2023 to 2025 workbooks brought in as a mergeable backup; "start
+clean from a file"; pictures read on the device first, then by fast text
+models, with vision models as the fallback; a long wallet history read in
+parts; each unclear card asked about one at a time; the black window after
+sign-in fixed.
+
+### 2026-09-27 (18 commits)
+
+A wallet history that could double the ledger; one borrowing seen on two
+screens booked once; the chat live across devices; On behalf (money held or
+paid for someone) as its own kind; credit limits that grow; stopping a bill;
+billing days for credit lines; debt payments as principal plus interest and
+fees in one; reading only what changed (the owner hit 48,000 of the free
+50,000 reads a day); "can I afford it"; Insights over any month, year or
+range.
+
+### 2026-09-28, the previous session
+
+The batch bar folded to one line on a phone, and typed dates like "Aug 25"
+read as that day (`3893fcd`). That session ran out of usage while writing
+this handoff.
+
+### 2026-09-28, this session
+
+The owner asked for five things. Each is pushed.
+
+| Asked | Done | Commit |
+|---|---|---|
+| "it struggles reading a receipt ... every different layout" | `domain/receipt.ts` finds a receipt's total by its arithmetic (cash less change, VATable plus VAT, VAT at 12/112, items, subtotal less discounts plus charges), tells the model with its working, and moves a card that landed on the cash handed over, the change or a tax line to the total. Photos read at 1,600px and whole, not cut like a screenshot. The extract instruction names receipt layouts. 33 tests | `434f6e4` |
+| "look at the code view" | The uploaded dump was the one word "Reading…": the screen had never finished. Each read now gives up after 20 seconds and uses the device's copy, progress shows, and Copy and Save wait until it is done | `ddae2e7` |
+| "give me new database rule that works" | Every write the app makes was checked against the rules. One real fault: binning, restoring and starting clean re-checked the whole row, so a row written under older rules could never be binned or set aside. A change to only a row's state is now allowed on any row, its money still guarded. Proved in the emulator: 33 of 33, where the old rules failed 2 | `b2f2746` |
+| "in phone all parts the ui is too large ... the spacing in add" | A phone spacing scale in `tokens.css`, labels that sit on their fields, a 22px amount, Today and Yesterday and the date on one line, three filters on one row, Settings accounts on two lines, Budget's rows tighter. The Add form fits on one screen above Save | `e595864` |
+| "Make a file in github that tell all things happened" | This file | |
+
+The owner's receipt of that day, the one that prompted the work, reads as
+109.00 with four checks agreeing, paid in cash. Its readings are in
+`receipt.test.ts`.
+
+---
+
+## 6. What the owner has to do
+
+1. **Publish the new rules.** Firestore does not read the file from GitHub.
+   Firebase console, Firestore Database, Rules, paste the whole of
+   `firestore.rules`, Publish. Or
+   `npx firebase-tools deploy --only firestore:rules --project financial-system-c2997`.
+   Until then the old rules are still the ones running.
+2. **Reload the app on the phone** after a deploy: tap Reload on the "newer
+   version" notice, or leave the app for a minute and come back.
+3. **Rotate the AI keys** if that has not been done since they were exposed
+   (CLAUDE.md §2).
+
+---
+
+## 7. Open, in order of what matters
+
+1. **"Fix the reasoning."** The owner asked this with the coderview dump as
+   evidence, and the dump was empty, so the assistant's reasoning has not
+   been looked at yet. The next dump, now that the screen finishes, is the
+   material: read "Thrown away, and never corrected" and "Said, and nothing
+   happened" first (`12-DEBUGGING-FROM-THE-RECORD.md` §1 says how).
+2. **A receipt's printed date** is often lost: the date line sits at the
+   curled bottom of the photo and the device does not read it. The card is
+   then dated today, which is right for a receipt photographed the same day
+   and wrong otherwise. The card says where its date came from only when it
+   was read.
+3. **A receipt with several purchases for different people or budgets** is
+   read as one purchase unless the owner asks for the items separately.
+4. **The question box under the chat** was tightened on 09-28 but has not
+   been seen on screen with a question in it.
+5. **Remove `?coderview`** once the assistant's faults it shows are fixed:
+   six steps in `11-CODERVIEW-IS-TEMPORARY.md`, including the rules block and
+   a redeploy.
+6. **Archiving a transaction** needs the owner's decision first
+   (`10-AI-ASSISTANT-STATUS.md` §3.2).
+7. **Learning from corrections is narrow on purpose** (same file, §3.1).
+
+---
+
+## 8. How the owner likes to be answered
+
+Plainly, without jargon, and short. Say what changed in their terms (what
+they will see on the phone), what was not checked, and whether it is pushed,
+with the hash from the `CLAUDE.md` §6 check. When a change needs them to do
+something (publish rules, reload), say exactly where to tap. No em dash.
