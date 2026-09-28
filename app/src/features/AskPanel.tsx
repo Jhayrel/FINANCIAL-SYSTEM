@@ -5272,9 +5272,23 @@ export function AskPanel({
   for (const i of openIndexes) standing.set(i, heldBack(turns[i] as Offered, i) ?? "ready");
   const placeOf = new Map(openIndexes.map((i, k) => [i, k + 1]));
   const groups = STANDING_ORDER.map((key) => ({ key, cards: openIndexes.filter((i) => standing.get(i) === key) })).filter((g) => g.cards.length > 0);
+  const readyCount = groups.find((g) => g.key === "ready")?.cards.length ?? 0;
 
   /** The number of the card the question bar is asking about, in the same count as the cards and the batch bar. */
   const askedPlace = openCount > 1 && askedCard ? placeOf.get(turns.findIndex((t) => isOffer(t) && t.cardId === askedCard)) : undefined;
+
+  /**
+   * The batch bar on a phone: one line until it is opened.
+   *
+   * Opened, it listed every group with its own 44px button, and with a
+   * question under the thread that left the cards a strip about a hundred
+   * pixels tall between the two (owner, 28 September 2026, a screenshot of
+   * seven cards: "this is too much in phone, fix it"). Closed, it says how
+   * many cards, what they are in a few words, and the one button most
+   * wanted, adding the ready ones. A computer has the room and keeps it open.
+   */
+  const [barOpen, setBarOpen] = useState(false);
+  const barFull = wide || barOpen;
 
   /** Bring a card into view and put the focus on it, so the bar's "card 4" is one tap from card 4. */
   const jumpTo = (index: number): void => {
@@ -5283,6 +5297,8 @@ export function AskPanel({
     if (!thread || !el) return;
     thread.scrollTop = Math.max(0, thread.scrollTop + topWithin(el, thread) - 8);
     el.focus({ preventScroll: true });
+    // On a phone the bar folds again, so the card it went to has the room.
+    if (!wide) setBarOpen(false);
   };
 
   /** Close the given cards without adding them: the copies, when the owner says skip them. */
@@ -5400,18 +5416,45 @@ export function AskPanel({
         cards scroll under it.
       */}
       {openCount > 1 && (
-        <div className={wide ? "fms-batchbar fms-batchbar--wide" : "fms-batchbar"}>
+        <div className={wide ? "fms-batchbar fms-batchbar--wide" : barOpen ? "fms-batchbar is-open" : "fms-batchbar is-folded"}>
           <div className="fms-batchbar-head">
-            <span className="t-body-strong">{openCount} cards to check</span>
+            {wide ? (
+              <span className="t-body-strong">{openCount} cards to check</span>
+            ) : (
+              <button
+                type="button"
+                className="fms-batchbar-toggle"
+                aria-expanded={barOpen}
+                onClick={() => setBarOpen((o) => !o)}
+              >
+                <span className="fms-batchbar-count">
+                  <span className="t-body-strong">{openCount} cards to check</span>
+                  <span className="t-micro fms-batchbar-brief">
+                    {groups.map((g) => `${g.cards.length} ${STANDING_SHORT[g.key]}`).join(" · ")}
+                  </span>
+                </span>
+                <span aria-hidden className="fms-batchbar-chev">
+                  <Icon name="chevronDown" size={18} />
+                </span>
+              </button>
+            )}
             {/*
               Throwing them all away is a quiet button, not a link, and it
               says how many it throws away: every open card, the ready ones
-              included.
+              included. Folded on a phone, the button beside the count is the
+              ready ones instead, the thing most often wanted.
             */}
-            <Button size="sm" tone="danger" disabled={busy} onClick={discardOpen}>
-              {`Discard all ${openCount}`}
-            </Button>
+            {barFull ? (
+              <Button size="sm" tone="danger" disabled={busy} onClick={discardOpen}>
+                {`Discard all ${openCount}`}
+              </Button>
+            ) : readyCount > 0 ? (
+              <Button size="sm" variant="primary" disabled={busy} onClick={addReady}>
+                {readyCount > 1 ? `Add ${readyCount} ready` : "Add the ready one"}
+              </Button>
+            ) : null}
           </div>
+          {barFull && (
           <div className="fms-batchgroups">
           {groups.map((g) => {
             const places = g.cards.map((i) => placeOf.get(i) ?? 0);
@@ -5473,6 +5516,7 @@ export function AskPanel({
             );
           })}
           </div>
+          )}
         </div>
       )}
 
@@ -5888,7 +5932,8 @@ export function AskPanel({
               ))}
             </div>
           )}
-          <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+          {/* The box under it already says "Your answer, or skip"; a phone has no room to say it twice. */}
+          <span className="t-caption fms-askq-hint" style={{ color: "var(--ink-3)" }}>
             Or type the answer below.
           </span>
         </div>
@@ -6151,6 +6196,15 @@ const STANDING_WORDS: Readonly<Record<Standing, string>> = {
   check: "Needs a fix on the card",
   ledger: "Already in your ledger",
   repeat: "Same as a card above",
+};
+
+/** The same, in a few words, for the folded bar on a phone: "1 ready · 4 already in". */
+const STANDING_SHORT: Readonly<Record<Standing, string>> = {
+  ready: "ready",
+  question: "to answer",
+  check: "to fix",
+  ledger: "already in",
+  repeat: "repeated",
 };
 
 /** "Sep 26": the day of a row in the batch bar's list, where the year is the same for all of them. */

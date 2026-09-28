@@ -5063,6 +5063,62 @@ button.fms-recent-row:disabled {
 }
 
 /*
+ * Folded on a phone: the count and a few words on what the cards are, as one
+ * button that opens the groups, and beside it the ready ones' button. One
+ * line, about 52px, where the open list took most of the screen.
+ */
+.fms-batchbar.is-folded .fms-batchbar-head {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.fms-batchbar-toggle {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-batchbar-count {
+  display: grid;
+  min-width: 0;
+}
+
+.fms-batchbar-brief {
+  overflow: hidden;
+  color: var(--ink-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fms-batchbar-chev {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--ink-3);
+  transition: transform var(--motion-hover) var(--ease-out);
+}
+
+.fms-batchbar-toggle[aria-expanded="true"] .fms-batchbar-chev {
+  transform: rotate(180deg);
+}
+
+/* Opened on a phone: capped, so the cards under it keep at least half the screen. */
+.fms-batchbar.is-open .fms-batchgroups {
+  max-height: 34vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/*
  * On a computer (1024px and wider), each card in a group as a row the eye can
  * run down: number, day, words, kind, amount. Capped, so a list of twenty
  * four still leaves the cards room; it scrolls inside itself.
@@ -9681,5 +9737,22 @@ textarea.fms-askinput {
 @media (max-width: 1023px) {
   .fms-ical-panel {
     scroll-margin-top: 76px;
+  }
+}
+
+
+/* ══ The question under the chat, on a phone ════════════════════════════════
+   Tighter, and without the line the box under it already says, so a question
+   and a folded batch bar together leave the cards most of the screen (owner,
+   2026-09-28: "this is too much in phone"). */
+@media (max-width: 1023px) {
+  .fms-askq {
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    max-height: 32vh;
+  }
+
+  .fms-askq-hint {
+    display: none;
   }
 }

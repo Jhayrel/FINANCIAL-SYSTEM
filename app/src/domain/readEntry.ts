@@ -339,7 +339,62 @@ const shift = (asOf: IsoDate, days: number): IsoDate => {
   return date.toISOString().slice(0, 10);
 };
 
-/** "today", "yesterday", "2026-08-30", or nothing, in which case today. */
+const MONTH_OF: Readonly<Record<string, number>> = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4, may: 5,
+  jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8, sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12,
+};
+// "May" is left out here and matched on its own terms below: it is also Tagalog for "there is".
+const MONTH_WORD = "january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec";
+const DAY_WORD = "([12]\\d|3[01]|0?[1-9])(?:st|nd|rd|th)?";
+const YEAR_WORD = "(?:,?\\s+((?:19|20)\\d{2})\\b)?";
+
+/**
+ * A day and month with no year belongs to this year, unless that is more
+ * than a month ahead: "Dec 30" typed on January 3 is last December's.
+ */
+function dayOfMonth(month: number, day: number, year: string | undefined, asOf: IsoDate): IsoDate | null {
+  let y = year ? Number(year) : Number(asOf.slice(0, 4));
+  const make = (yy: number): IsoDate => `${yy}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  if (!year && make(y) > shift(asOf, 31)) y -= 1;
+  const last = new Date(Date.UTC(y, month, 0)).getUTCDate();
+  return month >= 1 && month <= 12 && day >= 1 && day <= last ? make(y) : null;
+}
+
+/**
+ * "Aug 25", "August 25, 2026", "25 Aug", "25th of August", "May 5th", "08/25".
+ *
+ * The owner, 28 September 2026, a list typed into the chat: "Aug 25 Food 150
+ * cash", "Aug 26 Gas 200 cash", and every card came back dated today. The
+ * reader knew "yesterday", "2026-08-30" and "8/25/2026", but not a day named
+ * with its month, which is how every bank and wallet history writes one, so a
+ * week of spending typed on a Monday would all have been booked on Monday.
+ */
+function monthDayIn(text: string, asOf: IsoDate): IsoDate | null {
+  const monthFirst = new RegExp(`\\b(${MONTH_WORD})\\.?\\s+${DAY_WORD}\\b${YEAR_WORD}`, "i").exec(text);
+  if (monthFirst) return dayOfMonth(MONTH_OF[monthFirst[1]!.toLowerCase()] ?? 0, Number(monthFirst[2]), monthFirst[3], asOf);
+
+  const dayFirst = new RegExp(`\\b${DAY_WORD}\\s+(?:of\\s+)?(${MONTH_WORD})\\b\\.?${YEAR_WORD}`, "i").exec(text);
+  if (dayFirst) return dayOfMonth(MONTH_OF[dayFirst[2]!.toLowerCase()] ?? 0, Number(dayFirst[1]), dayFirst[3], asOf);
+
+  /*
+   * May, only where it cannot be the Tagalog word: "May 5th", "May 5, 2026",
+   * "5th of May", "5 May 2026". "gave 20 may natira pa" is twenty pesos with
+   * some left over, not the twentieth of May.
+   */
+  const may =
+    /\bmay\s+([12]\d|3[01]|0?[1-9])(?:(?:st|nd|rd|th)\b|,?\s+((?:19|20)\d{2})\b)/i.exec(text) ??
+    /\b([12]\d|3[01]|0?[1-9])(?:st|nd|rd|th)?\s+(?:of\s+may\b(?:,?\s+((?:19|20)\d{2})\b)?|may,?\s+((?:19|20)\d{2})\b)/i.exec(text);
+  if (may) return dayOfMonth(5, Number(may[1]), may[2] ?? may[3], asOf);
+
+  // "08/25": month then day, both written in two figures, so "1/2 kilo" is not January 2.
+  const slashed = /(?<![\d/])(\d{2})\/(\d{2})(?![\d/])/.exec(text);
+  if (slashed) return dayOfMonth(Number(slashed[1]), Number(slashed[2]), undefined, asOf);
+
+  return null;
+}
+
+/** "today", "yesterday", "2026-08-30", "Aug 25", or nothing, in which case today. */
 function dateIn(text: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
   const iso = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(text);
   if (iso?.[1]) return { date: iso[1], said: true };
@@ -352,6 +407,9 @@ function dateIn(text: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
       said: true,
     };
   }
+
+  const named = monthDayIn(text, asOf);
+  if (named) return { date: named, said: true };
 
   // Longest phrase first: "day before yesterday" contains "yesterday", and
   // testing the shorter one first reads it as one day back instead of two.
