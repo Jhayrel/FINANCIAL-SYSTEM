@@ -29,6 +29,7 @@ import { Insights, type InsightsAt } from "./features/Insights";
 import { Settings } from "./features/Settings";
 import { readIssued, Statements } from "./features/Statements";
 import { Button, Card, EmptyState, Money, Notice } from "./components/primitives";
+import { SideBalances } from "./components/SideBalances";
 import { Notifications } from "./components/Notifications";
 import { holdUpdates, useUpdateAvailable } from "./data/updateCheck";
 import { useBackToClose, useScreenHistory } from "./data/backButton";
@@ -2018,56 +2019,13 @@ export default function App() {
         </nav>
 
         {ready && (
-          <section className="fms-sidewallets" aria-label="Balances">
-            <div className="fms-sideusable">
-              <span className="t-label" style={{ color: "var(--ink-2)" }}>Usable now</span>
-              <Money value={side.usable} size="m" tone={side.usable < 0 ? "var(--over)" : undefined} />
-            </div>
-            {side.groups.map(([heading, list]) => {
-              const spending = heading === KIND_LABEL.spending;
-              const shown = spending ? list : list.filter((w) => w.balance !== 0);
-              const empty = spending ? [] : list.filter((w) => w.balance === 0);
-              return (
-                <div key={heading} className="fms-sidegroup">
-                  <div className="t-micro fms-sidegroup-head">{heading}</div>
-                  {shown.map((w) => {
-                    const low = spending && w.balance >= 0 && settings.lowBalanceThreshold > 0 && w.balance < settings.lowBalanceThreshold;
-                    return (
-                      <div key={w.name} className="fms-siderow">
-                        <span className="t-caption fms-sidename" title={w.name}>
-                          {w.name}
-                          {low && <span className="t-micro fms-sidelow">low</span>}
-                        </span>
-                        <Money value={w.balance} size="s" tone={w.balance < 0 ? "var(--over)" : w.balance === 0 ? "var(--ink-3)" : undefined} />
-                      </div>
-                    );
-                  })}
-                  {empty.length > 0 && (
-                    <div className="fms-siderow" title={empty.map((w) => w.name).join(", ")}>
-                      <span className="t-caption fms-sidename" style={{ color: "var(--ink-3)" }}>
-                        {empty.length === 1 ? empty[0]?.name : shown.length === 0 ? `${empty.length} accounts, all empty` : `${empty.length} more, empty`}
-                      </span>
-                      <Money value={0} size="s" tone="var(--ink-3)" />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {side.owed.length > 0 && (
-              <div className="fms-sidegroup">
-                <div className="t-micro fms-sidegroup-head">Owed</div>
-                {side.owed.map((d) => (
-                  <div key={d.id} className="fms-siderow">
-                    <span className="t-caption fms-sidename" title={d.name}>
-                      {d.name}
-                      {d.receivable && <span style={{ color: "var(--ink-3)" }}> · to you</span>}
-                    </span>
-                    <Money value={d.amount} size="s" tone={d.receivable ? undefined : "var(--flow-debt-text)"} />
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+          <SideBalances
+            usable={side.usable}
+            groups={side.groups}
+            owed={side.owed}
+            spendingHeading={KIND_LABEL.spending}
+            lowThreshold={settings.lowBalanceThreshold}
+          />
         )}
 
         <div className="fms-networth">

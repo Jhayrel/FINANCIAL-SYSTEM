@@ -36,7 +36,8 @@ import { namesPerson } from "./behalfFor";
 import { makeDebtId } from "./debt";
 import { parseAmount, type Centavos } from "./money";
 import type { Draft, Flow } from "./entry";
-import { itemsFor } from "./entry";
+import { emptyDraft, itemsFor } from "./entry";
+import { accountFor, type InterestCredit } from "./interestCredit";
 import { nearestName } from "./nearly";
 import { rowDatesIn } from "./ocrText";
 import type { ReceiptCheck } from "./receipt";
@@ -790,10 +791,15 @@ export function readProposals(
    * text the device read, then a credit line's own screen filed on that
    * line, then fees folded into what they were charged on.
    */
-  const checked = checkReceipts(
-    datesFromHeadings(checkAgainstReadings(proposals, context.readings ?? []), context.readings ?? [], context.readingDays ?? [], asOf),
-    context.receipts ?? [],
-    reference.wallets,
+  const checked = checkInterest(
+    checkReceipts(
+      datesFromHeadings(checkAgainstReadings(proposals, context.readings ?? []), context.readings ?? [], context.readingDays ?? [], asOf),
+      context.receipts ?? [],
+      reference.wallets,
+      asOf,
+    ),
+    context.interest ?? [],
+    reference,
     asOf,
   );
   const filed = onCreditLine(checked, context.note ?? "", reference);
@@ -821,8 +827,61 @@ function notIncomeKinds(proposals: readonly Proposal[], reference: ReferenceList
   );
 }
 
+/**
+ * An interest credit's card, held to the credit's own arithmetic.
+ *
+ * The model is told what the figures are (`interestCredit.ts`), and this
+ * makes sure: the rows it made from the earned figure, the tax or the net
+ * become one Revenue of the net, item Bank interest, into the savings
+ * account the screen named. Each change is said on the card.
+ */
+export function checkInterest(
+  proposals: readonly Proposal[],
+  credits: readonly InterestCredit[],
+  reference: ReferenceLists,
+  asOf: IsoDate,
+): Proposal[] {
+  let out = [...proposals];
+  for (const c of credits) {
+    const printed = new Set([c.net, c.gross, c.tax].filter((x): x is Centavos => x !== undefined));
+    const related = out.filter((p) => p.draft.amount !== null && printed.has(p.draft.amount) && p.draft.flow !== "Transfer" && p.draft.flow !== "Debt");
+    const base = related.find((p) => p.draft.flow === "Revenue" && p.draft.amount === c.net) ?? related.find((p) => p.draft.flow === "Revenue") ?? related[0];
+    const item = base && /interest/i.test(base.draft.item) ? base.draft.item : reference.revenueCategories.find((n) => /interest/i.test(n)) ?? base?.draft.item ?? "";
+    const into = accountFor(c, reference.savings);
+    const notes: string[] = [];
+    if (base && base.draft.amount !== c.net) notes.push(`Read as ${pesos(base.draft.amount ?? 0)}; what arrived is ${pesos(c.net)} (${c.evidence.join("; ")}).`);
+    const folded = related.filter((p) => p !== base);
+    if (folded.length > 0) notes.push(`Left out ${folded.map((p) => pesos(p.draft.amount ?? 0)).join(" and ")}: the interest before tax and the tax are parts of this one credit.`);
+    if (into && base?.draft.toWallet !== into) notes.push(`Into ${into}, the account the screen calls "${c.account || "savings"}".`);
+    if (!base) notes.push(`Read on this device: ${c.evidence.join("; ")}.`);
+    const start = base?.draft ?? emptyDraft(c.date ?? asOf);
+    const kept: Proposal = {
+      ...(base ?? { sourceRef: "the interest screen", confidence: "medium" as const }),
+      draft: {
+        ...start,
+        flow: "Revenue",
+        category: "Revenue",
+        item,
+        amount: c.net,
+        fromWallet: "",
+        toWallet: into || start.toWallet,
+        date: c.date ?? start.date,
+        description: start.description.trim() || `Interest from ${c.bank ?? "the bank"}${c.tax ? `, after ${pesos(c.tax)} tax` : ""}`,
+      },
+      confidence: c.confidence === "high" ? (base?.confidence ?? "high") : "medium",
+      adjustments: [...(base?.adjustments ?? []), ...notes],
+    };
+    const at = base ? out.indexOf(base) : out.length;
+    out = out.filter((p) => !related.includes(p));
+    out.splice(Math.min(at, out.length), 0, kept);
+  }
+  return out;
+}
+
 export interface ReadContext {
   readonly note?: string;
+  /** Interest credits in those pictures, checked by their arithmetic (`domain/interestCredit.ts`). */
+  readonly interest?: readonly InterestCredit[];
   /** The text the device read off the pictures, both readings of each. */
   readonly readings?: readonly string[];
   /** Receipts in those pictures, checked by their arithmetic (`domain/receipt.ts`). */

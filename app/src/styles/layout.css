@@ -147,14 +147,53 @@
 
 .fms-sidegroup + .fms-sidegroup,
 .fms-sideusable + .fms-sidegroup {
-  margin-top: var(--space-3);
+  margin-top: var(--space-2);
 }
 
+/* The heading folds its group away, and carries its total so a folded group still says something. */
 .fms-sidegroup-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: 32px;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--ink-3);
+  cursor: pointer;
+  text-align: left;
+}
+
+.fms-sidegroup-head:hover .fms-sidegroup-name,
+.fms-sidegroup-head:focus-visible .fms-sidegroup-name {
+  color: var(--ink-2);
+}
+
+.fms-sidegroup-head:focus-visible,
+.fms-sidemore:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.fms-sidegroup-name {
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  padding-bottom: 2px;
+}
+
+.fms-sidegroup-count {
+  padding: 0 5px;
+  border: 1px solid var(--hairline);
+  color: var(--ink-3);
+}
+
+.fms-sidegroup-head > :last-child:not(.fms-sidegroup-name):not(.fms-sidegroup-count) {
+  margin-left: auto;
+}
+
+.fms-sidechev {
+  flex: 0 0 auto;
+  color: var(--ink-3);
 }
 
 .fms-siderow {
@@ -162,20 +201,50 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
   column-gap: var(--space-2);
-  padding: 3px 0;
+  padding: 3px 0 3px 17px;
 }
 
+/* One line, cut with an ellipsis; the tag after it is never the part cut. */
 .fms-sidename {
+  display: flex;
+  align-items: baseline;
   min-width: 0;
-  overflow-wrap: anywhere;
+}
+
+.fms-sidename-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fms-sidename-note {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 
 .fms-sidelow {
+  flex: 0 0 auto;
   margin-left: var(--space-1);
   padding: 0 4px;
   color: var(--warn);
   background: var(--warn-bg);
   white-space: nowrap;
+}
+
+.fms-sidemore {
+  display: block;
+  min-height: 28px;
+  margin-left: 17px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
 }
 
 .fms-networth {

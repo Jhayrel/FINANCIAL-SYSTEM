@@ -48,6 +48,7 @@ import { redact } from "../domain/aiRedact";
 import { conversationBlock } from "../domain/memory";
 import { dayInFileName, dropRepeats, piecesOf, readingFor, rowsIn } from "../domain/ocrText";
 import { readReceipt, receiptNote, type ReceiptCheck } from "../domain/receipt";
+import { interestNote, readInterestCredit, type InterestCredit } from "../domain/interestCredit";
 import { readPicture } from "./ocr";
 import { pairBorrowings, readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
 import type { Attachment } from "./attachments";
@@ -560,6 +561,8 @@ export interface ExtractOptions {
   readonly readings?: readonly string[];
   /** Set here, not by callers: receipts in the pictures, checked by their arithmetic, for checking the model's cards against. */
   readonly receipts?: readonly ReceiptCheck[];
+  /** Set here, not by callers: interest credits in the pictures, checked by their arithmetic (`domain/interestCredit.ts`). */
+  readonly interest?: readonly InterestCredit[];
   /** Set here, not by callers: the day each reading's picture was taken, from its file name. */
   readonly readingDays?: readonly string[];
   /** The owner's own name as a bank prints it: money from or to it is between their own accounts. */
@@ -709,7 +712,11 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
     repeated += Math.max(plain.dropped, raised.dropped);
     return { plain: plain.text, raised: raised.text };
   });
-  const receipts = readings.map((r) => (r ? readReceipt([r.plain, r.raised], options.asOf) : null));
+  // A bank's interest screen: earned, tax and net, and which one arrived (domain/interestCredit.ts).
+  const credits = readings.map((r) => (r ? readInterestCredit([r.raised, r.plain]) : null));
+  const interest = credits.filter((c): c is InterestCredit => c !== null);
+  // Never a shop receipt as well: its "total" there is the interest before tax.
+  const receipts = readings.map((r, i) => (r && !credits[i] ? readReceipt([r.plain, r.raised], options.asOf) : null));
   const found = receipts.filter((r): r is ReceiptCheck => r !== null);
   const asText: Attachment[] = [];
   const stillPictures: Attachment[] = [];
@@ -731,7 +738,8 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
     const asRead = reading ? readingFor(picture.name, reading, room) : null;
     // A shop receipt carries what its own arithmetic says the total is (domain/receipt.ts).
     const receipt = receipts[i];
-    const text = asRead && receipt ? `${asRead}\n${receiptNote(receipt)}` : asRead;
+    const credit = credits[i];
+    const text = asRead && credit ? `${asRead}\n${interestNote(credit)}` : asRead && receipt ? `${asRead}\n${receiptNote(receipt)}` : asRead;
     if (text) {
       asText.push({ id: picture.id, name: `${picture.name}, read on this device`, kind: "text", bytes: text.length, text: redact(text) });
     } else {
@@ -763,16 +771,16 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
 
   if (jobs.length > 1) {
     const answers = await inTurn(jobs, LIST_PARTS_AT_ONCE, (attachments) =>
-      extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, attachments }),
+      extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, attachments }),
     );
     const joined = joinAnswers(answers);
     // Nothing usable in any of them: the pictures go to a model that can see, as below.
     if (usable(joined) >= 10 || options.signal?.aborted) return { ...joined, readOnDevice, repeated, readings: read };
-    const seen = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found });
+    const seen = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest });
     return usable(seen) > usable(joined) ? { ...seen, readings: read } : { ...joined, readOnDevice, repeated, readings: read };
   }
 
-  const first = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, attachments: jobs[0] ?? [...others, ...stillPictures] });
+  const first = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, attachments: jobs[0] ?? [...others, ...stillPictures] });
   /*
    * Rows it could not use count for nothing here. On 26 September 2026 the
    * text route returned one refused row, "Nothing in that looked like a
@@ -782,7 +790,7 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
   if (usable(first) >= 10 || options.signal?.aborted) {
     return { ...first, readOnDevice, repeated, readings: read };
   }
-  const second = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found });
+  const second = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest });
   return usable(second) > usable(first) ? { ...second, readings: read } : { ...first, readOnDevice, repeated, readings: read };
 }
 
@@ -915,6 +923,7 @@ async function extractOnce(options: ExtractOptions): Promise<ExtractResult> {
       readings: options.readings ?? [],
       readingDays: options.readingDays ?? [],
       receipts: options.receipts ?? [],
+      interest: options.interest ?? [],
     });
 
     return {

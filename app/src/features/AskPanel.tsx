@@ -2077,8 +2077,15 @@ export function AskPanel({
      * to read its own data. `readEntry` has already done this pass on the
      * offline path, so it says so rather than having it run twice.
      */
+    /*
+     * A card read off a picture has no typed words to go by, so its own
+     * description is read for the item when the reading left the item blank:
+     * two Maya cashback notifications asked "What was it?" though every
+     * cashback before them was Random (28 September 2026).
+     */
+    const historyHint = start.item.trim() || !start.description.trim() || hint.toLowerCase().includes(start.description.trim().toLowerCase()) ? hint : `${hint} ${start.description}`.trim();
     const { draft, because } = useHistory
-      ? inferFromHistory(start, transactions, reference, hint)
+      ? inferFromHistory(start, transactions, reference, historyHint)
       : { draft: start, because: learned };
 
     /**

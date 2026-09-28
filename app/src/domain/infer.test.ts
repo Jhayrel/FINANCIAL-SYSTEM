@@ -303,3 +303,21 @@ describe("the note beside a spending type", () => {
     expect(inferFromHistory(spend(), [], withRemarks, "scuba lessons").draft.item).toBe("");
   });
 });
+
+/*
+ * 28 September 2026: two Maya cashback notifications were read as
+ * "cashback" and both asked "What was it?", when the seven cashbacks before
+ * them, written "cash back", had all been Random.
+ */
+describe("the same word written apart or together", () => {
+  const earlier = [
+    row({ type: "Revenue", category: "Revenue", item: "Random", description: "maya cash back", fromWallet: "", toWallet: "Maya" }),
+    row({ type: "Revenue", category: "Revenue", item: "Random", description: "cash back", fromWallet: "", toWallet: "Maya" }),
+    row({ type: "Revenue", category: "Revenue", item: "Allowance", description: "allowance from mama", fromWallet: "", toWallet: "Gcash" }),
+  ];
+
+  it("finds cash back from cashback, and the other way round", () => {
+    expect(itemFromHistory("cashback", earlier)?.item).toBe("Random");
+    expect(itemFromHistory("Your ₱3.99 cash-back from Maya", earlier)?.item).toBe("Random");
+  });
+});

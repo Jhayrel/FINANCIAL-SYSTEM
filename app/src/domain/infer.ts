@@ -86,9 +86,26 @@ const NOISE = new Set([
   "through", "by", "last", "night", "morning", "afternoon", "evening",
 ]);
 
+/**
+ * The same word written apart or together.
+ *
+ * 28 September 2026: two Maya cashback notifications were read as
+ * "cashback", and the owner's seven earlier ones say "cash back". No word
+ * matched, so both cards asked what they were, when every one before had
+ * been Random.
+ */
+const TOGETHER: readonly (readonly [RegExp, string])[] = [
+  [/\bcash[\s-]+back\b/g, "cashback"],
+  [/\btop[\s-]+up\b/g, "topup"],
+  [/\be[\s-]+wallet\b/g, "ewallet"],
+  [/\bon[\s-]+line\b/g, "online"],
+  [/\bpay[\s-]+day\b/g, "payday"],
+];
+
+const together = (text: string): string => TOGETHER.reduce((t, [pattern, word]) => t.replace(pattern, word), text.toLowerCase());
+
 const words = (text: string): string[] =>
-  text
-    .toLowerCase()
+  together(text)
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
     .filter((w) => w.length > 2 && !NOISE.has(w) && !/^\d+$/.test(w));
