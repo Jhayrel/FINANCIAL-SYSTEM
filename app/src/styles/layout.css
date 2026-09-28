@@ -1385,11 +1385,12 @@
  * field is what brings the keyboard up.
  */
 @media (max-width: 1023px) and (pointer: coarse) {
-  .fms-app:has(input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus) .fms-bottomnav {
+  /* `fms-app--typing` stays on a moment after focus leaves (App.tsx), so a tap on Save lands on Save. */
+  .fms-app--typing .fms-bottomnav {
     display: none;
   }
 
-  .fms-app:has(input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus) .fms-content {
+  .fms-app--typing .fms-content {
     padding-bottom: 0;
   }
 }

@@ -1449,6 +1449,18 @@ export default function App() {
     // The theme lives outside settings, so restoring it is a separate call.
     setPreference(result.preferences.theme);
 
+    /*
+     * The budget reaches the database too. Replace and Merge set it on screen
+     * and never saved it, so the next load had no budget at all (found
+     * restoring a file into an empty database, 28 September 2026). Start clean
+     * already wrote its years; these are the same call.
+     */
+    if (cloud.uid) {
+      for (const [year, budget] of Object.entries(result.budgets)) {
+        if (budget && JSON.stringify(budget) !== JSON.stringify(before.budgets[year])) track(saveBudget(cloud.uid, year, budget), "budget");
+      }
+    }
+
     // Firestore is the source of truth when connected, so the restored ledger
     // has to reach it or the next snapshot would undo the restore. A replace
     // also sets aside every row the file does not have: the rules refuse a
@@ -1769,6 +1781,41 @@ export default function App() {
   useBackToClose(moreOpen, () => setMoreOpen(false));
   useBackToClose(chatOpen, () => setChatOpen(false));
 
+  /*
+   * Typing, as far as the bottom navigation is concerned.
+   *
+   * The navigation steps aside while a field has focus, so the keyboard does
+   * not push it over the field. It came back the instant focus left, and a tap
+   * on Save is what takes focus away: the bar reappeared under the finger,
+   * Save moved up 52px in the middle of the tap, and the tap landed on the
+   * navigation. On 28 September 2026 a correction typed and saved this way
+   * did nothing. It now comes back a moment later, after the tap has landed.
+   */
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    let later: ReturnType<typeof setTimeout> | undefined;
+    const isField = (el: EventTarget | null): boolean =>
+      el instanceof HTMLTextAreaElement ||
+      (el instanceof HTMLInputElement && el.type !== "checkbox" && el.type !== "radio");
+    const onIn = (e: FocusEvent): void => {
+      if (!isField(e.target)) return;
+      if (later) clearTimeout(later);
+      setTyping(true);
+    };
+    const onOut = (e: FocusEvent): void => {
+      if (!isField(e.target)) return;
+      if (later) clearTimeout(later);
+      later = setTimeout(() => setTyping(isField(document.activeElement)), 450);
+    };
+    document.addEventListener("focusin", onIn);
+    document.addEventListener("focusout", onOut);
+    return () => {
+      if (later) clearTimeout(later);
+      document.removeEventListener("focusin", onIn);
+      document.removeEventListener("focusout", onOut);
+    };
+  }, []);
+
   if (cloud.configured && cloud.auth.status !== "ready") {
     return <SignIn auth={cloud.auth} onSignIn={cloud.signIn} onSignOut={cloud.signOut} />;
   }
@@ -1904,6 +1951,7 @@ export default function App() {
         "fms-app",
         !compact && chatOn && screen !== "add" && "fms-app--fab",
         (chatOn ? BAR_WITH_AI : BAR).length % 2 === 0 && "fms-app--evennav",
+        typing && "fms-app--typing",
       ]
         .filter(Boolean)
         .join(" ")}

@@ -2539,8 +2539,9 @@ export function AskPanel({
        * `matchItem` answers.
        */
       const replyFlow = complete.flow;
+      // No item is not a new item: the card says so on its own line.
       const settledItem =
-        replyFlow === ""
+        replyFlow === "" || !complete.item.trim()
           ? null
           : matchItem(complete.item, replyFlow, complete.category, reference, learnedItems);
       if (settledItem && !settledItem.matched) {
@@ -4369,7 +4370,15 @@ export function AskPanel({
       files.length === 0 &&
       !as &&
       !isNoteLine &&
-      (routed === null || saysAnswer || saysCorrection)
+      /*
+       * With no router, only a reply that could be an answer. "delete the
+       * breakfast I just added" was taken as what the breakfast was for
+       * (28 September 2026, model unreachable): an instruction or a question
+       * is never the answer to the question on screen.
+       */
+      (routed === null
+        ? localRecall === null && !isQuestion(note) && looksLikeAnswer(note, pending.blank)
+        : saysAnswer || saysCorrection)
     ) {
       setDraft("");
       setBusy(true);

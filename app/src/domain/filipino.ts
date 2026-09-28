@@ -50,6 +50,21 @@ const THINGS: readonly (readonly [RegExp, string])[] = [
   [/\b(pasalubong|regalo|handa|libre|nilibre)\b/i, "treat"],
   [/\b(parking|paradahan)\b/i, "parking"],
   [/\b(kuryente|tubig|bayarin|bills)\b/i, "bills"],
+  /*
+   * The same things in English. "spent 95 on breakfast using cash" asked what
+   * it was for, with the model out of reach (28 September 2026): the list
+   * above knew "almusal" and not "breakfast". Resolved against the owner's
+   * list like the rest, so a word here never becomes an item they lack.
+   */
+  [/\b(breakfast|lunch|dinner|brunch|meals?|snacks?|merienda|coffee|milk ?tea|burgers?|pizza|fries|chicken|rice|bread|drinks?|softdrinks?)\b/i, "food"],
+  [/\b(fare|commute|commuting|ride|jeep fare|bus fare|taxi fare)\b/i, "travel"],
+  [/\b(fuel|petrol|gas station|refuel)\b/i, "gas"],
+  [/\b(school supplies|supplies|books?|tuition fee|printing|photocopy|xerox)\b/i, "school"],
+  [/\b(medicine|meds|pharmacy|drugstore|clinic|vitamins?|hospital)\b/i, "health"],
+  [/\b(haircut|salon|toothpaste|soap|toiletries|skincare|lotion|deodorant)\b/i, "self care"],
+  [/\b(groceries|detergent|air freshener|diffuser|cleaning|dishwashing|tissue|home items?|household)\b/i, "home needs"],
+  [/\b(movie|cinema|games?|arcade|karaoke|outing)\b/i, "fun"],
+  [/\b(gift|birthday|blowout|treated|treat)\b/i, "treat"],
 ];
 
 /**
