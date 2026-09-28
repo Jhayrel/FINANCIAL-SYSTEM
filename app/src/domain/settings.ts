@@ -71,6 +71,8 @@ export interface AiSettings {
     readonly chat?: boolean;
     /** Reading photos and files into proposed rows. */
     readonly capture?: boolean;
+    /** Wording the note after spending is saved (`domain/spendNote.ts`). The note itself does not need the model. */
+    readonly notes?: boolean;
   };
   /**
    * What a message may carry.
@@ -147,6 +149,11 @@ export interface AppSettings {
   readonly theme: ThemePreference;
   /** Warn when a spending wallet drops below this. */
   readonly lowBalanceThreshold: Centavos;
+  /**
+   * A short note after spending is saved, when it takes the month past its
+   * budget or a limit (`domain/spendNote.ts`). Absent means on.
+   */
+  readonly budgetNotes?: boolean;
   /** Bumped whenever the shape changes, so a stored blob can be upgraded. */
   readonly version: number;
 }
@@ -218,9 +225,11 @@ export function normaliseSettings(raw: unknown): AppSettings {
          */
         chat: input.ai?.features?.chat ?? base.ai.features.chat ?? true,
         capture: input.ai?.features?.capture ?? base.ai.features.capture ?? true,
+        notes: input.ai?.features?.notes ?? base.ai.features.notes ?? true,
       },
     },
     theme: input.theme ?? base.theme,
+    budgetNotes: typeof input.budgetNotes === "boolean" ? input.budgetNotes : true,
     lowBalanceThreshold:
       typeof input.lowBalanceThreshold === "number" && Number.isInteger(input.lowBalanceThreshold)
         ? input.lowBalanceThreshold

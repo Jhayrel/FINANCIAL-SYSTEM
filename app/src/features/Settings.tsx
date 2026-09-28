@@ -2427,6 +2427,22 @@ function AlertsSection({
         </p>
       </Group>
 
+      {/*
+        A short note after spending is saved, when it takes the month past its
+        budget or a limit you set (domain/spendNote.ts). Calm by design: said
+        once, never about a need once the month is already over.
+      */}
+      <Group title="Notes after spending" hint="A short, calm note when a purchase takes the month past its budget or a limit">
+        <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "flex-start", justifyContent: "space-between" }}>
+          <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)", flex: "1 1 auto" }}>
+            {settings.budgetNotes === false
+              ? "Off. Saving says only that it saved."
+              : "On. Each note is said once a month; a need such as food, fuel or a bill is counted, never judged, and says nothing once the month is already over."}
+          </p>
+          <Switch checked={settings.budgetNotes !== false} label="Notes after spending" onChange={(v) => patch({ budgetNotes: v })} />
+        </div>
+      </Group>
+
       <Group title="Always on" hint="Checks you cannot switch off">
         <dl className="fms-deflist">
           <dt className="t-body">Budget overrun</dt>
@@ -2457,6 +2473,7 @@ const clampLow = (v: Centavos | null): Centavos =>
 
 const AI_FEATURES: { key: keyof AiSettings["features"]; label: string; what: string }[] = [
   { key: "alerts", label: "Finance alerts", what: "Sums up the flagged items on the Dashboard" },
+  { key: "notes", label: "Budget notes", what: "Words the note after spending; off, the app words it itself" },
   { key: "insightSummary", label: "Insight summary", what: "Describes the month on the Insights screen" },
   {
     key: "descriptions",

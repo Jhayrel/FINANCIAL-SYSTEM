@@ -30,6 +30,9 @@ import { Settings } from "./features/Settings";
 import { readIssued, Statements } from "./features/Statements";
 import { Button, Card, EmptyState, Money, Notice } from "./components/primitives";
 import { SideBalances } from "./components/SideBalances";
+import { readShownNotes, rememberNote } from "./data/shownNotes";
+import { spendNoteFor } from "./domain/spendNote";
+import { phraseNote } from "./data/aiClient";
 import { Notifications } from "./components/Notifications";
 import { holdUpdates, useUpdateAvailable } from "./data/updateCheck";
 import { useBackToClose, useScreenHistory } from "./data/backButton";
@@ -217,7 +220,9 @@ export default function App() {
    * later by the first one's timer. Each notice now keeps its own clock
    * (`Notice`), paused while it is pointed at, and at most three show.
    */
-  const [toasts, setToasts] = useState<{ id: number; text: string; action?: { label: string; run: () => void } }[]>([]);
+  const [toasts, setToasts] = useState<
+    { id: number; text: string; detail?: string; note?: boolean; action?: { label: string; run: () => void } }[]
+  >([]);
   const toastSeq = useRef(0);
   /** The newer version's notice, closed for this tab. It comes back on the next visit if still true. */
   const [updateClosed, setUpdateClosed] = useState(false);
@@ -985,6 +990,32 @@ export default function App() {
   const closeToast = (id: number): void => setToasts((prev) => prev.filter((t) => t.id !== id));
 
   /**
+   * A note after spending, calm and once (`domain/spendNote.ts`).
+   *
+   * Worked out here from the ledger as it was before the save; worded by the
+   * model when AI and its "Budget notes" surface are on and it answers
+   * quickly with the note's own figures, and in the device's words when not.
+   * Which notes were said is kept on this device, so each is said once.
+   */
+  const noteAfterSave = (saved: readonly Transaction[], before: readonly Transaction[]): void => {
+    if (settings.budgetNotes === false) return;
+    const note = spendNoteFor(saved, before, budgets, asOf, readShownNotes());
+    if (!note) return;
+    rememberNote(note.id);
+    const show = (words: string): void => {
+      toastSeq.current += 1;
+      const id = toastSeq.current;
+      setToasts((prev) => [...prev, { id, text: note.title, detail: words, note: true, action: { label: "Budget", run: () => go("budget") } }].slice(-3));
+    };
+    const worded = settings.ai.enabled && settings.ai.features.notes !== false && online;
+    if (!worded) {
+      show(note.text);
+      return;
+    }
+    void phraseNote(note, settings.ai.model ? { provider: settings.ai.provider, model: settings.ai.model } : {}).then((words) => show(words ?? note.text));
+  };
+
+  /**
    * Whether this ledger renumbers on every write.
    *
    * The Excel did, and the ledger here does until it lives in Firebase (spec
@@ -1046,6 +1077,7 @@ export default function App() {
           }
         : undefined,
     );
+    noteAfterSave(stamped, transactions);
   };
 
   /**
@@ -2562,10 +2594,12 @@ export default function App() {
         {toasts.map((t) => (
           <Notice
             key={t.id}
-            status="ok"
+            // A note is information, never an alarm: the calm colour, and long enough to read.
+            status={t.note ? "info" : "ok"}
             title={t.text}
-            timeout={6000}
+            timeout={t.note ? 14_000 : 6000}
             onDismiss={() => closeToast(t.id)}
+            {...(t.detail ? { children: <span className="t-caption">{t.detail}</span> } : {})}
             action={
               t.action ? (
                 <Button

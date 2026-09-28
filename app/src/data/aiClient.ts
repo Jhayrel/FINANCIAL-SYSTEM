@@ -49,6 +49,7 @@ import { conversationBlock } from "../domain/memory";
 import { dayInFileName, dropRepeats, piecesOf, readingFor, rowsIn } from "../domain/ocrText";
 import { readReceipt, receiptNote, type ReceiptCheck } from "../domain/receipt";
 import { interestNote, readInterestCredit, type InterestCredit } from "../domain/interestCredit";
+import { acceptableWording, type SpendNote } from "../domain/spendNote";
 import { readPicture } from "./ocr";
 import { pairBorrowings, readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
 import type { Attachment } from "./attachments";
@@ -1212,5 +1213,52 @@ export async function modelsOnOffer(options: { fetcher?: typeof fetch; token?: (
     };
   } catch {
     return null;
+  }
+}
+
+/**
+ * A note after spending, in the model's words, or null for the device's.
+ *
+ * The model is given the note's facts and nothing else: no balances, no
+ * rows, no history. Its words are kept only when every figure in them is one
+ * of the facts and they do not preach (`spendNote.ts`, `acceptableWording`),
+ * and only when they come back quickly: a note that arrives long after the
+ * save is about something the owner has moved on from.
+ */
+export async function phraseNote(
+  note: SpendNote,
+  options: {
+    readonly provider?: string;
+    readonly model?: string;
+    readonly fetcher?: typeof fetch;
+    readonly token?: () => Promise<string | null>;
+    readonly timeoutMs?: number;
+  } = {},
+): Promise<string | null> {
+  const auth = await (options.token ?? idToken)().catch(() => null);
+  if (!auth) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 7_000);
+  try {
+    const response = await (options.fetcher ?? fetch)(ENDPOINT, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "content-type": "application/json", authorization: `Bearer ${auth}` },
+      body: JSON.stringify({
+        task: "note",
+        tone: "brief",
+        question: "Word this note.",
+        context: ["The facts:", ...note.facts, "", "The note as the app would say it:", note.text].join(String.fromCharCode(10)),
+        ...(options.provider && options.model ? { provider: options.provider, model: options.model } : {}),
+      }),
+    });
+    if (!response.ok || !(response.headers.get("content-type") ?? "").includes("application/json")) return null;
+    const payload = (await response.json()) as OkPayload;
+    const text = typeof payload.text === "string" ? plainText(payload.text).replace(/\s+/g, " ").trim() : "";
+    return text && acceptableWording(text, note) ? text : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
 }

@@ -732,6 +732,13 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "Summarise this month's finances. Lead with the single most important number. Do not give advice unless something is genuinely wrong.",
   alerts:
     "Rewrite the flagged items as prose a person would actually read. Keep every figure exactly as given. Do not add items that are not listed.",
+  /*
+   * A note after a purchase is saved (client: `domain/spendNote.ts`). The
+   * owner, 28 September 2026: "dont make those pushy what if its food or
+   * gas ... that is not in the budget but its need?"
+   */
+  note:
+    "Word this note about a purchase just saved, in one or two short sentences, as a friend who keeps their books would say it to them. Use only the figures given, exactly as written, and add none. Calm and plain: no scolding, no guilt, no warnings, no commands, no should or must, no exclamation marks, no emoji. A need (food, fuel, health, school, bills, home needs) is never judged: say it is counted, and at most mention where the month's wants have room if that is given. For a want, say the fact and leave the choice to them. Do not mention the app, a model or yourself.",
   patterns:
     "Point out at most two things about the spending pattern that the figures support, using the whole span of months provided rather than only the latest. Say which period you looked at. If nothing stands out across that span, say so plainly.",
   /**
@@ -949,6 +956,13 @@ const TASKS: Record<string, TaskSpec> = {
     shape: '{"summary": "your answer as plain sentences"}',
     parse: narrative,
     toned: true,
+    proseIsFine: true,
+  },
+  note: {
+    instruction: TASK_INSTRUCTIONS["note"] ?? "",
+    shape: '{"summary": "the note, one or two short sentences"}',
+    parse: narrative,
+    maxTokens: 200,
     proseIsFine: true,
   },
   chat: {
