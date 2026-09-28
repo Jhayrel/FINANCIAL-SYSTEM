@@ -185,7 +185,9 @@ import { imageLimits, type AppSettings } from "../domain/settings";
 import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
 import { changeWords, planEdit, readEditAsk, type EditPlan } from "../domain/chatChanges";
 import {
+  asksRatherThanTells,
   confirmsProposal,
+  isBudgetForm,
   namesBudgetCommand,
   planBudget,
   proposedBudgetIn,
@@ -3855,7 +3857,33 @@ export function AskPanel({
      * screen's own rules and shown on a card to apply.
      */
     const couldBudget = files.length === 0 && !as && !isNoteLine && sink.canBudget;
-    let budgetAsk = couldBudget ? readBudgetAsk(lead, reference, asOf) : null;
+    // A form of lines ("Bills and subscriptions: 1641", "Spending: 6359") is read whole, not by its first line.
+    let budgetAsk = couldBudget ? readBudgetAsk(isBudgetForm(ruled) ? ruled : lead, reference, asOf) : null;
+    /*
+     * "thats budget", straight after a message that was read as an entry:
+     * that message was a budget. 28 September 2026: the form above became a
+     * PHP 1,641.00 spending entry, "thats budget" asked what September's
+     * budget should be, and the figures were typed a third time. The message
+     * before is read again as a budget, and the entry card it made is put
+     * aside.
+     */
+    const meantBudget =
+      /^\s*(?:no[,.!\s]+|hindi[,.!\s]+)?(?:that'?s|thats|that is|that was|it'?s|its|it is|it was|this is)\s+(?:a\s+|the\s+|my\s+|for\s+(?:the\s+|my\s+)?)?budget\b|^\s*budget\s+(?:yan|iyan|yun|iyon|yon|to|po)\b|^\s*(?:i meant|i mean)\s+(?:a\s+|the\s+|my\s+)?budget\b/i.test(ruled);
+    if (!budgetAsk && couldBudget && meantBudget) {
+      const before = [...turns].reverse().find((t): t is Said => t.kind === "you");
+      const again = before ? readBudgetAsk(`set budget ${before.text}`, reference, asOf) : null;
+      if (before && again) {
+        budgetAsk = again;
+        const fromIt = (t: Turn): boolean => isOffer(t) && t.state === "open" && t.proposal.said !== undefined && t.proposal.said !== "" && before.text.includes(t.proposal.said);
+        for (const t of turns) {
+          if (!fromIt(t) || !isOffer(t)) continue;
+          const d = t.proposal.draft;
+          log(aiEvent("rejected", "add", { entry: `${d.date} ${d.flow} ${d.item} ${formatMoney(d.amount ?? 0)}`, text: "It was a budget, not an entry" }));
+          recordCard({ ...t, state: "discarded" });
+        }
+        setTurns((prev) => prev.map((t) => (fromIt(t) && isOffer(t) ? { ...t, state: "discarded" as const } : t)));
+      }
+    }
     const span = couldBudget ? spanIn(lead, asOf) : null;
     /*
      * The router saying "budget" is not enough for a question. "how about
@@ -4107,7 +4135,13 @@ export function AskPanel({
      * router called an edit still goes to the finder below, which opens the
      * row in the form.
      */
-    const editAsk = files.length === 0 && !as && !isNoteLine && sink.canUpdate ? readEditAsk(ruled, reference, asOf) : null;
+    /*
+     * "should I set my budget to 9000?" was read as editing a saved entry
+     * and answered "No saved entry matches that" (28 September 2026). Asking
+     * what to do is the model's; only telling it to do something is a card.
+     */
+    const advising = asksRatherThanTells(ruled);
+    const editAsk = files.length === 0 && !as && !isNoteLine && sink.canUpdate && !advising ? readEditAsk(ruled, reference, asOf) : null;
     if (editAsk && (routed === null || routed.intent === "editEntry" || routed.intent === "correction" || routed.intent === "entry" || routed.intent === "question")) {
       const onScreen = turns.some((t) => isOffer(t) && t.state === "open");
       /*
@@ -4582,7 +4616,8 @@ export function AskPanel({
      * that outranks it is the sentence reading as an entry on its own, which
      * is checked at the point of use below.
      */
-    const localRecall = files.length === 0 && !as ? detectRecall(ruled) : null;
+    // "should I delete my netflix?" asks; it is not a delete (`asksRatherThanTells`).
+    const localRecall = files.length === 0 && !as && !asksRatherThanTells(ruled) ? detectRecall(ruled) : null;
 
     const saysAnswer = routed?.intent === "answer";
     const saysCorrection = routed?.intent === "correction";
@@ -4955,7 +4990,7 @@ export function AskPanel({
       !/#\s*\d|\b(entry|entries|record|records|saved|yesterday)\b/i.test(note) &&
       amend(shownCard.turn.proposal.draft, note, reference, asOf) !== null;
     const saysRecall =
-      !cardTakesIt && (routed?.intent === "delete" || routed?.intent === "restore" || routed?.intent === "editEntry");
+      !cardTakesIt && !asksRatherThanTells(ruled) && (routed?.intent === "delete" || routed?.intent === "restore" || routed?.intent === "editEntry");
     const recall =
       files.length > 0 || as
         ? null
@@ -4969,7 +5004,7 @@ export function AskPanel({
               phrase: routed?.target || note,
             }
           : routed === null
-            ? detectRecall(ruled)
+            ? localRecall
             : /**
                * The local reading wins unless the sentence is an entry.
                *

@@ -30,6 +30,8 @@ export type BudgetAsk = (
       readonly spending?: Centavos | undefined;
       readonly billsSubs?: Centavos | undefined;
       readonly scope: PlanScope;
+      /** The figures are changes to what is set ("raise spending by 1000"), signed, not the new amounts. */
+      readonly by?: boolean | undefined;
     }
   | { readonly kind: "copy"; readonly year: number; readonly month: number; readonly scope: PlanScope }
   | {
@@ -45,7 +47,49 @@ export type BudgetAsk = (
   readonly toMonth?: number | undefined;
 };
 
-const SET = /\b(set|make|change|update|increase|raise|lower|reduce|put|copy|use|same|limit|cap)\b/i;
+const SET = /\b(set|make|change|update|increase|raise|lower|reduce|put|copy|use|same|limit|cap|save|apply|adjust|edit|modify|fix|allocate|assign|decrease|cut)\b/i;
+
+const NUM = String.raw`(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)(\s*k\b)?`;
+const BILLS_LABEL = String.raw`(?:bills?(?:\s*(?:and|&|\/|\+|n)\s*subs(?:criptions?)?)?|subscriptions?|subs)`;
+const SPENDING_LABEL = String.raw`(?:spending|spend|expenses?|day[- ]to[- ]day)`;
+
+const pesosOf = (digits: string, k: string | undefined): Centavos => {
+  const [whole = "0", cents = ""] = digits.replace(/,/g, "").split(".");
+  return (Number(whole) * 100 + Number((cents + "00").slice(0, 2))) * (k ? 1000 : 1);
+};
+
+/**
+ * The two budget lines in one message, each with its own figure.
+ *
+ * 28 September 2026: "Set October's bills and subscriptions budget to
+ * ₱1,641 and spending budget to ₱6,359" made a card with the bills figure
+ * and PHP 0.00 for spending, because one figure was read per sentence and
+ * the word "bills" decided which line it went to. And the same two lines
+ * typed as a form, "Bills and subscriptions: 1641 / Spending: 6359 / Save
+ * to: Oct only", has no word "budget" in it and became a PHP 1,641.00
+ * spending entry. Each line is read with the figure beside it, either way
+ * round ("1641 for bills", "bills: 1641").
+ */
+export function tracksIn(said: string): { spending?: Centavos; billsSubs?: Centavos } {
+  const text = said.toLowerCase().replace(/\b20\d{2}\b/g, " ").replace(/\b\d{1,2}\s+months?\b/g, " ");
+  const read = (label: string): Centavos | undefined => {
+    const before = new RegExp(String.raw`${NUM}\s*(?:pesos?\s*)?(?:for|on|to|sa|as|in|of)\s+(?:the\s+|my\s+|ang\s+)?${label}\b`).exec(text);
+    if (before?.[1]) return pesosOf(before[1], before[2]);
+    const after = new RegExp(String.raw`\b${label}\b(?:\s+budget)?[^\d\n]{0,28}?${NUM}`).exec(text);
+    if (after?.[1]) return pesosOf(after[1], after[2]);
+    return undefined;
+  };
+  const billsSubs = read(BILLS_LABEL);
+  // "bills and subscriptions spending" is one label, not both.
+  const spending = read(SPENDING_LABEL);
+  return { ...(spending !== undefined ? { spending } : {}), ...(billsSubs !== undefined ? { billsSubs } : {}) };
+}
+
+/** Both lines with a figure each, laid out like a form: a budget, whether or not it says so. */
+export function isBudgetForm(said: string): boolean {
+  const t = tracksIn(said);
+  return t.spending !== undefined && t.billsSubs !== undefined && !/\b(paid|spent|bought|bayad|received)\b/i.test(said);
+}
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 function figure(text: string): Centavos | null {
@@ -359,10 +403,30 @@ function proposalIn(text: string): { readonly value: Centavos; readonly sentence
 }
 
 /** Read a budget request, or return null when the sentence is not one. */
+/**
+ * Asking what to do, not saying to do it.
+ *
+ * "should I set my budget to 9000?" named a verb, the word budget and a
+ * figure, and would have made a card: a question read as a command. It is
+ * the model's to answer. A polite command ("can you set my budget to 9000",
+ * "please set it") is still a command.
+ */
+export function asksRatherThanTells(said: string): boolean {
+  const t = said.toLowerCase();
+  const polite = /\b(?:can|could|would|will) you\b|\bplease\b|\bpls\b|\bkindly\b|\bpaki/.test(t);
+  const opinion =
+    /\b(?:should i|should we|shall i|what if|would it be|is it (?:good|ok|okay|wise|better|enough|realistic|smart|too)|is that (?:good|ok|okay|enough|realistic)|do you think|good idea|too (?:much|little|low|high)|worth it|makes sense|wise to|dapat ba|pwede ba)\b/.test(t);
+  return opinion && !polite;
+}
+
 export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: IsoDate): BudgetAsk | null {
+  if (asksRatherThanTells(said)) return null;
   // "add buget same as last month": the misspellings that came in, read as the word.
   const text = respell(said).replace(/\b(buget|budjet|bugdet|budgt|budet|bujet|budgets?)\b/gi, "budget");
-  if (!/\b(budget|limit|cap)\b/i.test(text) || !(SET.test(text) || /\badd\b/i.test(text))) return null;
+  const form = isBudgetForm(text);
+  const labelled = tracksIn(text);
+  const namesLine = labelled.spending !== undefined || labelled.billsSubs !== undefined;
+  if (!form && (!/\b(budget|limit|cap)\b/i.test(text) || !(SET.test(text) || /\badd\b/i.test(text) || (namesLine && /\bbudget\b/i.test(text))))) return null;
   const span = spanIn(text, asOf);
   const { year, month } = span ?? monthIn(text, asOf);
   const scope = span?.scope ?? scopeIn(text);
@@ -386,9 +450,24 @@ export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: Iso
     if (value === null && !/\b(remove|clear|no limit|delete)\b/i.test(text)) return null;
     return { kind: "limit", year, month, name: kind, value: value ?? 0, scope, ...(toMonth ? { toMonth } : {}) };
   }
+  // "raise spending by 1000", "cut bills by 200": a change to what is there, not a new figure.
+  const by = /\bby\s+(?:₱|php\s*)?\d/i.test(text) ? (/\b(lower|reduce|cut|decrease|less|minus|bawas)\w*/i.test(text) ? -1 : /\b(increase|raise|add|more|plus|dagdag)\w*/i.test(text) ? 1 : 0) : 0;
+  if (namesLine) {
+    const sign = (c: Centavos | undefined): Centavos | undefined => (c === undefined ? undefined : by < 0 ? -c : c);
+    return {
+      kind: "tracks",
+      year,
+      month,
+      ...(labelled.spending !== undefined ? { spending: by !== 0 ? sign(labelled.spending) : labelled.spending } : {}),
+      ...(labelled.billsSubs !== undefined ? { billsSubs: by !== 0 ? sign(labelled.billsSubs) : labelled.billsSubs } : {}),
+      ...(by !== 0 ? { by: true } : {}),
+      scope,
+      ...(toMonth ? { toMonth } : {}),
+    };
+  }
   if (value === null) return null;
-  if (/\b(bills?|subscriptions?|subs)\b/i.test(text)) return { kind: "tracks", year, month, billsSubs: value, scope, ...(toMonth ? { toMonth } : {}) };
-  return { kind: "tracks", year, month, spending: value, scope, ...(toMonth ? { toMonth } : {}) };
+  if (/\b(bills?|subscriptions?|subs)\b/i.test(text)) return { kind: "tracks", year, month, billsSubs: by < 0 ? -value : value, ...(by !== 0 ? { by: true } : {}), scope, ...(toMonth ? { toMonth } : {}) };
+  return { kind: "tracks", year, month, spending: by < 0 ? -value : value, ...(by !== 0 ? { by: true } : {}), scope, ...(toMonth ? { toMonth } : {}) };
 }
 
 export interface BudgetPlan {
@@ -446,6 +525,10 @@ function valueFor(ask: BudgetAsk, budgets: Budgets, month: number): { spending: 
     const prevYear = ask.month === 1 ? ask.year - 1 : ask.year;
     const prevMonth = ask.month === 1 ? 12 : ask.month - 1;
     return budgetForMonth(budgets, prevYear, prevMonth);
+  }
+  if (ask.kind === "tracks" && ask.by) {
+    // A change to what each month already has, never below nothing.
+    return { spending: Math.max(0, current.spending + (ask.spending ?? 0)), billsSubs: Math.max(0, current.billsSubs + (ask.billsSubs ?? 0)) };
   }
   if (ask.kind === "tracks") return { spending: ask.spending ?? current.spending, billsSubs: ask.billsSubs ?? current.billsSubs };
   return current;

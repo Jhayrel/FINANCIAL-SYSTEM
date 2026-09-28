@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { namesBudgetCommand, namesMoneyFigure, planBudget, proposedBudgetIn, proposedMonthIn, readBudgetAsk, respell, saysMoneyMoved, spanIn } from "./budgetAsk";
+import { asksRatherThanTells, isBudgetForm, namesBudgetCommand, namesMoneyFigure, planBudget, tracksIn, proposedBudgetIn, proposedMonthIn, readBudgetAsk, respell, saysMoneyMoved, spanIn } from "./budgetAsk";
 import type { Budgets, ReferenceLists } from "./types";
 
 const reference: ReferenceLists = {
@@ -117,5 +117,55 @@ describe("the budget sentences from 26 September", () => {
   it("reads next month as the next month, and nothing when no month is named", () => {
     expect(proposedMonthIn("PHP **41,694.36** is a recommended budget for next month, matching what you spent this September.", "2026-09-26")).toMatchObject({ month: 10 });
     expect(proposedMonthIn("I recommend a budget of PHP 9,000.00.", "2026-09-26")).toBeNull();
+  });
+});
+
+/*
+ * 28 September 2026: "Set October's bills and subscriptions budget to
+ * ₱1,641 and spending budget to ₱6,359" made a card with PHP 0.00 for
+ * spending, and the same two lines typed as a form became a spending entry.
+ */
+describe("both budget lines in one message", () => {
+  const asOf = "2026-09-28";
+
+  it.each([
+    "Bills and subscriptions: 1641\nSpending: 6359\nSave to: Oct only",
+    "Set October's bills and subscriptions budget to ₱1,641 and spending budget to ₱6,359, saving it for October only.",
+    "set budget october 1641 for bills and 6359 for spending",
+  ])("reads each line with its own figure: %s", (said) => {
+    expect(readBudgetAsk(said, reference, asOf)).toEqual({ kind: "tracks", year: 2026, month: 10, spending: 635_900, billsSubs: 164_100, scope: "month" });
+  });
+
+  it("knows the form for a budget without the word", () => {
+    expect(isBudgetForm("Bills and subscriptions: 1641\nSpending: 6359")).toBe(true);
+    expect(isBudgetForm("paid wifi 999 bills and spent 50 on food")).toBe(false);
+    expect(readBudgetAsk("paid wifi 999 bills and spent 50 on food", reference, asOf)).toBeNull();
+  });
+
+  it("changes one line and leaves the other as it is", () => {
+    const ask = readBudgetAsk("change november bills budget to 1500", reference, asOf);
+    expect(ask).toMatchObject({ kind: "tracks", month: 11, billsSubs: 150_000 });
+    expect(ask && "spending" in ask ? ask.spending : undefined).toBeUndefined();
+    expect(tracksIn("edit october budget: spending 6000, bills 1500")).toEqual({ spending: 600_000, billsSubs: 150_000 });
+  });
+
+  it("raises or lowers by a figure, from what is set", () => {
+    const up = readBudgetAsk("raise october spending budget by 1000", reference, asOf);
+    expect(up).toMatchObject({ spending: 100_000, by: true });
+    expect(planBudget(up!, budgets, asOf, "2026-09-28T00:00:00Z").words).toContain("₱8,000.00 for spending and ₱2,000.00 for bills");
+    const down = readBudgetAsk("lower the bills budget for october by 200", reference, asOf);
+    expect(planBudget(down!, budgets, asOf, "2026-09-28T00:00:00Z").words).toContain("₱7,000.00 for spending and ₱1,800.00 for bills");
+  });
+});
+
+describe("a question is not a command", () => {
+  it.each(["should I set my budget to 9000?", "is it ok to set spending to 5000 for october?", "do you think I should raise my budget to 12000?", "dapat ba 9000 budget ko?"])("asks: %s", (said) => {
+    expect(asksRatherThanTells(said)).toBe(true);
+    expect(readBudgetAsk(said, reference, "2026-09-28")).toBeNull();
+  });
+
+  it.each(["can you set my october budget to 9000", "please set the budget to 9000", "set budget october 9000"])("tells: %s", (said) => {
+    expect(asksRatherThanTells(said)).toBe(false);
+    expect(readBudgetAsk(said, reference, "2026-09-28")).not.toBeNull();
   });
 });
