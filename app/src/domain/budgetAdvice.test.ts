@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, median } from "./budgetAdvice";
+import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, median, savingsGoalIn } from "./budgetAdvice";
 import { proposedBudgetIn, proposedMonthIn } from "./budgetAsk";
 import type { Transaction } from "./types";
 
@@ -183,5 +183,35 @@ describe("reading the question", () => {
     expect(median([100, 200, 30_000])).toBe(200);
     expect(median([100, 200])).toBe(150);
     expect(median([])).toBe(0);
+  });
+});
+
+describe("a budget asked for at length", () => {
+  const long =
+    "Okay, I want to plan October properly this time. Look at how I actually spent from April to September, not just one month, and leave out the big one-time things. My allowance for October is only 8000, and I want to keep at least 1000 aside as savings. What budget do you recommend for October, and show me the separation per item and the bills?";
+  const tagalog =
+    "Magkano dapat budget ko para sa November kung 8000 lang allowance ko at gusto ko mag-ipon ng 1500? Isama mo yung wifi pero wag na yung Netflix.";
+
+  it("reads the month beside the word budget, not the first month named", () => {
+    expect(adviceMonthIn(long, "2026-09-28")).toEqual({ year: 2026, month: 10 });
+    expect(adviceMonthIn("I overspent in May. What's a realistic budget for next month?", "2026-09-28")).toEqual({ year: 2026, month: 10 });
+    expect(adviceMonthIn(tagalog, "2026-09-28")).toEqual({ year: 2026, month: 11 });
+    expect(adviceMonthIn("recommend a budget for february", "2026-09-28")).toEqual({ year: 2027, month: 2 });
+  });
+
+  it("reads the income and what is to be kept, in English and Tagalog", () => {
+    expect(expectedIncomeIn(long)).toBe(800_000);
+    expect(savingsGoalIn(long)).toBe(100_000);
+    expect(expectedIncomeIn(tagalog)).toBe(800_000);
+    expect(savingsGoalIn(tagalog)).toBe(150_000);
+    expect(savingsGoalIn("how much would I save if I cut treats")).toBeNull();
+  });
+
+  it("keeps the savings out before anything is budgeted", () => {
+    const a = budgetAdvice({ transactions: ledger, year: 2026, month: 10, asOf: "2026-09-28", stopped, income: 500_000, keep: 100_000 });
+    // 5,000 less 1,084 of bills less 1,000 kept, down to the PHP 50: 2,900.
+    expect(a.fit?.room).toBe(290_000);
+    expect(a.fit?.keep).toBe(100_000);
+    expect(adviceWords(a)).toContain("with PHP 1,000.00 kept to save");
   });
 });

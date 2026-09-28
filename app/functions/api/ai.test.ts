@@ -149,6 +149,14 @@ describe("the conversation, apart from the figures", () => {
     expect(fitConversation(conversation, 16_000)).toBe(conversation);
   });
 
+  it("never shortens what to keep in mind", () => {
+    const pinned = "What to keep in mind:\nWhat they have told you, newest first (never ask for these again):\n- They expect about PHP 8,000.00 coming in.";
+    const cut = fitConversation(`${pinned}\n\n${conversation}`, 700);
+    expect(cut.startsWith(pinned)).toBe(true);
+    expect(cut).toContain("you: tell me whats the separation of that budget?");
+    expect(cut.length).toBeLessThanOrEqual(700);
+  });
+
   it("keeps this conversation, newest lines, before anything from earlier sessions", () => {
     const cut = fitConversation(conversation, 500);
     expect(cut.length).toBeLessThanOrEqual(500);

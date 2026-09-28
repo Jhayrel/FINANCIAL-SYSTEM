@@ -198,11 +198,11 @@ import {
   type BudgetPlan,
 } from "../domain/budgetAsk";
 import { readSpendAsk, spendAnswer } from "../domain/spendAsk";
-import { adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, type BudgetAdvice } from "../domain/budgetAdvice";
+import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { budgetForYear } from "../domain/budget";
 import { formatMedium, MONTH_NAMES } from "../domain/dates";
-import { chatHistory, earlierSessions } from "../domain/memory";
+import { chatHistory, earlierSessions, keepInMind } from "../domain/memory";
 import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, pendingChoices, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
 import { forecastYear } from "../domain/forecast";
@@ -1850,7 +1850,7 @@ export function AskPanel({
   };
 
   /** The last budget this device recommended, so "set it" takes both parts and "the separation" shows them. */
-  const lastAdvice = useRef<{ advice: BudgetAdvice; text: string } | null>(null);
+  const lastAdvice = useRef<{ advice: BudgetAdvice; text: string; asked: string } | null>(null);
   /** The budget question just asked, so the next message can answer it. */
   const budgetQuestion = useRef<{ year: number; month: number; toMonth?: number; scope: "month" | "rest" | "year" } | null>(null);
 
@@ -3240,7 +3240,21 @@ export function AskPanel({
   };
 
   /** Ask a question about the figures. */
-  const askQuestion = async (question: string, echo = true): Promise<void> => {
+  /**
+   * Ask the model, always first.
+   *
+   * The owner, 28 September 2026, after a budget answered on the device:
+   * "this is not what I want I want ai first not system always ai". So the
+   * device does the arithmetic and the model gives the answer: `worked` is
+   * what the app worked out for this question (a budget, a sum, whether
+   * something is affordable), sent above everything else as figures the
+   * model must build on, and `fallback` is said only when no model answers.
+   */
+  const askQuestion = async (
+    question: string,
+    echo = true,
+    worked: { readonly text: string; readonly fallback?: string } | null = null,
+  ): Promise<void> => {
     if (echo) say({ kind: "you", text: question });
     const asked = generation.current;
     const control = new AbortController();
@@ -3248,6 +3262,17 @@ export function AskPanel({
 
     // The newest turns whole, so a follow-up is sent what it follows (domain/memory.ts).
     const history = chatHistory(turns.filter(isSaid).map((t) => ({ role: t.kind, text: t.text })));
+    /*
+     * A budget recommended a few messages ago stays in front of the model,
+     * so "why 14K" is answered from how 14K was worked out. On 28 September
+     * it was answered "I do not have the figures for October".
+     */
+    const advised = lastAdvice.current;
+    const standing =
+      !worked && advised && turns.slice(-12).some((t) => t.kind === "you" && t.text === advised.asked)
+        ? `The budget recommended earlier in this conversation, as the app worked it out:\n${advised.text}`
+        : "";
+    const figures = worked?.text ?? standing;
     const earlier = earlierSessions(savedChat.current, [...history.map((h) => h.text.replace(/\.\.\.$/, "")), question]);
 
     // What the owner has open, so "what do you think" is about that screen (domain/screenContext.ts).
@@ -3267,6 +3292,9 @@ export function AskPanel({
            * field on the Add form.
            */
           screen: aboutTheScreen(question) ? screenText(currentScreen()) : "",
+          ...(figures ? { worked: figures } : {}),
+          // What it must not forget: what they told it, and this conversation in outline (domain/memory.ts).
+          pinned: keepInMind(savedChat.current, turns.filter(isSaid).map((t) => ({ role: t.kind, text: t.text })).concat([{ role: "you" as const, text: question }])),
           signal: control.signal,
         }),
       "Still waiting on the model",
@@ -3287,6 +3315,15 @@ export function AskPanel({
      */
     const model =
       answer.source === "model" ? modelLabel(answer.model ?? "") || "the provider" : "this device";
+    /*
+     * No model answered: the app's own working is the answer, and the line
+     * under it says why the model is not the one answering.
+     */
+    if (answer.source !== "model" && worked?.fallback) {
+      say({ kind: "assistant", text: worked.fallback, from: `this device, because ${(answer.reason ?? "no model answered").replace(/\.$/, "").replace(/^./, (c) => c.toLowerCase())}` });
+      log(aiEvent("answered", "add", { text: worked.fallback, model: "this device" }));
+      return;
+    }
     const from = answer.source === "model" ? model : (answer.reason ?? model);
     say({ kind: "assistant", text: answer.text, from });
     log(aiEvent("answered", "add", { text: answer.text, model }));
@@ -3705,105 +3742,107 @@ export function AskPanel({
     }
 
     /**
-     * "Can I afford it?", answered from what is held (`affordAsk.ts`).
-     *
-     * The owner, 27 September 2026, asked it eight ways in fifteen minutes
-     * and got "How much was it?" six times and a budget answer twice, a yes
-     * and a no a minute apart. It is answered here, on the device, from the
-     * wallets less what is still due, with the budget said apart. "Based on
-     * balance not budget" and "I am asking" after one are the same question
-     * again, about the same things.
+     * The model answers, with what the app worked out in front of it; the
+     * app's own words only when no model does (`askQuestion`).
      */
-    if (files.length === 0 && !as && !isNoteLine && !essay) {
-      const earlier = [...turns]
-        .reverse()
-        .slice(0, 8)
-        .find((t) => t.kind === "you" && isAffordQuestion(t.text));
-      /** The last thing asked, when it was that question, so "so is it an option?" is it again. */
-      const lastAsked = [...turns].reverse().slice(0, 4).find((t) => t.kind === "you");
-      const decidedJustNow = lastAsked?.kind === "you" && isAffordQuestion(lastAsked.text) ? lastAsked.text : null;
-      const again =
-        !isAffordQuestion(lead) && goesByBalance(lead) && earlier?.kind === "you"
-          ? earlier.text
-          : !isAffordQuestion(lead) && decidedJustNow && followsUpDecision(lead)
-            ? decidedJustNow
-            : null;
-      if (isAffordQuestion(lead) || again) {
-        setDraft("");
-        say({ kind: "you", text: note });
-        log(aiEvent("asked", "add", { text: note }));
-        const asked = readAffordAsk(again ? `${again} ${lead}` : lead, transactions, reference, asOf);
-        const reply = affordAnswer(asked, { transactions, reference, budgets, debts, asOf });
-        say({ kind: "assistant", text: reply, from: "this device" });
-        log(aiEvent("answered", "add", { text: reply, model: "this device" }));
-        return;
+    const answerWithModel = async (worked: string, fallback: string): Promise<void> => {
+      setBusy(true);
+      try {
+        await askQuestion(note, false, { text: worked, fallback });
+      } finally {
+        setBusy(false);
       }
-    }
+    };
 
     /**
-     * "What budget do you recommend?", worked out here (`budgetAdvice.ts`).
+     * Questions the app can work figures out for, always answered by the model.
      *
-     * 28 September 2026: asked five times with an income figure and never
-     * answered, then answered from July alone, then its "separation" was
-     * answered about September. A recommendation is arithmetic over the
-     * ledger, so the device does it, the same way each time, with the split
-     * under it and the months it read named. "set it" then puts both parts
-     * on one card, and "the separation of that" shows the parts again.
+     * The owner, 28 September 2026: "I want ai first not system always ai",
+     * and then "make it better ai first allways" after "but based on my
+     * current budget and give me realistic costing", asked about eating out,
+     * was answered with October's whole budget because it said "realistic"
+     * and "budget". The device is not the one to decide what a sentence
+     * means. It works out what the question may need, whether something is
+     * affordable (`affordAsk.ts`), a budget (`budgetAdvice.ts`), a sum
+     * (`spendAsk.ts`), and hands that to the model, which reads the question
+     * and answers it. The device's own words are said only when no model
+     * answers.
      */
-    if (files.length === 0 && !as && !isNoteLine && !essay) {
-      const advised = lastAdvice.current;
-      const stillHere = advised !== null && turns.some((t) => t.kind === "assistant" && "text" in t && t.text === advised.text);
-      const income = expectedIncomeIn(ruled);
-      const splitAgain = stillHere && asksForTheSplit(ruled) && !isAffordQuestion(lead) && ruled.split(/\s+/).length <= 16;
-      // "what if I get 10000 instead": the same month again, held to the new figure.
-      const newIncome = stillHere && income !== null && !asksBudgetAdvice(ruled) && ruled.split(/\s+/).length <= 14 && !saysMoneyMoved(ruled);
-      if (asksBudgetAdvice(ruled) || splitAgain || newIncome) {
-        setDraft("");
-        say({ kind: "you", text: note });
-        log(aiEvent("asked", "budget", { text: note }));
-        const named = spanIn(lead, asOf);
-        const next = nextOf(asOf);
-        const target =
-          named && named.anchored !== false
-            ? { year: named.year, month: named.month }
-            : (splitAgain || newIncome) && advised
-              ? { year: advised.advice.year, month: advised.advice.month }
-              : { year: next.year, month: next.month };
-        const held = income ?? (splitAgain && advised?.advice.fit ? advised.advice.fit.income : null);
-        const advice = budgetAdvice({
-          transactions,
-          year: target.year,
-          month: target.month,
-          asOf,
-          stopped: settings.stopped ?? [],
-          debts,
-          income: held,
-        });
-        const text = adviceWords(advice);
-        lastAdvice.current = { advice, text };
-        say({ kind: "assistant", text, from: "this device" });
-        log(aiEvent("answered", "budget", { text, model: "this device" }));
-        return;
-      }
-    }
+    if (files.length === 0 && !as && !isNoteLine && (!essay || entriesInside(note) < 2)) {
+      /** "should I go eat outside today?": a decision about spending, like "can I afford". */
+      const SHOULD_I = /\bshould i (?:go|eat|buy|get|order|spend|pay|try|treat|grab|have)\b|\bis it (?:ok|okay|fine|wise) (?:to|if i) (?:buy|eat|spend|get|order|go)\b/i;
+      const decides = (t: string): boolean => isAffordQuestion(t) || SHOULD_I.test(t);
+      const recentAsked = [...turns].reverse().slice(0, 8).filter((t): t is Said => t.kind === "you").map((t) => t.text);
+      const earlierAfford = recentAsked.find((t) => isAffordQuestion(t)) ?? null;
+      const decisionBefore = recentAsked.slice(0, 2).find(decides) ?? null;
+      // "based on balance not budget", "so is it an option?", "but based on my current budget": the same decision.
+      const again =
+        !decides(lead) && goesByBalance(lead) && earlierAfford
+          ? earlierAfford
+          : !decides(lead) && decisionBefore && followsUpDecision(lead)
+            ? decisionBefore
+            : null;
+      const affordish = !essay && (decides(lead) || again !== null);
 
-    /*
-     * "how much did I spend on food in August", "magkano nagastos ko sa
-     * pagkain nung august": a filter and a sum, done here (`spendAsk.ts`).
-     * A free model loses the rows first when a request is trimmed, and must
-     * not add up figures anyway. Anything it cannot place exactly, an item
-     * not on the list or a question about the future, goes on to the model.
-     */
-    if (files.length === 0 && !as && !isNoteLine && !essay && !wantsChart(note)) {
-      const spent = readSpendAsk(ruled, knownItems, asOf);
-      if (spent) {
+      const advised = lastAdvice.current;
+      const stillHere = advised !== null && turns.slice(-12).some((t) => t.kind === "you" && t.text === advised.asked);
+      const income = expectedIncomeIn(ruled);
+      const splitAgain = stillHere && asksForTheSplit(ruled) && ruled.split(/\s+/).length <= 16;
+      // "what if I get 10000 instead": the same month again, held to the new figure.
+      const newIncome =
+        stillHere && income !== null && !asksBudgetAdvice(ruled) && ruled.split(/\s+/).length <= 14 && !saysMoneyMoved(ruled) && !/^\s*(?:please\s+)?(?:remember|tandaan|keep in mind|note that|take note|fyi)\b/i.test(ruled);
+      const budgetish = !affordish && (asksBudgetAdvice(ruled) || splitAgain || newIncome);
+      const spent = !affordish && !budgetish && !essay && !wantsChart(note) ? readSpendAsk(ruled, knownItems, asOf) : null;
+
+      if (affordish || budgetish || spent) {
         setDraft("");
         say({ kind: "you", text: note });
-        log(aiEvent("asked", "add", { text: note }));
-        const reply = spendAnswer(spent, transactions, asOf);
-        say({ kind: "assistant", text: reply, from: "this device" });
-        log(aiEvent("answered", "add", { text: reply, model: "this device" }));
-        return;
+        log(aiEvent("asked", budgetish ? "budget" : "add", { text: note }));
+
+        if (affordish) {
+          const asked = readAffordAsk(again ? `${again} ${lead}` : lead, transactions, reference, asOf);
+          const reply = affordAnswer(asked, { transactions, reference, budgets, debts, asOf });
+          await answerWithModel(
+            [
+              `Whether they can afford it, as the app reads it: what the spending wallets hold less the bills and debt payments still due, what the thing usually costs going by their own entries, and the budget said apart.${again ? ` This message follows up on "${again}": it is the same decision.` : ""} Use it for the call and for what it would realistically cost; if they ask to go by the budget, give the budget's side too, and then the overall call. Answer what the message actually asks.`,
+              reply,
+            ].join("\n"),
+            reply,
+          );
+          return;
+        }
+
+        if (budgetish) {
+          // The month beside the word budget first: a long message names others.
+          const named = adviceMonthIn(ruled, asOf) ?? (essay ? null : (() => {
+            const span = spanIn(lead, asOf);
+            return span && span.anchored !== false ? { year: span.year, month: span.month } : null;
+          })());
+          const next = nextOf(asOf);
+          const target = named ?? ((splitAgain || newIncome) && advised ? { year: advised.advice.year, month: advised.advice.month } : { year: next.year, month: next.month });
+          const held = income ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.income : null);
+          const keep = savingsGoalIn(ruled) ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.keep : null);
+          const advice = budgetAdvice({ transactions, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: held, keep });
+          const text = adviceWords(advice);
+          lastAdvice.current = { advice, text, asked: note };
+          await answerWithModel(
+            [
+              `A budget for ${advice.name}, as the app works it out from the ledger: each item's median month over the months it names, the bills and subscriptions still running, one-offs and stopped ones left out${held ? ", held to the income they said" : ""}. Its figures are correct: never change or recompute them.`,
+              splitAgain
+                ? "They are asking for the parts of the budget recommended earlier: give the split, grouped as it is."
+                : `If they are asking for a budget, open with "I recommend a budget of" and its total and month, give the split, and explain why in your own words, naming the months it read and what was left out. If the message asks something else, answer that and use this only where it helps.`,
+              text,
+            ].join("\n"),
+            text,
+          );
+          return;
+        }
+
+        if (spent) {
+          const reply = spendAnswer(spent, transactions, asOf);
+          await answerWithModel(`The sum the message asks about, worked out by the app from the ledger. Answer with it, in your own words:\n${reply}`, reply);
+          return;
+        }
       }
     }
 
@@ -3818,7 +3857,13 @@ export function AskPanel({
     const couldBudget = files.length === 0 && !as && !isNoteLine && sink.canBudget;
     let budgetAsk = couldBudget ? readBudgetAsk(lead, reference, asOf) : null;
     const span = couldBudget ? spanIn(lead, asOf) : null;
-    const saysBudget = couldBudget && (namesBudgetCommand(lead) || (!essay && routed?.intent === "budget"));
+    /*
+     * The router saying "budget" is not enough for a question. "how about
+     * budget last month then upto december" was made a card, refused because
+     * August is closed (28 September 2026). A question goes to the model.
+     */
+    const asksAboutBudget = isQuestion(note) || /^\s*(?:how about|what about|why|what|how|is|are|can|could|should|would)\b/i.test(ruled);
+    const saysBudget = couldBudget && (namesBudgetCommand(lead) || (!essay && routed?.intent === "budget" && !asksAboutBudget));
 
     /**
      * "add that budget", with the figure sitting in the answer above it.
@@ -3933,7 +3978,13 @@ export function AskPanel({
      * that"). The card is planned again over the months named, and the old
      * one, if still open, is put aside so only one waits to be applied.
      */
-    if (!budgetAsk && couldBudget && noCardWaiting && lastBudget?.ask && span && !namesFigure && !movesMoney && ruled.split(/\s+/).length <= 16) {
+    /*
+     * Only when it says to do something. "how about december what budget you
+     * proporse?" moved the card above to December (28 September 2026): it
+     * asked for a proposal, and a proposal is the model's to give.
+     */
+    const doesSomething = /\b(add|apply|set|make|use|put|copy|extend|move|change|carry|long[- ]?term|from now on)\b/i.test(ruled) && !asksBudgetAdvice(ruled);
+    if (!budgetAsk && couldBudget && noCardWaiting && lastBudget?.ask && span && doesSomething && !namesFigure && !movesMoney && ruled.split(/\s+/).length <= 16) {
       budgetAsk = over(lastBudget.ask, span);
       if (lastBudget.state === "open") decide(lastBudgetAt, "discarded");
     }
@@ -3944,19 +3995,29 @@ export function AskPanel({
      * spending line would count the bills twice.
      */
     const advisedLast = lastAdvice.current;
+    const advisedHere = advisedLast !== null && turns.slice(-12).some((t) => t.kind === "you" && t.text === advisedLast.asked);
     if (
       !budgetAsk &&
       couldBudget &&
       advisedLast &&
-      recentProposal?.text === advisedLast.text &&
+      advisedHere &&
+      recentProposal !== null &&
       !namesFigure &&
       (yesToBudget || saysBudget || confirmsProposal(ruled) || /\b(use|set|apply|add)\b[^.]{0,20}\b(that|it|this|recommend\w*|suggest\w*|what you said)\b/i.test(ruled))
     ) {
+      /*
+       * The model said the figure; the app knows its parts. The app's own
+       * total goes in as its two parts. A different total the model chose
+       * keeps the bills as worked out and puts the rest to spending.
+       */
       const a = advisedLast.advice;
       const spendingAt = a.fit && !a.fit.fits ? a.fit.spending : a.spending;
+      const said = recentProposal.value;
+      const parts = said === spendingAt + a.billsSubs || said <= a.billsSubs ? { spending: spendingAt, billsSubs: a.billsSubs } : { spending: said - a.billsSubs, billsSubs: a.billsSubs };
+      const month = proposedMonthIn(recentProposal.text, asOf) ?? { year: a.year, month: a.month };
       budgetAsk = over(
-        { kind: "tracks", year: a.year, month: a.month, spending: spendingAt, billsSubs: a.billsSubs, scope: "month" },
-        span ?? { year: a.year, month: a.month, scope: "month", anchored: true },
+        { kind: "tracks", year: month.year, month: month.month, ...parts, scope: "month" },
+        span ?? { year: month.year, month: month.month, scope: "month", anchored: true },
       );
     }
     if (!budgetAsk && couldBudget && (saysBudget || yesToBudget)) {
@@ -5296,11 +5357,19 @@ export function AskPanel({
       !isQuestion(note) &&
       readEntry(note, transactions, reference, asOf).worthOffering;
 
+    /*
+     * "remember that my allowance is 8000 a month" is said to the assistant,
+     * not money moving: it became an income card (28 September 2026). The
+     * model acknowledges it, and `keepInMind` carries it from then on.
+     */
+    const tellsToRemember = /^\s*(?:please\s+|pls\s+|ok(?:ay)?\s+)?(?:remember|tandaan|keep in mind|note that|take note|fyi|for your info(?:rmation)?)\b/i.test(ruled);
     const job =
       as ??
       (files.length > 0
         ? "log"
-        : /**
+        : tellsToRemember
+          ? "ask"
+          : /**
            * Advice outranks a sentence that also reads as an entry.
            *
            * "should I go to mcdonalds today spend 30k?" has a verb, a figure

@@ -94,6 +94,8 @@ export interface AskOptions {
   readonly earlier?: string;
   /** Called off by the owner: Stop, or Clear this view. */
   readonly signal?: AbortSignal;
+  /** What the model must not forget, sent whole above the conversation (`domain/memory.ts`, `keepInMind`). */
+  readonly pinned?: string;
   /**
    * A context built somewhere other than `contextToText`.
    *
@@ -246,7 +248,7 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
    * asking about the first you said", 28 September 2026). The server keeps
    * it whole beside the figures, newest lines first when it must shorten it.
    */
-  const conversation = conversationBlock(options.earlier ? redact(options.earlier) : "", options.history ?? []);
+  const conversation = conversationBlock(options.earlier ? redact(options.earlier) : "", options.history ?? [], 14_000, options.pinned ? redact(options.pinned) : "");
 
   try {
     const response = await doFetch(ENDPOINT, {

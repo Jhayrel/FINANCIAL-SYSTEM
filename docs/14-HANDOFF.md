@@ -293,14 +293,38 @@ based on my current spending and the separation, it didnt answer it
 right", and "make an algorithm that works everything from free ai so
 that it wont get lost or forget".
 
-The rule this round settled on: **what the ledger can answer exactly is
-answered on the device, and what goes to a free model travels with the
-conversation where trimming cannot reach it.**
+The rule this round settled on, in the owner's words, "ai first
+allways": **the model answers every question. The device works out the
+figures a question may need and puts them above everything else as
+"Worked out by the app for this question"; its own words are said only
+when no model answers, marked "this device, because ...". Actions (cards,
+charts, files, deletes) stay the device's.** A first version answered
+budgets, sums and affordability on the device; the owner rejected it the
+same night ("this is not what I want I want ai first not system always
+ai"), and it was changed before the next deploy.
+
+**What the model is never allowed to forget** (`domain/memory.ts`,
+`keepInMind`), sent whole with every question above the conversation,
+where no trimming reaches (`fitConversation` keeps it):
+
+- what the owner told it, read from every saved message, newest first:
+  the income they expect, what they want saved, "based on balance not
+  budget", plans, "remember ...", and corrections they made;
+- this conversation in outline: every question and the first sentence of
+  its answer, numbered, so "the first you said" and "why 14K" point at
+  something.
+
+A budget recommended a few messages ago also goes back with the next
+questions as the app worked it out, so "why that number?" is answered
+from how it was made.
 
 | Found | Now |
 |---|---|
 | "what budget do you recommend for October if I only expect 8000 allowance?" asked five times, never answered | It read as a what if ("if i"), the what-if section subtracted centavos from pesos, the formatter threw, and the dropped promise said nothing. Units fixed; income wording is not a purchase; any fault now says so and is logged |
-| "realistic budget next month" answered from July alone; "the separation of that" answered about September | `domain/budgetAdvice.ts`: each item's median month over the six before, bills still running at their last amount, stopped ones and one-offs named and left out, held to an income when one is said, wants cut by the same share before any need. "set it" makes one card with both parts |
+| "realistic budget next month" answered from July alone; "the separation of that" answered about September | `domain/budgetAdvice.ts` works out the budget the model is given: each item's median month over the six before, bills still running at their last amount, stopped ones and one-offs named and left out, held to an income and a savings goal when said, wants cut by the same share before any need. The month is the one beside the word budget. "set it" makes one card with both parts |
+| "how about december what budget you proporse?" moved an October card to December | A question for a proposal goes to the model; a card is made only when the message says to do something (set, add, apply) |
+| "but based on my current budget and give me realistic costing", about eating out, got October's whole budget | It is the eating-out decision again: the model gets the wallets, what a meal usually costs them and the budget |
+| "remember that my allowance is 8000 a month" became an income card | Said to the assistant, kept in memory |
 | The conversation was appended below the entries, and a model refusing the size had it cut first | Sent as its own `conversation` field; the server keeps it beside the figures and shortens it from the oldest end (`fitConversation`). The newest four turns go whole, not cut to 500 characters |
 | At 18,000 characters the figures were cut from the end, losing the window asked about and the years | `compactContext` drops whole sections, least needed first (flags, the debt log, day by day), and says which |
 | Stop said "Stopped" and the answer arrived anyway; Clear this view left a pending question and an in-flight answer behind | Both abort the request and drop a late answer; Clear forgets the waiting entry, the card question, the rename, the last recommendation |
@@ -308,13 +332,15 @@ conversation where trimming cannot reach it.**
 | "pie" and "spending only" after "by year" went back to the first chart's window, one point | The router's period is used only when the message names one; year by year inside one year is month by month |
 | "compare income vs spending this year" drew two lists of items | Month against month |
 | "so is it an option or not?" after the device's yes went to the model and came back no | The device answers the same decision again (`followsUpDecision`) |
-| "how much did I spend on food in August" was a model's sum | `domain/spendAsk.ts`: the charts' window and `costOf`, in English, Tagalog and phone typos; an item not on the list still goes to the model |
+| "how much did I spend on food in August" was a model's sum | `domain/spendAsk.ts` works out the sum the model is given: the charts' window and `costOf`, in English, Tagalog and phone typos |
 
-Verified against the emulator with a deliberately slow fake model: the
-recommendation and its split, "set it" to one card held to a stated
-income, a spend answer, no file for "how much would I save", Stop and
-Clear dropping answers that land after them, and the request carrying
-`conversation` apart from `context`.
+Verified against the emulator with a fake model that reports what it was
+sent: every question reached the model with the right worked figures
+(affordability, a December budget, a sum, the standing budget for "why
+that number?"), the memory block and the outline; "set it" made the
+December card in its two parts; "remember ..." made no card; with every
+model failing, the device's figures were said and marked why. Stop and
+Clear drop answers that land after them.
 
 ---
 

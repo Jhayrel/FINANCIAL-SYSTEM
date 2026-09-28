@@ -59,7 +59,7 @@ export const isAffordQuestion = (text: string): boolean => AFFORD.test(text);
  * way, with the budget said apart as before.
  */
 const DECISION =
-  /^\s*(?:so|but|then|ok(?:ay)?|and|wait)?[\s,]*(?:is (?:it|that) (?:an? )?(?:option|ok(?:ay)?|possible|fine|good|a yes|a no)|yes or no|can i or not|so can i|or not|what'?s the (?:answer|verdict|call)|should i or not|(?:but )?i'?m over (?:the |my )?budget|(?:but )?what about (?:the |my )?budget|is it yes|is it no|so yes|so no)\b[^.]{0,40}\??\s*$/i;
+  /^\s*(?:so|but|then|ok(?:ay)?|and|wait)?[\s,]*(?:is (?:it|that) (?:an? )?(?:option|ok(?:ay)?|possible|fine|good|a yes|a no)|yes or no|can i or not|so can i|or not|what'?s the (?:answer|verdict|call)|should i or not|(?:but )?i'?m over (?:the |my )?budget|(?:but )?what about (?:the |my )?budget|is it yes|is it no|so yes|so no|based on (?:my |the )?(?:current )?(?:budget|balance)|(?:give me )?(?:a )?realistic cost\w*|how much (?:would|will) it (?:cost|be))\b[^.]{0,40}\??\s*$/i;
 export const followsUpDecision = (text: string): boolean => DECISION.test(text.trim()) && text.trim().split(/\s+/).length <= 12;
 
 /** A follow-up that only makes sense with an affordability question before it. */

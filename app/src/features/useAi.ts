@@ -83,6 +83,10 @@ export interface UseAi {
       earlier?: string;
       /** Stop and Clear this view call it off. */
       signal?: AbortSignal;
+      /** What the app worked out for this question, sent above the figures. */
+      worked?: string;
+      /** What the model must not forget (`domain/memory.ts`). */
+      pinned?: string;
     },
   ) => Promise<AiAnswer>;
   readonly clear: () => void;
@@ -210,6 +214,8 @@ export function useAi({
         earlier?: string;
         /** Stop and Clear this view call it off. */
         signal?: AbortSignal;
+        worked?: string;
+        pinned?: string;
       } = {},
     ): Promise<AiAnswer> => {
       // Switched off means nothing is sent, not that nothing comes back.
@@ -248,6 +254,13 @@ export function useAi({
               ...(options.screen ? { screen: options.screen } : {}),
             }).text
           : undefined;
+      /*
+       * What the app worked out for this question goes first, above every
+       * other figure, where no trimming reaches: the model builds its answer
+       * on it rather than doing the sum (AskPanel.tsx, `askQuestion`).
+       */
+      const withWorked =
+        chatText && options.worked ? `## Worked out by the app for this question\n${options.worked.trim()}\n\n${chatText}` : chatText;
 
       const answered = await askAi({
         context,
@@ -255,11 +268,12 @@ export function useAi({
         tone: ai.tone,
         provider: ai.provider,
         model: ai.model,
-        ...(chatText ? { contextText: chatText } : {}),
+        ...(withWorked ? { contextText: withWorked } : {}),
         ...(options.question ? { question: options.question } : {}),
         ...(options.history ? { history: options.history } : {}),
         ...(options.earlier ? { earlier: options.earlier } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.pinned ? { pinned: options.pinned } : {}),
       });
 
       /**
@@ -289,7 +303,7 @@ export function useAi({
        * when the model repeats it.
        */
       const said = [options.earlier ?? "", ...(options.history ?? []).map((h) => h.text)].join("\n");
-      const note = untracedNote(answered.text, [chatText ?? contextToText(context), said].join("\n"), formatMoney);
+      const note = untracedNote(answered.text, [withWorked ?? contextToText(context), said, options.pinned ?? ""].join("\n"), formatMoney);
       return note === "" ? answered : { ...answered, text: [answered.text, note].join("\n\n") };
     },
     [context, disabled, ai.enabled, ai.tone, ai.provider, ai.model, transactions, asOf, budgets, settings.credits],

@@ -116,6 +116,8 @@ export interface BudgetAdvice {
     readonly cuts: readonly { readonly name: string; readonly from: Centavos; readonly to: Centavos }[];
     /** Short even after every want is gone. */
     readonly short: Centavos;
+    /** Kept back to save before anything is budgeted, when they said so. */
+    readonly keep: Centavos;
   };
 }
 
@@ -149,6 +151,8 @@ export interface AdviceInput {
   readonly debts?: readonly Debt[];
   /** What the owner said they expect to receive in the month. */
   readonly income?: Centavos | null;
+  /** What they want kept back to save, out of that income. */
+  readonly keep?: Centavos | null;
 }
 
 export function budgetAdvice(input: AdviceInput): BudgetAdvice {
@@ -271,9 +275,10 @@ export function budgetAdvice(input: AdviceInput): BudgetAdvice {
   // ── 5. Held to what is coming in ───────────────────────────────────────────
   let fit: BudgetAdvice["fit"];
   if (input.income && input.income > 0) {
-    const room = down(input.income - billsSubs - debtDue);
+    const keep = Math.max(0, input.keep ?? 0);
+    const room = down(input.income - billsSubs - debtDue - keep);
     if (spending <= room) {
-      fit = { income: input.income, room, fits: true, spending, cuts: [], short: 0 };
+      fit = { income: input.income, room, fits: true, spending, cuts: [], short: 0, keep };
     } else {
       /*
        * The wants give, each by the same share, rather than the largest going
@@ -289,7 +294,7 @@ export function budgetAdvice(input: AdviceInput): BudgetAdvice {
           ? wants.map((l) => ({ name: l.name, from: l.amount, to: 0 }))
           : wants.map((l) => ({ name: l.name, from: l.amount, to: down(Math.floor((l.amount * (wanted - over)) / wanted)) }));
       const after = spending - cuts.reduce((sum, c) => sum + (c.from - c.to), 0);
-      fit = { income: input.income, room, fits: false, spending: after, cuts, short: Math.max(0, after - Math.max(0, room)) };
+      fit = { income: input.income, room, fits: false, spending: after, cuts, short: Math.max(0, after - Math.max(0, room)), keep };
     }
   }
 
@@ -353,15 +358,16 @@ export function adviceWords(a: BudgetAdvice, options: { readonly split?: boolean
   );
 
   if (a.fit) {
+    const kept = a.fit.keep > 0 ? ` with ${money(a.fit.keep)} kept to save` : "";
     if (a.fit.fits) {
-      out.push(`It fits the ${money(a.fit.income)} you expect${a.debtDue > 0 ? ` after ${money(a.debtDue)} of debt payments due` : ""}, leaving **${money(a.fit.income - a.total - a.debtDue)}** to save.`);
+      out.push(`It fits the ${money(a.fit.income)} you expect${kept}${a.debtDue > 0 ? ` after ${money(a.debtDue)} of debt payments due` : ""}, leaving **${money(a.fit.income - a.total - a.debtDue)}** unspent${a.fit.keep > 0 ? ", your savings included" : " to save"}.`);
     } else {
       const cuts = a.fit.cuts.map((c) => `${c.name} from ${money(c.from)} to ${money(c.to)}`);
       out.push(
-        `Your usual month (${money(a.total)}) is more than the ${money(a.fit.income)} you expect${a.debtDue > 0 ? ` less ${money(a.debtDue)} of debt payments due` : ""}, so the spending part is held to ${money(spendingAt)}${cuts.length > 0 ? `, by cutting ${cuts.join(", ")}` : ""}.`,
+        `Your usual month (${money(a.total)}) is more than the ${money(a.fit.income)} you expect${kept}${a.debtDue > 0 ? ` less ${money(a.debtDue)} of debt payments due` : ""}, so the spending part is held to ${money(spendingAt)}${cuts.length > 0 ? `, by cutting ${cuts.join(", ")}` : ""}.`,
       );
       if (a.fit.short > 0) {
-        out.push(`Even with every want cut it is **${money(a.fit.short)}** short: the needs alone (${a.items.filter((l) => !WANTS.test(l.name)).map((l) => l.name).join(", ")}) cost more than that leaves. The gap has to come from savings or more income.`);
+        out.push(`Even with every want cut it is **${money(a.fit.short)}** short: the needs alone (${a.items.filter((l) => !WANTS.test(l.name)).map((l) => l.name).join(", ")}) cost more than that leaves. The gap has to come from ${a.fit.keep > 0 ? "saving less this month, " : ""}savings or more income.`);
       }
     }
   } else if (a.typicalIncome > 0) {
@@ -419,7 +425,9 @@ export function asksBudgetAdvice(said: string): boolean {
   if (!/\bbudget/.test(text)) return false;
   if (/^\s*(set|change|update|make|put|copy|apply|use|add)\b/.test(text) && !/\?\s*$/.test(text)) return false;
   return (
-    /\b(recommend\w*|suggest\w*|propos\w*|realistic|reasonable|ideal|advise|advice)\b/.test(text) ||
+    // Spelled as typed on a phone: "proporse", "propoised", "reccomend", "sugest".
+    /\b(re?c+om+e?n?d\w*|sug+est\w*|prop[a-z]*s[a-z]*|realistic|reasonable|ideal|advi[cs]e)\b/.test(text) ||
+    /\bwhat\b[^.?!]{0,20}\bbudget\b[^.?!]{0,15}\b(?:you|u)\b/.test(text) ||
     /\b(magkano|ilan)\b[^.?!]{0,30}\bbudget\b/.test(text) ||
     /\b(what|how much|magkano|ilan)\b[^.?!]{0,40}\bbudget\b[^.?!]{0,20}\b(be|should|dapat|set|for|next|need)\b/.test(text) ||
     /\bwhat\s+(?:should|would|could)\b[^.?!]{0,30}\bbudget\b/.test(text) ||
@@ -437,8 +445,9 @@ export function expectedIncomeIn(said: string): Centavos | null {
   const INCOME = String.raw`(?:allowance|income|salary|sahod|kita|pay(?:check)?|budget money|money coming in|revenue)`;
   const patterns = [
     new RegExp(String.raw`\b(?:expect|expecting|get|getting|receive|receiving|earn|earning|make|making|have|only have|will have|matatanggap|makukuha)\w*\s+(?:only\s+|about\s+|around\s+|just\s+)?${NUM}`),
-    new RegExp(String.raw`${NUM}\s*(?:pesos?\s+)?(?:of\s+)?(?:as\s+)?(?:my\s+)?${INCOME}`),
-    new RegExp(String.raw`${INCOME}\s+(?:ko\s+)?(?:is|of|will be|would be|=|:|ay)?\s*(?:only\s+|about\s+|around\s+|just\s+)?${NUM}`),
+    new RegExp(String.raw`${NUM}\s*(?:pesos?\s+)?(?:lang\s+|only\s+|na\s+)?(?:of\s+)?(?:as\s+)?(?:my\s+|ang\s+)?${INCOME}`),
+    // "my allowance for October is only 8000": a few words may stand between.
+    new RegExp(String.raw`${INCOME}\b[^.?!\d]{0,30}?(?:\bis|\bof|\bwill be|\bwould be|=|:|\bay|\blang)?\s*(?:only\s+|about\s+|around\s+|just\s+)?${NUM}`),
   ];
   for (const p of patterns) {
     const m = p.exec(text);
@@ -458,4 +467,62 @@ export function expectedIncomeIn(said: string): Centavos | null {
 export function asksForTheSplit(said: string): boolean {
   const text = said.toLowerCase();
   return /\b(separat\w*|breakdown|break\s+(?:it\s+)?down|split|splits|parts?|per item|each item|by item|itemi[sz]e\w*|allocation|allocate\w*|distribut\w*|hati\w*|detail\w*|where does it go|what (?:is|are) (?:in|inside) it)\b/.test(text);
+}
+
+/**
+ * What they want kept back: "I want to save 2000", "set aside 1,500",
+ * "ipon 1000", "keep 2k for savings". Not "how much would I save", which
+ * asks rather than says.
+ */
+export function savingsGoalIn(said: string): Centavos | null {
+  const text = said.toLowerCase().replace(/(\d+(?:\.\d+)?)\s*k\b/g, (_m, n: string) => String(Math.round(Number(n) * 1000)));
+  if (/\bhow much (?:would|could|can|will) i save\b/.test(text) && !/\b(want|plan|goal|aim|need)\w* to save\b/.test(text)) return null;
+  const NUM = String.raw`(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)`;
+  const patterns = [
+    new RegExp(String.raw`\b(?:save|saving|set aside|put aside|keep|ipon|mag-?ipon|itabi)\s+(?:ng\s+|at least\s+|around\s+|about\s+|mga\s+)*${NUM}`),
+    new RegExp(String.raw`${NUM}\s*(?:pesos?\s+)?(?:for|to|into|as|sa)\s+(?:my\s+)?(?:savings?|ipon)\b`),
+    new RegExp(String.raw`\bsavings?\s+(?:goal\s+)?(?:of|is|=|:)\s*${NUM}`),
+  ];
+  for (const p of patterns) {
+    const raw = p.exec(text)?.[1]?.replace(/,/g, "");
+    if (!raw) continue;
+    const value = Math.round(Number(raw) * 100);
+    if (Number.isFinite(value) && value >= 10_000 && !/^20\d{2}$/.test(raw)) return value;
+  }
+  return null;
+}
+
+const MONTH_WORDS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/**
+ * The month a budget is being asked for, in a message that may name others.
+ *
+ * "I spent a lot in May and June because of school. What budget do you
+ * recommend for October?" is about October; the first month named is not
+ * the one. Read from the words beside "budget", then "next month".
+ */
+export function adviceMonthIn(said: string, asOf: IsoDate): { year: number; month: number } | null {
+  const text = said.toLowerCase();
+  const year = Number(asOf.slice(0, 4));
+  const now = Number(asOf.slice(5, 7));
+  const MONTH = String.raw`(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
+  const found =
+    new RegExp(String.raw`\bbudget\b[^.?!]{0,60}?\b(?:for|in|on|sa|ng|this|coming)\s+(?:the\s+)?(?:month\s+of\s+)?${MONTH}\b(?:\s+(20\d{2}))?`).exec(text) ??
+    new RegExp(String.raw`\b${MONTH}(?:\s+(20\d{2}))?(?:'s)?\s+budget\b`).exec(text);
+  if (found?.[1]) {
+    const month = MONTH_WORDS.indexOf(found[1].slice(0, 3)) + 1;
+    // A month already past this year means next year's, unless a year is said.
+    const y = found[2] ? Number(found[2]) : month < now ? year + 1 : year;
+    return { year: y, month };
+  }
+  if (/\bnext month\b|\bsusunod na buwan\b|\bcoming month\b/.test(text)) return now === 12 ? { year: year + 1, month: 1 } : { year, month: now + 1 };
+  // "how about december what budget you propose?": the one month it names.
+  const named = [...text.matchAll(new RegExp(String.raw`\b${MONTH}\b`, "g"))].map((m) => MONTH_WORDS.indexOf((m[1] ?? "").slice(0, 3)) + 1).filter((m) => m > 0);
+  const months = [...new Set(named)];
+  if (months.length === 1 && months[0] !== undefined && !/\blast month\b/.test(text)) {
+    const month = months[0];
+    return { year: month < now ? year + 1 : year, month };
+  }
+  if (/\bbudget\b[^.?!]{0,40}\bthis month\b|\bthis month'?s budget\b/.test(text)) return { year, month: now };
+  return null;
 }

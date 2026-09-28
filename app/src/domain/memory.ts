@@ -14,6 +14,9 @@
  */
 
 import type { ChatMessage } from "./chat";
+import { goesByBalance } from "./affordAsk";
+import { expectedIncomeIn, savingsGoalIn } from "./budgetAdvice";
+import { formatMoney } from "./money";
 
 /** Lines the app writes about itself, which say nothing the ledger does not. */
 const BOOKKEEPING =
@@ -104,11 +107,106 @@ export function keepNewest(text: string, max: number): string {
  * just said. This conversation is kept before earlier sessions when room is
  * short, and within each the newest lines are kept.
  */
-export function conversationBlock(earlier: string, history: readonly Spoken[], max = 14_000): string {
+export function conversationBlock(earlier: string, history: readonly Spoken[], max = 14_000, pinned = ""): string {
   const HEADER = "Earlier in this conversation:";
+  const keep = pinned.trim() ? pinned.trim().slice(0, PINNED_ROOM) : "";
+  const left = max - keep.length - 2;
   const lines = history.map((h) => `${h.role}: ${h.text}`).join("\n");
-  const now = lines ? `${HEADER}\n${keepNewest(lines, max - HEADER.length - 1)}` : "";
-  const room = max - now.length - 2;
+  const now = lines ? `${HEADER}\n${keepNewest(lines, left - HEADER.length - 1)}` : "";
+  const room = left - now.length - 2;
   const before = earlier.trim() && room > 300 ? `Earlier sessions, oldest first:\n${keepNewest(earlier.trim(), room - 40)}` : "";
-  return [before, now].filter(Boolean).join("\n\n");
+  return [keep, before, now].filter(Boolean).join("\n\n");
+}
+
+/** The most the pinned block may take: it goes with every question, whole. */
+export const PINNED_ROOM = 2_600;
+
+const short = (text: string, most: number): string => {
+  const flat = text.replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
+  return flat.length > most ? `${flat.slice(0, most - 3)}...` : flat;
+};
+const firstSentence = (text: string): string => {
+  const flat = text.replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
+  const end = flat.search(/(?<=[.!?])\s/);
+  return end > 0 ? flat.slice(0, end) : flat;
+};
+const money = (c: number): string => formatMoney(c).replace(/^₱/, "PHP ");
+
+/**
+ * What the model is never allowed to forget, pinned above the conversation.
+ *
+ * ── Why a pinned block ────────────────────────────────────────────────────
+ *
+ * The owner, 28 September 2026: "make an algorithm so the ai wont forget".
+ * The conversation is long and gets shortened; what matters in it is small.
+ * So two things are worked out here, on the device, every time, and sent
+ * whole with every question, above the conversation, where no trimming
+ * reaches (`functions/api/ai.ts`, `fitConversation`):
+ *
+ *   What they told you. From everything the owner ever typed, newest first:
+ *   what they expect to receive, what they want saved, how they want
+ *   "can I afford it" judged, their plans, what they asked to be
+ *   remembered, and what they corrected. Across sessions and past Clear
+ *   this view, because it is read from the saved record.
+ *
+ *   This conversation, in outline. Every question on screen and the first
+ *   sentence of its answer, numbered, so "the first you said", "that
+ *   budget" and "why 14K" point at something the model can see, however
+ *   much of the rest had to go.
+ *
+ * Only the owner's own words become facts. Nothing is inferred about them,
+ * and a developer note ("//...") is never one.
+ */
+export function keepInMind(saved: readonly ChatMessage[], onScreen: readonly Spoken[]): string {
+  const theirs = [...saved]
+    .filter((m) => m.role === "you" && m.text.trim() !== "" && !m.text.trim().startsWith("//"))
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  // What is on screen and not saved yet counts too, as said today.
+  const seen = new Set(theirs.map((m) => m.text.trim()));
+  const unsaved = onScreen.filter((t) => t.role === "you" && !seen.has(t.text.trim()) && !t.text.trim().startsWith("//"));
+  const said: { text: string; day: string }[] = [
+    ...[...unsaved].reverse().map((t) => ({ text: t.text, day: "today" })),
+    ...theirs.map((m) => ({ text: m.text, day: m.at.slice(0, 10) })),
+  ];
+
+  const facts: string[] = [];
+  const income = said.find((m) => expectedIncomeIn(m.text) !== null);
+  if (income) facts.push(`They expect about ${money(expectedIncomeIn(income.text) ?? 0)} coming in (${income.day}: "${short(income.text, 110)}").`);
+  const goal = said.find((m) => savingsGoalIn(m.text) !== null);
+  if (goal) facts.push(`They want to keep ${money(savingsGoalIn(goal.text) ?? 0)} aside to save (${goal.day}).`);
+  const basis = said.find((m) => goesByBalance(m.text));
+  if (basis) facts.push(`They want "can I afford it" judged by what the wallets hold, not by the budget (${basis.day}).`);
+
+  const PLAN = /\b(?:i'?m planning|i plan|planning to|i will|i'?ll|i'?m going to|i am going to|next week|balak|plano)\b/i;
+  const REMEMBER = /\b(?:remember|tandaan|keep in mind|note that|fyi|for your info)\b/i;
+  const CORRECTED = /\b(?:that'?s wrong|that is wrong|not correct|incorrect|mali|you are wrong|you'?re wrong|i said|i mean|i meant|not what i (?:want|asked))\b/i;
+  const asking = (t: string): boolean => /\?\s*$/.test(t);
+  const pick = (test: (t: string) => boolean, most: number, label: string): void => {
+    const found = said.filter((m) => test(m.text)).slice(0, most);
+    for (const m of found) facts.push(`${label} (${m.day}): "${short(m.text, 160)}"`);
+  };
+  pick((t) => REMEMBER.test(t), 4, "Asked you to remember");
+  pick((t) => PLAN.test(t) && !asking(t), 3, "A plan they mentioned");
+  pick((t) => CORRECTED.test(t), 3, "They corrected you");
+
+  const outline: string[] = [];
+  let n = 0;
+  for (let i = 0; i < onScreen.length; i += 1) {
+    const turn = onScreen[i];
+    if (!turn || turn.role !== "you") continue;
+    const reply = onScreen.slice(i + 1).find((t) => t.role === "assistant");
+    const next = onScreen.slice(i + 1).find((t) => t.role === "you");
+    const answered = reply && (!next || onScreen.indexOf(reply) < onScreen.indexOf(next));
+    n += 1;
+    outline.push(`${n}. They asked: "${short(turn.text, 120)}"${answered && reply ? ` You answered: "${short(firstSentence(reply.text), 180)}"` : ""}`);
+  }
+
+  const parts: string[] = [];
+  if (facts.length > 0) parts.push(["What they have told you, newest first (never ask for these again):", ...facts.map((f) => `- ${f}`)].join("\n"));
+  // The first question stays whatever else goes: "the first you said" is about it.
+  const kept = outline.length > 12 ? [outline[0] ?? "", "...", ...outline.slice(-10)] : outline;
+  if (outline.length > 1) parts.push(["This conversation so far, in order (\"the first\", \"that\", \"it\" point at these):", ...kept].join("\n"));
+  if (parts.length === 0) return "";
+  const block = ["What to keep in mind:", ...parts].join("\n");
+  return block.length > PINNED_ROOM ? `${block.slice(0, PINNED_ROOM - 3)}...` : block;
 }

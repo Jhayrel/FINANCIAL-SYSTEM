@@ -152,7 +152,7 @@ describe("the answer goes by what is held, and says the budget apart", () => {
  * device's to make again.
  */
 describe("asking the same decision again", () => {
-  it.each(["so is it an option or not?", "yes or no?", "but I'm over budget right?", "so can I", "is that a yes?"])("is a follow-up: %s", (q) => {
+  it.each(["so is it an option or not?", "yes or no?", "but I'm over budget right?", "so can I", "is that a yes?", "but based on my current budget and give me realistic costing"])("is a follow-up: %s", (q) => {
     expect(followsUpDecision(q)).toBe(true);
   });
 
