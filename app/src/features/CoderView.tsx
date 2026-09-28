@@ -52,7 +52,7 @@
 
 import { useEffect, useState } from "react";
 
-import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, getDocsFromCache } from "firebase/firestore";
 
 import { firestore } from "../data/firebase";
 import { activityStore } from "../data/activityStore";
@@ -115,15 +115,44 @@ interface Dumped {
  * One throw would lose the five that worked, and the file would say nothing
  * about why. A named denial is a diagnosis; an empty file is a mystery.
  */
+/**
+ * How long a collection's read may take before the copy on this device is used.
+ *
+ * 27 September 2026: the owner's saved dump was the single word "Reading…".
+ * A read from the server has no time limit of its own, and on a phone with
+ * patchy signal it can simply never answer, so the screen waited forever
+ * and Copy all copied the placeholder. Now each read gives up after this
+ * long, falls back to what this device has saved, and says so.
+ */
+const SERVER_WAIT_MS = 20_000;
+
+/** A promise that gives up, as `null`, after `ms`. */
+const within = <T,>(ms: number, work: Promise<T>): Promise<T | null> =>
+  Promise.race([work, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
+
 async function readAll(uid: string, name: string): Promise<Dumped> {
   const db = firestore();
   if (!db) return { name, docs: [], failed: "Firebase is not configured in this build." };
+  const docsOf = (snapshot: { docs: readonly { id: string; data: () => unknown }[] }) =>
+    snapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }));
   try {
-    const snapshot = await getDocs(collection(db, `users/${uid}/${name}`));
-    return {
-      name,
-      docs: snapshot.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> })),
-    };
+    const ref = collection(db, `users/${uid}/${name}`);
+    const snapshot = await within(SERVER_WAIT_MS, getDocs(ref));
+    if (snapshot) return { name, docs: docsOf(snapshot) };
+    try {
+      const saved = await getDocsFromCache(ref);
+      return {
+        name,
+        docs: docsOf(saved),
+        note: `The server did not answer within ${SERVER_WAIT_MS / 1000} seconds, so this is the copy saved on this device. It can be behind the database.`,
+      };
+    } catch {
+      return {
+        name,
+        docs: [],
+        failed: `No answer from the server within ${SERVER_WAIT_MS / 1000} seconds, and nothing of it is saved on this device. Check the connection and open this page again.`,
+      };
+    }
   } catch (e) {
     /*
      * The error as Firestore gave it, code and all. Every refusal used to
@@ -551,7 +580,12 @@ export interface LocalData {
 }
 
 export function CoderView({ uid, local }: { uid: string | null; local: LocalData }) {
-  const [text, setText] = useState("Reading…");
+  const [text, setText] = useState("");
+  /** Each collection as it arrives, so a slow read shows where it is instead of one word. */
+  const [progress, setProgress] = useState<Readonly<Record<string, string>>>({});
+  const [done, setDone] = useState(false);
+  const [started] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const [saved, setSaved] = useState("");
   /** Shown as a banner, because a line of text in the dump was missed. */
   const [wrongBuild, setWrongBuild] = useState(false);
@@ -591,9 +625,23 @@ export function CoderView({ uid, local }: { uid: string | null; local: LocalData
           ].join(String.fromCharCode(10)),
         );
         setWrongBuild(true);
+        setDone(true);
         return;
       }
-      const dumps = (await Promise.all(COLLECTIONS.map((name) => readAll(uid, name)))).map((d) => orLocal(d, local));
+      const dumps = (
+        await Promise.all(
+          COLLECTIONS.map(async (name) => {
+            const dump = await readAll(uid, name);
+            if (alive) {
+              setProgress((p) => ({
+                ...p,
+                [name]: dump.failed ? "could not read" : `${dump.docs.length} documents${dump.note ? ", from this device" : ""}`,
+              }));
+            }
+            return dump;
+          }),
+        )
+      ).map((d) => orLocal(d, local));
 
       /**
        * `users/{uid}` itself, in its own try, and this is load-bearing.
@@ -611,8 +659,8 @@ export function CoderView({ uid, local }: { uid: string | null; local: LocalData
       try {
         const db = firestore();
         if (db) {
-          const snapshot = await getDoc(doc(db, `users/${uid}`));
-          root = snapshot.exists() ? JSON.stringify(snapshot.data()) : "";
+          const snapshot = await within(5_000, getDoc(doc(db, `users/${uid}`)));
+          root = snapshot?.exists() ? JSON.stringify(snapshot.data()) : "";
         }
       } catch {
         // Denied, or not there. Either way it holds nothing worth reporting.
@@ -632,6 +680,7 @@ export function CoderView({ uid, local }: { uid: string | null; local: LocalData
             .filter(Boolean)
             .join(String.fromCharCode(10, 10)),
         );
+        setDone(true);
       } catch (e) {
         setText(
           `Could not read the database: ${
@@ -640,6 +689,7 @@ export function CoderView({ uid, local }: { uid: string | null; local: LocalData
             10,
           )}If this says permission denied, the rules are not deployed yet: npx firebase deploy --only firestore:rules`,
         );
+        setDone(true);
       }
     })();
 
@@ -647,6 +697,22 @@ export function CoderView({ uid, local }: { uid: string | null; local: LocalData
       alive = false;
     };
   }, [uid]);
+
+  // A clock while it reads, so a slow read is visibly still going rather than stuck.
+  useEffect(() => {
+    if (done) return;
+    const tick = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(tick);
+  }, [done]);
+
+  const reading = [
+    `Reading the database, ${Math.round((now - started) / 1000)} seconds so far.`,
+    `Each part waits up to ${SERVER_WAIT_MS / 1000} seconds for the server, then uses the copy saved on this device.`,
+    "",
+    ...(uid ? COLLECTIONS : []).map((name) => `  ${name.padEnd(14)} ${progress[name] ?? "reading"}`),
+    "",
+    "Copy all and Save wait until it is finished, so a half-read dump is never saved.",
+  ].join(String.fromCharCode(10));
 
   /**
    * Saved where you put it, not into Downloads.
@@ -720,14 +786,17 @@ export function CoderView({ uid, local }: { uid: string | null; local: LocalData
         </span>
         <span style={{ marginLeft: "auto", display: "flex", gap: "var(--space-2)" }}>
           <Button
+            disabled={!done}
             onClick={() => {
-              void navigator.clipboard.writeText(text);
-              setSaved("Copied.");
+              navigator.clipboard.writeText(text).then(
+                () => setSaved("Copied."),
+                () => setSaved("This browser would not copy that much. Use Save to a file instead."),
+              );
             }}
           >
             Copy all
           </Button>
-          <Button variant="primary" onClick={() => void save()}>
+          <Button variant="primary" disabled={!done} onClick={() => void save()}>
             Save to a file
           </Button>
         </span>
@@ -761,7 +830,7 @@ export function CoderView({ uid, local }: { uid: string | null; local: LocalData
           color: "var(--ink)",
         }}
       >
-        {text}
+        {done ? text : reading}
       </pre>
     </div>
   );
