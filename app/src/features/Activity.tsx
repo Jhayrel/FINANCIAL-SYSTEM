@@ -240,7 +240,12 @@ export function Activity({
       >
         {total > 0 && !failed && (
           <div className="fms-acttools">
-            {/* On a phone: one row of dropdowns, like the Database's. */}
+            {/*
+              One row of dropdowns, on a phone and on a computer, like the
+              Database's (style guide 3.14c). The computer also kept its old
+              rows of buttons, so it showed every filter twice (owner, 28
+              September 2026: "fix the ui it broke like this").
+            */}
             <div className="fms-dbfilterrow" role="group" aria-label="Filters">
               <FilterChip
                 label="Who did it"
@@ -257,14 +262,6 @@ export function Activity({
                 onChange={(id) => setKind(id as Kind)}
               />
             </div>
-            <Segments label="Who did it" options={WHO} value={who} onChange={setWho} />
-            <Segments
-              label="What kind of change"
-              options={KIND}
-              value={kind}
-              onChange={setKind}
-              counts={kindCounts}
-            />
           </div>
         )}
 
@@ -398,45 +395,6 @@ export function Activity({
           </Card>
         </aside>
       )}
-    </div>
-  );
-}
-
-/**
- * One filter, with exactly one answer showing.
- *
- * The filters were two rows of loose chips with the chosen one marked by a
- * slightly greener border, so "Everything" and "Settings" both looked picked
- * and nothing said the rows asked two different questions.
- */
-function Segments<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-  counts,
-}: {
-  label: string;
-  options: readonly { id: T; label: string }[];
-  value: T;
-  onChange: (id: T) => void;
-  counts?: Record<T, number>;
-}) {
-  return (
-    <div className="fms-segmented fms-segmented--scroll" role="radiogroup" aria-label={label}>
-      {options.map((o) => (
-        <button
-          key={o.id}
-          type="button"
-          role="radio"
-          aria-checked={value === o.id}
-          className={`fms-seg ${value === o.id ? "t-body-strong" : "t-body"}`}
-          onClick={() => onChange(o.id)}
-        >
-          {o.label}
-          {counts && <span className="t-micro fms-segcount">{counts[o.id]}</span>}
-        </button>
-      ))}
     </div>
   );
 }
