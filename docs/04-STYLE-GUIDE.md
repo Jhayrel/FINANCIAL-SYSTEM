@@ -221,6 +221,8 @@ Borders are `1px solid var(--hairline)`. Every card has one.
 
 **Banned:** page transitions, parallax, animated gradients, skeleton shimmer, bouncing, auto-carousels.
 
+**Loading outlines** (owner, 28 September 2026: "maybe boxes or data loading like social media"): the boxes a screen waits behind come in once, top to bottom, 45ms apart and 280ms each, then breathe on opacity alone (1 to 0.55 and back over 1.8s). That is the only looping motion in the app. A band of light sweeping across them is still shimmer and still banned. Under `prefers-reduced-motion: reduce` they hold still at full opacity.
+
 ### 2.6 Icons
 
 Single set, outline, 1.5px stroke, 20px default (16px in dense tables, 24px in nav). Icons never appear alone on a control unless the control also has an `aria-label`. **No emoji in the UI.**
@@ -578,7 +580,9 @@ whole.
 | Budget | `No budget set for September.` + `Set it` |
 | Search | `No results for "framelnk". Check the spelling or clear filters.` |
 
-**Loading**: static hairline placeholder blocks at the final layout's dimensions, `--surface-sunk`, no shimmer, no spinner for content. Spinners only inside buttons.
+**Loading**: the screen's own outline, drawn in `components/LoadingScreen.tsx`: `--hairline` boxes on the card surface at the final layout's dimensions (the Dashboard's figure with its muted ₱ and its rows, the Database's search, filters and rows, the Add form's kinds and fields, the calendar's grid). Motion as in 2.5: in once, then a slow breath, no shimmer. A line above says what it is waiting for and ticks off each part as it lands (Accounts, Entries, Budget), because the three arrive separately. Neutral colours only: nothing there is money yet, so no flow colour (D3). No spinner for content. Spinners only inside buttons.
+
+Replaced the static `--surface-sunk` blocks on 28 September 2026 at the owner's instruction, after the plain "Loading your figures" card.
 
 **Error**: inline alert in place of the content, stating cause and offering `Try again`.
 

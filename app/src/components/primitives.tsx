@@ -736,16 +736,6 @@ export function EmptyState({ message, action }: { message: string; action?: Reac
 
 /** Loading placeholder: static block, never a shimmer. §3.10 */
 export function Placeholder({ height = 20, width = "100%" }: { height?: number; width?: string }) {
-  return (
-    <span
-      aria-hidden
-      style={{
-        display: "block",
-        height,
-        width,
-        background: "var(--surface-sunk)",
-        borderRadius: "var(--radius-sm)",
-      }}
-    />
-  );
+  // The same box the loading outlines are drawn with (components/LoadingScreen.tsx).
+  return <span aria-hidden className="fms-bone" style={{ height, width }} />;
 }

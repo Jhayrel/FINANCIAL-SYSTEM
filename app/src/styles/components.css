@@ -1369,3 +1369,215 @@ button.fms-rankrow:hover .fms-ranktrack {
     margin-left: auto;
   }
 }
+
+/* ══ Loading: the screen's own outline (components/LoadingScreen.tsx) ═══════
+   Owner, 28 September 2026: "maybe boxes or data loading like social media".
+   Neutral boxes on the card surface, coming in once from the top and then
+   breathing slowly. Never a sweep (style guide 2.5 bans shimmer), and still
+   under reduced motion. */
+
+.fms-loading {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fms-loading-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.fms-loading-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--brand-600);
+}
+
+.fms-loading-steps {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+}
+
+.fms-loading-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ink-3);
+}
+
+.fms-loading-step.is-done {
+  color: var(--ink-2);
+}
+
+.fms-loading-step.is-done svg {
+  color: var(--brand-700);
+}
+
+.fms-loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--hairline-strong);
+}
+
+.fms-bone {
+  display: block;
+  flex: 0 0 auto;
+  max-width: 100%;
+  background: var(--hairline);
+  border-radius: var(--radius-sm);
+}
+
+.fms-bone--round {
+  border-radius: var(--radius-full);
+}
+
+.fms-bone-card {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+}
+
+.fms-bone-card--flush {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.fms-bone-head,
+.fms-bone-pair,
+.fms-bone-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fms-bone-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.fms-bone-peso {
+  font-family: var(--font-ui);
+  font-size: 24px;
+  line-height: 30px;
+  color: var(--ink-3);
+}
+
+.fms-bone-rows {
+  display: grid;
+}
+
+.fms-bone-pair {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-bone-row {
+  align-items: flex-start;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-bone-list {
+  display: grid;
+  min-width: 0;
+}
+
+.fms-bone-card:not(.fms-bone-card--flush) .fms-bone-row,
+.fms-bone-list .fms-bone-row {
+  padding-inline: 0;
+}
+
+.fms-bone-row:last-child {
+  border-bottom: 0;
+}
+
+.fms-bone-stack {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fms-bone-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-bone-tools {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-bone-tiles {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: var(--space-2);
+}
+
+.fms-bone-field {
+  display: grid;
+  gap: 6px;
+}
+
+.fms-bone-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.fms-bone-chat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fms-bone {
+    opacity: 0;
+    animation:
+      fms-bone-in 280ms var(--ease-out, ease-out) forwards,
+      fms-bone-breathe 1.8s ease-in-out infinite;
+  }
+}
+
+@keyframes fms-bone-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fms-bone-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}

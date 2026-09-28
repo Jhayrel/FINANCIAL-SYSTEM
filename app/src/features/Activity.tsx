@@ -10,8 +10,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Icon, type IconName } from "../components/Icon";
-import { Alert, Button, Card, EmptyState, Placeholder } from "../components/primitives";
+import { Alert, Button, Card, EmptyState } from "../components/primitives";
 import { FilterChip } from "../components/FilterChip";
+import { LoadingRows } from "../components/LoadingScreen";
 import { activityStore } from "../data/activityStore";
 import type { ActivityEvent, Actor } from "../domain/activity";
 import { factChanges, readRow } from "../domain/activityRead";
@@ -266,10 +267,8 @@ export function Activity({
         )}
 
         {events === null ? (
-          <div className="fms-actlist" role="status" aria-label="Loading the activity trail">
-            <Placeholder height={20} width="55%" />
-            <Placeholder height={20} width="80%" />
-            <Placeholder height={20} width="40%" />
+          <div className="fms-actlist">
+            <LoadingRows count={6} label="Loading the activity trail" />
           </div>
         ) : failed ? (
           <div className="fms-actlist">

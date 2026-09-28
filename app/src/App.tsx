@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AddTransaction } from "./features/AddTransaction";
 import { Bin } from "./features/Bin";
+import { LoadingScreen, loadingShapeFor } from "./components/LoadingScreen";
 import { CoderView } from "./features/CoderView";
 import { Budget } from "./features/Budget";
 import { Dashboard } from "./features/Dashboard";
@@ -2026,13 +2027,16 @@ export default function App() {
                 : ""
           }`}
         >
+          {/*
+            The screen's own outline while its figures arrive, and which of
+            the three have (components/LoadingScreen.tsx). Nothing reads as
+            zero meanwhile, because nothing is drawn from half a load.
+          */}
           {!ready && (
-            <Card>
-              <p className="t-body" style={{ margin: 0, color: "var(--ink-2)" }}>
-                Loading your figures. They show here the moment your accounts, entries and budget
-                have all arrived, so nothing reads as zero while they do.
-              </p>
-            </Card>
+            <LoadingScreen
+              shape={loadingShapeFor(screen)}
+              arrived={{ accounts: settingsKnown, entries: ledgerHeard, budget: budgetsHeard }}
+            />
           )}
           {ready && (
           <ScreenBoundary key={screen} where={title} onHome={() => go("dashboard")}>

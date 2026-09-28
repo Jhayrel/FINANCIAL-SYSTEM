@@ -20,6 +20,7 @@ import {
   StatusPill,
 } from "../components/primitives";
 import { Icon } from "../components/Icon";
+import { LoadingRows } from "../components/LoadingScreen";
 import { AmountInput, Field, Select, Switch, TextInput } from "../components/forms";
 import { useConfirm, type ConfirmRequest } from "../components/Confirm";
 import { FREE_READS, FREE_WRITES, resetsAt, usageLevel } from "../data/usage";
@@ -3728,9 +3729,7 @@ function AiHistoryGroup({ uid }: { uid: string | null }) {
   return (
     <Group title="History" hint="Everything asked, and what came back" wide>
       {messages === null ? (
-        <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-          Loading.
-        </p>
+        <LoadingRows count={3} label="Loading the history" />
       ) : failed ? (
         <p className="t-caption" style={{ margin: 0, color: "var(--over)" }}>
           The history could not be read: {failed}. If this says permissions, your database has not
@@ -3907,9 +3906,7 @@ function AiLearningGroup({
         </Alert>
       ) : null}
       {events === null ? (
-        <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-          Loading.
-        </p>
+        <LoadingRows count={3} label="Loading what the assistant has learned" />
       ) : all.length === 0 ? (
         <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
           Nothing yet. Change the item or the wallet on a card, on the card or in the form, and save it: the next sentence with the same words is filled in your way.
