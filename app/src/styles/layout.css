@@ -3226,6 +3226,11 @@
   color: var(--ink);
 }
 
+/* The same answers under a single entry's question, above the box that answers it. */
+.fms-pending-choices {
+  flex: 0 0 auto;
+}
+
 @media (hover: hover) {
   .fms-askq-choices > .fms-choice:hover {
     border-color: var(--ink-3);

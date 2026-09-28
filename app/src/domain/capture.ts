@@ -239,6 +239,31 @@ export function titleFrom(reply: string): string {
 export const WORDED_AS_CORRECTION =
   /^\s*(?:no[,.!]?\s+|actually[,]?\s+|wait[,]?\s+|sorry[,]?\s+)*(?:it'?s|its|it\s+(?:is|was)|that'?s|that\s+(?:is|was)|make\s+it|should\s+be|the\s+(?:amount|total|price|date|title|description|name|wallet|fee)\s+(?:is|was|should\s+be))\b/i;
 
+/**
+ * A whole new entry, typed while a card is open, rather than a correction to
+ * it. 28 September 2026, with a PHP 6.00 card open: "revenue 14 pesos change
+ * of the electric bill payment cash" set that card's wallet to Cash and made
+ * no card of its own, because a wallet was found in it. A sentence with its
+ * own figure that names a kind of entry or something bought is its own row;
+ * "make it 300", "gcash" and "300 gcash" still correct the card.
+ */
+export function startsNewEntry(
+  note: string,
+  read: {
+    readonly worthOffering: boolean;
+    readonly draft: { readonly amount: number | null; readonly item: string };
+    readonly named?: { readonly flow: boolean } | undefined;
+  },
+): boolean {
+  return (
+    read.worthOffering &&
+    read.draft.amount !== null &&
+    !WORDED_AS_CORRECTION.test(note) &&
+    (Boolean(read.named?.flow) || read.draft.item.trim() !== "") &&
+    note.trim().split(/\s+/).length >= 3
+  );
+}
+
 export function applyReply(
   draft: Draft,
   blank: Blank,

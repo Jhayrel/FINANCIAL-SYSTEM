@@ -154,3 +154,34 @@ describe("money in, answered as borrowed", () => {
     expect(drawn?.item).toBe("Maya Credit");
   });
 });
+
+describe("a new entry typed while a card is open", () => {
+  it("is its own row, and a correction is still a correction", async () => {
+    const { startsNewEntry } = await import("./capture");
+    const { readEntry } = await import("./readEntry");
+    const read = (said: string) => startsNewEntry(said, readEntry(said, [], { ...reference, revenueCategories: ["Random", "Allowance"] }, "2026-09-28"));
+    expect(read("revenue 14 pesos change of the electric bill payment cash")).toBe(true);
+    expect(read("bought lunch 150 using gcash")).toBe(true);
+    expect(read("spent 95 on food using cash")).toBe(true);
+    expect(read("make it 300")).toBe(false);
+    expect(read("gcash")).toBe(false);
+    expect(read("300 gcash")).toBe(false);
+    expect(read("its 109")).toBe(false);
+    expect(read("change the date to yesterday")).toBe(false);
+  });
+});
+
+describe("the answers to tap under an entry's question", () => {
+  it("puts the items used most lately first, then the rest, and never more than six", async () => {
+    const { pendingChoices } = await import("./cardQuestions");
+    const spent = (item: string, n: number): Transaction =>
+      ({ id: `s${n}`, recordNumber: n, date: "2026-09-20", type: "Spending", item, category: "Spending", fromWallet: "Cash", toWallet: "", amount: 100, fee: 0, total: 100, description: "", notes: "", status: "Paid" }) as Transaction;
+    const rows = [spent("Home Needs", 1), spent("Home Needs", 2), spent("Food", 3)];
+    const draft: Draft = { ...card, item: "" };
+    expect(pendingChoices(draft, "item", reference, rows)).toEqual(["Home Needs", "Food"]);
+    expect(pendingChoices(draft, "fromWallet", reference, rows)).toEqual(["Cash", "Gcash", "Maya"]);
+    expect(pendingChoices(draft, "amount", reference, rows)).toEqual([]);
+    const income: Draft = { ...emptyDraft("2026-09-28"), flow: "Revenue", category: "Revenue", toWallet: "Cash", amount: 1400 };
+    expect(pendingChoices(income, "item", reference, rows)).toEqual(["Random"]);
+  });
+});

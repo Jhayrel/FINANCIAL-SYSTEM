@@ -118,7 +118,7 @@ import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isQuestion, meantInstead, notMeantIn, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
-import { addressesEveryCard, asksToReadAgain, asksToRename, POINTS_ELSEWHERE, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
+import { addressesEveryCard, asksToReadAgain, asksToRename, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
 import { asksWhetherAdded, inLedgerOrNot } from "../domain/checkPicture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney } from "../domain/money";
@@ -200,7 +200,7 @@ import {
 import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { budgetForYear } from "../domain/budget";
 import { formatMedium, MONTH_NAMES } from "../domain/dates";
-import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
+import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, pendingChoices, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
 import { forecastYear } from "../domain/forecast";
 import { withCommandWordsFixed } from "../domain/typos";
@@ -4629,7 +4629,15 @@ export function AskPanel({
      * looked at. A saved row is meant when one is named.
      */
     const shownCard = openCard();
+    // A whole new entry is not a correction to the card above it (`startsNewEntry`).
+    const fresh = shownCard !== null && files.length === 0 && !as ? readEntry(note, transactions, reference, asOf) : null;
+    const saysNewEntry =
+      fresh !== null &&
+      (startsNewEntry(note, fresh) ||
+        // The router read a new entry ("lunch 150 gcash"), with its own figure, not worded as a correction.
+        (routed?.intent === "entry" && /\d/.test(note) && note.trim().split(/\s+/).length >= 3 && !WORDED_AS_CORRECTION.test(note)));
     const cardTakesIt =
+      !saysNewEntry &&
       shownCard !== null &&
       files.length === 0 &&
       !as &&
@@ -4830,7 +4838,7 @@ export function AskPanel({
      * no verb, nothing that happened, which is exactly what `detectIntent`
      * already calls a question.
      */
-    if (files.length === 0 && !as && detectIntent(note) === "ask") {
+    if (files.length === 0 && !as && !saysNewEntry && detectIntent(note) === "ask") {
       /**
        * "edit them 2026 and make also I use maya to all".
        *
@@ -5037,8 +5045,15 @@ export function AskPanel({
      * be discarded is a smaller failure than being told about the wrong
      * withdrawal three times.
      */
+    /*
+     * And with no model at all, the same. "6 pesos unknown spending cash" has
+     * no verb, so the word rules called it a question, and the question path
+     * had nothing to answer with but "The AI model is not working" (28
+     * September 2026, with the model unreachable). The entry reader can read
+     * it on its own, so it gets the sentence.
+     */
     const readsAsEntry =
-      modelGaveUp &&
+      (modelGaveUp || routed === null) &&
       files.length === 0 &&
       !as &&
       !isQuestion(note) &&
@@ -5436,6 +5451,12 @@ export function AskPanel({
       setBusy(false);
     }
   };
+
+  /** The answers to tap under the question an entry is waiting on (`pendingChoices`). */
+  const pendingOptions = useMemo(
+    () => (pending ? pendingChoices(pending.draft, pending.blank, reference, transactions) : []),
+    [pending, reference, transactions],
+  );
 
   /** Cards still waiting on a decision. */
   const open = turns.filter((t): t is Offered => isOffer(t) && t.state === "open");
@@ -6230,6 +6251,15 @@ export function AskPanel({
         </div>
       )}
 
+      {pending && pendingOptions.length > 0 && (
+        <div className="fms-askq-choices fms-pending-choices" role="group" aria-label="Answers">
+          {pendingOptions.map((choice) => (
+            <button key={choice} type="button" className="fms-choice t-body" disabled={busy} onClick={() => void send(choice)}>
+              {choice}
+            </button>
+          ))}
+        </div>
+      )}
       {pending && (
         <div className="fms-intent">
           <span className="t-micro" style={{ color: "var(--ink-3)" }}>

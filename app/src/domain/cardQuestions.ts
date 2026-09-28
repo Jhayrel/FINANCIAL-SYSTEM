@@ -16,7 +16,7 @@
 
 import { MONTH_NAMES } from "./dates";
 import { applyReply, asksToRename, NAMES_A_FIELD, nextQuestion, walletInside, type Blank } from "./capture";
-import type { Draft } from "./entry";
+import { itemsFor, type Draft } from "./entry";
 import { formatMoney } from "./money";
 import type { ReferenceLists, Transaction } from "./types";
 
@@ -345,4 +345,34 @@ export function keepTheMoney(before: Draft, after: Draft): Draft {
     if (!wasIncoming && !next.toWallet) next = { ...next, sentOut: true };
   }
   return next;
+}
+
+/**
+ * The answers to tap under a single entry's question, as the batch questions
+ * have. "What was it for?" came with nothing but a text box, and a reply of
+ * "cash" or "Read it" was the result (28 September 2026). For an item, the
+ * ones this kind of entry is most often filed under lately, then the rest of
+ * the list; for an account, their accounts. Each is a reply `applyReply` reads.
+ */
+export function pendingChoices(
+  draft: Draft,
+  blank: Blank,
+  reference: ReferenceLists,
+  transactions: readonly Transaction[],
+  most = 6,
+): string[] {
+  const accounts = [...reference.wallets, ...reference.savings];
+  if (blank === "fromWallet") return accounts.filter((a) => a !== draft.toWallet);
+  if (blank === "toWallet") return accounts.filter((a) => a !== draft.fromWallet);
+  if (blank !== "item" || (draft.flow !== "Spending" && draft.flow !== "Revenue")) return [];
+  const known = itemsFor(draft.flow, draft.category, reference);
+  const uses = new Map<string, number>();
+  for (const t of transactions.slice(-200)) {
+    if (t.type === draft.flow && known.includes(t.item)) uses.set(t.item, (uses.get(t.item) ?? 0) + 1);
+  }
+  return [...known]
+    .map((name, i) => ({ name, i, n: uses.get(name) ?? 0 }))
+    .sort((a, b) => b.n - a.n || a.i - b.i)
+    .slice(0, most)
+    .map((c) => c.name);
 }
