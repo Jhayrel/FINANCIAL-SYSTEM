@@ -129,11 +129,6 @@ service cloud.firestore {
              && d.debtEffect in ['draw', 'charge', 'repay', 'interest', 'fee',
                                  'writeoff', 'lend', 'collect']
              ))
-          // Present means binned; absent means live. Nothing else.
-          && (!('deletedAt' in d) || d.deletedAt is string)
-          // Set aside by "Start clean from this file": still here, shown on
-          // no screen. The owner's way to clear test rows without a delete.
-          && (!('discardedAt' in d) || d.discardedAt is string)
           // Who filled this row in. Optional, because every row written before
           // the assistant existed has no opinion on the matter, and rejecting
           // those would make the whole history unwritable.
@@ -141,12 +136,42 @@ service cloud.firestore {
           // The payment an interest row was part of, by that payment's id.
           && (!('partOf' in d) || (d.partOf is string && d.partOf.size() > 0
                                    && d.partOf.size() <= 200))
+          && validMarks(d)
           && noSecretKeys(d.keys());
+    }
+
+    // A row's state, as opposed to its money: binned, set aside, checked,
+    // and the server's time of the last write (`editedAt`, which another
+    // device asks for to read only what changed).
+    //
+    // `deletedAt` present means binned; absent means live. `discardedAt` is
+    // set by "Start clean from this file": still here, shown on no screen,
+    // the owner's way to clear test rows without a delete.
+    function validMarks(d) {
+      return (!('deletedAt' in d) || d.deletedAt is string)
+          && (!('discardedAt' in d) || d.discardedAt is string)
+          && (!('reviewed' in d) || d.reviewed is bool)
+          && (!('editedAt' in d) || d.editedAt is timestamp);
+    }
+
+    // Only the state changed. Binning, restoring and starting clean write
+    // one field onto a row that is already there, and the database checks
+    // the whole row as it would stand afterwards. A row written under older,
+    // looser rules therefore could never be binned or set aside: "Start
+    // clean" reported them as "refused by the database and still show"
+    // (28 September 2026). Changing only these fields touches no money, so
+    // it is allowed on any row the owner has, and the money fields of such a
+    // row still cannot be changed without the whole row passing.
+    function onlyMarksChanged() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['deletedAt', 'discardedAt', 'reviewed', 'editedAt'])
+          && validMarks(incoming());
     }
 
     match /users/{uid}/transactions/{txId} {
       allow read: if isOwner(uid);
-      allow create, update: if isOwner(uid) && validTransaction();
+      allow create: if isOwner(uid) && validTransaction();
+      allow update: if isOwner(uid) && (validTransaction() || onlyMarksChanged());
 
       // Never. Deleting is `deletedAt`, and restoring clears it. There is no
       // gesture anywhere in the app that should reach this line.

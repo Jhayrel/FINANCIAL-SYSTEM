@@ -100,6 +100,22 @@ npx firebase-tools deploy --only firestore:rules
 | 6 | No `apiKey` / `token` / `secret` field on any document. | The AI key lives in a Cloudflare env secret. Three layers refuse it: the UI has no field, `assertNoSecrets` throws, and this rejects the write (CLAUDE.md §2, rule AI4). |
 | 7 | Length caps on every string, size caps on every list. | A runaway client cannot fill the free tier with one document. |
 | 8 | `match /{document=**} { allow read, write: if false; }` | A collection added by hand in the console later is not silently public. |
+| 9 | A row's state (`deletedAt`, `discardedAt`, `reviewed`, `editedAt`) can change on its own, on any row. | Binning or starting clean writes one field onto a row already there. A row written under older rules failed the whole-row check, so it could never be binned or set aside (28 September 2026). Its money still cannot change unless the whole row passes. |
+
+### Checking the rules for real
+
+`app/src/data/rulesConformance.test.ts` mirrors the rules in TypeScript and
+runs with the other tests. [`tools/rules-check.mjs`](../tools/rules-check.mjs)
+runs the rules file itself in Google's emulator, against every kind of write
+the app makes and every kind the rules must refuse. Needs Java 11 or later:
+
+```bash
+npm i --no-save firebase-tools@15 @firebase/rules-unit-testing@5 firebase@12
+npx firebase emulators:exec --only firestore --project demo-fms "node tools/rules-check.mjs"
+```
+
+It uses a `demo-` project, which exists only inside the emulator, so it cannot
+touch the real database.
 
 ---
 
