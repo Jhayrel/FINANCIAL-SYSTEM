@@ -173,6 +173,7 @@ import { currentScreen } from "./screenReport";
 import { aboutTheScreen, screenText } from "../domain/screenContext";
 import { figuresIn } from "../domain/money";
 import { transactionToDraft } from "../domain/entry";
+import { rowSavedFor } from "../domain/formSaved";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
 import { choicesFor, effectsFor, interestOnTop, outstandingOf, asAmountAndFees, owedParts, type Debt, type DebtEffect } from "../domain/debt";
@@ -465,6 +466,11 @@ interface Offered {
    * gone.
    */
   readonly state: "open" | "added" | "used" | "discarded";
+  /**
+   * When it was sent to the form, so a save in the form is matched only to
+   * a card sent before it, never to one sent after (`lastSaved`).
+   */
+  readonly usedAt?: number;
   /**
    * The number this card's row was actually given, once it has one.
    *
@@ -764,7 +770,8 @@ function storedFrom(turn: Turn): StoredCard | null {
       id: turn.cardId,
       kind: "proposal",
       state: turn.state,
-      draft: turn.proposal.draft as unknown as Record<string, unknown>,
+      // Once saved, what was saved: a card corrected in the form comes back as the row it became.
+      draft: (turn.state === "added" ? (turn.live ?? turn.proposal.draft) : turn.proposal.draft) as unknown as Record<string, unknown>,
       sourceRef: turn.proposal.sourceRef,
       confidence: turn.proposal.confidence,
       adjustments: turn.proposal.adjustments,
@@ -898,7 +905,7 @@ export function AskPanel({
    * even after you pressed Save there, so the two halves of one entry
    * disagreed about what had happened to it.
    */
-  lastSaved: { draft: Draft; at: number } | null;
+  lastSaved: { draft: Draft; at: number; recordNumber?: number } | null;
   /**
    * What the form beside this holds, right now.
    *
@@ -1199,6 +1206,23 @@ export function AskPanel({
    * the same card. The date, the amount and the item agreeing is enough, and
    * a wrong match here costs a label, never a row.
    */
+  /*
+   * ── Saved, and said so everywhere ───────────────────────────────────────
+   *
+   * 29 September 2026: a Mang Inasal receipt's card was sent to the form,
+   * corrected there and saved as #3859, and the card still read "In the form"
+   * with Add to ledger on it; pressing Put back in the form then filled the
+   * form with the reading again, a copy of #3859. The card was marked added
+   * on this screen only and never written down, so the chat on any other
+   * screen, or this one after a reload, brought it back as waiting.
+   *
+   * So the change is recorded like any other settling, with the number the
+   * row was given, and it is looked for again whenever the conversation
+   * changes: a chat that was not open when the form saved (the phone's AI
+   * tab, the chat on another screen) finds its card once it has loaded. Only
+   * a card sent to the form before the save, so a later one of the same
+   * figure is never taken for it.
+   */
   useEffect(() => {
     if (!lastSaved) return;
     const saved = lastSaved.draft;
@@ -1209,15 +1233,47 @@ export function AskPanel({
      */
     const same = (t: Turn): t is Offered => {
       if (!isOffer(t) || t.state !== "used") return false;
+      if (t.usedAt !== undefined && t.usedAt > lastSaved.at) return false;
       const shown = t.live ?? t.proposal.draft;
-      return shown.date === saved.date && shown.amount === saved.amount && shown.flow === saved.flow;
+      const first = t.proposal.draft;
+      const matches = (d: Draft): boolean => d.date === saved.date && d.amount === saved.amount && d.flow === saved.flow;
+      return matches(shown) || matches(first);
     };
     const card = [...turns].reverse().find(same);
     if (!card) return;
     learnFrom(card, saved);
-    setTurns((prev) => prev.map((t) => (isOffer(t) && t.cardId === card.cardId ? { ...t, state: "added" } : t)));
+    const added: Offered = {
+      ...card,
+      state: "added",
+      live: saved,
+      ...(lastSaved.recordNumber !== undefined ? { recordNumber: lastSaved.recordNumber } : {}),
+    };
+    recordCard(added);
+    setTurns((prev) => prev.map((t) => (isOffer(t) && t.cardId === card.cardId ? added : t)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastSaved]);
+  }, [lastSaved, turns]);
+
+  /*
+   * A card still in the form whose row the ledger already has, saved after
+   * it while this chat was not open to hear of it (domain/formSaved.ts).
+   */
+  useEffect(() => {
+    const waiting = turns.filter((t): t is Offered => isOffer(t) && t.state === "used");
+    if (waiting.length === 0) return;
+    const claimed = new Set<string>();
+    const settledNow = new Map<string, Offered>();
+    for (const card of waiting) {
+      const row = rowSavedFor(card.cardId, [card.live ?? card.proposal.draft, card.proposal.draft], transactions, claimed);
+      if (!row) continue;
+      claimed.add(row.id);
+      const added: Offered = { ...card, state: "added", live: transactionToDraft(row), recordNumber: row.recordNumber };
+      recordCard(added);
+      settledNow.set(card.cardId, added);
+    }
+    if (settledNow.size === 0) return;
+    setTurns((prev) => prev.map((t) => (isOffer(t) && settledNow.has(t.cardId) ? (settledNow.get(t.cardId) ?? t) : t)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turns, transactions]);
 
   /**
    * Escape closes the picture.
@@ -1634,10 +1690,12 @@ export function AskPanel({
    * newer state to miss.
    */
   const settle = (index: number, state: Offered["state"], recordNumber?: number): void => {
+    const at = Date.now();
     const change = (t: Offered): Offered => ({
       ...t,
       state,
       ...(recordNumber === undefined ? {} : { recordNumber }),
+      ...(state === "used" ? { usedAt: at } : {}),
     });
 
     const was = turns[index];

@@ -178,8 +178,8 @@ export function AddTransaction({
   /** A card the assistant sent to the form from elsewhere ("Edit first"). */
   incoming: { draft: Draft; at: number } | null;
   /** The last row this form saved, shared so a card anywhere can say so. */
-  lastSaved: { draft: Draft; at: number } | null;
-  onSaved: (saved: { draft: Draft; at: number }) => void;
+  lastSaved: { draft: Draft; at: number; recordNumber?: number } | null;
+  onSaved: (saved: { draft: Draft; at: number; recordNumber?: number }) => void;
   /** Loads a saved row back into this form, from the latest entries beside it. */
   onEditRow?: ((row: Transaction) => void) | undefined;
   /**
@@ -1338,8 +1338,8 @@ export function AddTransaction({
       );
     }
 
-    // The card that supplied this row can now say it was saved.
-    onSaved({ draft: final, at: Date.now() });
+    // The card that supplied this row can now say it was saved, and as which number.
+    onSaved({ draft: final, at: Date.now(), recordNumber: target ? target.recordNumber : nextRecordNumber });
     forgetDraft();
     setNewPerson(null);
     setPersonKind(null);

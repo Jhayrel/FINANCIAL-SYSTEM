@@ -406,6 +406,17 @@ approval code on it) and Mang Inasal's own receipt for the same meal.
 | The slip and the receipt, sent together, were two cards (or three, with a "bought on credit" borrowing) | A slip and a receipt with the same approval code, or the same amount within a quarter hour, are one payment: one Spending, described from the receipt, made one again across the separate requests each picture goes in. An approval code read as "ppprCode", or a year read as 2020 in one of two readings, still matches |
 | Which account a card paid from | Where the owner's own card payments come from (`cardAccount`: rows like "Purchase at MCDO 878", "JOLLIBEE JB3829"; Maya in their ledger). A line is used instead only when their card purchases are filed as bought on one. Picking the account once teaches the next slip |
 
+Then: "I scan the picture, it got it wrong in the details but I click edit
+then I add it in manual but in ai it didnt register it as add". The card
+was sent to the form, corrected and saved as #3859, and still read "In the
+form" with Add to ledger on it; Put back in the form then filled the form
+with the first reading, a copy of #3859.
+
+| Found | Now |
+|---|---|
+| A save from the form marked the card added on that screen only, and never wrote it down, so the chat on any other screen, or after a reload, brought it back waiting | The change is recorded like a button press, with the number the row was given, and the card shows the row as saved, not as first read |
+| The phone's AI tab and the chat on other screens are not open while the form saves, so they never heard of it | The save is looked for again whenever a conversation loads, for a card sent to the form before it; and a card still in the form is settled from the ledger itself: the one row saved after the card with its date, amount and kind (`formSaved.ts`), which is what fixes a card left waiting before this |
+
 **For the owner, not changed:** the September withdrawals already saved
 from Maya's history hold their fee inside the amount: ₱1,018.00 on the
 18th and the 20th, ₱516.00 on the 24th and ₱218.00 on the 26th, each with

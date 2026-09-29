@@ -258,7 +258,7 @@ export default function App() {
    * places and the form is in one.
    */
   const [incoming, setIncoming] = useState<{ draft: Draft; at: number } | null>(null);
-  const [lastSaved, setLastSaved] = useState<{ draft: Draft; at: number } | null>(null);
+  const [lastSaved, setLastSaved] = useState<{ draft: Draft; at: number; recordNumber?: number } | null>(null);
   /** Phone and tablet: the bottom bar, and the phone's shorter list of screens. */
   const compact = useMediaQuery("(max-width: 1023px)");
 
