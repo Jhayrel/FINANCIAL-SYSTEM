@@ -80,6 +80,8 @@ import {
   type Blank,
 } from "../domain/capture";
 import { readEntry, splitEntries } from "../domain/readEntry";
+import { namedIn, readTotals, totalWords, withSaidItem, withoutTheTotal } from "../domain/entryTotals";
+import { cashWallet, slipsIn, withdrawalSource } from "../domain/withdrawal";
 import { Rich } from "../components/Rich";
 import {
   saysLatestIsWrong,
@@ -127,7 +129,7 @@ import { reconcile } from "../domain/reconcile";
 import { readAgainst, statementAccount } from "../domain/statement";
 import { useMediaQuery } from "./useMediaQuery";
 import { ownNamesIn, senseStatementRows } from "../domain/statementSense";
-import { walletBalance } from "../domain/balances";
+import { allWalletBalances, walletBalance } from "../domain/balances";
 import {
   draftForClue,
   investigate,
@@ -479,7 +481,7 @@ const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
 
 /** A card read off a picture or a statement, rather than from something typed. */
 const readOffPicture = (p: Proposal): boolean =>
-  !p.said || /\b(image|picture|photo|screenshot|receipt|statement|part \d)/i.test(p.sourceRef);
+  !p.typed && (!p.said || /\b(image|picture|photo|screenshot|receipt|statement|part \d)/i.test(p.sourceRef));
 const isFound = (t: Turn): t is Found => t.kind === "found";
 const isChart = (t: Turn): t is Drawn => t.kind === "chart";
 const isDebt = (t: Turn): t is DebtChoice => t.kind === "debt";
@@ -1856,6 +1858,25 @@ export function AskPanel({
   /** The budget question just asked, so the next message can answer it. */
   const budgetQuestion = useRef<{ year: number; month: number; toMonth?: number; scope: "month" | "rest" | "year" } | null>(null);
 
+  /** A total, its parts and what was said about all of them, in a typed message (domain/entryTotals.ts). */
+  const totalsIn = (text: string) => {
+    const totals = readTotals(text);
+    return {
+      totals,
+      item: namedIn(
+        totals.restated,
+        reference.spendingTypes.map((t) => t.name),
+      ),
+      words: totalWords(totals, formatMoney),
+    };
+  };
+  const saidItemWords = (item: string): string => `Booked as ${item}: you said they were all ${item}.`;
+  /** A reading filed under the kind the owner said they all were, saying so. */
+  const fileAsSaid = <R extends { draft: Draft; because: readonly string[] }>(read: R, item: string | null): R => {
+    const filed = withSaidItem(read, item);
+    return filed === read ? read : { ...filed, because: [...read.because.filter((b) => !/^Booked as /.test(b)), saidItemWords(item ?? "")] };
+  };
+
   /**
    * What the Budget screen's forecast plans for a month: the figure "use the
    * forecast" means. The same usual month (`domain/outlook.ts`), read from
@@ -2698,15 +2719,26 @@ export function AskPanel({
      * it (domain/when.ts). Pictures keep the dates printed on them.
      */
     const today = sent.length === 0 && note.trim() !== "" && !saysWhen(note);
+    const dated = today
+      ? folded.map((p) =>
+          p.draft.date === asOf
+            ? p
+            : { ...p, draft: { ...p.draft, date: asOf }, adjustments: [...p.adjustments, "Dated today: your message named no day."] },
+        )
+      : folded;
+    /*
+     * A total and its parts (domain/entryTotals.ts): a card that is only the
+     * total of the others is the same money twice, and "All school category"
+     * files each one as School.
+     */
+    const typed = sent.length === 0 && note.trim() !== "" ? totalsIn(note) : null;
     const result = {
       ...read,
-      proposals: today
-        ? folded.map((p) =>
-            p.draft.date === asOf
-              ? p
-              : { ...p, draft: { ...p.draft, date: asOf }, adjustments: [...p.adjustments, "Dated today: your message named no day."] },
-          )
-        : folded,
+      proposals: (typed ? withoutTheTotal(dated, typed.totals).cards : dated).map((p) => {
+        if (!typed) return p;
+        const filed = withSaidItem(p, typed.item);
+        return filed === p ? { ...p, typed: true } : { ...filed, typed: true, adjustments: [...p.adjustments, saidItemWords(typed.item ?? "")] };
+      }),
     };
     /** Read on this device and then by a text model, said wherever the answer is (data/aiClient.ts). */
     const route = result.readOnDevice ? ", read on this device" : "";
@@ -2872,7 +2904,7 @@ export function AskPanel({
       sent.length === 0 && note
         ? splitEntries(note).map((line) => ({
             line,
-            read: readEntry(line, transactions, reference, asOf),
+            read: fileAsSaid(readEntry(line, transactions, reference, asOf), typed?.item ?? null),
           }))
         : [];
     const usable = parts.filter((p) => p.read.readsAsDebt || p.read.worthOffering);
@@ -2881,7 +2913,7 @@ export function AskPanel({
       say({
         kind: "assistant",
         ephemeral: true,
-        text: `${usable.length} entries. Check each one, then add it.`,
+        text: `${usable.length} entries. Check each one, then add it.${typed?.words ? ` ${typed.words}` : ""}`,
         from: "this device",
       });
 
@@ -2901,6 +2933,7 @@ export function AskPanel({
             draft: read.draft,
             confidence: "high",
             sourceRef: `part of what you said: ${line}`,
+            typed: true,
             said: line,
             adjustments: read.because,
           },
@@ -2921,6 +2954,7 @@ export function AskPanel({
           (result.proposals.length === 1
             ? "One entry. Check it, then add it."
             : `${result.proposals.length} entries. Check each one, then add it.`) +
+          (typed?.words && result.proposals.length > 1 ? ` ${typed.words}` : "") +
           (result.repeated
             ? ` The picture shows ${result.repeated === 1 ? "one row" : `${result.repeated} rows`} twice, where the screenshot was stitched together, and each was read once.`
             : ""),
@@ -3015,7 +3049,29 @@ export function AskPanel({
         ? senseStatementRows(onDevice, { account, readings: result.readings ?? [], ownNames, debts, transactions, reference })
         : onDevice;
     // A row with no money in it is not a row: a PHP 0.00 card came off a Maya history (28 September 2026).
-    const checked = sent.length > 0 ? sensed.filter((p) => p.draft.amount !== 0) : sensed;
+    const nonZero = sent.length > 0 ? sensed.filter((p) => p.draft.amount !== 0) : sensed;
+    /*
+     * An ATM slip's card, with the account it came out of: by the balance the
+     * slip prints, or where the owner's withdrawals come from (domain/withdrawal.ts).
+     */
+    const slips = sent.length > 0 ? slipsIn(result.readings ?? []) : [];
+    const checked =
+      slips.length === 0
+        ? nonZero
+        : nonZero.map((p) => {
+            const cashIn = cashWallet(reference.wallets);
+            const w = slips.find((s) => p.draft.flow === "Transfer" && p.draft.toWallet === cashIn && p.draft.amount === s.cash && p.draft.fee === s.fee);
+            if (!w) return p;
+            const source = withdrawalSource(w, allWalletBalances(transactions), transactions, [...reference.wallets, ...reference.savings], cashIn);
+            if (!source) {
+              return p.draft.fromWallet ? p : { ...p, adjustments: [...p.adjustments, "Which account the card belongs to is not on the slip, and your past withdrawals do not say, so pick it."] };
+            }
+            const exact = source.off === 0 && w.balanceAfter !== undefined;
+            if (p.draft.fromWallet && p.draft.fromWallet !== source.account && !exact) {
+              return { ...p, adjustments: [...p.adjustments, `Check the account: ${source.how}.`] };
+            }
+            return { ...p, draft: { ...p.draft, fromWallet: source.account }, adjustments: [...p.adjustments, `From ${source.how}.`] };
+          });
 
     /*
      * "Can you check only if this is added?": a question about the picture,
@@ -5689,7 +5745,8 @@ export function AskPanel({
       const lines = splitEntries(note);
 
       if (files.length === 0 && lines.length > 1) {
-        const each = lines.map((line) => readEntry(line, transactions, reference, asOf));
+        const said = totalsIn(note).item;
+        const each = lines.map((line) => fileAsSaid(readEntry(line, transactions, reference, asOf), said));
 
         /**
          * A sentence can be part debt and part not, and it was all or nothing.
@@ -5710,6 +5767,8 @@ export function AskPanel({
         const usable = each.filter((r) => r.readsAsDebt || r.worthOffering);
 
         if (usable.length > 1) {
+          const total = totalWords(readTotals(note), formatMoney);
+          if (total) say({ kind: "assistant", ephemeral: true, text: `${usable.length} entries. ${total}`, from: "this device" });
           const skipped = lines.filter((_, i) => {
             const r = each[i];
             return r ? !r.readsAsDebt && !r.worthOffering : true;
@@ -5732,6 +5791,7 @@ export function AskPanel({
                 draft: r.draft,
                 confidence: "high",
                 sourceRef: `part ${i + 1}: ${lines[i] ?? ""}`,
+                typed: true,
                 said: lines[i] ?? "",
                 adjustments: r.because,
               },
@@ -5764,6 +5824,7 @@ export function AskPanel({
                 draft: r.draft,
                 confidence: "high",
                 sourceRef: `line ${i + 1}: ${lines[i] ?? ""}`,
+                typed: true,
                 said: lines[i] ?? "",
                 adjustments: r.because,
               },

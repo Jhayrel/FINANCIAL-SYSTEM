@@ -460,3 +460,111 @@ export function dropRepeats(text: string): { readonly text: string; readonly dro
   kept.push(...pending);
   return { text: kept.join("\n"), dropped };
 }
+
+/**
+ * How far a photo's lines of print are tilted, in degrees, clockwise.
+ *
+ * ── Why ────────────────────────────────────────────────────────────────────
+ *
+ * A 7-Eleven receipt photographed on a rock, 29 September 2026, tilted a few
+ * degrees: the reader kept its header and its VAT lines and lost everything
+ * between, the item, "Total Amount Due 25.00", the cash and the date. A line
+ * of print that runs downhill crosses the reader's rows, and it reads a
+ * slice of two lines as neither. Any photo of any receipt can be tilted, so
+ * the photo is straightened before it is read, never the receipt learned.
+ *
+ * ── How ────────────────────────────────────────────────────────────────────
+ *
+ * The usual way: tip the dark pixels by each small angle and count how many
+ * land on each row. At the angle the print is level, the counts are all
+ * lines and gaps, as uneven as they can be, so the angle with the largest
+ * sum of squared counts is the tilt, looked for up to 15 degrees either
+ * way, a phone held at an angle. Worked on a small copy, a few tens of
+ * milliseconds. `rgba` is binarized in place.
+ */
+export function skewAngle(rgba: Uint8ClampedArray, width: number, height: number, range = 15): number {
+  /*
+   * Only print on paper counts. The same receipt lay on granite, whose
+   * speckle binarized into more dark pixels than the print and hid its tilt.
+   * Paper is where a block's middle brightness is near the brightest in the
+   * picture: a receipt is mostly white even where it is printed, and a
+   * table, a rock or a hand is not.
+   */
+  const BLOCK = 24;
+  const bw = Math.ceil(width / BLOCK);
+  const bh = Math.ceil(height / BLOCK);
+  const medians = new Float64Array(bw * bh);
+  const darkest = new Float64Array(bw * bh);
+  for (let by = 0; by < bh; by += 1) {
+    for (let bx = 0; bx < bw; bx += 1) {
+      const hist = new Uint32Array(256);
+      let n = 0;
+      for (let y = by * BLOCK; y < Math.min(height, (by + 1) * BLOCK); y += 1) {
+        for (let x = bx * BLOCK; x < Math.min(width, (bx + 1) * BLOCK); x += 1) {
+          const i = (y * width + x) * 4;
+          hist[Math.round(0.299 * rgba[i]! + 0.587 * rgba[i + 1]! + 0.114 * rgba[i + 2]!)]! += 1;
+          n += 1;
+        }
+      }
+      let seen = 0;
+      let m = 0;
+      let low = -1;
+      while (m < 255 && seen + hist[m]! < n / 2) {
+        seen += hist[m]!;
+        if (low < 0 && seen >= n * 0.04) low = m;
+        m += 1;
+      }
+      medians[by * bw + bx] = m;
+      darkest[by * bw + bx] = low < 0 ? m : low;
+    }
+  }
+  const sorted = [...medians].sort((a, b) => a - b);
+  const bright = sorted[Math.floor(sorted.length * 0.9)] ?? 255;
+  // Paper, with print on it: near the brightest in the middle, and ink at least half as dark again.
+  const paper = (x: number, y: number): boolean => {
+    const k = Math.floor(y / BLOCK) * bw + Math.floor(x / BLOCK);
+    return medians[k]! >= bright * 0.8 && darkest[k]! <= medians[k]! * 0.5;
+  };
+
+  binarize(rgba, width, height);
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (rgba[(y * width + x) * 4]! < 128 && paper(x, y)) {
+        xs.push(x);
+        ys.push(y);
+      }
+    }
+  }
+  // Nearly blank, or nearly all ink: nothing to level.
+  if (xs.length < 200 || xs.length > width * height * 0.6) return 0;
+  const rows = height + width;
+  const score = (degrees: number): number => {
+    const t = (degrees * Math.PI) / 180;
+    const sin = Math.sin(t);
+    const cos = Math.cos(t);
+    const counts = new Float64Array(rows * 2);
+    for (let i = 0; i < xs.length; i += 1) {
+      const r = Math.round(ys[i]! * cos - xs[i]! * sin) + rows;
+      counts[r] = (counts[r] ?? 0) + 1;
+    }
+    let sum = 0;
+    for (const c of counts) sum += c * c;
+    return sum;
+  };
+  // Whole degrees across the range, then quarter degrees around the best of them.
+  let best = 0;
+  let bestScore = score(0);
+  const tryAngle = (a: number): void => {
+    const s = score(a);
+    if (s > bestScore * 1.0001) {
+      best = a;
+      bestScore = s;
+    }
+  };
+  for (let a = -range; a <= range; a += 1) tryAngle(a);
+  const coarse = best;
+  for (let a = coarse - 0.75; a <= coarse + 0.75 + 1e-9; a += 0.25) tryAngle(a);
+  return Math.round(best * 100) / 100;
+}

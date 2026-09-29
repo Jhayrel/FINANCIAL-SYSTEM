@@ -31,6 +31,7 @@
  * can stop a save, and a row this flags is still a row they can add.
  */
 
+import { withoutTotals } from "./entryTotals";
 import { itemsFor, needs, type Draft, type FieldName } from "./entry";
 import { numbersInWords } from "./numberWords";
 import { withoutDays } from "./money";
@@ -219,7 +220,8 @@ function clausesIn(text: string): string[] {
  * worse than no question, because it teaches the owner to ignore the line.
  */
 export function clauseFor(said: string, amount: number | null, reference?: ReferenceLists): string {
-  const text = said.trim();
+  // A total the parts add up to, and a sentence that only repeats them, belong to no one row (`entryTotals.ts`).
+  const text = withoutTotals(said).trim();
   if (text === "") return "";
 
   const parts = clausesIn(text);

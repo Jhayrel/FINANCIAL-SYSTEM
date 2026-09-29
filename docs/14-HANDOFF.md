@@ -356,6 +356,31 @@ December card in its two parts; "remember ..." made no card; with every
 model failing, the device's figures were said and marked why. Stop and
 Clear drop answers that land after them.
 
+### 2026-09-29: a total and its parts, an ATM slip, a tilted receipt
+
+The owner: "make sure it knows logic too, i keep explaining this", then
+two photos and "train it dont hard code". No model is trained from here:
+the free models are used as they are. What is taught is general rules on
+the device, worked examples in the instructions the model gets, and the
+owner's own corrections, which already outrank the next guess.
+
+| Found | Now |
+|---|---|
+| "I paid 450, 300 for honorarium for capstone and 150 for my donation for capstone. All school category basically 300 and 150 total of 450" made three cards, ₱450.00, ₱150.00 and ₱150.00 | `domain/entryTotals.ts`: a figure said as the total of the others (given first and broken down to the centavo, or named total, in total, in all, lahat) is not an entry, and a later sentence that only says it all again is not either; what it says about all of them ("all school") files each card. The splitter, the per-card amount check, the chat and the model's instructions all use it, and a card the model makes of the total beside cards that add up to it is dropped. The chat says "₱450.00 is what they come to, so it is not an entry of its own", and when the parts do not add up to the total said, says so |
+| The same cards were labelled "hard to make out in the picture", and a ₱300.00 honorarium was "Already in your ledger" as a ₱300.00 of gas two days before | Cards from typed words are marked typed (`Proposal.typed`), never taken for a picture's: typed labels, and the same-day window for repeats |
+| An ATM slip (China Bank Savings, "CASH WITHDRAWAL 1,000.00", "AN ATM FEE OF 16.00 IS ALREADY INCLUDED", balance after 2,934.79, "Visa Credit") had no rules | `domain/withdrawal.ts`: one Transfer into Cash, the cash as the amount and the ATM fee as the fee. A machine gives whole hundreds, so the cash is whichever of the printed figure, or it less the fee, is whole hundreds. The account is the one whose balance less what left it is the slip's balance, else the one the owner's withdrawals (at that machine first) came from, else asked; a balance far from the slip's says to check the account. "Visa Credit" is the chip's label, never a Debt. Nothing about China Bank is in it |
+| A history's "Withdrawal from TANQUI SFLU -1,018.00" was saved as ₱1,018.00 into Cash with no fee | The same rule: ₱1,000.00 of cash and an ₱18.00 fee, when the rest is ₱30.00 or less (`cashAndFee`) |
+| Two purchases out of Maya the same day, ₱700.00 and ₱300.00, were called a ₱1,000.00 withdrawal "together" | Between two of the owner's own accounts, parts must go the same way at both ends |
+| A 7-Eleven receipt photographed about ten degrees tilted lost its item, total, cash and date to the reader | Every camera photo is straightened before it is read (`ocrText.ts`, `skewAngle`: the tilt at which lines of print on paper line up sharpest, only paper with ink counting, so a rock or a zebra crossing does not). It is read both ways and the reading the reader is surer of is kept, so a level photo reads as before. The receipt then read whole, and the receipt check found ₱25.00 in cash on 29 September |
+| "NatureSprigPur iDHIL U": the shop's VAT mark read as part of the item | A lone tax mark after the price is dropped, and the model is told how a shop shortens names |
+
+**For the owner, not changed:** the September withdrawals already saved
+from Maya's history hold their fee inside the amount: ₱1,018.00 on the
+18th and the 20th, ₱516.00 on the 24th and ₱218.00 on the 26th, each with
+no fee. Cash was credited ₱70.00 it never received and ₱70.00 of fees were
+never counted as spending. Correcting each to its cash and fee is the
+owner's call; nothing was changed.
+
 ---
 
 ## 6. What the owner has to do

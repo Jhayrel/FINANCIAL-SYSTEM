@@ -26,6 +26,7 @@
  * borrowing as spending.
  */
 
+import { withoutTotals } from "./entryTotals";
 import { daysBackIn, itemHintIn } from "./filipino";
 import { emptyDraft, itemsFor, withDebtEffect, type Draft, type Flow } from "./entry";
 import { payBackClauseAt, readBehalf, readDebtSentence, readPassThrough } from "./debtSentence";
@@ -1111,7 +1112,12 @@ function leadingVerb(part: string): string {
 const startsWithFigure = (part: string): boolean => /^(?:₱|php\s*)?\d/i.test(part.trim());
 
 export function splitEntries(text: string): string[] {
-  const lines = text
+  /*
+   * A total and a sentence that only says it again are not entries: "I paid
+   * 450, 300 for honorarium and 150 for my donation. All school category
+   * basically 300 and 150 total of 450" is two payments (`entryTotals.ts`).
+   */
+  const lines = withoutTotals(text)
     .split(String.fromCharCode(10))
     .map((l) => l.trim())
     .filter(Boolean);

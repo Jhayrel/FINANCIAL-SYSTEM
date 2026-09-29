@@ -164,6 +164,17 @@ describe("cash taken out at a store", () => {
     expect(sensed?.draft).toMatchObject({ flow: "Transfer", fromWallet: "Maya", toWallet: "Cash", status: "Withdrawn", item: "", description: "Withdrawal from PALM CROSSING" });
   });
 
+  it("splits the figure into the cash and the machine's fee (29 September 2026)", () => {
+    const [sensed] = senseStatementRows([out(151800, "Purchase at PALM CROSSING")], context);
+    expect(sensed?.draft).toMatchObject({ amount: 150000, fee: 1800 });
+    expect(sensed?.adjustments.join(" ")).toContain("is ₱1,500.00 in cash, since a machine gives whole hundreds, and ₱18.00 its fee.");
+  });
+
+  it("splits a withdrawal the model already put into Cash", () => {
+    const [sensed] = senseStatementRows([out(151800, "Withdrawal from PALM CROSSING", { flow: "Transfer", category: "Transfer", item: "", toWallet: "Cash" })], context);
+    expect(sensed?.draft).toMatchObject({ amount: 150000, fee: 1800, toWallet: "Cash" });
+  });
+
   it("stays spending where the owner files withdrawals as spending", () => {
     const asSpending = ledger.map((t) => (t.description.startsWith("Withdrawal") ? { ...t, type: "Spending" as const, toWallet: "" } : t));
     const [sensed] = senseStatementRows([out(151800, "Purchase at PALM CROSSING")], { ...context, transactions: asSpending });

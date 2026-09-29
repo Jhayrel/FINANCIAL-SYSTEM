@@ -325,9 +325,17 @@ function partsOf(draft: Draft, transactions: readonly Transaction[], ignoreId?: 
   if (!out && !into) return null;
   const wallet = out || into;
   const figureOf = (t: Transaction): number => (out ? t.total : t.amount);
+  /*
+   * Between two of the owner's own accounts, the parts go the same way at
+   * both ends. A ₱1,000.00 withdrawal from Maya into Cash was "#0280 and
+   * #0281 together", ₱700.00 and ₱300.00 spent out of Maya the same day
+   * (29 September 2026): purchases are not a withdrawal in parts.
+   */
+  const alsoInto = draft.flow === "Transfer" && out ? draft.toWallet.trim() : "";
   const near = transactions
     .filter((t) => live(t) && t.id !== ignoreId && Math.abs(daysBetween(draft.date, t.date)) <= 1)
     .filter((t) => (out ? same(t.fromWallet, wallet) : same(t.toWallet, wallet)) && figureOf(t) > 0 && figureOf(t) < amount)
+    .filter((t) => !alsoInto || same(t.toWallet, alsoInto))
     .slice(0, 16);
   const targets = [amount, amount + draft.fee];
   let best: Transaction[] | null = null;

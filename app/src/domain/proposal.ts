@@ -38,6 +38,7 @@ import { parseAmount, type Centavos } from "./money";
 import type { Draft, Flow } from "./entry";
 import { emptyDraft, itemsFor } from "./entry";
 import { accountFor, type InterestCredit } from "./interestCredit";
+import { cashWallet, type Withdrawal } from "./withdrawal";
 import { nearestName } from "./nearly";
 import { rowDatesIn } from "./ocrText";
 import type { ReceiptCheck } from "./receipt";
@@ -60,6 +61,15 @@ export interface Proposal {
    * correction, which would have turned every future Gas entry into Food.
    */
   readonly said?: string;
+  /**
+   * Read from words the owner typed, not off a picture. Cards made from one
+   * typed message with several entries carry no `said` of their own, and
+   * were taken for a picture's: labelled "hard to make out in the picture"
+   * and checked for repeats over a picture's wider window, so ₱300.00 for
+   * an honorarium was "Already in your ledger" as a ₱300.00 of gas two days
+   * earlier (29 September 2026).
+   */
+  readonly typed?: boolean;
   /** What this module changed to make it fit, in the owner's words. */
   readonly adjustments: readonly string[];
 }
@@ -791,7 +801,7 @@ export function readProposals(
    * text the device read, then a credit line's own screen filed on that
    * line, then fees folded into what they were charged on.
    */
-  const checked = checkInterest(
+  const checked = checkWithdrawal(checkInterest(
     checkReceipts(
       datesFromHeadings(checkAgainstReadings(proposals, context.readings ?? []), context.readings ?? [], context.readingDays ?? [], asOf),
       context.receipts ?? [],
@@ -801,7 +811,7 @@ export function readProposals(
     context.interest ?? [],
     reference,
     asOf,
-  );
+  ), context.withdrawals ?? [], reference, asOf);
   const filed = onCreditLine(checked, context.note ?? "", reference);
   return { proposals: pairBorrowings(foldTransferFees(foldCharges(notIncomeKinds(filed, reference)))), refused, balances };
 }
@@ -878,8 +888,73 @@ export function checkInterest(
   return out;
 }
 
+/**
+ * An ATM slip's card, held to the slip's own figures (`withdrawal.ts`).
+ *
+ * The model is told what the figures are, and this makes sure: whatever it
+ * made of the amount, the fee, what left the account or the balance after
+ * becomes one Transfer into the cash wallet, the cash as the amount and the
+ * ATM's charge as the fee. A Debt made of "Visa Credit" is put right the
+ * same way. Which account it came out of is the ledger's to say, after this
+ * (`withdrawalSource`); the model's choice is kept only when it is one of
+ * the owner's accounts.
+ */
+export function checkWithdrawal(
+  proposals: readonly Proposal[],
+  slips: readonly Withdrawal[],
+  reference: ReferenceLists,
+  asOf: IsoDate,
+): Proposal[] {
+  let out = [...proposals];
+  const cash = cashWallet(reference.wallets);
+  const accounts = new Set([...reference.wallets, ...reference.savings]);
+  for (const w of slips) {
+    const printed = new Set([w.cash, w.printed, w.debit, w.fee, ...(w.balanceAfter !== undefined ? [w.balanceAfter] : [])].filter((x) => x > 0));
+    const related = out.filter((p) => p.draft.amount !== null && printed.has(p.draft.amount));
+    const base =
+      related.find((p) => p.draft.flow === "Transfer" && p.draft.amount === w.cash) ??
+      related.find((p) => p.draft.amount === w.cash || p.draft.amount === w.printed || p.draft.amount === w.debit);
+    const notes: string[] = [];
+    if (!base || base.draft.flow !== "Transfer") notes.push(`A cash withdrawal is money moved into ${cash || "your cash"}, so it is a transfer${base?.draft.flow === "Debt" ? ", not borrowing: the card's label is not a credit line" : ""}.`);
+    if (base && base.draft.amount !== w.cash) notes.push(`Read as ${pesos(base.draft.amount ?? 0)}; ${w.evidence.join("; ")}.`);
+    const folded = related.filter((p) => p !== base);
+    const feeRow = w.fee > 0 && folded.some((p) => p.draft.amount === w.fee);
+    const others = folded.filter((p) => !(w.fee > 0 && p.draft.amount === w.fee));
+    if (feeRow) notes.push(`The ${pesos(w.fee)} row is this withdrawal's ATM fee, so it is the card's fee now: the only part that is spending.`);
+    else if (w.fee > 0 && base?.draft.fee !== w.fee) notes.push(`The ${pesos(w.fee)} ATM fee is the card's fee: the only part that is spending.`);
+    if (others.length > 0) notes.push(`Left out ${others.map((p) => pesos(p.draft.amount ?? 0)).join(" and ")}: ${others.some((p) => p.draft.amount === w.balanceAfter) ? "the balance after it is not a movement" : "it is this same withdrawal"}.`);
+    if (!base) notes.push(`Read on this device: ${w.evidence.join("; ")}.`);
+    const from = base && accounts.has(base.draft.fromWallet) && base.draft.fromWallet !== cash ? base.draft.fromWallet : "";
+    const start = emptyDraft(w.date ?? base?.draft.date ?? asOf);
+    const kept: Proposal = {
+      ...(base ?? { sourceRef: "the ATM slip", confidence: "medium" as const }),
+      draft: {
+        ...start,
+        flow: "Transfer",
+        category: "Transfer",
+        amount: w.cash,
+        fee: w.fee,
+        fromWallet: from,
+        toWallet: cash,
+        date: w.date ?? base?.draft.date ?? asOf,
+        description: `Withdrawal from ${w.place || w.bank || "an ATM"}`,
+        notes: w.time ?? base?.draft.notes ?? "",
+        status: base?.draft.status ?? start.status,
+      },
+      confidence: w.confidence === "high" ? (base?.confidence === "low" ? "medium" : base?.confidence ?? "high") : "medium",
+      adjustments: [...(base?.adjustments ?? []), ...notes],
+    };
+    const at = base ? out.indexOf(base) : out.length;
+    out = out.filter((p) => !related.includes(p));
+    out.splice(Math.min(at, out.length), 0, kept);
+  }
+  return out;
+}
+
 export interface ReadContext {
   readonly note?: string;
+  /** ATM withdrawal slips in those pictures, checked by their own figures (`domain/withdrawal.ts`). */
+  readonly withdrawals?: readonly Withdrawal[];
   /** Interest credits in those pictures, checked by their arithmetic (`domain/interestCredit.ts`). */
   readonly interest?: readonly InterestCredit[];
   /** The text the device read off the pictures, both readings of each. */

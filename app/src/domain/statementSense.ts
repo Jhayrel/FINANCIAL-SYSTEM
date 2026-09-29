@@ -26,6 +26,7 @@
 import { outstandingOf, type Debt } from "./debt";
 import type { Draft } from "./entry";
 import { formatMoney } from "./money";
+import { cashAndFee } from "./withdrawal";
 import { DATE_LINE, ROW_AMOUNT } from "./ocrText";
 import type { Proposal } from "./proposal";
 import type { ReferenceLists, Transaction } from "./types";
@@ -256,12 +257,25 @@ export function senseStatementRows(proposals: readonly Proposal[], ctx: SenseCon
       }
     }
 
+    /*
+     * The figure a history shows for cash taken out is the cash and the
+     * machine's fee together: a machine gives whole hundreds (withdrawal.ts,
+     * `cashAndFee`). Only the fee is spending, and only the cash reaches Cash.
+     */
+    const split = WITHDRAWAL.test(words) && d.fee === 0 ? cashAndFee(d.amount) : null;
+    const splitWords = split ? ` ${formatMoney(d.amount)} is ${formatMoney(split.cash)} in cash, since a machine gives whole hundreds, and ${formatMoney(split.fee)} its fee.` : "";
+    const parts = split ? { amount: split.cash, fee: split.fee } : {};
+
     // Cash taken out at a store or a machine: a transfer to Cash, the way the owner files them.
     if (WITHDRAWAL.test(words) && cash && cashOut && left && left !== cash && (d.flow === "Spending" || (d.flow === "Transfer" && !d.toWallet && !d.sentOut))) {
       return note(
-        { ...d, flow: "Transfer", category: "Transfer", item: "", fromWallet: left, toWallet: cash, status: "Withdrawn", sentOut: false },
-        `The statement says "${words}": cash taken out, so a transfer from ${left} to ${cash}, the way your other withdrawals are filed.`,
+        { ...d, ...parts, flow: "Transfer", category: "Transfer", item: "", fromWallet: left, toWallet: cash, status: "Withdrawn", sentOut: false },
+        `The statement says "${words}": cash taken out, so a transfer from ${left} to ${cash}, the way your other withdrawals are filed.${splitWords}`,
       );
+    }
+    // Already a transfer into Cash, with the fee still inside the figure.
+    if (split && cash && d.flow === "Transfer" && d.toWallet === cash) {
+      return note({ ...d, ...parts }, `The statement says "${words}".${splitWords}`);
     }
 
     return p;

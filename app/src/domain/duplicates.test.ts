@@ -261,3 +261,21 @@ describe("the same money filed as another kind (27 September 2026)", () => {
     expect(found[0]?.evidence.join(" ")).toContain("That one is into Cash, this one into Maya");
   });
 });
+
+describe("a withdrawal is not purchases in parts (29 September 2026)", () => {
+  const withdrawal = draft({ flow: "Transfer", category: "Transfer", item: "", description: "Withdrawal from CBS ST LOUIS LA", fromWallet: "Maya", toWallet: "Cash", amount: 100000, fee: 1600, date: "2026-09-29" });
+  const spent = (id: string, n: number, amount: number): Transaction =>
+    row({ id, recordNumber: n, date: "2026-09-29", fromWallet: "Maya", item: "Food", description: "lunch", amount, total: amount });
+
+  it("does not call two purchases out of Maya a withdrawal into Cash", () => {
+    expect(duplicatesOf(withdrawal, [spent("a", 280, 70000), spent("b", 281, 30000)])).toEqual([]);
+  });
+
+  it("still finds a withdrawal saved as two moves into Cash", () => {
+    const moved = (id: string, n: number, amount: number): Transaction =>
+      row({ id, recordNumber: n, date: "2026-09-29", type: "Transfer", category: "Transfer", fromWallet: "Maya", toWallet: "Cash", item: "", description: "withdraw", amount, total: amount });
+    const found = duplicatesOf(withdrawal, [moved("a", 280, 70000), moved("b", 281, 30000)]);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.also).toHaveLength(1);
+  });
+});

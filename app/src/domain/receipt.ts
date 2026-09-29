@@ -473,8 +473,14 @@ export function readReceipt(readings: readonly string[], asOf: IsoDate): Receipt
    * words, and both go to the model, which reads through them better
    * together than either alone.
    */
+  /*
+   * A lone letter after an item's price is the shop's tax mark (V vatable,
+   * X or E exempt, Z zero rated, N not taxed), not part of its name:
+   * "NatureSpngPuriDW1L 25.00V" came through as "... U" (29 September 2026).
+   */
+  const taxMark = (name: string): string => name.replace(/\s+[VUXZEN]\s*$/, "").trim();
   const lists = texts
-    .map((t) => figuresOf(t).filter((f) => f.item && f.last && f.value > 0 && /[A-Za-z]{3,}/.test(f.name)).map((f) => f.name))
+    .map((t) => figuresOf(t).filter((f) => f.item && f.last && f.value > 0 && /[A-Za-z]{3,}/.test(f.name)).map((f) => taxMark(f.name)))
     .filter((l) => l.length > 0)
     .sort((a, b) => b.length - a.length);
   const bought = (lists[0] ?? []).map((name, k) => {
@@ -547,7 +553,7 @@ export function receiptNote(check: ReceiptCheck): string {
   if (check.time) parts.push(`The printed time is ${check.time}.`);
   if (check.bought.length > 0) {
     parts.push(
-      `What was bought, one line per item as the device read it, with letters it may have misread (a slash separates two readings of the same line): ${check.bought.map((b) => `"${b}"`).join(", ")}. Read through the misreadings as a person reading a smudged receipt would (FUSER or DIIFUSER is diffuser, SANTAL is sandalwood), then choose item from their list by what that thing is, and write it plainly in description. A receipt says what was bought, so leave item empty only when nothing on their list is that kind of thing.`,
+      `What was bought, one line per item as the device read it, with letters it may have misread (a slash separates two readings of the same line): ${check.bought.map((b) => `"${b}"`).join(", ")}. Read through the misreadings as a person reading a smudged receipt would (FUSER or DIIFUSER is diffuser, SANTAL is sandalwood), and through a shop's shortened names (NatureSpngPuriDW1L is Nature Spring purified drinking water, 1 litre), then choose item from their list by what that thing is, and write it plainly in description. A receipt says what was bought, so leave item empty only when nothing on their list is that kind of thing.`,
     );
   }
   return parts.join(" ");

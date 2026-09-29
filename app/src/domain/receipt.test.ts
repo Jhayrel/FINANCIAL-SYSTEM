@@ -381,3 +381,44 @@ describe("the date and time printed on a receipt", () => {
     expect(withDate("28.09.2026")?.total).toBe(5000);
   });
 });
+
+describe("a 7-Eleven receipt, photographed tilted (29 September 2026)", () => {
+  // What this device read once the photo was straightened (data/ocr.ts, `skewAngle`).
+  const read = [
+    "GREATER HEIGHTS 7-11",
+    "Owned & Operated by: GREATER -",
+    "HEIGHTS GROUP OF COMPANIES INC.",
+    "UATREGTIN #417-523-391-000",
+    "09/29/2026 (Tue) 11:07:40",
+    "{ INVOICE #200506419 RESET _CNT#00D",
+    "STORE#1020 SN# :NTM33522",
+    "NatureSprigPur iDHIL 25.00U",
+    "wad Total Amount Due (1 25.00",
+    "CASH 25.00",
+    "CHANGE 0.00",
+    "Uatable 22.32",
+    "UAT Amt 2.68",
+    "UpT Exempt Sales 0.00",
+    "zero Rated Sales 0.00",
+  ].join("\n");
+  const check = readReceipt([read, read], "2026-09-29");
+
+  it("finds what was paid, and that it was cash", () => {
+    expect(check?.total).toBe(2_500);
+    expect(check?.confidence).toBe("high");
+    expect(check?.paidWith).toBe("cash");
+  });
+
+  it("reads the day and time printed on it", () => {
+    expect(check?.date).toBe("2026-09-29");
+    expect(check?.time).toBe("11:07");
+  });
+
+  it("keeps the shop's tax mark out of what was bought", () => {
+    expect(check?.bought).toEqual(["NatureSprigPur iDHIL"]);
+  });
+
+  it("tells the model how to read a shop's shortened names", () => {
+    expect(check ? receiptNote(check) : "").toContain("NatureSpngPuriDW1L is Nature Spring purified drinking water, 1 litre");
+  });
+});
