@@ -50,6 +50,7 @@ import { dayInFileName, dropRepeats, piecesOf, readingFor, rowsIn } from "../dom
 import { readReceipt, receiptNote, type ReceiptCheck } from "../domain/receipt";
 import { interestNote, readInterestCredit, type InterestCredit } from "../domain/interestCredit";
 import { cashWallet, readWithdrawal, withdrawalNote, type Withdrawal } from "../domain/withdrawal";
+import { cardSlipNote, readCardSlip, type CardSlip } from "../domain/cardSlip";
 import { acceptableWording, onlyTheirFigures, type SpendNote } from "../domain/spendNote";
 import { readPicture } from "./ocr";
 import { pairBorrowings, readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
@@ -567,6 +568,8 @@ export interface ExtractOptions {
   readonly interest?: readonly InterestCredit[];
   /** Set here, not by callers: ATM withdrawal slips in the pictures, checked by their own figures (`domain/withdrawal.ts`). */
   readonly withdrawals?: readonly Withdrawal[];
+  /** Set here, not by callers: card terminal slips in the pictures (`domain/cardSlip.ts`). */
+  readonly cardSlips?: readonly CardSlip[];
   /** Set here, not by callers: the day each reading's picture was taken, from its file name. */
   readonly readingDays?: readonly string[];
   /** The owner's own name as a bank prints it: money from or to it is between their own accounts. */
@@ -722,6 +725,9 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
   // An ATM slip: the cash, the fee, and the balance after it (domain/withdrawal.ts).
   const slips = readings.map((r, i) => (r && !credits[i] ? readWithdrawal([r.raised, r.plain]) : null));
   const withdrawals = slips.filter((w): w is Withdrawal => w !== null);
+  // A card terminal's slip: one card payment at one merchant (domain/cardSlip.ts).
+  const cardReads = readings.map((r, i) => (r && !credits[i] && !slips[i] ? readCardSlip([r.raised, r.plain]) : null));
+  const cardSlips = cardReads.filter((c): c is CardSlip => c !== null);
   // Never a shop receipt as well: its "total" there is the interest before tax, or the cash and the fee.
   const receipts = readings.map((r, i) => (r && !credits[i] && !slips[i] ? readReceipt([r.plain, r.raised], options.asOf) : null));
   const found = receipts.filter((r): r is ReceiptCheck => r !== null);
@@ -752,6 +758,8 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
         ? `${asRead}\n${interestNote(credit)}`
         : asRead && slip
           ? `${asRead}\n${withdrawalNote(slip, cashWallet(options.reference.wallets))}`
+          : asRead && cardReads[i]
+            ? `${asRead}\n${cardSlipNote(cardReads[i]!)}`
           : asRead && receipt
             ? `${asRead}\n${receiptNote(receipt)}`
             : asRead;
@@ -786,16 +794,16 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
 
   if (jobs.length > 1) {
     const answers = await inTurn(jobs, LIST_PARTS_AT_ONCE, (attachments) =>
-      extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, attachments }),
+      extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips, attachments }),
     );
     const joined = joinAnswers(answers);
     // Nothing usable in any of them: the pictures go to a model that can see, as below.
     if (usable(joined) >= 10 || options.signal?.aborted) return { ...joined, readOnDevice, repeated, readings: read };
-    const seen = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals });
+    const seen = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips });
     return usable(seen) > usable(joined) ? { ...seen, readings: read } : { ...joined, readOnDevice, repeated, readings: read };
   }
 
-  const first = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, attachments: jobs[0] ?? [...others, ...stillPictures] });
+  const first = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips, attachments: jobs[0] ?? [...others, ...stillPictures] });
   /*
    * Rows it could not use count for nothing here. On 26 September 2026 the
    * text route returned one refused row, "Nothing in that looked like a
@@ -805,7 +813,7 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
   if (usable(first) >= 10 || options.signal?.aborted) {
     return { ...first, readOnDevice, repeated, readings: read };
   }
-  const second = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals });
+  const second = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips });
   return usable(second) > usable(first) ? { ...second, readings: read } : { ...first, readOnDevice, repeated, readings: read };
 }
 
@@ -940,6 +948,7 @@ async function extractOnce(options: ExtractOptions): Promise<ExtractResult> {
       receipts: options.receipts ?? [],
       interest: options.interest ?? [],
       withdrawals: options.withdrawals ?? [],
+      cardSlips: options.cardSlips ?? [],
     });
 
     return {

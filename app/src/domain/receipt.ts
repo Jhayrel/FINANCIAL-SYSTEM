@@ -29,6 +29,7 @@
  * Pure, on text, so it runs the same on the device and in a test.
  */
 
+import { approvalIn } from "./cardSlip";
 import type { Centavos } from "./money";
 import type { IsoDate } from "./types";
 
@@ -87,6 +88,8 @@ export interface ReceiptCheck {
   readonly notTheTotal: readonly Centavos[];
   /** How it was paid, going by the payment line. */
   readonly paidWith?: "cash" | "gcash" | "maya" | "card";
+  /** A card payment's approval code, which the terminal's slip prints too (`cardSlip.ts`). */
+  readonly approval?: string;
   /** The printed date, when one was found. */
   readonly date?: IsoDate;
   /** True when the date could be read two ways (09/08: month first is used, as on Philippine receipts). */
@@ -115,10 +118,11 @@ const LABELS: readonly (readonly [Role, RegExp])[] = [
   ["change", /\bchan[gq]e\b|\bchng\b|\bsukli\b/],
   ["subtotal", /\bsub[\s-]?t[o0]ta[l1i]\b|\bsubtt?l\b/],
   ["exempt", /ex[e3][mw]pt|z[e3]r[o0][\s-]?rated|rated\s*sal/],
-  ["vatable", /\bvat[\s-]?able\b|\bvat(?:able)?\s*sal[e3]s?\b|\bvatable\b|\bnet\s*of\s*vat\b|\bvat\s*exclusive\b/],
+  // A thermal printer's V is read as U as often as not: "UATable Sales", "UAT Amount" (29 September 2026).
+  ["vatable", /\b[vu]at[\s-]?able\b|\b[vu]at(?:able)?\s*sal[e3]s?\b|\bnet\s*of\s*[vu]at\b|\b[vu]at\s*exclusive\b/],
   ["discount", /disc|\bless\b|\bsenior\b|\bpwd\b|\bvoucher\b|\bpromo\b|\bcoupon\b|\bsavings?\b|\brebate\b/],
   ["total", /\bgrand\s*t[o0]ta[l1i]\b|\bamount\s*due\b|\bamt\s*due\b|\bt[o0]ta[l1i]\b(?!\s*(?:qty|quantity|items?|disc|savings?|vat|tax|no\b))|\bnet\s*amount\b|\bamount\s*payable\b|\bbalance\s*due\b/],
-  ["vat", /\bvat\b|\b12\s*%|\bv\.a\.t\b|\btax\b/],
+  ["vat", /\b[vu]at\b|\b12\s*%|\bv\.a\.t\b|\btax\b/],
   ["service", /\bservice\s*(?:charge|chg)\b|\bsvc\b|\bs\/c\b|\bfees?\b/],
   ["delivery", /\bdeliver|\bshipping\b|\bship\s*fee\b/],
   ["tendered", /\bcash\b|\btender|\bpayment\b|\bamount\s*paid\b|\bpaid\b|\breceived\b|\bg-?cash\b|\bmaya\b|\bpaymaya\b|\bcard\b|\bvisa\b|\bmaster\s*card\b|\bdebit\b|\bcredit\b|\bqr\s*ph\b|\be-?wallet\b/],
@@ -203,6 +207,12 @@ const same = (a: number, b: number): boolean => Math.abs(a - b) <= 1;
 /** How a receipt printed its payment, if it did. */
 function paidWithOf(text: string): ReceiptCheck["paidWith"] {
   const lower = text.toLowerCase();
+  /*
+   * A card first: "PAYMAYA CREDIT CARD 2,082.00" names the company whose
+   * terminal took the card, not the account it came out of. Any bank's card
+   * on a Maya terminal prints the same line (29 September 2026).
+   */
+  if (/\b(?:credit|debit)\s*card\b|\bvisa\b|\bmaster\s*card\b/.test(lower)) return "card";
   if (/\bg-?cash\b/.test(lower)) return "gcash";
   if (/\b(?:pay)?maya\b/.test(lower)) return "maya";
   if (/\b(?:visa|master\s*card|debit|credit\s*card|card)\b/.test(lower)) return "card";
@@ -495,6 +505,7 @@ export function readReceipt(readings: readonly string[], asOf: IsoDate): Receipt
   const dated = dateOf(joined, asOf);
   const time = timeOf(joined);
   const paidWith = paidWithOf(joined);
+  const approval = paidWith === "card" ? approvalIn(joined) : undefined;
   const subtotal = subtotals.find((s) => s !== best.total) ?? subtotals[0];
 
   return {
@@ -508,6 +519,7 @@ export function readReceipt(readings: readonly string[], asOf: IsoDate): Receipt
     ...(subtotal !== undefined ? { subtotal } : {}),
     notTheTotal: [...notTheTotal].sort((a, b) => a - b),
     ...(paidWith ? { paidWith } : {}),
+    ...(approval ? { approval } : {}),
     ...(dated ? { date: dated.date, ...(dated.ambiguous ? { dateAmbiguous: true } : {}) } : {}),
     ...(time ? { time } : {}),
     bought: bought.slice(0, 6),
@@ -518,7 +530,7 @@ const PAID_WITH: Record<NonNullable<ReceiptCheck["paidWith"]>, string> = {
   cash: "in cash, so fromWallet is their cash wallet",
   gcash: "with GCash, so fromWallet is their GCash wallet",
   maya: "with Maya, so fromWallet is their Maya wallet",
-  card: "by card, and the receipt does not say which account, so leave fromWallet empty and they will be asked",
+  card: "by card, and the receipt does not say which account, so leave fromWallet empty: the app fills it from where their card payments come from. A card payment is spending on what was bought, never borrowing, whatever the terminal calls the card",
 };
 
 /**

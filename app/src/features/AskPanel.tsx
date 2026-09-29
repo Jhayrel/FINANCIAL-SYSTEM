@@ -82,6 +82,9 @@ import {
 import { readEntry, splitEntries } from "../domain/readEntry";
 import { namedIn, partsTheModelMissed, readTotals, totalWords, withSaidItem, withoutTheTotal } from "../domain/entryTotals";
 import { cashWallet, slipsIn, withdrawalSource } from "../domain/withdrawal";
+import { cardAccount, cardSlipsIn } from "../domain/cardSlip";
+import { checkCardSlips } from "../domain/proposal";
+import { readReceipt } from "../domain/receipt";
 import { Rich } from "../components/Rich";
 import {
   saysLatestIsWrong,
@@ -3064,7 +3067,7 @@ export function AskPanel({
      * slip prints, or where the owner's withdrawals come from (domain/withdrawal.ts).
      */
     const slips = sent.length > 0 ? slipsIn(result.readings ?? []) : [];
-    const checked =
+    const withdrawn =
       slips.length === 0
         ? nonZero
         : nonZero.map((p) => {
@@ -3080,6 +3083,46 @@ export function AskPanel({
               return { ...p, adjustments: [...p.adjustments, `Check the account: ${source.how}.`] };
             }
             return { ...p, draft: { ...p.draft, fromWallet: source.account }, adjustments: [...p.adjustments, `From ${source.how}.`] };
+          });
+    /*
+     * Paid by card: a terminal's slip, or a shop receipt that says card. The
+     * account is where the owner's own card payments come from
+     * (domain/cardSlip.ts, `cardAccount`), never what the slip calls the card.
+     */
+    const readingsList = result.readings ?? [];
+    const cardAmounts = new Set<number>(sent.length > 0 ? cardSlipsIn(readingsList).map((c) => c.amount) : []);
+    for (let i = 0; sent.length > 0 && i < readingsList.length; i += 2) {
+      const r = readReceipt([readingsList[i] ?? "", readingsList[i + 1] ?? ""], asOf);
+      if (r?.paidWith === "card") cardAmounts.add(r.total);
+    }
+    const byCard = cardAmounts.size > 0 ? cardAccount(transactions, [...reference.wallets, ...reference.savings]) : null;
+    /*
+     * Each picture may go to the model in its own request, so a slip and its
+     * receipt can come back as a card each: they are one payment, and are
+     * made one again here, across the requests (domain/proposal.ts).
+     */
+    const onePerPayment = sent.length > 1 ? checkCardSlips(withdrawn, cardSlipsIn(readingsList), reference, asOf) : withdrawn;
+    const checked =
+      cardAmounts.size === 0
+        ? onePerPayment
+        : onePerPayment.map((p) => {
+            if (p.draft.flow !== "Spending" || p.draft.amount === null || !cardAmounts.has(p.draft.amount)) return p;
+            // Nothing in the ledger says: the usual history check fills it, or the card asks.
+            if (!byCard) return p;
+            if (byCard.line) {
+              return { ...p, adjustments: [...p.adjustments, `Your card payments are usually bought on ${byCard.line}: check the account.`] };
+            }
+            if (p.draft.fromWallet === byCard.account) {
+              return { ...p, adjustments: [...p.adjustments, `Paid by card: your card payments come out of ${byCard.account}.`] };
+            }
+            if (p.draft.fromWallet && byCard.count < 3) {
+              return { ...p, adjustments: [...p.adjustments, `Your recent card payments came out of ${byCard.account}: check the account.`] };
+            }
+            return {
+              ...p,
+              draft: { ...p.draft, fromWallet: byCard.account },
+              adjustments: [...p.adjustments, `Paid by card: your card payments come out of ${byCard.account}, the last ${byCard.count === 1 ? "one did" : `${byCard.count} did`}.`],
+            };
           });
 
     /*

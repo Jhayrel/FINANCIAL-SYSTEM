@@ -39,6 +39,7 @@ import type { Draft, Flow } from "./entry";
 import { emptyDraft, itemsFor } from "./entry";
 import { accountFor, type InterestCredit } from "./interestCredit";
 import { cashWallet, type Withdrawal } from "./withdrawal";
+import type { CardSlip } from "./cardSlip";
 import { nearestName } from "./nearly";
 import { rowDatesIn } from "./ocrText";
 import type { ReceiptCheck } from "./receipt";
@@ -801,7 +802,7 @@ export function readProposals(
    * text the device read, then a credit line's own screen filed on that
    * line, then fees folded into what they were charged on.
    */
-  const checked = checkWithdrawal(checkInterest(
+  const checked = checkCardSlips(checkWithdrawal(checkInterest(
     checkReceipts(
       datesFromHeadings(checkAgainstReadings(proposals, context.readings ?? []), context.readings ?? [], context.readingDays ?? [], asOf),
       context.receipts ?? [],
@@ -811,7 +812,7 @@ export function readProposals(
     context.interest ?? [],
     reference,
     asOf,
-  ), context.withdrawals ?? [], reference, asOf);
+  ), context.withdrawals ?? [], reference, asOf), context.cardSlips ?? [], reference, asOf);
   const filed = onCreditLine(checked, context.note ?? "", reference);
   return { proposals: pairBorrowings(foldTransferFees(foldCharges(notIncomeKinds(filed, reference)))), refused, balances };
 }
@@ -951,8 +952,70 @@ export function checkWithdrawal(
   return out;
 }
 
+/**
+ * A card slip's payment, held to the slip (`cardSlip.ts`).
+ *
+ * One payment is one entry. The model may make a card of the slip and
+ * another of the shop's receipt for the same ₱2,082.00, or read "Visa
+ * Credit" as borrowing and make the purchase twice, a draw beside it. So
+ * the cards for the slip's amount become one Spending: the one that names
+ * what was bought, dated by the slip, and every borrowing made of the same
+ * figure is dropped. Which account paid is filled after this, from where
+ * the owner's card payments come from.
+ */
+export function checkCardSlips(
+  proposals: readonly Proposal[],
+  slips: readonly CardSlip[],
+  reference: ReferenceLists,
+  asOf: IsoDate,
+): Proposal[] {
+  let out = [...proposals];
+  for (const slip of slips) {
+    if (slip.kind !== "sale") continue;
+    const related = out.filter((p) => p.draft.amount === slip.amount);
+    const borrowed = related.filter((p) => p.draft.flow === "Debt");
+    const spent = related.filter((p) => p.draft.flow === "Spending");
+    const others = related.filter((p) => p.draft.flow !== "Debt" && p.draft.flow !== "Spending");
+    const notes: string[] = [];
+    if (borrowed.length > 0) notes.push(`A card payment, not borrowing: "Credit Card" and "Visa Credit" on a terminal's slip are printed for nearly every card.`);
+    if (spent.length > 1) notes.push(`The card slip and the receipt are the same ${pesos(slip.amount)} payment${slip.approval ? ` (approval code ${slip.approval})` : ""}, so one entry.`);
+    const base =
+      [...spent].sort((a, b) => Number(Boolean(b.draft.item)) - Number(Boolean(a.draft.item)) || b.draft.description.length - a.draft.description.length)[0] ??
+      others[0];
+    const start = base?.draft ?? emptyDraft(slip.date ?? asOf);
+    const accounts = new Set([...reference.wallets, ...reference.savings]);
+    const kept: Proposal = {
+      ...(base ?? { sourceRef: "the card slip", confidence: "medium" as const }),
+      draft: {
+        ...emptyDraft(slip.date ?? start.date ?? asOf),
+        flow: "Spending",
+        category: start.flow === "Spending" && start.category ? start.category : "Spending",
+        item: start.flow === "Spending" ? start.item : "",
+        description: start.description.trim() || (slip.merchant ? `Card payment at ${slip.merchant}` : "Card payment"),
+        amount: slip.amount,
+        fee: 0,
+        fromWallet: accounts.has(start.fromWallet) ? start.fromWallet : "",
+        date: slip.date ?? start.date ?? asOf,
+        notes: slip.time ?? start.notes ?? "",
+        status: "Paid",
+      },
+      confidence: base?.confidence ?? "medium",
+      // Run again across requests, so a note already said is not said twice.
+      adjustments: [...new Set([...(base?.adjustments ?? []), ...notes, ...(base ? [] : [`Read on this device from the card slip${slip.merchant ? ` at ${slip.merchant}` : ""}.`])])],
+    };
+    const at = base ? out.indexOf(base) : out.length;
+    const drop = new Set([...borrowed, ...spent, ...(base && others.includes(base) ? [base] : [])]);
+    // The purchase a "bought on credit" reading paired with its borrowing is the same money again.
+    out = out.filter((p) => !drop.has(p));
+    out.splice(Math.min(at, out.length), 0, kept);
+  }
+  return out;
+}
+
 export interface ReadContext {
   readonly note?: string;
+  /** Card terminal slips in those pictures (`domain/cardSlip.ts`). */
+  readonly cardSlips?: readonly CardSlip[];
   /** ATM withdrawal slips in those pictures, checked by their own figures (`domain/withdrawal.ts`). */
   readonly withdrawals?: readonly Withdrawal[];
   /** Interest credits in those pictures, checked by their arithmetic (`domain/interestCredit.ts`). */

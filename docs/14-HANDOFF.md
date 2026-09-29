@@ -394,6 +394,18 @@ on five wordings of the same day (`wholeDay.test.ts`), not on that sentence.
 | When the model returned fewer cards than the message held, all of its cards were thrown away for the device's | Its cards stay; only what it left out is added, marked "The model's reading left this one out" (`partsTheModelMissed`) |
 | The lunch card warned "You wrote PHP 1,000.00" | Each card is checked against the clause the splitter gave it (`clauseFor`) |
 
+Then a card payment, sent as two photos: a Maya Business terminal's slip
+("PAYMENT CHANNEL Credit Card", "APP. LABEL Visa Credit", ₱2,082.00,
+approval code on it) and Mang Inasal's own receipt for the same meal.
+
+| Found | Now |
+|---|---|
+| Neither photo was checked: the receipt's "VAT" was read as "UAT", so it was not known as a receipt | VAT labels take a U for a V, as this printer's typeface is read: the receipt is checked, ₱2,082.00, three ways |
+| "PAYMAYA CREDIT CARD" on the receipt was read as paid with Maya | A card on the payment line is a card: PAYMAYA is the terminal's company, and any bank's card on it prints the same |
+| A terminal's slip had no rules | `domain/cardSlip.ts`: one card payment at the merchant printed at the top, with its date, time, approval code and the card's last four. "Credit Card", "Visa Credit", "I promise to pay" and the terminal company's name are never a Debt or a credit line. The model is told so, and its cards are held to it (`checkCardSlips`) |
+| The slip and the receipt, sent together, were two cards (or three, with a "bought on credit" borrowing) | A slip and a receipt with the same approval code, or the same amount within a quarter hour, are one payment: one Spending, described from the receipt, made one again across the separate requests each picture goes in. An approval code read as "ppprCode", or a year read as 2020 in one of two readings, still matches |
+| Which account a card paid from | Where the owner's own card payments come from (`cardAccount`: rows like "Purchase at MCDO 878", "JOLLIBEE JB3829"; Maya in their ledger). A line is used instead only when their card purchases are filed as bought on one. Picking the account once teaches the next slip |
+
 **For the owner, not changed:** the September withdrawals already saved
 from Maya's history hold their fee inside the amount: ₱1,018.00 on the
 18th and the 20th, ₱516.00 on the 24th and ₱218.00 on the 26th, each with
