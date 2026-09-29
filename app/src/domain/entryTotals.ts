@@ -41,6 +41,10 @@ export interface TotalsRead {
   readonly parts: Centavos;
   /** How many figures the total was said to be made of. */
   readonly count: number;
+  /** The figures it was made of, in the order said. */
+  readonly partValues?: readonly Centavos[];
+  /** Any other totals in the same message, each with its parts. */
+  readonly others?: readonly { readonly total: Centavos; readonly parts: readonly Centavos[] }[];
   /** Sentences left out because they only say again what was said, for their words ("All school category"). */
   readonly restated: readonly string[];
 }
@@ -64,6 +68,8 @@ function figures(text: string): Figure[] {
     // Part of a word ("iphone15", "g2") or of a date ("9/29", "sept 29").
     if (/[a-z0-9/]$/i.test(before) && !/(?:₱|php|p)$/i.test(match[0].slice(0, 1))) continue;
     if (MONTH_BEFORE.test(before)) continue;
+    // A small whole number before a plural thing is how many, not how much: "2 shirts", "3 packs".
+    if (/^\d{1,2}$/.test(match[1] ?? "") && /^\s+(?!pesos?\b|php\b|centavos?\b)[a-z]{2,}s\b/i.test(text.slice(start + match[0].length))) continue;
     const value = parseAmount(match[1] ?? "");
     if (value === null || value <= 0) continue;
     out.push({ value, start, end: start + match[0].length });
@@ -91,6 +97,8 @@ function sentencesOf(text: string): { sentence: string; line: number }[] {
 const TOTAL_BEFORE =
   /(?:[\s,;:(-]*(?:(?:with|for|at)\s+)?(?:a\s+|the\s+)?(?:grand\s+)?(?:total|sum|kabuuan)(?:\s+(?:of|is|was|na|ng|amount))?|[\s,;:(-]*(?:in total|in all|all in all|overall|altogether|all together|lahat lahat|lahat))\s*[:=]?\s*$/i;
 const TOTAL_AFTER = /^\s*(?:pesos?\s*)?(?:in total|total|in all|all in all|overall|altogether|all together|lahat)\b[\s,;:)]*/i;
+/** Words between the parts and a total named after it: "300 both in 450 total", "150, so 450 in all". */
+const FILLER_BEFORE = /(?:\s*(?:[,;:(=-]|\b(?:both|all|so|that'?s|which|is|are|in|equals?)\b))*\s*$/i;
 /** A figure followed straight away by another: the whole, then its parts. */
 const LEAD_AFTER = /^\s*(?:pesos?\s*)?[,:;(]\s*(?=(?:₱|php\s*|p)?\d)/i;
 
@@ -108,6 +116,7 @@ const tidy = (text: string): string =>
       line
         .replace(/\s{2,}/g, " ")
         .replace(/\s+([,.;:!?])/g, "$1")
+        .replace(/\(\s*\)/g, "")
         .replace(/(?:,|\band)\s*([.!?]|$)/gi, "$1")
         .replace(/^[\s,;:]+/, "")
         .trim(),
@@ -150,48 +159,91 @@ export function readTotals(message: string): TotalsRead {
     said.push(...values);
   }
 
-  // ── 2. The total among the figures that are left ────────────────────────
+  // ── 2. The totals among the figures that are left ───────────────────────
+  /*
+   * A total belongs to the figures beside it in its own sentence, never to
+   * the whole message: "I paid for gas using cash 250. I paid 150 for my
+   * school and honorarium 300 both in 450 total ... Then i ate lunch 95"
+   * has ₱450.00 as the total of ₱150.00 and ₱300.00 alone (29 September
+   * 2026). So the parts are the figures just before it, or just after it,
+   * in the same sentence, that come to it exactly.
+   */
   let text = kept.map((k, i) => (i === 0 ? "" : k.line === kept[i - 1]?.line ? " " : "\n") + k.sentence).join("");
   const all = figures(text);
-  let found: { figure: Figure; cut: [number, number]; labelled: boolean } | null = null;
+  const sentenceOf = (at: number): number => {
+    const before = text.slice(0, at);
+    return (before.match(/[.!?](?=\s)|\n/g) ?? []).length;
+  };
+  /*
+   * A total said on its own ("300 food / 150 gas / total 450", or "... gas.
+   * Total 450.") has no parts in its own sentence, so it looks at the ones
+   * before it, still only when they come to it exactly.
+   */
+  const run = (from: number, step: 1 | -1, total: Centavos, cross = false): Figure[] | null => {
+    const home = sentenceOf(all[from]?.start ?? 0);
+    const out: Figure[] = [];
+    let sum = 0;
+    for (let k = from + step; k >= 0 && k < all.length; k += step) {
+      const f = all[k];
+      if (!f || (!cross && sentenceOf(f.start) !== home)) break;
+      out.push(f);
+      sum += f.value;
+      if (sum === total && out.length >= 2) return out.sort((a, b) => a.start - b.start);
+      if (sum > total) break;
+    }
+    return null;
+  };
+  const found: { figure: Figure; cut: [number, number]; parts: Figure[] }[] = [];
+  const used = new Set<Figure>();
   for (const [i, f] of all.entries()) {
-    const others = all.filter((_, k) => k !== i);
-    if (others.length < 2) continue;
-    const sum = others.reduce((s, o) => s + o.value, 0);
+    if (used.has(f)) continue;
     const before = text.slice(0, f.start);
     const after = text.slice(f.end);
     const labelBefore = TOTAL_BEFORE.exec(before);
-    const labelAfter = TOTAL_AFTER.exec(after);
-    if (labelBefore) {
-      found = { figure: f, cut: [labelBefore.index, f.end + (/^\s*pesos?\b/i.exec(after)?.[0].length ?? 0)], labelled: true };
-      break;
-    }
-    if (labelAfter) {
-      const lead = /[\s,;:(-]*$/.exec(before);
-      found = { figure: f, cut: [lead ? lead.index : f.start, f.end + labelAfter[0].length], labelled: true };
-      break;
+    const labelAfter = labelBefore ? null : TOTAL_AFTER.exec(after);
+    if (labelBefore || labelAfter) {
+      const sameSentence = all.filter((o) => o !== f && sentenceOf(o.start) === sentenceOf(f.start));
+      const alone = sameSentence.length === 0;
+      const beside = run(i, -1, f.value, alone) ?? run(i, 1, f.value, alone);
+      const parts = beside ?? (sameSentence.length >= 2 ? sameSentence : null);
+      if (!parts) continue;
+      const cut: [number, number] = labelBefore
+        ? [labelBefore.index, f.end + (/^\s*(?:pesos?\b)?\s*\)?/i.exec(after)?.[0].length ?? 0)]
+        : [FILLER_BEFORE.exec(before)?.index ?? f.start, f.end + (labelAfter?.[0].length ?? 0)];
+      found.push({ figure: f, cut, parts });
+      used.add(f);
+      for (const p of parts) used.add(p);
+      continue;
     }
     // Said first in its sentence and followed straight away by the parts: only when they add up to it.
-    const sentenceStart = Math.max(before.lastIndexOf(". "), before.lastIndexOf("! "), before.lastIndexOf("? "), before.lastIndexOf("\n"));
-    const firstInSentence = !all.some((o) => o.start < f.start && o.start > sentenceStart);
+    const firstInSentence = !all.some((o) => o.start < f.start && sentenceOf(o.start) === sentenceOf(f.start));
     const lead = LEAD_AFTER.exec(after);
-    if (firstInSentence && lead && sum === f.value) {
-      found = { figure: f, cut: [f.start, f.end + lead[0].length], labelled: false };
-      break;
+    const parts = firstInSentence && lead ? run(i, 1, f.value) : null;
+    if (parts) {
+      found.push({ figure: f, cut: [f.start, f.end + (lead?.[0].length ?? 0)], parts });
+      used.add(f);
+      for (const p of parts) used.add(p);
     }
   }
 
-  if (!found) return restated.length > 0 ? { ...none, text: tidy(text), restated } : none;
-  const parts = all.filter((f) => f !== found.figure);
-  text = tidy(`${text.slice(0, found.cut[0])} ${text.slice(found.cut[1])}`);
+  if (found.length === 0) return restated.length > 0 ? { ...none, text: tidy(text), restated } : none;
+  for (const t of [...found].sort((a, b) => b.cut[0] - a.cut[0])) {
+    text = `${text.slice(0, t.cut[0])} ${text.slice(t.cut[1])}`;
+  }
+  const first = found[0]!;
   return {
-    text,
-    total: found.figure.value,
-    parts: parts.reduce((s, f) => s + f.value, 0),
-    count: parts.length,
+    text: tidy(text),
+    total: first.figure.value,
+    parts: first.parts.reduce((s, f) => s + f.value, 0),
+    count: first.parts.length,
+    partValues: first.parts.map((f) => f.value),
+    others: found.slice(1).map((t) => ({ total: t.figure.value, parts: t.parts.map((f) => f.value) })),
     restated,
   };
 }
+
+/** Whether a piece of a message names an amount of money, not a date, a time or a count. */
+export const namesMoney = (text: string): boolean => figures(text).length > 0;
 
 /** The message with any total, and any sentence that only repeats one, taken out. */
 export const withoutTotals = (message: string): string => readTotals(message).text;
@@ -242,6 +294,37 @@ export function withSaidItem<T extends { readonly draft: { readonly flow: string
 /** The line said beside the cards when a total was read, so it is plain the total was understood. */
 export function totalWords(totals: TotalsRead, money: (c: Centavos) => string): string {
   if (totals.total === null) return "";
-  if (totals.parts === totals.total) return `${money(totals.total)} is what they come to, so it is not an entry of its own.`;
-  return `You said ${money(totals.total)} in all, but the parts come to ${money(totals.parts)}. Check the amounts before adding them.`;
+  const said = (total: Centavos, parts: readonly Centavos[]): string => {
+    const sum = parts.reduce((a, b) => a + b, 0);
+    const named = parts.length >= 2 ? `${parts.slice(0, -1).map(money).join(", ")} and ${money(parts[parts.length - 1] ?? 0)}` : "";
+    if (sum === total) return named ? `${money(total)} is ${named} together, so it is not an entry of its own.` : `${money(total)} is what they come to, so it is not an entry of its own.`;
+    return `You said ${money(total)} in all, but ${named || "the parts"} come to ${money(sum)}. Check the amounts before adding them.`;
+  };
+  return [said(totals.total, totals.partValues ?? []), ...(totals.others ?? []).map((o) => said(o.total, o.parts))].join(" ");
+}
+
+/**
+ * Which of the parts the device read from a message the model's cards do
+ * not cover, by amount: the same figure, or the same with its fee on or off.
+ *
+ * When the model returns fewer cards than the message holds, its cards are
+ * kept, being better worded, and only what it left out is added from the
+ * device's reading. They used to be thrown away whole.
+ */
+export function partsTheModelMissed(
+  parts: readonly { readonly amount: Centavos | null; readonly fee: Centavos }[],
+  cards: readonly { readonly amount: Centavos | null; readonly fee: Centavos }[],
+): number[] {
+  const pool = [...cards];
+  const missed: number[] = [];
+  parts.forEach((p, i) => {
+    const a = p.amount ?? 0;
+    const at = pool.findIndex((c) => {
+      const b = c.amount ?? 0;
+      return b === a || b + c.fee === a || b === a + p.fee || b + c.fee === a + p.fee;
+    });
+    if (at >= 0) pool.splice(at, 1);
+    else missed.push(i);
+  });
+  return missed;
 }

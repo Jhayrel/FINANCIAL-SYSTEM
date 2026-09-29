@@ -26,7 +26,8 @@
  * borrowing as spending.
  */
 
-import { withoutTotals } from "./entryTotals";
+import { namesMoney, withoutTotals } from "./entryTotals";
+import { cashWallet } from "./withdrawal";
 import { daysBackIn, itemHintIn } from "./filipino";
 import { emptyDraft, itemsFor, withDebtEffect, type Draft, type Flow } from "./entry";
 import { payBackClauseAt, readBehalf, readDebtSentence, readPassThrough } from "./debtSentence";
@@ -98,7 +99,7 @@ export interface ReadEntry {
  * accepts the dictionary spelling is a reader that fails on real typing.
  */
 const SPENT =
-  /\b(spent|spend|spending|paid|pay|paying|bought|buy|buying|purchased|purchase|ordered|renewed|topped up|top up|loaded|reloaded|treated|payed|apid|piad|spnt|add|bayad|nagbayad|binayaran|magbayad|bumili|bumuli|binili|bibili|umorder|gumastos|gastos|nagastos|nag-load|nagload)\b/i;
+  /\b(spent|spend|spending|paid|pay|paying|bought|buy|buying|purchased|purchase|ordered|renewed|topped up|top up|loaded|reloaded|treated|payed|apid|piad|spnt|add|bayad|nagbayad|binayaran|magbayad|bumili|bumuli|binili|bibili|umorder|gumastos|gastos|nagastos|nag-load|nagload|ate|eat|kumain|drank|uminom)\b/i;
 
 /**
  * Money in, in either language.
@@ -715,7 +716,9 @@ export function readEntry(
   const verbless =
     !readsAsDebt &&
     flowOf(text) === null &&
-    itemFromHistory(text, transactions.filter((t) => t.type === "Spending")) !== null;
+    (itemFromHistory(text, transactions.filter((t) => t.type === "Spending")) !== null ||
+      // A kind of spending from their own list and a price: "gas 250 cash", "school 150".
+      (namesMoney(text) && reference.spendingTypes.some((t) => t.name.trim() !== "" && namesCredit(text, t.name))));
 
   const flow = readsAsDebt ? null : earnsInterest ? "Revenue" : (flowOf(text) ?? (verbless ? "Spending" : null));
   if (!flow) {
@@ -951,6 +954,17 @@ export function readEntry(
     : "";
   const interestItem = earnsInterest ? (reference.revenueCategories.find((c) => /interest/i.test(c)) ?? "") : "";
 
+  /*
+   * Cash taken out goes into Cash. "i withdraw from maya 1000 16 fee" left
+   * the destination blank, and a blank one means the money left the owner's
+   * accounts; the owner, 29 September 2026: "since it's physical withdraw
+   * means cash". A withdrawal that names where it went keeps that.
+   */
+  const cashIn = cashWallet(reference.wallets);
+  const intoCash =
+    flow === "Transfer" && WITHDRAWING.test(text) && !destination && !leftYourAccounts && cashIn !== "" && source !== cashIn;
+  if (intoCash) because.push(`Taken out as cash, so into ${cashIn}.`);
+
   const base: Draft = {
     ...emptyDraft(date),
     flow,
@@ -960,7 +974,11 @@ export function readEntry(
       flow === "Revenue"
         ? savingsNamed || destination || loose
         : flow === "Transfer"
-          ? (destination !== source ? destination : "")
+          ? intoCash
+            ? cashIn
+            : destination !== source
+              ? destination
+              : ""
           : "",
     amount,
     fee,
@@ -1090,7 +1108,7 @@ function feeIn(text: string): { fee: number; rest: string } {
  * the ordinary case.
  */
 const JOINS =
-  /(?:\band also\b|\bthen also\b|\band then\b|\bthen\b|\balso add\b|\balso i\b|\bplus i\b|;|\band\b(?=\s*(?:₱|php\s*)?\d))/i;
+  /(?:\band also\b|\bthen also\b|\band then\b|\bthen\b|\balso add\b|\balso i\b|\bplus i\b|\bpagkatapos\b|\btapos\b|;|\band\b(?=\s*(?:₱|php\s*)?\d))/i;
 
 /**
  * The verb at the front of the first clause, if it is short enough to lend.
@@ -1111,6 +1129,53 @@ function leadingVerb(part: string): string {
 /** Starts with a figure, so it has no verb of its own to read. */
 const startsWithFigure = (part: string): boolean => /^(?:₱|php\s*)?\d/i.test(part.trim());
 
+/** A verb of paying, buying, eating, moving or taking money, with its subject: "I paid", "i withdraw". */
+const VERB_PHRASE =
+  /\b(?:(?:i|we|my\s+\w+)\s+)?(?:also\s+|then\s+|just\s+)?(?:paid|pay|payed|bought|buy|spent|spend|purchased|ordered|loaded|topped up|ate|eat|drank|sent|send|gave|give|withdrew|withdraw|withdrawn|transferred|transfer|received|got|earned|borrowed|lent|deposited|nagbayad|bumili|binili|kumain|nagpadala|nag-withdraw|nagwithdraw)\b/i;
+
+/** The verb a clause opens with, to lend to a clause after it that has none. */
+function verbPhrase(part: string): string {
+  const m = VERB_PHRASE.exec(part);
+  return m ? m[0].trim() : "";
+}
+
+
+
+/** A clause that is only a fee: "16 fee", "fee of 15", "with 10 charge". */
+const FEE_ONLY = /^\s*(?:(?:with|a|the|plus)\s+)?(?:(?:₱|php\s*)?\d[\d,.]*\s*(?:pesos?\s*)?(?:fee|charge|service fee)|(?:fee|charge)\s*(?:of|is|:)?\s*(?:₱|php\s*)?\d[\d,.]*)\s*[.!?]?\s*$/i;
+
+/**
+ * "and" between two things, each with its own figure, is two entries.
+ *
+ * "I paid 150 for my school and honorarium 300" and "i ate lunch 95 and buy
+ * water 25" are two each (29 September 2026). "and" before a figure was
+ * already a split; before a word it was not, because "gas and food" is one
+ * purchase. So only where both sides carry a figure of their own, and the
+ * second opens with a verb or a few words and then its figure. Never before
+ * a fee, which belongs to what it was charged on.
+ */
+function splitOnAnd(part: string): string[] {
+  // "and", Tagalog "at", "tsaka" and "saka", and a comma between two things with their own figures.
+  const pieces = part.split(/(\s+(?:and|at|tsaka|saka|&)\s+|,\s+)/i);
+  if (pieces.length < 3) return [part];
+  const out: string[] = [pieces[0] ?? ""];
+  for (let k = 1; k < pieces.length; k += 2) {
+    const joint = pieces[k] ?? " ";
+    const piece = pieces[k + 1] ?? "";
+    const before = out[out.length - 1] ?? "";
+    const opensAsEntry =
+      VERB_PHRASE.test(piece.split(/\s+/).slice(0, 3).join(" ")) ||
+      /^\s*(?:[a-z][a-z'-]*\s+){1,3}(?:₱|php\s*)?\d/i.test(piece) ||
+      /^\s*(?:₱|php\s*)?\d/i.test(piece);
+    if (namesMoney(before) && namesMoney(piece) && opensAsEntry && !FEE_ONLY.test(piece)) {
+      out.push(piece);
+    } else {
+      out[out.length - 1] = `${before}${joint}${piece}`;
+    }
+  }
+  return out;
+}
+
 export function splitEntries(text: string): string[] {
   /*
    * A total and a sentence that only says it again are not entries: "I paid
@@ -1122,10 +1187,19 @@ export function splitEntries(text: string): string[] {
     .map((l) => l.trim())
     .filter(Boolean);
 
+  /*
+   * A full stop, a question mark or an exclamation ends an entry: "I paid
+   * for gas using cash 250. I paid 150 for my school ..." is two payments,
+   * and read as one sentence it was one card for ₱250.00 of School
+   * (29 September 2026). A point inside a figure is followed by a digit,
+   * not a space, so "1,000.50" is never cut.
+   */
   const parts = lines.flatMap((line) =>
     line
-      .split(JOINS)
+      .split(/(?<=[.!?])\s+(?=\S)/)
+      .flatMap((sentence) => sentence.split(JOINS))
       .map((part) => part.trim().replace(/^(?:and|also|plus)\s+/i, ""))
+      .flatMap(splitOnAnd)
       .filter((part) => part.length > 2),
   );
 
@@ -1141,16 +1215,25 @@ export function splitEntries(text: string): string[] {
    * amount, no wallet, nothing at all, and the caller dropped it for not
    * being an entry. Two of the three payments vanished without a word.
    *
-   * Only clauses that open with a figure borrow, and only from the first
-   * clause. "then paid 500 for food" and "then gave 300 to my mom" have their
-   * own verbs and keep them, which is what keeps a borrowed "I borrowed" off
-   * a row that was not borrowing.
+   * A clause that opens with a figure borrows the first clause's opening
+   * words, as before. A clause with no verb of its own ("honorarium 300"
+   * after "I paid 150 for my school and") borrows the verb of the nearest
+   * clause before it that has one. "then paid 500 for food" and "then gave
+   * 300 to my mom" have their own verbs and keep them, which is what keeps
+   * a borrowed "I borrowed" off a row that was not borrowing.
    */
   const lead = parts.length > 1 ? leadingVerb(parts[0] ?? "") : "";
-
-  const withVerb = lead
-    ? parts.map((part, i) => (i > 0 && startsWithFigure(part) ? `${lead} ${part}` : part))
-    : parts;
+  let nearest = "";
+  const withVerb = parts.map((part, i) => {
+    const own = verbPhrase(part);
+    if (own) {
+      nearest = own;
+      return part;
+    }
+    if (i === 0 || flowOf(part) !== null) return part;
+    if (startsWithFigure(part) && lead) return `${lead} ${part}`;
+    return nearest ? `${nearest} ${part}` : part;
+  });
 
   /**
    * ── A wallet named once, at the end, belongs to all of them ────────────
@@ -1191,8 +1274,13 @@ function namesCredit(text: string, name: string): boolean {
   return flat(text).includes(flat(name));
 }
 
-/** A source clause sitting at the very end of a message. */
-const FROM_TAIL = /\b(?:from|out of|using|via|thru|through)\s+[a-z0-9 ()'-]{2,40}$/i;
+/**
+ * A source clause sitting at the very end of a message, with no figure in
+ * it: "from maya 1000 16 fee" is the last entry's own wallet and amount, and
+ * lent to the others it put a ₱16.00 fee and Maya on a lunch (29 September
+ * 2026).
+ */
+const FROM_TAIL = /\b(?:from|out of|using|via|thru|through)\s+[a-z ()'-]{2,40}$/i;
 
 /** Any mention of where money came from, so an inherited one is not doubled. */
 const FROM_WORD = /\b(?:from|out of|using|used|via|thru|through|with)\b/i;

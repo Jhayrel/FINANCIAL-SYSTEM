@@ -137,9 +137,9 @@ describe("splitEntries lends the first verb to a clause that has none", () => {
     ]);
   });
 
-  it("lends nothing when the lead-in is a sentence rather than a verb", () => {
+  it("lends only the verb when the lead-in is a sentence, never the words around it", () => {
     const long = "on the way home from school yesterday afternoon I paid 500 for food, then 300 for gas";
-    expect(splitEntries(long)[1]).toBe("300 for gas");
+    expect(splitEntries(long)[1]).toBe("I paid 300 for gas");
   });
 
   it("lends nothing when there is only one clause", () => {

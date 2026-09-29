@@ -32,6 +32,7 @@
  */
 
 import { withoutTotals } from "./entryTotals";
+import { splitEntries } from "./readEntry";
 import { itemsFor, needs, type Draft, type FieldName } from "./entry";
 import { numbersInWords } from "./numberWords";
 import { withoutDays } from "./money";
@@ -224,7 +225,15 @@ export function clauseFor(said: string, amount: number | null, reference?: Refer
   const text = withoutTotals(said).trim();
   if (text === "") return "";
 
-  const parts = clausesIn(text);
+  /*
+   * The same pieces the message is split into for its cards (readEntry.ts,
+   * `splitEntries`), so a card is checked against the clause it came from.
+   * The rules here used to be their own and cruder: "i ate lunch 95 and buy
+   * water 25 and also i withdraw from maya 1000 16 fee" was one clause, and
+   * the lunch card said "You wrote PHP 1,000.00" (29 September 2026). The
+   * older, finer split still runs inside each piece, for figures in words.
+   */
+  const parts = splitEntries(text).flatMap(clausesIn);
   // One clause, or nothing to match on: the message is the sentence, as before.
   if (parts.length <= 1 || amount === null || amount <= 0) return text;
 

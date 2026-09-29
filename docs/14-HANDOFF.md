@@ -374,6 +374,26 @@ owner's own corrections, which already outrank the next guess.
 | A 7-Eleven receipt photographed about ten degrees tilted lost its item, total, cash and date to the reader | Every camera photo is straightened before it is read (`ocrText.ts`, `skewAngle`: the tilt at which lines of print on paper line up sharpest, only paper with ink counting, so a rock or a zebra crossing does not). It is read both ways and the reading the reader is surer of is kept, so a level photo reads as before. The receipt then read whole, and the receipt check found ₱25.00 in cash on 29 September |
 | "NatureSprigPur iDHIL U": the shop's VAT mark read as part of the item | A lone tax mark after the price is dropped, and the model is told how a shop shortens names |
 
+Then, the same day, a message the owner means to send in their own words
+each time: "I paid for gas using cash 250. I paid 150 for my school and
+honorarium 300 both in 450 total in school for our final capstonedefense.
+Then i ate lunch 95 and buy water 25 and also i withdraw from maya 1000 16
+fee". Six entries; it made three. Every fix is a rule about English, tested
+on five wordings of the same day (`wholeDay.test.ts`), not on that sentence.
+
+| Found | Now |
+|---|---|
+| Two sentences were one entry | A full stop, a question mark or an exclamation ends an entry (`splitEntries`) |
+| "150 for my school and honorarium 300", "lunch 95 and buy water 25", "lunch 95, water 25" were one entry each | "and", "at", "tsaka", "saka" or a comma splits when both sides carry their own amount and the second opens with a verb, a few words and a figure, or a figure. Never before a fee ("and 16 fee", ", fee 16"), and a date or a count ("sept 29", "2 shirts") is not an amount. "tapos" and "pagkatapos" are "then" |
+| "honorarium 300" had no verb and read as nothing | A clause with no verb borrows the nearest one before it ("I paid"), only the verb, never the words around it |
+| "from maya 1000 16 fee" was lent to the lunch as its wallet and fee | A wallet is shared from the last clause only when that clause has no figure of its own |
+| "i withdraw from maya 1000 16 fee" had no destination | Cash taken out with no destination named goes into the cash wallet |
+| "i ate lunch 95" was not spending | Eating and drinking words are spending (ate, kumain, drank, uminom) |
+| "gas 250 cash, school 150" with no verbs read as nothing without history | A kind from the owner's own list and a price is spending |
+| "450 total" was measured against every figure in the message | A total's parts are the figures beside it in its sentence that come to it exactly; one said on its own line or sentence looks at the ones before it. The chat names them: "₱450.00 is ₱150.00 and ₱300.00 together" |
+| When the model returned fewer cards than the message held, all of its cards were thrown away for the device's | Its cards stay; only what it left out is added, marked "The model's reading left this one out" (`partsTheModelMissed`) |
+| The lunch card warned "You wrote PHP 1,000.00" | Each card is checked against the clause the splitter gave it (`clauseFor`) |
+
 **For the owner, not changed:** the September withdrawals already saved
 from Maya's history hold their fee inside the amount: ₱1,018.00 on the
 18th and the 20th, ₱516.00 on the 24th and ₱218.00 on the 26th, each with

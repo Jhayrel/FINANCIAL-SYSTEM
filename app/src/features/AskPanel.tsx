@@ -80,7 +80,7 @@ import {
   type Blank,
 } from "../domain/capture";
 import { readEntry, splitEntries } from "../domain/readEntry";
-import { namedIn, readTotals, totalWords, withSaidItem, withoutTheTotal } from "../domain/entryTotals";
+import { namedIn, partsTheModelMissed, readTotals, totalWords, withSaidItem, withoutTheTotal } from "../domain/entryTotals";
 import { cashWallet, slipsIn, withdrawalSource } from "../domain/withdrawal";
 import { Rich } from "../components/Rich";
 import {
@@ -2908,8 +2908,17 @@ export function AskPanel({
           }))
         : [];
     const usable = parts.filter((p) => p.read.readsAsDebt || p.read.worthOffering);
+    /*
+     * The model returned cards, but fewer than the message holds: its cards
+     * stay, and only what it left out is added from the reading here
+     * (domain/entryTotals.ts, `partsTheModelMissed`).
+     */
+    const extras =
+      usable.length > result.proposals.length && result.proposals.length > 0
+        ? partsTheModelMissed(usable.map((p) => p.read.draft), result.proposals.map((p) => p.draft)).map((i) => usable[i]!).filter(Boolean)
+        : [];
 
-    if (usable.length > result.proposals.length && usable.length > 1) {
+    if (usable.length > result.proposals.length && usable.length > 1 && result.proposals.length === 0) {
       say({
         kind: "assistant",
         ephemeral: true,
@@ -2951,10 +2960,10 @@ export function AskPanel({
         kind: "assistant",
         ephemeral: true,
         text:
-          (result.proposals.length === 1
+          (result.proposals.length + extras.length === 1
             ? "One entry. Check it, then add it."
-            : `${result.proposals.length} entries. Check each one, then add it.`) +
-          (typed?.words && result.proposals.length > 1 ? ` ${typed.words}` : "") +
+            : `${result.proposals.length + extras.length} entries. Check each one, then add it.`) +
+          (typed?.words && result.proposals.length + extras.length > 1 ? ` ${typed.words}` : "") +
           (result.repeated
             ? ` The picture shows ${result.repeated === 1 ? "one row" : `${result.repeated} rows`} twice, where the screenshot was stitched together, and each was read once.`
             : ""),
@@ -3097,7 +3106,7 @@ export function AskPanel({
       });
     }
 
-    const batch = checked.length > 1;
+    const batch = checked.length + extras.length > 1;
     const made: CardToAsk[] = [];
     for (const proposal of checked) {
       /*
@@ -3112,6 +3121,28 @@ export function AskPanel({
        * code, not a figure of PHP 4,817.00 that the ₱174.00 was misread from.
        */
       const card = await offer(own ? { ...proposal, said: own } : proposal, own || note, true, batch, [], own ? "" : undefined);
+      if (card) made.push(card);
+    }
+    // What the model left out of the message, read here from the owner's own words.
+    for (const { line, read } of extras) {
+      if (read.readsAsDebt) {
+        say(debtCard(read.draft, line).turn);
+        continue;
+      }
+      const card = await offer(
+        {
+          draft: read.draft,
+          confidence: "medium",
+          sourceRef: `part of what you said: ${line}`,
+          said: line,
+          typed: true,
+          adjustments: [...read.because, "The model's reading left this one out, so it was read from your words on this device."],
+        },
+        line,
+        false,
+        true,
+        read.settled,
+      );
       if (card) made.push(card);
     }
     /*

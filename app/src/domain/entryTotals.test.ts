@@ -66,7 +66,7 @@ describe("the owner's message", () => {
   });
 
   it("says the total was understood", () => {
-    expect(totalWords(read, formatMoney)).toBe("₱450.00 is what they come to, so it is not an entry of its own.");
+    expect(totalWords(read, formatMoney)).toBe("₱450.00 is ₱300.00 and ₱150.00 together, so it is not an entry of its own.");
   });
 });
 
@@ -92,7 +92,7 @@ describe("the ways a total is said", () => {
     const read = readTotals("300 for food and 150 for gas, total of 460");
     expect(read.total).toBe(46_000);
     expect(read.parts).toBe(45_000);
-    expect(totalWords(read, formatMoney)).toBe("You said ₱460.00 in all, but the parts come to ₱450.00. Check the amounts before adding them.");
+    expect(totalWords(read, formatMoney)).toBe("You said ₱460.00 in all, but ₱300.00 and ₱150.00 come to ₱450.00. Check the amounts before adding them.");
   });
 });
 
