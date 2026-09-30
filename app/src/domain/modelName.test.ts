@@ -35,6 +35,18 @@ describe("modelName, ids the chain actually serves", () => {
   });
 });
 
+describe("modelName, Google and Cloudflare", () => {
+  it("names Gemini, whose ids carry no maker", () => {
+    expect(modelLabel("gemini:gemini-2.5-flash")).toBe("Gemini 2.5 Flash by Google");
+    expect(modelName("gemini:models/gemini-2.5-pro")).toEqual({ name: "Gemini 2.5 Pro", maker: "Google", host: "Google" });
+  });
+
+  it("names Workers AI's models without the catalogue prefix", () => {
+    expect(modelLabel("workers:@cf/meta/llama-3.3-70b-instruct-fp8-fast")).toBe("Llama 3.3 70B Instruct FP8 Fast by Meta");
+    expect(modelName("workers:@cf/mistralai/mistral-small-3.1-24b-instruct")).toEqual({ name: "Mistral Small 3.1 24B Instruct", maker: "Mistral AI", host: "Cloudflare" });
+  });
+});
+
 describe("modelName, the parts", () => {
   it("separates host, maker and name", () => {
     expect(modelName("groq:openai/gpt-oss-120b")).toEqual({

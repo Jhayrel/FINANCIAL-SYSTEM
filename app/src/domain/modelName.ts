@@ -51,6 +51,8 @@ const MAKERS: Record<string, string> = {
  * There is no way to derive the maker from "allam-2-7b", so it is listed.
  */
 const BARE: Record<string, string> = {
+  gemini: "Google",
+  gemma: "Google",
   allam: "SDAIA",
   whisper: "OpenAI",
   compound: "Groq",
@@ -69,6 +71,7 @@ const ACRONYMS = new Map<string, string>([
   ["tts", "TTS"],
   ["v3", "V3"],
   ["r1", "R1"],
+  ["fp8", "FP8"],
 ]);
 
 export interface ModelName {
@@ -80,7 +83,7 @@ export interface ModelName {
   readonly host: string;
 }
 
-const HOSTS: Record<string, string> = { groq: "Groq", openrouter: "OpenRouter" };
+const HOSTS: Record<string, string> = { groq: "Groq", openrouter: "OpenRouter", gemini: "Google", workers: "Cloudflare" };
 
 export function modelName(raw: string): ModelName {
   const trimmed = raw.trim();
@@ -92,8 +95,8 @@ export function modelName(raw: string): ModelName {
   const host = HOSTS[maybeHost] ?? "";
   let id = host ? trimmed.slice(colon + 1) : trimmed;
 
-  // OpenRouter marks its free tier with a suffix that is not part of the name.
-  id = id.replace(/:free$/i, "").replace(/:nitro$/i, "");
+  // OpenRouter marks its free tier with a suffix that is not part of the name; Workers AI prefixes its catalogue.
+  id = id.replace(/:free$/i, "").replace(/:nitro$/i, "").replace(/^@(?:cf|hf)\//i, "").replace(/^models\//i, "");
 
   const slash = id.indexOf("/");
   const vendor = slash > 0 ? id.slice(0, slash).toLowerCase() : "";

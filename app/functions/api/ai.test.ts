@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { compactContext, emptyRead, fitConversation, firstInWaves, shortReason, SHRINK_TO, systemFor, toneFor, usefulRead, visionChain } from "./ai";
+import { compactContext, emptyRead, fitConversation, firstInWaves, geminiRank, geminiRefusal, shortReason, SHRINK_TO, systemFor, textChain, toneFor, usefulRead, visionChain, workersFailure, workersModels } from "./ai";
 
 /** A context shaped like the real one: worked-out figures, then the rows. */
 function contextOf(rows: number): string {
@@ -398,5 +398,107 @@ describe("an answer worth winning with", () => {
 
   it("leaves other tasks' answers alone", () => {
     expect(usefulRead({ text: "A sentence." })).toBe(true);
+  });
+});
+
+/**
+ * 30 September 2026: "Can we add another powerful ai that is free and cannot
+ * forget and actually smart?" Google Gemini goes first and Cloudflare Workers
+ * AI stands behind the rest. Neither can be called from a test, so what is
+ * pinned is which of their models are asked, in what order, and how their
+ * failures are read.
+ */
+describe("Gemini's models, from Google's own list", () => {
+  const catalogue = [
+    "models/embedding-001",
+    "models/gemini-2.0-flash",
+    "models/gemini-2.0-flash-lite",
+    "models/gemini-2.5-flash",
+    "models/gemini-2.5-pro",
+    "models/gemini-2.5-flash-lite",
+    "models/gemini-2.5-flash-preview-tts",
+    "models/gemini-2.5-flash-image",
+    "models/gemini-2.0-flash-live-001",
+    "models/gemini-embedding-001",
+    "models/gemma-3-27b-it",
+    "models/gemini-flash-latest",
+  ];
+
+  it("keeps the chat models, newest first, Flash then Pro then Lite, aliases last", () => {
+    expect(geminiRank(catalogue)).toEqual([
+      "gemini-2.5-flash",
+      "gemini-2.5-pro",
+      "gemini-2.5-flash-lite",
+      "gemini-2.0-flash",
+      "gemini-2.0-flash-lite",
+      "gemini-flash-latest",
+    ]);
+  });
+
+  it("puts a newer version first when Google adds one", () => {
+    expect(geminiRank([...catalogue, "models/gemini-3-flash-preview", "models/gemini-3-pro-preview"]).slice(0, 3)).toEqual([
+      "gemini-3-flash-preview",
+      "gemini-3-pro-preview",
+      "gemini-2.5-flash",
+    ]);
+  });
+
+  it("is empty when the list has nothing to chat with", () => {
+    expect(geminiRank(["models/embedding-001", "models/imagen-4.0-generate-001"])).toEqual([]);
+  });
+});
+
+describe("a request Gemini refuses", () => {
+  it("is not sent again when the key is wrong or the region is not served", () => {
+    expect(geminiRefusal('{"error":{"code":400,"message":"User location is not supported for the API use.","status":"FAILED_PRECONDITION"}}')).toBe("403");
+    expect(geminiRefusal('[{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}]')).toBe("403");
+  });
+
+  it("is sent again, lean, when it was the request's shape", () => {
+    expect(geminiRefusal('{"error":{"code":400,"message":"Invalid JSON payload received.","status":"INVALID_ARGUMENT"}}')).toBe("400");
+    expect(geminiRefusal("")).toBe("400");
+  });
+});
+
+describe("the text models to try", () => {
+  const gemini = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"];
+  const workers = workersModels();
+  const at = (chain: ReturnType<typeof textChain>): string[] => chain.map((c) => `${c.provider}:${c.model}`);
+
+  it("asks Gemini's best two first, then Workers AI beside Groq, then the rest", () => {
+    expect(at(textChain(gemini, workers, ["g1", "g2", "g3", "g4"], ["o1", "o2"]))).toEqual([
+      "gemini:gemini-2.5-flash",
+      "gemini:gemini-2.5-pro",
+      "workers:@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "groq:g1",
+      "openrouter:o1",
+      "groq:g2",
+      "openrouter:o2",
+      "groq:g3",
+      "workers:@cf/mistralai/mistral-small-3.1-24b-instruct",
+    ]);
+  });
+
+  it("is the chain it always was when neither new provider is set up", () => {
+    expect(at(textChain([], [], ["g1", "g2"], ["o1"]))).toEqual(["groq:g1", "openrouter:o1", "groq:g2"]);
+  });
+
+  it("still has models when Gemini is the only key", () => {
+    expect(at(textChain(gemini, [], [], []))).toEqual(["gemini:gemini-2.5-flash", "gemini:gemini-2.5-pro"]);
+  });
+});
+
+describe("Workers AI", () => {
+  it("uses the models kept here unless the environment names its own", () => {
+    expect(workersModels()).toEqual(["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/mistralai/mistral-small-3.1-24b-instruct"]);
+    expect(workersModels(" @cf/qwen/qwen3-30b-a3b-fp8 , nonsense, @hf/some/model ")).toEqual(["@cf/qwen/qwen3-30b-a3b-fp8", "@hf/some/model"]);
+    expect(workersModels("nonsense")).toHaveLength(2);
+  });
+
+  it("reads a failure in the terms the chain acts on", () => {
+    expect(workersFailure("AiError: Input is too long for this model's context window")).toBe("413");
+    expect(workersFailure("4006: you have used up your daily free allocation of 10,000 neurons")).toBe("429");
+    expect(workersFailure("5007: No such model @cf/old/model or task")).toBe("404");
+    expect(workersFailure("InferenceUpstreamError: internal")).toBe("503");
   });
 });

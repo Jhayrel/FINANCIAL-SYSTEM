@@ -17,11 +17,13 @@ import type { Debt } from "./debt";
 import type { Centavos } from "./money";
 import type { SpendingType, StoppedItem } from "./types";
 
-export type AiProvider = "groq" | "openrouter" | "openai" | "anthropic";
+export type AiProvider = "groq" | "openrouter" | "gemini" | "workers" | "openai" | "anthropic";
 
 export const AI_PROVIDER_LABEL: Record<AiProvider, string> = {
   groq: "Groq",
   openrouter: "OpenRouter",
+  gemini: "Google Gemini",
+  workers: "Cloudflare Workers AI",
   openai: "OpenAI",
   anthropic: "Anthropic",
 };
@@ -38,16 +40,19 @@ export const AI_PROVIDER_LABEL: Record<AiProvider, string> = {
 export const AI_DEFAULT_MODEL: Record<AiProvider, string> = {
   groq: "",
   openrouter: "",
+  gemini: "",
+  workers: "",
   openai: "",
   anthropic: "",
 };
 
 /**
- * The providers the endpoint can call: it holds keys for these two only
- * (`functions/api/ai.ts`). The other two stay in the type so a document that
- * names one still loads, and read as "not connected" in Settings.
+ * The providers the endpoint can call (`functions/api/ai.ts`): Gemini and
+ * Workers AI were added on 30 September 2026. OpenAI and Anthropic stay in
+ * the type so a document that names one still loads, and read as "not
+ * connected" in Settings.
  */
-export const AI_CONNECTED_PROVIDERS: readonly AiProvider[] = ["groq", "openrouter"];
+export const AI_CONNECTED_PROVIDERS: readonly AiProvider[] = ["gemini", "workers", "groq", "openrouter"];
 
 export type AiTone = "brief" | "plain" | "detailed";
 

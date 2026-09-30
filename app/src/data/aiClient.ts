@@ -252,7 +252,7 @@ export async function askAi(options: AskOptions): Promise<AiAnswer> {
    * asking about the first you said", 28 September 2026). The server keeps
    * it whole beside the figures, newest lines first when it must shorten it.
    */
-  const conversation = conversationBlock(options.earlier ? redact(options.earlier) : "", options.history ?? [], 14_000, options.pinned ? redact(options.pinned) : "");
+  const conversation = conversationBlock(options.earlier ? redact(options.earlier) : "", options.history ?? [], 30_000, options.pinned ? redact(options.pinned) : "");
 
   try {
     const response = await doFetch(ENDPOINT, {
@@ -1203,9 +1203,11 @@ export async function routeMessage(options: {
 export interface ModelsOnOffer {
   readonly groq: readonly string[];
   readonly openrouter: readonly string[];
+  readonly gemini: readonly string[];
+  readonly workers: readonly string[];
   /** The order the endpoint tries them in when nothing is chosen, `provider:model`. */
   readonly chain: readonly string[];
-  readonly configured: { readonly groq: boolean; readonly openrouter: boolean };
+  readonly configured: { readonly groq: boolean; readonly openrouter: boolean; readonly gemini: boolean; readonly workers: boolean };
 }
 
 /**
@@ -1229,10 +1231,14 @@ export async function modelsOnOffer(options: { fetcher?: typeof fetch; token?: (
     return {
       groq: ids(body.groq),
       openrouter: ids(body.openrouter),
+      gemini: ids(body.gemini),
+      workers: ids(body.workers),
       chain: ids(body.chain),
       configured: {
         groq: Boolean(body.configured?.groq),
         openrouter: Boolean(body.configured?.openrouter),
+        gemini: Boolean(body.configured?.gemini),
+        workers: Boolean(body.configured?.workers),
       },
     };
   } catch {

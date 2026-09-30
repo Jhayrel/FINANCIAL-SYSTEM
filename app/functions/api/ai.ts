@@ -17,9 +17,13 @@
  *
  * Free models are unreliable by nature: rate limited, rotated, retired without
  * notice. One model is a single point of failure, so the endpoint walks a list
- * and returns the first that answers. Groq is tried first because it is fast
- * and its limits are generous; OpenRouter follows because it is the widest
- * catalogue.
+ * and returns the first that answers. Google's Gemini is asked first, being
+ * the strongest free model and the one with room for the most of the ledger
+ * and the conversation; Cloudflare's own Workers AI next, which needs no key
+ * and keeps the request inside Cloudflare; then Groq, fast with generous
+ * limits, and OpenRouter, the widest catalogue. The owner asked for the first
+ * two on 30 September 2026: "another powerful ai that is free and cannot
+ * forget and actually smart".
  *
  * A model id that no longer exists is not an error worth surfacing. It is
  * skipped, the next is tried, and only an empty chain is a failure the owner
@@ -39,10 +43,21 @@
 
 import { verifyOwner, type OwnerCheck } from "./_owner";
 
+/** Cloudflare's Workers AI, bound to the Pages project as `AI` (Settings, Bindings). */
+interface WorkersAi {
+  run(model: string, inputs: Record<string, unknown>): Promise<unknown>;
+}
+
 interface Env {
   /** Set in Cloudflare, Pages, Settings, Environment variables. Never in the repo. */
   readonly GROQ_API_KEY?: string;
   readonly OPENROUTER_API_KEY?: string;
+  /** A Google AI Studio key, for Gemini. A secret like the others. */
+  readonly GEMINI_API_KEY?: string;
+  /** The Workers AI binding. Not a key: Cloudflare connects it to this project. */
+  readonly AI?: WorkersAi;
+  /** Optional comma-separated Workers AI models, newest first, so a new one needs no deploy. */
+  readonly AI_WORKERS_MODELS?: string;
   /** Optional comma-separated override, so a retired model can be swapped without a deploy. */
   readonly AI_MODELS?: string;
   /**
@@ -282,7 +297,12 @@ export function compactContext(context: string, max: number): string {
 }
 
 /** The conversation, bounded, sent beside the figures and never cut with them. */
-const MAX_CONVERSATION_CHARS = 16_000;
+/*
+ * Twice what it was on 30 September 2026, when a model with room for far
+ * more (Gemini) went first: more of the conversation is sent whole, and the
+ * smaller models still shrink it on a refusal for size (`sized`).
+ */
+const MAX_CONVERSATION_CHARS = 32_000;
 
 /**
  * The conversation shortened to fit, this conversation before earlier
@@ -371,7 +391,75 @@ const TIMEOUT_MS = 20_000;
  */
 const VISION_TIMEOUT_MS = 20_000;
 
-type Provider = "groq" | "openrouter";
+type Provider = "groq" | "openrouter" | "gemini" | "workers";
+
+const PROVIDERS: readonly Provider[] = ["groq", "openrouter", "gemini", "workers"];
+
+/** The key for a provider that takes one; Workers AI takes a binding instead. */
+const keyOf = (provider: Provider, env: Env): string | undefined =>
+  provider === "groq" ? env.GROQ_API_KEY : provider === "openrouter" ? env.OPENROUTER_API_KEY : provider === "gemini" ? env.GEMINI_API_KEY : undefined;
+
+/** Whether a provider can be called at all here. */
+const usable = (provider: Provider, env: Env): boolean => (provider === "workers" ? Boolean(env.AI) : Boolean(keyOf(provider, env)));
+
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
+
+/**
+ * Gemini's models, best first, from Google's own list.
+ *
+ * The catalogue holds image makers, speech, embeddings and live audio beside
+ * the chat models, all named gemini-something. What is kept is the chat
+ * families, and they are ranked by version, newest first; Flash before Pro,
+ * because on the free tier Flash has the larger daily allowance and answers
+ * in seconds, and a wave asks both at once anyway (`firstInWaves`); Lite
+ * after both. An alias with no version ("gemini-flash-latest") goes last: it
+ * is one of the others under a second name, and asking it beside the model
+ * it points at would spend a place in the wave on the same answer.
+ */
+export function geminiRank(ids: readonly string[]): string[] {
+  const rank = (id: string): [number, number] => {
+    const m = /gemini-(?:(\d+(?:\.\d+)?)-)?(flash|pro)(-lite)?(?:-(latest))?/i.exec(id);
+    if (!m) return [0, 9];
+    const version = m[4] || !m[1] ? 0 : Number(m[1]);
+    const kind = m[3] ? 2 : (m[2] ?? "").toLowerCase() === "flash" ? 0 : 1;
+    return [version, kind];
+  };
+  return ids
+    .map((id) => id.replace(/^models\//, ""))
+    .filter((id) => /^gemini-/i.test(id) && /flash|pro/i.test(id))
+    .filter((id) => !/image|tts|audio|live|embed|vision-|computer-use|robotics|thinking-exp|learnlm|nano/i.test(id))
+    .filter((id, i, all) => all.indexOf(id) === i)
+    .sort((a, b) => {
+      const [va, ka] = rank(a);
+      const [vb, kb] = rank(b);
+      return vb - va || ka - kb || a.localeCompare(b);
+    });
+}
+
+/**
+ * Workers AI's text models, in order. Its binding has no catalogue to ask, so
+ * the list is kept here and can be replaced from the environment
+ * (`AI_WORKERS_MODELS`) without a deploy; a model Cloudflare has retired
+ * fails and the next is tried, as anywhere in the chain.
+ */
+const WORKERS_MODELS = ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/mistralai/mistral-small-3.1-24b-instruct"];
+
+export function workersModels(configured?: string): string[] {
+  const own = (configured ?? "").split(",").map((m) => m.trim()).filter((m) => m.startsWith("@cf/") || m.startsWith("@hf/"));
+  return own.length > 0 ? own : [...WORKERS_MODELS];
+}
+
+/**
+ * A Workers AI failure, in the terms the chain already acts on: too large is
+ * 413 (so a smaller request is tried), a spent daily allowance or a busy
+ * model is 429, anything else an outage.
+ */
+export function workersFailure(message: string): string {
+  if (/context|too long|too many tokens|token limit|max(?:imum)? input/i.test(message)) return "413";
+  if (/limit|capacity|quota|neurons|rate|429/i.test(message)) return "429";
+  if (/not found|no such model|unknown model|5007/i.test(message)) return "404";
+  return "503";
+}
 
 interface Candidate {
   readonly provider: Provider;
@@ -440,7 +528,8 @@ const CACHE = new Map<Provider, Cached>();
 const CACHE_MS = 60 * 60 * 1000;
 
 async function modelsOf(provider: Provider, env: Env): Promise<string[]> {
-  const key = provider === "groq" ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
+  if (provider === "workers") return env.AI ? workersModels(env.AI_WORKERS_MODELS) : [];
+  const key = keyOf(provider, env);
   if (!key) return [];
 
   const hit = CACHE.get(provider);
@@ -449,20 +538,24 @@ async function modelsOf(provider: Provider, env: Env): Promise<string[]> {
   const url =
     provider === "groq"
       ? "https://api.groq.com/openai/v1/models"
-      : "https://openrouter.ai/api/v1/models";
+      : provider === "gemini"
+        ? `${GEMINI_BASE}/models`
+        : "https://openrouter.ai/api/v1/models";
 
   const response = await fetch(url, { headers: { authorization: `Bearer ${key}` } });
   if (!response.ok) return [];
 
   const data = (await response.json()) as { data?: { id?: string }[] };
 
-  const models = (data.data ?? [])
-    .map((m) => m.id)
-    .filter((id): id is string => Boolean(id))
-    // Paying per token by accident is not a failure mode worth having.
-    .filter((id) => (provider === "openrouter" ? id.endsWith(":free") : true))
-    .filter((id) => !NOT_CHAT.test(id))
-    .sort((a, b) => score(a) - score(b));
+  const ids = (data.data ?? []).map((m) => m.id).filter((id): id is string => Boolean(id));
+  const models =
+    provider === "gemini"
+      ? geminiRank(ids)
+      : ids
+          // Paying per token by accident is not a failure mode worth having.
+          .filter((id) => (provider === "openrouter" ? id.endsWith(":free") : true))
+          .filter((id) => !NOT_CHAT.test(id))
+          .sort((a, b) => score(a) - score(b));
 
   CACHE.set(provider, { at: Date.now(), models });
   return models;
@@ -480,7 +573,7 @@ function parseOverride(configured: string): Candidate[] {
       const [provider, ...rest] = entry.split(":");
       return { provider: provider as Provider, model: rest.join(":") };
     })
-    .filter((c) => (c.provider === "groq" || c.provider === "openrouter") && c.model);
+    .filter((c) => PROVIDERS.includes(c.provider) && c.model);
 }
 
 /**
@@ -492,7 +585,7 @@ function parseOverride(configured: string): Candidate[] {
  * that works was reached.
  */
 async function chosenModel(env: Env, chosen?: { provider: string; model: string }): Promise<Candidate | null> {
-  if (!chosen || (chosen.provider !== "groq" && chosen.provider !== "openrouter") || !chosen.model.trim()) return null;
+  if (!chosen || !PROVIDERS.includes(chosen.provider as Provider) || !chosen.model.trim()) return null;
   const provider = chosen.provider as Provider;
   const offered = await modelsOf(provider, env);
   return offered.includes(chosen.model.trim()) ? { provider, model: chosen.model.trim() } : null;
@@ -510,28 +603,38 @@ async function discoveredChain(env: Env): Promise<Candidate[]> {
   // discovery picks badly, and second-guessing it would defeat the point.
   const configured = env.AI_MODELS?.trim();
   if (configured) {
-    return parseOverride(configured).filter((c) =>
-      c.provider === "groq" ? Boolean(env.GROQ_API_KEY) : Boolean(env.OPENROUTER_API_KEY),
-    );
+    return parseOverride(configured).filter((c) => usable(c.provider, env));
   }
 
-  const [groq, openrouter] = await Promise.all([
+  const [gemini, workers, groq, openrouter] = await Promise.all([
+    modelsOf("gemini", env),
+    modelsOf("workers", env),
     modelsOf("groq", env),
     modelsOf("openrouter", env),
   ]);
+  return textChain(gemini, workers, groq, openrouter);
+}
 
-  /**
-   * Groq first because it is fast and its limits are generous, but the two are
-   * interleaved rather than concatenated: a Groq outage should cost one slow
-   * attempt, not three.
-   */
+/**
+ * The order the text models are asked in, two at a time.
+ *
+ * Gemini's best two first, which on the free tier are its newest Flash and
+ * Pro: the smartest free answers, and a window large enough that nothing
+ * the app sends has to be cut. Then Workers AI's first model beside Groq's,
+ * then Groq and OpenRouter interleaved as before, so one provider's outage
+ * costs one slow attempt, not three, and Workers AI's second model last.
+ */
+export function textChain(gemini: readonly string[], workers: readonly string[], groq: readonly string[], openrouter: readonly string[]): Candidate[] {
   const chain: Candidate[] = [];
+  for (const m of gemini.slice(0, 2)) chain.push({ provider: "gemini", model: m });
+  if (workers[0]) chain.push({ provider: "workers", model: workers[0] });
   for (let i = 0; i < PER_PROVIDER; i++) {
     const g = groq[i];
     const o = openrouter[i];
     if (g) chain.push({ provider: "groq", model: g });
     if (o) chain.push({ provider: "openrouter", model: o });
   }
+  for (const m of workers.slice(1)) chain.push({ provider: "workers", model: m });
   return chain;
 }
 
@@ -563,7 +666,10 @@ const OPENROUTER_ROUTER = "openrouter/free";
 const VISION_CACHE = new Map<Provider, Cached>();
 
 async function visionModelsOf(provider: Provider, env: Env): Promise<string[]> {
-  const key = provider === "groq" ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
+  // Every Gemini chat model reads pictures. Workers AI is kept to text: a model there that cannot see would answer anyway.
+  if (provider === "gemini") return modelsOf("gemini", env);
+  if (provider === "workers") return [];
+  const key = keyOf(provider, env);
   if (!key) return [];
 
   const hit = VISION_CACHE.get(provider);
@@ -605,11 +711,13 @@ async function visionModelsOf(provider: Provider, env: Env): Promise<string[]> {
 }
 
 async function visionChainFrom(env: Env): Promise<Candidate[]> {
-  const [groq, openrouter] = await Promise.all([
+  const [gemini, groq, openrouter] = await Promise.all([
+    visionModelsOf("gemini", env),
     visionModelsOf("groq", env),
     visionModelsOf("openrouter", env),
   ]);
-  return visionChain(groq, openrouter);
+  // Gemini reads a receipt better than any free model before it, so its best two go first.
+  return [...gemini.slice(0, 2).map((model) => ({ provider: "gemini" as const, model })), ...visionChain(groq, openrouter)];
 }
 
 /**
@@ -1362,30 +1470,38 @@ export const onRequestGet = async (ctx: {
   if (refused) return refused;
 
   const list = async (provider: Provider): Promise<string[]> => {
-    const key = provider === "groq" ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
+    if (provider === "workers") return env.AI ? workersModels(env.AI_WORKERS_MODELS) : [];
+    const key = keyOf(provider, env);
     if (!key) return [];
 
     const url =
       provider === "groq"
         ? "https://api.groq.com/openai/v1/models"
-        : "https://openrouter.ai/api/v1/models";
+        : provider === "gemini"
+          ? `${GEMINI_BASE}/models`
+          : "https://openrouter.ai/api/v1/models";
 
     const response = await fetch(url, { headers: { authorization: `Bearer ${key}` } });
     if (!response.ok) return [`(${provider} returned ${response.status})`];
 
     const data = (await response.json()) as { data?: { id?: string }[] };
-    return (data.data ?? []).map((m) => m.id).filter((id): id is string => Boolean(id));
+    const ids = (data.data ?? []).map((m) => m.id).filter((id): id is string => Boolean(id));
+    return provider === "gemini" ? geminiRank(ids) : ids;
   };
 
-  const [groq, openrouter] = await Promise.all([list("groq"), list("openrouter")]);
+  const [groq, openrouter, gemini, workers] = await Promise.all([list("groq"), list("openrouter"), list("gemini"), list("workers")]);
 
   return json({
     configured: {
       groq: Boolean(env.GROQ_API_KEY),
       openrouter: Boolean(env.OPENROUTER_API_KEY),
+      gemini: Boolean(env.GEMINI_API_KEY),
+      workers: Boolean(env.AI),
       override: env.AI_MODELS ?? null,
     },
     groq,
+    gemini,
+    workers,
     // Free ids only: the paid catalogue is thousands long and unusable here.
     openrouter: openrouter.filter((id) => id.endsWith(":free")),
     chain: (await chainFrom(env)).map((c) => `${c.provider}:${c.model}`),
@@ -1459,9 +1575,9 @@ export const onRequestPost = async (ctx: {
     return json(
       {
         error: !hasKey(env)
-          ? "No provider key is configured. Set GROQ_API_KEY or OPENROUTER_API_KEY in Cloudflare, Pages, Settings, Environment variables."
+          ? "No provider is configured. Set GEMINI_API_KEY, GROQ_API_KEY or OPENROUTER_API_KEY in Cloudflare, Pages, Settings, Environment variables, or add the Workers AI binding named AI."
           : images.length > 0
-            ? "Neither provider is offering a free model that can read pictures right now. Type this one into the form, or try again later."
+            ? "No provider is offering a free model that can read pictures right now. Type this one into the form, or try again later."
             : "The providers offered no usable chat model. Check the key is still valid, or pin one with AI_MODELS.",
       },
       503,
@@ -1841,13 +1957,18 @@ async function send(
   task = "",
   outer?: AbortSignal,
 ): Promise<string> {
+  if (c.provider === "workers") return sendWorkers(c, env, prompt, maxTokens, task, outer);
+
   const isGroq = c.provider === "groq";
-  const key = isGroq ? env.GROQ_API_KEY : env.OPENROUTER_API_KEY;
+  const isGemini = c.provider === "gemini";
+  const key = keyOf(c.provider, env);
   if (!key) throw new Error("no key");
 
   const url = isGroq
     ? "https://api.groq.com/openai/v1/chat/completions"
-    : "https://openrouter.ai/api/v1/chat/completions";
+    : isGemini
+      ? `${GEMINI_BASE}/chat/completions`
+      : "https://openrouter.ai/api/v1/chat/completions";
 
   const controller = new AbortController();
   const timer = setTimeout(
@@ -1865,7 +1986,7 @@ async function send(
         "content-type": "application/json",
         authorization: `Bearer ${key}`,
         // OpenRouter asks for these and rate limits harder without them.
-        ...(isGroq ? {} : { "x-title": "Financial Management System" }),
+        ...(c.provider === "openrouter" ? { "x-title": "Financial Management System" } : {}),
       },
       body: JSON.stringify({
         model: c.model,
@@ -1894,8 +2015,20 @@ async function send(
          * when the job is putting fixed figures into a fixed shape.
          */
         temperature: 0.1,
-        max_tokens: maxTokens,
+        /*
+         * Gemini thinks before it answers and the thinking is counted against
+         * this, so it is given room enough that the answer is never the part
+         * cut off.
+         */
+        max_tokens: isGemini ? Math.max(4_096, maxTokens * 4) : maxTokens,
         ...(askForJson ? { response_format: { type: "json_object" } } : {}),
+        /*
+         * Gemini thinks for as long as it likes unless told, and every call
+         * here has twenty seconds: Pro thinking past them is an answer lost.
+         * The figures are worked out on the device before the model sees
+         * them, so a little thinking is enough, in the chat too.
+         */
+        ...(askForJson && isGemini ? { reasoning_effort: "low" } : {}),
         /*
          * GPT-OSS thinks before it answers, at medium effort unless told,
          * and the thinking counts against max_tokens: a six-row statement
@@ -1905,7 +2038,7 @@ async function send(
          * each provider's own spelling, so no other model sees a field it
          * does not know.
          */
-        ...(task !== "chat" && /gpt-oss/i.test(c.model)
+        ...(askForJson && task !== "chat" && /gpt-oss/i.test(c.model)
           ? c.provider === "groq"
             ? { reasoning_effort: "low" }
             : { reasoning: { effort: "low" } }
@@ -1914,7 +2047,7 @@ async function send(
     });
 
     if (!response.ok) {
-      throw new Error(`${response.status}`);
+      throw new Error(isGemini && response.status === 400 ? geminiRefusal(await response.text().catch(() => "")) : `${response.status}`);
     }
 
     const data = (await response.json()) as {
@@ -1924,6 +2057,67 @@ async function send(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * One call to Cloudflare's Workers AI, through the binding.
+ *
+ * No key and no network hop out of Cloudflare: the model runs where the app
+ * is hosted, and Cloudflare does not train on what it is sent. It has no
+ * abort signal, so the same time limit is kept by a race, and its failures
+ * are put in the chain's own terms (`workersFailure`).
+ */
+async function sendWorkers(
+  c: Candidate,
+  env: Env,
+  prompt: string,
+  maxTokens: number,
+  task: string,
+  outer?: AbortSignal,
+): Promise<string> {
+  const ai = env.AI;
+  if (!ai) throw new Error("no key");
+  if (outer?.aborted) throw new Error("aborted");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("aborted")), TIMEOUT_MS);
+    outer?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+  });
+  try {
+    const result = await Promise.race([
+      ai.run(c.model, {
+        messages: [
+          { role: "system", content: systemFor(task) },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: maxTokens,
+        temperature: 0.1,
+      }),
+      timeout,
+    ]);
+    const response = (result as { response?: unknown } | null)?.response;
+    const text = typeof response === "string" ? response : response && typeof response === "object" ? JSON.stringify(response) : "";
+    return withoutThinking(text);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message === "aborted") throw e;
+    throw new Error(workersFailure(message));
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * What a Gemini 400 means. Google answers a bad key, and a request from a
+ * region it does not serve, with 400, the status a request the model could
+ * not take is given; a 400 is sent again without the JSON field
+ * (`callProvider`), which for these would only be refused a second time.
+ * They are called 403, so the next model is asked at once. Cloudflare runs
+ * the app in whichever of its places is near, and not all of them are where
+ * Google serves the free tier.
+ */
+export function geminiRefusal(body: string): string {
+  return /location is not supported|api key not valid|api_key_invalid|permission_denied/i.test(body) ? "403" : "400";
 }
 
 /**
@@ -1961,8 +2155,7 @@ export function shortReason(e: unknown): string {
   return "unavailable";
 }
 
-const hasKey = (env: Env): boolean =>
-  Boolean(env.GROQ_API_KEY) || Boolean(env.OPENROUTER_API_KEY);
+const hasKey = (env: Env): boolean => PROVIDERS.some((p) => usable(p, env));
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

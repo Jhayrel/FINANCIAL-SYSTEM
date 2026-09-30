@@ -36,8 +36,9 @@ VBA to a web app for phone and computer. React 19, Vite, TypeScript strict,
 Firestore for data, Firebase Auth locked to one uid, Cloudflare Pages for
 hosting (`financial-system-96l.pages.dev`, built from `main`), and a Pages
 Function (`app/functions/api/ai.ts`) that calls free AI models with keys held
-as Cloudflare environment secrets (`GROQ_API_KEY`, `OPENROUTER_API_KEY`;
-names only, never values). The phone is the primary target. The owner
+as Cloudflare environment secrets (`GEMINI_API_KEY`, `GROQ_API_KEY`,
+`OPENROUTER_API_KEY`; names only, never values) and Cloudflare's own Workers
+AI through a binding named `AI`, which takes no key. The phone is the primary target. The owner
 writes in English and Tagalog, is direct, tests on a real phone, and sends
 screenshots and `?coderview` dumps as evidence.
 
@@ -424,6 +425,26 @@ no fee. Cash was credited ₱70.00 it never received and ₱70.00 of fees were
 never counted as spending. Correcting each to its cash and fee is the
 owner's call; nothing was changed.
 
+### 2026-09-30: Gemini, and Workers AI behind it
+
+The owner: "Can we add another powerful ai that is free and cannot forget
+and actually smart?", and, asked which, "Both".
+
+| Asked | Now |
+|---|---|
+| Smarter | Google Gemini is asked first, text and pictures: the two best chat models Google's own list offers at the moment, newest version first, Flash beside Pro (`geminiRank`). Nothing is pinned, as with the others: a model Google adds is used the day it appears. Its thinking is kept short, since the figures are worked out on the device and every call has twenty seconds |
+| Free, and a backup | Cloudflare Workers AI, through a binding on the Pages project, so no key and no network hop out of Cloudflare. Its first model (Llama 3.3 70B) stands beside Groq's, its second after everything else (`textChain`). Text only: a model there that cannot see a picture would answer anyway. `AI_WORKERS_MODELS` replaces the list without a deploy |
+| Cannot forget | The memory is the app's, not the model's: every model is sent what to keep in mind and the conversations before, from the database. What changed is how much of it goes: 30,000 characters of conversation, from 14,000, since Gemini reads a million tokens and cutting was the forgetting |
+| Chain as before | With neither set up the chain is exactly the old one. A bad Gemini key, or a Cloudflare location Google does not serve, is refused with 400; it is read as 403 (`geminiRefusal`), so the next model is asked at once rather than the same request sent twice |
+
+Settings lists both, with their models, and says when one is not set up in
+Cloudflare yet. `firestore.rules` accepts the two new provider names; until
+the rules are published, picking either in Settings is refused.
+
+**Privacy, told to the owner:** Gemini's free tier may be used by Google to
+improve its products, and people there may read what is sent. Workers AI
+says it does not train on what it is sent. The owner chose both knowing it.
+
 ---
 
 ## 6. What the owner has to do
@@ -439,6 +460,17 @@ owner's call; nothing was changed.
    version" notice, or leave the app for a minute and come back.
 3. **Rotate the AI keys** if that has not been done since they were exposed
    (CLAUDE.md §2).
+4. **Gemini (30 September).** Make a free key at Google AI Studio
+   (aistudio.google.com, Get API key), then in Cloudflare: Workers & Pages,
+   the project, Settings, Variables and Secrets, Add, type Secret, name
+   `GEMINI_API_KEY`, the key as its value, for Production. Never paste the
+   key anywhere else.
+5. **Workers AI (30 September).** Same project, Settings, Bindings, Add,
+   Workers AI, variable name `AI`, for Production. It takes no key.
+6. **Redeploy after 4 and 5:** Deployments, the latest, Retry deployment.
+   Secrets and bindings reach the function only on a new deployment. Then
+   publish the rules (1), so Settings can save Gemini or Workers AI as the
+   provider.
 
 ---
 

@@ -2535,9 +2535,19 @@ function ModelPicker({
     };
   }, []);
 
-  const listed = provider === "groq" ? offer?.groq ?? [] : provider === "openrouter" ? offer?.openrouter ?? [] : [];
+  const listed =
+    provider === "groq"
+      ? offer?.groq ?? []
+      : provider === "openrouter"
+        ? offer?.openrouter ?? []
+        : provider === "gemini"
+          ? offer?.gemini ?? []
+          : provider === "workers"
+            ? offer?.workers ?? []
+            : [];
   const chosenIsOffered = model !== "" && listed.includes(model);
   const answering = chosenIsOffered ? `${provider}:${model}` : offer?.chain[0];
+  const setUp = provider === "groq" || provider === "openrouter" || provider === "gemini" || provider === "workers" ? offer?.configured[provider] !== false : true;
 
   if (!offer) {
     return (
@@ -2558,11 +2568,13 @@ function ModelPicker({
     <Field
       label="Model"
       help={
-        model !== "" && !chosenIsOffered
-          ? `${model} is not offered by ${AI_PROVIDER_LABEL[provider]} now, so Automatic is answering${answering ? `: ${modelLabel(answering)}` : ""}.`
-          : answering
-            ? `Answering now: ${modelLabel(answering)}. If it is busy the next one on the list answers, and the answer says which.`
-            : "No model is reachable. Check the keys in Cloudflare."
+        !setUp
+          ? `${AI_PROVIDER_LABEL[provider]} is not set up in Cloudflare yet (${provider === "workers" ? "the Workers AI binding named AI" : "its key"}), so Automatic is answering${answering ? `: ${modelLabel(answering)}` : ""}.`
+          : model !== "" && !chosenIsOffered
+            ? `${model} is not offered by ${AI_PROVIDER_LABEL[provider]} now, so Automatic is answering${answering ? `: ${modelLabel(answering)}` : ""}.`
+            : answering
+              ? `Answering now: ${modelLabel(answering)}. If it is busy the next one on the list answers, and the answer says which.`
+              : "No model is reachable. Check the keys in Cloudflare."
       }
     >
       <Select

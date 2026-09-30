@@ -196,7 +196,7 @@ service cloud.firestore {
           && d.theme in ['light', 'dark', 'system']
           && d.ai is map
           && d.ai.enabled is bool
-          && d.ai.provider in ['groq', 'openrouter', 'openai', 'anthropic']
+          && d.ai.provider in ['groq', 'openrouter', 'gemini', 'workers', 'openai', 'anthropic']
           && d.ai.model is string && d.ai.model.size() <= 80
           && d.ai.tone in ['brief', 'plain', 'detailed']
           // There is no API key field in the app, and none may be introduced

@@ -254,6 +254,12 @@ ledger is unaffected either way, by design.
 Cloudflare Pages builds `main` automatically. `tsc`, `vitest` and
 `vite build` must all pass first (`docs/09-AUTO-PUSH.md`).
 
+The models it can reach are set in Cloudflare, not in code: the secrets
+`GEMINI_API_KEY`, `GROQ_API_KEY` and `OPENROUTER_API_KEY`, and the Workers AI
+binding named `AI`. Any of them may be missing; the chain is built from the
+ones there (`docs/14-HANDOFF.md` §6 has the steps). A new secret or binding
+reaches the function only on the next deployment.
+
 ---
 
 ## 6. Where things live
