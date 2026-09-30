@@ -432,8 +432,8 @@ and actually smart?", and, asked which, "Both".
 
 | Asked | Now |
 |---|---|
-| Smarter | Google Gemini is asked first, text and pictures: the two best chat models Google's own list offers at the moment, newest version first, Flash beside Pro (`geminiRank`). Nothing is pinned, as with the others: a model Google adds is used the day it appears. Its thinking is kept short, since the figures are worked out on the device and every call has twenty seconds |
-| Free, and a backup | Cloudflare Workers AI, through a binding on the Pages project, so no key and no network hop out of Cloudflare. Its first model (Llama 3.3 70B) stands beside Groq's, its second after everything else (`textChain`). Text only: a model there that cannot see a picture would answer anyway. `AI_WORKERS_MODELS` replaces the list without a deploy |
+| Smarter | Google Gemini, text and pictures, from Google's own list (`geminiRank`). Nothing is pinned, as with the others: a model Google adds is used the day it appears. Its thinking is kept short, since the figures are worked out on the device and every call has twenty seconds |
+| Free, and a backup | Cloudflare Workers AI, through a binding on the Pages project, so no key and no network hop out of Cloudflare. Text only: a model there that cannot see a picture would answer anyway. `AI_WORKERS_MODELS` replaces its list without a deploy |
 | Cannot forget | The memory is the app's, not the model's: every model is sent what to keep in mind and the conversations before, from the database. What changed is how much of it goes: 30,000 characters of conversation, from 14,000, since Gemini reads a million tokens and cutting was the forgetting |
 | Chain as before | With neither set up the chain is exactly the old one. A bad Gemini key, or a Cloudflare location Google does not serve, is refused with 400; it is read as 403 (`geminiRefusal`), so the next model is asked at once rather than the same request sent twice |
 
@@ -444,6 +444,20 @@ the rules are published, picking either in Settings is refused.
 **Privacy, told to the owner:** Gemini's free tier may be used by Google to
 improve its products, and people there may read what is sent. Workers AI
 says it does not train on what it is sent. The owner chose both knowing it.
+
+Then, the same day: "I want the most powerful ai. Like if the other
+powerful is not available means use the other most powerful. All low end ai
+and not smart ai make them last option."
+
+| Found | Now |
+|---|---|
+| The chain went by provider: Gemini's two, Workers AI's first, then Groq and OpenRouter taking turns, so Groq's 8B model could be asked before OpenRouter's MiniMax M3 | One list of every model from every provider, strongest first (`functions/api/_strength.ts`): a rough standing from public benchmarks, by family and version, so Gemini 3.8 Flash ranks above 3.5 and a newer GLM or MiniMax above the last without a change. An id never seen is placed by its size and marks ("70b", "lite", "instant"). The same model on two hosts sits side by side, so one host's outage leaves the other |
+| Two models were asked at once and the quicker answer won, so a weak model beat a strong one working beside it | The strongest answer is taken (`bestInOrder`): a weaker one that answers first is held while a stronger one is still working, until the job's hold (18 seconds for the chat and panels, 35 for a picture, 3 for sorting a message), inside what the app waits |
+| A model refused in a second still made the one beside it wait for the next round | A failed model is replaced at once by the next one down |
+| A model with nothing left for the day was asked first on every request | A refusal keeps it at the back for a while (`coolFor`): a minute for a busy minute, three hours for a day's allowance used, twelve for a model the free tier gives nothing (Gemini Pro since April 2026), an hour for a bad key, an unserved region or a retired model. Still tried last should all the others fail |
+| The newest Gemini Flash models give about twenty free answers a day each, Flash-Lite hundreds, Pro none | Every Flash version is kept, so four of them are about eighty strong answers a day, each used up in turn; three Lite; only the newest Pro, for the day the key has billing |
+| Sorting each message would have spent those | The quick jobs (sorting a message, naming an item, a one line note) leave Gemini's Flash and Pro and Workers AI to the questions, and count Groq's speed for ten points: the app waits only seconds for them |
+| Workers AI's list was Llama 3.3 70B and Mistral Small | GPT-OSS 120B first, then Qwen 3.8 27B, Llama 3.3 70B, Mistral Small. Its answer is read in each shape its models give (`workersText`). DeepSeek V4 on Workers AI needs the paid plan, so it is not on the list; a model that says so is left alone twelve hours |
 
 ---
 

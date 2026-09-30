@@ -17,13 +17,15 @@
  *
  * Free models are unreliable by nature: rate limited, rotated, retired without
  * notice. One model is a single point of failure, so the endpoint walks a list
- * and returns the first that answers. Google's Gemini is asked first, being
- * the strongest free model and the one with room for the most of the ledger
- * and the conversation; Cloudflare's own Workers AI next, which needs no key
- * and keeps the request inside Cloudflare; then Groq, fast with generous
- * limits, and OpenRouter, the widest catalogue. The owner asked for the first
- * two on 30 September 2026: "another powerful ai that is free and cannot
- * forget and actually smart".
+ * of every model four providers offer: Google's Gemini, Groq, OpenRouter and
+ * Cloudflare's own Workers AI, which needs no key. The owner asked for the
+ * first and the last on 30 September 2026 ("another powerful ai that is free
+ * and cannot forget and actually smart"), and the same day for the order:
+ * "I want the most powerful ai. Like if the other powerful is not available
+ * means use the other most powerful. All low end ai and not smart ai make
+ * them last option." So the list is strongest first whoever hosts the model
+ * (`_strength.ts`), a model refused lately goes to the back, and the
+ * strongest answer is taken, not the quickest (`bestInOrder`).
  *
  * A model id that no longer exists is not an error worth surfacing. It is
  * skipped, the next is tried, and only an empty chain is a failure the owner
@@ -42,6 +44,7 @@
  */
 
 import { verifyOwner, type OwnerCheck } from "./_owner";
+import { strength } from "./_strength";
 
 /** Cloudflare's Workers AI, bound to the Pages project as `AI` (Settings, Bindings). */
 interface WorkersAi {
@@ -384,8 +387,8 @@ const MAX_IMAGE_CHARS = 6_000_000;
  */
 const TIMEOUT_MS = 20_000;
 /*
- * Twenty, not forty, since pictures go out three at a time (see the wave in
- * `onRequestPost`): two whole waves now fit inside the browser's forty five
+ * Twenty, not forty, since pictures go out three at a time (`bestInOrder`
+ * in `onRequestPost`): two rounds fit inside the browser's forty five
  * seconds, and a model still reading after twenty is one of three, not the
  * only hope.
  */
@@ -405,34 +408,34 @@ const usable = (provider: Provider, env: Env): boolean => (provider === "workers
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
 
 /**
- * Gemini's models, best first, from Google's own list.
+ * Gemini's models, strongest first, from Google's own list.
  *
  * The catalogue holds image makers, speech, embeddings and live audio beside
- * the chat models, all named gemini-something. What is kept is the chat
- * families, and they are ranked by version, newest first; Flash before Pro,
- * because on the free tier Flash has the larger daily allowance and answers
- * in seconds, and a wave asks both at once anyway (`firstInWaves`); Lite
- * after both. An alias with no version ("gemini-flash-latest") goes last: it
- * is one of the others under a second name, and asking it beside the model
- * it points at would spend a place in the wave on the same answer.
+ * the chat models, all named gemini-something; only the chat families are
+ * kept, and they are ranked by `strength`, newest version first.
+ *
+ * Each model has its own free allowance, and since April 2026 the newest
+ * Flash models get about twenty requests a day each, Flash-Lite hundreds,
+ * and Pro none. So every Flash version is kept (four of them are eighty
+ * strong answers a day, one after another as each is used up), a few Lite,
+ * and only the newest Pro, for the day the key has billing: without it Pro
+ * is refused at once and left alone for hours (`cooling`).
  */
+const GEMINI_KEEP = { pro: 1, flash: 6, lite: 3 } as const;
+
 export function geminiRank(ids: readonly string[]): string[] {
-  const rank = (id: string): [number, number] => {
-    const m = /gemini-(?:(\d+(?:\.\d+)?)-)?(flash|pro)(-lite)?(?:-(latest))?/i.exec(id);
-    if (!m) return [0, 9];
-    const version = m[4] || !m[1] ? 0 : Number(m[1]);
-    const kind = m[3] ? 2 : (m[2] ?? "").toLowerCase() === "flash" ? 0 : 1;
-    return [version, kind];
-  };
+  const kind = (id: string): keyof typeof GEMINI_KEEP => (/-lite/i.test(id) ? "lite" : /pro/i.test(id) ? "pro" : "flash");
+  const kept = { pro: 0, flash: 0, lite: 0 };
   return ids
     .map((id) => id.replace(/^models\//, ""))
     .filter((id) => /^gemini-/i.test(id) && /flash|pro/i.test(id))
     .filter((id) => !/image|tts|audio|live|embed|vision-|computer-use|robotics|thinking-exp|learnlm|nano/i.test(id))
     .filter((id, i, all) => all.indexOf(id) === i)
-    .sort((a, b) => {
-      const [va, ka] = rank(a);
-      const [vb, kb] = rank(b);
-      return vb - va || ka - kb || a.localeCompare(b);
+    .sort((a, b) => strength(b) - strength(a) || a.localeCompare(b))
+    .filter((id) => {
+      const k = kind(id);
+      kept[k] += 1;
+      return kept[k] <= GEMINI_KEEP[k];
     });
 }
 
@@ -442,7 +445,12 @@ export function geminiRank(ids: readonly string[]): string[] {
  * (`AI_WORKERS_MODELS`) without a deploy; a model Cloudflare has retired
  * fails and the next is tried, as anywhere in the chain.
  */
-const WORKERS_MODELS = ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/mistralai/mistral-small-3.1-24b-instruct"];
+const WORKERS_MODELS = [
+  "@cf/openai/gpt-oss-120b",
+  "@cf/qwen/qwen3.8-27b",
+  "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  "@cf/mistralai/mistral-small-3.1-24b-instruct",
+];
 
 export function workersModels(configured?: string): string[] {
   const own = (configured ?? "").split(",").map((m) => m.trim()).filter((m) => m.startsWith("@cf/") || m.startsWith("@hf/"));
@@ -451,12 +459,16 @@ export function workersModels(configured?: string): string[] {
 
 /**
  * A Workers AI failure, in the terms the chain already acts on: too large is
- * 413 (so a smaller request is tried), a spent daily allowance or a busy
- * model is 429, anything else an outage.
+ * 413 (so a smaller request is tried), a model only a paid plan may use is
+ * 402, a spent daily allowance or a busy model is 429, anything else an
+ * outage.
  */
 export function workersFailure(message: string): string {
   if (/context|too long|too many tokens|token limit|max(?:imum)? input/i.test(message)) return "413";
-  if (/limit|capacity|quota|neurons|rate|429/i.test(message)) return "429";
+  // The free allowance spent says "upgrade to the paid plan" too, so it is looked for first.
+  if (/neurons|daily|allocation/i.test(message)) return "429";
+  if (/paid plan|workers paid|upgrade|billing|prepaid|credits/i.test(message)) return "402";
+  if (/limit|capacity|quota|rate|429/i.test(message)) return "429";
   if (/not found|no such model|unknown model|5007/i.test(message)) return "404";
   return "503";
 }
@@ -491,29 +503,8 @@ interface Candidate {
 const NOT_CHAT =
   /whisper|orpheus|tts|audio|embed|rerank|prompt-guard|guard-|safety|moderation|content-safety|-vision-ocr/i;
 
-/**
- * Ordered by how well suited each family is to writing two accurate sentences
- * about a number. Bigger is not automatically better here: the task is
- * summarising, not reasoning, and a smaller model that answers every time
- * beats a larger one that is busy.
- *
- * Anything unmatched still gets used, just last. That is what keeps this
- * working when a family appears that this comment has never heard of.
- */
-const PREFERENCE: RegExp[] = [
-  /gpt-oss-120b/i,
-  /glm-|minimax-m3/i,
-  /gemma-4-\d+b-it/i,
-  /qwen3\.\d+-\d+b/i,
-  /gpt-oss-20b/i,
-  /nemotron-3-super/i,
-  /compound(?!-mini)/i,
-];
-
-function score(id: string): number {
-  const index = PREFERENCE.findIndex((p) => p.test(id));
-  return index === -1 ? PREFERENCE.length : index;
-}
+/** Strongest first; the same strength in the order of the id, so the order never wanders. */
+const strongestFirst = (a: string, b: string): number => strength(b) - strength(a) || a.localeCompare(b);
 
 interface Cached {
   readonly at: number;
@@ -555,14 +546,15 @@ async function modelsOf(provider: Provider, env: Env): Promise<string[]> {
           // Paying per token by accident is not a failure mode worth having.
           .filter((id) => (provider === "openrouter" ? id.endsWith(":free") : true))
           .filter((id) => !NOT_CHAT.test(id))
-          .sort((a, b) => score(a) - score(b));
+          .sort(strongestFirst);
 
   CACHE.set(provider, { at: Date.now(), models });
   return models;
 }
 
 /** Bounded, so an exhausted chain fails in seconds rather than minutes. */
-const PER_PROVIDER = 3;
+const TEXT_CHAIN = 14;
+const VISION_CHAIN = 9;
 
 function parseOverride(configured: string): Candidate[] {
   return configured
@@ -591,10 +583,11 @@ async function chosenModel(env: Env, chosen?: { provider: string; model: string 
   return offered.includes(chosen.model.trim()) ? { provider, model: chosen.model.trim() } : null;
 }
 
-async function chainFrom(env: Env, chosen?: { provider: string; model: string }): Promise<Candidate[]> {
-  // The owner's own pick goes first, then everything else as it was, without it twice.
+async function chainFrom(env: Env, chosen?: { provider: string; model: string }, task = "chat"): Promise<Candidate[]> {
+  // The owner's own pick goes first, then everything else strongest first, without it twice.
   const first = await chosenModel(env, chosen);
-  const rest = await discoveredChain(env);
+  const configured = env.AI_MODELS?.trim();
+  const rest = configured ? await discoveredChain(env) : arrange(await discoveredChain(env), task, isCooling).slice(0, TEXT_CHAIN);
   return first ? [first, ...rest.filter((c) => !(c.provider === first.provider && c.model === first.model))] : rest;
 }
 
@@ -612,31 +605,94 @@ async function discoveredChain(env: Env): Promise<Candidate[]> {
     modelsOf("groq", env),
     modelsOf("openrouter", env),
   ]);
-  return textChain(gemini, workers, groq, openrouter);
+  return rankChain({ gemini, workers, groq, openrouter });
+}
+
+/** A tie in strength goes to the quicker host: Groq answers in a second or two. */
+const TIE_ORDER: readonly Provider[] = ["gemini", "groq", "openrouter", "workers"];
+
+/**
+ * Every model from every provider in one list, strongest first (`strength`).
+ *
+ * It was provider by provider, Gemini's two, then Groq and OpenRouter taking
+ * turns, so Groq's small models were asked before OpenRouter's large ones.
+ * The same model on two hosts sits side by side, so one host's outage
+ * leaves the other.
+ */
+export function rankChain(lists: Partial<Record<Provider, readonly string[]>>): Candidate[] {
+  const all: Candidate[] = [];
+  for (const provider of TIE_ORDER) for (const model of lists[provider] ?? []) all.push({ provider, model });
+  return all
+    .map((c, i) => ({ c, i, s: strength(c.model) }))
+    .sort((a, b) => b.s - a.s || a.i - b.i)
+    .map((x) => x.c);
 }
 
 /**
- * The order the text models are asked in, two at a time.
- *
- * Gemini's best two first, which on the free tier are its newest Flash and
- * Pro: the smartest free answers, and a window large enough that nothing
- * the app sends has to be cut. Then Workers AI's first model beside Groq's,
- * then Groq and OpenRouter interleaved as before, so one provider's outage
- * costs one slow attempt, not three, and Workers AI's second model last.
+ * The quick jobs: sorting a message, naming an item, a one line note. The
+ * app waits seconds for them (`aiClient.ts`), every strong model is well
+ * able for them, and they run on their own, many times a day.
  */
-export function textChain(gemini: readonly string[], workers: readonly string[], groq: readonly string[], openrouter: readonly string[]): Candidate[] {
-  const chain: Candidate[] = [];
-  for (const m of gemini.slice(0, 2)) chain.push({ provider: "gemini", model: m });
-  if (workers[0]) chain.push({ provider: "workers", model: workers[0] });
-  for (let i = 0; i < PER_PROVIDER; i++) {
-    const g = groq[i];
-    const o = openrouter[i];
-    if (g) chain.push({ provider: "groq", model: g });
-    if (o) chain.push({ provider: "openrouter", model: o });
-  }
-  for (const m of workers.slice(1)) chain.push({ provider: "workers", model: m });
-  return chain;
+const QUICK_TASKS = new Set(["route", "note", "classify", "categorise", "describe"]);
+
+/**
+ * Models with a small daily allowance: Gemini's Flash and Pro (about twenty
+ * a day each on the free tier) and Workers AI (ten thousand "neurons" a day
+ * in all, a few dozen answers).
+ */
+const scarce = (c: Candidate): boolean => (c.provider === "gemini" && !/-lite/i.test(c.model)) || c.provider === "workers";
+
+/**
+ * The chain for one job.
+ *
+ * The strongest first, for everything the owner asks: the conversation,
+ * reading pictures and entries, the forecast and the panels. The quick jobs
+ * are the exception, for two reasons. They leave the scarce models to those,
+ * or sorting ten messages would spend the day's strongest answers before a
+ * question was asked. And Groq's speed counts for ten points, since a quick
+ * job the app has stopped waiting for is no answer at all. A model refused
+ * lately (`cooling`) goes to the back either way, still there should every
+ * other one fail.
+ */
+export function arrange(chain: readonly Candidate[], task: string, cooled: (c: Candidate) => boolean = () => false): Candidate[] {
+  const quick = QUICK_TASKS.has(task);
+  const worth = (c: Candidate): number =>
+    strength(c.model) + (quick && c.provider === "groq" ? 10 : 0) - (quick && scarce(c) ? 100 : 0) - (cooled(c) ? 1_000 : 0);
+  return chain
+    .map((c, i) => ({ c, i, w: worth(c) }))
+    .sort((a, b) => b.w - a.w || a.i - b.i)
+    .map((x) => x.c);
 }
+
+/**
+ * Models refused lately, and until when, so the next request does not spend
+ * its first places on them: a Pro model the free tier gives nothing, a
+ * Flash whose twenty for the day are used, a region Google does not serve.
+ * Per isolate, like the catalogues, so it is a courtesy: at worst a model is
+ * asked once more and refused in a fraction of a second.
+ */
+const COOLING = new Map<string, number>();
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+
+/** How long a refusal keeps a model at the back of the chain. */
+export function coolFor(status: string, detail = ""): number {
+  if (status === "429") {
+    if (/limit:\s*0\b/i.test(detail)) return 12 * HOUR;
+    if (/per ?day|daily|rpd|free-models-per-day|neurons|allocation/i.test(detail)) return 3 * HOUR;
+    return MINUTE;
+  }
+  if (status === "402") return 12 * HOUR;
+  if (status === "403" || status === "404") return HOUR;
+  return 0;
+}
+
+function cool(c: Candidate, status: string, detail = ""): void {
+  const ms = coolFor(status, detail);
+  if (ms > 0) COOLING.set(`${c.provider}:${c.model}`, Date.now() + ms);
+}
+
+const isCooling = (c: Candidate): boolean => (COOLING.get(`${c.provider}:${c.model}`) ?? 0) > Date.now();
 
 /**
  * Which of the discovered models can look at a picture.
@@ -696,7 +752,7 @@ async function visionModelsOf(provider: Provider, env: Env): Promise<string[]> {
       return (m.architecture?.input_modalities ?? []).includes("image");
     })
     .map((m) => m.id as string)
-    .sort((a, b) => score(a) - score(b));
+    .sort(strongestFirst);
 
   /*
    * Last, not first. The router picks whichever free model it likes, and on
@@ -716,33 +772,22 @@ async function visionChainFrom(env: Env): Promise<Candidate[]> {
     visionModelsOf("groq", env),
     visionModelsOf("openrouter", env),
   ]);
-  // Gemini reads a receipt better than any free model before it, so its best two go first.
-  return [...gemini.slice(0, 2).map((model) => ({ provider: "gemini" as const, model })), ...visionChain(groq, openrouter)];
+  return visionChain({ gemini, groq, openrouter }, isCooling);
 }
 
 /**
- * The vision models to try, alternating providers, six at most.
+ * The vision models to try, strongest first, nine at most, and OpenRouter's
+ * router always last.
  *
- * Three from each used to be the rule, so with no Groq vision model the
- * chain was three OpenRouter ones, and the router that had been moved to the
- * end fell off it: on 26 September 2026 two were rate limited, one timed
- * out, and there was nothing left. A provider with fewer now leaves its
- * places to the other, and the router is always the last one tried.
+ * It alternated Groq and OpenRouter, six at most. The router stays at the
+ * end, where it was moved on 26 September 2026: it picks whichever free
+ * model it likes, and one that could not see beat the ones that could.
  */
-export function visionChain(groq: readonly string[], openrouter: readonly string[]): Candidate[] {
-  const total = PER_PROVIDER * 2;
-  const router = openrouter.includes(OPENROUTER_ROUTER);
-  const own = openrouter.filter((m) => m !== OPENROUTER_ROUTER);
-  const room = total - (router ? 1 : 0);
-  const chain: Candidate[] = [];
-  for (let i = 0; chain.length < room && (i < groq.length || i < own.length); i += 1) {
-    const g = groq[i];
-    const o = own[i];
-    if (g && chain.length < room) chain.push({ provider: "groq", model: g });
-    if (o && chain.length < room) chain.push({ provider: "openrouter", model: o });
-  }
-  if (router) chain.push({ provider: "openrouter", model: OPENROUTER_ROUTER });
-  return chain;
+export function visionChain(lists: Partial<Record<Provider, readonly string[]>>, cooled: (c: Candidate) => boolean = () => false): Candidate[] {
+  const router = (lists.openrouter ?? []).includes(OPENROUTER_ROUTER);
+  const own = { ...lists, openrouter: (lists.openrouter ?? []).filter((m) => m !== OPENROUTER_ROUTER) };
+  const chain = arrange(rankChain(own), "extract", cooled).slice(0, VISION_CHAIN - (router ? 1 : 0));
+  return router ? [...chain, { provider: "openrouter", model: OPENROUTER_ROUTER }] : chain;
 }
 
 /**
@@ -1486,7 +1531,7 @@ export const onRequestGet = async (ctx: {
 
     const data = (await response.json()) as { data?: { id?: string }[] };
     const ids = (data.data ?? []).map((m) => m.id).filter((id): id is string => Boolean(id));
-    return provider === "gemini" ? geminiRank(ids) : ids;
+    return provider === "gemini" ? geminiRank(ids) : ids.sort(strongestFirst);
   };
 
   const [groq, openrouter, gemini, workers] = await Promise.all([list("groq"), list("openrouter"), list("gemini"), list("workers")]);
@@ -1570,7 +1615,8 @@ export const onRequestPost = async (ctx: {
     typeof body.provider === "string" && typeof body.model === "string"
       ? { provider: body.provider, model: body.model.slice(0, 120) }
       : undefined;
-  const chain = images.length > 0 ? await visionChainFrom(env) : await chainFrom(env, chosen);
+  const started = Date.now();
+  const chain = images.length > 0 ? await visionChainFrom(env) : await chainFrom(env, chosen, task);
   if (chain.length === 0) {
     return json(
       {
@@ -1669,7 +1715,7 @@ export const onRequestPost = async (ctx: {
         nothingFound ??= json({ ...first, model: label, attempts });
         attempts.push({ model: candidate.model, reason: "read nothing" });
         emptyReads += 1;
-        // A whole wave that found nothing usable: it is not there.
+        // As many models as are asked at once found nothing usable: it is not there.
         return emptyReads >= (images.length > 0 ? 3 : 2) ? nothingFound : null;
       }
       if (first) return json({ ...first, model: label, attempts });
@@ -1744,18 +1790,21 @@ export const onRequestPost = async (ctx: {
   };
 
   /*
-   * Several at once, the first good answer wins.
+   * Several at once, and the strongest answer wins.
    *
    * The chain was tried one model at a time, each allowed its full timeout.
    * For a picture that meant forty seconds per free vision model that was
    * busy or retired, and the browser gave up before the chain reached one
    * that worked: the owner's last four screenshots on 26 September 2026 all
-   * came back "nothing readable" after a long "Still reading it". A wave now
-   * asks three vision models, or two chat models, together. The first
-   * readable answer is returned and the others are cancelled; only when a
-   * whole wave fails does the next one start.
+   * came back "nothing readable" after a long "Still reading it". So three
+   * vision models, or two chat models, are asked together.
+   *
+   * Since 30 September 2026 the strongest answer is taken, not the quickest:
+   * a weaker model that answers while a stronger one is still working is
+   * held, and the stronger one waited for until this job's hold (`HOLD_MS`).
+   * A model that fails is replaced at once by the next one down.
    */
-  const winner = await firstInWaves(chain, images.length > 0 ? 3 : 2, attempt);
+  const winner = await bestInOrder(chain, images.length > 0 ? 3 : 2, attempt, started + (HOLD_MS[task] ?? DEFAULT_HOLD_MS));
   if (winner) return winner;
   if (nothingFound) return nothingFound;
 
@@ -1926,7 +1975,7 @@ async function callProvider(
   maxTokens: number,
   images: readonly string[] = [],
   task = "",
-  /** Cancels the request when another model in the same wave has already answered. */
+  /** Cancels the request when a stronger model has answered, or the answer has been taken. */
   outer?: AbortSignal,
 ): Promise<string> {
   try {
@@ -2047,7 +2096,11 @@ async function send(
     });
 
     if (!response.ok) {
-      throw new Error(isGemini && response.status === 400 ? geminiRefusal(await response.text().catch(() => "")) : `${response.status}`);
+      // What a refusal says decides how long the model is left alone (`coolFor`), and a Gemini 400 what it means.
+      const detail = response.status === 429 || (isGemini && response.status === 400) ? await response.text().catch(() => "") : "";
+      const status = isGemini && response.status === 400 ? geminiRefusal(detail) : `${response.status}`;
+      cool(c, status, detail);
+      throw new Error(status);
     }
 
     const data = (await response.json()) as {
@@ -2095,16 +2148,45 @@ async function sendWorkers(
       }),
       timeout,
     ]);
-    const response = (result as { response?: unknown } | null)?.response;
-    const text = typeof response === "string" ? response : response && typeof response === "object" ? JSON.stringify(response) : "";
-    return withoutThinking(text);
+    return withoutThinking(workersText(result));
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     if (message === "aborted") throw e;
-    throw new Error(workersFailure(message));
+    const status = workersFailure(message);
+    cool(c, status, message);
+    throw new Error(status);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
+}
+
+/**
+ * The words of a Workers AI answer, in whichever shape the model gives it.
+ *
+ * The older models answer `{ response }`; the newer ones, GPT-OSS among
+ * them, may answer as the chat completions API does (`choices`) or as the
+ * responses API does (`output`, where the thinking is its own part and only
+ * the message is the answer).
+ */
+export function workersText(result: unknown): string {
+  if (typeof result === "string") return result;
+  if (!result || typeof result !== "object") return "";
+  const r = result as { response?: unknown; choices?: unknown; output_text?: unknown; output?: unknown };
+  if (typeof r.response === "string") return r.response;
+  if (r.response && typeof r.response === "object") return JSON.stringify(r.response);
+  if (Array.isArray(r.choices)) {
+    const content = (r.choices[0] as { message?: { content?: unknown } } | undefined)?.message?.content;
+    if (typeof content === "string") return content;
+  }
+  if (typeof r.output_text === "string") return r.output_text;
+  if (Array.isArray(r.output)) {
+    return (r.output as { type?: unknown; content?: unknown }[])
+      .filter((part) => part?.type === "message" && Array.isArray(part.content))
+      .flatMap((part) => part.content as { text?: unknown }[])
+      .map((piece) => (typeof piece?.text === "string" ? piece.text : ""))
+      .join("");
+  }
+  return "";
 }
 
 /**
@@ -2121,28 +2203,92 @@ export function geminiRefusal(body: string): string {
 }
 
 /**
- * Try `items` a wave at a time, all of a wave at once; the first non-null
- * answer wins, and the rest of its wave is told to stop through the signal.
- * A wave where nothing answers leads to the next. Null when none do.
+ * How long after a request starts a stronger model still working is waited
+ * for, once a weaker one has answered. Each is inside what the app itself
+ * waits for that job (`aiClient.ts`: 25 seconds for the conversation and the
+ * panels, 20 for the forecast, 45 for a picture, 12 for naming an item, 7
+ * for a note, 6 for sorting a message), with room for the answer to arrive.
  */
-export async function firstInWaves<T, R>(
+const HOLD_MS: Record<string, number> = {
+  chat: 18_000,
+  summary: 18_000,
+  alerts: 18_000,
+  patterns: 18_000,
+  outlook: 14_000,
+  extract: 35_000,
+  describe: 8_000,
+  classify: 8_000,
+  categorise: 8_000,
+  note: 4_000,
+  route: 3_000,
+};
+const DEFAULT_HOLD_MS = 8_000;
+
+/**
+ * Ask `items` in order, `width` at a time, and answer with the strongest
+ * that answers: the lowest place in the list.
+ *
+ * It asked a wave at a time and took the first answer, so a quick weak
+ * model beat a strong one working beside it, and a wave with one model
+ * refused in a second still waited for the other before the next was
+ * tried. Now a model that fails is replaced at once by the next one down,
+ * and an answer is taken when no stronger model is still working, or at
+ * `holdUntil`, whichever comes first; the rest are told to stop through the
+ * signal. Null when none answer.
+ */
+export function bestInOrder<T, R>(
   items: readonly T[],
-  size: number,
-  run: (item: T, stop: AbortSignal) => Promise<R | null>,
+  width: number,
+  run: (item: T, signal: AbortSignal) => Promise<R | null>,
+  holdUntil = 0,
 ): Promise<R | null> {
-  for (let i = 0; i < items.length; i += size) {
-    const stop = new AbortController();
-    const winner = await Promise.any(
-      items.slice(i, i + size).map(async (item) => {
-        const answer = await run(item, stop.signal);
-        if (answer === null) throw new Error("no answer");
-        return answer;
-      }),
-    ).catch(() => null);
-    stop.abort();
-    if (winner !== null) return winner;
-  }
-  return null;
+  return new Promise((resolve) => {
+    const running = new Map<number, AbortController>();
+    const answers = new Map<number, R>();
+    let next = 0;
+    let finished = false;
+    let hold: ReturnType<typeof setTimeout> | undefined;
+
+    const best = (): number | undefined => {
+      let low: number | undefined;
+      for (const i of answers.keys()) if (low === undefined || i < low) low = i;
+      return low;
+    };
+    const finish = (value: R | null): void => {
+      if (finished) return;
+      finished = true;
+      if (hold !== undefined) clearTimeout(hold);
+      for (const c of running.values()) c.abort();
+      resolve(value);
+    };
+    const take = (): void => {
+      const b = best();
+      finish(b === undefined ? null : (answers.get(b) ?? null));
+    };
+    const start = (i: number): void => {
+      const controller = new AbortController();
+      running.set(i, controller);
+      run(items[i] as T, controller.signal)
+        .catch(() => null)
+        .then((answer) => {
+          running.delete(i);
+          if (finished) return;
+          if (answer !== null) answers.set(i, answer);
+          settle();
+        });
+    };
+    function settle(): void {
+      const b = best();
+      if (b !== undefined) {
+        if (![...running.keys()].some((i) => i < b)) return take();
+        hold ??= setTimeout(take, Math.max(0, holdUntil - Date.now()));
+        return;
+      }
+      while (running.size < width && next < items.length) start(next++);
+      if (running.size === 0) finish(null);
+    }
+    settle();
+  });
 }
 
 /** Enough to diagnose, never enough to leak a key or a figure. */

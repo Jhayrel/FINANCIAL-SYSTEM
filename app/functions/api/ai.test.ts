@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { compactContext, emptyRead, fitConversation, firstInWaves, geminiRank, geminiRefusal, shortReason, SHRINK_TO, systemFor, textChain, toneFor, usefulRead, visionChain, workersFailure, workersModels } from "./ai";
+import { arrange, bestInOrder, compactContext, coolFor, emptyRead, fitConversation, geminiRank, geminiRefusal, rankChain, shortReason, SHRINK_TO, systemFor, toneFor, usefulRead, visionChain, workersFailure, workersModels, workersText } from "./ai";
 
 /** A context shaped like the real one: worked-out figures, then the rows. */
 function contextOf(rows: number): string {
@@ -273,32 +273,54 @@ describe("asking several models at once", () => {
       });
     });
 
-  it("takes the first good answer and stops the slow ones", async () => {
-    const stopped: string[] = [];
-    const started = Date.now();
-    const answer = await firstInWaves(["slow", "fast", "broken"], 3, async (name: string, stop: AbortSignal) => {
-      stop.addEventListener("abort", () => stopped.push(name));
-      if (name === "broken") return null;
-      await wait(name === "slow" ? 5_000 : 20, stop);
+  it("takes the stronger answer when it comes in time, though the weaker came first", async () => {
+    const answer = await bestInOrder(["strong", "weak"], 2, async (name: string, stop: AbortSignal) => {
+      await wait(name === "strong" ? 60 : 5, stop);
       return name;
-    });
-    expect(answer).toBe("fast");
-    expect(Date.now() - started).toBeLessThan(1_000);
-    expect(stopped).toContain("slow");
+    }, Date.now() + 2_000);
+    expect(answer).toBe("strong");
   });
 
-  it("moves to the next wave only when a whole wave fails", async () => {
-    const tried: string[] = [];
-    const answer = await firstInWaves(["a", "b", "c", "d"], 2, async (name: string) => {
-      tried.push(name);
-      return name === "d" ? name : null;
-    });
-    expect(answer).toBe("d");
-    expect(tried).toEqual(["a", "b", "c", "d"]);
+  it("takes the weaker answer at the hold, and stops the stronger", async () => {
+    const stopped: string[] = [];
+    const started = Date.now();
+    const answer = await bestInOrder(["strong", "weak"], 2, async (name: string, stop: AbortSignal) => {
+      stop.addEventListener("abort", () => stopped.push(name));
+      await wait(name === "strong" ? 5_000 : 5, stop);
+      return name;
+    }, Date.now() + 100);
+    expect(answer).toBe("weak");
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(stopped).toContain("strong");
+  });
+
+  it("takes the weaker answer as soon as the stronger fails", async () => {
+    const started = Date.now();
+    const answer = await bestInOrder(["strong", "weak"], 2, async (name: string, stop: AbortSignal) => {
+      await wait(name === "strong" ? 40 : 5, stop);
+      return name === "strong" ? null : name;
+    }, Date.now() + 5_000);
+    expect(answer).toBe("weak");
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it("puts the next one down in a failed model's place at once", async () => {
+    const began: string[] = [];
+    const answer = await bestInOrder(["a", "b", "c", "d"], 2, async (name: string, stop: AbortSignal) => {
+      began.push(name);
+      if (name === "a") {
+        await wait(80, stop);
+        return null;
+      }
+      return name === "c" ? name : null;
+    }, Date.now() + 5_000);
+    expect(answer).toBe("c");
+    // c was asked while a was still working, and d never was.
+    expect(began).toEqual(["a", "b", "c"]);
   });
 
   it("answers null when nothing answers", async () => {
-    expect(await firstInWaves([1, 2, 3], 2, async () => null)).toBeNull();
+    expect(await bestInOrder([1, 2, 3], 2, async () => null)).toBeNull();
   });
 });
 
@@ -345,7 +367,7 @@ describe("a picture read as empty", () => {
   });
 
   it("loses the race to a slower model that reads it", async () => {
-    const answer = await firstInWaves(["blind", "slow reader"], 3, async (name: string) => {
+    const answer = await bestInOrder(["blind", "slow reader"], 3, async (name: string) => {
       if (name === "blind") return null; // what an empty read now returns while others run
       await new Promise((r) => setTimeout(r, 30));
       return "rows";
@@ -360,22 +382,24 @@ describe("a picture read as empty", () => {
  * OpenRouter, and the router had fallen off the end.
  */
 describe("the vision models to try", () => {
-  const or = ["a:free", "b:free", "c:free", "d:free", "e:free", "f:free", "g:free", "openrouter/free"];
+  const or = ["google/gemma-3-12b-it:free", "qwen/qwen3.8-27b-vl:free", "minimax/minimax-m3:free", "a:free", "b:free", "c:free", "d:free", "e:free", "f:free", "g:free", "openrouter/free"];
+  const at = (chain: readonly { provider: string; model: string }[]): string[] => chain.map((c) => `${c.provider}:${c.model}`);
 
-  it("fills Groq's places from OpenRouter when Groq has none, and keeps the router last", () => {
-    const chain = visionChain([], or).map((c) => c.model);
-    expect(chain).toEqual(["a:free", "b:free", "c:free", "d:free", "e:free", "openrouter/free"]);
+  it("is strongest first across providers, and keeps the router last", () => {
+    const chain = at(visionChain({ gemini: ["gemini-3.8-flash", "gemini-3.5-flash-lite"], groq: ["meta-llama/llama-4-scout-17b-16e-instruct"], openrouter: or }));
+    expect(chain.slice(0, 4)).toEqual(["gemini:gemini-3.8-flash", "openrouter:minimax/minimax-m3:free", "gemini:gemini-3.5-flash-lite", "openrouter:qwen/qwen3.8-27b-vl:free"]);
+    expect(chain).toHaveLength(9);
+    expect(chain[8]).toBe("openrouter:openrouter/free");
+    expect(chain).not.toContain("openrouter:google/gemma-3-12b-it:free");
   });
 
-  it("alternates when both have models", () => {
-    const chain = visionChain(["g1", "g2", "g3", "g4"], or).map((c) => `${c.provider}:${c.model}`);
-    expect(chain.slice(0, 4)).toEqual(["groq:g1", "openrouter:a:free", "groq:g2", "openrouter:b:free"]);
-    expect(chain).toHaveLength(6);
-    expect(chain[5]).toBe("openrouter:openrouter/free");
+  it("puts a model refused lately behind the others", () => {
+    const chain = at(visionChain({ gemini: ["gemini-3.8-flash"], openrouter: ["minimax/minimax-m3:free", "openrouter/free"] }, (c) => c.model === "gemini-3.8-flash"));
+    expect(chain).toEqual(["openrouter:minimax/minimax-m3:free", "gemini:gemini-3.8-flash", "openrouter:openrouter/free"]);
   });
 
-  it("is empty only when neither provider has a model", () => {
-    expect(visionChain([], [])).toEqual([]);
+  it("is empty only when no provider has a model", () => {
+    expect(visionChain({})).toEqual([]);
   });
 });
 
@@ -411,35 +435,35 @@ describe("an answer worth winning with", () => {
 describe("Gemini's models, from Google's own list", () => {
   const catalogue = [
     "models/embedding-001",
-    "models/gemini-2.0-flash",
-    "models/gemini-2.0-flash-lite",
     "models/gemini-2.5-flash",
     "models/gemini-2.5-pro",
-    "models/gemini-2.5-flash-lite",
-    "models/gemini-2.5-flash-preview-tts",
-    "models/gemini-2.5-flash-image",
-    "models/gemini-2.0-flash-live-001",
+    "models/gemini-3.5-flash",
+    "models/gemini-3.6-flash",
+    "models/gemini-3.7-flash",
+    "models/gemini-3.8-flash",
+    "models/gemini-3.8-pro",
+    "models/gemini-3.5-pro",
+    "models/gemini-3.5-flash-lite",
+    "models/gemini-3.1-flash-lite",
+    "models/gemini-3.8-flash-preview-tts",
+    "models/gemini-3.5-flash-image",
+    "models/gemini-3.5-flash-live-001",
     "models/gemini-embedding-001",
-    "models/gemma-3-27b-it",
+    "models/gemma-4-31b-it",
     "models/gemini-flash-latest",
   ];
 
-  it("keeps the chat models, newest first, Flash then Pro then Lite, aliases last", () => {
+  it("keeps the chat models, strongest first: the newest Pro, every Flash, a few Lite", () => {
     expect(geminiRank(catalogue)).toEqual([
+      "gemini-3.8-pro",
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
       "gemini-2.5-flash",
-      "gemini-2.5-pro",
-      "gemini-2.5-flash-lite",
-      "gemini-2.0-flash",
-      "gemini-2.0-flash-lite",
       "gemini-flash-latest",
-    ]);
-  });
-
-  it("puts a newer version first when Google adds one", () => {
-    expect(geminiRank([...catalogue, "models/gemini-3-flash-preview", "models/gemini-3-pro-preview"]).slice(0, 3)).toEqual([
-      "gemini-3-flash-preview",
-      "gemini-3-pro-preview",
-      "gemini-2.5-flash",
+      "gemini-3.1-flash-lite",
     ]);
   });
 
@@ -460,45 +484,95 @@ describe("a request Gemini refuses", () => {
   });
 });
 
+/**
+ * 30 September 2026: "I want the most powerful ai. Like if the other
+ * powerful is not available means use the other most powerful. All low end
+ * ai and not smart ai make them last option."
+ */
 describe("the text models to try", () => {
-  const gemini = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"];
-  const workers = workersModels();
-  const at = (chain: ReturnType<typeof textChain>): string[] => chain.map((c) => `${c.provider}:${c.model}`);
+  const lists = {
+    gemini: ["gemini-3.8-flash", "gemini-3.5-flash-lite"],
+    groq: ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.1-8b-instant", "allam-2-7b"],
+    openrouter: ["minimax/minimax-m3:free", "z-ai/glm-5.2:free", "meta-llama/llama-3.3-70b-instruct:free"],
+    workers: ["@cf/openai/gpt-oss-120b", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"],
+  };
+  const at = (chain: readonly { provider: string; model: string }[]): string[] => chain.map((c) => `${c.provider}:${c.model}`);
 
-  it("asks Gemini's best two first, then Workers AI beside Groq, then the rest", () => {
-    expect(at(textChain(gemini, workers, ["g1", "g2", "g3", "g4"], ["o1", "o2"]))).toEqual([
-      "gemini:gemini-2.5-flash",
-      "gemini:gemini-2.5-pro",
+  it("asks the strongest first, whoever hosts it, and the small ones last", () => {
+    expect(at(arrange(rankChain(lists), "chat"))).toEqual([
+      "gemini:gemini-3.8-flash",
+      "openrouter:minimax/minimax-m3:free",
+      "openrouter:z-ai/glm-5.2:free",
+      "gemini:gemini-3.5-flash-lite",
+      "groq:openai/gpt-oss-120b",
+      "workers:@cf/openai/gpt-oss-120b",
+      "groq:openai/gpt-oss-20b",
+      "openrouter:meta-llama/llama-3.3-70b-instruct:free",
       "workers:@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-      "groq:g1",
-      "openrouter:o1",
-      "groq:g2",
-      "openrouter:o2",
-      "groq:g3",
-      "workers:@cf/mistralai/mistral-small-3.1-24b-instruct",
+      "groq:llama-3.1-8b-instant",
+      "groq:allam-2-7b",
     ]);
   });
 
-  it("is the chain it always was when neither new provider is set up", () => {
-    expect(at(textChain([], [], ["g1", "g2"], ["o1"]))).toEqual(["groq:g1", "openrouter:o1", "groq:g2"]);
+  it("uses the next strongest when the strongest was refused lately", () => {
+    const chain = at(arrange(rankChain(lists), "chat", (c) => c.provider === "gemini" && c.model === "gemini-3.8-flash"));
+    expect(chain[0]).toBe("openrouter:minimax/minimax-m3:free");
+    expect(chain[chain.length - 1]).toBe("gemini:gemini-3.8-flash");
   });
 
-  it("still has models when Gemini is the only key", () => {
-    expect(at(textChain(gemini, [], [], []))).toEqual(["gemini:gemini-2.5-flash", "gemini:gemini-2.5-pro"]);
+  it("leaves the few strong answers a day to the questions, and asks Groq first for the quick jobs", () => {
+    const chain = at(arrange(rankChain(lists), "route"));
+    expect(chain.slice(0, 4)).toEqual(["groq:openai/gpt-oss-120b", "openrouter:minimax/minimax-m3:free", "openrouter:z-ai/glm-5.2:free", "gemini:gemini-3.5-flash-lite"]);
+    expect(chain.indexOf("gemini:gemini-3.8-flash")).toBeGreaterThan(chain.indexOf("groq:allam-2-7b"));
+    expect(chain.indexOf("workers:@cf/openai/gpt-oss-120b")).toBeGreaterThan(chain.indexOf("groq:allam-2-7b"));
+  });
+
+  it("is the old providers alone when neither new one is set up", () => {
+    expect(at(rankChain({ groq: ["openai/gpt-oss-20b", "openai/gpt-oss-120b"], openrouter: ["minimax/minimax-m3:free"] }))).toEqual([
+      "openrouter:minimax/minimax-m3:free",
+      "groq:openai/gpt-oss-120b",
+      "groq:openai/gpt-oss-20b",
+    ]);
+  });
+});
+
+describe("how long a refused model is left alone", () => {
+  it("is hours for an allowance that is used up or never given, a minute for a busy minute", () => {
+    expect(coolFor("429", "Quota exceeded for metric: generate_content_free_tier_requests, limit: 0, model: gemini-3.8-pro")).toBe(12 * 60 * 60_000);
+    expect(coolFor("429", '"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"')).toBe(3 * 60 * 60_000);
+    expect(coolFor("429", "Rate limit exceeded: free-models-per-day")).toBe(3 * 60 * 60_000);
+    expect(coolFor("429", "Rate limit reached on tokens per minute (TPM)")).toBe(60_000);
+  });
+
+  it("is an hour for a bad key, a region not served or a retired model, and nothing for an outage", () => {
+    expect(coolFor("403")).toBe(60 * 60_000);
+    expect(coolFor("404")).toBe(60 * 60_000);
+    expect(coolFor("402")).toBe(12 * 60 * 60_000);
+    expect(coolFor("503")).toBe(0);
+    expect(coolFor("413")).toBe(0);
   });
 });
 
 describe("Workers AI", () => {
   it("uses the models kept here unless the environment names its own", () => {
-    expect(workersModels()).toEqual(["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/mistralai/mistral-small-3.1-24b-instruct"]);
+    expect(workersModels()[0]).toBe("@cf/openai/gpt-oss-120b");
     expect(workersModels(" @cf/qwen/qwen3-30b-a3b-fp8 , nonsense, @hf/some/model ")).toEqual(["@cf/qwen/qwen3-30b-a3b-fp8", "@hf/some/model"]);
-    expect(workersModels("nonsense")).toHaveLength(2);
+    expect(workersModels("nonsense")).toEqual(workersModels());
   });
 
   it("reads a failure in the terms the chain acts on", () => {
     expect(workersFailure("AiError: Input is too long for this model's context window")).toBe("413");
-    expect(workersFailure("4006: you have used up your daily free allocation of 10,000 neurons")).toBe("429");
+    expect(workersFailure("4006: you have used up your daily free allocation of 10,000 neurons, please upgrade to Cloudflare's Workers Paid plan")).toBe("429");
+    expect(workersFailure("This model requires the Workers Paid plan or prepaid credits")).toBe("402");
     expect(workersFailure("5007: No such model @cf/old/model or task")).toBe("404");
     expect(workersFailure("InferenceUpstreamError: internal")).toBe("503");
+  });
+
+  it("reads the answer in each shape its models give", () => {
+    expect(workersText({ response: '{"summary":"a"}' })).toBe('{"summary":"a"}');
+    expect(workersText({ response: { summary: "a" } })).toBe('{"summary":"a"}');
+    expect(workersText({ choices: [{ message: { content: "b" } }] })).toBe("b");
+    expect(workersText({ output: [{ type: "reasoning", content: [{ text: "thinking" }] }, { type: "message", content: [{ type: "output_text", text: "c" }] }] })).toBe("c");
+    expect(workersText(null)).toBe("");
   });
 });
