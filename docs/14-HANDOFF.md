@@ -482,6 +482,15 @@ all dated 2 October. #3869 and #3870 are the two the chat later showed as
 discarded; the four from the screenshots were most likely different days.
 Which of them to keep, and their dates, is the owner's call.
 
+Then "lets fix the ai", read against every question asked since the 28
+September "AI first" change. Most were already fixed that night; two were
+still open:
+
+| Found | Now |
+|---|---|
+| "I think i deleted a wrong entry" was shown the newest saved rows to edit or bin (the rule for "my last entry is wrong" caught "wrong entry"); "last month?" after it was answered with August's spending; "//fix this it should know all the deleted by date" | A sentence about having deleted something lists the bin, newest deletion first, each with Restore and the day it was deleted and the day it was for; a day or period narrows it, by either date; a period said alone right after ("last month?", "september") narrows the same list. The model is told the bin too: count and the newest 25 by deletion day (`domain/deletedAsk.ts`, `binForModel` in `aiChatContext.ts`) |
+| "You didn't read the other one", after two photos came back as cards off one, was answered with where the month's money came from | Heard as "read it again", and only the pictures no card came off are read (`saysOneWasMissed` in `capture.ts`) |
+
 **Read but not fixed:** the shop receipt of 30 September came back as four
 items (₱495.00, ₱80.00, ₱3.00, ₱1.00) and was treated as a stitched list;
 the owner kept one. Without the photo the reading cannot be replayed.

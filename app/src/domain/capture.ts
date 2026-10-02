@@ -194,7 +194,22 @@ export const POINTS_ELSEWHERE =
 const READ_AGAIN =
   /\b(?:read|re-?read|look\s+at|check|scan|see)\b[^?]*\b(?:receipt|picture|photo|screenshot|image|statement|product\s+name|it\s+again|this\s+again|again)\b|^\s*(?:(?:please\s+)?read\s+(?:it|this|that)|again|try\s+again|read\s+again)\s*[.!]*\s*$/i;
 
-export const asksToReadAgain = (note: string): boolean => READ_AGAIN.test(note) && note.trim().split(/\s+/).length <= 14;
+/**
+ * Saying one of the pictures was not read: "You didn't read the other one",
+ * "you missed the second picture", "hindi mo nabasa yung isa".
+ *
+ * 29 September 2026: two photos came back as two cards off one of them, and
+ * "You didn't read the other one" was answered with where the month's money
+ * came from. It is a request to read the picture again, the one that gave
+ * nothing.
+ */
+const ONE_MISSED =
+  /\b(?:didn'?t|did\s+not|never|haven'?t|have\s+not|not)\s+(?:read|see|scan|get|catch|check)\b[^?]*\b(?:other|another|second|first|last|one|picture|photo|receipt|screenshot|image|slip)\b|\b(?:missed|skipped|ignored|left\s+out|forgot)\b[^?]*\b(?:other|another|second|first|one|picture|photo|receipt|screenshot|image|slip)\b|\bhindi\s+mo\s+(?:nabasa|binasa|nakita)\b/i;
+
+export const saysOneWasMissed = (note: string): boolean => ONE_MISSED.test(note) && note.trim().split(/\s+/).length <= 14;
+
+export const asksToReadAgain = (note: string): boolean =>
+  (READ_AGAIN.test(note) || ONE_MISSED.test(note)) && note.trim().split(/\s+/).length <= 14;
 
 /**
  * "Change the title", with nothing after it: the words come next.

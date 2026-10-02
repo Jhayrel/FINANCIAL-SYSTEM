@@ -88,4 +88,16 @@ describe("asking for the last picture again", () => {
       expect(asksToReadAgain(said), said).toBe(false);
     }
   });
+
+  // 29 September 2026: two photos, cards off one of them, and this was answered with the month's money.
+  it("hears that one picture was not read", async () => {
+    const { asksToReadAgain, saysOneWasMissed } = await import("./capture");
+    for (const said of ["You didn't read the other one", "you missed the second picture", "you did not read the receipt", "hindi mo nabasa yung isa"]) {
+      expect(saysOneWasMissed(said), said).toBe(true);
+      expect(asksToReadAgain(said), said).toBe(true);
+    }
+    for (const said of ["I didn't spend on food today", "not this one, the gas", "I missed my bus so I took a tricycle 50 cash"]) {
+      expect(saysOneWasMissed(said), said).toBe(false);
+    }
+  });
 });

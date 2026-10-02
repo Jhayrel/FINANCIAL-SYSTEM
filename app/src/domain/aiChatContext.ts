@@ -55,7 +55,8 @@ import { moneyFlow, flowWords } from "./moneyFlow";
 import { whyOver } from "./budgetAdvice";
 import { namesWindow, windowOf } from "./charts";
 import { figuresIn } from "./money";
-import type { Budgets, IsoDate, Transaction } from "./types";
+import { binForModel } from "./deletedAsk";
+import type { Budgets, DeletedTransaction, IsoDate, Transaction } from "./types";
 
 /**
  * The ceiling on the ledger half, in bytes.
@@ -226,6 +227,12 @@ export interface ChatContextInput {
    * first so "what do you think" is about the screen they are looking at.
    */
   readonly screen?: string | undefined;
+  /**
+   * The bin, so "what did I delete last week" is answered. It was never
+   * sent, and "I think I deleted a wrong entry" could not be (29 September
+   * 2026: "it should know all the deleted by date").
+   */
+  readonly deleted?: readonly DeletedTransaction[] | undefined;
 }
 
 export interface ChatContext {
@@ -787,6 +794,11 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     if (spent + size > budget) break;
     kept.push(text);
     spent += size;
+  }
+
+  if (input.deleted) {
+    out.push("");
+    out.push(...binForModel(input.deleted));
   }
 
   out.push("");

@@ -120,11 +120,12 @@ import {
 import { rampFor } from "../components/charts";
 import { Icon } from "../components/Icon";
 import { fileAsBefore } from "../domain/fileAsBefore";
+import { asksAboutDeleted, deletedRows, deletedWindowIn, deletedWords, onlyAWindow } from "../domain/deletedAsk";
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isQuestion, meantInstead, notMeantIn, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
-import { addressesEveryCard, asksToReadAgain, asksToRename, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
+import { addressesEveryCard, asksToReadAgain, asksToRename, saysOneWasMissed, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
 import { asksWhetherAdded, inLedgerOrNot } from "../domain/checkPicture";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney, type Centavos } from "../domain/money";
@@ -931,7 +932,7 @@ export function AskPanel({
    * follow-up came back with "I cannot read your question without the
    * model" while the model was perfectly available.
    */
-  const ai = useAi({ settings, transactions, budgets, reference, feature: "chat", asOf });
+  const ai = useAi({ settings, transactions, budgets, reference, feature: "chat", asOf, deleted });
 
   /**
    * A computer's screen, where a card shows every field and a copy is set
@@ -1463,6 +1464,8 @@ export function AskPanel({
    * "Sent to the form" messages, which then read in the record as six entries.
    */
   const lastRecorded = useRef(new Map<string, string>());
+  /** The last question about the bin, so a period said alone after it ("last month?") narrows the same list. */
+  const lastDeletedAsk = useRef<string | null>(null);
   /** Cards already written down as added, so a second path never writes the same one again. */
   const addedCards = useRef(new Set<string>());
 
@@ -3894,9 +3897,21 @@ export function AskPanel({
       lastPictures.current.length > 0
     ) {
       setDraft("");
+      /*
+       * "You didn't read the other one": only the pictures no card came off,
+       * when some did. Every card names the file it was read from.
+       */
+      const unread = saysOneWasMissed(note)
+        ? lastPictures.current.filter((p) => !turns.some((t) => isOffer(t) && t.proposal.sourceRef.includes(p.name)))
+        : [];
+      const again = unread.length > 0 && unread.length < lastPictures.current.length ? unread : lastPictures.current;
       setBusy(true);
       try {
-        await during("Reading the picture again", () => readAttached(note, lastPictures.current), "Still reading it");
+        await during(
+          again.length < lastPictures.current.length ? `Reading ${again.map((p) => p.name).join(" and ")} again` : "Reading the picture again",
+          () => readAttached(note, again),
+          "Still reading it",
+        );
       } finally {
         setBusy(false);
       }
@@ -4753,6 +4768,31 @@ export function AskPanel({
       log(aiEvent("answered", "add", { text: `Listed ${flagged.length} flagged rows. Asked: ${note}`, model: "this device" }));
       return;
     }
+
+    /*
+     * The bin, by date: "I think I deleted a wrong entry", "what did I delete
+     * last week", and a period said alone right after ("last month?"). It was
+     * answered with the newest saved rows, by the rule for "my last entry is
+     * wrong", because the sentence says "wrong entry" (domain/deletedAsk.ts).
+     */
+    const lastYouSaid = [...turns].reverse().find((t): t is Said => t.kind === "you")?.text ?? "";
+    const deletedFollowUp = lastDeletedAsk.current !== null && lastYouSaid === lastDeletedAsk.current ? onlyAWindow(note, asOf) : null;
+    if (openCards.length === 0 && !pending && files.length === 0 && !as && (deletedFollowUp || asksAboutDeleted(ruled))) {
+      const window = deletedFollowUp ?? deletedWindowIn(note, asOf);
+      const found = deletedRows(deleted, window);
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      const reply = deletedWords(found, deleted.length, window);
+      say({ kind: "assistant", text: reply, from: "this device" });
+      if (found.length > 0) {
+        say({ kind: "found", action: "restore", candidates: found.map((f, i) => ({ row: f.row, score: 100 - i, why: [...f.why] })), done: [] });
+      }
+      log(aiEvent("answered", "add", { text: `Listed ${found.length} rows from the bin. Asked: ${note}`, model: "this device" }));
+      lastDeletedAsk.current = note;
+      return;
+    }
+    lastDeletedAsk.current = null;
 
     if (openCards.length === 0 && !pending && files.length === 0 && !as && saysLatestIsWrong(ruled)) {
       const newest = [...transactions].sort((x, y) => y.recordNumber - x.recordNumber).slice(0, 3);

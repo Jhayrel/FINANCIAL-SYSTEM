@@ -26,7 +26,7 @@ import { cacheKey, readCache, writeCache } from "../domain/aiCache";
 import { offlineAnswer } from "../domain/aiOffline";
 import { today } from "../domain/dates";
 import type { AppSettings } from "../domain/settings";
-import type { Budgets, ReferenceLists, Transaction } from "../domain/types";
+import type { Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
 
 export interface UseAiInput {
   readonly settings: AppSettings;
@@ -57,6 +57,8 @@ export interface UseAiInput {
    * is nothing to notice.
    */
   readonly asOf?: string;
+  /** The bin, for the chat: what was deleted and when. */
+  readonly deleted?: readonly DeletedTransaction[] | undefined;
 }
 
 export interface UseAi {
@@ -99,6 +101,7 @@ export function useAi({
   reference,
   feature,
   asOf,
+  deleted,
 }: UseAiInput): UseAi {
   const [answer, setAnswer] = useState<AiAnswer | null>(null);
   const [loading, setLoading] = useState(false);
@@ -253,6 +256,7 @@ export function useAi({
               budgets,
               // The months ahead leave out what was stopped, as the Budget screen does.
               stopped: settings.stopped,
+              ...(deleted ? { deleted } : {}),
               ...(options.screen ? { screen: options.screen } : {}),
             }).text
           : undefined;
@@ -308,7 +312,7 @@ export function useAi({
       const note = untracedNote(answered.text, [withWorked ?? contextToText(context), said, options.pinned ?? ""].join("\n"), formatMoney);
       return note === "" ? answered : { ...answered, text: [answered.text, note].join("\n\n") };
     },
-    [context, disabled, ai.enabled, ai.tone, ai.provider, ai.model, transactions, asOf, budgets, settings.credits],
+    [context, disabled, ai.enabled, ai.tone, ai.provider, ai.model, transactions, asOf, budgets, settings.credits, deleted],
   );
 
   const clear = useCallback(() => setAnswer(null), []);
