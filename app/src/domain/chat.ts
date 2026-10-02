@@ -128,6 +128,13 @@ export interface StoredCard {
   readonly confidence?: string;
   readonly adjustments?: readonly string[];
   readonly said?: string;
+  /**
+   * Read from typed words rather than off a picture. Kept, because a card
+   * that comes back from the record without it is checked as a picture's,
+   * against two days either side: a typed ₱25.00 of water on 30 September
+   * 2026 was called a copy of the day before's.
+   */
+  readonly typed?: boolean;
   /** The number the row was actually given, once it has one. */
   readonly recordNumber?: number;
   /**

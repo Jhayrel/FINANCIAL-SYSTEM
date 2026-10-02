@@ -133,3 +133,54 @@ describe("every row read against that account", () => {
     expect(ownSide("Transfer")).toBe("fromWallet");
   });
 });
+
+/**
+ * 2 October 2026: two "Received money" rows off a Maya history came back as
+ * transfers from Maya to Maya, because the blank source was filled with the
+ * account the statement is for, which was already the destination.
+ */
+describe("money coming into the statement's own account", () => {
+  const into = (from: string): Draft => ({
+    ...emptyDraft("2026-09-30"),
+    flow: "Transfer",
+    item: "Transaction Fee",
+    description: "Received money",
+    amount: 300000,
+    fromWallet: from,
+    toWallet: "Maya",
+    status: "Transferred",
+  });
+
+  it("is income into it when it came from outside, never Maya to Maya", () => {
+    const [read] = readAgainst("Maya", [into("")]);
+    expect(read?.draft.flow).toBe("Revenue");
+    expect(read?.draft.category).toBe("Revenue");
+    expect(read?.draft.toWallet).toBe("Maya");
+    expect(read?.draft.fromWallet).toBe("");
+    expect(read?.draft.item).toBe("");
+    expect(read?.draft.status).toBe("");
+    expect(read?.draft.amount).toBe(300000);
+    expect(read?.note).toMatch(/income/);
+  });
+
+  it("stays a transfer when one of the owner's accounts sent it", () => {
+    const [read] = readAgainst("Maya", [into("Gcash")]);
+    expect(read?.draft.flow).toBe("Transfer");
+    expect(read?.draft.fromWallet).toBe("Gcash");
+    expect(read?.note).toBe("");
+  });
+
+  it("asks where a row read as Maya to Maya went, instead of keeping it", () => {
+    const [read] = readAgainst("Maya", [into("Maya")]);
+    expect(read?.draft.fromWallet).toBe("Maya");
+    expect(read?.draft.toWallet).toBe("");
+    expect(read?.note).toMatch(/Pick where it went/);
+  });
+
+  it("still fills the source of money going out of it", () => {
+    const out: Draft = { ...emptyDraft("2026-09-30"), flow: "Transfer", amount: 57100, fromWallet: "", toWallet: "" };
+    const [read] = readAgainst("Maya", [out]);
+    expect(read?.draft.fromWallet).toBe("Maya");
+    expect(read?.draft.toWallet).toBe("");
+  });
+});

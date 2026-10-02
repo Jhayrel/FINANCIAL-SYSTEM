@@ -367,8 +367,16 @@ export function contextToText(c: AiContext): string {
   lines.push(
     `Spending so far averages ${php(c.month.burnRatePerDay)} a day, with ${c.month.daysLeft} days left.`,
   );
-  if (c.month.allowancePerDay !== null) {
+  /*
+   * Never a negative figure a day. Over budget, this said "What is left of
+   * the budget works out to PHP -10,218.71 a day", and the model passed it on
+   * as "a daily shortfall of PHP -10,218.71 for the remaining day" (30
+   * September 2026). Nothing is left to spend a day; the overspend is said once.
+   */
+  if (c.month.allowancePerDay !== null && c.month.allowancePerDay >= 0) {
     lines.push(`What is left of the budget works out to ${php(c.month.allowancePerDay)} a day.`);
+  } else if (c.month.allowancePerDay !== null) {
+    lines.push("Nothing is left of the budget to spend a day: the month is already over it, by the figure above.");
   }
   lines.push(
     `Split: spending ${php(c.month.breakdown.spending)}, bills ${php(c.month.breakdown.bills)}, subscriptions ${php(c.month.breakdown.subscriptions)}, transfer fees ${php(c.month.breakdown.fees)}, debt interest ${php(c.month.breakdown.debtInterest)}.`,

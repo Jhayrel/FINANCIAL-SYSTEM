@@ -268,12 +268,25 @@ export function invertBoxes(rgba: Uint8ClampedArray, width: number, boxes: reado
 }
 
 const MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
-/** A line that dates the rows under it: "September 24, 2026", "24 Sep 2026", "2026-09-24", "Today". */
+const WEEKDAY = "(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\\.?";
+const CLOCK = "\\d{1,2}:\\d{2}(?::\\d{2})?\\s*(?:[ap]\\.?\\s?m\\.?)?";
+/**
+ * A line that is a date and nothing else, perhaps with its weekday before it
+ * and its time after: "Oct 1", "Oct 1, 11:59 PM", "Wed, 01 Oct", "10/01/2026".
+ *
+ * 2 October 2026: a Maya Bank interest list, one row a day, was read as four
+ * rows all dated that day, and five more were dropped as the overlap of a
+ * stitched screenshot. Its dates have no year, and only a date with a year
+ * was known as one, so every row sat under no date at all, and one day's
+ * "Interest earned ₱0.15" looked exactly like the next day's. Whole line only,
+ * so "Sep 30 bill" or "May 5 pa" in a row's words is never taken for a date.
+ */
+const ONLY_DATE = `^\\W*(?:${WEEKDAY}\\W+)?(?:${MONTH}\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?|\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH}\\.?(?:,?\\s+\\d{4})?|\\d{1,2}[/-]\\d{1,2}[/-](?:\\d{4}|\\d{2}))(?:\\W+(?:at\\s+)?${CLOCK})?\\W*$`;
+/** A line that dates the rows under it: "September 24, 2026", "24 Sep 2026", "2026-09-24", "Today", "Oct 1, 11:59 PM". */
 export const DATE_LINE = new RegExp(
-  `\\b${MONTH}\\.?\\s+\\d{1,2},?\\s+\\d{4}\\b|\\b\\d{1,2}\\s+${MONTH}\\.?,?\\s+\\d{4}\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b|^\\W*(?:today|yesterday)\\W*$`,
+  `\\b${MONTH}\\.?\\s+\\d{1,2},?\\s+\\d{4}\\b|\\b\\d{1,2}\\s+${MONTH}\\.?,?\\s+\\d{4}\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b|^\\W*(?:today|yesterday)\\b(?:\\W+(?:at\\s+)?${CLOCK})?\\W*$|${ONLY_DATE}`,
   "i",
-);
-/** A figure in pesos and centavos, which is what closes a row. */
+);/** A figure in pesos and centavos, which is what closes a row. */
 export const ROW_AMOUNT = /\d[\d,]*\.\d{2}(?!\d)/;
 
 /** How many rows of a list the text holds, going by the figures in it. */
@@ -343,14 +356,54 @@ export function piecesOf(text: string, rows = 8): string[] {
 
 const MONTHS_LONG = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
+/**
+ * The day a date names, as YYYY-MM-DD, or null.
+ *
+ * "September 24, 2026", "24 Sep 2026", "Oct 1", "1st October", "10/01/2026",
+ * "2026-10-01". With no year it is the year of `ref` (the day the picture was
+ * taken), or the year before when that would put it more than a month after
+ * `ref`: "Dec 30" on a picture taken on January 3 is last December's.
+ */
+function isoDayIn(line: string, ref?: string): string | null {
+  const make = (y: number, m: number, d: number): string | null => {
+    if (!(m >= 1 && m <= 12 && d >= 1 && d <= 31)) return null;
+    const iso = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const at = Date.parse(`${iso}T00:00:00Z`);
+    return Number.isNaN(at) || new Date(at).toISOString().slice(0, 10) !== iso ? null : iso;
+  };
+  const withYear = (m: number, d: number, year: string | undefined): string | null => {
+    if (year) return make(Number(year.length === 2 ? `20${year}` : year), m, d);
+    if (!ref) return null;
+    const y = Number(ref.slice(0, 4));
+    const day = make(y, m, d);
+    if (!day) return null;
+    const limit = new Date(`${ref}T00:00:00Z`);
+    limit.setUTCDate(limit.getUTCDate() + 31);
+    return day > limit.toISOString().slice(0, 10) ? make(y - 1, m, d) : day;
+  };
+  const month = (word: string): number => MONTHS_LONG.indexOf(word.slice(0, 3).toLowerCase()) + 1;
+
+  const iso = /\b(\d{4})-(\d{2})-(\d{2})\b/.exec(line);
+  if (iso?.[1] && iso[2] && iso[3]) return make(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  const monthFirst = new RegExp(`\\b(${MONTH})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?:,?\\s+(\\d{4})\\b)?`, "i").exec(line);
+  if (monthFirst?.[1] && monthFirst[2]) return withYear(month(monthFirst[1]), Number(monthFirst[2]), monthFirst[3]);
+  const dayFirst = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${MONTH})\\b\\.?(?:,?\\s+(\\d{4})\\b)?`, "i").exec(line);
+  if (dayFirst?.[1] && dayFirst[2]) return withYear(month(dayFirst[2]), Number(dayFirst[1]), dayFirst[3]);
+  const numeric = /\b(\d{1,2})[/-](\d{1,2})[/-](\d{4}|\d{2})\b/.exec(line);
+  if (numeric?.[1] && numeric[2] && numeric[3]) return withYear(Number(numeric[1]), Number(numeric[2]), numeric[3]);
+  return null;
+}
+
 /** A date line as YYYY-MM-DD when it reads as one, else its own letters. */
-function dayOf(line: string): string {
-  const named = new RegExp(`\\b(${MONTH})\\.?\\s+(\\d{1,2}),?\\s+(\\d{4})\\b`, "i").exec(line);
-  if (named?.[1] && named[2] && named[3]) {
-    const month = MONTHS_LONG.indexOf(named[1].slice(0, 3).toLowerCase()) + 1;
-    return `${named[3]}-${String(month).padStart(2, "0")}-${named[2].padStart(2, "0")}`;
-  }
-  return line.toLowerCase().replace(/[^a-z0-9]/g, "");
+function dayOf(line: string, ref?: string): string {
+  return isoDayIn(line, ref) ?? line.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** A month and day inside a row's own line ("Interest earned Oct 1 +₱0.15"), not its figure. */
+function dayInRow(line: string, ref: string): string | null {
+  const words = line.replace(/[-+]?\s*(?:₱|php)?\s*\d[\d,]*\.\d{2}(?!\d)/gi, " ");
+  const named = new RegExp(`\\b${MONTH}\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?\\b|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTH}\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b|\\b\\d{1,2}/\\d{1,2}/(?:\\d{4}|\\d{2})\\b`, "i");
+  return named.test(words) ? isoDayIn(words, ref) : null;
 }
 
 /**
@@ -363,6 +416,65 @@ export function dayInFileName(name: string): string | null {
   const iso = `${m[1]}-${m[2]}-${m[3]}`;
   const at = Date.parse(`${iso}T00:00:00Z`);
   return Number.isNaN(at) || new Date(at).toISOString().slice(0, 10) !== iso ? null : iso;
+}
+
+const isDateOnlyLine = (line: string): boolean => DATE_LINE.test(line) && !ROW_AMOUNT.test(line) && !/\bas\s+of\b/i.test(line);
+
+/**
+ * Whether every row carries its own date, printed under its figure.
+ *
+ * A date line for nearly every row (four in five or more), the first of them
+ * after the first figure. Then each date belongs to the row above it, not to
+ * the rows below as a heading does.
+ */
+function datesFollowIn(lines: readonly string[]): boolean {
+  const dateLines = lines.filter(isDateOnlyLine).length;
+  const figureLines = lines.filter((l) => ROW_AMOUNT.test(l)).length;
+  const firstDate = lines.findIndex(isDateOnlyLine);
+  const firstFigure = lines.findIndex((l) => ROW_AMOUNT.test(l));
+  return dateLines >= 2 && dateLines * 5 >= figureLines * 4 && firstFigure >= 0 && firstDate > firstFigure;
+}
+
+/**
+ * The same as `dropRepeats`, for a list whose dates sit under each row.
+ *
+ * Each row is its words, its figure and the date under it, and is told apart
+ * by that date. Keyed by the date above it instead, the first row of a second
+ * capture carried the last date of the first, and a row shown twice at the
+ * seam was kept twice.
+ */
+function dropRepeatsDatedBelow(lines: readonly string[]): { readonly text: string; readonly dropped: number } {
+  const squash = (l: string): string => l.toLowerCase().replace(/[^a-z0-9.:]/g, "");
+  const kept: string[] = [];
+  const seen = new Set<string>();
+  let dropped = 0;
+  let pending: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    pending.push(line);
+    if (!ROW_AMOUNT.test(line)) continue;
+    // Its date: the first date line after the figure, before the next figure.
+    let end = i;
+    for (let j = i + 1; j < lines.length && !ROW_AMOUNT.test(lines[j] ?? ""); j += 1) {
+      if (isDateOnlyLine(lines[j] ?? "")) {
+        end = j;
+        break;
+      }
+    }
+    const stamp = end > i ? (lines[end] ?? "") : "";
+    pending.push(...lines.slice(i + 1, end + 1));
+    i = end;
+    const body = pending.filter((l) => !isDateOnlyLine(l)).map(squash).filter(Boolean).join("|");
+    const key = `${squash(stamp)}|${body}`;
+    if (body !== "" && stamp !== "" && seen.has(key)) dropped += 1;
+    else {
+      seen.add(key);
+      kept.push(...pending);
+    }
+    pending = [];
+  }
+  kept.push(...pending);
+  return { text: kept.join("\n"), dropped };
 }
 
 export interface DatedRow {
@@ -388,20 +500,49 @@ export function rowDatesIn(text: string, takenOn: string): DatedRow[] {
     at.setUTCDate(at.getUTCDate() + days);
     return at.toISOString().slice(0, 10);
   };
+  const lines = text.split("\n");
+  const isDateLine = (line: string): boolean => DATE_LINE.test(line) && !ROW_AMOUNT.test(line) && !/\bas\s+of\b/i.test(line);
+
+  /*
+   * Headings, or each row its own date.
+   *
+   * A history grouped by day has a few headings over many rows, and a
+   * heading dates what is under it. A list like Maya Bank's interest, one
+   * row a day, has a date line for every row, and may print it under the
+   * figure rather than over it ("Interest earned +₱0.15", then "Oct 1, 11:59
+   * PM"). Read as headings, every row took the date of the row before it,
+   * and the first took none. When there is a date line for nearly every row
+   * and the first comes after the first figure, each one dates the row above.
+   */
+  const datesFollow = datesFollowIn(lines);
+
   let today = takenOn;
   let current = "";
-  const rows: DatedRow[] = [];
-  for (const line of text.split("\n")) {
+  const rows: { amount: number; date: string; own: boolean }[] = [];
+  for (const line of lines) {
     const hasAmount = ROW_AMOUNT.test(line);
     if (/\bas\s+of\b/i.test(line) && !hasAmount) {
-      const said = dayOf(line);
-      if (/^\d{4}-\d{2}-\d{2}$/.test(said)) today = said;
+      const said = isoDayIn(line, today);
+      if (said) today = said;
       continue;
     }
-    if (DATE_LINE.test(line) && !hasAmount) {
+    if (isDateLine(line)) {
       const word = line.trim().toLowerCase().replace(/[^a-z]/g, "");
-      const said = dayOf(line);
-      current = word === "today" ? today : word === "yesterday" ? shift(today, -1) : /^\d{4}-\d{2}-\d{2}$/.test(said) ? said : current;
+      const said = /^(today|yesterday)/.test(word) && !isoDayIn(line, today)
+        ? word.startsWith("today")
+          ? today
+          : shift(today, -1)
+        : isoDayIn(line, today);
+      if (datesFollow) {
+        // The nearest row above with no date of its own.
+        const above = [...rows].reverse().find((r) => !r.own);
+        if (above && said) {
+          above.date = said;
+          above.own = true;
+        }
+        continue;
+      }
+      if (said) current = said;
       continue;
     }
     if (!hasAmount) continue;
@@ -409,9 +550,11 @@ export function rowDatesIn(text: string, takenOn: string): DatedRow[] {
     const last = figures[figures.length - 1]?.[0];
     if (!last) continue;
     const [whole, cents] = last.replace(/,/g, "").split(".");
-    rows.push({ amount: Number(whole) * 100 + Number(cents), date: current });
+    // A date on the row's own line is that row's, whatever the headings say.
+    const inLine = dayInRow(line, today);
+    rows.push({ amount: Number(whole) * 100 + Number(cents), date: inLine ?? (datesFollow ? "" : current), own: inLine !== null });
   }
-  return rows;
+  return rows.map((r) => ({ amount: r.amount, date: r.date }));
 }
 
 /**
@@ -428,6 +571,7 @@ export function rowDatesIn(text: string, takenOn: string): DatedRow[] {
  */
 export function dropRepeats(text: string): { readonly text: string; readonly dropped: number } {
   const lines = text.split("\n");
+  if (datesFollowIn(lines)) return dropRepeatsDatedBelow(lines);
   const kept: string[] = [];
   const seen = new Set<string>();
   let day = "";

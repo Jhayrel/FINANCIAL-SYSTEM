@@ -119,6 +119,7 @@ import {
 } from "../domain/charts";
 import { rampFor } from "../components/charts";
 import { Icon } from "../components/Icon";
+import { fileAsBefore } from "../domain/fileAsBefore";
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
@@ -490,7 +491,8 @@ const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
 
 /** A card read off a picture or a statement, rather than from something typed. */
 const readOffPicture = (p: Proposal): boolean =>
-  !p.typed && (!p.said || /\b(image|picture|photo|screenshot|receipt|statement|part \d)/i.test(p.sourceRef));
+  // "user text" is what a model's card from a typed message is sourced to, kept by cards saved before `typed` was.
+  !p.typed && !/^(user text|this message)\b/i.test(p.sourceRef.trim()) && (!p.said || /\b(image|picture|photo|screenshot|receipt|statement|part \d)/i.test(p.sourceRef));
 const isFound = (t: Turn): t is Found => t.kind === "found";
 const isChart = (t: Turn): t is Drawn => t.kind === "chart";
 const isDebt = (t: Turn): t is DebtChoice => t.kind === "debt";
@@ -732,6 +734,7 @@ function turnFromCard(card: StoredCard): Turn {
       sourceRef: card.sourceRef ?? "an earlier session",
       adjustments: card.adjustments ?? [],
       ...(card.said ? { said: card.said } : {}),
+      ...(card.typed ? { typed: true } : {}),
     },
     state,
     cardId: card.id,
@@ -776,6 +779,7 @@ function storedFrom(turn: Turn): StoredCard | null {
       confidence: turn.proposal.confidence,
       adjustments: turn.proposal.adjustments,
       ...(turn.proposal.said ? { said: turn.proposal.said } : {}),
+      ...(turn.proposal.typed ? { typed: true } : {}),
       ...(turn.recordNumber === undefined ? {} : { recordNumber: turn.recordNumber }),
     };
   }
@@ -1258,7 +1262,14 @@ export function AskPanel({
    * it while this chat was not open to hear of it (domain/formSaved.ts).
    */
   useEffect(() => {
-    const waiting = turns.filter((t): t is Offered => isOffer(t) && t.state === "used");
+    /*
+     * Not a card the form's own save has just settled. Both run on the same
+     * update, so a card saved from the form was written down as added twice,
+     * once as the form held it and once as the ledger row, and the chat
+     * record carried two "Added" lines for one row (#3860, #3865, #3876 on
+     * 30 September to 2 October 2026).
+     */
+    const waiting = turns.filter((t): t is Offered => isOffer(t) && t.state === "used" && !addedCards.current.has(t.cardId));
     if (waiting.length === 0) return;
     const claimed = new Set<string>();
     const settledNow = new Map<string, Offered>();
@@ -1452,10 +1463,13 @@ export function AskPanel({
    * "Sent to the form" messages, which then read in the record as six entries.
    */
   const lastRecorded = useRef(new Map<string, string>());
+  /** Cards already written down as added, so a second path never writes the same one again. */
+  const addedCards = useRef(new Set<string>());
 
   const recordCard = (turn: Offered | DebtChoice | Found | Changing | Budgeting | Exporting): void => {
     const card = storedFrom(turn);
     if (!card) return;
+    if (card.state === "added") addedCards.current.add(card.id);
 
     const signature = JSON.stringify(card);
     if (lastRecorded.current.get(card.id) === signature) return;
@@ -3159,7 +3173,15 @@ export function AskPanel({
      * receipt can come back as a card each: they are one payment, and are
      * made one again here, across the requests (domain/proposal.ts).
      */
-    const onePerPayment = sent.length > 1 ? checkCardSlips(withdrawn, cardSlipsIn(readingsList), reference, asOf) : withdrawn;
+    /*
+     * A new kind the model named, filed where the ledger has filed that word
+     * before: water under Food, not a new "Water" (domain/fileAsBefore.ts).
+     */
+    const onePerPayment = fileAsBefore(
+      sent.length > 1 ? checkCardSlips(withdrawn, cardSlipsIn(readingsList), reference, asOf) : withdrawn,
+      transactions,
+      reference,
+    );
     const checked =
       cardAmounts.size === 0
         ? onePerPayment
@@ -6176,32 +6198,45 @@ export function AskPanel({
    * One pass over the list rather than one setState per card, so eight rows
    * are one render and one batch of writes rather than eight of each.
    */
+  /*
+   * Each card the way its own Add to ledger button does it: what is on the
+   * card (an edit made on it included), logged as accepted, learned from,
+   * and written down as added.
+   *
+   * It only changed the screen. The rows were saved and the cards were not
+   * recorded, so after a reload they came back open: on 2 October 2026 two
+   * Maya Bank interest cards added this way at 05:08 were back ten minutes
+   * later, were discarded, and stayed in the ledger as #3869 and #3870; the
+   * two added by hand in between were warned as copies of them. It also
+   * saved the card as first read, so a figure corrected on the card was lost.
+   */
   const addReady = (): void => {
     // Each card keeps the number its own row was given. Reading the next one
     // afterwards showed every card in the batch the same figure.
-    const given = new Map<number, number | null>();
+    const given = new Map<number, Offered>();
     turns.forEach((t, i) => {
-      if (isOffer(t) && t.state === "open" && standing.get(i) === "ready") {
-        given.set(
-          i,
-          sink.add(t.proposal.draft, {
-            actor: "ai",
-            via: t.proposal.sourceRef.toLowerCase().includes("image") ? "ai_image" : "ai_chat",
-          }),
-        );
-      }
+      if (!isOffer(t) || t.state !== "open" || standing.get(i) !== "ready") return;
+      const draft = t.live ?? t.proposal.draft;
+      log(
+        aiEvent("accepted", "add", {
+          entry: `${draft.date} ${draft.flow} ${draft.item} ${formatMoney(draft.amount ?? 0)}`,
+          text: "Added with the batch's Add ready",
+        }),
+      );
+      learnFrom(t, draft);
+      const number = sink.add(draft, {
+        actor: "ai",
+        via: t.proposal.sourceRef.toLowerCase().includes("image") ? "ai_image" : "ai_chat",
+      });
+      const added: Offered = {
+        ...t,
+        state: "added",
+        ...(number === null || number === undefined ? {} : { recordNumber: number }),
+      };
+      recordCard(added);
+      given.set(i, added);
     });
-    setTurns((prev) =>
-      prev.map((t, i) => {
-        if (!given.has(i) || !isOffer(t)) return t;
-        const number = given.get(i);
-        return {
-          ...t,
-          state: "added" as const,
-          ...(number === null || number === undefined ? {} : { recordNumber: number }),
-        };
-      }),
-    );
+    setTurns((prev) => prev.map((t, i) => (given.has(i) && isOffer(t) ? (given.get(i) ?? t) : t)));
   };
 
   const discardOpen = (): void => {

@@ -121,6 +121,40 @@ export function readAgainst(account: string, drafts: readonly Draft[]): Reading[
   if (!account) return drafts.map((draft) => ({ draft, note: "" }));
 
   return drafts.map((draft) => {
+    /*
+     * A transfer into this account already has it, on the other end.
+     *
+     * Its own side was taken to be where it came from, so the blank there
+     * was filled with this account too: "Received money" ₱2,018.00 and
+     * ₱3,000.00 off a Maya history came back as transfers from Maya to Maya
+     * (2 October 2026), a row that moves nothing and cannot be saved. Money
+     * that arrives from outside the owner's accounts is income into this
+     * one, as every received row in their ledger is filed; from one of their
+     * own accounts it stays a transfer, and the card asks which.
+     */
+    if (draft.flow === "Transfer" && clean(draft.toWallet) === clean(account) && clean(draft.fromWallet) !== clean(account)) {
+      if (draft.fromWallet.trim()) return { draft, note: "" };
+      return {
+        draft: {
+          ...draft,
+          flow: "Revenue",
+          category: "Revenue",
+          fromWallet: "",
+          fee: 0,
+          // A transfer's own words do not name income.
+          item: /^(transaction fee|money send|transfer)$/i.test(draft.item.trim()) ? "" : draft.item,
+          status: /^transferred$/i.test(draft.status) ? "" : draft.status,
+        },
+        note: `Money into ${account} from outside your accounts, so income, as every received row before it. If it came from one of your own accounts, make it a transfer from that account.`,
+      };
+    }
+    if (draft.flow === "Transfer" && clean(draft.fromWallet) === clean(account) && clean(draft.toWallet) === clean(account)) {
+      return {
+        draft: { ...draft, toWallet: "" },
+        note: `This reads as ${account} to ${account}, which moves nothing. Pick where it went.`,
+      };
+    }
+
     const side = ownSide(draft.flow);
     const has = draft[side].trim();
 

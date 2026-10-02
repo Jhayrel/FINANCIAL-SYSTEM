@@ -1,6 +1,6 @@
 # Handoff: everything a new session needs
 
-**Written 2026-09-28, at commit `e595864` plus this file.** For a fresh Claude
+**Written 2026-09-28, at commit `e595864` plus this file; brought up to date on 2026-10-02.** For a fresh Claude
 session, or anyone, picking this project up cold. It says what the project
 is, how to work in it without breaking anything, what has happened, and what
 is left. The detail behind each change is in its commit message; this is
@@ -459,6 +459,33 @@ and not smart ai make them last option."
 | Sorting each message would have spent those | The quick jobs (sorting a message, naming an item, a one line note) leave Gemini's Flash and Pro and Workers AI to the questions, and count Groq's speed for ten points: the app waits only seconds for them |
 | Workers AI's list was Llama 3.3 70B and Mistral Small | GPT-OSS 120B first, then Qwen 3.8 27B, Llama 3.3 70B, Mistral Small. Its answer is read in each shape its models give (`workersText`). DeepSeek V4 on Workers AI needs the paid plan, so it is not on the list; a model that says so is left alone twelve hours |
 
+### 2026-10-02: the fourth dump, read from the 30 September build
+
+The owner sent a `?coderview` dump taken on build `9ad7d26` and asked for
+everything in it to be fixed. It covers 30 September to 2 October: a shop
+receipt, a Maya history, two screenshots of Maya Bank's daily interest, and
+typed entries. The dump itself stays out of git.
+
+| Found | Now |
+|---|---|
+| "Add N ready" on the batch bar saved the rows and never wrote the cards down as added, logged nothing as accepted, and saved each card as first read, ignoring an edit made on it. After a reload the cards came back open: two interest cards added this way at 05:08 were back ten minutes later, were discarded, and stayed in the ledger as #3869 and #3870, and the two added by hand in between were warned as copies of them | Each card goes the way its own Add to ledger button does: what is on the card, logged, learned from, recorded as added (`addReady` in `AskPanel.tsx`). The same fault "Discard all" had on 21 September |
+| A card saved from the form was recorded as added twice, once as the form held it and once as the ledger row, so the record had two "Added" lines for #3860, #3865 and #3876 | Written once (`addedCards`) |
+| "Received money" ₱2,018.00 and ₱3,000.00 off a Maya history came back as transfers from Maya to Maya: the blank source was filled with the account the statement is for, which was already the destination | Money into the statement's account from outside is income into it, as every received row in the ledger is filed (hundreds, all Revenue); from one of the owner's accounts it stays a transfer; a row read as the same account at both ends asks where it went (`domain/statement.ts`, `readAgainst`) |
+| Two screenshots of the same daily interest list came back as four cards all dated the day of the picture, and five more rows were dropped as "shown twice". A date with no year ("Oct 1", "Oct 1, 11:59 PM") was not known as a date, so every row sat under no day and one day's "Interest earned ₱0.15" looked like the next day's | A date alone on its line is a date with or without a year, a weekday or a time, day first or month first, or as 10/01/2026; with no year it is the picture's year, or last year's when that would be more than a month ahead. When nearly every row has its own date under its figure, each date belongs to the row above it, and the stitched-screenshot check tells rows apart by that date. A date inside a row's own line dates that row (`ocrText.ts`: `DATE_LINE`, `isoDayIn`, `rowDatesIn`, `dropRepeats`). The photo is not kept, so the exact layout was not seen: the common layouts are tested (`rowDates.test.ts`) |
+| "I spent 25 water and 175 tokens" made a card for a new kind "Water", though the owner had filed water three times that week under Food | A new kind the model names is filed where the ledger has filed that word, when at least two past rows and two in three of them agree, and the card says so (`domain/fileAsBefore.ts`). "Tokens", never seen, is left as read |
+| The same typed ₱25.00 of water was "already in the ledger" as the day before's | A card's `typed` mark is now kept when it is stored and read back, so a typed card is matched against its own day only, after a reload too; cards from before that mark, sourced "user text", count as typed |
+| "How is this month going?" was answered "a daily shortfall of PHP -10,218.71 for the remaining day" | The app told the model "What is left of the budget works out to PHP -10,218.71 a day". Over budget it now says nothing is left to spend a day, and the overspend once (`aiContext.ts`) |
+
+**For the owner, not changed:** Maya Bank interest on 2 October is five
+rows, #3869 to #3873 (₱0.15, ₱0.10, ₱0.10, ₱0.15 and ₱0.35, ₱0.85 in all),
+all dated 2 October. #3869 and #3870 are the two the chat later showed as
+discarded; the four from the screenshots were most likely different days.
+Which of them to keep, and their dates, is the owner's call.
+
+**Read but not fixed:** the shop receipt of 30 September came back as four
+items (₱495.00, ₱80.00, ₱3.00, ₱1.00) and was treated as a stitched list;
+the owner kept one. Without the photo the reading cannot be replayed.
+
 ---
 
 ## 6. What the owner has to do
@@ -517,6 +544,14 @@ and not smart ai make them last option."
 7. **Archiving a transaction** needs the owner's decision first
    (`10-AI-ASSISTANT-STATUS.md` §3.2).
 8. **Learning from corrections is narrow on purpose** (same file, §3.1).
+9. **Personal details in a public repository.** Test data and comments name
+   places from the owner's own bank history (an ATM's location, a college,
+   the province) and the spec names the owner. Swapping them for invented
+   ones is safe for the tests; the old commits keep them either way. Ask the
+   owner before doing it.
+10. **The next dump** should show "Add N ready" cards staying added after a
+    reload, and a daily interest screenshot read one row a day. Read the
+    interest cards' dates first.
 
 ---
 
