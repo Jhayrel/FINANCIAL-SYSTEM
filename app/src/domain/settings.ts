@@ -29,6 +29,25 @@ export const AI_PROVIDER_LABEL: Record<AiProvider, string> = {
 };
 
 /**
+ * Which providers Cloudflare has set up, and how a picture will be read, in
+ * one line for Settings, so "did it work" after adding a key is answered on
+ * the screen rather than by asking a question and reading the model's name.
+ */
+export function providersSetUp(configured: { readonly groq: boolean; readonly openrouter: boolean; readonly gemini: boolean; readonly workers: boolean }): string {
+  const order = ["gemini", "workers", "groq", "openrouter"] as const;
+  const words = (list: readonly string[]): string =>
+    list.length <= 1 ? (list[0] ?? "") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+  const ready = order.filter((p) => configured[p]).map((p) => AI_PROVIDER_LABEL[p]);
+  const missing = order.filter((p) => !configured[p]).map((p) => AI_PROVIDER_LABEL[p]);
+  const set = ready.length === 0 ? "Nothing is set up in Cloudflare yet." : `Set up in Cloudflare: ${words(ready)}.`;
+  const not = ready.length > 0 && missing.length > 0 ? ` Not set up: ${words(missing)}.` : "";
+  const pictures = configured.gemini
+    ? " Pictures are looked at by Gemini, with this device's reading as a check."
+    : " Pictures are read on this device first, since Gemini is not set up.";
+  return `${set}${not}${pictures}`;
+}
+
+/**
  * The model each provider starts on: none named, so the endpoint picks.
  *
  * These used to be fixed names ("llama-3.3-70b-versatile", "openai/gpt-4o-

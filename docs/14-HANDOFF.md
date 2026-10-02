@@ -495,6 +495,24 @@ still open:
 items (₱495.00, ₱80.00, ₱3.00, ₱1.00) and was treated as a stitched list;
 the owner kept one. Without the photo the reading cannot be replayed.
 
+### 2026-10-02, night: Gemini and Workers AI set up, pictures looked at
+
+The owner added `GEMINI_API_KEY` and the Workers AI binding `AI` in
+Cloudflare and asked for the picture reader, "always failing in
+identifying", to be fixed. Every upload in the fourth dump says "read on this
+device": the model was only ever given the device's text, so its misreadings
+became item names and a quantity became an amount.
+
+| Found | Now |
+|---|---|
+| Pictures went to a model only as the device's text, and to a model that could see only when that text found nothing, which it never did | With Gemini set up each picture goes to Gemini itself, one to a request, two at a time, with the device's reading beside it marked for checking only; the device's checks (amounts, dates under headings, receipt arithmetic) still run on the answer (`lookFirst`, `seesPictures` in `data/aiClient.ts`; the prompt's line on "the picture itself" in `functions/api/ai.ts`) |
+| A picture Gemini cannot read (its free allowance spent, say) would have fallen to the free vision models that were slow and blind on 26 September | The request asks Gemini only (`seeWell`) and is not retried; that picture then goes the device's way, and one neither could read goes to every model that can see, as before |
+| A list the device counts over twelve rows | Still read in parts as text: one answer for all of it would outrun the twenty seconds a model is given |
+| No way to see on the screen whether the keys and binding took | Settings, AI, under Model: "Set up in Cloudflare: ..." and how pictures will be read (`providersSetUp` in `domain/settings.ts`) |
+
+Not seen against the live models: there is no key here. The owner's first
+picture after the deploy is the test; its card says which model answered.
+
 ---
 
 ## 6. What the owner has to do
@@ -521,6 +539,8 @@ the owner kept one. Without the photo the reading cannot be replayed.
    Secrets and bindings reach the function only on a new deployment. Then
    publish the rules (1), so Settings can save Gemini or Workers AI as the
    provider.
+   Done on 2 October, night: the owner set up 4 and 5 and redeployed.
+   Settings, AI, under Model, says which providers are set up.
 
 ---
 

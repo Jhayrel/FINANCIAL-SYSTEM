@@ -159,6 +159,13 @@ interface AskBody {
    * courtesy to the user and never a control.
    */
   readonly images?: unknown;
+  /**
+   * True when the app has its own reading of the pictures to fall back on
+   * (`lookFirst` in `data/aiClient.ts`): only Gemini, which sees well, is
+   * asked, and a refusal comes back at once rather than going on to the free
+   * models that were too slow or blind to read them (26 September 2026).
+   */
+  readonly seeWell?: unknown;
 }
 
 /**
@@ -766,11 +773,11 @@ async function visionModelsOf(provider: Provider, env: Env): Promise<string[]> {
   return models;
 }
 
-async function visionChainFrom(env: Env): Promise<Candidate[]> {
+async function visionChainFrom(env: Env, onlyGemini = false): Promise<Candidate[]> {
   const [gemini, groq, openrouter] = await Promise.all([
     visionModelsOf("gemini", env),
-    visionModelsOf("groq", env),
-    visionModelsOf("openrouter", env),
+    onlyGemini ? Promise.resolve([]) : visionModelsOf("groq", env),
+    onlyGemini ? Promise.resolve([]) : visionModelsOf("openrouter", env),
   ]);
   return visionChain({ gemini, groq, openrouter }, isCooling);
 }
@@ -961,7 +968,15 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
      * 2026). A wallet app's list reads as a label line then an item and
      * amount line, under a date that covers every row until the next one.
      */
-    "Some of what you are given may be text the owner's device read from a screenshot or photo, marked as read on this device. Treat it exactly as you would the picture. In a wallet app's list, a date line applies to every row under it until the next date; a row is a label such as Fee applied or Transferred money to, with its time, then the item and its amount on the next line. A minus before an amount means money out. Fees shown as their own rows (a service fee, DST) are their own proposals unless the owner says to combine them.",
+    "Some of what you are given may be text the owner's device read from a screenshot or photo, marked as read on this device. Treat it exactly as you would the picture.",
+    /*
+     * 2 October 2026: with no model that saw the picture, the device's
+     * misreadings became the item names and a quantity became an amount.
+     * When the picture itself is given,
+     * its reading comes along only as a check (`data/aiClient.ts`).
+     */
+    "When you are given the picture itself, read the picture: the device's text of the same picture, marked for checking only, misreads letters, splits and joins lines and can miss rows. Use it only to settle a figure you cannot make out. Every row, name and amount comes from what the picture shows, and a name in that text the picture does not show is a misreading, never a row. A quantity or a unit price is never the amount: the amount is what the line or the receipt totals.",
+    "In a wallet app's list, a date line applies to every row under it until the next date; a row is a label such as Fee applied or Transferred money to, with its time, then the item and its amount on the next line. A minus before an amount means money out. Fees shown as their own rows (a service fee, DST) are their own proposals unless the owner says to combine them.",
     /*
      * A shop receipt (28 September 2026): 109.00 paid with 200.00 cash, 91.00
      * change, 97.32 VATable and 11.68 VAT, and a photo's curl had moved each
@@ -1514,6 +1529,22 @@ export const onRequestGet = async (ctx: {
   const refused = await refuseStranger(request, env);
   if (refused) return refused;
 
+  /*
+   * Only which providers are set up, without asking any of them for its
+   * catalogue: the app asks this before reading a picture, to know whether a
+   * model that sees well (Gemini) is there to look at it (`data/aiClient.ts`).
+   */
+  if (new URL(request.url).searchParams.has("configured")) {
+    return json({
+      configured: {
+        groq: Boolean(env.GROQ_API_KEY),
+        openrouter: Boolean(env.OPENROUTER_API_KEY),
+        gemini: Boolean(env.GEMINI_API_KEY),
+        workers: Boolean(env.AI),
+      },
+    });
+  }
+
   const list = async (provider: Provider): Promise<string[]> => {
     if (provider === "workers") return env.AI ? workersModels(env.AI_WORKERS_MODELS) : [];
     const key = keyOf(provider, env);
@@ -1616,7 +1647,7 @@ export const onRequestPost = async (ctx: {
       ? { provider: body.provider, model: body.model.slice(0, 120) }
       : undefined;
   const started = Date.now();
-  const chain = images.length > 0 ? await visionChainFrom(env) : await chainFrom(env, chosen, task);
+  const chain = images.length > 0 ? await visionChainFrom(env, body.seeWell === true) : await chainFrom(env, chosen, task);
   if (chain.length === 0) {
     return json(
       {

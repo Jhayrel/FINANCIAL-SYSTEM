@@ -76,6 +76,7 @@ import {
   AI_TONE_HINT,
   IMAGE_BOUNDS,
   imageLimits,
+  providersSetUp,
   type AiProvider,
   type AiSettings,
   type AiTone,
@@ -2573,8 +2574,8 @@ function ModelPicker({
           : model !== "" && !chosenIsOffered
             ? `${model} is not offered by ${AI_PROVIDER_LABEL[provider]} now, so Automatic is answering${answering ? `: ${modelLabel(answering)}` : ""}.`
             : answering
-              ? `Answering now: ${modelLabel(answering)}. If it is busy the next one on the list answers, and the answer says which.`
-              : "No model is reachable. Check the keys in Cloudflare."
+              ? `Answering now: ${modelLabel(answering)}. If it is busy the next one on the list answers, and the answer says which. ${providersSetUp(offer.configured)}`
+              : `No model is reachable. Check the keys in Cloudflare. ${providersSetUp(offer.configured)}`
       }
     >
       <Select

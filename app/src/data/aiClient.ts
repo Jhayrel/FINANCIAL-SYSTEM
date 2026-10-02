@@ -560,6 +560,14 @@ export interface ExtractOptions {
    * picture goes to a vision model as before.
    */
   readonly readPicture?: (dataUrl: string, key?: string) => Promise<{ readonly plain: string; readonly raised: string } | null>;
+  /**
+   * Whether a model that sees well is set up (`seesPictures`). When it is,
+   * each picture is looked at by it, with the device's reading beside it as
+   * a check (`lookFirst`). Given by tests; the browser asks the endpoint.
+   */
+  readonly seesPictures?: () => Promise<boolean>;
+  /** Set here, not by callers: only Gemini looks, and a refusal is not tried again, since the device's reading is there to fall back on (`lookFirst`). */
+  readonly seeWell?: boolean;
   /** Set here, not by callers: what the device read, for checking the model's amounts against. */
   readonly readings?: readonly string[];
   /** Set here, not by callers: receipts in the pictures, checked by their arithmetic, for checking the model's cards against. */
@@ -708,6 +716,9 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
    * faster answer, never lose one.
    */
   const room = Math.floor(10_000 / pictures.length);
+  // Whether a model that sees well is set up, asked while the device reads, so the answer is there with the reading.
+  const sight = options.seesPictures ?? (typeof document === "undefined" ? undefined : () => seesPictures());
+  const sees = sight ? sight().catch(() => false) : Promise.resolve(false);
   // Under its fingerprint, so a reading of the full-size original made at attach time is found (data/ocr.ts).
   const raw = await Promise.all(pictures.map((p) => reader(p.dataUrl as string, p.digest).catch(() => null)));
   // A scroll capture repeats the rows where two screens overlap: each is read once.
@@ -735,16 +746,25 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
   const stillPictures: Attachment[] = [];
   /** A long list's parts, each its own request (`piecesOf`). */
   const parts: Attachment[] = [];
+  /** Each picture's own requests as text: its parts, or its reading, or none. */
+  const ownJobs: Attachment[][][] = pictures.map(() => []);
+  /** Each picture's reading, to go beside the picture as a check when a model looks at it. */
+  const checks: (string | null)[] = pictures.map(() => null);
+  /** A list too long for one answer, which is read in parts as text whatever can see. */
+  const isLong: boolean[] = pictures.map(() => false);
   pictures.forEach((picture, i) => {
     const reading = readings[i];
     const long = reading ? longest(reading) : "";
     const pieces = long ? piecesOf(long, LIST_PART_ROWS) : [];
     if (pieces.length > 1) {
+      isLong[i] = true;
       pieces.forEach((piece, k) => {
         const text = readingFor(picture.name, { plain: piece, raised: "" }, room);
         if (!text) return;
         const said = `${text}\nPart ${k + 1} of ${pieces.length} of this list. The other parts are read separately, so give only the rows in this part.`;
-        parts.push({ id: `${picture.id}-${k + 1}`, name: `${picture.name}, part ${k + 1} of ${pieces.length}, read on this device`, kind: "text", bytes: said.length, text: redact(said) });
+        const part: Attachment = { id: `${picture.id}-${k + 1}`, name: `${picture.name}, part ${k + 1} of ${pieces.length}, read on this device`, kind: "text", bytes: said.length, text: redact(said) };
+        parts.push(part);
+        ownJobs[i]?.push([part]);
       });
       return;
     }
@@ -764,12 +784,14 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
             ? `${asRead}\n${receiptNote(receipt)}`
             : asRead;
     if (text) {
-      asText.push({ id: picture.id, name: `${picture.name}, read on this device`, kind: "text", bytes: text.length, text: redact(text) });
+      const asRead: Attachment = { id: picture.id, name: `${picture.name}, read on this device`, kind: "text", bytes: text.length, text: redact(text) };
+      asText.push(asRead);
+      ownJobs[i]?.push([asRead]);
+      checks[i] = text;
     } else {
       stillPictures.push(picture);
     }
   });
-  if ((asText.length === 0 && parts.length === 0) || options.signal?.aborted) return extractOnce(options);
 
   const others = options.attachments.filter((a) => !(a.kind === "image" && a.dataUrl));
   const read = readings.flatMap((r) => (r ? [r.plain, r.raised] : []));
@@ -778,6 +800,14 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
     const day = dayInFileName(pictures[i]?.name ?? "") ?? options.asOf;
     return r ? [day, day] : [];
   });
+  const withChecks = (attachments: readonly Attachment[], seeWell = false): Promise<ExtractResult> =>
+    extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips, attachments, ...(seeWell ? { seeWell } : {}) });
+
+  if ((await sees) && !options.signal?.aborted) {
+    return lookFirst({ pictures, others, checks, isLong, ownJobs, read, repeated, signal: options.signal, ask: withChecks });
+  }
+
+  if ((asText.length === 0 && parts.length === 0) || options.signal?.aborted) return extractOnce(options);
   const readOnDevice = pictures.length - stillPictures.length;
 
   /*
@@ -820,6 +850,129 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
 /** Rows a list is cut into for reading, and how many parts are read at once. */
 const LIST_PART_ROWS = 8;
 const LIST_PARTS_AT_ONCE = 3;
+/** Pictures looked at at once: two, since each is three models working on the server (`bestInOrder`). */
+const PICTURES_AT_ONCE = 2;
+
+/**
+ * Each picture looked at by a model that sees, one picture to a request, with
+ * the device's reading beside it as a check. A list too long for one answer,
+ * and a picture no model could read, go the device's way as before.
+ *
+ * ── Why ───────────────────────────────────────────────────────────────────
+ *
+ * Every picture was read on the device and only its text went to a model,
+ * because the free models that could see were slow and often blind (26
+ * September 2026). The text carried the reader's misreadings, and the model,
+ * which never saw the picture, filed them as read: on 30 September and 1
+ * October a receipt's item names came back misspelt with a quantity as an
+ * amount, and a Maya screen's names as strings of wrong letters. Gemini sees
+ * well and quickly, so once it is set up the model reads the picture itself,
+ * and the device's reading only settles a figure it cannot make out.
+ */
+async function lookFirst(job: {
+  readonly pictures: readonly Attachment[];
+  readonly others: readonly Attachment[];
+  readonly checks: readonly (string | null)[];
+  readonly isLong: readonly boolean[];
+  readonly ownJobs: readonly (readonly (readonly Attachment[])[])[];
+  readonly read: readonly string[];
+  readonly repeated: number;
+  readonly signal?: AbortSignal | undefined;
+  readonly ask: (attachments: readonly Attachment[], seeWell?: boolean) => Promise<ExtractResult>;
+}): Promise<ExtractResult> {
+  const { pictures, others, checks, isLong, ownJobs, read, repeated, ask } = job;
+  const looks = pictures.flatMap((picture, i) => (isLong[i] ? [] : [{ i, attachments: [picture, ...checkBeside(picture, checks[i] ?? null)] }]));
+  const answers: ExtractResult[][] = pictures.map(() => []);
+  // Files the owner attached go with the first request, so nothing is read twice.
+  const withOthers = <T extends { readonly attachments: readonly Attachment[] }>(list: readonly T[]): T[] =>
+    list.map((j, k) => (k === 0 && others.length > 0 ? { ...j, attachments: [...others, ...j.attachments] } : j));
+
+  const looked = await inTurn(withOthers(looks), PICTURES_AT_ONCE, (l) => ask(l.attachments, true));
+  looks.forEach((l, k) => {
+    const seen = looked[k];
+    if (seen) answers[l.i] = [named(seen, pictures[l.i]?.name ?? "")];
+  });
+
+  /*
+   * A long list, and a picture Gemini could not read, go the device's way;
+   * one the device could not read either goes to every model that can see,
+   * as it did before. The owner's own files ride with the first of these
+   * when the request they went with found nothing.
+   */
+  const instead = pictures.flatMap((picture, i) => {
+    const seen = answers[i]?.[0];
+    if (seen && usable(seen) >= 10) return [];
+    const own = ownJobs[i] ?? [];
+    return own.length > 0 ? own.map((attachments) => ({ i, attachments, device: true })) : [{ i, attachments: [picture] as readonly Attachment[], device: false }];
+  });
+  const carry = looks[0]?.i ?? instead[0]?.i;
+  const carried = instead.findIndex((j) => j.i === carry);
+  const insteadJobs = instead.map((j, k) => (k === carried && others.length > 0 ? { ...j, attachments: [...others, ...j.attachments] } : j));
+
+  let readOnDevice = 0;
+  if (instead.length > 0 && !job.signal?.aborted) {
+    const got = await inTurn(insteadJobs, LIST_PARTS_AT_ONCE, (j) => ask(j.attachments));
+    const byPicture = new Map<number, { readonly answers: ExtractResult[]; readonly device: boolean }>();
+    instead.forEach((j, k) => {
+      const answer = got[k];
+      if (answer) byPicture.set(j.i, { answers: [...(byPicture.get(j.i)?.answers ?? []), answer], device: j.device });
+    });
+    for (const [i, theirs] of byPicture) {
+      const seen = answers[i]?.[0];
+      // Kept only when it found more than the model that looked.
+      if (!seen || usable(joinAnswers(theirs.answers)) > usable(seen)) {
+        answers[i] = theirs.device ? theirs.answers : theirs.answers.map((a) => named(a, pictures[i]?.name ?? ""));
+        if (theirs.device) readOnDevice += 1;
+      }
+    }
+  }
+  const joined = joinAnswers(answers.flat());
+  return { ...joined, repeated, readings: read, ...(readOnDevice > 0 ? { readOnDevice } : {}) };
+}
+
+/** The device's reading of a picture, sent beside it to check a figure against, never to read instead of it. */
+function checkBeside(picture: Attachment, text: string | null): Attachment[] {
+  if (!text) return [];
+  const said = `For checking only. You can see the picture ${picture.name} itself; this is what this device's text reader made of it, misreadings and all. Read the picture, and use this only for a figure you cannot make out there.\n${text}`;
+  return [{ id: `${picture.id}-check`, name: `${picture.name}, the device's reading, for checking only`, kind: "text", bytes: said.length, text: redact(said) }];
+}
+
+/** Each row names its picture, so "you missed one" knows which pictures gave cards (`AskPanel`). */
+function named(answer: ExtractResult, name: string): ExtractResult {
+  if (!name || answer.source !== "model") return answer;
+  const mark = <T extends { readonly sourceRef: string }>(p: T): T => (p.sourceRef.includes(name) ? p : { ...p, sourceRef: p.sourceRef.trim() ? `${name}, ${p.sourceRef.trim()}` : name });
+  return { ...answer, proposals: answer.proposals.map(mark) };
+}
+
+/**
+ * Whether a model that reads pictures well, Gemini, is set up here.
+ *
+ * Asked at most once in ten minutes, and only which providers have keys, not
+ * their catalogues. False when it cannot be known, which keeps the device's
+ * way of reading, the one that works with any provider.
+ */
+let sightKnown: { readonly at: number; readonly sees: boolean } | null = null;
+const SIGHT_MS = 10 * 60_000;
+
+export async function seesPictures(options: { fetcher?: typeof fetch; token?: () => Promise<string | null> } = {}): Promise<boolean> {
+  if (sightKnown && Date.now() - sightKnown.at < SIGHT_MS) return sightKnown.sees;
+  const auth = await (options.token ?? idToken)();
+  if (!auth) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6_000);
+  try {
+    const response = await (options.fetcher ?? fetch)(`${ENDPOINT}?configured`, { headers: { authorization: `Bearer ${auth}` }, signal: controller.signal });
+    if (!response.ok || !(response.headers.get("content-type") ?? "").includes("application/json")) return false;
+    const body = (await response.json()) as { configured?: { gemini?: unknown } };
+    const sees = body.configured?.gemini === true;
+    sightKnown = { at: Date.now(), sees };
+    return sees;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** How much an answer holds that can be used: a found row counts, a refusal barely does. */
 function usable(r: ExtractResult): number {
@@ -908,6 +1061,7 @@ async function extractOnce(options: ExtractOptions): Promise<ExtractResult> {
         tone: "brief",
         context: extractContext(options),
         images,
+        ...(options.seeWell && images.length > 0 ? { seeWell: true } : {}),
       }),
     });
 
@@ -934,7 +1088,7 @@ async function extractOnce(options: ExtractOptions): Promise<ExtractResult> {
        * slowest, the one with the fewest free models that can do it, and the
        * one where giving up means the owner types the whole receipt by hand.
        */
-      if (attempt + 1 < TRIES && worthRetrying(response.status, message)) {
+      if (attempt + 1 < TRIES && !options.seeWell && worthRetrying(response.status, message)) {
         await wait(PAUSE_MS[attempt + 1] ?? 2000);
         return extractOnce({ ...options, attempt: attempt + 1 });
       }

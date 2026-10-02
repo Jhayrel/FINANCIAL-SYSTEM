@@ -49,7 +49,7 @@ It does five jobs:
 |---|---|
 | Answer questions about the figures | `chat` task, `domain/aiChatContext.ts` |
 | Read a sentence into a proposed row | `extract` task, `domain/readEntry.ts` |
-| Read a photo or file into proposed rows | read on the device (`data/ocr.ts`), then the `extract` task as text; images only as the fallback |
+| Read a photo or file into proposed rows | with Gemini set up, the picture itself to Gemini with the device's reading beside it as a check (`lookFirst` in `data/aiClient.ts`); without it, read on the device (`data/ocr.ts`), then the `extract` task as text, images only as the fallback |
 | Draw a chart | `domain/charts.ts`, no model involved |
 | Find a row to bin or restore | `domain/recall.ts` |
 
@@ -64,6 +64,20 @@ the device can only add a faster answer. The reader (tesseract.js, Apache 2.0)
 and its English data are copied from `node_modules` into the build under
 `/ocr/v7/` by `tools/ocrAssets.ts` and served from this site: no CDN, no
 third-party script. When it works, the picture never leaves the device.
+
+**With Gemini set up, Gemini looks at the picture** (2 October 2026). The
+device's reading carried its misreadings to models that never saw the
+picture: a receipt's item names came back misspelt with a quantity as an
+amount, and a Maya screen's names as wrong letters. Once Cloudflare has
+`GEMINI_API_KEY`, each picture goes to Gemini on its own, with the device's
+reading beside it marked for checking only, and the device's arithmetic and
+dates still check what comes back. Only Gemini is asked (`seeWell`), and
+once: when it cannot read a picture, that picture goes the device's way as
+above, and one the device could not read either goes to every model that
+can see. A list the device counts over twelve rows is still read in parts as
+text, since one answer for all of it would run past the time a model is
+given. The app asks `GET /api/ai?configured` once in ten minutes to know
+whether Gemini is there; Settings says the same in a line under Model.
 
 **The safety model has not changed and must not.** The assistant returns text.
 It holds no Firestore handle. Every row reaches the ledger through
