@@ -55,6 +55,7 @@ import { acceptableWording, onlyTheirFigures, type SpendNote } from "../domain/s
 import { readPicture } from "./ocr";
 import { pairBorrowings, readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
 import type { Attachment } from "./attachments";
+import { hintFrom, type ChartHint } from "../domain/chartAsk";
 import type { IsoDate } from "../domain/types";
 import { stopOf } from "../domain/bills";
 
@@ -1255,6 +1256,8 @@ export interface Routed {
    * ["this month", "last month"]. Empty when they named one or none.
    */
   readonly compare: readonly [string, string] | readonly [];
+  /** What to draw, when a chart would show the answer: shape, grouping and money (`chartAsk.ts`). */
+  readonly draw: ChartHint | null;
 }
 
 const INTENTS: readonly Intent[] = [
@@ -1343,7 +1346,7 @@ export async function routeMessage(options: {
     }
 
     const payload = (await response.json()) as { data?: unknown };
-    const data = payload.data as { intent?: unknown; target?: unknown; period?: unknown; compare?: unknown } | undefined;
+    const data = payload.data as { intent?: unknown; target?: unknown; period?: unknown; compare?: unknown; draw?: unknown } | undefined;
     const intent = typeof data?.intent === "string" ? data.intent : "";
 
     // Checked against the list, so an invented intent is ignored rather than
@@ -1355,6 +1358,7 @@ export async function routeMessage(options: {
       target: typeof data?.target === "string" ? data.target.slice(0, 120) : "",
       period: typeof data?.period === "string" ? data.period.slice(0, 60) : "",
       compare: twoPeriods(data?.compare),
+      draw: hintFrom(data?.draw),
     };
   } catch {
     // A failed routing is not an error worth showing: the local rules answer.

@@ -36,7 +36,6 @@ export type IconName =
   | "close"
   | "check"
   | "camera"
-  | "paste"
   | "search"
   | "ai"
   | "chevronLeft"
@@ -125,14 +124,6 @@ const SHAPES: Record<IconName, ReactNode> = {
     <>
       <path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2.3l1.4-2h5.6l1.4 2h2.3A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z" />
       <circle cx="12" cy="13" r="3.5" />
-    </>
-  ),
-  // A clipboard: paste a copied picture.
-  paste: (
-    <>
-      <rect x="5.75" y="5.25" width="12.5" height="15" rx="1.5" />
-      <path d="M9.25 5.25V4.5A1 1 0 0 1 10.25 3.5h3.5a1 1 0 0 1 1 1v.75" />
-      <path d="M9 11h6M9 14.5h4" />
     </>
   ),
   search: (

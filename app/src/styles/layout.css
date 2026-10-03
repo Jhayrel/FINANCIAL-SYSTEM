@@ -3483,9 +3483,6 @@
 
 .fms-askform {
   flex: 0 0 auto;
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
 }
 
 /*
@@ -3826,15 +3823,68 @@
   border-left: 1px solid var(--hairline);
 }
 
-.fms-askinput {
-  flex: 1;
-  min-width: 0;
-  min-height: 32px;
-  padding: 0 var(--space-2);
+/*
+ * The composer: one box, the words across its whole width on top and the
+ * tools in a row under them, Send at the right (owner, 4 October 2026,
+ * beside the Claude app). The words are a rich box kept plain
+ * (`PlainBox.tsx`), so it is drawn as text, not as a field inside a field.
+ */
+.fms-askfield {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-2) var(--space-1) var(--space-3);
   background: var(--surface);
   border: 1px solid var(--hairline-strong);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+}
+
+.fms-askinput {
+  min-width: 0;
+  min-height: 24px;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 4px 0;
+  line-height: 1.4;
   color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+  cursor: text;
+}
+
+/* The placeholder, which a rich box does not draw for itself. */
+.fms-askinput:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-3);
+  pointer-events: none;
+}
+
+.fms-askinput[aria-disabled="true"] {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.fms-asktools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* Attach and the camera are quiet glyphs in the box; Send is the one thing with a fill, at the right. */
+.fms-asktools > .fms-attach {
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+}
+
+.fms-asktools > .fms-attach:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.fms-asktools > .fms-btn {
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .fms-linkish {
@@ -5650,36 +5700,13 @@ button.fms-recent-row:disabled {
 }
 
 /*
- * The composer, as a textarea.
- *
- * Grows to a few lines then scrolls, so pasting a statement cannot push the
- * composer up over the conversation. `field-sizing` does it natively where it
- * exists; the max-height is what holds everywhere else.
- */
-textarea.fms-askinput {
-  field-sizing: content;
-  min-height: 32px;
-  max-height: 96px;
-  padding: 6px var(--space-2);
-  resize: none;
-  line-height: 1.4;
-  font-family: inherit;
-}
-
-@media (max-width: 1023px) {
-  textarea.fms-askinput {
-    min-height: 44px;
-  }
-}
-
-/*
  * The composer glows, like the panel does.
  *
  * Same tokens as the panel halo, so it reads as the same feature rather than
  * as a second decoration. It sits outside the box, so nothing inside changes
  * contrast (rule D7).
  */
-.fms-askform:focus-within .fms-askinput {
+.fms-askfield:focus-within {
   border-color: var(--brand-600);
   box-shadow:
     0 0 0 1px var(--ai-glow-ring),
@@ -6472,6 +6499,29 @@ textarea.fms-askinput {
   stroke-width: 2;
   stroke-linejoin: round;
   stroke-linecap: round;
+}
+
+/* The budget's steady pace beside the spending line: a guide, never a series of its own. */
+.fms-linepace {
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+/* Zero, when a balance goes under it. */
+.fms-linezero {
+  stroke: var(--hairline-strong);
+  stroke-width: 1;
+}
+
+/*
+ * What the chart says, under its title (`chartAsk.ts`): the answer in a
+ * sentence, before the picture of it.
+ */
+.fms-chartsays {
+  margin: 0 0 var(--space-2);
+  color: var(--ink-2);
 }
 
 /* A month with one entry should be visible as a point, not only as a bend. */
@@ -9538,36 +9588,31 @@ textarea.fms-askinput {
 
 /* ── The AI tab on a phone: the screen is the conversation ────────────────── */
 
-/* The composer's field is only drawn on a phone; elsewhere its pieces sit in the row, + first. */
-.fms-askfield {
-  display: contents;
-}
-
-.fms-askfield > .fms-attach:not(.fms-askcamera):not(.fms-askpaste) {
-  order: -1;
-}
-
-/*
- * The camera is a phone's: a computer's webcam is no way to read a receipt.
- * So is Paste picture: a computer pastes a screenshot with Ctrl+V into the
- * box, and a phone's text box offers no Paste for a picture.
- */
-.fms-askcamera,
-.fms-askpaste {
+/* The camera is a phone's: a computer's webcam is no way to read a receipt. */
+.fms-askcamera {
   display: none;
 }
 
 @media (max-width: 639px), (max-width: 1023px) and (pointer: coarse) {
-  .fms-askcamera,
-  .fms-askpaste {
+  .fms-askcamera {
     display: grid;
   }
-}
 
-/* A narrow phone keeps room for the words: Paste picture gives way, and long-press Paste still takes a picture. */
-@media (max-width: 370px) {
-  .fms-askpaste {
-    display: none;
+  /* 16px, or a phone zooms the page when the box is touched, and 44px to hit (rule D10). */
+  .fms-askinput {
+    font-size: 16px;
+    line-height: 22px;
+  }
+
+  .fms-askfield {
+    padding-inline-start: var(--space-4);
+    border-radius: 22px;
+  }
+
+  .fms-asktools > .fms-btn {
+    min-height: 44px;
+    padding-inline: var(--space-4);
+    border-radius: 22px;
   }
 }
 
@@ -9603,18 +9648,9 @@ textarea.fms-askinput {
   }
 
   .fms-aiscreen .fms-askform {
-    align-items: flex-end;
     padding: var(--space-2) var(--space-3) calc(var(--space-3) + var(--space-4));
     background: var(--surface);
     border-top: 1px solid var(--hairline);
-  }
-
-  .fms-aiscreen .fms-askform > .fms-btn {
-    flex: 0 0 auto;
-    min-height: 44px;
-    padding-inline: var(--space-4);
-    border-radius: 22px;
-    white-space: nowrap;
   }
 
   /*
@@ -9622,70 +9658,23 @@ textarea.fms-askinput {
    * green, which read as broken rather than waiting. It waits in grey, with
    * words that can be read, and turns green when there is something to send.
    */
-  .fms-aiscreen .fms-askform > .fms-btn:disabled:not([aria-busy="true"]) {
+  .fms-aiscreen .fms-asktools > .fms-btn:disabled:not([aria-busy="true"]) {
     opacity: 1;
     background: var(--surface-sunk);
     border-color: var(--hairline-strong);
     color: var(--ink-3);
   }
 
-  /*
-   * One rounded field: the text, then attach and the camera inside it at the
-   * right, the way a phone's own chat apps draw a composer. The glow that
-   * marks the AI's field moves from the text to the whole field.
-   */
   .fms-aiscreen .fms-askfield {
-    display: flex;
-    flex: 1 1 auto;
-    align-items: flex-end;
-    min-width: 0;
-    padding: 0 2px 0 var(--space-4);
     background: var(--surface-sunk);
-    border: 1px solid var(--hairline-strong);
-    border-radius: 22px;
   }
 
-  .fms-aiscreen .fms-askfield:focus-within {
-    border-color: var(--brand-600);
-    box-shadow:
-      0 0 0 1px var(--ai-glow-ring),
-      0 0 10px 1px var(--ai-glow-halo-active);
-  }
-
-  .fms-aiscreen .fms-askform .fms-askfield > .fms-askinput,
-  .fms-aiscreen .fms-askform:focus-within .fms-askfield > .fms-askinput {
-    flex: 1 1 auto;
-    min-height: 42px;
-    padding: 10px 0;
-    font-size: 16px;
-    line-height: 22px;
-    background: transparent;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    outline: none;
-  }
-
-  .fms-aiscreen .fms-askfield > .fms-attach {
-    position: relative;
-    order: 0;
-    width: 44px;
-    height: 42px;
-    border: 0;
-    border-radius: var(--radius-full);
-    background: transparent;
+  .fms-aiscreen .fms-asktools > .fms-attach {
     color: var(--ink-2);
     font-size: 24px;
   }
 
-  /* 44px to hit, as every target here (rule D10), without the field growing a line. */
-  .fms-aiscreen .fms-askfield > .fms-attach::after {
-    content: "";
-    position: absolute;
-    inset: -1px 0;
-  }
-
-  .fms-aiscreen .fms-askfield > .fms-attach:active:not(:disabled) {
+  .fms-aiscreen .fms-asktools > .fms-attach:active:not(:disabled) {
     background: var(--surface-hover);
   }
 

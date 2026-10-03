@@ -69,6 +69,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import { createPortal } from "react-dom";
 
 import { Button, Money } from "../components/primitives";
+import { PlainBox } from "../components/PlainBox";
 import {
   amend,
   applyReply,
@@ -120,7 +121,9 @@ import {
   wantsStatement,
   withoutTheFilePart,
   type Chart,
+  type ComparedPeriods,
 } from "../domain/charts";
+import { buildMeasureChart, chartHelps, chartReading, chartsWorked, inWords, localHint, measureOf, mergeHint, type ChartHint } from "../domain/chartAsk";
 import { rampFor } from "../components/charts";
 import { Icon } from "../components/Icon";
 import { fileAsBefore } from "../domain/fileAsBefore";
@@ -2135,38 +2138,6 @@ export function AskPanel({
    */
   const renaming = useRef<"pending" | { readonly cardId: string } | null>(null);
 
-  /*
-   * A picture copied to the clipboard, attached with one tap. On a phone a
-   * screenshot is copied from its own toolbar, and a text box offers no
-   * Paste for a picture, so the button reads the clipboard itself. The
-   * browser asks the first time; nothing is read until it is pressed.
-   */
-  const canPastePicture = typeof navigator !== "undefined" && Boolean(navigator.clipboard) && "read" in navigator.clipboard;
-  const pastePicture = async (): Promise<void> => {
-    try {
-      const items = await navigator.clipboard.read();
-      const pictures: File[] = [];
-      for (const item of items) {
-        const type = item.types.find((t) => t.startsWith("image/"));
-        if (!type) continue;
-        const blob = await item.getType(type);
-        const ext = type.split("/")[1] === "jpeg" ? "jpg" : (type.split("/")[1] ?? "png");
-        pictures.push(new File([blob], `Pasted picture ${pictures.length + 1}.${ext}`, { type }));
-      }
-      if (pictures.length === 0) {
-        say({ kind: "assistant", text: "There is no picture on the clipboard. Copy the screenshot first, then press Paste picture.", from: "this device" });
-        return;
-      }
-      await attach(pictures);
-    } catch {
-      say({
-        kind: "assistant",
-        text: "The browser did not let the app read the clipboard. Allow it when it asks, or pick the screenshot with + instead.",
-        from: "this device",
-      });
-    }
-  };
-
   const attach = async (given: ArrayLike<File> | null): Promise<void> => {
     if (!given || given.length === 0) return;
     /*
@@ -3646,12 +3617,51 @@ export function AskPanel({
    * something is affordable), sent above everything else as figures the
    * model must build on, and `fallback` is said only when no model answers.
    */
+  /**
+   * The charts for what was asked: a budget, a balance or a debt when the
+   * hint names one (`chartAsk.ts`), else money in or out over the window,
+   * both directions as two charts when both were asked for (rule D3: one
+   * chart is one direction). Every figure is added up here.
+   */
+  const chartsFor = (asked: string, hint: ChartHint | null, pair: ComparedPeriods | null): Chart[] => {
+    if (measureOf(hint)) {
+      const drawn = buildMeasureChart(asked, hint, { transactions, budgets, reference, debts, asOf });
+      return drawn ? [drawn] : [];
+    }
+    const said = inWords(asked, hint);
+    const both = wantsBothDirections(said);
+    const income = buildChart(said, transactions, asOf, both ? "revenue" : undefined, pair);
+    const spending = both ? buildChart(said, transactions, asOf, "spending", pair) : null;
+    return [spending, income].filter((c): c is Chart => c !== null);
+  };
+
+  /** A chart said in the conversation, and kept in the record with its figures. */
+  const drawChart = (chart: Chart): void => {
+    say({ kind: "chart", chart });
+    log(aiEvent("answered", "add", { text: `Drew ${chart.title}. ${chartInWords(chart)}`, entry: chart.title }));
+  };
+
   const askQuestion = async (
     question: string,
     echo = true,
     worked: { readonly text: string; readonly fallback?: string } | null = null,
+    /**
+     * Charts drawn for this question, above the answer. The owner, 4 October
+     * 2026: "if the result need to show charts or pie or tend etc show
+     * them". The model is handed their figures (`chartsWorked`), so the
+     * words and the picture are the same answer.
+     */
+    drawn: readonly Chart[] = [],
   ): Promise<void> => {
     if (echo) say({ kind: "you", text: question });
+    for (const chart of drawn) drawChart(chart);
+    if (drawn.length > 0) {
+      const shown = chartsWorked(drawn, chartInWords);
+      worked = {
+        text: worked ? `${worked.text}\n\n${shown}` : shown,
+        fallback: worked?.fallback ?? drawn.map(chartReading).filter(Boolean).join(" "),
+      };
+    }
     const asked = generation.current;
     const control = new AbortController();
     stopper.current = control;
@@ -4101,7 +4111,7 @@ export function AskPanel({
       return;
     }
 
-    let routed: { intent: Routed; target: string; period: string; compare: readonly [string, string] | readonly [] } | null = null;
+    let routed: { intent: Routed; target: string; period: string; compare: readonly [string, string] | readonly []; draw: ChartHint | null } | null = null;
     /*
      * Said plainly enough to need no model to sort it, with nothing on
      * screen it could be answering: a plan is a question, and money that has
@@ -4145,6 +4155,28 @@ export function AskPanel({
     const modelSawEntry = routed === null || routed.intent === "entry";
 
     /**
+     * A chart beside a question answered in words, when one shows the answer
+     * better: where the money went, what cost most, how something moved, two
+     * periods side by side. What the model said to draw is used for what the
+     * words leave open (`chartAsk.ts`). Not the same chart again, and not for
+     * a question about the chart already on screen.
+     */
+    const credits = reference.credits ?? [];
+    const besideFor = (question: string, pair: ComparedPeriods | null = null): Chart[] => {
+      const recent = turns.slice(-4).filter(isChart).map((t) => t.chart.title);
+      const justShown = recent.length > 0;
+      const charts = pair
+        ? justShown
+          ? []
+          : [buildChart(question, transactions, asOf, undefined, pair)].filter((c): c is Chart => c !== null)
+        : (() => {
+            const hint = mergeHint(localHint(question, credits), routed?.draw ?? null, question, credits);
+            return chartHelps(question, hint, justShown) ? chartsFor(question, hint, null) : [];
+          })();
+      return charts.filter((c) => !recent.includes(c.title));
+    };
+
+    /**
      * What the assistant can do, and where it stops.
      *
      * Answered on this device, from one list (`assistantScope.ts`), so the
@@ -4176,10 +4208,10 @@ export function AskPanel({
      * The model answers, with what the app worked out in front of it; the
      * app's own words only when no model does (`askQuestion`).
      */
-    const answerWithModel = async (worked: string, fallback: string): Promise<void> => {
+    const answerWithModel = async (worked: string, fallback: string, drawn: readonly Chart[] = []): Promise<void> => {
       setBusy(true);
       try {
-        await askQuestion(note, false, { text: worked, fallback });
+        await askQuestion(note, false, { text: worked, fallback }, drawn);
       } finally {
         setBusy(false);
       }
@@ -4291,7 +4323,8 @@ export function AskPanel({
 
         if (spent) {
           const reply = spendAnswer(spent, transactions, asOf);
-          await answerWithModel(`The sum the message asks about, worked out by the app from the ledger. Answer with it, in your own words:\n${reply}`, reply);
+          // "how much did I spend each month this year": the months drawn as well as summed.
+          await answerWithModel(`The sum the message asks about, worked out by the app from the ledger. Answer with it, in your own words:\n${reply}`, reply, besideFor(ruled));
           return;
         }
       }
@@ -5293,11 +5326,17 @@ export function AskPanel({
      */
     const plainQuestion = /\?\s*$/.test(note) && !wantsChart(note) && !followUp && !narrows;
     const wantsWords = asksForProse(note) || plainQuestion;
+    /*
+     * Except a chart of what is owed: "chart my maya credit" is a picture of
+     * the line over time, which the app now draws (`chartAsk.ts`). Going
+     * through it draw by draw is still a question.
+     */
+    const owedChart = measureOf(localHint(ruled, credits)) === "owed";
 
     if (
       files.length === 0 &&
       !as &&
-      !aboutADebt &&
+      (!aboutADebt || owedChart) &&
       !wantsWords &&
       (saysChart ||
         narrows ||
@@ -5428,46 +5467,57 @@ export function AskPanel({
       const saidPair = laterSaid && earlierSaid ? periodsSaid(laterSaid, earlierSaid, asOf) : null;
       // A pie is one period split up, so "pie" after a comparison draws this period alone.
       const pair = saidPair ?? (followUp && !namesPeriod && !asksPie(ruled) ? shown?.against?.periods ?? null : null);
-      const both = wantsBothDirections(asked);
-      const chart = buildChart(asked, transactions, asOf, both ? "revenue" : undefined, pair);
-      const second = both ? buildChart(asked, transactions, asOf, "spending", pair) : null;
+      /*
+       * What to draw, read from this message and, for a new request, from
+       * what the model said to draw (`chartAsk.ts`). A follow-up keeps what
+       * the chart on screen measured: "by day" after a budget chart is the
+       * budget by day, not spending.
+       */
+      const fresh = !followUp && !narrows;
+      const keptMeasure: ChartHint | null =
+        !fresh && shown?.measure && !namesDirection ? { money: shown.measure, ...(shown.by === "wallet" ? { by: "wallet" as const } : {}) } : null;
+      const hint = mergeHint(localHint(ruled, credits) ?? keptMeasure, fresh ? (routed?.draw ?? null) : null, ruled, credits);
+      const drawn = chartsFor(asked, hint, measureOf(hint) ? null : pair);
       setDraft("");
       say({ kind: "you", text: note });
-      if (second) {
-        say({ kind: "chart", chart: second });
-        log(aiEvent("answered", "add", { text: `Drew ${second.title}. ${chartInWords(second)}`, entry: second.title }));
-      }
-      /**
-       * Both outcomes are recorded, and that is the point of recording it.
-       *
-       * `asked` caught the question and nothing caught the answer, so the
-       * record could not say whether a chart request had produced a chart or
-       * fallen through to prose. That gap is most of what made the follow-up
-       * faults hard to find: the failures looked identical to the successes.
-       */
-      if (chart) {
-        say({ kind: "chart", chart });
-        log(
-          aiEvent("answered", "add", {
-            text: `Drew ${chart.title}. ${chartInWords(chart)}`,
-            entry: chart.title,
-          }),
-        );
-      } else {
+      for (const chart of drawn) drawChart(chart);
+
+      const measure = measureOf(hint);
+      const both = !measure && wantsBothDirections(inWords(asked, hint));
+      if (drawn.length === 0 || (both && drawn.length === 1 && chartDirection(drawn[0] as Chart) === "spending")) {
         say({
           kind: "assistant",
-          text: second
-            ? "There is no income in that period to draw beside it."
-            : chartTopic(asked, transactions)
-              ? `Nothing in your entries mentions ${chartTopic(asked, transactions).replace(/^./, (c) => c.toUpperCase())}. Say it the way the entry's description does, or name the item instead.`
-              : "There is nothing in that period to draw. Try a wider window, a month with entries in it, or the year.",
+          text:
+            drawn.length > 0
+              ? "There is no income in that period to draw beside it."
+              : measure === "budget"
+                ? "There is no spending or budget in that period to draw. Name a month that has started, or the year."
+                : measure === "balance"
+                  ? "No entry moves that account in that period. Try a wider window, or name the account the way Settings does."
+                  : measure === "owed"
+                    ? "Nothing has been borrowed on that line yet, so there is nothing owed to draw."
+                    : chartTopic(asked, transactions)
+                      ? `Nothing in your entries mentions ${chartTopic(asked, transactions).replace(/^./, (c) => c.toUpperCase())}. Say it the way the entry's description does, or name the item instead.`
+                      : "There is nothing in that period to draw. Try a wider window, a month with entries in it, or the year.",
           from: "this device",
         });
-        log(
-          aiEvent("answered", "add", {
-            text: `No chart drawn: nothing in that period. Asked: ${note}`,
-          }),
-        );
+        log(aiEvent("answered", "add", { text: `No chart drawn: nothing in that period. Asked: ${note}` }));
+      }
+
+      /*
+       * The chart, and the question as well when the message asks one:
+       * "How much did I spend on my trip to Abra? show me a chart" wants the
+       * figure said, not only drawn. The model answers from the chart's own
+       * figures, so the two agree.
+       */
+      const asksMore = /\b(?:how much|how many|why|explain|tell me|which|what (?:did|was|is|are|were)|did i|am i|is it|was it|magkano|bakit|ilan)\b/i.test(note);
+      if (drawn.length > 0 && asksMore && !ai.disabled) {
+        setBusy(true);
+        try {
+          await askQuestion(note, false, { text: chartsWorked(drawn, chartInWords), fallback: drawn.map(chartReading).filter(Boolean).join(" ") });
+        } finally {
+          setBusy(false);
+        }
       }
       return;
     }
@@ -5987,6 +6037,7 @@ export function AskPanel({
           compared
             ? { text: `Two periods side by side, worked out by the app from the ledger. Answer with these figures:\n${compared}`, fallback: compared }
             : null,
+          besideFor(ruled, pair),
         );
 
         /*
@@ -7235,9 +7286,8 @@ export function AskPanel({
          * next message, as in any chat.
          */
         onMouseDown={(e) => {
-          // Send and Stop sit directly in the form; attach and the camera sit inside the field.
-          const pressed = (e.target as HTMLElement).closest("button");
-          if (pressed && pressed.parentElement === e.currentTarget) e.preventDefault();
+          // Every button sits inside the box now: none of them takes the focus from the words.
+          if ((e.target as HTMLElement).closest("button")) e.preventDefault();
         }}
       >
         <input
@@ -7280,25 +7330,27 @@ export function AskPanel({
           as zoomed in (owner, 26 September 2026). On a computer the box is
           not drawn and the pieces sit in a row as before (layout.css).
         */}
+        {/*
+          One rounded box, the way the phone's own chat apps draw one: the
+          words across the whole width on top, so "Ask, or type an entry"
+          fits on one line, and under them attach, the camera and Send. The
+          owner, 4 October 2026, beside the Claude app: "Fix the chat area
+          ui ... I dont want that paste icon thats just clutter". A copied
+          screenshot is pasted from the keyboard's own Paste, which the box
+          is built to take (`PlainBox`).
+        */}
         <div className="fms-askfield">
           {/*
-            A textarea, so several entries fit in one message.
-
-            Enter sends and Shift plus Enter starts a line, which is what every
-            chat does and therefore what the fingers already expect. It grows to
-            a few lines and then scrolls, so a long paste cannot push the
+            Several entries fit in one message. Enter sends and Shift plus
+            Enter starts a line, which is what every chat does. It grows to a
+            few lines and then scrolls, so a long paste cannot push the
             composer over the conversation.
           */}
-          <textarea
+          <PlainBox
             className="t-caption fms-askinput"
-            rows={1}
             value={draft}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter" || e.shiftKey) return;
-              e.preventDefault();
-              void send();
-            }}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={setDraft}
+            onEnter={() => void send()}
             placeholder={
               asking && !pending
                 ? "Your answer, or skip"
@@ -7310,64 +7362,54 @@ export function AskPanel({
                   ? "Add a note"
                   : "Ask, or type an entry"
             }
-            aria-label={attached ? "A note about the attached files" : "Ask a question, or type an entry"}
+            label={attached ? "A note about the attached files" : "Ask a question, or type an entry"}
             disabled={busy}
           />
-          <button
-            type="button"
-            className="fms-attach"
-            aria-label="Attach a photo or a file"
-            title="Attach a photo or a file"
-            disabled={busy || files.length >= limits.maxCount}
-            onClick={() => pickerRef.current?.click()}
-          >
-            +
-          </button>
-          {canPastePicture && (
+          <div className="fms-asktools">
             <button
               type="button"
-              className="fms-attach fms-askpaste"
-              aria-label="Paste a copied picture"
-              title="Paste a copied picture"
+              className="fms-attach"
+              aria-label="Attach a photo or a file"
+              title="Attach a photo or a file"
               disabled={busy || files.length >= limits.maxCount}
-              onClick={() => void pastePicture()}
+              onClick={() => pickerRef.current?.click()}
             >
-              <Icon name="paste" size={20} />
+              +
             </button>
-          )}
-          <button
-            type="button"
-            className="fms-attach fms-askcamera"
-            aria-label="Take a photo"
-            title="Take a photo"
-            disabled={busy || files.length >= limits.maxCount}
-            onClick={() => cameraRef.current?.click()}
-          >
-            <Icon name="camera" size={22} />
-          </button>
-        </div>
-        {busy ? (
-          /*
-            A way out of the queue.
+            <button
+              type="button"
+              className="fms-attach fms-askcamera"
+              aria-label="Take a photo"
+              title="Take a photo"
+              disabled={busy || files.length >= limits.maxCount}
+              onClick={() => cameraRef.current?.click()}
+            >
+              <Icon name="camera" size={22} />
+            </button>
+            {busy ? (
+              /*
+                A way out of the queue.
 
-            A free model can sit there for the better part of a minute, and
-            three dots with no way to stop is the app holding you to a
-            provider's queue. Stopping abandons the request; nothing was
-            going to be saved by it either way.
-          */
-          <Button size="sm" onClick={stop}>
-            Stop
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            variant="primary"
-            type="submit"
-            disabled={!draft.trim() && !attached}
-          >
-            {attached ? "Read" : pending ? "Answer" : intent === "log" ? "Log" : "Send"}
-          </Button>
-        )}
+                A free model can sit there for the better part of a minute, and
+                three dots with no way to stop is the app holding you to a
+                provider's queue. Stopping abandons the request; nothing was
+                going to be saved by it either way.
+              */
+              <Button size="sm" onClick={stop}>
+                Stop
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="primary"
+                type="submit"
+                disabled={!draft.trim() && !attached}
+              >
+                {attached ? "Read" : pending ? "Answer" : intent === "log" ? "Log" : "Send"}
+              </Button>
+            )}
+          </div>
+        </div>
       </form>
 
       {turns.length > 0 && (
@@ -8672,8 +8714,21 @@ function FoundList({
  * other screen, and the rows step lighter from the largest so they stay
  * apart without borrowing a colour that means something else.
  */
-const toneOf = (chart: Chart): string =>
-  chartDirection(chart) === "revenue" ? "var(--flow-revenue)" : "var(--flow-spending)";
+const toneOf = (chart: Chart): string => `var(--flow-${flowOf(chart)})`;
+
+/**
+ * The flow a chart's colour comes from (rule D3). A balance is money held,
+ * neither gain nor loss, so it takes the grey a transfer has; what is owed
+ * is a liability, so it takes the amber debt has everywhere else.
+ */
+function flowOf(chart: Chart): "revenue" | "spending" | "transfer" | "debt" {
+  if (chart.measure === "balance") return "transfer";
+  if (chart.measure === "owed") return "debt";
+  return chartDirection(chart) === "revenue" ? "revenue" : "spending";
+}
+
+/** A level is read at the end of a period; a day is read on it. */
+const levelWhen = (chart: Chart, label: string): string => (chart.by === "day" ? `on ${label}` : chart.by === "wallet" ? "today" : `at the end of ${label}`);
 
 /**
  * How strongly a row is drawn, when the chart is months.
@@ -8709,6 +8764,39 @@ function ChartRead({ chart, at }: { chart: Chart; at: number | null }) {
   }
 
   const share = chart.total > 0 ? Math.round((row.value / chart.total) * 100) : 0;
+
+  if (chart.measure === "budget") {
+    const budget = row.previous ?? 0;
+    const gap = budget - row.value;
+    return (
+      <p className="t-micro fms-chartread">
+        <span className="fms-chartread-label">{row.label}</span>
+        <span className="fms-proposalmoney fms-chartread-money">{chartLabel(row.value)}</span>
+        <span className="fms-chartread-of">
+          {chart.by === "day"
+            ? budget > 0
+              ? `spent by then, against a steady pace of ${chartLabel(budget)}`
+              : "spent by then"
+            : budget > 0
+              ? `of ${chartLabel(budget)}, ${gap >= 0 ? `${chartLabel(gap)} left` : `${chartLabel(-gap)} over`}`
+              : "with no budget set"}
+        </span>
+      </p>
+    );
+  }
+
+  if (chart.measure === "balance" || chart.measure === "owed") {
+    return (
+      <p className="t-micro fms-chartread">
+        <span className="fms-chartread-label">{row.label}</span>
+        <span className="fms-proposalmoney fms-chartread-money">{chartLabel(row.value)}</span>
+        <span className="fms-chartread-of">
+          {chart.measure === "owed" ? "owed" : "held"} {levelWhen(chart, row.label)}
+          {chart.by === "wallet" && chart.total > 0 && row.value > 0 ? `, ${share}% of what these accounts hold` : ""}
+        </span>
+      </p>
+    );
+  }
 
   if (chart.against) {
     const was = row.previous ?? 0;
@@ -8785,9 +8873,12 @@ function ChartView({ chart }: { chart: Chart }) {
           {chart.title}
         </span>
         <span className="t-micro fms-proposalmoney" style={{ color: "var(--ink-3)" }}>
-          {chartLabel(chart.total)}
+          {(chart.measure === "balance" || chart.measure === "owed") && chart.by !== "wallet" ? `Now ${chartLabel(chart.total)}` : chartLabel(chart.total)}
         </span>
       </div>
+
+      {/* What the chart says, in a sentence worked out from its own rows (`chartAsk.ts`). */}
+      {chartReading(chart) && <p className="t-caption fms-chartsays">{chartReading(chart)}</p>}
 
       {chart.against && (
         <p className="t-micro fms-chartkey">
@@ -8797,7 +8888,7 @@ function ChartView({ chart }: { chart: Chart }) {
           </span>
           <span className="fms-chartkey-entry">
             <span className="fms-chartkey-swatch fms-chartkey-swatch--before" aria-hidden />
-            {chart.against.name}: <span className="fms-proposalmoney">{chartLabel(chart.against.total)}</span>
+            {chart.measure === "budget" ? "Budget" : chart.against.name}: <span className="fms-proposalmoney">{chartLabel(chart.against.total)}</span>
           </span>
         </p>
       )}
@@ -8816,11 +8907,13 @@ function ChartView({ chart }: { chart: Chart }) {
             const average = chart.total / Math.max(chart.rows.length, 1);
             // Days are a series too: shaded by rank they would read as a ranking.
             const months = overTime(chart.by);
-            const strength = months ? monthStrength(r.value, average) : 1;
+            // Against a budget, full colour is a month over it; otherwise a period above the average.
+            const strength =
+              chart.measure === "budget" ? ((r.previous ?? 0) > 0 && r.value > (r.previous ?? 0) ? 1 : 0.55) : months ? monthStrength(r.value, average) : 1;
             // Two periods side by side: one ink for now, so rank does not read as a third thing.
             const colour = months || chart.against
               ? toneOf(chart)
-              : rampFor(chartDirection(chart) === "revenue" ? "revenue" : "spending", i, chart.rows.length);
+              : rampFor(flowOf(chart), i, chart.rows.length);
             return (
             <button
               key={r.label}
@@ -8852,7 +8945,11 @@ function ChartView({ chart }: { chart: Chart }) {
               )}
               <span className="t-micro fms-chartvalue fms-proposalmoney">
                 {chartLabel(r.value)}
-                {chart.against && <span className="fms-chartbefore"> was {chartLabel(r.previous ?? 0)}</span>}
+                {chart.against && (
+                  <span className="fms-chartbefore">
+                    {chart.measure === "budget" ? (r.previous ? ` of ${chartLabel(r.previous)}` : " no budget") : ` was ${chartLabel(r.previous ?? 0)}`}
+                  </span>
+                )}
               </span>
             </button>
             );
@@ -8863,10 +8960,18 @@ function ChartView({ chart }: { chart: Chart }) {
       <ChartRead chart={chart} at={at} />
 
       <p className="t-micro fms-proposalfrom">
-        {chart.othersCount > 0
-          ? `The ${chart.rows.length} largest, with ${chart.othersCount} smaller left off. Totals worked out on this device.`
-          : "Totals worked out on this device, from your entries."}
-        {chart.kind === "bars" && overTime(chart.by)
+        {chart.measure === "budget"
+          ? "Spending as the budget counts it: spending, bills, subscriptions, fees and interest. Worked out on this device."
+          : chart.measure === "balance"
+            ? "Balances worked out on this device, from your entries, the same way every screen does."
+            : chart.measure === "owed"
+              ? "What is owed: borrowed and charges added, less what was paid and written off. Interest paid is not owed. Worked out on this device."
+              : chart.othersCount > 0
+                ? `The ${chart.rows.length} largest, with ${chart.othersCount} smaller left off. Totals worked out on this device.`
+                : "Totals worked out on this device, from your entries."}
+        {chart.kind === "bars" && chart.measure === "budget"
+          ? " Full colour marks the months over their budget."
+          : chart.kind === "bars" && overTime(chart.by)
           ? ` Full colour marks the ${chart.by === "day" ? "days" : chart.by === "week" ? "weeks" : chart.by === "year" ? "years" : "months"} above the average of ${chartLabel(Math.round(chart.total / Math.max(chart.rows.length, 1)))}.`
           : ""}
       </p>
@@ -8960,7 +9065,7 @@ function PieView({
       // Largest strongest, then stepping toward grey, in the colour of the
       // money (`rampFor`). Fading one hue over a dark background turned the
       // small slices the colour of a transfer.
-      colour: rampFor(chartDirection(chart) === "revenue" ? "revenue" : "spending", i, chart.rows.length),
+      colour: rampFor(flowOf(chart), i, chart.rows.length),
       percent: Math.round(fraction * 100),
     };
     offset += fraction * circumference;
@@ -9067,7 +9172,16 @@ function LineView({
   const top = pad;
   const bottom = height - pad;
 
-  const highest = Math.max(...chart.rows.map((r) => r.value), 1);
+  /*
+   * The axis runs from zero, or from below it when a balance went under:
+   * a line that starts at its own lowest point makes a quiet month look like
+   * a collapse. The budget's steady pace, when there is one, is on the same
+   * scale, so where the two lines cross is where the month went over.
+   */
+  const pace = chart.measure === "budget" ? chart.rows.map((r) => r.previous ?? 0) : [];
+  const highest = Math.max(...chart.rows.map((r) => r.value), ...pace, 1);
+  const lowest = Math.min(0, ...chart.rows.map((r) => r.value));
+  const yOf = (value: number): number => bottom - ((value - lowest) / (highest - lowest)) * (bottom - top);
 
   /**
    * One month is drawn in the middle, not in the corner.
@@ -9086,8 +9200,10 @@ function LineView({
     value: r.value,
     count: r.count,
     x: single ? width / 2 : pad + i * step,
-    y: bottom - (r.value / highest) * (bottom - top),
+    y: yOf(r.value),
   }));
+  const paceLine = pace.some((v) => v > 0) ? points.map((p, i) => `${p.x.toFixed(1)},${yOf(pace[i] ?? 0).toFixed(1)}`).join(" ") : "";
+  const zeroY = yOf(0);
 
   const line = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   // "January 2026" to "Jan" when every point is in one year: the title already says which.
@@ -9095,7 +9211,22 @@ function LineView({
   const sameYear = years.size === 1 && !years.has("");
   const firstX = points[0]?.x ?? pad;
   const lastX = points[points.length - 1]?.x ?? width - pad;
-  const area = `${firstX.toFixed(1)},${bottom} ${line} ${lastX.toFixed(1)},${bottom}`;
+  const area = `${firstX.toFixed(1)},${zeroY.toFixed(1)} ${line} ${lastX.toFixed(1)},${zeroY.toFixed(1)}`;
+
+  /*
+   * Which points get a line in the list. A flow lists every period with
+   * money in it. A level lists where it changed, with the first and the
+   * last, or thirty days of one balance read as thirty rows of the same
+   * figure. Spending against the budget lists the days that had some.
+   */
+  const level = chart.measure === "balance" || chart.measure === "owed";
+  const listed = (i: number): boolean => {
+    const r = chart.rows[i];
+    if (!r) return false;
+    if (level) return i === 0 || i === chart.rows.length - 1 || r.value !== chart.rows[i - 1]?.value;
+    if (chart.measure === "budget") return r.count > 0 || i === chart.rows.length - 1;
+    return r.value !== 0;
+  };
 
   /** Half a step either side, so the whole width of the chart is pointable. */
   const grab = single ? width / 2 : step / 2;
@@ -9109,6 +9240,10 @@ function LineView({
         aria-label={chart.title}
       >
         {single ? null : <polygon points={area} className="fms-linefill" style={{ fill: toneOf(chart) }} />}
+        {/* Zero, drawn only when the line goes under it. */}
+        {lowest < 0 ? <line x1={pad} y1={zeroY} x2={width - pad} y2={zeroY} className="fms-linezero" /> : null}
+        {/* The steady pace to the budget: a guide, in the quiet ink, dashed. */}
+        {paceLine && !single ? <polyline points={paceLine} className="fms-linepace" /> : null}
         {single ? null : <polyline points={line} className="fms-linestroke" style={{ stroke: toneOf(chart) }} />}
 
         {/* The one being read, marked down the full height so it is findable. */}
@@ -9161,7 +9296,7 @@ function LineView({
         month of days reads as thirty rows of PHP 0.00.
       */}
       <ul className="fms-linelegend">
-        {points.map((p, i) => (p.value === 0 ? null : (
+        {points.map((p, i) => (!listed(i) ? null : (
           <li key={p.label}>
             <button
               type="button"

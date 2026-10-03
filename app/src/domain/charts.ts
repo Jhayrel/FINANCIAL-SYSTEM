@@ -85,6 +85,15 @@ export interface Chart {
         readonly periods?: ComparedPeriods | undefined;
       }
     | undefined;
+  /**
+   * What it measures, when it is not money in or money out over a window
+   * (`chartAsk.ts`). A budget chart puts each period's spending beside its
+   * budget, in `previous`; a balance or what is owed is a level, read at the
+   * end of each period, so `total` is the latest level rather than a sum.
+   */
+  readonly measure?: "budget" | "balance" | "owed" | undefined;
+  /** The last row is a period still running: "October 2026" read on 3 October. */
+  readonly running?: boolean | undefined;
 }
 
 /** Which way the money in a chart went, including charts stored before it was recorded. */
@@ -176,6 +185,9 @@ const revenueOf = incomeOf;
  * a purchase, the thing photographed for the chat, so "chart my receipts"
  * reading as income was backwards.
  */
+/** Money in or money out, as the words say it (`chartAsk.ts`). */
+export const directionIn = (question: string): "spending" | "revenue" => directionOf(question);
+
 function directionOf(question: string): "spending" | "revenue" {
   /*
    * "positive" is the owner's own word for it.
@@ -245,6 +257,8 @@ function kindOf(question: string, by: ChartBy): ChartKind {
   if (/\b(line|trend|over time|curve|movement|progression)\b/i.test(question)) {
     return overTime(by) ? "line" : "bars";
   }
+  // Two named months side by side are two bars: a line between two points says nothing a bar does not.
+  if (comparesMonths(question)) return "bars";
   // A question about months or days is a series whether or not it says so.
   return overTime(by) ? "line" : "bars";
 }
@@ -277,6 +291,9 @@ export function comparesMonths(question: string): boolean {
   const found = MONTHS.filter((m) => new RegExp(`\\b${m}\\b`, "i").test(question));
   return found.length > 1;
 }
+
+/** The grouping the words ask for, item when they ask for none (`chartAsk.ts`). */
+export const groupingOf = (question: string): ChartBy => dimensionOf(question);
 
 function dimensionOf(question: string, twoMonthsAreBars = true): ChartBy {
   /**
@@ -817,7 +834,11 @@ const ASKING_WORDS = new Set(
     "category categories budget income revenue expense expenses have does your mine their them they there here just only also " +
     "like some every each over trend trends bars line compare compared versus against between than more less cost costs amount " +
     "figure figures entries entry transactions record records ledger report breakdown split group grouped tell went going goes " +
-    "much whole time ever bought sent received earned used using daily weekly monthly yearly pesos peso php could would should"
+    "much whole time ever bought sent received earned used using daily weekly monthly yearly pesos peso php could would should " +
+    // Words about the asking, never a topic: "at the same time", "all of my transaction", "a proper explanation" (4 October 2026).
+    "same transaction kind kinds type types visual visuals summary summarize summarized summarise summarised proper explanation " +
+    "explain high highest low lowest latest wanted give charts graphs trend pie bars look good better worse okay please thanks " +
+    "thank kindly maybe again also both other others another thing things stuff overall everything anything something"
   ).split(" "),
 );
 
@@ -1284,6 +1305,34 @@ export function buildChart(
     }
   }
 
+  /*
+   * A month with nothing in it is a zero, not a gap. "Treat by month" read
+   * May, July, August, and the line ran straight from May to July as if
+   * June had been in between them at the same height. Months, weeks and
+   * years between the first and the last get a row of their own.
+   */
+  if (by === "month" || by === "week" || by === "year") {
+    const keys = [...groups.keys()].sort();
+    const first = keys[0];
+    const last = keys[keys.length - 1];
+    const after = (k: string): string => {
+      if (by === "year") return String(Number(k) + 1);
+      if (by === "week") {
+        const d = new Date(`${k}T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + 7);
+        return d.toISOString().slice(0, 10);
+      }
+      const d = new Date(`${k}-01T00:00:00Z`);
+      d.setUTCMonth(d.getUTCMonth() + 1);
+      return d.toISOString().slice(0, 7);
+    };
+    if (first && last) {
+      for (let k = after(first); k < last; k = after(k)) {
+        if (!groups.has(k)) groups.set(k, { value: 0, count: 0 });
+      }
+    }
+  }
+
   const all = [...groups.entries()]
     // Months and days read in order; everything else reads largest first.
     .sort((a, b) => (overTime(by) ? a[0].localeCompare(b[0]) : b[1].value - a[1].value));
@@ -1313,6 +1362,16 @@ export function buildChart(
     folded = rest.length;
   }
   const largest = Math.max(...kept.map(([, g]) => g.value), 1);
+  /*
+   * The last period is still running when today is inside it. October read
+   * on 3 October is three days of a month, and a reading that called it the
+   * lowest month would be telling the truth about the wrong thing.
+   */
+  const lastKey = kept[kept.length - 1]?.[0] ?? "";
+  const running =
+    overTime(by) &&
+    lastKey !== "" &&
+    lastKey === (by === "month" ? monthOf(asOf) : by === "week" ? weekOf(asOf) : by === "year" ? asOf.slice(0, 4) : asOf);
 
   return {
     /**
@@ -1350,12 +1409,14 @@ export function buildChart(
     // What an "Other" slice holds is in the chart, so nothing is left off.
     othersCount: folded > 0 ? 0 : all.length - kept.length,
     direction,
+    ...(running ? { running: true } : {}),
   };
 }
 
 /** Pesos, for a label. Display only, never arithmetic. */
 export const chartLabel = (centavos: number): string =>
-  `PHP ${Number(toPesos(centavos).toFixed(2)).toLocaleString("en-PH", {
+  // A balance can be below zero; the sign is the minus sign (U+2212), as everywhere money is shown.
+  `PHP ${centavos < 0 ? "\u2212" : ""}${Number(toPesos(Math.abs(centavos)).toFixed(2)).toLocaleString("en-PH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -1376,6 +1437,28 @@ export function chartInWords(chart: Chart): string {
    * counted: "show me trend this year" listed January to May and stopped,
    * with nothing to say four more months were drawn (28 September 2026).
    */
+  // Spending beside the budget: each month's pair, or how far into the month the spending is.
+  if (chart.measure === "budget") {
+    const budget = chart.against?.total ?? 0;
+    if (chart.by === "day") {
+      const last = chart.rows[chart.rows.length - 1];
+      if (!last) return "";
+      return budget > 0
+        ? `Spent ${chartLabel(last.value)} by ${last.label}, against a steady pace of ${chartLabel(last.previous ?? 0)} to the ${chartLabel(budget)} budget.`
+        : `Spent ${chartLabel(last.value)} by ${last.label}. No budget is set for the month.`;
+    }
+    const said = chart.rows.slice(-12).map((r) => `${r.label} ${chartLabel(r.value)} of ${r.previous ? `${chartLabel(r.previous)} budgeted` : "no budget"}`);
+    return `${said.join(", ")}. Spent ${chartLabel(chart.total)} against ${chartLabel(budget)} budgeted.`;
+  }
+  // A level, not a flow: what each account holds, or what was held or owed at each period's end.
+  if (chart.measure === "balance" || chart.measure === "owed") {
+    if (chart.by === "wallet") {
+      return `${chart.rows.map((r) => `${r.label} ${chartLabel(r.value)}`).join(", ")}. Together ${chartLabel(chart.total)}.`;
+    }
+    const said = chart.rows.slice(-12);
+    const left = chart.rows.length - said.length;
+    return `${said.map((r) => `${r.label} ${chartLabel(r.value)}`).join(", ")}${left > 0 ? `, after ${left} earlier` : ""}. Now ${chartLabel(chart.total)}.`;
+  }
   // A comparison says each row's earlier figure beside it, and both totals.
   if (chart.against) {
     const said = chart.rows.slice(0, 6);
@@ -1383,7 +1466,8 @@ export function chartInWords(chart: Chart): string {
     const left = chart.rows.length - said.length + chart.othersCount;
     return `${top}${left > 0 ? `, and ${left} more` : ""}. Total ${chartLabel(chart.total)}, against ${chartLabel(chart.against.total)} for ${chart.against.name}.`;
   }
-  const shown = chart.rows.filter((r) => r.value > 0);
+  // A month, week or year with nothing in it is part of a trend and is said; an empty day is not, or a month reads as thirty zeros.
+  const shown = chart.rows.filter((r) => r.value > 0 || (overTime(chart.by) && chart.by !== "day"));
   const said = shown.slice(0, overTime(chart.by) ? 12 : 5);
   const top = said.map((r) => `${r.label} ${chartLabel(r.value)}`).join(", ");
   const left = shown.length - said.length + chart.othersCount;

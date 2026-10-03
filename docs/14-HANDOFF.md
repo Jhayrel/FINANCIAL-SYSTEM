@@ -771,6 +771,32 @@ entry it should know", "make sure ai first", with five screenshots.
 | "allow copy paste ... I screenshot then I can attach it directly" | A Paste picture button in the phone's chat box reads a copied screenshot from the clipboard; a pasted picture is taken from the clipboard's items as well as its files |
 
 The 275 labelled sentences of the owner's read exactly as before.
+
+### 2026-10-04: the AI and the charts, one answer
+
+The owner: "Fix the ai and charting like make sure they are align like if
+the result need to show charts or pie or tend etc show them but be careful
+ai should know properly and show the right things. Make sure everything ai
+can do and charts can do all." Then, beside a screenshot of the Claude app:
+"Fix the chat area ui ... it shows the photo in clipboard and in my system
+it didn't ... I dont want that paste icon thats just clutter".
+
+| Found | Done |
+|---|---|
+| The model said only whether a message was a chart; what kind, split by what and of which money came from the words alone | Routing returns `draw` (shape, by, money). The device's own reading of plain words wins (a "pie" typed is a pie) and the model fills what the words leave open; a model's budget, balance or debt stands only when the words are about one (`chartAsk.ts`: `hintFrom`, `localHint`, `mergeHint`, `inWords`) |
+| "where did my money go this month?", "what did I spend most on", "is my food going up?" were answered in words with nothing drawn | A question a chart answers better gets one beside the words: a pie for where it went, bars for what cost most, a line for going up or down, both periods for a comparison. Never for one figure, a yes or no, a list of questions, or a question about the chart on screen (`chartHelps`, `besideFor`) |
+| The model's words and the chart could disagree ("your description and the chart doesnt match", 5 September) | The model is handed the drawn chart's own figures as worked text (`chartsWorked`); a chart request that also asks something ("how much ... show me a chart") gets the chart and then the answer from it |
+| "show me my budget vs actual" drew spending by item; balances and what is owed could not be drawn at all | Three more charts: spending against the budget by month (the Dashboard's figures), one month day by day against a steady pace (the Insights burn), a balance per account or over time (the balances every screen shows), and what is owed over time (rule 5.6.2, interest paid left out). "chart my maya credit" is a chart now; "check my maya credit draw by draw" is still a question |
+| Every chart was a picture with a total and nothing said | Each chart says itself in a sentence under its title, worked out from its rows: the largest part and its share, the high, the low and the average of a trend, how two periods differ, which months broke the budget. A period still running is called that and kept out of the high, low and average (`chartReading`, `running`) |
+| "Treat by month" ran straight from May to July; "how did august compare with july" drew a line between two points | A month, week or year with nothing in it is a zero on the line, and said ("Nothing in June 2026"); two named months are two bars |
+| "I want chart and trend at the same time" charted entries mentioning "same"; "all of my transaction" charted "Transaction" | Words about the asking are never the topic (`ASKING_WORDS`) |
+| The keyboard offered a copied screenshot over the Claude app's box and nothing over ours | Chrome tells a phone keyboard a box takes pictures only when the box is rich text; a textarea is text only. The chat box is now a rich box kept plain (`PlainBox.tsx`): the keyboard's Paste chip and long-press Paste both hand the picture in as a paste, which attaches it. Formatting never gets in; Enter sends, Shift+Enter is a new line |
+| The box was crowded: the words wrapped to two lines beside +, Paste and the camera | One rounded box: the words across the whole width, + and the camera under them, Send inside at the right. The Paste picture button is gone |
+
+`chartAsk.test.ts` pins every rule with invented figures, including that a
+balance chart ends at `walletBalance` and an owed chart at `outstandingOf`.
+Of the owner's 618 messages, five would now get a chart beside the answer,
+each a split or a ranking.
 ---
 
 ## 6. What the owner has to do

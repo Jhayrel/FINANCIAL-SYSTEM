@@ -81,7 +81,9 @@ describe("buildChart", () => {
   it("reads months in order, not by size", () => {
     const chart = buildChart("chart my spending per month", ledger, ASOF);
     expect(chart?.by).toBe("month");
-    expect(chart?.rows.map((r) => r.label)).toEqual(["May 2026", "August 2026"]);
+    // The months between with nothing in them are zeros on the line, not gaps (4 October 2026).
+    expect(chart?.rows.map((r) => r.label)).toEqual(["May 2026", "June 2026", "July 2026", "August 2026"]);
+    expect(chart?.rows.map((r) => r.value).slice(1, 3)).toEqual([0, 0]);
   });
 
   it("groups by wallet when asked", () => {

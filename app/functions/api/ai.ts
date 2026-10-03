@@ -1123,6 +1123,13 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "chat: none of the above, including small talk.",
     "In target, put which entry they mean when they name one: the exact words, or the word last when they mean the most recent. In period, put the window when they name one, in their own words. Leave both empty when they name none.",
     "In compare, when they want two periods put side by side, however it is worded (compared to, versus, than, against, how it changed, up or down from, stack up with), put both periods, the later first, separated by a vertical bar: this month|last month. Leave it empty when they name one period or none.",
+    /*
+     * Which chart, not only whether. The owner, 4 October 2026: "if the
+     * result need to show charts or pie or trend etc show them but be
+     * careful ai should know properly and show the right things". The app
+     * draws it and adds up every figure; this only says what to draw.
+     */
+    "In draw, when a chart would show the answer better than words alone (intent chart, or a question about where the money went, what cost the most, how something changed over time, how two periods or a budget compare, or how a balance or a debt moved), say what to draw. shape: pie for shares of one whole, line for change over time, bars for a ranking or things side by side. by: item, category, wallet, day, week, month or year. money: spending, income, both (income and spending together), budget (spending against the budget), balance (what accounts hold, per account or over time) or owed (what is owed on credit over time). Leave each part empty when the message does not say or imply it, and leave draw empty for one figure, a yes or no, advice, an entry or anything a chart would not help.",
     "Prefer correction and answer over entry when something is on screen waiting: someone who has just been asked how much is telling you how much, not starting a new entry.",
     /**
      * Worked examples, from the misroutings in the owner's record.
@@ -1155,6 +1162,16 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "nagbayad ako ng tricycle 500 kanina cash: entry.",
     "I will be spending 1000 cash: question. Money not yet spent is a plan, never an entry. So are i'm going to buy shoes 2000 gcash and gagastos ako 300 bukas.",
     "How much did I spend on my trip to Abra? show me a chart: chart. A place or a trip is found in the entries' descriptions.",
+    "where did my money go this month?: question, draw pie, item, spending.",
+    "what did I spend the most on this year: question, draw bars, item, spending.",
+    "is my food spending going up?: question, draw line, month, spending.",
+    "show my income and spending this year: chart, draw line, month, both.",
+    "chart my budget vs actual: chart, draw bars, month, budget.",
+    "how am I doing against my budget this month, show me: chart, draw line, day, budget.",
+    "how has my maya balance changed since june: question, draw line, month, balance.",
+    "how much is in each of my accounts, show me: chart, draw bars, wallet, balance.",
+    "chart my maya credit: chart, draw line, month, owed.",
+    "how much did I spend today: question, draw empty. how much is my maya balance: question, draw empty. One figure needs no chart.",
   ].join(" "),
   /*
    * Which of their items a thing is. It had no instruction at all until 28
@@ -1260,15 +1277,18 @@ const TASKS: Record<string, TaskSpec> = {
   route: {
     instruction: TASK_INSTRUCTIONS["route"] ?? "",
     shape:
-      '{"reasoning": "one short sentence", "intent": "entry or question or chart or correction or answer or delete or restore or editEntry or investigate or budget or export or chat", "target": "", "period": "", "compare": ""}',
+      '{"reasoning": "one short sentence", "intent": "entry or question or chart or correction or answer or delete or restore or editEntry or investigate or budget or export or chat", "target": "", "period": "", "compare": "", "draw": {"shape": "", "by": "", "money": ""}}',
     parse: (v) => {
       const intent = str(v["intent"]);
       if (!intent) return null;
+      // Only the three words, each checked again on the device (`chartAsk.ts`, `hintFrom`).
+      const said = v["draw"] && typeof v["draw"] === "object" && !Array.isArray(v["draw"]) ? (v["draw"] as Record<string, unknown>) : {};
+      const draw = { shape: str(said["shape"]).slice(0, 12), by: str(said["by"]).slice(0, 12), money: str(said["money"]).slice(0, 12) };
       return {
         text: intent,
         category: intent,
         confidence: str(v["target"]),
-        data: { intent, target: str(v["target"]), period: str(v["period"]), compare: str(v["compare"]) },
+        data: { intent, target: str(v["target"]), period: str(v["period"]), compare: str(v["compare"]), draw },
       };
     },
     maxTokens: 500,
