@@ -726,6 +726,7 @@ The owner: Cash recorded PHP 760.00, really PHP 1,100.00. Replayed on the
 | The owner's own earlier estimate ("Cash spending not written down at the time", PHP 3,523.00) was never looked at | With more in hand than recorded, an estimate big enough to hold the difference is the first thing offered, with the figure to lower it to (`estimate`) |
 | "Difference −PHP 340.00" and "Found −PHP 120.00" in red read as money lost | Said in words: "More than recorded" or "Less than recorded", the figure plain |
 | The chat added a "Random PHP 220.00" income card beside two entries that add up to the same, said "mostly clear in the picture" with no picture, and its cards read "Matched on entered twice" | No income card when the ledger itself could be the answer; a card from the difference is never "in the picture"; each reason is a sentence ("Looks like #3842 entered a second time.") |
+| On a phone, "Read Saturday, October 3, 2026" on the Spending through chart did nothing that could be seen: it changed the day panel, a screen above | The panel is brought into view after a chart's button changes it (`showPanel` in `Insights.tsx`), for the spending, trend and budget charts |
 ---
 
 ## 6. What the owner has to do

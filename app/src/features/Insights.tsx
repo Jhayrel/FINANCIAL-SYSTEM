@@ -220,6 +220,24 @@ export function Insights({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /*
+   * A chart's "Read Saturday, October 3" or "Show only March" changes the
+   * panel, and on a phone the panel is a screen or more above the chart: the
+   * tap did its work out of sight and looked like nothing (3 October 2026,
+   * "in phone like there's nothing happening"). So the panel is brought into
+   * view once it has changed, unless its top is already on screen.
+   */
+  const showPanel = (): void => {
+    requestAnimationFrame(() => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      const top = panel.getBoundingClientRect().top;
+      if (top >= 76 && top < window.innerHeight * 0.6) return;
+      const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      panel.scrollIntoView({ block: "start", behavior: still ? "auto" : "smooth" });
+    });
+  };
+
   /** A new period starts whole: no pick, no half-made range, no kind picked. */
   const setPeriod = (p: Period): void => {
     setPeriodOnly(p);
@@ -833,6 +851,7 @@ export function Insights({
             if (!p) return;
             setPicked({ start: p.start, end: p.end });
             setAnchor(null);
+            showPanel();
           }}
           pickLabel={(i) => `Show only ${trend[i]?.title ?? ""}`}
         />
@@ -1279,6 +1298,7 @@ export function Insights({
                 if (!p) return;
                 setPicked({ start: p.start, end: p.end });
                 setAnchor(null);
+                showPanel();
               }}
               pickLabel={(i) => `Read ${burn.points[i]?.title ?? "that day"}`}
             />
@@ -1468,7 +1488,9 @@ export function Insights({
             actual={budgetMonths.map((m) => m.spent)}
             onPick={(i) => {
               const m = budgetMonths[i];
-              if (m) setPeriod({ kind: "month", year: m.year, month: m.month });
+              if (!m) return;
+              setPeriod({ kind: "month", year: m.year, month: m.month });
+              showPanel();
             }}
             pickLabel={(i) => `Open ${monthName(budgetMonths[i]?.month ?? 1)} ${budgetMonths[i]?.year ?? ""} on the calendar`}
           />
