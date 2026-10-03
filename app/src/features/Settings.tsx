@@ -90,6 +90,7 @@ import { activityStore } from "../data/activityStore";
 import { correctionsFrom, type AiEvent } from "../domain/aiLog";
 import type { ChatMessage } from "../domain/chat";
 import { setPreference as setThemePreference } from "../theme";
+import { checkRename, KIND_LIST_WORD, namesOn, renameInLists, rowsNamed, unlistedKinds, type KindList, type RenameCheck, type Unlisted } from "../domain/kindRename";
 import type { Budgets, ReferenceLists, SpendingType, StoppedItem, Transaction } from "../domain/types";
 import { billStatuses, STOPPED_AFTER_DAYS, type BillStatus } from "../domain/bills";
 import { behalfFor } from "../domain/behalfFor";
@@ -280,6 +281,7 @@ export function Settings({
           <CategoriesSection
             settings={settings}
             transactions={transactions}
+            deleted={deleted}
             patch={patch}
             onRenameItem={onRenameItem}
           />
@@ -1519,14 +1521,37 @@ function GoalRow({
 function CategoriesSection({
   settings,
   transactions,
+  deleted,
   patch,
   onRenameItem,
 }: {
   settings: AppSettings;
   transactions: readonly Transaction[];
+  deleted: readonly Transaction[];
   patch: (part: Partial<AppSettings>) => void;
   onRenameItem: (from: string, to: string) => void;
 }) {
+  /*
+   * Every list renames the same way, and a rename reaches every row that
+   * carries the name, live and in the bin, its budget limits, a stop on it
+   * and what the assistant learned under it (`domain/kindRename.ts`, App's
+   * `handleRename`). 3 October 2026, the owner: "make them editable too then
+   * it will sync to the whole system and fix every data".
+   */
+  const others = useMemo(
+    () => ({ accounts: settings.accounts.map((a) => a.name), credits: settings.credits.map((c) => c.name) }),
+    [settings.accounts, settings.credits],
+  );
+  const everyRow = useMemo(() => [...transactions, ...deleted], [transactions, deleted]);
+  const tools = (list: KindList): RenameTools => ({
+    check: (from, to) => checkRename(settings, list, from, to, others),
+    rows: (name) => rowsNamed(everyRow, name),
+    apply: (from, to) => {
+      onRenameItem(from, to);
+      patch(renameInLists(settings, list, from, to));
+    },
+  });
+  const unlisted = useMemo(() => unlistedKinds(transactions, settings), [transactions, settings]);
   /*
    * Where each bill and subscription stands: last paid, and stopped or not.
    * The owner, 27 September 2026, on a cancelled Google Drive: "is there an
@@ -1578,6 +1603,7 @@ function CategoriesSection({
         hint="Recurring. Predicted one month after the last payment. Stop one you no longer pay: its history stays."
         values={settings.bills}
         onChange={(bills) => patch({ bills })}
+        rename={tools("bills")}
         recurring={{
           statuses,
           theirs,
@@ -1594,6 +1620,7 @@ function CategoriesSection({
         hint="Same prediction, separate budget line. Stop one you cancelled: its history stays."
         values={settings.subscriptions}
         onChange={(subscriptions) => patch({ subscriptions })}
+        rename={tools("subscriptions")}
         recurring={{
           statuses,
           theirs,
@@ -1610,14 +1637,215 @@ function CategoriesSection({
         hint="Sources of money in"
         values={settings.revenueCategories}
         onChange={(revenueCategories) => patch({ revenueCategories })}
+        rename={tools("revenueCategories")}
       />
       <SpendingTypes
         types={settings.spendingTypes}
-        transactions={transactions}
         onChange={(spendingTypes) => patch({ spendingTypes })}
-        onRename={onRenameItem}
+        rename={tools("spendingTypes")}
+      />
+      <UnlistedKinds
+        kinds={unlisted}
+        settings={settings}
+        others={others}
+        onMove={onRenameItem}
+        onPutOnList={(u) =>
+          patch(
+            u.list === "spendingTypes"
+              ? { spendingTypes: [...settings.spendingTypes, { name: u.name, remark: "" }] }
+              : ({ [u.list]: [...settings[u.list], u.name] } as Partial<AppSettings>),
+          )
+        }
       />
     </>
+  );
+}
+
+/** How a list's kinds are renamed: checked, counted and applied everywhere (`domain/kindRename.ts`). */
+interface RenameTools {
+  readonly check: (from: string, to: string) => RenameCheck;
+  /** Rows carrying the name, live and in the bin. */
+  readonly rows: (name: string) => number;
+  readonly apply: (from: string, to: string) => void;
+}
+
+const rowsWord = (n: number): string => (n === 1 ? "1 row" : `${n.toLocaleString()} rows`);
+
+/**
+ * Renaming one kind in place: the name typed over, checked as it is typed,
+ * and confirmed with what it will change before anything does.
+ */
+function useRename(tools: RenameTools, confirm: ReturnType<typeof useConfirm>["confirm"]) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState("");
+
+  const begin = (name: string): void => {
+    setEditing(name);
+    setDraft(name);
+    setError("");
+  };
+  const cancel = (): void => {
+    setEditing(null);
+    setError("");
+  };
+  const type = (value: string): void => {
+    setDraft(value);
+    setError("");
+  };
+
+  /** What saving will do, under the box while typing. */
+  const preview = (from: string): string => {
+    const n = tools.rows(from);
+    const typed = draft.trim();
+    const c = typed && typed !== from.trim() ? tools.check(from, typed) : null;
+    if (c && c.ok && c.merge) return `Merges into ${c.to}: ${n > 0 ? `its ${rowsWord(n)} move there` : "nothing to move"}, and ${from} comes off the list.`;
+    return n > 0 ? `Renaming rewrites ${rowsWord(n)}, in the ledger and the bin.` : "Nothing uses it yet, so only the list changes.";
+  };
+
+  const save = async (from: string): Promise<void> => {
+    if (draft.trim() === from.trim()) {
+      cancel();
+      return;
+    }
+    const c = tools.check(from, draft);
+    if (!c.ok) {
+      setError(c.reason);
+      return;
+    }
+    const n = tools.rows(from);
+    const ok = await confirm({
+      title: c.merge ? `Merge \u201c${from}\u201d into \u201c${c.to}\u201d?` : `Rename \u201c${from}\u201d to \u201c${c.to}\u201d?`,
+      body: [
+        n > 0
+          ? `${rowsWord(n)} will carry the name ${c.to}, in the ledger and the bin, with its budget limits and anything stopped.`
+          : "Nothing uses it yet, so only the list changes.",
+        c.merge ? `${from} comes off the list.` : "",
+        "Amounts and dates do not change, so no balance or total moves.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      confirmLabel: c.merge ? "Merge" : "Rename",
+    });
+    if (!ok) return;
+    tools.apply(from, c.to);
+    setEditing(null);
+  };
+
+  /** Enter saves and Escape puts it back, as in every other box here. */
+  const keys = (from: string) => (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void save(from);
+    } else if (e.key === "Escape") {
+      cancel();
+    }
+  };
+
+  return { editing, draft, error, begin, cancel, type, preview, save, keys };
+}
+
+/**
+ * The kinds the entries use that are on none of the lists.
+ *
+ * Renamed away, removed, or saved from a card before 3 October 2026. No
+ * total, filter or ranking that goes by the owner's kinds finds those rows,
+ * so each is moved into a kind of theirs (every row renamed, as a rename
+ * does) or put on its list as it is.
+ */
+function UnlistedKinds({
+  kinds,
+  settings,
+  others,
+  onMove,
+  onPutOnList,
+}: {
+  kinds: readonly Unlisted[];
+  settings: AppSettings;
+  others: { readonly accounts: readonly string[]; readonly credits: readonly string[] };
+  onMove: (from: string, to: string) => void;
+  onPutOnList: (kind: Unlisted) => void;
+}) {
+  const { confirm, dialog } = useConfirm();
+  const [all, setAll] = useState(false);
+  const [refused, setRefused] = useState<{ name: string; reason: string } | null>(null);
+  if (kinds.length === 0) return null;
+  const shown = all ? kinds : kinds.slice(0, 8);
+
+  const move = async (u: Unlisted, to: string): Promise<void> => {
+    const ok = await confirm({
+      title: `Move \u201c${u.name}\u201d into \u201c${to}\u201d?`,
+      body: `${rowsWord(u.rows)} will carry the name ${to}, in the ledger and the bin. Amounts and dates do not change, so no balance moves; the totals by kind now count them under ${to}.`,
+      confirmLabel: "Move them",
+    });
+    if (ok) onMove(u.name, to);
+  };
+
+  const putOn = (u: Unlisted): void => {
+    // Checked as a rename onto itself would be: never a name another list, an account or a worked-out kind has.
+    const c = checkRename(settings, u.list, "", u.name, others);
+    if (!c.ok) {
+      setRefused({ name: u.name, reason: c.reason });
+      return;
+    }
+    setRefused(null);
+    onPutOnList(u);
+  };
+
+  return (
+    <Group
+      title="Kinds on no list"
+      hint="Your entries use these, but none of your lists has them, so no total or filter that goes by your kinds finds those rows. Move each into one of yours, or put it on its list."
+      action={<CountChip>{kinds.length}</CountChip>}
+    >
+      {dialog}
+      <table className="fms-table">
+        <thead>
+          <tr>
+            <th>Kind</th>
+            <th className="fms-shrink" />
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((u) => (
+            <tr key={`${u.flow}:${u.name}`}>
+              <td>
+                <span className="fms-recurring-name">
+                  <span className="t-body">{u.name}</span>
+                  <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                    {rowsWord(u.rows)} of {u.flow === "Revenue" ? "income" : "spending"}, the last on {formatMedium(u.last)}
+                  </span>
+                  {refused?.name === u.name && (
+                    <span className="t-caption" style={{ color: "var(--over)" }}>
+                      {refused.reason}
+                    </span>
+                  )}
+                </span>
+              </td>
+              <td>
+                <span className="fms-rowactions fms-rowactions--three">
+                  <Select
+                    value=""
+                    placeholder="Move into"
+                    options={namesOn(settings, u.list)}
+                    ariaLabel={`Move ${u.name} into one of your ${KIND_LIST_WORD[u.list]}`}
+                    onChange={(to) => void move(u, to)}
+                  />
+                  <Button size="sm" variant="secondary" onClick={() => putOn(u)}>
+                    Put on the list
+                  </Button>
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {kinds.length > 8 && (
+        <button type="button" className="t-caption fms-linkbtn" onClick={() => setAll((v) => !v)}>
+          {all ? "Show the latest 8" : `Show all ${kinds.length}`}
+        </button>
+      )}
+    </Group>
   );
 }
 
@@ -1645,6 +1873,7 @@ function StringList({
   hint,
   values,
   onChange,
+  rename,
   recurring,
 }: {
   title: string;
@@ -1652,10 +1881,12 @@ function StringList({
   hint: string;
   values: readonly string[];
   onChange: (values: string[]) => void;
+  rename: RenameTools;
   recurring?: Recurring;
 }) {
   const [adding, setAdding] = useState("");
   const { confirm, dialog } = useConfirm();
+  const renaming = useRename(rename, confirm);
 
   const add = (): void => {
     const name = adding.trim();
@@ -1667,7 +1898,7 @@ function StringList({
   const remove = async (v: string): Promise<void> => {
     const ok = await confirm({
       title: `Remove \u201c${v}\u201d?`,
-      body: `It disappears from the ${singular.toLowerCase()} list and stops being predicted. Transactions already filed under it keep the name and still count.${
+      body: `It disappears from the ${singular.toLowerCase()} list and stops being predicted. Transactions already filed under it keep the name and still count, on no list. To move them, rename it instead.${
         recurring ? " To keep it listed but no longer expected, press Stop instead." : ""
       }`,
       confirmLabel: "Remove",
@@ -1728,7 +1959,32 @@ function StringList({
         </tr>
       </thead>
       <tbody>
-        {list.map((v) => (
+        {list.map((v) =>
+          renaming.editing === v ? (
+            <tr key={v}>
+              <td>
+                <span className="fms-recurring-name">
+                  <TextInput
+                    value={renaming.draft}
+                    onChange={renaming.type}
+                    onKeyDown={renaming.keys(v)}
+                    invalid={renaming.error !== ""}
+                    ariaLabel={`New name for ${v}`}
+                    maxLength={80}
+                  />
+                  <span className="t-caption" style={{ color: renaming.error ? "var(--over)" : "var(--ink-3)" }}>
+                    {renaming.error || renaming.preview(v)}
+                  </span>
+                </span>
+              </td>
+              <td>
+                <span className="fms-rowactions fms-rowactions--three">
+                  <Button size="sm" variant="primary" onClick={() => void renaming.save(v)}>Save</Button>
+                  <Button size="sm" variant="secondary" onClick={renaming.cancel}>Cancel</Button>
+                </span>
+              </td>
+            </tr>
+          ) : (
           <tr key={v}>
             <td>
               <span className="fms-recurring-name">
@@ -1739,7 +1995,10 @@ function StringList({
               </span>
             </td>
             <td>
-              <span className="fms-rowactions">
+              <span className="fms-rowactions fms-rowactions--three">
+                <Button size="sm" variant="secondary" ariaLabel={`Rename ${v}`} onClick={() => renaming.begin(v)}>
+                  Rename
+                </Button>
                 {recurring &&
                   (halted ? (
                     <Button size="sm" ariaLabel={`Start paying ${v} again`} onClick={() => recurring.onStart(v)}>
@@ -1756,7 +2015,8 @@ function StringList({
               </span>
             </td>
           </tr>
-        ))}
+          ),
+        )}
       </tbody>
     </table>
   );
@@ -1828,21 +2088,18 @@ const NECESSITY_KEYS = Object.keys(NECESSITY_LABEL) as (keyof typeof NECESSITY_L
 
 function SpendingTypes({
   types,
-  transactions,
   onChange,
-  onRename,
+  rename,
 }: {
   types: readonly SpendingType[];
-  transactions: readonly Transaction[];
   onChange: (types: SpendingType[]) => void;
-  onRename: (from: string, to: string) => void;
+  rename: RenameTools;
 }) {
   const [adding, setAdding] = useState("");
-  const [editingName, setEditingName] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
   const { confirm, dialog } = useConfirm();
+  const renaming = useRename(rename, confirm);
 
-  const used = (name: string): number => transactions.filter((x) => x.item === name).length;
+  const used = rename.rows;
 
   /** The list you can edit. The derived two are not part of it. */
   const shown = types.filter((t) => !isDerived(t.name));
@@ -1855,29 +2112,6 @@ function SpendingTypes({
     if (isDerived(name)) return;
     onChange([...types, { name, remark: "" }]);
     setAdding("");
-  };
-
-  const commitRename = async (from: string): Promise<void> => {
-    const to = draft.trim();
-    if (!to || to === from) {
-      setEditingName(null);
-      return;
-    }
-
-    const n = used(from);
-    const ok = await confirm({
-      title: `Rename \u201c${from}\u201d to \u201c${to}\u201d?`,
-      body:
-        n > 0
-          ? `${n} transaction${n === 1 ? "" : "s"} will be rewritten so the ranking stays whole. Amounts and dates do not change.`
-          : "Nothing uses this type yet, so only the list changes.",
-      confirmLabel: "Rename",
-    });
-    if (!ok) return;
-
-    onRename(from, to);
-    onChange(types.map((t) => (t.name === from ? { ...t, name: to } : t)));
-    setEditingName(null);
   };
 
   const remove = async (name: string): Promise<void> => {
@@ -1918,16 +2152,21 @@ function SpendingTypes({
           {shown.map((t) => {
             const rows = used(t.name);
 
-            if (editingName === t.name) {
+            if (renaming.editing === t.name) {
               return (
                 <tr key={t.name}>
                   <td>
-                    <TextInput value={draft} onChange={setDraft} />
+                    <TextInput
+                      value={renaming.draft}
+                      onChange={renaming.type}
+                      onKeyDown={renaming.keys(t.name)}
+                      invalid={renaming.error !== ""}
+                      ariaLabel={`New name for ${t.name}`}
+                      maxLength={80}
+                    />
                   </td>
-                  <td className="t-caption" style={{ color: "var(--ink-3)" }}>
-                    {rows > 0
-                      ? `Renaming rewrites ${rows} row${rows === 1 ? "" : "s"}.`
-                      : "Nothing uses this type yet."}
+                  <td className="t-caption" style={{ color: renaming.error ? "var(--over)" : "var(--ink-3)" }}>
+                    {renaming.error || renaming.preview(t.name)}
                   </td>
                   <td className="t-caption" style={{ color: "var(--ink-3)" }}>
                     {NECESSITY_LABEL[t.necessity ?? "unmarked"]}
@@ -1936,9 +2175,9 @@ function SpendingTypes({
                     <span className="t-num-s" style={{ color: "var(--ink-3)" }}>{rows || "0"}</span>
                   </td>
                   <td>
-                    <span className="fms-rowactions">
-                      <Button size="sm" variant="primary" onClick={() => void commitRename(t.name)}>Save</Button>
-                      <Button size="sm" variant="secondary" onClick={() => setEditingName(null)}>Cancel</Button>
+                    <span className="fms-rowactions fms-rowactions--three">
+                      <Button size="sm" variant="primary" onClick={() => void renaming.save(t.name)}>Save</Button>
+                      <Button size="sm" variant="secondary" onClick={renaming.cancel}>Cancel</Button>
                     </span>
                   </td>
                 </tr>
@@ -1982,8 +2221,8 @@ function SpendingTypes({
                   <span className="t-num-s" style={{ color: "var(--ink-3)" }}>{rows || "0"}</span>
                 </td>
                 <td>
-                  <span className="fms-rowactions">
-                    <Button size="sm" variant="secondary" onClick={() => { setEditingName(t.name); setDraft(t.name); }}>
+                  <span className="fms-rowactions fms-rowactions--three">
+                    <Button size="sm" variant="secondary" ariaLabel={`Rename ${t.name}`} onClick={() => renaming.begin(t.name)}>
                       Rename
                     </Button>
                     <Button size="sm" variant="danger" ariaLabel={`Remove ${t.name}`} onClick={() => void remove(t.name)}>

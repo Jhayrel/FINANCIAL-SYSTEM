@@ -633,6 +633,28 @@ the owner's kinds found it again. The Add form only ever offered the lists.
 | Everyday words (`filipino.ts`) | vacation, trip, transportation, entertainment, medicines, dining, grooming and a few more, resolved against the owner's own list like the rest |
 
 A genuinely new kind is made in Settings and is then on the list like the rest.
+
+### 2026-10-03, last: every kind on every list can be renamed
+
+"In categories make them editable too then it will sync to the whole system and
+fix every data." Only kinds of spending had Rename; a bill, a subscription or a
+kind of income could only be removed and added again, which left its rows on
+no list.
+
+| What | How |
+|---|---|
+| Rename on every list (Settings, Categories) | Typed in place; under the box, what saving will do; Enter saves, Escape puts it back; a confirm names the rows before anything changes (`useRename` in `Settings.tsx`) |
+| What follows a rename | Every row with that name, any case, live and in the bin (`renameItem`); the budget limits (`renameLimitKind`); a stop on a bill or subscription; what the assistant learned under the old name (a rename is kept as a correction, and `correctionsFrom` follows the chain); the trail ("Renamed the kind ...") |
+| Onto a name already on the same list | A merge: one kind afterwards, the target's note and mark kept, the old one's taken where the target has none |
+| Refused, with the reason under the box | A name on another list, an account's or credit line's name, Money Send or Transaction Fee, a kind of entry (Spending, Revenue ...) |
+| Kinds on no list (new group, shown only when there are some) | Kinds the rows carry that no list has, newest first: Move into one of yours (every row renamed), or Put on the list. This is where rows saved from a card before today with a made-up kind are put right |
+
+Checked in a browser on the sample ledger: rename, refusals, merge, Move into,
+the month's spending unchanged throughout, and the phone layout at 390px with
+no sideways scroll. `kindRename.test.ts` holds the rules. The sample ledger is
+not kept across a reload in the local preview (only Firestore keeps rows), so
+a rename there comes back as a kind on no list after a reload, which the new
+group then fixes.
 ---
 
 ## 6. What the owner has to do

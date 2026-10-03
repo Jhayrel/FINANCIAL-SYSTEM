@@ -1940,6 +1940,13 @@
 .fms-rowactions > button { min-width: 96px; }
 
 /*
+ * The Categories tab: Rename, Stop and Remove on a bill, two on the other
+ * lists. Every list there reserves the width of three, so the buttons line
+ * up from one section to the next as they did when the most was two.
+ */
+.fms-rowactions--three { min-width: calc(3 * 96px + 2 * var(--space-2)); }
+
+/*
  * A settings section spaces its own children.
  *
  * The header carried a bottom margin and everything after it carried nothing,

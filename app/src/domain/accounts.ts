@@ -385,7 +385,12 @@ export function renameItem<T extends Transaction>(
 ): T[] {
   const next = to.trim();
   if (!next || next === from) return [...transactions];
-  return transactions.map((t) => (t.item === from ? { ...t, item: next } : t));
+  /*
+   * Whatever its case or spacing: "food " and "Food" are one kind, and a
+   * rename that left one of them behind left those rows on no list.
+   */
+  const was = from.trim().toLowerCase();
+  return transactions.map((t) => (t.item.trim().toLowerCase() === was && t.item !== next ? { ...t, item: next } : t));
 }
 
 // ── Migration from the old flat lists ──────────────────────────────────────

@@ -97,7 +97,7 @@ import { FREE_READS, resetsAt, usageLevel } from "./data/usage";
 import { useUsage } from "./features/useUsage";
 import { useConfirm } from "./components/Confirm";
 import { aiLogStore } from "./data/aiLogStore";
-import { manualCorrections } from "./domain/aiLog";
+import { aiEvent, manualCorrections } from "./domain/aiLog";
 import {
   binned as binnedEvent,
   budgetChanged,
@@ -1391,6 +1391,17 @@ export default function App() {
       ...live.filter((t, i) => t !== transactions[i]),
       ...binned.filter((t, i) => t !== deleted[i]),
     ];
+    if (kind === "item") {
+      /*
+       * On the trail, and kept as a correction of the old name to the new
+       * one, so what the assistant learned under the old name follows it
+       * (`correctionsFrom`). 3 October 2026: every list can be renamed now.
+       */
+      record(settingsChanged(`Renamed the kind "${from}" to "${to}": ${changed.length === 1 ? "1 row" : `${changed.length.toLocaleString()} rows`} now carry the new name`));
+      void aiLogStore(cloud.uid ?? null)
+        .record(aiEvent("edited", "add", { field: "item", proposed: from, corrected: to, text: "Renamed in Settings" }))
+        .catch(() => {});
+    }
     if (changed.length === 0) return;
 
     setTransactions(live);

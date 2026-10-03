@@ -237,6 +237,22 @@ export function correctionsFrom(
     learned.set(from, to);
   }
 
+  /*
+   * A lesson that points at a name renamed since follows it: "beach" taught
+   * as Vacation, then Vacation renamed to Travel in Settings, is Travel. A
+   * rename is kept as a correction of the old name to the new one, so the
+   * chain is in this same map. A few steps at most, and never round a loop.
+   */
+  for (const [word, item] of learned) {
+    let now = item;
+    for (let step = 0; step < 5; step += 1) {
+      const next = learned.get(now.trim().toLowerCase());
+      if (!next || next.trim().toLowerCase() === word || next === now) break;
+      now = next;
+    }
+    if (now !== item) learned.set(word, now);
+  }
+
   return learned;
 }
 
