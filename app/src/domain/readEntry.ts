@@ -631,6 +631,22 @@ const DEPOSITING = /\b(deposited|deposit|credited|credit to)\b/i;
  * The two halves are deliberately separate: this one reads English, and
  * `inferFromHistory` reads the owner's own rows. Neither invents.
  */
+/** A question, a plan or a budget about money: never read as a row from a bare word and a price. */
+const NOT_A_ROW =
+  /\?|^\s*(?:how|what|why|when|which|is|are|do|does|can|could|would|should|will)\b|\b(?:how much|how many|should i|can i|could i|would it|budget|limit|plan|planning|save|saving|goal|afford|balance|forecast|recommend|suggest)\b/i;
+
+/** One of the owner's kinds of spending that an everyday word in the sentence names, or "". */
+function kindByWord(text: string, reference: ReferenceLists): string {
+  const hint = itemHintIn(text);
+  if (!hint) return "";
+  const kinds = reference.spendingTypes.filter((t) => t.name.trim() !== "");
+  return (
+    kinds.find((t) => t.name.toLowerCase() === hint)?.name ??
+    kinds.find((t) => t.remark.toLowerCase().includes(hint))?.name ??
+    ""
+  );
+}
+
 export function readEntry(
   text: string,
   transactions: readonly Transaction[],
@@ -718,7 +734,18 @@ export function readEntry(
     flowOf(text) === null &&
     (itemFromHistory(text, transactions.filter((t) => t.type === "Spending")) !== null ||
       // A kind of spending from their own list and a price: "gas 250 cash", "school 150".
-      (namesMoney(text) && reference.spendingTypes.some((t) => t.name.trim() !== "" && namesCredit(text, t.name))));
+      (namesMoney(text) && !NOT_A_ROW.test(text) && reference.spendingTypes.some((t) => t.name.trim() !== "" && namesCredit(text, t.name))) ||
+      /*
+       * The everyday word for one of their kinds and a price: "lunch 99
+       * cash", "grab 250 gcash", "coffee 120". With no model to read it the
+       * chat said the AI was not working (3 October 2026). The word has to
+       * resolve to a kind on their own list, as "gas" does, so a word that
+       * names nothing of theirs still makes nothing; and a question or a
+       * plan about money is never a row.
+       */
+      (namesMoney(text) && !NOT_A_ROW.test(text) && kindByWord(text, reference) !== "") ||
+      // One of their bills or subscriptions by name and a price: "spotify 149 maya".
+      (namesMoney(text) && !NOT_A_ROW.test(text) && [...reference.bills, ...reference.subscriptions].some((n) => n.trim() !== "" && namesCredit(text, n))));
 
   const flow = readsAsDebt ? null : earnsInterest ? "Revenue" : (flowOf(text) ?? (verbless ? "Spending" : null));
   if (!flow) {
@@ -1029,7 +1056,23 @@ export function readEntry(
    * a named destination is still your money and only the fee is spending; a
    * blank one means it left your accounts and the whole amount is.
    */
-  const { draft, because: fromHistory } = inferFromHistory(base, transactions, reference, text);
+  const { draft: inferred, because: fromHistory } = inferFromHistory(base, transactions, reference, text);
+
+  /*
+   * A bill or subscription by name is filed on its own list: "paid spotify
+   * 149 maya" read Spotify as the item under plain Spending, a kind no
+   * spending list has (3 October 2026), so its budget line and its due date
+   * never saw the payment.
+   */
+  const recurringList: Draft["category"] =
+    inferred.flow !== "Spending" || !inferred.item.trim()
+      ? ""
+      : reference.bills.some((b) => b.trim().toLowerCase() === inferred.item.trim().toLowerCase())
+        ? "Bills"
+        : reference.subscriptions.some((b) => b.trim().toLowerCase() === inferred.item.trim().toLowerCase())
+          ? "Subscriptions"
+          : "";
+  const draft = recurringList && inferred.category !== recurringList ? { ...inferred, category: recurringList } : inferred;
 
   /**
    * Worth showing when the sentence gave a figure, or the ledger recognised

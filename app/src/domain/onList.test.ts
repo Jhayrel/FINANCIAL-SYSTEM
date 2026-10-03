@@ -109,3 +109,13 @@ describe("the ledger's own history", () => {
     expect(inferFromHistory(spend(""), history, reference, "pasalubong 500 cash").draft.item).not.toBe("Pasalubong");
   });
 });
+
+describe("a name on the owner's other spending list", () => {
+  it("moves the card to that list rather than reading it for another kind", () => {
+    const bill = fitItem({ ...spend("internet"), category: "Spending" }, "", reference);
+    expect(bill.draft).toMatchObject({ item: "Internet", category: "Bills" });
+    expect(bill.note).toBe("Internet is one of your bills, so it is filed there.");
+    const back = fitItem({ ...spend("Food"), category: "Subscriptions" }, "", reference);
+    expect(back.draft).toMatchObject({ item: "Food", category: "Spending" });
+  });
+});

@@ -94,6 +94,29 @@ export function fitItem(
 
   const flow = draft.flow as "Spending" | "Revenue";
   const item = draft.item.trim();
+
+  /*
+   * On the owner's other spending list: "Globe at Home Wifi" read with the
+   * category Spending is their bill, so the card moves to Bills rather than
+   * the name being read for a kind of spending. And a kind of spending read
+   * as a bill goes back to Spending.
+   */
+  if (flow === "Spending") {
+    const lists: readonly [Draft["category"], readonly string[]][] = [
+      ["Bills", reference.bills],
+      ["Subscriptions", reference.subscriptions],
+      ["Spending", reference.spendingTypes.map((t) => t.name)],
+    ];
+    for (const [category, names] of lists) {
+      if (category === draft.category) continue;
+      const exact = matchExact(item, [...names]);
+      if (exact) {
+        const word = category === "Bills" ? "bill" : category === "Subscriptions" ? "subscription" : "kind of spending";
+        return { draft: { ...draft, item: exact, category }, note: `${exact} is one of your ${word === "kind of spending" ? "kinds of spending" : `${word}s`}, so it is filed there.` };
+      }
+    }
+  }
+
   const known = itemsFor(flow, draft.category, reference);
   const kinds = kindsWord(flow, draft.category);
 
