@@ -5657,8 +5657,16 @@ textarea.fms-askinput {
    and every bar prints its own figure, so the chart is readable without
    comparing any two lengths at all. */
 
+/*
+ * The columns belong to the chart, not to each row. Each row used to size its
+ * own figure column, so a row with a longer figure had a shorter track, and a
+ * bar's length said something about its label's width as well as its money.
+ * With one set of columns every track is the same length and every bar is on
+ * one scale, which a comparison of two periods depends on outright.
+ */
 .fms-chartrows {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(40px, 2fr) auto;
   gap: var(--space-2);
   min-width: 0;
 }
@@ -5707,7 +5715,8 @@ textarea.fms-askinput {
  */
 .fms-chartrow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(40px, 2fr) auto;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   align-items: center;
   gap: var(--space-2);
   width: 100%;
@@ -5840,12 +5849,107 @@ textarea.fms-askinput {
 
 /* Stacked, the label goes above so the bar keeps its width. */
 @media (max-width: 1023px) {
-  .fms-chartrow {
+  .fms-chartrows {
     grid-template-columns: minmax(0, 1fr) auto;
   }
   .fms-chartlabel {
     grid-column: 1 / -1;
   }
+}
+
+/*
+ * Two periods side by side: "this month compared to last month".
+ *
+ * Each row carries two bars, now over then, on one scale. The earlier one is
+ * thinner and in the quiet ink, because it is a reference, not money moving
+ * one way or the other (rule D3). Both figures print, so nothing hangs on
+ * comparing two lengths.
+ */
+.fms-chartrow--compare {
+  grid-template-rows: auto auto;
+  row-gap: 3px;
+}
+
+.fms-chartrow--compare .fms-chartlabel {
+  grid-row: 1 / span 2;
+}
+
+.fms-chartrow--compare .fms-charttrack {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.fms-chartrow--compare .fms-charttrack--before {
+  grid-row: 2;
+  height: 6px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.fms-chartbar--before {
+  background: var(--ink-3);
+}
+
+.fms-chartrow--compare .fms-chartvalue {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  text-align: right;
+}
+
+.fms-chartbefore {
+  display: block;
+  color: var(--ink-3);
+}
+
+.fms-chartrow[aria-pressed="true"] .fms-chartbefore {
+  font-weight: 400;
+}
+
+@media (max-width: 1023px) {
+  .fms-chartrow--compare {
+    grid-template-rows: auto auto auto;
+  }
+  .fms-chartrow--compare .fms-chartlabel {
+    grid-row: 1;
+  }
+  .fms-chartrow--compare .fms-charttrack {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .fms-chartrow--compare .fms-charttrack--before {
+    grid-row: 3;
+  }
+  .fms-chartrow--compare .fms-chartvalue {
+    grid-column: 2;
+    grid-row: 2 / span 2;
+  }
+}
+
+/* What each bar is, above the chart: now in the money's ink, then in the quiet one. */
+.fms-chartkey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0 0 var(--space-2);
+  color: var(--ink-2);
+}
+
+.fms-chartkey-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.fms-chartkey-swatch {
+  display: inline-block;
+  flex: none;
+  width: 12px;
+  height: 10px;
+}
+
+.fms-chartkey-swatch--before {
+  height: 6px;
+  background: var(--ink-3);
 }
 
 /* ── Attachments, as squares ──────────────────────────────────────────────

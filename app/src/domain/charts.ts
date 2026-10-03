@@ -51,6 +51,10 @@ export interface ChartRow {
   /** 0 to 1, of the largest row, for the bar length. */
   readonly share: number;
   readonly count: number;
+  /** On a comparison: the same row in the earlier period, in centavos. */
+  readonly previous?: number | undefined;
+  /** And its bar length, on the same scale as `share`. */
+  readonly previousShare?: number | undefined;
 }
 
 export interface Chart {
@@ -68,6 +72,19 @@ export interface Chart {
    * from the title.
    */
   readonly direction?: "spending" | "revenue" | undefined;
+  /**
+   * The earlier period of a comparison: "this month compared to last
+   * month". Each row carries its own figure for it in `previous`.
+   */
+  readonly against?:
+    | {
+        readonly name: string;
+        readonly total: number;
+        readonly now: string;
+        /** Both windows, so a follow-up ("by wallet", "pie") keeps comparing the same two. */
+        readonly periods?: ComparedPeriods | undefined;
+      }
+    | undefined;
 }
 
 /** Which way the money in a chart went, including charts stored before it was recorded. */
@@ -825,15 +842,207 @@ function nextDay(day: IsoDate): IsoDate {
   return at.toISOString().slice(0, 10);
 }
 
+export interface ComparedPeriods {
+  readonly now: { readonly from: IsoDate; readonly to: IsoDate; readonly name: string };
+  readonly before: { readonly from: IsoDate; readonly to: IsoDate; readonly name: string };
+}
+
+/**
+ * Two periods side by side, said in relative words.
+ *
+ * 3 October 2026, the owner: "Show me my spending this month compared to
+ * last month" drew September alone, by item. A comparison was read only
+ * when two months were named ("september vs august"); "this month" and
+ * "last month" are neither, and "last month" became the whole window.
+ *
+ * This month against last, this week against last, this year against last,
+ * however it is put ("compared to", "vs", "than", "against", "from last
+ * month"). A period still running is compared with the same days of the
+ * one before it, as Insights does: three days of October against all of
+ * September says nothing about either.
+ */
+export function comparedPeriods(question: string, asOf: IsoDate): ComparedPeriods | null {
+  const q = question.toLowerCase();
+  /*
+   * Words that put two periods against each other. Not "from last month" or
+   * "over last month": "chart my spending from last month" is last month
+   * alone, and comparing it with this one draws a different question.
+   */
+  if (!/\b(compar\w*|versus|vs\.?|against|than|difference|differ\w*|changed|increase[sd]?|decrease[sd]?|stack(?:s|ed)? up|(?:went|gone|go) (?:up|down)|up from|down from)\b|\bhow\b.*\bchange\b/.test(q)) return null;
+  const unit = /\b(?:last|previous|past|prior)\s+week\b/.test(q)
+    ? "week"
+    : /\b(?:last|previous|prior)\s+year\b/.test(q)
+      ? "year"
+      : /\b(?:last|previous|prior)\s+month\b/.test(q)
+        ? "month"
+        : null;
+  if (!unit) return null;
+
+  const iso = (d: Date): IsoDate => d.toISOString().slice(0, 10);
+  const at = (d: IsoDate): Date => new Date(`${d}T00:00:00Z`);
+  const shortDay = (d: IsoDate): string => `${MONTHS[Number(d.slice(5, 7)) - 1]?.slice(0, 3) ?? ""} ${Number(d.slice(8, 10))}`;
+
+  if (unit === "week") {
+    const today = at(asOf);
+    const start = new Date(today);
+    start.setUTCDate(today.getUTCDate() - ((today.getUTCDay() + 6) % 7));
+    const days = Math.round((today.getTime() - start.getTime()) / 86_400_000);
+    const beforeStart = new Date(start);
+    beforeStart.setUTCDate(start.getUTCDate() - 7);
+    const beforeEnd = new Date(beforeStart);
+    beforeEnd.setUTCDate(beforeStart.getUTCDate() + days);
+    return {
+      now: { from: iso(start), to: asOf, name: `this week, ${shortDay(iso(start))} to ${shortDay(asOf)}` },
+      before: { from: iso(beforeStart), to: iso(beforeEnd), name: `the same days last week, ${shortDay(iso(beforeStart))} to ${shortDay(iso(beforeEnd))}` },
+    };
+  }
+
+  if (unit === "year") {
+    const y = Number(asOf.slice(0, 4));
+    const sameDay = `${y - 1}${asOf.slice(4)}`;
+    return {
+      now: { from: `${y}-01-01`, to: asOf, name: `${y} so far` },
+      before: { from: `${y - 1}-01-01`, to: sameDay, name: `${y - 1} to ${shortDay(sameDay)}` },
+    };
+  }
+
+  const y = Number(asOf.slice(0, 4));
+  const m = Number(asOf.slice(5, 7));
+  const day = Number(asOf.slice(8, 10));
+  const py = m === 1 ? y - 1 : y;
+  const pm = m === 1 ? 12 : m - 1;
+  const lastOfPrev = new Date(Date.UTC(py, pm, 0)).getUTCDate();
+  const thisName = `${MONTHS[m - 1] ?? ""} ${y}`;
+  const prevName = `${MONTHS[pm - 1] ?? ""} ${py}`;
+  const from = `${y}-${String(m).padStart(2, "0")}-01`;
+  const prevFrom = `${py}-${String(pm).padStart(2, "0")}-01`;
+  const prevTo = `${py}-${String(pm).padStart(2, "0")}-${String(Math.min(day, lastOfPrev)).padStart(2, "0")}`;
+  return {
+    now: { from, to: asOf, name: day === 1 ? `${thisName}, today` : `${thisName} so far, the 1st to the ${ordinal(day)}` },
+    before: { from: prevFrom, to: prevTo, name: `the same days of ${prevName}` },
+  };
+}
+
+const ordinal = (n: number): string => {
+  const tens = n % 100;
+  if (tens >= 11 && tens <= 13) return `${n}th`;
+  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+};
+
+/**
+ * The two periods the assistant read out of a message, in the owner's words,
+ * the later first: "this month" and "last month", "september" and "august",
+ * "this week" and "the week before".
+ *
+ * The words for a comparison are many and a list of them is never finished
+ * ("how does this month stack up with the one before"), so the model says
+ * which two periods are meant and this only works out their dates. "this"
+ * against "last" of the same unit is the same days of each, as above.
+ */
+export function periodsSaid(now: string, before: string, asOf: IsoDate): ComparedPeriods | null {
+  const unitOf = (s: string, words: string): string =>
+    new RegExp(String.raw`^(?:the\s+)?(?:${words})\s+(week|month|year)(?:\s+so far)?$`, "i").exec(s.trim())?.[1]?.toLowerCase() ?? "";
+  const earlier =
+    unitOf(before, "last|previous|prior|past|one before") ||
+    (/^(?:the\s+)?(week|month|year)\s+before(?:\s+(?:it|that))?$/i.exec(before.trim())?.[1]?.toLowerCase() ?? "");
+  const later = unitOf(now, "this|current|the current");
+  if (earlier && (later === earlier || /^(?:now|so far|to ?date|today)$/i.test(now.trim()))) {
+    return comparedPeriods(`compared to last ${earlier}`, asOf);
+  }
+  if (!namesWindow(now) || !namesWindow(before)) return null;
+  const a = windowOf(now, asOf);
+  const b = windowOf(before, asOf);
+  if (a.from === b.from && a.to === b.to) return null;
+  return { now: a, before: b };
+}
+
+/** The two periods' rows side by side, by item (or wallet, or category), largest of either first. */
+function buildComparison(
+  question: string,
+  everything: readonly Transaction[],
+  pair: ComparedPeriods,
+  direction: "spending" | "revenue",
+  focus: Focus,
+): Chart | null {
+  const valueOf = direction === "revenue" ? revenueOf : spendingOf;
+  const word = direction === "revenue" ? "Income" : "Spending";
+  const said = dimensionOf(question);
+  const by: ChartBy = (said === "wallet" && !focus.wallet) || said === "category" ? said : "item";
+  // One item, or one wallet, named: only its rows, each period's figure for it.
+  const sideOf = (t: Transaction): string => (direction === "revenue" ? t.toWallet : t.fromWallet).trim().toLowerCase();
+  const transactions = everything.filter(
+    (t) =>
+      (!focus.item || t.item.trim().toLowerCase() === focus.item.trim().toLowerCase()) &&
+      (!focus.wallet || sideOf(t) === focus.wallet.trim().toLowerCase()),
+  );
+  const narrowed = [focus.item, focus.wallet].filter(Boolean).join(", ");
+  const key = (t: Transaction): string =>
+    by === "wallet"
+      ? (direction === "revenue" ? t.toWallet : t.fromWallet).trim() || "(none)"
+      : by === "category"
+        ? t.category.trim() || "(none)"
+        : t.item.trim() || "(no item)";
+  const sum = (from: IsoDate, to: IsoDate): Map<string, { value: number; count: number }> => {
+    const out = new Map<string, { value: number; count: number }>();
+    for (const t of transactions) {
+      if (t.date < from || t.date > to) continue;
+      const v = valueOf(t);
+      if (v <= 0) continue;
+      const k = key(t);
+      const found = out.get(k) ?? { value: 0, count: 0 };
+      found.value += v;
+      found.count += 1;
+      out.set(k, found);
+    }
+    return out;
+  };
+  const now = sum(pair.now.from, pair.now.to);
+  const before = sum(pair.before.from, pair.before.to);
+  if (now.size === 0 && before.size === 0) return null;
+  const names = [...new Set([...now.keys(), ...before.keys()])];
+  const largest = Math.max(1, ...names.map((n) => Math.max(now.get(n)?.value ?? 0, before.get(n)?.value ?? 0)));
+  const rows = names
+    .map((n) => {
+      const a = now.get(n);
+      const b = before.get(n);
+      return { label: n, value: a?.value ?? 0, share: (a?.value ?? 0) / largest, count: a?.count ?? 0, previous: b?.value ?? 0, previousShare: (b?.value ?? 0) / largest };
+    })
+    .sort((x, y) => Math.max(y.value, y.previous) - Math.max(x.value, x.previous));
+  const kept = rows.slice(0, MOST_ROWS);
+  const total = rows.reduce((s, r) => s + r.value, 0);
+  return {
+    title: `${word}${narrowed ? ` on ${narrowed}` : ""} by ${by}, ${pair.now.name}, against ${pair.before.name}`,
+    by,
+    kind: "bars",
+    rows: kept,
+    total,
+    othersCount: rows.length - kept.length,
+    direction,
+    against: { name: pair.before.name, total: rows.reduce((s, r) => s + r.previous, 0), now: pair.now.name, periods: pair },
+  };
+}
+
 export function buildChart(
   question: string,
   transactions: readonly Transaction[],
   asOf: IsoDate,
   /** Money in or money out, when the caller has decided (income and spending drawn side by side). */
   only?: "spending" | "revenue",
+  /** Two periods to put side by side, when the assistant read them out of the message. */
+  said?: ComparedPeriods | null,
 ): Chart | null {
   const focus = focusOf(question, transactions);
   const direction = only ?? directionOf(question);
+  /*
+   * "this month compared to last month": both periods, row by row, as a
+   * split (by item, wallet or category). A trend over months already
+   * compares them by being drawn, and so do two named months, one bar each.
+   */
+  const pair = said ?? comparedPeriods(question, asOf);
+  if (pair && !overTime(dimensionOf(question))) {
+    const compared = buildComparison(question, transactions, pair, direction, focus);
+    if (compared) return compared;
+  }
   const valueOf = direction === "revenue" ? revenueOf : spendingOf;
   const word = direction === "revenue" ? "Income" : "Spending";
   /**
@@ -1046,6 +1255,13 @@ export function chartInWords(chart: Chart): string {
    * counted: "show me trend this year" listed January to May and stopped,
    * with nothing to say four more months were drawn (28 September 2026).
    */
+  // A comparison says each row's earlier figure beside it, and both totals.
+  if (chart.against) {
+    const said = chart.rows.slice(0, 6);
+    const top = said.map((r) => `${r.label} ${chartLabel(r.value)} (was ${chartLabel(r.previous ?? 0)})`).join(", ");
+    const left = chart.rows.length - said.length + chart.othersCount;
+    return `${top}${left > 0 ? `, and ${left} more` : ""}. Total ${chartLabel(chart.total)}, against ${chartLabel(chart.against.total)} for ${chart.against.name}.`;
+  }
   const shown = chart.rows.filter((r) => r.value > 0);
   const said = shown.slice(0, overTime(chart.by) ? 12 : 5);
   const top = said.map((r) => `${r.label} ${chartLabel(r.value)}`).join(", ");

@@ -1113,6 +1113,7 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "export: they want a file: a spreadsheet, a CSV, a backup, or a statement to download.",
     "chat: none of the above, including small talk.",
     "In target, put which entry they mean when they name one: the exact words, or the word last when they mean the most recent. In period, put the window when they name one, in their own words. Leave both empty when they name none.",
+    "In compare, when they want two periods put side by side, however it is worded (compared to, versus, than, against, how it changed, up or down from, stack up with), put both periods, the later first, separated by a vertical bar: this month|last month. Leave it empty when they name one period or none.",
     "Prefer correction and answer over entry when something is on screen waiting: someone who has just been asked how much is telling you how much, not starting a new entry.",
     /**
      * Worked examples, from the misroutings in the owner's record.
@@ -1138,7 +1139,10 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "download my september spending as a spreadsheet: export.",
     "change the amount of yesterday's food to 250: editEntry.",
     "bring back the snack I deleted in may: restore, target snack, period may.",
-    "how did august compare with july: chart, period july to august.",
+    "how did august compare with july: chart, period july to august, compare august|july.",
+    "Show me my spending this month compared to last month: chart, compare this month|last month.",
+    "did I spend more this week than the one before, draw it: chart, compare this week|last week.",
+    "chart how my food went from last month to now: chart, compare this month|last month.",
     "nagbayad ako ng tricycle 500 kanina cash: entry.",
   ].join(" "),
   /*
@@ -1245,7 +1249,7 @@ const TASKS: Record<string, TaskSpec> = {
   route: {
     instruction: TASK_INSTRUCTIONS["route"] ?? "",
     shape:
-      '{"reasoning": "one short sentence", "intent": "entry or question or chart or correction or answer or delete or restore or editEntry or investigate or budget or export or chat", "target": "", "period": ""}',
+      '{"reasoning": "one short sentence", "intent": "entry or question or chart or correction or answer or delete or restore or editEntry or investigate or budget or export or chat", "target": "", "period": "", "compare": ""}',
     parse: (v) => {
       const intent = str(v["intent"]);
       if (!intent) return null;
@@ -1253,7 +1257,7 @@ const TASKS: Record<string, TaskSpec> = {
         text: intent,
         category: intent,
         confidence: str(v["target"]),
-        data: { intent, target: str(v["target"]), period: str(v["period"]) },
+        data: { intent, target: str(v["target"]), period: str(v["period"]), compare: str(v["compare"]) },
       };
     },
     maxTokens: 500,

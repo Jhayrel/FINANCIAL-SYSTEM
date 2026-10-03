@@ -1249,6 +1249,11 @@ export interface Routed {
   readonly target: string;
   /** The window they named, in their words. */
   readonly period: string;
+  /**
+   * Two periods they want side by side, the later first, in their words:
+   * ["this month", "last month"]. Empty when they named one or none.
+   */
+  readonly compare: readonly [string, string] | readonly [];
 }
 
 const INTENTS: readonly Intent[] = [
@@ -1337,7 +1342,7 @@ export async function routeMessage(options: {
     }
 
     const payload = (await response.json()) as { data?: unknown };
-    const data = payload.data as { intent?: unknown; target?: unknown; period?: unknown } | undefined;
+    const data = payload.data as { intent?: unknown; target?: unknown; period?: unknown; compare?: unknown } | undefined;
     const intent = typeof data?.intent === "string" ? data.intent : "";
 
     // Checked against the list, so an invented intent is ignored rather than
@@ -1348,6 +1353,7 @@ export async function routeMessage(options: {
       intent: intent as Intent,
       target: typeof data?.target === "string" ? data.target.slice(0, 120) : "",
       period: typeof data?.period === "string" ? data.period.slice(0, 60) : "",
+      compare: twoPeriods(data?.compare),
     };
   } catch {
     // A failed routing is not an error worth showing: the local rules answer.
@@ -1355,6 +1361,14 @@ export async function routeMessage(options: {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** "this month|last month" as its two halves, or nothing when it is not two. */
+export function twoPeriods(said: unknown): readonly [string, string] | readonly [] {
+  if (typeof said !== "string") return [];
+  const parts = said.split("|").map((p) => p.trim().slice(0, 60));
+  const [now, before] = parts;
+  return parts.length === 2 && now && before && now.toLowerCase() !== before.toLowerCase() ? [now, before] : [];
 }
 
 /** What the endpoint can answer with right now, for the model picker in Settings. */

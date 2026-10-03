@@ -99,6 +99,7 @@ import {
 } from "../domain/recall";
 import {
   buildChart,
+  periodsSaid,
   wantsBothDirections,
   chartDirection,
   chartInWords,
@@ -4007,7 +4008,7 @@ export function AskPanel({
       return;
     }
 
-    let routed: { intent: Routed; target: string; period: string } | null = null;
+    let routed: { intent: Routed; target: string; period: string; compare: readonly [string, string] | readonly [] } | null = null;
     // A "//" line is a note to the developer: nothing to route, and nothing to wait on a model for.
     if (files.length === 0 && !as && !ai.disabled && !/^\s*\/\//.test(note)) {
       setBusy(true);
@@ -5295,9 +5296,19 @@ export function AskPanel({
        * Money in and money out together ("income vs spending", "cash flow")
        * is two charts, each in its own colour, rather than one of them.
        */
+      /*
+       * Two periods side by side, as the assistant read them: "this month
+       * compared to last month" however it is worded (3 October 2026, the
+       * owner: "sometimes the grammar will change so identify first"). A
+       * follow-up that names no period of its own ("by wallet", "pie") keeps
+       * comparing the two on screen.
+       */
+      const [laterSaid, earlierSaid] = routed?.compare ?? [];
+      const saidPair = laterSaid && earlierSaid ? periodsSaid(laterSaid, earlierSaid, asOf) : null;
+      const pair = saidPair ?? (followUp && !namesPeriod ? shown?.against?.periods ?? null : null);
       const both = wantsBothDirections(asked);
-      const chart = buildChart(asked, transactions, asOf, both ? "revenue" : undefined);
-      const second = both ? buildChart(asked, transactions, asOf, "spending") : null;
+      const chart = buildChart(asked, transactions, asOf, both ? "revenue" : undefined, pair);
+      const second = both ? buildChart(asked, transactions, asOf, "spending", pair) : null;
       setDraft("");
       say({ kind: "you", text: note });
       if (second) {
@@ -8538,6 +8549,22 @@ function ChartRead({ chart, at }: { chart: Chart; at: number | null }) {
 
   const share = chart.total > 0 ? Math.round((row.value / chart.total) * 100) : 0;
 
+  if (chart.against) {
+    const was = row.previous ?? 0;
+    const moved = row.value - was;
+    return (
+      <p className="t-micro fms-chartread">
+        <span className="fms-chartread-label">{row.label}</span>
+        <span className="fms-proposalmoney fms-chartread-money">{chartLabel(row.value)}</span>
+        <span className="fms-chartread-of">
+          {moved === 0
+            ? `the same as ${chart.against.name}`
+            : `${chartLabel(Math.abs(moved))} ${moved > 0 ? "more" : "less"} than ${chart.against.name}, ${was === 0 ? "which had none" : `which was ${chartLabel(was)}`}`}
+        </span>
+      </p>
+    );
+  }
+
   return (
     <p className="t-micro fms-chartread">
       <span className="fms-chartread-label">{row.label}</span>
@@ -8601,6 +8628,18 @@ function ChartView({ chart }: { chart: Chart }) {
         </span>
       </div>
 
+      {chart.against && (
+        <p className="t-micro fms-chartkey">
+          <span className="fms-chartkey-entry">
+            <span className="fms-chartkey-swatch" style={{ background: toneOf(chart) }} aria-hidden />
+            {chart.against.now}: <span className="fms-proposalmoney">{chartLabel(chart.total)}</span>
+          </span>
+          <span className="fms-chartkey-entry">
+            <span className="fms-chartkey-swatch fms-chartkey-swatch--before" aria-hidden />
+            {chart.against.name}: <span className="fms-proposalmoney">{chartLabel(chart.against.total)}</span>
+          </span>
+        </p>
+      )}
       {chart.kind === "pie" ? (
         <PieView chart={chart} at={at} point={point} pin={pin} leave={leave} />
       ) : chart.kind === "line" ? (
@@ -8617,14 +8656,15 @@ function ChartView({ chart }: { chart: Chart }) {
             // Days are a series too: shaded by rank they would read as a ranking.
             const months = overTime(chart.by);
             const strength = months ? monthStrength(r.value, average) : 1;
-            const colour = months
+            // Two periods side by side: one ink for now, so rank does not read as a third thing.
+            const colour = months || chart.against
               ? toneOf(chart)
               : rampFor(chartDirection(chart) === "revenue" ? "revenue" : "spending", i, chart.rows.length);
             return (
             <button
               key={r.label}
               type="button"
-              className="fms-chartrow"
+              className={chart.against ? "fms-chartrow fms-chartrow--compare" : "fms-chartrow"}
               aria-pressed={pinned && at === i}
               onMouseEnter={() => point(i)}
               onFocus={() => point(i)}
@@ -8643,7 +8683,16 @@ function ChartView({ chart }: { chart: Chart }) {
                   }}
                 />
               </span>
-              <span className="t-micro fms-chartvalue fms-proposalmoney">{chartLabel(r.value)}</span>
+              {chart.against && (
+                /* The earlier period, under it in grey: neither gain nor loss, only what it was. */
+                <span className="fms-charttrack fms-charttrack--before">
+                  <span className="fms-chartbar fms-chartbar--before" style={{ width: !r.previous ? 0 : `${Math.max((r.previousShare ?? 0) * 100, 1.5)}%` }} />
+                </span>
+              )}
+              <span className="t-micro fms-chartvalue fms-proposalmoney">
+                {chartLabel(r.value)}
+                {chart.against && <span className="fms-chartbefore"> was {chartLabel(r.previous ?? 0)}</span>}
+              </span>
             </button>
             );
           })}

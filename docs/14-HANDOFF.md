@@ -689,6 +689,19 @@ On the owner's data (the 2 October dump), the new "Kinds on no list" group
 holds 15 kinds, most from 2024; two came from the AI bug: Water (1 row,
 30 September) and Load (7 rows, September). Theirs to move; nothing was
 changed.
+
+### 2026-10-03, last: two periods side by side
+
+"Show me my spending this month compared to last month" drew September
+alone, by item. A comparison was read only when two months were named
+("september vs august"), so "last month" became the whole window.
+
+| Found | Fixed |
+|---|---|
+| "this month compared to last month" drew last month | Both periods, row by row: each item's figure now beside its figure then, on one scale, the earlier bar thin and grey with "was" beside it, and a key naming both totals (`comparedPeriods`, `buildComparison` in `charts.ts`, `chartCompare.test.ts`). A month still running is compared with the same days of the one before, as Insights does. Week and year work the same way |
+| The owner: "sometimes the grammar will change so identify first" | The router now names the two periods itself (`compare`, "this month\|last month") however the sentence puts it, and the device works out their dates (`periodsSaid`). With no model, the device's own words for a comparison still draw it. "chart my spending from last month" stays one month |
+| A follow-up ("by wallet", "pie") lost the comparison | The chart keeps both windows, and a follow-up naming no period of its own compares the same two |
+| Every bar chart in the chat: each row sized its own figure column, so a row with a longer figure had a shorter track and its bar was not on the same scale as the rest | One set of columns for the chart (`subgrid`), so every track is the same length |
 ---
 
 ## 6. What the owner has to do
