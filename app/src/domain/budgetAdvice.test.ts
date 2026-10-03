@@ -229,3 +229,28 @@ describe("why a month is over its budget", () => {
     expect(whyOver(ledger, { spending: 0, billsSubs: 0 }, 2026, 9, "2026-09-28")).toEqual([]);
   });
 });
+
+/*
+ * 4 October 2026, the owner: "I plan to adjusted my budget this month, can
+ * you set a plan? Like based on my income and spending" was answered by the
+ * device asking what the budget should be. It is a request for the app's
+ * recommendation, which the model gives ("Ai first. Fix this").
+ */
+describe("a plan asked for with no figure is advice", () => {
+  it("reads a plan, an adjustment with no figure, and a budget based on income", () => {
+    for (const q of [
+      "I plan to adjusted my budget this month, can you set a plan? Like based on my income and spending",
+      "can you make a budget plan for november",
+      "budget based on my allowance",
+      "please adjust my budget this month",
+    ]) {
+      expect(asksBudgetAdvice(q), q).toBe(true);
+    }
+  });
+
+  it("leaves a figure the owner gave to be set as given", () => {
+    expect(asksBudgetAdvice("set my budget to 9000 for october to december")).toBe(false);
+    expect(asksBudgetAdvice("adjust my budget to 12000")).toBe(false);
+    expect(asksBudgetAdvice("i planned to spend 500 today")).toBe(false);
+  });
+});

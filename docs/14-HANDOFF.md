@@ -816,6 +816,20 @@ Mkae it ver short and clean".
 Every statement type was checked on the owner's September: the account and
 wallet sheets close at what the wallets hold, the revenue and expense sheets
 total `incomeOf` and `costOf`, the debt sheets close at `outstandingOf`.
+
+### 2026-10-04: a budget plan, AI first
+
+The owner, with a screenshot: "I plan to adjusted my budget this month, can
+you set a plan? Like based on my income and spending" was answered by the
+device, "What should the budget be for October 2026?". Then: "Ai first. Fix
+this".
+
+| Found | Done |
+|---|---|
+| A plan, an adjustment with no figure, or a budget "based on my income" was not read as asking for advice, so it fell to the budget command with no figure, which asks | Read as advice (`asksBudgetAdvice`): the model answers with the app's recommendation for the month named ("this month" is October) |
+| "based on my income" had nothing to hold the budget to | Held to the income they usually receive, the median month over the months the spending is read from (`BY_INCOME`, `typicalIncome`) |
+| A recommendation needed "add it" before there was anything to apply | Asked to set or adjust one, the card comes with the answer, the app's own two parts, editable before Apply; asked only what it should be, it is still "add it" (`SETS_BUDGET`, `ASKS_ONLY`, `offerAdvisedBudget`) |
+| Any budget request with no figure got the device's question | With a model available it gets the recommendation and the card instead; the question is only for when no model can answer |
 ---
 
 ## 6. What the owner has to do

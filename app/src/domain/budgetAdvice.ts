@@ -444,7 +444,17 @@ export function asksBudgetAdvice(said: string): boolean {
     /\b(magkano|ilan)\b[^.?!]{0,30}\bbudget\b/.test(text) ||
     /\b(what|how much|magkano|ilan)\b[^.?!]{0,40}\bbudget\b[^.?!]{0,20}\b(be|should|dapat|set|for|next|need)\b/.test(text) ||
     /\bwhat\s+(?:should|would|could)\b[^.?!]{0,30}\bbudget\b/.test(text) ||
-    /\b(give|make|plan|work out|build|create)\s+(?:me\s+)?(?:a\s+|my\s+)?(?:new\s+|realistic\s+)?budget\b/.test(text)
+    /\b(give|make|plan|work out|build|create)\s+(?:me\s+)?(?:a\s+|my\s+)?(?:new\s+|realistic\s+)?budget\b/.test(text) ||
+    /*
+     * A plan to be worked out, with no figure of the owner's: "I plan to
+     * adjusted my budget this month, can you set a plan? Like based on my
+     * income and spending" was answered by the device asking what the budget
+     * should be (4 October 2026). The figure is the app's to work out and
+     * the model's to recommend.
+     */
+    /\b(set|make|give|create|build|work out|do|draft)\s+(?:me\s+|up\s+)?(?:a\s+|my\s+)?(?:new\s+)?(?:budget\s+)?plan\b/.test(text) ||
+    /\b(?:based on|base(?:d)? sa|according to)\s+(?:my\s+|the\s+|ang\s+)?(?:usual\s+)?(?:income|allowance|salary|sahod|kita|spending|expenses|gastos)\b/.test(text) ||
+    (!/\d/.test(text) && /\b(?:adjust\w*|redo|rework|plan(?:ning)?)\b[^.?!]{0,30}\bbudget\b/.test(text))
   );
 }
 

@@ -895,6 +895,19 @@ function cardWords(turn: Turn, state: StoredCard["state"]): string {
  */
 const HISTORY_TURNS = 10;
 
+/** "based on my income", "within my allowance", "income and spending": a budget held to what usually comes in. */
+const BY_INCOME =
+  /\b(?:based on|base(?:d)? sa|from|within|fit(?:s|ting)?(?: in| into| to)?|according to)\s+(?:my\s+|the\s+|ang\s+)?(?:usual\s+|monthly\s+)?(?:income|allowance|salary|sahod|kita|earnings)\b|\bincome and (?:spending|expenses|gastos)\b/i;
+
+/** Asked to set a budget, not only told one: "can you set a plan", "adjust my budget this month". */
+const SETS_BUDGET = /\b(?:set|adjust\w*|make|create|build|plan|apply|update|change|fix|redo|gawa\w*|ayusin)\b/i;
+
+/** The recommendation's own words, without the line saying how to get the card that is already under it. */
+const withoutSetIt = (text: string): string => text.replace(/\s*Say "set it"[^.]*\.\s*/g, " ").replace(/\s{2,}/g, " ").trim();
+
+/** Asking what it should be, which the answer gives and "add it" applies. */
+const ASKS_ONLY = /\b(?:re?c+om+e?n?d\w*|sug+est\w*|propos\w*|should i|what budget|how much should)\b/i;
+
 /** Openers, because a blank box invites nothing. */
 const STARTERS = ["How is this month going?", "What needs attention?"] as const;
 
@@ -4219,6 +4232,33 @@ export function AskPanel({
       }
     };
 
+    /*
+     * The recommended budget as a card to apply, right after the answer that
+     * recommends it, when the message asked for one to be set: "can you set a
+     * plan?" (4 October 2026). The app's own parts, as "set it" would put
+     * them; every figure can be changed on the card before Apply.
+     */
+    const offerAdvisedBudget = (advice: BudgetAdvice, months?: { readonly toMonth?: number | undefined }): void => {
+      if (!sink.canBudget) return;
+      const spendingAt = advice.fit && !advice.fit.fits ? advice.fit.spending : advice.spending;
+      const ask: BudgetAsk = {
+        kind: "tracks",
+        year: advice.year,
+        month: advice.month,
+        spending: spendingAt,
+        billsSubs: advice.billsSubs,
+        scope: "month",
+        ...(months?.toMonth && months.toMonth > advice.month ? { toMonth: months.toMonth } : {}),
+      };
+      const plan = planBudget(ask, budgets, asOf, new Date().toISOString());
+      if (plan.outcome.refused || plan.outcome.written.length === 0) return;
+      const note = advice.fit
+        ? `From the ${formatMoney(advice.fit.income)} ${advice.fit.income === advice.typicalIncome ? "you usually receive" : "you expect"}: ${formatMoney(advice.billsSubs)} for bills and subscriptions, ${formatMoney(spendingAt)} for spending.`
+        : undefined;
+      say({ kind: "budget", plan, state: "open", ask, ...(note ? { note } : {}) });
+      log(aiEvent("proposed", "add", { entry: plan.words, text: note ?? plan.words }));
+    };
+
     /**
      * Questions the app can work figures out for, always answered by the model.
      *
@@ -4278,6 +4318,12 @@ export function AskPanel({
         }
 
         if (budgetish) {
+          /*
+           * Asked to set one, not only for one: "can you set a plan?", "adjust
+           * my budget this month". The answer recommends it and the card to
+           * apply it comes with the answer, one step rather than "add it".
+           */
+          const setsIt = !splitAgain && SETS_BUDGET.test(ruled) && !ASKS_ONLY.test(ruled);
           // The month beside the word budget first: a long message names others.
           const named = adviceMonthIn(ruled, asOf) ?? (essay ? null : (() => {
             const span = spanIn(lead, asOf);
@@ -4297,29 +4343,40 @@ export function AskPanel({
               : arrivesNow
                 ? { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) }
                 : { year: next.year, month: next.month });
-          const held = income ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.income : null);
+          const said = income ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.income : null);
           const keep = savingsGoalIn(ruled) ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.keep : null);
-          const advice = budgetAdvice({ transactions, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: held, keep });
+          const first = budgetAdvice({ transactions, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: said, keep });
+          /*
+           * "based on my income and spending" with no figure: held to the
+           * income they usually receive, the median month over the same
+           * months the spending is read from (4 October 2026).
+           */
+          const byIncome = said === null && first.typicalIncome > 0 && BY_INCOME.test(ruled);
+          const held = byIncome ? first.typicalIncome : said;
+          const advice = byIncome ? budgetAdvice({ transactions, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: held, keep }) : first;
           const text = adviceWords(advice);
           lastAdvice.current = { advice, text, asked: note };
           await answerWithModel(
             [
-              `A budget for ${advice.name}, as the app works it out from the ledger: each item's median month over the months it names, the bills and subscriptions still running, one-offs and stopped ones left out${held ? ", held to the income they said" : ""}. Its figures are correct: never change or recompute them.`,
+              `A budget for ${advice.name}, as the app works it out from the ledger: each item's median month over the months it names, the bills and subscriptions still running, one-offs and stopped ones left out${byIncome ? `, held to the income they usually receive, ${formatMoney(advice.typicalIncome)} a month` : held ? ", held to the income they said" : ""}. Its figures are correct: never change or recompute them.`,
               /*
                * 3 October 2026: held to a PHP 10,000.00 salary, the answer
                * recommended the usual month, PHP 15,122.00, "leaving room for
                * the salary and your wallets", and that went on the card.
                */
               held
-                ? "It is held to the income they said: the total to recommend is the one in its first sentence, never the usual month's, and money already in their wallets is not part of it. Say what the income covers first (bills, then spending), and what is left to save."
+                ? `It is held to ${byIncome ? "their usual income" : "the income they said"}: the total to recommend is the one in its first sentence, never the usual month's, and money already in their wallets is not part of it. Say what the income covers first (bills, then spending), and what is left to save.`
                 : "",
+              setsIt ? "A card with these figures is shown under your answer for them to apply: say so in one short sentence, and never say it is set or applied." : "",
               splitAgain
                 ? "They are asking for the parts of the budget recommended earlier: give the split, grouped as it is."
                 : `If they are asking for a budget, open with "I recommend a budget of" and its total and month, give the split, and explain why in your own words, naming the months it read and what was left out. If the message asks something else, answer that and use this only where it helps.`,
               text,
             ].join("\n"),
-            text,
+            // The card is under the answer already, so the line saying how to get one goes.
+            setsIt ? withoutSetIt(text) : text,
           );
+          if (setsIt) offerAdvisedBudget(advice);
           return;
         }
 
@@ -4588,6 +4645,27 @@ export function AskPanel({
          * last one recommended here and what it forecasts for the month.
          */
         const target = span ?? { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), scope: "month" as const };
+        /*
+         * AI first: a budget asked for with no figure gets the app's own
+         * recommendation for the month, answered by the model, with the card
+         * to apply it under the answer. The owner, 4 October 2026, of the
+         * question this used to ask instead: "Ai first. Fix this".
+         */
+        if (!ai.disabled && !yesAfterBudgetTalk) {
+          const advice = budgetAdvice({ transactions, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts });
+          const text = adviceWords(advice);
+          lastAdvice.current = { advice, text, asked: note };
+          await answerWithModel(
+            [
+              `A budget for ${advice.name}, as the app works it out from the ledger: each item's median month over the months it names, the bills and subscriptions still running, one-offs and stopped ones left out. Its figures are correct: never change or recompute them.`,
+              `They asked for the budget to be set or changed and gave no figure. Open with "I recommend a budget of" and its total and month, give the split, and explain why in your own words. A card with these figures is shown under your answer for them to apply or change: say so in one short sentence, and never say it is set or applied.`,
+              text,
+            ].join("\n"),
+            withoutSetIt(text),
+          );
+          offerAdvisedBudget(advice, span ?? undefined);
+          return;
+        }
         budgetQuestion.current = { year: target.year, month: target.month, scope: target.scope, ...(span?.toMonth ? { toMonth: span.toMonth } : {}) };
         /*
          * A month already running has no forecast, only what it has spent so
