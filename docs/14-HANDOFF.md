@@ -585,6 +585,20 @@ leaves the bar's height clear (`layout.css`).
 not working; "food 150 gcash" and "I spent 99 on lunch cash" are read on
 the device. Signed in, the model reads it.
 
+### 2026-10-03, later still: the same two questions, answered the same way
+
+After the rules above went live the owner asked again and got "I recommend
+allocating PHP 4,500.00 for the urgent invitation ... after the planned
+school spend (PHP 2,000) and gym sessions (PHP 140)", from GPT-OSS, with
+Gemini chosen as the provider. Traced:
+
+| Where it came from | Now |
+|---|---|
+| "Gym sessions (PHP 140)": "I'm planning to go to the gym this week and 70 per session 2x a week", said on 28 September, pinned in "What to keep in mind" as a plan, sent with every question since | A plan stays in it for three days (`keepInMind`'s `asOf`) |
+| PHP 4,500.00, invented once, then repeated: the earlier answer was in the conversation, and the figure check counted the conversation, model answers included, as a source | Only the owner's words and the device's own answers count (`trusted` in `useAi.ts`); an answer that was flagged is marked in the outline, "never repeat them" |
+| "Earlier" and "the treat" not connected to the ₱375.00 treat added that day | The device says what the question most likely points at, the newest entry it names or the newest today, and that no amount was given (`pointsAt.ts`, a section of the chat's figures) |
+| GPT-OSS answering with Gemini chosen: the Dashboard and Insights panels asked Gemini first, two at a time, whenever they opened, and its free answers (a few dozen a day) were gone when the owner asked | The panels leave the scarce models for the chat and pictures (`BACKGROUND_TASKS`); a question asks the strongest alone for eight seconds before a second joins (`bestInOrder`'s `staggerMs`), so an answer costs one Gemini request, not two |
+
 ---
 
 ## 6. What the owner has to do

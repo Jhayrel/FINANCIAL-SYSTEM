@@ -322,6 +322,26 @@ describe("asking several models at once", () => {
   it("answers null when nothing answers", async () => {
     expect(await bestInOrder([1, 2, 3], 2, async () => null)).toBeNull();
   });
+
+  it("asks the strongest alone first when staggered, and the next only if it is slow or fails", async () => {
+    // 3 October 2026: Gemini's free answers went two at a time.
+    const asked: string[] = [];
+    const quick = await bestInOrder(["strong", "next"], 2, async (name: string) => {
+      asked.push(name);
+      await new Promise((r) => setTimeout(r, 20));
+      return name;
+    }, 0, 200);
+    expect(quick).toBe("strong");
+    expect(asked).toEqual(["strong"]);
+
+    const tried: string[] = [];
+    const failed = await bestInOrder(["strong", "next"], 2, async (name: string) => {
+      tried.push(name);
+      return name === "strong" ? null : name;
+    }, 0, 10_000);
+    expect(failed).toBe("next");
+    expect(tried).toEqual(["strong", "next"]);
+  });
 });
 
 

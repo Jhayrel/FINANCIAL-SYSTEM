@@ -157,7 +157,7 @@ const money = (c: number): string => formatMoney(c).replace(/^₱/, "PHP ");
  * Only the owner's own words become facts. Nothing is inferred about them,
  * and a developer note ("//...") is never one.
  */
-export function keepInMind(saved: readonly ChatMessage[], onScreen: readonly Spoken[]): string {
+export function keepInMind(saved: readonly ChatMessage[], onScreen: readonly Spoken[], asOf?: string): string {
   const theirs = [...saved]
     .filter((m) => m.role === "you" && m.text.trim() !== "" && !m.text.trim().startsWith("//"))
     .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
@@ -186,7 +186,19 @@ export function keepInMind(saved: readonly ChatMessage[], onScreen: readonly Spo
     for (const m of found) facts.push(`${label} (${m.day}): "${short(m.text, 160)}"`);
   };
   pick((t) => REMEMBER.test(t), 4, "Asked you to remember");
-  pick((t) => PLAN.test(t) && !asking(t), 3, "A plan they mentioned");
+  /*
+   * A plan is for its own few days. 3 October 2026: "I'm planning to go to
+   * the gym this week and 70 per session 2x a week", said on 28 September,
+   * was still pinned five days later and came back as "gym sessions (PHP
+   * 140)" in advice about something else. Three days, then it is history.
+   */
+  const recent = (day: string): boolean => {
+    if (!asOf || day === "today") return true;
+    const apart = (Date.parse(`${asOf}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / 86_400_000;
+    return Number.isFinite(apart) && apart <= 3;
+  };
+  const plans = said.filter((m) => PLAN.test(m.text) && !asking(m.text) && recent(m.day)).slice(0, 3);
+  for (const m of plans) facts.push(`A plan they mentioned (${m.day}): "${short(m.text, 160)}"`);
   pick((t) => CORRECTED.test(t), 3, "They corrected you");
 
   const outline: string[] = [];
@@ -198,7 +210,11 @@ export function keepInMind(saved: readonly ChatMessage[], onScreen: readonly Spo
     const next = onScreen.slice(i + 1).find((t) => t.role === "you");
     const answered = reply && (!next || onScreen.indexOf(reply) < onScreen.indexOf(next));
     n += 1;
-    outline.push(`${n}. They asked: "${short(turn.text, 120)}"${answered && reply ? ` You answered: "${short(firstSentence(reply.text), 180)}"` : ""}`);
+    // An answer whose figures the app could not trace is not to be repeated (`aiFigures.ts`).
+    const untraced = answered && reply && /not (?:a figure|figures) this app worked out/.test(reply.text);
+    outline.push(
+      `${n}. They asked: "${short(turn.text, 120)}"${answered && reply ? ` You answered: "${short(firstSentence(reply.text), 180)}"` : ""}${untraced ? " (That answer had figures not from the data: never repeat them.)" : ""}`,
+    );
   }
 
   const parts: string[] = [];

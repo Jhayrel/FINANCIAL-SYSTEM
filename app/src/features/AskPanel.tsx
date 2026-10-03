@@ -3560,6 +3560,11 @@ export function AskPanel({
           question,
           history,
           earlier,
+          // The owner's words and the device's own answers: a model's earlier figure is not a source (useAi.ts).
+          trusted: [
+            question,
+            ...turns.filter(isSaid).filter((t) => t.kind === "you" || t.from === "this device").map((t) => t.text),
+          ].join("\n"),
           /*
            * Only when the question points at it.
            *
@@ -3571,7 +3576,7 @@ export function AskPanel({
           screen: aboutTheScreen(question) ? screenText(currentScreen()) : "",
           ...(figures ? { worked: figures } : {}),
           // What it must not forget: what they told it, and this conversation in outline (domain/memory.ts).
-          pinned: keepInMind(savedChat.current, turns.filter(isSaid).map((t) => ({ role: t.kind, text: t.text })).concat([{ role: "you" as const, text: question }])),
+          pinned: keepInMind(savedChat.current, turns.filter(isSaid).map((t) => ({ role: t.kind, text: t.text })).concat([{ role: "you" as const, text: question }]), asOf),
           signal: control.signal,
         }),
       "Still waiting on the model",

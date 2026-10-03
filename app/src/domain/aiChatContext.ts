@@ -57,6 +57,7 @@ import { namesWindow, windowOf } from "./charts";
 import { figuresIn } from "./money";
 import { binForModel } from "./deletedAsk";
 import type { Budgets, DeletedTransaction, IsoDate, Transaction } from "./types";
+import { pointsAt } from "./pointsAt";
 
 /**
  * The ceiling on the ledger half, in bytes.
@@ -258,6 +259,9 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   const thisYear = rows.filter((t) => t.date.startsWith(year));
 
   const out: string[] = [...(input.screen ? [input.screen, ""] : []), contextToText(snapshot), ""];
+  // "Earlier", "that", "the treat": what the device can tell the question points at (`pointsAt.ts`).
+  const pointed = pointsAt(question, rows, asOf);
+  if (pointed.length > 0) out.push(...pointed, "");
 
   // ── The ledger, described ────────────────────────────────────────────────
   const dates = rows.map((t) => t.date).sort();

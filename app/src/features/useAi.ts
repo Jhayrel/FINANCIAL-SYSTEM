@@ -89,6 +89,8 @@ export interface UseAi {
       worked?: string;
       /** What the model must not forget (`domain/memory.ts`). */
       pinned?: string;
+      /** The conversation's figures that count as sources: the owner's and the device's, never a model's. */
+      trusted?: string;
     },
   ) => Promise<AiAnswer>;
   readonly clear: () => void;
@@ -219,6 +221,13 @@ export function useAi({
         signal?: AbortSignal;
         worked?: string;
         pinned?: string;
+        /**
+         * What in the conversation counts as a source for the answer's
+         * figures: the owner's words and what the device worked out, never a
+         * model's earlier answer. Repeated, a sum a model invented became
+         * "known" (3 October 2026, PHP 4,500.00 twice). Defaults to all of it.
+         */
+        trusted?: string;
       } = {},
     ): Promise<AiAnswer> => {
       // Switched off means nothing is sent, not that nothing comes back.
@@ -308,7 +317,7 @@ export function useAi({
        * message ago ("I recommend a budget of PHP 14,322.00") is traceable
        * when the model repeats it.
        */
-      const said = [options.earlier ?? "", ...(options.history ?? []).map((h) => h.text)].join("\n");
+      const said = options.trusted ?? [options.earlier ?? "", ...(options.history ?? []).map((h) => h.text)].join("\n");
       const note = untracedNote(answered.text, [withWorked ?? contextToText(context), said, saidAsFigures(said), options.pinned ?? ""].join("\n"), formatMoney);
       return note === "" ? answered : { ...answered, text: [answered.text, note].join("\n\n") };
     },

@@ -643,6 +643,18 @@ export function rankChain(lists: Partial<Record<Provider, readonly string[]>>): 
 const QUICK_TASKS = new Set(["route", "note", "classify", "categorise", "describe"]);
 
 /**
+ * The panels the app fills on its own: the month's summary, the alerts, the
+ * patterns and the outlook. Nobody asked; they run whenever a screen opens.
+ *
+ * 3 October 2026: the owner had Gemini chosen and the chat was still being
+ * answered by GPT-OSS, which then invented a sum. Gemini's free allowance is
+ * a few dozen answers a day, and the panels were spending it first, two at a
+ * time, every time the Dashboard or Insights opened. They now leave the
+ * scarce models for what the owner asks and the pictures they send.
+ */
+const BACKGROUND_TASKS = new Set(["summary", "alerts", "patterns", "outlook"]);
+
+/**
  * Models with a small daily allowance: Gemini's Flash and Pro (about twenty
  * a day each on the free tier) and Workers AI (ten thousand "neurons" a day
  * in all, a few dozen answers).
@@ -663,8 +675,9 @@ const scarce = (c: Candidate): boolean => (c.provider === "gemini" && !/-lite/i.
  */
 export function arrange(chain: readonly Candidate[], task: string, cooled: (c: Candidate) => boolean = () => false): Candidate[] {
   const quick = QUICK_TASKS.has(task);
+  const spare = quick || BACKGROUND_TASKS.has(task);
   const worth = (c: Candidate): number =>
-    strength(c.model) + (quick && c.provider === "groq" ? 10 : 0) - (quick && scarce(c) ? 100 : 0) - (cooled(c) ? 1_000 : 0);
+    strength(c.model) + (quick && c.provider === "groq" ? 10 : 0) - (spare && scarce(c) ? 100 : 0) - (cooled(c) ? 1_000 : 0);
   return chain
     .map((c, i) => ({ c, i, w: worth(c) }))
     .sort((a, b) => b.w - a.w || a.i - b.i)
@@ -1854,7 +1867,9 @@ export const onRequestPost = async (ctx: {
    * held, and the stronger one waited for until this job's hold (`HOLD_MS`).
    * A model that fails is replaced at once by the next one down.
    */
-  const winner = await bestInOrder(chain, images.length > 0 ? 3 : 2, attempt, started + (HOLD_MS[task] ?? DEFAULT_HOLD_MS));
+  // What the owner asks, and what they send, asks the strongest alone first (`staggerMs`).
+  const stagger = task === "chat" ? 8_000 : task === "extract" ? (images.length > 0 ? 10_000 : 6_000) : 0;
+  const winner = await bestInOrder(chain, images.length > 0 ? 3 : 2, attempt, started + (HOLD_MS[task] ?? DEFAULT_HOLD_MS), stagger);
   if (winner) return winner;
   if (nothingFound) return nothingFound;
 
@@ -2291,6 +2306,13 @@ export function bestInOrder<T, R>(
   width: number,
   run: (item: T, signal: AbortSignal) => Promise<R | null>,
   holdUntil = 0,
+  /**
+   * Ask the first alone for this long before the others join it, so an
+   * answer from the strongest costs one request, not `width` (3 October
+   * 2026: Gemini's few dozen free answers a day went two at a time). A
+   * failure still starts the next at once. Zero starts them together.
+   */
+  staggerMs = 0,
 ): Promise<R | null> {
   return new Promise((resolve) => {
     const running = new Map<number, AbortController>();
@@ -2298,6 +2320,14 @@ export function bestInOrder<T, R>(
     let next = 0;
     let finished = false;
     let hold: ReturnType<typeof setTimeout> | undefined;
+    let allowed = staggerMs > 0 ? 1 : width;
+    const widen =
+      staggerMs > 0 && width > 1
+        ? setTimeout(() => {
+            allowed = width;
+            if (!finished) settle();
+          }, staggerMs)
+        : undefined;
 
     const best = (): number | undefined => {
       let low: number | undefined;
@@ -2308,6 +2338,7 @@ export function bestInOrder<T, R>(
       if (finished) return;
       finished = true;
       if (hold !== undefined) clearTimeout(hold);
+      if (widen !== undefined) clearTimeout(widen);
       for (const c of running.values()) c.abort();
       resolve(value);
     };
@@ -2334,7 +2365,7 @@ export function bestInOrder<T, R>(
         hold ??= setTimeout(take, Math.max(0, holdUntil - Date.now()));
         return;
       }
-      while (running.size < width && next < items.length) start(next++);
+      while (running.size < allowed && next < items.length) start(next++);
       if (running.size === 0) finish(null);
     }
     settle();

@@ -120,6 +120,20 @@ describe("what the model must not forget", () => {
     expect(block.length).toBeLessThanOrEqual(PINNED_ROOM);
   });
 
+  it("lets a plan go after three days, and marks an answer whose figures were not the data's", () => {
+    // 3 October 2026: the gym plan of 28 September came back as "gym sessions (PHP 140)".
+    const later = keepInMind(saved, conversation, "2026-10-03");
+    expect(later).not.toContain("gym");
+    expect(later).toContain("They expect about PHP 8,000.00 coming in");
+    expect(keepInMind(saved, conversation, "2026-09-30")).toContain("A plan they mentioned (2026-09-28)");
+    const flagged = keepInMind([], [
+      { role: "you", text: "what can you advise?" },
+      { role: "assistant", text: "You can allocate PHP 4,500.00. ₱4,500.00 is not a figure this app worked out. Check it before you rely on it." },
+      { role: "you", text: "and now?" },
+    ]);
+    expect(flagged).toContain("never repeat them");
+  });
+
   it("is nothing when there is nothing to keep", () => {
     expect(keepInMind([], [{ role: "you", text: "hello" }])).toBe("");
   });
