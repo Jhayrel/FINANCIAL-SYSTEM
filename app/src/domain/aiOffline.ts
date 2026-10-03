@@ -69,8 +69,11 @@ function offlineSummary(c: AiContext): string {
         `That is ${php(Math.abs(month.remaining))} over the ${php(month.budget)} budget.`,
       );
     } else if (month.allowancePerDay !== null && month.daysLeft > 0) {
+      const forSpending = month.spendingLeft ?? null;
       parts.push(
-        `${php(month.remaining)} of the ${php(month.budget)} budget is left, which is ${php(month.allowancePerDay)} a day for the ${month.daysLeft} days remaining.`,
+        forSpending !== null && forSpending !== month.remaining
+          ? `${php(month.remaining)} of the ${php(month.budget)} budget is left; ${php(Math.max(0, forSpending))} of it is for spending, which is ${php(Math.max(0, month.allowancePerDay))} a day for the ${month.daysLeft} days remaining.`
+          : `${php(month.remaining)} of the ${php(month.budget)} budget is left, which is ${php(Math.max(0, month.allowancePerDay))} a day for the ${month.daysLeft} days remaining.`,
       );
     } else {
       parts.push(`${php(month.remaining)} of the ${php(month.budget)} budget is left.`);

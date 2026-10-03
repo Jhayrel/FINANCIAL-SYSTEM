@@ -41,13 +41,14 @@ describe("the month view carries rule 3.6 and changes none of it", () => {
     }
   });
 
-  it("paces the running month exactly as the Dashboard does", () => {
+  it("paces the running month as the Dashboard does", () => {
     const v = view(MONTH);
     const pace = dailyPacing(fx.transactions, fx.budgets, AS_OF);
     expect(v.phase).toBe("current");
     expect(v.daysLeft).toBe(pace.daysLeft);
     expect(v.projected).toBe(pace.projected);
-    expect(v.perDay).toBe(pace.perDay);
+    // A day's share of the spending track's remainder: the Dashboard's safe figure when the budget sets it.
+    expect(v.perDay).toBe(Math.floor(Math.max(0, v.assessment.spending.remaining) / v.daysLeft));
   });
 
   it("keeps what came in less what went out", () => {

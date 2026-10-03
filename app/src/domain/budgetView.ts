@@ -131,11 +131,18 @@ export function monthPlanView(
     daysLeft = 0;
     perDay = 0;
   } else if (phase === "current") {
-    // One definition of pace in the app: the Dashboard's.
     const pace = dailyPacing(transactions, budgets, asOf);
     elapsed = pace.daysElapsed / pace.daysInMonth;
     daysLeft = pace.daysLeft;
-    perDay = plan > 0 ? pace.perDay : 0;
+    /*
+     * A day's share of what is left of the spending track, as the
+     * Dashboard's "Safe to spend a day" has it when the budget sets it. The
+     * whole plan's remainder counted the bills track's unspent part too: on
+     * 3 October 2026 the Budget screen said PHP 1,837.00 a day beside the
+     * Dashboard's PHP 1,719.66, with every bill paid, and spending PHP
+     * 1,837.00 a day would have put the spending track PHP 352.00 over.
+     */
+    perDay = plan > 0 && daysLeft > 0 ? Math.floor(Math.max(0, assessment.spending.remaining) / daysLeft) : 0;
     projected = pace.projected;
   }
 

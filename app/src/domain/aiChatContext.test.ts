@@ -346,7 +346,7 @@ describe("any window, and what if", () => {
     const snapshot = buildContext({ transactions: odd, accounts: [], budgets: set, credits: [], reference, lowBalanceThreshold: 0, asOf: "2026-08-31" });
     const build2 = (question: string) => buildChatContext({ snapshot, transactions: odd, asOf: "2026-08-31", question, budgets: set }).text;
     expect(() => build2("what if I spend 8000 tonight?")).not.toThrow();
-    expect(build2("what if I spend 8000 tonight?")).toContain("August 2026's budget: PHP 1,700.71 over before, PHP 9,700.71 over after.");
+    expect(build2("what if I spend 8000 tonight?")).toContain("August 2026's spending budget: PHP 1,700.71 over before, PHP 9,700.71 over after.");
   });
 
   it("does not read money coming in as money spent", () => {

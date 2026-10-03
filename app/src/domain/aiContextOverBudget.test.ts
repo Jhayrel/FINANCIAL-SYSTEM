@@ -59,7 +59,8 @@ describe("what is left of the budget a day", () => {
   it("is never negative once the month is over it", () => {
     const text = textFor(budget(300000));
     expect(text).not.toMatch(/-\s?(?:PHP\s)?[\d,]+\.\d{2} a day/);
-    expect(text).toMatch(/Nothing is left of the budget to spend a day/);
+    // The spending track's own figure since 3 October 2026, as the screens have it.
+    expect(text).toMatch(/Nothing is left of the (?:spending )?budget to spend a day/);
     expect(text).toMatch(/over by PHP 2,000\.00/);
   });
 });

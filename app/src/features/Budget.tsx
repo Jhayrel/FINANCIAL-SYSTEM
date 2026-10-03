@@ -485,7 +485,7 @@ export function Budget({
                 />
                 <span className="t-caption" style={{ color: "var(--ink-3)" }}>
                   {formatMoney(a.combined.spent)} spent of {formatMoney(a.combined.budget)}
-                  {view.phase !== "past" && view.perDay > 0 ? ` · ${formatMoney(view.perDay)} a day` : ""}
+                  {view.phase !== "past" && view.perDay > 0 ? ` · ${formatMoney(view.perDay)} a day for spending` : ""}
                 </span>
               </div>
               <div className="fms-budgettracks">

@@ -625,10 +625,16 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     out.push(`## What if ${php(what)} is spent now`);
     out.push("Worked out by the app. Quote these rather than subtracting anything yourself.");
     if (snap.month.budget !== null && snap.month.remaining !== null) {
-      const left = cents(snap.month.remaining);
+      /*
+       * A purchase comes out of the spending budget, so that is the one held
+       * to it, and the day's figure is its own (3 October 2026: the whole
+       * plan's remainder counted the bills budget as spendable).
+       */
+      const spendingLeft = snap.month.spendingLeft ?? null;
+      const left = cents(spendingLeft ?? snap.month.remaining);
       const after = left - what;
       out.push(
-        `${snap.month.name}'s budget: ${left < 0 ? `${php(-left)} over` : `${php(left)} left`} before, ${after < 0 ? `${php(-after)} over` : `${php(after)} left`} after.${
+        `${snap.month.name}'s ${spendingLeft !== null ? "spending budget" : "budget"}: ${left < 0 ? `${php(-left)} over` : `${php(left)} left`} before, ${after < 0 ? `${php(-after)} over` : `${php(after)} left`} after.${
           snap.month.daysLeft > 0 && after > 0 ? ` That is ${php(Math.floor(after / snap.month.daysLeft))} a day for the ${snap.month.daysLeft} days left.` : ""
         }`,
       );

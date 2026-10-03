@@ -58,6 +58,12 @@ export interface AiContext {
     readonly revenue: number;
     readonly budget: number | null;
     readonly remaining: number | null;
+    /**
+     * What is left of the spending track alone, when it has a budget. The
+     * day's figure is this over the days left, as the Dashboard and the
+     * Budget screen have it (3 October 2026).
+     */
+    readonly spendingLeft?: number | null;
     readonly burnRatePerDay: number;
     readonly allowancePerDay: number | null;
     readonly breakdown: {
@@ -182,10 +188,23 @@ export function buildContext(input: ContextInput): AiContext {
       revenue: pesos(totals.revenue),
       budget: hasBudget ? pesos(assessment.combined.budget) : null,
       remaining: hasBudget ? pesos(assessment.combined.remaining) : null,
+      spendingLeft: assessment.spending.budget > 0 ? pesos(assessment.spending.remaining) : null,
       burnRatePerDay: pesos(burnRate(transactions, asOf)),
+      /*
+       * A day's share of the spending track, the screens' "a day" figure.
+       * The whole plan's remainder over the days counted the bills track's
+       * unspent part as spendable: PHP 1,837.00 a day here beside the
+       * Dashboard's PHP 1,719.66 (3 October 2026). Negative when over.
+       */
       allowancePerDay: (() => {
-        const a = dailyAllowance(transactions, budgets, asOf);
-        return a === null ? null : pesos(a);
+        if (assessment.spending.budget <= 0) {
+          const a = dailyAllowance(transactions, budgets, asOf);
+          return a === null ? null : pesos(a);
+        }
+        const left = daysLeft(asOf);
+        if (left === 0) return 0;
+        const r = assessment.spending.remaining;
+        return pesos(r < 0 ? Math.ceil(r / left) : Math.floor(r / left));
       })(),
       breakdown: {
         spending: pesos(totals.spending),
@@ -373,10 +392,19 @@ export function contextToText(c: AiContext): string {
    * as "a daily shortfall of PHP -10,218.71 for the remaining day" (30
    * September 2026). Nothing is left to spend a day; the overspend is said once.
    */
+  const spendingLeft = c.month.spendingLeft ?? null;
   if (c.month.allowancePerDay !== null && c.month.allowancePerDay >= 0) {
-    lines.push(`What is left of the budget works out to ${php(c.month.allowancePerDay)} a day.`);
+    lines.push(
+      spendingLeft !== null
+        ? `What is left of the spending budget, ${php(spendingLeft)}, works out to ${php(c.month.allowancePerDay)} a day. This is the day's figure the app shows; bills are paid from their own budget.`
+        : `What is left of the budget works out to ${php(c.month.allowancePerDay)} a day.`,
+    );
   } else if (c.month.allowancePerDay !== null) {
-    lines.push("Nothing is left of the budget to spend a day: the month is already over it, by the figure above.");
+    lines.push(
+      spendingLeft !== null
+        ? `Nothing is left of the spending budget to spend a day: spending is already ${php(Math.abs(spendingLeft))} over it.`
+        : "Nothing is left of the budget to spend a day: the month is already over it, by the figure above.",
+    );
   }
   lines.push(
     `Split: spending ${php(c.month.breakdown.spending)}, bills ${php(c.month.breakdown.bills)}, subscriptions ${php(c.month.breakdown.subscriptions)}, transfer fees ${php(c.month.breakdown.fees)}, debt interest ${php(c.month.breakdown.debtInterest)}.`,
