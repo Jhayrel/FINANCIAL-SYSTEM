@@ -9024,6 +9024,13 @@ textarea.fms-askinput {
   .fms-monthlink {
     padding-block: 12px;
     margin-block: -12px;
+    /* A short name ("Gas", "May") is still a thumb wide. */
+    min-width: 44px;
+    text-align: left;
+  }
+
+  .fms-budgetcat-head > button.fms-linkish:first-child {
+    min-width: 44px;
   }
 
   .fms-pill,
@@ -9383,14 +9390,22 @@ textarea.fms-askinput {
   }
 
   .fms-aiscreen .fms-askfield > .fms-attach {
+    position: relative;
     order: 0;
-    width: 40px;
+    width: 44px;
     height: 42px;
     border: 0;
     border-radius: var(--radius-full);
     background: transparent;
     color: var(--ink-2);
     font-size: 24px;
+  }
+
+  /* 44px to hit, as every target here (rule D10), without the field growing a line. */
+  .fms-aiscreen .fms-askfield > .fms-attach::after {
+    content: "";
+    position: absolute;
+    inset: -1px 0;
   }
 
   .fms-aiscreen .fms-askfield > .fms-attach:active:not(:disabled) {
@@ -9437,8 +9452,28 @@ textarea.fms-askinput {
     display: none;
   }
 
+  /* An odd one out takes the row, rather than half of it beside a gap. */
+  .fms-debtactions[data-count="1"] > .fms-btn:nth-child(1),
+  .fms-debtactions[data-count="3"] > .fms-btn:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
+  /*
+   * Details, and Close details, as a button of its own across the card: as
+   * a link in one cell of the grid it sat off centre under the buttons and
+   * did not read as something to press (3 October 2026, "in details in debt
+   * in phone fix it").
+   */
   .fms-debtactions > .fms-linkbtn {
+    grid-column: 1 / -1;
     justify-content: center;
+    min-height: 44px;
+    border: 1px solid var(--hairline-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    color: var(--ink);
+    font-weight: 500;
+    text-decoration: none;
   }
 }
 
@@ -10041,10 +10076,23 @@ textarea.fms-askinput {
     margin-bottom: 0;
   }
 
+  /*
+   * The reach goes upward only, into the gap between fields, and the line
+   * it sits on is 32px: reaching 14px down, it lay over the top of the
+   * picker under it, so a tap meant to open the picker could take the
+   * suggestion instead (3 October 2026).
+   */
+  .fms-field-head:has(> .fms-linkbtn) {
+    min-height: 32px;
+  }
+
   .fms-field-head > .fms-linkbtn {
-    min-height: 0;
-    padding-block: 14px;
-    margin-block: -14px;
+    align-self: stretch;
+    min-height: 44px;
+    padding-top: 12px;
+    margin-top: -12px;
+    padding-bottom: 0;
+    margin-bottom: 0;
   }
 
   .fms-fields {
@@ -10203,7 +10251,7 @@ textarea.fms-askinput {
 
   .fms-ical-tabs > .fms-ical-tab {
     justify-content: center;
-    min-height: 40px;
+    min-height: 44px;
   }
 
   .fms-ical-fig > .t-caption {
@@ -10217,8 +10265,14 @@ textarea.fms-askinput {
    * January to May sat hidden to the left of a 360px screen whenever
    * September was picked (Budget and Insights).
    */
+  /*
+   * A row of their own under the year: beside it each month had 32px of
+   * width, under the 44px a thumb needs (3 October 2026, "all buttons fix it
+   * in phones"). Across the screen each has about 56px.
+   */
   .fms-period-months {
     display: grid;
+    flex: 1 1 100%;
     grid-template-columns: repeat(6, minmax(0, 1fr));
     overflow: visible;
     mask-image: none;
@@ -10226,7 +10280,7 @@ textarea.fms-askinput {
 
   .fms-period-month {
     min-width: 0;
-    min-height: 40px;
+    min-height: 44px;
     padding: 0;
   }
 }

@@ -787,7 +787,7 @@ function DebtCard({
           </ul>
         )}
 
-        <div className="fms-debtactions">
+        <div className="fms-debtactions" data-count={actions.length}>
           {actions.map((a) => (
             <Button key={a.effect} size="sm" variant={a.primary ? "primary" : "secondary"} onClick={() => onRecord(a.effect, a.amount)}>
               {a.label}
@@ -904,7 +904,7 @@ function LimitQuick({
         </Button>
         <Button
           size="sm"
-          variant="ghost"
+          variant="secondary"
           onClick={() => {
             setAmount(current);
             setFrom(asOf);
@@ -1093,7 +1093,7 @@ function DebtDetails({
         <Button size="sm" variant="primary" onClick={save}>
           Save details
         </Button>
-        <Button size="sm" variant="ghost" onClick={onCancel}>
+        <Button size="sm" variant="secondary" onClick={onCancel}>
           Cancel
         </Button>
       </div>

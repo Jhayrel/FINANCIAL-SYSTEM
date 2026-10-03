@@ -1850,6 +1850,15 @@ export default function App() {
    */
   useScreenHistory(screen, (id) => goRef.current(id as Screen));
   useBackToClose(moreOpen, () => setMoreOpen(false));
+  // Escape closes it too, as every other sheet and dialog here closes.
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setMoreOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [moreOpen]);
   useBackToClose(chatOpen, () => setChatOpen(false));
 
   /*

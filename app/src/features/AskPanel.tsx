@@ -1409,31 +1409,65 @@ export function AskPanel({
     else cardElements.current.delete(index);
   };
 
+  /*
+   * Whether the view was at the end before this change, kept as it happens.
+   *
+   * Measured after the change, a reply and a card arriving together were
+   * taller than the tolerance by themselves, so the view read as scrolled
+   * away and stopped: a budget card's Apply sat under the message box until
+   * it was scrolled to (3 October 2026). What counts is where the owner was,
+   * so it is noted on every scroll and after every placement.
+   */
+  const atEnd = useRef(true);
+  const distanceToEnd = (thread: HTMLElement): number => thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+  const noteScroll = (): void => {
+    const thread = threadRef.current;
+    if (thread) atEnd.current = distanceToEnd(thread) <= NEAR_BOTTOM;
+  };
+
   useLayoutEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
 
     const anchor = held.current;
     held.current = null;
+    const follow = atEnd.current;
 
-    if (anchor) {
-      const el = cardElements.current.get(anchor.index);
-      if (el) {
-        thread.scrollTop = Math.max(0, thread.scrollTop + topWithin(el, thread) - anchor.offset);
-        return;
+    const placed = ((): boolean => {
+      if (anchor) {
+        const el = cardElements.current.get(anchor.index);
+        if (el) {
+          thread.scrollTop = Math.max(0, thread.scrollTop + topWithin(el, thread) - anchor.offset);
+          return true;
+        }
       }
-    }
+      // The restored conversation, opened at its latest message.
+      if (!landed.current && turns.length > 0) {
+        landed.current = true;
+        thread.scrollTop = thread.scrollHeight;
+        return true;
+      }
+      return false;
+    })();
 
-    // The restored conversation, opened at its latest message.
-    if (!landed.current && turns.length > 0) {
-      landed.current = true;
-      thread.scrollTop = thread.scrollHeight;
-      return;
-    }
-
-    const distance = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
-    if (distance <= NEAR_BOTTOM) thread.scrollTop = thread.scrollHeight;
+    if (!placed && follow) thread.scrollTop = thread.scrollHeight;
+    atEnd.current = distanceToEnd(thread) <= NEAR_BOTTOM;
   }, [turns, busy]);
+
+  /*
+   * The thread itself changing size: the bar under it grows or shrinks once
+   * an answer is in, and the view was left 52px short of the end, a card's
+   * buttons under the message box. At the end stays at the end.
+   */
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => {
+      if (atEnd.current) thread.scrollTop = thread.scrollHeight;
+    });
+    watch.observe(thread);
+    return () => watch.disconnect();
+  }, []);
 
   /*
    * The card a question is about, brought into view. With a batch of
@@ -6560,7 +6594,7 @@ export function AskPanel({
         </div>
       )}
 
-      <div className="fms-thread" ref={threadRef}>
+      <div className="fms-thread" ref={threadRef} onScroll={noteScroll}>
         {turns.length === 0 && !busy && (
           <div className="fms-askempty">
             <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>

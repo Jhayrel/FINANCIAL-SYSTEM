@@ -1369,7 +1369,7 @@ function LimitEditor({
             Remove
           </Button>
         )}
-        <Button size="sm" variant="ghost" onClick={onCancel}>
+        <Button size="sm" variant="secondary" onClick={onCancel}>
           Cancel
         </Button>
       </div>

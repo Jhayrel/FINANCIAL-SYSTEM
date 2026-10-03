@@ -132,6 +132,24 @@
 .fms-btn--ghost:active:not(:disabled) { background: var(--hairline); }
 
 /*
+ * A touch screen has no hover, so a ghost button never gained its chrome
+ * there and read as a label: "Cancel" beside "Save details" on a phone was
+ * text, not a button (3 October 2026, "all buttons fix it in phones"). On
+ * touch it carries a hairline at rest, and a quiet one that removes
+ * something says so in its colour without being reached for first.
+ */
+@media (pointer: coarse), (max-width: 639px) {
+  .fms-btn--ghost {
+    border-color: var(--hairline-strong);
+    background: var(--surface);
+    color: var(--ink);
+  }
+  .fms-btn--ghost.fms-btn--tone-danger {
+    color: var(--over);
+  }
+}
+
+/*
  * Danger is outlined, never filled (§3.1).
  *
  * A destructive action should not be the loudest thing on the screen. It was
