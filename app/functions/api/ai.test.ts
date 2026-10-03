@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { arrange, bestInOrder, compactContext, coolFor, emptyRead, fitConversation, geminiRank, geminiRefusal, rankChain, shortReason, SHRINK_TO, systemFor, toneFor, usefulRead, visionChain, workersFailure, workersModels, workersText } from "./ai";
+import { arrange, bestInOrder, compactContext, coolFor, spreadProviders, emptyRead, fitConversation, geminiRank, geminiRefusal, rankChain, shortReason, SHRINK_TO, systemFor, toneFor, usefulRead, visionChain, workersFailure, workersModels, workersText } from "./ai";
 
 /** A context shaped like the real one: worked-out figures, then the rows. */
 function contextOf(rows: number): string {
@@ -596,3 +596,34 @@ describe("Workers AI", () => {
     expect(workersText(null)).toBe("");
   });
 });
+
+describe("asking one of each provider at once", () => {
+  // 3 October 2026: "even provider switch, whichever is available ... the fastest".
+  const chain = [
+    { provider: "gemini" as const, model: "gemini-3.8-flash" },
+    { provider: "gemini" as const, model: "gemini-3.5-flash" },
+    { provider: "groq" as const, model: "openai/gpt-oss-120b" },
+    { provider: "openrouter" as const, model: "nvidia/nemotron-3-ultra:free" },
+    { provider: "groq" as const, model: "qwen/qwen3-32b" },
+  ];
+
+  it("puts the strongest of each provider first, then the rest in order", () => {
+    expect(spreadProviders(chain, 3).map((c) => c.model)).toEqual([
+      "gemini-3.8-flash",
+      "openai/gpt-oss-120b",
+      "nvidia/nemotron-3-ultra:free",
+      "gemini-3.5-flash",
+      "qwen/qwen3-32b",
+    ]);
+  });
+
+  it("leaves a chain of one provider as it is", () => {
+    const gemini = chain.filter((c) => c.provider === "gemini");
+    expect(spreadProviders(gemini, 3)).toEqual(gemini);
+  });
+
+  it("sets a model that ran out of time aside for a few minutes", () => {
+    expect(coolFor("timeout")).toBe(5 * 60_000);
+  });
+});
+

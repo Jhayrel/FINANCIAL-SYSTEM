@@ -599,6 +599,21 @@ Gemini chosen as the provider. Traced:
 | "Earlier" and "the treat" not connected to the ₱375.00 treat added that day | The device says what the question most likely points at, the newest entry it names or the newest today, and that no amount was given (`pointsAt.ts`, a section of the chat's figures) |
 | GPT-OSS answering with Gemini chosen: the Dashboard and Insights panels asked Gemini first, two at a time, whenever they opened, and its free answers (a few dozen a day) were gone when the owner asked | The panels leave the scarce models for the chat and pictures (`BACKGROUND_TASKS`); a question asks the strongest alone for eight seconds before a second joins (`bestInOrder`'s `staggerMs`), so an answer costs one Gemini request, not two |
 
+### 2026-10-03, last: every provider at once, the strongest that answers
+
+The eight seconds alone above made it worse: with Gemini busy the chat
+waited on one Gemini model after another, twenty seconds each, and said
+"The model took too long to answer". The owner asked for every provider to
+be used, the strongest that is available, and the fastest. Now:
+
+| Before | Now |
+|---|---|
+| The chain in strength order, so the first two or three asked were often all Gemini | The strongest of each provider is asked together, Gemini, Groq and OpenRouter (`spreadProviders`), then the rest in order |
+| The strongest asked alone for eight seconds (`staggerMs`) | No wait, unless every model left is one provider's (a picture for Gemini alone), which keeps six seconds |
+| The chat held for the strongest up to eighteen seconds, each model allowed twenty | Twelve seconds held, fifteen each (`HOLD_MS`, `CHAT_TIMEOUT_MS`, Workers AI as well) |
+| A model that ran out of time was asked first again on the next question | Set aside for five minutes (`coolFor("timeout")`), only when it ran out on its own clock, never when it was stopped because a stronger one answered |
+| Settings: "Automatic (the best free one available)", and Provider said "the service tried first" | "Automatic (the strongest available, any provider)"; under it, the three asked at once by name; Provider says it changes nothing while the model is Automatic, which was already true (the provider is sent only with a model) |
+
 ---
 
 ## 6. What the owner has to do

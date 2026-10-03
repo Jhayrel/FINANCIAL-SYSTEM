@@ -393,6 +393,7 @@ const MAX_IMAGE_CHARS = 6_000_000;
  * than waiting.
  */
 const TIMEOUT_MS = 20_000;
+const CHAT_TIMEOUT_MS = 15_000;
 /*
  * Twenty, not forty, since pictures go out three at a time (`bestInOrder`
  * in `onRequestPost`): two rounds fit inside the browser's forty five
@@ -636,6 +637,29 @@ export function rankChain(lists: Partial<Record<Provider, readonly string[]>>): 
 }
 
 /**
+ * The first few to ask at once, one from each provider, strongest first.
+ *
+ * 3 October 2026, the owner: "all available and powerful model ... even
+ * provider switch, whichever is available ... the fastest". The strongest
+ * of each provider is asked together, so the strongest that answers in
+ * time wins, a busy or spent provider costs nothing, and no provider's
+ * daily allowance is spent twice on one question. After those, the rest in
+ * order. Asking one at a time instead had the chat wait on Gemini after
+ * Gemini, twenty seconds each, until it gave up ("The model took too long").
+ */
+export function spreadProviders(chain: readonly Candidate[], width: number): Candidate[] {
+  const head: Candidate[] = [];
+  const seen = new Set<Provider>();
+  for (const c of chain) {
+    if (head.length >= width) break;
+    if (seen.has(c.provider)) continue;
+    head.push(c);
+    seen.add(c.provider);
+  }
+  return [...head, ...chain.filter((c) => !head.includes(c))];
+}
+
+/**
  * The quick jobs: sorting a message, naming an item, a one line note. The
  * app waits seconds for them (`aiClient.ts`), every strong model is well
  * able for them, and they run on their own, many times a day.
@@ -697,6 +721,8 @@ const HOUR = 60 * MINUTE;
 
 /** How long a refusal keeps a model at the back of the chain. */
 export function coolFor(status: string, detail = ""): number {
+  // Out of time on its own clock: left alone a few minutes, so the next question does not wait on it again.
+  if (status === "timeout") return 5 * MINUTE;
   if (status === "429") {
     if (/limit:\s*0\b/i.test(detail)) return 12 * HOUR;
     if (/per ?day|daily|rpd|free-models-per-day|neurons|allocation/i.test(detail)) return 3 * HOUR;
@@ -1848,6 +1874,8 @@ export const onRequestPost = async (ctx: {
       // A retired model, a rate limit, a blip. Try the next one; only an
       // exhausted chain is worth telling the owner about.
       attempts.push({ model: candidate.model, reason: shortReason(e) });
+      // Timed out on its own clock, not stopped because a stronger one answered (3 October 2026).
+      if (!outer.aborted && e instanceof Error && /abort/i.test(`${e.name} ${e.message}`)) cool(candidate, "timeout");
     }
     return null;
   };
@@ -1867,9 +1895,16 @@ export const onRequestPost = async (ctx: {
    * held, and the stronger one waited for until this job's hold (`HOLD_MS`).
    * A model that fails is replaced at once by the next one down.
    */
-  // What the owner asks, and what they send, asks the strongest alone first (`staggerMs`).
-  const stagger = task === "chat" ? 8_000 : task === "extract" ? (images.length > 0 ? 10_000 : 6_000) : 0;
-  const winner = await bestInOrder(chain, images.length > 0 ? 3 : 2, attempt, started + (HOLD_MS[task] ?? DEFAULT_HOLD_MS), stagger);
+  /*
+   * One from each provider at once, strongest first (`spreadProviders`): a
+   * question three wide, a picture three wide. Only a chain that is all one
+   * provider (a picture for Gemini alone, `seeWell`) asks its first alone
+   * for a while, so three of its few free answers are not spent on one.
+   */
+  const width = images.length > 0 || task === "chat" ? 3 : 2;
+  const ordered = spreadProviders(chain, width);
+  const oneProvider = new Set(chain.map((c) => c.provider)).size === 1;
+  const winner = await bestInOrder(ordered, width, attempt, started + (HOLD_MS[task] ?? DEFAULT_HOLD_MS), oneProvider ? 6_000 : 0);
   if (winner) return winner;
   if (nothingFound) return nothingFound;
 
@@ -2087,7 +2122,8 @@ async function send(
   const controller = new AbortController();
   const timer = setTimeout(
     () => controller.abort(),
-    images.length > 0 ? VISION_TIMEOUT_MS : TIMEOUT_MS,
+    // The chat gets fifteen: three asked at once, a second round still fits in the browser's twenty five.
+    images.length > 0 ? VISION_TIMEOUT_MS : task === "chat" ? CHAT_TIMEOUT_MS : TIMEOUT_MS,
   );
   if (outer?.aborted) controller.abort();
   outer?.addEventListener("abort", () => controller.abort(), { once: true });
@@ -2198,7 +2234,7 @@ async function sendWorkers(
   if (outer?.aborted) throw new Error("aborted");
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("aborted")), TIMEOUT_MS);
+    timer = setTimeout(() => reject(new Error("aborted")), task === "chat" ? CHAT_TIMEOUT_MS : TIMEOUT_MS);
     outer?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
   });
   try {
@@ -2275,7 +2311,8 @@ export function geminiRefusal(body: string): string {
  * for a note, 6 for sorting a message), with room for the answer to arrive.
  */
 const HOLD_MS: Record<string, number> = {
-  chat: 18_000,
+  // 3 October 2026: "the fastest". The strongest gets twelve seconds; after that the best answer already in.
+  chat: 12_000,
   summary: 18_000,
   alerts: 18_000,
   patterns: 18_000,

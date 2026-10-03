@@ -2497,7 +2497,21 @@ const AI_FEATURES: { key: keyof AiSettings["features"]; label: string; what: str
 /** Model ids are short; anything longer is a paste accident. */
 const MAX_MODEL_LENGTH = 80;
 
-const AUTOMATIC = "Automatic (the best free one available)";
+const AUTOMATIC = "Automatic (the strongest available, any provider)";
+
+/** The first of each provider in the endpoint's order, three at most: the models a question asks together (`spreadProviders`). */
+function firstOfEach(chain: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of chain) {
+    const provider = id.split(":")[0] ?? "";
+    if (seen.has(provider)) continue;
+    seen.add(provider);
+    out.push(id);
+    if (out.length === 3) break;
+  }
+  return out;
+}
 
 /**
  * Which model answers, picked from what the provider offers right now.
@@ -2574,7 +2588,11 @@ function ModelPicker({
           : model !== "" && !chosenIsOffered
             ? `${model} is not offered by ${AI_PROVIDER_LABEL[provider]} now, so Automatic is answering${answering ? `: ${modelLabel(answering)}` : ""}.`
             : answering
-              ? `Answering now: ${modelLabel(answering)}. If it is busy the next one on the list answers, and the answer says which. ${providersSetUp(offer.configured)}`
+              ? `${
+                  chosenIsOffered
+                    ? `Answering now: ${modelLabel(answering)}. If it is busy the next one on the list answers, and the answer says which.`
+                    : `Asked at once now, the strongest of each provider: ${firstOfEach(offer.chain).map(modelLabel).join(", ")}. The strongest that answers in time is used, and the answer says which.`
+                } ${providersSetUp(offer.configured)}`
               : `No model is reachable. Check the keys in Cloudflare. ${providersSetUp(offer.configured)}`
       }
     >
@@ -2717,7 +2735,14 @@ function AiSection({
       <>
       <Group title="Model" hint="Which service answers">
         <div style={{ display: "grid", gap: "var(--space-3)" }}>
-          <Field label="Provider" help="The service tried first. The other one is still used when it is busy.">
+          <Field
+            label="Provider"
+            help={
+              ai.model
+                ? "Its model below is asked first; every other provider is still used when it is busy or slow."
+                : "With the model on Automatic this changes nothing: every provider is asked, the strongest of each at once, and the strongest that answers in time is used. Pick a model below to put one first."
+            }
+          >
             <Select
               value={`${AI_PROVIDER_LABEL[ai.provider]}${AI_CONNECTED_PROVIDERS.includes(ai.provider) ? "" : " (not connected)"}`}
               disabled={off}
