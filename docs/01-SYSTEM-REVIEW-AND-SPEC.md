@@ -518,10 +518,12 @@ The whole module rests on four statements. Print them on the wall.
 |---|---|---|:---:|---|
 | They owe you | **Advance**: paid or sent on their behalf | `lend` | ▼ down | neither |
 | They owe you | **Reimbursed**: they paid it back | `collect` | ▲ up | neither |
-| They owe you | **Write off**: they will not pay | `writeoff`, category Spending, an item | – none | **spending**, on the day, under its item |
+| They owe you | **Write off**: they will not pay | `writeoff`, category Spending, an item if one is picked | – none | **spending**, on the day, under its item, or as **Money Send** (money given away) when none is picked |
 | You hold theirs | **Held**: received on their behalf | `draw` | ▲ up | neither |
 | You hold theirs | **Released**: passed on to them | `repay` | ▼ down | neither |
 | You hold theirs | **Retained**: they let you keep it | `writeoff`, category Revenue, an item | – none | **income**, on the day |
+
+The item on a write-off is optional since 3 October 2026, at the owner's instruction ("In write off why do I need to add a spending? ... mostly use is the logic of giving money to someone"): it is spending either way, and without a kind it is filed as Money Send, the name money sent to someone already goes by. No figure moves, only the name it is grouped under. Retained still needs its kind of income. A write-off against someone who owes nothing is warned, because no wallet moves: money given now is a Transfer with no destination.
 
 Write off and Retained are the one exception to footnote ¹ below, at the owner's instruction ("if he didn't pay me I can consider it now as spending"). An ordinary debt's write-off keeps category blank and still counts as neither. The historical ledger has no On behalf rows, so every known figure is unchanged.
 

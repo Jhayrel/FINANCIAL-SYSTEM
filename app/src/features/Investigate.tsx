@@ -151,7 +151,7 @@ export function Investigate({
    * Both ways of dealing with a row the investigation named.
    *
    * Every finding that points at one record used to offer exactly one thing
-   * to do with it: "Correct #0432", or for a duplicate, "Move to the bin".
+   * to do with it: "Edit #0432", or for a duplicate, "Move to the bin".
    * Which one you were given depended on what the investigation thought was
    * wrong, not on what you wanted to do about it, and the owner asked for
    * both on 21 September 2026: "add an option where I can delete it here or
@@ -164,7 +164,7 @@ export function Investigate({
   const rowActions = (row: Transaction) => (
     <span className="fms-findrow-actions">
       <Button size="sm" onClick={() => onEditRow(row)}>
-        Correct {number(row)}
+        Edit {number(row)}
       </Button>
       <Button size="sm" variant="ghost" tone="danger" onClick={() => void bin(row)}>
         Move to the bin
@@ -198,7 +198,7 @@ export function Investigate({
         return (
           <span className="fms-findrow-actions">
             <Button size="sm" onClick={() => onEditRow(clue.row)}>
-              Correct {number(clue.row)}
+              Edit {number(clue.row)}
             </Button>
           </span>
         );

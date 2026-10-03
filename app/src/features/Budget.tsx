@@ -457,7 +457,7 @@ export function Budget({
                     : "Set one and this shows what is left, and what that is a day."}
               </p>
               {lock.state === "closed" ? (
-                <Button onClick={focusPlanner}>Correct it, with a reason</Button>
+                <Button onClick={focusPlanner}>Edit it, with a reason</Button>
               ) : previous ? (
                 <Button variant="primary" onClick={usePrevious}>
                   Use {previousName}'s budget, {formatMoney(previous.spending + previous.billsSubs)}
@@ -1097,7 +1097,7 @@ function Planner({
             </span>
             {!correcting && (
               <button type="button" className="t-caption fms-linkbtn" onClick={() => setCorrecting(true)}>
-                The budget was wrong: correct it
+                The budget was wrong: edit it
               </button>
             )}
           </div>
@@ -1223,16 +1223,16 @@ function Planner({
             {closed ? (
               <div className="fms-planner-field">
                 <span className="t-label" style={{ color: "var(--ink-2)" }}>
-                  Why it needs correcting
+                  Why it needs changing
                 </span>
                 <TextInput
                   value={reason}
                   onChange={setReason}
                   placeholder="For example: forgot to set it, or the rent went up"
-                  ariaLabel="Why the budget needs correcting"
+                  ariaLabel="Why the budget needs changing"
                 />
                 <p className="t-caption fms-planner-note">
-                  Kept with the correction, under this card and in Activity.
+                  Kept with the edit, under this card and in Activity.
                 </p>
               </div>
             ) : manyMonths ? (
@@ -1252,7 +1252,7 @@ function Planner({
 
             <div className="fms-limitedit-actions">
               <Button variant="primary" fullWidth onClick={() => void save()}>
-                {closed ? "Save the correction" : hasPlan ? "Save changes" : "Save budget"}
+                {closed ? "Save the edit" : hasPlan ? "Save changes" : "Save budget"}
               </Button>
               {closed && (
                 <Button

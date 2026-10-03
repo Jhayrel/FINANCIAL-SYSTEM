@@ -22,6 +22,7 @@ import { checkDraft, draftToTransactions, emptyDraft, type Draft } from "./entry
 import { REFERENCE, TODAY } from "./eval/corpus";
 import { readProposals } from "./proposal";
 import { readEntry } from "./readEntry";
+import { kindOf } from "./kinds";
 import { costOf, incomeOf, totalsFor } from "./totals";
 import type { Transaction } from "./types";
 
@@ -121,9 +122,10 @@ describe("what it does to the money", () => {
     expect(walletBalance(ledger, "Cash")).toBe(150000);
   });
 
-  it("asks what a write off counts as, and keeps an ordinary debt's write off out of every total", () => {
-    const check = checkDraft(entry({ behalf: "owed", debtId: "stephen", debtEffect: "writeoff", amount: 6000 }), [opening], REFERENCE, [friend], TODAY);
-    expect(check.errors.map((e) => e.field)).toContain("item");
+  it("asks what retained money counts as, and keeps an ordinary debt's write off out of every total", () => {
+    // Retained is income, so it still needs the kind it counts under.
+    const kept = checkDraft(entry({ behalf: "held", debtId: "stephen", debtEffect: "writeoff", amount: 6000 }), [opening], REFERENCE, [friend], TODAY);
+    expect(kept.errors.map((e) => e.field)).toContain("item");
     const plain = draftToTransactions(entry({ debtId: "maya-credit", debtEffect: "writeoff", item: "Maya Credit", amount: 1000 }), 5, "w");
     expect(plain[0]?.category).toBe("");
     expect(costOf(plain[0] as Transaction)).toBe(0);
@@ -247,5 +249,36 @@ describe("someone sends you money to pass on", () => {
     for (const said of ["I transferred 1000 from maya to gcash", "I sent 500 to my friend from gcash"]) {
       expect(readBehalf(said), said).not.toEqual({ side: "held", effect: "draw" });
     }
+  });
+});
+
+/**
+ * A write-off needs no kind. 3 October 2026, the owner: "In write off why do
+ * I need to add a spending? ... mostly use is the logic of giving money to
+ * someone." Left empty it is money given away, Money Send; still spending.
+ */
+describe("a write-off with no kind", () => {
+  const advanced = draftToTransactions(entry({ behalf: "owed", debtId: "stephen", debtEffect: "lend", fromWallet: "Cash", amount: 6000 }), 2, "a");
+
+  it("saves, counts as spending, and is filed as Money Send", () => {
+    const ledger = [opening, ...advanced];
+    const check = checkDraft(entry({ behalf: "owed", debtId: "stephen", debtEffect: "writeoff", amount: 6000 }), ledger, REFERENCE, [friend], TODAY);
+    expect(check.errors).toEqual([]);
+    const [row] = draftToTransactions(entry({ behalf: "owed", debtId: "stephen", debtEffect: "writeoff", amount: 6000 }), 3, "w");
+    expect(costOf(row as Transaction)).toBe(6000);
+    expect(kindOf(row as Transaction)).toBe("Money Send");
+    // No wallet moves on the write-off: the money left when it was advanced.
+    expect(walletBalance([...ledger, row as Transaction], "Cash")).toBe(walletBalance(ledger, "Cash"));
+  });
+
+  it("is still filed under what it bought, when one is picked", () => {
+    const [row] = draftToTransactions(entry({ behalf: "owed", debtId: "stephen", debtEffect: "writeoff", item: "Food", amount: 6000 }), 3, "w");
+    expect(kindOf(row as Transaction)).toBe("Food");
+  });
+
+  it("says so when nothing is owed, and points at giving money by transfer", () => {
+    const check = checkDraft(entry({ behalf: "owed", debtId: "stephen", debtEffect: "writeoff", amount: 50000 }), [opening], REFERENCE, [friend], TODAY);
+    expect(check.warnings.map((w) => w.message).join(" ")).toContain("Stephen owes you nothing yet, so there is nothing to write off");
+    expect(check.warnings.map((w) => w.message).join(" ")).toContain("Use Transfer with no destination");
   });
 });

@@ -691,7 +691,7 @@ export function clueWords(clue: Clue): string {
     }
     case "unrecorded":
       if (clue.direction === "in" && clue.cash) {
-        return `${formatMoney(Math.abs(clue.explains))} more cash than recorded: cash someone gave you or paid back, change you were handed, or a cash spending entered that did not happen or was paid another way. Add it as what it was, or correct that spending.`;
+        return `${formatMoney(Math.abs(clue.explains))} more cash than recorded: cash someone gave you or paid back, change you were handed, or a cash spending entered that did not happen or was paid another way. Add it as what it was, or edit that spending.`;
       }
       return clue.direction === "in"
         ? `${formatMoney(Math.abs(clue.explains))} came in that the ledger does not have: bank interest, a refund or cashback, or someone sending or paying you back. Add it as what it was.`

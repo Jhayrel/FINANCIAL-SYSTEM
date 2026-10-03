@@ -1158,7 +1158,7 @@ export function AddTransaction({
     () => ({
       screen: "Add",
       lines: [
-        editing ? `Correcting saved record #${String(editingNumber).padStart(4, "0")}.` : "Adding a new entry.",
+        editing ? `Editing saved record #${String(editingNumber).padStart(4, "0")}.` : "Adding a new entry.",
         draft.flow
           ? `The form holds: ${draft.flow}${draft.item ? `, ${draft.item}` : ""}${
               draft.amount !== null ? `, ${formatMoney(draft.amount + draft.fee)}` : ", no amount yet"
@@ -1291,7 +1291,7 @@ export function AddTransaction({
       const total = (draft.amount ?? 0) + draft.fee;
       const ok = await confirm({
         title: `Save ${formatMoney(total)}?`,
-        body: `That is ${check.unusual.times} times the largest entry of its kind so far (${formatMoney(check.unusual.largest)}). If a zero slipped in, go back and correct the amount first.`,
+        body: `That is ${check.unusual.times} times the largest entry of its kind so far (${formatMoney(check.unusual.largest)}). If a zero slipped in, go back and edit the amount first.`,
         confirmLabel: `Save ${formatMoney(total)}`,
         tone: "normal",
       });
@@ -1496,7 +1496,7 @@ export function AddTransaction({
         <div className={editing ? "fms-entryhead is-editing" : "fms-entryhead"}>
           <div className="fms-entryhead-text">
             <span className="t-body-strong">
-              {editing ? `Correcting #${String(editingNumber).padStart(4, "0")}` : "New entry"}
+              {editing ? `Editing #${String(editingNumber).padStart(4, "0")}` : "New entry"}
             </span>
             <span className="t-caption fms-truncate" style={{ color: editing ? "var(--ink-2)" : "var(--ink-3)" }}>
               {editing
@@ -1513,7 +1513,7 @@ export function AddTransaction({
             )}
             {editing && (
               <Button size="sm" onClick={cancelEdit}>
-                Stop correcting
+                Stop editing
               </Button>
             )}
           </div>
@@ -1688,21 +1688,37 @@ export function AddTransaction({
                     </div>
                   </Field>
                   {renderPerson()}
-                  {draft.debtEffect === "writeoff" && (
-                    <Field
-                      label={draft.behalf === "owed" ? "Counts as spending on" : "Counts as income from"}
-                      required
-                      error={errorFor("item")}
-                    >
-                      <Select
-                        value={draft.item}
-                        onChange={(v) => set("item", v)}
-                        options={draft.behalf === "owed" ? reference.spendingTypes.map((s) => s.name) : reference.revenueCategories}
-                        placeholder="Pick an item"
-                        ariaLabel="What it counts as"
-                      />
-                    </Field>
-                  )}
+                  {draft.debtEffect === "writeoff" &&
+                    (draft.behalf === "owed" ? (
+                      /*
+                       * Optional: money given to someone is Money Send, the
+                       * name money sent away already goes by. A kind only when
+                       * it bought something, such as their meal (3 October 2026).
+                       */
+                      <Field
+                        label="What it bought (optional)"
+                        hint={draft.item ? `Counts as spending on ${draft.item}.` : "Left empty, it counts as Money Send: money given to them."}
+                        error={errorFor("item")}
+                      >
+                        <Select
+                          value={draft.item}
+                          onChange={(v) => set("item", v)}
+                          options={reference.spendingTypes.map((s) => s.name)}
+                          placeholder="Money given (Money Send)"
+                          ariaLabel="What it bought"
+                        />
+                      </Field>
+                    ) : (
+                      <Field label="Counts as income from" required error={errorFor("item")}>
+                        <Select
+                          value={draft.item}
+                          onChange={(v) => set("item", v)}
+                          options={reference.revenueCategories}
+                          placeholder="Pick an item"
+                          ariaLabel="What it counts as"
+                        />
+                      </Field>
+                    ))}
                 </>
               )}
 
@@ -2270,7 +2286,12 @@ export function AddTransaction({
               {MONTH_NAMES[impact.month - 1]} spending
             </div>
             <p className="t-caption" style={{ color: "var(--ink-2)" }}>
-              {formatMoney(impact.cost)} of this is {draft.debtEffect === "draw" ? "fees" : "interest"}, and counts as{" "}
+              {/* What the cost is, by what the row does: a write-off is not interest (3 October 2026). */}
+              {draft.debtEffect === "writeoff"
+                ? `${formatMoney(impact.cost)} written off counts as`
+                : draft.debtEffect === "charge"
+                  ? `${formatMoney(impact.cost)} added to what you owe counts as`
+                  : `${formatMoney(impact.cost)} of this is ${draft.debtEffect === "draw" ? "fees" : "interest"}, and counts as`}{" "}
               {MONTH_NAMES[impact.month - 1]} spending.{" "}
               {impact.budget > 0
                 ? impact.leftAfter < 0
@@ -2520,7 +2541,7 @@ export function AddTransaction({
                     className="fms-recent-row"
                     disabled={!onEditRow}
                     onClick={() => onEditRow?.(t)}
-                    title={onEditRow ? `Open #${String(t.recordNumber).padStart(4, "0")} to correct it` : undefined}
+                    title={onEditRow ? `Open #${String(t.recordNumber).padStart(4, "0")} to edit it` : undefined}
                   >
                   <div className="fms-recent-text">
                     <span className="t-body fms-truncate">{recentTitle(t, debts)}</span>

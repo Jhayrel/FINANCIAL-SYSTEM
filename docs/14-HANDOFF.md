@@ -727,6 +727,15 @@ The owner: Cash recorded PHP 760.00, really PHP 1,100.00. Replayed on the
 | "Difference −PHP 340.00" and "Found −PHP 120.00" in red read as money lost | Said in words: "More than recorded" or "Less than recorded", the figure plain |
 | The chat added a "Random PHP 220.00" income card beside two entries that add up to the same, said "mostly clear in the picture" with no picture, and its cards read "Matched on entered twice" | No income card when the ledger itself could be the answer; a card from the difference is never "in the picture"; each reason is a sentence ("Looks like #3842 entered a second time.") |
 | On a phone, "Read Saturday, October 3, 2026" on the Spending through chart did nothing that could be seen: it changed the day panel, a screen above | The panel is brought into view after a chart's button changes it (`showPanel` in `Insights.tsx`), for the spending, trend and budget charts |
+
+### 2026-10-03, last: Edit, and a write-off without a kind
+
+| Asked | Done |
+|---|---|
+| "Correct? Just say edit for universal terming" | Every button, link and sentence that changes a saved entry says Edit: the Database sheet, Insights, Find a difference, the Debt history, the Add form ("Editing #3888", "Stop editing"), a closed budget month ("Edit it, with a reason"), the chat. Rule W4 in `07-WRITING-RULES.md` and `CLAUDE.md` |
+| "In write off why do I need to add a spending? ... mostly use is the logic of giving money to someone" | The kind on a write-off is optional ("What it bought"). Left empty it is filed as Money Send, money given away; it is spending either way, so no figure moves. Retained still needs its kind of income. Spec 5.6.1 updated (`entry.ts`, `kinds.ts`, `charts.ts`, `onBehalf.test.ts`) |
+| (same screenshot) A write-off against a name with nothing owed only said "takes it below zero" | It says nothing is owed, that no wallet moves, and that money given now is a Transfer with no destination |
+| (same screenshot) The budget note said "PHP 500.00 of this is interest" for a write-off | "PHP 500.00 written off counts as October spending" |
 ---
 
 ## 6. What the owner has to do

@@ -560,7 +560,7 @@ export default function App() {
         if (open && snap.deleted.some((t) => t.id === open.id)) {
           setEditing(null);
           flash(
-            `#${String(open.recordNumber).padStart(4, "0")} was moved to the bin on another device, so its correction was closed. Restore it from the Bin to correct it.`,
+            `#${String(open.recordNumber).padStart(4, "0")} was moved to the bin on another device, so its edit was closed. Restore it from the Bin to edit it.`,
           );
         }
       },

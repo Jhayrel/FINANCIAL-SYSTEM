@@ -70,6 +70,16 @@ action. An empty state names an action, not an absence.
 
 ---
 
+## W4. Edit, never Correct
+
+The owner, 3 October 2026: "Correct? Just say edit for universal terming."
+Changing a saved entry is **Edit** on every button, link and sentence:
+"Edit #0432", "Stop editing", "Editing #3888", "a closed month is edited with
+a reason". Not "Correct", "Correcting" or "Save the correction". The word
+correct as an adjective ("the figures are correct") is unaffected.
+
+---
+
 ## Checking
 
 ```bash

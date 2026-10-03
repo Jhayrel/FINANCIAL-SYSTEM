@@ -770,7 +770,7 @@ function DebtCard({
                   </Button>
                 )}
                 <Button size="sm" onClick={() => onOpenRow(t.payment)}>
-                  Correct {n(t.payment)}
+                  Edit {n(t.payment)}
                 </Button>
               </div>
             </div>
@@ -1235,7 +1235,7 @@ function History({
                     <th className="t-th fms-rnum">Amount</th>
                     <th className="t-th fms-rnum">{owedLabel}</th>
                     {limited && <th className="t-th fms-rnum">Left to borrow</th>}
-                    <th className="t-th" aria-label="Correct" />
+                    <th className="t-th" aria-label="Edit" />
                   </tr>
                 </thead>
                 <tbody>
@@ -1282,7 +1282,7 @@ function History({
                         {limited && <td className="fms-rnum">{left(line.leftAfter)}</td>}
                         <td className="fms-rnum">
                           <button type="button" className="t-caption fms-linkbtn" onClick={() => onEditRow(line.m.row)}>
-                            Correct
+                            Edit
                           </button>
                         </td>
                       </tr>
@@ -1314,7 +1314,7 @@ function History({
                   </li>
                 ) : (
                   <li key={line.key}>
-                    <button type="button" className="fms-debthist-item" onClick={() => onEditRow(line.m.row)} aria-label={`Correct ${what(line)} ${formatMoney(line.m.total)} on ${formatMedium(line.date)}`}>
+                    <button type="button" className="fms-debthist-item" onClick={() => onEditRow(line.m.row)} aria-label={`Edit ${what(line)} ${formatMoney(line.m.total)} on ${formatMedium(line.date)}`}>
                       <span className="fms-debthist-line">
                         <StatusPill status={line.m.row.debtEffect ? EFFECT_STATUS[line.m.row.debtEffect] : "none"}>{what(line)}</StatusPill>
                         <Money value={line.m.total} size="m" />

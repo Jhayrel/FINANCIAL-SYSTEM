@@ -112,7 +112,7 @@ describe("forgetting to set last month's budget (B4, B5)", () => {
     expect(fixed.written).toEqual([7]);
     expect(fixed.revisions[0]).toMatchObject({ when: "closed", reason: "Forgot to set it" });
     expect(monthMarks(fixed.plan, 7)).toEqual({ late: false, corrected: true });
-    expect(describeRevision(fixed.revisions[0]!)).toBe("Correction: set to ₱7,700.00. Forgot to set it");
+    expect(describeRevision(fixed.revisions[0]!)).toBe("Edit: set to ₱7,700.00. Forgot to set it");
   });
 
   it("corrects a closed month only on its own", () => {

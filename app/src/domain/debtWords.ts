@@ -97,7 +97,7 @@ export function effectMeaning(effect: DebtEffect, debt?: Shape): string {
       }
       if (effect === "collect") return "They paid you back. It is not income: it was your money all along.";
       if (effect === "writeoff") {
-        return "They will not pay it back. What they owe you is cleared, and the amount counts as spending today under the item you pick.";
+        return "They will not pay it back. What they owe you is cleared, and the amount counts as spending today: as Money Send, money given away, or under what it bought if you pick one.";
       }
     } else {
       if (effect === "draw") {

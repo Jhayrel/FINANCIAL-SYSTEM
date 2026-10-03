@@ -228,6 +228,7 @@ binding, not advisory.
 | D8 | Empty states name an action. Errors say what happened and what to do. No "Something went wrong". |
 | D9 | Motion is minimal. No parallax, no gradient meshes, no skeleton shimmer, no page transitions. `prefers-reduced-motion` respected. |
 | W1 | **No em dash, anywhere.** Not in UI copy, docs, comments, commit messages, or replies. Use a colon, a full stop, a comma, or parentheses. `docs/07-WRITING-RULES.md` is binding and has the substitutions. The U+2212 minus sign in money is unaffected. |
+| W4 | **Edit, never Correct.** Changing a saved entry is "Edit" on every button, link and sentence ("Edit #0432", "Editing #3888", "Stop editing"). Owner's instruction, 2026-10-03. See `docs/07-WRITING-RULES.md`. |
 | D10 | **Phone is the primary target.** 44px touch targets, `inputmode="decimal"` on amounts, primary action within thumb reach. |
 
 If a design decision is not covered by the spec, propose it and wait. Do not default.

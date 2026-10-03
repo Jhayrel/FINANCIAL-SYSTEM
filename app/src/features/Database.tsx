@@ -831,7 +831,7 @@ export function Database({
                     onEdit(t);
                   }}
                 >
-                  Correct
+                  Edit
                 </Button>
               )}
             </>

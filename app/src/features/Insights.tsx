@@ -1072,7 +1072,7 @@ export function Insights({
                             <Money value={row.total} size="s" tone={TONE[row.type]} />
                             {onEditRow && (
                               <button type="button" className="t-caption fms-linkbtn" onClick={() => onEditRow(row)}>
-                                Correct
+                                Edit
                               </button>
                             )}
                           </div>

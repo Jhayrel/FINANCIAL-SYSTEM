@@ -23,7 +23,7 @@
 import { spanIn } from "./periodIn";
 import { toPesos } from "./money";
 import { editsBetween } from "./nearly";
-import { costOf, incomeOf } from "./totals";
+import { costOf, incomeOf, writtenOffAsSpending } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 
 export type ChartBy = "item" | "month" | "wallet" | "category" | "day" | "week" | "year";
@@ -846,6 +846,9 @@ function nextDay(day: IsoDate): IsoDate {
   return at.toISOString().slice(0, 10);
 }
 
+/** What a row is filed under by item: a write-off with no kind is money given away, Money Send (`kinds.ts`). */
+const itemName = (t: Transaction): string => t.item.trim() || (writtenOffAsSpending(t) ? "Money Send" : "(no item)");
+
 export interface ComparedPeriods {
   readonly now: { readonly from: IsoDate; readonly to: IsoDate; readonly name: string };
   readonly before: { readonly from: IsoDate; readonly to: IsoDate; readonly name: string };
@@ -985,7 +988,7 @@ function buildComparison(
       ? (direction === "revenue" ? t.toWallet : t.fromWallet).trim() || "(none)"
       : by === "category"
         ? t.category.trim() || "(none)"
-        : t.item.trim() || "(no item)";
+        : itemName(t);
   const sum = (from: IsoDate, to: IsoDate): Map<string, { value: number; count: number }> => {
     const out = new Map<string, { value: number; count: number }>();
     for (const t of transactions) {
@@ -1168,7 +1171,7 @@ export function buildChart(
       case "category":
         return t.category.trim() || "(none)";
       case "item":
-        return t.item.trim() || "(no item)";
+        return itemName(t);
     }
   };
 

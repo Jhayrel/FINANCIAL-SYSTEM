@@ -28,14 +28,14 @@ export function asksSettingsChange(text: string): boolean {
 }
 
 export const SETTINGS_ARE_YOURS =
-  "Settings are yours to change: accounts, categories, bills and subscriptions, credit lines, alerts, the theme and the AI itself. Open Settings for those. Everything else I can do from here: add, correct, move, bin and restore entries, set budgets and limits, find where a difference went, and hand you a backup or a spreadsheet.";
+  "Settings are yours to change: accounts, categories, bills and subscriptions, credit lines, alerts, the theme and the AI itself. Open Settings for those. Everything else I can do from here: add, edit, move, bin and restore entries, set budgets and limits, find where a difference went, and hand you a backup or a spreadsheet.";
 
 /** The answer to "what can you do", with the one restriction said plainly. */
 export function capabilitiesAnswer(): string {
   return [
     "Here is what I can do. Nothing is added, changed or deleted until you press the button on its card.",
     "- **Add entries** from a sentence, a receipt, a screenshot or a pasted list: spending, income, transfers, money sent to someone, and debt (borrowing with its fees, charges the lender added, payments with interest inside).",
-    "- **Correct and move entries**: \"change the treat yesterday to 1200\", \"move my spotify from gcash to maya\", \"move all grab rides this month to cash\".",
+    "- **Edit and move entries**: \"change the treat yesterday to 1200\", \"move my spotify from gcash to maya\", \"move all grab rides this month to cash\".",
     "- **Bin and restore**: \"delete the food I paid yesterday\", \"restore my deleted entry\", \"delete everything entered by ai\".",
     "- **Budgets and limits**, for one month or many: \"set my budget to 8000\", \"set october to december to 9000\", \"for the next 3 months\", \"limit food to 3000 from now on\", \"same budget as last month\", \"use the forecast\". After a budget card, \"make it september to december\" moves it.",
     "- **Find a difference**: \"my maya balance is 30000, where's the rest?\", with screenshots of the balance and the history, or the history pasted underneath.",

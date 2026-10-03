@@ -121,7 +121,7 @@ function gate(plan: BudgetYear, year: number, month: number, scope: PlanScope, a
   if (reason.length < MIN_REASON) {
     return {
       lock,
-      refused: `${name} is closed. Say why it needs correcting, and the correction is kept with the reason.`,
+      refused: `${name} is closed. Say why it needs changing, and the edit is kept with the reason.`,
     };
   }
   void plan;
@@ -273,7 +273,7 @@ export function undoLast(
   const last = monthHistory(plan, month)[0];
   if (!last) return refuse(plan, `Nothing has changed in ${monthName(month)} ${year} to undo.`);
   if (monthLock(year, month, asOf).state === "closed") {
-    return refuse(plan, `${monthName(month)} ${year} is closed. Correct it with a reason instead.`);
+    return refuse(plan, `${monthName(month)} ${year} is closed. Edit it with a reason instead.`);
   }
   const reason = "Undid the last change";
   return last.what === "tracks"
@@ -323,7 +323,7 @@ export function describeRevision(r: BudgetRevision): string {
           : `Changed from ${formatMoney(from)} to ${formatMoney(to)}`;
   }
   const when =
-    r.when === "closed" ? "Correction: " : "";
+    r.when === "closed" ? "Edit: " : "";
   const after = r.when === "grace" ? ", after the month ended" : "";
   const text = `${when}${when ? core.charAt(0).toLowerCase() + core.slice(1) : core}${after}`;
   return r.reason ? `${text}. ${r.reason}` : text;

@@ -508,14 +508,18 @@ export function checkDraft(
       });
     }
     /*
-     * Written off or retained on someone's behalf becomes spending or income,
-     * so it needs the item it counts under, like any other spending or income.
+     * Retained on someone's behalf becomes income, so it needs the kind it
+     * counts under, like any other income.
+     *
+     * Written off needs none. The owner, 3 October 2026: "In write off why do
+     * I need to add a spending? ... mostly use is the logic of giving money to
+     * someone." Money given to someone already has a name, Money Send, the
+     * one money sent away by transfer counts under, and a write-off left
+     * without a kind is filed there (`kinds.ts`). It is spending either way;
+     * a kind is picked only when the money bought something.
      */
-    if (draft.behalf && draft.debtEffect === "writeoff" && !draft.item.trim()) {
-      errors.push({
-        field: "item",
-        message: draft.behalf === "owed" ? "Pick what it counts as in your spending." : "Pick what it counts as in your income.",
-      });
+    if (draft.behalf === "held" && draft.debtEffect === "writeoff" && !draft.item.trim()) {
+      errors.push({ field: "item", message: "Pick what it counts as in your income." });
     }
 
     const debt = draft.debtId ? debts.find((d) => d.id === draft.debtId) : undefined;
@@ -782,8 +786,19 @@ export function checkDraft(
        */
     }
 
-    // Collecting or forgiving more than is outstanding takes it below zero.
-    if ((draft.debtEffect === "collect" || draft.debtEffect === "writeoff") && amount > Math.max(0, outstanding)) {
+    /*
+     * Nothing owed and a write-off: there is nothing to clear, and no money
+     * moves, so the spending would be booked from no wallet. Money given to
+     * someone now is a transfer to no account of yours (3 October 2026, the
+     * owner writing off PHP 500.00 against a name with nothing outstanding).
+     */
+    if (draft.debtEffect === "writeoff" && draft.behalf === "owed" && Math.max(0, outstanding) === 0) {
+      warnings.push({
+        field: "amount",
+        message: `${debt?.name ?? "They"} ${debt ? "owes" : "owe"} you nothing yet, so there is nothing to write off and no money leaves a wallet. Giving them money now? Use Transfer with no destination: it leaves your wallet and counts as Money Send.`,
+      });
+    } else if ((draft.debtEffect === "collect" || draft.debtEffect === "writeoff") && amount > Math.max(0, outstanding)) {
+      // Collecting or forgiving more than is outstanding takes it below zero.
       warnings.push({
         field: "amount",
         message: `Only ${money(Math.max(0, outstanding))} is outstanding on ${debt?.name ?? "this debt"}. ${

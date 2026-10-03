@@ -872,7 +872,7 @@ function cardWords(turn: Turn, state: StoredCard["state"]): string {
   if (isDebt(turn)) return `${CARD_WORD[state]}: ${turn.draft.date} Debt ${formatMoney(turn.draft.amount ?? 0)}`;
   if (isFound(turn)) {
     const n = turn.candidates.length || turn.restored?.length || 0;
-    const verb = turn.action === "edit" ? "to correct" : turn.action === "restore" ? "to restore" : "to move to the bin";
+    const verb = turn.action === "edit" ? "to edit" : turn.action === "restore" ? "to restore" : "to move to the bin";
     return `${n} ${n === 1 ? "entry" : "entries"} found ${verb}.`;
   }
   if (isChanging(turn)) {
@@ -3921,7 +3921,7 @@ export function AskPanel({
           reply = `The card you discarded is open again above. What should its title say?${reads(back.proposal.draft)}`;
         } else {
           reply =
-            "There is no card open to rename. For a saved entry, name the day, the item or the amount, or give the record number, and I will find it for you to correct.";
+            "There is no card open to rename. For a saved entry, name the day, the item or the amount, or give the record number, and I will find it for you to edit.";
         }
       }
       say({ kind: "assistant", text: reply, from: "this device" });
@@ -4945,12 +4945,12 @@ export function AskPanel({
       setDraft("");
       say({ kind: "you", text: note });
       if (newest.length === 0) {
-        say({ kind: "assistant", text: "The ledger has no entries yet, so there is nothing to correct.", from: "this device" });
+        say({ kind: "assistant", text: "The ledger has no entries yet, so there is nothing to edit.", from: "this device" });
         return;
       }
       say({
         kind: "assistant",
-        text: "Here are your newest entries. **Edit this** puts one in the form to correct, keeping its record number. **Move to bin** removes it, and the Bin can bring it back.",
+        text: "Here are your newest entries. **Edit this** puts one in the form to edit, keeping its record number. **Move to bin** removes it, and the Bin can bring it back.",
         from: "this device",
       });
       say({
@@ -4960,7 +4960,7 @@ export function AskPanel({
         candidates: newest.map((row, n) => ({ row, score: 100 - n, why: [n === 0 ? "the newest entry" : "a recent entry"] })),
         done: [],
       });
-      log(aiEvent("answered", "add", { text: `Offered the ${newest.length} newest entries to correct. Asked: ${note}`, model: "this device" }));
+      log(aiEvent("answered", "add", { text: `Offered the ${newest.length} newest entries to edit. Asked: ${note}`, model: "this device" }));
       return;
     }
 
@@ -9214,7 +9214,7 @@ function DebtCard({
     );
   }
 
-  const left = (ready.debtId ? 0 : 1) + (draft.debtEffect ? 0 : 1) + (behalf && draft.debtEffect === "writeoff" && !draft.item ? 1 : 0);
+  const left = (ready.debtId ? 0 : 1) + (draft.debtEffect ? 0 : 1) + (behalf === "held" && draft.debtEffect === "writeoff" && !draft.item ? 1 : 0);
 
   return (
     <div ref={hostRef} className="fms-proposal">
@@ -9379,7 +9379,7 @@ function DebtCard({
       {behalf && draft.debtEffect === "writeoff" && (
         <div className="fms-debtpick">
           <label className="t-micro fms-pfieldlabel" htmlFor={`debt-item-${turn.cardId}`}>
-            {behalf === "owed" ? "Counts as spending on" : "Counts as income from"}
+            {behalf === "owed" ? "What it bought" : "Counts as income from"}
           </label>
           <select
             id={`debt-item-${turn.cardId}`}
@@ -9387,7 +9387,8 @@ function DebtCard({
             value={draft.item}
             onChange={(e) => onChange({ ...draft, item: e.target.value })}
           >
-            <option value="">Pick one</option>
+            {/* Written off with no kind is money given away: Money Send (`kinds.ts`). */}
+            <option value="">{behalf === "owed" ? "Money given (Money Send)" : "Pick one"}</option>
             {(behalf === "owed" ? reference.spendingTypes.map((t) => t.name) : reference.revenueCategories).map((name) => (
               <option key={name} value={name}>
                 {name}

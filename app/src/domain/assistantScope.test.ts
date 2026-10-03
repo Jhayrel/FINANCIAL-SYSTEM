@@ -12,7 +12,7 @@ describe("what the assistant can do", () => {
 
   it("names every kind of action and says Settings are not one of them", () => {
     const answer = capabilitiesAnswer();
-    for (const part of ["Add entries", "Correct and move", "Bin and restore", "Budgets and limits", "Find a difference", "Settings stay yours"]) {
+    for (const part of ["Add entries", "Edit and move", "Bin and restore", "Budgets and limits", "Find a difference", "Settings stay yours"]) {
       expect(answer).toContain(part);
     }
     expect(answer.includes(String.fromCharCode(0x2014))).toBe(false);

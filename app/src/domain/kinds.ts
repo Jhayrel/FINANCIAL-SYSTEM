@@ -38,8 +38,12 @@ import type { RankedAmount, Transaction } from "./types";
 export function kindOf(t: Transaction, debts: readonly Debt[] = []): string {
   if (t.type === "Transfer") return t.toWallet.trim() ? "Transaction Fee" : "Money Send";
   if (t.type === "Debt") {
-    // Money advanced for someone and written off is spending on what it bought.
-    if (writtenOffAsSpending(t)) return t.item.trim() || "No item";
+    /*
+     * Money advanced for someone and written off is spending on what it
+     * bought, or, with no kind picked, money given away: Money Send, the name
+     * money sent to someone already goes by (`entry.ts`, 3 October 2026).
+     */
+    if (writtenOffAsSpending(t)) return t.item.trim() || "Money Send";
     if (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge") {
       return `Interest and fees, ${debts.find((d) => d.id === t.debtId)?.name ?? "a debt"}`;
     }
