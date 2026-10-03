@@ -2399,8 +2399,14 @@ function CreditLines({
     const shape = c.form ?? "credit-line";
     const outstanding = position?.outstanding ?? 0;
     const used = filedOn(c);
-    // Paid back, or never used: what is left to do with it is put it away.
-    const settled = !c.archived && outstanding === 0 && used > 0;
+    /*
+     * Paid back, so what is left to do with it is put it away: a loan to or
+     * from a person, money on someone's behalf, a bank loan repaid. Never a
+     * credit line: it is drawn on again and again, and at nothing owed it is
+     * waiting for the next draw, not finished. Maya Credit at PHP 0.00 was
+     * offered Archive as "settled" (3 October 2026).
+     */
+    const settled = !c.archived && shape !== "credit-line" && outstanding === 0 && used > 0;
     const days = billed(c)
       ? [c.billingDay ? `bill closes the ${choiceOfDay(c.billingDay)}` : "", c.dueDay ? `due the ${choiceOfDay(c.dueDay)}` : ""].filter(Boolean)
       : [];
@@ -2548,7 +2554,8 @@ function CreditLines({
     return (
       <Group title={title} hint={hint} action={<CountChip>{live.length}</CountChip>} wide>
         {live.length === 0 ? (
-          <EmptyState message={`Nothing open. Add one below if you have ${title.toLowerCase()}.`} />
+          // One quiet line, not a block: nothing open is the usual state of a list like this.
+          <p className="t-caption fms-creditempty">{key === "owed" ? "You owe nothing right now. Add a credit line or loan below." : "Nobody owes you anything right now. Lending money in Add puts them here."}</p>
         ) : (
           <ul className="fms-creditlist">{live.map(row)}</ul>
         )}

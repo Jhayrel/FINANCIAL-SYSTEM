@@ -2216,6 +2216,19 @@
   min-width: 0;
 }
 
+/* A button beside the row keeps its word whole: "Archi / ve" on a phone (3 October 2026). */
+.fms-creditrow-line > .fms-btn {
+  flex: none;
+  white-space: nowrap;
+}
+
+.fms-creditempty {
+  margin: 0;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-2);
+}
+
 .fms-creditrow-head {
   display: grid;
   flex: 1 1 auto;

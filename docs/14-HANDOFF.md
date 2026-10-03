@@ -752,6 +752,8 @@ entry or update".
 | Remove was offered on everything, then refused with a message at the bottom of the page when anything was filed | Remove shows only when nothing is filed; otherwise the row says why it is archived instead |
 | Archive, Reopen and a change of account each asked first | Only a change of form asks (it changes what recorded money means); the rest is undone the way it was done |
 | Lending to Tita again made a second "Tita" beside the archived one | The same name on the same side is reopened with its history, in the form and the chat (`archivedNamed`, `withDebt`, `reopenPerson.test.ts`), and the form says so |
+| (owner's phone, after) Maya Credit at PHP 0.00 was called "settled" and offered Archive, and the button wrapped to "Archi / ve" | A credit line is never settled: it is drawn on again. Only a loan, money on someone's behalf or a repaid bank loan is offered Archive, and the button keeps its word on one line |
+| (same) An empty list read "Nothing open. Add one below if you have what is owed to me" in a large empty block | One quiet line per list: "You owe nothing right now. Add a credit line or loan below." and "Nobody owes you anything right now. Lending money in Add puts them here." |
 ---
 
 ## 6. What the owner has to do
