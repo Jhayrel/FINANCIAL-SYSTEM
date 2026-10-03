@@ -518,8 +518,23 @@ export function amend(
   // "change the item to treat": the item, matched to the owner's own list.
   const itemSaid = /^(?:please\s+)?(?:change|set|make|update|put)?\s*(?:the\s+|its\s+)?(?:item|category|type)\s*(?:to|as|into|:|=|should be|is)\s+(.{1,60})$/i.exec(trimmed);
   if (itemSaid?.[1] && (draft.flow === "Spending" || draft.flow === "Revenue")) {
-    const match = matchItem(itemSaid[1].trim(), draft.flow, draft.category, reference);
-    if (match.item) return { draft: { ...draft, item: match.item }, what: `Item set to ${match.item}.` };
+    const said = itemSaid[1].trim();
+    const match = matchItem(said, draft.flow, draft.category, reference);
+    if (match.matched) return { draft: { ...draft, item: match.item }, what: `Item set to ${match.item}.` };
+    // A bill or a subscription by name moves the card to that list.
+    const bill = draft.flow === "Spending" ? matchExact(said, reference.bills) : "";
+    const sub = draft.flow === "Spending" && !bill ? matchExact(said, reference.subscriptions) : "";
+    if (bill || sub) {
+      return { draft: { ...draft, item: bill || sub, category: bill ? "Bills" : "Subscriptions" }, what: `Item set to ${bill || sub}, as a ${bill ? "bill" : "subscription"}.` };
+    }
+    /*
+     * Not one of theirs: the card is not given a kind no list has, which
+     * saved a row no total or filter finds (3 October 2026, `onList.ts`).
+     */
+    if (match.item) {
+      const kinds = draft.flow === "Revenue" ? "kinds of income" : draft.category === "Bills" ? "bills" : draft.category === "Subscriptions" ? "subscriptions" : "kinds of spending";
+      return { draft, what: `"${match.item}" is not one of your ${kinds}, so the item stays as it was. Pick one of yours on the card, or add it in Settings first.` };
+    }
   }
 
   /*

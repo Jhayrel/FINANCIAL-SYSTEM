@@ -614,6 +614,25 @@ be used, the strongest that is available, and the fastest. Now:
 | A model that ran out of time was asked first again on the next question | Set aside for five minutes (`coolFor("timeout")`), only when it ran out on its own clock, never when it was stopped because a stronger one answered |
 | Settings: "Automatic (the best free one available)", and Provider said "the service tried first" | "Automatic (the strongest available, any provider)"; under it, the three asked at once by name; Provider says it changes nothing while the model is Automatic, which was already true (the provider is sent only with a model) |
 
+
+### 2026-10-03, last: a card's kind is always one of the owner's
+
+"I said I travel ... the entry says vacation instead of travel. Make it always
+align in the database." A model named a kind the owner does not have, the card
+kept it and said "Saving this adds it as a new one", which nothing did: the row
+was saved with an item on no list, so no total, filter or ranking that goes by
+the owner's kinds found it again. The Add form only ever offered the lists.
+
+| Where | Now |
+|---|---|
+| A model's reading (`readProposals`) | `fitItem` (`domain/onList.ts`): the list's own spelling; the one kind the owner named in their words (when the message made one card); a near spelling; the item's words read against the notes and the everyday words (Vacation is Travel, Groceries is Home Needs); the description; else left empty, the word kept as the description, and the card says why |
+| The card on its way to the chat (`offer` in `AskPanel.tsx`) | The same, before the ledger and a model fill an empty item, and again after |
+| The ledger's history (`inferFromHistory`) | Only rows whose item is on a list now count: a kind from years back is never today's |
+| An answer to "What was it for?", and "change the item to X" | One of theirs, a bill or subscription by name moving the card to that list, or refused with what to do |
+| The card | A kind on no list shows the picker, and Add refuses it (`offListProblem` in the sink's check) |
+| Everyday words (`filipino.ts`) | vacation, trip, transportation, entertainment, medicines, dining, grooming and a few more, resolved against the owner's own list like the rest |
+
+A genuinely new kind is made in Settings and is then on the list like the rest.
 ---
 
 ## 6. What the owner has to do

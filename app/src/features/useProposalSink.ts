@@ -26,6 +26,7 @@ import {
   nextRecordNumber as numberAfter,
   type Draft,
 } from "../domain/entry";
+import { offListProblem } from "../domain/onList";
 import type { BudgetYear, ReferenceLists, Transaction } from "../domain/types";
 import type { ProposalSink } from "./AskPanel";
 
@@ -100,9 +101,15 @@ export function useProposalSink(input: SinkInput): ProposalSink {
       nextRecordNumber,
       check: (d, extra) => {
         const c = checkDraft(d, transactions, reference, extra && extra.length > 0 ? [...debts, ...extra] : debts);
+        /*
+         * A kind on none of the owner's lists is not added from a card, as the
+         * Add form's picker offers only theirs: saved, it was a row no total
+         * or filter finds (3 October 2026, `domain/onList.ts`).
+         */
+        const offList = offListProblem(d, reference);
         return {
-          ok: c.ok,
-          problems: c.errors.map((e) => e.message),
+          ok: c.ok && offList === "",
+          problems: [...c.errors.map((e) => e.message), ...(offList ? [offList] : [])],
           warnings: c.warnings.map((w) => w.message),
           unusual: c.unusual?.times,
           split: c.repaymentSplit,

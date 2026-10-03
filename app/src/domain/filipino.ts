@@ -65,6 +65,16 @@ const THINGS: readonly (readonly [RegExp, string])[] = [
   [/\b(groceries|detergent|air freshener|diffuser|cleaning|dishwashing|tissue|home items?|household)\b/i, "home needs"],
   [/\b(movie|cinema|games?|arcade|karaoke|outing)\b/i, "fun"],
   [/\b(gift|birthday|blowout|treated|treat)\b/i, "treat"],
+  /*
+   * The names a model gives a kind the owner calls something else: Vacation
+   * for their Travel (3 October 2026), Entertainment for Fun. Last, so a
+   * plainer word in the same message decides first.
+   */
+  [/\b(vacations?|trips?|tours?|travell?(?:ed|ing|er|ers)|transport(?:ation)?|transpo)\b/i, "travel"],
+  [/\b(entertainment|leisure|recreation|hangout|hang out)\b/i, "fun"],
+  [/\b(medicines|medications?|dental|dentist|check-up)\b/i, "health"],
+  [/\b(dining|restaurants?|eating out|take ?out|food delivery)\b/i, "food"],
+  [/\b(personal care|grooming|hygiene)\b/i, "self care"],
 ];
 
 /**

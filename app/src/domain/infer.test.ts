@@ -5,7 +5,7 @@ import { emptyDraft, type Draft } from "./entry";
 import { blanksIn, nextQuestion } from "./capture";
 import type { ReferenceLists, Transaction } from "./types";
 
-const reference: ReferenceLists = {
+const base: ReferenceLists = {
   wallets: ["Cash", "Gcash", "Maya"],
   savings: ["Maya Bank (Personal savings)"],
   bills: ["Electricity"],
@@ -13,6 +13,7 @@ const reference: ReferenceLists = {
   revenueCategories: ["Allowance"],
   spendingTypes: [{ name: "Load", remark: "" }, { name: "Food", remark: "" }],
 };
+const reference = base;
 
 let n = 0;
 const row = (over: Partial<Transaction> = {}): Transaction => {
@@ -234,6 +235,7 @@ describe("inferFromHistory fills the blanks and says why", () => {
 });
 
 describe("the usual amount, from your own rows", () => {
+  const reference: ReferenceLists = { ...base, spendingTypes: [...base.spendingTypes, { name: "Gas", remark: "" }] };
   const twoHundred = [
     row({ item: "Gas", amount: 20000, total: 20000, fromWallet: "Cash" }),
     row({ item: "Gas", amount: 20000, total: 20000, fromWallet: "Cash" }),

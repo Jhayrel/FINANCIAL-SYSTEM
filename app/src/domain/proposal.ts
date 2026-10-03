@@ -40,7 +40,7 @@ import { emptyDraft, itemsFor } from "./entry";
 import { accountFor, type InterestCredit } from "./interestCredit";
 import { cashWallet, type Withdrawal } from "./withdrawal";
 import type { CardSlip } from "./cardSlip";
-import { nearestName } from "./nearly";
+import { fitItem } from "./onList";
 import { rowDatesIn } from "./ocrText";
 import type { ReceiptCheck } from "./receipt";
 import type { IsoDate, ReferenceLists, TransactionCategory, TransactionStatus } from "./types";
@@ -413,29 +413,14 @@ function readOne(
   }
   if (/^(spending|revenue|income|transfer)$/i.test(str(value["item"]).trim())) value = { ...value, item: "" };
 
-  /**
-   * An item that is not on the list is kept, not dropped.
-   *
-   * `checkDraft` does not require the item to be a known one, and a receipt
-   * naming something new is how a new item gets added in the first place. It
-   * is flagged so the owner can see it is new rather than a typo.
+  /*
+   * The item as the model wrote it, on the list's own spelling when it is
+   * there. One that is not is put back on the list, or left for the owner,
+   * once every reading is in (`fitItem` in `readProposals`).
    */
   const rawItem = str(value["item"]);
   const known = itemsFor(flow, category, reference);
   const item = matchExact(rawItem, known) || rawItem;
-  if (rawItem && !matchExact(rawItem, known)) {
-    /**
-     * Nearly right is worse than plainly wrong.
-     *
-     * "This is not on your list yet" is correct and useless when the name is
-     * "Foood": it reads as an invitation to add a second item, and then every
-     * food total is split between two spellings and neither is right. So when
-     * it is one letter from something already on the list, the note says
-     * which one and why it matters.
-     */
-    const near = nearestName(rawItem, known);
-    adjustments.push(near ? near.note : `"${rawItem}" is not on your list yet.`);
-  }
 
   const status =
     (matchExact(str(value["status"]), [...STATUSES]) as TransactionStatus) ||
@@ -814,7 +799,24 @@ export function readProposals(
     asOf,
   ), context.withdrawals ?? [], reference, asOf), context.cardSlips ?? [], reference, asOf);
   const filed = onCreditLine(checked, context.note ?? "", reference);
-  return { proposals: pairBorrowings(foldTransferFees(foldCharges(notIncomeKinds(filed, reference)))), refused, balances };
+  const folded = pairBorrowings(foldTransferFees(foldCharges(notIncomeKinds(filed, reference))));
+  return { proposals: onTheirLists(folded, context.note ?? "", reference), refused, balances };
+}
+
+/**
+ * Every item put back on the owner's lists, or left for them (`onList.ts`).
+ *
+ * The owner's words count only when the message made one card: "lunch 100
+ * and travel 50" names Travel, and that is the fare's kind, not the lunch's.
+ */
+function onTheirLists(proposals: readonly Proposal[], note: string, reference: ReferenceLists): Proposal[] {
+  const kinds = proposals.filter((p) => p.draft.flow === "Spending" || p.draft.flow === "Revenue").length;
+  const said = kinds === 1 ? note : "";
+  return proposals.map((p) => {
+    const fitted = fitItem(p.draft, said, reference);
+    if (!fitted.note) return fitted.draft === p.draft ? p : { ...p, draft: fitted.draft };
+    return { ...p, draft: fitted.draft, adjustments: [...p.adjustments, fitted.note] };
+  });
 }
 
 /**

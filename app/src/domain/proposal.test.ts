@@ -82,10 +82,12 @@ describe("readProposals never invents", () => {
     expect(proposals[0]?.adjustments).toHaveLength(0);
   });
 
-  it("keeps an item that is new, and says it is new", () => {
-    const { proposals } = one({ item: "Haircut" });
-    expect(proposals[0]?.draft.item).toBe("Haircut");
-    expect(proposals[0]?.adjustments.join(" ")).toContain("not on your list yet");
+  // 3 October 2026: a kind the owner does not have is never kept, it is left for them to pick.
+  it("leaves an item that is not on the list for the owner to pick, and says why", () => {
+    const { proposals } = one({ item: "Haircut", description: "" });
+    expect(proposals[0]?.draft.item).toBe("");
+    expect(proposals[0]?.draft.description).toBe("Haircut");
+    expect(proposals[0]?.adjustments.join(" ")).toContain('"Haircut" is not one of your kinds of spending');
   });
 
   it("falls back to today when the date is unreadable, and says so", () => {

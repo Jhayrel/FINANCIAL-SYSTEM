@@ -170,6 +170,7 @@ import { useBackToClose } from "../data/backButton";
 import { aiLogStore } from "../data/aiLogStore";
 import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AttachmentNote } from "../domain/aiLog";
 import { clauseFor, verifyReading } from "../domain/verify";
+import { fitItem, itemOnList } from "../domain/onList";
 import { carded, cardsIn, drawn, drew, proposed, said, type ChatMessage, type StoredCard } from "../domain/chat";
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
@@ -2195,10 +2196,18 @@ export function AskPanel({
      * two Maya cashback notifications asked "What was it?" though every
      * cashback before them was Random (28 September 2026).
      */
-    const historyHint = start.item.trim() || !start.description.trim() || hint.toLowerCase().includes(start.description.trim().toLowerCase()) ? hint : `${hint} ${start.description}`.trim();
+    /*
+     * On the owner's own lists before anything else reads the item: a kind
+     * they do not have is put back on one of theirs, or left for the ledger,
+     * a model and then the owner to fill. Saving it as typed made a row no
+     * list, total or filter knows (3 October 2026, `domain/onList.ts`).
+     */
+    const fitted = fitItem(start, against ?? proposal.said ?? clauseFor(hint, start.amount, reference), reference, learnedItems);
+    const onTheirList = fitted.draft;
+    const historyHint = onTheirList.item.trim() || !onTheirList.description.trim() || hint.toLowerCase().includes(onTheirList.description.trim().toLowerCase()) ? hint : `${hint} ${onTheirList.description}`.trim();
     const { draft, because } = useHistory
-      ? inferFromHistory(start, transactions, reference, historyHint)
-      : { draft: start, because: learned };
+      ? inferFromHistory(onTheirList, transactions, reference, historyHint)
+      : { draft: onTheirList, because: learned };
 
     /**
      * ── Between step 3 and step 4: check the reading against what was said ─
@@ -2245,6 +2254,7 @@ export function AskPanel({
       adjustments: [
         // One reason, said once: the ledger agreeing with a lesson is not a second note about the same item.
         ...proposal.adjustments.filter((note) => !(teachable && note.startsWith(`Booked as ${taught}`))),
+        ...(fitted.note ? [fitted.note] : []),
         ...(useHistory ? [...learned, ...because] : because),
         ...checked.notes,
       ],
@@ -2320,6 +2330,10 @@ export function AskPanel({
       }
     }
 
+    // Whatever filled the item since, it is one of theirs or it is left empty.
+    const still = fitItem(ready.draft, "", reference, learnedItems);
+    if (still.note) ready = { ...ready, draft: still.draft, adjustments: [...ready.adjustments, still.note] };
+
     /**
      * Whatever else is missing, work out what the thing was.
      *
@@ -2356,26 +2370,6 @@ export function AskPanel({
           ],
         };
       }
-    }
-
-    /**
-     * A new spending type is worth seeing before it is saved, however the
-     * entry got here: a second type that differs only in wording splits every
-     * ranking that groups by item.
-     */
-    const itemFlow = ready.draft.flow;
-    if (
-      ready.draft.item.trim() &&
-      (itemFlow === "Spending" || itemFlow === "Revenue") &&
-      !matchItem(ready.draft.item, itemFlow, ready.draft.category, reference, learnedItems).matched
-    ) {
-      ready = {
-        ...ready,
-        adjustments: [
-          ...ready.adjustments,
-          `"${ready.draft.item}" is not one of your spending types. Saving this adds it as a new one.`,
-        ],
-      };
     }
 
     const asked = batch ? null : nextQuestion(ready.draft, reference, settled);
@@ -2523,10 +2517,13 @@ export function AskPanel({
         if (guessed) filled = { ...filled, item: guessed.item };
       }
     }
+    // One of their kinds, or the card is left to pick one: never a kind made up on the way (`domain/onList.ts`).
+    const kept = fitItem(filled, note, reference, learnedItems);
+    filled = kept.draft;
 
     setDraft("");
     say({ kind: "you", text: note });
-    const what = whatChanged(before, filled);
+    const what = [whatChanged(before, filled), kept.note].filter(Boolean).join(" ");
 
     /*
      * The same answer for the rows like it still to come: five cash backs
@@ -2717,25 +2714,14 @@ export function AskPanel({
       }
 
       /**
-       * Decided from the item that will actually be saved.
-       *
-       * An earlier version compared the item against the raw reply, so a
-       * reply that only had its casing tidied ("dog" into "Dog") no longer
-       * matched and the warning was skipped. What matters is whether the
-       * final item is one of the owner's types, which is the question
-       * `matchItem` answers.
+       * Decided from the item that will actually be saved: one of their
+       * kinds, or left for them to pick on the card. A reply that named no
+       * kind of theirs was saved as a new one and said so, and nothing put it
+       * on any list (3 October 2026, `domain/onList.ts`).
        */
-      const replyFlow = complete.flow;
-      // No item is not a new item: the card says so on its own line.
-      const settledItem =
-        replyFlow === "" || !complete.item.trim()
-          ? null
-          : matchItem(complete.item, replyFlow, complete.category, reference, learnedItems);
-      if (settledItem && !settledItem.matched) {
-        because.push(
-          `"${complete.item}" is not one of your spending types. Saving this adds it as a new one.`,
-        );
-      }
+      const kept = fitItem(complete, about, reference, learnedItems);
+      complete = kept.draft;
+      if (kept.note) because.push(kept.note);
     }
     // The words that named it, as the description, when nothing else wrote one.
     const named = pending.said ? lessonKey(pending.said, reference) : "";
@@ -7373,7 +7359,8 @@ function ProposalCard({
    */
   const itemChoices =
     flow === "Spending" || flow === "Revenue" ? itemsFor(flow, draft.category, reference) : [];
-  const needsItem = itemChoices.length > 0 && draft.item.trim() === "";
+  // Empty, or a kind on none of their lists (a card kept from before 3 October 2026): picked from theirs.
+  const needsItem = itemChoices.length > 0 && (draft.item.trim() === "" || !itemOnList(draft, reference));
 
   /**
    * Where a transfer went, which the card could not ask.
@@ -7742,7 +7729,7 @@ function ProposalCard({
           <select
             id={itemPickerId}
             className="t-caption fms-proposalselect"
-            value={draft.item}
+            value={itemChoices.includes(draft.item) ? draft.item : ""}
             onChange={(e) => onChange({ ...draft, item: e.target.value })}
           >
             <option value="">Pick one</option>

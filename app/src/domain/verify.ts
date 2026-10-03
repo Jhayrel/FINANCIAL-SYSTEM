@@ -70,7 +70,7 @@ export interface Verified {
 const REQUIRED: readonly FieldName[] = ["date", "amount", "fromWallet", "toWallet"];
 
 /** A sentence reduced to spaced words, so a name can be found whole. */
-function flatten(text: string): string {
+export function flatten(text: string): string {
   return ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
 }
 
@@ -98,7 +98,7 @@ function names(sentence: string, name: string): boolean {
 const WENT_THERE = /\b(?:to|at|from|near|outside|inside|toward|towards|past|around)$/;
 
 /** The name appears, and at least once as a thing bought rather than a place. */
-function namesAPurchase(sentence: string, name: string): boolean {
+export function namesAPurchase(sentence: string, name: string): boolean {
   const flat = flatten(name).trim();
   if (flat === "") return false;
   const needle = ` ${flat} `;

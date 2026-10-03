@@ -270,7 +270,15 @@ export function inferFromHistory(
 
   // ── The item ─────────────────────────────────────────────────────────────
   if (!next.item.trim() && (flow === "Spending" || flow === "Revenue")) {
-    const sameFlow = transactions.filter((t) => t.type === flow);
+    /*
+     * Only rows whose item is still on the owner's lists: a kind from years
+     * back that is on no list now is not one to file today's row under
+     * (3 October 2026, "make it always align in the database").
+     */
+    const current = new Set(
+      (flow === "Revenue" ? reference.revenueCategories : [...reference.spendingTypes.map((s) => s.name), ...reference.bills, ...reference.subscriptions]).map((n) => n.trim().toLowerCase()),
+    );
+    const sameFlow = transactions.filter((t) => t.type === flow && (current.size === 0 || current.has(t.item.trim().toLowerCase())));
     const match = itemFromHistory(hint, sameFlow, [
       ...reference.wallets,
       ...reference.savings,
