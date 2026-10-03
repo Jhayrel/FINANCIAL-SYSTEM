@@ -73,6 +73,8 @@ export type Clue =
       readonly explains: Centavos;
     }
   | { readonly kind: "duplicate"; readonly row: Transaction; readonly twin: Transaction; readonly explains: Centavos }
+  /** Entered again, though an older row already holds it with others, as the statement lists them. */
+  | { readonly kind: "inside"; readonly row: Transaction; readonly whole: Transaction; readonly explains: Centavos }
   | { readonly kind: "together"; readonly rows: readonly Transaction[]; readonly explains: Centavos }
   | { readonly kind: "cash"; readonly perDay: Centavos; readonly days: number; readonly explains: Centavos }
   | { readonly kind: "wrong-account"; readonly row: Transaction; readonly other: string; readonly explains: Centavos }
@@ -91,6 +93,13 @@ export interface Investigation {
   readonly found: readonly Clue[];
   /** Possibilities with no evidence: each could be the whole answer, and they overlap. */
   readonly possible: readonly Clue[];
+  /**
+   * Rows in the period that what was sent does not show, which the balance
+   * does not need: the rest already accounts for the difference to the
+   * centavo, so these are most likely a part of the history the picture
+   * does not reach. Said, never counted.
+   */
+  readonly aside: readonly Clue[];
   /** The part of the gap the found clues account for. */
   readonly explained: Centavos;
   /** What is still unaccounted for. */
@@ -262,8 +271,9 @@ export function investigate(input: InvestigateInput): Investigation {
   const recorded = onAccount.reduce((sum, t) => sum + movedOn(t, account), 0);
   const gap = recorded - actual;
 
-  const found: Clue[] = [];
+  let found: Clue[] = [];
   const possible: Clue[] = [];
+  let aside: Clue[] = [];
   const statement = [...(input.statement ?? [])].filter((l) => l.amount !== 0 && l.date <= asOf);
   let covered: Investigation["covered"];
 
@@ -271,26 +281,41 @@ export function investigate(input: InvestigateInput): Investigation {
     const from = statement.reduce((m, l) => (l.date < m ? l.date : m), statement[0]!.date);
     const to = statement.reduce((m, l) => (l.date > m ? l.date : m), statement[0]!.date);
     covered = { from, to };
-    const inWindow = onAccount.filter((t) => t.date >= from && t.date <= to);
+    const inPeriod = (t: Transaction): boolean => t.date >= from && t.date <= to;
+    /*
+     * Rows a few days either side are matched too: Maya listed on 1 October
+     * a withdrawal and a transfer the owner had dated 30 September (2 October
+     * 2026). Only a row inside the period is ever said to be missing from it.
+     */
+    const inWindow = onAccount.filter((t) => t.date >= addDays(from, -3) && t.date <= addDays(to, 3));
 
     const lines = statement.map((line, index) => ({ line, index }));
     const unmatchedLines = new Set(lines.map((l) => l.index));
     const unmatchedRows = new Set(inWindow.map((t) => t.id));
+    /** The row each line matched to the centavo, for the parts found below. */
+    const rowOfLine = new Map<number, Transaction>();
 
-    // Pass 1: the same figure, the closest date, the likeliest words.
+    /*
+     * Pass 1: the same figure, the closest date, the likeliest words, the
+     * closest pairs first across the whole list. Line by line, today's
+     * ₱100.00 took yesterday's ₱100.00 row and yesterday's line was called
+     * missing (2 October 2026).
+     */
+    const pairs: { index: number; row: Transaction; score: number }[] = [];
     for (const { line, index } of lines) {
-      let best: { row: Transaction; score: number } | null = null;
       for (const row of inWindow) {
-        if (!unmatchedRows.has(row.id) || movedOn(row, account) !== line.amount) continue;
+        if (movedOn(row, account) !== line.amount) continue;
         const apart = Math.abs(daysBetween(row.date, line.date));
         if (apart > 3) continue;
-        const score = apart * 10 - likeness(describe(row), line.description) * 5;
-        if (!best || score < best.score) best = { row, score };
+        pairs.push({ index, row, score: apart * 10 - likeness(describe(row), line.description) * 5 });
       }
-      if (best) {
-        unmatchedRows.delete(best.row.id);
-        unmatchedLines.delete(index);
-      }
+    }
+    pairs.sort((a, b) => a.score - b.score || a.index - b.index || a.row.recordNumber - b.row.recordNumber);
+    for (const { index, row } of pairs) {
+      if (!unmatchedLines.has(index) || !unmatchedRows.has(row.id)) continue;
+      unmatchedRows.delete(row.id);
+      unmatchedLines.delete(index);
+      rowOfLine.set(index, row);
     }
 
     // Pass 2: a transfer and its fee listed as two lines on the same day.
@@ -332,8 +357,38 @@ export function investigate(input: InvestigateInput): Investigation {
       }
     }
 
+    /*
+     * Pass 4: one row the statement lists in parts, entered again part by
+     * part. 2 October 2026: Maya listed three load purchases, ₱204.00,
+     * ₱102.00 and ₱102.00, that the owner had logged as one ₱408.00 row; two
+     * of them were then added again from the picture. Pass 1 matched the two
+     * new rows to their lines and left the ₱408.00 as "not on the
+     * statement", which is the wrong way round. A row left over that two to
+     * four of the day's lines add up to takes those lines, when every row
+     * they had matched was entered after it: those rows are the copies.
+     */
+    for (const whole of inWindow) {
+      if (!unmatchedRows.has(whole.id)) continue;
+      const value = movedOn(whole, account);
+      const near = lines.filter(
+        (l) =>
+          Math.abs(daysBetween(l.line.date, whole.date)) <= 1 &&
+          Math.sign(l.line.amount) === Math.sign(value) &&
+          Math.abs(l.line.amount) < Math.abs(value) &&
+          (unmatchedLines.has(l.index) || (rowOfLine.get(l.index)?.recordNumber ?? 0) > whole.recordNumber),
+      );
+      const parts = bestParts(near.slice(0, 12), value, (l) => l.line.amount, (l) => unmatchedLines.has(l.index));
+      if (!parts) continue;
+      unmatchedRows.delete(whole.id);
+      for (const l of parts) {
+        const again = unmatchedLines.has(l.index) ? undefined : rowOfLine.get(l.index);
+        unmatchedLines.delete(l.index);
+        if (again) found.push({ kind: "inside", row: again, whole, explains: movedOn(again, account) });
+      }
+    }
+
     // What is left over on either side.
-    const leftRows = inWindow.filter((t) => unmatchedRows.has(t.id));
+    const leftRows = inWindow.filter((t) => unmatchedRows.has(t.id) && inPeriod(t));
     const doubled = twins(inWindow, account).filter((p) => unmatchedRows.has(p.row.id) && !unmatchedRows.has(p.twin.id));
     const doubledIds = new Set(doubled.map((p) => p.row.id));
     for (const p of doubled) found.push({ kind: "duplicate", row: p.row, twin: p.twin, explains: movedOn(p.row, account) });
@@ -348,6 +403,40 @@ export function investigate(input: InvestigateInput): Investigation {
     const recent = onAccount.filter((t) => searched(t, input.lookBackDays ?? 90));
     for (const p of twins(recent, account)) {
       found.push({ kind: "duplicate", row: p.row, twin: p.twin, explains: movedOn(p.row, account) });
+    }
+  }
+
+  /*
+   * A row the picture does not show is the weakest of the findings: a
+   * screenshot is part of a history. When the rest account for the
+   * difference to the centavo, with none of them or with some, the others
+   * are said apart and not counted (2 October 2026: a cashback and a ₱5.05
+   * row of the owner's own, true but under the picture's edge, would have
+   * been listed as causes beside the real ones).
+   */
+  const loose = found.filter((c) => c.kind === "not-on-statement");
+  if (loose.length > 0 && loose.length <= 12 && gap !== 0) {
+    const firm = found.filter((c) => c.kind !== "not-on-statement");
+    const firmSum = firm.reduce((sum, c) => sum + c.explains, 0);
+    let keep = -1;
+    let fewest = Infinity;
+    for (let mask = 0; mask < 1 << loose.length; mask += 1) {
+      let sum = firmSum;
+      let count = 0;
+      loose.forEach((c, k) => {
+        if (mask & (1 << k)) {
+          sum += c.explains;
+          count += 1;
+        }
+      });
+      if (sum === gap && count < fewest) {
+        keep = mask;
+        fewest = count;
+      }
+    }
+    if (keep >= 0 && fewest < loose.length) {
+      aside = loose.filter((_, k) => !(keep & (1 << k)));
+      found = found.filter((c) => !aside.includes(c));
     }
   }
 
@@ -444,7 +533,30 @@ export function investigate(input: InvestigateInput): Investigation {
         )
     : undefined;
 
-  return { account, asOf, recorded, actual, gap, found, possible, explained, unexplained, overshoot, covered, since, movedSince };
+  return { account, asOf, recorded, actual, gap, found, possible, aside, explained, unexplained, overshoot, covered, since, movedSince };
+}
+
+/**
+ * The lines, two to four of them, that add up to `value`, preferring the set
+ * with the most lines nothing else matched, then the smallest.
+ */
+function bestParts<T>(items: readonly T[], value: Centavos, amountOf: (item: T) => Centavos, free: (item: T) => boolean): T[] | null {
+  let best: { set: T[]; free: number } | null = null;
+  const consider = (set: T[]): void => {
+    if (set.reduce((sum, item) => sum + amountOf(item), 0) !== value) return;
+    const n = set.filter(free).length;
+    if (!best || n > best.free || (n === best.free && set.length < best.set.length)) best = { set, free: n };
+  };
+  const n = items.length;
+  for (let a = 0; a < n; a += 1)
+    for (let b = a + 1; b < n; b += 1) {
+      consider([items[a]!, items[b]!]);
+      for (let c = b + 1; c < n; c += 1) {
+        consider([items[a]!, items[b]!, items[c]!]);
+        for (let d = c + 1; d < n; d += 1) consider([items[a]!, items[b]!, items[c]!, items[d]!]);
+      }
+    }
+  return best === null ? null : (best as { set: T[] }).set;
 }
 
 // ── In words ───────────────────────────────────────────────────────────────
@@ -469,6 +581,10 @@ export function clueWords(clue: Clue): string {
       )}.`;
     case "duplicate":
       return `${row(clue.row)} looks like ${row(clue.twin)} entered a second time, ${formatMoney(Math.abs(clue.explains))}.`;
+    case "inside":
+      return `${row(clue.row)}, ${formatMoney(Math.abs(clue.explains))}, is already part of ${row(clue.whole)}, ${formatMoney(
+        clue.whole.total,
+      )}, which the statement lists in parts: it was entered a second time.`;
     case "together":
       return `${clue.rows.length === 1 ? "One entry" : `${clue.rows.length} entries`} add up to exactly ${formatMoney(
         Math.abs(clue.explains),
@@ -497,7 +613,7 @@ export function investigationWords(result: Investigation): {
   /** What was searched, when the owner gave the day it last matched. */
   readonly since: string | null;
 } {
-  const { account, recorded, actual, gap, found, possible, explained, unexplained, overshoot, covered, since, movedSince } = result;
+  const { account, recorded, actual, gap, found, possible, aside, explained, unexplained, overshoot, covered, since, movedSince } = result;
   if (gap === 0) {
     return {
       headline: `${account} matches: the ledger and the account both hold ${formatMoney(actual)}.`,
@@ -530,6 +646,12 @@ export function investigationWords(result: Investigation): {
           : `Found ${formatMoney(Math.abs(explained))} of it, in ${found.length} ${found.length === 1 ? "place" : "places"}:`,
     );
     lines.push(...found.map(clueWords));
+  }
+  if (aside.length > 0) {
+    lines.push(
+      `Also in the ledger and not in what you sent, though the difference does not need ${aside.length === 1 ? "it" : "them"}, so ${aside.length === 1 ? "it is" : "they are"} most likely past the edge of the picture:`,
+    );
+    lines.push(...aside.map((c) => ("row" in c ? `${row(c.row)}, ${formatMoney(Math.abs(c.explains))} ${c.explains > 0 ? "in" : "out"}.` : clueWords(c))));
   }
   if (unexplained !== 0 && !overshoot) {
     if (possible.length > 0) {

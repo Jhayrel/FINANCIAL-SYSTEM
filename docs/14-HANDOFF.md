@@ -513,6 +513,31 @@ became item names and a quantity became an amount.
 Not seen against the live models: there is no key here. The owner's first
 picture after the deploy is the test; its card says which model answered.
 
+### 2026-10-03: two dumps, one Maya history, and the difference it left
+
+The owner sent dumps at 22:08 on 2 October and 01:59 on 3 October (build
+`a8aeea4`), a Maya screenshot and two Dashboard screenshots, and said the
+asking struggles, Find a difference could not find what was wrong after
+adding, and the app cannot tell what is already added. They then put Maya
+right by hand: binned #3877 to #3879 and added one ₱200.00 row (#3882).
+Nothing in their data was changed here.
+
+| Found | Now |
+|---|---|
+| A Maya history's ₱204.00, ₱102.00 and ₱102.00 of load were already one ₱408.00 row (#3867, "Buy load"). Each was compared alone, all three were called new, and "Add ready" added them again: Maya ₱206.00 out | Two to four cards out of (or into) one account within a day that add up to one row here are that row: "This and the ₱102.00 and ₱102.00 cards are #3867, already in the ledger as one row." The batch bar holds them back as already in, they are not asked questions, and "is this added?" lists them together (`togetherAsOne` in `duplicates.ts`, `checkPicture.ts`) |
+| "wait my original balance is 176.56" made the open ₱102.00 card ₱176.56 | A sentence with a balance and a figure is never a card correction (`statesBalance` in `capture.ts`); with no account named it is the account of the picture just read, and goes to finding the difference, with that picture's rows as the history (`readInvestigateAsk`'s `inContext`, `lastRead` in `AskPanel.tsx`) |
+| Find a difference, given that history, would have called #3867 "not on the statement" and the two copies matched; a row dated 30 September did not match the same movement listed on 1 October; today's ₱100.00 took yesterday's row and yesterday's was called missing; a cashback the picture does not reach was counted as a cause | Closest pairs are matched first across the whole list; rows three days either side are matched; a row the day's lines add up to takes them, and the rows entered after it for those lines are named as copies ("already part of #3867"); rows the picture does not show are set apart, uncounted, when the rest account for the difference to the centavo (`investigate.ts`: kind `inside`, `aside`). On the owner's data: "Found all ₱206.00": #3878 and #3879 inside #3867, and ₱100.00 on 3 October missing |
+| "all that entry is load" gave five cards of Unknown | A kind said for every row goes on every spending card, filed where the ledger filed that word this past year: load under Online Buy (`saidForAll.ts`) |
+| The newest row, under Maya's "Today", was dated the day before. Replaying the screenshot through the phone's reader: "Today" (white on black) is not read at all, and the second reading prints "October 02,2026" with no space and a stray letter before it, so it had no dates | "36 mins ago" (minutes, or up to three hours) dates a row as the picture's day; a date with no space after the comma is a date; two readings disagree about a repeated figure only when the other has no undated row of it left (`ocrText.ts`, `datesFromHeadings`) |
+| "if I recieved my salary woth 10k today how can I budget it? maya" became ₱10,000.00 of income, twice, then a budget card | "how can I", "if I ... how", and a question mark with up to three words after it are questions; a question never sets a budget (`intent.ts`, `asksRatherThanTells`). Asked how to budget an amount, the model is told to divide it into parts that add up to it: bills still due, the rest of the month's spending, what is left to keep (`ADVICE_RULES`) |
+| Dashboard: "Spending faster than the budget allows ... ₱4,964.95 left over 29 days is ₱171.21 a day" beside "₱3,264.95 left of the spending budget, ₱112.58 a day" | The warning counts the spending budget when the month has one, as the Dashboard does (`alerts.ts`) |
+| A picture after the deploy was still "read on this device"; the record cannot say whether the page was the old build or Gemini could not read it | The reason Gemini could not is now in the record and under the answer: "read on this device (Gemini could not: ...)" (`sightMissed`) |
+
+**Open:** the owner wrote "ui error" with the 3 October Dashboard
+screenshot. Nothing in the dump names one. The two figures that disagreed
+are fixed above; the outline round the Dashboard item in the menu is the
+keyboard focus ring and was left. Ask the owner which part they meant.
+
 ---
 
 ## 6. What the owner has to do

@@ -81,6 +81,12 @@ export interface Duplicate {
    * and ₱25,000.00 held for a relative. `row` is the largest of them.
    */
   readonly also?: readonly Transaction[];
+  /**
+   * The other cards, when this card and they are one row here: Maya listed
+   * three load purchases the owner had logged as one (`togetherAsOne`).
+   * Their amounts, for the card to say which.
+   */
+  readonly withCards?: readonly number[];
 }
 
 const clean = (value: string | undefined): string =>
@@ -368,6 +374,97 @@ function partsOf(draft: Draft, transactions: readonly Transaction[], ignoreId?: 
 }
 
 /**
+ * Several cards that are one row here.
+ *
+ * 2 October 2026: Maya's history listed three load purchases that day,
+ * ₱204.00, ₱102.00 and ₱102.00, which the owner had logged as one row,
+ * ₱408.00 "Buy load". Each card was compared alone, matched nothing, and all
+ * three were offered as new, then added: Maya went ₱306.00 under. The other
+ * way round (one statement line, several rows here) is `partsOf`.
+ *
+ * Cards out of one account, or into it, within a day of each other and of
+ * the row, that add up to the row's figure to the centavo: two to four of
+ * them, a row no card already matches, and never typed cards, whose dates are
+ * the owner's own. `skip` leaves out cards already matched one to one.
+ * Returns each card's match, keyed by its place in `drafts`.
+ */
+export function togetherAsOne(
+  drafts: readonly Draft[],
+  transactions: readonly Transaction[],
+  skip: (index: number) => boolean = () => false,
+  takenRows: ReadonlySet<string> = new Set(),
+): Map<number, Duplicate> {
+  const out = new Map<number, Duplicate>();
+  const sideOf = (d: Draft): { wallet: string; out: boolean } | null => {
+    const from = d.flow !== "Revenue" ? d.fromWallet.trim() : "";
+    const into = d.flow !== "Spending" && !from ? d.toWallet.trim() : "";
+    return from ? { wallet: from, out: true } : into ? { wallet: into, out: false } : null;
+  };
+  const open = drafts
+    .map((d, i) => ({ d, i, side: sideOf(d) }))
+    .filter((c): c is { d: Draft; i: number; side: { wallet: string; out: boolean } } => !skip(c.i) && c.d.amount !== null && c.d.amount > 0 && c.side !== null);
+  if (open.length < 2) return out;
+  const used = new Set<number>();
+  const rowsUsed = new Set(takenRows);
+  const days = [...new Set(open.map((c) => c.d.date))];
+  const near = transactions
+    .filter((t) => live(t) && !rowsUsed.has(t.id) && days.some((day) => Math.abs(daysBetween(day, t.date)) <= 1))
+    .sort((a, b) => b.recordNumber - a.recordNumber);
+
+  for (const row of near) {
+    for (const outward of [true, false]) {
+      if (rowsUsed.has(row.id)) break;
+      const fits = open.filter(
+        (c) =>
+          !used.has(c.i) &&
+          c.side.out === outward &&
+          Math.abs(daysBetween(c.d.date, row.date)) <= 1 &&
+          (outward ? same(row.fromWallet, c.side.wallet) && row.type !== "Revenue" : same(row.toWallet, c.side.wallet)) &&
+          (c.d.amount as number) < (outward ? row.total : row.amount),
+      );
+      if (fits.length < 2) continue;
+      const targets = outward ? [row.total, row.amount] : [row.amount];
+      const pick = fits.slice(0, 12);
+      const best = smallestSet(pick.length, (set) =>
+        set.every((k) => set.every((m) => Math.abs(daysBetween(pick[k]!.d.date, pick[m]!.d.date)) <= 1)) &&
+        targets.includes(set.reduce((sum, k) => sum + (pick[k]!.d.amount as number), 0)),
+      );
+      if (!best) continue;
+      const members = best.map((k) => pick[k]!);
+      rowsUsed.add(row.id);
+      const figure = members[0]!.side.out ? row.total : row.amount;
+      const where = members[0]!.side.out ? `out of ${row.fromWallet}` : `into ${row.toWallet}`;
+      const amounts = members.map((m) => m.d.amount as number);
+      for (const m of members) {
+        used.add(m.i);
+        const others = members.filter((o) => o !== m).map((o) => o.d.amount as number);
+        out.set(m.i, {
+          row,
+          certainty: "close",
+          withCards: others,
+          evidence: [
+            `${amounts.map((v) => formatMoney(v)).join(" + ")} = ${formatMoney(figure)} ${where}, ${members.every((o) => o.d.date === row.date) ? "the same day" : "within a day"}: #${String(row.recordNumber).padStart(4, "0")}${row.description ? `, "${row.description}"` : ""}.`,
+            "The statement lists them apart; the ledger has them as one row.",
+          ],
+          score: 4,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** The first set of two to four of `n` places that `fits`, smallest sets first. */
+function smallestSet(n: number, fits: (set: readonly number[]) => boolean): number[] | null {
+  for (let a = 0; a < n; a += 1) for (let b = a + 1; b < n; b += 1) if (fits([a, b])) return [a, b];
+  for (let a = 0; a < n; a += 1) for (let b = a + 1; b < n; b += 1) for (let c = b + 1; c < n; c += 1) if (fits([a, b, c])) return [a, b, c];
+  for (let a = 0; a < n; a += 1)
+    for (let b = a + 1; b < n; b += 1)
+      for (let c = b + 1; c < n; c += 1) for (let e = c + 1; e < n; e += 1) if (fits([a, b, c, e])) return [a, b, c, e];
+  return null;
+}
+
+/**
  * The wallet two rows of different kinds both move money through, in words,
  * or "" when they do not: out of it for both, or into it for both.
  *
@@ -394,6 +491,11 @@ function sameMoneyOtherKind(draft: Draft, row: Transaction): string {
  */
 export function duplicateHeadline(match: Duplicate): string {
   const number = `#${String(match.row.recordNumber).padStart(4, "0")}`;
+  if (match.withCards && match.withCards.length > 0) {
+    const others = match.withCards.map((v) => formatMoney(v));
+    const list = others.length === 1 ? others[0] : `${others.slice(0, -1).join(", ")} and ${others[others.length - 1]}`;
+    return `This and the ${list} ${others.length === 1 ? "card" : "cards"} are ${number}, already in the ledger as one row.`;
+  }
   if (match.also && match.also.length > 0) {
     const all = [match.row, ...match.also].map((t) => `#${String(t.recordNumber).padStart(4, "0")}`);
     return `This looks like ${all.slice(0, -1).join(", ")} and ${all[all.length - 1]} together, already in the ledger.`;

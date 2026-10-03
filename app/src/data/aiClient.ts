@@ -624,6 +624,8 @@ export interface ExtractResult {
   readonly reason?: string;
   /** How many pictures were read on this device and sent as text. */
   readonly readOnDevice?: number;
+  /** Why the model that sees well did not read a picture, when it was asked and could not: for the record. */
+  readonly sightMissed?: string;
   /** Rows a stitched screenshot showed twice, read once (`dropRepeats`). */
   readonly repeated?: number;
   /** What the device read off the pictures, for the checks after the model (`statementSense`). */
@@ -927,7 +929,9 @@ async function lookFirst(job: {
     }
   }
   const joined = joinAnswers(answers.flat());
-  return { ...joined, repeated, readings: read, ...(readOnDevice > 0 ? { readOnDevice } : {}) };
+  // 3 October 2026: a picture read the device's way after the deploy, and the record could not say why.
+  const missed = looks.map((_, k) => looked[k]).find((a) => a !== undefined && a.source !== "model")?.reason;
+  return { ...joined, repeated, readings: read, ...(readOnDevice > 0 ? { readOnDevice } : {}), ...(missed ? { sightMissed: missed.slice(0, 160) } : {}) };
 }
 
 /** The device's reading of a picture, sent beside it to check a figure against, never to read instead of it. */

@@ -284,7 +284,7 @@ const CLOCK = "\\d{1,2}:\\d{2}(?::\\d{2})?\\s*(?:[ap]\\.?\\s?m\\.?)?";
 const ONLY_DATE = `^\\W*(?:${WEEKDAY}\\W+)?(?:${MONTH}\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?|\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH}\\.?(?:,?\\s+\\d{4})?|\\d{1,2}[/-]\\d{1,2}[/-](?:\\d{4}|\\d{2}))(?:\\W+(?:at\\s+)?${CLOCK})?\\W*$`;
 /** A line that dates the rows under it: "September 24, 2026", "24 Sep 2026", "2026-09-24", "Today", "Oct 1, 11:59 PM". */
 export const DATE_LINE = new RegExp(
-  `\\b${MONTH}\\.?\\s+\\d{1,2},?\\s+\\d{4}\\b|\\b\\d{1,2}\\s+${MONTH}\\.?,?\\s+\\d{4}\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b|^\\W*(?:today|yesterday)\\b(?:\\W+(?:at\\s+)?${CLOCK})?\\W*$|${ONLY_DATE}`,
+  `\\b${MONTH}\\.?\\s+\\d{1,2}(?:,\\s*|\\s+)\\d{4}\\b|\\b\\d{1,2}\\s+${MONTH}\\.?(?:,\\s*|\\s+)\\d{4}\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b|^\\W*(?:today|yesterday)\\b(?:\\W+(?:at\\s+)?${CLOCK})?\\W*$|${ONLY_DATE}`,
   "i",
 );/** A figure in pesos and centavos, which is what closes a row. */
 export const ROW_AMOUNT = /\d[\d,]*\.\d{2}(?!\d)/;
@@ -385,9 +385,10 @@ function isoDayIn(line: string, ref?: string): string | null {
 
   const iso = /\b(\d{4})-(\d{2})-(\d{2})\b/.exec(line);
   if (iso?.[1] && iso[2] && iso[3]) return make(Number(iso[1]), Number(iso[2]), Number(iso[3]));
-  const monthFirst = new RegExp(`\\b(${MONTH})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?:,?\\s+(\\d{4})\\b)?`, "i").exec(line);
+  // "October 02,2026": a reading can lose the space after the comma (3 October 2026).
+  const monthFirst = new RegExp(`\\b(${MONTH})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?:(?:,\\s*|\\s+)(\\d{4})\\b)?`, "i").exec(line);
   if (monthFirst?.[1] && monthFirst[2]) return withYear(month(monthFirst[1]), Number(monthFirst[2]), monthFirst[3]);
-  const dayFirst = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${MONTH})\\b\\.?(?:,?\\s+(\\d{4})\\b)?`, "i").exec(line);
+  const dayFirst = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${MONTH})\\b\\.?(?:(?:,\\s*|\\s+)(\\d{4})\\b)?`, "i").exec(line);
   if (dayFirst?.[1] && dayFirst[2]) return withYear(month(dayFirst[2]), Number(dayFirst[1]), dayFirst[3]);
   const numeric = /\b(\d{1,2})[/-](\d{1,2})[/-](\d{4}|\d{2})\b/.exec(line);
   if (numeric?.[1] && numeric[2] && numeric[3]) return withYear(Number(numeric[1]), Number(numeric[2]), numeric[3]);
@@ -518,9 +519,21 @@ export function rowDatesIn(text: string, takenOn: string): DatedRow[] {
 
   let today = takenOn;
   let current = "";
+  /*
+   * "Purchased on 36 mins ago": a row's label saying how long ago, which is
+   * the day the picture was taken. Maya's "Today" heading is white on black
+   * and the reader loses it, so the newest row sat under no heading and was
+   * dated the day before (3 October 2026). Minutes, or a few hours, only:
+   * "10 hours ago" at six in the morning was yesterday.
+   */
+  let sinceToday = false;
   const rows: { amount: number; date: string; own: boolean }[] = [];
   for (const line of lines) {
     const hasAmount = ROW_AMOUNT.test(line);
+    if (!hasAmount && /\b(?:\d{1,2}\s*(?:mins?|minutes?|secs?|seconds?)|[1-3]\s*(?:hrs?|hours?))\s+ago\b|\bjust\s+now\b/i.test(line)) {
+      sinceToday = true;
+      continue;
+    }
     if (/\bas\s+of\b/i.test(line) && !hasAmount) {
       const said = isoDayIn(line, today);
       if (said) today = said;
@@ -543,6 +556,7 @@ export function rowDatesIn(text: string, takenOn: string): DatedRow[] {
         continue;
       }
       if (said) current = said;
+      sinceToday = false;
       continue;
     }
     if (!hasAmount) continue;
@@ -551,7 +565,8 @@ export function rowDatesIn(text: string, takenOn: string): DatedRow[] {
     if (!last) continue;
     const [whole, cents] = last.replace(/,/g, "").split(".");
     // A date on the row's own line is that row's, whatever the headings say.
-    const inLine = dayInRow(line, today);
+    const inLine = dayInRow(line, today) ?? (sinceToday ? today : null);
+    sinceToday = false;
     rows.push({ amount: Number(whole) * 100 + Number(cents), date: inLine ?? (datesFollow ? "" : current), own: inLine !== null });
   }
   return rows.map((r) => ({ amount: r.amount, date: r.date }));

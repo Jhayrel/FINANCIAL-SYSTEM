@@ -29,7 +29,7 @@ import { useConfirm } from "../components/Confirm";
 import { accountGroups, type Account } from "../domain/accounts";
 import { walletBalance } from "../domain/balances";
 import type { Draft } from "../domain/entry";
-import { getYear } from "../domain/dates";
+import { formatMedium, getYear } from "../domain/dates";
 import {
   choicesForClue,
   clueWords,
@@ -189,6 +189,7 @@ export function Investigate({
         ) : null;
       case "wrong-account":
       case "duplicate":
+      case "inside":
       case "amount-differs":
       case "not-on-statement":
         return rowActions(clue.row);
@@ -360,6 +361,26 @@ export function Investigate({
                   </li>
                 ))}
               </ul>
+            )}
+
+            {result.aside.length > 0 && (
+              <>
+                <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+                  Also in the ledger and not in the history you gave, though the difference does not need{" "}
+                  {result.aside.length === 1 ? "it, so it is" : "them, so they are"} most likely before or after what it shows:
+                </p>
+                <ul className="fms-findlist">
+                  {result.aside.map((clue, i) => (
+                    <li key={`a${i}`} className="fms-findrow fms-findrow--maybe">
+                      <span className="t-body">{"row" in clue ? `#${String(clue.row.recordNumber).padStart(4, "0")} ${clue.row.item || clue.row.description || clue.row.type} on ${formatMedium(clue.row.date)}` : clueWords(clue)}</span>
+                      <span className="fms-findrow-end">
+                        <Money value={clue.explains} size="s" signed />
+                        {actionFor(clue)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
 
             {result.unexplained !== 0 && !result.overshoot && (

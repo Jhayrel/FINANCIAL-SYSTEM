@@ -317,6 +317,18 @@ export function sayInstead(previous: string, meant: string, notMeant?: string | 
 const ASKING_ANYWHERE =
   /\b(?:afford|affored|aford|kaya ko ba|do i have enough|what can i (?:buy|get|spend|afford)|how much (?:can|could|should) i|can i spare|i am asking|i'?m asking|just asking|not adding|it'?s a question|this is a question|based on (?:my )?(?:current )?balance|not (?:with |on )?(?:the |my )?budget)\b|\bcan i\s*\??\s*$/i;
 
+/**
+ * Asking how, or what if, wherever in the sentence it is.
+ *
+ * 2 October 2026: "if I recieved my salary woth 10k today how can I budget
+ * it? maya" ends with the wallet, not the question mark, and opens with
+ * "if", so it was read as ₱10,000.00 of income, twice, and the owner wrote
+ * "//I am asking" both times. A question mark with a word or three after it
+ * is still the end of a question.
+ */
+const HOW_OR_IF =
+  /\bhow (?:can|could|should|do|would|will|to) (?:i|we)\b|\bwhat (?:should|would|can|could) i do\b|^\s*(?:if|kung)\s+(?:i|ako)\b[^.]*\b(?:how|what|should|can|could|would|will|ba)\b|\?(?=\s*(?:[^\s?\d]+\s*){1,3}$)/i;
+
 export function isQuestion(text: string): boolean {
   /**
    * Leading punctuation is not part of the question.
@@ -333,7 +345,8 @@ export function isQuestion(text: string): boolean {
     ASKING.test(trimmed) ||
     REQUESTING.test(trimmed) ||
     ADVICE.test(trimmed) ||
-    ASKING_ANYWHERE.test(trimmed)
+    ASKING_ANYWHERE.test(trimmed) ||
+    HOW_OR_IF.test(trimmed)
   );
 }
 

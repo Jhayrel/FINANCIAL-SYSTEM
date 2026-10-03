@@ -1335,6 +1335,13 @@ const ADVICE_RULES = [
   "Work from what they would have left, not from the budget alone: what the account holds, what is already due before the next money arrives, and what the amount asked about would leave of both. A budget being over is a fact about a plan; being unable to pay a bill on Friday is a fact about money.",
   "When the honest answer is no, say no and say what would make it yes: a smaller amount, a different account, or after a date when something arrives.",
   "Never answer a question about tonight with a figure about the year.",
+  /*
+   * 2 October 2026: "if I received my salary worth 10k today how can I
+   * budget it?" was answered "I recommend a budget of PHP 10,000.00 for
+   * October": all of it, as spending. Asked how to divide money, the answer
+   * divides it.
+   */
+  "Asked how to budget, split or allocate an amount of income, real or expected, divide that amount into named parts that add up to it exactly, each with its figure: the bills and subscriptions still due this month, as the figures name them; what the rest of the month's spending needs, from the spending budget left or the usual pace; and what is left over, to keep or save. Never recommend making the whole amount the spending budget, and never record it: it is a question, not an entry.",
 
   /*
    * ── The four rules below are about reasoning, not tone ──────────────────

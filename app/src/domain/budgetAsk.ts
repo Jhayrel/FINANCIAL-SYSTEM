@@ -415,7 +415,9 @@ export function asksRatherThanTells(said: string): boolean {
   const t = said.toLowerCase();
   const polite = /\b(?:can|could|would|will) you\b|\bplease\b|\bpls\b|\bkindly\b|\bpaki/.test(t);
   const opinion =
-    /\b(?:should i|should we|shall i|what if|would it be|is it (?:good|ok|okay|wise|better|enough|realistic|smart|too)|is that (?:good|ok|okay|enough|realistic)|do you think|good idea|too (?:much|little|low|high)|worth it|makes sense|wise to|dapat ba|pwede ba)\b/.test(t);
+    /\b(?:should i|should we|shall i|what if|would it be|is it (?:good|ok|okay|wise|better|enough|realistic|smart|too)|is that (?:good|ok|okay|enough|realistic)|do you think|good idea|too (?:much|little|low|high)|worth it|makes sense|wise to|dapat ba|pwede ba|how (?:can|could|should|do|would) i|(?:this is a |it'?s a |a )?question)\b/.test(t) ||
+    // "if I received my salary ... how can I budget it": what if, not what to set (2 October 2026).
+    /^\s*(?:if|kung)\s+(?:i|ako)\b/.test(t);
   return opinion && !polite;
 }
 

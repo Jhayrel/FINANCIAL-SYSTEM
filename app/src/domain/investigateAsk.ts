@@ -58,6 +58,10 @@ export function matchedOnIn(text: string, asOf: IsoDate): IsoDate | null {
 const MISMATCH =
   /\b(extra money|more money than|have extra|has extra|got extra|more than (?:the |my )?(?:system|app|ledger|tracker)|less than (?:the |my )?(?:system|app|ledger|tracker)|where('?s| is| are| did| does| do)? (the )?(rest|remaining|difference|missing|balance|it go|they go|my money)|where did (my|the|it)|where('?s| is) my|missing|nawawala|nasaan|doesn'?t match|don'?t match|not match(ing)?|hindi (match|tugma)|mismatch|discrepanc\w*|reconcile|reconciliation|investigate|investigation|find (the|my) (difference|missing)|balance is (off|wrong|different)|off by|wrong balance|unaccounted|lost money|check my balance|different (from|than) (the )?(app|bank|system))\b/i;
 
+/** A balance said for an account: "my balance is", "the balance now", "check my balance". */
+const BALANCE_SAID =
+  /\b(?:my|the)\b[^.]{0,40}\bbalance\b[^.]{0,40}?\b(?:is|now|are|=|should be)\b|\bbalance\b[^.]{0,30}\b(?:look|check|compare|see)\b|\b(?:look|check|compare)\b[^.]{0,40}\bbalance\b/i;
+
 /** Words saying a figure is what the account really holds. */
 const REAL = /\b(balance|really|actual|actually|only have|i have|counted|count|in my (bank|account|wallet)|bank says|app says|sa app|on the app|in the app|left|remaining|holds|has)\b/i;
 
@@ -112,11 +116,19 @@ export function readInvestigateAsk(
   accounts: readonly string[],
   recorded: (account: string) => Centavos,
   asOf?: IsoDate,
+  /**
+   * The account the conversation is about when the sentence names none: the
+   * one a screenshot just read moved. "wait my original balance is 176.56",
+   * straight after a Maya history, is Maya's (2 October 2026).
+   */
+  inContext?: string,
 ): InvestigateAsk | null {
   const text = said;
   const matchedOn = asOf ? matchedOnIn(said, asOf) : null;
-  const account = accountIn(text, accounts);
-  const figures = figuresIn(text.replace(NOT_MONEY, (m) => " ".repeat(m.length)));
+  const named = accountIn(text, accounts);
+  const figuresSaid = figuresIn(text.replace(NOT_MONEY, (m) => " ".repeat(m.length)));
+  const account = named || (inContext && accounts.includes(inContext) && figuresSaid.length === 1 && BALANCE_SAID.test(text) ? inContext : "");
+  const figures = figuresSaid;
   const mismatch = MISMATCH.test(text);
   const counted = /\b(counted|count|bilang|binilang)\b/i.test(text) && account !== "";
   // "maya app says 30,000 but here it says 50,000": two figures set against each other.
@@ -128,10 +140,7 @@ export function readInvestigateAsk(
    * is a request to compare it, with no word of a mismatch needed. It was
    * read as a debt movement of ₱1,533.83 on Maya Credit instead.
    */
-  const claimed =
-    account !== "" &&
-    figures.length === 1 &&
-    /\b(?:my|the)\b[^.]{0,40}\bbalance\b[^.]{0,40}?\b(?:is|now|are|=)\b|\bbalance\b[^.]{0,30}\b(?:look|check|compare|see)\b|\b(?:look|check|compare)\b[^.]{0,40}\bbalance\b/i.test(text);
+  const claimed = account !== "" && figures.length === 1 && BALANCE_SAID.test(text);
 
   if (!mismatch && !counted && !contrasted && !claimed) return null;
   // "where did I spend the most" names no account and no figure: not this.

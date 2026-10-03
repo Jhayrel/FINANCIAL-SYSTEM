@@ -127,6 +127,7 @@ import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../do
 import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isQuestion, meantInstead, notMeantIn, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
 import { addressesEveryCard, asksToReadAgain, asksToRename, saysOneWasMissed, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
 import { asksWhetherAdded, inLedgerOrNot } from "../domain/checkPicture";
+import { kindSaidForAll } from "../domain/saidForAll";
 import { modelLabel } from "../domain/modelName";
 import { formatMoney, type Centavos } from "../domain/money";
 import { describeFile, summariseFile } from "../domain/photoNote";
@@ -151,6 +152,7 @@ import {
   groupDuplicates,
   duplicatesOf,
   repeatsWithin,
+  togetherAsOne,
   type Duplicate,
 } from "../domain/duplicates";
 import {
@@ -1466,6 +1468,13 @@ export function AskPanel({
   const lastRecorded = useRef(new Map<string, string>());
   /** The last question about the bin, so a period said alone after it ("last month?") narrows the same list. */
   const lastDeletedAsk = useRef<string | null>(null);
+  /**
+   * The rows the last picture showed, all of them, and the account they
+   * moved: "wait my original balance is 176.56" after a Maya history is
+   * Maya's, and its rows are the history to check the ledger against, those
+   * already in as much as those added (2 October 2026).
+   */
+  const lastRead = useRef<{ readonly account: string; readonly drafts: readonly Draft[]; readonly at: number } | null>(null);
   /** Cards already written down as added, so a second path never writes the same one again. */
   const addedCards = useRef(new Set<string>());
 
@@ -2819,7 +2828,7 @@ export function AskPanel({
       }),
     };
     /** Read on this device and then by a text model, said wherever the answer is (data/aiClient.ts). */
-    const route = result.readOnDevice ? ", read on this device" : "";
+    const route = result.readOnDevice ? `, read on this device${result.sightMissed ? ` (Gemini could not: ${result.sightMissed})` : ""}` : "";
 
     /**
      * The photo, as a description of itself.
@@ -3180,11 +3189,30 @@ export function AskPanel({
      * A new kind the model named, filed where the ledger has filed that word
      * before: water under Food, not a new "Water" (domain/fileAsBefore.ts).
      */
-    const onePerPayment = fileAsBefore(
+    const filedAsBefore = fileAsBefore(
       sent.length > 1 ? checkCardSlips(withdrawn, cardSlipsIn(readingsList), reference, asOf) : withdrawn,
       transactions,
       reference,
     );
+    /*
+     * "all that entry is load": the kind the owner said for every row goes on
+     * every spending card, filed where the ledger files that word
+     * (domain/saidForAll.ts). Five cards of Unknown came back on 2 October 2026.
+     */
+    const forAll = sent.length > 0 && note ? kindSaidForAll(note, transactions, reference, asOf) : null;
+    const onePerPayment = forAll
+      ? filedAsBefore.map((p) => {
+          const d = p.draft;
+          if (d.flow !== "Spending" || (d.category && d.category !== "Spending") || d.item === forAll.item) return p;
+          const word = forAll.word.charAt(0).toUpperCase() + forAll.word.slice(1);
+          const description = d.description.toLowerCase().includes(forAll.word) ? d.description : d.description.trim() ? `${word}, ${d.description.trim()}` : word;
+          return {
+            ...p,
+            draft: { ...d, category: "Spending" as const, item: forAll.item, description },
+            adjustments: [...p.adjustments, `Filed as ${forAll.item}: you said all of them are ${forAll.word}${forAll.because}.`],
+          };
+        })
+      : filedAsBefore;
     const checked =
       cardAmounts.size === 0
         ? onePerPayment
@@ -3207,6 +3235,12 @@ export function AskPanel({
               adjustments: [...p.adjustments, `Paid by card: your card payments come out of ${byCard.account}, the last ${byCard.count === 1 ? "one did" : `${byCard.count} did`}.`],
             };
           });
+
+    if (sent.length > 0) {
+      const drafts = checked.map((p) => p.draft);
+      const moved = account || mostMoved(drafts);
+      lastRead.current = moved ? { account: moved, drafts, at: Date.now() } : null;
+    }
 
     /*
      * "Can you check only if this is added?": a question about the picture,
@@ -3276,10 +3310,12 @@ export function AskPanel({
      * something. The owner, 27 September 2026: "it should ask following
      * question like the entry on this have send money to?".
      */
+    const matchedAlone = made.map((c) => duplicatesOf(c.draft, transactions).length > 0);
+    const matchedTogether = togetherAsOne(made.map((c) => c.draft), transactions, (i) => matchedAlone[i] === true);
     const toAsk = batch
       ? made
           // A row already in the ledger is not asked about: its card says which row it is.
-          .filter((c) => duplicatesOf(c.draft, transactions).length === 0)
+          .filter((_, i) => !matchedAlone[i] && !matchedTogether.has(i))
           .map((c) => (sent.length > 0 && confirmsIncome(c.draft) ? { ...c, confirm: true } : c))
           .filter((c) => cardQuestion(c.draft, reference, 1, 1, c.confirm ? { lines: [] } : undefined) !== null)
       : [];
@@ -3396,6 +3432,13 @@ export function AskPanel({
     if (sent.length === 0 && account) {
       statement = readHistory(note.split(/\r?\n/).slice(1).join("\n"), Number(asOf.slice(0, 4)));
     }
+    // Nothing sent and nothing pasted: the picture just read, when it was this account's (`lastRead`).
+    const recent = lastRead.current;
+    let fromPicture = false;
+    if (sent.length === 0 && account && statement.length === 0 && recent && recent.account === account && Date.now() - recent.at < 60 * 60_000) {
+      statement = linesFromDrafts(recent.drafts, account);
+      fromPicture = statement.length > 0;
+    }
 
     if (!account) {
       const reply = "Which account is it, and what does it really hold right now? For example: my Maya balance is 30,000. A screenshot of the balance works too, with its transaction history if you have it.";
@@ -3419,7 +3462,9 @@ export function AskPanel({
     const bold = (text: string): string => text.replace(formatMoney(Math.abs(result.gap)), (m) => `**${m}**`);
     const reply = [
       bold(words.headline),
-      ...(statement.length > 0 ? [`Checked ${statement.length} ${statement.length === 1 ? "movement" : "movements"} from what you sent against the ledger.`] : []),
+      ...(statement.length > 0
+        ? [`Checked ${statement.length} ${statement.length === 1 ? "movement" : "movements"} from ${fromPicture ? "the picture you sent before" : "what you sent"} against the ledger.`]
+        : []),
       ...words.lines.map((line) => (line.endsWith(":") ? line : `- ${line}`)),
     ].join("\n");
     say({ kind: "assistant", text: reply, from: "this device" });
@@ -3448,7 +3493,13 @@ export function AskPanel({
         false,
       );
     }
-    const twins = result.found.flatMap((c) => (c.kind === "duplicate" ? [{ row: c.row, score: 100, why: ["entered twice"] }] : []));
+    const twins = result.found.flatMap((c) =>
+      c.kind === "duplicate"
+        ? [{ row: c.row, score: 100, why: ["entered twice"] }]
+        : c.kind === "inside"
+          ? [{ row: c.row, score: 100, why: [`already part of #${String(c.whole.recordNumber).padStart(4, "0")}`] }]
+          : [],
+    );
     if (twins.length > 0) say({ kind: "found", action: "bin", candidates: twins, done: [] });
     const seen = new Set<string>();
     const toCheck = [...result.found, ...result.possible]
@@ -4568,7 +4619,7 @@ export function AskPanel({
     const findable = [...reference.wallets, ...reference.savings];
     const askedToFind = as
       ? null
-      : readInvestigateAsk(lead, findable, (account) => walletBalance(transactions, account), asOf) ??
+      : readInvestigateAsk(lead, findable, (account) => walletBalance(transactions, account), asOf, lastRead.current?.account) ??
         (!essay && routed?.intent === "investigate"
           ? (readInvestigateAsk(`${note} doesn't match`, findable, (account) => walletBalance(transactions, account), asOf) ?? {
               account: "",
@@ -6100,11 +6151,25 @@ export function AskPanel({
    */
   const alreadyInLedger = useMemo(() => {
     const found = new Map<number, readonly Duplicate[]>();
+    /** Open cards off a picture with no match of their own, for the check below. */
+    const unmatched: number[] = [];
     turns.forEach((t, i) => {
       if (!isOffer(t) || t.state !== "open") return;
-      const matches = duplicatesOf(t.proposal.draft, transactions, { typed: !readOffPicture(t.proposal) });
+      const offPicture = readOffPicture(t.proposal);
+      const matches = duplicatesOf(t.proposal.draft, transactions, { typed: !offPicture });
       if (matches.length > 0) found.set(i, matches);
+      else if (offPicture) unmatched.push(i);
     });
+    /*
+     * Cards that are one row here together: three load purchases the owner
+     * logged as one ₱408.00 row, offered and added again one by one on 2
+     * October 2026 (`togetherAsOne`).
+     */
+    const drafts = unmatched.map((i) => (turns[i] as Offered).proposal.draft);
+    for (const [k, match] of togetherAsOne(drafts, transactions)) {
+      const at = unmatched[k];
+      if (at !== undefined) found.set(at, [match]);
+    }
     return found;
   }, [turns, transactions]);
 
@@ -9214,4 +9279,15 @@ function DebtCard({
       </p>
     </div>
   );
+}
+
+/** The account most of a picture's rows moved, when most of them agree, or "". */
+function mostMoved(drafts: readonly Draft[]): string {
+  const count = new Map<string, number>();
+  for (const d of drafts) {
+    const wallet = (d.flow === "Revenue" ? d.toWallet : d.fromWallet || d.toWallet).trim();
+    if (wallet) count.set(wallet, (count.get(wallet) ?? 0) + 1);
+  }
+  const [best, n] = [...count].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+  return n * 2 > drafts.length ? best : "";
 }

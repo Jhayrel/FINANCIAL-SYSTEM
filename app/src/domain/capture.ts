@@ -476,6 +476,18 @@ export function addressesEveryCard(text: string): boolean {
   return /\b(all|them all|to all|for all|every|everything|each|both|them|these|those)\b/i.test(said);
 }
 
+/**
+ * A sentence saying what an account holds, not what a card should say.
+ *
+ * 2 October 2026, with a card for ₱102.00 open under a Maya history: "wait
+ * my original balance is 176.56" made the card ₱176.56. The owner was
+ * saying what Maya really holds, after the cards had taken it to minus
+ * ₱29.44. A balance goes to finding the difference (`investigateAsk.ts`).
+ */
+export function statesBalance(text: string): boolean {
+  return /\b(?:balance|bal|natitira|laman)\b/i.test(text) && /\d/.test(text) && !/\b(?:pay|paid|bayad)\b[^.]{0,20}\bbalance\b/i.test(text);
+}
+
 export function amend(
   draft: Draft,
   text: string,
@@ -484,6 +496,8 @@ export function amend(
 ): Amendment | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
+  // What an account holds is never a card's amount (`statesBalance`).
+  if (statesBalance(trimmed)) return null;
 
   /*
    * "change the description to Buy food" was typed with the card open and

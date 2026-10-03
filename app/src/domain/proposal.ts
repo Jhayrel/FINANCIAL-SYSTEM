@@ -1181,8 +1181,15 @@ export function datesFromHeadings(
     const other = fuller === a ? b : a;
     for (const row of fuller) {
       if (!row.date) continue;
-      const elsewhere = other.filter((r) => r.amount === row.amount && r.date);
-      if (elsewhere.length > 0 && !elsewhere.some((r) => r.date === row.date)) disputed.add(row.amount);
+      const same = other.filter((r) => r.amount === row.amount);
+      const elsewhere = same.filter((r) => r.date);
+      /*
+       * Only a disagreement when the other reading has no undated row of that
+       * figure left to be this one: one reading lost "Today", the other read
+       * "36 mins ago", and the two ₱100.00 rows (today's and yesterday's)
+       * were called a dispute and neither was dated (3 October 2026).
+       */
+      if (elsewhere.length > 0 && elsewhere.length === same.length && !elsewhere.some((r) => r.date === row.date)) disputed.add(row.amount);
       byAmount.set(row.amount, [...(byAmount.get(row.amount) ?? []), row.date]);
     }
   }

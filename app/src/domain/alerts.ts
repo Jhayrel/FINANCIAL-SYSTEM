@@ -157,8 +157,19 @@ export function financeAlerts(input: AlertInput): Alert[] {
         weight: 100 + fraction(over, assessment.combined.budget),
       });
     } else {
-      const perDay = dailyAllowance(transactions, budgets, asOf);
-      const rate = burnRate(transactions, asOf);
+      /*
+       * The spending budget against spending, when the month has one. On 3
+       * October 2026 this said "₱4,964.95 left over 29 days is ₱171.21 a
+       * day" beside the Dashboard's "₱3,264.95 left of the spending budget,
+       * ₱112.58 a day": the first counted the ₱1,700.00 for bills, which is
+       * not money to spend on anything else. Without a spending budget it is
+       * the whole budget, as before.
+       */
+      const ownTrack = assessment.spending.budget > 0;
+      const remaining = ownTrack ? assessment.spending.remaining : assessment.combined.remaining;
+      const perDay = ownTrack ? (left > 0 ? Math.round(Math.max(0, remaining) / left) : 0) : dailyAllowance(transactions, budgets, asOf);
+      const dayOfMonth = Number(asOf.slice(8, 10));
+      const rate = ownTrack ? (dayOfMonth > 0 ? Math.round(assessment.spending.spent / dayOfMonth) : 0) : burnRate(transactions, asOf);
       // Only worth saying when the current pace would actually break it.
       if (perDay !== null && rate > perDay && left > 0) {
         out.push({
@@ -166,7 +177,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
           level: "warn",
           area: "budget",
           title: "Spending faster than the budget allows",
-          detail: `${money(rate)} a day so far. ${money(assessment.combined.remaining)} left over ${left} day${left === 1 ? "" : "s"} is ${money(perDay)} a day.`,
+          detail: `${money(rate)} a day so far. ${money(remaining)} ${ownTrack ? "of the spending budget " : ""}left over ${left} day${left === 1 ? "" : "s"} is ${money(perDay)} a day.`,
           weight: 70,
         });
       }
