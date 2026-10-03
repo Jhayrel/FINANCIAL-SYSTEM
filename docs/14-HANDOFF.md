@@ -706,6 +706,13 @@ alone, by item. A comparison was read only when two months were named
 | "by wallet" after the comparison drew one bar of one month: its title names two months and "against", which read as "compare two months" | A known pair decides its own grouping, and the title is carried as dates |
 | "by category" after "Spending by wallet" stayed by wallet, on any chart: the old title's "by wallet" was read first | A grouping named in the follow-up replaces the one in the title |
 | "by month", "by wallets", "per category" straight after a chart, with no model, went nowhere | Read as follow-ups (`isChartFollowUp`) |
+
+### 2026-10-03, last: Insights entries and the bottom bar
+
+| Found | Fixed |
+|---|---|
+| Insights listed each entry by its kind only; reading the description meant Correct, which leaves for the Add form | The description sits under the kind, three lines at most; a longer one opens whole with a tap (`EntryWords` in `Insights.tsx`) |
+| On a phone the bottom bar vanished and stayed gone: it hid while a field had focus, and Android's back gesture closes the keyboard and leaves the field focused | It follows the keyboard, read from the visible height: hidden while the keyboard is up, back the moment it closes. A tap on Save still gets its moment before the bar returns (`App.tsx`, `typing`) |
 ---
 
 ## 6. What the owner has to do

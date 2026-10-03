@@ -8785,6 +8785,36 @@ textarea.fms-askinput {
   min-width: 0;
 }
 
+/*
+ * The entry's own words, under its kind: quieter than the kind, louder than
+ * the record number. Three lines at most, so one long statement line does
+ * not push the day's other entries off the screen.
+ */
+.fms-ical-row-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.fms-ical-row-desc--long {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-ical-row-desc--long[aria-expanded="true"] {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+
 .fms-ical-row-end {
   display: flex;
   flex: 0 0 auto;

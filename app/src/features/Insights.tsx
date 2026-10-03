@@ -135,6 +135,35 @@ const TONE: Record<Transaction["type"], string> = {
 
 const BUCKET_WORD = { day: "day", week: "week", month: "month" } as const;
 
+/**
+ * What an entry was, in the owner's own words, under its kind.
+ *
+ * 3 October 2026, the owner: "show also description ... so I know I dont
+ * need to click it and redirected to add". Only Correct opened it, which
+ * meant leaving Insights for the Add form to read one line. Three lines at
+ * most; a longer one opens whole where it is, with a tap.
+ */
+const LONG_WORDS = 120;
+
+function EntryWords({ row }: { row: Transaction }) {
+  const [whole, setWhole] = useState(false);
+  const words = row.description.trim();
+  // Already the title when the entry has no item.
+  if (!words || !row.item.trim()) return null;
+  if (words.length <= LONG_WORDS) return <span className="t-caption fms-ical-row-desc">{words}</span>;
+  return (
+    <button
+      type="button"
+      className="t-caption fms-ical-row-desc fms-ical-row-desc--long"
+      aria-expanded={whole}
+      aria-label={whole ? `${words}. Tap to show less.` : `${words}. Tap to show it whole.`}
+      onClick={() => setWhole((w) => !w)}
+    >
+      {words}
+    </button>
+  );
+}
+
 export function Insights({
   transactions,
   reference,
@@ -1013,6 +1042,7 @@ export function Insights({
                         <li key={row.id} className="fms-ical-row">
                           <div className="fms-ical-row-text">
                             <span className="t-body fms-truncate">{row.item || row.description || row.type}</span>
+                            <EntryWords row={row} />
                             <span className="t-micro fms-truncate" style={{ color: "var(--ink-3)" }}>
                               #{String(row.recordNumber).padStart(4, "0")} · {row.type}
                               {row.fromWallet ? ` · from ${row.fromWallet}` : ""}

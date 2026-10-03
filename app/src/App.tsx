@@ -1864,35 +1864,79 @@ export default function App() {
   /*
    * Typing, as far as the bottom navigation is concerned.
    *
-   * The navigation steps aside while a field has focus, so the keyboard does
-   * not push it over the field. It came back the instant focus left, and a tap
-   * on Save is what takes focus away: the bar reappeared under the finger,
-   * Save moved up 52px in the middle of the tap, and the tap landed on the
-   * navigation. On 28 September 2026 a correction typed and saved this way
-   * did nothing. It now comes back a moment later, after the tap has landed.
+   * The navigation steps aside while the on-screen keyboard is up, so the
+   * keyboard does not push it over the field. It came back the instant focus
+   * left, and a tap on Save is what takes focus away: the bar reappeared
+   * under the finger, Save moved up 52px in the middle of the tap, and the
+   * tap landed on the navigation. On 28 September 2026 a correction typed
+   * and saved this way did nothing. So when focus goes, it comes back a
+   * moment later, after the tap has landed.
+   *
+   * It followed focus rather than the keyboard, and on Android the back
+   * gesture closes the keyboard and leaves the field focused: the bar stayed
+   * gone with no keyboard on screen (3 October 2026, "the buttons at the
+   * bottom is disappearing", the amount in Find a difference still
+   * outlined). The keyboard is read from the visible height now, which is
+   * what it takes away, and the bar comes back the moment the keyboard goes
+   * while a field still has focus.
    */
   const [typing, setTyping] = useState(false);
   useEffect(() => {
     let later: ReturnType<typeof setTimeout> | undefined;
+    const view = window.visualViewport;
+    const height = (): number => view?.height ?? window.innerHeight;
+    // The tallest the screen has been at this width: the height with no keyboard.
+    let tall = height();
+    let wide = window.innerWidth;
+    // A keyboard takes far more than the address bar sliding away does.
+    const keyboardUp = (): boolean => height() < tall - 150;
     const isField = (el: EventTarget | null): boolean =>
       el instanceof HTMLTextAreaElement ||
-      (el instanceof HTMLInputElement && el.type !== "checkbox" && el.type !== "radio");
+      (el instanceof HTMLInputElement && el.type !== "checkbox" && el.type !== "radio" && el.type !== "date" && el.type !== "range") ||
+      (el instanceof HTMLElement && el.isContentEditable);
     const onIn = (e: FocusEvent): void => {
       if (!isField(e.target)) return;
       if (later) clearTimeout(later);
       setTyping(true);
+      /*
+       * No keyboard came up (a hardware one, or a field focused for you):
+       * the bar stays. Measured once the keyboard has had time to open.
+       */
+      later = setTimeout(() => setTyping(isField(document.activeElement) && keyboardUp()), 900);
     };
     const onOut = (e: FocusEvent): void => {
       if (!isField(e.target)) return;
       if (later) clearTimeout(later);
-      later = setTimeout(() => setTyping(isField(document.activeElement)), 450);
+      later = setTimeout(() => setTyping(isField(document.activeElement) && keyboardUp()), 450);
+    };
+    const onResize = (): void => {
+      if (window.innerWidth !== wide) {
+        // Turned on its side: a new height with no keyboard.
+        wide = window.innerWidth;
+        tall = height();
+      }
+      tall = Math.max(tall, height());
+      if (keyboardUp()) {
+        if (isField(document.activeElement)) {
+          if (later) clearTimeout(later);
+          setTyping(true);
+        }
+        return;
+      }
+      // Closed with a field still focused (the back gesture): the bar is back at once.
+      if (isField(document.activeElement)) {
+        if (later) clearTimeout(later);
+        setTyping(false);
+      }
     };
     document.addEventListener("focusin", onIn);
     document.addEventListener("focusout", onOut);
+    (view ?? window).addEventListener("resize", onResize);
     return () => {
       if (later) clearTimeout(later);
       document.removeEventListener("focusin", onIn);
       document.removeEventListener("focusout", onOut);
+      (view ?? window).removeEventListener("resize", onResize);
     };
   }, []);
 
