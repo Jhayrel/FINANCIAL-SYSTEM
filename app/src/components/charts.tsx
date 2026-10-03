@@ -37,6 +37,7 @@
  */
 
 import {
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -47,6 +48,7 @@ import {
   type RefObject,
 } from "react";
 
+import { clearPick, notePick } from "../chartPick";
 import { formatAmount, formatMoney, toPesos, type Centavos } from "../domain/money";
 import type { Flow } from "./primitives";
 
@@ -229,6 +231,20 @@ function useReading(count: number) {
 
 type Reading = ReturnType<typeof useReading>;
 
+/** The point a tap pinned, kept for the assistant; let go when the pin is. */
+function usePick(chart: string, reading: Reading, part: (i: number) => string, lines: (i: number) => string[]): void {
+  const at = reading.pinned ? reading.at : null;
+  useEffect(() => {
+    if (at === null) {
+      clearPick(chart);
+      return;
+    }
+    notePick({ chart, part: part(at), lines: lines(at) });
+    // The pinned point is what matters; the builders change every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chart, at]);
+}
+
 export interface TipLine {
   readonly label: string;
   readonly value: Centavos;
@@ -390,6 +406,13 @@ export function AreaChart({
   const [box, width] = useWidth<HTMLDivElement>();
   const [off, setOff] = useState<ReadonlySet<string>>(() => new Set(initiallyHidden ?? []));
   const reading = useReading(labels.length);
+  // A point tapped is what "that" means to the assistant (chartPick.ts).
+  usePick(
+    `${series.map((s) => s.name).join(" and ")} chart`,
+    reading,
+    (i) => titles?.[i] ?? labels[i] ?? "",
+    (i) => series.filter((s) => !s.guide && !off.has(s.name)).map((s) => `${s.name}: ${formatMoney(s.values[i] ?? 0)}`),
+  );
 
   const W = Math.max(width, 1);
   const H = height ?? heightFor(width);
@@ -583,6 +606,10 @@ export function BarChart({
 }) {
   const [box, width] = useWidth<HTMLDivElement>();
   const reading = useReading(labels.length);
+  usePick("Budget and spending chart", reading, (i) => titles?.[i] ?? labels[i] ?? "", (i) => [
+    `Spent: ${formatMoney(actual[i] ?? 0)}`,
+    `Budget: ${formatMoney(budget[i] ?? 0)}`,
+  ]);
 
   const W = Math.max(width, 1);
   const H = height ?? heightFor(width);

@@ -175,6 +175,8 @@ import { carded, cardsIn, drawn, drew, proposed, said, type ChatMessage, type St
 import { formatBytes, readFiles, totalBytes, type Attachment } from "../data/attachments";
 import { useAi } from "./useAi";
 import { currentScreen } from "./screenReport";
+import { clearPick, currentPick, notePick } from "../chartPick";
+import { asksAboutPick, pickAnswer, pickText } from "../domain/chartPick";
 import { aboutTheScreen, screenText } from "../domain/screenContext";
 import { figuresIn } from "../domain/money";
 import { transactionToDraft } from "../domain/entry";
@@ -3546,6 +3548,8 @@ export function AskPanel({
     const figures = worked?.text ?? standing;
     const earlier = earlierSessions(savedChat.current, [...history.map((h) => h.text.replace(/\.\.\.$/, "")), question]);
 
+    // The part of a chart they tapped, when the question points at it (domain/chartPick.ts).
+    const picked = asksAboutPick(question) ? currentPick() : null;
     // What the owner has open, so "what do you think" is about that screen (domain/screenContext.ts).
     const answer = await during(
       "Reading your ledger",
@@ -3567,7 +3571,7 @@ export function AskPanel({
            * much did I spend today" came back describing the empty amount
            * field on the Add form.
            */
-          screen: aboutTheScreen(question) ? screenText(currentScreen()) : "",
+          screen: [aboutTheScreen(question) ? screenText(currentScreen()) : "", picked ? pickText(picked) : ""].filter(Boolean).join("\n\n"),
           ...(figures ? { worked: figures } : {}),
           // What it must not forget: what they told it, and this conversation in outline (domain/memory.ts).
           pinned: keepInMind(savedChat.current, turns.filter(isSaid).map((t) => ({ role: t.kind, text: t.text })).concat([{ role: "you" as const, text: question }]), asOf),
@@ -3595,9 +3599,10 @@ export function AskPanel({
      * No model answered: the app's own working is the answer, and the line
      * under it says why the model is not the one answering.
      */
-    if (answer.source !== "model" && worked?.fallback) {
-      say({ kind: "assistant", text: worked.fallback, from: `this device, because ${(answer.reason ?? "no model answered").replace(/\.$/, "").replace(/^./, (c) => c.toLowerCase())}` });
-      log(aiEvent("answered", "add", { text: worked.fallback, model: "this device" }));
+    const fallback = worked?.fallback ?? (picked ? pickAnswer(picked) : undefined);
+    if (answer.source !== "model" && fallback) {
+      say({ kind: "assistant", text: fallback, from: `this device, because ${(answer.reason ?? "no model answered").replace(/\.$/, "").replace(/^./, (c) => c.toLowerCase())}` });
+      log(aiEvent("answered", "add", { text: fallback, model: "this device" }));
       return;
     }
     const from = answer.source === "model" ? model : (answer.reason ?? model);
@@ -8528,10 +8533,24 @@ function ChartView({ chart }: { chart: Chart }) {
     if (pinned && at === i) {
       setPinned(false);
       setAt(null);
+      clearPick(chart.title);
       return;
     }
     setPinned(true);
     setAt(i);
+    // What "that" means in the next question (features/chartPick.ts).
+    const row = chart.rows[i];
+    if (row) {
+      const whole = chart.rows.reduce((sum, r) => sum + r.value, 0);
+      notePick({
+        chart: chart.title,
+        part: row.label,
+        lines: [
+          `${row.label}: ${formatMoney(row.value)}${row.count > 0 ? `, ${row.count} ${row.count === 1 ? "entry" : "entries"}` : ""}`,
+          ...(whole > 0 && chart.kind === "pie" ? [`${Math.round((row.value / whole) * 100)}% of the ${formatMoney(whole)} the chart shows`] : []),
+        ],
+      });
+    }
   };
   const leave = (): void => {
     if (!pinned) setAt(null);

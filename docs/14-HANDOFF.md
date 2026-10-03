@@ -675,6 +675,20 @@ wallets"), and "add it" put the model's figure on the card.
 Checked in a browser: a card made from the chat, changed to PHP 6,000.00
 and PHP 1,522.00, the total following the typing, applied, and the Budget
 screen showing both.
+
+### 2026-10-03, last: "fix more, find more"
+
+| Found | Fixed |
+|---|---|
+| With no model, "lunch 99 cash", "coffee 120 gcash", "grab 250 gcash", "spotify 149 maya" made nothing: a sentence with no verb was read only when the word was a past item or a kind's exact name | The everyday word for one of the owner's kinds counts (`kindByWord` in `readEntry.ts`), and so does a bill or subscription by name; a question, plan or budget never does (`NOT_A_ROW`, which also stops "food budget 3000" becoming a Food row). The 281 labelled sentences read the same as before |
+| "paid spotify 149 maya" was filed under plain Spending, on no list | A bill or subscription named in a sentence goes on its own list; an AI card naming one under the wrong list moves to it (`fitItem`) |
+| The Budget screen said PHP 1,837.00 a day, the Dashboard PHP 1,719.66, the assistant the first: the whole plan's remainder counted the bills budget's unspent PHP 352.00 with every bill paid | One figure: a day's share of the spending track's remainder, on the Budget screen ("a day for spending"), in the assistant's context, its what-if and the offline answer (`dailyAgree.test.ts`) |
+| "whats that selected?" (open item 2) | Above |
+
+On the owner's data (the 2 October dump), the new "Kinds on no list" group
+holds 15 kinds, most from 2024; two came from the AI bug: Water (1 row,
+30 September) and Load (7 rows, September). Theirs to move; nothing was
+changed.
 ---
 
 ## 6. What the owner has to do
@@ -716,9 +730,10 @@ screen showing both.
    by tests and by the device path on a local copy. The next coderview dump
    is the check: read "Thrown away, and never corrected" and "Said, and
    nothing happened" first (`12-DEBUGGING-FROM-THE-RECORD.md` §1 says how).
-2. **"whats that selected?"** about a pie slice the owner had tapped: the
-   chat is not told which slice is picked. It needs the chart's picked row
-   passed up from `components/charts.tsx` into the question's context.
+2. ~~"whats that selected?"~~ Done 3 October 2026: a tapped part of any
+   chart (the chat's own, and the Dashboard's and Insights' line and bar
+   charts) is kept for fifteen minutes (`src/chartPick.ts`) and sent with a
+   question that points at it (`domain/chartPick.ts`).
 3. **The real due date for Maya Credit.** The app now says what "both the
    6th" means; whether Maya's own due date is another day only its app can
    say. If it is, the owner sets Payment due to it.
