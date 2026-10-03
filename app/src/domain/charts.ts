@@ -278,14 +278,17 @@ export function comparesMonths(question: string): boolean {
   return found.length > 1;
 }
 
-function dimensionOf(question: string): ChartBy {
+function dimensionOf(question: string, twoMonthsAreBars = true): ChartBy {
   /**
    * A comparison of two months is one bar per month.
    *
    * Checked first, because such a question also names two months, and
    * grouping by item inside a two month window answers something else.
+   * Not when the two periods are already known and drawn side by side: a
+   * comparison chart's own title names two months, and "by wallet" after it
+   * drew one bar of one month (3 October 2026).
    */
-  if (comparesMonths(question)) return "month";
+  if (twoMonthsAreBars && comparesMonths(question)) return "month";
 
   // "daily", "day by day", "per day": one point a day.
   if (/\b(daily|per day|by day|day by day|each day|every day|day to day)\b/i.test(question)) return "day";
@@ -713,7 +716,8 @@ export function isChartFollowUp(question: string, chartOnScreen: boolean): boole
     // escape, so a single one builds a regex that matches a control
     // character and never a word boundary.
     MONTHS.some((m) => new RegExp(`\\b${m}\\b`, "i").test(trimmed)) ||
-    /\b(this month|last month|this year|last year|the year|ytd|all|everything|per month|monthly|by wallet|by category|by item|weekly|by week|per week|yearly|by year|per year|20\d{2}|(last|past) \d+ (months?|weeks?|years?))\b/i.test(
+    // "by month" was missing, so straight after a chart it went to a model, or with none, nowhere.
+    /\b(this month|last month|this year|last year|the year|ytd|all|everything|(?:by|per) (?:months?|wallets?|accounts?|categor(?:y|ies)|items?)|monthly|month by month|weekly|by week|per week|yearly|by year|per year|20\d{2}|(last|past) \d+ (months?|weeks?|years?))\b/i.test(
       trimmed,
     ) ||
     // The short windows: "how about this week", "today only", "last 10 days".
@@ -963,10 +967,10 @@ function buildComparison(
   pair: ComparedPeriods,
   direction: "spending" | "revenue",
   focus: Focus,
+  said: ChartBy = dimensionOf(question),
 ): Chart | null {
   const valueOf = direction === "revenue" ? revenueOf : spendingOf;
   const word = direction === "revenue" ? "Income" : "Spending";
-  const said = dimensionOf(question);
   const by: ChartBy = (said === "wallet" && !focus.wallet) || said === "category" ? said : "item";
   // One item, or one wallet, named: only its rows, each period's figure for it.
   const sideOf = (t: Transaction): string => (direction === "revenue" ? t.toWallet : t.fromWallet).trim().toLowerCase();
@@ -1022,6 +1026,36 @@ function buildComparison(
   };
 }
 
+/**
+ * Two periods side by side, in words, for a question asked in words: "did I
+ * spend more this month than last month?". The same figures the chart draws,
+ * money in and money out, so the answer is built on them rather than on a
+ * month still running set against a whole one.
+ */
+export function comparisonWorked(question: string, transactions: readonly Transaction[], pair: ComparedPeriods): string {
+  const focus = focusOf(question, transactions);
+  const span = (p: ComparedPeriods["now"]): string => (p.from === p.to ? p.from : `${p.from} to ${p.to}`);
+  const lines: string[] = [];
+  for (const direction of ["spending", "revenue"] as const) {
+    const chart = buildComparison(question, transactions, pair, direction, focus, dimensionOf(question, false));
+    if (!chart?.against) continue;
+    const moved = chart.total - chart.against.total;
+    const word = direction === "revenue" ? "Received" : "Spent";
+    lines.push(
+      `${word}: ${chartLabel(chart.total)} in ${pair.now.name} (${span(pair.now)}), against ${chartLabel(chart.against.total)} in ${pair.before.name} (${span(pair.before)}). ${
+        moved === 0 ? "The same." : `${chartLabel(Math.abs(moved))} ${moved > 0 ? "more" : "less"} now.`
+      }`,
+    );
+    const rows = chart.rows.map((r) => `${r.label} ${chartLabel(r.value)} (was ${chartLabel(r.previous ?? 0)})`);
+    lines.push(`By ${chart.by}: ${rows.join(", ")}${chart.othersCount > 0 ? `, and ${chart.othersCount} smaller` : ""}.`);
+  }
+  if (lines.length === 0) return "";
+  if (pair.now.name.includes("so far") || pair.before.name.startsWith("the same days")) {
+    lines.push("A period still running is set against the same days of the one before, so the two compare fairly.");
+  }
+  return lines.join("\n");
+}
+
 export function buildChart(
   question: string,
   transactions: readonly Transaction[],
@@ -1039,8 +1073,9 @@ export function buildChart(
    * compares them by being drawn, and so do two named months, one bar each.
    */
   const pair = said ?? comparedPeriods(question, asOf);
-  if (pair && !overTime(dimensionOf(question))) {
-    const compared = buildComparison(question, transactions, pair, direction, focus);
+  const pairedBy = dimensionOf(question, !said);
+  if (pair && !overTime(pairedBy)) {
+    const compared = buildComparison(question, transactions, pair, direction, focus, pairedBy);
     if (compared) return compared;
   }
   const valueOf = direction === "revenue" ? revenueOf : spendingOf;

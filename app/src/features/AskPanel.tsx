@@ -99,6 +99,8 @@ import {
 } from "../domain/recall";
 import {
   buildChart,
+  comparedPeriods,
+  comparisonWorked,
   periodsSaid,
   wantsBothDirections,
   chartDirection,
@@ -5252,7 +5254,25 @@ export function AskPanel({
        * after a spending chart carried "Spending by item" and drew both
        * (28 September 2026).
        */
-      const title = !shown ? "" : namesDirection ? shown.title.replace(/^(?:spending|income)\s+/i, "") : shown.title;
+      /*
+       * A comparison's title names both periods; carried as words they read
+       * as "compare two months" and drew one bar (3 October 2026). Its own
+       * window goes as dates instead, and the earlier one comes along as
+       * `pair` below when the follow-up keeps comparing.
+       */
+      const shownTitle = !shown
+        ? ""
+        : shown.against?.periods
+          ? `${shown.title.split(",")[0] ?? ""}, ${shown.against.periods.now.from} to ${shown.against.periods.now.to}`
+          : shown.title;
+      /*
+       * A new grouping replaces the old one rather than sitting beside it:
+       * "by category" after "Spending by wallet" kept wallet, because the
+       * title's "by wallet" was read first.
+       */
+      const namesGrouping = /\b(?:by|per)\s+(?:items?|months?|days?|weeks?|wallets?|accounts?|categor(?:y|ies)|years?)\b|\b(?:monthly|daily|weekly|yearly)\b/i.test(ruled);
+      const regrouped = namesGrouping ? shownTitle.replace(/\s+by\s+(?:item|wallet|category|month|day|week|year)\b/i, "") : shownTitle;
+      const title = !shown ? "" : namesDirection ? regrouped.replace(/^(?:spending|income)\s+/i, "") : regrouped;
       const carriedTitle = !shown
         ? note
         : !namesPeriod
@@ -5305,7 +5325,8 @@ export function AskPanel({
        */
       const [laterSaid, earlierSaid] = routed?.compare ?? [];
       const saidPair = laterSaid && earlierSaid ? periodsSaid(laterSaid, earlierSaid, asOf) : null;
-      const pair = saidPair ?? (followUp && !namesPeriod ? shown?.against?.periods ?? null : null);
+      // A pie is one period split up, so "pie" after a comparison draws this period alone.
+      const pair = saidPair ?? (followUp && !namesPeriod && !asksPie(ruled) ? shown?.against?.periods ?? null : null);
       const both = wantsBothDirections(asked);
       const chart = buildChart(asked, transactions, asOf, both ? "revenue" : undefined, pair);
       const second = both ? buildChart(asked, transactions, asOf, "spending", pair) : null;
@@ -5848,7 +5869,22 @@ export function AskPanel({
     setBusy(true);
     try {
       if (job === "ask") {
-        await askQuestion(note);
+        /*
+         * Two periods set against each other, asked in words: both, the same
+         * days of each, worked out here (`comparisonWorked`). The router names
+         * the periods however the question is put; the device's own reading
+         * is the fallback.
+         */
+        const [laterSaid, earlierSaid] = routed?.compare ?? [];
+        const pair = (laterSaid && earlierSaid ? periodsSaid(laterSaid, earlierSaid, asOf) : null) ?? comparedPeriods(ruled, asOf);
+        const compared = pair ? comparisonWorked(ruled, transactions, pair) : "";
+        await askQuestion(
+          note,
+          true,
+          compared
+            ? { text: `Two periods side by side, worked out by the app from the ledger. Answer with these figures:\n${compared}`, fallback: compared }
+            : null,
+        );
 
         /*
          * A message can be both, and the entries in it must not be lost.

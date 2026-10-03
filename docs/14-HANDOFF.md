@@ -702,6 +702,10 @@ alone, by item. A comparison was read only when two months were named
 | The owner: "sometimes the grammar will change so identify first" | The router now names the two periods itself (`compare`, "this month\|last month") however the sentence puts it, and the device works out their dates (`periodsSaid`). With no model, the device's own words for a comparison still draw it. "chart my spending from last month" stays one month |
 | A follow-up ("by wallet", "pie") lost the comparison | The chart keeps both windows, and a follow-up naming no period of its own compares the same two |
 | Every bar chart in the chat: each row sized its own figure column, so a row with a longer figure had a shorter track and its bar was not on the same scale as the rest | One set of columns for the chart (`subgrid`), so every track is the same length |
+| "did I spend more this month than last month?", asked in words, gave the model a month still running and a whole month | Both periods, the same days of each, money out and in, by item, worked out on the device and put in front of the model (`comparisonWorked`); said as the answer when no model replies |
+| "by wallet" after the comparison drew one bar of one month: its title names two months and "against", which read as "compare two months" | A known pair decides its own grouping, and the title is carried as dates |
+| "by category" after "Spending by wallet" stayed by wallet, on any chart: the old title's "by wallet" was read first | A grouping named in the follow-up replaces the one in the title |
+| "by month", "by wallets", "per category" straight after a chart, with no model, went nowhere | Read as follow-ups (`isChartFollowUp`) |
 ---
 
 ## 6. What the owner has to do

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { buildChart, chartInWords, comparedPeriods, periodsSaid } from "./charts";
+import { buildChart, chartInWords, comparedPeriods, comparisonWorked, periodsSaid } from "./charts";
 import { twoPeriods } from "../data/aiClient";
 import type { Transaction } from "./types";
 
@@ -130,5 +130,33 @@ describe("the assistant's reading of the two periods", () => {
     expect(twoPeriods("this month|last month")).toEqual(["this month", "last month"]);
     expect(twoPeriods(" september | august ")).toEqual(["september", "august"]);
     for (const said of ["", "this month", "a|b|c", "may|May", 3, null]) expect(twoPeriods(said)).toEqual([]);
+  });
+});
+
+describe("two periods asked about in words", () => {
+  it("are both, the same days of each, money out and money in", () => {
+    const pair = comparedPeriods("did I spend more this month than last month?", ASOF);
+    expect(pair).not.toBeNull();
+    const words = pair ? comparisonWorked("did I spend more this month than last month?", ledger, pair) : "";
+    expect(words.split("\n")).toEqual([
+      "Spent: PHP 470.00 in October 2026 so far, the 1st to the 3rd (2026-10-01 to 2026-10-03), against PHP 700.00 in the same days of September 2026 (2026-09-01 to 2026-09-03). PHP 230.00 less now.",
+      "By item: Fun PHP 0.00 (was PHP 500.00), Food PHP 420.00 (was PHP 200.00), Travel PHP 50.00 (was PHP 0.00).",
+      "A period still running is set against the same days of the one before, so the two compare fairly.",
+    ]);
+  });
+});
+
+describe("a follow-up to a comparison", () => {
+  it("keeps both periods and takes the new grouping", () => {
+    const first = buildChart("Show me my spending this month compared to last month", ledger, ASOF);
+    const pair = first?.against?.periods ?? null;
+    expect(pair).not.toBeNull();
+    const next = buildChart(`by wallet ${first?.title ?? ""}`, ledger, ASOF, undefined, pair);
+    expect(next?.by).toBe("wallet");
+    expect(next?.against?.name).toBe("the same days of September 2026");
+    expect(next?.rows.map((r) => [r.label, r.value, r.previous])).toEqual([
+      ["Cash", 35_000, 70_000],
+      ["Wallet A", 12_000, 0],
+    ]);
   });
 });
