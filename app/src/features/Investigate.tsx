@@ -193,6 +193,15 @@ export function Investigate({
       case "amount-differs":
       case "not-on-statement":
         return rowActions(clue.row);
+      case "estimate":
+        // A guess the owner made: corrected, never binned from here.
+        return (
+          <span className="fms-findrow-actions">
+            <Button size="sm" onClick={() => onEditRow(clue.row)}>
+              Correct {number(clue.row)}
+            </Button>
+          </span>
+        );
       case "together":
         return (
           <span className="fms-findrow-actions">
@@ -330,13 +339,21 @@ export function Investigate({
                 <span className="t-label">Really holds</span>
                 <Money value={result.actual} size="m" />
               </div>
+              {/*
+                In words, not signs. "Difference −PHP 340.00" in red, with
+                more cash in hand than recorded, read as money lost (3
+                October 2026). Which way it goes is the label; the figure is
+                how much.
+              */}
               <div>
-                <span className="t-label">Difference</span>
-                <Money value={result.gap} size="m" signed tone={result.gap === 0 ? "var(--ok)" : undefined} />
+                <span className="t-label">
+                  {result.gap === 0 ? "Difference" : result.gap < 0 ? "More than recorded" : "Less than recorded"}
+                </span>
+                <Money value={Math.abs(result.gap)} size="m" tone={result.gap === 0 ? "var(--ok)" : "var(--ink)"} />
               </div>
               <div>
-                <span className="t-label">{result.overshoot ? "Worth checking" : "Found"}</span>
-                <Money value={result.explained} size="m" signed tone={result.unexplained === 0 && result.gap !== 0 ? "var(--ok)" : undefined} />
+                <span className="t-label">{result.overshoot ? "Worth checking" : "Found so far"}</span>
+                <Money value={Math.abs(result.explained)} size="m" tone={result.unexplained === 0 && result.gap !== 0 ? "var(--ok)" : "var(--ink)"} />
               </div>
             </div>
 
@@ -355,7 +372,7 @@ export function Investigate({
                   <li key={`f${i}`} className={clue.kind === "missing" && clue.line.amount > 0 ? "fms-findrow fms-findrow--stack" : "fms-findrow"}>
                     <span className="t-body">{clueWords(clue)}</span>
                     <span className="fms-findrow-end">
-                      <Money value={clue.explains} size="s" signed />
+                      <Money value={Math.abs(clue.explains)} size="s" tone="var(--ink)" />
                       {actionFor(clue)}
                     </span>
                   </li>
@@ -374,7 +391,7 @@ export function Investigate({
                     <li key={`a${i}`} className="fms-findrow fms-findrow--maybe">
                       <span className="t-body">{"row" in clue ? `#${String(clue.row.recordNumber).padStart(4, "0")} ${clue.row.item || clue.row.description || clue.row.type} on ${formatMedium(clue.row.date)}` : clueWords(clue)}</span>
                       <span className="fms-findrow-end">
-                        <Money value={clue.explains} size="s" signed />
+                        <Money value={Math.abs(clue.explains)} size="s" tone="var(--ink)" />
                         {actionFor(clue)}
                       </span>
                     </li>
@@ -394,7 +411,7 @@ export function Investigate({
                       <li
                       key={`p${i}`}
                       className={
-                        clue.kind === "unrecorded" || clue.kind === "together"
+                        clue.kind === "unrecorded" || clue.kind === "together" || clue.kind === "estimate"
                           ? "fms-findrow fms-findrow--maybe fms-findrow--stack"
                           : "fms-findrow fms-findrow--maybe"
                       }

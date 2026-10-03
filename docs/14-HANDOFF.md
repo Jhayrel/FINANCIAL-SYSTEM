@@ -713,6 +713,19 @@ alone, by item. A comparison was read only when two months were named
 |---|---|
 | Insights listed each entry by its kind only; reading the description meant Correct, which leaves for the Add form | The description sits under the kind, three lines at most; a longer one opens whole with a tap (`EntryWords` in `Insights.tsx`) |
 | On a phone the bottom bar vanished and stayed gone: it hid while a field had focus, and Android's back gesture closes the keyboard and leaves the field focused | It follows the keyboard, read from the visible height: hidden while the keyboard is up, back the moment it closes. A tap on Save still gets its moment before the bar returns (`App.tsx`, `typing`) |
+
+### 2026-10-03, last: Find a difference on Cash
+
+The owner: Cash recorded PHP 760.00, really PHP 1,100.00. Replayed on the
+2 October copy, the same faults came up.
+
+| Found | Fixed |
+|---|---|
+| "#3854 Food on September 29 looks like #3842 Food on September 28 entered a second time": breakfast one day, lunch the next, PHP 95.00 each; and water bought on each day. The kind was read with the words, so "Food breakfast" and "Food ate lunch" shared "Food", and a day apart counted like the same day | Only the owner's own words make two rows alike, never the kind. Same day: the same kind with words alike, or the very same words. A day apart: the very same words, and never a habit (three days or more of the same thing at the same price) (`twins`, `investigateCash.test.ts`) |
+| More cash than recorded was offered bank interest, with an "Add as interest" button | Cash gets a person's reasons (given, paid back, change, a spending that did not happen) and no interest |
+| The owner's own earlier estimate ("Cash spending not written down at the time", PHP 3,523.00) was never looked at | With more in hand than recorded, an estimate big enough to hold the difference is the first thing offered, with the figure to lower it to (`estimate`) |
+| "Difference −PHP 340.00" and "Found −PHP 120.00" in red read as money lost | Said in words: "More than recorded" or "Less than recorded", the figure plain |
+| The chat added a "Random PHP 220.00" income card beside two entries that add up to the same, said "mostly clear in the picture" with no picture, and its cards read "Matched on entered twice" | No income card when the ledger itself could be the answer; a card from the difference is never "in the picture"; each reason is a sentence ("Looks like #3842 entered a second time.") |
 ---
 
 ## 6. What the owner has to do

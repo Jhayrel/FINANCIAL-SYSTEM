@@ -507,7 +507,8 @@ const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
 /** A card read off a picture or a statement, rather than from something typed. */
 const readOffPicture = (p: Proposal): boolean =>
   // "user text" is what a model's card from a typed message is sourced to, kept by cards saved before `typed` was.
-  !p.typed && !/^(user text|this message)\b/i.test(p.sourceRef.trim()) && (!p.said || /\b(image|picture|photo|screenshot|receipt|statement|part \d)/i.test(p.sourceRef));
+  // "the difference" is worked out from the ledger: a card from it was never in a picture (3 October 2026).
+  !p.typed && !/^(user text|this message|the difference)\b/i.test(p.sourceRef.trim()) && (!p.said || /\b(image|picture|photo|screenshot|receipt|statement|part \d)/i.test(p.sourceRef));
 const isFound = (t: Turn): t is Found => t.kind === "found";
 const isChart = (t: Turn): t is Drawn => t.kind === "chart";
 const isDebt = (t: Turn): t is DebtChoice => t.kind === "debt";
@@ -3503,8 +3504,15 @@ export function AskPanel({
     say({ kind: "assistant", text: reply, from: "this device" });
     log(aiEvent("answered", "add", { text: `Investigated ${account}: gap ${formatMoney(result.gap)}, found ${formatMoney(result.explained)}.`, model: "this device" }));
 
-    // What can be put right, as cards.
+    /*
+     * What can be put right, as cards. Money nobody wrote down is a card only
+     * when nothing in the ledger could be the answer instead: beside two
+     * entries that add up to it, a ready-made income card was a guess that
+     * would have counted the money twice (3 October 2026, "Random PHP 220.00").
+     */
+    const ledgerCouldSay = result.possible.some((c) => c.kind === "together" || c.kind === "estimate" || c.kind === "wrong-account");
     const adds = [...result.found, ...result.possible]
+      .filter((clue) => !(clue.kind === "unrecorded" && ledgerCouldSay))
       .map((clue) => draftForClue(clue, account, readOn, interestItem))
       .filter((draft): draft is Draft => draft !== null);
     /*
@@ -3526,11 +3534,13 @@ export function AskPanel({
         false,
       );
     }
+    // Each reason a whole sentence, so the card says it as it is rather than "Matched on entered twice".
+    const no = (t: Transaction): string => `#${String(t.recordNumber).padStart(4, "0")}`;
     const twins = result.found.flatMap((c) =>
       c.kind === "duplicate"
-        ? [{ row: c.row, score: 100, why: ["entered twice"] }]
+        ? [{ row: c.row, score: 100, why: [`Looks like ${no(c.twin)} entered a second time.`] }]
         : c.kind === "inside"
-          ? [{ row: c.row, score: 100, why: [`already part of #${String(c.whole.recordNumber).padStart(4, "0")}`] }]
+          ? [{ row: c.row, score: 100, why: [`Already part of ${no(c.whole)}.`] }]
           : [],
     );
     if (twins.length > 0) say({ kind: "found", action: "bin", candidates: twins, done: [] });
@@ -3538,12 +3548,18 @@ export function AskPanel({
     const toCheck = [...result.found, ...result.possible]
       .flatMap((c) =>
         c.kind === "amount-differs" || c.kind === "not-on-statement"
-          ? [{ row: c.row, score: 90, why: [c.kind === "amount-differs" ? "a different figure on the statement" : "not on the statement"] }]
-          : c.kind === "together"
-            ? c.rows.map((row) => ({ row, score: 50, why: ["could be the difference"] }))
-            : c.kind === "wrong-account"
-              ? [{ row: c.row, score: 60, why: [`filed on ${c.other}`] }]
-              : [],
+          ? [{ row: c.row, score: 90, why: [c.kind === "amount-differs" ? "The statement shows a different figure." : "Not on the statement."] }]
+          : c.kind === "estimate"
+            ? [{ row: c.row, score: 80, why: [`An estimate of spending not written down: if ${formatMoney(Math.abs(c.explains))} of it was never spent, lower it.`] }]
+            : c.kind === "together"
+              ? c.rows.map((row) => ({
+                  row,
+                  score: 50,
+                  why: [c.rows.length > 1 ? `With ${c.rows.filter((r) => r.id !== row.id).map(no).join(" and ")}, adds up to the difference. Check it was on this account.` : "Adds up to the difference. Check it was on this account."],
+                }))
+              : c.kind === "wrong-account"
+                ? [{ row: c.row, score: 60, why: [`Filed on ${c.other}. Check it was not this account.`] }]
+                : [],
       )
       .filter((c) => !seen.has(c.row.id) && Boolean(seen.add(c.row.id)));
     if (toCheck.length > 0) say({ kind: "found", action: "edit", candidates: toCheck, done: [] });

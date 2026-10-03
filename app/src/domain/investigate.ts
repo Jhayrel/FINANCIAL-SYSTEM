@@ -78,7 +78,20 @@ export type Clue =
   | { readonly kind: "together"; readonly rows: readonly Transaction[]; readonly explains: Centavos }
   | { readonly kind: "cash"; readonly perDay: Centavos; readonly days: number; readonly explains: Centavos }
   | { readonly kind: "wrong-account"; readonly row: Transaction; readonly other: string; readonly explains: Centavos }
-  | { readonly kind: "unrecorded"; readonly direction: "in" | "out"; readonly explains: Centavos };
+  | {
+      readonly kind: "unrecorded";
+      readonly direction: "in" | "out";
+      readonly explains: Centavos;
+      /** On a cash account: no bank, so no interest, and the reasons are a person's. */
+      readonly cash?: boolean | undefined;
+    }
+  /**
+   * An earlier estimate of spending not written down ("Unknown", "Cash
+   * spending not written down at the time"), large enough to be where the
+   * difference is: when there is more in hand than recorded, the guess was
+   * too high.
+   */
+  | { readonly kind: "estimate"; readonly row: Transaction; readonly explains: Centavos };
 
 export interface Investigation {
   readonly account: string;
@@ -148,6 +161,11 @@ function likeness(a: string, b: string): number {
 }
 
 const describe = (t: Transaction): string => [t.item, t.description, t.notes].filter(Boolean).join(" ");
+
+/** A row that stands for spending nobody wrote down: a guess, not a purchase. */
+const isEstimate = (t: Transaction): boolean =>
+  /^(?:unknown|not classified|day total)$/i.test(t.item.trim()) ||
+  /\b(?:not written down|no detail|unknown spending|unrecorded)\b/i.test(t.description);
 
 /**
  * Figures a slip of the finger apart: one digit too many or too few, or two
@@ -219,11 +237,56 @@ export function rowsAddingTo(
   return out;
 }
 
-/** Two rows on one account that are the same movement entered twice. */
-function twins(rows: readonly Transaction[], account: string): { row: Transaction; twin: Transaction }[] {
+/**
+ * What the owner wrote about a row, without its kind: the description, or
+ * the notes when there is none. Lowercase, one space between words.
+ */
+const ownWords = (t: Transaction): string =>
+  (t.description.trim() || t.notes.trim()).toLowerCase().replace(/\s+/g, " ");
+
+/**
+ * Two rows on one account that are the same movement entered twice.
+ *
+ * ── What it got wrong ─────────────────────────────────────────────────────
+ *
+ * 3 October 2026, the owner's Cash: "#3854 Food on September 29 looks like
+ * #3842 Food on September 28 entered a second time". #3842 was breakfast and
+ * #3854 lunch, PHP 95.00 each; the other pair was water, bought on each day.
+ * The kind was read together with the words, so "Food breakfast" and "Food
+ * ate lunch" shared "Food" and passed as alike, and a day apart was allowed
+ * as freely as the same day.
+ *
+ * Now the kind never makes two rows alike, only the owner's own words do.
+ * On the same day: the same kind and words alike, or the very same words.
+ * A day apart: the very same words, and only when it is not a habit. Water
+ * bought every day for PHP 25.00 is three rows on three days, and the one
+ * after it is the fourth, not the third again.
+ */
+function twins(
+  rows: readonly Transaction[],
+  account: string,
+  history: readonly Transaction[] = rows,
+): { row: Transaction; twin: Transaction }[] {
   const out: { row: Transaction; twin: Transaction }[] = [];
   const used = new Set<string>();
   const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date) || a.recordNumber - b.recordNumber);
+
+  /** The days a row like this one turns up on: the same amount, the same kind or the same words. */
+  const daysLike = (t: Transaction): number => {
+    const value = movedOn(t, account);
+    const words = ownWords(t);
+    const kind = t.item.trim().toLowerCase();
+    const days = new Set<string>();
+    for (const other of history) {
+      if (movedOn(other, account) !== value) continue;
+      const otherWords = ownWords(other);
+      const sameKind = kind !== "" && other.item.trim().toLowerCase() === kind;
+      const alike = words !== "" && otherWords !== "" && likeness(words, otherWords) >= 0.6;
+      if (sameKind || alike) days.add(other.date);
+    }
+    return days.size;
+  };
+
   for (let i = 0; i < sorted.length; i += 1) {
     const a = sorted[i]!;
     if (used.has(a.id)) continue;
@@ -231,9 +294,15 @@ function twins(rows: readonly Transaction[], account: string): { row: Transactio
       const b = sorted[j]!;
       if (daysBetween(a.date, b.date) > 1) break;
       if (used.has(b.id) || movedOn(a, account) !== movedOn(b, account)) continue;
-      const sameThing = a.item.trim().toLowerCase() === b.item.trim().toLowerCase() && likeness(describe(a), describe(b)) >= 0.5;
-      const sameWords = describe(a).trim().toLowerCase() === describe(b).trim().toLowerCase();
-      if (sameThing || sameWords) {
+      const wa = ownWords(a);
+      const wb = ownWords(b);
+      const sameWords = wa !== "" && wa === wb;
+      const sameKind = a.item.trim().toLowerCase() === b.item.trim().toLowerCase();
+      const twice =
+        a.date === b.date
+          ? sameWords || (sameKind && (wa === "" || wb === "" || likeness(wa, wb) >= 0.6))
+          : sameWords && daysLike(a) < 3;
+      if (twice) {
         out.push({ row: b, twin: a });
         used.add(a.id);
         used.add(b.id);
@@ -389,7 +458,7 @@ export function investigate(input: InvestigateInput): Investigation {
 
     // What is left over on either side.
     const leftRows = inWindow.filter((t) => unmatchedRows.has(t.id) && inPeriod(t));
-    const doubled = twins(inWindow, account).filter((p) => unmatchedRows.has(p.row.id) && !unmatchedRows.has(p.twin.id));
+    const doubled = twins(inWindow, account, onAccount).filter((p) => unmatchedRows.has(p.row.id) && !unmatchedRows.has(p.twin.id));
     const doubledIds = new Set(doubled.map((p) => p.row.id));
     for (const p of doubled) found.push({ kind: "duplicate", row: p.row, twin: p.twin, explains: movedOn(p.row, account) });
     for (const row of leftRows) {
@@ -401,7 +470,7 @@ export function investigate(input: InvestigateInput): Investigation {
   } else {
     // Without a statement: rows entered twice are evidence enough on their own.
     const recent = onAccount.filter((t) => searched(t, input.lookBackDays ?? 90));
-    for (const p of twins(recent, account)) {
+    for (const p of twins(recent, account, onAccount)) {
       found.push({ kind: "duplicate", row: p.row, twin: p.twin, explains: movedOn(p.row, account) });
     }
   }
@@ -465,6 +534,22 @@ export function investigate(input: InvestigateInput): Investigation {
    * answer.
    */
   if (unexplained !== 0 && !overshoot) {
+    /*
+     * An estimate that was too high. More in hand than recorded, and a
+     * "spent, not written down" row on this account big enough to hold the
+     * difference: the owner's own guess, made to settle the account once
+     * before, is the likeliest place for it (3 October 2026, Cash: PHP 340.00
+     * more in hand, with a PHP 3,523.00 "Cash spending not written down at
+     * the time" from 27 September). Newest first, two at most.
+     */
+    if (unexplained < 0) {
+      const guesses = onAccount
+        .filter((t) => searched(t, input.lookBackDays ?? 60) && t.type === "Spending" && isEstimate(t) && -movedOn(t, account) >= -unexplained)
+        .sort((a, b) => b.date.localeCompare(a.date) || b.recordNumber - a.recordNumber)
+        .slice(0, 2);
+      for (const row of guesses) possible.push({ kind: "estimate", row, explains: unexplained });
+    }
+
     const pool = onAccount
       .filter((t) => searched(t, input.lookBackDays ?? 60) && (!covered || t.date < covered.from))
       .map((row) => ({ row, value: movedOn(row, account) }))
@@ -517,7 +602,7 @@ export function investigate(input: InvestigateInput): Investigation {
 
     // Money nobody wrote down, which is the answer whenever nothing recorded is.
     if (!(isCash && unexplained > 0)) {
-      possible.push({ kind: "unrecorded", direction: unexplained < 0 ? "in" : "out", explains: unexplained });
+      possible.push({ kind: "unrecorded", direction: unexplained < 0 ? "in" : "out", explains: unexplained, ...(isCash ? { cash: true } : {}) });
     }
   }
 
@@ -597,7 +682,17 @@ export function clueWords(clue: Clue): string {
       return `${row(clue.row)} is filed on ${clue.other}, for exactly ${formatMoney(Math.abs(clue.explains))}. If it really ${
         clue.explains > 0 ? "came out of" : "went into"
       } this account, that is the difference.`;
+    case "estimate": {
+      const was = clue.row.total;
+      const over = Math.abs(clue.explains);
+      return `${row(clue.row)}, ${formatMoney(was)}, was an estimate of spending not written down. If ${formatMoney(over)} of it was never spent, ${
+        was === over ? "it can go" : `lowering it to ${formatMoney(was - over)}`
+      } settles the difference.`;
+    }
     case "unrecorded":
+      if (clue.direction === "in" && clue.cash) {
+        return `${formatMoney(Math.abs(clue.explains))} more cash than recorded: cash someone gave you or paid back, change you were handed, or a cash spending entered that did not happen or was paid another way. Add it as what it was, or correct that spending.`;
+      }
       return clue.direction === "in"
         ? `${formatMoney(Math.abs(clue.explains))} came in that the ledger does not have: bank interest, a refund or cashback, or someone sending or paying you back. Add it as what it was.`
         : `${formatMoney(Math.abs(clue.explains))} went out that the ledger does not have: a fee, a purchase or a transfer not written down. Add it as what it was.`;
@@ -707,8 +802,9 @@ export function choicesForClue(
     status: "Received",
   });
   return [
-    ...(interestItem ? [{ label: "Add as interest", draft: income(interestItem, "Interest earned") }] : []),
-    { label: "Add as income", draft: income("", "Came in, not written down at the time") },
+    // Cash earns no interest: there is no bank to pay it.
+    ...(interestItem && !clue.cash ? [{ label: "Add as interest", draft: income(interestItem, "Interest earned") }] : []),
+    { label: "Add as income", draft: income("", clue.cash ? "Cash received, not written down at the time" : "Came in, not written down at the time") },
     {
       label: "Someone paid me back",
       draft: { ...emptyDraft(asOf), flow: "Debt", debtEffect: "collect", toWallet: account, amount },
