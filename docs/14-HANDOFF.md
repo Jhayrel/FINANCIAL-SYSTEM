@@ -655,6 +655,26 @@ no sideways scroll. `kindRename.test.ts` holds the rules. The sample ledger is
 not kept across a reload in the local preview (only Firestore keeps rows), so
 a rename there comes back as a kind on no list after a reload, which the new
 group then fixes.
+
+### 2026-10-03, last: the budget card, from the right figure and editable
+
+The owner's screenshot: "if I received my salary worth 10k today, how can I
+budget it?", then "add it", gave a card for November 2026 of PHP 13,600.00
+spending and PHP 1,522.00 bills, PHP 15,122.00 against the PHP 10,000.00
+salary. The app's own advice was held to the salary; the model's answer
+recommended the usual month instead ("leaves room for the salary and your
+wallets"), and "add it" put the model's figure on the card.
+
+| Before | Now |
+|---|---|
+| "add it" after the app's advice took a different total the answer named | The app's own parts, always; the card says the answer named another figure, and what the salary covers: bills, spending, what is left to save |
+| The model told only "never recompute" | Held to an income, it is told the total is the first sentence's, never the usual month's, and wallets are not part of it |
+| Money "today" was planned for the next month | Money that arrives today, now or this month is budgeted in the month running |
+| The card could only be applied or discarded | Change the figures: Spending and Bills and subscriptions (or the limit), every month on the card, planned again with the Budget screen's rules before Apply (`editedAsk`); the edited ask is what is kept, so a reload plans the owner's figures |
+
+Checked in a browser: a card made from the chat, changed to PHP 6,000.00
+and PHP 1,522.00, the total following the typing, applied, and the Budget
+screen showing both.
 ---
 
 ## 6. What the owner has to do

@@ -472,6 +472,25 @@ export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: Iso
   return { kind: "tracks", year, month, spending: by < 0 ? -value : value, ...(by !== 0 ? { by: true } : {}), scope, ...(toMonth ? { toMonth } : {}) };
 }
 
+/** The figures typed on a budget card, a month. */
+export type CardFigures = { readonly spending: Centavos; readonly billsSubs: Centavos } | { readonly limit: Centavos };
+
+/**
+ * The ask a budget card is planned from, with the owner's own figures in it.
+ *
+ * 3 October 2026, of a card the assistant made: "make sure it's editable
+ * too". The months and their span stay as asked; the figures are the ones
+ * typed, as amounts, never as changes to what is set. A limit card keeps
+ * its kind of spending and takes the new limit.
+ */
+export function editedAsk(ask: BudgetAsk, figures: CardFigures): BudgetAsk {
+  const span = { year: ask.year, month: ask.month, scope: ask.scope, ...(ask.toMonth ? { toMonth: ask.toMonth } : {}) };
+  if ("limit" in figures) {
+    return ask.kind === "limit" ? { ...ask, value: Math.max(0, figures.limit) } : ask;
+  }
+  return { kind: "tracks", ...span, spending: Math.max(0, figures.spending), billsSubs: Math.max(0, figures.billsSubs) };
+}
+
 export interface BudgetPlan {
   readonly year: number;
   readonly outcome: SaveOutcome;

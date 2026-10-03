@@ -190,7 +190,7 @@ import { fillDebt, personDebt } from "../domain/debtFill";
 import { foldInterest } from "../domain/interestFold";
 import { saysWhen } from "../domain/when";
 import { lessonKey, lessonsFrom } from "../domain/learning";
-import { AmountInput } from "../components/forms";
+import { AmountInput, Field as FormField } from "../components/forms";
 import type { Provenance } from "../domain/activity";
 import { imageLimits, type AppSettings } from "../domain/settings";
 import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
@@ -209,6 +209,8 @@ import {
   spanIn,
   type BudgetAsk,
   type BudgetPlan,
+  type CardFigures,
+  editedAsk,
 } from "../domain/budgetAsk";
 import { readSpendAsk, spendAnswer } from "../domain/spendAsk";
 import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
@@ -319,6 +321,10 @@ interface Budgeting {
   readonly cardId?: string;
   /** Came back from the record. An open one is planned again before it can be applied. */
   readonly restored?: boolean;
+  /** Where the figures came from, under the table: the income they are held to, a different figure the answer said. */
+  readonly note?: string;
+  /** Changed on the card by the owner. */
+  readonly edited?: boolean;
 }
 
 /** A file the owner asked for, waiting to be saved. */
@@ -705,6 +711,7 @@ function turnFromCard(card: StoredCard): Turn {
       },
       state: settled(card.state),
       ...(ask ? { ask } : {}),
+      ...(typeof data["note"] === "string" && data["note"] ? { note: data["note"] } : {}),
       cardId: card.id,
       restored: true,
     };
@@ -835,6 +842,7 @@ function storedFrom(turn: Turn): StoredCard | null {
       draft: {},
       data: {
         ...(turn.ask ? { ask: turn.ask } : {}),
+        ...(turn.note ? { note: turn.note } : {}),
         words: turn.plan.words,
         changes: turn.plan.changes,
         skipped: turn.plan.outcome.skipped.length,
@@ -4099,7 +4107,19 @@ export function AskPanel({
             return span && span.anchored !== false ? { year: span.year, month: span.month } : null;
           })());
           const next = nextOf(asOf);
-          const target = named ?? ((splitAgain || newIncome) && advised ? { year: advised.advice.year, month: advised.advice.month } : { year: next.year, month: next.month });
+          /*
+           * "if I received my salary worth 10k today, how can I budget it": money
+           * that arrives now is budgeted from now, in the month running. It was
+           * planned for the month after (3 October 2026, a November card).
+           */
+          const arrivesNow = income !== null && /\b(?:today|now|ngayon|kanina|this month)\b/i.test(ruled);
+          const target =
+            named ??
+            ((splitAgain || newIncome) && advised
+              ? { year: advised.advice.year, month: advised.advice.month }
+              : arrivesNow
+                ? { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) }
+                : { year: next.year, month: next.month });
           const held = income ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.income : null);
           const keep = savingsGoalIn(ruled) ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.keep : null);
           const advice = budgetAdvice({ transactions, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: held, keep });
@@ -4108,6 +4128,14 @@ export function AskPanel({
           await answerWithModel(
             [
               `A budget for ${advice.name}, as the app works it out from the ledger: each item's median month over the months it names, the bills and subscriptions still running, one-offs and stopped ones left out${held ? ", held to the income they said" : ""}. Its figures are correct: never change or recompute them.`,
+              /*
+               * 3 October 2026: held to a PHP 10,000.00 salary, the answer
+               * recommended the usual month, PHP 15,122.00, "leaving room for
+               * the salary and your wallets", and that went on the card.
+               */
+              held
+                ? "It is held to the income they said: the total to recommend is the one in its first sentence, never the usual month's, and money already in their wallets is not part of it. Say what the income covers first (bills, then spending), and what is left to save."
+                : "",
               splitAgain
                 ? "They are asking for the parts of the budget recommended earlier: give the split, grouped as it is."
                 : `If they are asking for a budget, open with "I recommend a budget of" and its total and month, give the split, and explain why in your own words, naming the months it read and what was left out. If the message asks something else, answer that and use this only where it helps.`,
@@ -4137,6 +4165,8 @@ export function AskPanel({
     const couldBudget = files.length === 0 && !as && !isNoteLine && sink.canBudget;
     // A form of lines ("Bills and subscriptions: 1641", "Spending: 6359") is read whole, not by its first line.
     let budgetAsk = couldBudget ? readBudgetAsk(isBudgetForm(ruled) ? ruled : lead, reference, asOf) : null;
+    /** What the card says under its figures: where they came from, when that is worth saying. */
+    let budgetNote = "";
     /*
      * "thats budget", straight after a message that was read as an entry:
      * that message was a budget. 28 September 2026: the form above became a
@@ -4319,7 +4349,23 @@ export function AskPanel({
       const a = advisedLast.advice;
       const spendingAt = a.fit && !a.fit.fits ? a.fit.spending : a.spending;
       const said = recentProposal.value;
-      const parts = said === spendingAt + a.billsSubs || said <= a.billsSubs ? { spending: spendingAt, billsSubs: a.billsSubs } : { spending: said - a.billsSubs, billsSubs: a.billsSubs };
+      /*
+       * The app's own parts, always: the figure is arithmetic and the model
+       * does none. A different total in the answer was put on the card as
+       * said, and on 3 October 2026 that was the usual month, PHP 15,122.00,
+       * against the PHP 10,000.00 the owner expected. The card says so, and
+       * the figures can be changed on it before Apply.
+       */
+      const parts = { spending: spendingAt, billsSubs: a.billsSubs };
+      const ours = spendingAt + a.billsSubs;
+      budgetNote = [
+        a.fit
+          ? `From the ${formatMoney(a.fit.income)} you expect: ${formatMoney(a.billsSubs)} for bills and subscriptions${a.debtDue > 0 ? `, ${formatMoney(a.debtDue)} of debt payments due` : ""}${a.fit.keep > 0 ? `, ${formatMoney(a.fit.keep)} kept to save` : ""}, ${formatMoney(spendingAt)} for spending${a.fit.income - ours - a.debtDue - a.fit.keep > 0 ? `, and ${formatMoney(a.fit.income - ours - a.debtDue - a.fit.keep)} left to save` : ""}${a.fit.short > 0 ? `. Even so it is ${formatMoney(a.fit.short)} short` : ""}.`
+          : "",
+        said !== ours && said > a.billsSubs ? `The answer above said ${formatMoney(said)}; these are the app's own figures${a.fit ? `, held to the ${formatMoney(a.fit.income)} you expect` : ""}. Change them before you apply if you want another.` : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
       const month = proposedMonthIn(recentProposal.text, asOf) ?? { year: a.year, month: a.month };
       budgetAsk = over(
         { kind: "tracks", year: month.year, month: month.month, ...parts, scope: "month" },
@@ -4400,7 +4446,7 @@ export function AskPanel({
       }
       // The figures are on the card, as a table; said once is enough.
       say({ kind: "assistant", text: "Here is the change. Check the figures on the card, then press Apply.", from: "this device", ephemeral: true });
-      say({ kind: "budget", plan, state: "open", ask: budgetAsk });
+      say({ kind: "budget", plan, state: "open", ask: budgetAsk, ...(budgetNote ? { note: budgetNote } : {}) });
       log(aiEvent("proposed", "add", { entry: plan.words, text: note }));
       return;
     }
@@ -6554,6 +6600,22 @@ export function AskPanel({
                 say({ kind: "assistant", text: `Budget set: ${budgetBlocks(turn.plan).map((b) => b.label).join(", ") || turn.plan.words}. The Budget screen shows it now.`, from: "this device" });
               }}
               onDiscard={() => decide(i, "discarded")}
+              onEdit={
+                turn.ask
+                  ? (figures) => {
+                      const ask = editedAsk(turn.ask!, figures);
+                      const plan = planBudget(ask, budgets, asOf, new Date().toISOString());
+                      if (plan.outcome.refused) return plan.outcome.refused;
+                      if (plan.outcome.written.length === 0) return "The budget already reads that way, so there is nothing to apply. Give other figures, or discard the card.";
+                      const { note: _was, ...rest } = turn;
+                      const changed: Budgeting = { ...rest, plan, ask, edited: true, note: "Your figures, changed on the card." };
+                      setTurns((prev) => prev.map((t, j) => (j === i ? changed : t)));
+                      recordCard(changed);
+                      log(aiEvent("edited", "add", { field: "budget", entry: plan.words }));
+                      return null;
+                    }
+                  : undefined
+              }
             />
           ) : isExporting(turn) ? (
             <ExportCard
@@ -8075,10 +8137,55 @@ function budgetBlocks(plan: BudgetPlan): BudgetBlock[] {
   return blocks;
 }
 
-function BudgetCard({ turn, onApply, onDiscard }: { turn: Budgeting; onApply: () => void; onDiscard: () => void }) {
+function BudgetCard({
+  turn,
+  onApply,
+  onDiscard,
+  onEdit,
+}: {
+  turn: Budgeting;
+  onApply: () => void;
+  onDiscard: () => void;
+  /** Plan the card again with these figures; the reason when it cannot be, or null. */
+  onEdit?: ((figures: CardFigures) => string | null) | undefined;
+}) {
   const { plan, state } = turn;
   const blocks = budgetBlocks(plan);
   const skipped = plan.outcome.skipped;
+
+  /*
+   * The figures, changed on the card before Apply (3 October 2026: "make
+   * sure it's editable too"). Every month on the card takes them, and the
+   * table shows the change again before anything is set.
+   */
+  const isLimit = turn.ask?.kind === "limit";
+  const first = blocks[0];
+  const nowOf = (name: string): Centavos => first?.rows.find((r) => r.name === name)?.now ?? 0;
+  const [editing, setEditing] = useState(false);
+  const [spending, setSpending] = useState<Centavos | null>(null);
+  const [billsSubs, setBillsSubs] = useState<Centavos | null>(null);
+  const [limit, setLimit] = useState<Centavos | null>(null);
+  const [problem, setProblem] = useState("");
+  const months = plan.outcome.written.length;
+
+  const begin = (): void => {
+    setSpending(nowOf("Spending"));
+    setBillsSubs(nowOf("Bills and subscriptions"));
+    setLimit(first?.rows[0]?.now ?? 0);
+    setProblem("");
+    setEditing(true);
+  };
+  const update = (): void => {
+    if (!onEdit) return;
+    const figures: CardFigures = isLimit ? { limit: limit ?? 0 } : { spending: spending ?? 0, billsSubs: billsSubs ?? 0 };
+    const why = onEdit(figures);
+    if (why) {
+      setProblem(why);
+      return;
+    }
+    setEditing(false);
+  };
+
   return (
     <div className="fms-proposal">
       <div className="fms-proposalhead">
@@ -8141,11 +8248,48 @@ function BudgetCard({ turn, onApply, onDiscard }: { turn: Budgeting; onApply: ()
         </p>
       )}
       {plan.outcome.refused && <p className="t-micro fms-proposalnote fms-proposalnote--warn">{plan.outcome.refused}</p>}
-      {state === "open" && (
+      {turn.note && !editing && <p className="t-micro fms-proposalnote">{turn.note}</p>}
+      {state === "open" && editing && (
+        <div className="fms-budgetedit" role="group" aria-label="Change the figures">
+          {isLimit && turn.ask?.kind === "limit" ? (
+            <FormField label={`${turn.ask.name} limit, a month`}>
+              <AmountInput value={limit} onChange={setLimit} ariaLabel={`${turn.ask.name} limit`} />
+            </FormField>
+          ) : (
+            <>
+              <FormField label="Spending, a month">
+                <AmountInput value={spending} onChange={setSpending} ariaLabel="Spending budget" />
+              </FormField>
+              <FormField label="Bills and subscriptions, a month">
+                <AmountInput value={billsSubs} onChange={setBillsSubs} ariaLabel="Bills and subscriptions budget" />
+              </FormField>
+              <p className="t-micro fms-budgetedit-total">
+                Total <Money value={(spending ?? 0) + (billsSubs ?? 0)} size="s" />
+                {months > 1 ? ", on every month on this card" : ""}
+              </p>
+            </>
+          )}
+          {problem && <p className="t-micro fms-proposalnote fms-proposalnote--stop">{problem}</p>}
+          <div className="fms-proposalactions">
+            <Button size="sm" variant="primary" onClick={update}>
+              Update the card
+            </Button>
+            <Button size="sm" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {state === "open" && !editing && (
         <div className="fms-proposalactions">
           <Button size="sm" variant="primary" onClick={onApply}>
             Apply
           </Button>
+          {onEdit && blocks.length > 0 && (
+            <Button size="sm" onClick={begin}>
+              Change the figures
+            </Button>
+          )}
           <Button size="sm" onClick={onDiscard}>
             Discard
           </Button>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asksRatherThanTells, isBudgetForm, namesBudgetCommand, namesMoneyFigure, planBudget, tracksIn, proposedBudgetIn, proposedMonthIn, readBudgetAsk, respell, saysMoneyMoved, spanIn } from "./budgetAsk";
+import { asksRatherThanTells, editedAsk, isBudgetForm, namesBudgetCommand, namesMoneyFigure, planBudget, tracksIn, proposedBudgetIn, proposedMonthIn, readBudgetAsk, respell, saysMoneyMoved, spanIn } from "./budgetAsk";
 import type { Budgets, ReferenceLists } from "./types";
 
 const reference: ReferenceLists = {
@@ -167,5 +167,33 @@ describe("a question is not a command", () => {
   it.each(["can you set my october budget to 9000", "please set the budget to 9000", "set budget october 9000"])("tells: %s", (said) => {
     expect(asksRatherThanTells(said)).toBe(false);
     expect(readBudgetAsk(said, reference, "2026-09-28")).not.toBeNull();
+  });
+});
+
+describe("a budget card's figures, changed before Apply", () => {
+  // 3 October 2026: "make sure it's editable too".
+  it("plans the same months with the figures typed, as amounts", () => {
+    const ask = { kind: "tracks" as const, year: 2026, month: 10, toMonth: 12, spending: 900_000, scope: "month" as const };
+    const plan = planBudget(editedAsk(ask, { spending: 600_000, billsSubs: 152_200 }), budgets, ASOF, AT);
+    expect(plan.outcome.written).toEqual([10, 11, 12]);
+    expect(plan.outcome.revisions.map((r) => [r.spending, r.billsSubs])).toEqual([
+      [600_000, 152_200],
+      [600_000, 152_200],
+      [600_000, 152_200],
+    ]);
+  });
+
+  it("turns a change by an amount, or a copy, into the figures typed", () => {
+    const by = { kind: "tracks" as const, year: 2026, month: 10, spending: 100_000, by: true, scope: "month" as const };
+    const edited = editedAsk(by, { spending: 800_000, billsSubs: 200_000 });
+    expect(edited).toMatchObject({ kind: "tracks", spending: 800_000, billsSubs: 200_000 });
+    expect("by" in edited && edited.by).toBeFalsy();
+  });
+
+  it("keeps a limit card a limit on the same kind, never below nothing", () => {
+    const ask = { kind: "limit" as const, year: 2026, month: 10, name: "Food", value: 300_000, scope: "month" as const };
+    expect(editedAsk({ kind: "copy", year: 2026, month: 10, scope: "month" }, { spending: 1, billsSubs: 2 })).toMatchObject({ kind: "tracks", spending: 1, billsSubs: 2 });
+    expect(editedAsk(ask, { limit: 250_000 })).toMatchObject({ kind: "limit", name: "Food", value: 250_000 });
+    expect(editedAsk(ask, { limit: -5 })).toMatchObject({ value: 0 });
   });
 });

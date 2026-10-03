@@ -7488,6 +7488,22 @@ textarea.fms-askinput {
   text-align: right;
 }
 
+/* A budget card's figures, changed in place before Apply (3 October 2026). */
+.fms-budgetedit {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
+}
+.fms-budgetedit-total {
+  margin: 0;
+  color: var(--ink-2);
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
 /* ══ Find a difference ═══════════════════════════════════════════════════════ */
 
 /*
