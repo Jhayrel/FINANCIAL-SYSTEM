@@ -538,6 +538,53 @@ screenshot. Nothing in the dump names one. The two figures that disagreed
 are fixed above; the outline round the Dashboard item in the menu is the
 keyboard focus ring and was left. Ask the owner which part they meant.
 
+### 2026-10-03, later: how the chat reads a message, measured
+
+The owner sent a phone screenshot: "Does my treat earlier
+unconstitutional?" answered "Yes, ... it is not a violation", and "Like I
+was invited urgently earlier, what can you advice?" answered "Yes, you can
+allocate PHP 4,500.00", a sum nobody said, beside "gym sessions" nobody
+planned. They asked for "an algorithm that works", and for every add, edit,
+delete and move to be checked.
+
+**Measured, not guessed.** Every sentence in the 3 October dump was labelled
+by what happened next: a card from it was added (an entry), or it was
+answered with no card or followed by "I am asking" (a question), 281 in all.
+The local reader (`readEntry`, `isQuestion`) read 15 questions as entries.
+After the changes below, 6, and each of those is an answer to a card's own
+question, a report ("blue screen"), or a label that was wrong ("umutang ako
+2000 sa maya credit" is borrowing). The labelling script is
+`scratchpad/oct3b/label.ts` in that session; rebuild it from the
+description here, never commit the dump.
+
+| Found | Now |
+|---|---|
+| Plans read as money that moved: "I will spend 1000 today for my school", "I'm planning to go to the beach today ang spen 500 for food" | A plan with no past verb beside it is a question (`isPlan` in `intent.ts`); "I want to add 500 food" and "I borrowed 2000, will pay next week" stay entries |
+| Questions asked mid-sentence, misspelt or in Tagalog: "so if the night comes what happens", "rate your self how advanced are you", "hw much i spnt on gas last wek", "magkano nagastos ko" | Read as questions (`ASKED_ELSEWHERE`); the scoreboard (`eval/corpus.ts`) carries invented sentences of each shape, and its judge now follows the app's real order, question before entry |
+| "My Maya Credit does not balance" | Opens Find a difference |
+| Every question answered with yes or no first; "what can you advise" answered "Yes, you can allocate PHP 4,500.00" | Only a yes or no question opens with yes or no, and the word must agree with the rest; no figure on a cost nobody gave; "earlier", "that", "the treat" read against the conversation; a word that does not fit is answered by its likely meaning, said (`ADVICE_RULES`) |
+| An invented figure passed the check under the answer: in a context of hundreds of figures nearly any number is one step from two of them | With more than 40 figures given, the step must show one of its parts in the answer; the owner's own "2k" or "5000" count as given (`aiFigures.ts`) |
+
+**Every action, end to end.** On the demo build, by Playwright, each checked
+against the wallet balances rather than a screenshot, at desktop and phone
+widths: add a spending; edit its amount in the Database; bin it; restore it
+from the Bin; move money Cash to Gcash; change a month's budget and see it on
+the Dashboard; borrow on a credit line into a wallet and pay part back; add
+an entry from the chat and bin it from the chat; add a wallet, move money
+into it, rename it (its entries follow the name). All passed, no page
+errors. `firestore.rules` in Google's emulator: 33 of 33 (`tools/rules-check.mjs`).
+The rules have not changed since 30 September, so nothing needs publishing.
+
+One thing found and changed: the last field above the pinned Save bar (the
+debt payment's "Paid from") could sit under the bar at one scroll position,
+so a press landed on the bar. A field scrolled to the end of the view now
+leaves the bar's height clear (`layout.css`).
+
+**Open:** with no model reachable at all, "lunch 99 cash" (no verb, and
+"lunch" not a kind's name) reads as nothing and the chat says the model is
+not working; "food 150 gcash" and "I spent 99 on lunch cash" are read on
+the device. Signed in, the model reads it.
+
 ---
 
 ## 6. What the owner has to do

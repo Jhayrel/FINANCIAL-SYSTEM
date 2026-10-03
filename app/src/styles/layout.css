@@ -1358,6 +1358,18 @@
   }
 }
 
+/*
+ * A field brought into view stops above the pinned Save bar, never under it.
+ *
+ * 3 October 2026: the debt payment's "Paid from" picker, last field above
+ * the bar, sat under it when scrolled to the bottom edge, and a press on it
+ * landed on the bar: the picker looked as if it would not open. A field
+ * scrolled to the end of the view now leaves the bar's height clear.
+ */
+.fms-entryform :is(input, textarea, select, button, [role="combobox"]) {
+  scroll-margin-bottom: 104px;
+}
+
 /* Above the phone bar the raised Add button stands 14px into the page, so
    the Save bar keeps that much clear under its buttons. */
 @media (max-width: 1023px) {
