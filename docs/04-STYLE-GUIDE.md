@@ -748,6 +748,7 @@ noon (an exception to D1, recorded here rather than made quietly).
 
 - Contrast floors in §2.1, enforced by test in both themes
 - Every interactive element reachable and operable by keyboard; visible 2px focus ring
+- The focus ring is for moving with the keyboard (Tab, Shift+Tab, the arrow keys). After a press of the mouse, a finger or a pen it is not drawn, even where the browser would draw it because a key was pressed earlier (a long press's menu closed with Esc left Dashboard ringed, 3 October 2026). Text fields keep their own focus style either way. `inputModality.ts` sets `data-input` on the root; `base.css` reads it.
 - 44px minimum touch target on phone
 - Colour is never the only signal, pair with glyph, label or position
 - Every icon-only control has an `aria-label`

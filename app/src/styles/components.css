@@ -1122,6 +1122,11 @@
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
+/* A chart pressed to read it is not a keyboard visit (`inputModality.ts`). */
+:root[data-input="pointer"] .fms-plot:focus-visible {
+  box-shadow: none;
+}
+
 .fms-plotbox {
   position: relative;
 }

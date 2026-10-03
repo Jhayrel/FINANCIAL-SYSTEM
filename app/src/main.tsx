@@ -11,9 +11,11 @@ import "./styles/components.css";
 
 import App from "./App";
 import { AppBoundary } from "./components/AppBoundary";
+import { initInputModality } from "./inputModality";
 import { initTheme } from "./theme";
 
 initTheme();
+initInputModality();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root not found");

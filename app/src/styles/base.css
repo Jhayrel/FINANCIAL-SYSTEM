@@ -127,6 +127,16 @@ body {
   outline-offset: 2px;
 }
 
+/*
+ * Not after a press. The browser also shows the ring on whatever is pressed
+ * next after any key, so a long press closed with Esc left Dashboard ringed
+ * (3 October 2026). The ring is for moving with Tab and the arrow keys
+ * (`inputModality.ts`); a text field keeps its own focus style.
+ */
+:root[data-input="pointer"] :focus-visible:not(input, textarea, select, [contenteditable="true"]) {
+  outline: none;
+}
+
 /* ── Forms ──────────────────────────────────────────────────────────────── */
 
 input, select, textarea, button {
