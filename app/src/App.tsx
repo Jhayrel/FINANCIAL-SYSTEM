@@ -53,7 +53,7 @@ import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
 import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
-import { asAmountAndFees, isPartOf, netWorth, outstandingOf, parentOf, partOf, positionsOf, renameDebtAccount, type Debt, type DebtEffect } from "./domain/debt";
+import { asAmountAndFees, isPartOf, netWorth, outstandingOf, parentOf, partOf, positionsOf, renameDebtAccount, withDebt, type Debt, type DebtEffect } from "./domain/debt";
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
@@ -1830,7 +1830,7 @@ export default function App() {
     },
     onUpdate: handleUpdate,
     onBudget: handleBudgetYear,
-    onAddDebt: (debt) => setSettings((s) => ({ ...s, credits: [...s.credits, debt] })),
+    onAddDebt: (debt) => setSettings((s) => ({ ...s, credits: withDebt(s.credits, debt) })),
     onExport: handleAskedExport,
   });
 
@@ -2260,7 +2260,7 @@ export default function App() {
               reserved={renumbers ? undefined : deleted}
               onUpdate={handleUpdate}
               onBudget={handleBudgetYear}
-              onAddDebt={(debt) => setSettings((s) => ({ ...s, credits: [...s.credits, debt] }))}
+              onAddDebt={(debt) => setSettings((s) => ({ ...s, credits: withDebt(s.credits, debt) }))}
               editing={editing}
               onCancelEdit={() => {
                 setEditing(null);

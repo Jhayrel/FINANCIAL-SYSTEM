@@ -736,6 +736,22 @@ The owner: Cash recorded PHP 760.00, really PHP 1,100.00. Replayed on the
 | "In write off why do I need to add a spending? ... mostly use is the logic of giving money to someone" | The kind on a write-off is optional ("What it bought"). Left empty it is filed as Money Send, money given away; it is spending either way, so no figure moves. Retained still needs its kind of income. Spec 5.6.1 updated (`entry.ts`, `kinds.ts`, `charts.ts`, `onBehalf.test.ts`) |
 | (same screenshot) A write-off against a name with nothing owed only said "takes it below zero" | It says nothing is owed, that no wallet moves, and that money given now is a Transfer with no destination |
 | (same screenshot) The budget note said "PHP 500.00 of this is interest" for a write-off | "PHP 500.00 written off counts as October spending" |
+
+### 2026-10-03, last: Credit and loans, by how often each thing is done
+
+The owner, over a settled, archived "Loan to Tita" that filled a phone screen
+with two dropdowns, a green Reopen and a Remove: "fix this more suitable and
+faster to use ... study how this will be used. How often will I remove an
+entry or update".
+
+| Found | Done |
+|---|---|
+| Every debt was a table row of four pickers and two buttons; stacked on a phone, a screen each | One line each: name, form, bill days, and what is owed on the right. Its settings open under it on a tap, one at a time (`CreditLines` in `Settings.tsx`) |
+| Settled ones had to be opened to be put away | A settled one (nothing outstanding, history behind it) has Archive on its row |
+| Archived ones sat among the open ones, Reopen the loudest button | Folded under "Archived (N)"; Reopen is an ordinary button inside |
+| Remove was offered on everything, then refused with a message at the bottom of the page when anything was filed | Remove shows only when nothing is filed; otherwise the row says why it is archived instead |
+| Archive, Reopen and a change of account each asked first | Only a change of form asks (it changes what recorded money means); the rest is undone the way it was done |
+| Lending to Tita again made a second "Tita" beside the archived one | The same name on the same side is reopened with its history, in the form and the chat (`archivedNamed`, `withDebt`, `reopenPerson.test.ts`), and the form says so |
 ---
 
 ## 6. What the owner has to do

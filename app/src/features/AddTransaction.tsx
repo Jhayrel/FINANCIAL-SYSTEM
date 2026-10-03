@@ -23,6 +23,7 @@ import { AmountInput, Select, TextInput } from "../components/forms";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
 import { billClosingFor, choicesFor, debtDue, effectsFor, interestOnTop, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionOf, positionsOf, unpaidCharges, withFeesPaid } from "../domain/debt";
+import { archivedNamed } from "../domain/debtFill";
 import { creditRoom, limitOn, takesLimit, usedAfterOne, usedOn } from "../domain/creditLimit";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, partWords, type BehalfSide } from "../domain/debtWords";
 import { formatMoney, type Centavos } from "../domain/money";
@@ -497,6 +498,9 @@ export function AddTransaction({
     : undefined;
   const provisional = useMemo<Debt | null>(() => {
     if (!typedName || namedAlready) return null;
+    // Named before and archived since: reopened with their history, never a second one (`archivedNamed`).
+    const before = archivedNamed(typedName, newKind, Boolean(draft.behalf), debts);
+    if (before) return { ...before, archived: false };
     let id = makeDebtId(typedName);
     for (let n = 2; debts.some((d) => d.id === id); n += 1) id = `${makeDebtId(typedName)}-${n}`;
     return {
@@ -518,7 +522,10 @@ export function AddTransaction({
     () => (provisional ? { ...draft, debtId: provisional.id } : namedAlready ? { ...draft, debtId: namedAlready.id } : draft),
     [draft, provisional, namedAlready],
   );
-  const debtsNow = useMemo(() => (provisional ? [...debts, provisional] : debts), [debts, provisional]);
+  const debtsNow = useMemo(
+    () => (provisional ? [...debts.filter((d) => d.id !== provisional.id), provisional] : debts),
+    [debts, provisional],
+  );
 
   const check = useMemo(
     () => checkDraft(effective, transactions, reference, debtsNow, asOf),
@@ -973,7 +980,9 @@ export function AddTransaction({
             <p className="t-micro" style={{ margin: 0, color: "var(--ink-3)" }}>
               {namedAlready
                 ? `Already on your list, so it is filed there.`
-                : typedName
+                : provisional && debts.some((d) => d.id === provisional.id && d.archived)
+                  ? `${provisional.name} was archived. Saving this reopens them, with everything recorded before.`
+                  : typedName
                   ? "Saved with this entry, and kept under Credit and loans in Settings."
                   : draft.behalf
                     ? "The person you paid, sent or hold money for."

@@ -191,6 +191,24 @@ export function fillDebt(
 }
 
 /**
+ * Someone archived under this name, on this side and of this form.
+ *
+ * Lending to Tita again after her loan was settled and archived made a
+ * second "Tita", with an empty history beside the first (3 October 2026).
+ * The same person named again is the one already kept: reopened, not
+ * doubled. Only on the same side (owed to you, or owed by you) and the same
+ * form (on someone's behalf, or not), so a different relationship stays
+ * apart.
+ */
+export function archivedNamed(name: string, kind: Debt["kind"], behalf: boolean, debts: readonly Debt[]): Debt | undefined {
+  const said = name.trim().toLowerCase();
+  if (!said) return undefined;
+  return debts.find(
+    (d) => d.archived && d.name.trim().toLowerCase() === said && d.kind === kind && (d.form === "pass-through") === behalf,
+  );
+}
+
+/**
  * A new person, as the Add form makes one, for the button on the card.
  *
  * Lent to or paid back by: they owe you. Borrowed from: you owe them.
@@ -203,6 +221,9 @@ export function personDebt(name: string, draft: Draft, debts: readonly Debt[], f
     : draft.debtEffect === "lend" || draft.debtEffect === "collect"
       ? "receivable"
       : "payable";
+  // Named before and archived since: the same person again, brought back with their history.
+  const before = archivedNamed(name, kind, Boolean(draft.behalf), debts);
+  if (before) return { ...before, archived: false };
   const base = makeDebtId(name);
   let id = base;
   for (let n = 2; debts.some((d) => d.id === id); n += 1) id = `${base}-${n}`;

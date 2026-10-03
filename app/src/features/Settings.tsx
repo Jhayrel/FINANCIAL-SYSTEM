@@ -2339,6 +2339,26 @@ function CreditLines({
   const billed = (c: Debt): boolean =>
     !c.archived && c.kind === "payable" && c.form !== "pass-through" && c.form !== "informal" && c.counterpartyType !== "person";
 
+  /*
+   * ── How often each of these is done ─────────────────────────────────────
+   *
+   * 3 October 2026, the owner, over a settled loan that filled a phone screen
+   * with two dropdowns, a green Reopen and a Remove: "fix this more suitable
+   * and faster to use ... study how this will be used. How often will I
+   * remove an entry or update".
+   *
+   *   Read what is owed            every visit       the row itself
+   *   Archive one that is settled  when it is paid   one tap on the row
+   *   Set the bill days            once per line     open the row
+   *   Change form or account       almost never      open the row
+   *   Reopen an archived one       almost never      the archived fold
+   *   Remove one                   only a mistake    open the row, and only
+   *                                                  when nothing is filed
+   *
+   * So a row is one line to read, the rest opens on a tap, and only what
+   * changes the meaning of money already recorded asks first: the form.
+   * Archive, reopen and a new account are undone the way they were done.
+   */
   const confirmUpdate = async (
     c: Debt,
     part: Partial<Debt>,
@@ -2351,181 +2371,202 @@ function CreditLines({
     if (ok) update(c.id, part);
   };
 
+  const filedOn = (c: Debt): number => transactions.filter((t) => t.debtId === c.id).length;
+
   const remove = async (c: Debt): Promise<void> => {
-    const used = transactions.filter((t) => t.debtId === c.id).length;
-    if (used > 0) {
-      setError(
-        `\u201c${c.name}\u201d has ${used} transaction${used === 1 ? "" : "s"} filed against it. Removing it would orphan them. Archive it instead.`,
-      );
-      return;
-    }
+    // Only offered when nothing is filed against it (`CreditRow`); checked again here all the same.
+    if (filedOn(c) > 0) return;
     const ok = await confirm({
       title: `Remove \u201c${c.name}\u201d?`,
       body: "Nothing is filed against it, so nothing is lost. It disappears from the Debt screen and from the entry form.",
       confirmLabel: "Remove",
       tone: "danger",
     });
-    if (ok) onChange(credits.filter((x) => x.id !== c.id));
+    if (ok) {
+      onChange(credits.filter((x) => x.id !== c.id));
+      setOpenId(null);
+    }
   };
+
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [foldOpen, setFoldOpen] = useState<Record<string, boolean>>({});
 
   const owed = credits.filter((c) => c.kind === "payable");
   const owing = credits.filter((c) => c.kind === "receivable");
 
-  const section = (title: string, hint: string, rows: readonly Debt[]): React.ReactNode => {
-    // The two days only where a lender bills one of these lines: none of what is owed to you is billed.
-    const days = rows.some(billed);
+  const row = (c: Debt): React.ReactNode => {
+    const position = positions.find((x) => x.debt.id === c.id);
+    const shape = c.form ?? "credit-line";
+    const outstanding = position?.outstanding ?? 0;
+    const used = filedOn(c);
+    // Paid back, or never used: what is left to do with it is put it away.
+    const settled = !c.archived && outstanding === 0 && used > 0;
+    const days = billed(c)
+      ? [c.billingDay ? `bill closes the ${choiceOfDay(c.billingDay)}` : "", c.dueDay ? `due the ${choiceOfDay(c.dueDay)}` : ""].filter(Boolean)
+      : [];
+    // The figure is on the right already; the line says only what it adds: a limit's room, a loan's months.
+    const said = position ? headline(position, today(), formatMoney) : "";
+    const status = [
+      DEBT_FORM_LABEL[shape],
+      c.archived ? "archived" : settled ? "settled" : said.endsWith(" outstanding") ? "" : said,
+      ...days,
+    ]
+      .filter(Boolean)
+      .join(" \u00b7 ");
+    const open = openId === c.id;
+    const bodyId = `credit-${c.id}`;
     return (
-      <Group title={title} hint={hint} action={<CountChip>{rows.length}</CountChip>} wide>
-        {rows.length === 0 ? (
-          <EmptyState message={`Nothing here. Add one below if you have ${title.toLowerCase()}.`} />
-        ) : (
-          <>
-            <table className="fms-table fms-table--wide fms-credittable">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th style={{ width: 165 }}>Form</th>
-                  <th style={{ width: 165 }}>Account</th>
-                  {days && <th style={{ width: 118 }}>{BILL_CLOSES}</th>}
-                  {days && <th style={{ width: 118 }}>{PAYMENT_DUE}</th>}
-                  <th className="fms-th-right fms-shrink">Outstanding</th>
-                  <th className="fms-shrink" />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((c) => {
-                  const position = positions.find((x) => x.debt.id === c.id);
-                  const shape = c.form ?? "credit-line";
-                  return (
-                    <tr key={c.id}>
-                      <td className="fms-cell-flex">
-                        <span className="t-body fms-truncate" title={c.name}>{c.name}</span>
-                        <span className="t-micro" style={{ display: "block", color: "var(--ink-3)" }}>
-                          {position ? headline(position, today(), formatMoney) : debtLabel(c.kind, shape)}
-                          {c.archived ? " \u00b7 archived" : ""}
-                        </span>
-                      </td>
-                      <td data-label="Form">
-                        <Select
-                          value={DEBT_FORM_LABEL[shape]}
-                          ariaLabel={`Form of ${c.name}`}
-                          onChange={(label) => {
-                            const found = FORMS.find((f) => DEBT_FORM_LABEL[f] === label);
-                            if (!found || found === shape) return;
-                            void confirmUpdate(
-                              c,
-                              { form: found, ...defaultsFor(found) },
-                              `Treat ${c.name} as a ${DEBT_FORM_LABEL[found].toLowerCase()}?`,
-                              debtExplanation(c.kind, found),
-                              "Change it",
-                            );
-                          }}
-                          options={FORMS.map((f) => DEBT_FORM_LABEL[f])}
-                        />
-                      </td>
-                      <td data-label="Account">
-                        <Select
-                          value={c.wallet}
-                          ariaLabel={`Account for ${c.name}`}
-                          onChange={(bank) => {
-                            if (bank === c.wallet) return;
-                            void confirmUpdate(
-                              c,
-                              { wallet: bank, counterparty: bank },
-                              `Move ${c.name} to ${bank}?`,
-                              `New movements will be filed against ${bank}. Everything already recorded keeps the account it was filed against.`,
-                              `Use ${bank}`,
-                            );
-                          }}
-                          options={banks.includes(c.wallet) ? banks : [c.wallet, ...banks]}
-                        />
-                      </td>
-                      {/*
-                        The day the bill closes and the day it is due, on a line a
-                        lender bills: each lender sets its own, so nothing is
-                        assumed (owner, 27 September 2026: "Maya credit my personal
-                        billing date is 6 of the months. every bank is different").
-                      */}
-                      {days && (
-                        <td data-label={billed(c) ? BILL_CLOSES : undefined}>
-                          {billed(c) && (
-                            <Select
-                              value={choiceOfDay(c.billingDay)}
-                              ariaLabel={`Day the bill closes for ${c.name}`}
-                              onChange={(v) => setDay(c, "billingDay", v)}
-                              options={BILL_DAY_CHOICES}
-                            />
-                          )}
-                        </td>
-                      )}
-                      {days && (
-                        <td data-label={billed(c) ? PAYMENT_DUE : undefined}>
-                          {billed(c) && (
-                            <Select
-                              value={choiceOfDay(c.dueDay)}
-                              ariaLabel={`Day the payment is due for ${c.name}`}
-                              onChange={(v) => setDay(c, "dueDay", v)}
-                              options={BILL_DAY_CHOICES}
-                            />
-                          )}
-                        </td>
-                      )}
-                      <td className="fms-td-right fms-credittable-owed">
-                        <Money
-                          value={position?.outstanding ?? 0}
-                          size="s"
-                          tone={
-                            position && position.outstanding > 0
-                              ? c.kind === "payable"
-                                ? "var(--flow-debt-text)"
-                                : "var(--ok)"
-                              : "var(--ink-3)"
-                          }
-                        />
-                      </td>
-                      <td>
-                        <span className="fms-rowactions">
-                          <Button
-                            size="sm"
-                            variant={c.archived ? "primary" : "secondary"}
-                            onClick={() =>
-                              void confirmUpdate(
-                                c,
-                                { archived: !c.archived },
-                                c.archived ? `Reopen ${c.name}?` : `Archive ${c.name}?`,
-                                c.archived
-                                  ? "It comes back on the Debt screen and in the entry form. Its history and balance are unchanged."
-                                  : "It disappears from the Debt screen and from the entry form, so you cannot file new movements against it. Everything already recorded stays.",
-                                c.archived ? "Reopen" : "Archive",
-                                c.archived ? "normal" : "danger",
-                              )
-                            }
-                          >
-                            {c.archived ? "Reopen" : "Archive"}
-                          </Button>
-                          <Button size="sm" variant="danger" onClick={() => void remove(c)}>Remove</Button>
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {days &&
-              rows
-                .filter((c) => !c.archived)
-                .map((c) => sameDayNote(c.name, c.billingDay, c.dueDay))
-                .filter(Boolean)
-                .map((note) => (
-                  <p key={note} className="t-caption" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-2)" }}>
-                    {note}
-                  </p>
-                ))}
-            {days && (
-              <p className="t-caption" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-3)" }}>
-                {BILL_DAYS_EXPLAINED}
+      <li key={c.id} className={c.archived ? "fms-creditrow fms-creditrow--archived" : "fms-creditrow"}>
+        <div className="fms-creditrow-line">
+          <button
+            type="button"
+            className="fms-creditrow-head"
+            aria-expanded={open}
+            aria-controls={bodyId}
+            onClick={() => setOpenId(open ? null : c.id)}
+          >
+            <span className="fms-creditrow-text">
+              <span className="t-body fms-truncate">{c.name}</span>
+              <span className="t-micro fms-creditrow-status">{status}</span>
+            </span>
+            <Money
+              value={outstanding}
+              size="s"
+              tone={outstanding > 0 ? (c.kind === "payable" ? "var(--flow-debt-text)" : "var(--ok)") : "var(--ink-3)"}
+            />
+            <span className="fms-creditrow-chev" aria-hidden>
+              <Icon name="chevronDown" size={18} />
+            </span>
+          </button>
+          {/* The one thing done often: putting away what is settled, without opening it. */}
+          {settled && (
+            <Button size="sm" variant="secondary" onClick={() => update(c.id, { archived: true })}>
+              Archive
+            </Button>
+          )}
+        </div>
+
+        {open && (
+          <div id={bodyId} className="fms-creditrow-body">
+            <div className="fms-creditrow-fields">
+              <Field label="Form" help={debtExplanation(c.kind, shape)}>
+                <Select
+                  value={DEBT_FORM_LABEL[shape]}
+                  ariaLabel={`Form of ${c.name}`}
+                  onChange={(label) => {
+                    const found = FORMS.find((f) => DEBT_FORM_LABEL[f] === label);
+                    if (!found || found === shape) return;
+                    void confirmUpdate(
+                      c,
+                      { form: found, ...defaultsFor(found) },
+                      `Treat ${c.name} as a ${DEBT_FORM_LABEL[found].toLowerCase()}?`,
+                      debtExplanation(c.kind, found),
+                      "Change it",
+                    );
+                  }}
+                  options={FORMS.map((f) => DEBT_FORM_LABEL[f])}
+                />
+              </Field>
+              <Field label="Account" help="New movements are filed against it. What is recorded keeps its account.">
+                <Select
+                  value={c.wallet}
+                  ariaLabel={`Account for ${c.name}`}
+                  onChange={(bank) => {
+                    if (bank !== c.wallet) update(c.id, { wallet: bank, counterparty: bank });
+                  }}
+                  options={banks.includes(c.wallet) ? banks : [c.wallet, ...banks]}
+                />
+              </Field>
+              {/*
+                The day the bill closes and the day it is due, on a line a
+                lender bills: each lender sets its own, so nothing is assumed
+                (owner, 27 September 2026: "Maya credit my personal billing
+                date is 6 of the months. every bank is different").
+              */}
+              {billed(c) && (
+                // The two days side by side on every screen: short figures, read together.
+                <div className="fms-creditrow-days">
+                  <Field label={BILL_CLOSES}>
+                    <Select
+                      value={choiceOfDay(c.billingDay)}
+                      ariaLabel={`Day the bill closes for ${c.name}`}
+                      onChange={(v) => setDay(c, "billingDay", v)}
+                      options={BILL_DAY_CHOICES}
+                    />
+                  </Field>
+                  <Field label={PAYMENT_DUE}>
+                    <Select
+                      value={choiceOfDay(c.dueDay)}
+                      ariaLabel={`Day the payment is due for ${c.name}`}
+                      onChange={(v) => setDay(c, "dueDay", v)}
+                      options={BILL_DAY_CHOICES}
+                    />
+                  </Field>
+                </div>
+              )}
+            </div>
+            {billed(c) && (
+              <p className="t-caption fms-creditrow-note">
+                {sameDayNote(c.name, c.billingDay, c.dueDay) || BILL_DAYS_EXPLAINED}
               </p>
             )}
+
+            <div className="fms-creditrow-foot">
+              <span className="t-caption fms-creditrow-note">
+                {used === 0
+                  ? "Nothing is filed against it yet."
+                  : `${used} ${used === 1 ? "entry is" : "entries are"} filed against it, so it is archived rather than removed.`}
+              </span>
+              <span className="fms-creditrow-actions">
+                {used === 0 && (
+                  <Button size="sm" variant="ghost" tone="danger" onClick={() => void remove(c)}>
+                    Remove
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    update(c.id, { archived: !c.archived });
+                    setOpenId(null);
+                  }}
+                >
+                  {c.archived ? "Reopen" : "Archive"}
+                </Button>
+              </span>
+            </div>
+          </div>
+        )}
+      </li>
+    );
+  };
+
+  const section = (key: string, title: string, hint: string, rows: readonly Debt[]): React.ReactNode => {
+    const live = rows.filter((c) => !c.archived);
+    const put = rows.filter((c) => c.archived);
+    const fold = foldOpen[key] ?? false;
+    return (
+      <Group title={title} hint={hint} action={<CountChip>{live.length}</CountChip>} wide>
+        {live.length === 0 ? (
+          <EmptyState message={`Nothing open. Add one below if you have ${title.toLowerCase()}.`} />
+        ) : (
+          <ul className="fms-creditlist">{live.map(row)}</ul>
+        )}
+        {/* Settled and put away: kept for their history, out of the way until wanted. */}
+        {put.length > 0 && (
+          <>
+            <button
+              type="button"
+              className="t-caption fms-creditfold"
+              aria-expanded={fold}
+              onClick={() => setFoldOpen((f) => ({ ...f, [key]: !fold }))}
+            >
+              <span>Archived ({put.length})</span>
+              <span className="fms-creditrow-chev" aria-hidden>
+                <Icon name="chevronDown" size={16} />
+              </span>
+            </button>
+            {fold && <ul className="fms-creditlist">{put.map(row)}</ul>}
           </>
         )}
       </Group>
@@ -2536,17 +2577,9 @@ function CreditLines({
     <>
       {dialog}
 
-      {section(
-        "What I owe",
-        "Money you have to pay back. It comes off your net worth.",
-        owed,
-      )}
+      {section("owed", "What I owe", "Money you have to pay back. It comes off your net worth.", owed)}
 
-      {section(
-        "What is owed to me",
-        "Money you lent out. It is still yours, so it counts towards your net worth.",
-        owing,
-      )}
+      {section("owing", "What is owed to me", "Money you lent out. It is still yours, so it counts towards your net worth.", owing)}
 
       <Group title="Add one" hint="Two questions: which way, and what shape" wide>
         <div className="fms-addrow" style={{ borderTop: 0, marginTop: 0, paddingTop: 0 }}>

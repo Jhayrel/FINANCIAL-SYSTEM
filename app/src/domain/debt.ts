@@ -1204,3 +1204,12 @@ export function projectNextDue(
   const last = repayments.at(-1);
   return last ? addMonths(last.date, 1) : undefined;
 }
+
+/**
+ * A debt saved into the list: in its place when it is already there (an
+ * archived person reopened by being named again), at the end when it is new.
+ * Appending a reopened one listed it twice under one id.
+ */
+export function withDebt(credits: readonly Debt[], debt: Debt): Debt[] {
+  return credits.some((c) => c.id === debt.id) ? credits.map((c) => (c.id === debt.id ? debt : c)) : [...credits, debt];
+}

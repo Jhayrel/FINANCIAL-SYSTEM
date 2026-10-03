@@ -2190,29 +2190,146 @@
 }
 
 /*
- * Credit and loans, stacked on a laptop-width card: each debt's four pickers
- * two to a row under their names, not four full-width boxes down the page
- * (owner, 27 September 2026: "this is so messy"). What is outstanding is
- * already under the name, so the stacked row does not say it twice.
+ * Credit and loans in Settings: one line each, the rest on a tap.
+ *
+ * Each debt was a table row of four pickers and two buttons, which on a
+ * phone stacked into a screen per debt; a settled loan, archived, filled one
+ * with a green Reopen (owner, 3 October 2026). A row now says what it is and
+ * what is owed; its settings open under it. Separated by hairlines, square,
+ * the way ledger rows are (rule D2).
  */
-@container (min-width: 440px) and (max-width: 880px) {
-  .fms-credittable tbody tr {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-1) var(--space-3);
-    align-items: end;
-  }
+.fms-creditlist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--hairline);
+}
 
-  .fms-credittable tbody td.fms-cell-flex,
-  .fms-credittable tbody td:last-child {
-    grid-column: 1 / -1;
+.fms-creditrow {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-creditrow-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-creditrow-head {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 56px;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-creditrow-head:focus-visible,
+.fms-creditfold:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.fms-creditrow-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fms-creditrow-status {
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+.fms-creditrow--archived .fms-creditrow-text .t-body {
+  color: var(--ink-2);
+}
+
+.fms-creditrow-chev {
+  display: inline-flex;
+  color: var(--ink-3);
+  transition: transform 120ms ease;
+}
+
+.fms-creditrow-head[aria-expanded="true"] .fms-creditrow-chev,
+.fms-creditfold[aria-expanded="true"] .fms-creditrow-chev {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fms-creditrow-chev {
+    transition: none;
   }
 }
 
-@container (max-width: 880px) {
-  .fms-credittable td.fms-credittable-owed {
-    display: none;
+.fms-creditrow-body {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-1) 0 var(--space-4);
+}
+
+/* Form and Account side by side on a wide screen, one above the other on a phone, where their notes need the width. */
+.fms-creditrow-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.fms-creditrow-days {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@media (max-width: 639px) {
+  .fms-creditrow-fields {
+    grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.fms-creditrow-note {
+  margin: 0;
+  color: var(--ink-3);
+}
+
+.fms-creditrow-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+}
+
+.fms-creditrow-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* The archived ones, folded under the open ones. */
+.fms-creditfold {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+  margin-top: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
 }
 
 /* ══ Buttons ════════════════════════════════════════════════════════════════
