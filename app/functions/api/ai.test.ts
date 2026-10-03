@@ -294,6 +294,27 @@ describe("asking several models at once", () => {
     expect(stopped).toContain("strong");
   });
 
+  it("answers by the deadline with what is in, before every model's own timeout", async () => {
+    // 4 October 2026: the app gave up first and answered on its own.
+    const started = Date.now();
+    const answer = await bestInOrder(["strong", "weak"], 2, async (name: string, stop: AbortSignal) => {
+      await wait(name === "strong" ? 5_000 : 40, stop);
+      return name;
+    }, Date.now() + 10_000, 0, Date.now() + 150);
+    expect(answer).toBe("weak");
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it("gives up at the deadline with nothing, rather than past the app's wait", async () => {
+    const started = Date.now();
+    const answer = await bestInOrder(["a", "b"], 2, async (_name: string, stop: AbortSignal) => {
+      await wait(5_000, stop);
+      return "late";
+    }, 0, 0, Date.now() + 100);
+    expect(answer).toBeNull();
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
   it("takes the weaker answer as soon as the stronger fails", async () => {
     const started = Date.now();
     const answer = await bestInOrder(["strong", "weak"], 2, async (name: string, stop: AbortSignal) => {

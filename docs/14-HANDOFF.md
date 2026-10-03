@@ -754,6 +754,23 @@ entry or update".
 | Lending to Tita again made a second "Tita" beside the archived one | The same name on the same side is reopened with its history, in the form and the chat (`archivedNamed`, `withDebt`, `reopenPerson.test.ts`), and the form says so |
 | (owner's phone, after) Maya Credit at PHP 0.00 was called "settled" and offered Archive, and the button wrapped to "Archi / ve" | A credit line is never settled: it is drawn on again. Only a loan, money on someone's behalf or a repaid bank loan is offered Archive, and the button keeps its word on one line |
 | (same) An empty list read "Nothing open. Add one below if you have what is owed to me" in a large empty block | One quiet line per list: "You owe nothing right now. Add a credit line or loan below." and "Nobody owes you anything right now. Lending money in Add puts them here." |
+
+### 2026-10-04: AI first, and fast
+
+The owner: "make the system powerful and instant ... make sure questions and
+entry it should know", "make sure ai first", with five screenshots.
+
+| Found | Done |
+|---|---|
+| "I will be spending 1000 cash" was answered with an Entry line and a PHP 1,000.00 card ("spending spending") | A plan is never an entry: "im going to", "planning to", "about to", "will be spending", the Filipino future (gagastos, bibili, magbabayad) and later, tomorrow, bukas, mamaya all read as plans (`isPlan`). No card is taken from the answer to a plan, and the chat and entry models are told so (`ai.ts`) |
+| Every message waited on a model to sort it, then the chat held a quicker answer up to 12 seconds for the strongest model: "looking for the best model", and "this device, because the model took too long" | Plans and plain entries ("I spent 1000 cash", `plainlyDone`) skip the sorting call (the entry is still read by the model). The chat holds 4.5 seconds, sorting 1.2; each model gets 10 seconds and the whole answer comes within 18, before the app's 25 (`CHAT_DEADLINE_MS`, `bestInOrder` deadline) |
+| "How much should I use? The fare is 300" got "Yes, going by what you hold" | A "how much" question gets the figure first ("PHP 300.00 fits what you hold"); yes and no only when asked as one (`affordAsk.ts`) |
+| "How much I spent in my trip in abra? show me a chart" drew all of October | A place or trip is found in the descriptions ("in abra", "to baguio"), over the whole ledger unless a window is named, titled "Spending on Abra by item". With nothing mentioning it, the chat says so rather than charting another word (`aboutOf`, `chartTopic`, `aiFirst.test.ts`) |
+| A Maya receipt for load, note "Load", booked as Emergency, "what you called it the last few times" | The kind from past words goes by how often each word went with each kind: "load" is Online Buy 19 times and Emergency once, so Online Buy, and the card says "19 of your entries with these words are Online Buy" (`infer.ts`) |
+| On a phone, a card sent to the form stayed "In the form" after the edit was cancelled there | The phone's chat reads what the form holds; an emptied form with no save opens the card again, as read. A save still marks it added (`formDraftNow`, the release effect in `AskPanel.tsx`) |
+| "allow copy paste ... I screenshot then I can attach it directly" | A Paste picture button in the phone's chat box reads a copied screenshot from the clipboard; a pasted picture is taken from the clipboard's items as well as its files |
+
+The 275 labelled sentences of the owner's read exactly as before.
 ---
 
 ## 6. What the owner has to do

@@ -2819,6 +2819,15 @@ function restoreDraft(): Draft | null {
   }
 }
 
+/**
+ * What the form holds now, for a chat that is not beside it: the phone's AI
+ * screen, or the chat over another screen. A blank draft when it holds
+ * nothing, or an edit of a saved row, which is no card's.
+ */
+export function formDraftNow(): Draft {
+  return restoreDraft() ?? emptyDraft();
+}
+
 function forgetDraft(): void {
   try {
     window.sessionStorage.removeItem(DRAFT_KEY);

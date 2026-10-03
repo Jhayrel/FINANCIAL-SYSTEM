@@ -345,12 +345,38 @@ const ASKED_ELSEWHERE =
  * the same sentence ("I paid 500 and will pay the rest") is still an entry,
  * and "I want to add 500 food" is an order to record it.
  */
+/*
+ * Said before it happens. 4 October 2026: "I will be spending 1000 cash" was
+ * answered with a PHP 1,000.00 card. "im" without the apostrophe, a bare
+ * "planning to" or "about to", "will be", and the Filipino future ("bibili",
+ * "gagastos", "magbabayad": the first syllable said twice) are plans too, and
+ * so is money said for later, tomorrow or next week with nothing done yet.
+ */
 const PLANNED =
-  /\b(?:i(?:'ll| will| shall)|i(?: am|'m) (?:going|planning|thinking of|about) to|i(?: am|'m) (?:planning|thinking)|i plan to|i want to|i wanna|i would like to|i intend to|gonna|balak ko|plano ko|gusto ko(?:ng)?)\b(?!\s+(?:add|record|log|save|enter|input|put|note|delete|remove|restore|edit|change|fix|move)\b)/i;
+  /\b(?:i(?:'ll| will| shall)|i(?: am|'m|m) (?:going|planning|thinking of|about) to|i(?: am|'m|m) (?:planning|thinking)|i plan to|i want to|i wanna|i would like to|i intend to|will be (?:spending|paying|buying|sending|using|getting)|(?:planning|about|going) to (?:spend|pay|buy|send|use|get|withdraw|transfer|lend|borrow)|gonna|balak ko|plano ko|gusto ko(?:ng)?|(?:bibili|gagastos|gagastusin|magbabayad|babayaran|babayad|magpapadala|ipapadala|magwi-?withdraw|mangungutang|uutang|magpapautang|kakain)\b|(?:later|tomorrow|tmrw|tonight|next (?:week|month)|mamaya|bukas|mamayang gabi|sa susunod)\b)\b(?!\s+(?:add|record|log|save|enter|input|put|note|delete|remove|restore|edit|change|fix|move)\b)/i;
 const MOVED = /\b(?:spent|paid|bought|received|recieved|got|sent|transferred|withdrew|withdrawn|earned|borrowed|lent|loaned|gave|deposited|cashed|nagbayad|bumili|binili|nagastos|natanggap|ginastos|umutang|nangutang|inutang|nagpadala|nagbigay)\b/i;
 
 export function isPlan(text: string): boolean {
   return PLANNED.test(text) && !MOVED.test(text);
+}
+
+/**
+ * Money that has moved, said with its figure and nothing asked: "I spent
+ * 1000 cash", "bought load 100 gcash". Plain enough that no model is needed
+ * to say it is an entry, so the chat skips that round trip and goes straight
+ * to the model that reads the entry (4 October 2026: the wait before every
+ * answer). A word that changes or removes something, or a question, is
+ * never plain.
+ */
+export function plainlyDone(text: string): boolean {
+  const t = text.trim();
+  return (
+    MOVED.test(t) &&
+    /\d/.test(t) &&
+    t.split(/\s+/).length <= 14 &&
+    !isQuestion(t) &&
+    !/\b(?:delete|remove|restore|edit|change|wrong|instead|undo|bin|budget|not|hindi|mali)\b/i.test(t)
+  );
 }
 
 export function isQuestion(text: string): boolean {

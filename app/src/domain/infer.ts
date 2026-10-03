@@ -209,21 +209,36 @@ export function itemFromHistory(
    * them. So each word is weighed first, and one that turns up under three or
    * more items is structural noise and votes for nothing.
    */
-  const itemsPerWord = new Map<string, Set<string>>();
+  // Each word, the items it has gone with, and how many rows each time.
+  const itemsPerWord = new Map<string, Map<string, number>>();
   for (const row of spending) {
     const item = row.item.trim();
-    for (const w of words(row.description)) {
+    for (const w of new Set(words(row.description))) {
       if (!hintWords.has(w)) continue;
-      const found = itemsPerWord.get(w) ?? new Set<string>();
-      found.add(item);
+      const found = itemsPerWord.get(w) ?? new Map<string, number>();
+      found.set(item, (found.get(item) ?? 0) + 1);
       itemsPerWord.set(w, found);
     }
   }
 
+  /*
+   * A word with one or two items behind it votes for them by how often it
+   * went with each. One vote each was a tie: "load" sat under Online Buy
+   * nineteen times and Emergency once, and a Maya receipt for load was
+   * booked as Emergency, "what you called it the last few times" (4 October
+   * 2026). The habit is the item it went with most.
+   */
   const SPREAD = 3;
+  const rowsBehind = new Map<string, number>();
   for (const [, items] of itemsPerWord) {
     if (items.size >= SPREAD) continue;
-    for (const item of items) votes.set(item, (votes.get(item) ?? 0) + 1);
+    const most = Math.max(...items.values());
+    for (const [item, n] of items) {
+      // One that went with it once, beside one that went with it many times, is the exception, not a vote.
+      if (items.size > 1 && n * 4 < most) continue;
+      votes.set(item, (votes.get(item) ?? 0) + n);
+      rowsBehind.set(item, (rowsBehind.get(item) ?? 0) + n);
+    }
   }
 
   let best: string | null = null;
@@ -238,7 +253,7 @@ export function itemFromHistory(
   // A word that describes one or two items, and matches, is enough. A word
   // that describes everything was already thrown out above.
   if (!best || score < 1) return null;
-  return { item: best, seen: seen.get(best) ?? 0, how: "pattern" };
+  return { item: best, seen: rowsBehind.get(best) ?? seen.get(best) ?? 0, how: "pattern" };
 }
 
 /**
@@ -289,7 +304,9 @@ export function inferFromHistory(
       because.push(
         match.how === "named"
           ? `Booked as ${match.item}, which you have used ${match.seen} ${match.seen === 1 ? "time" : "times"}.`
-          : `Booked as ${match.item}: that is what you called it the last few times you wrote this.`,
+          : match.seen > 1
+            ? `Booked as ${match.item}: ${match.seen} of your entries with these words are ${match.item}.`
+            : `Booked as ${match.item}: your one entry with these words is ${match.item}.`,
       );
     } else if (namedInLists(hint, flow, next.category, reference)) {
       /**

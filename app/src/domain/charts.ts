@@ -793,7 +793,84 @@ export const wantsReport = (question: string): boolean =>
 interface Focus {
   readonly item: string;
   readonly wallet: string;
+  /**
+   * A word from the owner's own descriptions the question is about: a place,
+   * a trip, an event. "How much I spent in my trip in abra? show me a chart"
+   * drew all of October by item (4 October 2026); the trip is the rows that
+   * say Abra.
+   */
+  readonly about: string;
 }
+
+const capital = (w: string): string => w.charAt(0).toUpperCase() + w.slice(1);
+
+/** The small words after "in", "to" or "from" that are never a place: "from the 1st", "to my". */
+const LITTLE_WORDS = new Set(
+  "the this that these those my our your his her their its him them you me our one two all any each every some more less same next last first".split(" "),
+);
+
+/** Words that are how a question is asked, never what it is about. */
+const ASKING_WORDS = new Set(
+  (
+    "what when where which much many show chart graph draw plot want need please give make tell know spent spend spending " +
+    "paid money total from with into this that last month year week days today yesterday since about item items wallet wallets " +
+    "category categories budget income revenue expense expenses have does your mine their them they there here just only also " +
+    "like some every each over trend trends bars line compare compared versus against between than more less cost costs amount " +
+    "figure figures entries entry transactions record records ledger report breakdown split group grouped tell went going goes " +
+    "much whole time ever bought sent received earned used using daily weekly monthly yearly pesos peso php could would should"
+  ).split(" "),
+);
+
+/**
+ * The rarest word of the question that the descriptions use, when one is
+ * rare enough to pick a few rows out: "abra" in a few rows, not "food" in
+ * hundreds. Names of items and wallets are left to their own filters.
+ */
+function aboutOf(question: string, transactions: readonly Transaction[], taken: readonly string[]): string {
+  const months = MONTHS.map((m) => m.toLowerCase());
+  const skip = new Set([...ASKING_WORDS, ...months, ...months.map((m) => m.slice(0, 3)), ...taken.map((t) => t.toLowerCase())]);
+  const said = transactions.map((t) => ` ${`${t.description} ${t.notes}`.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `);
+  const used = (w: string): number => said.filter((d) => d.includes(` ${w} `) || d.includes(` ${w}s `)).length;
+  /*
+   * A place said as one ("my trip in abra", "to baguio", "sa vigan") is the
+   * topic, ahead of any other word: with nothing mentioning Abra, "trip"
+   * picked out a school trip instead. A place nothing mentions is still the
+   * topic, so the answer is that nothing mentions it.
+   */
+  const places = [...question.toLowerCase().matchAll(/\b(?:in|to|at|sa|from|going)\s+(?:the\s+)?([a-z]{3,})\b/g)]
+    .map((m) => m[1] ?? "")
+    .filter((w) => w && !skip.has(w) && !LITTLE_WORDS.has(w));
+  if (places.length > 0) {
+    const found = places.filter((w) => used(w) > 0).sort((a, b) => used(a) - used(b))[0];
+    return found ?? places[places.length - 1] ?? "";
+  }
+  const asked = [...new Set(question.toLowerCase().match(/[a-z]{4,}/g) ?? [])].filter((w) => !skip.has(w));
+  if (asked.length === 0) return "";
+  const limit = Math.max(12, Math.floor(transactions.length * 0.02));
+  let best = "";
+  let fewest = Number.POSITIVE_INFINITY;
+  for (const w of asked) {
+    const count = used(w);
+    if (count >= 1 && count <= limit && count < fewest) {
+      best = w;
+      fewest = count;
+    }
+  }
+  return best;
+}
+
+/** The place or trip a chart question is about when no entry mentions it at all, or "". */
+export function chartTopic(question: string, transactions: readonly Transaction[]): string {
+  const about = focusOf(question, transactions).about;
+  return about && !transactions.some((t) => mentions(t, about)) ? about : "";
+}
+
+/** Whether a row's own words name what the question is about. */
+const mentions = (t: Transaction, about: string): boolean => {
+  if (!about) return true;
+  const d = ` ${`${t.description} ${t.notes}`.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
+  return d.includes(` ${about} `) || d.includes(` ${about}s `);
+};
 
 /** The first name in `names` that the question uses, longest first. */
 function named(question: string, names: readonly string[]): string {
@@ -810,8 +887,11 @@ function named(question: string, names: readonly string[]): string {
 }
 
 function focusOf(question: string, transactions: readonly Transaction[]): Focus {
+  const item = named(question, transactions.map((t) => t.item));
+  const wallet = named(question, transactions.flatMap((t) => [t.fromWallet, t.toWallet]));
   return {
-    item: named(question, transactions.map((t) => t.item)),
+    about: aboutOf(question, transactions, [item, wallet].filter(Boolean)),
+    item,
     /**
      * Naming one account is a filter, not a grouping.
      *
@@ -824,10 +904,7 @@ function focusOf(question: string, transactions: readonly Transaction[]): Focus 
      * or renamed later is recognised without touching this file: "chart my
      * reserved fund" matched nothing at all before.
      */
-    wallet: named(
-      question,
-      transactions.flatMap((t) => [t.fromWallet, t.toWallet]),
-    ),
+    wallet,
   };
 }
 
@@ -980,9 +1057,10 @@ function buildComparison(
   const transactions = everything.filter(
     (t) =>
       (!focus.item || t.item.trim().toLowerCase() === focus.item.trim().toLowerCase()) &&
-      (!focus.wallet || sideOf(t) === focus.wallet.trim().toLowerCase()),
+      (!focus.wallet || sideOf(t) === focus.wallet.trim().toLowerCase()) &&
+      mentions(t, focus.about),
   );
-  const narrowed = [focus.item, focus.wallet].filter(Boolean).join(", ");
+  const narrowed = [focus.item, focus.wallet, focus.about ? capital(focus.about) : ""].filter(Boolean).join(", ");
   const key = (t: Transaction): string =>
     by === "wallet"
       ? (direction === "revenue" ? t.toWallet : t.fromWallet).trim() || "(none)"
@@ -1092,7 +1170,11 @@ export function buildChart(
    * says whether it is growing, and a wallet goes across items, which says
    * what it was spent on.
    */
-  const period = windowOf(question, asOf);
+  /*
+   * A trip or a place with no window said is wherever it is in the ledger,
+   * not this month: the trip may have been in August.
+   */
+  const period = focus.about && !namesWindow(question) ? windowOf("all time", asOf) : windowOf(question, asOf);
   /** How many days the window covers. The whole ledger is as long as a window gets. */
   const span =
     period.from < "1000"
@@ -1150,7 +1232,8 @@ export function buildChart(
       t.date >= period.from &&
       t.date <= period.to &&
       (!focus.item || t.item.trim().toLowerCase() === focus.item.toLowerCase()) &&
-      matchesWallet(t),
+      matchesWallet(t) &&
+      mentions(t, focus.about),
   );
 
   const key = (t: Transaction): string => {
@@ -1245,7 +1328,7 @@ export function buildChart(
      * month's spending and is wrong by everything it left out. The same goes
      * for one wallet.
      */
-    title: `${focus.item || word}${focus.wallet ? ` from ${focus.wallet}` : ""} by ${by}, ${
+    title: `${focus.item || word}${focus.about ? ` on ${capital(focus.about)}` : ""}${focus.wallet ? ` from ${focus.wallet}` : ""} by ${by}, ${
       period.name
     }`,
     by,

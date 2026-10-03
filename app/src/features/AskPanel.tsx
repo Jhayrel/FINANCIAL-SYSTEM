@@ -99,6 +99,7 @@ import {
 } from "../domain/recall";
 import {
   buildChart,
+  chartTopic,
   comparedPeriods,
   comparisonWorked,
   periodsSaid,
@@ -127,7 +128,7 @@ import { asksAboutDeleted, deletedRows, deletedWindowIn, deletedWords, onlyAWind
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
-import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isQuestion, meantInstead, notMeantIn, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
+import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
 import { addressesEveryCard, asksToReadAgain, asksToRename, saysOneWasMissed, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
 import { asksWhetherAdded, inLedgerOrNot } from "../domain/checkPicture";
 import { kindSaidForAll } from "../domain/saidForAll";
@@ -1015,6 +1016,14 @@ export function AskPanel({
       formDraft.amount === null &&
       formDraft.item.trim() === "" &&
       formDraft.description.trim() === "";
+    /*
+     * An emptied form with nothing saved is the edit called off. 4 October
+     * 2026, the owner on a phone: "i cancel editing it manually but it look
+     * like this", a card still reading "In the form" and "Following the form
+     * beside this" over a form that held nothing. The card is open again, as
+     * it was read, with Add to ledger and Edit first on it. Released in the
+     * effect below, once a save has had its chance to claim it.
+     */
     if (empty) return;
 
     setTurns((prev) => {
@@ -1274,6 +1283,35 @@ export function AskPanel({
     setTurns((prev) => prev.map((t) => (isOffer(t) && t.cardId === card.cardId ? added : t)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSaved, turns]);
+
+  /*
+   * The form emptied with no save behind it: the edit was called off, so the
+   * card is open again (see the follow effect above). Never a card the form
+   * saved, by the save the form reported or by a row the ledger already has:
+   * that one is added, and opening it again would invite the same row twice.
+   */
+  useEffect(() => {
+    if (!formDraft) return;
+    const empty = formDraft.amount === null && formDraft.item.trim() === "" && formDraft.description.trim() === "";
+    if (!empty) return;
+    // Not in the moment between Edit first and the form filling, when it is still empty.
+    const settledIn = (card: Offered): boolean => card.usedAt === undefined || Date.now() - card.usedAt > 1_500;
+    const inForm = turns.filter((t): t is Offered => isOffer(t) && t.state === "used" && !addedCards.current.has(t.cardId) && settledIn(t));
+    if (inForm.length === 0) return;
+    const savedByForm = (card: Offered): boolean => {
+      if (!lastSaved || (card.usedAt !== undefined && card.usedAt > lastSaved.at)) return false;
+      const s0 = lastSaved.draft;
+      return [card.live ?? card.proposal.draft, card.proposal.draft].some((d) => d.date === s0.date && d.amount === s0.amount && d.flow === s0.flow);
+    };
+    const back = inForm.filter(
+      (card) => !savedByForm(card) && !rowSavedFor(card.cardId, [card.live ?? card.proposal.draft, card.proposal.draft], transactions, new Set()),
+    );
+    if (back.length === 0) return;
+    const ids = new Set(back.map((c) => c.cardId));
+    for (const card of back) recordCard({ ...card, state: "open", live: undefined });
+    setTurns((prev) => prev.map((t) => (isOffer(t) && ids.has(t.cardId) ? { ...t, state: "open", live: undefined } : t)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formDraft, turns, lastSaved, transactions]);
 
   /*
    * A card still in the form whose row the ledger already has, saved after
@@ -2096,6 +2134,38 @@ export function AskPanel({
    * the title, for the entry waiting on a question or for this card.
    */
   const renaming = useRef<"pending" | { readonly cardId: string } | null>(null);
+
+  /*
+   * A picture copied to the clipboard, attached with one tap. On a phone a
+   * screenshot is copied from its own toolbar, and a text box offers no
+   * Paste for a picture, so the button reads the clipboard itself. The
+   * browser asks the first time; nothing is read until it is pressed.
+   */
+  const canPastePicture = typeof navigator !== "undefined" && Boolean(navigator.clipboard) && "read" in navigator.clipboard;
+  const pastePicture = async (): Promise<void> => {
+    try {
+      const items = await navigator.clipboard.read();
+      const pictures: File[] = [];
+      for (const item of items) {
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (!type) continue;
+        const blob = await item.getType(type);
+        const ext = type.split("/")[1] === "jpeg" ? "jpg" : (type.split("/")[1] ?? "png");
+        pictures.push(new File([blob], `Pasted picture ${pictures.length + 1}.${ext}`, { type }));
+      }
+      if (pictures.length === 0) {
+        say({ kind: "assistant", text: "There is no picture on the clipboard. Copy the screenshot first, then press Paste picture.", from: "this device" });
+        return;
+      }
+      await attach(pictures);
+    } catch {
+      say({
+        kind: "assistant",
+        text: "The browser did not let the app read the clipboard. Allow it when it asks, or pick the screenshot with + instead.",
+        from: "this device",
+      });
+    }
+  };
 
   const attach = async (given: ArrayLike<File> | null): Promise<void> => {
     if (!given || given.length === 0) return;
@@ -3669,7 +3739,12 @@ export function AskPanel({
      * "add it" then found nothing. It now ends such an answer with an
      * "Entry:" line (ai.ts), read here by the same rules as a typed one.
      */
-    if (answer.source === "model") await offerFromAnswer(answer.text);
+    /*
+     * Never from a plan. "I will be spending 1000 cash" was answered with an
+     * Entry line and a PHP 1,000.00 card for money not yet spent (4 October
+     * 2026). It is a decision; it becomes an entry when the money moves.
+     */
+    if (answer.source === "model" && !isPlan(question)) await offerFromAnswer(answer.text);
   };
 
   /** The "Entry:" line of an answer, as a card. False when there is none, or it reads as nothing. */
@@ -4027,8 +4102,18 @@ export function AskPanel({
     }
 
     let routed: { intent: Routed; target: string; period: string; compare: readonly [string, string] | readonly [] } | null = null;
+    /*
+     * Said plainly enough to need no model to sort it, with nothing on
+     * screen it could be answering: a plan is a question, and money that has
+     * moved, with its figure, is an entry. That sorting round trip was the
+     * wait before every answer (4 October 2026, "make the system powerful and
+     * instant"). The entry is still read by the model, and the question
+     * still answered by one: only the sorting is skipped.
+     */
+    // `waiting`, above: a question, a card or a debt card still open.
+    const sortedAlready = !waiting && (isPlan(note) || plainlyDone(note));
     // A "//" line is a note to the developer: nothing to route, and nothing to wait on a model for.
-    if (files.length === 0 && !as && !ai.disabled && !/^\s*\/\//.test(note)) {
+    if (files.length === 0 && !as && !ai.disabled && !/^\s*\/\//.test(note) && !sortedAlready) {
       setBusy(true);
       try {
         setStage("Reading what you asked");
@@ -5373,7 +5458,9 @@ export function AskPanel({
           kind: "assistant",
           text: second
             ? "There is no income in that period to draw beside it."
-            : "There is nothing in that period to draw. Try a wider window, a month with entries in it, or the year.",
+            : chartTopic(asked, transactions)
+              ? `Nothing in your entries mentions ${chartTopic(asked, transactions).replace(/^./, (c) => c.toUpperCase())}. Say it the way the entry's description does, or name the item instead.`
+              : "There is nothing in that period to draw. Try a wider window, a month with entries in it, or the year.",
           from: "this device",
         });
         log(
@@ -6528,11 +6615,21 @@ export function AskPanel({
         void attach(e.dataTransfer.files);
       }}
       onPaste={(e) => {
-        const pasted = [...e.clipboardData.files];
+        /*
+         * The files, and the items as files: an Android keyboard pasting a
+         * screenshot often leaves `files` empty and puts it in `items`
+         * (4 October 2026, "allow copy paste ... I screenshot then I can
+         * attach it directly").
+         */
+        const fromItems = [...e.clipboardData.items]
+          .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
+          .map((i) => i.getAsFile())
+          .filter((f): f is File => f !== null);
+        const pasted = e.clipboardData.files.length > 0 ? [...e.clipboardData.files] : fromItems;
         if (pasted.length === 0) return;
         // Let a pasted screenshot in without also pasting its filename.
         e.preventDefault();
-        void attach(pasted);
+        void attach(pasted.map((f, i) => (f.name && f.name !== "image.png" ? f : new File([f], `Pasted picture ${i + 1}.${f.type.split("/")[1] === "jpeg" ? "jpg" : (f.type.split("/")[1] ?? "png")}`, { type: f.type }))));
       }}
     >
       <div className="fms-askhead">
@@ -7226,6 +7323,18 @@ export function AskPanel({
           >
             +
           </button>
+          {canPastePicture && (
+            <button
+              type="button"
+              className="fms-attach fms-askpaste"
+              aria-label="Paste a copied picture"
+              title="Paste a copied picture"
+              disabled={busy || files.length >= limits.maxCount}
+              onClick={() => void pastePicture()}
+            >
+              <Icon name="paste" size={20} />
+            </button>
+          )}
           <button
             type="button"
             className="fms-attach fms-askcamera"

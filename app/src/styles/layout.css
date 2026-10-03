@@ -9543,18 +9543,31 @@ textarea.fms-askinput {
   display: contents;
 }
 
-.fms-askfield > .fms-attach:not(.fms-askcamera) {
+.fms-askfield > .fms-attach:not(.fms-askcamera):not(.fms-askpaste) {
   order: -1;
 }
 
-/* The camera is a phone's: a computer's webcam is no way to read a receipt. */
-.fms-askcamera {
+/*
+ * The camera is a phone's: a computer's webcam is no way to read a receipt.
+ * So is Paste picture: a computer pastes a screenshot with Ctrl+V into the
+ * box, and a phone's text box offers no Paste for a picture.
+ */
+.fms-askcamera,
+.fms-askpaste {
   display: none;
 }
 
 @media (max-width: 639px), (max-width: 1023px) and (pointer: coarse) {
-  .fms-askcamera {
+  .fms-askcamera,
+  .fms-askpaste {
     display: grid;
+  }
+}
+
+/* A narrow phone keeps room for the words: Paste picture gives way, and long-press Paste still takes a picture. */
+@media (max-width: 370px) {
+  .fms-askpaste {
+    display: none;
   }
 }
 

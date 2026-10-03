@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { AddTransaction } from "./features/AddTransaction";
+import { AddTransaction, formDraftNow } from "./features/AddTransaction";
 import { Bin } from "./features/Bin";
 import { LoadingScreen, loadingShapeFor } from "./components/LoadingScreen";
 import { CoderView } from "./features/CoderView";
@@ -259,6 +259,19 @@ export default function App() {
    */
   const [incoming, setIncoming] = useState<{ draft: Draft; at: number } | null>(null);
   const [lastSaved, setLastSaved] = useState<{ draft: Draft; at: number; recordNumber?: number } | null>(null);
+  /*
+   * What the Add form holds, for a chat that is not beside it: the phone's AI
+   * screen, or the chat over another screen. Read again each time one of
+   * them opens, since the form is on another screen then. Without it a card
+   * sent to the form stayed "In the form" after the edit was called off
+   * there (4 October 2026).
+   */
+  const formAway = useMemo(
+    // Only while the form is on another screen: beside it, the chat hears the form itself.
+    () => (screen !== "add" && (screen === "ai" || chatOpen) ? formDraftNow() : undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [screen, chatOpen, lastSaved],
+  );
   /** Phone and tablet: the bottom bar, and the phone's shorter list of screens. */
   const compact = useMediaQuery("(max-width: 1023px)");
 
@@ -2293,6 +2306,7 @@ export default function App() {
                 deleted={deleted}
                 debts={settings.credits}
                 lastSaved={lastSaved}
+                formDraft={formAway}
                 uid={cloud.uid ?? null}
                 settings={settings}
                 transactions={transactions}
@@ -2577,6 +2591,7 @@ export default function App() {
                   deleted={deleted}
                   debts={settings.credits}
                   lastSaved={lastSaved}
+                  formDraft={formAway}
                   uid={cloud.uid ?? null}
                   settings={settings}
                   transactions={transactions}

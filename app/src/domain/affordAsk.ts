@@ -74,6 +74,12 @@ export interface AffordAsk {
   readonly wallet: string | null;
   /** "tomorrow", "today", or nothing said. */
   readonly when: "tomorrow" | "today" | null;
+  /**
+   * Asked as yes or no ("can I", "should I buy"), as against "how much
+   * should I use". A "Yes," before an answer to how much read as answering
+   * something else (4 October 2026: "How much should I use? The fare is 300").
+   */
+  readonly yesNo?: boolean | undefined;
 }
 
 const words = (s: string): string => s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ");
@@ -114,7 +120,8 @@ export function readAffordAsk(
   const wallet =
     [...reference.wallets, ...reference.savings].find((w) => said.includes(` ${words(w).trim()} `)) ?? null;
   const when = /\b(?:tomorrow|tommorrow|tomorow|tmrw|bukas)\b/i.test(text) ? "tomorrow" : /\b(?:today|now|ngayon)\b/i.test(text) ? "today" : null;
-  return { items, amount: figureIn(text), wallet, when };
+  const yesNo = !/\bhow (?:much|many)\b|\bmagkano\b|\bilan\b/i.test(text);
+  return { items, amount: figureIn(text), wallet, when, yesNo };
 }
 
 /** What one of these usually costs: the middle of the last ninety days' purchases. */
@@ -183,7 +190,9 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
     const room = fromWallet ?? free;
     const after = room - cost;
     if (room >= cost) {
-      lines.push(`Yes, going by what you hold${ask.when ? ` ${ask.when === "tomorrow" ? "for tomorrow" : "today"}` : ""}. ${holding}${fromWallet === null ? dueWords : ""}`);
+      lines.push(
+        `${ask.yesNo === false ? `${money(cost)} fits what you hold` : "Yes, going by what you hold"}${ask.when ? ` ${ask.when === "tomorrow" ? "for tomorrow" : "today"}` : ""}. ${holding}${fromWallet === null ? dueWords : ""}`,
+      );
       lines.push(
         ask.amount !== null
           ? `After ${what} you would have ${money(after)} left${fromWallet !== null ? ` in ${ask.wallet}` : " free"}.`
@@ -193,7 +202,7 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
       lines.push(`Only by using money that is already spoken for. ${holding}${dueWords}`);
       lines.push(`${ask.amount !== null ? what : `${what}, about ${money(cost)}`} is ${money(cost - Math.max(0, free))} more than is free.`);
     } else {
-      lines.push(`No. ${holding}${fromWallet === null ? dueWords : ""}`);
+      lines.push(`${ask.yesNo === false ? `${money(cost)} does not fit what you hold.` : "No."} ${holding}${fromWallet === null ? dueWords : ""}`);
       lines.push(`${ask.amount !== null ? what : `${what}, about ${money(cost)}`} is ${money(cost - Math.max(0, room))} more than that.`);
     }
     const unknown = costs.filter((c) => c.cost === null).map((c) => c.item);

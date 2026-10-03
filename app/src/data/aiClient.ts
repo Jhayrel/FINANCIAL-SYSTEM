@@ -149,7 +149,8 @@ const DEFAULT_TIMEOUT_MS = 25_000;
  * This trades a little routing accuracy for latency, deliberately, and only
  * in the case where the model was already failing to answer.
  */
-const ROUTE_TIMEOUT_MS = 6_000;
+// 4 October 2026: three and a half, not six. The server now answers it within about a second and a half.
+const ROUTE_TIMEOUT_MS = 3_500;
 
 /**
  * How many times to try before giving up.
