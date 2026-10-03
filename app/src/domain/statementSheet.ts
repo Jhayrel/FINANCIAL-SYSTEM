@@ -34,6 +34,7 @@ import { describeRange } from "./dayRange";
 import { owedChange, type Debt, type DebtEffect } from "./debt";
 import { effectLabel } from "./debtWords";
 import { costOf, incomeOf } from "./totals";
+import { cashWallet, feeInside, isWithdrawal } from "./withdrawal";
 import {
   belongsIn,
   buildStatementBetween,
@@ -57,6 +58,11 @@ export interface SheetLine {
   readonly moneyOut: Centavos;
   /** Null on a sheet with no running column. */
   readonly balance: Centavos | null;
+  /**
+   * What moved and what it cost, when the columns cannot say it: "Withdrew
+   * PHP 1,000.00, fee PHP 18.00". Empty when the columns already do.
+   */
+  readonly detail: string;
 }
 
 export interface StatementSheet {
@@ -230,6 +236,7 @@ export function periodLabel(year: number, fromMonth: number, toMonth: number, to
 
 const isOpening = (t: Transaction): boolean => t.category === "Opening";
 
+
 export function buildSheet(
   transactions: readonly Transaction[],
   request: SheetRequest,
@@ -286,6 +293,9 @@ export function buildSheet(
   let interest = 0;
   let sentOut = 0;
   let sentCount = 0;
+  const cash = cashWallet(reference.wallets);
+  const withdrawn = { cash: 0, fees: 0, count: 0 };
+  const folded: { readonly date: IsoDate; readonly amount: Centavos; readonly cash: Centavos; readonly fee: Centavos }[] = [];
   const lines: SheetLine[] = [];
 
   for (const { transaction: t } of statement.rows) {
@@ -348,8 +358,40 @@ export function buildSheet(
     if (mode === "held" && t.type === "Debt" && moneyIn === 0 && moneyOut === 0 && owedChange(t) !== 0) {
       const d = owedChange(t);
       const whose = debts.find((x) => x.id === t.debtId)?.kind === "receivable" ? "what is owed to you" : "what you owe";
-      text = `${text} (${formatMoney(Math.abs(d))} ${d > 0 ? "added to" : "taken off"} ${whose}, no money moved)`;
+      text = `${text} (${formatMoney(Math.abs(d))} ${d > 0 ? "added to" : "taken off"} ${whose})`;
     }
+    /*
+     * What moved and what it cost, said beside the row. The owner, 4
+     * October 2026, under an account statement whose withdrawals showed
+     * blank columns: "in withdrawal add how muc i spent like transactions
+     * fee, how much i withdraw". Between two of their own accounts the
+     * money is still theirs, so on a sheet of everything held only the fee
+     * is money out; the cash taken out and the fee are said in words.
+     */
+    const out = t.type === "Transfer" && !t.toWallet.trim();
+    const withdrawal = isWithdrawal(t, cash);
+    const inside = feeInside(t, cash);
+    let detail = "";
+    if (t.type === "Transfer" && !isOpening(t) && mode !== "transfers") {
+      const verb = out ? "Sent" : withdrawal ? "Withdrew" : "Moved";
+      detail = `${verb} ${formatMoney(t.amount)}, ${t.fee > 0 ? `fee ${formatMoney(t.fee)}` : "no fee"}`;
+      if (mode === "cost" && !out) detail = `Fee on ${formatMoney(t.amount)} ${withdrawal ? "withdrawn" : "moved"}`;
+    } else if (t.fee > 0 && t.type !== "Transfer" && mode !== "transfers") {
+      detail = `${formatMoney(t.amount)} plus a fee of ${formatMoney(t.fee)}`;
+    }
+    if (inside) {
+      detail = `${detail ? detail.replace(/, no fee$/, "") : `${formatMoney(t.amount)}`}, fee not saved`;
+      folded.push({ date: t.date, amount: t.amount, cash: inside.cash, fee: inside.fee });
+    }
+    if (withdrawal && !inside) {
+      withdrawn.cash += t.amount;
+      withdrawn.fees += t.fee;
+      withdrawn.count += 1;
+    } else if (inside) {
+      withdrawn.cash += inside.cash;
+      withdrawn.count += 1;
+    }
+
     // Income saved with its wallet on the other side still arrived in it, as its balance counts it.
     const arrived = t.type === "Revenue" && !t.toWallet.trim() && !!t.fromWallet.trim();
     lines.push({
@@ -363,18 +405,32 @@ export function buildSheet(
       moneyIn,
       moneyOut,
       balance: running,
+      detail,
     });
   }
 
   const notes: string[] = [];
   if (sentOut > 0) {
     notes.push(
-      `${sentCount === 1 ? "One of these" : `${sentCount} of these`}, ${formatMoney(sentOut)} in all, left your accounts for someone else (Money Send). That money counts as spending in full, not only its fee. Every other row moved between your own accounts, where only the fee is spending.`,
+      `Money Send: ${formatMoney(sentOut)} (${sentCount}), spending in full, not only the fee.`,
+    );
+  }
+  // Cash taken out, on the sheets that show money held or moved.
+  if (withdrawn.count > 0 && (mode === "held" || mode === "transfers")) {
+    notes.push(
+      `Cash withdrawn: ${formatMoney(withdrawn.cash)} (${withdrawn.count}), fees ${formatMoney(withdrawn.fees)}.${type === "account" ? " A transfer counts only its fee." : ""}`,
+    );
+  }
+  if (folded.length > 0 && mode !== "income" && mode !== "owed") {
+    const day = (d: IsoDate): string => `${MONTH_NAMES[Number(d.slice(5, 7)) - 1]?.slice(0, 3) ?? ""} ${Number(d.slice(8, 10))}${statement.from.slice(0, 4) !== statement.to.slice(0, 4) ? `, ${d.slice(0, 4)}` : ""}`;
+    // Short, the owner's word (4 October 2026: "I dont like to have so very long text explanation").
+    notes.push(
+      `No fee saved on ${folded.length} ${folded.length === 1 ? "withdrawal" : "withdrawals"} (${folded.map((f) => day(f.date)).join(", ")}). Edit ${folded.length === 1 ? "it" : "each"}: cash in Amount, the rest in Fee.`,
     );
   }
   if (interest > 0) {
     notes.push(
-      `Of what was paid, ${formatMoney(interest)} was interest and fees. It was paid from a wallet and was never part of what is owed, so it does not lower the running figure.`,
+      `Interest and fees paid: ${formatMoney(interest)}, not part of what is owed.`,
     );
   }
 

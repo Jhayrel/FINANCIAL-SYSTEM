@@ -6501,6 +6501,20 @@ button.fms-recent-row:disabled {
   stroke-linecap: round;
 }
 
+/* The statement's own notes, under its rows, as the PDF prints them under its totals. */
+.fms-stmtnotes {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+/* A statement row's description, with what a transfer moved and its fee under it. */
+.fms-stmtdesc {
+  display: grid;
+  min-width: 0;
+}
+
 /* The budget's steady pace beside the spending line: a guide, never a series of its own. */
 .fms-linepace {
   fill: none;

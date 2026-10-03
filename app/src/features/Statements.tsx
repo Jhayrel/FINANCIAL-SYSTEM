@@ -210,8 +210,16 @@ export function Statements({
       key: "desc",
       header: "Description",
       render: (l) => (
-        <span className="t-body fms-truncate" title={l.description}>
-          {l.description}
+        <span className="fms-stmtdesc">
+          <span className="t-body fms-truncate" title={l.description}>
+            {l.description}
+          </span>
+          {/* What a transfer moved and what it cost, which its columns cannot say. */}
+          {l.detail && (
+            <span className="t-micro fms-truncate" style={{ color: "var(--ink-3)" }} title={l.detail}>
+              {l.detail}
+            </span>
+          )}
         </span>
       ),
     },
@@ -410,6 +418,11 @@ export function Statements({
                         {formatShort(l.date)} · {l.kind}
                         {l.fromWallet || l.toWallet ? ` · ${[l.fromWallet, l.toWallet].filter(Boolean).join(" → ")}` : ""}
                       </div>
+                      {l.detail && (
+                        <div className="t-micro" style={{ color: "var(--ink-3)" }}>
+                          {l.detail}
+                        </div>
+                      )}
                     </div>
                     <div className="fms-dbrow-figure fms-stmtfigure">
                       {l.moneyIn > 0 && <Money value={l.moneyIn} size="s" signed tone="var(--flow-revenue-text)" />}
@@ -424,6 +437,16 @@ export function Statements({
                 </li>
               ))}
             </ul>
+            {/* What the PDF says under its totals, said here too: what was withdrawn, and any fee folded into a figure. */}
+            {sheet.notes.length > 0 && (
+              <div className="fms-stmtnotes">
+                {sheet.notes.map((n) => (
+                  <p key={n} className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+                    {n}
+                  </p>
+                ))}
+              </div>
+            )}
           </>
         )}
       </Card>

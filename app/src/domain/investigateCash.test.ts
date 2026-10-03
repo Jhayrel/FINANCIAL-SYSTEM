@@ -84,3 +84,31 @@ describe("more cash in hand than recorded", () => {
     expect(unrecorded && choicesForClue(unrecorded, "Maya", ASOF, "Interest").map((c) => c.label)[0]).toBe("Add as interest");
   });
 });
+
+/*
+ * 4 October 2026: withdrawals read off a Maya history as one figure,
+ * PHP 1,018.00, were saved with no fee. The machine gave PHP 1,000.00, so
+ * Cash was recorded PHP 18.00 higher each time than it really was.
+ */
+describe("a machine's fee saved inside a withdrawal", () => {
+  const out = (date: string, amount: number, fee = 0): Transaction =>
+    cash(date, "", "Withdrawal from an ATM", amount, { type: "Transfer", fromWallet: "Maya", toWallet: "Cash", category: "Transfer", fee, total: amount + fee, status: "Withdrawn" });
+  const ledger = [...days, out("2026-09-18", 101_800), out("2026-09-24", 51_600), out("2026-09-30", 200_000, 1_800)];
+  const held = walletBalance(ledger, "Cash");
+
+  it("is named as where cash that never arrived came from, with each row to edit", () => {
+    const result = investigate({ transactions: ledger, account: "Cash", actual: held - 3_400, asOf: ASOF });
+    const clue = result.possible.find((c) => c.kind === "fee-inside");
+    expect(clue).toBeDefined();
+    if (clue?.kind !== "fee-inside") return;
+    expect(clue.explains).toBe(1_800 + 1_600);
+    // The one saved with its fee apart is not among them.
+    expect(clue.rows.map((r) => r.amount)).toEqual([101_800, 51_600]);
+    expect(clueWords(clue)).toContain("Edit each: the cash in Amount and the rest in Fee.");
+  });
+
+  it("is not offered when there is more cash than recorded", () => {
+    const result = investigate({ transactions: ledger, account: "Cash", actual: held + 3_400, asOf: ASOF });
+    expect(result.possible.some((c) => c.kind === "fee-inside")).toBe(false);
+  });
+});

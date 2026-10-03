@@ -797,6 +797,25 @@ it didn't ... I dont want that paste icon thats just clutter".
 balance chart ends at `walletBalance` and an owed chart at `outstandingOf`.
 Of the owner's 618 messages, five would now get a chart beside the answer,
 each a split or a ranking.
+
+### 2026-10-04: withdrawals on the statements, and short notes
+
+The owner, under a September account statement whose withdrawals showed
+blank columns: "in withdrawal add how muc i spent like transactions fee,
+how much i withdraw. Be careful like you know how the logic of transferring
+is. Make sure everything works fine update all statement". Then, of the
+notes under the totals: "I dont like to have so very long text explanation.
+Mkae it ver short and clean".
+
+| Found | Done |
+|---|---|
+| A transfer between two of the owner's own accounts showed nothing on the account statement, so a withdrawal said neither what was taken out nor its fee | Every transfer row says it under its description, on screen and in the PDF: "Withdrew ₱2,000.00, fee ₱15.00", "Moved ₱1,000.00, no fee", "Sent ₱5,000.00, fee ₱10.00"; the expense sheet says "Fee on ₱2,000.00 withdrawn" (`SheetLine.detail`). The columns are unchanged and correct: on a sheet of everything held, money between your own accounts is still yours, so only the fee is money out; on one wallet's sheet the whole figure leaves it |
+| Four September withdrawals (₱1,018.00 twice, ₱516.00, ₱218.00) were saved before withdrawal cards split the machine's fee, with the fee inside the figure: no fee was spending and Cash was recorded ₱70.00 higher than it was | Never changed by the app. The statement says "fee not saved" on each, and one note names the days; Find a difference on Cash names them as the likely cause, with Edit on each (`feeInside`, clue `fee-inside`); the Add form offers "Split: ₱1,000.00 cash + ₱18.00 fee" on such a withdrawal, one tap |
+| Statement notes ran to paragraphs | One short line each: "Cash withdrawn: ₱9,200.00 (8), fees ₱67.00. A transfer counts only its fee.", "No fee saved on 4 withdrawals (Sep 18, Sep 20, Sep 24, Sep 26). Edit each: cash in Amount, the rest in Fee.", "Money Send: ₱5,571.00 (2), spending in full, not only the fee.", "Interest and fees paid: ₱1,071.36, not part of what is owed." The notes are on the Statements screen now as well as in the PDF |
+
+Every statement type was checked on the owner's September: the account and
+wallet sheets close at what the wallets hold, the revenue and expense sheets
+total `incomeOf` and `costOf`, the debt sheets close at `outstandingOf`.
 ---
 
 ## 6. What the owner has to do

@@ -142,7 +142,8 @@ function metaOf(line: SheetLine): string {
         : line.fromWallet
           ? `from ${line.fromWallet}`
           : "";
-  return [line.kind, path].filter(Boolean).join("  ·  ");
+  // And what moved and its fee, which the columns of a transfer cannot say (`SheetLine.detail`).
+  return [line.kind, path, line.detail].filter(Boolean).join("  ·  ");
 }
 
 const heading = (sheet: StatementSheet): string => `${sheet.title}${sheet.subject ? `, ${sheet.subject}` : ""}`;
@@ -224,14 +225,15 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
   for (const line of sheet.lines) {
     const desc = wrap(doc, line.description, "regular", BODY, detailsW - 12, 2);
     const meta = metaOf(line);
-    const metaText = meta ? (wrap(doc, meta, "regular", META, detailsW - 12, 1)[0] ?? "") : "";
-    const h = PAD_Y * 2 + desc.length * LINE + (metaText ? META_LINE : 0);
+    // Two lines when a transfer says what moved and its fee, so the fee is never cut off.
+    const metaLines = meta ? wrap(doc, meta, "regular", META, detailsW - 12, line.detail ? 2 : 1) : [];
+    const h = PAD_Y * 2 + desc.length * LINE + metaLines.length * META_LINE;
     if (y + h > bottom) newPage();
 
     const first = y + PAD_Y + LINE - 2.4;
     page.text(x.date, first, shortDate(line.date), { size: BODY, color: INK_2 });
     desc.forEach((l, i) => page.text(x.details, first + i * LINE, l, { size: BODY, color: INK }));
-    if (metaText) page.text(x.details, first + desc.length * LINE - 0.5, metaText, { size: META, color: INK_3 });
+    metaLines.forEach((m, i) => page.text(x.details, first + desc.length * LINE - 0.5 + i * META_LINE, m, { size: META, color: INK_3 }));
     if (showIn) money(line.moneyIn, x.in, first, "regular", true);
     if (showOut) money(line.moneyOut, x.out, first, "regular", true);
     if (line.balance !== null) money(line.balance, x.balance, first, "regular", false);
@@ -255,7 +257,7 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
   }
 
   // Notes, then the closing line.
-  const notes = ["Amounts are in Philippine pesos (₱). A blank money cell means nothing moved that way.", ...sheet.notes].flatMap(
+  const notes = ["Amounts are in pesos (₱).", ...sheet.notes].flatMap(
     (n) => wrap(doc, n, "regular", 7, CONTENT_W, 4),
   );
   const closingHeight = 16 + notes.length * 9.5 + 34;

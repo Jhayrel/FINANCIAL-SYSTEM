@@ -54,6 +54,7 @@ import { addDays, daysBetween, formatMedium } from "./dates";
 import { draftToTransactions, emptyDraft, type Draft } from "./entry";
 import { formatMoney, type Centavos } from "./money";
 import type { IsoDate, Transaction } from "./types";
+import { feeInside } from "./withdrawal";
 
 /** One line of an account's own history, as it moved that account. */
 export interface StatementLine {
@@ -91,7 +92,14 @@ export type Clue =
    * difference is: when there is more in hand than recorded, the guess was
    * too high.
    */
-  | { readonly kind: "estimate"; readonly row: Transaction; readonly explains: Centavos };
+  | { readonly kind: "estimate"; readonly row: Transaction; readonly explains: Centavos }
+  /**
+   * Withdrawals saved as one figure with a machine's fee inside it: each put
+   * the fee into this account as well as the cash (`feeInside`). PHP
+   * 1,018.00 out of Maya is PHP 1,000.00 of cash; saved whole, Cash holds
+   * PHP 18.00 that never arrived (4 October 2026).
+   */
+  | { readonly kind: "fee-inside"; readonly rows: readonly Transaction[]; readonly explains: Centavos };
 
 export interface Investigation {
   readonly account: string;
@@ -535,6 +543,19 @@ export function investigate(input: InvestigateInput): Investigation {
    */
   if (unexplained !== 0 && !overshoot) {
     /*
+     * More recorded than there is, and withdrawals into this account carry a
+     * machine's fee inside their figure: each put that fee here too. Said
+     * first, because it is in the ledger already and names its rows.
+     */
+    if (unexplained > 0) {
+      const folded = onAccount
+        .filter((t) => searched(t, input.lookBackDays ?? 60) && t.toWallet === account && feeInside(t, account) !== null)
+        .sort((a, b) => a.date.localeCompare(b.date) || a.recordNumber - b.recordNumber);
+      const fees = folded.reduce((sum, t) => sum + (feeInside(t, account)?.fee ?? 0), 0);
+      if (folded.length > 0 && fees > 0) possible.push({ kind: "fee-inside", rows: folded, explains: fees });
+    }
+
+    /*
      * An estimate that was too high. More in hand than recorded, and a
      * "spent, not written down" row on this account big enough to hold the
      * difference: the owner's own guess, made to settle the account once
@@ -688,6 +709,12 @@ export function clueWords(clue: Clue): string {
       return `${row(clue.row)}, ${formatMoney(was)}, was an estimate of spending not written down. If ${formatMoney(over)} of it was never spent, ${
         was === over ? "it can go" : `lowering it to ${formatMoney(was - over)}`
       } settles the difference.`;
+    }
+    case "fee-inside": {
+      const n = clue.rows.length;
+      return `${n === 1 ? "One withdrawal was" : `${n} withdrawals were`} saved with the machine's fee inside the figure, so ${formatMoney(clue.explains)} of fees went into this account as if it were cash: ${clue.rows
+        .map((t) => `${row(t)}, ${formatMoney(t.amount)}`)
+        .join("; ")}. A machine gives whole hundreds. Edit ${n === 1 ? "it" : "each"}: the cash in Amount and the rest in Fee.`;
     }
     case "unrecorded":
       if (clue.direction === "in" && clue.cash) {

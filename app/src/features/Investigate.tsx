@@ -212,6 +212,17 @@ export function Investigate({
             ))}
           </span>
         );
+      case "fee-inside":
+        // The owner's entries: opened to edit, never changed from here.
+        return (
+          <span className="fms-findrow-actions">
+            {clue.rows.map((r) => (
+              <Button key={r.id} size="sm" onClick={() => onEditRow(r)}>
+                Edit {number(r)}
+              </Button>
+            ))}
+          </span>
+        );
     }
   };
 
@@ -411,7 +422,7 @@ export function Investigate({
                       <li
                       key={`p${i}`}
                       className={
-                        clue.kind === "unrecorded" || clue.kind === "together" || clue.kind === "estimate"
+                        clue.kind === "unrecorded" || clue.kind === "together" || clue.kind === "estimate" || clue.kind === "fee-inside"
                           ? "fms-findrow fms-findrow--maybe fms-findrow--stack"
                           : "fms-findrow fms-findrow--maybe"
                       }

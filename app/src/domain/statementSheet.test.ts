@@ -133,7 +133,7 @@ describe("the income and expense sheets use the one definition of each", () => {
     ]);
     expect(s.headings).toEqual({ moneyIn: "Moved", moneyOut: "Fees", balance: "Fees so far" });
     expect(s.totalOut).toBe(1500);
-    expect(s.notes[0]).toContain("One of these, ₱500.00 in all, left your accounts for someone else (Money Send)");
+    expect(s.notes[0]).toBe("Money Send: ₱500.00 (1), spending in full, not only the fee.");
   });
 });
 
@@ -263,7 +263,7 @@ describe("every row named for what it is", () => {
   it("calls a credit line's movements credit, and says its fees moved no money", () => {
     expect(byText("Borrowed")?.kind).toBe("Credit drawn");
     expect(byText("Fees")?.kind).toBe("Credit fees added");
-    expect(byText("Fees")?.description).toBe("Fees (₱151.03 added to what you owe, no money moved)");
+    expect(byText("Fees")?.description).toBe("Fees (₱151.03 added to what you owe)");
     expect(byText("Pay Later")?.kind).toBe("Credit payment");
   });
 
@@ -287,5 +287,49 @@ describe("every row named for what it is", () => {
 
   it("keeps the figures: the names changed, not the money", () => {
     expect(s.closing).toBe(1500000 - 1000 - 100000 + 200000 - 215103 - 59800 + 9400 + 76);
+  });
+});
+
+/*
+ * The owner, 4 October 2026, under an account statement whose withdrawals
+ * showed blank columns: "in withdrawal add how muc i spent like
+ * transactions fee, how much i withdraw. Be careful like you know how the
+ * logic of transferring is."
+ */
+describe("a withdrawal says what was taken out and its fee", () => {
+  const withdrawals = [
+    row({ date: "2026-09-02", type: "Transfer", fromWallet: "Maya", toWallet: "Cash", amount: 200000, fee: 1500, status: "Withdrawn", description: "withdraw 2000" }),
+    // Saved whole, the way a history list shows it: the machine's fee is inside the figure.
+    row({ date: "2026-09-18", type: "Transfer", fromWallet: "Maya", toWallet: "Cash", amount: 101800, status: "Withdrawn", description: "Withdrawal from an ATM" }),
+    // Cash between two pockets is no withdrawal.
+    row({ date: "2026-09-20", type: "Transfer", fromWallet: "Cash", toWallet: "Gcash", amount: 50000, description: "Moved" }),
+    row({ date: "2026-09-21", type: "Transfer", fromWallet: "Maya", toWallet: "", amount: 500000, fee: 1000, description: "To a friend" }),
+  ];
+  const ledger2 = [row({ date: "2026-09-01", type: "Revenue", toWallet: "Maya", amount: 1000000, description: "Pay" }), ...withdrawals];
+  const sheet = buildSheet(ledger2, { type: "account", year: 2026, fromMonth: 9, toMonth: 9 }, reference);
+  const line = (d: string) => sheet.lines.find((l) => l.date === d)!;
+
+  it("counts only the fee as money out on the account statement, and says the rest in words", () => {
+    expect(line("2026-09-02")).toMatchObject({ moneyIn: 0, moneyOut: 1500, detail: "Withdrew ₱2,000.00, fee ₱15.00" });
+    expect(line("2026-09-20").detail).toBe("Moved ₱500.00, no fee");
+    // Money sent away is money out in full.
+    expect(line("2026-09-21")).toMatchObject({ moneyOut: 501000, detail: "Sent ₱5,000.00, fee ₱10.00" });
+  });
+
+  it("says when a fee looks folded into the figure, and changes nothing", () => {
+    expect(line("2026-09-18")).toMatchObject({ moneyIn: 0, moneyOut: 0 });
+    expect(line("2026-09-18").detail).toBe("Withdrew ₱1,018.00, fee not saved");
+    expect(sheet.notes).toContain("No fee saved on 1 withdrawal (Sep 18). Edit it: cash in Amount, the rest in Fee.");
+  });
+
+  it("adds up what was withdrawn", () => {
+    expect(sheet.notes).toContain("Cash withdrawn: ₱3,000.00 (2), fees ₱15.00. A transfer counts only its fee.");
+  });
+
+  it("puts the whole figure out of the wallet it left, and the fee on the expense sheet", () => {
+    const maya = buildSheet(ledger2, { type: "wallet", wallet: "Maya", year: 2026, fromMonth: 9, toMonth: 9 }, reference);
+    expect(maya.lines.find((l) => l.date === "2026-09-02")).toMatchObject({ moneyOut: 201500 });
+    const expense = buildSheet(ledger2, { type: "expense", year: 2026, fromMonth: 9, toMonth: 9 }, reference);
+    expect(expense.lines.find((l) => l.date === "2026-09-02")).toMatchObject({ moneyOut: 1500, kind: "Transaction Fee", detail: "Fee on ₱2,000.00 withdrawn" });
   });
 });

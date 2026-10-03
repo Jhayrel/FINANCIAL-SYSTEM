@@ -58,6 +58,7 @@ import { connectionWords } from "../domain/syncState";
 import { entryImpact } from "../domain/entryImpact";
 import { whenWords } from "./Dashboard";
 import { useReportScreen } from "./screenReport";
+import { cashAndFee, cashWallet } from "../domain/withdrawal";
 import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
 /**
@@ -1889,18 +1890,46 @@ export function AddTransaction({
                 </Field>
               )}
 
-              {draft.flow === "Transfer" && (
-                <Field label="Fee" half error={errorFor("fee")}>
-                  <div className="fms-amounthero fms-amounthero--quiet">
-                    <AmountInput
-                      value={draft.fee}
-                      onChange={(v) => set("fee", v ?? 0)}
-                      invalid={Boolean(errorFor("fee"))}
-                      ariaLabel="Fee"
-                    />
-                  </div>
-                </Field>
-              )}
+              {draft.flow === "Transfer" && (() => {
+                /*
+                 * Cash taken out with the machine's fee inside the figure: a
+                 * machine gives whole hundreds, so PHP 1,018.00 is PHP 1,000.00
+                 * of cash and PHP 18.00 of fee. One tap splits it (4 October
+                 * 2026: four September withdrawals were saved whole).
+                 */
+                const cashName = cashWallet(reference.wallets);
+                const withdrawing =
+                  !draft.fee &&
+                  draft.amount !== null &&
+                  (draft.status === "Withdrawn" || (cashName !== "" && draft.toWallet === cashName && !/\bcash\b/i.test(draft.fromWallet)));
+                const split = withdrawing && draft.amount !== null ? cashAndFee(draft.amount) : null;
+                return (
+                  <Field
+                    label="Fee"
+                    half
+                    error={errorFor("fee")}
+                    hint={split && !errorFor("fee") ? `A machine gives whole hundreds: ${formatMoney(draft.amount ?? 0)} is likely cash and a fee.` : undefined}
+                  >
+                    <div className="fms-amounthero fms-amounthero--quiet">
+                      <AmountInput
+                        value={draft.fee}
+                        onChange={(v) => set("fee", v ?? 0)}
+                        invalid={Boolean(errorFor("fee"))}
+                        ariaLabel="Fee"
+                      />
+                    </div>
+                    {split && (
+                      <button
+                        type="button"
+                        className="t-caption fms-linkbtn"
+                        onClick={() => setDraft((d) => ({ ...d, amount: split.cash, fee: split.fee }))}
+                      >
+                        Split: {formatMoney(split.cash)} cash + {formatMoney(split.fee)} fee
+                      </button>
+                    )}
+                  </Field>
+                );
+              })()}
 
               {showCategory && (
                 <Field

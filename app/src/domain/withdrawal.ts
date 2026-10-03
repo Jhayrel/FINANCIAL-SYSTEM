@@ -307,3 +307,25 @@ export function cashAndFee(total: Centavos): { cash: Centavos; fee: Centavos } |
   if (total < 10_000 || rest === 0 || rest > 3_000) return null;
   return { cash: total - rest, fee: rest };
 }
+
+/**
+ * Cash taken out: saved as withdrawn, said as one, or money from an account
+ * into the cash wallet. "Cash to Extra Cash" moves cash between pockets and
+ * is no withdrawal.
+ */
+export function isWithdrawal(t: Transaction, cash: string): boolean {
+  if (t.type !== "Transfer" || !t.toWallet.trim()) return false;
+  if (t.status === "Withdrawn" || /\b(?:withdr[ae]w\w*|cash ?out)\b/i.test(`${t.description} ${t.item} ${t.notes}`)) return true;
+  return cash !== "" && t.toWallet === cash && !/\bcash\b/i.test(t.fromWallet);
+}
+
+/**
+ * A withdrawal saved as one figure with no fee, when that figure is cash
+ * and a machine's fee together: a machine gives whole hundreds
+ * (`cashAndFee`), so PHP 1,018.00 out of Maya is PHP 1,000.00 of cash and an
+ * PHP 18.00 fee. Said on the statement, never changed by it: the entry is
+ * the owner's to edit.
+ */
+export function feeInside(t: Transaction, cash: string): { readonly cash: Centavos; readonly fee: Centavos } | null {
+  return isWithdrawal(t, cash) && t.fee === 0 ? cashAndFee(t.amount) : null;
+}

@@ -3551,7 +3551,7 @@ export function AskPanel({
      * entries that add up to it, a ready-made income card was a guess that
      * would have counted the money twice (3 October 2026, "Random PHP 220.00").
      */
-    const ledgerCouldSay = result.possible.some((c) => c.kind === "together" || c.kind === "estimate" || c.kind === "wrong-account");
+    const ledgerCouldSay = result.possible.some((c) => c.kind === "together" || c.kind === "estimate" || c.kind === "wrong-account" || c.kind === "fee-inside");
     const adds = [...result.found, ...result.possible]
       .filter((clue) => !(clue.kind === "unrecorded" && ledgerCouldSay))
       .map((clue) => draftForClue(clue, account, readOn, interestItem))
@@ -3600,7 +3600,9 @@ export function AskPanel({
                 }))
               : c.kind === "wrong-account"
                 ? [{ row: c.row, score: 60, why: [`Filed on ${c.other}. Check it was not this account.`] }]
-                : [],
+                : c.kind === "fee-inside"
+                  ? c.rows.map((row) => ({ row, score: 85, why: ["The machine's fee is inside this withdrawal's figure. Edit it: the cash in Amount and the rest in Fee."] }))
+                  : [],
       )
       .filter((c) => !seen.has(c.row.id) && Boolean(seen.add(c.row.id)));
     if (toCheck.length > 0) say({ kind: "found", action: "edit", candidates: toCheck, done: [] });
