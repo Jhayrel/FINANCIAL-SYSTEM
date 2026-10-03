@@ -48,6 +48,22 @@
 const FIGURE =
   /(?:[-\u2212]\s*)?(?:php|₱)\s*(?:[-\u2212]\s*)?\d[\d,]*(?:\.\d{1,2})?|(?<![\d.,])\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?(?![\d.,])/gi;
 
+/**
+ * The owner's own figures, written the way the figure reader reads them.
+ *
+ * "can I allocate 2k", "I have 5000": a figure the owner said is given,
+ * however they wrote it, so an answer that repeats it is not flagged.
+ */
+export function saidAsFigures(said: string): string {
+  return [...said.matchAll(/(?<![\d.,])(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*(k)?(?![\d.,])/gi)]
+    .map((m) => {
+      const n = Number((m[1] ?? "").replace(/,/g, ""));
+      return Number.isFinite(n) && n > 0 ? `PHP ${(m[2] ? n * 1_000 : n).toFixed(2)}` : "";
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
 /** The centavos in one matched token, or null when it is not a figure. */
 function centavosOf(token: string): number | null {
   const negative = /[-\u2212]/.test(token);
@@ -100,8 +116,18 @@ export function untracedFigures(answer: string, given: string): readonly number[
    * lookup each way, so this stays a handful of lookups per figure rather
    * than every pair of a long context.
    */
+  /*
+   * With many figures given, one of the two must be in the answer itself,
+   * so the step can be seen. Any pair from the chat's whole context let
+   * "PHP 4,500.00 for the urgent invitation", a figure nobody said, through
+   * on 3 October 2026: with hundreds of figures, nearly any figure is one
+   * step from two of them. A short context keeps the step it always had.
+   */
+  const written = new Set(figuresIn(answer).map(Math.abs));
+  const crowded = known.size > 40;
   const oneStepAway = (f: number): boolean => {
     for (const a of known) {
+      if (crowded && (!written.has(a) || a === f)) continue;
       if (known.has(f - a) || known.has(a - f)) return true;
     }
     return false;

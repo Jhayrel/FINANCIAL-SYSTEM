@@ -1331,7 +1331,19 @@ const ADVICE_RULES = [
    * leaves behind. What it is not is the briefing above the entries, however
    * true that briefing is.
    */
-  "A question asking whether to do something, spend this, borrow that, afford it tonight, is answered with yes or no in the first three words, then the arithmetic that decides it, then what it leaves. Never answer one by restating the month.",
+  "A yes or no question about one amount, can I, should I, is it okay to, is it possible to, spend this, borrow that, afford it tonight, is answered with yes or no in the first three words, then the arithmetic that decides it, then what it leaves. Never answer one by restating the month.",
+  /*
+   * 3 October 2026, from a phone screenshot: "Does my treat earlier
+   * unconstitutional?" was answered "Yes, ... it is not a violation", and
+   * "Like I was invited urgently earlier, what can you advice?" was
+   * answered "Yes, you can allocate PHP 4,500.00 for the urgent
+   * invitation", a sum nobody said, beside "gym sessions" nobody planned.
+   * The rule above had been read as applying to every question.
+   */
+  "Only a yes or no question opens with yes or no, and the word must agree with the rest of the answer. A what, how or why question, or a request for advice, opens with the answer itself.",
+  "Never put a figure on something the owner has not priced. If they ask about a cost they did not state, say what is free to spend and ask what it costs; never assume an amount for it. Name only plans they stated in this conversation: a forecast or a usual monthly cost is not a plan.",
+  "Read each message against the conversation before it. Earlier, that, it and the treat mean what was just said, added or shown. A sentence explaining something already recorded, such as why it was spent, is about that entry: answer about that entry, with its figure, and do not treat it as a new expense.",
+  "When a word does not fit the question, a misspelling or the wrong word, answer the meaning that fits the conversation and say in a few words which meaning you took.",
   "Work from what they would have left, not from the budget alone: what the account holds, what is already due before the next money arrives, and what the amount asked about would leave of both. A budget being over is a fact about a plan; being unable to pay a bill on Friday is a fact about money.",
   "When the honest answer is no, say no and say what would make it yes: a smaller amount, a different account, or after a date when something arrives.",
   "Never answer a question about tonight with a figure about the year.",

@@ -329,6 +329,30 @@ const ASKING_ANYWHERE =
 const HOW_OR_IF =
   /\bhow (?:can|could|should|do|would|will|to) (?:i|we)\b|\bwhat (?:should|would|can|could) i do\b|^\s*(?:if|kung)\s+(?:i|ako)\b[^.]*\b(?:how|what|should|can|could|would|will|ba)\b|\?(?=\s*(?:[^\s?\d]+\s*){1,3}$)/i;
 
+/**
+ * Asking, in the shapes the owner's record shows the reader missing, scored
+ * against every sentence they sent (3 October 2026): "so if the night comes
+ * what happens", "rate your self how advanced are you", "hw much i spnt on
+ * gas last wek", "magkano nagastos ko sa pagkain nung august?".
+ */
+const ASKED_ELSEWHERE =
+  /\bwhat (?:happens|will happen|would happen|happened to)\b|\bhow (?:advanced|good|smart|much|many|long|often|far)\b|\b(?:hw|hwo|hoe|hm|haw) (?:much|many)\b|\b(?:magkano|ilan|bakit|paano|kailan|saan napunta)\b|^\s*(?:ano|anong|alin|sino|pwede ba|kaya ba)\b|^\s*(?:rate|grade|describe|explain|summari[sz]e)\b/i;
+
+/**
+ * A plan, not money that moved: "I will spend 1000 today for my school"
+ * (answered "Thats a question"), "I'm planning to go to the beach today ang
+ * spen 500 for food". Saying it will happen records nothing; a past verb in
+ * the same sentence ("I paid 500 and will pay the rest") is still an entry,
+ * and "I want to add 500 food" is an order to record it.
+ */
+const PLANNED =
+  /\b(?:i(?:'ll| will| shall)|i(?: am|'m) (?:going|planning|thinking of|about) to|i(?: am|'m) (?:planning|thinking)|i plan to|i want to|i wanna|i would like to|i intend to|gonna|balak ko|plano ko|gusto ko(?:ng)?)\b(?!\s+(?:add|record|log|save|enter|input|put|note|delete|remove|restore|edit|change|fix|move)\b)/i;
+const MOVED = /\b(?:spent|paid|bought|received|recieved|got|sent|transferred|withdrew|withdrawn|earned|borrowed|lent|loaned|gave|deposited|cashed|nagbayad|bumili|binili|nagastos|natanggap|ginastos|umutang|nangutang|inutang|nagpadala|nagbigay)\b/i;
+
+export function isPlan(text: string): boolean {
+  return PLANNED.test(text) && !MOVED.test(text);
+}
+
 export function isQuestion(text: string): boolean {
   /**
    * Leading punctuation is not part of the question.
@@ -346,7 +370,9 @@ export function isQuestion(text: string): boolean {
     REQUESTING.test(trimmed) ||
     ADVICE.test(trimmed) ||
     ASKING_ANYWHERE.test(trimmed) ||
-    HOW_OR_IF.test(trimmed)
+    HOW_OR_IF.test(trimmed) ||
+    ASKED_ELSEWHERE.test(trimmed) ||
+    isPlan(trimmed)
   );
 }
 

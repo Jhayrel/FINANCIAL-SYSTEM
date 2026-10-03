@@ -20,7 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { askAi, type AiAnswer, type AiTask } from "../data/aiClient";
 import { buildContext, contextToText } from "../domain/aiContext";
 import { buildChatContext } from "../domain/aiChatContext";
-import { untracedNote } from "../domain/aiFigures";
+import { saidAsFigures, untracedNote } from "../domain/aiFigures";
 import { formatMoney } from "../domain/money";
 import { cacheKey, readCache, writeCache } from "../domain/aiCache";
 import { offlineAnswer } from "../domain/aiOffline";
@@ -309,7 +309,7 @@ export function useAi({
        * when the model repeats it.
        */
       const said = [options.earlier ?? "", ...(options.history ?? []).map((h) => h.text)].join("\n");
-      const note = untracedNote(answered.text, [withWorked ?? contextToText(context), said, options.pinned ?? ""].join("\n"), formatMoney);
+      const note = untracedNote(answered.text, [withWorked ?? contextToText(context), said, saidAsFigures(said), options.pinned ?? ""].join("\n"), formatMoney);
       return note === "" ? answered : { ...answered, text: [answered.text, note].join("\n\n") };
     },
     [context, disabled, ai.enabled, ai.tone, ai.provider, ai.model, transactions, asOf, budgets, settings.credits, deleted],

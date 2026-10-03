@@ -56,7 +56,7 @@ export function matchedOnIn(text: string, asOf: IsoDate): IsoDate | null {
 
 /** Words that say the figures do not agree, or ask to check them. */
 const MISMATCH =
-  /\b(extra money|more money than|have extra|has extra|got extra|more than (?:the |my )?(?:system|app|ledger|tracker)|less than (?:the |my )?(?:system|app|ledger|tracker)|where('?s| is| are| did| does| do)? (the )?(rest|remaining|difference|missing|balance|it go|they go|my money)|where did (my|the|it)|where('?s| is) my|missing|nawawala|nasaan|doesn'?t match|don'?t match|not match(ing)?|hindi (match|tugma)|mismatch|discrepanc\w*|reconcile|reconciliation|investigate|investigation|find (the|my) (difference|missing)|balance is (off|wrong|different)|off by|wrong balance|unaccounted|lost money|check my balance|different (from|than) (the )?(app|bank|system))\b/i;
+  /\b(extra money|more money than|have extra|has extra|got extra|more than (?:the |my )?(?:system|app|ledger|tracker)|less than (?:the |my )?(?:system|app|ledger|tracker)|where('?s| is| are| did| does| do)? (the )?(rest|remaining|difference|missing|balance|it go|they go|my money)|where did (my|the|it)|where('?s| is) my|missing|nawawala|nasaan|doesn'?t match|don'?t match|not match(ing)?|hindi (match|tugma)|mismatch|discrepanc\w*|reconcile|reconciliation|investigate|investigation|find (the|my) (difference|missing)|balance is (off|wrong|different)|does(?:n'?t| not) balance|not balanced|off by|wrong balance|unaccounted|lost money|check my balance|different (from|than) (the )?(app|bank|system))\b/i;
 
 /** A balance said for an account: "my balance is", "the balance now", "check my balance". */
 const BALANCE_SAID =

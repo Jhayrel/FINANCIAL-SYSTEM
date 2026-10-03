@@ -75,9 +75,14 @@ export function judge(c: Case): string | null {
        * app checks for an entry first. That is exactly the failure that turned
        * advice into two PHP 20,000 rows, so it is scored as a failure here.
        */
+      /*
+       * `AskPanel` now asks before it files: `readsAsEntry` requires
+       * `!isQuestion`, so a sentence read as a question is answered whatever
+       * else it reads as. Kept as a check of the advice reading too, which
+       * still outranks an entry where both apply.
+       */
       const r = read(c.said);
-      // Advice outranks an entry reading, exactly as `AskPanel` decides it.
-      if (r.worthOffering && !r.readsAsDebt && !isAdvice(c.said)) {
+      if (r.worthOffering && !r.readsAsDebt && !isAdvice(c.said) && !isQuestion(c.said)) {
         return `would be filed as a ${r.draft.flow} entry`;
       }
       return null;

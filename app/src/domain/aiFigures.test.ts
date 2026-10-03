@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { figuresIn, untracedFigures, untracedNote } from "./aiFigures";
+import { figuresIn, saidAsFigures, untracedFigures, untracedNote } from "./aiFigures";
 import { formatMoney } from "./money";
 
 describe("reading figures out of text", () => {
@@ -95,3 +95,26 @@ describe("what it deliberately allows", () => {
     expect(untracedFigures(answer, given)).toEqual([411121]);
   });
 });
+
+describe("a crowded context", () => {
+  // The chat is given hundreds of figures; nearly anything is one step from two of them.
+  const many = Array.from({ length: 60 }, (_, i) => `PHP ${(1_000 + i * 137.25).toFixed(2)}`).join(", ");
+  const given = `${many}. Budget left PHP 4,589.95. Usable PHP 9,893.56.`;
+
+  it("does not let an amount nobody said through on a coincidence", () => {
+    // 3 October 2026: "Yes, you can allocate PHP 4,500.00", for a cost the owner never gave.
+    const loose = untracedFigures("You can allocate PHP 4,500.00. It fits within the PHP 4,589.95 budget left and leaves PHP 89.95.", `${given} PHP 5,500.00 and PHP 1,000.00 elsewhere.`);
+    expect(loose).toContain(450_000);
+  });
+
+  it("still allows a step whose parts are written in the answer", () => {
+    expect(untracedFigures("Of the PHP 9,893.56 usable, PHP 4,589.95 is the budget left, so PHP 5,303.61 is beyond it.", given)).toEqual([]);
+  });
+});
+
+describe("what the owner said", () => {
+  it("counts as given, however it was written", () => {
+    expect(saidAsFigures("Is it possible to allocate 2k? I have 5000 and 1,500.50")).toBe("PHP 2000.00 PHP 5000.00 PHP 1500.50");
+  });
+});
+
