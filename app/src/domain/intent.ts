@@ -379,6 +379,25 @@ export function plainlyDone(text: string): boolean {
   );
 }
 
+/**
+ * Putting right what the assistant understood: "I said 250 not 450", "I
+ * meant 250", "no, 250 not 450". The owner, 4 October 2026, after the
+ * answer to a weekly plan took 250 and 200 for 450: "I said 250 not 450"
+ * became a Spending card of PHP 250.00 described "said not". With no card
+ * on screen to correct, it is the conversation being corrected, and the
+ * model answers it again.
+ */
+export function correctsWhatWasSaid(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t || t.split(/\s+/).length > 16) return false;
+  // A figure being put right, and nothing to do: "I said delete it" is a delete, and its own rules read it.
+  if (!/\d/.test(t) || /\b(?:delete|discard|remove|restore|bring back|add|edit|change|bin|undo|cancel|record|save)\b/.test(t)) return false;
+  return (
+    /^(?:no[,.!]?\s+|nope[,.!]?\s+|hindi[,.!]?\s+|wait[,.!]?\s+)?(?:i\s+(?:said|meant|mean|told you|was saying)|i'?m saying|what i (?:said|meant)|sabi ko)\b/.test(t) ||
+    /^(?:no[,.!]?\s+|hindi[,.!]?\s+)?(?:it'?s\s+|its\s+|it is\s+)?(?:php\s*|₱)?\d[\d,.]*k?\s+(?:not|hindi)\s+(?:php\s*|₱)?\d/.test(t)
+  );
+}
+
 export function isQuestion(text: string): boolean {
   /**
    * Leading punctuation is not part of the question.

@@ -830,6 +830,19 @@ this".
 | "based on my income" had nothing to hold the budget to | Held to the income they usually receive, the median month over the months the spending is read from (`BY_INCOME`, `typicalIncome`) |
 | A recommendation needed "add it" before there was anything to apply | Asked to set or adjust one, the card comes with the answer, the app's own two parts, editable before Apply; asked only what it should be, it is still "add it" (`SETS_BUDGET`, `ASKS_ONLY`, `offerAdvisedBudget`) |
 | Any budget request with no figure got the device's question | With a model available it gets the recommendation and the card instead; the question is only for when no model can answer |
+
+### 2026-10-04: "I said 250 not 450"
+
+The owner asked whether PHP 250.00 a week would work ("2 classes means 250
+per week then I'll use 200 for gas and other too"). The model took PHP
+450.00 and worked out PHP 64.29 a day and PHP 1,030.95 itself, which the app
+flagged as not its figures. "I said 250 not 450" then became a Spending card
+of PHP 250.00, described "said not".
+
+| Found | Done |
+|---|---|
+| A correction of what the answer understood, with no card on screen, was read as an entry | "I said 250 not 450", "I meant 250", "250 not 450" go back to the model as the same question with the figure put right; never a row (`correctsWhatWasSaid`). It needs a figure and no command word, so "I said delete it" and "I mean subscription" are read as before (none of the owner's 733 messages changes) |
+| A plan said by the week or the day was the model's arithmetic | The app sets each figure the plan names, and their sum, beside what is left of the spending budget: a day, a week, over the days left, and whether it fits or by how much it does not (`planRate.ts`). A correction takes its period from the question before it, and a figure after "not" is left out |
 ---
 
 ## 6. What the owner has to do

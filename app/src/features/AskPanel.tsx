@@ -131,7 +131,8 @@ import { asksAboutDeleted, deletedRows, deletedWindowIn, deletedWords, onlyAWind
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
-import { allPaidScope, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
+import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
+import { planWorked } from "../domain/planRate";
 import { addressesEveryCard, asksToReadAgain, asksToRename, saysOneWasMissed, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
 import { asksWhetherAdded, inLedgerOrNot } from "../domain/checkPicture";
 import { kindSaidForAll } from "../domain/saidForAll";
@@ -6039,11 +6040,18 @@ export function AskPanel({
      * September 2026, with the model unreachable). The entry reader can read
      * it on its own, so it gets the sentence.
      */
+    /*
+     * "I said 250 not 450", with no card on screen for it to correct, puts
+     * right what the last answer understood: the conversation goes on, and
+     * no row is read from it (4 October 2026, a PHP 250.00 card "said not").
+     */
+    const correctsAnswer = files.length === 0 && !as && !pending && shownCard === null && correctsWhatWasSaid(ruled);
     const readsAsEntry =
       (modelGaveUp || routed === null) &&
       files.length === 0 &&
       !as &&
       !isQuestion(note) &&
+      !correctsAnswer &&
       readEntry(note, transactions, reference, asOf).worthOffering;
 
     /*
@@ -6056,7 +6064,7 @@ export function AskPanel({
       as ??
       (files.length > 0
         ? "log"
-        : tellsToRemember
+        : tellsToRemember || correctsAnswer
           ? "ask"
           : /**
            * Advice outranks a sentence that also reads as an entry.
@@ -6111,12 +6119,28 @@ export function AskPanel({
         const [laterSaid, earlierSaid] = routed?.compare ?? [];
         const pair = (laterSaid && earlierSaid ? periodsSaid(laterSaid, earlierSaid, asOf) : null) ?? comparedPeriods(ruled, asOf);
         const compared = pair ? comparisonWorked(ruled, transactions, pair) : "";
+        /*
+         * A plan said by the week or the day ("250 per week ... would that
+         * work?"), and a correction of one ("I said 250 not 450"): the app's
+         * own arithmetic against what is left of the spending budget, so the
+         * model chooses the reading and works out nothing (`planRate.ts`).
+         */
+        const saidBefore = [...turns].reverse().filter((t): t is Said => t.kind === "you").slice(0, 3).map((t) => t.text);
+        const plan = compared ? "" : planWorked(ruled, { transactions, budgets, asOf, ...(correctsAnswer || saidBefore.length > 0 ? { before: correctsAnswer ? saidBefore : [] } : {}) });
         await askQuestion(
           note,
           true,
           compared
             ? { text: `Two periods side by side, worked out by the app from the ledger. Answer with these figures:\n${compared}`, fallback: compared }
-            : null,
+            : plan
+              ? {
+                  text: correctsAnswer ? `They are correcting a figure your last answer took. Answer again with the figure they say.\n${plan}` : plan,
+                  // With no model, the app's own lines, without the one addressed to the model.
+                  fallback: plan.split("\n").slice(1).join(" "),
+                }
+              : correctsAnswer
+                ? { text: "They are correcting what your last answer took them to mean. Answer the same question again with what they say now, and never treat it as a new entry." }
+                : null,
           besideFor(ruled, pair),
         );
 
