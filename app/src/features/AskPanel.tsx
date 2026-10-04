@@ -152,7 +152,8 @@ import {
   readHistory,
   type StatementLine,
 } from "../domain/investigate";
-import { exportWords, readExportAsk, type ExportAsk } from "../domain/exportAsk";
+import { buildSheet } from "../domain/statementSheet";
+import { asksAboutAFile, exportWords, readExportAsk, sheetRequestOf, statementBrief, statementWords, withSheet, type ExportAsk } from "../domain/exportAsk";
 import { readInvestigateAsk, type InvestigateAsk } from "../domain/investigateAsk";
 import { affordAnswer, followsUpDecision, goesByBalance, isAffordQuestion, readAffordAsk } from "../domain/affordAsk";
 import {
@@ -4901,9 +4902,33 @@ export function AskPanel({
      * spending, and every reader below would happily make an entry out of it.
      * A request for a file is not a movement of money.
      */
-    const askedToExport = as ? null : readExportAsk(ruled, asOf) ?? (routed?.intent === "export" ? readExportAsk(`export ${ruled}`, asOf) : null);
+    /*
+     * A question about the statement just made, answered from its figures.
+     * "What do you think about that statement?" was offered a new statement
+     * for 2026 (the owner, 4 October 2026: "Fix the reasoning").
+     */
+    const aboutAFile = !as && asksAboutAFile(ruled);
+    const lastStatement = aboutAFile
+      ? [...turns].reverse().find((t): t is Exporting => isExporting(t) && t.ask.kind === "statement")?.ask
+      : undefined;
+    if (aboutAFile && lastStatement) {
+      setDraft("");
+      const sheetOf = buildSheet(transactions, sheetRequestOf(lastStatement, asOf), reference, debts);
+      await askQuestion(note, true, { text: statementBrief(sheetOf), fallback: statementBrief(sheetOf, true) });
+      return;
+    }
+
+    const exportAsked = as || aboutAFile ? null : readExportAsk(ruled, asOf) ?? (routed?.intent === "export" ? readExportAsk(`export ${ruled}`, asOf) : null);
+    /*
+     * A statement is fitted to what is recorded and said to the day, with what
+     * is in it: "Can you be specific? Like look it say January" (the owner, 4
+     * October 2026, of a statement that began four months before the first
+     * entry).
+     */
+    const offeredSheet = exportAsked?.kind === "statement" ? buildSheet(transactions, sheetRequestOf(exportAsked, asOf), reference, debts) : null;
+    const askedToExport = exportAsked && offeredSheet ? withSheet(exportAsked, offeredSheet) : exportAsked;
     if (askedToExport) {
-      const words = exportWords(askedToExport, asOf);
+      const words = offeredSheet ? statementWords(offeredSheet, askedToExport.format) : exportWords(askedToExport, asOf);
       // Said and cleared like every other message: it stayed in the box, unsent-looking (28 September 2026).
       setDraft("");
       say({ kind: "you", text: note });
@@ -8436,6 +8461,11 @@ function ExportCard({ turn, onSave, onDiscard }: { turn: Exporting; onSave: () =
           {state === "applied" ? "saved to this device" : state === "discarded" ? "not saved" : "nothing is saved yet"}
         </span>
       </div>
+      {ask.summary && (
+        <p className="t-body" style={{ margin: 0 }}>
+          {ask.summary}
+        </p>
+      )}
       <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
         It goes to this device's downloads and nowhere else.
       </p>

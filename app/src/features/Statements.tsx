@@ -35,7 +35,7 @@ import {
   STATEMENT_TYPES,
   type StatementType,
 } from "../domain/statements";
-import type { ReferenceLists, Transaction } from "../domain/types";
+import type { IsoDate, ReferenceLists, Transaction } from "../domain/types";
 import { yearsCovered } from "../domain/year";
 
 /** Remembered on this device, so the name is typed once. */
@@ -71,6 +71,7 @@ export function Statements({
   accounts = [],
   debts,
   year: initialYear,
+  asOf,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -79,6 +80,8 @@ export function Statements({
   debts: readonly Debt[];
   /** The year it opens on. Any year the ledger covers can be picked. */
   year: number;
+  /** Today: a statement starts at the first entry it covers and ends today at the latest (`fitPeriod`). */
+  asOf?: IsoDate;
 }) {
   /*
    * Only the months the ledger has. Every month of every year was offered,
@@ -168,8 +171,8 @@ export function Statements({
   const [failed, setFailed] = useState("");
 
   const sheet = useMemo(
-    () => buildSheet(transactions, { type, year, fromMonth: from, toMonth: to, toYear, wallet, debtId: debtId || undefined }, reference, debts),
-    [transactions, type, year, from, to, toYear, wallet, debtId, reference, debts],
+    () => buildSheet(transactions, { type, year, fromMonth: from, toMonth: to, toYear, wallet, debtId: debtId || undefined, asOf }, reference, debts),
+    [transactions, type, year, from, to, toYear, wallet, debtId, reference, debts, asOf],
   );
   const statementNow = () =>
     buildStatementBetween(transactions, type, sheet.from, sheet.to, reference, debtId || undefined, { wallet, debts });

@@ -85,6 +85,8 @@ export interface StatementSheet {
   readonly closing: Centavos;
   /** Said under the totals, when a figure needs a sentence to be read right. */
   readonly notes: readonly string[];
+  /** How the period was fitted to what is recorded, when today was given (`fitPeriod`). */
+  readonly fitted?: FittedPeriod | undefined;
 }
 
 export interface SheetRequest {
@@ -105,6 +107,50 @@ export interface SheetRequest {
    */
   readonly fromDate?: IsoDate | undefined;
   readonly toDate?: IsoDate | undefined;
+  /**
+   * Today. Given, the period is fitted to what is recorded (`fitPeriod`): it
+   * starts no earlier than the month of the first entry it covers, and a
+   * period running into this month ends today.
+   */
+  readonly asOf?: IsoDate | undefined;
+}
+
+export interface FittedPeriod {
+  readonly from: IsoDate;
+  readonly to: IsoDate;
+  /** Started later than asked: nothing it covers is recorded before `from`. */
+  readonly startsLater: boolean;
+  /** Ended today rather than at the end of the month asked for. */
+  readonly endsToday: boolean;
+}
+
+/**
+ * The days a statement really covers.
+ *
+ * The owner, 4 October 2026, of "Give me account statement all 2022 to
+ * today": the PDF said "January 2022 to October 2026" and opened with a
+ * balance brought forward on Jan 1, 2022, while the first entry was May 1,
+ * 2022, and October had four days in it. "Can you be specific? Like look it
+ * say January like make sure its align." So a statement starts at the month
+ * of the first entry it covers when that is later than asked, ends today
+ * when the period runs past it, and says both days.
+ */
+export function fitPeriod(
+  transactions: readonly Transaction[],
+  type: StatementType,
+  from: IsoDate,
+  to: IsoDate,
+  reference: ReferenceLists,
+  asOf: IsoDate,
+  debtId?: string,
+  scope: StatementScope = {},
+): FittedPeriod {
+  const first = buildStatementBetween(transactions, type, "0001-01-01", to, reference, debtId, scope).rows[0]?.transaction.date;
+  const monthOfFirst = first ? `${first.slice(0, 7)}-01` : null;
+  const startsLater = monthOfFirst !== null && monthOfFirst > from && monthOfFirst <= to;
+  const start = startsLater && monthOfFirst ? monthOfFirst : from;
+  const endsToday = start <= asOf && to > asOf;
+  return { from: start, to: endsToday ? asOf : to, startsLater, endsToday };
 }
 
 type Mode = "held" | "income" | "cost" | "bills" | "transfers" | "owed";
@@ -247,7 +293,11 @@ export function buildSheet(
   const toYear = request.toYear ?? year;
   const scope: StatementScope = { wallet: request.wallet, debts };
   const byDays = request.fromDate && request.toDate ? { from: request.fromDate, to: request.toDate } : null;
-  const range = byDays ?? rangeOf({ year, month: fromMonth }, { year: toYear, month: toMonth });
+  const asked = byDays ?? rangeOf({ year, month: fromMonth }, { year: toYear, month: toMonth });
+  const fitted = request.asOf ? fitPeriod(transactions, type, asked.from, asked.to, reference, request.asOf, request.debtId, scope) : null;
+  const range = fitted ?? asked;
+  // Said to the day whenever it is not whole months as asked: "May 1, 2022 to October 4, 2026".
+  const toTheDay = byDays !== null || fitted?.startsLater === true || fitted?.endsToday === true;
   const statement = buildStatementBetween(transactions, type, range.from, range.to, reference, request.debtId, scope);
   const mode = MODE[type];
   const savings = new Set(reference.savings);
@@ -459,7 +509,7 @@ export function buildSheet(
     type,
     title: STATEMENT_LABEL[type],
     subject,
-    period: byDays ? describeRange({ start: byDays.from, end: byDays.to }) : periodLabel(year, fromMonth, toMonth, toYear),
+    period: toTheDay ? describeRange({ start: range.from, end: range.to }) : periodLabel(year, fromMonth, toMonth, toYear),
     from: statement.from,
     to: statement.to,
     headings,
@@ -469,5 +519,6 @@ export function buildSheet(
     totalOut,
     closing: running,
     notes,
+    ...(fitted ? { fitted } : {}),
   };
 }

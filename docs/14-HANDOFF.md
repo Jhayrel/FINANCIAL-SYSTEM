@@ -895,6 +895,22 @@ Tested with invented receipts of every kind (`walletReceipt.test.ts`,
 owner's picture and no model: one card, Transfer from Gcash to someone
 else, ₱99.00, 4 October 2026, its time and reference in the notes, and
 Gcash down ₱99.00 once added. Not tested with a live model.
+
+### 2026-10-04: statements say their exact days
+
+"Give me account statement all 2022 to today" made a PDF headed "January
+2022 to October 2026" with a balance brought forward on Jan 1, 2022, four
+months before the first entry, and October four days old. The owner: "Can
+you be specific? Like look it say January like make sure its align." Then
+"What do you think about that statement?" was offered a new statement for
+2026: "Fix the reasoning".
+
+| Found | Done |
+|---|---|
+| A statement started before the first entry and ran past today | `fitPeriod` (statementSheet.ts): it starts at the month of the first entry it covers and ends today, and the period is said to the day: "May 1, 2022 to October 4, 2026". The chat, the PDF, the CSV and the Statements screen all use it. Whole past months are still said as months ("January to December 2023") |
+| The chat said only "a statement for January 2022 to October 2026, so far" | `statementWords`: which statement, the days, "(today)", the number of entries, brought forward, money in, money out, the balance at the end, and where it starts and why. The card shows the days and the count, and keeps them, so a file saved later is the one described |
+| "Date issued 4 October 2026" beside "May 1, 2022" | Month first everywhere: "October 4, 2026, 5:18 PM" |
+| A question about a statement made a new one | `asksAboutAFile`: pointing back ("that statement", "my statement", "the PDF") and asking (what, is it right, explain, check) is a question. It goes to the model with that statement's figures (`statementBrief`): the days, totals, each year, the three largest each way and its notes. Asking for it again (give, send, export, again) still makes the file. None of the owner's 13 earlier file requests changes |
 ---
 
 ## 6. What the owner has to do

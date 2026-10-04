@@ -20,8 +20,10 @@
  * the only safe destination for it is the machine it was asked for on.
  */
 
-import { getMonth, getYear, monthName } from "./dates";
+import { formatMedium, getMonth, getYear, monthName } from "./dates";
 import { describeRange } from "./dayRange";
+import { formatMoney } from "./money";
+import type { SheetRequest, StatementSheet } from "./statementSheet";
 import { spanIn } from "./periodIn";
 import type { StatementType } from "./statements";
 import type { IsoDate } from "./types";
@@ -61,6 +63,8 @@ export interface ExportAsk {
   readonly toDate?: IsoDate;
   /** What was asked for, in words, for the reply. */
   readonly said: string;
+  /** What the statement holds, worked out when it was offered: "May 1, 2022 to October 4, 2026 · 3,885 entries". */
+  readonly summary?: string;
 }
 
 /** Asking for a file at all. Without one of these, nothing here applies. */
@@ -130,9 +134,123 @@ const FILE_WORDS = /\b(export|exports|exported|download|backup|back\s?up|csv|spr
 const FILE_OBJECT =
   /\b(save|copy|print|file|document)\b[^.?!]{0,30}\b(data|ledger|entries|transactions|records|history|file|files|csv|pdf|spreadsheet|excel|sheet|statement|backup|everything|all of it|chat|conversation)\b|\b(save|copy|print)\s+(?:it|this|that|them)\s+as\b/i;
 
+/**
+ * A question about a statement or file already made, not a request for one.
+ *
+ * The owner, 4 October 2026, straight after an account statement: "What do
+ * you think about that statement?" was offered a new statement for 2026.
+ * Pointing back at one ("that statement", "my statement", "the PDF") and
+ * asking about it (what, why, is it right, explain, check) is a question,
+ * answered from that statement's figures. Asking for it again (give, send,
+ * make, export, download, need) is still a file.
+ */
+const POINTS_BACK = /\b(?:that|this|the|my|your|last|latest|the last|my last)\s+(?:statement|statements|pdf|file|report|export)\b/i;
+const ASKS_ABOUT =
+  /\?\s*$|^\s*(?:what|what's|whats|why|how|is|are|was|does|did|do you|can you (?:explain|check|review|summari[sz]e|analy[sz]e|read)|could you (?:explain|check|review)|explain|check|review|summari[sz]e|analy[sz]e|tell me|thoughts|any thoughts|opinion)\b|\b(?:what do you think|your (?:opinion|thoughts|take|view)|anything (?:wrong|off|unusual|strange))\b/i;
+const WANTS_A_FILE = /\b(?:give|make|export|download|send|save|generate|create|print|need|want|get me|prepare|produce|redo|again|gawa|gawin)\b/i;
+
+export function asksAboutAFile(said: string): boolean {
+  const text = said.trim();
+  return POINTS_BACK.test(text) && ASKS_ABOUT.test(text) && !WANTS_A_FILE.test(text);
+}
+
+/** The sheet a statement request asks for, fitted to what is recorded by `asOf`. */
+export function sheetRequestOf(ask: ExportAsk, asOf: IsoDate): SheetRequest {
+  return {
+    type: ask.type ?? "account",
+    year: ask.year,
+    fromMonth: ask.fromMonth ?? 1,
+    toMonth: ask.toMonth ?? 12,
+    toYear: ask.toYear ?? ask.year,
+    fromDate: ask.fromDate,
+    toDate: ask.toDate,
+    asOf,
+  };
+}
+
+/** "3,885 entries: money in ₱2,297,460.93, money out ₱2,284,625.34, balance ₱12,835.59 at the end". */
+function holds(sheet: StatementSheet): string {
+  const n = sheet.lines.length;
+  if (n === 0) return "no entries in this period";
+  const lower = (s: string): string => s.charAt(0).toLowerCase() + s.slice(1);
+  const parts = [
+    ...(sheet.broughtForward ? [`brought forward ${formatMoney(sheet.broughtForward)}`] : []),
+    ...(sheet.headings.moneyIn ? [`${lower(sheet.headings.moneyIn)} ${formatMoney(sheet.totalIn)}`] : []),
+    ...(sheet.headings.moneyOut ? [`${lower(sheet.headings.moneyOut)} ${formatMoney(sheet.totalOut)}`] : []),
+    // A level (what is held, what is owed) ends somewhere; a running total is the total above.
+    ...(sheet.broughtForward !== null ? [`${lower(sheet.headings.balance)} ${formatMoney(sheet.closing)} at the end`] : []),
+  ];
+  return `${n.toLocaleString("en-US")} ${n === 1 ? "entry" : "entries"}: ${parts.join(", ")}`;
+}
+
+/** The period, said to the day, and "(today)" when it ends today. */
+function spanOf(sheet: StatementSheet): string {
+  return `${sheet.period}${sheet.fitted?.endsToday ? " (today)" : ""}`;
+}
+
+/**
+ * The reply when a statement is offered: which one, the exact days, and what
+ * is in it. "Can you be specific?" (the owner, 4 October 2026).
+ */
+export function statementWords(sheet: StatementSheet, format: "pdf" | "csv" = "pdf"): string {
+  const name = `${sheet.title}${sheet.subject ? ` for ${sheet.subject}` : ""}`;
+  const starts = sheet.fitted?.startsLater ? ` Nothing is recorded before ${formatMedium(sheet.from)}, so it starts there.` : "";
+  return `${name}, ${spanOf(sheet)}, as ${format === "csv" ? "a spreadsheet" : "a PDF"}. ${holds(sheet).replace(/^./, (c) => c.toUpperCase())}.${starts}`;
+}
+
+/** The offered statement, with the days it was fitted to kept, so the file made later is the one described. */
+export function withSheet(ask: ExportAsk, sheet: StatementSheet): ExportAsk {
+  const n = sheet.lines.length;
+  const summary = `${spanOf(sheet)} · ${n.toLocaleString("en-US")} ${n === 1 ? "entry" : "entries"}`;
+  const fitted = sheet.fitted && (sheet.fitted.startsLater || sheet.fitted.endsToday);
+  return { ...ask, ...(fitted ? { fromDate: sheet.from, toDate: sheet.to } : {}), summary };
+}
+
+/**
+ * A statement's figures, for a question about it: the period, the totals,
+ * each year, and the largest movements each way. The app adds them up; the
+ * model says what it thinks of them.
+ */
+export function statementBrief(sheet: StatementSheet, forTheOwner = false): string {
+  const years = new Map<string, { into: number; out: number; count: number }>();
+  for (const l of sheet.lines) {
+    const y = l.date.slice(0, 4);
+    const at = years.get(y) ?? { into: 0, out: 0, count: 0 };
+    at.into += l.moneyIn;
+    at.out += l.moneyOut;
+    at.count += 1;
+    years.set(y, at);
+  }
+  const top = (pick: (l: StatementSheet["lines"][number]) => number): string =>
+    [...sheet.lines]
+      .filter((l) => pick(l) > 0)
+      .sort((a, b) => pick(b) - pick(a))
+      .slice(0, 3)
+      .map((l) => `${formatMoney(pick(l))} on ${formatMedium(l.date)}, ${l.description || l.kind} (#${String(l.recordNumber).padStart(4, "0")})`)
+      .join("; ");
+  const largestIn = sheet.headings.moneyIn ? top((l) => l.moneyIn) : "";
+  const largestOut = sheet.headings.moneyOut ? top((l) => l.moneyOut) : "";
+  return [
+    `${forTheOwner ? "Your" : "The statement they mean:"} ${forTheOwner ? sheet.title.charAt(0).toLowerCase() + sheet.title.slice(1) : sheet.title}${sheet.subject ? ` for ${sheet.subject}` : ""}, ${spanOf(sheet)}.`,
+    `${holds(sheet).replace(/^./, (c) => c.toUpperCase())}.`,
+    sheet.fitted?.startsLater ? `Nothing is recorded before ${formatMedium(sheet.from)}, so it starts there.` : "",
+    years.size > 1
+      ? `By year: ${[...years.entries()]
+          .map(([y, v]) => `${y}, ${v.count.toLocaleString("en-US")} entries${sheet.headings.moneyIn ? `, ${formatMoney(v.into)} ${sheet.headings.moneyIn.toLowerCase()}` : ""}${sheet.headings.moneyOut ? `, ${formatMoney(v.out)} ${sheet.headings.moneyOut.toLowerCase()}` : ""}`)
+          .join("; ")}.`
+      : "",
+    largestIn ? `Largest ${sheet.headings.moneyIn.toLowerCase()}: ${largestIn}.` : "",
+    largestOut ? `Largest ${sheet.headings.moneyOut.toLowerCase()}: ${largestOut}.` : "",
+    ...sheet.notes,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function readExportAsk(said: string, asOf: IsoDate): ExportAsk | null {
   const text = said.trim();
   if (!text || !EXPORTING.test(text)) return null;
+  if (asksAboutAFile(text)) return null;
   if (!FILE_WORDS.test(text) && !FILE_OBJECT.test(text)) return null;
 
   // "Save 500 on food" is an entry, not an export: a figure with a verb of

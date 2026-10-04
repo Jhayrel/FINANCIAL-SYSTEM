@@ -76,11 +76,15 @@ export interface StatementPdfOptions {
   readonly compress?: boolean;
 }
 
-/** "26 September 2026, 2:38 PM", in the time of the device that made it. */
+/**
+ * "September 26, 2026, 2:38 PM", in the time of the device that made it:
+ * month first, as the period and every row are written (4 October 2026,
+ * "make sure its align").
+ */
 export function issuedLabel(d: Date): string {
   const h = d.getHours();
   const hour = h % 12 === 0 ? 12 : h % 12;
-  return `${d.getDate()} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}, ${hour}:${String(d.getMinutes()).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+  return `${MONTH_NAMES[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}, ${hour}:${String(d.getMinutes()).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 
 /** Break text into at most `max` lines of `width`, ending the last in an ellipsis if it does not fit. */

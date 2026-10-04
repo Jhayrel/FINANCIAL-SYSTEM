@@ -86,8 +86,8 @@ describe("a statement PDF", () => {
   });
 
   it("says who issued it on the date it was made", () => {
-    expect(issuedLabel(new Date(2026, 8, 26, 14, 38))).toBe("26 September 2026, 2:38 PM");
-    expect(issuedLabel(new Date(2026, 0, 1, 0, 5))).toBe("1 January 2026, 12:05 AM");
+    expect(issuedLabel(new Date(2026, 8, 26, 14, 38))).toBe("September 26, 2026, 2:38 PM");
+    expect(issuedLabel(new Date(2026, 0, 1, 0, 5))).toBe("January 1, 2026, 12:05 AM");
   });
 
   it("is compressed when downloaded", async () => {

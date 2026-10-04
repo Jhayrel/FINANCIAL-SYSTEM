@@ -62,8 +62,8 @@ import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domai
 import { debtWalletDirection, emptyDraft, insertChronologically } from "./domain/entry";
 import { formatMedium, getYear, today } from "./domain/dates";
 import { systemToCsv } from "./domain/csv";
-import type { ExportAsk } from "./domain/exportAsk";
-import { buildStatementBetween, rangeOf, statementFilename, statementToCsv } from "./domain/statements";
+import { sheetRequestOf, type ExportAsk } from "./domain/exportAsk";
+import { buildStatementBetween, statementFilename, statementToCsv } from "./domain/statements";
 import { buildSheet } from "./domain/statementSheet";
 import { browserSettingsStore, type SettingsStore } from "./data/settingsStore";
 import {
@@ -1659,14 +1659,11 @@ export default function App() {
       return;
     }
 
-    const type = ask.type ?? "account";
-    const fromMonth = ask.fromMonth ?? 1;
-    const toMonth = ask.toMonth ?? 12;
-    // Across years when asked: "january 2025 to june 2026" is eighteen months, not one year's six.
-    const toYear = ask.toYear ?? ask.year;
-    // Days, when the period is not whole months ("september 1 to 19").
-    const span = ask.fromDate && ask.toDate ? { from: ask.fromDate, to: ask.toDate } : rangeOf({ year: ask.year, month: fromMonth }, { year: toYear, month: toMonth });
-    const statement = buildStatementBetween(transactions, type, span.from, span.to, reference, undefined, {
+    // The period as asked, fitted to what is recorded and ending today at the latest (`fitPeriod`).
+    const request = sheetRequestOf(ask, asOf);
+    const type = request.type;
+    const sheet = buildSheet(transactions, request, reference, settings.credits);
+    const statement = buildStatementBetween(transactions, type, sheet.from, sheet.to, reference, undefined, {
       debts: settings.credits,
     });
     const count = statement.rows.length;
@@ -1681,7 +1678,6 @@ export default function App() {
     }
 
     // The same PDF the Statements screen makes, with the name it last used.
-    const sheet = buildSheet(transactions, { type, year: ask.year, fromMonth, toMonth, toYear, fromDate: ask.fromDate, toDate: ask.toDate }, reference, settings.credits);
     const issued = readIssued();
     void import("./pdf/statementPdf")
       .then(({ statementPdf }) => statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() }))
@@ -2432,6 +2428,7 @@ export default function App() {
               accounts={settings.accounts}
               debts={settings.credits}
               year={getYear(asOf)}
+              asOf={asOf}
             />
           )}
           {screen === "bin" && (
