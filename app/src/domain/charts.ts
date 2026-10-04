@@ -94,6 +94,12 @@ export interface Chart {
   readonly measure?: "budget" | "balance" | "owed" | undefined;
   /** The last row is a period still running: "October 2026" read on 3 October. */
   readonly running?: boolean | undefined;
+  /**
+   * Entries dated after today, counted in a level's last point so it is the
+   * balance, or the amount owed, that every other screen shows. The Add
+   * form takes a date ahead with a warning, and the sidebar counts it.
+   */
+  readonly ahead?: number | undefined;
 }
 
 /** Which way the money in a chart went, including charts stored before it was recorded. */
@@ -902,7 +908,7 @@ function named(question: string, names: readonly string[]): string {
 
   for (const name of byLength) {
     const escaped = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`\\b${escaped}s?\\b`).test(asked)) return name;
+    if (new RegExp(`(?<![a-z0-9])${escaped}s?(?![a-z0-9])`).test(asked)) return name;
   }
   return "";
 }

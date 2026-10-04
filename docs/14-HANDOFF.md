@@ -843,6 +843,29 @@ of PHP 250.00, described "said not".
 |---|---|
 | A correction of what the answer understood, with no card on screen, was read as an entry | "I said 250 not 450", "I meant 250", "250 not 450" go back to the model as the same question with the figure put right; never a row (`correctsWhatWasSaid`). It needs a figure and no command word, so "I said delete it" and "I mean subscription" are read as before (none of the owner's 733 messages changes) |
 | A plan said by the week or the day was the model's arithmetic | The app sets each figure the plan names, and their sum, beside what is left of the spending budget: a day, a week, over the days left, and whether it fits or by how much it does not (`planRate.ts`). A correction takes its period from the question before it, and a figure after "not" is left out |
+
+### 2026-10-04: scenario tests
+
+The owner: "Run more test and fix more, implement more", then "Use
+scenario base testing". `app/src/domain/monthScenarios.test.ts` tells
+fourteen stories (an allowance month, a credit line, money held for an
+aunt, a withdrawal with its fee inside, a week run from the chat, an entry
+dated ahead, and others). After every step `screensAgree` checks that the
+sidebar, each statement, the balance chart, Find a difference, the month
+total, the budget, the budget chart, the AI's figures and the debt screens
+all say the same thing. The same story was then run in the app at phone
+width (390px): an entry, a withdrawal with its fee, a plan, a delete and a
+restore by describing them, a balance chart, a balance told, a statement.
+
+| Found | Done |
+|---|---|
+| "paid my wifi bill 999 from maya" was Online Buy | Two word boundaries in the bill matcher had been saved as backspace characters. Now Bills, Globe at Home Wifi (`recurringIn`) |
+| A chart of "Maya Bank (Personal savings)" drew Maya | A name ending in a bracket never matched. It now matches in full, without its brackets ("maya bank"), or by the words inside them ("personal savings") |
+| The Send button said Log for "I will be spending 1000 cash tomorrow" | `detectIntent` now knows the same plans `isQuestion` does. No card was ever made; the label was wrong |
+| A saved card still said "This puts Maya at −₱5,954.00. Save anyway?" | Problems and warnings show only while a card is open. A saved card was being checked against a ledger that already held it |
+| A balance chart, and Find a difference, left out entries dated after today while the sidebar counts them | Read to today, the last point counts them and the reading says "Counts 5 entries dated after today." Told "my cash balance is X" today, the answer starts from the sidebar's figure, and an early entry is named as a cause only when it fits inside the difference |
+| The budget chart for this month left out spending entered for later in the month | Counted on the last day, as the month total counts it |
+| "One entry add up to exactly" | "One entry adds up to exactly" |
 ---
 
 ## 6. What the owner has to do

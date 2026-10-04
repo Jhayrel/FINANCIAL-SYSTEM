@@ -191,6 +191,19 @@ describe("balances", () => {
     expect(chart.rows.map((r) => r.value)).toEqual([endOf("2026-07-31"), endOf("2026-08-31"), endOf("2026-09-30"), endOf(ASOF)]);
   });
 
+  it("counts an entry dated after today, as the sidebar does, and says so", () => {
+    // The Add form takes a date ahead with a warning; the sidebar counts it, so the chart's "now" does too.
+    const ahead = [...ledger, tx({ date: "2026-10-09", amount: 40000, item: "School", fromWallet: "Maya" })];
+    const chart = buildBalanceChart("chart my maya balance", ahead, { wallets: ["Maya", "Cash"], savings: [] }, ASOF)!;
+    expect(chart.total).toBe(walletBalance(ahead, "Maya"));
+    expect(chart.ahead).toBe(1);
+    expect(chartReading(chart)).toMatch(/ Counts 1 entry dated after today\.$/);
+    const split = buildBalanceChart("how much is in each account", ahead, { wallets: ["Maya", "Cash"], savings: [] }, ASOF, true)!;
+    expect(split.rows.find((r) => r.label === "Maya")?.value).toBe(walletBalance(ahead, "Maya"));
+    // A window that ended before today is read as it stood then.
+    expect(buildBalanceChart("chart my maya balance in august", ahead, { wallets: ["Maya", "Cash"], savings: [] }, ASOF)?.ahead).toBeUndefined();
+  });
+
   it("splits by account, largest first", () => {
     const chart = buildBalanceChart("how much is in each account", ledger, { wallets: ["Maya", "Cash"], savings: [] }, ASOF, true)!;
     expect(chart.by).toBe("wallet");
@@ -211,6 +224,13 @@ describe("what is owed", () => {
     ]);
     expect(chart.total).toBe(outstandingOf(ledger, "maya-credit"));
     expect(chartReading(chart)).toBe("Nothing owed now: it is paid off. The most owed was PHP 2,500.00, at the end of August 2026.");
+  });
+
+  it("counts a draw dated after today in what is owed now", () => {
+    const ahead = [...ledger, tx({ date: "2026-10-20", type: "Debt", fromWallet: "", toWallet: "Maya", category: "", item: "Maya Credit", amount: 60000, debtId: "maya-credit", debtEffect: "draw" })];
+    const chart = buildOwedChart("chart my maya credit", ahead, [line], ASOF)!;
+    expect(chart.total).toBe(outstandingOf(ahead, "maya-credit"));
+    expect(chartReading(chart)).toBe("PHP 600.00 owed now. The most owed was PHP 2,500.00, at the end of August 2026. Counts 1 entry dated after today.");
   });
 });
 

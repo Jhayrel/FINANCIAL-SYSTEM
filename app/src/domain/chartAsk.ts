@@ -335,14 +335,23 @@ function stepsOver(from: IsoDate, to: IsoDate, asOf: IsoDate): Step[] {
 const firstDayOf = (rows: readonly Transaction[]): IsoDate | null =>
   rows.reduce<IsoDate | null>((first, t) => (first === null || t.date < first ? t.date : first), null);
 
-/** The named one, longest first, so "Maya Bank (Personal savings)" beats "Maya". */
+/**
+ * The named one, longest first, so "Maya Bank (Personal savings)" beats "Maya".
+ * A name in brackets is also said without them: "maya bank" or "personal
+ * savings" both mean "Maya Bank (Personal savings)". The edges are letters
+ * and digits rather than a word boundary, which cannot follow a closing bracket.
+ */
 function namedIn(question: string, names: readonly string[]): string {
   const lower = question.toLowerCase();
-  return (
-    [...new Set(names.map((n) => n.trim()).filter(Boolean))]
-      .sort((a, b) => b.length - a.length)
-      .find((n) => new RegExp(`\\b${n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower)) ?? ""
-  );
+  const says = (phrase: string): boolean =>
+    new RegExp(`(?<![a-z0-9])${phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9])`).test(lower);
+  const spoken = [...new Set(names.map((n) => n.trim()).filter(Boolean))].flatMap((name) => {
+    const full = name.toLowerCase();
+    const bare = full.replace(/\s*\([^)]*\)\s*/g, " ").trim();
+    const inside = /\(([^)]+)\)/.exec(full)?.[1]?.trim() ?? "";
+    return [full, bare, inside].filter((p) => p.length >= 3).map((phrase) => ({ name, phrase }));
+  });
+  return spoken.sort((a, b) => b.phrase.length - a.phrase.length).find((s) => says(s.phrase))?.name ?? "";
 }
 
 /**
@@ -390,6 +399,13 @@ export function buildBudgetChart(
       const pace = budget > 0 ? Math.round((budget * Number(d.slice(8, 10))) / days) : 0;
       rows.push({ label: dayName(d), value: spent, share: 0, count: day?.count ?? 0, previous: pace, previousShare: 0 });
     }
+    // The rest of the month already entered counts on the last day, as the month's total counts it.
+    const later = last < end ? transactions.filter((t) => t.date > last && t.date <= end && costOf(t) > 0) : [];
+    const lastDay = rows[rows.length - 1];
+    if (later.length > 0 && lastDay) {
+      spent += later.reduce((sum, t) => sum + costOf(t), 0);
+      rows[rows.length - 1] = { ...lastDay, value: spent, count: lastDay.count + later.length };
+    }
     if (spent === 0 && budget === 0) return null;
     const top = Math.max(1, spent, budget);
     return {
@@ -403,6 +419,7 @@ export function buildBudgetChart(
       measure: "budget",
       against: { name: "the budget", total: budget, now: last < end ? "Spent so far" : "Spent" },
       ...(last < end ? { running: true } : {}),
+      ...(later.length > 0 ? { ahead: later.length } : {}),
     };
   }
 
@@ -425,6 +442,8 @@ export function buildBudgetChart(
   const kept = used.slice(-24);
   const top = Math.max(1, ...kept.map((m) => Math.max(m.spent, m.budget)));
   const lastYm = kept[kept.length - 1]?.ym ?? "";
+  // The month's total already counts what is entered for later in it.
+  const ahead = lastYm === asOf.slice(0, 7) ? transactions.filter((t) => t.date > asOf && t.date.startsWith(lastYm) && costOf(t) > 0).length : 0;
   return {
     title: `Spending against the budget by month, ${said.name}`,
     by: "month",
@@ -443,6 +462,7 @@ export function buildBudgetChart(
     measure: "budget",
     against: { name: "the budget", total: kept.reduce((s, m) => s + m.budget, 0), now: "Spent" },
     ...(lastYm === asOf.slice(0, 7) ? { running: true } : {}),
+    ...(ahead > 0 ? { ahead } : {}),
   };
 }
 
@@ -492,7 +512,8 @@ export function buildBalanceChart(
         let value = 0;
         let count = 0;
         for (const t of transactions) {
-          if (t.date > end) continue;
+          // Up to today, everything entered counts, dated ahead or not, as on the sidebar.
+          if (t.date > end && end !== asOf) continue;
           const d = delta(t, w);
           if (d !== 0) {
             value += d;
@@ -506,6 +527,7 @@ export function buildBalanceChart(
     if (rows.length === 0) return null;
     const top = Math.max(1, ...rows.map((r) => r.value));
     const positive = rows.every((r) => r.value > 0);
+    const ahead = end === asOf ? transactions.filter((t) => t.date > asOf && set.some((w) => delta(t, w) !== 0)).length : 0;
     return {
       title: `Balance by account, ${end === asOf ? "today" : dayName(end)}`,
       by: "wallet",
@@ -514,6 +536,7 @@ export function buildBalanceChart(
       total: rows.reduce((s, r) => s + r.value, 0),
       othersCount: 0,
       measure: "balance",
+      ...(ahead > 0 ? { ahead } : {}),
     };
   }
 
@@ -540,6 +563,12 @@ export function buildBalanceChart(
     previousEnd = step.end;
     rows.push({ label: step.label, value: level, share: 0, count });
   }
+  // Read to today, the last point is the balance the sidebar shows, entries dated ahead included.
+  const later = end === asOf ? transactions.filter((t) => t.date > asOf && delta(t) !== 0) : [];
+  const lastRow = rows[rows.length - 1];
+  if (later.length > 0 && lastRow) {
+    rows[rows.length - 1] = { ...lastRow, value: lastRow.value + later.reduce((sum, t) => sum + delta(t), 0), count: lastRow.count + later.length };
+  }
   const top = Math.max(1, ...rows.map((r) => Math.abs(r.value)));
   const who = named ? named : savingsOnly ? "Savings" : everything ? "All accounts" : "Wallets";
   const name = window ? window.name : `${from.slice(0, 4) === year ? year : `${monthName(from.slice(0, 7))} to today`}`;
@@ -553,6 +582,7 @@ export function buildBalanceChart(
     othersCount: 0,
     measure: "balance",
     ...(end === asOf ? { running: true } : {}),
+    ...(later.length > 0 ? { ahead: later.length } : {}),
   };
 }
 
@@ -597,6 +627,12 @@ export function buildOwedChart(
     }
     rows.push({ label: step.label, value: owed, share: 0, count });
   }
+  // As with a balance: read to today, what is owed includes what is dated ahead, as the sidebar has it.
+  const later = end === asOf ? rowsOf.filter((t) => t.date > asOf) : [];
+  const lastOwed = rows[rows.length - 1];
+  if (later.length > 0 && lastOwed) {
+    rows[rows.length - 1] = { ...lastOwed, value: lastOwed.value + later.reduce((sum, t) => sum + owedChange(t), 0), count: lastOwed.count + later.length };
+  }
   const top = Math.max(1, ...rows.map((r) => Math.abs(r.value)));
   const who = name || (chosen.length === 1 ? chosen[0]?.name ?? "" : "your credit lines");
   const by: ChartBy = /^\w{3} \d{1,2}$/.test(steps[0]?.label ?? "") ? "day" : "month";
@@ -610,6 +646,7 @@ export function buildOwedChart(
     othersCount: 0,
     measure: "owed",
     ...(end === asOf ? { running: true } : {}),
+    ...(later.length > 0 ? { ahead: later.length } : {}),
   };
 }
 
@@ -668,15 +705,16 @@ export function chartReading(chart: Chart): string {
   const when = (label: string): string => (chart.by === "day" ? `on ${label}` : chart.by === "week" ? `in the ${label.replace(/^Week/, "week")}` : `in ${label}`);
   const asName = (label: string): string => (chart.by === "week" ? `The ${label.replace(/^Week/, "week")}` : label);
   const lastName = chart.running ? `${asName(last.label)} so far` : asName(last.label);
+  const ahead = chart.ahead ? ` Counts ${chart.ahead} ${chart.ahead === 1 ? "entry" : "entries"} dated after today.` : "";
 
   if (chart.measure === "budget") {
     const budget = chart.against?.total ?? 0;
     if (chart.by === "day") {
-      if (budget === 0) return `${m(last.value)} spent by ${last.label}. No budget is set for this month, so there is no pace to measure against.`;
+      if (budget === 0) return `${m(last.value)} spent by ${last.label}. No budget is set for this month, so there is no pace to measure against.${ahead}`;
       const pace = last.previous ?? 0;
       const gap = pace - last.value;
       const left = budget - last.value;
-      return `${m(last.value)} spent by ${last.label}, ${gap >= 0 ? `${m(gap)} under` : `${m(-gap)} over`} a steady pace to the ${m(budget)} budget. ${left >= 0 ? `${m(left)} of it is left.` : `The budget is passed by ${m(-left)}.`}`;
+      return `${m(last.value)} spent by ${last.label}, ${gap >= 0 ? `${m(gap)} under` : `${m(-gap)} over`} a steady pace to the ${m(budget)} budget. ${left >= 0 ? `${m(left)} of it is left.` : `The budget is passed by ${m(-left)}.`}${ahead}`;
     }
     // A month still running is not over or under yet: it is said apart, with what is left of it.
     const finished = chart.running ? rows.slice(0, -1) : rows;
@@ -687,7 +725,7 @@ export function chartReading(chart: Chart): string {
         : ` ${last.label} is still running, with no budget set.`
       : "";
     if (withBudget.length === 0) {
-      return rows.some((r) => (r.previous ?? 0) > 0) ? now.trim() : "No budget is set for these months, so there is nothing to measure against. Ask me to set one.";
+      return rows.some((r) => (r.previous ?? 0) > 0) ? `${now.trim()}${ahead}` : "No budget is set for these months, so there is nothing to measure against. Ask me to set one.";
     }
     const over = withBudget.filter((r) => r.value > (r.previous ?? 0));
     const worst = [...over].sort((a, b) => b.value - (b.previous ?? 0) - (a.value - (a.previous ?? 0)))[0];
@@ -695,28 +733,31 @@ export function chartReading(chart: Chart): string {
       over.length === 0
         ? `Within the budget in every month that has one (${withBudget.length}).`
         : `Over the budget in ${over.length} of ${withBudget.length} ${withBudget.length === 1 ? "month" : "months"} with one${worst ? `; ${worst.label} by the most, ${m(worst.value - (worst.previous ?? 0))} over` : ""}.`;
-    return `${head}${now}`;
+    return `${head}${now}${ahead}`;
   }
+
+  // A level is read at the end of a month, and on a day.
+  const at = (label: string): string => (chart.by === "day" ? `on ${label}` : `at the end of ${label}`);
 
   if (chart.measure === "balance") {
     if (chart.by === "wallet") {
       const top = rows[0] as ChartRow;
       const below = rows.filter((r) => r.value < 0);
-      return `${top.label} holds the most, ${m(top.value)}${chart.total > 0 && rows.length > 1 ? `, ${percent(top.value, chart.total)}% of the ${m(chart.total)} across these accounts` : ""}.${below.length > 0 ? ` ${below.map((r) => r.label).join(" and ")} ${below.length === 1 ? "is" : "are"} below zero.` : ""}`;
+      return `${top.label} holds the most, ${m(top.value)}${chart.total > 0 && rows.length > 1 ? `, ${percent(top.value, chart.total)}% of the ${m(chart.total)} across these accounts` : ""}.${below.length > 0 ? ` ${below.map((r) => r.label).join(" and ")} ${below.length === 1 ? "is" : "are"} below zero.` : ""}${ahead}`;
     }
     const firstRow = rows[0] as ChartRow;
     const moved = last.value - firstRow.value;
     const low = rows.reduce((a, b) => (b.value < a.value ? b : a), firstRow);
-    const lowNote = rows.length > 2 && low !== firstRow && low !== last ? ` Lowest at the end of ${low.label}, ${m(low.value)}.` : "";
-    return `${m(last.value)} now, ${moved === 0 ? "the same as" : `${moved > 0 ? "up" : "down"} ${m(Math.abs(moved))} from`} ${m(firstRow.value)} at the end of ${firstRow.label}.${lowNote}`;
+    const lowNote = rows.length > 2 && low !== firstRow && low !== last ? ` Lowest ${at(low.label)}, ${m(low.value)}.` : "";
+    return `${m(last.value)} now, ${moved === 0 ? "the same as" : `${moved > 0 ? "up" : "down"} ${m(Math.abs(moved))} from`} ${m(firstRow.value)} ${at(firstRow.label)}.${lowNote}${ahead}`;
   }
 
   if (chart.measure === "owed") {
     const firstRow = rows[0] as ChartRow;
     const peak = rows.reduce((a, b) => (b.value > a.value ? b : a), firstRow);
     const now = last.value <= 0 ? "Nothing owed now: it is paid off." : `${m(last.value)} owed now.`;
-    const was = peak.value > last.value ? ` The most owed was ${m(peak.value)}, at the end of ${peak.label}.` : "";
-    return `${now}${was}`;
+    const was = peak.value > last.value ? ` The most owed was ${m(peak.value)}, ${at(peak.label)}.` : "";
+    return `${now}${was}${ahead}`;
   }
 
   if (chart.against) {

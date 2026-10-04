@@ -99,7 +99,9 @@ export type Clue =
    * 1,018.00 out of Maya is PHP 1,000.00 of cash; saved whole, Cash holds
    * PHP 18.00 that never arrived (4 October 2026).
    */
-  | { readonly kind: "fee-inside"; readonly rows: readonly Transaction[]; readonly explains: Centavos };
+  | { readonly kind: "fee-inside"; readonly rows: readonly Transaction[]; readonly explains: Centavos }
+  /** Entries dated after the day the balance was read, counted already, as every screen counts them (`countAhead`). */
+  | { readonly kind: "ahead"; readonly rows: readonly Transaction[]; readonly explains: Centavos };
 
 export interface Investigation {
   readonly account: string;
@@ -337,6 +339,15 @@ export interface InvestigateInput {
    * it is taken as right, so only what came after is searched.
    */
   readonly matchedOn?: IsoDate | undefined;
+  /**
+   * The balance was read today, so it is set against what every screen
+   * shows: entries dated after today count, and are named as a possible
+   * cause. 4 October 2026, the phone scenario: the sidebar said Cash holds
+   * PHP 14,292.00 and the answer began "The ledger says Cash holds PHP
+   * 13,159.00", a figure no screen shows, because five entries dated after
+   * today were left out.
+   */
+  readonly countAhead?: boolean | undefined;
 }
 
 export function investigate(input: InvestigateInput): Investigation {
@@ -344,7 +355,8 @@ export function investigate(input: InvestigateInput): Investigation {
   const since = input.matchedOn && input.matchedOn < asOf ? input.matchedOn : undefined;
   /** Inside the search: after the day it last matched, or within the look-back. */
   const searched = (t: Transaction, days: number): boolean => (since ? t.date > since : t.date >= addDays(asOf, -days));
-  const onAccount = transactions.filter((t) => t.date <= asOf && movedOn(t, account) !== 0);
+  const onAccount = transactions.filter((t) => (t.date <= asOf || input.countAhead === true) && movedOn(t, account) !== 0);
+  const later = onAccount.filter((t) => t.date > asOf);
   const recorded = onAccount.reduce((sum, t) => sum + movedOn(t, account), 0);
   const gap = recorded - actual;
 
@@ -479,7 +491,17 @@ export function investigate(input: InvestigateInput): Investigation {
     // Without a statement: rows entered twice are evidence enough on their own.
     const recent = onAccount.filter((t) => searched(t, input.lookBackDays ?? 90));
     for (const p of twins(recent, account, onAccount)) {
-      found.push({ kind: "duplicate", row: p.row, twin: p.twin, explains: movedOn(p.row, account) });
+      const explains = movedOn(p.row, account);
+      /*
+       * Not when it matches. Counted and matching, two lunches on one day
+       * were both real: calling the second "entered a second time" beside
+       * "Cash matches" was a false alarm (4 October 2026,
+       * `monthScenarios.test.ts`). A difference the other way still lists
+       * them, as rows worth looking at: on 19 September five such rows were
+       * real duplicates beside a difference they did not explain.
+       */
+      if (gap === 0) continue;
+      found.push({ kind: "duplicate", row: p.row, twin: p.twin, explains });
     }
   }
 
@@ -542,6 +564,14 @@ export function investigate(input: InvestigateInput): Investigation {
    * answer.
    */
   if (unexplained !== 0 && !overshoot) {
+    // Counted, though dated after today: if it has not happened yet, the account cannot show it.
+    const ahead = later.reduce((sum, t) => sum + movedOn(t, account), 0);
+    // Only when they fit inside it: PHP 1,133.00 dated ahead cannot be why the account is PHP 95.00 short.
+    const named = ahead !== 0 && Math.sign(ahead) === Math.sign(unexplained) && Math.abs(ahead) <= Math.abs(unexplained);
+    if (named) possible.push({ kind: "ahead", rows: later, explains: ahead });
+    /** Rows already named as dated ahead are not offered again as "adds up to exactly". */
+    const namedAhead = new Set(named ? later.map((t) => t.id) : []);
+
     /*
      * More recorded than there is, and withdrawals into this account carry a
      * machine's fee inside their figure: each put that fee here too. Said
@@ -572,7 +602,7 @@ export function investigate(input: InvestigateInput): Investigation {
     }
 
     const pool = onAccount
-      .filter((t) => searched(t, input.lookBackDays ?? 60) && (!covered || t.date < covered.from))
+      .filter((t) => searched(t, input.lookBackDays ?? 60) && (!covered || t.date < covered.from) && !namedAhead.has(t.id))
       .map((row) => ({ row, value: movedOn(row, account) }))
       .filter((r) => Math.sign(r.value) === Math.sign(unexplained))
       .sort((a, b) => b.row.date.localeCompare(a.row.date) || Math.abs(b.value) - Math.abs(a.value));
@@ -692,7 +722,7 @@ export function clueWords(clue: Clue): string {
         clue.whole.total,
       )}, which the statement lists in parts: it was entered a second time.`;
     case "together":
-      return `${clue.rows.length === 1 ? "One entry" : `${clue.rows.length} entries`} add up to exactly ${formatMoney(
+      return `${clue.rows.length === 1 ? "One entry adds" : `${clue.rows.length} entries add`} up to exactly ${formatMoney(
         Math.abs(clue.explains),
       )}: ${clue.rows.map(row).join("; ")}. If ${clue.rows.length === 1 ? "it was" : "they were"} never on this account, that is the difference.`;
     case "cash":
@@ -715,6 +745,13 @@ export function clueWords(clue: Clue): string {
       return `${n === 1 ? "One withdrawal was" : `${n} withdrawals were`} saved with the machine's fee inside the figure, so ${formatMoney(clue.explains)} of fees went into this account as if it were cash: ${clue.rows
         .map((t) => `${row(t)}, ${formatMoney(t.amount)}`)
         .join("; ")}. A machine gives whole hundreds. Edit ${n === 1 ? "it" : "each"}: the cash in Amount and the rest in Fee.`;
+    }
+    case "ahead": {
+      const n = clue.rows.length;
+      const shown = clue.rows.slice(0, 3).map(row).join("; ");
+      return `${n === 1 ? "One entry is" : `${n} entries are`} dated after today and counted already, ${formatMoney(Math.abs(clue.explains))} ${
+        clue.explains < 0 ? "out" : "in"
+      }: ${shown}${n > 3 ? `, and ${n - 3} more` : ""}. If ${n === 1 ? "it has" : "they have"} not happened yet, that is the difference; if ${n === 1 ? "it has, edit its date" : "they have, edit their dates"}.`;
     }
     case "unrecorded":
       if (clue.direction === "in" && clue.cash) {

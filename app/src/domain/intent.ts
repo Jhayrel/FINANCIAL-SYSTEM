@@ -104,6 +104,8 @@ export function detectIntent(text: string): Intent {
    * about whether they can, which is the thing they were actually asking.
    */
   if (PLANNING.test(trimmed)) return "ask";
+  // The same plans `isQuestion` knows ("I will be spending 1000 cash tomorrow"), so the button never says Log for one.
+  if (isPlan(trimmed)) return "ask";
 
   // Something done: an entry, whether or not the figure was mentioned.
   if (HAPPENED.test(trimmed)) return "log";

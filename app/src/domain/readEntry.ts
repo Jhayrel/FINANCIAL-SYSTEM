@@ -745,7 +745,7 @@ export function readEntry(
        */
       (namesMoney(text) && !NOT_A_ROW.test(text) && kindByWord(text, reference) !== "") ||
       // One of their bills or subscriptions by name and a price: "spotify 149 maya".
-      (namesMoney(text) && !NOT_A_ROW.test(text) && [...reference.bills, ...reference.subscriptions].some((n) => n.trim() !== "" && namesCredit(text, n))));
+      (namesMoney(text) && !NOT_A_ROW.test(text) && recurringIn(text, [...reference.bills, ...reference.subscriptions]) !== ""));
 
   const flow = readsAsDebt ? null : earnsInterest ? "Revenue" : (flowOf(text) ?? (verbless ? "Spending" : null));
   if (!flow) {
@@ -956,7 +956,15 @@ export function readEntry(
     flow === "Spending" || flow === "Revenue"
       ? itemsFor(flow, flow === "Revenue" ? "Revenue" : "Spending", reference)
       : [];
-  const statesAnItem = itemsHere.some((name) => namesCredit(text, name));
+  /*
+   * One of their bills or subscriptions named outright, longest first: "paid
+   * globe at home wifi 999 from maya" is that bill. Only the spending kinds
+   * were looked at, so "globe" was taken as load and the bill was filed as
+   * Online Buy, where its budget line and due date never saw it (4 October
+   * 2026, `monthScenarios.test.ts`).
+   */
+  const recurringNamed = flow === "Spending" ? recurringIn(text, [...reference.bills, ...reference.subscriptions]) : "";
+  const statesAnItem = recurringNamed !== "" || itemsHere.some((name) => namesCredit(text, name));
   const hint = statesAnItem ? "" : itemHintIn(text);
   const filipinoItem =
     hint && (flow === "Spending" || flow === "Revenue")
@@ -1024,7 +1032,7 @@ export function readEntry(
      * can only ever choose an item they already have: a word with no match
      * leaves the field blank exactly as before.
      */
-    ...(filipinoItem ? { item: filipinoItem } : {}),
+    ...(recurringNamed ? { item: recurringNamed } : filipinoItem ? { item: filipinoItem } : {}),
     ...(interestItem ? { item: interestItem, description: "Interest earned" } : {}),
     /**
      * The credit line, when the sentence named one.
@@ -1310,6 +1318,35 @@ export function splitEntries(text: string): string[] {
 function thingIn(text: string, transactions: readonly Transaction[], person: string): string {
   const found = itemFromHistory(text, transactions.filter((t) => t.type === "Spending" && t.item.trim().toLowerCase() !== person.trim().toLowerCase()));
   return found?.how === "named" ? found.item : "";
+}
+
+/** Words of a bill's name that say nothing about which bill it is. */
+const GENERIC_NAME_WORDS = new Set(["home", "bill", "bills", "plan", "monthly", "subscription", "premium", "family", "postpaid", "prepaid", "account"]);
+
+/**
+ * The bill or subscription a sentence names, in full or as people shorten it,
+ * or "". "Globe at Home Wifi" is said "globe at home", "globe wifi" and "my
+ * wifi bill"; only the whole name was looked for, so the shortened ones read
+ * as nothing, or as load (4 October 2026). A shortened name counts when it
+ * leaves no doubt: every word that tells the bill apart, or the name less its
+ * last word, or one such word beside "bill"; and only when one name fits.
+ */
+export function recurringIn(text: string, names: readonly string[]): string {
+  const flat = (v: string): string => ` ${v.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  const said = flat(text);
+  const listed = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  const whole = listed.filter((n) => said.includes(flat(n))).sort((a, b) => b.length - a.length)[0];
+  if (whole) return whole;
+  const saysBill = /\b(?:bill|bills|subscription)\b/i.test(text);
+  const fits = listed.filter((name) => {
+    const words = flat(name).trim().split(" ");
+    const telling = words.filter((w) => w.length >= 4 && !GENERIC_NAME_WORDS.has(w));
+    const hits = telling.filter((w) => said.includes(` ${w} `));
+    const allTelling = telling.length >= 2 && hits.length === telling.length;
+    const lessLast = words.length >= 3 && said.includes(` ${words.slice(0, -1).join(" ")} `);
+    return allTelling || lessLast || (saysBill && hits.length > 0);
+  });
+  return fits.length === 1 ? (fits[0] ?? "") : "";
 }
 
 function namesCredit(text: string, name: string): boolean {

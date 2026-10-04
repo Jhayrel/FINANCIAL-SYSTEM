@@ -113,7 +113,9 @@ export function Investigate({
     setAsked((prev) => ({ ...prev, ...next, ran: next.ran ?? false }));
   };
 
-  const upToDate = useMemo(() => transactions.filter((t) => t.date <= date), [transactions, date]);
+  // Read today, the ledger's figure is the sidebar's: entries dated ahead count (`countAhead`).
+  const today = date === asOf;
+  const upToDate = useMemo(() => transactions.filter((t) => today || t.date <= date), [transactions, date, today]);
   const recordedNow = account ? walletBalance(upToDate, account) : 0;
   const lines = useMemo(() => readHistory(history, getYear(date)), [history, date]);
   const interestItem = reference.revenueCategories.find((c) => /interest/i.test(c)) ?? "";
@@ -122,9 +124,9 @@ export function Investigate({
   const result = useMemo(
     () =>
       ran && account && actual !== null
-        ? investigate({ transactions, account, actual, asOf: date, statement: lines, matchedOn: matchedOn || undefined })
+        ? investigate({ transactions, account, actual, asOf: date, statement: lines, matchedOn: matchedOn || undefined, countAhead: today })
         : null,
-    [ran, account, actual, date, lines, matchedOn, transactions],
+    [ran, account, actual, date, lines, matchedOn, transactions, today],
   );
 
   const run = (): void => {
@@ -213,6 +215,7 @@ export function Investigate({
           </span>
         );
       case "fee-inside":
+      case "ahead":
         // The owner's entries: opened to edit, never changed from here.
         return (
           <span className="fms-findrow-actions">
@@ -422,7 +425,7 @@ export function Investigate({
                       <li
                       key={`p${i}`}
                       className={
-                        clue.kind === "unrecorded" || clue.kind === "together" || clue.kind === "estimate" || clue.kind === "fee-inside"
+                        clue.kind === "unrecorded" || clue.kind === "together" || clue.kind === "estimate" || clue.kind === "fee-inside" || clue.kind === "ahead"
                           ? "fms-findrow fms-findrow--maybe fms-findrow--stack"
                           : "fms-findrow fms-findrow--maybe"
                       }
