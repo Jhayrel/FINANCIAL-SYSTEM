@@ -354,3 +354,17 @@ describe("any window, and what if", () => {
     expect(text).not.toContain("## What if");
   });
 });
+
+describe("a debt row, as the model reads it", () => {
+  it("says what it does and whose it is, so an advance is never read as money owed", () => {
+    const friend = { id: "friend", name: "Friend loan", kind: "receivable" as const, form: "pass-through" as const, counterparty: "Friend", openedDate: "2026-08-30", wallet: "Cash", interestType: "none" as const, interestRate: 0, notes: "", archived: false };
+    const advance: Transaction = {
+      id: "adv", recordNumber: 90, date: "2026-08-30", type: "Debt", fromWallet: "Cash", toWallet: "", category: "", item: "",
+      description: "For his repair", amount: 50000, fee: 0, total: 50000, notes: "", status: "Paid", debtId: "friend", debtEffect: "lend",
+    };
+    const transactions = [...ledger, advance];
+    const snapshot = buildContext({ transactions, accounts: [], budgets, credits: [friend], reference, lowBalanceThreshold: 0, asOf: "2026-08-31" });
+    const context = buildChatContext({ snapshot, transactions, credits: [friend], asOf: "2026-08-31", question: "what needs attention?" });
+    expect(context.text).toContain("#90 | 2026-08-30 | Debt: Advance on Friend loan (on behalf, advanced for someone) | Cash");
+  });
+});

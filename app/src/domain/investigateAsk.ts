@@ -58,9 +58,14 @@ export function matchedOnIn(text: string, asOf: IsoDate): IsoDate | null {
 const MISMATCH =
   /\b(extra money|more money than|have extra|has extra|got extra|more than (?:the |my )?(?:system|app|ledger|tracker)|less than (?:the |my )?(?:system|app|ledger|tracker)|where('?s| is| are| did| does| do)? (the )?(rest|remaining|difference|missing|balance|it go|they go|my money)|where did (my|the|it)|where('?s| is) my|missing|nawawala|nasaan|doesn'?t match|don'?t match|not match(ing)?|hindi (match|tugma)|mismatch|discrepanc\w*|reconcile|reconciliation|investigate|investigation|find (the|my) (difference|missing)|balance is (off|wrong|different)|does(?:n'?t| not) balance|not balanced|off by|wrong balance|unaccounted|lost money|check my balance|different (from|than) (the )?(app|bank|system))\b/i;
 
-/** A balance said for an account: "my balance is", "the balance now", "check my balance". */
+/**
+ * A balance said for an account: "my balance is", "the balance now", "check
+ * my balance", and, with one figure and the account named, "balance maya
+ * 6000", "maya is 6000 now", "I have 6000 left in maya" (5 October 2026: the
+ * owner wants a balance told to be looked into however it is worded).
+ */
 const BALANCE_SAID =
-  /\b(?:my|the)\b[^.]{0,40}\bbalance\b[^.]{0,40}?\b(?:is|now|are|=|should be)\b|\bbalance\b[^.]{0,30}\b(?:look|check|compare|see)\b|\b(?:look|check|compare)\b[^.]{0,40}\bbalance\b/i;
+  /\b(?:my|the)\b[^.]{0,40}\bbalance\b[^.]{0,40}?\b(?:is|now|are|=|should be)\b|\bbalance\b[^.]{0,30}\b(?:look|check|compare|see)\b|\b(?:look|check|compare)\b[^.]{0,40}\bbalance\b|\bbalance\s+(?:of\s+|in\s+|sa\s+|ng\s+)?[a-z][a-z ()]{1,30}?\s*(?:is\s+|=\s*|:\s*)?(?:₱|php\s*)?\d|\b(?:is|are|has|have|holds?)\s+(?:only\s+|just\s+)?(?:₱|php\s*)?\d[\d,.]*k?\s*(?:now|na lang|left|remaining|today)\b|\b(?:left|remaining)\s*(?:is\s+)?(?:₱|php\s*)?\d/i;
 
 /** Words saying a figure is what the account really holds. */
 const REAL = /\b(balance|really|actual|actually|only have|i have|counted|count|in my (bank|account|wallet)|bank says|app says|sa app|on the app|in the app|left|remaining|holds|has)\b/i;

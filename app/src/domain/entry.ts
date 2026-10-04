@@ -599,9 +599,12 @@ export function checkDraft(
     (savings.has(source) || source.includes("saving")) &&
     (draft.amount ?? 0) > 0
   ) {
+    // Said as Settings files it: a reserve is set aside, a goal is a goal, and only savings is savings.
+    const kind = reference.accountKinds?.[draft.fromWallet];
+    const is = kind === "reserve" ? "a reserve, set aside" : kind === "goal" ? "a goal" : "savings";
     warnings.push({
       field: "fromWallet",
-      message: `${draft.fromWallet} is savings. Taking ${money((draft.amount ?? 0) + draft.fee)} out of it?`,
+      message: `${draft.fromWallet} is ${is}. Taking ${money((draft.amount ?? 0) + draft.fee)} out of it?`,
     });
   }
 

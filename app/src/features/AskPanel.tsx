@@ -131,9 +131,10 @@ import { asksAboutDeleted, deletedRows, deletedWindowIn, deletedWords, onlyAWind
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
-import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, wantsThoseEntries, type Intent } from "../domain/intent";
+import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, wantsThoseEntries, type Intent } from "../domain/intent";
 import { planWorked } from "../domain/planRate";
-import { addressesEveryCard, asksToReadAgain, asksToRename, saysOneWasMissed, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
+import { notPaidIn, paidDraftFor, saysItWasPaid, type NotPaid } from "../domain/notPaid";
+import { addressesEveryCard, asksToReadAgain, asksToRename, saysAllOfIt, saysOneWasMissed, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
 import { asksWhetherAdded, inLedgerOrNot } from "../domain/checkPicture";
 import { kindSaidForAll } from "../domain/saidForAll";
 import { modelLabel } from "../domain/modelName";
@@ -150,9 +151,12 @@ import {
   investigationWords,
   linesFromDrafts,
   readHistory,
+  type Clue,
   type StatementLine,
 } from "../domain/investigate";
 import { buildSheet } from "../domain/statementSheet";
+import { asksToAddTheDifference, differenceNextStep, namedForTheDifference } from "../domain/differenceFollowUp";
+import { withoutFalseDenial } from "../domain/aiText";
 import { asksAboutAFile, exportWords, readExportAsk, sheetRequestOf, statementBrief, statementWords, withSheet, type ExportAsk } from "../domain/exportAsk";
 import { readInvestigateAsk, type InvestigateAsk } from "../domain/investigateAsk";
 import { affordAnswer, followsUpDecision, goesByBalance, isAffordQuestion, readAffordAsk } from "../domain/affordAsk";
@@ -1580,6 +1584,10 @@ export function AskPanel({
    * already in as much as those added (2 October 2026).
    */
   const lastRead = useRef<{ readonly account: string; readonly drafts: readonly Draft[]; readonly at: number } | null>(null);
+  /** A told balance's guess at the difference, made a card only when the next message asks (`differenceFollowUp.ts`). */
+  const heldDifference = useRef<{ readonly draft: Draft; readonly at: number } | null>(null);
+  /** A bill, a fee assessment or a checkout just read, held for "paid it" (`domain/notPaid.ts`). */
+  const heldPaper = useRef<{ readonly docs: readonly NotPaid[]; readonly at: number } | null>(null);
   /** Cards already written down as added, so a second path never writes the same one again. */
   const addedCards = useRef(new Set<string>());
 
@@ -2213,6 +2221,20 @@ export function AskPanel({
     // Steps 2 and 3 below are the work this names: your corrections, then the
     // ledger and Settings. It is set here because it starts here.
     setStage("Checking it against your ledger");
+    /*
+     * A card for the entry a question is still waiting on answers it.
+     * 5 October 2026: "Transfer extra cash to cash" was asked how much, the
+     * chat then wrote the same transfer with its amount as a card, and the
+     * question stayed, so "That's yesterday" went to it and was told there
+     * was no figure in that. The card is the entry now; the question goes.
+     */
+    if (pending && (proposal.draft.amount ?? 0) > 0) {
+      const was = pending.draft;
+      const fits = (a: string, b: string): boolean => !a.trim() || a.trim().toLowerCase() === b.trim().toLowerCase();
+      if (was.flow === proposal.draft.flow && fits(was.fromWallet, proposal.draft.fromWallet) && fits(was.toWallet, proposal.draft.toWallet) && (was.amount === null || was.amount === proposal.draft.amount)) {
+        setPending(null);
+      }
+    }
     /**
      * ── Step 2 of 4: what you have already corrected ────────────────────
      *
@@ -2750,6 +2772,21 @@ export function AskPanel({
         return;
       }
     }
+    /*
+     * A change to the entry rather than the answer: "That's yesterday",
+     * "make it gcash". The owner, 5 October 2026, asked how much a transfer
+     * was: "That's yesterday" was told "I could not find a figure in that".
+     * The entry takes the change, and the same question is asked again.
+     */
+    if (!filled) {
+      const changed = amend(pending.draft, reply, reference, asOf);
+      if (changed && JSON.stringify(changed.draft) !== JSON.stringify(pending.draft) && (changed.draft.amount ?? null) === (pending.draft.amount ?? null)) {
+        const again = nextQuestion(changed.draft, reference, pending.settled);
+        setPending({ ...pending, draft: changed.draft, ...(again ? { blank: again.blank } : {}) });
+        say({ kind: "assistant", ephemeral: true, text: [changed.what, again?.question ?? ""].filter(Boolean).join(" "), from: "this device" });
+        return;
+      }
+    }
     if (!filled) {
       say({
         kind: "assistant",
@@ -3005,6 +3042,12 @@ export function AskPanel({
             .record(said("you", note || `${described.length} attached, not kept.`))
             .catch(() => {});
         });
+    }
+
+    // Paper that asks for money, read just now: "paid it" or "placed it" next makes its card.
+    if (sent.length > 0) {
+      const docs = notPaidIn(result.readings ?? []);
+      heldPaper.current = docs.length > 0 && !saysItWasPaid(note) ? { docs, at: Date.now() } : null;
     }
 
     if (result.source === "offline") {
@@ -3552,27 +3595,44 @@ export function AskPanel({
     const interestItem = reference.revenueCategories.find((c) => /interest/i.test(c)) ?? "";
     const words = investigationWords(result);
     const bold = (text: string): string => text.replace(formatMoney(Math.abs(result.gap)), (m) => `**${m}**`);
-    const reply = [
-      bold(words.headline),
-      ...(statement.length > 0
-        ? [`Checked ${statement.length} ${statement.length === 1 ? "movement" : "movements"} from ${fromPicture ? "the picture you sent before" : "what you sent"} against the ledger.`]
-        : []),
-      ...words.lines.map((line) => (line.endsWith(":") ? line : `- ${line}`)),
-    ].join("\n");
-    say({ kind: "assistant", text: reply, from: "this device" });
-    log(aiEvent("answered", "add", { text: `Investigated ${account}: gap ${formatMoney(result.gap)}, found ${formatMoney(result.explained)}.`, model: "this device" }));
 
     /*
      * What can be put right, as cards. Money nobody wrote down is a card only
      * when nothing in the ledger could be the answer instead: beside two
      * entries that add up to it, a ready-made income card was a guess that
      * would have counted the money twice (3 October 2026, "Random PHP 220.00").
+     *
+     * And only rows the screen or the history shows, or a few centavos of
+     * interest on a savings account. A guess at the rest is held, not
+     * offered: "MY BALANCE NOW IN MAYA IS 6000" came back with a card saving
+     * PHP 2,040.56 as unknown spending (5 October 2026, "it should know if I
+     * am asking or adding entry or investigation"), and every such card
+     * before it had been thrown away. "add it", or what it was ("it was
+     * food"), makes the card (`differenceFollowUp.ts`).
      */
     const ledgerCouldSay = result.possible.some((c) => c.kind === "together" || c.kind === "estimate" || c.kind === "wrong-account" || c.kind === "fee-inside" || c.kind === "ahead");
-    const adds = [...result.found, ...result.possible]
-      .filter((clue) => !(clue.kind === "unrecorded" && ledgerCouldSay))
+    const shown = (clue: Clue): boolean =>
+      clue.kind === "missing" || (clue.kind === "unrecorded" && clue.direction === "in" && !clue.cash && interestItem !== "" && Math.abs(clue.explains) <= 10000);
+    const clues = [...result.found, ...result.possible].filter((clue) => !(clue.kind === "unrecorded" && ledgerCouldSay));
+    const adds = clues
+      .filter(shown)
       .map((clue) => draftForClue(clue, account, readOn, interestItem))
       .filter((draft): draft is Draft => draft !== null);
+    const guessClue = adds.length === 0 && !ledgerCouldSay ? clues.find((c) => (c.kind === "unrecorded" || c.kind === "cash") && !shown(c)) : undefined;
+    const guess = guessClue ? draftForClue(guessClue, account, readOn, interestItem) : null;
+    heldDifference.current = guess ? { draft: guess, at: Date.now() } : null;
+
+    const reply = [
+      bold(words.headline),
+      ...(statement.length > 0
+        ? [`Checked ${statement.length} ${statement.length === 1 ? "movement" : "movements"} from ${fromPicture ? "the picture you sent before" : "what you sent"} against the ledger.`]
+        : []),
+      ...words.lines.map((line) => (line.endsWith(":") ? line : `- ${line}`)),
+      ...(guess ? [differenceNextStep(guess, account)] : []),
+    ].join("\n");
+    say({ kind: "assistant", text: reply, from: "this device" });
+    log(aiEvent("answered", "add", { text: `Investigated ${account}: gap ${formatMoney(result.gap)}, found ${formatMoney(result.explained)}.`, model: "this device" }));
+
     /*
      * Each card is checked against its own line, not the whole message: the
      * message holds the balance, and comparing a ₱500.00 cinema line with
@@ -3676,6 +3736,20 @@ export function AskPanel({
   ): Promise<void> => {
     if (echo) say({ kind: "you", text: question });
     for (const chart of drawn) drawChart(chart);
+    /*
+     * "Can you explain that?" straight after a chart is about that chart.
+     * The model is sent the conversation as words, and a chart is not words:
+     * after a trend of Maya's spending in September it explained all of
+     * September instead, PHP 24,502.71 against the chart's PHP 9,689.65
+     * (3 October 2026).
+     */
+    const chartJustShown = drawn.length === 0 && !worked ? [...turns.slice(-3)].reverse().find(isChart)?.chart : undefined;
+    if (chartJustShown && question.split(/\s+/).length <= 15 && /\b(?:that|this|it|these|those|the (?:chart|graph|trend|pie|bars?|line)|explain|why|what does|what do you (?:think|see)|meaning|mean|summari[sz]e|tell me more|ano ibig)\b/i.test(question)) {
+      worked = {
+        text: `The chart just shown, which "that", "this" and "it" in the message mean. Answer about it and its figures, not the whole month:\n${chartsWorked([chartJustShown], chartInWords)}`,
+        fallback: chartReading(chartJustShown),
+      };
+    }
     if (drawn.length > 0) {
       const shown = chartsWorked(drawn, chartInWords);
       worked = {
@@ -3760,8 +3834,9 @@ export function AskPanel({
       return;
     }
     const from = answer.source === "model" ? model : (answer.reason ?? model);
-    say({ kind: "assistant", text: answer.text, from });
-    log(aiEvent("answered", "add", { text: answer.text, model }));
+    const answerText = answer.source === "model" ? withoutFalseDenial(answer.text) : answer.text;
+    say({ kind: "assistant", text: answerText, from });
+    log(aiEvent("answered", "add", { text: answerText, model }));
     /*
      * An entry the answer worked out, offered as a card at once.
      *
@@ -3775,7 +3850,7 @@ export function AskPanel({
      * Entry line and a PHP 1,000.00 card for money not yet spent (4 October
      * 2026). It is a decision; it becomes an entry when the money moves.
      */
-    if (answer.source === "model" && !isPlan(question)) await offerFromAnswer(answer.text);
+    if (answer.source === "model" && !isPlan(question)) await offerFromAnswer(answerText);
   };
 
   /** The "Entry:" line of an answer, as a card. False when there is none, or it reads as nothing. */
@@ -3846,6 +3921,67 @@ export function AskPanel({
       setDraft("");
       await send(message, "log");
       return;
+    }
+
+    /*
+     * "add it", or what it was ("it was food"), straight after a difference
+     * was found: the guess held back from that answer becomes the card. Any
+     * other message lets it go, so a later "add it" means something else.
+     */
+    const heldGuess = heldDifference.current && Date.now() - heldDifference.current.at < 30 * 60_000 ? heldDifference.current.draft : null;
+    heldDifference.current = null;
+    if (heldGuess && files.length === 0 && !as) {
+      const named = namedForTheDifference(note, heldGuess, reference);
+      if (named || asksToAddTheDifference(note)) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        await offer(
+          { draft: named ?? heldGuess, confidence: "medium", sourceRef: "the difference", adjustments: ["The difference found above, added because you asked."] },
+          named ? note : (heldGuess.description || note),
+          !named,
+        );
+        return;
+      }
+    }
+
+    /*
+     * "placed it, paid with gcash", "paid it from cash", after a bill, a fee
+     * assessment or a checkout screen was read and nothing was added: its
+     * card, as the answer said it would be.
+     */
+    const paper = heldPaper.current && Date.now() - heldPaper.current.at < 60 * 60_000 ? heldPaper.current.docs : null;
+    if (paper && files.length === 0 && !as && saysItWasPaid(note) && note.trim().split(/\s+/).length <= 14) {
+      heldPaper.current = null;
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      for (const doc of paper) {
+        await offer(
+          { draft: paidDraftFor(doc, note, reference, asOf), confidence: "medium", sourceRef: "the picture above", adjustments: ["From the picture above, now that you say it was paid."] },
+          note,
+          true,
+        );
+      }
+      return;
+    }
+
+    /*
+     * "Add it again", straight after a card was thrown away: that card, as it
+     * was. 4 October 2026: it went to the model, which said it could not add
+     * entries and made a different one (Online Buy, "spending online") in
+     * place of the load the picture showed.
+     */
+    if (files.length === 0 && !as && /^\s*(?:ok(?:ay)?|pls|please|sige)?[\s,]*(?:add|save|log|record|put)\s+(?:it|that|this|that one)\s+(?:again|back)\b|^\s*re-?add\b/i.test(note)) {
+      const lastCard = [...turns].reverse().find(isOffer);
+      if (lastCard && lastCard.state === "discarded") {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const again = lastCard.live ?? lastCard.proposal.draft;
+        await offer({ ...lastCard.proposal, draft: again, adjustments: [...lastCard.proposal.adjustments.filter((a) => !/^Added again/.test(a)), "Added again, as it was before you discarded it."] }, lastCard.proposal.said ?? again.description, false);
+        return;
+      }
     }
 
     /*
@@ -4052,8 +4188,14 @@ export function AskPanel({
       files.length === 0 &&
       !as &&
       !wantsDiscardOpen(note) &&
-      looksLikeAnswer(note, pending.blank) &&
-      !(pending.blank === "amount" && note.trim().split(/\s+/).length >= 4 && readEntry(note, transactions, reference, asOf).draft.flow !== "");
+      (looksLikeAnswer(note, pending.blank) || pendingOptions.includes(note) || (pending.blank === "amount" && saysAllOfIt(note))) &&
+      !(
+        pending.blank === "amount" &&
+        note.trim().split(/\s+/).length >= 4 &&
+        !saysAllOfIt(note) &&
+        !pendingOptions.includes(note) &&
+        readEntry(note, transactions, reference, asOf).draft.flow !== ""
+      );
     if (answersPending) {
       setDraft("");
       setBusy(true);
@@ -4440,7 +4582,15 @@ export function AskPanel({
      * August is closed (28 September 2026). A question goes to the model.
      */
     const asksAboutBudget = isQuestion(note) || /^\s*(?:how about|what about|why|what|how|is|are|can|could|should|would)\b/i.test(ruled);
-    const saysBudget = couldBudget && (namesBudgetCommand(lead) || (!essay && routed?.intent === "budget" && !asksAboutBudget));
+    /*
+     * Nor is the router saying "budget" enough for talk about spending.
+     * 5 October 2026, after a weekly plan was answered: "Just usual not too
+     * deep, safe to spend" (a plainer answer, please) opened a budget change
+     * for May 2027. A change is asked for in words that name the budget or
+     * say to set something; anything else goes to the model as talk.
+     */
+    const namesTheBudget = /\b(?:budget|buget|budjet|bugdet|limit|allocation|allot\w*)\b|\b(?:set|apply|use|change|update|adjust|raise|lower|increase|decrease|cut)\b/i.test(ruled);
+    const saysBudget = couldBudget && (namesBudgetCommand(lead) || (!essay && routed?.intent === "budget" && !asksAboutBudget && namesTheBudget));
 
     /**
      * "add that budget", with the figure sitting in the answer above it.
@@ -4932,7 +5082,6 @@ export function AskPanel({
       // Said and cleared like every other message: it stayed in the box, unsent-looking (28 September 2026).
       setDraft("");
       say({ kind: "you", text: note });
-      log(aiEvent("asked", "add", { text: note }));
       say({ kind: "assistant", text: words, from: "this device" });
       say({ kind: "export", ask: askedToExport, state: "open" });
       log(aiEvent("answered", "statements", { text: words, model: "this device" }));
@@ -5129,7 +5278,6 @@ export function AskPanel({
       const flagged = flaggedRows(transactions);
       setDraft("");
       say({ kind: "you", text: note });
-      log(aiEvent("asked", "add", { text: note }));
       if (flagged.length === 0) {
         const reply = "The app's checks find nothing wrong in the ledger: every total adds up, and every row has its wallet, its item and its category. If one entry looks wrong to you, name it and I will find it.";
         say({ kind: "assistant", text: reply, from: "this device" });
@@ -5156,7 +5304,6 @@ export function AskPanel({
       const found = deletedRows(deleted, window);
       setDraft("");
       say({ kind: "you", text: note });
-      log(aiEvent("asked", "add", { text: note }));
       const reply = deletedWords(found, deleted.length, window);
       say({ kind: "assistant", text: reply, from: "this device" });
       if (found.length > 0) {
@@ -5523,7 +5670,15 @@ export function AskPanel({
       const namesGrouping = /\b(?:by|per)\s+(?:items?|months?|days?|weeks?|wallets?|accounts?|categor(?:y|ies)|years?)\b|\b(?:monthly|daily|weekly|yearly)\b/i.test(ruled);
       const regrouped = namesGrouping ? shownTitle.replace(/\s+by\s+(?:item|wallet|category|month|day|week|year)\b/i, "") : shownTitle;
       const title = !shown ? "" : namesDirection ? regrouped.replace(/^(?:spending|income)\s+/i, "") : regrouped;
-      const carriedTitle = !shown
+      /*
+       * A snapshot hands on nothing. "Balance by account, today" carried its
+       * "today" into "I want graphs", "Chart" and "Spending", each answered
+       * "nothing in that period", and into "my chart in maya balance", drawn
+       * as one point (5 October 2026). What a snapshot measured is kept
+       * below (`keptMeasure`); its day is not.
+       */
+      const snapshot = shown?.measure === "balance" && shown.by === "wallet";
+      const carriedTitle = !shown || snapshot
         ? note
         : !namesPeriod
           ? `${note} ${title}`
@@ -5586,10 +5741,41 @@ export function AskPanel({
       const fresh = !followUp && !narrows;
       const keptMeasure: ChartHint | null =
         !fresh && shown?.measure && !namesDirection ? { money: shown.measure, ...(shown.by === "wallet" ? { by: "wallet" as const } : {}) } : null;
-      const hint = mergeHint(localHint(ruled, credits) ?? keptMeasure, fresh ? (routed?.draw ?? null) : null, ruled, credits);
-      const drawn = chartsFor(asked, hint, measureOf(hint) ? null : pair);
+      /*
+       * "I want graphs", "Chart", nothing else, after a snapshot of what each
+       * account holds: the same money over time, which a second snapshot
+       * would not show.
+       */
+      const bare = !namesPeriod && !namesDirection && !saysGrouping && localHint(ruled, credits) === null;
+      const overTime = snapshot && bare;
+      const hint = overTime
+        ? ({ money: "balance" } as ChartHint)
+        : mergeHint(localHint(ruled, credits) ?? (snapshot ? null : keptMeasure), fresh ? (routed?.draw ?? null) : null, ruled, credits);
+      const askedNow = overTime ? `${note} balance this year` : asked;
+      let drawn = chartsFor(askedNow, hint, measureOf(hint) ? null : pair);
+      /*
+       * A window carried over from the chart before, with nothing in it, or a
+       * budget chart of years with no budget ("Budget vs spending" after
+       * "2022"), is widened to this month and then this year, and says so.
+       * A window the message named itself is drawn as named.
+       */
+      let widened = "";
+      const noBudget = measureOf(hint) === "budget" && drawn.length > 0 && !drawn.some((c) => c.rows.some((r) => (r.previous ?? 0) > 0));
+      if (!namesPeriod && askedNow !== note && (drawn.length === 0 || noBudget)) {
+        for (const window of noBudget ? ["this year"] : ["this month", "this year"]) {
+          const wider = chartsFor(`${note} ${window}`, hint, null);
+          if (wider.length > 0 && (!noBudget || wider.some((c) => c.rows.some((r) => (r.previous ?? 0) > 0)))) {
+            widened = noBudget
+              ? `No budget was set in ${shown?.title.split(", ").pop() ?? "that period"}, so this is ${window}.`
+              : `Nothing in ${shown?.title.split(", ").pop() ?? "that period"} to draw, so this is ${window}.`;
+            drawn = wider;
+            break;
+          }
+        }
+      }
       setDraft("");
       say({ kind: "you", text: note });
+      if (widened) say({ kind: "assistant", text: widened, from: "this device" });
       for (const chart of drawn) drawChart(chart);
 
       const measure = measureOf(hint);
@@ -6130,7 +6316,7 @@ export function AskPanel({
             isQuestion(note)
             ? "ask"
             : routed
-              ? routed.intent === "question" || routed.intent === "chat"
+              ? routed.intent === "question" || routed.intent === "chat" || routed.intent === "budget"
                 ? "ask"
                 : "log"
               : detectIntent(note));
@@ -6419,6 +6605,20 @@ export function AskPanel({
          * contain the word "then". Fragments in between are skipped and said
          * out loud, rather than taking the rest down with them.
          */
+        /*
+         * A piece with no figure and no word that money moved is a fragment,
+         * and a piece that asks is a question: neither is offered. 5 October
+         * 2026, "Thats apply today or this week? A gas can last a week or 4
+         * days" came back as a Parking card and a Gas card with no amount.
+         */
+        const fragment = (i: number): boolean => {
+          const line = lines[i] ?? "";
+          const r = each[i];
+          return isQuestion(line) || (r !== undefined && !r.readsAsDebt && (r.draft.amount ?? 0) <= 0 && !saysItHappened(line));
+        };
+        each.forEach((r, i) => {
+          if (fragment(i)) each[i] = { ...r, worthOffering: false, readsAsDebt: false };
+        });
         const usable = each.filter((r) => r.readsAsDebt || r.worthOffering);
 
         if (usable.length > 1) {

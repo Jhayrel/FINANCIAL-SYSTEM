@@ -52,6 +52,7 @@ import { readWalletReceipt, walletFor, walletReceiptNote, walletReceiptsIn, type
 import { interestNote, readInterestCredit, type InterestCredit } from "../domain/interestCredit";
 import { cashWallet, readWithdrawal, slipsIn, withdrawalNote, type Withdrawal } from "../domain/withdrawal";
 import { cardSlipNote, cardSlipsIn, readCardSlip, type CardSlip } from "../domain/cardSlip";
+import { isNotPaidFigure, notPaidIn, notPaidNote, notPaidWords, readNotPaid, saysItWasPaid } from "../domain/notPaid";
 import { acceptableWording, onlyTheirFigures, type SpendNote } from "../domain/spendNote";
 import { readPicture } from "./ocr";
 import { pairBorrowings, readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
@@ -710,7 +711,29 @@ function extractContext(options: ExtractOptions): string {
  * presses the button. See `domain/proposal.ts`.
  */
 export async function extractProposals(options: ExtractOptions): Promise<ExtractResult> {
-  return onDeviceWhenUnread(await extractRead(options), options);
+  return onDeviceWhenUnread(holdNotPaid(await extractRead(options), options.note), options);
+}
+
+/**
+ * A bill, an assessment of fees or a checkout screen makes no card unless
+ * the owner says it was paid (`domain/notPaid.ts`). A card the model made on
+ * one of its figures anyway is held back, and the owner is told what the
+ * picture is and how to add it once it is paid.
+ */
+export function holdNotPaid(result: ExtractResult, note: string | undefined): ExtractResult {
+  const readings = result.readings ?? [];
+  const docs = notPaidIn(readings);
+  if (docs.length === 0 || saysItWasPaid(note)) return result;
+  // Any of a document's figures when every picture is one; its amounts only, beside a real receipt.
+  const onlyThese = docs.length * 2 >= readings.length;
+  const held = (p: Proposal): boolean =>
+    onlyThese ? isNotPaidFigure(p.draft.amount, docs) : docs.some((d) => d.amount === p.draft.amount || d.whole === p.draft.amount);
+  return {
+    ...result,
+    proposals: result.proposals.filter((p) => !held(p)),
+    refused: [...result.refused, ...docs.map((d) => ({ sourceRef: "the picture", reason: notPaidWords(d) }))],
+    ...(result.source === "offline" && result.proposals.length === 0 ? { source: "device" as const } : {}),
+  };
 }
 
 /**
@@ -787,6 +810,9 @@ async function extractRead(options: ExtractOptions): Promise<ExtractResult> {
   // An e-wallet's confirmation: sent, paid, a bill, load, received (domain/walletReceipt.ts).
   const walletReads = readings.map((r, i) => (r && !credits[i] && !slips[i] && !cardReads[i] ? readWalletReceipt([r.raised, r.plain]) : null));
   const walletReceipts = walletReads.filter((w): w is WalletReceipt => w !== null);
+  // A bill, an assessment of fees or a checkout screen: money asked for, not paid (domain/notPaid.ts).
+  const notPaids = readings.map((r, i) => (r && !credits[i] && !slips[i] && !cardReads[i] && !walletReads[i] ? readNotPaid([r.raised, r.plain]) : null));
+  const paidSaid = saysItWasPaid(options.note);
   /*
    * Only the screens in the request: each picture is its own request, and a
    * screen's reference number or date read as money (₱10.00 for October)
@@ -799,7 +825,7 @@ async function extractRead(options: ExtractOptions): Promise<ExtractResult> {
       return own && w ? [w] : [];
     });
   // Never a shop receipt as well: its "total" there is the interest before tax, or the cash and the fee.
-  const receipts = readings.map((r, i) => (r && !credits[i] && !slips[i] && !walletReads[i] ? readReceipt([r.plain, r.raised], options.asOf) : null));
+  const receipts = readings.map((r, i) => (r && !credits[i] && !slips[i] && !walletReads[i] && !notPaids[i] ? readReceipt([r.plain, r.raised], options.asOf) : null));
   const found = receipts.filter((r): r is ReceiptCheck => r !== null);
   const asText: Attachment[] = [];
   const stillPictures: Attachment[] = [];
@@ -841,6 +867,8 @@ async function extractRead(options: ExtractOptions): Promise<ExtractResult> {
             ? `${asRead}\n${cardSlipNote(cardReads[i]!)}`
           : asRead && walletReads[i]
             ? `${asRead}\n${walletReceiptNote(walletReads[i]!, walletFor(walletReads[i]!.app, options.reference))}`
+          : asRead && notPaids[i]
+            ? `${asRead}\n${notPaidNote(notPaids[i]!, paidSaid)}`
           : asRead && receipt
             ? `${asRead}\n${receiptNote(receipt)}`
             : asRead;

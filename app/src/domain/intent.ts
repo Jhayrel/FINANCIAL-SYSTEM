@@ -74,6 +74,11 @@ const AMOUNT = /(?:₱|php)?\s*\d{1,3}(?:,\d{3})+(?:\.\d+)?|(?:₱|php)?\s*\d+\.
 const HAPPENED =
   /\b(spent|paid|bought|purchased|received|recieved|recived|earned|earnd|sent|transferred|transfered|withdrew|withdrawed|deposited|gave|borrowed|lent|loaned|collected|loaded|refunded|topped up|cashed out|kumita|natanggap|nagbayad|bumili|binili|nagpadala|nangutang|pinautang|nag[- ]?(?:withdraw|withdrew|deposit|transfer|send|load|padala|bayad|bili|utang))\b/i;
 
+/** Says money has already moved: "paid", "bought", "received", "nagbayad". */
+export function saysItHappened(text: string): boolean {
+  return HAPPENED.test(text);
+}
+
 /** What this message most likely wants. */
 /**
  * Money not spent yet.
@@ -91,7 +96,7 @@ export function detectIntent(text: string): Intent {
   if (!trimmed) return "ask";
 
   // An explicit question is a question, whatever else is in it.
-  if (trimmed.endsWith("?")) return "ask";
+  if (trimmed.endsWith("?") || askedThenSaid(trimmed)) return "ask";
   if (ASKING.test(trimmed)) return "ask";
   if (ASKING_ANYWHERE.test(trimmed)) return "ask";
 
@@ -175,7 +180,7 @@ const REQUESTING =
  * So these are matched anywhere.
  */
 const ADVICE =
-  /\b(what should i|should i|shall i|what would you|what do you think|do you think i|any advice|advise me|is it (?:good|bad|wise|smart|ok|okay|worth|better)|is that (?:good|bad|wise|worth|better)|worth it|help me decide|ano ang dapat|dapat ba)\b/i;
+  /\b(what should i|should i|shall i|what would you|what do you think|do you think i|any advice|advi[cs]e me|(?:pls|please|plz)\s+advi[cs]e|need (?:your )?advi[cs]e|help me (?:with|on|budget|plan|save|decide|manage|cut|spend|understand|figure)|i need help|need help (?:with|on)|is it (?:good|bad|wise|smart|ok|okay|worth|better)|is that (?:good|bad|wise|worth|better)|worth it|help me decide|ano ang dapat|dapat ba)\b/i;
 
 /**
  * Asking what to do, which outranks everything a sentence also contains.
@@ -413,6 +418,7 @@ export function isQuestion(text: string): boolean {
   if (!trimmed) return true;
   return (
     trimmed.endsWith("?") ||
+    askedThenSaid(trimmed) ||
     ASKING.test(trimmed) ||
     REQUESTING.test(trimmed) ||
     ADVICE.test(trimmed) ||
@@ -421,6 +427,27 @@ export function isQuestion(text: string): boolean {
     ASKED_ELSEWHERE.test(trimmed) ||
     isPlan(trimmed)
   );
+}
+
+/**
+ * A question, then a sentence of what it is about, with no money in either.
+ *
+ * The owner, 5 October 2026, after "How much gas can I use?" was answered
+ * PHP 250.00: "Thats apply today or this week? A gas can last a week or 4
+ * days". The question mark was mid-message, so the whole was not a question,
+ * and it was cut in two and offered as a Parking card and a Gas card, both
+ * with no amount. A question followed by its context is still a question.
+ * A figure that is money ("is that right? I paid 300 for gas") is left to
+ * the entry reader; a count of days, weeks or litres is not money.
+ */
+export function askedThenSaid(text: string): boolean {
+  const trimmed = text.trim();
+  if (!/\?\s*\S/.test(trimmed)) return false;
+  const withoutCounts = trimmed.replace(
+    /\b\d+(?:\.\d+)?\s*(?:days?|weeks?|wks?|months?|mos?|years?|yrs?|hours?|hrs?|minutes?|mins?|times?|x|liters?|litres?|l|km|kms|kilometers?|pcs|pieces?|people|persons?|pax|meals?|%)(?![a-z])/gi,
+    " ",
+  );
+  return !/\d/.test(withoutCounts) && !HAPPENED.test(trimmed);
 }
 
 /**

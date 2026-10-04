@@ -144,9 +144,23 @@ export function respell(text: string): string {
     });
 }
 
-/** "may" the verb, which is not the month: "it may be", "I may need". */
+/**
+ * "may" the verb, which is not the month: "it may be", "you may cover it".
+ *
+ * The month only where a month is meant: after "in", "for", "next" and the
+ * like, before a year or a day, or in a range. 5 October 2026, an answer's
+ * "you may ..." put a budget change on May 2027.
+ */
 const notTheMonth = (text: string): string =>
-  respell(text).replace(/\bmay\b(?=\s+(?:be|have|need|not|also|still|want|help|go|get|use|spend|pay|buy|i|we|you|it|as|want)\b)/gi, "might");
+  respell(text).replace(/\bmay\b/gi, (word, at: number, whole: string) => {
+    const before = whole.slice(Math.max(0, at - 12), at).toLowerCase();
+    const after = whole.slice(at + word.length, at + word.length + 14).toLowerCase();
+    const isMonth =
+      /\b(?:in|for|of|this|next|last|until|till|to|from|by|since|on|during|before|after|thru|through|and|or|early|late|mid|end of)\s+$|[,(-]\s*$/.test(before) ||
+      /^\s*(?:\d|20\d{2}|to\b|until\b|till\b|[-\u2010-\u2015]|onwards?\b|budget\b|spending\b|bills?\b)/.test(after) ||
+      /^\s*$/.test(after);
+    return isMonth ? word : "might";
+  });
 
 function monthIn(raw: string, asOf: IsoDate): { year: number; month: number } {
   const text = notTheMonth(raw);

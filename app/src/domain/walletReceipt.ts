@@ -131,13 +131,17 @@ function partyIn(lines: readonly string[], kind: WalletReceiptKind, text: string
       .replace(/\s{2,}/g, " ")
       .trim()
       .slice(0, 40);
-  const ok = (s: string): boolean => /[a-z]{2}/i.test(s) && !/\b(?:gcash|maya|amount|total|fee|ref|via|successful)\b/i.test(s);
+  // An e-mail address is where the receipt went, never who was paid: "Receipt sent to" (4 October 2026).
+  const ok = (s: string): boolean => /[a-z]{2}/i.test(s) && !/\b(?:gcash|maya|amount|total|fee|ref|via|successful)\b/i.test(s) && !/@|\b(?:gmail|yahoo|outlook|hotmail)\b|\.com\b/i.test(s);
+  const named = /^\s*(?:to|recipient|account name|biller(?: name)?|merchant(?: name)?)\s*[:-]?\s+(.+)$/im;
   const patterns =
     kind === "received"
       ? [/\b(?:received (?:money )?from|from)\s*[:-]?\s+(.+)$/im, /^\s*sender\s*[:-]?\s+(.+)$/im]
       : [
-          /\b(?:sent to|paid to|transferred to|transfer to|send to)\s*[:-]?\s*(.+)$/im,
-          /^\s*(?:to|recipient|account name|biller(?: name)?|merchant(?: name)?)\s*[:-]?\s+(.+)$/im,
+          // A bank transfer prints the account's name on its own line: that is who it went to.
+          ...(kind === "bank" ? [named] : []),
+          /\b(?<!receipt\s)(?:sent to|paid to|transferred to|transfer to|send to)\s*[:-]?\s*(.+)$/im,
+          named,
         ];
   for (const p of patterns) {
     const said = tidy(p.exec(text)?.[1] ?? "");

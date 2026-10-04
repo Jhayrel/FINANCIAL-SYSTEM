@@ -214,6 +214,14 @@ export interface ReferenceLists {
    */
   readonly credits?: readonly string[];
   /**
+   * Each account's kind as Settings has it. `savings` above holds every
+   * account set aside (savings, goals and reserves) because they all sit
+   * apart from the spending money; this says which one each is, so a
+   * reserve is never called savings (5 October 2026: "In add it say extra
+   * cash is a saving", of a Reserve account).
+   */
+  readonly accountKinds?: Readonly<Record<string, "spending" | "savings" | "goal" | "reserve">>;
+  /**
    * The people money is paid or held for (On behalf), with their side.
    *
    * Named apart from the credit lines because naming one is not debt by

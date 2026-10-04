@@ -911,6 +911,41 @@ you be specific? Like look it say January like make sure its align." Then
 | The chat said only "a statement for January 2022 to October 2026, so far" | `statementWords`: which statement, the days, "(today)", the number of entries, brought forward, money in, money out, the balance at the end, and where it starts and why. The card shows the days and the count, and keeps them, so a file saved later is the one described |
 | "Date issued 4 October 2026" beside "May 1, 2022" | Month first everywhere: "October 4, 2026, 5:18 PM" |
 | A question about a statement made a new one | `asksAboutAFile`: pointing back ("that statement", "my statement", "the PDF") and asking (what, is it right, explain, check) is a question. It goes to the model with that statement's figures (`statementBrief`): the days, totals, each year, the three largest each way and its notes. Asking for it again (give, send, export, again) still makes the file. None of the owner's 13 earlier file requests changes |
+### 2026-10-05: asking, adding or looking, and the receipts to train on
+
+Daily use, five reports. "MY BALANCE NOW IN MAYA IS 6000" came back with a
+card saving the difference as unknown spending; "fix this it should know if
+I am asking or adding entry or investigation etc". The savings warning
+called Extra Cash, a reserve, "a saving". "Transfer extra cash to cash" was
+asked how much; "Check my balance and transfer it" went to the chat, which
+said it could not transfer and wrote a second card; "That's yesterday" was
+told "I could not find a figure in that". "Thats apply today or this week?
+A gas can last a week or 4 days" became a Parking card and a Gas card with
+no amount. "Just usual not too deep, safe to spend" opened a budget change
+for May 2027. And fourteen receipts: "Training receipts. Dont add this just
+train". Nothing of the owner's was written or added; the receipt texts in
+the tests are invented in the same layouts.
+
+| Found | Done |
+|---|---|
+| A told balance made a card for the difference | The difference is explained and nothing is offered. The guess is held, and becomes a card only when the next message asks: "add it", or what it was, "it was food" (`differenceFollowUp.ts`). The answer ends "Nothing is added. Say what the ₱2,040.56 was ..." |
+| "Extra Cash is savings" | Settings' own word: "a reserve, set aside", "a goal", or savings (`accountKinds` on the reference lists) |
+| "How much?" of a transfer had no answer for all of it | "all of it", "everything", "lahat", "check my balance and transfer it" is what the account holds less the fee, and an "All of it (₱1,000.00)" button sits under the question (`saysAllOfIt`, `allOf`) |
+| "That's yesterday" while it asked how much | The entry takes the change and the same question is asked again |
+| The chat's card for the same transfer left the question open | A card for the entry a question waits on answers it; "I cannot transfer it" is taken out of answers like "I cannot add it" |
+| "Transfer maya to cash" with no figure was not an entry without a model | The account before "to" is the source; a transfer between two named accounts asks how much |
+| A question mark mid-message, then context, was cut into empty cards | `askedThenSaid`: a question followed by more words with no money in them (a count of days or litres is not money) is a question. The splitter offers no piece that asks or has no figure and no "paid" word |
+| The router's "budget" alone opened a budget change | Only with words that name the budget or say to set something; "may" the verb is never the month May |
+| "advice me", "help me budget", "I need help" were not questions | They are |
+| A bill, a fee assessment and two checkout screens read as purchases | `notPaid.ts`: "not a receipt", "please pay on or before", "statement of account", an assessment's amount due, "Place Order". The owner is told what it is, what it asks for and by when, and nothing is added; "paid it from cash" or "placed it, paid with gcash" next makes its card (bill on the bills list, checkout as an online purchase, fees as school). A card a model made on one anyway is held back |
+| A school's official receipt read 2,600.00 in one reading; the LTO total was in no reading | `amountInWords`: "Four Hundred Thirty One And 06/100 Pesos Only" is checked against the figures, and "...thousand only" says whole thousands. A receipt that is only a breakdown is the sum of its lines. "MODE OF PAYMENT: CASH" is cash |
+| DEFERRED INCOME-TUITION on a receipt | The model is told a receipt is money paid out whatever its lines say; a fee breakdown is one row; a renewal or due date is not the day paid; RECEIVED FROM another person they pay for is On behalf; 0.00 lines are free items; two tickets of one purchase are one row |
+| A GCash bank transfer's recipient was read from "Receipt sent to" (an e-mail) | The account name, and an address is never a recipient |
+
+What the phone's reader could not read at all: the dessert receipt under
+pink light and the faded supermarket tape. Those go to the vision model,
+which has the new rules. The cinema tickets were unreadable on the device too.
+
 ---
 
 ## 6. What the owner has to do

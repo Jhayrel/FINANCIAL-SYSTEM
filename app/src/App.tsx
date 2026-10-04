@@ -838,6 +838,7 @@ export default function App() {
     return {
       wallets: namesOf(["spending"]),
       savings: namesOf(["savings", "goal", "reserve"]),
+      accountKinds: Object.fromEntries(settings.accounts.filter((a) => !a.archived && a.name.trim()).map((a) => [a.name.trim(), a.kind])),
       bills: lists.bills,
       subscriptions: lists.subscriptions,
       revenueCategories: lists.revenueCategories,

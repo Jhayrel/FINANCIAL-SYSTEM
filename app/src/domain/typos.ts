@@ -58,6 +58,13 @@ const COMMAND_WORDS = [
   "every",
   "until",
   "through",
+  // "Trand" drew a pie of the month instead of a trend (3 October 2026).
+  "trend",
+  "trends",
+  "chart",
+  "charts",
+  "graph",
+  "graphs",
 ] as const;
 
 /** Real words one keystroke from a command word, which mean themselves. */
@@ -101,6 +108,16 @@ const REAL_WORDS = new Set([
   "balanced",
   "limbo",
   "correcting",
+  "tread",
+  "treads",
+  "trent",
+  "chard",
+  "charm",
+  "charms",
+  "chant",
+  "chants",
+  "grape",
+  "grapes",
 ]);
 
 /** Optimal string alignment distance, capped: only "is it one keystroke" matters here. */

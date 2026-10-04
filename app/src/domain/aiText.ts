@@ -121,3 +121,25 @@ export const PLAIN_TEXT_RULES = [
   "Never use an em dash. Use a comma, a colon, or a full stop.",
   "Do not bold or emphasise anything, especially not the figures.",
 ].join(" ");
+
+/**
+ * A sentence denying what the app does, taken out.
+ *
+ * 4 October 2026, after "Add it again": "I cannot add entries directly from
+ * here, but you can add it through the card below." The app adds through
+ * that card; the model is one part of it and is told so (ai.ts), and still
+ * says it cannot. Only a denial of adding, saving, recording, editing or
+ * deleting an entry goes, never the rest of the answer, and never a figure.
+ * "I cannot transfer it from here" goes too (5 October 2026): a transfer is
+ * recorded from a card like any other entry.
+ */
+export function withoutFalseDenial(text: string): string {
+  const cleaned = text
+    .replace(
+      /(^|(?<=[.!?]\s)|(?<=\n))[^.!?\n]*\bI\s+(?:cannot|can't|can not|am unable to|am not able to|don't have the ability to)\s+(?:directly\s+)?(?:add|save|record|log|enter|create|make|change|edit|update|delete|remove|transfer|move|send|pay|process|execute|perform|carry out|do (?:that|this|it|the transfer|transfers))\b[^.!?\n]*[.!?]?[ \t]*/gi,
+      "$1",
+    )
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return cleaned || text;
+}

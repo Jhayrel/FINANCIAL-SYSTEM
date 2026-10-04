@@ -909,7 +909,18 @@ export function readEntry(
    * destination wallet, so a wallet named after "to" is where it was paid
    * from, not where it went.
    */
-  const source = stated || (flow === "Spending" ? destination || loose : destination ? "" : loose);
+  /*
+   * "Transfer extra cash to cash": the account before "to" is the one it
+   * came out of, with no "from" to say so (5 October 2026). Only for a
+   * transfer that names where it went, and never that same account.
+   */
+  const headWallet = (() => {
+    if (flow !== "Transfer" || stated || !destination) return "";
+    const to = /\b(?:to|into)\b/i.exec(text);
+    const head = to ? walletIn(text.slice(0, to.index), accounts) : "";
+    return head && head !== destination ? head : "";
+  })();
+  const source = stated || headWallet || (flow === "Spending" ? destination || loose : destination ? "" : loose);
 
   const because: string[] = [];
   if (said && date !== asOf) because.push(`Dated ${date}, from what you said.`);
@@ -1088,7 +1099,13 @@ export function readEntry(
    * figure but a known item, and "I spent 500" has a figure and no item. Both
    * become a card with one question on it, which is the point.
    */
-  const worthOffering = amount !== null || Boolean(draft.item.trim());
+  /*
+   * A transfer between two accounts it names is worth it too, figure or
+   * not: "Transfer extra cash to cash" (5 October 2026) is a whole entry
+   * with one question, how much, which "all of it" can answer.
+   */
+  const namedTransfer = draft.flow === "Transfer" && draft.fromWallet.trim() !== "" && draft.toWallet.trim() !== "" && draft.fromWallet !== draft.toWallet;
+  const worthOffering = amount !== null || Boolean(draft.item.trim()) || namedTransfer;
 
   return {
     draft,

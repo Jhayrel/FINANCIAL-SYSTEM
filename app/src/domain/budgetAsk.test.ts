@@ -197,3 +197,17 @@ describe("a budget card's figures, changed before Apply", () => {
     expect(editedAsk(ask, { limit: -5 })).toMatchObject({ value: 0 });
   });
 });
+
+describe("may, the verb", () => {
+  // 5 October 2026: an answer's "you may" put a budget change on May 2027.
+  it("is never the month", () => {
+    expect(proposedMonthIn("I recommend PHP 10,650.00 for spending, so you may keep PHP 500.00 aside.", "2026-10-05")).toBeNull();
+    expect(proposedMonthIn("I suggest a budget of PHP 9,000.00; it may be tight.", "2026-10-05")).toBeNull();
+  });
+
+  it("is the month where a month is meant", () => {
+    expect(proposedMonthIn("I recommend a budget of PHP 9,000.00 for May.", "2026-10-05")).toMatchObject({ month: 5 });
+    expect(proposedMonthIn("I recommend PHP 9,000.00 from May to July.", "2026-10-05")).toMatchObject({ month: 5, toMonth: 7 });
+    expect(proposedMonthIn("I recommend PHP 9,000.00 in May 2027.", "2026-10-05")).toMatchObject({ year: 2027, month: 5 });
+  });
+});

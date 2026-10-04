@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { allPaidScope, detectIntent, isBudgetCommand, meantInstead, sayInstead, wantsAllBillsPaid , entriesInside, wantsThoseEntries } from "./intent";
+import { allPaidScope, askedThenSaid, detectIntent, isQuestion, isBudgetCommand, meantInstead, sayInstead, wantsAllBillsPaid , entriesInside, wantsThoseEntries } from "./intent";
 
 describe("detectIntent: entries", () => {
   it("reads the sentence that was answered as a question instead", () => {
@@ -252,5 +252,37 @@ describe("money not spent yet", () => {
     for (const said of ["I spent 500 on food", "bumili ako ng pagkain 200 gcash", "I paid 1000 for wifi"]) {
       expect(detectIntent(said), said).toBe("log");
     }
+  });
+});
+
+describe("a question, then what it is about", () => {
+  // The owner, 5 October 2026, after "How much gas can I use?" was answered: two empty cards came back.
+  it("is a question when neither part carries money", () => {
+    for (const said of ["Thats apply today or this week? A gas can last a week or 4 days", "Is that per day? I eat out 3 times a week", "for the whole month? my load lasts 30 days"]) {
+      expect(askedThenSaid(said), said).toBe(true);
+      expect(isQuestion(said), said).toBe(true);
+      expect(detectIntent(said), said).toBe("ask");
+    }
+  });
+
+  it("leaves money that moved to the entry reader", () => {
+    for (const said of ["ok? I paid 300 for gas", "gas? 250", "Thats right? bought load"]) {
+      expect(askedThenSaid(said), said).toBe(false);
+    }
+    // A question mark only at the end is the rule it always was.
+    expect(askedThenSaid("how much gas can I use?")).toBe(false);
+  });
+});
+
+describe("asking for help, however it is spelled", () => {
+  // From the owner's record, 4 October 2026: "advice me" was read as nothing in particular.
+  it("is a question", () => {
+    for (const said of ["advice me", "advice me on my spending", "pls advice", "help me budget", "I need help with my budget", "help me with food spending"]) {
+      expect(isQuestion(said), said).toBe(true);
+    }
+  });
+
+  it("leaves money that moved alone", () => {
+    expect(isQuestion("I paid 300 for help desk fee")).toBe(false);
   });
 });

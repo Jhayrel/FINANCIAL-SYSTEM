@@ -15,7 +15,7 @@
  */
 
 import { MONTH_NAMES } from "./dates";
-import { applyReply, asksToRename, NAMES_A_FIELD, nextQuestion, walletInside, type Blank } from "./capture";
+import { allOf, applyReply, asksToRename, NAMES_A_FIELD, nextQuestion, walletInside, type Blank } from "./capture";
 import { itemsFor, type Draft } from "./entry";
 import { formatMoney } from "./money";
 import type { ReferenceLists, Transaction } from "./types";
@@ -362,6 +362,11 @@ export function pendingChoices(
   most = 6,
 ): string[] {
   const accounts = [...reference.wallets, ...reference.savings];
+  // "How much?" of money moved out of an account: all of what it holds is one answer (`saysAllOfIt`).
+  if (blank === "amount") {
+    const all = draft.flow === "Transfer" ? allOf(draft, transactions) : null;
+    return all === null ? [] : [`All of it (${formatMoney(all)})`];
+  }
   if (blank === "fromWallet") return accounts.filter((a) => a !== draft.toWallet);
   if (blank === "toWallet") return accounts.filter((a) => a !== draft.fromWallet);
   if (blank !== "item" || (draft.flow !== "Spending" && draft.flow !== "Revenue")) return [];

@@ -216,6 +216,7 @@ function paidWithOf(text: string): ReceiptCheck["paidWith"] {
   if (/\bg-?cash\b/.test(lower)) return "gcash";
   if (/\b(?:pay)?maya\b/.test(lower)) return "maya";
   if (/\b(?:visa|master\s*card|debit|credit\s*card|card)\b/.test(lower)) return "card";
+  if (/\b(?:mode|form|method)\s+of\s+payment\s*:?\s*cash\b|\bpayment\s*(?:mode|method)\s*:?\s*cash\b/.test(lower)) return "cash";
   // CASHIER is not a payment; CASH on its own line, or before a figure, is.
   if (/(?:^|\n)\W*cash\b(?!ier)/i.test(text) || /\bcash\s*(?:tendered|received|payment)\b/.test(lower)) return "cash";
   return undefined;
@@ -271,6 +272,65 @@ function timeOf(text: string): string | undefined {
   return `${String(hour).padStart(2, "0")}:${m[2]}`;
 }
 
+const UNITS: Record<string, number> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  twenty: 20, thirty: 30, forty: 40, fourty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+const SCALES: Record<string, number> = { hundred: 100, thousand: 1000, million: 1_000_000 };
+
+/**
+ * The amount an official receipt writes out in words: "Four Hundred Thirty
+ * One And 06/100 Pesos Only", "Two thousand only".
+ *
+ * The owner's LTO receipt of 1 September 2025 (sent 4 October 2026 to train
+ * on): the phone read every line of it but the total, and the words were
+ * whole. A school's receipt read 2,000.00 in one reading and 2,600.00 in the
+ * other, and "...thousand only" was all that survived of its words: that
+ * still says the amount is whole thousands. `exact` when every word was
+ * read, `scale` when only the last ones were.
+ */
+export function amountInWords(text: string): { exact?: Centavos; scale?: number } {
+  for (const line of text.split(/\r?\n/)) {
+    if (!/\bonl[a-z]*\b/i.test(line) && !/\bpesos?\b/i.test(line)) continue;
+    const words = line.toLowerCase().replace(/[^a-z0-9/\s-]/g, " ").split(/[\s-]+/).filter(Boolean);
+    const end = words.findIndex((w) => /^onl/.test(w));
+    const upto = end >= 0 ? end : words.length;
+    let cents = 0;
+    const said: string[] = [];
+    for (let k = upto - 1; k >= 0; k -= 1) {
+      const w = words[k] ?? "";
+      const frac = /^(\d{1,2})\/100$/.exec(w);
+      if (frac) {
+        cents = Number(frac[1]);
+        continue;
+      }
+      if (w === "and" || w === "pesos" || w === "peso" || w === "php") continue;
+      if (w in UNITS || w in SCALES) {
+        said.unshift(w);
+        continue;
+      }
+      break;
+    }
+    if (said.length === 0) continue;
+    // Only the scale was read: the figure is whole units of it.
+    if (said[0]! in SCALES) return { scale: SCALES[said[0]!]! * 100 };
+    let total = 0;
+    let current = 0;
+    for (const w of said) {
+      if (w in UNITS) current += UNITS[w]!;
+      else if (w === "hundred") current *= 100;
+      else {
+        total += current * SCALES[w]!;
+        current = 0;
+      }
+    }
+    const pesos = total + current;
+    if (pesos > 0) return { exact: pesos * 100 + cents };
+  }
+  return {};
+}
+
 const show = (c: Centavos): string =>
   (c / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -310,7 +370,7 @@ export function readReceipt(readings: readonly string[], asOf: IsoDate): Receipt
     cashLine;
   const markers = [
     shop,
-    /\b(?:cashier|receipt|invoice|o\.?r\.?\s*(?:no|#)|tin\b|thank\s*you|vat\s*reg)/i.test(joined),
+    /\b(?:cashier|receipt|invoice|o\.?r\.?\s*(?:no|#)|tin\b|thank\s*you|vat\s*reg|dine[\s-]?in|take[\s-]?out|order\s*no|settled|served)/i.test(joined),
     withRole("total").length > 0,
     every.some((f) => has(f, "change")) && withRole("tendered").length > 0,
   ].filter(Boolean).length;
@@ -327,7 +387,13 @@ export function readReceipt(readings: readonly string[], asOf: IsoDate): Receipt
   const subtotals = values(withRole("subtotal"));
   const discounts = values(withRole("discount"));
   const extras = values([...withRole("service"), ...withRole("delivery")]);
-  const everything = values(all);
+  const words = amountInWords(joined);
+  const everything = [...new Set([...values(all), ...(words.exact !== undefined ? [words.exact] : [])])];
+  /** Each reading's figures added up, for a receipt that is nothing but its breakdown and its total. */
+  const breakdowns = texts.map((t) => {
+    const own = figuresOf(t).filter((f) => f.value > 0 && !f.negative && f.role !== "count");
+    return own.length >= 3 ? own.reduce((sum, f) => sum + f.value, 0) : -1;
+  });
 
   // An item line's own total is its last figure; the unit price before it is not a second item.
   const itemSums: Centavos[] = texts.map((t) =>
@@ -427,6 +493,24 @@ export function readReceipt(readings: readonly string[], asOf: IsoDate): Receipt
       evidence.push(items > 1 ? `the items add up to ${show(total)}` : `the one item is ${show(total)}`);
     }
 
+    // Written out in words, as an official receipt does.
+    if (words.exact !== undefined && same(words.exact, total)) {
+      score += 3;
+      checks += 1;
+      evidence.push(`written in words as ${show(total)}`);
+    } else if (words.scale !== undefined && total % words.scale === 0 && total < words.scale * 10) {
+      score += 2;
+      checks += 1;
+      evidence.push(`the amount in words is whole ${words.scale === 100_000 ? "thousands" : words.scale === 10_000 ? "hundreds" : "millions"}`);
+    }
+
+    // A breakdown and nothing else: its lines add up to the amount paid.
+    if (breakdowns.some((b) => b === total) && !at.some((f) => f.item)) {
+      score += 2;
+      checks += 1;
+      evidence.push(`the lines of the breakdown add up to ${show(total)}`);
+    }
+
     // A subtotal, less what came off it, plus what was added to it.
     for (const sub of subtotals) {
       if (sub === total) {
@@ -456,7 +540,7 @@ export function readReceipt(readings: readonly string[], asOf: IsoDate): Receipt
      */
     const elsewhere = (f: Figure): boolean =>
       f.role !== null && f.role !== "total" && (f.role !== "tendered" || changes.some((c) => c > 0));
-    if (at.every(elsewhere)) score -= 3;
+    if (at.length > 0 && at.every(elsewhere)) score -= 3;
 
     return { ...result, score, checks, evidence };
   });
@@ -554,6 +638,8 @@ export function receiptNote(check: ReceiptCheck): string {
     parts.push(`${wrong.join(", ")}: none of them is what was spent, and the tax lines are parts of the total, never rows of their own.`);
   }
   parts.push(`One receipt is one purchase: one proposal with amountPesos ${check.total / 100}, the store or what was bought in description, unless they asked for the items separately.`);
+  // A receipt is money paid out: the issuer's own bookkeeping on it is not their income (4 October 2026, DEFERRED INCOME-TUITION).
+  parts.push("It records money they paid out: INCOME, DEFERRED INCOME or REVENUE printed on it is the issuer's own bookkeeping, never income to them, and a breakdown of fees on it is part of this one amount.");
   if (check.paidWith) parts.push(`It was paid ${PAID_WITH[check.paidWith]}.`);
   if (check.date) {
     parts.push(

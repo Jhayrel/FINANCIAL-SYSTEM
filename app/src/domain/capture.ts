@@ -23,6 +23,7 @@
  * The model reads pictures and sentences. Filling in one blank is not that.
  */
 
+import { walletBalance } from "./balances";
 import { debtWalletDirection, itemsFor, needs, type Draft, type Flow } from "./entry";
 import { figuresIn } from "./money";
 import { itemHintIn } from "./filipino";
@@ -304,6 +305,12 @@ export function applyReply(
       if (figuresIn(text).length > 1) return null;
       const amount = readMoney(text) ?? firstAmountIn(text);
       if (amount !== null && amount > 0) return { ...draft, amount };
+
+      // "All of it": what the account it comes out of holds, less its fee.
+      if (saysAllOfIt(text)) {
+        const all = allOf(draft, transactions);
+        return all === null ? null : { ...draft, amount: all };
+      }
 
       // No figure in it. If they said it was the usual one, look it up.
       if (!USUAL_REPLY.test(text)) return null;
@@ -968,6 +975,25 @@ const plainPesos = (centavos: number): string =>
   `PHP ${(centavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** "the usual", "same as always", "normal". */
+/**
+ * "All of it", "everything", "check my balance and transfer it", "lahat".
+ *
+ * The owner, 5 October 2026: "Transfer extra cash to cash" was asked how
+ * much, and "Check my balance and transfer it" went to the chat, which said
+ * it could not transfer anything and wrote a second card beside the first.
+ * The answer was the account's balance, which the ledger knows.
+ */
+export function saysAllOfIt(text: string): boolean {
+  return /\b(?:all(?:\s+of\s+it|\s+of\s+them|\s+the\s+money|\s+my\s+money)?|everything|lahat(?:\s+na)?|ubos(?:in)?|empty\s+it|the\s+whole\s+(?:thing|balance|amount)|whole\s+(?:balance|amount)|full\s+(?:balance|amount)|(?:my|the|its|current)\s+balance|what(?:ever)?\s+(?:is\s+)?(?:in\s+it|left|remains|it\s+(?:has|holds)))\b/i.test(text) && !/\d/.test(text);
+}
+
+/** What the account a card takes money from holds, less the card's fee, or null when it holds nothing. */
+export function allOf(draft: Draft, transactions: readonly Transaction[]): number | null {
+  if (!draft.fromWallet || (draft.flow !== "Transfer" && draft.flow !== "Spending")) return null;
+  const held = walletBalance(transactions, draft.fromWallet) - (draft.fee || 0);
+  return held > 0 ? held : null;
+}
+
 const USUAL_REPLY = /\b(usual|usually|same|normal|regular|always|like before|as before)\b/i;
 
 /**

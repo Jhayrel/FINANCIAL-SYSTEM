@@ -146,3 +146,26 @@ describe("PLAIN_TEXT_RULES", () => {
     expect(PLAIN_TEXT_RULES).not.toContain("*");
   });
 });
+
+describe("a denial of what the app does", () => {
+  it("is taken out, and the rest of the answer kept", async () => {
+    const { withoutFalseDenial } = await import("./aiText");
+    expect(withoutFalseDenial("I cannot add entries directly from here, but you can add it through the card below.\n\nEntry: Spending PHP 51.00, Online Buy, from Maya")).toBe(
+      "Entry: Spending PHP 51.00, Online Buy, from Maya",
+    );
+    expect(withoutFalseDenial("Your Maya holds PHP 8,040.56. I can't save that from here. The card below has it.")).toBe("Your Maya holds PHP 8,040.56. The card below has it.");
+    // Not a denial of adding: kept as it is.
+    expect(withoutFalseDenial("I cannot advise on stocks. Ask a licensed adviser.")).toBe("I cannot advise on stocks. Ask a licensed adviser.");
+    // Nothing else left: the answer stands rather than vanishing.
+    expect(withoutFalseDenial("I cannot add that.")).toBe("I cannot add that.");
+  });
+});
+
+describe("a transfer it says it cannot make", () => {
+  it("is left out, and the rest kept", async () => {
+    const { withoutFalseDenial } = await import("./aiText");
+    expect(withoutFalseDenial("Extra Cash holds PHP 1,000.00. I cannot transfer it from here, but you can record it. Entry: Transfer PHP 1,000.00 from Extra Cash to Cash")).toBe(
+      "Extra Cash holds PHP 1,000.00. Entry: Transfer PHP 1,000.00 from Extra Cash to Cash",
+    );
+  });
+});

@@ -48,6 +48,7 @@ import { redact } from "./aiRedact";
 import { toCentavos, toPesos } from "./money";
 import { costOf, incomeOf } from "./totals";
 import { debtDue, positionsOf, rowsFor, type Debt } from "./debt";
+import { effectLabel } from "./debtWords";
 import { creditRoom, limitSteps } from "./creditLimit";
 import { assessMonthFor, budgetForMonth } from "./budget";
 import { outlookAhead, outlookFacts } from "./outlook";
@@ -186,11 +187,35 @@ export function monthsNamedIn(question: string, year: string): string[] {
 }
 
 /** One row, as short as it can be while still answering questions about it. */
-function line(t: Transaction): string {
+/**
+ * A debt row's type, said with what it does and whose it is.
+ *
+ * "Debt" alone read as money owed: an advance paid for a friend's repair,
+ * written off the same day, was told back as "a new PHP 500.00 debt ...
+ * adding to the liability load" (4 October 2026). Said as "Debt: Advance on
+ * Renz loan (on behalf, advanced for someone)", it is what it is.
+ */
+function typeOf(t: Transaction, debts: ReadonlyMap<string, Debt>): string {
+  if (t.type !== "Debt") return t.type;
+  const debt = t.debtId ? debts.get(t.debtId) : undefined;
+  const what = t.debtEffect ? effectLabel(t.debtEffect, debt) : "movement";
+  const side = !debt
+    ? ""
+    : debt.form === "pass-through"
+      ? debt.kind === "receivable"
+        ? "on behalf, advanced for someone"
+        : "on behalf, held for someone"
+      : debt.kind === "payable"
+        ? "I owe"
+        : "owed to me";
+  return `Debt: ${what}${debt ? ` on ${debt.name}` : ""}${side ? ` (${side})` : ""}`;
+}
+
+function line(t: Transaction, debts: ReadonlyMap<string, Debt> = new Map()): string {
   const parts = [
     `#${t.recordNumber}`,
     t.date,
-    t.type,
+    typeOf(t, debts),
     t.fromWallet || "-",
     t.toWallet || "-",
     t.category || "-",
@@ -795,11 +820,12 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   });
 
   const encoder = new TextEncoder();
+  const debtsById = new Map((input.credits ?? []).map((d) => [d.id, d] as const));
   const kept: string[] = [];
   let spent = 0;
 
   for (const row of ordered) {
-    const text = line(row);
+    const text = line(row, debtsById);
     const size = encoder.encode(text).length + 1;
     if (spent + size > budget) break;
     kept.push(text);
