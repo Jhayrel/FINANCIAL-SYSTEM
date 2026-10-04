@@ -48,9 +48,10 @@ import { redact } from "../domain/aiRedact";
 import { conversationBlock } from "../domain/memory";
 import { dayInFileName, dropRepeats, piecesOf, readingFor, rowsIn } from "../domain/ocrText";
 import { readReceipt, receiptNote, type ReceiptCheck } from "../domain/receipt";
+import { readWalletReceipt, walletFor, walletReceiptNote, walletReceiptsIn, type WalletReceipt } from "../domain/walletReceipt";
 import { interestNote, readInterestCredit, type InterestCredit } from "../domain/interestCredit";
-import { cashWallet, readWithdrawal, withdrawalNote, type Withdrawal } from "../domain/withdrawal";
-import { cardSlipNote, readCardSlip, type CardSlip } from "../domain/cardSlip";
+import { cashWallet, readWithdrawal, slipsIn, withdrawalNote, type Withdrawal } from "../domain/withdrawal";
+import { cardSlipNote, cardSlipsIn, readCardSlip, type CardSlip } from "../domain/cardSlip";
 import { acceptableWording, onlyTheirFigures, type SpendNote } from "../domain/spendNote";
 import { readPicture } from "./ocr";
 import { pairBorrowings, readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
@@ -580,6 +581,8 @@ export interface ExtractOptions {
   readonly withdrawals?: readonly Withdrawal[];
   /** Set here, not by callers: card terminal slips in the pictures (`domain/cardSlip.ts`). */
   readonly cardSlips?: readonly CardSlip[];
+  /** Set here, not by callers: e-wallet confirmation screens in the pictures (`domain/walletReceipt.ts`). */
+  readonly walletReceipts?: readonly WalletReceipt[];
   /** Set here, not by callers: the day each reading's picture was taken, from its file name. */
   readonly readingDays?: readonly string[];
   /** The owner's own name as a bank prints it: money from or to it is between their own accounts. */
@@ -620,7 +623,8 @@ export interface ExtractResult {
   readonly balances?: readonly ReadBalance[];
   /** Rows the model found but this app will not act on, with the reason. */
   readonly refused: readonly Refused[];
-  readonly source: "model" | "offline";
+  /** "device" when no model gave a card and the device's own reading of a receipt did (`onDeviceWhenUnread`). */
+  readonly source: "model" | "offline" | "device";
   readonly model?: string;
   /** Why nothing came back. Present only when source is "offline". */
   readonly reason?: string;
@@ -706,6 +710,43 @@ function extractContext(options: ExtractOptions): string {
  * presses the button. See `domain/proposal.ts`.
  */
 export async function extractProposals(options: ExtractOptions): Promise<ExtractResult> {
+  return onDeviceWhenUnread(await extractRead(options), options);
+}
+
+/**
+ * A receipt the device can read whole still makes its card when no model does.
+ *
+ * An e-wallet's confirmation, an ATM slip and a card slip are read and
+ * checked on the device (`walletReceipt.ts`, `withdrawal.ts`, `cardSlip.ts`):
+ * the amount, the fee, the day and the wallet are the screen's, whatever a
+ * model makes of them. When every provider is down, or a model finds nothing,
+ * those checks make the card on their own, and it says so, instead of "the
+ * picture could not be read" over a picture the phone has just read.
+ */
+export function onDeviceWhenUnread(
+  result: ExtractResult,
+  options: Pick<ExtractOptions, "reference" | "asOf"> & Partial<Pick<ExtractOptions, "signal" | "note">>,
+): ExtractResult {
+  if (options.signal?.aborted) return result;
+  const readings = result.readings ?? [];
+  if (readings.length === 0) return result;
+  // A screen whose card no answer holds: its own request failed, or the model left it out.
+  const walletReceipts = walletReceiptsIn(readings).filter(
+    (r) => !result.proposals.some((p) => (p.draft.amount === r.amount || p.draft.amount === r.total) && (!r.date || p.draft.date === r.date)),
+  );
+  const nothing = result.proposals.length === 0;
+  const withdrawals = nothing ? slipsIn(readings) : [];
+  const cardSlips = nothing ? cardSlipsIn(readings) : [];
+  if (walletReceipts.length + withdrawals.length + cardSlips.length === 0) return result;
+  const made = readProposals([], options.reference, options.asOf, { ...(options.note ? { note: options.note } : {}), readings, walletReceipts, withdrawals, cardSlips }).proposals;
+  if (made.length === 0) return result;
+  const why = result.source === "offline" ? "The model could not be reached, so this was read on this device. Check it." : "Read on this device. Check it.";
+  // One note that it was read here, and the screen's own confidence: a clean read is not "hard to make out".
+  const added = made.map((p) => ({ ...p, adjustments: [...new Set([...p.adjustments.filter((a) => !/^Read on this device\b/.test(a)), why])] }));
+  return nothing ? { ...result, proposals: added, source: "device" } : { ...result, proposals: [...result.proposals, ...added] };
+}
+
+async function extractRead(options: ExtractOptions): Promise<ExtractResult> {
   const pictures = options.attachments.filter((a) => a.kind === "image" && a.dataUrl);
   const reader = options.readPicture ?? (typeof document === "undefined" ? undefined : readPicture);
   if ((options.attempt ?? 0) > 0 || !reader || pictures.length === 0) return extractOnce(options);
@@ -743,8 +784,22 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
   // A card terminal's slip: one card payment at one merchant (domain/cardSlip.ts).
   const cardReads = readings.map((r, i) => (r && !credits[i] && !slips[i] ? readCardSlip([r.raised, r.plain]) : null));
   const cardSlips = cardReads.filter((c): c is CardSlip => c !== null);
+  // An e-wallet's confirmation: sent, paid, a bill, load, received (domain/walletReceipt.ts).
+  const walletReads = readings.map((r, i) => (r && !credits[i] && !slips[i] && !cardReads[i] ? readWalletReceipt([r.raised, r.plain]) : null));
+  const walletReceipts = walletReads.filter((w): w is WalletReceipt => w !== null);
+  /*
+   * Only the screens in the request: each picture is its own request, and a
+   * screen's reference number or date read as money (₱10.00 for October)
+   * must never move another picture's card.
+   */
+  const receiptsFor = (attachments: readonly Attachment[]): WalletReceipt[] =>
+    pictures.flatMap((picture, j) => {
+      const own = attachments.some((a) => a.id === picture.id || a.id.startsWith(`${picture.id}-`));
+      const w = walletReads[j];
+      return own && w ? [w] : [];
+    });
   // Never a shop receipt as well: its "total" there is the interest before tax, or the cash and the fee.
-  const receipts = readings.map((r, i) => (r && !credits[i] && !slips[i] ? readReceipt([r.plain, r.raised], options.asOf) : null));
+  const receipts = readings.map((r, i) => (r && !credits[i] && !slips[i] && !walletReads[i] ? readReceipt([r.plain, r.raised], options.asOf) : null));
   const found = receipts.filter((r): r is ReceiptCheck => r !== null);
   const asText: Attachment[] = [];
   const stillPictures: Attachment[] = [];
@@ -784,6 +839,8 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
           ? `${asRead}\n${withdrawalNote(slip, cashWallet(options.reference.wallets))}`
           : asRead && cardReads[i]
             ? `${asRead}\n${cardSlipNote(cardReads[i]!)}`
+          : asRead && walletReads[i]
+            ? `${asRead}\n${walletReceiptNote(walletReads[i]!, walletFor(walletReads[i]!.app, options.reference))}`
           : asRead && receipt
             ? `${asRead}\n${receiptNote(receipt)}`
             : asRead;
@@ -805,7 +862,7 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
     return r ? [day, day] : [];
   });
   const withChecks = (attachments: readonly Attachment[], seeWell = false): Promise<ExtractResult> =>
-    extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips, attachments, ...(seeWell ? { seeWell } : {}) });
+    extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips, walletReceipts: receiptsFor(attachments), attachments, ...(seeWell ? { seeWell } : {}) });
 
   if ((await sees) && !options.signal?.aborted) {
     return lookFirst({ pictures, others, checks, isLong, ownJobs, read, repeated, signal: options.signal, ask: withChecks });
@@ -828,16 +885,17 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
 
   if (jobs.length > 1) {
     const answers = await inTurn(jobs, LIST_PARTS_AT_ONCE, (attachments) =>
-      extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips, attachments }),
+      extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips, walletReceipts: receiptsFor(attachments), attachments }),
     );
     const joined = joinAnswers(answers);
     // Nothing usable in any of them: the pictures go to a model that can see, as below.
     if (usable(joined) >= 10 || options.signal?.aborted) return { ...joined, readOnDevice, repeated, readings: read };
-    const seen = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips });
+    const seen = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips, walletReceipts });
     return usable(seen) > usable(joined) ? { ...seen, readings: read } : { ...joined, readOnDevice, repeated, readings: read };
   }
 
-  const first = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips, attachments: jobs[0] ?? [...others, ...stillPictures] });
+  const firstJob = jobs[0] ?? [...others, ...stillPictures];
+  const first = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips, walletReceipts: receiptsFor(firstJob), attachments: firstJob });
   /*
    * Rows it could not use count for nothing here. On 26 September 2026 the
    * text route returned one refused row, "Nothing in that looked like a
@@ -847,7 +905,7 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
   if (usable(first) >= 10 || options.signal?.aborted) {
     return { ...first, readOnDevice, repeated, readings: read };
   }
-  const second = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips });
+  const second = await extractOnce({ ...options, readings: read, readingDays: readDays, receipts: found, interest, withdrawals, cardSlips, walletReceipts });
   return usable(second) > usable(first) ? { ...second, readings: read } : { ...first, readOnDevice, repeated, readings: read };
 }
 
@@ -1109,6 +1167,7 @@ async function extractOnce(options: ExtractOptions): Promise<ExtractResult> {
       interest: options.interest ?? [],
       withdrawals: options.withdrawals ?? [],
       cardSlips: options.cardSlips ?? [],
+      walletReceipts: options.walletReceipts ?? [],
     });
 
     return {

@@ -866,6 +866,35 @@ restore by describing them, a balance chart, a balance told, a statement.
 | A balance chart, and Find a difference, left out entries dated after today while the sidebar counts them | Read to today, the last point counts them and the reading says "Counts 5 entries dated after today." Told "my cash balance is X" today, the answer starts from the sidebar's figure, and an early entry is named as a cause only when it fits inside the difference |
 | The budget chart for this month left out spending entered for later in the month | Counted on the last day, as the month total counts it |
 | "One entry add up to exactly" | "One entry adds up to exactly" |
+
+### 2026-10-04: e-wallet receipts
+
+The owner sent a GCash "Sent via GCash" receipt: "Make sure it knows this
+type of receipt etc. More powerful". Read on the device, it has one figure
+that is money and four that look like it: the reference number, the phone
+number (its "+" read as a peso sign, "₱63"), the carbon banner ("279g"
+read as "2799") and the date. The masked name is not read at all.
+
+`domain/walletReceipt.ts` reads an e-wallet's own confirmation screen
+(GCash, Maya, GoTyme, ShopeePay, GrabPay, Coins.ph): money sent, a bank
+transfer, a bill, load, a QR or shop payment, money received, and the text
+message form. It reads the amount, the fee, the total, the day, the time,
+the reference and who it went to, only from figures printed with two
+decimals, and names the rest as not money.
+
+| Part | What it does |
+|---|---|
+| Note to the model | Goes with the picture's text: what kind of screen it is, the one proposal it makes, and what is not an amount (`walletReceiptNote`) |
+| Check on the answer | `checkWalletReceipts`: the amount, fee, day and wallet are the screen's; a card made of the phone, reference or carbon figure is put back or dropped. Money sent to a person is a Transfer with no destination (Money Send), unless the owner's words name what it paid for, or it went to one of their own accounts. A bill is filed as their bill of that biller, load as their load item, money received is never spending |
+| One picture, one request | Each request is checked only against the screen in its own picture, so a ₱10.00 shop receipt beside it is never taken for this screen's "10" (October) |
+| No model | `onDeviceWhenUnread`: when no model answers, or one leaves the screen out, the device's own reading makes the card and says "read on this device" |
+| Model instruction | One line in the extract instructions on these screens, for when the model sees the picture itself |
+
+Tested with invented receipts of every kind (`walletReceipt.test.ts`,
+`walletReceiptRead.test.ts`), and in the app at phone width with the
+owner's picture and no model: one card, Transfer from Gcash to someone
+else, ₱99.00, 4 October 2026, its time and reference in the notes, and
+Gcash down ₱99.00 once added. Not tested with a live model.
 ---
 
 ## 6. What the owner has to do

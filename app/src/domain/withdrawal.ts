@@ -73,7 +73,7 @@ function figures(line: string): Centavos[] {
 
 const peso = (c: Centavos): string => `PHP ${(Math.floor(c / 100)).toLocaleString("en-US")}.${String(c % 100).padStart(2, "0")}`;
 
-function dateIn(text: string): IsoDate | undefined {
+export function dateIn(text: string): IsoDate | undefined {
   const pad = (n: number): string => String(n).padStart(2, "0");
   // "29SEP2026", "29 SEP 2026", "29-Sep-2026"
   const dayFirst = /\b(\d{1,2})[\s-]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?[\s,-]?(20\d{2})\b/i.exec(text);
@@ -99,7 +99,7 @@ function dateIn(text: string): IsoDate | undefined {
   return undefined;
 }
 
-const BANKS: readonly [RegExp, string][] = [
+export const BANKS: readonly [RegExp, string][] = [
   [/china\s*bank\s*savings|\bcbs\b/i, "China Bank Savings"],
   [/china\s*bank/i, "China Bank"],
   [/\bbdo\b/i, "BDO"],

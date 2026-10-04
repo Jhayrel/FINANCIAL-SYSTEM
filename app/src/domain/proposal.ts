@@ -39,6 +39,7 @@ import type { Draft, Flow } from "./entry";
 import { emptyDraft, itemsFor } from "./entry";
 import { accountFor, type InterestCredit } from "./interestCredit";
 import { cashWallet, type Withdrawal } from "./withdrawal";
+import { billFor, describe as describeReceipt, walletFor, type WalletReceipt } from "./walletReceipt";
 import type { CardSlip } from "./cardSlip";
 import { fitItem } from "./onList";
 import { rowDatesIn } from "./ocrText";
@@ -787,7 +788,7 @@ export function readProposals(
    * text the device read, then a credit line's own screen filed on that
    * line, then fees folded into what they were charged on.
    */
-  const checked = checkCardSlips(checkWithdrawal(checkInterest(
+  const checked = checkWalletReceipts(checkCardSlips(checkWithdrawal(checkInterest(
     checkReceipts(
       datesFromHeadings(checkAgainstReadings(proposals, context.readings ?? []), context.readings ?? [], context.readingDays ?? [], asOf),
       context.receipts ?? [],
@@ -797,7 +798,7 @@ export function readProposals(
     context.interest ?? [],
     reference,
     asOf,
-  ), context.withdrawals ?? [], reference, asOf), context.cardSlips ?? [], reference, asOf);
+  ), context.withdrawals ?? [], reference, asOf), context.cardSlips ?? [], reference, asOf), context.walletReceipts ?? [], reference, asOf);
   const filed = onCreditLine(checked, context.note ?? "", reference);
   const folded = pairBorrowings(foldTransferFees(foldCharges(notIncomeKinds(filed, reference))));
   return { proposals: onTheirLists(folded, context.note ?? "", reference), refused, balances };
@@ -1014,12 +1015,130 @@ export function checkCardSlips(
   return out;
 }
 
+/**
+ * An e-wallet confirmation's card, held to the screen (`walletReceipt.ts`).
+ *
+ * The cards made of its figures become one: the amount, the fee and the day
+ * as printed, from the wallet that printed it. A card made of the reference
+ * number, the phone number or the carbon figure is dropped. What it was is
+ * the model's call where the owner's words decide it (what a send paid for,
+ * which bill), and the screen's otherwise: money sent to a person left their
+ * accounts, a bill is a bill, money received is never spending. With no card
+ * from the model at all, the screen makes one on its own.
+ */
+export function checkWalletReceipts(
+  proposals: readonly Proposal[],
+  receipts: readonly WalletReceipt[],
+  reference: ReferenceLists,
+  asOf: IsoDate,
+): Proposal[] {
+  let out = [...proposals];
+  const accounts = new Set([...reference.wallets, ...reference.savings]);
+  for (const r of receipts) {
+    const printed = new Set([r.amount, r.total, ...(r.fee > 0 ? [r.fee] : [])]);
+    const junk = new Set(r.notMoneyFigures.filter((c) => !printed.has(c)));
+    const related = out.filter((p) => p.draft.amount !== null && (printed.has(p.draft.amount) || junk.has(p.draft.amount)));
+    const base =
+      related.find((p) => p.draft.amount === r.amount) ??
+      related.find((p) => p.draft.amount === r.total) ??
+      related.find((p) => p.draft.amount !== null && printed.has(p.draft.amount)) ??
+      related[0];
+    const was = base?.draft;
+    const notes: string[] = [];
+    const wallet = walletFor(r.app, reference) || (was && accounts.has(r.kind === "received" ? was.toWallet : was.fromWallet) ? (r.kind === "received" ? was.toWallet : was.fromWallet) : "");
+    if (was && was.amount !== null && was.amount !== r.amount) {
+      notes.push(junk.has(was.amount) ? `Read as ${pesos(was.amount)}, which is not money on this screen. It shows ${pesos(r.amount)}.` : `Read as ${pesos(was.amount)}; the screen shows ${pesos(r.amount)}${r.fee > 0 ? ` and a ${pesos(r.fee)} fee` : ""}.`);
+    }
+
+    // ── What it was ───────────────────────────────────────────────────────
+    const named = was?.flow === "Spending" && was.item.trim() !== "";
+    const own = was && accounts.has(was.toWallet) && was.toWallet !== wallet ? was.toWallet : "";
+    let shape: Pick<Draft, "flow" | "category" | "item" | "toWallet" | "fromWallet" | "status"> & { sentOut?: boolean };
+    switch (r.kind) {
+      case "send":
+      case "bank":
+        if (was?.flow === "Debt" || named) {
+          shape = { flow: was.flow, category: was.category, item: was.item, fromWallet: wallet, toWallet: was.flow === "Debt" ? was.toWallet : "", status: was.status || "Paid" };
+        } else if (own) {
+          shape = { flow: "Transfer", category: "Transfer", item: "", fromWallet: wallet, toWallet: own, status: "Transferred" };
+        } else {
+          shape = { flow: "Transfer", category: "Transfer", item: "", fromWallet: wallet, toWallet: "", status: "Transferred", sentOut: true };
+          if (was && was.flow !== "Transfer") notes.push("Money sent to someone left your accounts, so it counts as Money Send. If it paid for something, edit it and pick what.");
+        }
+        break;
+      case "bills": {
+        const bill = was?.category === "Bills" && was.item ? was.item : billFor(r.party ?? "", reference.bills);
+        shape = bill
+          ? { flow: "Spending", category: "Bills", item: bill, fromWallet: wallet, toWallet: "", status: "Paid" }
+          : { flow: "Spending", category: named ? was.category : "Spending", item: named ? was.item : "", fromWallet: wallet, toWallet: "", status: "Paid" };
+        break;
+      }
+      case "load": {
+        const load = reference.spendingTypes.find((t) => /\bload\b/i.test(t.name))?.name ?? "";
+        shape = { flow: "Spending", category: "Spending", item: named ? was.item : load, fromWallet: wallet, toWallet: "", status: "Paid" };
+        break;
+      }
+      case "pay":
+        shape = { flow: "Spending", category: named ? was.category : "Spending", item: named ? was.item : "", fromWallet: wallet, toWallet: "", status: "Paid" };
+        break;
+      case "received":
+        if (was && (was.flow === "Revenue" || was.flow === "Debt" || (was.flow === "Transfer" && accounts.has(was.fromWallet)))) {
+          shape = { flow: was.flow, category: was.category, item: was.item, fromWallet: was.flow === "Revenue" ? "" : was.fromWallet, toWallet: wallet, status: was.status || "Received" };
+        } else {
+          shape = { flow: "Revenue", category: "Revenue", item: "", fromWallet: "", toWallet: wallet, status: "Received" };
+          if (was) notes.push("Money received is never spending.");
+        }
+        break;
+    }
+
+    const folded = related.filter((p) => p !== base);
+    const leftOut = folded.filter((p) => p.draft.amount !== null);
+    if (leftOut.length > 0) {
+      notes.push(`Left out ${leftOut.map((p) => pesos(p.draft.amount ?? 0)).join(" and ")}: ${leftOut.every((p) => junk.has(p.draft.amount ?? -1)) ? "not money on this screen" : "the same payment"}.`);
+    }
+    if (!base) notes.push(`Read on this device from the ${r.app || "e-wallet"} receipt.`);
+    if (!wallet) notes.push(`Pick the wallet it ${r.kind === "received" ? "went into" : "came from"}.`);
+
+    const date = r.date ?? was?.date ?? asOf;
+    const start = emptyDraft(date);
+    const timeAndRef = [r.time, r.ref ? `ref ${r.ref}` : ""].filter(Boolean).join(", ");
+    const kept: Proposal = {
+      ...(base ?? { sourceRef: `the ${r.app || "e-wallet"} receipt`, confidence: "medium" as const }),
+      draft: {
+        ...start,
+        ...(was?.debtId ? { debtId: was.debtId, debtEffect: was.debtEffect, ...(was.behalf ? { behalf: was.behalf } : {}) } : {}),
+        flow: shape.flow,
+        category: shape.category,
+        item: shape.item,
+        fromWallet: shape.fromWallet,
+        toWallet: shape.toWallet,
+        ...(shape.sentOut ? { sentOut: true } : {}),
+        amount: r.amount,
+        fee: r.kind === "received" ? 0 : r.fee,
+        date,
+        description: was?.description.trim() || describeReceipt(r),
+        notes: was?.notes.trim() || timeAndRef,
+        status: shape.status,
+      },
+      confidence: r.confidence === "high" ? (base?.confidence === "low" ? "medium" : base?.confidence ?? "high") : "medium",
+      // Run again across requests, so a note already said is not said twice.
+      adjustments: [...new Set([...(base?.adjustments ?? []), ...notes])],
+    };
+    const at = base ? out.indexOf(base) : out.length;
+    out = out.filter((p) => !related.includes(p));
+    out.splice(Math.min(at, out.length), 0, kept);
+  }
+  return out;
+}
+
 export interface ReadContext {
   readonly note?: string;
   /** Card terminal slips in those pictures (`domain/cardSlip.ts`). */
   readonly cardSlips?: readonly CardSlip[];
   /** ATM withdrawal slips in those pictures, checked by their own figures (`domain/withdrawal.ts`). */
   readonly withdrawals?: readonly Withdrawal[];
+  /** E-wallet confirmation screens in those pictures (`domain/walletReceipt.ts`). */
+  readonly walletReceipts?: readonly WalletReceipt[];
   /** Interest credits in those pictures, checked by their arithmetic (`domain/interestCredit.ts`). */
   readonly interest?: readonly InterestCredit[];
   /** The text the device read off the pictures, both readings of each. */

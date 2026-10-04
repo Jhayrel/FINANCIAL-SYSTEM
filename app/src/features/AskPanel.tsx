@@ -3051,7 +3051,7 @@ export function AskPanel({
           sent.length > 0
             ? "No transaction was readable in that. A clearer photo of the amount and the date usually works."
             : "I could not find an entry in that. Say it with the amount and the wallet, or use the form beside this.",
-        from: sent.length > 0 ? `${modelLabel(result.model ?? "") || "the provider"}${route}` : "this device",
+        from: sent.length > 0 ? `${result.source === "device" ? "this device" : `${modelLabel(result.model ?? "") || "the provider"}${route}`}` : "this device",
       });
       return false;
     }
@@ -3143,7 +3143,7 @@ export function AskPanel({
           (result.repeated
             ? ` The picture shows ${result.repeated === 1 ? "one row" : `${result.repeated} rows`} twice, where the screenshot was stitched together, and each was read once.`
             : ""),
-        from: `${modelLabel(result.model ?? "") || "the provider"}${route}`,
+        from: `${result.source === "device" ? "this device" : `${modelLabel(result.model ?? "") || "the provider"}${route}`}`,
       });
     }
 
