@@ -29,7 +29,7 @@ import type { ReferenceLists } from "./types";
 const reference: ReferenceLists = {
   wallets: ["Cash", "Gcash", "Maya"],
   savings: [],
-  bills: ["Riverside Power", "Globe at Home Wifi"],
+  bills: ["Lakeside Water", "Globe at Home Wifi"],
   subscriptions: [],
   revenueCategories: ["Allowance"],
   spendingTypes: [
@@ -48,39 +48,36 @@ const proposal = (over: Partial<Draft>): Proposal => ({
   adjustments: [],
 });
 
-// ── An electricity bill ─────────────────────────────────────────────────────
+// ── Papers the starter examples never saw ──────────────────────────────────
+// Different companies, schools and shops from any in `paperSeed.ts`, so these
+// tests show what the reader learned rather than what it was shown.
 
 const BILL = [
-  "RIVERSIDE POWER COOPERATIVE, INC.",
-  "BILLING INVOICE 0012345",
-  "ACCT NAME DEMO ACCOUNT",
+  "LAKESIDE WATER AND POWER CO., INC.",
+  "BILLING INVOICE No 0045521",
+  "Customer DEMO ACCOUNT",
   "PERIOD COVERED 03/10/2025-04/10/2025",
-  "GENERATION 250x7.0077 1751.93 210.23 1962.16",
-  "TOTAL CURRENT BILL AMOUNT 2871.10 344.53 3215.63",
+  "Energy charge 250 kWh 1,751.93",
+  "TOTAL CURRENT BILL AMOUNT 3215.63",
   "GRAND TOTAL / NETBILL 3215.63",
-  "VAT Sales 2700.00",
   "Charges for this billing period 3215.63",
   "PLEASE PAY ON OR BEFORE Apr 22, 2025",
   "THIS IS NOT A RECEIPT UNLESS MACHINE VALIDATED",
   "REMINDER AND/OR DISCONNECTION NOTICE",
-  "if your bill is not paid on or before the due date stated here",
 ].join("\n");
-
-// ── A school's assessment of fees ───────────────────────────────────────────
 
 const ASSESSMENT = [
-  "Hillcrest College",
-  "Assessment (First Term 2025)",
-  "ASSESSMENT OF FEES: TOTAL TUITION AND FEES : ₱5,210.40",
-  "Total Tuition Fees 3,400.00 DOWNPAYMENT 2,605.20",
-  "Total Miscellaneous Fees 1,810.40 AMOUNT DUE ₱2,605.20",
+  "Northfield Institute of Technology",
+  "Student Assessment (Summer Term 2025)",
+  "ASSESSMENT OF FEES TOTAL TUITION AND FEES : ₱5,210.40",
+  "Tuition 3,400.00 Laboratory 600.00 Miscellaneous 1,210.40",
+  "Payment Schedule DOWNPAYMENT 2,605.20 MIDTERM 1,302.60 FINALS 1,302.60",
+  "AMOUNT DUE ₱2,605.20",
   "GRAND TOTAL ₱5,210.40",
   "Enrollment is not yet validated!",
-  "To validate your enrolment, please pay at least the down payment on or before",
-  "July 3, 2025. Failure to do so means deletion of your reserved subjects",
+  "Please pay at least the down payment on or before",
+  "July 3, 2025.",
 ].join("\n");
-
-// ── An online shop's checkout, before Place Order ───────────────────────────
 
 const CHECKOUT = [
   "Checkout",
@@ -102,11 +99,11 @@ const CHECKOUT = [
 
 describe("paper that asks for money, not paid", () => {
   it("a bill: what it asks for, by when, and who from", () => {
-    expect(readNotPaid([BILL])).toMatchObject({ kind: "bill", from: "RIVERSIDE POWER COOPERATIVE, INC", amount: 321563, due: "Apr 22, 2025", period: "03/10/2025 to 04/10/2025" });
+    expect(readNotPaid([BILL])).toMatchObject({ kind: "bill", from: "LAKESIDE WATER AND POWER CO., INC", amount: 321563, due: "Apr 22, 2025", period: "03/10/2025 to 04/10/2025" });
   });
 
   it("a fee assessment: the amount due now, and the whole", () => {
-    expect(readNotPaid([ASSESSMENT])).toMatchObject({ kind: "assessment", from: "Hillcrest College", amount: 260520, whole: 521040, due: "July 3, 2025" });
+    expect(readNotPaid([ASSESSMENT])).toMatchObject({ kind: "assessment", from: "Northfield Institute of Technology", amount: 260520, whole: 521040, due: "July 3, 2025" });
   });
 
   it("a checkout: the grand total, never a package's own total", () => {
@@ -119,7 +116,7 @@ describe("paper that asks for money, not paid", () => {
 
   it("says what it is, and that nothing is added", () => {
     expect(notPaidWords(readNotPaid([BILL])!)).toBe(
-      'That is a bill from RIVERSIDE POWER COOPERATIVE, INC, not a receipt, so it records no payment. It asks for ₱3,215.63, due Apr 22, 2025. Nothing is added. When you pay it, send the receipt, or say "paid it from cash".',
+      'That is a bill from LAKESIDE WATER AND POWER CO., INC, not a receipt, so it records no payment. It asks for ₱3,215.63, due Apr 22, 2025. Nothing is added. When you pay it, send the receipt, or say "paid it from cash".',
     );
     expect(notPaidWords(readNotPaid([ASSESSMENT])!)).toContain("It asks for ₱2,605.20 (₱5,210.40 in all), due July 3, 2025.");
   });
@@ -148,7 +145,7 @@ describe("a card made on one of them anyway", () => {
   it("is held back, and the owner told why", () => {
     const held = holdNotPaid(result([proposal({ amount: 321563, item: "Electricity" })], [BILL, BILL]), "Dont add this just train");
     expect(held.proposals).toEqual([]);
-    expect(held.refused[0]?.reason).toMatch(/^That is a bill from RIVERSIDE POWER COOPERATIVE, INC, not a receipt/);
+    expect(held.refused[0]?.reason).toMatch(/^That is a bill from LAKESIDE WATER AND POWER CO\., INC, not a receipt/);
   });
 
   it("is kept when they say it was paid", () => {
@@ -201,7 +198,7 @@ describe("an official receipt for tuition", () => {
   });
 
   it("tells the model the income printed on it is not theirs", () => {
-    expect(receiptNote(readReceipt([plain, raised], ASOF)!)).toContain("INCOME, DEFERRED INCOME or REVENUE printed on it is the issuer's own bookkeeping, never income to them");
+    expect(receiptNote(readReceipt([plain, raised], ASOF)!)).toContain("words like income or revenue printed on it are the issuer's own bookkeeping, never income to them");
   });
 });
 
@@ -247,7 +244,7 @@ describe("once they say it was paid", () => {
 
   it("a bill is on the bills list, at what it asked for or what they say", () => {
     const bill = readNotPaid([BILL])!;
-    expect(paidDraftFor(bill, "paid it from cash", reference, ASOF)).toMatchObject({ category: "Bills", item: "Riverside Power", amount: 321563, fromWallet: "Cash" });
+    expect(paidDraftFor(bill, "paid it from cash", reference, ASOF)).toMatchObject({ category: "Bills", item: "Lakeside Water", amount: 321563, fromWallet: "Cash" });
     expect(paidDraftFor(bill, "paid 3000 from maya", reference, ASOF)).toMatchObject({ amount: 300000, fromWallet: "Maya" });
   });
 

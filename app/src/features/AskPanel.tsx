@@ -133,7 +133,9 @@ import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, wantsThoseEntries, type Intent } from "../domain/intent";
 import { planWorked } from "../domain/planRate";
-import { notPaidIn, paidDraftFor, saysItWasPaid, type NotPaid } from "../domain/notPaid";
+import { notPaidIn, notPaidWords, paidDraftFor, saysItWasPaid, type NotPaid } from "../domain/notPaid";
+import { classifyPaper, PAPER_KINDS, PAPER_WORDS, UNPAID, type PaperKind } from "../domain/paperKind";
+import { maskNumbers, nearestTaught, paperEvent, papersFrom, taughtFromCard, trainingFrom, wantsTraining, type TaughtPaper } from "../domain/paperMemory";
 import { addressesEveryCard, asksToReadAgain, asksToRename, saysAllOfIt, saysOneWasMissed, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
 import { asksWhetherAdded, inLedgerOrNot } from "../domain/checkPicture";
 import { kindSaidForAll } from "../domain/saidForAll";
@@ -491,7 +493,14 @@ interface Offered {
    * the moment you asked to look at it. It stays, marked, with its buttons
    * gone.
    */
-  readonly state: "open" | "added" | "used" | "discarded";
+  readonly state: "open" | "added" | "used" | "discarded" | "taught";
+  /**
+   * The picture it was read off, for teaching the paper reader: its kind as
+   * the trained reader saw it and what the phone read, numbers masked.
+   * `teach` when the message asked to train rather than add, so the card
+   * keeps an example instead of adding a row (`domain/paperMemory.ts`).
+   */
+  readonly paper?: { readonly kind: PaperKind; readonly text: string; readonly teach: boolean } | undefined;
   /**
    * When it was sent to the form, so a save in the form is matched only to
    * a card sent before it, never to one sent after (`lastSaved`).
@@ -749,9 +758,10 @@ function turnFromCard(card: StoredCard): Turn {
   }
 
   const state: Offered["state"] =
-    card.state === "added" || card.state === "used" || card.state === "discarded"
+    card.state === "added" || card.state === "used" || card.state === "discarded" || card.state === "taught"
       ? card.state
       : "open";
+  const paperKind = card.paper && (PAPER_KINDS as readonly string[]).includes(card.paper.kind) ? (card.paper.kind as PaperKind) : null;
 
   return {
     kind: "proposal",
@@ -766,6 +776,8 @@ function turnFromCard(card: StoredCard): Turn {
     state,
     cardId: card.id,
     ...(card.recordNumber === undefined ? {} : { recordNumber: card.recordNumber }),
+    // A training card comes back a training card, never with Add to ledger on it. Its reading stayed on the device it was read on.
+    ...(paperKind && card.paper ? { paper: { kind: paperKind, text: "", teach: card.paper.teach } } : {}),
   };
 }
 
@@ -808,6 +820,8 @@ function storedFrom(turn: Turn): StoredCard | null {
       ...(turn.proposal.said ? { said: turn.proposal.said } : {}),
       ...(turn.proposal.typed ? { typed: true } : {}),
       ...(turn.recordNumber === undefined ? {} : { recordNumber: turn.recordNumber }),
+      // The kind and the training flag only: the reading stays on this device, and a training card never comes back with Add on it.
+      ...(turn.paper ? { paper: { kind: turn.paper.kind, teach: turn.paper.teach } } : {}),
     };
   }
   if (isDebt(turn)) {
@@ -1199,6 +1213,16 @@ export function AskPanel({
    * the word. Kept raw because the lists can change while the panel is open.
    */
   const [learnedEvents, setLearnedEvents] = useState<readonly AiEvent[]>([]);
+  /** The papers the owner taught, and the paper reader trained on them (domain/paperMemory.ts). */
+  const [taught, setTaught] = useState<readonly TaughtPaper[]>([]);
+  const training = useMemo(() => trainingFrom(taught), [taught]);
+  /**
+   * The picture being read right now: what the phone read off it, and
+   * whether the message asked to train rather than add. Cards offered while
+   * it is set carry their paper, so adding one teaches the reader and a
+   * training card keeps an example instead of a row.
+   */
+  const pictureNow = useRef<{ readonly readings: readonly string[]; readonly teach: boolean } | null>(null);
 
   const learnedItems = useMemo(
     () =>
@@ -1240,6 +1264,13 @@ export function AskPanel({
       .recentOnce()
       .then((events) => {
         if (live) setLearnedEvents(events);
+      })
+      .catch(() => {});
+    // Every paper taught, however far back: the reader is trained on them.
+    aiLogStore(uid)
+      .papers()
+      .then((events) => {
+        if (live) setTaught(papersFrom(events));
       })
       .catch(() => {});
     return () => {
@@ -1638,6 +1669,15 @@ export function AskPanel({
 
   /** Learn from a card whose row was saved: every field changed is a lesson (domain/learning.ts). */
   const learnFrom = (turn: Offered, saved: Draft): void => {
+    /*
+     * A picture card added is an example too: this paper, filed this way.
+     * Added means paid, whatever kind of paper it was read as.
+     */
+    if (turn.paper?.text && !turn.paper.teach) {
+      const paper = taughtFromCard(turn.paper.kind, turn.paper.text, saved, true);
+      log(paperEvent(paper));
+      setTaught((prev) => [...prev, { ...paper, at: new Date().toISOString() }]);
+    }
     const first = firstRead.current.get(turn.cardId) ?? turn.proposal.draft;
     const lessons = lessonsFrom(first, saved, turn.proposal.said ?? "", reference);
     if (lessons.length === 0) return;
@@ -2209,6 +2249,56 @@ export function AskPanel({
    * One question at a time: a card with three blanks on it is a form, and a
    * form is what the assistant exists to avoid.
    */
+  /**
+   * The paper a card was read off, while a picture is being read: the
+   * reading that holds the card's amount (or the first), its kind as the
+   * trained reader or the nearest taught example says, numbers masked.
+   */
+  const paperOf = (draft: Draft): Offered["paper"] => {
+    const now = pictureNow.current;
+    if (!now || now.readings.length === 0) return undefined;
+    const pairs: string[] = [];
+    for (let k = 0; k < now.readings.length; k += 2) pairs.push(`${now.readings[k] ?? ""}\n${now.readings[k + 1] ?? ""}`);
+    const shown = draft.amount ? (draft.amount / 100).toFixed(2) : "";
+    const commas = draft.amount ? (draft.amount / 100).toLocaleString("en-US", { minimumFractionDigits: 2 }) : "";
+    const text = pairs.find((p) => shown && (p.includes(shown) || p.includes(commas))) ?? pairs[0] ?? "";
+    if (!text.trim()) return undefined;
+    const near = nearestTaught(text, training.taught, 0.5);
+    const kind = near ? near.paper.kind : classifyPaper(text, training.model).kind;
+    return { kind, text: maskNumbers(text).slice(0, 1800), teach: now.teach };
+  };
+
+  /** A training card taught: the example kept, nothing added (domain/paperMemory.ts). */
+  const teachCard = (index: number, turn: Offered, kind: PaperKind): void => {
+    hold(index);
+    const draft = turn.live ?? turn.proposal.draft;
+    const text = turn.paper?.text ?? "";
+    if (!text) {
+      say({
+        kind: "assistant",
+        ephemeral: true,
+        text: 'This card came back after a refresh without what was read off its picture, so it cannot be taught. Send the picture again with "train".',
+        from: "this device",
+      });
+      return;
+    }
+    const paper = taughtFromCard(kind, text, draft, !UNPAID.has(kind));
+    log(paperEvent(paper));
+    setTaught((prev) => [...prev, { ...paper, at: new Date().toISOString() }]);
+    const taughtTurn: Offered = { ...turn, state: "taught", paper: { kind, text, teach: true } };
+    recordCard(taughtTurn);
+    setTurns((prev) => prev.map((t, j) => (j === index && isOffer(t) ? taughtTurn : t)));
+    const filed = UNPAID.has(kind)
+      ? "not paid, so papers like it make no entry until you say they were paid"
+      : [draft.item, draft.fromWallet ? `from ${draft.fromWallet}` : ""].filter(Boolean).join(", ");
+    say({
+      kind: "assistant",
+      ephemeral: true,
+      text: `Taught: ${PAPER_WORDS[kind]}${filed ? `, ${filed}` : ""}. Papers that read like it will be read the same way. Nothing was added to the ledger.`,
+      from: "this device",
+    });
+  };
+
   const offer = async (
     proposal: Proposal,
     hint: string,
@@ -2498,11 +2588,13 @@ export function AskPanel({
       }
     }
 
-    const asked = batch ? null : nextQuestion(ready.draft, reference, settled);
+    // A training card asks nothing: it is there to be taught, not saved.
+    const asked = batch || pictureNow.current?.teach ? null : nextQuestion(ready.draft, reference, settled);
 
     if (!asked) {
       const cardId = newCardId();
-      say({ kind: "proposal", proposal: ready, state: "open", cardId });
+      const paper = paperOf(ready.draft);
+      say({ kind: "proposal", proposal: ready, state: "open", cardId, ...(paper ? { paper } : {}) });
       log(
         aiEvent("proposed", "add", {
           entry: `${ready.draft.date} ${ready.draft.flow} ${ready.draft.item} ${formatMoney(ready.draft.amount ?? 0)}`,
@@ -2886,7 +2978,16 @@ export function AskPanel({
   };
 
   /** Read the attached files into proposals. Returns false when there were none. */
+  /** Read what was sent; the picture being read is let go however it ends (`pictureNow`). */
   const readAttached = async (note: string, again?: readonly Attachment[]): Promise<boolean> => {
+    try {
+      return await readSent(note, again);
+    } finally {
+      pictureNow.current = null;
+    }
+  };
+
+  const readSent = async (note: string, again?: readonly Attachment[]): Promise<boolean> => {
     const sent = again ? [...again] : files;
     if (!again) setFiles([]);
     // Kept for "read it again" and "look at the receipt", which name no file (see READ_AGAIN).
@@ -2922,10 +3023,13 @@ export function AskPanel({
           signal: control.signal,
           lastUsed,
           ownNames,
+          training,
         }),
       "Still reading it",
     );
     stopper.current = null;
+    // The cards offered from here on carry their picture's paper (`paperOf`).
+    if (sent.length > 0) pictureNow.current = { readings: read.readings ?? [], teach: wantsTraining(note) };
     // A screenful of daily interest is one entry, not sixty cards (domain/interestFold.ts).
     const folded = foldInterest(read.proposals, transactions, reference);
     /*
@@ -3046,8 +3150,15 @@ export function AskPanel({
 
     // Paper that asks for money, read just now: "paid it" or "placed it" next makes its card.
     if (sent.length > 0) {
-      const docs = notPaidIn(result.readings ?? []);
-      heldPaper.current = docs.length > 0 && !saysItWasPaid(note) ? { docs, at: Date.now() } : null;
+      const docs = notPaidIn(result.readings ?? [], training);
+      const teaching = pictureNow.current?.teach === true;
+      heldPaper.current = docs.length > 0 && !teaching && !saysItWasPaid(note) ? { docs, at: Date.now() } : null;
+      // Sent to train: a bill or a checkout gets its card too, to be taught as what it is.
+      if (teaching) {
+        for (const doc of docs) {
+          await offer({ draft: paidDraftFor(doc, "", reference, asOf), confidence: "medium", sourceRef: "the picture", adjustments: [notPaidWords(doc)] }, note, false, true);
+        }
+      }
     }
 
     if (result.source === "offline") {
@@ -3529,7 +3640,7 @@ export function AskPanel({
       setBusy(true);
       const read = await during(
         "Reading what you sent",
-        () => extractProposals({ note, attachments: sent, reference, asOf, signal: control.signal, lastUsed }),
+        () => extractProposals({ note, attachments: sent, reference, asOf, signal: control.signal, lastUsed, training }),
         "Still reading it",
       ).finally(() => {
         stopper.current = null;
@@ -6728,7 +6839,7 @@ export function AskPanel({
   );
 
   /** Cards still waiting on a decision. */
-  const open = turns.filter((t): t is Offered => isOffer(t) && t.state === "open");
+  const open = turns.filter((t): t is Offered => isOffer(t) && t.state === "open" && !t.paper?.teach);
   const openCount = open.length;
 
   /**
@@ -6861,7 +6972,8 @@ export function AskPanel({
    */
   const openIndexes: number[] = [];
   turns.forEach((t, i) => {
-    if (isOffer(t) && t.state === "open") openIndexes.push(i);
+    // A training card is taught, never added: it stays out of the batch.
+    if (isOffer(t) && t.state === "open" && !t.paper?.teach) openIndexes.push(i);
   });
   const standing = new Map<number, Standing>();
   for (const i of openIndexes) standing.set(i, heldBack(turns[i] as Offered, i) ?? "ready");
@@ -7340,6 +7452,7 @@ export function AskPanel({
                 sink.use(turn.proposal.draft);
                 settle(i, "used");
               }}
+              onTeach={turn.paper?.teach ? (kind) => teachCard(i, turn, kind) : undefined}
               onDiscard={() => {
                 hold(i);
                 log(
@@ -7882,6 +7995,7 @@ function ProposalCard({
   onAdd,
   onUse,
   onDiscard,
+  onTeach,
 }: {
   offered: Offered;
   sink: ProposalSink;
@@ -7911,8 +8025,14 @@ function ProposalCard({
   onAdd: () => void;
   onUse: () => void;
   onDiscard: () => void;
+  /** A training card: keep it as an example of this kind instead of adding it. */
+  onTeach?: ((kind: PaperKind) => void) | undefined;
 }) {
   const { proposal, state } = offered;
+  /** The kind of paper a training card says it is, changeable before Teach. */
+  const [paperKind, setPaperKind] = useState<PaperKind>(offered.paper?.kind ?? "receipt");
+  const kindPickerId = useId();
+  const teaching = offered.paper?.teach === true && onTeach !== undefined;
   /**
    * What is on the card: the form while it is following it, and otherwise
    * what was read. Everything below reads this one binding, so the fields,
@@ -8478,7 +8598,9 @@ function ProposalCard({
       {settled ? (
         <>
           <p className="t-micro fms-proposalfrom">
-            {state === "added"
+            {state === "taught"
+              ? `Taught as ${PAPER_WORDS[offered.paper?.kind ?? "receipt"]}. Nothing was added to the ledger.`
+              : state === "added"
               ? "Saved to the ledger. It is in the Database and in the activity trail."
               : changedInForm
                 ? "Following the form beside this, which no longer matches what I read. Put the original back to undo what changed there."
@@ -8505,6 +8627,35 @@ function ProposalCard({
               </Button>
             </div>
           )}
+        </>
+      ) : teaching ? (
+        <>
+          {/*
+            Training, not adding: the owner sent this picture to teach the
+            reader ("train", "don't add"). Teach keeps it as an example of
+            the kind picked here, filed as the card says; nothing is saved
+            to the ledger (domain/paperMemory.ts).
+          */}
+          <p className="t-micro fms-proposalnote">Training: nothing is added to the ledger. Fix the kind, the account or the item here if they are wrong, then teach it.</p>
+          <label className="t-micro fms-pfieldlabel" htmlFor={kindPickerId}>
+            Kind of paper
+          </label>
+          <select id={kindPickerId} className="t-caption fms-proposalselect" value={paperKind} onChange={(e) => setPaperKind(e.target.value as PaperKind)}>
+            {PAPER_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {PAPER_WORDS[k].replace(/^an? /, "").replace(/^./, (c) => c.toUpperCase())}
+              </option>
+            ))}
+          </select>
+          <div className="fms-proposalactions">
+            <Button size="sm" variant="primary" onClick={() => onTeach?.(paperKind)}>
+              Teach this
+            </Button>
+            <Button size="sm" onClick={onDiscard}>
+              Discard
+            </Button>
+          </div>
+          <p className="t-micro fms-proposalfrom">From {proposal.sourceRef}</p>
         </>
       ) : (
         <>

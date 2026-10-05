@@ -946,6 +946,29 @@ What the phone's reader could not read at all: the dessert receipt under
 pink light and the faded supermarket tape. Those go to the vision model,
 which has the new rules. The cinema tickets were unreadable on the device too.
 
+### 2026-10-05: the paper reader is trained, not written
+
+"Dont hard code those please train them." The kind of paper a picture is
+(receipt, card slip, e-wallet or bank confirmation, ATM slip, account
+history, bill, assessment of fees, checkout, quotation) now comes from a
+naive Bayes reader trained on examples (`paperKind.ts`), not from rules
+written for particular papers.
+
+| Part | What it does |
+|---|---|
+| `paperSeed.ts` | Starter examples, invented in many layouts, none the owner's. Adding one teaches every reading after it |
+| `paperMemory.ts` | The owner's own examples, kept in their `ai` record as `accepted` events with field `paper` (reading masked in `text`, filing in `entry`). The existing rules allow this shape, so nothing was deployed. Read whole with one equality query (`aiLogStore.papers`). Counted three times over the starter set |
+| Teach mode | Pictures sent with "train", "don't add", "for training": each card has a kind picker and **Teach this** in place of Add to ledger, asks no questions, stays out of the batch bar, and comes back a training card after a refresh. A bill or checkout gets a card too |
+| Learning from use | Every picture card added teaches: this paper, filed this way, paid |
+| At read time | The model is told the trained kind and how sure, and the nearest taught paper with how it was filed (`taughtNote`). A paper that reads like a taught one is that kind; a new one is held back as unpaid only at 85% or more (`SURE_UNPAID`), because holding back a paid receipt loses an entry. The amount is read off the line the owner's example carried it on. A single picture like a taught one gets that filing where the model left a field open (`fileAsTaught`) |
+| No model | A shop receipt the device is sure of makes its own card |
+
+Measured on the owner's 14 readings (kept out of the repo): 13 right on
+the starter set alone; the miss is the dessert receipt the phone cannot
+read, at 0.35, below anything acted on. Leave-one-out on the starter set
+is 61 of 68, and no paid paper is ever read as unpaid (asserted in
+`paperTraining.test.ts`).
+
 ---
 
 ## 6. What the owner has to do

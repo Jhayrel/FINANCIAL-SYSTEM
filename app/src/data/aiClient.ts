@@ -39,7 +39,7 @@ import {
   type CategoryAnswer,
 } from "../domain/categorise";
 import type { ReferenceLists } from "../domain/types";
-import type { Draft } from "../domain/entry";
+import { emptyDraft, type Draft } from "../domain/entry";
 import type { Transaction } from "../domain/types";
 import type { AiTask } from "../domain/aiOffline";
 import { plainText } from "../domain/aiText";
@@ -53,6 +53,8 @@ import { interestNote, readInterestCredit, type InterestCredit } from "../domain
 import { cashWallet, readWithdrawal, slipsIn, withdrawalNote, type Withdrawal } from "../domain/withdrawal";
 import { cardSlipNote, cardSlipsIn, readCardSlip, type CardSlip } from "../domain/cardSlip";
 import { isNotPaidFigure, notPaidIn, notPaidNote, notPaidWords, readNotPaid, saysItWasPaid } from "../domain/notPaid";
+import { classifyPaper, paperNote } from "../domain/paperKind";
+import { nearestTaught, taughtNote, trainingFrom, type PaperTraining } from "../domain/paperMemory";
 import { acceptableWording, onlyTheirFigures, type SpendNote } from "../domain/spendNote";
 import { readPicture } from "./ocr";
 import { pairBorrowings, readProposals, type Proposal, type ReadBalance, type Refused } from "../domain/proposal";
@@ -544,6 +546,8 @@ export interface ExtractOptions {
   readonly attachments: readonly Attachment[];
   readonly reference: ReferenceLists;
   readonly asOf: IsoDate;
+  /** The paper reader, trained on the starter examples and what the owner taught (`domain/paperMemory.ts`). */
+  readonly training?: PaperTraining;
   readonly fetcher?: typeof fetch;
   readonly timeoutMs?: number;
   readonly token?: () => Promise<string | null>;
@@ -711,7 +715,35 @@ function extractContext(options: ExtractOptions): string {
  * presses the button. See `domain/proposal.ts`.
  */
 export async function extractProposals(options: ExtractOptions): Promise<ExtractResult> {
-  return onDeviceWhenUnread(holdNotPaid(await extractRead(options), options.note), options);
+  const training = options.training ?? trainingFrom();
+  const read = await extractRead({ ...options, training });
+  return onDeviceWhenUnread(fileAsTaught(holdNotPaid(read, options.note, training), training), options);
+}
+
+/**
+ * A picture that reads like one the owner taught is filed the way they
+ * filed that one, where the model left a field open: the same shop's
+ * receipt as the same kind of spending, from the same account. Only for a
+ * single picture, whose cards are all its own, and only a field left empty:
+ * the model was shown the example and chose, and what it chose stands.
+ */
+export function fileAsTaught(result: ExtractResult, training: PaperTraining): ExtractResult {
+  const readings = result.readings ?? [];
+  if (readings.length !== 2 || training.taught.length === 0 || result.proposals.length === 0) return result;
+  const near = nearestTaught(`${readings[0] ?? ""}\n${readings[1] ?? ""}`, training.taught, 0.5);
+  if (!near || !near.paper.paid) return result;
+  const t = near.paper;
+  const proposals = result.proposals.map((p) => {
+    const d = p.draft;
+    if (d.flow !== t.flow) return p;
+    const item = !d.item.trim() && t.item ? t.item : d.item;
+    const category = item !== d.item && t.category ? (t.category as Draft["category"]) : d.category;
+    const fromWallet = !d.fromWallet && t.fromWallet ? t.fromWallet : d.fromWallet;
+    if (item === d.item && fromWallet === d.fromWallet) return p;
+    const said = [item !== d.item ? item : "", fromWallet !== d.fromWallet ? `from ${fromWallet}` : ""].filter(Boolean).join(", ");
+    return { ...p, draft: { ...d, item, category, fromWallet }, adjustments: [...p.adjustments, `Filed as ${said}, as you taught from a paper like this one.`] };
+  });
+  return { ...result, proposals };
 }
 
 /**
@@ -720,9 +752,9 @@ export async function extractProposals(options: ExtractOptions): Promise<Extract
  * one of its figures anyway is held back, and the owner is told what the
  * picture is and how to add it once it is paid.
  */
-export function holdNotPaid(result: ExtractResult, note: string | undefined): ExtractResult {
+export function holdNotPaid(result: ExtractResult, note: string | undefined, training: PaperTraining = trainingFrom()): ExtractResult {
   const readings = result.readings ?? [];
-  const docs = notPaidIn(readings);
+  const docs = notPaidIn(readings, training);
   if (docs.length === 0 || saysItWasPaid(note)) return result;
   // Any of a document's figures when every picture is one; its amounts only, beside a real receipt.
   const onlyThese = docs.length * 2 >= readings.length;
@@ -760,8 +792,37 @@ export function onDeviceWhenUnread(
   const nothing = result.proposals.length === 0;
   const withdrawals = nothing ? slipsIn(readings) : [];
   const cardSlips = nothing ? cardSlipsIn(readings) : [];
-  if (walletReceipts.length + withdrawals.length + cardSlips.length === 0) return result;
-  const made = readProposals([], options.reference, options.asOf, { ...(options.note ? { note: options.note } : {}), readings, walletReceipts, withdrawals, cardSlips }).proposals;
+  /*
+   * A shop receipt whose arithmetic the device is sure of makes its card
+   * too: the total, the day printed, and the wallet its payment line names.
+   * Not a picture that is a slip, a wallet screen or a paper that asks for
+   * money; those have their own readers.
+   */
+  const shopCards: Proposal[] = [];
+  if (nothing && walletReceipts.length + withdrawals.length + cardSlips.length === 0) {
+    for (let i = 0; i < readings.length; i += 2) {
+      const pair = [readings[i] ?? "", readings[i + 1] ?? ""];
+      if (readNotPaid(pair) || readCardSlip(pair) || readWalletReceipt(pair) || readWithdrawal(pair)) continue;
+      const r = readReceipt(pair, options.asOf);
+      if (!r || r.confidence !== "high") continue;
+      const wallets = options.reference.wallets;
+      const fromWallet =
+        r.paidWith === "cash" ? cashWallet(wallets) : r.paidWith === "gcash" ? walletFor("GCash", options.reference) : r.paidWith === "maya" ? walletFor("Maya", options.reference) : "";
+      shopCards.push({
+        draft: { ...emptyDraft(r.date ?? options.asOf), flow: "Spending", category: "Spending", amount: r.total, fromWallet, description: (r.bought[0] ?? "").split(" / ")[0] ?? "", status: "Paid" },
+        confidence: "medium",
+        sourceRef: "the picture",
+        adjustments: [`The total, by the receipt's own arithmetic: ${r.evidence.join("; ")}.`],
+      });
+    }
+  }
+  if (walletReceipts.length + withdrawals.length + cardSlips.length + shopCards.length === 0) return result;
+  const made = [
+    ...(walletReceipts.length + withdrawals.length + cardSlips.length > 0
+      ? readProposals([], options.reference, options.asOf, { ...(options.note ? { note: options.note } : {}), readings, walletReceipts, withdrawals, cardSlips }).proposals
+      : []),
+    ...shopCards,
+  ];
   if (made.length === 0) return result;
   const why = result.source === "offline" ? "The model could not be reached, so this was read on this device. Check it." : "Read on this device. Check it.";
   // One note that it was read here, and the screen's own confidence: a clean read is not "hard to make out".
@@ -811,7 +872,18 @@ async function extractRead(options: ExtractOptions): Promise<ExtractResult> {
   const walletReads = readings.map((r, i) => (r && !credits[i] && !slips[i] && !cardReads[i] ? readWalletReceipt([r.raised, r.plain]) : null));
   const walletReceipts = walletReads.filter((w): w is WalletReceipt => w !== null);
   // A bill, an assessment of fees or a checkout screen: money asked for, not paid (domain/notPaid.ts).
-  const notPaids = readings.map((r, i) => (r && !credits[i] && !slips[i] && !cardReads[i] && !walletReads[i] ? readNotPaid([r.raised, r.plain]) : null));
+  const training = options.training ?? trainingFrom();
+  const notPaids = readings.map((r, i) => (r && !credits[i] && !slips[i] && !cardReads[i] && !walletReads[i] ? readNotPaid([r.raised, r.plain], training) : null));
+  /*
+   * What the trained reader makes of each picture, and the paper the owner
+   * taught that it reads most like: told to the model beside the reading.
+   */
+  const learned = readings.map((r) => {
+    if (!r) return "";
+    const both = `${r.raised}\n${r.plain}`;
+    const near = nearestTaught(both, training.taught);
+    return [paperNote(classifyPaper(both, training.model), training.model), near ? taughtNote(near) : ""].filter(Boolean).join(" ");
+  });
   const paidSaid = saysItWasPaid(options.note);
   /*
    * Only the screens in the request: each picture is its own request, and a
@@ -873,7 +945,8 @@ async function extractRead(options: ExtractOptions): Promise<ExtractResult> {
             ? `${asRead}\n${receiptNote(receipt)}`
             : asRead;
     if (text) {
-      const asRead: Attachment = { id: picture.id, name: `${picture.name}, read on this device`, kind: "text", bytes: text.length, text: redact(text) };
+      const withLearned = learned[i] ? `${text}\n${learned[i]}` : text;
+      const asRead: Attachment = { id: picture.id, name: `${picture.name}, read on this device`, kind: "text", bytes: withLearned.length, text: redact(withLearned) };
       asText.push(asRead);
       ownJobs[i]?.push([asRead]);
       checks[i] = text;

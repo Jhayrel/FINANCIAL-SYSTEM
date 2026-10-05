@@ -639,7 +639,7 @@ export function receiptNote(check: ReceiptCheck): string {
   }
   parts.push(`One receipt is one purchase: one proposal with amountPesos ${check.total / 100}, the store or what was bought in description, unless they asked for the items separately.`);
   // A receipt is money paid out: the issuer's own bookkeeping on it is not their income (4 October 2026, DEFERRED INCOME-TUITION).
-  parts.push("It records money they paid out: INCOME, DEFERRED INCOME or REVENUE printed on it is the issuer's own bookkeeping, never income to them, and a breakdown of fees on it is part of this one amount.");
+  parts.push("It records money they paid out: words like income or revenue printed on it are the issuer's own bookkeeping, never income to them, and a breakdown of fees on it is part of this one amount.");
   if (check.paidWith) parts.push(`It was paid ${PAID_WITH[check.paidWith]}.`);
   if (check.date) {
     parts.push(

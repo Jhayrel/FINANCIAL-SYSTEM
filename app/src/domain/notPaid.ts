@@ -1,21 +1,19 @@
 /**
  * A picture of money asked for, not money paid.
  *
- * The owner, 4 October 2026, sent fourteen pictures to train the reader on
- * ("Dont add this just train"). Four of them record no payment at all:
+ * A bill, an assessment of fees, a checkout screen and a quotation print
+ * totals, tax lines and dates exactly as a receipt does, so a reader that
+ * looks for a total finds one and offers it as spending. None of them
+ * happened: a bill is owed, an assessment is a schedule, a checkout is an
+ * order not yet placed. The card waits for the owner to say it was paid.
  *
- *   - an electricity company's billing invoice, printed "THIS IS NOT A
- *     RECEIPT UNLESS MACHINE VALIDATED", with "PLEASE PAY ON OR BEFORE";
- *   - a school's assessment of fees, "Enrollment is not yet validated",
- *     with an amount due as the down payment and a grand total;
- *   - two online shop checkout screens with "Place Order" still on them.
- *
- * Each prints totals, tax lines and dates exactly as a receipt does, so a
- * reader that looks for a total finds one and offers it as spending. None
- * of them happened: a bill is owed, an assessment is a schedule, and a
- * checkout is an order not yet placed. So they are told apart here, from
- * the words the document prints about itself, and the card waits for the
- * owner to say it was paid.
+ * Which kind a paper is comes from training, not from rules written for
+ * particular papers (`paperKind.ts`): the owner, 5 October 2026, "Dont hard
+ * code those please train them". A paper that reads like one the owner
+ * taught is that kind; otherwise the trained reader decides, and only when
+ * it is sure. What is left here is reading the figures off a paper once its
+ * kind is known: the amount it asks for, by when, and from whom, helped by
+ * the line the owner's own example of it carried its amount on.
  *
  * Pure, on text, so it runs the same on the device and in a test.
  */
@@ -24,6 +22,8 @@ import { walletInside } from "./capture";
 import { emptyDraft, type Draft } from "./entry";
 import type { Centavos } from "./money";
 import { figuresIn, formatMoney } from "./money";
+import { classifyPaper, UNPAID, type PaperKind } from "./paperKind";
+import { nearestTaught, trainingFrom, type PaperTraining, type TaughtPaper } from "./paperMemory";
 import type { IsoDate, ReferenceLists } from "./types";
 import { billFor } from "./walletReceipt";
 
@@ -51,10 +51,6 @@ const FIGURE = /(?<![\d.,])(?:₱|php|#)?\s?(\d{1,3}(?:,\d{3})+|\d+)\.(\d{2})(?!
 
 const figuresOn = (line: string): Centavos[] =>
   [...line.matchAll(FIGURE)].map((m) => Number((m[1] ?? "0").replace(/,/g, "")) * 100 + Number(m[2] ?? "0"));
-
-/** Words the document prints that say it was paid: such a picture is a receipt, read elsewhere. */
-const PAID =
-  /\b(?:order (?:placed|confirmed|received|successful)|payment (?:successful|complete(?:d)?|received|confirmed|posted)|thank you for (?:your )?(?:order|purchase|payment)|amount paid|total amount paid|validated payment|machine validated:)\b|\bpaid on\s+(?:\d|[a-z]{3,9}\.?\s+\d)/i;
 
 /** The owner saying it was paid, in the message with the picture. */
 export function saysItWasPaid(note: string | undefined): boolean {
@@ -105,92 +101,100 @@ function agreed(lines: readonly string[], label: RegExp): Centavos | null {
   return best ? best[0] : null;
 }
 
-function checkoutIn(lines: readonly string[], text: string): NotPaid | null {
-  const onScreen =
-    /\bplace\s*(?:my\s*)?order\b/i.test(text) ||
-    /\bproceed\s+to\s+(?:checkout|payment)\b/i.test(text) ||
-    (/\bcheck\s*-?\s*out\b/i.test(text) && /\b(?:enter voucher|voucher code|shipping fee|delivery option|choose your delivery)\b/i.test(text));
-  if (!onScreen) return null;
+/** How sure the trained reader must be before a picture is held back as unpaid. */
+export const SURE_UNPAID = 0.85;
+
+const STOP = new Set(["the", "and", "for", "total", "amount", "php", "with", "this", "your", "from"]);
+
+/**
+ * The figure on the line the owner's own example carried its amount on.
+ * Their electricity bill's amount sat beside "GRAND TOTAL / NETBILL": this
+ * month's does too, whatever else on the page reads as a total.
+ */
+function byTaughtLine(lines: readonly string[], taught: TaughtPaper | undefined): Centavos | null {
+  if (!taught?.amount) return null;
+  const shown = (taught.amount / 100).toFixed(2);
+  const withCommas = Number(shown).toLocaleString("en-US", { minimumFractionDigits: 2 });
+  const line = taught.text.split(/\r?\n/).find((l) => l.includes(shown) || l.includes(withCommas));
+  const words = (line ?? "").toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !STOP.has(w));
+  if (words.length === 0) return null;
+  for (const l of lines) {
+    const own = l.toLowerCase();
+    if (!words.some((w) => own.includes(w))) continue;
+    const figures = figuresOn(l);
+    const last = figures[figures.length - 1];
+    if (last !== undefined && last > 0) return last;
+  }
+  return null;
+}
+
+function checkoutFigures(lines: readonly string[]): Pick<NotPaid, "amount" | "parts"> {
   // The grand total is the last line that starts with "Total", not a package's "1 Items, Total".
   const totals = lines.filter((l) => /^\W*total\b/i.test(l.trim())).flatMap((l) => figuresOn(l));
-  const amount = totals[totals.length - 1] ?? null;
-  const subtotal = agreed(lines, /^\W*sub\s*-?\s*total\b/i);
-  const shipping = agreed(lines, /\b(?:shipping|delivery)\s*(?:fee)?\b/i);
-  const parts = [
-    ...(subtotal !== null ? [`${formatMoney(subtotal)} for the items`] : []),
-    ...(shipping !== null ? [`${formatMoney(shipping)} shipping`] : []),
-  ];
+  const subtotal = agreed(lines, /^\W*(?:sub\s*-?\s*total|merchandise\s*subtotal|items?\s*subtotal)\b/i);
+  const shipping = agreed(lines, /\b(?:shipping|delivery)\s*(?:fee|subtotal)?\b/i);
+  return {
+    amount: totals[totals.length - 1] ?? agreed(lines, /\btotal\b/i),
+    parts: [
+      ...(subtotal !== null ? [`${formatMoney(subtotal)} for the items`] : []),
+      ...(shipping !== null ? [`${formatMoney(shipping)} shipping`] : []),
+    ],
+  };
+}
+
+const DUE_LABEL =
+  /\b(?:grand\s*total|net\s*bill|total\s*amount\s*due|amount\s*due|total\s*due|charges\s*for\s*this|total\s*current\s*bill|amount\s*payable|please\s*pay|statement\s*balance|balance\s*due)\b/i;
+
+/** The figures of a paper whose kind is known. */
+function figuresFor(kind: NotPaidKind, lines: readonly string[], text: string, taught: TaughtPaper | undefined): NotPaid {
+  const fromExample = byTaughtLine(lines, taught);
   const figures = lines.flatMap(figuresOn);
-  return { kind: "checkout", from: "", amount, parts, figures };
-}
-
-function billIn(lines: readonly string[], text: string): NotPaid | null {
-  const says =
-    /\b(?:this is )?not (?:a|an official) receipt\b/i.test(text) ||
-    /\bbilling\s+(?:invoice|statement|notice)\b/i.test(text) ||
-    /\bstatement\s+of\s+account\b/i.test(text) ||
-    /\bdisconnection\s+notice\b/i.test(text) ||
-    /\bplease\s+pay\s+(?:on\s+or\s+before|before|by)\b/i.test(text);
-  if (!says) return null;
-  const amount = agreed(
-    lines,
-    /\b(?:grand\s*total|net\s*bill|total\s*amount\s*due|amount\s*due|total\s*due|charges\s*for\s*this|total\s*current\s*bill|amount\s*payable|please\s*pay)\b/i,
-  );
+  const from = issuerIn(lines);
   const due = dueIn(text);
+  if (kind === "checkout") {
+    const c = checkoutFigures(lines);
+    return { kind, from: "", amount: fromExample ?? c.amount, parts: c.parts, figures };
+  }
+  if (kind === "assessment") {
+    const amount = fromExample ?? agreed(lines, /\b(?:amount\s*due|due\s*this\s*month|minimum\s*down\s*-?\s*payment|initial\s*payment|down\s*-?\s*payment)\b/i);
+    const whole = agreed(lines, /\b(?:grand\s*total|total\s*tuition\s*and\s*fees|total\s*assessment|total\s*fees|total\s*school\s*fees|total\s*amount)\b/i);
+    return { kind, from, amount: amount ?? whole, ...(whole !== null && whole !== amount ? { whole } : {}), ...(due ? { due } : {}), parts: [], figures };
+  }
+  if (kind === "quote") {
+    return { kind, from, amount: fromExample ?? agreed(lines, /\b(?:quoted\s*total|estimated\s*(?:total|cost)|grand\s*total|total\s*amount|total)\b/i), parts: [], figures };
+  }
   const period = periodIn(text);
-  return {
-    kind: "bill",
-    from: issuerIn(lines),
-    amount,
-    ...(due ? { due } : {}),
-    ...(period ? { period } : {}),
-    parts: [],
-    figures: lines.flatMap(figuresOn),
-  };
-}
-
-function assessmentIn(lines: readonly string[], text: string): NotPaid | null {
-  if (!/\bassessment\b/i.test(text)) return null;
-  if (!/\b(?:amount\s*due|payment\s*schedule|down\s*-?\s*payment|please\s*pay|not\s*yet\s*validated|to\s*validate)\b/i.test(text)) return null;
-  const amount = agreed(lines, /\bamount\s*due\b/i);
-  const whole = agreed(lines, /\b(?:grand\s*total|total\s*tuition\s*and\s*fees|total\s*assessment)\b/i);
-  const due = dueIn(text);
-  return {
-    kind: "assessment",
-    from: issuerIn(lines),
-    amount: amount ?? whole,
-    ...(whole !== null && whole !== amount ? { whole } : {}),
-    ...(due ? { due } : {}),
-    parts: [],
-    figures: lines.flatMap(figuresOn),
-  };
-}
-
-function quoteIn(lines: readonly string[], text: string): NotPaid | null {
-  if (!/\b(?:quotation|price\s*quote|pro\s*-?\s*forma|estimate(?:d)?\s+(?:cost|total|amount))\b/i.test(text)) return null;
-  const amount = agreed(lines, /\b(?:grand\s*total|total\s*amount|total)\b/i);
-  return { kind: "quote", from: issuerIn(lines), amount, parts: [], figures: lines.flatMap(figuresOn) };
+  return { kind, from, amount: fromExample ?? agreed(lines, DUE_LABEL), ...(due ? { due } : {}), ...(period ? { period } : {}), parts: [], figures };
 }
 
 /**
- * The document in one or more readings of one picture, when it asks for
- * money rather than records it paid; null for anything else.
+ * The paper in one or more readings of one picture, when it asks for money
+ * rather than records it paid; null for anything else.
+ *
+ * A paper that reads like one the owner taught is the kind they taught. A
+ * new one is the kind the trained reader says, when it is at least
+ * `SURE_UNPAID` sure: less sure, it is left to the model as before, because
+ * holding back a paid receipt by mistake loses an entry.
  */
-export function readNotPaid(readings: readonly string[]): NotPaid | null {
+export function readNotPaid(readings: readonly string[], training: PaperTraining = trainingFrom()): NotPaid | null {
   const texts = readings.filter((t) => t.trim());
   if (texts.length === 0) return null;
   const text = texts.join("\n");
-  if (PAID.test(text)) return null;
-  // The reading with the most lines carries the most labels; the others fill a figure it lost.
   const lines = texts.flatMap((t) => t.split(/\r?\n/)).map((l) => l.trim()).filter(Boolean);
-  return checkoutIn(lines, text) ?? assessmentIn(lines, text) ?? billIn(lines, text) ?? quoteIn(lines, text);
+  const near = nearestTaught(text, training.taught, 0.5);
+  const kind: PaperKind = near ? near.paper.kind : (() => {
+    const guess = classifyPaper(text, training.model);
+    return guess.p >= SURE_UNPAID ? guess.kind : "receipt";
+  })();
+  if (!UNPAID.has(kind)) return null;
+  return figuresFor(kind as NotPaidKind, lines, text, near?.paper.kind === kind ? near.paper : undefined);
 }
 
 /** Each picture's document, from the readings in pairs (plain, raised) as `extractRead` lays them out. */
-export function notPaidIn(readings: readonly string[]): NotPaid[] {
+export function notPaidIn(readings: readonly string[], training: PaperTraining = trainingFrom()): NotPaid[] {
   const out: NotPaid[] = [];
   for (let i = 0; i < readings.length; i += 2) {
-    const d = readNotPaid([readings[i] ?? "", readings[i + 1] ?? ""]);
+    const d = readNotPaid([readings[i] ?? "", readings[i + 1] ?? ""], training);
     if (d && !out.some((o) => o.kind === d.kind && o.amount === d.amount)) out.push(d);
   }
   return out;

@@ -11,11 +11,12 @@
  * whole.
  */
 
-import { collection, doc, getDocs, limit, orderBy, query, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, limit, orderBy, query, setDoc, where } from "firebase/firestore";
 
 import { firestore } from "./firebase";
 import { countReads, noteError } from "./usage";
 import { byNewest, type AiEvent } from "../domain/aiLog";
+import { PAPER_FIELD } from "../domain/paperMemory";
 
 /** Enough to learn from and to scan. The rest stays in the database. */
 const PAGE = 400;
@@ -83,6 +84,12 @@ export interface AiLogStore {
    * added to what the panel holds as they happen.
    */
   recentOnce(): Promise<AiEvent[]>;
+  /**
+   * The papers the owner taught (`domain/paperMemory.ts`), all of them,
+   * however far back: they are what the paper reader is trained on, and
+   * the last 400 events of everything else would push them out.
+   */
+  papers(): Promise<AiEvent[]>;
 }
 
 /** The session's one read, per account. */
@@ -101,6 +108,9 @@ export function aiLogStore(uid: string | null): AiLogStore {
       },
       async recentOnce() {
         return [...memory].sort(byNewest);
+      },
+      async papers() {
+        return memory.filter((e) => e.field === PAPER_FIELD);
       },
     };
   }
@@ -148,6 +158,19 @@ export function aiLogStore(uid: string | null): AiLogStore {
       } catch (e) {
         noteError(e, "reads");
         throw e;
+      }
+    },
+
+    async papers() {
+      if (!db) return [];
+      try {
+        // One field, one value: the index Firestore keeps for every field, so nothing has to be deployed.
+        const snapshot = await getDocs(query(collection(db, path(uid)), where("field", "==", PAPER_FIELD), limit(500)));
+        if (!snapshot.metadata.fromCache) countReads(snapshot.size);
+        return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as AiEvent);
+      } catch (e) {
+        noteError(e, "reads");
+        return [];
       }
     },
 
