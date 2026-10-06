@@ -7,6 +7,9 @@
  * it is answered here, and draws the line at Settings in one place.
  */
 
+import { isQuestion } from "./intent";
+import { asksSafeToSpend } from "./safeAsk";
+
 /** "what can you do", "what can my ai do", "help". */
 export function wantsCapabilities(text: string): boolean {
   return /\b(what (can|could) (you|my ai|the ai|the assistant|this ai) do|what are you able to do|what can i ask( you)?|how (do|can) i use (you|the ai|the assistant|this chat)|what do you do|your (features|capabilities)|help me use (you|the ai))\b/i.test(
@@ -20,6 +23,15 @@ export function wantsCapabilities(text: string): boolean {
  * the category of one entry is not a setting.
  */
 export function asksSettingsChange(text: string): boolean {
+  /*
+   * A sum with the bills taken out, or a question, is never a change to
+   * Settings. 5 and 6 October 2026: "What is my safe spending? ... remove the
+   * subscription and bills" and "You need to remove the subscription and bill
+   * to the equation" were both told "Settings are yours to change", three
+   * times. "How do I add a bill?" goes to the model, which knows where
+   * Settings is and says so.
+   */
+  if (asksSafeToSpend(text) || isQuestion(text)) return false;
   if (/\b(settings?|dark mode|light mode|theme)\b/i.test(text) && /\b(change|set|switch|turn|make|update|enable|disable|open)\b/i.test(text)) {
     return true;
   }

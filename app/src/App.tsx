@@ -57,6 +57,7 @@ import { asAmountAndFees, isPartOf, netWorth, outstandingOf, parentOf, partOf, p
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
+import { moveRows, type BillCategory } from "./domain/kindRename";
 import { formatMoney, type Centavos } from "./domain/money";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { debtWalletDirection, emptyDraft, insertChronologically } from "./domain/entry";
@@ -1424,6 +1425,27 @@ export default function App() {
   };
 
   /**
+   * A bill moved to subscriptions, or back (Settings, Categories): every row
+   * of it, live and in the bin, takes the new list's category, so the Budget
+   * screen, the Dashboard and the statements all count it under the list it
+   * is on (`moveRows`). Settings changes the two lists itself, straight after.
+   * Only the category changes on a row; no money moves.
+   */
+  const handleMoveKind = (name: string, to: BillCategory): void => {
+    const live = moveRows(transactions, name, to);
+    const binned = moveRows(deleted, name, to);
+    const changed: Transaction[] = [
+      ...live.filter((t, i) => t !== transactions[i]),
+      ...binned.filter((t, i) => t !== deleted[i]),
+    ];
+    record(settingsChanged(`Moved "${name}" to ${to}: ${changed.length === 1 ? "1 row" : `${changed.length.toLocaleString()} rows`} now count under ${to}`));
+    if (changed.length === 0) return;
+    setTransactions(live);
+    setDeleted(binned);
+    push((l) => l.saveMany(changed));
+  };
+
+  /**
    * Purge exists only in local mode. Against Firestore the rules deny `delete`
    * outright, so there is no way to lose a money record, and offering a
    * button that always fails would be worse than not offering it.
@@ -2475,6 +2497,7 @@ export default function App() {
               }}
               onRenameAccount={(from, to) => handleRename("account", from, to)}
               onRenameItem={(from, to) => handleRename("item", from, to)}
+              onMoveKind={handleMoveKind}
               onExport={handleExport}
             />
           )}

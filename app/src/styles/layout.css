@@ -1946,6 +1946,12 @@
  */
 .fms-rowactions--three { min-width: calc(3 * 96px + 2 * var(--space-2)); }
 
+/* A bill or subscription has a fourth: Move to the other list. Each button as wide as its words. */
+.fms-rowactions--four {
+  grid-auto-columns: auto;
+  min-width: 0;
+}
+
 /*
  * A settings section spaces its own children.
  *
@@ -2151,6 +2157,24 @@
     white-space: normal;
   }
   .fms-rowactions > button { flex: 1 1 auto; min-width: 0; }
+  /* Four in two rows of two, Rename and Stop over Move and Remove, so none is squeezed. */
+  .fms-rowactions.fms-rowactions--four {
+    display: grid;
+    grid-auto-flow: row;
+    grid-template-columns: 1fr 1fr;
+  }
+  /* "Move to Subscriptions" on one line on a phone: the words, not the padding, get the room. */
+  .fms-rowactions--four > button {
+    padding-inline: 6px;
+    white-space: nowrap;
+  }
+}
+
+/* The narrowest phones: two lines in the button rather than words cut off. */
+@container (max-width: 300px) {
+  .fms-rowactions--four > button {
+    white-space: normal;
+  }
 }
 
 @container (max-width: 880px) {
@@ -3885,6 +3909,19 @@
 .fms-asktools > .fms-btn {
   margin-left: auto;
   white-space: nowrap;
+}
+
+/*
+ * Stop sits beside Send, never in its place: the second tap of the thumb
+ * that pressed Send lands on Send, which waits, and not on Stop.
+ */
+.fms-asktools > .fms-askstop + .fms-btn {
+  margin-left: var(--space-3);
+}
+
+/* The words stand apart from the row of buttons, so a tap meant for the text does not land on Send. */
+.fms-asktools {
+  padding-top: 2px;
 }
 
 .fms-linkish {
@@ -6952,6 +6989,17 @@ button.fms-recent-row:disabled {
 }
 
 .fms-line:last-child {
+  border-bottom: 0;
+}
+
+/* A sum of the lines above it: the ink rule over it, as a total on paper. */
+.fms-line.fms-line-total {
+  border-top: 2px solid var(--ink);
+  padding-top: 8px;
+}
+
+/* The line above a total already ends at the rule. */
+.fms-line:has(+ .fms-line-total) {
   border-bottom: 0;
 }
 

@@ -16,15 +16,34 @@
  * ── Safe to spend ──────────────────────────────────────────────────────────
  *
  *   free     = what the spending wallets hold
- *              − bills still due this month
+ *              − bills and subscriptions still due this month
  *              − debt payments due before the month ends
- *   safe     = free, or what is left of the spending budget when that is less
- *   per day  = safe ÷ the days left, today included, rounded down
+ *   safe     = free, never below zero
+ *   today    = (safe + what today already spent) ÷ the days left, today
+ *              included, less what today already spent
+ *   after    = safe ÷ the days after today
+ *
+ * The owner, 6 October 2026: "5000 money then 1700 alloted for subscription
+ * and bills then I have 3,300 safe to spend and the safe to spend today
+ * is ... make it accurate based on real things". Safe to spend is the money
+ * that is there, less what is already promised to bills, subscriptions and
+ * lenders. Until then the spending budget could lower it, so the Dashboard
+ * said one figure and the chat, reading the wallets, another (₱297.95 a day
+ * against ₱201.13 on 6 October). The budget is a plan, not money: it is
+ * still worked out (`budgetLeft`, `budgetPerDay`) and said beside the figure
+ * when it is the tighter of the two, but it no longer changes it.
+ *
+ * Today is a share, not a rate. Spending ₱3,201.00 in the morning used to
+ * divide what was left by every day still to come, today included, so the
+ * day's figure dropped for the whole month and never said today was spent.
+ * Now today's share is set from what the wallets held before today's
+ * spending, today's spending comes out of it, and the rest of the month
+ * gets the rest.
  *
  * Savings are left out: they are not meant to be spent from. The bills are the
  * Budget screen's own list (`monthBills`) and the debt dates are the Debt
  * screen's (`debtDue`), so what is set aside here is what those screens show.
- * Rounded down, so the daily figure never promises a centavo that is not there.
+ * Rounded down, so a daily figure never promises a centavo that is not there.
  */
 
 import { learnPatterns } from "./allocation";
@@ -35,7 +54,7 @@ import { debtDue, positionsOf, type Debt, type DebtKind, type DueBasis } from ".
 import { addDays, daysInMonth, firstOfMonth, getDay, lastOfMonth, monthName } from "./dates";
 import { formatMoney as money, type Centavos } from "./money";
 import { costByKind } from "./kinds";
-import { monthTotals } from "./totals";
+import { monthTotals, totalsFor } from "./totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
 type Tracks = ReturnType<typeof assessMonthFor>;
@@ -76,9 +95,24 @@ export interface SafeToSpend {
   readonly free: Centavos;
   /** What is left of the spending budget, or null with none set. Negative when over. */
   readonly budgetLeft: Centavos | null;
+  /** What the spending budget leaves a day, the Budget screen's figure. Null with none set; 0 when over. */
+  readonly budgetPerDay: Centavos | null;
+  /** Wallets less what is still due, never below zero: safe to spend until the month ends. */
   readonly safe: Centavos;
+  /** Safe to spend today: today's share less what today already spent, never below zero. */
   readonly perDay: Centavos;
-  /** Which of the two sets the figure. */
+  /** Today's share, set from what the wallets held before today's spending. */
+  readonly todayShare: Centavos;
+  /** Spent today out of the spending wallets, bills and subscriptions apart (they are set aside already). */
+  readonly spentToday: Centavos;
+  /** How far today's spending went past today's share. 0 when it did not. */
+  readonly overToday: Centavos;
+  /** A day from tomorrow: what is safe over the days after today. 0 on the month's last day. */
+  readonly perDayAfter: Centavos;
+  /**
+   * Which is tighter. The wallets set the figure; "budget" says the spending
+   * budget leaves less than they do, so it is said beside it.
+   */
   readonly limitedBy: "wallets" | "budget";
   /** Spending that usually comes round before the month ends. Shown, not set aside. */
   readonly habits: readonly HabitSpend[];
@@ -109,6 +143,12 @@ export interface MonthBrief {
   readonly safe: SafeToSpend | null;
   /** Plain sentences, each a figure and what it is measured against. */
   readonly notes: readonly string[];
+  /**
+   * Of those, the ones that need doing something about: over a budget, past
+   * today's share, more due than held. The Dashboard shows only these, since
+   * its lines already say the rest (6 October 2026: "make it clean").
+   */
+  readonly warnings: readonly string[];
 }
 
 const TOP_KINDS = 6;
@@ -195,9 +235,23 @@ export function monthBrief(input: {
     const reservedDebt = due.filter((d) => d.kind === "payable").reduce((s, d) => s + d.amount, 0);
     const free = wallets - reservedBills - reservedDebt;
     const budgetLeft = tracks.spending.budget > 0 ? tracks.spending.remaining : null;
-    const room = Math.max(0, free);
-    const limitedBy = budgetLeft !== null && budgetLeft < room ? "budget" : "wallets";
-    const amount = Math.max(0, limitedBy === "budget" ? (budgetLeft ?? 0) : room);
+    const amount = Math.max(0, free);
+    const limitedBy = budgetLeft !== null && budgetLeft < amount ? "budget" : "wallets";
+    const budgetPerDay = budgetLeft === null ? null : daysLeft > 0 ? Math.floor(Math.max(0, budgetLeft) / daysLeft) : 0;
+
+    /*
+     * What today already took out of the spending wallets, bills and
+     * subscriptions apart: a bill paid today leaves the wallets and the
+     * bills still due alike, so it changes nothing here. A transfer between
+     * two of the owner's own accounts counts only its fee; money sent away
+     * counts whole (`totalsFor`).
+     */
+    const spendingWallets = new Set(reference.wallets);
+    const today = totalsFor(transactions.filter((t) => t.date === asOf && spendingWallets.has(t.fromWallet)));
+    const spentToday = today.spending + today.fees;
+    const todayShare = daysLeft > 0 ? Math.floor((amount + spentToday) / daysLeft) : 0;
+    const leftToday = todayShare - spentToday;
+    const after = daysLeft - 1;
 
     const habits = learnPatterns(transactions, asOf)
       .filter((p) => p.isRecurring)
@@ -216,8 +270,19 @@ export function monthBrief(input: {
       reservedDebt,
       free,
       budgetLeft,
+      budgetPerDay,
       safe: amount,
-      perDay: daysLeft > 0 ? Math.floor(amount / daysLeft) : 0,
+      // Never more than is safe for the whole month, whatever today's share says.
+      perDay: Math.min(amount, Math.max(0, leftToday)),
+      todayShare,
+      spentToday,
+      overToday: Math.max(0, -leftToday),
+      /*
+       * As if the rest of today's share is spent: the same rate as today's
+       * when today kept to it (never a centavo more, as rounding could give),
+       * and what is left spread over the days after when today went past it.
+       */
+      perDayAfter: after <= 0 ? 0 : leftToday >= 0 ? Math.min(todayShare, Math.floor((amount - leftToday) / after)) : Math.floor(amount / after),
       limitedBy,
       habits,
     };
@@ -239,7 +304,10 @@ export function monthBrief(input: {
     bills,
     debts: due,
     safe,
-    notes: notesFor(phase, month, tracks, cameIn, wentOut, safe),
+    ...(() => {
+      const warnings: string[] = [];
+      return { notes: notesFor(phase, month, tracks, cameIn, wentOut, safe, warnings), warnings };
+    })(),
   };
 }
 
@@ -250,14 +318,20 @@ function notesFor(
   cameIn: Centavos,
   wentOut: Centavos,
   safe: SafeToSpend | null,
+  /** Filled with the notes that need doing something about, as they are written. */
+  warnings: string[] = [],
 ): string[] {
   const out: string[] = [];
+  const warn = (line: string): void => {
+    out.push(line);
+    warnings.push(line);
+  };
   const name = monthName(month);
   const over = phase === "past";
 
   if (phase !== "future") {
     if (tracks.combined.budget <= 0) {
-      out.push(`No budget ${over ? "was" : "is"} set for ${name}.`);
+      warn(`No budget ${over ? "was" : "is"} set for ${name}.`);
     } else {
       const lines = [
         ["Spending", tracks.spending],
@@ -265,7 +339,7 @@ function notesFor(
       ] as const;
       for (const [label, t] of lines) {
         if (t.budget <= 0) out.push(`${label} ${over ? "had" : "has"} no budget.`);
-        else if (t.remaining < 0) out.push(`${label} ${over ? "went" : "is"} ${money(-t.remaining)} over its budget.`);
+        else if (t.remaining < 0) warn(`${label} ${over ? "went" : "is"} ${money(-t.remaining)} over its budget.`);
         else out.push(`${label} ${over ? "stayed" : "is"} within its budget, ${money(t.remaining)} ${over ? "to spare" : "left"}.`);
       }
     }
@@ -274,28 +348,32 @@ function notesFor(
   if (safe) {
     const reserved = safe.reservedBills + safe.reservedDebt;
     const what =
-      safe.reservedDebt > 0 ? (safe.reservedBills > 0 ? "bills and debt payments" : "debt payments") : "bills";
-    const days = `${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"}`;
+      safe.reservedDebt > 0
+        ? safe.reservedBills > 0
+          ? "bills, subscriptions and debt payments"
+          : "debt payments"
+        : "bills and subscriptions";
 
     if (safe.wallets < 0) {
       // Said as what it is. "The ₱0.00 of bills still due is more than your wallets hold" was true and meant nothing.
-      out.push(`Your wallets are ${money(-safe.wallets)} below zero, so nothing is safe to spend until that is put right.`);
+      warn(`Your wallets are ${money(-safe.wallets)} below zero, so nothing is safe to spend until that is put right.`);
     } else if (safe.free < 0) {
-      out.push(`The ${money(reserved)} of ${what} still due this month is ${money(-safe.free)} more than your wallets hold.`);
-    } else if (reserved > 0) {
-      out.push(`After the ${money(reserved)} of ${what} still due, ${money(safe.safe)} is safe to spend: ${money(safe.perDay)} a day for ${days}.`);
+      warn(`The ${money(reserved)} of ${what} still due this month is ${money(-safe.free)} more than your wallets hold.`);
     } else {
-      out.push(`${money(safe.safe)} is safe to spend: ${money(safe.perDay)} a day for ${days}.`);
+      out.push(
+        reserved > 0
+          ? `Your wallets hold ${money(safe.wallets)}. Less the ${money(reserved)} of ${what} still to pay, ${money(safe.safe)} is safe to spend until ${name} ends.`
+          : `Your wallets hold ${money(safe.wallets)} and nothing is still due, so all of it is safe to spend until ${name} ends.`,
+      );
+      if (safe.overToday > 0) {
+        warn(`Today's share was ${money(safe.todayShare)} and ${money(safe.spentToday)} went out today, ${money(safe.overToday)} past it.`);
+      }
     }
 
-    if (safe.budgetLeft === null) {
-      out.push("With no spending budget set, this goes by your wallets alone.");
-    } else if (safe.budgetLeft <= 0) {
-      out.push("The spending budget is used up, so nothing more is budgeted this month.");
-    } else if (safe.limitedBy === "budget") {
-      out.push(`The budget is the limit this month: your wallets could cover ${money(Math.max(0, safe.free))}.`);
-    } else if (safe.budgetLeft > Math.max(0, safe.free)) {
-      out.push(`Your wallets are the limit this month, not the budget, which still has ${money(safe.budgetLeft)}.`);
+    if (safe.budgetLeft !== null && safe.budgetLeft <= 0) {
+      warn("The spending budget is used up: anything more this month is past the plan, even with the money there.");
+    } else if (safe.limitedBy === "budget" && safe.budgetLeft !== null) {
+      warn(`The spending budget has less left than this, ${money(safe.budgetLeft)}: ${money(safe.budgetPerDay ?? 0)} a day keeps to it.`);
     }
   }
 

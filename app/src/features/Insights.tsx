@@ -583,7 +583,7 @@ export function Insights({
         ...reportLines,
         ...(period.kind === "month" ? [`${name} ${year}: ${phaseWords.toLowerCase()}.`, ...brief.notes] : []),
         safe && period.kind === "month"
-          ? `Safe to spend ${formatMoney(safe.perDay)} a day (${formatMoney(safe.safe)}), set by the ${safe.limitedBy}.`
+          ? `Safe to spend today ${formatMoney(safe.perDay)}; ${formatMoney(safe.safe)} until the month ends, wallets less what is still to pay; ${formatMoney(safe.perDayAfter)} a day from tomorrow.`
           : "",
         ...healthLines,
       ],
@@ -1135,15 +1135,11 @@ export function Insights({
             )}
             {aheadThisMonth > 0 && nowSafe && (
               <p className="t-caption fms-ical-note">
-                {nowSafe.perDay > 0
-                  ? `At today's safe ${formatMoney(nowSafe.perDay)} a day, ${
+                {nowSafe.perDayAfter > 0
+                  ? `At ${formatMoney(nowSafe.perDayAfter)} a day safe from tomorrow, ${
                       aheadThisMonth === 1 ? "that day allows" : `those ${aheadThisMonth} days this month allow`
-                    } ${formatMoney(nowSafe.perDay * aheadThisMonth)}.`
-                  : `Nothing is safe to spend on ${aheadThisMonth === 1 ? "that day" : "those days"}: ${
-                      nowSafe.limitedBy === "budget"
-                        ? "the month's spending is already past its budget."
-                        : "the wallets are needed for what is still due."
-                    }`}
+                    } ${formatMoney(nowSafe.perDayAfter * aheadThisMonth)}.`
+                  : `Nothing is safe to spend on ${aheadThisMonth === 1 ? "that day" : "those days"}: the wallets are needed for what is still due.`}
               </p>
             )}
           </>
@@ -1306,11 +1302,15 @@ export function Insights({
         )}
 
         {safe ? (
-          <Card title="Safe to spend" subtitle="What the wallets can cover once what is still due is set aside">
+          <Card title="Safe to spend" subtitle="The money in the wallets, less the bills, subscriptions and debt payments still to pay">
             <div className="fms-safe-hero">
               <Money value={safe.perDay} size="xl" tone={safe.perDay === 0 ? "var(--over)" : undefined} />
-              <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                a day for the {safe.daysLeft} {safe.daysLeft === 1 ? "day" : "days"} left
+              <span className="t-caption" style={{ color: safe.overToday > 0 ? "var(--over)" : "var(--ink-3)" }}>
+                {safe.overToday > 0
+                  ? `today: ${formatMoney(safe.spentToday)} spent, ${formatMoney(safe.overToday)} past today's ${formatMoney(safe.todayShare)}`
+                  : safe.spentToday > 0
+                    ? `left today, of ${formatMoney(safe.todayShare)}`
+                    : `today, of ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"} left`}
               </span>
             </div>
             <div className="fms-month-lines">
@@ -1328,9 +1328,9 @@ export function Insights({
                 .map((d) => (
                   <Row key={`debt-${d.debtId}`} label={`${d.name}, ${whenWords(d.daysToDue).toLowerCase()}`} value={-d.amount} quiet />
                 ))}
-              <Row label="Free to spend" value={safe.free} strong />
-              {safe.budgetLeft !== null && <Row label="Left of the spending budget" value={safe.budgetLeft} />}
-              <Row label={`Safe to spend, set by the ${safe.limitedBy === "budget" ? "budget" : "wallets"}`} value={safe.safe} strong />
+              <Row label="Safe until the month ends" value={safe.safe} strong />
+              {safe.daysLeft > 1 && <Row label="From tomorrow, a day" value={safe.perDayAfter} quiet />}
+              {safe.budgetLeft !== null && <Row label="Left of the spending budget (the plan)" value={safe.budgetLeft} quiet />}
             </div>
             {safe.habits.length > 0 && (
               <div style={{ marginTop: "var(--space-4)" }}>

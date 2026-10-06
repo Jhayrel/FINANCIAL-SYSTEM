@@ -189,7 +189,7 @@ export function Dashboard({
       lines: [
         `${name} ${year}, ${brief.daysLeft} days left.`,
         safe
-          ? `Safe to spend ${formatMoney(safe.perDay)} a day, ${formatMoney(safe.safe)} for the rest of the month: wallets ${formatMoney(safe.wallets)}, bills still due ${formatMoney(safe.reservedBills)}, debt payments due ${formatMoney(safe.reservedDebt)}.`
+          ? `Safe to spend today ${formatMoney(safe.perDay)} (today's share ${formatMoney(safe.todayShare)}, ${formatMoney(safe.spentToday)} spent today). Safe until the month ends ${formatMoney(safe.safe)}: wallets ${formatMoney(safe.wallets)}, less bills and subscriptions still to pay ${formatMoney(safe.reservedBills)} and debt payments due ${formatMoney(safe.reservedDebt)}. From tomorrow ${formatMoney(safe.perDayAfter)} a day.`
           : "",
         noBudget
           ? `No budget set for ${name}. Spent ${formatMoney(t.combined.spent)}.`
@@ -220,24 +220,39 @@ export function Dashboard({
           }
         >
           <div className="fms-month">
+            {/*
+              Safe to spend, as the owner sums it (6 October 2026): the money
+              in the wallets, less the bills and subscriptions still to pay,
+              is what is safe until the month ends; today is today's share of
+              it, less what today already spent (`monthPlan.ts`).
+            */}
             <div className="fms-month-half">
               <div className="fms-month-head">
                 <span className="t-label" style={{ color: "var(--ink-2)" }}>
-                  Safe to spend a day
+                  Safe to spend today
                 </span>
               </div>
               <Money value={safe?.perDay ?? 0} size="xl" tone={(safe?.perDay ?? 0) === 0 ? "var(--over)" : undefined} />
-              <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                {formatMoney(safe?.safe ?? 0)} for the rest of {name}
+              <span className="t-caption" style={{ color: safe && safe.overToday > 0 ? "var(--over)" : "var(--ink-3)" }}>
+                {!safe
+                  ? ""
+                  : safe.overToday > 0
+                    ? `${formatMoney(safe.spentToday)} spent today, ${formatMoney(safe.overToday)} past today's ${formatMoney(safe.todayShare)}`
+                    : safe.spentToday > 0
+                      ? `${formatMoney(safe.spentToday)} of today's ${formatMoney(safe.todayShare)} spent`
+                      : `Today's share of ${formatMoney(safe.safe)}, over ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"}`}
               </span>
               <div className="fms-month-lines">
                 <Line label="In your wallets" value={safe?.wallets ?? brief.wallets} />
-                <Line label="Bills still due" value={safe && safe.reservedBills > 0 ? -safe.reservedBills : 0} quiet={!safe || safe.reservedBills === 0} />
-                <Line label="Debt payments due" value={safe && safe.reservedDebt > 0 ? -safe.reservedDebt : 0} quiet={!safe || safe.reservedDebt === 0} />
-                {safe && safe.budgetLeft !== null ? (
-                  <Line label="Left of the spending budget" value={safe.budgetLeft} tone={safe.budgetLeft < 0 ? "var(--over)" : undefined} />
-                ) : (
-                  <TextLine label="Spending budget" text="None set" />
+                <Line
+                  label="Bills and subscriptions to pay"
+                  value={safe && safe.reservedBills > 0 ? -safe.reservedBills : 0}
+                  quiet={!safe || safe.reservedBills === 0}
+                />
+                {safe && safe.reservedDebt > 0 && <Line label="Debt payments due" value={-safe.reservedDebt} />}
+                <Line label={`Safe until ${name} ends`} value={safe?.safe ?? 0} strong total />
+                {safe && safe.daysLeft > 1 && (
+                  <Line label={`From tomorrow, a day (${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"})`} value={safe.perDayAfter} quiet />
                 )}
               </div>
             </div>
@@ -269,9 +284,9 @@ export function Dashboard({
             </div>
           </div>
 
-          {brief.notes.length > 0 && (
+          {brief.warnings.length > 0 && (
             <ul className="fms-month-notes">
-              {brief.notes.map((note) => (
+              {brief.warnings.map((note) => (
                 <li key={note} className="t-body">
                   {note}
                 </li>
@@ -614,6 +629,7 @@ function Line({
   strong,
   quiet,
   signed,
+  total,
 }: {
   label: ReactNode;
   value: Centavos;
@@ -621,9 +637,11 @@ function Line({
   strong?: boolean | undefined;
   quiet?: boolean | undefined;
   signed?: boolean | undefined;
+  /** The sum of the lines above it, under a rule. */
+  total?: boolean | undefined;
 }) {
   return (
-    <div className="fms-line">
+    <div className={total ? "fms-line fms-line-total" : "fms-line"}>
       <span className={strong ? "t-body-strong" : "t-caption"} style={{ color: quiet ? "var(--ink-3)" : "var(--ink-2)" }}>
         {label}
       </span>
@@ -639,19 +657,6 @@ function Keyed({ colour, children }: { colour: string; children: ReactNode }) {
       <span aria-hidden style={{ background: colour }} />
       {children}
     </span>
-  );
-}
-
-function TextLine({ label, text }: { label: string; text: string }) {
-  return (
-    <div className="fms-line">
-      <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-        {label}
-      </span>
-      <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-        {text}
-      </span>
-    </div>
   );
 }
 

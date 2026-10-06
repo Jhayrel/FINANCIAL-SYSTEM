@@ -42,8 +42,9 @@ import { addDays, daysBetween, getMonth, getYear, monthName } from "./dates";
 import { financeAlerts, burnRate, daysLeft, dailyAllowance } from "./alerts";
 import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
 import { toPesos } from "./money";
+import { isOpenBill, monthBrief } from "./monthPlan";
 import type { Account } from "./accounts";
-import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
+import type { BudgetRevision, Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
 /** Money as a plain number of pesos. A model reads 8791.37 better than 879137. */
 const pesos = (centavos: number): number => Number(toPesos(centavos).toFixed(2));
@@ -144,6 +145,41 @@ export interface AiContext {
   readonly alerts: readonly { readonly level: string; readonly title: string; readonly detail: string }[];
   /** Same month last year and the month before, for "is this normal". */
   readonly comparison: readonly { readonly month: string; readonly spent: number }[];
+  /**
+   * Safe to spend, the Dashboard's own figures (`monthBrief`). 6 October
+   * 2026: asked how much was safe today, the model answered from the budget,
+   * PHP 297.95 a day, while the Dashboard said PHP 201.13 from the wallets;
+   * "Thats wrong check my balance again".
+   */
+  /**
+   * The newest change to a month's budget, from the last month. 5 October
+   * 2026: "is the new budget reasonable?" was answered about a November card
+   * from the conversation, while the budget just changed was October's, on
+   * the Budget screen, the night before.
+   */
+  readonly lastBudgetChange?: {
+    readonly on: string;
+    readonly month: string;
+    readonly spending: number;
+    readonly billsSubs: number;
+    readonly wasSpending: number;
+    readonly wasBillsSubs: number;
+  } | null;
+  readonly safe?: {
+    readonly wallets: number;
+    readonly billsDue: number;
+    readonly due: readonly { readonly name: string; readonly amount: number; readonly on: string | null }[];
+    readonly debtDue: number;
+    readonly safe: number;
+    readonly today: number;
+    readonly todayShare: number;
+    readonly spentToday: number;
+    readonly overToday: number;
+    readonly perDayAfter: number;
+    readonly daysLeft: number;
+    readonly budgetLeft: number | null;
+    readonly budgetPerDay: number | null;
+  } | null;
 }
 
 export interface ContextInput {
@@ -316,6 +352,49 @@ export function buildContext(input: ContextInput): AiContext {
     }).map((a) => ({ level: a.level, title: a.title, detail: a.detail })),
 
     comparison: recentMonths(transactions, asOf, 6),
+
+    lastBudgetChange: (() => {
+      let newest: { at: string; year: string; month: number; r: BudgetRevision } | null = null;
+      for (const [year, plan] of Object.entries(budgets)) {
+        for (const [month, list] of Object.entries(plan.revisions ?? {})) {
+          for (const r of list) {
+            if (r.what !== "tracks") continue;
+            if (!newest || r.at > newest.at) newest = { at: r.at, year, month: Number(month), r };
+          }
+        }
+      }
+      if (!newest || daysBetween(newest.at.slice(0, 10), asOf) > 31) return null;
+      const { r } = newest;
+      return {
+        on: newest.at.slice(0, 10),
+        month: `${monthName(newest.month)} ${newest.year}`,
+        spending: pesos(r.spending ?? 0),
+        billsSubs: pesos(r.billsSubs ?? 0),
+        wasSpending: pesos(r.wasSpending ?? 0),
+        wasBillsSubs: pesos(r.wasBillsSubs ?? 0),
+      };
+    })(),
+
+    safe: (() => {
+      const brief = monthBrief({ transactions, reference, budgets, debts: credits, year, month, asOf });
+      const safe = brief.safe;
+      if (!safe) return null;
+      return {
+        wallets: pesos(safe.wallets),
+        billsDue: pesos(safe.reservedBills),
+        due: brief.bills.bills.filter(isOpenBill).map((b) => ({ name: b.item, amount: pesos(b.amount), on: b.dueOn ?? null })),
+        debtDue: pesos(safe.reservedDebt),
+        safe: pesos(safe.safe),
+        today: pesos(safe.perDay),
+        todayShare: pesos(safe.todayShare),
+        spentToday: pesos(safe.spentToday),
+        overToday: pesos(safe.overToday),
+        perDayAfter: pesos(safe.perDayAfter),
+        daysLeft: safe.daysLeft,
+        budgetLeft: safe.budgetLeft === null ? null : pesos(safe.budgetLeft),
+        budgetPerDay: safe.budgetPerDay === null ? null : pesos(safe.budgetPerDay),
+      };
+    })(),
   };
 }
 
@@ -396,7 +475,7 @@ export function contextToText(c: AiContext): string {
   if (c.month.allowancePerDay !== null && c.month.allowancePerDay >= 0) {
     lines.push(
       spendingLeft !== null
-        ? `What is left of the spending budget, ${php(spendingLeft)}, works out to ${php(c.month.allowancePerDay)} a day. This is the day's figure the app shows; bills are paid from their own budget.`
+        ? `What is left of the spending budget, ${php(spendingLeft)}, works out to ${php(c.month.allowancePerDay)} a day. That is the budget's pace, the plan; what is safe to spend is the money, below.`
         : `What is left of the budget works out to ${php(c.month.allowancePerDay)} a day.`,
     );
   } else if (c.month.allowancePerDay !== null) {
@@ -406,9 +485,40 @@ export function contextToText(c: AiContext): string {
         : "Nothing is left of the budget to spend a day: the month is already over it, by the figure above.",
     );
   }
+  const changed = c.lastBudgetChange;
+  if (changed) {
+    lines.push(
+      `Newest budget change, ${changed.on}: ${changed.month} spending ${php(changed.spending)} (was ${php(changed.wasSpending)}), bills and subscriptions ${php(changed.billsSubs)} (was ${php(changed.wasBillsSubs)}). "The new budget" means this one.`,
+    );
+  }
   lines.push(
     `Split: spending ${php(c.month.breakdown.spending)}, bills ${php(c.month.breakdown.bills)}, subscriptions ${php(c.month.breakdown.subscriptions)}, transfer fees ${php(c.month.breakdown.fees)}, debt interest ${php(c.month.breakdown.debtInterest)}.`,
   );
+
+  /*
+   * The Dashboard's safe to spend, figures only: how to use them is in the
+   * server's instruction, so the summary stays a summary (`contextSize`).
+   */
+  const safe = c.safe;
+  if (safe) {
+    const until = c.month.name.split(" ")[0] ?? "the month";
+    const due = safe.due.length > 0 ? ` (${safe.due.map((d) => `${d.name} ${php(d.amount)}`).join(", ")})` : "";
+    lines.push("");
+    lines.push("## Safe to spend, the Dashboard's figure");
+    lines.push(
+      `Spending wallets ${php(safe.wallets)}, less bills and subscriptions still to pay ${php(safe.billsDue)}${due}${safe.debtDue > 0 ? ` and debt payments due ${php(safe.debtDue)}` : ""}: ${php(safe.safe)} is safe to spend until ${until} ends.`,
+    );
+    lines.push(
+      `Safe to spend today: ${php(safe.today)} (today's share ${php(safe.todayShare)}, spent today ${php(safe.spentToday)}${safe.overToday > 0 ? `, ${php(safe.overToday)} past it` : ""}).${safe.daysLeft > 1 ? ` From tomorrow: ${php(safe.perDayAfter)} a day for ${safe.daysLeft - 1} days.` : ""}`,
+    );
+    if (safe.budgetLeft !== null) {
+      lines.push(
+        safe.budgetLeft <= 0
+          ? "The spending budget is used up: the plan, not the money."
+          : `Spending budget left ${php(safe.budgetLeft)}, ${php(safe.budgetPerDay ?? 0)} a day: the plan, not the money.`,
+      );
+    }
+  }
 
   lines.push("");
   lines.push("## Today and the days before it");

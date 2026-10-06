@@ -149,12 +149,20 @@ describe("safe to spend", () => {
     expect(brief.debts[0]).toMatchObject({ name: "Maya Credit", dueOn: "2026-09-10", daysToDue: -6, basis: "borrowed" });
   });
 
-  it("lets the budget set the figure when it is the smaller", () => {
-    const safe = briefOf(30000, 50000).safe;
+  /*
+   * The owner, 6 October 2026: safe to spend is the money there, less the
+   * bills and subscriptions still to pay. The budget is said beside it when
+   * it is tighter, and no longer lowers it.
+   */
+  it("goes by the money, and says the budget beside it when the budget is tighter", () => {
+    const brief = briefOf(30000, 50000);
+    const safe = brief.safe;
     expect(safe?.budgetLeft).toBe(30000);
     expect(safe?.limitedBy).toBe("budget");
-    expect(safe?.safe).toBe(30000);
-    expect(safe?.perDay).toBe(2000);
+    expect(safe?.safe).toBe(120000);
+    expect(safe?.perDay).toBe(8000);
+    expect(safe?.budgetPerDay).toBe(2000);
+    expect(brief.notes.some((note) => note.includes("₱20.00 a day keeps to it"))).toBe(true);
   });
 
   it("says plainly when the wallets cannot cover what is due, and offers nothing a day", () => {

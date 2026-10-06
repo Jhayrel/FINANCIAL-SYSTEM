@@ -16,6 +16,15 @@
  * pasted stays plain text, formatting never gets in, a pasted picture is
  * handed up as a file and never drawn inside the box, Enter sends and
  * Shift+Enter starts a new line, as in the textarea it replaces.
+ *
+ * ── On a phone, Enter is a new line ───────────────────────────────────────
+ *
+ * The owner, 6 October 2026: "the chat box is hard to use like it just
+ * randomly send". A phone keyboard's Enter key sits beside the full stop
+ * and the delete key, under the thumb, and it was a Send key: a half typed
+ * message went the moment a thumb brushed it. With `enterSends` off the key
+ * starts a new line, says so ("enter", not "send"), and only the Send button
+ * sends, as in a phone's own messaging apps.
  */
 
 import { useEffect, useLayoutEffect, useRef } from "react";
@@ -63,20 +72,27 @@ export function PlainBox({
   placeholder,
   label,
   disabled = false,
+  enterSends = true,
+  onFocus,
   className,
 }: {
   readonly value: string;
   readonly onChange: (text: string) => void;
-  /** Enter without Shift: send. */
+  /** Enter without Shift: send, when `enterSends`. */
   readonly onEnter: () => void;
   readonly placeholder: string;
   readonly label: string;
   readonly disabled?: boolean;
+  /** False on a phone: Enter is a new line and only the Send button sends. */
+  readonly enterSends?: boolean;
+  readonly onFocus?: () => void;
   readonly className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const enter = useRef(onEnter);
   enter.current = onEnter;
+  const sends = useRef(enterSends);
+  sends.current = enterSends;
 
   /*
    * The box follows the value when it changes from outside: cleared after
@@ -100,10 +116,11 @@ export function PlainBox({
     const el = ref.current;
     if (!el) return;
     const before = (e: InputEvent): void => {
-      if (e.inputType === "insertParagraph") {
-        e.preventDefault();
-        enter.current();
-      }
+      if (e.inputType !== "insertParagraph") return;
+      e.preventDefault();
+      if (sends.current) enter.current();
+      // A line break, not a paragraph: the box holds one run of words.
+      else if (!document.execCommand("insertLineBreak")) insertPlain("\n");
     };
     el.addEventListener("beforeinput", before);
     return () => el.removeEventListener("beforeinput", before);
@@ -122,14 +139,15 @@ export function PlainBox({
       suppressContentEditableWarning
       tabIndex={0}
       inputMode="text"
-      enterKeyHint="send"
+      enterKeyHint={enterSends ? "send" : "enter"}
       autoCapitalize="sentences"
       spellCheck
       className={className}
+      onFocus={onFocus}
       onKeyDown={(e) => {
         if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
         e.preventDefault();
-        if (!e.shiftKey) onEnter();
+        if (!e.shiftKey && enterSends) onEnter();
         else if (!document.execCommand("insertLineBreak")) insertPlain("\n");
       }}
       onInput={(e) => {

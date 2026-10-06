@@ -163,12 +163,18 @@ export function Investigate({
    * without being looked at. The bin asks first and is restorable, matching
    * every other delete in the app.
    */
+  /*
+   * Every way to act on a finding is a button that looks like one: outlined,
+   * the same size, side by side. 6 October 2026, the owner, over "Open #3893"
+   * drawn as bare text beside three outlined buttons: "add button then make
+   * it clean". Binning is outlined in red, as Remove is in Settings.
+   */
   const rowActions = (row: Transaction) => (
     <span className="fms-findrow-actions">
       <Button size="sm" onClick={() => onEditRow(row)}>
         Edit {number(row)}
       </Button>
-      <Button size="sm" variant="ghost" tone="danger" onClick={() => void bin(row)}>
+      <Button size="sm" variant="danger" onClick={() => void bin(row)}>
         Move to the bin
       </Button>
     </span>
@@ -204,16 +210,25 @@ export function Investigate({
             </Button>
           </span>
         );
-      case "together":
-        return (
+      case "together": {
+        /*
+         * One entry that adds up to the difference: Edit it (another account,
+         * another amount) or bin it if it never happened. Several: each one
+         * to look at, never binned together from here.
+         */
+        const only = clue.rows.length === 1 ? clue.rows[0] : undefined;
+        return only ? (
+          rowActions(only)
+        ) : (
           <span className="fms-findrow-actions">
             {clue.rows.map((r) => (
-              <Button key={r.id} size="sm" variant="ghost" onClick={() => onEditRow(r)}>
-                Open {number(r)}
+              <Button key={r.id} size="sm" onClick={() => onEditRow(r)}>
+                Edit {number(r)}
               </Button>
             ))}
           </span>
         );
+      }
       case "fee-inside":
       case "ahead":
         // The owner's entries: opened to edit, never changed from here.

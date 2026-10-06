@@ -90,7 +90,7 @@ import { activityStore } from "../data/activityStore";
 import { correctionsFrom, type AiEvent } from "../domain/aiLog";
 import type { ChatMessage } from "../domain/chat";
 import { setPreference as setThemePreference } from "../theme";
-import { checkRename, KIND_LIST_WORD, namesOn, renameInLists, rowsNamed, unlistedKinds, type KindList, type RenameCheck, type Unlisted } from "../domain/kindRename";
+import { CATEGORY_OF, checkMove, checkRename, KIND_LIST_WORD, moveInLists, namesOn, otherList, renameInLists, rowsNamed, rowsToMove, unlistedKinds, type BillCategory, type BillList, type KindList, type MoveCheck, type RenameCheck, type Unlisted } from "../domain/kindRename";
 import type { Budgets, ReferenceLists, SpendingType, StoppedItem, Transaction } from "../domain/types";
 import { billStatuses, STOPPED_AFTER_DAYS, type BillStatus } from "../domain/bills";
 import { behalfFor } from "../domain/behalfFor";
@@ -131,6 +131,7 @@ export function Settings({
   onChange,
   onRenameAccount,
   onRenameItem,
+  onMoveKind,
   onExport,
   onBackup,
   onRestore,
@@ -157,6 +158,8 @@ export function Settings({
   onChange: (next: AppSettings) => void;
   onRenameAccount: (from: string, to: string) => void;
   onRenameItem: (from: string, to: string) => void;
+  /** A bill or subscription moved to the other list: its rows follow (App's `handleMoveKind`). */
+  onMoveKind?: ((name: string, to: BillCategory) => void) | undefined;
   onExport: () => void;
   onBackup: () => void;
   onRestore: (backup: Backup, mode: RestoreMode | "clean") => void;
@@ -284,6 +287,7 @@ export function Settings({
             deleted={deleted}
             patch={patch}
             onRenameItem={onRenameItem}
+            onMoveKind={onMoveKind}
           />
         )}
 
@@ -1524,12 +1528,14 @@ function CategoriesSection({
   deleted,
   patch,
   onRenameItem,
+  onMoveKind,
 }: {
   settings: AppSettings;
   transactions: readonly Transaction[];
   deleted: readonly Transaction[];
   patch: (part: Partial<AppSettings>) => void;
   onRenameItem: (from: string, to: string) => void;
+  onMoveKind?: ((name: string, to: BillCategory) => void) | undefined;
 }) {
   /*
    * Every list renames the same way, and a rename reaches every row that
@@ -1590,6 +1596,19 @@ function CategoriesSection({
     return out;
   }, [transactions, settings.bills, settings.subscriptions, settings.credits]);
 
+  /*
+   * Moving one to the other list: its rows first, then the lists, the order
+   * a rename uses. Counted before anything changes, for the confirm.
+   */
+  const mover = (from: BillList): MoveTools => ({
+    rows: (name) => rowsToMove(everyRow, name, CATEGORY_OF[otherList(from)]),
+    check: (name) => checkMove(settings, from, name),
+    apply: (name) => {
+      onMoveKind?.(name, CATEGORY_OF[otherList(from)]);
+      patch(moveInLists(settings, from, name));
+    },
+  });
+
   const stop = (name: string): void =>
     patch({ stopped: [...settings.stopped.filter((x) => !sameName(x.name, name)), { name, since: today() }] });
   const start = (name: string): void => patch({ stopped: settings.stopped.filter((x) => !sameName(x.name, name)) });
@@ -1612,6 +1631,7 @@ function CategoriesSection({
           onStart: start,
           onKeepHere: (name) => patch({ subscriptions: settings.subscriptions.filter((x) => !sameName(x, name)) }),
           onRemove: (name, bills) => patch({ bills, stopped: forget(name) }),
+          ...(onMoveKind ? { move: mover("bills") } : {}),
         }}
       />
       <StringList
@@ -1629,6 +1649,7 @@ function CategoriesSection({
           onStart: start,
           onKeepHere: (name) => patch({ bills: settings.bills.filter((x) => !sameName(x, name)) }),
           onRemove: (name, subscriptions) => patch({ subscriptions, stopped: forget(name) }),
+          ...(onMoveKind ? { move: mover("subscriptions") } : {}),
         }}
       />
       <StringList
@@ -1659,6 +1680,14 @@ function CategoriesSection({
       />
     </>
   );
+}
+
+/** How a bill moves to subscriptions or back: checked, its rows counted, and applied (`domain/kindRename.ts`). */
+interface MoveTools {
+  readonly check: (name: string) => MoveCheck;
+  /** Rows that will change category, live and in the bin. */
+  readonly rows: (name: string) => number;
+  readonly apply: (name: string) => void;
 }
 
 /** How a list's kinds are renamed: checked, counted and applied everywhere (`domain/kindRename.ts`). */
@@ -1865,6 +1894,8 @@ interface Recurring {
   readonly onKeepHere: (name: string) => void;
   /** Removed from this list, with any stop on it forgotten. */
   readonly onRemove: (name: string, values: string[]) => void;
+  /** Moved to the other list, its rows with it. */
+  readonly move?: MoveTools;
 }
 
 function StringList({
@@ -1908,6 +1939,35 @@ function StringList({
     const left = values.filter((x) => x !== v);
     if (recurring) recurring.onRemove(v, left);
     else onChange(left);
+  };
+
+  /*
+   * Moving it to the other list, with what that changes said first. Bills and
+   * subscriptions share one budget line, so no total moves: only which of
+   * the two it counts under, everywhere.
+   */
+  const moveTo = async (v: string): Promise<void> => {
+    const move = recurring?.move;
+    if (!recurring || !move) return;
+    const check = move.check(v);
+    const there = recurring.other.title;
+    if (!check.ok) {
+      await confirm({ title: `${v} cannot move`, body: check.reason, confirmLabel: "OK" });
+      return;
+    }
+    const n = move.rows(v);
+    const ok = await confirm({
+      title: `Move “${v}” to ${there}?`,
+      body: `${
+        n === 0
+          ? "No entries are filed under it yet."
+          : `Its ${n === 1 ? "1 entry" : `${n.toLocaleString()} entries`}, the ones in the bin too, will count under ${there}.`
+      } Nothing else on them changes, and no total moves: bills and subscriptions share one budget line.${
+        check.already ? ` It is already on ${there} as well, so it stays listed there once.` : ""
+      }`,
+      confirmLabel: `Move to ${there}`,
+    });
+    if (ok) move.apply(v);
   };
 
   const statusOf = (v: string): BillStatus | undefined => recurring?.statuses.get(v.trim().toLowerCase());
@@ -1995,7 +2055,7 @@ function StringList({
               </span>
             </td>
             <td>
-              <span className="fms-rowactions fms-rowactions--three">
+              <span className={`fms-rowactions ${recurring?.move ? "fms-rowactions--four" : "fms-rowactions--three"}`}>
                 <Button size="sm" variant="secondary" ariaLabel={`Rename ${v}`} onClick={() => renaming.begin(v)}>
                   Rename
                 </Button>
@@ -2009,6 +2069,11 @@ function StringList({
                       Stop
                     </Button>
                   ))}
+                {recurring?.move && (
+                  <Button size="sm" ariaLabel={`Move ${v} to ${recurring.other.title}`} onClick={() => void moveTo(v)}>
+                    {`Move to ${recurring.other.title}`}
+                  </Button>
+                )}
                 <Button size="sm" variant="danger" ariaLabel={`Remove ${v}`} onClick={() => void remove(v)}>
                   Remove
                 </Button>

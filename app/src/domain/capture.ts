@@ -192,8 +192,14 @@ export const POINTS_ELSEWHERE =
  * 28 September 2026: each of those went to the chat, which said it "cannot
  * read a physical receipt" or described one it had never been given.
  */
+/*
+ * "Rescan the other one", 6 October 2026, after "Part 1 of 2 of the list
+ * could not be read": nothing happened. "rescan", "re-check" and "retry" are
+ * reading again, and "the other one", "the rest" and "that part" are what to
+ * read.
+ */
 const READ_AGAIN =
-  /\b(?:read|re-?read|look\s+at|check|scan|see)\b[^?]*\b(?:receipt|picture|photo|screenshot|image|statement|product\s+name|it\s+again|this\s+again|again)\b|^\s*(?:(?:please\s+)?read\s+(?:it|this|that)|again|try\s+again|read\s+again)\s*[.!]*\s*$/i;
+  /\b(?:read|re-?read|look\s+at|check|scan|see)\b[^?]*\b(?:(?:receipt|picture|photo|screenshot|image|statement)s?|pics?|product\s+name|it\s+again|this\s+again|again)\b|^\s*(?:(?:please\s+)?read\s+(?:it|this|that)|again|try\s+again|read\s+again)\s*[.!]*\s*$|^\s*(?:(?:please|pls|can\s+you|could\s+you)\s+)?(?:re-?scan|re-?check|re-?try|re-?read|scan|read)(?:\s+(?:it|this|that|them|those|the\s+(?:other|rest|first|second|last|missing|failed)(?:\s+(?:one|ones|part|parts|half|picture|photo|screenshot|image))?|that\s+part|the\s+part|part\s+\d))?(?:\s+(?:again|please|pls))?\s*[.!]*\s*$/i;
 
 /**
  * Saying one of the pictures was not read: "You didn't read the other one",

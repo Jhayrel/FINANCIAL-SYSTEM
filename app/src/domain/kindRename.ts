@@ -163,3 +163,72 @@ export function unlistedKinds(rows: readonly Transaction[], lists: Lists): Unlis
     // Most recent first: what was saved last week matters more than a kind from years back.
     .sort((a, b) => (a.last === b.last ? b.rows - a.rows : a.last < b.last ? 1 : -1));
 }
+
+// ── Moving a bill to subscriptions, or back ───────────────────────────────
+
+/*
+ * The owner, 6 October 2026, on Settings, Categories: "what happen if I want
+ * to change it the subscription to bills ... add option like moving dito from
+ * subscription to bills. make sure it works all entry will be connected and
+ * the database is still good".
+ *
+ * A bill or subscription's rows carry the list in their category (Bills or
+ * Subscriptions), and the Budget screen, the Dashboard and the statements
+ * split by it. Removing a name from one list and adding it to the other left
+ * every row it already had under the old category, so the new list showed
+ * it never paid. A move changes the name's list and the category of every
+ * row that carries it, live and in the bin, together. The name, amounts and
+ * dates never change, and bills and subscriptions share one budget line, so
+ * no balance, month total or budget moves: only which of the two it counts
+ * under.
+ */
+
+export type BillList = "bills" | "subscriptions";
+export type BillCategory = "Bills" | "Subscriptions";
+
+export const CATEGORY_OF: Readonly<Record<BillList, BillCategory>> = { bills: "Bills", subscriptions: "Subscriptions" };
+export const otherList = (list: BillList): BillList => (list === "bills" ? "subscriptions" : "bills");
+
+export type MoveCheck =
+  | { readonly ok: true; readonly to: BillList; readonly already: boolean }
+  | { readonly ok: false; readonly reason: string };
+
+/** Whether `name` can move off `from` to the other list, and whether the other list has it already. */
+export function checkMove(lists: Lists, from: BillList, name: string): MoveCheck {
+  const k = key(name);
+  if (!k) return { ok: false, reason: "Pick a bill or subscription to move." };
+  if (!lists[from].some((n) => key(n) === k)) return { ok: false, reason: `${name.trim()} is not one of your ${KIND_LIST_WORD[from]}.` };
+  const to = otherList(from);
+  return { ok: true, to, already: lists[to].some((n) => key(n) === k) };
+}
+
+/** The two lists after the move: off one, on the other once, spelled as it was. A stop follows the name, so it stays. */
+export function moveInLists(lists: Lists, from: BillList, name: string): Partial<AppSettings> {
+  const k = key(name);
+  const to = otherList(from);
+  const spelled = lists[from].find((n) => key(n) === k) ?? name.trim();
+  const left = lists[from].filter((n) => key(n) !== k);
+  const onto = lists[to].some((n) => key(n) === k) ? [...lists[to]] : [...lists[to], spelled];
+  return { [from]: left, [to]: onto } as Partial<AppSettings>;
+}
+
+/** Whether a row is one of this name's payments, filed under the other list's category. */
+const filedUnder = (t: Transaction, k: string, was: BillCategory): boolean =>
+  key(t.item) === k &&
+  t.category === was &&
+  // A payment, or money paid for someone on this bill and written off as spending (`writtenOffAsSpending`).
+  (t.type === "Spending" || (t.type === "Debt" && t.debtEffect === "writeoff"));
+
+/** Every row of `name` filed under the other category, now under `to`. Nothing else on a row changes. */
+export function moveRows<T extends Transaction>(rows: readonly T[], name: string, to: BillCategory): T[] {
+  const k = key(name);
+  const was: BillCategory = to === "Bills" ? "Subscriptions" : "Bills";
+  return rows.map((t) => (filedUnder(t, k, was) ? { ...t, category: to } : t));
+}
+
+/** How many rows a move to `to` would change. */
+export function rowsToMove(rows: readonly Transaction[], name: string, to: BillCategory): number {
+  const k = key(name);
+  const was: BillCategory = to === "Bills" ? "Subscriptions" : "Bills";
+  return rows.filter((t) => filedUnder(t, k, was)).length;
+}

@@ -525,3 +525,21 @@ export function notMeantIn(text: string): string | null {
 }
 
 const escapeRe = (v: string): string => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * "Thats a question", "I am asking", "it's a question, read it": saying the
+ * message before was a question, with nothing new in it.
+ *
+ * The owner, 5 and 6 October 2026, each time straight after a question was
+ * read as something else (a chart, a card, a change to Settings). Once the
+ * model happened to answer the question before; once it answered "Sure, what
+ * would you like to know?". The question is the message before, so that is
+ * what is answered.
+ */
+const SAYS_IT_WAS_A_QUESTION =
+  /^\s*(?:no[,.!]?\s+|hindi[,.!]?\s+|bro[,.!]?\s+|wait[,.!]?\s+)?(?:(?:(?:that'?s|thats|that\s+is|that\s+was|that|it'?s|its|it\s+is|it\s+was|this\s+is|i\s+said|i\s+asked)\s+)?(?:an?\s+|my\s+)?(?:questions?|tanong(?:\s+(?:lang|yan|ko))?)|(?:i'?m|im|i\s+am|i\s+was|just)\s+asking(?:\s+(?:an?\s+)?questions?)?)\b(?:[\s,.!]+(?:read\s+it(?:\s+again)?|answer\s+it|not\s+an?\s+(?:entry|chart|transaction|setting)|not\s+adding(?:\s+(?:an?\s+)?(?:entry|ledger))?|please|pls|po|lang|lol|again))*\s*[.!?]*\s*$/i;
+
+export function saysItWasAQuestion(text: string): boolean {
+  const t = text.trim();
+  return t.split(/\s+/).length <= 10 && SAYS_IT_WAS_A_QUESTION.test(t);
+}

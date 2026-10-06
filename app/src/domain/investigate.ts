@@ -724,7 +724,7 @@ export function clueWords(clue: Clue): string {
     case "together":
       return `${clue.rows.length === 1 ? "One entry adds" : `${clue.rows.length} entries add`} up to exactly ${formatMoney(
         Math.abs(clue.explains),
-      )}: ${clue.rows.map(row).join("; ")}. If ${clue.rows.length === 1 ? "it was" : "they were"} never on this account, that is the difference.`;
+      )}: ${clue.rows.map(row).join("; ")}. If ${clue.rows.length === 1 ? "it was" : "they were"} never on this account, that is the difference: ${clue.rows.length === 1 ? "Edit it to the right account, or move it to the bin if it never happened." : "Edit each to the right account."}`;
     case "cash":
       return `Cash has no statement. At your recent rate of ${formatMoney(clue.perDay)} a day, ${formatMoney(clue.explains)} is about ${clue.days} ${
         clue.days === 1 ? "day" : "days"

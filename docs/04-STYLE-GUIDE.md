@@ -397,11 +397,11 @@ Wallets ₱6,112.45 · Debt −₱2,762.06 ← caption, components in flow colou
 
 **The Dashboard answers "how much can I spend today" first.** Its main column is:
 
-1. **The month.** What is safe to spend a day, how the budget stands, and the month's sentences.
+1. **The month.** What is safe to spend today, how the budget stands, and only the sentences that need doing something about.
 2. **Still to pay.** Each item has a button to record it.
 3. **Where it went.** Spending by kind, against last month.
 
-A rail beside it holds your money (net worth, then each account, with Low and Below zero said), the worst three findings, and the debts. The year's charts sit below, on a desktop only. "Safe to spend" is the spending wallets less the bills and debt payments still due this month, capped by what is left of the spending budget, divided by the days left and rounded down (`domain/monthPlan.ts`). Insights reads the same brief for any month, so the two screens cannot disagree.
+A rail beside it holds your money (net worth, then each account, with Low and Below zero said), the worst three findings, and the debts. The year's charts sit below, on a desktop only. "Safe to spend" is laid out as a sum: in your wallets, less the bills and subscriptions still to pay (and debt payments due), under a 2px ink rule "Safe until the month ends", then "From tomorrow, a day". Above it, large, "Safe to spend today": today's share of what was safe at the start of the day, less what today already spent, rounded down. The spending budget no longer lowers it: the owner, 6 October 2026, "5000 money then 1700 alloted for subscription and bills then I have 3,300 safe to spend ... make it accurate based on real things". When the budget is the tighter of the two it is said beside it, as the plan (`domain/monthPlan.ts`). Insights reads the same brief for any month, so the two screens cannot disagree.
 
 **The Debt screen judges its dates.** Each debt card shows:
 

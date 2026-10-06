@@ -80,6 +80,13 @@ function offlineSummary(c: AiContext): string {
     }
   }
 
+  // The Dashboard's safe to spend, the money and not the plan (6 October 2026).
+  if (c.safe) {
+    parts.push(
+      `Safe to spend today is ${php(c.safe.today)}, and ${php(c.safe.safe)} until the month ends once the ${php(c.safe.billsDue + c.safe.debtDue)} still to pay is set aside.`,
+    );
+  }
+
   const overdue = c.bills.overdue.length;
   if (overdue > 0) {
     parts.push(`${overdue} bill${overdue === 1 ? " is" : "s are"} overdue: ${c.bills.overdue.join(", ")}.`);

@@ -113,6 +113,7 @@ import {
   namesWindow,
   pointsAtScreen,
   asksForProse,
+  wantsReport,
   wantsChart,
   overTime,
   asksPie,
@@ -131,11 +132,13 @@ import { asksAboutDeleted, deletedRows, deletedWindowIn, deletedWords, onlyAWind
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
-import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, wantsThoseEntries, type Intent } from "../domain/intent";
+import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, wantsThoseEntries, type Intent } from "../domain/intent";
+import { monthBrief } from "../domain/monthPlan";
+import { asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
 import { planWorked } from "../domain/planRate";
 import { notPaidIn, notPaidWords, paidDraftFor, saysItWasPaid, type NotPaid } from "../domain/notPaid";
 import { classifyPaper, PAPER_KINDS, PAPER_WORDS, UNPAID, type PaperKind } from "../domain/paperKind";
-import { maskNumbers, nearestTaught, paperEvent, papersFrom, taughtFromCard, trainingFrom, wantsTraining, type TaughtPaper } from "../domain/paperMemory";
+import { maskNumbers, nearestTaught, paperEvent, papersFrom, printedIn, taughtFromCard, trainingFrom, wantsTraining, type TaughtPaper } from "../domain/paperMemory";
 import { addressesEveryCard, asksToReadAgain, asksToRename, saysAllOfIt, saysOneWasMissed, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
 import { asksWhetherAdded, inLedgerOrNot } from "../domain/checkPicture";
 import { kindSaidForAll } from "../domain/saidForAll";
@@ -1085,9 +1088,44 @@ export function AskPanel({
       return prev.map((t, i) => (i === at && isOffer(t) ? { ...t, live: formDraft } : t));
     });
   }, [formDraft]);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraftState] = useState("");
+  /*
+   * The box is emptied the moment a message is sent (`sendNow`), and stays
+   * open to type in while it is answered, so the keyboard does not drop and
+   * the page does not jump (6 October 2026, "the chat box is hard to use").
+   * Every branch that answers still says "clear the box" when it is done;
+   * by then the box may hold the next message, typed while waiting, so a
+   * clear asked for while a message is on its way is already done and is
+   * not done again.
+   */
+  const sending = useRef(0);
+  const setDraft = (text: string): void => {
+    if (text === "" && sending.current > 0) return;
+    setDraftState(text);
+  };
   const [files, setFiles] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
+  /*
+   * Guards on Send and Stop, for a thumb. When Send was pressed, so a second
+   * tap of the same thumb is not taken for Stop ("Stopped. Nothing was
+   * saved.", 5 October 2026, 23:45, and the message sent again twice); when
+   * the keyboard last opened or closed or the box was touched, since the
+   * page moves under the thumb then; and what was last sent, so a double tap
+   * does not send it twice.
+   */
+  const sentAt = useRef(0);
+  const settledAt = useRef(0);
+  const lastSent = useRef<{ readonly text: string; readonly at: number } | null>(null);
+  const touch = useMemo(() => typeof window !== "undefined" && (window.matchMedia?.("(pointer: coarse)").matches ?? false), []);
+  useEffect(() => {
+    const viewport = typeof window !== "undefined" ? window.visualViewport : null;
+    if (!viewport) return;
+    const moved = (): void => {
+      settledAt.current = Date.now();
+    };
+    viewport.addEventListener("resize", moved);
+    return () => viewport.removeEventListener("resize", moved);
+  }, []);
   // Pictures waiting or an answer on its way: a new version waits until they are done (data/updateCheck.ts).
   useEffect(() => {
     holdUpdates("ask", files.length > 0 || busy);
@@ -1188,6 +1226,8 @@ export function AskPanel({
 
   /** Abandon whatever is in flight and hand the box back. */
   const stop = (): void => {
+    // The second tap of the thumb that pressed Send is not a Stop.
+    if (Date.now() - sentAt.current < 1200) return;
     generation.current += 1;
     stopper.current?.abort();
     stopper.current = null;
@@ -2259,9 +2299,14 @@ export function AskPanel({
     if (!now || now.readings.length === 0) return undefined;
     const pairs: string[] = [];
     for (let k = 0; k < now.readings.length; k += 2) pairs.push(`${now.readings[k] ?? ""}\n${now.readings[k + 1] ?? ""}`);
-    const shown = draft.amount ? (draft.amount / 100).toFixed(2) : "";
-    const commas = draft.amount ? (draft.amount / 100).toLocaleString("en-US", { minimumFractionDigits: 2 }) : "";
-    const text = pairs.find((p) => shown && (p.includes(shown) || p.includes(commas))) ?? pairs[0] ?? "";
+    /*
+     * The picture whose reading shows the card's amount. With several
+     * pictures and none showing it, none is guessed: the first picture's
+     * reading was kept for another's card, and taught the next receipt from
+     * that shop the wrong amount and wallet (6 October 2026, `filedOnItsOwn`).
+     */
+    const amount = draft.amount;
+    const text = (amount ? pairs.find((p) => printedIn(p, amount)) : undefined) ?? (pairs.length === 1 ? pairs[0] : undefined) ?? "";
     if (!text.trim()) return undefined;
     const near = nearestTaught(text, training.taught, 0.5);
     const kind = near ? near.paper.kind : classifyPaper(text, training.model).kind;
@@ -3984,6 +4029,7 @@ export function AskPanel({
    * Coder view can find it.
    */
   const send = async (typed?: string, as?: Intent): Promise<void> => {
+    sending.current += 1;
     try {
       await sendNow(typed, as);
     } catch (error) {
@@ -3997,6 +4043,8 @@ export function AskPanel({
         from: "this device",
       });
       log(aiEvent("answered", "add", { text: `Fault: ${what}`.slice(0, 400), model: "this device" }));
+    } finally {
+      sending.current = Math.max(0, sending.current - 1);
     }
   };
 
@@ -4017,6 +4065,15 @@ export function AskPanel({
     const lead = essay ? (ruled.split(/\n/).find((l) => l.trim()) ?? ruled) : ruled;
     if (busy) return;
     if (!note && files.length === 0) return;
+    if (typed === undefined) {
+      // The same words again within a few seconds is a double tap, not a second message.
+      const now = Date.now();
+      if (files.length === 0 && lastSent.current && lastSent.current.text === note && now - lastSent.current.at < 4000) return;
+      lastSent.current = { text: note, at: now };
+      sentAt.current = now;
+      // Emptied now, so what is typed while this is answered is the next message.
+      setDraftState("");
+    }
     setStage("");
 
     /*
@@ -4108,6 +4165,69 @@ export function AskPanel({
         log(aiEvent("asked", "add", { text: note }));
         if (await offerFromAnswer(answered.text)) return;
       }
+    }
+
+    /*
+     * Safe to spend, and "that's a question" after one read as something else.
+     *
+     * 5 and 6 October 2026: "Make me a breakdown of how much i can spend
+     * today" was drawn as an empty chart three times, "remove the subscription
+     * and bills" was told Settings are the owner's, and the budget's pace was
+     * given as what was safe. The figures are the Dashboard's (`safeAsk.ts`),
+     * handed to the model, which answers; the device says them when no model
+     * does. "Thats a question" then answers the message before it, and any
+     * card it wrongly made is put aside.
+     */
+    const answerSafe = async (question: string): Promise<void> => {
+      const brief = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
+      const words = safeWords(brief, rateIn(question));
+      setBusy(true);
+      try {
+        await askQuestion(
+          question,
+          false,
+          {
+            text: `Safe to spend, worked out by the app exactly as the Dashboard shows it: the spending wallets less the bills, subscriptions and debt payments still to pay this month; today's share less what today already spent; then a day from tomorrow; the spending budget said apart, as the plan. Answer with these figures, today's first. If the message proposes its own figure a day, say whether it fits, using the line that checks it. Never answer with the budget's pace in place of these.\n${words}`,
+            fallback: words,
+          },
+        );
+      } finally {
+        setBusy(false);
+      }
+    };
+    if (files.length === 0 && !as && saysItWasAQuestion(note)) {
+      const before = [...turns]
+        .reverse()
+        .find((t): t is Said => t.kind === "you" && !saysItWasAQuestion(t.text) && !/^\s*\/\//.test(t.text) && t.text.trim() !== "");
+      if (before) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        // A card or a waiting question it wrongly made goes, without a word: the answer is what was asked.
+        if (pending) setPending(null);
+        // Only when every open card came from that message: one left open from before stays.
+        const from = turns.lastIndexOf(before);
+        const open = turns.map((t, i) => ({ open: closedCard(t) !== null, i })).filter((x) => x.open);
+        if (open.length > 0 && open.every((x) => x.i > from)) discardEveryOpen(note);
+        if (asksSafeToSpend(before.text)) {
+          await answerSafe(before.text);
+          return;
+        }
+        setBusy(true);
+        try {
+          await askQuestion(before.text, false);
+        } finally {
+          setBusy(false);
+        }
+        return;
+      }
+    }
+    if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && asksSafeToSpend(note) && !plainlyDone(note)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      await answerSafe(note);
+      return;
     }
 
     /*
@@ -4368,7 +4488,7 @@ export function AskPanel({
        * "You didn't read the other one": only the pictures no card came off,
        * when some did. Every card names the file it was read from.
        */
-      const unread = saysOneWasMissed(note)
+      const unread = saysOneWasMissed(note) || /\bthe\s+(?:other|rest|missing|failed)\b/i.test(note)
         ? lastPictures.current.filter((p) => !turns.some((t) => isOffer(t) && t.proposal.sourceRef.includes(p.name)))
         : [];
       const again = unread.length > 0 && unread.length < lastPictures.current.length ? unread : lastPictures.current;
@@ -4382,6 +4502,31 @@ export function AskPanel({
       } finally {
         setBusy(false);
       }
+      return;
+    }
+    /*
+     * Asked to read a picture again when none is held: a picture is read and
+     * let go, never stored, so after a reload or Clear this view there is
+     * nothing to read. "Rescan the other one", half an hour after a list whose
+     * first part could not be read, got no answer at all (6 October 2026).
+     */
+    if (
+      pending === null &&
+      files.length === 0 &&
+      !as &&
+      asksToReadAgain(note) &&
+      !bareAgain &&
+      note.trim().split(/\s+/).length <= 8 &&
+      lastPictures.current.length === 0 &&
+      turns.some((t) => t.kind === "you" && ((t.described?.length ?? 0) > 0 || /\.(?:jpe?g|png|webp|heic|gif)\b/i.test(t.text)))
+    ) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      const reply =
+        "That picture is no longer held: pictures are read and let go, never stored, so after the app reloads or the view is cleared there is nothing to read again. Attach it again with + or the camera. Anything it shows that is already in the ledger says so on its card, so nothing is added twice.";
+      say({ kind: "assistant", text: reply, from: "this device" });
+      log(aiEvent("asked", "add", { text: note }));
+      log(aiEvent("answered", "add", { text: reply, model: "this device" }));
       return;
     }
 
@@ -5210,8 +5355,26 @@ export function AskPanel({
               gap: null,
             })
           : null);
-    if (askedToFind) {
-      await findDifference(note, askedToFind);
+    /*
+     * "Maya banks not maya", straight after "my real balance in my maya is
+     * 3536.16" (5 October 2026): the account put right, the figure the same.
+     * It asked for the figure again. A short message that names an account
+     * and no figure takes the balance said in the last few messages.
+     */
+    const withFigure = ((): InvestigateAsk | null => {
+      if (!askedToFind || askedToFind.actual !== null || askedToFind.gap !== null || !askedToFind.account) return askedToFind;
+      // Putting the account right ("not maya", "I mean maya bank", or the name alone), never a new question about another one.
+      const words = note.trim().split(/\s+/).length;
+      if (words > 10 || (words > 3 && !/\b(?:not|i mean|i meant|hindi|instead|sorry)\b/i.test(note))) return askedToFind;
+      const said = [...turns].reverse().filter((t): t is Said => t.kind === "you").slice(0, 2);
+      for (const t of said) {
+        const before = readInvestigateAsk(t.text, findable, (account) => walletBalance(transactions, account), asOf);
+        if (before && before.actual !== null) return { ...askedToFind, actual: before.actual };
+      }
+      return askedToFind;
+    })();
+    if (withFigure) {
+      await findDifference(note, withFigure);
       return;
     }
 
@@ -5693,7 +5856,14 @@ export function AskPanel({
      * September 2026).
      */
     const plainQuestion = /\?\s*$/.test(note) && !wantsChart(note) && !followUp && !narrows;
-    const wantsWords = asksForProse(note) || plainQuestion;
+    /*
+     * "Summary that i need a clearer picture", 5 October 2026, after three
+     * questions about what was safe to spend, was drawn as October's spending
+     * by item; "//error i said summary the questions". A summary asked for in
+     * words, with no word for a chart, is said, and a chart that helps comes
+     * beside it (`besideFor`).
+     */
+    const wantsWords = asksForProse(note) || plainQuestion || (wantsReport(note) && !asksPie(note) && !narrows && !followUp);
     /*
      * Except a chart of what is owed: "chart my maya credit" is a picture of
      * the line over time, which the app now draws (`chartAsk.ts`). Going
@@ -7717,6 +7887,12 @@ export function AskPanel({
         className="fms-askform"
         onSubmit={(e) => {
           e.preventDefault();
+          /*
+           * A tap while the keyboard is opening or closing, or a moment after
+           * the box was touched, landed where the page was, not where it went:
+           * on a phone it is not taken for Send.
+           */
+          if (touch && Date.now() - settledAt.current < 350) return;
           void send();
         }}
         /*
@@ -7795,8 +7971,12 @@ export function AskPanel({
           <PlainBox
             className="t-caption fms-askinput"
             value={draft}
-            onChange={setDraft}
+            onChange={setDraftState}
             onEnter={() => void send()}
+            enterSends={!touch}
+            onFocus={() => {
+              settledAt.current = Date.now();
+            }}
             placeholder={
               asking && !pending
                 ? "Your answer, or skip"
@@ -7809,7 +7989,6 @@ export function AskPanel({
                   : "Ask, or type an entry"
             }
             label={attached ? "A note about the attached files" : "Ask a question, or type an entry"}
-            disabled={busy}
           />
           <div className="fms-asktools">
             <button
@@ -7832,28 +8011,25 @@ export function AskPanel({
             >
               <Icon name="camera" size={22} />
             </button>
-            {busy ? (
-              /*
-                A way out of the queue.
+            {/*
+              A way out of the queue, never where Send is.
 
-                A free model can sit there for the better part of a minute, and
-                three dots with no way to stop is the app holding you to a
-                provider's queue. Stopping abandons the request; nothing was
-                going to be saved by it either way.
-              */
-              <Button size="sm" onClick={stop}>
+              A free model can sit there for the better part of a minute, and
+              three dots with no way to stop is the app holding you to a
+              provider's queue. Stopping abandons the request; nothing was
+              going to be saved by it either way. It used to take Send's place,
+              so the second tap of a thumb that pressed Send stopped what it
+              had just sent (5 October 2026). It sits beside it now, and Send
+              stays where it was, waiting.
+            */}
+            {busy && (
+              <button type="button" className="fms-btn fms-btn--secondary fms-btn--sm fms-askstop" onClick={stop}>
                 Stop
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                variant="primary"
-                type="submit"
-                disabled={!draft.trim() && !attached}
-              >
-                {attached ? "Read" : pending ? "Answer" : intent === "log" ? "Log" : "Send"}
-              </Button>
+              </button>
             )}
+            <Button size="sm" variant="primary" type="submit" disabled={busy || (!draft.trim() && !attached)}>
+              {busy ? "Working" : attached ? "Read" : pending ? "Answer" : intent === "log" ? "Log" : "Send"}
+            </Button>
           </div>
         </div>
       </form>

@@ -76,7 +76,7 @@ describe("a budget set after the month's spending is already past it", () => {
   const brief = (budgets: Budgets) =>
     monthBrief({ transactions: ledger, reference, budgets, debts: [], year: 2026, month: 9, asOf: AS_OF });
 
-  it("saves it, and from that moment the month reads as over with nothing safe to spend", () => {
+  it("saves it, and from that moment the month reads as over, the budget used up", () => {
     expect(brief({}).tracks.spending.budget).toBe(0);
 
     const out = saveTracks(EMPTY, 2026, 9, { spending: 1000000, billsSubs: 0 }, "month", AS_OF, AT);
@@ -86,7 +86,8 @@ describe("a budget set after the month's spending is already past it", () => {
     const after = brief({ "2026": out.plan });
     expect(after.tracks.spending.remaining).toBe(-1000000);
     expect(after.tracks.spending.status).toBe("OVER THE BUDGET");
-    expect(after.safe?.perDay).toBe(0);
+    // Safe to spend is the money there (6 October 2026); the budget is said beside it.
+    expect(after.safe?.budgetPerDay).toBe(0);
     expect(after.safe?.limitedBy).toBe("budget");
     expect(after.notes.some((line) => line.includes("over its budget"))).toBe(true);
     expect(after.notes.some((line) => line.includes("used up"))).toBe(true);

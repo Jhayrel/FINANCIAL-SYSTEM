@@ -26,11 +26,11 @@ const transactions = [
 const asOf = "2026-08-29";
 
 describe("the daily figure", () => {
-  it("is the same on the Budget screen and the Dashboard when the budget sets it", () => {
+  it("is the same on the Budget screen and the Dashboard's budget line", () => {
     const view = monthPlanView(transactions, budgets, 2026, 8, asOf);
     const brief = monthBrief({ transactions, reference, budgets, debts: [], year: 2026, month: 8, asOf });
     expect(brief.safe?.limitedBy).toBe("budget");
-    expect(view.perDay).toBe(brief.safe?.perDay);
+    expect(view.perDay).toBe(brief.safe?.budgetPerDay);
     // PHP 5,159.00 of spending left over three days, not the whole plan's PHP 5,511.00.
     expect(view.perDay).toBe(171_966);
   });

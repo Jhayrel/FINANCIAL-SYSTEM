@@ -1,6 +1,6 @@
 # Handoff: everything a new session needs
 
-**Written 2026-09-28, at commit `e595864` plus this file; brought up to date on 2026-10-02.** For a fresh Claude
+**Written 2026-09-28, at commit `e595864` plus this file; brought up to date on 2026-10-06.** For a fresh Claude
 session, or anyone, picking this project up cold. It says what the project
 is, how to work in it without breaking anything, what has happened, and what
 is left. The detail behind each change is in its commit message; this is
@@ -968,6 +968,55 @@ the starter set alone; the miss is the dessert receipt the phone cannot
 read, at 0.35, below anything acted on. Leave-one-out on the starter set
 is 61 of 68, and no paid paper is ever read as unpaid (asserted in
 `paperTraining.test.ts`).
+
+### 2026-10-06: safe to spend from the money, a chat box for a thumb, bills moved
+
+The owner's earlier session, on another account, ran out before it pushed
+anything: its branch, `claude/gallant-turing-ir537u`, sits at `6526489`
+with no commits of its own. What it was asked is in the 6 October dump
+(build `6526489`, taken 07:07), and this session picked it up from there,
+with the owner's new asks: the send button "accidentally touched", the box
+that "randomly sends", safe to spend "based on real things", moving Dito
+from subscriptions to bills with every entry following, and the Find a
+difference buttons ("add button then make it clean"). The dump stays out of
+git.
+
+| Found | Now |
+|---|---|
+| "What is my safe spending? ... remove the subscription and bills" (twice) and "You need to remove the subscription and bill to the equation" were told "Settings are yours to change": `asksSettingsChange` read "remove the subscription" as an order | A question, or a sum with the bills taken out, is never a change to Settings (`assistantScope.ts`, `safeAsk.ts`) |
+| "Make me a breakdown of how much i can spend today" was drawn as an empty chart, three times; "Summary that i need a clearer picture" drew October by item | What is safe or left to spend is answered with the Dashboard's figures (`asksSafeToSpend`, `safeWords`, `answerSafe` in `AskPanel.tsx`), before the router is asked; a summary asked in words is said, with a chart beside it only when one helps. The router has the three sentences as worked examples |
+| "How much i can spend today" was answered from the budget, PHP 297.95 a day, while the Dashboard said PHP 201.13 from the wallets ("Thats wrong check my balance again") | The model is given the Dashboard's safe to spend as its own section ("Safe to spend, the Dashboard's figure", `aiContext.ts`), told to answer from it first and to say the budget's pace only as the plan (`ai.ts`). The offline summary says it too |
+| "Thats a question" after a misread message got "Sure, what would you like to know?" | It answers the message before it, and puts aside a card that message wrongly made (`saysItWasAQuestion` in `intent.ts`) |
+| Safe to spend was capped by the spending budget, and a day's figure was the month's remainder over the days left, so spending PHP 3,201.00 in a morning lowered every day to come and never said today was spent | The owner's sum: wallets less the bills, subscriptions and debt payments still to pay is safe until the month ends; **today** is today's share of what was safe at the start of the day, less what today already spent; **from tomorrow** is the rest over the days after. The budget is worked out (`budgetLeft`, `budgetPerDay`) and said beside it when it is tighter, never in its place (`monthPlan.ts`). The Dashboard lays it out as a sum under a 2px ink rule and shows only the notes that need doing something about (`warnings`); Insights says the same |
+| On a phone the keyboard's Enter key was a Send key, beside the full stop and delete | Enter is a new line on a touch screen (`enterSends`, `enterKeyHint="enter"`); only the Send button sends. A computer keeps Enter to send |
+| Send turned into Stop in the same place: the second tap of the thumb that pressed Send stopped it ("Stopped. Nothing was saved.", 5 October 23:45) and the message was sent twice more | Stop sits beside Send and ignores a tap in the first 1.2 seconds; Send stays where it was, greyed "Working". The same words sent again within four seconds are a double tap, not a message. On a phone, a tap within 350 ms of the keyboard opening or closing, or of the box being touched, is not taken for Send |
+| The box was locked while an answer came, so the keyboard dropped and the page jumped under the thumb | The box empties the moment a message goes and stays open; what is typed meanwhile is kept for the next message (`sending`, `setDraft` in `AskPanel.tsx`) |
+| A bill or subscription could not change lists without its history being left on the old one | **Move to Bills** and **Move to Subscriptions** on every row in Settings, Categories: the name changes list and every row of it, live and in the bin, takes the new category; nothing else on a row changes and no total moves, since the two share one budget line (`checkMove`, `moveInLists`, `moveRows` in `kindRename.ts`; `handleMoveKind` in `App.tsx`). On the owner's data: Dito Prepaid, 13 entries |
+| Find a difference: "Open #3893" was a borderless button beside outlined ones, and "Move to the bin" was the same | Every action is outlined; one entry that makes up the difference has Edit and Move to the bin, and the sentence says which to press |
+| "Rescan the other one" after "Part 1 of 2 of the list could not be read" did nothing; "Read the images ..." was answered by the model | "rescan", "retry", "the other one", "the rest" and plural picture words read the picture again (`capture.ts`); with the picture no longer held (it is never stored), the chat says so and to attach it again |
+| "Maya banks not maya" after "my real balance in my maya is 3536.16" asked for the figure again | A short message that names only an account takes the balance said just before it |
+| Two receipts sent together (7-Eleven PHP 426.00, a restaurant PHP 2,475.00): the 7-Eleven card was kept with the restaurant's reading, as PHP 426.00 out of Maya, and would have taught the next receipt from that restaurant the wrong amount and wallet | A card keeps the reading that shows its amount, and with several pictures and none showing it, none (`printedIn`, `paperOf`); a lesson whose amount its own reading does not show is never used to file a paper like it (`filedOnItsOwn`), which also sets aside the one already in the owner's record |
+| "is the new budget reasonable?" was answered about a November card, while October's budget had been changed the night before | The newest budget change of the last month goes to the model: "The new budget" means this one |
+
+**Checked:** typecheck (`tsc -b`), the suite (the same 42 files that need
+the private fixture, and the one `pickableYears` test that already failed,
+and nothing else; 2,700-odd passing, 40 new), and the 42 files run with a
+stand-in fixture built locally from the dump, compared test by test against
+the untouched commit: the only differences are the tests changed or added on
+purpose. In the running app at 390 by 844, dark: the Dashboard's sum, Move
+to Bills on Dito (13 entries, then under Bills with its last payment), the
+phone box keeping Enter as a new line, emptying on Send and answering the
+safe to spend question; the four buttons fit at 320 and 390 with no
+sideways scroll.
+
+**Database rules:** no change. Moving a bill writes the same row with a
+different category, which `validTransaction` already allows, as a rename
+does.
+
+**For the owner, not changed:** the father's Globe Postpaid of 6 October is
+in once (#3900, PHP 599.00 out of Maya, and #3901, PHP 600.00 back in cash),
+whatever the chat's repeated "Added" lines suggest. "Subscriptions" is also
+on the list of kinds of spending; it is the owner's to remove or rename.
 
 ---
 

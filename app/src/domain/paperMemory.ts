@@ -130,10 +130,34 @@ export function likeness(a: string, b: string): number {
 }
 
 /** The taught paper most like this one, when one is like it enough to go by. */
+/**
+ * Whether a figure is printed in a reading, the way a phone's reader prints
+ * it: "426.00", "426,00", "2,475", "2.475", "2 ,475", "Tatal = 2 ,475".
+ * Separators between digits are dropped, and a run of digits that starts
+ * with the whole pesos and has at most two more (the centavos) holds it.
+ */
+export function printedIn(text: string, amount: number): boolean {
+  const whole = String(Math.floor(Math.abs(amount) / 100));
+  const runs = text.replace(/(\d)[\s,.'\u2019]+(?=\d)/g, "$1").match(/\d+/g) ?? [];
+  return runs.some((run) => run.startsWith(whole) && run.length - whole.length <= 2);
+}
+
+/**
+ * Whether an example can be trusted for how to file a paper like it: one
+ * filed as paid at an amount its own reading does not show was filed
+ * against another picture. 6 October 2026: a 7-Eleven card for ₱426.00 sent
+ * beside a restaurant receipt was kept with the restaurant's reading, so
+ * the next receipt from that restaurant would have been filed as ₱426.00
+ * out of Maya. It still counts as an example of the kind of paper.
+ */
+export const filedOnItsOwn = (paper: TaughtPaper): boolean =>
+  !paper.paid || paper.amount === null || printedIn(paper.text, paper.amount);
+
 export function nearestTaught(text: string, papers: readonly TaughtPaper[], least = 0.35): { readonly paper: TaughtPaper; readonly likeness: number } | null {
   let best: { paper: TaughtPaper; likeness: number } | null = null;
   // The newest of two equally alike wins: the owner's latest word on it.
   for (const paper of papers) {
+    if (!filedOnItsOwn(paper)) continue;
     const l = likeness(text, paper.text);
     if (l >= least && (!best || l >= best.likeness)) best = { paper, likeness: l };
   }

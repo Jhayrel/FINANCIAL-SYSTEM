@@ -33,4 +33,22 @@ describe("where it stops", () => {
     expect(asksSettingsChange("set my budget to 8000")).toBe(false);
     expect(asksSettingsChange("delete the food I paid yesterday")).toBe(false);
   });
+
+  /*
+   * 5 and 6 October 2026: each of these was told "Settings are yours to
+   * change", three times in all.
+   */
+  it("does not mistake a sum with the bills taken out for one", () => {
+    expect(asksSettingsChange("What is my safe spending? Like the actual safe spending based remove the subscription and bills")).toBe(false);
+    expect(asksSettingsChange("What is my safe spending? Like the actual safe spending based remove the subscription and bills. Just a question let me know")).toBe(false);
+    expect(
+      asksSettingsChange(
+        "Actually 200 per day is the safe to spend like look. You need to remove the subscription and bill to the equation then only whats left is use. Check it this works",
+      ),
+    ).toBe(false);
+    expect(asksSettingsChange("how much is left if I remove the bills")).toBe(false);
+    // Still a change to Settings when it is one.
+    expect(asksSettingsChange("remove the subscription Netflix")).toBe(true);
+    expect(asksSettingsChange("add a bill called Water")).toBe(true);
+  });
 });
