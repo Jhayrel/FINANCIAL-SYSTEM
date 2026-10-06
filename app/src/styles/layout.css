@@ -3912,11 +3912,42 @@
 }
 
 /*
- * Stop sits beside Send, never in its place: the second tap of the thumb
- * that pressed Send lands on Send, which waits, and not on Stop.
+ * Send: one round arrow at the right of the box. Stop is not here: it is on
+ * the "Reading your ledger" line, so the second tap of the thumb that
+ * pressed Send lands on Send, which waits, and never on Stop.
  */
-.fms-asktools > .fms-askstop + .fms-btn {
-  margin-left: var(--space-3);
+.fms-asktools > .fms-btn.fms-btn--icon {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: var(--radius-full);
+  box-shadow: none;
+}
+
+/* 44px on a touch screen (rule D10). */
+@media (max-width: 639px), (max-width: 1023px) and (pointer: coarse) {
+  .fms-asktools > .fms-btn.fms-btn--icon {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Stop, on the line that says what is being waited on: quiet, at its right, 44px to hit. */
+.fms-askstop {
+  margin-left: auto;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  background: none;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-full);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.fms-askstop:hover {
+  border-color: var(--over);
+  color: var(--over);
 }
 
 /* The words stand apart from the row of buttons, so a tap meant for the text does not land on Send. */

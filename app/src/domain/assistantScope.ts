@@ -18,6 +18,35 @@ export function wantsCapabilities(text: string): boolean {
 }
 
 /**
+ * "WHAT KIND OF TABLE CAN MY SYSTEM PROVIDE LIKE CHARTS, TRENDS ETC??", 6
+ * October 2026: it named a chart and a trend, so it was drawn, as October's
+ * spending by day. It asks what can be drawn, not for one drawing.
+ */
+const WHAT_KINDS =
+  /\bwhat\s+(?:kinds?|types?|sorts?)\s+of\s+(?:tables?|charts?|graphs?|trends?|reports?|visuals?|statements?|files?|pies?)\b|\bwhat\s+(?:tables?|charts?|graphs?|reports?|visuals?|statements?)\s+(?:can|could|do|does|will)\s+(?:you|it|my|the|this|i)\b|\b(?:which|anong|ano\s+(?:ang\s+)?mga)\s+(?:tables?|charts?|graphs?|reports?)\s+(?:can|could|ang|pwede|kaya)\b/i;
+
+export function asksWhatChartsExist(text: string): boolean {
+  const t = text.trim();
+  return t.split(/\s+/).length <= 24 && WHAT_KINDS.test(t);
+}
+
+/** What the app draws and makes, with a way to ask for each in plain words. */
+export function chartsAnswer(): string {
+  return [
+    "Here is what I can draw or make for you. Ask in your own words, for any day, week, month, range or year.",
+    "- **Where the money went**: by item, category or wallet, as bars or a pie. \"where did my money go this month\", \"pie of september by wallet\".",
+    "- **Trends over time**: by day, week, month or year, as a line. \"trend of my food since march\", \"daily spending this week\", \"income by month this year\".",
+    "- **Two periods side by side**: \"this month compared to last month\", \"august vs july\".",
+    "- **Budget against what was spent**: month by month, or one month day by day against a steady pace. \"budget vs actual this year\".",
+    "- **Balances**: each account now, or one over time. \"how much is in each account\", \"chart my maya balance\".",
+    "- **What is owed**: a credit line or loan over time. \"chart my maya credit\".",
+    "- **A trip or a place**, found in your descriptions: \"spending on my abra trip\".",
+    "- **Tables as files**: a statement as a PDF (account, wallet, income, expenses, debt) over any span, a spreadsheet of entries, or a full backup. \"account statement for september\", \"export october as a spreadsheet\".",
+    "Each chart comes with a sentence saying what it shows: the biggest part, the high and low, and how two periods differ.",
+  ].join("\n");
+}
+
+/**
  * A request to change Settings: accounts, categories, credit lines, alerts,
  * the theme, the AI's own switches and model. Changing entries, budgets and
  * the category of one entry is not a setting.

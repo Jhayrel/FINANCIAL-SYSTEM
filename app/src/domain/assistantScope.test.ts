@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asksSettingsChange, capabilitiesAnswer, wantsCapabilities } from "./assistantScope";
+import { asksSettingsChange, asksWhatChartsExist, capabilitiesAnswer, chartsAnswer, wantsCapabilities } from "./assistantScope";
 
 describe("what the assistant can do", () => {
   it("recognises the question", () => {
@@ -50,5 +50,33 @@ describe("where it stops", () => {
     // Still a change to Settings when it is one.
     expect(asksSettingsChange("remove the subscription Netflix")).toBe(true);
     expect(asksSettingsChange("add a bill called Water")).toBe(true);
+  });
+});
+
+/*
+ * 6 October 2026: "WHAT KIND OF TABLE CAN MY SYSTEM PROVIDE LIKE CHARTS,
+ * TRENDS ETC??" was drawn as October's spending by day.
+ */
+describe("what can be drawn", () => {
+  it("is heard as a question about the charts, not a request for one", () => {
+    for (const said of [
+      "WHAT KIND OF TABLE CAN MY SYSTEM PROVIDE LIKE CHARTS, TRENDS ETC??",
+      "what kinds of charts can you make",
+      "what charts can you do",
+      "what type of reports can my app give",
+    ]) {
+      expect([said, asksWhatChartsExist(said)]).toEqual([said, true]);
+    }
+    for (const said of ["chart my spending this month", "show me a trend of food", "what did I spend on food", "pie of september"]) {
+      expect([said, asksWhatChartsExist(said)]).toEqual([said, false]);
+    }
+  });
+
+  it("names every kind of chart and file, with words to ask for each", () => {
+    const answer = chartsAnswer();
+    for (const part of ["Where the money went", "Trends over time", "Two periods side by side", "Budget against what was spent", "Balances", "What is owed", "Tables as files"]) {
+      expect(answer).toContain(part);
+    }
+    expect(answer.includes(String.fromCharCode(0x2014))).toBe(false);
   });
 });

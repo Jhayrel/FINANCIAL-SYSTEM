@@ -36,6 +36,7 @@ export type IconName =
   | "close"
   | "check"
   | "camera"
+  | "send"
   | "search"
   | "ai"
   | "chevronLeft"
@@ -119,6 +120,8 @@ const SHAPES: Record<IconName, ReactNode> = {
     </>
   ),
   close: <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" />,
+  // An arrow up, as a phone's messaging apps draw Send.
+  send: <path d="M12 19V5.5M6 11.5l6-6 6 6" />,
   check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
   camera: (
     <>

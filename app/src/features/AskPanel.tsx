@@ -234,7 +234,7 @@ import {
 } from "../domain/budgetAsk";
 import { readSpendAsk, spendAnswer } from "../domain/spendAsk";
 import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
-import { asksSettingsChange, capabilitiesAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
+import { asksSettingsChange, asksWhatChartsExist, capabilitiesAnswer, chartsAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { budgetForYear } from "../domain/budget";
 import { formatMedium, MONTH_NAMES } from "../domain/dates";
 import { chatHistory, earlierSessions, keepInMind } from "../domain/memory";
@@ -4604,10 +4604,10 @@ export function AskPanel({
     // A line starting with "//" is a note, handled further down, and never an instruction.
     const isNoteLine = /^\s*\/\//.test(note);
 
-    if (files.length === 0 && !as && !isNoteLine && wantsCapabilities(note)) {
+    if (files.length === 0 && !as && !isNoteLine && (wantsCapabilities(note) || asksWhatChartsExist(note))) {
       setDraft("");
       say({ kind: "you", text: note });
-      const reply = capabilitiesAnswer();
+      const reply = asksWhatChartsExist(note) ? chartsAnswer() : capabilitiesAnswer();
       say({ kind: "assistant", text: reply, from: "this device" });
       log(aiEvent("asked", "add", { text: note }));
       log(aiEvent("answered", "add", { text: "Said what the assistant can do.", model: "this device" }));
@@ -7734,6 +7734,21 @@ export function AskPanel({
             <span className="t-caption" style={{ color: "var(--ink-3)" }}>
               {stage || (attached ? "Reading the picture" : intent === "log" ? "Reading" : "Thinking")}
             </span>
+            {/*
+              A way out of the queue, on the line that says what is being
+              waited on, well away from Send.
+
+              A free model can sit there for the better part of a minute, and
+              three dots with no way to stop is the app holding you to a
+              provider's queue. Stopping abandons the request; nothing was
+              going to be saved by it either way. In Send's place, the second
+              tap of a thumb that pressed Send stopped what it had just sent
+              (5 October 2026); beside it, Stop and a greyed "Working" were two
+              pills in the box ("its ugly", 6 October 2026).
+            */}
+            <button type="button" className="t-caption fms-askstop" onClick={stop}>
+              Stop
+            </button>
           </div>
         )}
       </div>
@@ -8012,24 +8027,20 @@ export function AskPanel({
               <Icon name="camera" size={22} />
             </button>
             {/*
-              A way out of the queue, never where Send is.
-
-              A free model can sit there for the better part of a minute, and
-              three dots with no way to stop is the app holding you to a
-              provider's queue. Stopping abandons the request; nothing was
-              going to be saved by it either way. It used to take Send's place,
-              so the second tap of a thumb that pressed Send stopped what it
-              had just sent (5 October 2026). It sits beside it now, and Send
-              stays where it was, waiting.
+              Send is one round arrow, as in a phone's messaging apps, and it
+              stays where it is, greyed, while an answer comes: Stop is on the
+              line above that says what is being waited on. What it will do
+              (send, read the picture, answer the card, log) is its name.
             */}
-            {busy && (
-              <button type="button" className="fms-btn fms-btn--secondary fms-btn--sm fms-askstop" onClick={stop}>
-                Stop
-              </button>
-            )}
-            <Button size="sm" variant="primary" type="submit" disabled={busy || (!draft.trim() && !attached)}>
-              {busy ? "Working" : attached ? "Read" : pending ? "Answer" : intent === "log" ? "Log" : "Send"}
-            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              type="submit"
+              iconLeft={<Icon name="send" size={22} />}
+              ariaLabel={busy ? "Working on it" : attached ? "Read" : pending ? "Answer" : intent === "log" ? "Log" : "Send"}
+              title={busy ? "Working on it" : attached ? "Read" : pending ? "Answer" : intent === "log" ? "Log" : "Send"}
+              disabled={busy || (!draft.trim() && !attached)}
+            />
           </div>
         </div>
       </form>
