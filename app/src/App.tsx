@@ -2481,6 +2481,8 @@ export default function App() {
               onRestore={handleRestoreBackup}
               onAddTransactions={handleSave}
               signedInUid={cloud.auth.status === "ready" ? cloud.auth.uid : undefined}
+              signedInAs={cloud.auth.status === "ready" ? cloud.auth.email : undefined}
+              onSignOut={cloud.configured ? cloud.signOut : undefined}
               ledgerSource={cloud.uid ? ledgerSource : undefined}
               uploading={uploading}
               onUpload={cloud.uid ? () => void handleUpload() : undefined}

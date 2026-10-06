@@ -43,7 +43,7 @@
  */
 
 import { contextToText, phpFigure, type AiContext } from "./aiContext";
-import { addDays, dayOfWeek, formatMedium } from "./dates";
+import { addDays, dayInWords, dayOfWeek, formatMedium } from "./dates";
 import { redact } from "./aiRedact";
 import { toCentavos, toPesos } from "./money";
 import { costOf, incomeOf } from "./totals";
@@ -497,6 +497,41 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   out.push(windowLine("Last week, Monday to Sunday", lastMonday, addDays(monday, -1)));
   out.push(windowLine("The last 7 days", addDays(asOf, -6)));
   out.push(windowLine("The last 30 days", addDays(asOf, -29)));
+
+  /*
+   * Today, yesterday and tomorrow, by name and with what happened in them:
+   * "today you can spend ...", "yesterday you spent ..." (the owner, 6
+   * October 2026). The totals above say how much; these say on what, so an
+   * answer about yesterday names yesterday's food, not the month's.
+   */
+  const dayEntry = (t: Transaction): string => {
+    const what = t.item || t.category || t.type;
+    const fee = t.fee > 0 ? `, fee ${php(t.fee)}` : "";
+    if (t.type === "Revenue") return `received ${what} ${php(t.amount)} into ${t.toWallet || "-"}`;
+    if (t.type === "Transfer") return t.toWallet ? `moved ${php(t.amount)} from ${t.fromWallet || "-"} to ${t.toWallet}${fee}` : `sent ${php(t.amount)} away from ${t.fromWallet || "-"}${fee}`;
+    if (t.type === "Debt") return `${t.debtEffect ?? "debt"} ${php(t.amount)}${t.fromWallet ? ` from ${t.fromWallet}` : t.toWallet ? ` into ${t.toWallet}` : ""}${fee}`;
+    return `${what} ${php(t.total)} from ${t.fromWallet || "-"}`;
+  };
+  const dayLine = (label: string, day: IsoDate): string => {
+    const onDay = rows.filter((t) => t.date === day);
+    const shown = onDay.slice(0, 12).map(dayEntry);
+    const more = onDay.length > shown.length ? `; and ${onDay.length - shown.length} more` : "";
+    return `${label}, ${dayInWords(day)}: ${shown.length > 0 ? `${shown.join("; ")}${more}` : "nothing entered"}.`;
+  };
+  const tomorrow = addDays(asOf, 1);
+  const dueSoon = (snapshot.safe?.due ?? []).filter((d) => d.on !== null && d.on <= addDays(asOf, 3));
+  out.push("");
+  out.push("## Today, yesterday and tomorrow");
+  out.push("Say today, yesterday and tomorrow for these days, as the owner does, and the weekday for the days around them.");
+  out.push(dayLine("Today so far", asOf));
+  out.push(dayLine("Yesterday", addDays(asOf, -1)));
+  out.push(
+    `Tomorrow, ${dayInWords(tomorrow)}: ${
+      dueSoon.length > 0
+        ? `due soon, ${dueSoon.map((d) => `${d.name} ${php(Math.round(d.amount * 100))} ${d.on === asOf ? "today" : d.on === tomorrow ? "tomorrow" : `on ${dayInWords(d.on as IsoDate)}`}${(d.on as IsoDate) < asOf ? " (late)" : ""}`).join(", ")}`
+        : "no bill or subscription is due today, tomorrow or the day after"
+    }.`,
+  );
 
   /**
    * The fortnight, day by day.

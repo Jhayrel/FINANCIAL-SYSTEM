@@ -143,6 +143,8 @@ export function Settings({
   alerts,
   asOf,
   openTab,
+  signedInAs,
+  onSignOut,
 }: {
   /** A tab to open on, from a link elsewhere: the database-use notice opens Data. */
   openTab?: { readonly tab: string; readonly at: number } | undefined;
@@ -175,6 +177,10 @@ export function Settings({
   alerts?: readonly Finding[] | undefined;
   /** Today, as every other screen reads it. */
   asOf?: string | undefined;
+  /** Who is signed in, by e-mail, for the Sign out line. */
+  signedInAs?: string | undefined;
+  /** Signing out of this device; none when there is no sign-in (a local copy). */
+  onSignOut?: (() => Promise<void>) | undefined;
 }) {
   const [tab, setTab] = useState<Tab>(() => (TABS.some((t) => t.id === openTab?.tab) ? (openTab?.tab as Tab) : "accounts"));
   useEffect(() => {
@@ -324,6 +330,7 @@ export function Settings({
             onUpload={onUpload}
           />
         )}
+        {onSignOut && <SignOutRow who={signedInAs ?? ""} onSignOut={onSignOut} />}
        </div>
       </div>
 
@@ -335,6 +342,43 @@ export function Settings({
         alerts={alerts ?? []}
         asOf={asOf}
       />
+    </div>
+  );
+}
+
+/**
+ * Signing out of this device, under every tab of Settings.
+ *
+ * The owner, 6 October 2026: "in setting add log out". Asked first, since it
+ * takes the ledger off the screen; nothing in the database changes, and
+ * Continue with Google brings it back.
+ */
+function SignOutRow({ who, onSignOut }: { who: string; onSignOut: () => Promise<void> }) {
+  const { confirm, dialog } = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const out = async (): Promise<void> => {
+    const ok = await confirm({
+      title: "Sign out of this device?",
+      body: "Your ledger stays in the database, untouched. It is off this screen until you sign in again with Google.",
+      confirmLabel: "Sign out",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await onSignOut();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="fms-signout">
+      {dialog}
+      <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+        {who ? `Signed in as ${who}` : "Signed in"}
+      </span>
+      <Button variant="secondary" loading={busy} onClick={() => void out()}>
+        Sign out
+      </Button>
     </div>
   );
 }

@@ -38,7 +38,7 @@ import { assessMonthFor } from "./budget";
 import { billStatuses, overdue, STOPPED_AFTER_DAYS, upcoming } from "./bills";
 import { debtDue, incomeQuality, netWorth, positionsOf, unpaidCharges, type Debt } from "./debt";
 import { creditRoom, limitSteps } from "./creditLimit";
-import { addDays, daysBetween, getMonth, getYear, monthName } from "./dates";
+import { addDays, dayInWords, daysBetween, getMonth, getYear, monthName } from "./dates";
 import { financeAlerts, burnRate, daysLeft, dailyAllowance } from "./alerts";
 import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
 import { toPesos } from "./money";
@@ -451,7 +451,15 @@ export function contextToText(c: AiContext): string {
   const lines: string[] = [];
   const php = phpFigure;
 
-  lines.push(`Date: ${c.asOf}. Currency: Philippine Peso.`);
+  /*
+   * The day in words, and the days either side. 6 October 2026, the owner:
+   * "Make sure the ai knows the date like today etc, yesterday etc tomorrow
+   * etc like 'today you can spend ...' 'yesterday you spent ...'". The date
+   * is the phone's own (`today()`), so Philippine time.
+   */
+  lines.push(
+    `Today is ${dayInWords(c.asOf)}, ${getYear(c.asOf)} (${c.asOf}). Yesterday was ${dayInWords(addDays(c.asOf, -1))}; tomorrow is ${dayInWords(addDays(c.asOf, 1))}. Currency: Philippine Peso.`,
+  );
   lines.push("");
   lines.push(`## ${c.month.name}`);
   lines.push(`Spent ${php(c.month.spent)}, received ${php(c.month.revenue)}.`);
@@ -509,7 +517,7 @@ export function contextToText(c: AiContext): string {
       `Spending wallets ${php(safe.wallets)}, less bills and subscriptions still to pay ${php(safe.billsDue)}${due}${safe.debtDue > 0 ? ` and debt payments due ${php(safe.debtDue)}` : ""}: ${php(safe.safe)} is safe to spend until ${until} ends.`,
     );
     lines.push(
-      `Safe to spend today: ${php(safe.today)} (today's share ${php(safe.todayShare)}, spent today ${php(safe.spentToday)}${safe.overToday > 0 ? `, ${php(safe.overToday)} past it` : ""}).${safe.daysLeft > 1 ? ` From tomorrow: ${php(safe.perDayAfter)} a day for ${safe.daysLeft - 1} days.` : ""}`,
+      `Safe to spend today: ${php(safe.today)} (today's share ${php(safe.todayShare)}, spent today ${php(safe.spentToday)}${safe.overToday > 0 ? `, ${php(safe.overToday)} past it` : ""}).${safe.daysLeft > 1 ? ` From tomorrow, ${dayInWords(addDays(c.asOf, 1))}: ${php(safe.perDayAfter)} a day for ${safe.daysLeft - 1} days.` : ""}`,
     );
     if (safe.budgetLeft !== null) {
       lines.push(
@@ -523,7 +531,7 @@ export function contextToText(c: AiContext): string {
   lines.push("");
   lines.push("## Today and the days before it");
   lines.push(
-    `Today, ${c.asOf}: spent ${php(c.recent.today.spent)}, received ${php(c.recent.today.received)}, across ${c.recent.today.entries} ${c.recent.today.entries === 1 ? "entry" : "entries"}.`,
+    `Today so far: spent ${php(c.recent.today.spent)}, received ${php(c.recent.today.received)}, across ${c.recent.today.entries} ${c.recent.today.entries === 1 ? "entry" : "entries"}.`,
   );
   lines.push(`Yesterday: spent ${php(c.recent.yesterday.spent)}.`);
   lines.push(`The last seven days, today included: spent ${php(c.recent.lastSevenDays.spent)}.`);

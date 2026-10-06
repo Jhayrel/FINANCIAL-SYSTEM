@@ -6,7 +6,7 @@
  * rather than pretending to be a general login.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Alert, Button, Card } from "../components/primitives";
 import type { AuthState } from "../data/auth";
@@ -64,6 +64,27 @@ export function SignIn({
    * out of, and this has no such state left to get into.
    */
   const checking = auth.status === "loading";
+  /*
+   * ── And no button while the check normally answers ─────────────────────
+   *
+   * The owner, 6 October 2026, over this card on a phone: "i keep
+   * accidentally hitting that". The check answers in a fraction of a second
+   * when signed in, and the big green button sat under the thumb for that
+   * fraction, opening Google's account chooser for someone already signed
+   * in. So while checking, the card says only that it is checking, and the
+   * button comes after four seconds, the time a check that has stalled has
+   * clearly stalled. Two independent ways bring it, so neither can be the
+   * one that locks the owner out, which is what the comment above is about:
+   * this timer, and a CSS animation on the button itself (`fms-gate-later`),
+   * which shows it after six seconds with no JavaScript at all.
+   */
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    if (!checking) return;
+    const timer = setTimeout(() => setStalled(true), 4000);
+    return () => clearTimeout(timer);
+  }, [checking]);
+  const waiting = checking && !stalled;
 
   return (
     <div className="fms-gate">
@@ -100,25 +121,37 @@ export function SignIn({
             anything is wrong. It says what is happening and points at the
             button, which works either way: signing in resolves the state.
           */}
-          {checking && (
-            <Alert status="info" title="This usually takes a moment">
-              If it stays like this, the check has been blocked rather than answered. Signing in
-              below works regardless.
+          {waiting && (
+            <span className="fms-working" role="status" aria-live="polite">
+              <span className="fms-dots" aria-hidden>
+                <i />
+                <i />
+                <i />
+              </span>
+            </span>
+          )}
+
+          {checking && stalled && (
+            <Alert status="info" title="This is taking longer than usual">
+              The check has been blocked rather than answered. If you are signed in, this page moves
+              on by itself; if not, sign in below.
             </Alert>
           )}
 
           {auth.status === "wrong-account" ? (
             <Button variant="primary" onClick={() => void onSignOut()}>Sign out</Button>
           ) : (
-            <Button
-              variant="primary"
-              size="lg"
-              fullWidth
-              loading={busy}
-              onClick={() => void go()}
-            >
-              Continue with Google
-            </Button>
+            <div className={waiting ? "fms-gate-later" : undefined}>
+              <Button
+                variant="primary"
+                size="lg"
+                fullWidth
+                loading={busy}
+                onClick={() => void go()}
+              >
+                Continue with Google
+              </Button>
+            </div>
           )}
 
           <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>

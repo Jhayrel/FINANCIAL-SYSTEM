@@ -21,6 +21,13 @@ export const MONTH_NAMES_SHORT = [
 
 export const DAY_NAMES_SHORT = ["S", "M", "T", "W", "TH", "F", "S"] as const;
 
+export const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+
+/** "Tuesday, October 6": a day as a person says it, for the assistant's today, yesterday and tomorrow. */
+export function dayInWords(d: IsoDate): string {
+  return `${WEEKDAY_NAMES[dayOfWeek(d)] ?? ""}, ${MONTH_NAMES[getMonth(d) - 1] ?? ""} ${getDay(d)}`;
+}
+
 const ISO_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export function isIsoDate(value: unknown): value is IsoDate {

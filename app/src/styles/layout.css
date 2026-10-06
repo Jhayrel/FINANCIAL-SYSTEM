@@ -2581,6 +2581,37 @@
   background: var(--paper);
 }
 
+/* Sign out, at the foot of every Settings tab: who is signed in, and the button. */
+.fms-signout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+/*
+ * The sign-in button while the check normally answers: not there to be hit
+ * by a thumb that meant nothing (6 October 2026). It appears after six
+ * seconds by this animation alone, whatever the script does; the script
+ * shows it at four. Reduced motion shortens an animation, never its delay,
+ * so it still appears there too.
+ */
+.fms-gate-later {
+  /* Hidden takes no taps; visibility, unlike pointer-events, can be animated. */
+  visibility: hidden;
+  animation: fms-gate-show 0.01s linear 6s forwards;
+}
+
+@keyframes fms-gate-show {
+  to {
+    visibility: visible;
+  }
+}
+
 .fms-gatecard {
   width: min(440px, 100%);
   margin: auto;

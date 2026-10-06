@@ -40,6 +40,14 @@
  * spending, today's spending comes out of it, and the rest of the month
  * gets the rest.
  *
+ * Only spending is put back for today's share. Money that moved today
+ * without being spent (income, a transfer to savings, money paid for someone
+ * and paid back) changes every day's share alike, as it changes what is
+ * there for all of them: on 6 October the father's ₱599.00 out and ₱600.00
+ * back moved today's share by under a centavo a day. A bill, subscription or
+ * debt payment paid today is not today's spending either: it was set aside
+ * already, and paying it leaves the wallets and what is set aside alike.
+ *
  * Savings are left out: they are not meant to be spent from. The bills are the
  * Budget screen's own list (`monthBills`) and the debt dates are the Debt
  * screen's (`debtDue`), so what is set aside here is what those screens show.

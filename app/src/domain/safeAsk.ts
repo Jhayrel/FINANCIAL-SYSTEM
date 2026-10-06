@@ -100,7 +100,7 @@ export function safeWords(brief: MonthBrief, rate: number | null = null): string
     );
   }
   if (rate !== null && safe.daysLeft > 0) {
-    // From the start of today: today's own spending counts against today's figure.
+    // Counted from before today's spending: what today already spent counts against today's figure.
     const days = safe.daysLeft;
     const need = rate * days;
     const room = safe.safe + safe.spentToday;

@@ -130,7 +130,9 @@ describe("safe to spend is the money there, less what is still to pay", () => {
     expect(text).toContain("## Safe to spend");
     expect(text).toContain("PHP 3,200.00 is safe to spend until September ends");
     expect(text).toContain("Safe to spend today: PHP 230.00");
-    expect(text).toContain("From tomorrow: PHP 330.00 a day");
+    expect(text).toContain("From tomorrow, Tuesday, September 22: PHP 330.00 a day");
+    // The day in words, and the days either side (6 October 2026).
+    expect(text).toContain("Today is Monday, September 21, 2026 (2026-09-21). Yesterday was Sunday, September 20; tomorrow is Tuesday, September 22.");
     expect(text).toContain("(Music PHP 500.00, Internet PHP 1,200.00)");
     expect(text).not.toContain("the day's figure the app shows");
   });
@@ -165,5 +167,26 @@ describe("the newest budget change, for \"the new budget\"", () => {
       },
     };
     expect(buildContext({ transactions: base, accounts: [], budgets, credits: [], reference, lowBalanceThreshold: 0, asOf: ASOF }).lastBudgetChange).toBeNull();
+  });
+});
+
+describe("today, yesterday and tomorrow, for the assistant", () => {
+  it("names each day and what happened in it, and what falls due", async () => {
+    const { buildChatContext } = await import("./aiChatContext");
+    const transactions = [
+      ...base,
+      row({ date: "2026-09-20", amount: 54_500, fromWallet: "Wallet B", description: "lunch" }),
+      row({ date: ASOF, amount: 10_000 }),
+      row({ date: ASOF, type: "Transfer", fromWallet: "Wallet B", toWallet: "Cash", category: "", item: "", amount: 200_000, fee: 1_800 }),
+    ];
+    const snapshot = buildContext({ transactions, accounts: [], budgets: {}, credits: [], reference, lowBalanceThreshold: 0, asOf: ASOF });
+    const text = buildChatContext({ snapshot, transactions, asOf: ASOF, question: "how much did I spend yesterday" }).text;
+    expect(text).toContain("## Today, yesterday and tomorrow");
+    expect(text).toContain("Today so far, Monday, September 21: Food PHP 100.00 from Cash; moved PHP 2,000.00 from Wallet B to Cash, fee PHP 18.00.");
+    expect(text).toContain("Yesterday, Sunday, September 20: Food PHP 545.00 from Wallet B.");
+    // Music and Internet were last paid 23 and 24 August, so they fall due two and three days off, said by weekday.
+    expect(text).toContain(
+      "Tomorrow, Tuesday, September 22: due soon, Music PHP 500.00 on Wednesday, September 23, Internet PHP 1,200.00 on Thursday, September 24.",
+    );
   });
 });
