@@ -312,6 +312,8 @@ export function Settings({
 
         {tab === "appearance" && <AppearanceSection settings={settings} patch={patch} />}
 
+        {/* Sign out lives in Data only (the owner, 6 October 2026), first, where it is seen. */}
+        {tab === "data" && onSignOut && <SignOutRow who={signedInAs ?? ""} onSignOut={onSignOut} />}
         {tab === "data" && (
           <DataSection
             transactions={transactions}
@@ -330,7 +332,6 @@ export function Settings({
             onUpload={onUpload}
           />
         )}
-        {onSignOut && <SignOutRow who={signedInAs ?? ""} onSignOut={onSignOut} />}
        </div>
       </div>
 
@@ -347,7 +348,7 @@ export function Settings({
 }
 
 /**
- * Signing out of this device, under every tab of Settings.
+ * Signing out of this device, at the top of Settings, Data.
  *
  * The owner, 6 October 2026: "in setting add log out". Asked first, since it
  * takes the ledger off the screen; nothing in the database changes, and

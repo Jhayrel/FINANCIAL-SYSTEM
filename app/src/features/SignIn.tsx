@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from "react";
 
-import { Alert, Button, Card } from "../components/primitives";
+import { Alert, Button } from "../components/primitives";
 import type { AuthState } from "../data/auth";
 
 export function SignIn({
@@ -86,81 +86,63 @@ export function SignIn({
   }, [checking]);
   const waiting = checking && !stalled;
 
+  /*
+   * One quiet screen, not a card of paragraphs (the owner, 6 October 2026:
+   * "the loading screen ... when opening make it cleaner", "even the login
+   * make it clean"). The mark and the name, one line, and the button when
+   * there is something to press. The button keeps its place while hidden, so
+   * nothing moves when it appears.
+   */
   return (
     <div className="fms-gate">
-      {/* A card sizes itself from its container, so the gate gives it a width. */}
-      <div className="fms-gatecard">
-      <Card>
-        <div style={{ display: "grid", gap: "var(--space-4)", maxWidth: 380 }}>
-          <div>
-            <h1 className="t-display-l" style={{ margin: 0 }}>Finances</h1>
-            <p className="t-body" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-2)" }}>
-              {/*
-                The only thing the loading state changes. Saying "sign in" to
-                someone who is already signed in and merely being checked is
-                what read as being logged out; saying this does not, and it
-                costs no branch and no timer.
-              */}
-              {checking
-                ? "Checking whether you are already signed in."
-                : "Your ledger is in Firebase. Sign in with the Google account that owns it."}
-            </p>
-          </div>
+      <main className="fms-gatebox">
+        <span aria-hidden className="fms-mark fms-mark--l">
+          <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
+            <path d="M4 4.5h8M4 8h8M4 11.5h4.5" stroke="var(--on-brand)" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </span>
+        <h1 className="t-display-l fms-gatetitle">Finances</h1>
 
-          {auth.status === "wrong-account" && (
-            <Alert status="warn" title="That is not this database">
-              You are signed in as {auth.email || auth.uid}, which is not the owner account. Sign out
-              and use the one recorded in the security rules.
-            </Alert>
-          )}
-
-          {error && <Alert status="over" title="Could not sign in">{error}</Alert>}
-
-          {/*
-            The check can stay silent rather than fail, so this never claims
-            anything is wrong. It says what is happening and points at the
-            button, which works either way: signing in resolves the state.
-          */}
-          {waiting && (
-            <span className="fms-working" role="status" aria-live="polite">
-              <span className="fms-dots" aria-hidden>
-                <i />
-                <i />
-                <i />
-              </span>
+        {waiting ? (
+          <div className="fms-gatewait" role="status" aria-live="polite">
+            <span className="t-body" style={{ color: "var(--ink-3)" }}>
+              Opening your ledger
             </span>
-          )}
-
-          {checking && stalled && (
-            <Alert status="info" title="This is taking longer than usual">
-              The check has been blocked rather than answered. If you are signed in, this page moves
-              on by itself; if not, sign in below.
-            </Alert>
-          )}
-
-          {auth.status === "wrong-account" ? (
-            <Button variant="primary" onClick={() => void onSignOut()}>Sign out</Button>
-          ) : (
-            <div className={waiting ? "fms-gate-later" : undefined}>
-              <Button
-                variant="primary"
-                size="lg"
-                fullWidth
-                loading={busy}
-                onClick={() => void go()}
-              >
-                Continue with Google
-              </Button>
-            </div>
-          )}
-
-          <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-            Nothing is readable without this. The rules allow exactly one account and deny every
-            other request, signed in or not.
+            <span className="fms-dots" aria-hidden>
+              <i />
+              <i />
+              <i />
+            </span>
+          </div>
+        ) : (
+          <p className="t-body fms-gateline">
+            {auth.status === "wrong-account"
+              ? `Signed in as ${auth.email || auth.uid}, which is not the account that owns this ledger.`
+              : checking
+                ? "This is taking longer than usual. If you are signed in it opens by itself; if not, sign in."
+                : "Sign in with the Google account that owns this ledger."}
           </p>
-        </div>
-      </Card>
-      </div>
+        )}
+
+        {error && (
+          <Alert status="over" title="Could not sign in">
+            {error}
+          </Alert>
+        )}
+
+        {auth.status === "wrong-account" ? (
+          <Button variant="primary" size="lg" fullWidth onClick={() => void onSignOut()}>
+            Sign out
+          </Button>
+        ) : (
+          <div className={waiting ? "fms-gate-later fms-gatebutton" : "fms-gatebutton"}>
+            <Button variant="primary" size="lg" fullWidth loading={busy} onClick={() => void go()}>
+              Continue with Google
+            </Button>
+            <p className="t-caption fms-gatenote">Only the owner's account can open it.</p>
+          </div>
+        )}
+      </main>
     </div>
   );
 }

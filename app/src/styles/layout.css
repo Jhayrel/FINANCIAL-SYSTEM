@@ -2581,16 +2581,15 @@
   background: var(--paper);
 }
 
-/* Sign out, at the foot of every Settings tab: who is signed in, and the button. */
+/* Sign out, at the top of Settings, Data: who is signed in, and the button. */
 .fms-signout {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2) var(--space-4);
-  margin-top: var(--space-6);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--hairline);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--hairline);
 }
 
 /*
@@ -2612,9 +2611,48 @@
   }
 }
 
-.fms-gatecard {
-  width: min(440px, 100%);
+/* The sign-in screen: the mark, the name, one line and one button, centred. */
+.fms-gatebox {
+  width: min(360px, 100%);
   margin: auto;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-4);
+  text-align: center;
+}
+
+.fms-mark.fms-mark--l {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-md);
+}
+
+.fms-gatetitle {
+  margin: 0;
+}
+
+.fms-gateline {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.fms-gatewait {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 24px;
+}
+
+.fms-gatebutton {
+  width: 100%;
+  margin-top: var(--space-2);
+  display: grid;
+  gap: var(--space-4);
+}
+
+.fms-gatenote {
+  margin: 0;
+  color: var(--ink-3);
 }
 
 /* ══ Select ═════════════════════════════════════════════════════════════════
