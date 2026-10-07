@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 import { affordAnswer, followsUpDecision, goesByBalance, isAffordQuestion, readAffordAsk, usualCost } from "./affordAsk";
 import { detectIntent, isQuestion } from "./intent";
 import type { Budgets, ReferenceLists, Transaction } from "./types";
+import { monthBrief } from "./monthPlan";
+import { formatMoney } from "./money";
 
 const TODAY = "2026-09-27";
 let n = 0;
@@ -135,8 +137,10 @@ describe("the answer goes by what is held, and says the budget apart", () => {
 
   it("says how much is free, and per day, when nothing is named", () => {
     const text = affordAnswer(readAffordAsk("so with my current balance, what can I afford", rows, reference, TODAY), input);
-    expect(text).toContain("So you can spend up to ₱4,125.00 and still cover what is due");
-    expect(text).toContain("a day for the 4 days left in September");
+    expect(text).toContain("So you can spend up to ₱4,125.00 before September ends and still cover what is due.");
+    // The Dashboard's day figures, not an even split of its own (6 October 2026 audit).
+    const safe = monthBrief({ ...input, year: 2026, month: 9 }).safe!;
+    expect(text).toContain(`That is ${formatMoney(safe.perDay)} today, then ${formatMoney(safe.perDayAfter)} a day for the 3 days after.`);
   });
 
   it("adds up two things named together", () => {
@@ -158,5 +162,20 @@ describe("asking the same decision again", () => {
 
   it.each(["what budget do you recommend for October?", "how much did I spend on food", "is it raining"])("is not: %s", (q) => {
     expect(followsUpDecision(q)).toBe(false);
+  });
+});
+
+/*
+ * 7 October 2026: a PHP 95.00 meal was called within PHP 80.64 a day. The
+ * month can cover something today's figure does not, so both are said.
+ */
+describe("a purchase against today's figure", () => {
+  it("says when it is more than today's figure, and what that leaves from tomorrow", () => {
+    const safe = monthBrief({ ...input, year: 2026, month: 9 }).safe!;
+    const over = safe.perDay + 1_000;
+    const text = affordAnswer(readAffordAsk(`can I spend ${over / 100} on food today`, rows, reference, TODAY), input);
+    expect(text).toContain(`It is ₱10.00 more than today's figure of ${formatMoney(safe.perDay)}`);
+    const under = affordAnswer(readAffordAsk("can I spend 1 on food today", rows, reference, TODAY), input);
+    expect(under).toContain(`It fits today's figure of ${formatMoney(safe.perDay)}, so from tomorrow stays ${formatMoney(safe.perDayAfter)} a day.`);
   });
 });

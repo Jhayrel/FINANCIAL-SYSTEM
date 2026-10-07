@@ -322,7 +322,9 @@ describe("any window, and what if", () => {
   it("says what is left after a purchase that has not happened", () => {
     const text = build("what if I buy a 25k phone?", { transactions: days }).text;
     expect(text).toContain("## What if PHP 25,000.00 is spent now");
-    expect(text).toMatch(/Net worth after debt: PHP [\d,.-]+ before, PHP [\d,.-]+ after\./);
+    expect(text).toMatch(/Safe to spend until August ends: PHP [\d,.-]+ before/);
+    // Net worth is never money to spend, so a what if does not quote it.
+    expect(text).not.toContain("Net worth after debt: PHP 0.00 before");
   });
 
   it("adds nothing for a question that is not a what if", () => {
@@ -330,9 +332,9 @@ describe("any window, and what if", () => {
   });
 
   it("works in centavos, so the figures after are the figures before less the purchase", () => {
-    // No accounts in this ledger, so net worth is nothing before and the phone after.
+    // Nothing is safe in this ledger, so all of the phone is more than is safe.
     const text = build("what if I buy a 25k phone?", { transactions: days }).text;
-    expect(text).toContain("Net worth after debt: PHP 0.00 before, PHP -25,000.00 after.");
+    expect(text).toContain("Safe to spend until August ends: PHP 0.00 before; PHP 25,000.00 is PHP 25,000.00 more than that, and the spending wallets do not hold it.");
   });
 
   /*
@@ -346,7 +348,7 @@ describe("any window, and what if", () => {
     const snapshot = buildContext({ transactions: odd, accounts: [], budgets: set, credits: [], reference, lowBalanceThreshold: 0, asOf: "2026-08-31" });
     const build2 = (question: string) => buildChatContext({ snapshot, transactions: odd, asOf: "2026-08-31", question, budgets: set }).text;
     expect(() => build2("what if I spend 8000 tonight?")).not.toThrow();
-    expect(build2("what if I spend 8000 tonight?")).toContain("August 2026's spending budget: PHP 1,700.71 over before, PHP 9,700.71 over after.");
+    expect(build2("what if I spend 8000 tonight?")).toContain("The plan, not the money: August 2026's spending budget PHP 1,700.71 over before, PHP 9,700.71 over after.");
   });
 
   it("does not read money coming in as money spent", () => {

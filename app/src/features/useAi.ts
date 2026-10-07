@@ -21,7 +21,8 @@ import { askAi, type AiAnswer, type AiTask } from "../data/aiClient";
 import { buildContext, contextToText } from "../domain/aiContext";
 import { buildChatContext } from "../domain/aiChatContext";
 import { saidAsFigures, untracedNote } from "../domain/aiFigures";
-import { formatMoney } from "../domain/money";
+import { fitNote } from "../domain/dayFit";
+import { formatMoney, toCentavos } from "../domain/money";
 import { cacheKey, readCache, writeCache } from "../domain/aiCache";
 import { offlineAnswer } from "../domain/aiOffline";
 import { today } from "../domain/dates";
@@ -319,7 +320,16 @@ export function useAi({
        */
       const said = options.trusted ?? [options.earlier ?? "", ...(options.history ?? []).map((h) => h.text)].join("\n");
       const note = untracedNote(answered.text, [withWorked ?? contextToText(context), said, saidAsFigures(said), options.pinned ?? ""].join("\n"), formatMoney);
-      return note === "" ? answered : { ...answered, text: [answered.text, note].join("\n\n") };
+      /*
+       * Every figure can be real and the answer still wrong: "a PHP 95.00
+       * meal is within that daily limit" of PHP 80.64 (7 October 2026). A
+       * fit claimed against the day's figure is checked the same way, and
+       * said underneath (`domain/dayFit.ts`).
+       */
+      const day = context.safe ? { today: toCentavos(context.safe.today), after: toCentavos(context.safe.perDayAfter) } : null;
+      const slip = task === "chat" && day ? fitNote(answered.text, day, formatMoney) : "";
+      const notes = [note, slip].filter(Boolean);
+      return notes.length === 0 ? answered : { ...answered, text: [answered.text, ...notes].join("\n\n") };
     },
     [context, disabled, ai.enabled, ai.tone, ai.provider, ai.model, transactions, asOf, budgets, settings.credits, deleted],
   );

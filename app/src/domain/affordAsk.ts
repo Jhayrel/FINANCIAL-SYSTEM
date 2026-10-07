@@ -36,7 +36,7 @@ import { walletBalance } from "./balances";
 import { addDays, getMonth, getYear, MONTH_NAMES } from "./dates";
 import type { Debt } from "./debt";
 import { formatMoney, type Centavos } from "./money";
-import { monthBrief } from "./monthPlan";
+import { monthBrief, safeAfter } from "./monthPlan";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
 /** Asking whether there is money for something, anywhere in the sentence. */
@@ -205,19 +205,49 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
       lines.push(`${ask.yesNo === false ? `${money(cost)} does not fit what you hold.` : "No."} ${holding}${fromWallet === null ? dueWords : ""}`);
       lines.push(`${ask.amount !== null ? what : `${what}, about ${money(cost)}`} is ${money(cost - Math.max(0, room))} more than that.`);
     }
+    /*
+     * The day, as the Dashboard has it. "Yes, going by what you hold" is the
+     * month; a meal can fit the month and still be more than today's figure
+     * (7 October 2026: a PHP 95.00 meal called within PHP 80.64 a day).
+     */
+    if (safe && fromWallet === null && room >= cost) {
+      const then = safeAfter(safe, cost);
+      if (ask.when === "tomorrow" && safe.daysLeft > 1) {
+        lines.push(
+          cost <= safe.perDayAfter
+            ? `It fits tomorrow's figure of ${money(safe.perDayAfter)}.`
+            : `It is ${money(cost - safe.perDayAfter)} more than tomorrow's figure of ${money(safe.perDayAfter)}, so the days after it would have less.`,
+        );
+      } else if (then.fitsToday) {
+        lines.push(`It fits today's figure of ${money(safe.perDay)}, so from tomorrow stays ${money(then.perDayAfter)} a day.`);
+      } else {
+        lines.push(
+          `It is ${money(cost - safe.perDay)} more than today's figure of ${money(safe.perDay)}${safe.daysLeft > 1 ? `: from tomorrow you would have ${money(then.perDayAfter)} a day instead of ${money(safe.perDayAfter)}` : ""}.`,
+        );
+      }
+    }
     const unknown = costs.filter((c) => c.cost === null).map((c) => c.item);
     if (unknown.length > 0) lines.push(`There is nothing recent to go by for ${unknown.join(" and ")}, so it is not counted.`);
   } else if (ask.items.length > 0) {
     lines.push(`${holding}${dueWords}`);
     lines.push(`There is nothing in the last ninety days to say what ${ask.items.join(" and ")} usually costs. Tell me the amount and I will check it.`);
   } else {
-    // "What can I afford": how much, and how that spreads over the days left.
-    const days = Math.max(1, safe?.daysLeft ?? 1);
+    /*
+     * "What can I afford": how much, and the day's figures the Dashboard
+     * shows. Its own even split said PHP 77.32 a day beside the Dashboard's
+     * PHP 80.42 from tomorrow (6 October 2026 audit).
+     */
     lines.push(`${holding}${dueWords}`);
     if (free > 0) {
-      lines.push(
-        `So you can spend up to ${money(free)} and still cover what is due: about ${money(Math.floor(free / Math.max(1, days)))} a day for the ${days} ${days === 1 ? "day" : "days"} left in ${monthName}.`,
-      );
+      const days = safe?.daysLeft ?? 1;
+      const rest = days - 1;
+      const after = safe && rest > 0 ? `${money(safe.perDayAfter)} a day for the ${rest} ${rest === 1 ? "day" : "days"} after` : "";
+      const day = !safe
+        ? ""
+        : safe.overToday > 0
+          ? ` Today's share is already spent, ${money(safe.overToday)} past it${after ? `; from tomorrow, ${after}` : ""}.`
+          : ` That is ${money(safe.perDay)} today${after ? `, then ${after}` : ""}.`;
+      lines.push(`So you can spend up to ${money(free)} before ${monthName} ends and still cover what is due.${day}`);
     } else {
       lines.push(`So nothing is free to spend until more comes in: what is due is more than the wallets hold.`);
     }

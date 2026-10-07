@@ -166,6 +166,71 @@ const HABITS = 3;
 export const isOpenBill = (b: MonthBill): boolean =>
   b.state === "late" || b.state === "soon" || b.state === "due";
 
+/** Today's figure and the rate after it, as `dayFigures` works them out. */
+export interface DayFigures {
+  /** An even share of what is safe plus what today already spent, over the days left. */
+  readonly todayShare: Centavos;
+  /** What is left of today's share, never more than is safe for the month. */
+  readonly perDay: Centavos;
+  /** How far today's spending went past its share. 0 when it did not. */
+  readonly overToday: Centavos;
+  /** A day from tomorrow, as if the rest of today's share is spent. 0 on the last day. */
+  readonly perDayAfter: Centavos;
+}
+
+/**
+ * Today's figure and the rate from tomorrow, from what is safe and what
+ * today already spent.
+ *
+ * One rule for every place that says a day's figure: the Dashboard, the
+ * chat's safe answer, a what if, a plan and an affordability answer. Four
+ * of those had their own division (6 October 2026 audit): "what can I
+ * afford" said PHP 77.32 a day beside the Dashboard's PHP 80.42.
+ */
+export function dayFigures(safe: Centavos, spentToday: Centavos, daysLeft: number): DayFigures {
+  const amount = Math.max(0, safe);
+  const todayShare = daysLeft > 0 ? Math.floor((amount + spentToday) / daysLeft) : 0;
+  const leftToday = todayShare - spentToday;
+  const after = daysLeft - 1;
+  return {
+    todayShare,
+    // Never more than is safe for the whole month, whatever today's share says.
+    perDay: Math.min(amount, Math.max(0, leftToday)),
+    overToday: Math.max(0, -leftToday),
+    /*
+     * As if the rest of today's share is spent: the same rate as today's
+     * when today kept to it (never a centavo more, as rounding could give),
+     * and what is left spread over the days after when today went past it.
+     */
+    perDayAfter: after <= 0 ? 0 : leftToday >= 0 ? Math.min(todayShare, Math.floor((amount - leftToday) / after)) : Math.floor(amount / after),
+  };
+}
+
+/** The month's safe figures as they would be after `spend` more goes out of the spending wallets today. */
+export interface SafeAfter extends DayFigures {
+  /** Safe until the month ends, after it. Never below 0. */
+  readonly safe: Centavos;
+  /** How much of `spend` is more than was safe. 0 when it fits. */
+  readonly short: Centavos;
+  /** Whether it fits what is left of today's figure. */
+  readonly fitsToday: boolean;
+}
+
+/**
+ * What a purchase today leaves: worked out here so no answer has to
+ * subtract. A purchase within today's figure leaves tomorrow's rate as it
+ * was; one past it spreads what is left over the days after.
+ */
+export function safeAfter(safe: Pick<SafeToSpend, "safe" | "spentToday" | "daysLeft" | "perDay">, spend: Centavos): SafeAfter {
+  const left = safe.safe - spend;
+  return {
+    ...dayFigures(Math.max(0, left), safe.spentToday + spend, safe.daysLeft),
+    safe: Math.max(0, left),
+    short: Math.max(0, -left),
+    fitsToday: spend <= safe.perDay,
+  };
+}
+
 export function monthBrief(input: {
   readonly transactions: readonly Transaction[];
   readonly reference: ReferenceLists;
@@ -257,9 +322,7 @@ export function monthBrief(input: {
     const spendingWallets = new Set(reference.wallets);
     const today = totalsFor(transactions.filter((t) => t.date === asOf && spendingWallets.has(t.fromWallet)));
     const spentToday = today.spending + today.fees;
-    const todayShare = daysLeft > 0 ? Math.floor((amount + spentToday) / daysLeft) : 0;
-    const leftToday = todayShare - spentToday;
-    const after = daysLeft - 1;
+    const day = dayFigures(amount, spentToday, daysLeft);
 
     const habits = learnPatterns(transactions, asOf)
       .filter((p) => p.isRecurring)
@@ -280,17 +343,8 @@ export function monthBrief(input: {
       budgetLeft,
       budgetPerDay,
       safe: amount,
-      // Never more than is safe for the whole month, whatever today's share says.
-      perDay: Math.min(amount, Math.max(0, leftToday)),
-      todayShare,
+      ...day,
       spentToday,
-      overToday: Math.max(0, -leftToday),
-      /*
-       * As if the rest of today's share is spent: the same rate as today's
-       * when today kept to it (never a centavo more, as rounding could give),
-       * and what is left spread over the days after when today went past it.
-       */
-      perDayAfter: after <= 0 ? 0 : leftToday >= 0 ? Math.min(todayShare, Math.floor((amount - leftToday) / after)) : Math.floor(amount / after),
       limitedBy,
       habits,
     };

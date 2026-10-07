@@ -135,6 +135,7 @@ import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../do
 import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, wantsThoseEntries, type Intent } from "../domain/intent";
 import { monthBrief } from "../domain/monthPlan";
 import { asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
+import { challengesAnswer, challengeWorked } from "../domain/dayFit";
 import { planWorked } from "../domain/planRate";
 import { notPaidIn, notPaidWords, paidDraftFor, saysItWasPaid, type NotPaid } from "../domain/notPaid";
 import { classifyPaper, PAPER_KINDS, PAPER_WORDS, UNPAID, type PaperKind } from "../domain/paperKind";
@@ -3912,6 +3913,23 @@ export function AskPanel({
         text: worked ? `${worked.text}\n\n${shown}` : shown,
         fallback: worked?.fallback ?? drawn.map(chartReading).filter(Boolean).join(" "),
       };
+    }
+    /*
+     * "But why you suggested it?" is about the answer before, and that
+     * answer was wrong: a PHP 95.00 meal "within" PHP 80.64 a day. The reply
+     * explained how PHP 80.64 was worked out, as if the meal had fitted
+     * (7 October 2026). The answer is checked first and what the app found
+     * goes on top, so the reply starts by owning the mistake (`dayFit.ts`).
+     */
+    if (challengesAnswer(question)) {
+      const before = [...turns].reverse().find((t): t is Said => t.kind === "assistant" && "text" in t);
+      if (before) {
+        const safe = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe;
+        const checked = challengeWorked(before.text, safe ? { today: safe.perDay, after: safe.perDayAfter } : null, formatMoney);
+        worked = worked
+          ? { text: `${checked.text}\n\n${worked.text}`, ...(checked.fallback || worked.fallback ? { fallback: [checked.fallback, worked.fallback].filter(Boolean).join("\n\n") } : {}) }
+          : checked;
+      }
     }
     const asked = generation.current;
     const control = new AbortController();

@@ -59,6 +59,8 @@ import { figuresIn } from "./money";
 import { binForModel } from "./deletedAsk";
 import type { Budgets, DeletedTransaction, IsoDate, Transaction } from "./types";
 import { pointsAt } from "./pointsAt";
+import { asksWhatTheDayBuys, everydayPrices, pricesAgainstDay } from "./dayFit";
+import { safeAfter } from "./monthPlan";
 
 /**
  * The ceiling on the ledger half, in bytes.
@@ -648,13 +650,40 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     }
   }
 
+  /*
+   * ── What today's figure buys ────────────────────────────────────────────
+   *
+   * "does 80 pesos still useful?" was answered "a PHP 95.00 meal is within
+   * that daily limit" of PHP 80.64 (7 October 2026). Each everyday purchase
+   * is set against today's figure and the rate from tomorrow here, so the
+   * answer quotes a comparison rather than making one (`dayFit.ts`).
+   */
+  const day = input.snapshot.safe;
+  if (day && question && asksWhatTheDayBuys(question)) {
+    const lines = pricesAgainstDay(
+      everydayPrices(rows, asOf),
+      { today: toCentavos(day.today), after: toCentavos(day.perDayAfter), daysLeft: day.daysLeft },
+      php,
+    );
+    if (lines.length > 0) {
+      out.push("");
+      out.push("## Everyday prices against today's figure");
+      out.push(
+        `Today's figure is ${php(toCentavos(day.today))}${day.daysLeft > 1 ? `; from tomorrow ${php(toCentavos(day.perDayAfter))} a day` : ""}. Worked out by the app: say only the fits and does-not-fits written here, and never call something within a figure it is more than.`,
+      );
+      out.push(...lines);
+    }
+  }
+
   /**
    * ── What if: the figures after a purchase that has not happened ─────────
    *
    * "can I buy a 25k phone", "what if I spend 10000 tonight". Answering
    * needs what would be left, and that is subtraction, which the model must
-   * not do. So the app does it: the month's budget, what is left of it a day,
-   * and net worth, each after the amount named.
+   * not do. So the app does it: what is safe to spend after it, today and
+   * from tomorrow, then the spending budget after it, as the plan. Net worth
+   * was here and is gone: it is never money to spend, and a what if quoted
+   * it as what was left (6 October 2026 audit).
    */
   /*
    * Money coming in is not a purchase. "if I only expect 8000 allowance"
@@ -684,6 +713,27 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     out.push("");
     out.push(`## What if ${php(what)} is spent now`);
     out.push("Worked out by the app. Quote these rather than subtracting anything yourself.");
+    if (snap.safe) {
+      const base = {
+        safe: cents(snap.safe.safe),
+        spentToday: cents(snap.safe.spentToday),
+        daysLeft: snap.safe.daysLeft,
+        perDay: cents(snap.safe.today),
+      };
+      const after = safeAfter(base, what);
+      out.push(
+        after.short > 0
+          ? `Safe to spend until ${snap.month.name.split(" ")[0]} ends: ${php(base.safe)} before; ${php(what)} is ${php(after.short)} more than that, ${
+              cents(snap.safe.wallets) >= what ? "so it would take money kept for the bills, subscriptions and debt payments still due" : "and the spending wallets do not hold it"
+            }.`
+          : `Safe to spend until ${snap.month.name.split(" ")[0]} ends: ${php(base.safe)} before, ${php(after.safe)} after.`,
+      );
+      out.push(
+        after.fitsToday
+          ? `It fits today's figure of ${php(base.perDay)}, so from tomorrow stays ${php(after.perDayAfter)} a day.`
+          : `It is ${php(what - base.perDay)} more than today's figure of ${php(base.perDay)}${base.daysLeft > 1 ? `, so from tomorrow drops to ${php(after.perDayAfter)} a day for ${base.daysLeft - 1} days` : ""}.`,
+      );
+    }
     if (snap.month.budget !== null && snap.month.remaining !== null) {
       /*
        * A purchase comes out of the spending budget, so that is the one held
@@ -694,13 +744,9 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       const left = cents(spendingLeft ?? snap.month.remaining);
       const after = left - what;
       out.push(
-        `${snap.month.name}'s ${spendingLeft !== null ? "spending budget" : "budget"}: ${left < 0 ? `${php(-left)} over` : `${php(left)} left`} before, ${after < 0 ? `${php(-after)} over` : `${php(after)} left`} after.${
-          snap.month.daysLeft > 0 && after > 0 ? ` That is ${php(Math.floor(after / snap.month.daysLeft))} a day for the ${snap.month.daysLeft} days left.` : ""
-        }`,
+        `The plan, not the money: ${snap.month.name}'s ${spendingLeft !== null ? "spending budget" : "budget"} ${left < 0 ? `${php(-left)} over` : `${php(left)} left`} before, ${after < 0 ? `${php(-after)} over` : `${php(after)} left`} after.`,
       );
     }
-    const worth = cents(snap.netWorth);
-    out.push(`Net worth after debt: ${php(worth)} before, ${php(worth - what)} after.`);
     for (const b of snap.balances) {
       if (new RegExp(`\\b${b.account.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(question.toLowerCase())) {
         const had = cents(b.balance);

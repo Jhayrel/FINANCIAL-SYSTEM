@@ -69,3 +69,30 @@ describe("the device's answer", () => {
     expect(safeWords(brief, 50_000)).toContain("₱1,200.00 more than is safe. ₱380.00 a day fits.");
   });
 });
+
+/*
+ * 6 October 2026 audit: with PHP 3,219.00 spent today and PHP 80.42 a day
+ * left from tomorrow, "150 a day" was said to fit, because today was
+ * counted at the rate rather than at what it had already spent.
+ */
+describe("a rate the owner proposes, on a day already past it", () => {
+  const brief = {
+    month: 10,
+    bills: { bills: [] },
+    safe: {
+      daysLeft: 26, wallets: 344756, reservedBills: 143700, reservedDebt: 0, free: 201056, budgetLeft: null, budgetPerDay: null,
+      safe: 201056, perDay: 0, todayShare: 20113, spentToday: 321900, overToday: 301787, perDayAfter: 8042, limitedBy: "wallets", habits: [],
+    },
+  } as unknown as Parameters<typeof safeWords>[0];
+
+  it("does not say it fits", () => {
+    const text = safeWords(brief, 15000);
+    expect(text).not.toContain("it fits");
+    expect(text).toContain("Today already spent ₱3,219.00, so ₱150.00 a day from tomorrow for 25 days comes to ₱6,969.00 with today");
+    expect(text).toContain("₱80.42 a day from tomorrow fits.");
+  });
+
+  it("still says a rate that fits fits", () => {
+    expect(safeWords(brief, 8000)).toContain("it fits, with");
+  });
+});

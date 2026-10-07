@@ -100,15 +100,22 @@ export function safeWords(brief: MonthBrief, rate: number | null = null): string
     );
   }
   if (rate !== null && safe.daysLeft > 0) {
-    // Counted from before today's spending: what today already spent counts against today's figure.
+    /*
+     * Counted from before today's spending, with today at whichever is more,
+     * the rate or what today already spent: a day already past the rate
+     * cannot be spent at it. Counting today at the rate said PHP 150.00 a day
+     * fits with PHP 3,219.00 gone today and PHP 80.42 a day left from
+     * tomorrow (6 October 2026 audit).
+     */
     const days = safe.daysLeft;
-    const need = rate * days;
+    const need = Math.max(rate, safe.spentToday) + rate * (days - 1);
     const room = safe.safe + safe.spentToday;
-    after.push(
-      need <= room
-        ? `${money(rate)} a day for the ${days} ${days === 1 ? "day" : "days"} left, today included, is ${money(need)}: it fits, with ${money(room - need)} to spare.`
-        : `${money(rate)} a day for the ${days} ${days === 1 ? "day" : "days"} left, today included, is ${money(need)}: ${money(need - room)} more than is safe. ${money(Math.floor(room / days))} a day fits.`,
-    );
+    const pastToday = safe.spentToday > rate;
+    const what = pastToday
+      ? `Today already spent ${money(safe.spentToday)}, so ${money(rate)} a day from tomorrow for ${days - 1} ${days - 1 === 1 ? "day" : "days"} comes to ${money(need)} with today`
+      : `${money(rate)} a day for the ${days} ${days === 1 ? "day" : "days"} left, today included, is ${money(need)}`;
+    const fits = safe.overToday > 0 ? `${money(safe.perDayAfter)} a day from tomorrow fits.` : `${money(safe.todayShare)} a day fits.`;
+    after.push(need <= room ? `${what}: it fits, with ${money(room - need)} to spare.` : `${what}: ${money(need - room)} more than is safe. ${fits}`);
   }
   if (safe.budgetLeft !== null) {
     after.push(
