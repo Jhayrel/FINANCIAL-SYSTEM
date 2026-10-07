@@ -69,7 +69,16 @@ export function rateIn(text: string): number | null {
   return whole * 100 + (m[2] ? Number(m[2].padEnd(2, "0")) : 0);
 }
 
-export function safeWords(brief: MonthBrief, rate: number | null = null): string {
+export function safeWords(
+  brief: MonthBrief,
+  rate: number | null = null,
+  /**
+   * The owner's own money in the spending wallets beside what is borrowed
+   * there (`borrowed.ts`): safe to spend counts every peso in the wallets,
+   * and part of it may be a credit line's (7 October 2026).
+   */
+  own: { readonly own: number; readonly borrowed: number; readonly from: string } | null = null,
+): string {
   const safe = brief.safe;
   const name = MONTH_NAMES[brief.month - 1] ?? "the month";
   if (!safe) return `Safe to spend is worked out for the month running only.`;
@@ -120,6 +129,11 @@ export function safeWords(brief: MonthBrief, rate: number | null = null): string
       : `${money(rate)} a day for the ${days} ${days === 1 ? "day" : "days"} left, today included, is ${money(need)}`;
     const fits = safe.overToday > 0 ? `${money(safe.perDayAfter)} a day from tomorrow fits.` : `${money(safe.todayShare)} a day fits.`;
     after.push(need <= room ? `${what}: it fits, with ${money(room - need)} to spare.` : `${what}: ${money(need - room)} more than is safe. ${fits}`);
+  }
+  if (own && own.borrowed > 0 && own.own < safe.safe) {
+    after.push(
+      `Of what is safe, ${money(own.own)} is your own money; ${money(Math.min(own.borrowed, safe.safe - own.own))} of it is borrowed, from ${own.from}, so spending past ${money(own.own)} spends what you borrowed.`,
+    );
   }
   if (safe.budgetLeft !== null) {
     after.push(

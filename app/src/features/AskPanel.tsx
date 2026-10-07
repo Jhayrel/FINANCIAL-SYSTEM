@@ -137,6 +137,7 @@ import { monthBrief } from "../domain/monthPlan";
 import { asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
 import { challengesAnswer, challengeWorked } from "../domain/dayFit";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
+import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
 import { planWorked } from "../domain/planRate";
 import { notPaidIn, notPaidWords, paidDraftFor, saysItWasPaid, type NotPaid } from "../domain/notPaid";
 import { classifyPaper, PAPER_KINDS, PAPER_WORDS, UNPAID, type PaperKind } from "../domain/paperKind";
@@ -4201,7 +4202,17 @@ export function AskPanel({
      */
     const answerSafe = async (question: string): Promise<void> => {
       const brief = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
-      const words = safeWords(brief, rateIn(question));
+      // Their own money beside what is borrowed, in the spending wallets (`borrowed.ts`).
+      const lent = borrowedMoney(transactions, debts, [...reference.wallets, ...reference.savings], asOf);
+      const ownMoney =
+        lent.inHand > 0
+          ? {
+              own: ownIn(lent, reference.wallets, (w) => walletBalance(transactions, w)),
+              borrowed: reference.wallets.reduce((s, w) => s + (lent.byAccount.get(w) ?? 0), 0),
+              from: lenderNames(new Map([...lent.byLender].filter(([id]) => debts.find((d) => d.id === id)?.form !== "pass-through")), debts),
+            }
+          : null;
+      const words = safeWords(brief, rateIn(question), ownMoney);
       setBusy(true);
       try {
         await askQuestion(

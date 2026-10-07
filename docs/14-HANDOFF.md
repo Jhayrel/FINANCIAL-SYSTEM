@@ -1018,6 +1018,36 @@ in once (#3900, PHP 599.00 out of Maya, and #3901, PHP 600.00 back in cash),
 whatever the chat's repeated "Added" lines suggest. "Subscriptions" is also
 on the list of kinds of spending; it is the owner's to remove or rename.
 
+### 2026-10-06 and 7: one figure per question, limits that work, borrowed money followed
+
+Asked: "fix all calculations and data ... all sync no redundancy", the
+sign-in and loading screens clean with Sign out under Data only, the AI to
+know today, yesterday and tomorrow, a PHP 95.00 meal the chat called
+"within" PHP 80.64 a day, "in budget make sure the individual limits
+works", and, on 7 October, "knows how much money I have that is not from
+loan or credit then it warns me". Two audits ran as workflows (figures,
+then limits), each finding proved with a throwaway test; every one fixed
+below except the owner decisions in §7.
+
+| Found | Now |
+|---|---|
+| "You owe" worked out four ways: money held for someone counted as owed on the Dashboard and not on the Debt screen; the Settings rail dropped archived debts and showed -PHP 1.00 | `owedTotals` in `debt.ts`: you owe, owed to you, held for others, paid for others, each at zero or above. Every screen, the offline answer and the AI read it; net worth's total does not move |
+| The AI's net worth and the balance rule were written out in several places | Net worth from the screens' own functions; `walletDelta` in `balances.ts` is the one copy of the three-term rule (checked identical on every wallet of the owner's data) |
+| A chat "loan statement" counted money lent out as owed; a statement for this month dropped entries dated later | "loan" and "debt" statements are what was borrowed; a statement runs to an entry dated later in the period |
+| A PHP 95.00 meal "within" PHP 80.64, then defended when asked why | The owner's everyday prices go to the model set against today's figure (`dayFit.ts`); an answer that calls an amount within a day's figure it is above gets a "Check this" line; "why did you say that" checks the earlier answer first and the reply starts by owning it |
+| Four different "a day" figures; the pace judged from five days with a repair in them; "is the new budget reasonable?" answered for November | One day rule (`dayFigures`, `safeAfter`, `weekAhead` in `monthPlan.ts`) for the Dashboard, what if, afford and plan answers; the pace alert waits a week and the model is told the first days are not a pace; a question about the set budget is answered against the usual month and what is left (`judgesSetBudget`, `judgeWords`) |
+| Per-category limits: write-offs and debt fees not counted, a limit on Subscriptions counting nothing, junk input removing a limit, limits hidden past the top 8, Undo reverting one month of three, chat "set food budget to 3000" replacing the whole spending budget, no alert anywhere when a kind went over | `spendingTrackByKind` and `limitable` in `kinds.ts`; the Budget screen's editor checks input, opens on the months a limit covers, asks before replacing another month's limit, edits a closed month with a reason; Undo covers every month of one save; the chat reads kinds, plurals, "by", remove, years and "until december", answers questions about limits (`limitAsk.ts`) and re-plans a card on Apply; alerts for past and near a limit; the AI is told every limit; limits are in the CSV |
+| Nothing knew which money was borrowed | `borrowed.ts` follows money drawn on a loan or credit line through every transfer and withdrawal: own money is spent first, a repayment lowers what is borrowed in hand, income and a loan on the same day both arrive before that day's spending, money held for someone is kept apart and used last. Said in the note after saving, in alerts, on the Add form before saving, in afford answers, on the Dashboard ("Your own money") and to the AI. On the owner's data: the food of 21 to 26 September was paid with the Maya Credit drawn on 18 and 20 September |
+| Sign-in showed a button while it checked | One centred screen, the button only once it is known to be needed; Sign out is under Settings, Data |
+
+**Checked:** typecheck (`tsc -b`, in a clean copy), the suite (the same 42
+files that need the private fixture and the one `pickableYears` test, and
+nothing else), the build. The fixture tests whose pinned figures this
+touched were updated by reasoning, not run: `alerts.test.ts` (burn rate
+rounds down), `budgetView.test.ts` (kinds add up to the spending track).
+
+**Database rules:** no change.
+
 ---
 
 ## 6. What the owner has to do
@@ -1087,6 +1117,20 @@ on the list of kinds of spending; it is the owner's to remove or rename.
 10. **The next dump** should show "Add N ready" cards staying added after a
     reload, and a daily interest screenshot read one row a day. Read the
     interest cards' dates first.
+11. **Owner decisions from the 6 and 7 October audits, behaviour kept:**
+    money in an archived account is left out of net worth while the account
+    statement counts it (rule A6 says archived is still counted); money
+    held for someone counts in safe to spend (it is now named on the
+    Dashboard and to the AI); limits end on 31 December and "Use last
+    December's budget" does not copy them; a restore that replaces
+    everything leaves a budget year the file does not have. Unused helpers
+    were kept: `allocation.planDay` is the port of spec rule 5.7, and the
+    `accounts.ts` totals are tested.
+12. **Electric Bill** was last paid in May 2024, so nothing is reserved for
+    it in safe to spend; if it is still paid, the owner records it, or
+    marks it stopped. **Father's line** is PHP 1.00 below nothing (PHP
+    599.00 paid, PHP 600.00 back): an alert now says so; the owner decides
+    which row is off.
 
 ---
 

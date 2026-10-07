@@ -96,3 +96,20 @@ describe("a rate the owner proposes, on a day already past it", () => {
     expect(safeWords(brief, 8000)).toContain("it fits, with");
   });
 });
+
+describe("safe to spend, with borrowed money in the wallets (7 October 2026)", () => {
+  const brief = {
+    month: 10,
+    bills: { bills: [] },
+    safe: {
+      daysLeft: 25, wallets: 550000, reservedBills: 0, reservedDebt: 0, free: 550000, budgetLeft: null, budgetPerDay: null,
+      safe: 550000, perDay: 22000, todayShare: 22000, spentToday: 0, overToday: 0, perDayAfter: 22000, limitedBy: "wallets", habits: [],
+    },
+  } as unknown as Parameters<typeof safeWords>[0];
+
+  it("says how much of what is safe is their own", () => {
+    const text = safeWords(brief, null, { own: 50000, borrowed: 500000, from: "Maya Credit" });
+    expect(text).toContain("Of what is safe, ₱500.00 is your own money; ₱5,000.00 of it is borrowed, from Maya Credit, so spending past ₱500.00 spends what you borrowed.");
+    expect(safeWords(brief, null, null)).not.toContain("your own money");
+  });
+});
