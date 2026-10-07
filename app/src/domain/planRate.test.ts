@@ -42,9 +42,9 @@ describe("a plan said as a rate", () => {
   it("sets each figure and their sum beside what is left, in the app's own arithmetic", () => {
     const worked = planWorked(ASKED, { transactions: ledger, budgets, asOf: ASOF });
     // PHP 3,000.00 less PHP 1,519.05 is PHP 1,480.95 over the 28 days left, October the 4th included.
-    expect(worked).toContain("What is left of the spending budget: ₱1,480.95 over the 28 days left, ₱52.89 a day.");
-    expect(worked).toContain("The plan's ₱250.00 a week: ₱35.71 a day, ₱250.00 a week, ₱1,000.00 over the 28 days left in the month. That fits what is left of the spending budget, with ₱480.95 to spare.");
-    expect(worked).toContain("All together, ₱450.00 a week: ₱64.29 a day, ₱450.00 a week, ₱1,800.00 over the 28 days left in the month. That is ₱319.05 more than what is left of the spending budget.");
+    expect(worked).toContain("What is left of the spending budget, the plan: ₱1,480.95 over the 28 days left, ₱52.89 a day.");
+    expect(worked).toContain("The plan's ₱250.00 a week: ₱35.71 a day, ₱250.00 a week, ₱1,000.00 over the 28 days left in the month. Against the plan: it fits what is left of the spending budget, with ₱480.95 to spare.");
+    expect(worked).toContain("All together, ₱450.00 a week: ₱64.29 a day, ₱450.00 a week, ₱1,800.00 over the 28 days left in the month. Against the plan: it is ₱319.05 more than what is left of the spending budget.");
   });
 
   it("takes the period from what was said just before, for a correction", () => {
@@ -54,5 +54,23 @@ describe("a plan said as a rate", () => {
     expect(worked).not.toContain("₱450.00");
     expect(worked).not.toContain("All together");
     expect(planWorked("I said 250 not 450", { transactions: ledger, budgets, asOf: ASOF })).toBe("");
+  });
+});
+
+/*
+ * 6 October 2026 audit: "150 a day, would that work?" was told it fit the
+ * spending budget while only PHP 80.42 a day was safe to spend.
+ */
+describe("a plan against the money", () => {
+  it("is set against what is safe first, today counted at what it already spent", () => {
+    const worked = planWorked("I'll use 150 a day for food and gas, would that work?", {
+      transactions: [],
+      budgets: {},
+      asOf: "2026-10-06",
+      safe: { safe: 201056, spentToday: 321900, perDay: 0, perDayAfter: 8042 },
+    });
+    expect(worked).toContain("What is safe to spend, the Dashboard's figure and the money: ₱2,010.56 until the month ends; ₱0.00 today, then ₱80.42 a day from tomorrow.");
+    // Today at the ₱3,219.00 already spent, then 25 days at ₱150.00: ₱6,969.00 against ₱5,229.56.
+    expect(worked).toContain("Against the money: it is ₱1,739.44 more than is safe to spend, counting today at the ₱3,219.00 already spent.");
   });
 });

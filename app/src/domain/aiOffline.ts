@@ -59,6 +59,19 @@ function offlineSummary(c: AiContext): string {
     `You have spent ${php(month.spent)} in ${month.name} and taken in ${php(month.revenue)}.`,
   );
 
+  /*
+   * The Dashboard's safe to spend first, the money and not the plan: the
+   * budget's day figure led, unlabelled, with no figure from tomorrow (6
+   * October 2026 audit).
+   */
+  if (c.safe) {
+    parts.push(
+      `Safe to spend today is ${php(c.safe.today)}, and ${php(c.safe.safe)} until the month ends once the ${php(c.safe.billsDue + c.safe.debtDue)} still to pay is set aside.${
+        c.safe.daysLeft > 1 ? ` From tomorrow, ${php(c.safe.perDayAfter)} a day.` : ""
+      }`,
+    );
+  }
+
   /**
    * Budget wording turns on the sign, because "PHP -400.00 remaining" is a
    * sentence no one should have to parse.
@@ -72,20 +85,14 @@ function offlineSummary(c: AiContext): string {
       const forSpending = month.spendingLeft ?? null;
       parts.push(
         forSpending !== null && forSpending !== month.remaining
-          ? `${php(month.remaining)} of the ${php(month.budget)} budget is left; ${php(Math.max(0, forSpending))} of it is for spending, which is ${php(Math.max(0, month.allowancePerDay))} a day for the ${month.daysLeft} days remaining.`
-          : `${php(month.remaining)} of the ${php(month.budget)} budget is left, which is ${php(Math.max(0, month.allowancePerDay))} a day for the ${month.daysLeft} days remaining.`,
+          ? `On the plan, ${php(month.remaining)} of the ${php(month.budget)} budget is left; ${php(Math.max(0, forSpending))} of it is for spending, ${php(Math.max(0, month.allowancePerDay))} a day for the ${month.daysLeft} days remaining.`
+          : `On the plan, ${php(month.remaining)} of the ${php(month.budget)} budget is left, bills and subscriptions included.`,
       );
     } else {
       parts.push(`${php(month.remaining)} of the ${php(month.budget)} budget is left.`);
     }
   }
 
-  // The Dashboard's safe to spend, the money and not the plan (6 October 2026).
-  if (c.safe) {
-    parts.push(
-      `Safe to spend today is ${php(c.safe.today)}, and ${php(c.safe.safe)} until the month ends once the ${php(c.safe.billsDue + c.safe.debtDue)} still to pay is set aside.`,
-    );
-  }
 
   const overdue = c.bills.overdue.length;
   if (overdue > 0) {

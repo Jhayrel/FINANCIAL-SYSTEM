@@ -24,6 +24,7 @@
 import type { Debt } from "./debt";
 import type { Centavos } from "./money";
 import type { IsoDate, Transaction } from "./types";
+import { walletDelta } from "./balances";
 
 export interface FlowLine {
   /** What it was, in words: "Allowance", "Borrowed on Maya Credit". */
@@ -107,9 +108,7 @@ function poolBefore(rows: readonly Transaction[], pool: ReadonlySet<string>, day
   let balance = 0;
   for (const t of rows) {
     if (t.date >= day) continue;
-    if (t.type === "Revenue" && pool.has(t.fromWallet)) balance += t.total;
-    if (pool.has(t.toWallet)) balance += t.amount;
-    if (pool.has(t.fromWallet) && t.type !== "Revenue") balance -= t.total;
+    balance += walletDelta(t, (w) => pool.has(w));
   }
   return balance;
 }

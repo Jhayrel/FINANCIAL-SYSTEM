@@ -26,28 +26,34 @@
 import { type Centavos } from "./money";
 import type { Transaction, WalletBalance } from "./types";
 
+/**
+ * What one row does to the balance of the wallets `counts` accepts.
+ *
+ * The workbook's three terms, written once. Four other places wrote them out
+ * again, each with a comment saying it must match this file and nothing
+ * making it (6 October 2026 audit): Find a difference, where the money went,
+ * the balance charts and the zero-balance pattern now all call this.
+ */
+export function walletDelta(t: Transaction, counts: (wallet: string) => boolean): Centavos {
+  let delta = 0;
+  // Term 1: Revenue booked against `fromWallet` is an inflow.
+  if (t.type === "Revenue" && t.fromWallet && counts(t.fromWallet)) delta += t.total;
+  // Term 2: anything arriving at a wallet, net of fee.
+  if (t.toWallet && counts(t.toWallet)) delta += t.amount;
+  // Term 3: anything leaving a wallet, fee included.
+  if (t.fromWallet && t.type !== "Revenue" && counts(t.fromWallet)) delta -= t.total;
+  return delta;
+}
+
 /** Balance of a single wallet across the given transactions. */
 export function walletBalance(
   transactions: readonly Transaction[],
   wallet: string,
 ): Centavos {
   if (!wallet) return 0;
-
+  const isIt = (w: string): boolean => w === wallet;
   let balance = 0;
-  for (const t of transactions) {
-    // Term 1: Revenue booked against `fromWallet` is an inflow.
-    if (t.type === "Revenue" && t.fromWallet === wallet) {
-      balance += t.total;
-    }
-    // Term 2: anything arriving at this wallet, net of fee.
-    if (t.toWallet === wallet) {
-      balance += t.amount;
-    }
-    // Term 3: anything leaving this wallet, fee included.
-    if (t.fromWallet === wallet && t.type !== "Revenue") {
-      balance -= t.total;
-    }
-  }
+  for (const t of transactions) balance += walletDelta(t, isIt);
   return balance;
 }
 

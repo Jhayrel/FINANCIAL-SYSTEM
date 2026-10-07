@@ -37,7 +37,8 @@ const base: AlertInput = {
 describe("the numbers behind the alerts", () => {
   it("works the burn rate out from the month so far", () => {
     // August spend is PHP 11,291.37 over 29 days.
-    expect(burnRate(fixture.transactions, AS_OF)).toBe(Math.round(1129137 / 29));
+    // Rounded down, as every daily figure is (6 October 2026 audit).
+    expect(burnRate(fixture.transactions, AS_OF)).toBe(Math.floor(1129137 / 29));
   });
 
   it("counts today as a day still left", () => {

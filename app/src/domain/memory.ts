@@ -17,6 +17,7 @@ import type { ChatMessage } from "./chat";
 import { goesByBalance } from "./affordAsk";
 import { expectedIncomeIn, savingsGoalIn } from "./budgetAdvice";
 import { formatMoney } from "./money";
+import { localDay } from "./dates";
 
 /** Lines the app writes about itself, which say nothing the ledger does not. */
 const BOOKKEEPING =
@@ -48,7 +49,7 @@ export function earlierSessions(
     const m = said[i];
     if (!m) continue;
     const text = m.text.replace(/\s+/g, " ").trim();
-    const line = `${m.at.slice(0, 10)} ${m.role === "you" ? "you" : "assistant"}: ${text.length > 220 ? `${text.slice(0, 220)}...` : text}`;
+    const line = `${localDay(m.at)} ${m.role === "you" ? "you" : "assistant"}: ${text.length > 220 ? `${text.slice(0, 220)}...` : text}`;
     if (used + line.length > room) break;
     used += line.length + 1;
     lines.unshift(line);
@@ -166,7 +167,7 @@ export function keepInMind(saved: readonly ChatMessage[], onScreen: readonly Spo
   const unsaved = onScreen.filter((t) => t.role === "you" && !seen.has(t.text.trim()) && !t.text.trim().startsWith("//"));
   const said: { text: string; day: string }[] = [
     ...[...unsaved].reverse().map((t) => ({ text: t.text, day: "today" })),
-    ...theirs.map((m) => ({ text: m.text, day: m.at.slice(0, 10) })),
+    ...theirs.map((m) => ({ text: m.text, day: localDay(m.at) })),
   ];
 
   const facts: string[] = [];

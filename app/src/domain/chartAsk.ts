@@ -46,6 +46,7 @@ import { budgetForMonth } from "./budget";
 import { owedChange, type Debt } from "./debt";
 import { costOf, monthTotals } from "./totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
+import { walletDelta } from "./balances";
 
 // ── What the message wants drawn ────────────────────────────────────────────
 
@@ -498,14 +499,7 @@ export function buildBalanceChart(
   const end = window && window.to < asOf ? window.to : asOf;
 
   /** What one row does to the set's balance, by the workbook's own three terms. */
-  const delta = (t: Transaction, only?: string): number => {
-    let d = 0;
-    const counts = (w: string): boolean => (only ? w === only : inSet.has(w));
-    if (t.type === "Revenue" && counts(t.fromWallet)) d += t.total;
-    if (counts(t.toWallet)) d += t.amount;
-    if (counts(t.fromWallet) && t.type !== "Revenue") d -= t.total;
-    return d;
-  };
+  const delta = (t: Transaction, only?: string): number => walletDelta(t, (w) => (only ? w === only : inSet.has(w)));
 
   if (perAccount && !named) {
     const rows = set

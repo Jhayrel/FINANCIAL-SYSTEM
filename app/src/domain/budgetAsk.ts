@@ -151,7 +151,8 @@ export function respell(text: string): string {
  * like, before a year or a day, or in a range. 5 October 2026, an answer's
  * "you may ..." put a budget change on May 2027.
  */
-const notTheMonth = (text: string): string =>
+/** "may" the verb read as "might", so only May the month is a month (also `budgetAdvice.ts`, `adviceMonthIn`). */
+export const notTheMonth = (text: string): string =>
   respell(text).replace(/\bmay\b/gi, (word, at: number, whole: string) => {
     const before = whole.slice(Math.max(0, at - 12), at).toLowerCase();
     const after = whole.slice(at + word.length, at + word.length + 14).toLowerCase();

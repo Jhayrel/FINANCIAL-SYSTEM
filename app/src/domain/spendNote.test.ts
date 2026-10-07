@@ -39,7 +39,7 @@ describe("when the month goes past its budget", () => {
 
   it("says a want plainly, and leaves the call to the owner", () => {
     const note = spendNoteFor([spend(asOf, "Treat", 500)], month, budgets, asOf, new Set());
-    expect(note?.text).toBe("Treat ₱500.00 takes September's spending ₱400.00 past its ₱7,000.00 budget, with 2 days left. Your call; the Budget screen shows where the month went.");
+    expect(note?.text).toBe("Treat ₱500.00 takes September's spending ₱400.00 past its ₱7,000.00 budget, with 3 days left. Your call; the Budget screen shows where the month went.");
   });
 
   it("is said once a month", () => {
@@ -82,7 +82,8 @@ describe("near the budget", () => {
     const early = [spend("2026-09-02", "Food", 3_000), spend("2026-09-10", "Treat", 3_000)];
     const note = spendNoteFor([spend(asOf, "Food", 400)], early, budgets, asOf, new Set());
     expect(note?.stage).toBe("near");
-    expect(note?.text).toBe("September's spending is at 91% of its budget: ₱600.00 left for 2 days, about ₱300.00 a day.");
+    // 28 September: three days left, today included, as the Budget screen counts them.
+    expect(note?.text).toBe("September's spending is at 91% of its budget: ₱600.00 left for 3 days, about ₱200.00 a day.");
   });
 });
 

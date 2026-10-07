@@ -29,7 +29,7 @@
 
 import { formatMoney, type Centavos } from "./money";
 import { allWalletBalances } from "./balances";
-import { MONTH_NAMES } from "./dates";
+import { addDays, MONTH_NAMES } from "./dates";
 import { describeRange } from "./dayRange";
 import { owedChange, type Debt, type DebtEffect } from "./debt";
 import { effectLabel } from "./debtWords";
@@ -149,8 +149,21 @@ export function fitPeriod(
   const monthOfFirst = first ? `${first.slice(0, 7)}-01` : null;
   const startsLater = monthOfFirst !== null && monthOfFirst > from && monthOfFirst <= to;
   const start = startsLater && monthOfFirst ? monthOfFirst : from;
-  const endsToday = start <= asOf && to > asOf;
-  return { from: start, to: endsToday ? asOf : to, startsLater, endsToday };
+  /*
+   * Today, unless something it covers is dated later in the period: every
+   * other figure counts an entry dated later this month, and a statement
+   * that dropped it closed at a balance no screen showed (6 October 2026
+   * audit). Then it ends on the last such entry.
+   */
+  const runsPast = start <= asOf && to > asOf;
+  const ahead = runsPast
+    ? buildStatementBetween(transactions, type, addDays(asOf, 1), to, reference, debtId, scope).rows.reduce<IsoDate | null>(
+        (last, r) => (last === null || r.transaction.date > last ? r.transaction.date : last),
+        null,
+      )
+    : null;
+  const endsToday = runsPast && ahead === null;
+  return { from: start, to: endsToday ? asOf : (ahead ?? to), startsLater, endsToday };
 }
 
 type Mode = "held" | "income" | "cost" | "bills" | "transfers" | "owed";

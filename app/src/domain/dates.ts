@@ -52,6 +52,19 @@ export function today(): IsoDate {
   return makeDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
 }
 
+/**
+ * The day an instant fell on, in the viewer's local calendar, as `today`
+ * counts days. `at.slice(0, 10)` is the UTC day: in Manila anything saved
+ * before 08:00 landed on the day before, so the AI dated a budget change a
+ * day early beside the Budget screen's local time (6 October 2026 audit).
+ * An instant that does not parse keeps its first ten characters.
+ */
+export function localDay(at: string): IsoDate {
+  const when = new Date(at);
+  if (Number.isNaN(when.getTime())) return at.slice(0, 10);
+  return makeDate(when.getFullYear(), when.getMonth() + 1, when.getDate());
+}
+
 /** Days in a month. `month` is 1-12. */
 export function daysInMonth(year: number, month: number): number {
   return new Date(year, month, 0).getDate();

@@ -597,7 +597,14 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     const w = question && namesWindow(question) ? windowOf(question, asOf) : null;
     const month = monthOf(asOf);
     const from = w && w.from > "1000" ? w.from : `${month}-01`;
-    const to = w && w.to < "9000" ? (w.to > asOf ? asOf : w.to) : asOf;
+    /*
+     * Up to today, or to an entry dated later in the window: "Usable now"
+     * counts those, and a flow that stopped at today ended at a different
+     * figure in the same prompt (6 October 2026 audit).
+     */
+    const asked = w && w.to < "9000" ? w.to : `${month}-31`;
+    const later = rows.reduce<string | null>((last, t) => (t.date > asOf && t.date <= asked && (last === null || t.date > last) ? t.date : last), null);
+    const to = w && w.to < "9000" && w.to <= asOf ? w.to : (later ?? asOf);
     if (pool.length > 0) {
       const flow = moneyFlow(rows, pool, from, to, input.credits ?? []);
       if (flow.totalIn + flow.totalOut > 0) {

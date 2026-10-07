@@ -55,6 +55,7 @@ import { draftToTransactions, emptyDraft, type Draft } from "./entry";
 import { formatMoney, type Centavos } from "./money";
 import type { IsoDate, Transaction } from "./types";
 import { feeInside } from "./withdrawal";
+import { walletDelta } from "./balances";
 
 /** One line of an account's own history, as it moved that account. */
 export interface StatementLine {
@@ -145,11 +146,7 @@ export interface Investigation {
 
 /** What one row did to one account, by the same terms `walletBalance` uses. */
 export function movedOn(t: Transaction, account: string): Centavos {
-  let delta = 0;
-  if (t.type === "Revenue" && t.fromWallet === account) delta += t.total;
-  if (t.toWallet === account) delta += t.amount;
-  if (t.fromWallet === account && t.type !== "Revenue") delta -= t.total;
-  return delta;
+  return walletDelta(t, (w) => w === account);
 }
 
 const words = (text: string): Set<string> =>

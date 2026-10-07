@@ -25,7 +25,7 @@
  */
 
 import { formatMoney as money } from "./money";
-import { isOpenBill, type MonthBrief } from "./monthPlan";
+import { isOpenBill, weekAhead, type MonthBrief } from "./monthPlan";
 import { MONTH_NAMES } from "./dates";
 
 /**
@@ -87,6 +87,10 @@ export function safeWords(brief: MonthBrief, rate: number | null = null): string
     ...(safe.reservedDebt > 0 ? [`- Debt payments due: \u2212${money(safe.reservedDebt)}`] : []),
     `- Safe until ${name} ends: **${money(safe.safe)}**`,
     ...(safe.daysLeft > 1 ? [`- From tomorrow: ${money(safe.perDayAfter)} a day for ${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"}`] : []),
+    ...(() => {
+      const week = weekAhead(safe);
+      return week.days > 1 ? [`- The next ${week.days} days, today included: ${money(week.amount)}${week.days < 7 ? `, to the end of ${name}` : ""}`] : [];
+    })(),
   ];
 
   const after: string[] = [];

@@ -54,6 +54,21 @@ describe("the days a statement covers", () => {
     });
   });
 
+  /*
+   * 6 October 2026 audit: an entry dated later this month counts everywhere
+   * else, and a statement that ended today dropped it and closed at a
+   * balance no screen showed.
+   */
+  it("runs to an entry dated later in the period, rather than dropping it", () => {
+    const ahead = [...ledger, tx("2026-10-20", { amount: 5000, description: "Booked ahead" })];
+    expect(fitPeriod(ahead, "account", "2026-10-01", "2026-10-31", reference, ASOF)).toEqual({
+      from: "2026-10-01",
+      to: "2026-10-20",
+      startsLater: false,
+      endsToday: false,
+    });
+  });
+
   it("leaves a period inside the ledger as it was asked", () => {
     expect(fitPeriod(ledger, "account", "2023-01-01", "2023-12-31", reference, ASOF)).toEqual({ from: "2023-01-01", to: "2023-12-31", startsLater: false, endsToday: false });
   });

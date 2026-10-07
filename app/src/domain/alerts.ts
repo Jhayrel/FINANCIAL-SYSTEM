@@ -33,7 +33,7 @@ import { assessMonthFor } from "./budget";
 import { overdue, STOPPED_AFTER_DAYS, upcoming, type BillStatus } from "./bills";
 import { basisWords, billWords, debtDue, debtNamedBy, paymentsFiledAsSpending, positionsOf, type Debt } from "./debt";
 import { creditRoom, roomWords } from "./creditLimit";
-import { addDays, daysBetween, daysInMonth, formatMedium, getMonth, getYear, monthName } from "./dates";
+import { addDays, daysBetween, daysLeftInMonth, formatMedium, getMonth, getYear, monthName } from "./dates";
 import { unusualRows } from "./unusual";
 import { actionableIssues, checkIntegrity } from "./integrity";
 import { monthTotals } from "./totals";
@@ -102,14 +102,27 @@ export function burnRate(
   const month = getMonth(asOf);
   const dayOfMonth = Number(asOf.slice(8, 10));
   if (dayOfMonth <= 0) return 0;
-  return Math.round(monthTotals(transactions, year, month).total / dayOfMonth);
+  /*
+   * So far means up to today, and a day's figure is rounded down as every
+   * other one is: an entry dated later in the month counted here, and the
+   * rate rounded up, so the prompt carried PHP 1,759.51 beside Insights'
+   * PHP 1,759.50 (6 October 2026 audit).
+   */
+  const sofar = transactions.filter((t) => t.date <= asOf);
+  return Math.floor(monthTotals(sofar, year, month).total / dayOfMonth);
 }
 
-/** Days left in the month, including today. */
-export function daysLeft(asOf: IsoDate): number {
-  const total = daysInMonth(getYear(asOf), getMonth(asOf));
-  return Math.max(0, total - Number(asOf.slice(8, 10)) + 1);
-}
+/** Days left in the month, including today. The one count, from `dates.ts`. */
+export const daysLeft = daysLeftInMonth;
+
+/**
+ * Before this many days a month's average a day is a handful of entries,
+ * and one repair or trip decides it. The pace alert waits, and the model is
+ * told the average is too early to read (6 October 2026: "No, that budget
+ * will not work at your current pace" on the fifth, after a PHP 1,534.00
+ * repair).
+ */
+export const PACE_FROM_DAY = 7;
 
 /**
  * What is left of the budget, spread over the days remaining.
@@ -126,7 +139,9 @@ export function dailyAllowance(
   if (assessment.combined.budget <= 0) return null;
   const left = daysLeft(asOf);
   if (left === 0) return 0;
-  return Math.round(assessment.combined.remaining / left);
+  const r = assessment.combined.remaining;
+  // Rounded down, never a centavo more than is left, as the screens do; over, rounded towards zero.
+  return r < 0 ? Math.ceil(r / left) : Math.floor(r / left);
 }
 
 /**
@@ -167,11 +182,11 @@ export function financeAlerts(input: AlertInput): Alert[] {
        */
       const ownTrack = assessment.spending.budget > 0;
       const remaining = ownTrack ? assessment.spending.remaining : assessment.combined.remaining;
-      const perDay = ownTrack ? (left > 0 ? Math.round(Math.max(0, remaining) / left) : 0) : dailyAllowance(transactions, budgets, asOf);
+      const perDay = ownTrack ? (left > 0 ? Math.floor(Math.max(0, remaining) / left) : 0) : dailyAllowance(transactions, budgets, asOf);
       const dayOfMonth = Number(asOf.slice(8, 10));
-      const rate = ownTrack ? (dayOfMonth > 0 ? Math.round(assessment.spending.spent / dayOfMonth) : 0) : burnRate(transactions, asOf);
-      // Only worth saying when the current pace would actually break it.
-      if (perDay !== null && rate > perDay && left > 0) {
+      const rate = ownTrack ? (dayOfMonth > 0 ? Math.floor(assessment.spending.spent / dayOfMonth) : 0) : burnRate(transactions, asOf);
+      // Only worth saying when the current pace would actually break it, and once there is a pace to read.
+      if (perDay !== null && rate > perDay && left > 0 && dayOfMonth >= PACE_FROM_DAY) {
         out.push({
           id: "budget-pace",
           level: "warn",
@@ -409,6 +424,27 @@ export function financeAlerts(input: AlertInput): Alert[] {
             : `${p.debt.name} is close to its limit`,
       detail: `${roomWords(room)}.${when}`,
       weight: room.state === "over" ? 90 : room.state === "reached" ? (soon ? 85 : 70) : 45,
+    });
+  }
+
+  /**
+   * A line that came back more than it went out: collected more than was
+   * lent, or paid more than was borrowed. Every total counts it as nothing
+   * owed, so it showed as -PHP 1.00 in two places and PHP 0.00 in two
+   * others, and nothing said why (6 October 2026 audit, Father's line).
+   * Reported, never put right: the row that is off is the owner's to find.
+   */
+  for (const p of positionsOf(debts, transactions, asOf)) {
+    if (p.outstanding >= 0) continue;
+    const back = p.debt.kind === "receivable" ? "collected than was lent" : "paid than was owed";
+    out.push({
+      id: `debt-below-zero-${p.debt.id}`,
+      level: "info",
+      area: "debt",
+      title: `${p.debt.name} is ${money(-p.outstanding)} below nothing`,
+      detail: `${money(-p.outstanding)} more was ${back}, so every total counts this line as settled. Open its rows: an amount may be off, or a row may belong to another line.`,
+      weight: 35,
+      query: p.debt.name,
     });
   }
 

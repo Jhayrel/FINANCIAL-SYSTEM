@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { whyOver, adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, median, savingsGoalIn } from "./budgetAdvice";
+import { whyOver, adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, judgesSetBudget, judgeWords, median, newestBudgetChange, savingsGoalIn } from "./budgetAdvice";
 import { proposedBudgetIn, proposedMonthIn } from "./budgetAsk";
 import type { Transaction } from "./types";
 
@@ -162,8 +162,13 @@ describe("reading the question", () => {
     expect(asksBudgetAdvice(q)).toBe(true);
   });
 
-  it.each(["set budget october 9000", "is my budget ok?", "add it to my budget", "how much did I spend on food"])("is not advice: %s", (q) => {
+  it.each(["set budget october 9000", "add it to my budget", "how much did I spend on food"])("is not advice: %s", (q) => {
     expect(asksBudgetAdvice(q)).toBe(false);
+  });
+
+  // Since 7 October 2026 a question about the budget that is set is answered about it, never with a recommendation.
+  it("reads 'is my budget ok?' as judging the budget set, not asking for one", () => {
+    expect(judgesSetBudget("is my budget ok?")).toBe(true);
   });
 
   it("reads what they expect to receive", () => {
@@ -252,5 +257,52 @@ describe("a plan asked for with no figure is advice", () => {
     expect(asksBudgetAdvice("set my budget to 9000 for october to december")).toBe(false);
     expect(asksBudgetAdvice("adjust my budget to 12000")).toBe(false);
     expect(asksBudgetAdvice("i planned to spend 500 today")).toBe(false);
+  });
+});
+
+describe("may, the verb", () => {
+  it("is not the month in budget advice", () => {
+    const asOf = "2026-10-05";
+    expect(adviceMonthIn("what budget may I set for next month?", asOf)).toEqual({ year: 2026, month: 11 });
+    expect(adviceMonthIn("may I ask what budget you recommend", asOf)).toBeNull();
+    expect(adviceMonthIn("what budget for may?", asOf)).toEqual({ year: 2027, month: 5 });
+    expect(adviceMonthIn("recommend a may budget", asOf)).toEqual({ year: 2027, month: 5 });
+  });
+});
+
+/*
+ * 5 October 2026: "is the new budget reasonable?" was answered with a
+ * recommendation for November, then "No" from five days' average.
+ */
+describe("a question about the budget already set", () => {
+  it("is told apart from asking for one", () => {
+    expect(judgesSetBudget("is the new budget reasonable?")).toBe(true);
+    expect(judgesSetBudget("is the new budget reasonable? thid month")).toBe(true);
+    expect(judgesSetBudget("Can you verify if this budget would work this month based on the spendings and revenue and current balances?")).toBe(true);
+    expect(judgesSetBudget("is my budget too low")).toBe(true);
+    expect(judgesSetBudget("what budget do you recommend for november?")).toBe(false);
+    expect(judgesSetBudget("suggest a realistic budget")).toBe(false);
+    expect(asksBudgetAdvice("Can you verify if this budget would work this month based on the spendings and revenue and current balances?")).toBe(true);
+  });
+
+  it("goes to the month whose budget changed last", () => {
+    const budgets = { "2026": { spending: [], billsSubs: [], revisions: { "10": [{ what: "tracks", at: "2026-10-04T23:51:06.219Z", when: "open", spending: 1500000, billsSubs: 170000, wasSpending: 600000, wasBillsSubs: 170000 }] } } } as unknown as Parameters<typeof newestBudgetChange>[0];
+    expect(newestBudgetChange(budgets, "2026-10-05")).toEqual({ year: 2026, month: 10 });
+    expect(newestBudgetChange(budgets, "2026-12-20")).toBeNull();
+  });
+
+  it("sets the budget against the usual month and what is left of it", () => {
+    const advice = { name: "October 2026", read: ["2026-07", "2026-08", "2026-09"], spending: 1200000, billsSubs: 170000 } as unknown as Parameters<typeof judgeWords>[0];
+    const tracks = {
+      spending: { budget: 1500000, spent: 600000, remaining: 900000, status: "under" },
+      billsSubs: { budget: 170000, spent: 0, remaining: 170000, status: "under" },
+      combined: { budget: 1670000, spent: 600000, remaining: 1070000, status: "under" },
+    } as unknown as Parameters<typeof judgeWords>[1];
+    const words = judgeWords(advice, tracks, 27)!;
+    expect(words).toContain("The budget set for October 2026: PHP 15,000.00 for spending and PHP 1,700.00 for bills and subscriptions, PHP 16,700.00 in all.");
+    expect(words).toContain("The spending budget is PHP 3,000.00 above the usual month");
+    expect(words).toContain("PHP 9,000.00 of the spending budget is left for the 27 days left, today included, PHP 333.33 a day.");
+    const none = { ...tracks, spending: { ...tracks.spending, budget: 0 }, billsSubs: { ...tracks.billsSubs, budget: 0 } } as typeof tracks;
+    expect(judgeWords(advice, none, 27)).toBeNull();
   });
 });

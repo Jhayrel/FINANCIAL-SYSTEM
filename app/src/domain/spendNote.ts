@@ -28,7 +28,7 @@
 
 import { assessMonth, budgetForMonth } from "./budget";
 import { categoryLimits } from "./budgetView";
-import { daysInMonth, firstOfMonth, getMonth, getYear, lastOfMonth, monthName } from "./dates";
+import { daysLeftInMonth, firstOfMonth, getMonth, getYear, lastOfMonth, monthName } from "./dates";
 import { formatMoney, type Centavos } from "./money";
 import { costOf, monthTotals, spendingAttribution, UNCATEGORISED } from "./totals";
 import { transferBucket } from "./transfers";
@@ -94,7 +94,8 @@ export function spendNoteFor(
   const after = [...before, ...rows];
   const was = assessMonth(monthTotals(before, year, m), budget)[track];
   const now = assessMonth(monthTotals(after, year, m), budget)[track];
-  const daysLeft = daysInMonth(year, m) - Number(asOf.slice(8, 10));
+  // Today included, as the Budget screen and the Dashboard count them (6 October 2026 audit).
+  const daysLeft = daysLeftInMonth(asOf);
   const trackName = bills ? "bills and subscriptions" : "spending";
   const range = { start: firstOfMonth(year, m), end: lastOfMonth(year, m) };
 

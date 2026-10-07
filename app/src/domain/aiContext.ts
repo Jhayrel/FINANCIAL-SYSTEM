@@ -38,11 +38,11 @@ import { assessMonthFor } from "./budget";
 import { billStatuses, overdue, STOPPED_AFTER_DAYS, upcoming } from "./bills";
 import { debtDue, incomeQuality, netWorth, positionsOf, unpaidCharges, type Debt } from "./debt";
 import { creditRoom, limitSteps } from "./creditLimit";
-import { addDays, dayInWords, daysBetween, getMonth, getYear, monthName } from "./dates";
-import { financeAlerts, burnRate, daysLeft, dailyAllowance } from "./alerts";
+import { addDays, dayInWords, daysBetween, getMonth, getYear, localDay, monthName } from "./dates";
+import { financeAlerts, burnRate, daysLeft, dailyAllowance, PACE_FROM_DAY } from "./alerts";
 import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
-import { toPesos } from "./money";
-import { isOpenBill, monthBrief } from "./monthPlan";
+import { toCentavos, toPesos } from "./money";
+import { isOpenBill, monthBrief, weekAhead } from "./monthPlan";
 import type { Account } from "./accounts";
 import type { BudgetRevision, Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -374,10 +374,11 @@ export function buildContext(input: ContextInput): AiContext {
           }
         }
       }
-      if (!newest || daysBetween(newest.at.slice(0, 10), asOf) > 31) return null;
+      // Only one made by the day the figures are for, and in the month before it.
+      if (!newest || localDay(newest.at) > asOf || daysBetween(localDay(newest.at), asOf) > 31) return null;
       const { r } = newest;
       return {
-        on: newest.at.slice(0, 10),
+        on: localDay(newest.at),
         month: `${monthName(newest.month)} ${newest.year}`,
         spending: pesos(r.spending ?? 0),
         billsSubs: pesos(r.billsSubs ?? 0),
@@ -481,8 +482,18 @@ export function contextToText(c: AiContext): string {
   } else {
     lines.push("No budget set for this month.");
   }
+  /*
+   * The month's average a day so far, every cost counted, bills included.
+   * Before a week it is a few entries, and one repair decides it: on 5
+   * October the model said a budget "will not work at your current pace"
+   * from five days with a PHP 1,534.00 repair in them. So it is said for
+   * what it is, and judging a budget by it is ruled out in the instructions.
+   */
+  const dayOfMonth = Number(c.asOf.slice(8, 10));
   lines.push(
-    `Spending so far averages ${php(c.month.burnRatePerDay)} a day, with ${c.month.daysLeft} days left.`,
+    `All costs so far: ${php(c.month.burnRatePerDay)} a day over ${dayOfMonth} ${dayOfMonth === 1 ? "day" : "days"}, ${c.month.daysLeft} days left.${
+      dayOfMonth < PACE_FROM_DAY ? " Too early to read as a pace." : ""
+    }`,
   );
   /*
    * Never a negative figure a day. Over budget, this said "What is left of
@@ -491,12 +502,16 @@ export function contextToText(c: AiContext): string {
    * September 2026). Nothing is left to spend a day; the overspend is said once.
    */
   const spendingLeft = c.month.spendingLeft ?? null;
+  // The safe section says what the spending budget leaves a day; saying it here too gave the prompt the figure twice.
+  const saidBelow = spendingLeft !== null && c.safe != null && c.safe.budgetLeft !== null;
   if (c.month.allowancePerDay !== null && c.month.allowancePerDay >= 0) {
-    lines.push(
-      spendingLeft !== null
-        ? `What is left of the spending budget, ${php(spendingLeft)}, works out to ${php(c.month.allowancePerDay)} a day. That is the budget's pace, the plan; what is safe to spend is the money, below.`
-        : `What is left of the budget works out to ${php(c.month.allowancePerDay)} a day.`,
-    );
+    if (!saidBelow) {
+      lines.push(
+        spendingLeft !== null
+          ? `What is left of the spending budget, ${php(spendingLeft)}, leaves ${php(c.month.allowancePerDay)} a day. That is the plan; what is safe to spend is the money, below.`
+          : `What is left of the budget leaves ${php(c.month.allowancePerDay)} a day, bills and subscriptions included.`,
+      );
+    }
   } else if (c.month.allowancePerDay !== null) {
     lines.push(
       spendingLeft !== null
@@ -528,8 +543,12 @@ export function contextToText(c: AiContext): string {
       `Spending wallets ${php(safe.wallets)}, less bills and subscriptions still to pay ${php(safe.billsDue)}${due}${safe.debtDue > 0 ? ` and debt payments due ${php(safe.debtDue)}` : ""}: ${php(safe.safe)} is safe to spend until ${until} ends.`,
     );
     lines.push(
-      `Safe to spend today: ${php(safe.today)} (today's share ${php(safe.todayShare)}, spent today ${php(safe.spentToday)}${safe.overToday > 0 ? `, ${php(safe.overToday)} past it` : ""}).${safe.daysLeft > 1 ? ` From tomorrow, ${dayInWords(addDays(c.asOf, 1))}: ${php(safe.perDayAfter)} a day for ${safe.daysLeft - 1} days.` : ""}`,
+      `Safe to spend today: ${php(safe.today)} (today's share ${php(safe.todayShare)}, spent today ${php(safe.spentToday)}, bills apart${safe.overToday > 0 ? `, ${php(safe.overToday)} past it` : ""}).${safe.daysLeft > 1 ? ` From tomorrow, ${dayInWords(addDays(c.asOf, 1))}: ${php(safe.perDayAfter)} a day for ${safe.daysLeft - 1} days.` : ""}`,
     );
+    {
+      const week = weekAhead({ perDay: toCentavos(safe.today), perDayAfter: toCentavos(safe.perDayAfter), daysLeft: safe.daysLeft });
+      if (week.days > 1) lines.push(`Next ${week.days} days, today included: ${php(pesos(week.amount))}${week.days < 7 ? `, to ${until}'s end` : ""}.`);
+    }
     if (safe.budgetLeft !== null) {
       lines.push(
         safe.budgetLeft <= 0

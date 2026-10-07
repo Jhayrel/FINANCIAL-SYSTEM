@@ -78,3 +78,27 @@ describe("a net worth chart", () => {
     expect(mergeHint(null, { money: "balance" }, "chart my savings this year")?.money).toBe("balance");
   });
 });
+
+describe("an instant, dated by the local day", () => {
+  it("is the day it was where the owner is, not the UTC day", async () => {
+    const { localDay } = await import("./dates");
+    const at = new Date(2026, 9, 5, 7, 51).toISOString();
+    expect(localDay(at)).toBe("2026-10-05");
+    expect(localDay("garbage-text")).toBe("garbage-te");
+  });
+});
+
+describe("a line below nothing", () => {
+  it("is reported, and nothing is changed", async () => {
+    const { financeAlerts } = await import("./alerts");
+    const father = { id: "father", name: "Father", kind: "receivable" as const, form: "pass-through" as const, counterparty: "Father", openedDate: "2026-09-01", wallet: "Cash", interestType: "none" as const, interestRate: 0, notes: "", archived: false };
+    const rows = [
+      { id: "a", recordNumber: 1, date: "2026-09-02", type: "Debt", fromWallet: "Cash", toWallet: "", category: "", item: "", description: "", amount: 59900, fee: 0, total: 59900, notes: "", status: "Paid", debtId: "father", debtEffect: "lend" },
+      { id: "b", recordNumber: 2, date: "2026-09-05", type: "Debt", fromWallet: "", toWallet: "Cash", category: "", item: "", description: "", amount: 60000, fee: 0, total: 60000, notes: "", status: "Received", debtId: "father", debtEffect: "collect" },
+    ] as unknown as Parameters<typeof financeAlerts>[0]["transactions"];
+    const alerts = financeAlerts({ transactions: rows, accounts: [], budgets: {}, debts: [father], bills: [], lowBalanceThreshold: 0, asOf: "2026-10-06" });
+    const below = alerts.find((a) => a.id === "debt-below-zero-father");
+    expect(below?.title).toBe("Father is ₱1.00 below nothing");
+    expect(below?.detail).toContain("₱1.00 more was collected than was lent");
+  });
+});

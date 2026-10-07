@@ -206,6 +206,18 @@ export function dayFigures(safe: Centavos, spentToday: Centavos, daysLeft: numbe
   };
 }
 
+/**
+ * The next seven days, today included, at the day figures: today's figure
+ * and the rate from tomorrow. Never past the month's end, since the next
+ * month's figures are not known yet. "Safe for this week" had no figure, and
+ * the model, told never to multiply, invented one or left it out (6 October
+ * 2026 back-read).
+ */
+export function weekAhead(safe: Pick<SafeToSpend, "perDay" | "perDayAfter" | "daysLeft">): { readonly days: number; readonly amount: Centavos } {
+  const days = Math.min(7, Math.max(0, safe.daysLeft));
+  return { days, amount: days === 0 ? 0 : safe.perDay + safe.perDayAfter * (days - 1) };
+}
+
 /** The month's safe figures as they would be after `spend` more goes out of the spending wallets today. */
 export interface SafeAfter extends DayFigures {
   /** Safe until the month ends, after it. Never below 0. */

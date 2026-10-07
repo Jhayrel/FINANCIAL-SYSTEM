@@ -53,7 +53,10 @@ const textFor = (budgets: Budgets): string =>
 
 describe("what is left of the budget a day", () => {
   it("is said as a figure while some is left", () => {
-    expect(textFor(budget(1000000))).toMatch(/works out to PHP [\d,]+\.\d{2} a day/);
+    // Once, in the safe section, as the plan (it was said twice before the 6 October 2026 audit).
+    const text = textFor(budget(1000000));
+    expect(text.match(/PHP [\d,]+\.\d{2} a day: the plan, not the money/g)).toHaveLength(1);
+    expect(text).not.toMatch(/works out to PHP [\d,]+\.\d{2} a day/);
   });
 
   it("is never negative once the month is over it", () => {

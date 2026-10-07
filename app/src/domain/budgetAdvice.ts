@@ -40,11 +40,12 @@
 
 import type { Centavos } from "./money";
 import { formatMoney } from "./money";
-import { daysInMonth, makeDate, monthName } from "./dates";
+import { addDays, daysInMonth, localDay, makeDate, monthName } from "./dates";
 import { costOf, incomeOf, spendingAttribution, totalsFor } from "./totals";
 import { forecastYear } from "./forecast";
 import type { Debt } from "./debt";
-import type { IsoDate, Transaction } from "./types";
+import type { BudgetAssessment, Budgets, IsoDate, Transaction } from "./types";
+import { notTheMonth } from "./budgetAsk";
 
 /** Months read, at most, before the one being planned. */
 const WINDOW = 6;
@@ -437,6 +438,7 @@ export function asksBudgetAdvice(said: string): boolean {
   const text = said.toLowerCase().replace(/\b(buget|budjet|bugdet|budgt|budet|bujet)\b/g, "budget");
   if (!/\bbudget/.test(text)) return false;
   if (/^\s*(set|change|update|make|put|copy|apply|use|add)\b/.test(text) && !/\?\s*$/.test(text)) return false;
+  if (judgesSetBudget(said)) return true;
   return (
     // Spelled as typed on a phone: "proporse", "propoised", "reccomend", "sugest".
     /\b(re?c+om+e?n?d\w*|sug+est\w*|prop[a-z]*s[a-z]*|realistic|reasonable|ideal|advi[cs]e)\b/.test(text) ||
@@ -453,7 +455,7 @@ export function asksBudgetAdvice(said: string): boolean {
      * the model's to recommend.
      */
     /\b(set|make|give|create|build|work out|do|draft)\s+(?:me\s+|up\s+)?(?:a\s+|my\s+)?(?:new\s+)?(?:budget\s+)?plan\b/.test(text) ||
-    /\b(?:based on|base(?:d)? sa|according to)\s+(?:my\s+|the\s+|ang\s+)?(?:usual\s+)?(?:income|allowance|salary|sahod|kita|spending|expenses|gastos)\b/.test(text) ||
+    /\b(?:based on|base(?:d)? sa|according to)\s+(?:my\s+|the\s+|ang\s+)?(?:usual\s+)?(?:income|allowance|salary|sahod|kita|spendings?|expenses|gastos)\b/.test(text) ||
     (!/\d/.test(text) && /\b(?:adjust\w*|redo|rework|plan(?:ning)?)\b[^.?!]{0,30}\bbudget\b/.test(text))
   );
 }
@@ -525,7 +527,12 @@ const MONTH_WORDS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "se
  * the one. Read from the words beside "budget", then "next month".
  */
 export function adviceMonthIn(said: string, asOf: IsoDate): { year: number; month: number } | null {
-  const text = said.toLowerCase();
+  /*
+   * "may" the verb is not the month. The fix of 5 October was made where a
+   * budget is set (`budgetAsk.ts`) and not here, so "what budget may I set"
+   * worked figures out for May 2027 (6 October 2026 back-read).
+   */
+  const text = notTheMonth(said).toLowerCase();
   const year = Number(asOf.slice(0, 4));
   const now = Number(asOf.slice(5, 7));
   const MONTH = String.raw`(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
@@ -548,6 +555,84 @@ export function adviceMonthIn(said: string, asOf: IsoDate): { year: number; mont
   }
   if (/\bbudget\b[^.?!]{0,40}\bthis month\b|\bthis month'?s budget\b/.test(text)) return { year, month: now };
   return null;
+}
+
+/**
+ * Judging a budget already set, as against asking for one.
+ *
+ * 5 October 2026: "is the new budget reasonable?", just after October's
+ * budget changed, was answered with a recommendation for November, and
+ * then "No" from the first five days' average. "Can you verify if this
+ * budget would work this month based on the spendings" was not read as
+ * about a budget at all. A question about the budget that is set is
+ * answered about that budget: against the usual month, and against what is
+ * left of it.
+ */
+const JUDGES =
+  /\b(?:is|are|will|would|does|do|can|could|was)\b[^.?!]{0,40}\bbudget\b[^.?!]{0,40}\b(?:reasonable|realistic|enough|ok(?:ay)?|work|works|fine|good|right|doable|achievable|possible|kaya|too (?:low|high|much|little|tight|big|small))\b|\b(?:verify|check|review|assess|evaluate|judge|rate)\b[^.?!]{0,30}\bbudget\b/;
+const ASKS_FOR_ONE = /\b(?:re?c+om+e?n?d\w*|sug+est\w*|propos\w*|what (?:budget|should)|how much should|give me|make me|set me|work out)\b/;
+
+export function judgesSetBudget(said: string): boolean {
+  const text = notTheMonth(said).toLowerCase().replace(/\b(buget|budjet|bugdet|budgt|budet|bujet)\b/g, "budget");
+  return /\bbudget/.test(text) && JUDGES.test(text) && !ASKS_FOR_ONE.test(text);
+}
+
+/** The month of the newest change to a month's two budgets, if one was made in the last 31 days. */
+export function newestBudgetChange(budgets: Budgets, asOf: IsoDate): { readonly year: number; readonly month: number } | null {
+  let newest: { at: string; year: number; month: number } | null = null;
+  for (const [year, plan] of Object.entries(budgets)) {
+    for (const [month, list] of Object.entries(plan.revisions ?? {})) {
+      for (const r of list) {
+        if (r.what !== "tracks") continue;
+        if (!newest || r.at > newest.at) newest = { at: r.at, year: Number(year), month: Number(month) };
+      }
+    }
+  }
+  if (!newest) return null;
+  const day = localDay(newest.at);
+  return day <= asOf && day >= addDays(asOf, -31) ? { year: newest.year, month: newest.month } : null;
+}
+
+/**
+ * The budget that is set, against the usual month and what is left of it,
+ * in plain sentences for the top of the figures. Null when nothing is set
+ * for the month, which is a question for a recommendation instead.
+ */
+export function judgeWords(
+  a: BudgetAdvice,
+  tracks: BudgetAssessment,
+  daysLeft: number,
+): string | null {
+  const set = tracks.spending.budget + tracks.billsSubs.budget;
+  if (set <= 0) return null;
+  const out: string[] = [];
+  out.push(
+    `The budget set for ${a.name}: ${money(tracks.spending.budget)} for spending and ${money(tracks.billsSubs.budget)} for bills and subscriptions, ${money(set)} in all.`,
+  );
+  if (a.read.length > 0) {
+    out.push(
+      `The usual month, each item's middle month over ${monthsRead(a.read)} with one-offs left out: ${money(a.spending)} of spending and ${money(a.billsSubs)} of bills and subscriptions still running.`,
+    );
+    const gap = tracks.spending.budget - a.spending;
+    out.push(
+      gap >= 0
+        ? `The spending budget is ${money(gap)} above the usual month, so keeping to it needs no more care than a usual month.`
+        : `The spending budget is ${money(-gap)} below the usual month, so keeping to it means spending less than usual.`,
+    );
+    const bills = tracks.billsSubs.budget - a.billsSubs;
+    if (bills < 0) out.push(`The bills and subscriptions budget is ${money(-bills)} less than the ones still running cost in a usual month.`);
+  }
+  if (daysLeft > 0) {
+    const left = tracks.spending.remaining;
+    out.push(
+      left >= 0
+        ? `So far ${money(tracks.spending.spent)} of spending: ${money(left)} of the spending budget is left for the ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left, today included, ${money(Math.floor(left / daysLeft))} a day.`
+        : `So far ${money(tracks.spending.spent)} of spending: already ${money(-left)} over the spending budget, with ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left.`,
+    );
+  } else {
+    out.push(`${a.name} is over: ${money(tracks.spending.spent)} of spending against the ${money(tracks.spending.budget)} budget.`);
+  }
+  return out.join(" ");
 }
 
 /**

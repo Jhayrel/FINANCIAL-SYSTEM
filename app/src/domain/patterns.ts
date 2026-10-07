@@ -48,6 +48,7 @@ import { formatMedium, getMonth, getYear } from "./dates";
 import { formatMoney, type Centavos } from "./money";
 import { costOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
+import { walletDelta } from "./balances";
 
 export interface Finding {
   readonly id: string;
@@ -351,9 +352,7 @@ export function zeroBalanceCount(
      * Every wallet then looked permanently empty. A running balance has one
      * correct definition in this codebase and this has to be it.
      */
-    if (t.type === "Revenue" && t.fromWallet === wallet) balance += t.total;
-    if (t.toWallet === wallet) balance += t.amount;
-    if (t.fromWallet === wallet && t.type !== "Revenue") balance -= t.total;
+    balance += walletDelta(t, (w) => w === wallet);
 
     const atZero = balance <= 0;
     if (atZero && !wasZero && t.date >= start && t.date <= asOf) hits++;

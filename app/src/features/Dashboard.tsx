@@ -237,7 +237,7 @@ export function Dashboard({
                 {!safe
                   ? ""
                   : safe.overToday > 0
-                    ? `${formatMoney(safe.spentToday)} spent today, ${formatMoney(safe.overToday)} past today's ${formatMoney(safe.todayShare)}`
+                    ? `${formatMoney(safe.spentToday)} spent today, bills apart: ${formatMoney(safe.overToday)} past today's ${formatMoney(safe.todayShare)}`
                     : safe.spentToday > 0
                       ? `${formatMoney(safe.spentToday)} of today's ${formatMoney(safe.todayShare)} spent`
                       : `Today's share of ${formatMoney(safe.safe)}, over ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"}`}

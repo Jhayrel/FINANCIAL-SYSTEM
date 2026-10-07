@@ -112,8 +112,16 @@ describe("the pace warning", () => {
   it("counts what is left of the spending budget, as the Dashboard does", () => {
     const transactions = [spend("2026-10-01", "Food", "groceries", 150_000), spend("2026-10-02", "Food", "groceries", 123_505)];
     const budgets = { "2026": { spending: [0, 0, 0, 0, 0, 0, 0, 0, 0, 600_000, 0, 0], billsSubs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 170_000, 0, 0] } } as unknown as Budgets;
-    const pace = financeAlerts({ transactions, budgets, accounts: [], debts: [], bills: [], lowBalanceThreshold: 0, asOf: "2026-10-03" } as never).find((a) => a.id === "budget-pace");
-    // ₱6,000.00 less ₱2,735.05 spent is ₱3,264.95, over 29 days ₱112.58: not the ₱1,700.00 for bills as well.
-    expect(pace?.detail).toBe("₱911.68 a day so far. ₱3,264.95 of the spending budget left over 29 days is ₱112.58 a day.");
+    const pace = financeAlerts({ transactions, budgets, accounts: [], debts: [], bills: [], lowBalanceThreshold: 0, asOf: "2026-10-07" } as never).find((a) => a.id === "budget-pace");
+    // ₱6,000.00 less ₱2,735.05 spent is ₱3,264.95, over 25 days ₱130.59: not the ₱1,700.00 for bills as well.
+    expect(pace?.detail).toBe("₱390.72 a day so far. ₱3,264.95 of the spending budget left over 25 days is ₱130.59 a day.");
+  });
+
+  // 5 October 2026: five days with a repair in them were read as a pace. The alert waits a week.
+  it("waits until a week of the month has gone", () => {
+    const transactions = [spend("2026-10-01", "Food", "groceries", 150_000), spend("2026-10-02", "Food", "groceries", 123_505)];
+    const budgets = { "2026": { spending: [0, 0, 0, 0, 0, 0, 0, 0, 0, 600_000, 0, 0], billsSubs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 170_000, 0, 0] } } as unknown as Budgets;
+    const early = financeAlerts({ transactions, budgets, accounts: [], debts: [], bills: [], lowBalanceThreshold: 0, asOf: "2026-10-03" } as never);
+    expect(early.some((a) => a.id === "budget-pace")).toBe(false);
   });
 });

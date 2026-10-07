@@ -16,6 +16,7 @@
 import { assessMonthFor } from "./budget";
 import { daysLeft } from "./alerts";
 import { formatMoney, type Centavos } from "./money";
+import type { SafeToSpend } from "./monthPlan";
 import type { Budgets, IsoDate, Transaction } from "./types";
 
 export type Per = "day" | "week" | "month";
@@ -60,6 +61,13 @@ export function planWorked(
     readonly asOf: IsoDate;
     /** The owner's messages just before, newest first, for "I said 250 not 450". */
     readonly before?: readonly string[];
+    /**
+     * The Dashboard's safe to spend (`monthPlan.ts`). A plan was set against
+     * the spending budget only: "150 a day, would that work?" was told it
+     * fit with PHP 627.95 to spare while PHP 80.42 a day was safe (6 October
+     * 2026 audit). The money comes first now, the budget after, as the plan.
+     */
+    readonly safe?: Pick<SafeToSpend, "safe" | "spentToday" | "perDay" | "perDayAfter"> | null;
   },
 ): string {
   const per = periodIn(text) ?? (data.before ?? []).map(periodIn).find((p) => p !== null) ?? null;
@@ -80,20 +88,34 @@ export function planWorked(
     const aDay = Math.round(amount / periodDays);
     const aWeek = Math.round((amount * 7) / periodDays);
     const overLeft = Math.round((amount * days) / periodDays);
+    // Today at whichever is more, the plan's day or what today already spent: a day past the plan cannot be spent at it.
+    const need = safe ? Math.max(aDay, safe.spentToday) + Math.round((amount * Math.max(0, days - 1)) / periodDays) : 0;
+    const room = safe ? safe.safe + safe.spentToday : 0;
+    const money = !safe
+      ? ""
+      : need <= room
+        ? ` Against the money: it fits what is safe to spend, with ${formatMoney(room - need)} to spare.`
+        : ` Against the money: it is ${formatMoney(need - room)} more than is safe to spend${safe.spentToday > aDay ? `, counting today at the ${formatMoney(safe.spentToday)} already spent` : ""}.`;
     const against =
       left === null
         ? ""
         : overLeft <= left
-          ? ` That fits what is left of the spending budget, with ${formatMoney(left - overLeft)} to spare.`
-          : ` That is ${formatMoney(overLeft - left)} more than what is left of the spending budget.`;
-    return `${label} ${formatMoney(amount)} a ${per}: ${formatMoney(aDay)} a day, ${formatMoney(aWeek)} a week, ${formatMoney(overLeft)} over the ${days} ${days === 1 ? "day" : "days"} left in the month.${against}`;
+          ? ` Against the plan: it fits what is left of the spending budget, with ${formatMoney(left - overLeft)} to spare.`
+          : ` Against the plan: it is ${formatMoney(overLeft - left)} more than what is left of the spending budget.`;
+    return `${label} ${formatMoney(amount)} a ${per}: ${formatMoney(aDay)} a day, ${formatMoney(aWeek)} a week, ${formatMoney(overLeft)} over the ${days} ${days === 1 ? "day" : "days"} left in the month.${money}${against}`;
   };
+  const safe = data.safe ?? null;
 
   const lines = [
     `A plan said ${per === "day" ? "by the day" : per === "week" ? "by the week" : "by the month"}, worked out by the app. Its figures are correct: use them and do no arithmetic of your own. Each figure the message names is set out on its own, and their sum after, because the message may mean either: answer the reading the message means, and when a correction says which figure, use that one.`,
+    ...(safe
+      ? [
+          `What is safe to spend, the Dashboard's figure and the money: ${formatMoney(safe.safe)} until the month ends; ${formatMoney(safe.perDay)} today, then ${formatMoney(safe.perDayAfter)} a day from tomorrow. Say whether the plan fits this first.`,
+        ]
+      : []),
     left === null
       ? "No spending budget is set for the month, so nothing is said against one."
-      : `What is left of the spending budget: ${formatMoney(left)} over the ${days} ${days === 1 ? "day" : "days"} left, ${formatMoney(Math.max(0, Math.floor(left / Math.max(days, 1))))} a day.`,
+      : `What is left of the spending budget, the plan: ${formatMoney(left)} over the ${days} ${days === 1 ? "day" : "days"} left, ${formatMoney(Math.max(0, Math.floor(left / Math.max(days, 1))))} a day.`,
     ...figures.map((f) => line(f, "The plan's")),
   ];
   if (figures.length > 1) lines.push(line(figures.reduce((s, f) => s + f, 0), "All together,"));

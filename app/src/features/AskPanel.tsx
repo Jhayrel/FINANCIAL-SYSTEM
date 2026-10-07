@@ -234,10 +234,10 @@ import {
   editedAsk,
 } from "../domain/budgetAsk";
 import { readSpendAsk, spendAnswer } from "../domain/spendAsk";
-import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
+import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, judgeWords, judgesSetBudget, newestBudgetChange, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
 import { asksSettingsChange, asksWhatChartsExist, capabilitiesAnswer, chartsAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
-import { budgetForYear } from "../domain/budget";
-import { formatMedium, MONTH_NAMES } from "../domain/dates";
+import { assessMonthFor, budgetForYear } from "../domain/budget";
+import { daysInMonth, daysLeftInMonth, formatMedium, MONTH_NAMES } from "../domain/dates";
 import { chatHistory, earlierSessions, keepInMind } from "../domain/memory";
 import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, pendingChoices, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
@@ -4758,8 +4758,16 @@ export function AskPanel({
            * planned for the month after (3 October 2026, a November card).
            */
           const arrivesNow = income !== null && /\b(?:today|now|ngayon|kanina|this month)\b/i.test(ruled);
+          /*
+           * "is the new budget reasonable?" is about the budget that is set:
+           * the month named, else the one whose budget changed last, else
+           * this month. It went to next month by default (5 October 2026).
+           */
+          const judging = judgesSetBudget(ruled) && !splitAgain && !newIncome;
+          const thisMonth = { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) };
           const target =
             named ??
+            (judging ? (newestBudgetChange(budgets, asOf) ?? thisMonth) : null) ??
             ((splitAgain || newIncome) && advised
               ? { year: advised.advice.year, month: advised.advice.month }
               : arrivesNow
@@ -4776,6 +4784,22 @@ export function AskPanel({
           const byIncome = said === null && first.typicalIncome > 0 && BY_INCOME.test(ruled);
           const held = byIncome ? first.typicalIncome : said;
           const advice = byIncome ? budgetAdvice({ transactions, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: held, keep }) : first;
+          if (judging) {
+            const tracks = assessMonthFor(transactions, budgets, target.year, target.month);
+            const phase = target.year * 12 + target.month - (thisMonth.year * 12 + thisMonth.month);
+            const daysLeft = phase < 0 ? 0 : phase > 0 ? daysInMonth(target.year, target.month) : daysLeftInMonth(asOf);
+            const judged = judgeWords(advice, tracks, daysLeft);
+            if (judged !== null) {
+              await answerWithModel(
+                [
+                  `They are asking whether the budget already set for ${advice.name} is reasonable. The app set it against their usual month and what is left of it; these figures are correct, so quote them and never recompute them. Answer yes or no on whether it can hold, from these, and never from the first days' average. Do not recommend a different budget unless they ask for one.`,
+                  judged,
+                ].join("\n"),
+                judged,
+              );
+              return;
+            }
+          }
           const text = adviceWords(advice);
           lastAdvice.current = { advice, text, asked: note };
           await answerWithModel(
@@ -6640,7 +6664,15 @@ export function AskPanel({
          * model chooses the reading and works out nothing (`planRate.ts`).
          */
         const saidBefore = [...turns].reverse().filter((t): t is Said => t.kind === "you").slice(0, 3).map((t) => t.text);
-        const plan = compared ? "" : planWorked(ruled, { transactions, budgets, asOf, ...(correctsAnswer || saidBefore.length > 0 ? { before: correctsAnswer ? saidBefore : [] } : {}) });
+        const plan = compared
+          ? ""
+          : planWorked(ruled, {
+              transactions,
+              budgets,
+              asOf,
+              safe: monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe,
+              ...(correctsAnswer || saidBefore.length > 0 ? { before: correctsAnswer ? saidBefore : [] } : {}),
+            });
         await askQuestion(
           note,
           true,

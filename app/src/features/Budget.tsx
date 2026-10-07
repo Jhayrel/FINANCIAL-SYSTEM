@@ -476,7 +476,7 @@ export function Budget({
                     ? "Over the budget by"
                     : view.phase === "past"
                       ? "Left unspent"
-                      : "Left to spend"}
+                      : "Left of the budget"}
                 </span>
                 <Money
                   value={Math.abs(a.combined.remaining)}
@@ -485,7 +485,10 @@ export function Budget({
                 />
                 <span className="t-caption" style={{ color: "var(--ink-3)" }}>
                   {formatMoney(a.combined.spent)} spent of {formatMoney(a.combined.budget)}
-                  {view.phase !== "past" && view.perDay > 0 ? ` · ${formatMoney(view.perDay)} a day for spending` : ""}
+                  {/* The headline is the whole plan, bills included; the day's figure is the spending part's (6 October 2026 audit). */}
+                  {view.phase !== "past" && view.perDay > 0 && a.spending.remaining > 0
+                    ? ` · ${formatMoney(a.spending.remaining)} of it for spending, ${formatMoney(view.perDay)} a day`
+                    : ""}
                 </span>
               </div>
               <div className="fms-budgettracks">
