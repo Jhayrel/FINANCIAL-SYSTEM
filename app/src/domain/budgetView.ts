@@ -43,9 +43,12 @@ import {
   MONTH_NAMES,
 } from "./dates";
 import type { Centavos } from "./money";
-import { monthTotals, spendingAttribution } from "./totals";
+import { monthTotals } from "./totals";
+import { spendingTrackByKind } from "./kinds";
+import type { Debt } from "./debt";
 import type {
   BudgetAssessment,
+  BudgetRevision,
   BudgetYear,
   Budgets,
   IsoDate,
@@ -199,15 +202,18 @@ export function categoryLines(
   month: number,
   lookback = 3,
   limits: ReadonlyMap<string, Centavos> = new Map(),
+  debts: readonly Debt[] = [],
 ): CategoryLine[] {
-  const current = spendingAttribution(transactions, monthRange(year, month));
+  // The spending track by kind, so the lines add up to the track and a limit counts every row the track does (`kinds.ts`).
+  const current = spendingTrackByKind(transactions, monthRange(year, month), debts);
 
   const history: Map<string, Centavos>[] = [];
   for (let back = 1; back <= lookback; back++) {
     const index = year * 12 + (month - 1) - back;
-    const past = spendingAttribution(
+    const past = spendingTrackByKind(
       transactions,
       monthRange(Math.floor(index / 12), (index % 12) + 1),
+      debts,
     );
     if (past.size > 0) history.push(past);
   }
@@ -456,8 +462,13 @@ export function applyPlan(
  * name, so without this the limit on "Food" stayed on a name no row used any
  * more: the Budget screen showed Meals with no limit, and the limit sat on a
  * kind with nothing in it. Where both names have a limit in a month, the one
- * already on the new name is kept. The change history keeps the old name,
- * since that is what the kind was called when it changed.
+ * already on the new name is kept.
+ *
+ * The change history follows the limit to its new name, in each month where
+ * the limit moved: Undo reads the name off the last change, and with the old
+ * name it put a limit back on a kind no row used (7 October 2026 limits
+ * audit). Where the new name kept its own limit, the history keeps the old
+ * name, and Undo refuses rather than guess (`budgetLock.ts`, `undoLast`).
  */
 export function renameLimitKind(
   budgets: Budgets,
@@ -479,7 +490,12 @@ export function renameLimitKind(
     }
     const kept = categories[now];
     categories[now] = kept ? (kept.map((v, i) => (v > 0 ? v : (moving[i] ?? 0))) as unknown as Amounts) : moving;
-    next[year] = { ...plan, categories };
+    const revisions: Record<string, readonly BudgetRevision[]> = {};
+    for (const [month, list] of Object.entries(plan.revisions ?? {})) {
+      const moved = !kept || (kept[Number(month) - 1] ?? 0) === 0;
+      revisions[month] = moved ? list.map((r) => (r.what === "limit" && r.name === was ? { ...r, name: now } : r)) : list;
+    }
+    next[year] = { ...plan, categories, ...(plan.revisions ? { revisions } : {}) };
     years.push(year);
   }
   return { budgets: next, years };

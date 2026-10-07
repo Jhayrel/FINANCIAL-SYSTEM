@@ -154,6 +154,17 @@ export function systemToCsv(data: BackupData, now: string): string {
     ),
   );
 
+  // The limits on kinds of spending, month by month: the file says it writes every part, and these were left out (7 October 2026 limits audit).
+  section(
+    "LIMITS",
+    ["Year", "Month", "Kind of spending", "Limit"],
+    Object.entries(data.budgets).flatMap(([year, y]) =>
+      Object.entries(y.categories ?? {}).flatMap(([kind, amounts]) =>
+        amounts.flatMap((v, i) => (v > 0 ? [[year, MONTHS[i] ?? String(i + 1), kind, money(v)]] : [])),
+      ),
+    ),
+  );
+
   section(
     "SPENDING TYPES",
     ["Type", "What counts as this", "Rows using it"],

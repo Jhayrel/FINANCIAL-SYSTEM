@@ -679,7 +679,10 @@ export function AddTransaction({
   );
 
   /** What this entry does to its month's budget, while the amount is still in the field. */
-  const impact = useMemo(() => entryImpact(draft, transactions, budgets, asOf), [draft, transactions, budgets, asOf]);
+  const impact = useMemo(
+    () => entryImpact(draft, transactions, budgets, asOf, { debts, accounts: [...reference.wallets, ...reference.savings] }),
+    [draft, transactions, budgets, asOf, debts, reference],
+  );
 
   const guess = useMemo(() => predictAmount(transactions, draft), [transactions, draft]);
 
@@ -2379,8 +2382,19 @@ export function AddTransaction({
                 className="t-caption"
                 style={{ color: impact.limit - impact.kindBefore - impact.cost < 0 ? "var(--over)" : "var(--ink-2)" }}
               >
-                {impact.kind} limit: {formatMoney(impact.limit - impact.kindBefore)} left, then{" "}
-                {formatMoney(impact.limit - impact.kindBefore - impact.cost)}
+                {/* Over said as over, never as a negative "left" (7 October 2026 limits audit). */}
+                {impact.kindBefore > impact.limit
+                  ? `${impact.kind} is ${formatMoney(impact.kindBefore - impact.limit)} over its ${formatMoney(impact.limit)} limit, ${formatMoney(impact.kindBefore + impact.cost - impact.limit)} after this`
+                  : impact.kindBefore + impact.cost > impact.limit
+                    ? `${impact.kind} limit: ${formatMoney(impact.limit - impact.kindBefore)} left; this takes it ${formatMoney(impact.kindBefore + impact.cost - impact.limit)} over`
+                    : `${impact.kind} limit: ${formatMoney(impact.limit - impact.kindBefore)} left, then ${formatMoney(impact.limit - impact.kindBefore - impact.cost)}`}
+              </p>
+            )}
+            {impact.borrowed && (
+              <p className="t-caption" style={{ color: "var(--warn)" }}>
+                {formatMoney(impact.borrowed.amount)} of this would be{" "}
+                {impact.borrowed.held ? `money held for ${impact.borrowed.from}` : `borrowed money, from ${impact.borrowed.from}`}: your own money in{" "}
+                {draft.fromWallet || "that account"} runs out first.
               </p>
             )}
             {impact.kind && impact.limit === null && impact.kindBefore > 0 && (

@@ -96,6 +96,19 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
   const out = [
     `You spent **${money(total)}**${what} ${when}, over ${rows.length} ${rows.length === 1 ? "entry" : "entries"}.`,
   ];
+  /*
+   * Entries dated later in the window count on the Budget screen and in a
+   * limit, so they are said rather than dropped silently: the chat gave Food
+   * as PHP 4,691.00 "in October" beside the Budget's PHP 5,191.00 (7 October
+   * 2026 limits audit). The total above stays to today.
+   */
+  if (ask.to > asOf) {
+    const ahead = live.filter((t) => t.date > asOf && t.date <= ask.to && matches(t) && costOf(t) > 0);
+    if (ahead.length > 0) {
+      const sum = ahead.reduce((s, t) => s + costOf(t), 0);
+      out.push(`That is up to today; ${money(sum)} more is entered for later ${ahead.length === 1 ? "date" : "dates"} in the same period, ${money(total + sum)} with it.`);
+    }
+  }
   if (biggest && rows.length > 1) {
     out.push(`The largest was ${money(costOf(biggest))} on ${biggest.date}${biggest.description.trim() ? ` (${biggest.description.trim().slice(0, 50)})` : ""}.`);
   }

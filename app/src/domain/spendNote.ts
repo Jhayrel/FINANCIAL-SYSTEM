@@ -15,6 +15,14 @@
  *   - Only a change is worth a note: the month goes past its budget, an item
  *     goes past a limit the owner set, or the month goes past nine tenths of
  *     its budget. Each of those is said once a month, never on every save.
+ *     A limit is read from where the kind stands after the save, not from
+ *     whether this one save crossed it: a save of several cards, an edit or
+ *     a limit set after the kind was already over took it past its limit
+ *     and nothing was ever said (7 October 2026 limits audit).
+ *   - Spending paid with borrowed money is said every time, with whose money
+ *     it was and what of the owner's own is left (7 October 2026: "it warns
+ *     me like you're using that money from credit and you spend it to
+ *     treat"). Money held for someone, the same. See `borrowed.ts`.
  *   - A need (food, fuel, health, school, bills, home needs) is never judged.
  *     Its note says it is counted, and at most where the month's wants have
  *     room. Once the month is already over, saving a need says nothing.
@@ -30,15 +38,36 @@ import { assessMonth, budgetForMonth } from "./budget";
 import { categoryLimits } from "./budgetView";
 import { daysLeftInMonth, firstOfMonth, getMonth, getYear, lastOfMonth, monthName } from "./dates";
 import { formatMoney, type Centavos } from "./money";
-import { costOf, monthTotals, spendingAttribution, UNCATEGORISED } from "./totals";
-import { transferBucket } from "./transfers";
-import type { Budgets, IsoDate, Transaction } from "./types";
+import { costOf, monthTotals, UNCATEGORISED } from "./totals";
+import { limitKindOf, spendingTrackByKind } from "./kinds";
+import { borrowedMoney, lenderNames } from "./borrowed";
+import type { Debt } from "./debt";
+import type { Budgets, IsoDate, SpendingType, Transaction } from "./types";
 
 /** Things bought because they are needed, whatever the budget says. */
 export const NEEDS =
   /\b(food|groceries|grocery|rice|meals?|gas|fuel|diesel|health|medicine|medical|pharmacy|clinic|hospital|school|tuition|books?|home needs|household|rent|utilit\w*|electric\w*|water|wifi|internet|bills?|repairs?|transport\w*|fare|commute|parking|toll|emergency|load|baby|milk)\b/i;
 
-export type NoteStage = "crossed" | "limit" | "near" | "over-want";
+export type NoteStage = "borrowed" | "crossed" | "limit" | "near" | "over-want";
+
+/**
+ * Whether a kind of spending is a need. The owner marks each kind on the
+ * list as essential, an emergency or discretionary; the words are the guess
+ * only for a kind not marked.
+ */
+export function isNeed(name: string, spendingTypes: readonly Pick<SpendingType, "name" | "necessity">[] = []): boolean {
+  const marked = spendingTypes.find((t) => t.name.trim().toLowerCase() === name.trim().toLowerCase())?.necessity;
+  if (marked === "discretionary") return false;
+  if (marked === "essential" || marked === "emergency") return true;
+  return NEEDS.test(name);
+}
+
+/** What the note can see beyond the ledger: whose money is borrowed, which accounts are the owner's, and which kinds are needs. */
+export interface NoteContext {
+  readonly debts?: readonly Debt[] | undefined;
+  readonly accounts?: readonly string[] | undefined;
+  readonly spendingTypes?: readonly Pick<SpendingType, "name" | "necessity">[] | undefined;
+}
 
 export interface SpendNote {
   /** Said once: a note with an id already shown is not shown again. */
@@ -52,15 +81,14 @@ export interface SpendNote {
   readonly facts: readonly string[];
   /** A need: never judged. */
   readonly need: boolean;
+  /** Other notes this one already says, so they are not said again. */
+  readonly also?: readonly string[] | undefined;
 }
 
 const money = (c: Centavos): string => formatMoney(c);
 
-function kindOf(row: Transaction): string | null {
-  if (row.type === "Spending" && row.category === "Spending") return row.item.trim() || UNCATEGORISED;
-  if (row.type === "Transfer") return transferBucket(row) ?? null;
-  return null;
-}
+/** The kind a limit counts the row under: the spending track's own split (`kinds.ts`). */
+const kindOf = limitKindOf;
 
 /**
  * The note for what was just saved, or null when there is nothing worth
@@ -73,6 +101,7 @@ export function spendNoteFor(
   budgets: Budgets,
   asOf: IsoDate,
   shown: ReadonlySet<string>,
+  context: NoteContext = {},
 ): SpendNote | null {
   const month = asOf.slice(0, 7);
   const rows = saved.filter((t) => t.date.startsWith(month) && costOf(t) > 0);
@@ -88,7 +117,7 @@ export function spendNoteFor(
   const track = bills ? "billsSubs" : "spending";
   const kind = kindOf(main);
   const label = (main.item.trim() || kind || (bills ? main.category : "This")).replace(/^Uncategorised$/, "This entry");
-  const need = bills || NEEDS.test(`${main.item} ${kind ?? ""}`);
+  const need = bills || isNeed(kind ?? main.item, context.spendingTypes) || (!kind && NEEDS.test(main.item));
 
   const budget = budgetForMonth(budgets, year, m);
   const after = [...before, ...rows];
@@ -101,8 +130,8 @@ export function spendNoteFor(
 
   /** The wants this month with the most in them: where there is room, if any is wanted. */
   const wants = (): { words: string; count: number } => {
-    const list = [...spendingAttribution(after, range)]
-      .filter(([k, v]) => v > 0 && !NEEDS.test(k) && k !== UNCATEGORISED && !/transaction fee/i.test(k))
+    const list = [...spendingTrackByKind(after, range)]
+      .filter(([k, v]) => v > 0 && !isNeed(k, context.spendingTypes) && k !== UNCATEGORISED && !/transaction fee/i.test(k))
       .sort((a, b) => b[1] - a[1])
       .slice(0, 2);
     return { words: list.map(([k, v]) => `${k} ${money(v)}`).join(" and "), count: list.length };
@@ -110,7 +139,69 @@ export function spendNoteFor(
 
   const pick = (candidate: SpendNote | null): SpendNote | null => (candidate && !shown.has(candidate.id) ? candidate : null);
 
-  // ── 1. The month goes past its budget ────────────────────────────────────
+  // Every kind this save touched that is past its limit now, and not yet said.
+  const limits = categoryLimits(budgets[String(year)], m);
+  const pastLimit = [...new Set(rows.map(kindOf).filter((k): k is string => k !== null))]
+    .map((k) => ({ kind: k, limit: limits.get(k) ?? 0, now: spendingTrackByKind(after, range).get(k) ?? 0 }))
+    .filter((x) => x.limit > 0 && x.now > x.limit && !shown.has(`${month}:limit:${x.kind.toLowerCase()}`));
+
+  // ── 0. Borrowed money, or money held for someone, paid for it ───────────
+  if (context.debts && context.debts.length > 0 && context.accounts && context.accounts.length > 0) {
+    const b = borrowedMoney(after, context.debts, context.accounts);
+    const lent = new Map<string, number>();
+    const held = new Map<string, number>();
+    let fromLent = 0;
+    let fromHeld = 0;
+    for (const r of rows) {
+      const use = b.spent.get(r.id);
+      if (use) {
+        fromLent += use.amount;
+        for (const [id, v] of use.from) lent.set(id, (lent.get(id) ?? 0) + v);
+      }
+      const hold = b.spentHeld.get(r.id);
+      if (hold) {
+        fromHeld += hold.amount;
+        for (const [id, v] of hold.from) held.set(id, (held.get(id) ?? 0) + v);
+      }
+    }
+    if (fromLent > 0 || fromHeld > 0) {
+      const whose = fromLent > 0 ? lenderNames(lent, context.debts) : "";
+      const forWhom = fromHeld > 0 ? lenderNames(held, context.debts) : "";
+      const ownLeft = b.own;
+      const facts = [
+        `Saved: ${label} ${money(cost)}.`,
+        ...(fromLent > 0 ? [`${money(fromLent)} of it was borrowed money, from ${whose}: their own money in the accounts ran out first.`] : []),
+        ...(fromHeld > 0 ? [`${money(fromHeld)} of it was money held for ${forWhom}, which is not theirs.`] : []),
+        `Their own money left in their accounts: ${money(ownLeft)}. Borrowed money still in them: ${money(b.inHand)}.`,
+        need ? `${label} is a need.` : `${label} is not a need.`,
+      ];
+      const parts = [
+        fromLent > 0 ? `${money(fromLent)} of this ${money(cost)} ${label} was borrowed money, from ${whose}.` : "",
+        fromHeld > 0 ? `${money(fromHeld)} of it was money held for ${forWhom}, which has to go back.` : "",
+        `Your own money left: ${money(ownLeft)}${b.inHand > 0 ? `; borrowed still in your wallets: ${money(b.inHand)}` : ""}.`,
+        need ? "It is a need, so this is for knowing." : "",
+      ].filter(Boolean);
+      const extra = pastLimit.map((x) => `${x.kind} is ${money(x.now)}, past its ${money(x.limit)} limit.`);
+      const note = pick({
+        id: `${asOf}:borrowed:${main.id}`,
+        stage: "borrowed",
+        title: fromLent > 0 ? (need ? "Paid partly with borrowed money" : "A want paid with borrowed money") : "Paid with money held for someone",
+        text: [...parts, ...extra].join(" "),
+        facts: [...facts, ...extra],
+        need,
+        also: pastLimit.map((x) => `${month}:limit:${x.kind.toLowerCase()}`),
+      });
+      if (note) return note;
+    }
+  }
+
+  /*
+   * ── 1. The month goes past its budget ────────────────────────────────────
+   * Only the save that crosses it: once a month is over, a need says nothing
+   * more. `before` is the ledger as it stood just before this save, cards
+   * saved a moment earlier included (`App.tsx`), so a save of several cards
+   * crosses on the card that does it.
+   */
   if (now.budget > 0 && was.spent <= now.budget && now.spent > now.budget) {
     const past = now.spent - now.budget;
     const room = need && !bills ? wants() : { words: "", count: 0 };
@@ -125,23 +216,29 @@ export function spendNoteFor(
       : need
         ? `${label} ${money(cost)} takes ${name}'s spending ${money(past)} past its ${money(now.budget)} budget. It is a need, so it is counted and that is all.${room.words ? ` If you want to make up for it, ${room.words} ${room.count === 1 ? "is this month's biggest want" : "are this month's biggest wants"}.` : ""}`
         : `${label} ${money(cost)} takes ${name}'s spending ${money(past)} past its ${money(now.budget)} budget, with ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left. Your call; the Budget screen shows where the month went.`;
-    const note = pick({ id: `${month}:${track}:crossed`, stage: "crossed", title: `${name} is past its ${trackName} budget`, text, facts, need });
+    // A kind past its limit in the same save is said in the same note (7 October 2026 limits audit).
+    const extra = pastLimit.map((x) => `${x.kind} is ${money(x.now)}, past its ${money(x.limit)} limit too.`);
+    const note = pick({
+      id: `${month}:${track}:crossed`,
+      stage: "crossed",
+      title: `${name} is past its ${trackName} budget`,
+      text: [text, ...extra].join(" "),
+      facts: [...facts, ...extra],
+      need,
+      also: pastLimit.map((x) => `${month}:limit:${x.kind.toLowerCase()}`),
+    });
     if (note) return note;
   }
 
-  // ── 2. An item goes past a limit the owner set ───────────────────────────
-  const limit = kind ? categoryLimits(budgets[String(year)], m).get(kind) ?? null : null;
-  if (kind && limit !== null && limit > 0) {
-    const kindWas = spendingAttribution(before, range).get(kind) ?? 0;
-    const kindNow = spendingAttribution(after, range).get(kind) ?? 0;
-    if (kindWas <= limit && kindNow > limit) {
-      const facts = [`Saved: ${label} ${money(cost)}.`, `${kind} this month is now ${money(kindNow)}, past the limit of ${money(limit)} they set for it.`, need ? `${kind} is a need.` : `${kind} is not a need.`];
-      const text = need
-        ? `${kind} is now ${money(kindNow)} this month, past the ${money(limit)} limit you set. It is a need, so this is for knowing, not for stopping.`
-        : `${kind} is now ${money(kindNow)} this month, past the ${money(limit)} limit you set for it.`;
-      const note = pick({ id: `${month}:limit:${kind.toLowerCase()}`, stage: "limit", title: `${kind} is past its limit`, text, facts, need });
-      if (note) return note;
-    }
+  // ── 2. A kind past a limit the owner set ─────────────────────────────────
+  for (const x of pastLimit) {
+    const kindNeed = isNeed(x.kind, context.spendingTypes);
+    const facts = [`Saved: ${label} ${money(cost)}.`, `${x.kind} this month is now ${money(x.now)}, past the limit of ${money(x.limit)} they set for it.`, kindNeed ? `${x.kind} is a need.` : `${x.kind} is not a need.`];
+    const text = kindNeed
+      ? `${x.kind} is now ${money(x.now)} this month, past the ${money(x.limit)} limit you set. It is a need, so this is for knowing, not for stopping.`
+      : `${x.kind} is now ${money(x.now)} this month, past the ${money(x.limit)} limit you set for it.`;
+    const note = pick({ id: `${month}:limit:${x.kind.toLowerCase()}`, stage: "limit", title: `${x.kind} is past its limit`, text, facts, need: kindNeed });
+    if (note) return note;
   }
 
   // ── 3. The month goes past nine tenths of its budget ─────────────────────
@@ -162,7 +259,7 @@ export function spendNoteFor(
   const notSmall = cost >= 50_000 || (now.budget > 0 && cost * 20 >= now.budget);
   if (!need && now.budget > 0 && was.spent > now.budget && notSmall) {
     const over = now.spent - now.budget;
-    const kindNow = kind ? spendingAttribution(after, range).get(kind) ?? 0 : 0;
+    const kindNow = kind ? spendingTrackByKind(after, range).get(kind) ?? 0 : 0;
     const facts = [
       `Saved: ${label} ${money(cost)}.`,
       `${name}'s ${trackName} was already past its ${money(now.budget)} budget; it is now ${money(over)} past it.`,

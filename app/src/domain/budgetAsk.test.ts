@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asksRatherThanTells, editedAsk, isBudgetForm, namesBudgetCommand, namesMoneyFigure, planBudget, tracksIn, proposedBudgetIn, proposedMonthIn, readBudgetAsk, respell, saysMoneyMoved, spanIn } from "./budgetAsk";
+import { asksRatherThanTells, editedAsk, limitTalk, isBudgetForm, namesBudgetCommand, namesMoneyFigure, planBudget, tracksIn, proposedBudgetIn, proposedMonthIn, readBudgetAsk, respell, saysMoneyMoved, spanIn } from "./budgetAsk";
 import type { Budgets, ReferenceLists } from "./types";
 
 const reference: ReferenceLists = {
@@ -209,5 +209,62 @@ describe("may, the verb", () => {
     expect(proposedMonthIn("I recommend a budget of PHP 9,000.00 for May.", "2026-10-05")).toMatchObject({ month: 5 });
     expect(proposedMonthIn("I recommend PHP 9,000.00 from May to July.", "2026-10-05")).toMatchObject({ month: 5, toMonth: 7 });
     expect(proposedMonthIn("I recommend PHP 9,000.00 in May 2027.", "2026-10-05")).toMatchObject({ year: 2027, month: 5 });
+  });
+});
+
+/*
+ * 7 October 2026 limits audit: each of these did something other than what
+ * was asked, from a card for the whole spending budget to no card at all.
+ */
+describe("a limit said in the chat", () => {
+  const asOf = "2026-10-06";
+  const refs = { ...reference, spendingTypes: [...reference.spendingTypes, { name: "Subscriptions", remark: "" }] };
+  const read = (said: string) => readBudgetAsk(said, refs, asOf);
+
+  it("moves the limit set by the figure, never below nothing", () => {
+    expect(read("raise my food limit by 500")).toMatchObject({ kind: "limit", name: "Food", value: 50_000, by: true });
+    expect(read("lower food limit by 500")).toMatchObject({ kind: "limit", name: "Food", value: -50_000, by: true });
+    const set = { "2026": { spending: Array(12).fill(0), billsSubs: Array(12).fill(0), categories: { Food: [0, 0, 0, 0, 0, 0, 0, 0, 0, 300_000, 300_000, 300_000] } } } as unknown as Budgets;
+    const raised = planBudget(read("raise my food limit by 500")!, set, asOf, AT);
+    expect(raised.outcome.plan.categories?.["Food"]?.slice(9)).toEqual([350_000, 350_000, 350_000]);
+    expect(editedAsk(read("raise my food limit by 500")!, { limit: 400_000 })).not.toHaveProperty("by");
+  });
+
+  it("reads a kind's own budget as its limit, plurals included", () => {
+    expect(read("set food budget to 3000")).toMatchObject({ kind: "limit", name: "Food", value: 300_000 });
+    expect(read("limit foods to 3000")).toMatchObject({ kind: "limit", name: "Food", value: 300_000 });
+    expect(read("limit money send to 500")).toMatchObject({ kind: "limit", name: "Money Send", value: 50_000 });
+    expect(read("set my spending budget to 9000")).toMatchObject({ kind: "tracks", spending: 900_000 });
+  });
+
+  it("never turns a limit on an unknown kind into the whole spending budget", () => {
+    expect(read("limit grab to 500")).toBeNull();
+    expect(limitTalk("limit grab to 500", ["Food"])).toEqual({ kind: "unknown", name: "grab" });
+    expect(limitTalk("limit subscriptions to 500", ["Food"])).toEqual({ kind: "structural", name: "subscriptions" });
+    expect(read("limit subscriptions to 500")).not.toMatchObject({ kind: "limit" });
+  });
+
+  it("removes when told to remove, whatever figure is said", () => {
+    expect(read("remove the 3000 limit on food")).toMatchObject({ kind: "limit", name: "Food", value: 0 });
+    expect(read("delete the 3k food limit")).toMatchObject({ kind: "limit", value: 0 });
+  });
+
+  it("answers a question about a limit rather than making a card", () => {
+    expect(read("did I go over my 3000 food limit?")).toBeNull();
+    expect(read("how much of the 3000 food limit is left")).toBeNull();
+    expect(read("can you limit food to 3000?")).toMatchObject({ kind: "limit", value: 300_000 });
+  });
+
+  it("reads 2000 after 'to' as money, and a year beside a month as a year", () => {
+    expect(read("limit food to 2000")).toMatchObject({ kind: "limit", value: 200_000 });
+    expect(read("set a 2000 limit on food")).toMatchObject({ kind: "limit", value: 200_000 });
+    expect(read("limit food to 3000 in october 2026")).toMatchObject({ kind: "limit", value: 300_000, month: 10 });
+  });
+
+  it("runs from this month to December, as the Budget screen does", () => {
+    expect(read("limit food to 3000 until december")).toMatchObject({ month: 10, scope: "rest" });
+    expect(read("limit food to 3000")).toMatchObject({ month: 10, scope: "rest" });
+    expect(read("remove the food limit")).toMatchObject({ value: 0, scope: "rest" });
+    expect(read("limit food to 3000 this month only")).toMatchObject({ scope: "month" });
   });
 });

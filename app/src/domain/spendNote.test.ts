@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import { acceptableWording, spendNoteFor } from "./spendNote";
 import type { Budgets, Transaction } from "./types";
+import type { Debt } from "./debt";
 
 let n = 0;
 const spend = (date: string, item: string, pesos: number, category: "Spending" | "Bills" = "Spending"): Transaction => {
@@ -97,5 +98,45 @@ describe("the model's wording", () => {
   it("is thrown away for a figure it made up, or for preaching", () => {
     expect(acceptableWording("Food ₱150.00 puts you ₱2,000.00 over.", note)).toBe(false);
     expect(acceptableWording("You should stop spending on food!", note)).toBe(false);
+  });
+});
+
+/*
+ * 7 October 2026: "it warns me like you're using that money from credit and
+ * you spend it to treat". And the limits audit: a limit crossed in a save
+ * that also crossed the budget, or set after the kind was over, was never said.
+ */
+describe("borrowed money and limits", () => {
+  const credit = { id: "maya-credit", name: "Maya Credit", kind: "payable", counterparty: "Maya", openedDate: "2026-01-01", wallet: "Maya", interestType: "none", interestRate: 0, notes: "", archived: false } as Debt;
+  const ctx = { debts: [credit], accounts: ["Cash", "Maya"], spendingTypes: [{ name: "Treat", necessity: "discretionary" as const }, { name: "Food", necessity: "essential" as const }] };
+  const draw = { ...spend("2026-09-26", "x", 5000), type: "Debt", category: "", item: "", fromWallet: "", toWallet: "Maya", debtId: "maya-credit", debtEffect: "draw", id: "draw" } as Transaction;
+  const own = { ...spend("2026-09-20", "x", 500), type: "Revenue", category: "Revenue", item: "Allowance", fromWallet: "Maya", id: "own" } as Transaction;
+
+  it("says how much of a treat was borrowed, and whose it was", () => {
+    const treat = { ...spend(asOf, "Treat", 1_200), fromWallet: "Maya", id: "treat" } as Transaction;
+    const note = spendNoteFor([treat], [own, draw], {}, asOf, new Set(), ctx);
+    expect(note?.stage).toBe("borrowed");
+    expect(note?.text).toContain("₱700.00 of this ₱1,200.00 Treat was borrowed money, from Maya Credit.");
+    expect(note?.text).toContain("Your own money left: ₱0.00; borrowed still in your wallets: ₱4,300.00.");
+    expect(note?.need).toBe(false);
+  });
+
+  it("is calm about a need", () => {
+    const food = { ...spend(asOf, "Food", 800), fromWallet: "Maya", id: "food" } as Transaction;
+    const note = spendNoteFor([food], [own, draw], {}, asOf, new Set(), ctx);
+    expect(note?.text).toContain("It is a need, so this is for knowing.");
+  });
+
+  it("says nothing when their own money paid", () => {
+    const food = { ...spend(asOf, "Food", 300), fromWallet: "Maya", id: "food" } as Transaction;
+    expect(spendNoteFor([food], [own, draw], {}, asOf, new Set(), ctx)?.stage).not.toBe("borrowed");
+  });
+
+  it("says a limit already past, once, when that kind is next saved", () => {
+    const set = { "2026": { spending: Array(12).fill(0), billsSubs: Array(12).fill(0), categories: { Treat: [0, 0, 0, 0, 0, 0, 0, 0, 100_000, 0, 0, 0] } } } as unknown as Budgets;
+    const earlier = spend("2026-09-10", "Treat", 1_500);
+    const note = spendNoteFor([spend(asOf, "Treat", 100)], [earlier], set, asOf, new Set());
+    expect(note?.stage).toBe("limit");
+    expect(spendNoteFor([spend(asOf, "Treat", 100)], [earlier], set, asOf, new Set([note!.id]))).toBeNull();
   });
 });

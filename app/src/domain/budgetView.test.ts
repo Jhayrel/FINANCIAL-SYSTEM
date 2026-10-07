@@ -86,7 +86,12 @@ const spend = (date: string, item: string, total: number): Transaction => ({
 });
 
 describe("where the month went", () => {
-  it("is the month's spending attribution, biggest first, and nothing else", () => {
+  /*
+   * The spending track, by kind, so the kinds add up to the spending figure
+   * above them: the workbook's attribution plus write-offs, debt fees and
+   * interest, which it leaves out (7 October 2026 limits audit).
+   */
+  it("is the month's spending track by kind, biggest first, and nothing else", () => {
     const lines = categoryLines(fx.transactions, YEAR, MONTH);
     const attributed = [
       ...spendingAttribution(fx.transactions, {
@@ -96,8 +101,10 @@ describe("where the month went", () => {
     ]
       .filter((v) => v > 0)
       .reduce((a, v) => a + v, 0);
+    const t = monthTotals(fx.transactions, YEAR, MONTH);
 
-    expect(lines.reduce((a, l) => a + l.spent, 0)).toBe(attributed);
+    expect(lines.reduce((a, l) => a + l.spent, 0)).toBe(t.spending + t.fees + t.interest);
+    expect(lines.reduce((a, l) => a + l.spent, 0)).toBeGreaterThanOrEqual(attributed);
     expect(lines.every((l, i) => i === 0 || (lines[i - 1]?.spent ?? 0) >= l.spent)).toBe(true);
   });
 

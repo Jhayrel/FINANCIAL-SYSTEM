@@ -19,6 +19,7 @@ import { budgetForMonth, budgetForYear } from "./budget";
 import { monthLock, revisionSummary, saveLimit, saveTracks, type SaveOutcome } from "./budgetLock";
 import type { PlanScope } from "./budgetView";
 import { MONTH_NAMES } from "./dates";
+import { limitable } from "./kinds";
 import { formatMoney, type Centavos } from "./money";
 import type { Budgets, IsoDate, ReferenceLists } from "./types";
 
@@ -41,6 +42,8 @@ export type BudgetAsk = (
       readonly name: string;
       readonly value: Centavos;
       readonly scope: PlanScope;
+      /** The figure is a change to the limit set ("raise my food limit by 500"), signed, not the new limit. */
+      readonly by?: boolean | undefined;
     }
 ) & {
   /** The last month of a range ("September to December"), written month by month. */
@@ -176,6 +179,8 @@ function monthIn(raw: string, asOf: IsoDate): { year: number; month: number } {
   return { year, month: now };
 }
 
+const SCOPE_WORDS = /\b(whole|all|entire)\s+year\b|\bevery month (of|in) \d{4}\b|\b(rest of the year|from now on|every month|each month|onwards|until december)\b/i;
+
 function scopeIn(text: string): PlanScope {
   if (/\b(whole|all|entire)\s+year\b|\bevery month (of|in) \d{4}\b/i.test(text)) return "year";
   if (/\b(rest of the year|from now on|every month|each month|onwards|until december)\b/i.test(text)) return "rest";
@@ -261,6 +266,15 @@ export function spanIn(said: string, asOf: IsoDate): BudgetSpan | null {
   }
 
   if (/\b(long[- ]?term|from now on|onwards?|moving forward|going forward|for good|permanently|every month|each month|monthly from now|rest of (?:the )?year|until december|till december|to december|all (?:the )?(?:remaining|coming|next) months)\b/.test(text)) {
+    /*
+     * "until december" names where it ends, not where it starts: read as the
+     * month, it set December only (7 October 2026 limits audit). From this
+     * month, unless another month is named as the start.
+     */
+    const others = text.replace(/\b(?:until|till|to)\s+december\b/g, " ");
+    if (others !== text && !new RegExp(String.raw`\b${MONTH_WORD}\b|\b(this|next) month\b`, "i").test(others)) {
+      return { year, month: now, scope: "rest", anchored: true };
+    }
     return { ...start(), scope: "rest", anchored };
   }
 
@@ -436,7 +450,34 @@ export function asksRatherThanTells(said: string): boolean {
   return opinion && !polite;
 }
 
-export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: IsoDate): BudgetAsk | null {
+/**
+ * What a "limit X to ..." sentence limits, when it is not a kind a limit can
+ * count.
+ *
+ * 7 October 2026 limits audit: "limit money send to 500" and "limit grab to
+ * 500" became a card setting the whole spending budget to PHP 500.00, since
+ * only the kinds on Settings' list were known; "limit subscriptions to 500"
+ * made a limit no row could ever reach, since subscriptions are not filed as
+ * a kind of spending. "structural" names a track (subscriptions, bills),
+ * "unknown" a kind with no rows and no list entry.
+ */
+export function limitTalk(said: string, kinds: readonly string[]): { readonly kind: "structural" | "unknown"; readonly name: string } | null {
+  const m = /\b(?:limit|cap)\s+(?:on\s+|for\s+)?(?:my\s+|the\s+|ang\s+)?([a-z][a-z' ]{0,30}?)\s+(?:to|at|of|=)\s/i.exec(` ${respell(said)} `);
+  const target = m?.[1]?.trim() ?? "";
+  if (!target || /^(?:spending|spend|budget|my budget|the budget|spending budget|monthly|month|overall|total|it|that|this)$/i.test(target)) return null;
+  if (/^(?:bills?|subscriptions?|subs|bills and subscriptions)$/i.test(target)) return { kind: "structural", name: target };
+  const norm = (k: string): string => k.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (kinds.some((k) => norm(k) === norm(target))) return null;
+  return { kind: "unknown", name: target };
+}
+
+/** Kinds a limit can be set on: the list, the two transfer kinds, and any kind already limited. */
+export function limitKinds(reference: Pick<ReferenceLists, "spendingTypes">, known: readonly string[] = []): string[] {
+  const all = [...reference.spendingTypes.map((t) => t.name), "Money Send", "Transaction Fee", ...known];
+  return [...new Set(all.map((k) => k.trim()).filter((k) => k && limitable(k)))];
+}
+
+export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: IsoDate, known: readonly string[] = []): BudgetAsk | null {
   if (asksRatherThanTells(said)) return null;
   // "add buget same as last month": the misspellings that came in, read as the word.
   const text = respell(said).replace(/\b(buget|budjet|bugdet|budgt|budet|bujet|budgets?)\b/gi, "budget");
@@ -453,22 +494,68 @@ export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: Iso
     return { kind: "copy", year, month, scope, ...(toMonth ? { toMonth } : {}) };
   }
 
-  const kinds = [...reference.spendingTypes.map((t) => t.name)].sort((a, b) => b.length - a.length);
+  const kinds = limitKinds(reference, known).sort((a, b) => b.length - a.length);
   const flat = ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
-  const kind = kinds.find((k) => flat.includes(` ${k.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `));
-  // Dates and counts of months are not the figure: "for the next 3 months" is not PHP 3.00.
+  const wordsOf = (k: string): string => k.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  // "foods", "transaction fees": a plural is the kind (7 October 2026 limits audit).
+  const kind = kinds.find((k) => [` ${wordsOf(k)} `, ` ${wordsOf(k)}s `, ` ${wordsOf(k)}es `].some((w) => flat.includes(w)));
+  // A limit on something no kind is called never becomes a change to the whole spending budget.
+  if (/\b(limit|cap)\b/i.test(text) && !kind && limitTalk(text, kinds) !== null) return null;
+  /*
+   * Dates and counts of months are not the figure: "for the next 3 months"
+   * is not PHP 3.00. A year is a year beside a month or after in, of or for;
+   * after "to", "at", "a" or "limit" it is money, so "limit food to 2000" is
+   * PHP 2,000.00 and not the year (7 October 2026 limits audit).
+   */
   const withoutDates = text
-    .replace(/\b20\d{2}\b/g, " ")
+    .replace(/\b20\d{2}\b/g, (y: string, at: number, whole: string) => {
+      const before = whole.slice(Math.max(0, at - 14), at);
+      const money = /(?:\bto|\bat|\ba|₱|\bphp|\blimit(?: of)?|\bcap(?: of)?|\bbudget(?: of)?|\bby)\s*$/i.test(before);
+      const dated = new RegExp(String.raw`\b${MONTH_TOKEN}\s*$`, "i").test(before);
+      return money && !dated ? y : " ";
+    })
     .replace(/\b\d{1,2}\s+months?\b/gi, " ")
     .replace(new RegExp(String.raw`\b${MONTH_TOKEN}\s+\d{1,2}\b`, "gi"), " ");
   const value = figure(withoutDates);
-
-  if (/\b(limit|cap)\b/i.test(text) && kind) {
-    if (value === null && !/\b(remove|clear|no limit|delete)\b/i.test(text)) return null;
-    return { kind: "limit", year, month, name: kind, value: value ?? 0, scope, ...(toMonth ? { toMonth } : {}) };
-  }
   // "raise spending by 1000", "cut bills by 200": a change to what is there, not a new figure.
   const by = /\bby\s+(?:₱|php\s*)?\d/i.test(text) ? (/\b(lower|reduce|cut|decrease|less|minus|bawas)\w*/i.test(text) ? -1 : /\b(increase|raise|add|more|plus|dagdag)\w*/i.test(text) ? 1 : 0) : 0;
+  /*
+   * "set food budget to 3000" is a limit on Food: it replaced the month's
+   * whole spending budget with PHP 3,000.00 (7 October 2026 limits audit).
+   */
+  const kindWords = kind ? wordsOf(kind) : "";
+  const kindBudget =
+    kind !== undefined &&
+    !/\b(spending|bills?|subscriptions?)\s+budget\b/i.test(text) &&
+    (flat.includes(` ${kindWords} budget `) || flat.includes(` ${kindWords}s budget `) || new RegExp(String.raw`\bbudget (?:for|on|of|sa) (?:my |the )?${kindWords}\b`).test(flat));
+
+  if ((/\b(limit|cap)\b/i.test(text) || kindBudget) && kind) {
+    // A question about a limit is answered, never made into a card: "did I go over my 3000 food limit?"
+    const polite = /\b(?:can|could|would|will) you\b|\bplease\b|\bpls\b/i.test(said);
+    if ((/\?\s*$/.test(said) || /^\s*(?:did|am|is|are|was|were|how|what|do|does|have|has|why|when|which)\b/i.test(said)) && !polite) return null;
+    // Remove means remove, whatever figure the sentence also names: "remove the 3000 limit on food".
+    const removing = /\b(remove|clear|no limit|delete|take off|drop)\b/i.test(text);
+    if (value === null && !removing) return null;
+    /*
+     * With no months said, a limit is set, or taken off, from this month to
+     * December, as the Budget screen does. "remove the food limit" cleared
+     * October only and the limit came back on 1 November (7 October 2026
+     * limits audit).
+     */
+    const saidScope = span?.scope ?? (/\b(?:this month|only|just)\b/i.test(text) ? "month" : SCOPE_WORDS.test(text) ? scopeIn(text) : null);
+    const limitScope: PlanScope = saidScope ?? (month < 12 ? "rest" : "month");
+    const amount = removing ? 0 : (value ?? 0);
+    return {
+      kind: "limit",
+      year,
+      month,
+      name: kind,
+      value: by !== 0 && !removing ? by * amount : amount,
+      scope: limitScope,
+      ...(by !== 0 && !removing ? { by: true } : {}),
+      ...(toMonth ? { toMonth } : {}),
+    };
+  }
   if (namesLine) {
     const sign = (c: Centavos | undefined): Centavos | undefined => (c === undefined ? undefined : by < 0 ? -c : c);
     return {
@@ -501,7 +588,10 @@ export type CardFigures = { readonly spending: Centavos; readonly billsSubs: Cen
 export function editedAsk(ask: BudgetAsk, figures: CardFigures): BudgetAsk {
   const span = { year: ask.year, month: ask.month, scope: ask.scope, ...(ask.toMonth ? { toMonth: ask.toMonth } : {}) };
   if ("limit" in figures) {
-    return ask.kind === "limit" ? { ...ask, value: Math.max(0, figures.limit) } : ask;
+    // A typed figure is the new limit, not a change to it.
+    if (ask.kind !== "limit") return ask;
+    const { by: _change, ...rest } = ask;
+    return { ...rest, value: Math.max(0, figures.limit) };
   }
   return { kind: "tracks", ...span, spending: Math.max(0, figures.spending), billsSubs: Math.max(0, figures.billsSubs) };
 }
@@ -536,8 +626,14 @@ export function planBudget(ask: BudgetAsk, budgets: Budgets, asOf: IsoDate, at: 
   let words: string;
 
   if (ask.kind === "limit") {
-    outcome = saveLimit(plan, ask.year, ask.month, ask.name, ask.value, ask.scope, asOf, at);
-    words = ask.value > 0 ? `${ask.name} limited to ${formatMoney(ask.value)} a month, ${span}.` : `The limit on ${ask.name} removed, ${span}.`;
+    // "raise my food limit by 500": the limit set, moved by the figure, never below nothing.
+    const was = plan.categories?.[ask.name]?.[ask.month - 1] ?? 0;
+    const value = ask.by ? Math.max(0, was + ask.value) : ask.value;
+    outcome = saveLimit(plan, ask.year, ask.month, ask.name, value, ask.scope, asOf, at);
+    words =
+      value > 0
+        ? `${ask.name} limited to ${formatMoney(value)} a month${ask.by ? `, was ${formatMoney(was)}` : ""}, ${span}.`
+        : `The limit on ${ask.name} removed, ${span}.`;
   } else {
     const current = budgetForMonth(budgets, ask.year, ask.month);
     const value = valueFor(ask, budgets, ask.month);
@@ -584,7 +680,7 @@ function planRange(ask: BudgetAsk, budgets: Budgets, start: ReturnType<typeof bu
     }
     const out =
       ask.kind === "limit"
-        ? saveLimit(plan, ask.year, m, ask.name, ask.value, "month", asOf, at)
+        ? saveLimit(plan, ask.year, m, ask.name, ask.by ? Math.max(0, (plan.categories?.[ask.name]?.[m - 1] ?? 0) + ask.value) : ask.value, "month", asOf, at)
         : saveTracks(plan, ask.year, m, valueFor(ask, budgets, m), "month", asOf, at);
     if (out.refused) {
       skipped.push(m);
@@ -601,9 +697,11 @@ function planRange(ask: BudgetAsk, budgets: Budgets, start: ReturnType<typeof bu
   const value = valueFor(ask, budgets, ask.month);
   const words =
     ask.kind === "limit"
-      ? ask.value > 0
-        ? `${ask.name} limited to ${formatMoney(ask.value)} a month, ${span}.`
-        : `The limit on ${ask.name} removed, ${span}.`
+      ? ask.by
+        ? `${ask.name} limit ${ask.value >= 0 ? "raised" : "lowered"} by ${formatMoney(Math.abs(ask.value))} a month, ${span}.`
+        : ask.value > 0
+          ? `${ask.name} limited to ${formatMoney(ask.value)} a month, ${span}.`
+          : `The limit on ${ask.name} removed, ${span}.`
       : ask.kind === "copy"
         ? `${span}: the same budget as ${MONTH_NAMES[(ask.month + 10) % 12] ?? "the month before"}, ${formatMoney(value.spending)} for spending and ${formatMoney(value.billsSubs)} for bills and subscriptions each month.`
         : `${span}: ${formatMoney(value.spending)} for spending and ${formatMoney(value.billsSubs)} for bills and subscriptions each month.`;

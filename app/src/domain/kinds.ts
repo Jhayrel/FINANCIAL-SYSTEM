@@ -24,8 +24,9 @@
 
 import type { Debt } from "./debt";
 import type { Centavos } from "./money";
-import { costOf, writtenOffAsSpending } from "./totals";
-import type { RankedAmount, Transaction } from "./types";
+import { costOf, inRange, spendingAttribution, UNCATEGORISED, writtenOffAsSpending } from "./totals";
+import { transferBucket } from "./transfers";
+import type { DateRange, RankedAmount, Transaction } from "./types";
 
 /**
  * The name a row's cost is filed under.
@@ -78,3 +79,66 @@ export function costByKind(
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .map(([name, amount]) => ({ name, amount }));
 }
+
+// ── The spending track, by kind: what a limit is held to ───────────────────
+
+/**
+ * The kind a row's spending-track cost is filed under, for a limit, or null
+ * when the row costs the spending track nothing.
+ *
+ * The Budget screen's kinds, the note after saving and the Add form's limit
+ * line read only spending rows and transfers. Food bought for someone and
+ * written off counted as Food on the Dashboard and in the spending track,
+ * and never against the Food limit, which said there was room left when
+ * there was none (7 October 2026 limits audit). Bills and subscriptions are
+ * not here: they have their own track and are followed one by one.
+ */
+export function limitKindOf(t: Transaction): string | null {
+  if (t.type === "Spending") return t.category === "Spending" ? t.item.trim() || UNCATEGORISED : null;
+  if (t.type === "Transfer") return transferBucket(t);
+  if (t.type === "Debt") {
+    if (writtenOffAsSpending(t) && t.category === "Spending") return t.item.trim() || "Money Send";
+    if (t.fee > 0) return "Transaction Fee";
+  }
+  return null;
+}
+
+/**
+ * The spending track split by kind, so the kinds add up to the track.
+ *
+ * `spendingAttribution` (the workbook's split, which the parity tests hold)
+ * plus what it leaves out of the track: money written off for someone under
+ * a kind of spending, the fee to send a debt payment, and what a lender
+ * added, named after the lender. With these the Budget screen's "Where it
+ * went" came PHP 500.00 short of the spending figure above it (October 2026,
+ * a write-off with no kind, which is Money Send).
+ */
+export function spendingTrackByKind(
+  transactions: readonly Transaction[],
+  range?: DateRange,
+  debts: readonly Debt[] = [],
+): Map<string, Centavos> {
+  const out = spendingAttribution(transactions, range);
+  const add = (name: string, amount: Centavos): void => {
+    if (amount !== 0) out.set(name, (out.get(name) ?? 0) + amount);
+  };
+  for (const t of inRange(transactions, range)) {
+    if (t.type !== "Debt") continue;
+    if (writtenOffAsSpending(t) && t.category === "Spending") add(t.item.trim() || "Money Send", t.amount);
+    if (t.debtEffect === "interest" || t.debtEffect === "fee" || t.debtEffect === "charge") {
+      add(`Interest and fees, ${debts.find((d) => d.id === t.debtId)?.name ?? "a debt"}`, t.amount);
+    }
+    if (t.fee > 0) add("Transaction Fee", t.fee);
+  }
+  return out;
+}
+
+/**
+ * Whether a limit can count anything under this name. Bills and
+ * subscriptions are not filed as kinds of spending: a limit on
+ * "Subscriptions" read PHP 0.00 while Spotify was paid, because no spending
+ * row is ever called that (7 October 2026 limits audit). They are budgeted
+ * by their own track and followed one by one.
+ */
+export const limitable = (name: string): boolean =>
+  !/^(?:bills?|subscriptions?|spending|revenue|income|transfer|debt|opening|paid|received|pending)$/i.test(name.trim());

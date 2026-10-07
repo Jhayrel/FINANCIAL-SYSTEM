@@ -276,18 +276,55 @@ export function undoLast(
     return refuse(plan, `${monthName(month)} ${year} is closed. Edit it with a reason instead.`);
   }
   const reason = "Undid the last change";
-  return last.what === "tracks"
-    ? saveTracks(
-        plan,
-        year,
-        month,
-        { spending: last.wasSpending ?? 0, billsSubs: last.wasBillsSubs ?? 0 },
-        "month",
-        asOf,
-        at,
-        reason,
-      )
-    : saveLimit(plan, year, month, last.name ?? "", last.wasLimit ?? 0, "month", asOf, at, reason);
+  /*
+   * A limit whose kind was renamed or merged since: putting the old figure
+   * back under the old name made a limit on a kind no row uses, or did
+   * nothing while saying it had (7 October 2026 limits audit). Refused, with
+   * where to change it instead.
+   */
+  if (last.what === "limit") {
+    const name = last.name ?? "";
+    const now = plan.categories?.[name]?.[month - 1] ?? 0;
+    if (now !== (last.limit ?? 0)) {
+      return refuse(plan, `The ${name} limit has changed since, by a rename or another edit, so there is nothing to undo safely. Change it on its row instead.`);
+    }
+  }
+  /*
+   * Every month the same save wrote. A limit saved from October to December
+   * was undone in October only, and the screen said the budget was back as
+   * it was; on 1 November the limit returned (7 October 2026 limits audit).
+   * A month changed again since keeps its newer change.
+   */
+  const sameSave = (r: BudgetRevision | undefined): boolean =>
+    r !== undefined && r.at === last.at && r.what === last.what && (r.name ?? "") === (last.name ?? "");
+  const months = [month];
+  for (let m = 1; m <= 12; m += 1) {
+    if (m !== month && sameSave(monthHistory(plan, m)[0])) months.push(m);
+  }
+  let current = plan;
+  const written: number[] = [];
+  const skipped: number[] = [];
+  const revisions: BudgetRevision[] = [];
+  for (const m of months.sort((a, b) => a - b)) {
+    const r = monthHistory(current, m)[0]!;
+    if (m !== month && monthLock(year, m, asOf).state !== "open") {
+      skipped.push(m);
+      continue;
+    }
+    const outcome =
+      r.what === "tracks"
+        ? saveTracks(current, year, m, { spending: r.wasSpending ?? 0, billsSubs: r.wasBillsSubs ?? 0 }, "month", asOf, at, reason)
+        : saveLimit(current, year, m, r.name ?? "", r.wasLimit ?? 0, "month", asOf, at, reason);
+    if (outcome.refused) {
+      if (m === month) return outcome;
+      skipped.push(m);
+      continue;
+    }
+    current = outcome.plan;
+    written.push(...outcome.written);
+    revisions.push(...outcome.revisions);
+  }
+  return { plan: current, written, skipped, revisions };
 }
 
 /** Whether a month's budget was set after it ended, or corrected once closed. */

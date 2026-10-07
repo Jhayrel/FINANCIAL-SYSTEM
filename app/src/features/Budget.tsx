@@ -86,6 +86,7 @@ import {
   type PlanSuggestions,
 } from "../domain/budgetView";
 import type { Debt } from "../domain/debt";
+import { limitable } from "../domain/kinds";
 import { cashFlow } from "../domain/forecast";
 import type { MonthOutlook } from "../domain/outlook";
 import { getMonth, getYear, MONTH_NAMES } from "../domain/dates";
@@ -120,6 +121,10 @@ interface Note {
   readonly text: string;
   readonly over: boolean;
 }
+
+/** "October", "October and November", "October, November and December". */
+const listWords = (xs: readonly string[]): string =>
+  xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
 
 const monthLabel = (m: number): string => MONTH_NAMES[m - 1] ?? "";
 
@@ -226,11 +231,11 @@ export function Budget({
   const m = useMemo(
     () => ({
       view: monthPlanView(transactions, budgets, year, month, asOf),
-      lines: categoryLines(transactions, year, month, 3, limits),
+      lines: categoryLines(transactions, year, month, 3, limits, debts),
       bills: monthBills(transactions, reference, year, month, asOf),
       suggestions: planSuggestions(transactions, reference, budgets, year, month, asOf),
     }),
-    [transactions, budgets, reference, year, month, asOf, limits],
+    [transactions, budgets, reference, year, month, asOf, limits, debts],
   );
 
   const { view, lines, bills, suggestions } = m;
@@ -242,6 +247,20 @@ export function Budget({
   const spentByKind = lines.reduce((s, l) => s + l.spent, 0);
   const limitsTotal = [...limits.values()].reduce((s, v) => s + v, 0);
   const limitsOpen = lock.state !== "closed";
+  /*
+   * A closed month's limit is still corrected, with a reason, as its budget
+   * is (rules B5 and B7). Every limit control was hidden once a month
+   * closed (7 October 2026 limits audit).
+   */
+  const limitsClosed = lock.state === "closed";
+  /*
+   * The kinds shown: the top eight, and every kind with a limit wherever it
+   * ranks. A limit set on a kind with nothing spent yet sorted last and
+   * vanished behind "Show all" the moment it was saved, and one over its
+   * limit could sit there unseen (7 October 2026 limits audit).
+   */
+  const shown = allCategories ? lines : lines.filter((l, i) => i < TOP_CATEGORIES || l.limit !== null || l.name === limitFor);
+  const overLimit = lines.filter((l) => l.limit !== null && l.spent > l.limit);
 
   const unnamedBills = view.phase === "future" ? 0 : a.billsSubs.spent - bills.paid;
 
@@ -252,9 +271,10 @@ export function Budget({
   const planSpending = y.plan.spending.reduce((s, v) => s + v, 0);
   const planBills = y.plan.billsSubs.reduce((s, v) => s + v, 0);
 
+  // Bills and subscriptions are budgeted by their own track: a limit on "Subscriptions" counted nothing, ever.
   const addable = reference.spendingTypes
     .map((s) => s.name)
-    .filter((n) => n.trim() && !lines.some((l) => l.name === n));
+    .filter((n) => n.trim() && limitable(n) && !shown.some((l) => l.name === n));
 
   const pick = (nextYear: number, nextMonth: number): void => {
     setYear(nextYear);
@@ -321,7 +341,7 @@ export function Budget({
     const total = formatMoney(value.spending + value.billsSubs);
     const done =
       lock.state === "closed"
-        ? `Corrected. ${name} ${year} is now ${total}, and the reason is kept with it.`
+        ? `Edited. ${name} ${year} is now ${total}, and the reason is kept with it.`
         : scope === "month"
           ? `Saved. ${name} is set to ${total}.`
           : scope === "rest"
@@ -358,19 +378,29 @@ export function Budget({
   };
 
   const undo = (): void => {
+    const outcome = undoLast(y.plan, year, month, asOf, now());
+    // Every month the change was undone in, and any that kept it, by name.
+    const names = (ms: readonly number[]): string => listWords(ms.map((m) => monthLabel(m)));
+    const kept = outcome.skipped.length > 0 ? ` ${names(outcome.skipped)} ${outcome.skipped.length === 1 ? "keeps" : "keep"} it: ${outcome.skipped.length === 1 ? "that month is" : "those months are"} over or changed again since.` : "";
     commit(
-      undoLast(y.plan, year, month, asOf, now()),
-      "Undone. The budget is back to what it was before the last change.",
+      outcome,
+      outcome.written.length > 1 ? `Undone in ${names(outcome.written)}.${kept}` : `Undone. ${name} is back to what it was before the last change.${kept}`,
       setNote,
     );
   };
 
-  const saveLimitFor = (kind: string, value: Centavos, scope: PlanScope): void => {
+  const saveLimitFor = (kind: string, value: Centavos, scope: PlanScope, reason = ""): void => {
     const months =
       scope === "month" ? `in ${name}` : scope === "rest" ? `from ${name} to December` : `in every month of ${year} still ahead`;
     const ok = commit(
-      saveLimit(y.plan, year, month, kind, value, scope, asOf, now()),
-      value > 0 ? `Saved. ${kind} is limited to ${formatMoney(value)} a month ${months}.` : `Removed the limit on ${kind} ${months}.`,
+      saveLimit(y.plan, year, month, kind, value, scope, asOf, now(), reason),
+      reason
+        ? value > 0
+          ? `Edited. ${kind} is limited to ${formatMoney(value)} in ${name}, and the reason is kept with it.`
+          : `Edited. The ${kind} limit is removed from ${name}, and the reason is kept with it.`
+        : value > 0
+          ? `Saved. ${kind} is limited to ${formatMoney(value)} a month ${months}.`
+          : `Removed the limit on ${kind} ${months}.`,
       setLimitNote,
     );
     if (ok) setLimitFor(null);
@@ -399,8 +429,9 @@ export function Budget({
         previous ? `${monthLabel(previous.month)} ${previous.year} was budgeted at ${formatMoney(previous.spending + previous.billsSubs)}; the planner can copy it in one tap.` : "",
         lines.length > 0
           ? `Spending by kind: ${lines
-              .slice(0, 6)
-              .map((l) => `${l.name} ${formatMoney(l.spent)}${l.limit !== null ? ` of a ${formatMoney(l.limit)} limit` : ""}`)
+              // The top six, and every kind with a limit: a limit ranked seventh was never mentioned.
+              .filter((l, i) => i < 6 || l.limit !== null)
+              .map((l) => `${l.name} ${formatMoney(l.spent)}${l.limit !== null ? ` of a ${formatMoney(l.limit)} limit, ${l.spent > l.limit ? `${formatMoney(l.spent - l.limit)} over` : `${formatMoney(l.limit - l.spent)} left`}` : ""}`)
               .join(", ")}.`
           : "",
         bills.bills.length > 0 ? `Bills: ${bills.bills.map((b) => `${b.item} ${formatMoney(b.amount)} ${b.state}`).join(", ")}.` : "",
@@ -604,13 +635,18 @@ export function Budget({
                     </span>
                   </div>
                   {a.spending.budget > 0 && <ProgressBar value={limitsTotal} max={a.spending.budget} height={6} />}
+                  {overLimit.length > 0 && (
+                    <p className="t-caption fms-note-over" role="status">
+                      {listWords(overLimit.map((l) => `${l.name} is ${formatMoney(l.spent - (l.limit ?? 0))} over its limit`))}.
+                    </p>
+                  )}
                   <p className="t-caption fms-planner-note">
                     {a.spending.budget === 0
                       ? "No spending budget for the month yet, so the limits stand on their own."
                       : limitsTotal > a.spending.budget
                         ? `The limits add up to ${formatMoney(limitsTotal - a.spending.budget)} more than the spending budget.`
                         : `${formatMoney(a.spending.budget - limitsTotal)} of the spending budget is for everything without a limit.`}
-                    {lock.state === "closed" ? ` ${name} is closed, so its limits stay as they were.` : ""}
+                    {limitsClosed ? ` ${name} is closed: a limit can still be edited, with a reason, which is kept with it.` : ""}
                   </p>
                 </div>
               ) : lock.state !== "closed" ? (
@@ -637,22 +673,29 @@ export function Budget({
             ) : (
               <>
                 <ol className="fms-budgetcats">
-                  {(allCategories ? lines : lines.slice(0, TOP_CATEGORIES)).map((l) => (
+                  {shown.map((l) => (
                     <CategoryRow
                       key={l.name}
                       line={l}
                       onShow={onShowRows}
-                      onLimit={limitsOpen ? () => setLimitFor(limitFor === l.name ? null : l.name) : undefined}
+                      onLimit={
+                        limitable(l.name) && (limitsOpen || (limitsClosed && l.limit !== null))
+                          ? () => setLimitFor(limitFor === l.name ? null : l.name)
+                          : undefined
+                      }
+                      limitWord={limitsClosed ? "Edit limit, with a reason" : undefined}
                       editor={
-                        limitsOpen && limitFor === l.name ? (
+                        limitFor === l.name && (limitsOpen || limitsClosed) ? (
                           <LimitEditor
                             kind={l.name}
                             year={year}
                             month={month}
                             onlyThisMonth={lock.state !== "open"}
+                            reasonNeeded={limitsClosed}
                             current={l.limit}
+                            months={stored?.categories?.[l.name] ?? []}
                             usual={l.usual}
-                            onSave={(value, scope) => saveLimitFor(l.name, value, scope)}
+                            onSave={(value, scope, reason) => saveLimitFor(l.name, value, scope, reason)}
                             onCancel={() => setLimitFor(null)}
                           />
                         ) : null
@@ -692,7 +735,9 @@ export function Budget({
                 year={year}
                 month={month}
                 onlyThisMonth={lock.state !== "open"}
+                reasonNeeded={false}
                 current={null}
+                months={stored?.categories?.[limitFor] ?? []}
                 usual={null}
                 onSave={(value, scope) => saveLimitFor(limitFor, value, scope)}
                 onCancel={() => setLimitFor(null)}
@@ -1324,7 +1369,9 @@ function LimitEditor({
   year,
   month,
   onlyThisMonth,
+  reasonNeeded,
   current,
+  months,
   usual,
   onSave,
   onCancel,
@@ -1334,41 +1381,129 @@ function LimitEditor({
   month: number;
   /** A month that has ended takes a limit only for itself. */
   onlyThisMonth: boolean;
+  /** A closed month: the edit is a correction, kept with why (rules B5 and B7). */
+  reasonNeeded: boolean;
   current: Centavos | null;
+  /** The kind's limit in each month of the year, January first. */
+  months: readonly Centavos[];
   usual: Centavos | null;
-  onSave: (value: Centavos, scope: PlanScope) => void;
+  onSave: (value: Centavos, scope: PlanScope, reason: string) => void;
   onCancel: () => void;
 }) {
   // Starts at the limit it has, or its usual month in whole hundreds of pesos.
   const [value, setValue] = useState<Centavos | null>(
     current ?? (usual !== null && usual > 0 ? Math.round(usual / 10000) * 10000 : null),
   );
-  // A limit is usually meant to last, so it defaults to the rest of the year.
-  const [scope, setScope] = useState<PlanScope>(!onlyThisMonth && month < 12 ? "rest" : "month");
+  /*
+   * A new limit is usually meant to last, so it starts on the rest of the
+   * year. One already set starts on the months it really covers: an
+   * October-only limit reopened on "Oct to Dec", and saving or removing it
+   * then wrote November and December too (7 October 2026 limits audit).
+   */
+  const ahead = months.slice(month);
+  const lastsAhead = current !== null && ahead.length > 0 && ahead.every((v) => v === current);
+  const [scope, setScope] = useState<PlanScope>(
+    onlyThisMonth || month >= 12 ? "month" : current === null || lastsAhead ? "rest" : "month",
+  );
+  const [reason, setReason] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  // The warning shown once before a save that replaces another month's own limit; a second press goes ahead.
+  const [warned, setWarned] = useState<string | null>(null);
+  const reach: PlanScope = onlyThisMonth ? "month" : scope;
+
+  /** Later months the save would change that hold a limit of their own, by name. */
+  const replaces = (next: Centavos): string | null => {
+    if (reach === "month") return null;
+    const hit = months
+      .map((v, i) => ({ m: i + 1, v }))
+      .filter(({ m, v }) => m > month && v > 0 && v !== next && v !== current);
+    if (hit.length === 0) return null;
+    const named = listWords(hit.map(({ m, v }) => `${monthLabel(m)}'s ${formatMoney(v)}`));
+    return next > 0
+      ? `${named} ${hit.length === 1 ? "limit" : "limits"} will be replaced. Press Save limit again to go ahead.`
+      : `${named} ${hit.length === 1 ? "limit" : "limits"} will be removed too. Press Remove again to go ahead.`;
+  };
+
+  const attempt = (next: Centavos): void => {
+    if (reasonNeeded && !reason.trim()) {
+      setProblem("Say why it needs changing: the reason is kept with the edit.");
+      return;
+    }
+    const warning = replaces(next);
+    if (warning && warned !== warning) {
+      setWarned(warning);
+      setProblem(null);
+      return;
+    }
+    onSave(next, reach, reasonNeeded ? reason.trim() : "");
+  };
+
+  // Only Remove takes a limit off: junk, a minus sign or an empty box removed it (7 October 2026 limits audit).
+  const save = (): void => {
+    if (value === null || value <= 0) {
+      setProblem(current !== null ? "Type an amount above zero, or press Remove to take the limit off." : "Type an amount above zero.");
+      return;
+    }
+    attempt(value);
+  };
 
   return (
     <div className="fms-limitedit">
       <span className="t-label" style={{ color: "var(--ink-2)" }}>
         {kind}: limit a month
       </span>
-      <AmountInput value={value} onChange={setValue} ariaLabel={`${kind} limit a month`} />
+      <AmountInput
+        value={value}
+        onChange={(v) => {
+          setValue(v);
+          setProblem(null);
+          setWarned(null);
+        }}
+        ariaLabel={`${kind} limit a month`}
+      />
       {onlyThisMonth ? (
-        <p className="t-caption fms-planner-note">{monthLabel(month)} has ended, so this is for {monthLabel(month)} only.</p>
+        <p className="t-caption fms-planner-note">
+          {reasonNeeded ? `${monthLabel(month)} is closed` : `${monthLabel(month)} has ended`}, so this is for {monthLabel(month)} only.
+        </p>
       ) : (
         <ScopeChoice
           year={year}
           month={month}
           value={scope}
-          onChange={setScope}
+          onChange={(next) => {
+            setScope(next);
+            setWarned(null);
+          }}
           label={`Which months the ${kind} limit is for`}
         />
       )}
+      {reasonNeeded && (
+        <div className="fms-planner-field">
+          <span className="t-label" style={{ color: "var(--ink-2)" }}>
+            Why it needs changing
+          </span>
+          <TextInput
+            value={reason}
+            onChange={(v) => {
+              setReason(v);
+              setProblem(null);
+            }}
+            placeholder="For example: set by mistake"
+            ariaLabel={`Why the ${kind} limit needs changing`}
+          />
+        </div>
+      )}
+      {(problem ?? warned) && (
+        <p className={problem ? "t-caption fms-note-over" : "t-caption"} role="status" style={problem ? undefined : { color: "var(--ink-2)" }}>
+          {problem ?? warned}
+        </p>
+      )}
       <div className="fms-limitedit-actions">
-        <Button size="sm" variant="primary" onClick={() => onSave(value ?? 0, onlyThisMonth ? "month" : scope)}>
+        <Button size="sm" variant="primary" onClick={save}>
           Save limit
         </Button>
         {current !== null && (
-          <Button size="sm" tone="danger" onClick={() => onSave(0, onlyThisMonth ? "month" : scope)}>
+          <Button size="sm" tone="danger" onClick={() => attempt(0)}>
             Remove
           </Button>
         )}
@@ -1418,11 +1553,14 @@ function CategoryRow({
   line,
   onShow,
   onLimit,
+  limitWord,
   editor,
 }: {
   line: CategoryLine;
   onShow?: ((query: string) => void) | undefined;
   onLimit?: (() => void) | undefined;
+  /** The words on the limit button, when not the usual ones. */
+  limitWord?: string | undefined;
   editor: ReactNode;
 }) {
   const above = line.usual === null ? 0 : line.spent - line.usual;
@@ -1478,7 +1616,7 @@ function CategoryRow({
           {notable && <span className="t-micro fms-budgetcat-flag">{formatMoney(above)} more than usual</span>}
           {onLimit && (
             <button type="button" className="t-caption fms-linkbtn" onClick={onLimit}>
-              {line.limit !== null ? "Change limit" : "Set a limit"}
+              {limitWord ?? (line.limit !== null ? "Change limit" : "Set a limit")}
             </button>
           )}
         </span>

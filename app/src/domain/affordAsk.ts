@@ -33,6 +33,7 @@
  */
 
 import { walletBalance } from "./balances";
+import { borrowedMoney, lenderNames, ownIn } from "./borrowed";
 import { addDays, getMonth, getYear, MONTH_NAMES } from "./dates";
 import type { Debt } from "./debt";
 import { formatMoney, type Centavos } from "./money";
@@ -224,6 +225,26 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
         lines.push(
           `It is ${money(cost - safe.perDay)} more than today's figure of ${money(safe.perDay)}${safe.daysLeft > 1 ? `: from tomorrow you would have ${money(then.perDayAfter)} a day instead of ${money(safe.perDayAfter)}` : ""}.`,
         );
+      }
+    }
+    /*
+     * Their own money, and what would be borrowed. "You have enough" was true
+     * of money drawn on a credit line too; the owner asked to be told when a
+     * purchase would be paid with borrowed money (7 October 2026). Followed
+     * through every transfer (`borrowed.ts`).
+     */
+    if (debts.length > 0 && room >= cost) {
+      const b = borrowedMoney(transactions, debts, [...reference.wallets, ...reference.savings], asOf);
+      if (b.inHand > 0 || b.heldForOthers > 0) {
+        const own = ownIn(b, fromWallet !== null && ask.wallet ? [ask.wallet] : reference.wallets, (w) => walletBalance(transactions, w));
+        const past = cost - own;
+        if (past > 0) {
+          lines.push(
+            `But only ${money(own)} of what ${fromWallet !== null ? ask.wallet : "your spending wallets"} ${fromWallet !== null ? "holds" : "hold"} is your own: ${money(Math.min(past, cost))} of this would be ${b.inHand > 0 ? `borrowed money, from ${lenderNames(new Map([...b.byLender].filter(([id]) => debts.find((d) => d.id === id)?.form !== "pass-through")), debts)}` : "money held for someone"}.`,
+          );
+        } else {
+          lines.push(`It is covered by your own money, ${money(own)}, without touching what you borrowed.`);
+        }
       }
     }
     const unknown = costs.filter((c) => c.cost === null).map((c) => c.item);

@@ -10792,3 +10792,11 @@ button.fms-recent-row:disabled {
     padding: var(--space-3) var(--space-4);
   }
 }
+
+/* Their own money beside what is borrowed or held for someone (Dashboard, Your money). */
+.fms-ownmoney {
+  margin: var(--space-3) 0 0;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-2);
+}

@@ -46,6 +46,7 @@ import { totalSavingsBalance, totalWalletBalance } from "../domain/balances";
 import { budgetSummary } from "../domain/budget";
 import type { MonthBill } from "../domain/budgetView";
 import { incomeQuality, netWorth, outstandingOf, positionsOf, type Debt, type DebtEffect } from "../domain/debt";
+import { borrowedMoney, lenderNames } from "../domain/borrowed";
 import { ON_BEHALF } from "../domain/debtWords";
 import { getMonth, getYear, MONTH_NAMES_SHORT, monthName } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
@@ -141,6 +142,8 @@ export function Dashboard({
       /** Borrowing recorded as debt: beside cash in, not part of it. */
       borrowedAsDebt: quality.borrowed - inRevenue,
       heldForOthers,
+      /** What of the accounts is the owner's own, borrowed money followed through every transfer (`borrowed.ts`). */
+      own: borrowedMoney(transactions, debts, [...reference.wallets, ...reference.savings], asOf),
       annual: totalSpending(transactions, range),
       ranking: spendingRanking(transactions, reference.spendingTypes, range).slice(0, 6),
       spendSeries: perMonth.map((m) => m.total),
@@ -319,6 +322,19 @@ export function Dashboard({
             />
             {v.worth.heldForOthers > 0 && <Line label="Held for others" value={-v.worth.heldForOthers} />}
           </div>
+          {/*
+            Their own money, apart from what is borrowed or held for someone,
+            followed through transfers and withdrawals. The owner, 7 October
+            2026: "knows how much money I have that is not from loan or credit".
+          */}
+          {(v.own.inHand > 0 || v.own.heldForOthers > 0) && (
+            <p className="t-caption fms-ownmoney">
+              Your own money: <strong>{formatMoney(v.own.own)}</strong>.{" "}
+              {v.own.inHand > 0 ? `${formatMoney(v.own.inHand)} in your accounts is borrowed, from ${lenderNames(new Map([...v.own.byLender].filter(([id]) => debts.find((d) => d.id === id)?.form !== "pass-through")), debts)}. ` : ""}
+              {v.own.heldForOthers > 0 ? `${formatMoney(v.own.heldForOthers)} is held for others. ` : ""}
+              Spending past your own money spends that.
+            </p>
+          )}
           {/*
             On behalf: money a person owes back or money held for them, apart
             from Debt. The two buttons are the ways it ends: settled, or

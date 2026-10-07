@@ -136,6 +136,7 @@ import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvic
 import { monthBrief } from "../domain/monthPlan";
 import { asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
 import { challengesAnswer, challengeWorked } from "../domain/dayFit";
+import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { planWorked } from "../domain/planRate";
 import { notPaidIn, notPaidWords, paidDraftFor, saysItWasPaid, type NotPaid } from "../domain/notPaid";
 import { classifyPaper, PAPER_KINDS, PAPER_WORDS, UNPAID, type PaperKind } from "../domain/paperKind";
@@ -221,6 +222,8 @@ import {
   confirmsProposal,
   isBudgetForm,
   namesBudgetCommand,
+  limitKinds,
+  limitTalk,
   planBudget,
   proposedBudgetIn,
   proposedMonthIn,
@@ -4844,8 +4847,38 @@ export function AskPanel({
      * screen's own rules and shown on a card to apply.
      */
     const couldBudget = files.length === 0 && !as && !isNoteLine && sink.canBudget;
+    // Kinds already limited are limitable by name, whatever the list says (7 October 2026 limits audit).
+    const limited = Object.keys(budgets[asOf.slice(0, 4)]?.categories ?? {});
     // A form of lines ("Bills and subscriptions: 1641", "Spending: 6359") is read whole, not by its first line.
-    let budgetAsk = couldBudget ? readBudgetAsk(isBudgetForm(ruled) ? ruled : lead, reference, asOf) : null;
+    let budgetAsk = couldBudget ? readBudgetAsk(isBudgetForm(ruled) ? ruled : lead, reference, asOf, limited) : null;
+
+    /*
+     * A limit asked about, or one on something a limit cannot count. "did I
+     * go over my 3000 food limit?" made a card; "limit grab to 500" became
+     * PHP 500.00 for the whole spending budget; "limit subscriptions to 500"
+     * made a limit nothing could reach (7 October 2026 limits audit). Each
+     * is answered here, with the Budget screen's own figures.
+     */
+    if (couldBudget && !budgetAsk) {
+      const kinds = limitKinds(reference, limited);
+      const talk = /\b(?:limit|cap)\b/i.test(ruled) ? limitTalk(ruled, kinds) : null;
+      const [ly, lm] = [Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7))];
+      const reply = talk
+        ? talk.kind === "structural"
+          ? `Subscriptions and bills have no limit of their own: they are budgeted together, ${formatMoney(budgetForYear(budgets, ly).billsSubs[lm - 1] ?? 0)} for ${MONTH_NAMES[lm - 1]}, and each is followed by name on the Budget screen. To change it, say "set bills and subscriptions to 2000".`
+          : `There is no kind of spending called "${talk.name}" to limit. Kinds you can limit: ${kinds.slice(0, 10).join(", ")}. Say one of them, for example "limit ${(kinds[0] ?? "Food").toLowerCase()} to 3000".`
+        : asksAboutLimit(ruled, kinds)
+          ? limitAnswer(ruled, limitLines(transactions, budgets, debts, ly, lm), lm, asOf, kinds)
+          : null;
+      if (reply) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "budget", { text: note }));
+        say({ kind: "assistant", text: reply, from: "this device" });
+        log(aiEvent("answered", "budget", { text: reply, model: "this device" }));
+        return;
+      }
+    }
     /** What the card says under its figures: where they came from, when that is worth saying. */
     let budgetNote = "";
     /*
@@ -4860,7 +4893,7 @@ export function AskPanel({
       /^\s*(?:no[,.!\s]+|hindi[,.!\s]+)?(?:that'?s|thats|that is|that was|it'?s|its|it is|it was|this is)\s+(?:a\s+|the\s+|my\s+|for\s+(?:the\s+|my\s+)?)?budget\b|^\s*budget\s+(?:yan|iyan|yun|iyon|yon|to|po)\b|^\s*(?:i meant|i mean)\s+(?:a\s+|the\s+|my\s+)?budget\b/i.test(ruled);
     if (!budgetAsk && couldBudget && meantBudget) {
       const before = [...turns].reverse().find((t): t is Said => t.kind === "you");
-      const again = before ? readBudgetAsk(`set budget ${before.text}`, reference, asOf) : null;
+      const again = before ? readBudgetAsk(`set budget ${before.text}`, reference, asOf, limited) : null;
       if (before && again) {
         budgetAsk = again;
         const fromIt = (t: Turn): boolean => isOffer(t) && t.state === "open" && t.proposal.said !== undefined && t.proposal.said !== "" && before.text.includes(t.proposal.said);
@@ -4958,7 +4991,7 @@ export function AskPanel({
       } else if (recentProposal && /\b(that|it|this|recommend\w*|suggest\w*|what you said)\b/i.test(ruled) && !namesFigure) {
         budgetAsk = over({ ...base, spending: recentProposal.value }, { ...target, anchored: true });
       } else if (namesFigure) {
-        const read = readBudgetAsk(`set budget ${ruled}`, reference, asOf);
+        const read = readBudgetAsk(`set budget ${ruled}`, reference, asOf, limited);
         if (read && read.kind === "tracks") budgetAsk = over({ ...read }, span ? { ...target, anchored: true } : { ...target, anchored: true });
       }
     }
@@ -7509,10 +7542,26 @@ export function AskPanel({
               key={i}
               turn={turn}
               onApply={() => {
-                sink.budget(turn.plan.year, turn.plan.outcome.plan, turn.plan.changes);
-                log(aiEvent("accepted", "add", { entry: turn.plan.words }));
+                /*
+                 * Planned again against the budget as it is now. The card held
+                 * the whole year as it was when the card was made, so a limit
+                 * set since, a second card, or a rename was wiped on Apply (7
+                 * October 2026 limits audit).
+                 */
+                const plan = turn.ask ? planBudget(turn.ask, budgets, asOf, new Date().toISOString()) : turn.plan;
+                if (plan.outcome.refused) {
+                  say({ kind: "assistant", text: plan.outcome.refused, from: "this device" });
+                  return;
+                }
+                if (turn.ask && plan.outcome.written.length === 0) {
+                  decide(i, "applied");
+                  say({ kind: "assistant", text: "The budget already reads that way, so nothing needed changing.", from: "this device" });
+                  return;
+                }
+                sink.budget(plan.year, plan.outcome.plan, plan.changes);
+                log(aiEvent("accepted", "add", { entry: plan.words }));
                 decide(i, "applied");
-                say({ kind: "assistant", text: `Budget set: ${budgetBlocks(turn.plan).map((b) => b.label).join(", ") || turn.plan.words}. The Budget screen shows it now.`, from: "this device" });
+                say({ kind: "assistant", text: `Budget set: ${budgetBlocks(plan).map((b) => b.label).join(", ") || plan.words}. The Budget screen shows it now.`, from: "this device" });
               }}
               onDiscard={() => decide(i, "discarded")}
               onEdit={

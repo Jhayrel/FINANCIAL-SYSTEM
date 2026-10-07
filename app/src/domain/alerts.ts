@@ -33,7 +33,11 @@ import { assessMonthFor } from "./budget";
 import { overdue, STOPPED_AFTER_DAYS, upcoming, type BillStatus } from "./bills";
 import { basisWords, billWords, debtDue, debtNamedBy, paymentsFiledAsSpending, positionsOf, type Debt } from "./debt";
 import { creditRoom, roomWords } from "./creditLimit";
-import { addDays, daysBetween, daysLeftInMonth, formatMedium, getMonth, getYear, monthName } from "./dates";
+import { addDays, daysBetween, daysLeftInMonth, firstOfMonth, formatMedium, getMonth, getYear, lastOfMonth, monthName } from "./dates";
+import { categoryLimits } from "./budgetView";
+import { limitKindOf, spendingTrackByKind } from "./kinds";
+import { borrowedMoney, lenderNames } from "./borrowed";
+import { isNeed } from "./spendNote";
 import { unusualRows } from "./unusual";
 import { actionableIssues, checkIntegrity } from "./integrity";
 import { monthTotals } from "./totals";
@@ -41,7 +45,7 @@ import { overdueGoals } from "./goalClose";
 import { patternFindings, type Finding } from "./patterns";
 import type { Account } from "./accounts";
 import type { Centavos } from "./money";
-import type { Budgets, IsoDate, Transaction } from "./types";
+import type { Budgets, IsoDate, SpendingType, Transaction } from "./types";
 
 export type AlertLevel = "over" | "warn" | "info";
 
@@ -91,6 +95,8 @@ export interface AlertInput {
   readonly bills: readonly BillStatus[];
   readonly lowBalanceThreshold: Centavos;
   readonly asOf: IsoDate;
+  /** The kinds of spending, with the owner's needs and wants marked. */
+  readonly spendingTypes?: readonly Pick<SpendingType, "name" | "necessity">[] | undefined;
 }
 
 /** Pace of spending so far this month, per day. */
@@ -196,6 +202,118 @@ export function financeAlerts(input: AlertInput): Alert[] {
           weight: 70,
         });
       }
+    }
+  }
+
+  // ── A kind of spending past or near its limit ───────────────────────────
+  /*
+   * Nothing outside the Budget screen ever said a kind was past its limit:
+   * not the bell, not the Dashboard, not the AI, which reads these. Food at
+   * PHP 4,691.00 of a PHP 3,000.00 limit went unmentioned everywhere (7
+   * October 2026 limits audit). Same figures as the Budget screen
+   * (`kinds.ts`, `spendingTrackByKind`). A need is said as calmly as a want.
+   */
+  {
+    const limits = categoryLimits(budgets[String(year)], month);
+    if (limits.size > 0) {
+      const spent = spendingTrackByKind(transactions, { start: firstOfMonth(year, month), end: lastOfMonth(year, month) }, debts);
+      for (const [kind, limit] of limits) {
+        const used = spent.get(kind) ?? 0;
+        if (used > limit) {
+          out.push({
+            id: `limit-over-${kind.toLowerCase()}`,
+            level: "warn",
+            area: "budget",
+            title: `${kind} is past its limit`,
+            detail: `${money(used)} of the ${money(limit)} limit for ${monthName(month)}: ${money(used - limit)} over${left > 0 ? `, with ${left} day${left === 1 ? "" : "s"} left` : ""}.`,
+            weight: 68,
+            query: kind,
+          });
+        } else if (used * 10 >= limit * 9 && left > 0) {
+          const room = limit - used;
+          out.push({
+            id: `limit-near-${kind.toLowerCase()}`,
+            level: "info",
+            area: "budget",
+            title: `${kind} is near its limit`,
+            detail: `${money(used)} of the ${money(limit)} limit: ${money(room)} left for ${left} day${left === 1 ? "" : "s"}, ${money(Math.floor(room / left))} a day.`,
+            weight: 42,
+            query: kind,
+          });
+        }
+      }
+    }
+  }
+
+  // ── Borrowed money, and money held for someone ───────────────────────────
+  /*
+   * The owner, 7 October 2026: "knows how much money I have that is not
+   * from loan or credit, then it warns me, like you're using that money from
+   * credit and you spend it to treat". Followed through every transfer and
+   * withdrawal (`borrowed.ts`): what is borrowed in the accounts now, and
+   * what of this month's spending it paid for, wants named first.
+   */
+  if (debts.length > 0) {
+    const names = accounts.map((a) => a.name);
+    const b = borrowedMoney(transactions, debts, names, asOf);
+    const start = firstOfMonth(year, month);
+    const used = new Map<string, Centavos>();
+    let wantTotal = 0;
+    let needTotal = 0;
+    const lenders = new Map<string, Centavos>();
+    for (const t of transactions) {
+      if (t.date < start || t.date > asOf) continue;
+      const use = b.spent.get(t.id);
+      if (!use) continue;
+      const kind = limitKindOf(t) ?? (t.item.trim() || "Other");
+      if (isNeed(kind, input.spendingTypes)) needTotal += use.amount;
+      else {
+        wantTotal += use.amount;
+        used.set(kind, (used.get(kind) ?? 0) + use.amount);
+      }
+      for (const [id, v] of use.from) lenders.set(id, (lenders.get(id) ?? 0) + v);
+    }
+    if (wantTotal > 0) {
+      const list = [...used].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([k, v]) => `${k} ${money(v)}`);
+      out.push({
+        id: `borrowed-wants-${year}-${month}`,
+        level: "warn",
+        area: "debt",
+        title: `${money(wantTotal)} of borrowed money went to wants this month`,
+        detail: `${list.join(", ")}, from ${lenderNames(lenders, debts)}: your own money had run out.${needTotal > 0 ? ` ${money(needTotal)} more went to needs.` : ""}${b.inHand > 0 ? ` ${money(b.inHand)} borrowed is still in your accounts.` : ""}`,
+        weight: 66,
+      });
+    } else if (needTotal > 0) {
+      out.push({
+        id: `borrowed-needs-${year}-${month}`,
+        level: "info",
+        area: "debt",
+        title: `${money(needTotal)} of borrowed money paid for needs this month`,
+        detail: `From ${lenderNames(lenders, debts)}, once your own money had run out.`,
+        weight: 34,
+      });
+    }
+    if (b.inHand > 0) {
+      const whose = new Map([...b.byLender].filter(([id]) => debts.find((d) => d.id === id)?.form !== "pass-through"));
+      out.push({
+        id: "borrowed-in-hand",
+        level: "info",
+        area: "debt",
+        title: `${money(b.inHand)} of your money is borrowed`,
+        detail: `From ${lenderNames(whose, debts)}, in ${[...b.byAccount].map(([a, v]) => `${a} ${money(v)}`).join(", ")}. Your own money is ${money(b.own)}; spending past it spends what you borrowed.`,
+        weight: 32,
+      });
+    }
+    if (b.heldForOthers > 0) {
+      const whose = new Map([...b.byLender].filter(([id]) => debts.find((d) => d.id === id)?.form === "pass-through"));
+      out.push({
+        id: "held-in-hand",
+        level: "info",
+        area: "debt",
+        title: `${money(b.heldForOthers)} in your accounts is held for ${lenderNames(whose, debts)}`,
+        detail: `It is not yours to spend. Your own money is ${money(b.own)}.`,
+        weight: 33,
+      });
     }
   }
 

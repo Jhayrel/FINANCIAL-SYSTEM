@@ -60,6 +60,9 @@ import { binForModel } from "./deletedAsk";
 import type { Budgets, DeletedTransaction, IsoDate, Transaction } from "./types";
 import { pointsAt } from "./pointsAt";
 import { asksWhatTheDayBuys, everydayPrices, pricesAgainstDay } from "./dayFit";
+import { categoryLimits } from "./budgetView";
+import { spendingTrackByKind } from "./kinds";
+import { borrowedMoney, lenderNames } from "./borrowed";
 import { safeAfter } from "./monthPlan";
 
 /**
@@ -654,6 +657,54 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       }
       const stopped = input.snapshot.bills.stopped ?? [];
       if (stopped.length > 0) out.push(`Marked stopped in Settings, no longer expected: ${stopped.join(", ")}.`);
+    }
+  }
+
+  /*
+   * ── Limits on kinds of spending, this month ─────────────────────────────
+   * The model was never told a limit: "how much food budget is left" was
+   * answered without one, and the context was byte for byte the same with
+   * a Food limit as without (7 October 2026 limits audit). Every limit, with
+   * the Budget screen's own figures (`kinds.ts`).
+   */
+  if (input.budgets) {
+    const [y, m] = [Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7))];
+    const limits = categoryLimits(input.budgets[String(y)], m);
+    if (limits.size > 0) {
+      const spent = spendingTrackByKind(rows, { start: `${asOf.slice(0, 7)}-01`, end: `${asOf.slice(0, 7)}-31` }, input.credits ?? []);
+      const days = input.snapshot.month.daysLeft;
+      out.push("");
+      out.push(`## Limits on kinds of spending, ${monthName(monthOf(asOf))}`);
+      for (const [kind, limit] of limits) {
+        const used = spent.get(kind) ?? 0;
+        out.push(
+          used > limit
+            ? `- ${kind}: ${php(used)} of a ${php(limit)} limit, ${php(used - limit)} over.`
+            : `- ${kind}: ${php(used)} of a ${php(limit)} limit, ${php(limit - used)} left${days > 0 ? `, ${php(Math.floor((limit - used) / days))} a day for ${days} days` : ""}.`,
+        );
+      }
+    }
+  }
+
+  /*
+   * ── Spending paid with borrowed money ───────────────────────────────────
+   * Followed through every transfer (`borrowed.ts`): which of this month's
+   * spending ran past the owner's own money, and whose money paid for it.
+   */
+  if ((input.credits ?? []).length > 0) {
+    const accounts = input.snapshot.balances.map((b) => b.account);
+    const b = borrowedMoney(rows, input.credits ?? [], accounts, asOf);
+    const used = rows.filter((t) => t.date.startsWith(asOf.slice(0, 7)) && t.date <= asOf && (b.spent.has(t.id) || b.spentHeld.has(t.id)));
+    if (used.length > 0) {
+      out.push("");
+      out.push(`## ${monthName(monthOf(asOf))} spending paid with money that was not theirs`);
+      for (const t of used.slice(-12)) {
+        const lent = b.spent.get(t.id);
+        const held = b.spentHeld.get(t.id);
+        out.push(
+          `- ${formatMedium(t.date)} ${t.item.trim() || t.category || t.type} ${php(t.total)}:${lent ? ` ${php(lent.amount)} borrowed, from ${lenderNames(lent.from, input.credits ?? [])}` : ""}${held ? `${lent ? ";" : ""} ${php(held.amount)} held for ${lenderNames(held.from, input.credits ?? [])}` : ""}.`,
+        );
+      }
     }
   }
 

@@ -59,6 +59,7 @@ import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
 import { moveRows, type BillCategory } from "./domain/kindRename";
 import { formatMoney, type Centavos } from "./domain/money";
+import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { debtWalletDirection, emptyDraft, insertChronologically } from "./domain/entry";
 import { formatMedium, getYear, today } from "./domain/dates";
@@ -1000,6 +1001,7 @@ export default function App() {
         bills: billStatuses(transactions, reference, asOf),
         lowBalanceThreshold: settings.lowBalanceThreshold,
         asOf,
+        spendingTypes: reference.spendingTypes,
       }),
     [transactions, settings.accounts, settings.credits, settings.lowBalanceThreshold, budgets, reference, asOf],
   );
@@ -1022,9 +1024,14 @@ export default function App() {
    */
   const noteAfterSave = (saved: readonly Transaction[], before: readonly Transaction[]): void => {
     if (settings.budgetNotes === false) return;
-    const note = spendNoteFor(saved, before, budgets, asOf, readShownNotes());
+    const note = spendNoteFor(saved, before, budgets, asOf, readShownNotes(), {
+      debts: settings.credits,
+      accounts: [...reference.wallets, ...reference.savings],
+      spendingTypes: reference.spendingTypes,
+    });
     if (!note) return;
     rememberNote(note.id);
+    for (const id of note.also ?? []) rememberNote(id);
     const show = (words: string): void => {
       toastSeq.current += 1;
       const id = toastSeq.current;
@@ -1047,6 +1054,16 @@ export default function App() {
    * numbers stored.
    */
   const renumbers = ledgerSource !== "live";
+
+  /*
+   * The ledger as it stands right now, rows saved a moment ago included.
+   * "Add ready" saves several cards in one go, before the screen redraws, and
+   * each card's note was worked out against the ledger without the cards
+   * before it: three Food cards took Food past its limit and none said so
+   * (7 October 2026 limits audit).
+   */
+  const ledgerNow = useRef(transactions);
+  ledgerNow.current = transactions;
 
   const handleSave = (rows: Transaction[], by: Provenance = BY_OWNER): void => {
     /**
@@ -1100,7 +1117,9 @@ export default function App() {
           }
         : undefined,
     );
-    noteAfterSave(stamped, transactions);
+    const before = ledgerNow.current;
+    ledgerNow.current = [...before, ...stamped];
+    noteAfterSave(stamped, before);
   };
 
   /**
@@ -1168,9 +1187,24 @@ export default function App() {
     const changed = first && was ? changedWords(was, first) : "";
     const undoable = rows.every((r) => previous.has(r.id));
     flash(
-      `Corrected #${String(first?.recordNumber ?? 0).padStart(4, "0")}${changed ? `: ${changed}` : ""}.`,
+      `Edited #${String(first?.recordNumber ?? 0).padStart(4, "0")}${changed ? `: ${changed}` : ""}.`,
       undoable ? { label: "Undo", run: () => handleUpdate(rows.map((r) => previous.get(r.id) ?? r), by) } : undefined,
     );
+    /*
+     * An edit that makes a row cost more can take a kind past its limit, or
+     * pay with borrowed money, as a new entry can. Edits never said so (7
+     * October 2026 limits audit). Only rows that now cost more are looked at.
+     */
+    const grew = rows.filter((r) => {
+      const old = previous.get(r.id);
+      return !old || costOf(r) > costOf(old) || r.fromWallet !== old.fromWallet;
+    });
+    if (grew.length > 0) {
+      const ids = new Set(rows.map((r) => r.id));
+      const before = ledgerNow.current.filter((t) => !ids.has(t.id));
+      ledgerNow.current = [...before, ...rows];
+      noteAfterSave(grew, [...before, ...rows.filter((r) => !grew.includes(r))]);
+    }
   };
 
   /**

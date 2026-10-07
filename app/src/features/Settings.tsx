@@ -4377,7 +4377,7 @@ function AiLearningGroup({
             {[
               ["Suggested", count("proposed")],
               ["Added", count("accepted")],
-              ["Corrected", count("edited")],
+              ["Edited", count("edited")],
               ["Thrown away", count("rejected")],
               ["Photos read", count("uploaded")],
             ].map(([label, n]) => (

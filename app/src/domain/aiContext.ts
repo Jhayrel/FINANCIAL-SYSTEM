@@ -43,6 +43,7 @@ import { financeAlerts, burnRate, daysLeft, dailyAllowance, PACE_FROM_DAY } from
 import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
 import { toCentavos, toPesos } from "./money";
 import { isOpenBill, monthBrief, weekAhead } from "./monthPlan";
+import { borrowedMoney, lenderNames } from "./borrowed";
 import type { Account } from "./accounts";
 import type { BudgetRevision, Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -104,6 +105,12 @@ export interface AiContext {
    */
   readonly youOwe?: number;
   readonly heldForOthers?: number;
+  /**
+   * Borrowed money still in the accounts, followed through every transfer
+   * (`borrowed.ts`), and the owner's own money beside it. Null when none is
+   * borrowed or held.
+   */
+  readonly ownMoney?: { readonly own: number; readonly borrowed: number; readonly held: number; readonly from: string } | null;
   readonly income: {
     readonly cashIn: number;
     /** Cash in, less borrowing. The figure that is actually income. */
@@ -295,6 +302,12 @@ export function buildContext(input: ContextInput): AiContext {
       return { netWorth: pesos(worth.total), youOwe: pesos(worth.youOwe), heldForOthers: pesos(worth.heldForOthers) };
     })(),
 
+    ownMoney: (() => {
+      const b = borrowedMoney(transactions, credits, [...reference.wallets, ...reference.savings], asOf);
+      if (b.inHand <= 0 && b.heldForOthers <= 0) return null;
+      return { own: pesos(b.own), borrowed: pesos(b.inHand), held: pesos(b.heldForOthers), from: lenderNames(b.byLender, credits) };
+    })(),
+
     income: {
       cashIn: pesos(quality.cashIn),
       trueIncome: pesos(quality.trueIncome),
@@ -360,6 +373,7 @@ export function buildContext(input: ContextInput): AiContext {
       bills,
       lowBalanceThreshold: input.lowBalanceThreshold,
       asOf,
+      spendingTypes: reference.spendingTypes,
     }).map((a) => ({ level: a.level, title: a.title, detail: a.detail })),
 
     comparison: recentMonths(transactions, asOf, 6),
@@ -583,6 +597,12 @@ export function contextToText(c: AiContext): string {
   }
   const owes = [(c.youOwe ?? 0) > 0 ? `you owe ${php(c.youOwe ?? 0)}` : "", (c.heldForOthers ?? 0) > 0 ? `held for others ${php(c.heldForOthers ?? 0)}` : ""].filter(Boolean);
   lines.push(`Net worth after debt: ${php(c.netWorth)}${owes.length > 0 ? ` (${owes.join("; ")})` : ""}`);
+  if (c.ownMoney) {
+    const m = c.ownMoney;
+    lines.push(
+      `Their own money: ${php(m.own)}.${m.borrowed > 0 ? ` Borrowed and still in the accounts: ${php(m.borrowed)}.` : ""}${m.held > 0 ? ` Held for others: ${php(m.held)}.` : ""} From ${m.from}. Spending past their own money spends that.`,
+    );
+  }
   lines.push(
     "What they can use or spend is the usable figure. Reserve and savings are theirs but set aside: name them apart and never add them into what is usable unless they ask to count them. Net worth is everything, less what is owed, and is never what they can spend.",
   );
