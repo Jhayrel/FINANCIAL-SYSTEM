@@ -95,8 +95,16 @@ const STATEMENTS: Readonly<Record<string, StatementType>> = {
   utang: "borrowed",
   lent: "lent",
   credit: "credit",
-  debt: "debt",
-  loan: "debt",
+  /*
+   * "my loan statement", "debt statement": what the owner borrowed. A
+   * statement of every debt with none picked added money lent out and money
+   * held for someone under "You owe", a figure no screen showed (6 October
+   * 2026 audit). A statement of one named line still covers that line.
+   */
+  debt: "borrowed",
+  debts: "borrowed",
+  loan: "borrowed",
+  loans: "borrowed",
 };
 
 const MONTHS = [

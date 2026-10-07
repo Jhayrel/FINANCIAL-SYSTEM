@@ -47,6 +47,7 @@ import {
   type Debt,
   type DebtDue,
   type DebtEffect,
+  owedTotals,
 } from "../domain/debt";
 import {
   creditRoom,
@@ -134,12 +135,8 @@ export function DebtScreen({
   const [editId, setEditId] = useState<string | null>(null);
 
   const year = getYear(asOf);
-  // Every debt, archived ones too: money still owed is owed whether or not the line is in use.
-  const everything = positionsOf(debts.filter((d) => !passing(d)), transactions, asOf);
-  const sum = (keep: (d: Debt) => boolean): Centavos =>
-    everything.filter((p) => keep(p.debt)).reduce((s, p) => s + Math.max(0, p.outstanding), 0);
-  const owe = sum((d) => d.kind === "payable" && !passing(d));
-  const owedToYou = sum((d) => d.kind === "receivable" && !passing(d));
+  // Every debt, archived ones too, by the one definition every screen reads (`owedTotals`).
+  const { youOwe: owe, owedToYou } = owedTotals(positionsOf(debts, transactions, asOf));
   const costThisYear = transactions
     .filter((t) => t.type === "Debt" && t.debtEffect !== undefined && COST.has(t.debtEffect) && getYear(t.date) === year)
     .reduce((s, t) => s + t.total, 0);

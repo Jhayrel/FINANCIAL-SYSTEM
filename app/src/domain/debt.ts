@@ -297,12 +297,60 @@ export function totalReceivables(positions: readonly DebtPosition[]): Centavos {
     .reduce((a, p) => a + Math.max(0, p.outstanding), 0);
 }
 
+/**
+ * What is owed, each way, in one place.
+ *
+ * ── Why one function ──────────────────────────────────────────────────────
+ *
+ * "You owe" was worked out four ways (the system audit of 6 October 2026):
+ * the Dashboard and the sidebar's net worth line counted money held for
+ * someone (On behalf, spec 5.6.1) as owed, the Debt screen, the sidebar's
+ * list and the owed chart did not, and the Settings panel left archived
+ * lines out and let a line below zero pull the total down. The day money is
+ * held for a relative, "You owe" read PHP 26,000.00 on one screen and PHP
+ * 1,000.00 on the next. Every screen now reads these four figures.
+ *
+ * Each line is counted at zero or more: a line paid past what was owed (the
+ * father's PHP 600.00 back for PHP 599.00) is owed by nobody, and the
+ * integrity check reports it rather than any total hiding it. Archived lines
+ * count: money still owed is owed whether or not the line is in use.
+ */
+export interface Owed {
+  /** Borrowed by the owner: banks, credit lines, loans from people. */
+  readonly youOwe: Centavos;
+  /** Lent by the owner. */
+  readonly owedToYou: Centavos;
+  /** On behalf: someone's money the owner holds, theirs to be released. */
+  readonly heldForOthers: Centavos;
+  /** On behalf: money the owner put up for someone, to come back. */
+  readonly advancedForOthers: Centavos;
+}
+
+export function owedTotals(positions: readonly DebtPosition[]): Owed {
+  let youOwe = 0;
+  let owedToYou = 0;
+  let heldForOthers = 0;
+  let advancedForOthers = 0;
+  for (const p of positions) {
+    const amount = Math.max(0, p.outstanding);
+    const behalf = p.debt.form === "pass-through";
+    if (p.debt.kind === "payable") {
+      if (behalf) heldForOthers += amount;
+      else youOwe += amount;
+    } else if (behalf) advancedForOthers += amount;
+    else owedToYou += amount;
+  }
+  return { youOwe, owedToYou, heldForOthers, advancedForOthers };
+}
+
 // ── Net worth, rule 5.6.3 ─────────────────────────────────────────────────
 
-export interface NetWorth {
+export interface NetWorth extends Owed {
   readonly wallets: Centavos;
   readonly savings: Centavos;
+  /** owedToYou + advancedForOthers */
   readonly receivables: Centavos;
+  /** youOwe + heldForOthers */
   readonly payables: Centavos;
   /** wallets + savings + receivables − payables */
   readonly total: Centavos;
@@ -319,10 +367,12 @@ export function netWorth(
   savingsTotal: Centavos,
   positions: readonly DebtPosition[],
 ): NetWorth {
-  const receivables = totalReceivables(positions);
-  const payables = totalPayables(positions);
+  const owed = owedTotals(positions);
+  const receivables = owed.owedToYou + owed.advancedForOthers;
+  const payables = owed.youOwe + owed.heldForOthers;
 
   return {
+    ...owed,
     wallets: walletTotal,
     savings: savingsTotal,
     receivables,

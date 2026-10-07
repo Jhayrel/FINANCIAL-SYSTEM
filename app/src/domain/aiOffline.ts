@@ -92,12 +92,11 @@ function offlineSummary(c: AiContext): string {
     parts.push(`${overdue} bill${overdue === 1 ? " is" : "s are"} overdue: ${c.bills.overdue.join(", ")}.`);
   }
 
-  const owed = c.debts.reduce((total, d) => total + d.outstanding, 0);
-  if (owed > 0) {
-    parts.push(`Net worth is ${php(c.netWorth)}, after ${php(owed)} still owed.`);
-  } else {
-    parts.push(`Net worth is ${php(c.netWorth)}.`);
-  }
+  // What the owner owes, never what is owed to them (`owedTotals`); money held for someone said apart.
+  const owed = c.youOwe ?? 0;
+  const held = c.heldForOthers ?? 0;
+  const after = [owed > 0 ? `${php(owed)} still owed` : "", held > 0 ? `${php(held)} held for others` : ""].filter(Boolean);
+  parts.push(after.length > 0 ? `Net worth is ${php(c.netWorth)}, after ${after.join(" and ")}.` : `Net worth is ${php(c.netWorth)}.`);
 
   return parts.join(" ");
 }

@@ -185,7 +185,8 @@ function moneyAllowed(money: ChartMoney, question: string, credits: readonly str
   if (money === "balance") {
     return (
       !TELLS_BALANCE.test(question) &&
-      (BALANCE_NOUN.test(question) || /\b(?:savings|ipon|net worth|where is (?:all )?my money|in (?:my|each|every) (?:wallets?|accounts?))\b/i.test(question) || new RegExp(IN_ACCOUNTS, "i").test(question))
+      // Not "net worth": a balance chart takes no debt off, so it drew a line above the Dashboard's net worth (6 October 2026 audit).
+      (BALANCE_NOUN.test(question) || /\b(?:savings|ipon|where is (?:all )?my money|in (?:my|each|every) (?:wallets?|accounts?))\b/i.test(question) || new RegExp(IN_ACCOUNTS, "i").test(question))
     );
   }
   if (money === "owed") {
@@ -482,7 +483,7 @@ export function buildBalanceChart(
 ): Chart | null {
   const named = namedIn(question, [...reference.wallets, ...reference.savings]);
   const savingsOnly = !named && /\b(?:savings|ipon)\b/i.test(question);
-  const everything = /\b(?:all|every|each|total|whole|net worth|everything)\b/i.test(question);
+  const everything = /\b(?:all|every|each|total|whole|everything)\b/i.test(question);
   const set = named
     ? [named]
     : savingsOnly

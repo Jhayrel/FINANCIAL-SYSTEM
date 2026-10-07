@@ -38,7 +38,9 @@ describe("what file is being asked for", () => {
     expect(september?.toMonth).toBe(9);
     expect(september?.year).toBe(2026);
 
-    expect(ask("download my debt statement")?.type).toBe("debt");
+    // What was borrowed: a statement of every debt would count money lent out as owed.
+    expect(ask("download my debt statement")?.type).toBe("borrowed");
+    expect(ask("give me my loan statement for 2026")?.type).toBe("borrowed");
     expect(ask("export my income for august")?.type).toBe("revenue");
     expect(ask("save my expense sheet")?.type).toBe("expense");
     expect(ask("export my savings")?.type).toBe("savings");

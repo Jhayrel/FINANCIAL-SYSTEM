@@ -341,7 +341,8 @@ export function Insights({
         transactions,
         accounts: settings.accounts,
         debts,
-        positions: positionsOf(debts.filter((d) => !d.archived), transactions, asOf),
+        // Every line, archived ones too: money still owed is owed (`owedTotals`).
+        positions: positionsOf(debts, transactions, asOf),
         necessity,
         asOf,
       }),
@@ -1257,7 +1258,7 @@ export function Insights({
               }
             />
             <Fig label="Wallets" value={brief.wallets} hint={brief.phase === "past" ? "At the end of the month" : "Today"} />
-            <Fig label="Savings" value={brief.savings} hint={brief.phase === "past" ? "At the end of the month" : "Today"} />
+            <Fig label="Savings and reserves" value={brief.savings} hint={brief.phase === "past" ? "At the end of the month" : "Today"} />
           </div>
         </div>
       </Card>

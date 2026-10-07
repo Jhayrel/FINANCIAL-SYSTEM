@@ -198,7 +198,7 @@ export function Dashboard({
         upcoming.length > 0
           ? `Still to pay: ${upcoming.map((u) => `${u.name} ${formatMoney(u.amount)} (${whenWords(u.days).toLowerCase()})`).join(", ")}.`
           : "Nothing left to pay this month.",
-        `Net worth ${formatMoney(v.worth.total)}: wallets ${formatMoney(v.worth.wallets)}, savings ${formatMoney(v.worth.savings)}, owed ${formatMoney(v.worth.payables)}.`,
+        `Net worth ${formatMoney(v.worth.total)}: wallets ${formatMoney(v.worth.wallets)}, savings and reserves ${formatMoney(v.worth.savings)}, you owe ${formatMoney(v.worth.youOwe)}${v.worth.heldForOthers > 0 ? `, held for others ${formatMoney(v.worth.heldForOthers)}` : ""}, owed to you ${formatMoney(v.worth.owedToYou + v.worth.advancedForOthers)}.`,
         alerts.length > 0 ? `Needs attention: ${alerts.slice(0, 5).map((a) => a.title).join("; ")}.` : "Nothing needs attention.",
         brief.kinds.length > 0 ? `Where it went: ${brief.kinds.map((k) => `${k.name} ${formatMoney(k.amount)}`).join(", ")}.` : "",
       ],
@@ -301,15 +301,23 @@ export function Dashboard({
         <Card title="Your money" subtitle="Net worth, and where it is">
           <Money value={v.worth.total} size="xl" />
           <div className="fms-month-lines">
+            {/*
+              Lines that add up to the figure above, each said once, as every
+              screen says it (`owedTotals`, 6 October 2026). "Savings" here is
+              everything set aside, reserves and goals too, so it says so: the
+              sidebar's Savings heading is the savings accounts alone.
+            */}
             <Line label="Wallets" value={v.worth.wallets} />
-            <Line label="Savings" value={v.worth.savings} />
-            <Line label="Owed to you" value={v.worth.receivables} quiet={v.worth.receivables === 0} />
+            <Line label="Savings and reserves" value={v.worth.savings} />
+            <Line label="Owed to you" value={v.worth.owedToYou} quiet={v.worth.owedToYou === 0} />
+            {v.worth.advancedForOthers > 0 && <Line label="Paid for others, coming back" value={v.worth.advancedForOthers} />}
             <Line
               label="You owe"
-              value={v.worth.payables > 0 ? -v.worth.payables : 0}
-              tone={v.worth.payables > 0 ? "var(--flow-debt-text)" : undefined}
-              quiet={v.worth.payables === 0}
+              value={v.worth.youOwe > 0 ? -v.worth.youOwe : 0}
+              tone={v.worth.youOwe > 0 ? "var(--flow-debt-text)" : undefined}
+              quiet={v.worth.youOwe === 0}
             />
+            {v.worth.heldForOthers > 0 && <Line label="Held for others" value={-v.worth.heldForOthers} />}
           </div>
           {/*
             On behalf: money a person owes back or money held for them, apart

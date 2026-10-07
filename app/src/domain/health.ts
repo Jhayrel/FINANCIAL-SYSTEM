@@ -26,7 +26,7 @@ import type { Account } from "./accounts";
 import { walletBalance } from "./balances";
 import { addDays, daysBetween } from "./dates";
 import type { Debt, DebtPosition } from "./debt";
-import { incomeQuality, totalPayables } from "./debt";
+import { incomeQuality, owedTotals } from "./debt";
 import { creditRoom } from "./creditLimit";
 import { formatMoney, type Centavos } from "./money";
 import { costOf } from "./totals";
@@ -123,7 +123,8 @@ export function moneyHealth(input: {
   const runwayMonths = perMonth > 0 ? Math.max(0, wallets) / perMonth : null;
 
   // ── What is owed, against a year of earning ──────────────────────────────
-  const debtToIncome = ratio(totalPayables(positions), yearIncome);
+  // What the owner borrowed, never money held for someone (On behalf, spec 5.6.1): `owedTotals`.
+  const debtToIncome = ratio(owedTotals(positions).youOwe, yearIncome);
   const rooms = positions
     .filter((p) => !p.debt.archived)
     .map((p) => creditRoom(p.debt, transactions, asOf))

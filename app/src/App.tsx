@@ -53,7 +53,7 @@ import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
 import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
-import { asAmountAndFees, isPartOf, netWorth, outstandingOf, parentOf, partOf, positionsOf, renameDebtAccount, withDebt, type Debt, type DebtEffect } from "./domain/debt";
+import { asAmountAndFees, isPartOf, netWorth, parentOf, partOf, positionsOf, renameDebtAccount, withDebt, type Debt, type DebtEffect } from "./domain/debt";
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
@@ -881,7 +881,10 @@ export default function App() {
        * correctly one line above, and this is the one it should always have
        * used.
        */
-      owed: worth.payables,
+      owed: worth.youOwe,
+      /** Someone else's money the owner holds (On behalf): net worth takes it off too, said apart. */
+      held: worth.heldForOthers,
+      positions,
       rows: walletBalances(
         transactions,
         [...reference.wallets, ...reference.savings],
@@ -909,12 +912,17 @@ export default function App() {
       byHeading.set(heading, [...(byHeading.get(heading) ?? []), { name, balance: row.balance }]);
     }
     const usable = view.rows.filter((r) => reference.wallets.includes(r.name)).reduce((sum, r) => sum + r.balance, 0);
-    const owed = settings.credits
-      .filter((d) => !d.archived && d.form !== "pass-through")
-      .map((d) => ({ id: d.id, name: d.name, receivable: d.kind === "receivable", amount: outstandingOf(transactions, d.id) }))
-      .filter((d) => d.amount !== 0);
+    /*
+     * Each line still owed, either way, as the Debt screen lists them: an
+     * archived line still owed counts, and one paid past what was owed is
+     * owed by nobody (`owedTotals`), so the father's PHP 600.00 back for PHP
+     * 599.00 is not "-PHP 1.00" here and nothing on the Dashboard.
+     */
+    const owed = view.positions
+      .filter((p) => p.debt.form !== "pass-through" && p.outstanding > 0)
+      .map((p) => ({ id: p.debt.id, name: p.debt.name, receivable: p.debt.kind === "receivable", amount: p.outstanding }));
     return { groups: [...byHeading], usable, owed };
-  }, [view.rows, settings.accounts, settings.credits, reference, transactions]);
+  }, [view.rows, view.positions, settings.accounts, reference]);
 
   /**
    * Everything worth a look, worst first: the bell on every screen and the
@@ -2159,9 +2167,20 @@ export default function App() {
         <div className="fms-networth">
           <div className="t-label" style={{ color: "var(--ink-2)" }}>Net worth</div>
           {ready ? <Money value={view.worth.total} size="l" /> : <span className="t-caption" style={{ color: "var(--ink-3)" }}>Loading</span>}
-          {view.owed > 0 && (
+          {(view.owed > 0 || view.held > 0) && (
             <div className="t-caption" style={{ color: "var(--ink-3)", marginTop: 2 }}>
-              after <Money value={view.owed} size="s" tone="var(--flow-debt-text)" /> owed
+              after{" "}
+              {view.owed > 0 && (
+                <>
+                  <Money value={view.owed} size="s" tone="var(--flow-debt-text)" /> owed
+                </>
+              )}
+              {view.owed > 0 && view.held > 0 && " and "}
+              {view.held > 0 && (
+                <>
+                  <Money value={view.held} size="s" /> held for others
+                </>
+              )}
             </div>
           )}
         </div>

@@ -57,7 +57,7 @@ import {
   saveConfig,
   saveOwnerUid,
 } from "../data/firebaseConfig";
-import { makeDebtId, outstandingOf, positionsOf, type Debt, type DebtKind } from "../domain/debt";
+import { makeDebtId, outstandingOf, owedTotals, positionsOf, type Debt, type DebtKind } from "../domain/debt";
 import { BILL_CLOSES, BILL_DAY_CHOICES, BILL_DAYS_EXPLAINED, choiceOfDay, dayOfChoice, PAYMENT_DUE, sameDayNote } from "../domain/debtWords";
 import { creditRoom } from "../domain/creditLimit";
 import {
@@ -447,13 +447,12 @@ function SettingsRail({
   }
 
   if (tab === "credit") {
-    let owed = 0;
-    let owedToYou = 0;
+    // The totals by the one definition every screen reads (`owedTotals`): archived lines count, none below zero.
+    const totals = owedTotals(positionsOf(settings.credits, transactions, today()));
+    const owedToYou = totals.owedToYou + totals.advancedForOthers;
     for (const c of settings.credits.filter((x) => !x.archived)) {
-      const amount = outstandingOf(transactions, c.id);
-      if (c.kind === "payable") owed += amount;
-      else owedToYou += amount;
-      lines.push({ label: c.kind === "payable" ? c.name : `${c.name}, owed to you`, value: amount });
+      const amount = Math.max(0, outstandingOf(transactions, c.id));
+      if (amount > 0) lines.push({ label: c.kind === "payable" ? c.name : `${c.name}, owed to you`, value: amount });
       // A line whose lender sets a limit: what is left under it (creditLimit.ts).
       const room = creditRoom(c, transactions, today());
       if (room) {
@@ -464,7 +463,8 @@ function SettingsRail({
         });
       }
     }
-    lines.push({ label: "You owe in all", value: owed, tone: owed > 0 ? "var(--flow-debt-text)" : undefined });
+    lines.push({ label: "You owe in all", value: totals.youOwe, tone: totals.youOwe > 0 ? "var(--flow-debt-text)" : undefined });
+    if (totals.heldForOthers > 0) lines.push({ label: "Held for others", value: totals.heldForOthers });
     if (owedToYou > 0) lines.push({ label: "Owed to you in all", value: owedToYou });
   }
 

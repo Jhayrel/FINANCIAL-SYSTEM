@@ -33,7 +33,7 @@
  * model decides to say.
  */
 
-import { walletBalance } from "./balances";
+import { totalSavingsBalance, totalWalletBalance, walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { billStatuses, overdue, STOPPED_AFTER_DAYS, upcoming } from "./bills";
 import { debtDue, incomeQuality, netWorth, positionsOf, unpaidCharges, type Debt } from "./debt";
@@ -96,6 +96,14 @@ export interface AiContext {
    */
   readonly balances: readonly { readonly account: string; readonly balance: number; readonly kind?: "spending" | "reserve" | "savings" | undefined }[];
   readonly netWorth: number;
+  /**
+   * What the owner owes and what they hold for others, by the definition
+   * every screen reads (`owedTotals`). The offline answer summed every
+   * debt, either way, so money a friend owed read as money owed (6 October
+   * 2026 audit).
+   */
+  readonly youOwe?: number;
+  readonly heldForOthers?: number;
   readonly income: {
     readonly cashIn: number;
     /** Cash in, less borrowing. The figure that is actually income. */
@@ -276,13 +284,16 @@ export function buildContext(input: ContextInput): AiContext {
      * for his phone plan, the assistant would have quoted a net worth lower
      * than the Dashboard by twice what he owed.
      */
-    netWorth: pesos(
-      netWorth(
-        live.filter((a) => reference.wallets.includes(a.name)).reduce((sum, a) => sum + walletBalance(transactions, a.name), 0),
-        live.filter((a) => !reference.wallets.includes(a.name)).reduce((sum, a) => sum + walletBalance(transactions, a.name), 0),
-        positions,
-      ).total,
-    ),
+    /*
+     * From the same lists as the Dashboard (`reference`, names trimmed and
+     * each once), never from the raw account list: two accounts saved under
+     * one name were counted twice here and once on every screen (6 October
+     * 2026 audit).
+     */
+    ...(() => {
+      const worth = netWorth(totalWalletBalance(transactions, reference.wallets), totalSavingsBalance(transactions, reference.savings), positions);
+      return { netWorth: pesos(worth.total), youOwe: pesos(worth.youOwe), heldForOthers: pesos(worth.heldForOthers) };
+    })(),
 
     income: {
       cashIn: pesos(quality.cashIn),
@@ -551,7 +562,8 @@ export function contextToText(c: AiContext): string {
     lines.push(`${title}: ${php(sum)} in all`);
     for (const b of these) lines.push(`- ${b.account}: ${php(b.balance)}`);
   }
-  lines.push(`Net worth after debt: ${php(c.netWorth)}`);
+  const owes = [(c.youOwe ?? 0) > 0 ? `you owe ${php(c.youOwe ?? 0)}` : "", (c.heldForOthers ?? 0) > 0 ? `held for others ${php(c.heldForOthers ?? 0)}` : ""].filter(Boolean);
+  lines.push(`Net worth after debt: ${php(c.netWorth)}${owes.length > 0 ? ` (${owes.join("; ")})` : ""}`);
   lines.push(
     "What they can use or spend is the usable figure. Reserve and savings are theirs but set aside: name them apart and never add them into what is usable unless they ask to count them. Net worth is everything, less what is owed, and is never what they can spend.",
   );
