@@ -15,7 +15,7 @@
 
 import { assessMonthFor } from "./budget";
 import { daysLeft } from "./alerts";
-import { formatMoney, type Centavos } from "./money";
+import { formatMoney, withoutYears, type Centavos } from "./money";
 import type { SafeToSpend } from "./monthPlan";
 import type { Budgets, IsoDate, Transaction } from "./types";
 
@@ -37,9 +37,10 @@ export function periodIn(text: string): Per | null {
 export function figuresIn(text: string): Centavos[] {
   const out: Centavos[] = [];
   const re = /(?:₱|php\s*)?(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?![\d,])\s*(k\b)?(?!\s*(?:%|days?|weeks?|months?|years?|times?|classes|class|pcs|pieces|x\b|am\b|pm\b|people|persons|kids|items|hours?|hrs?|mins?|minutes?))/gi;
-  for (const m of text.matchAll(re)) {
+  // Years taken out as years, so 2000 to 2099 can still be money (`withoutYears`).
+  for (const m of withoutYears(text).matchAll(re)) {
     const whole = Number((m[1] ?? "").replace(/,/g, ""));
-    if (!Number.isFinite(whole) || /^20\d{2}$/.test(m[1] ?? "")) continue;
+    if (!Number.isFinite(whole)) continue;
     const pesos = m[3] ? whole * 1000 : whole;
     const centavos = Math.round(pesos * 100) + (m[2] && !m[3] ? Number(m[2].padEnd(2, "0")) : 0);
     if (centavos >= 1000) out.push(centavos);

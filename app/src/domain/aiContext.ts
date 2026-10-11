@@ -38,7 +38,7 @@ import { assessMonthFor } from "./budget";
 import { billStatuses, overdue, STOPPED_AFTER_DAYS, upcoming } from "./bills";
 import { debtDue, incomeQuality, netWorth, positionsOf, unpaidCharges, type Debt } from "./debt";
 import { creditRoom, limitSteps } from "./creditLimit";
-import { addDays, dayInWords, daysBetween, getMonth, getYear, localDay, monthName } from "./dates";
+import { addDays, dayInWords, daysBetween, daysInMonth, getMonth, getYear, localDay, monthName } from "./dates";
 import { financeAlerts, burnRate, daysLeft, dailyAllowance, PACE_FROM_DAY } from "./alerts";
 import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
 import { toCentavos, toPesos } from "./money";
@@ -66,6 +66,23 @@ export interface AiContext {
      * Budget screen have it (3 October 2026).
      */
     readonly spendingLeft?: number | null;
+    /**
+     * The spending budget's pace, as the pace alert measures it: what a
+     * steady pace allows by today, what the spending track has spent, and
+     * that over the days so far. "How is this month going?" was called on
+     * track beside the alert saying the opposite (backup of 7 October 2026).
+     */
+    readonly pace?: {
+      readonly allowed: number;
+      readonly spent: number;
+      readonly perDay: number;
+      /** What is left of the spending budget a day, for the days left. */
+      readonly perDayLeft: number;
+      /** The pace alert's own test: spending a day so far above what is left a day. */
+      readonly fast: boolean;
+      readonly day: number;
+      readonly days: number;
+    } | null;
     readonly burnRatePerDay: number;
     readonly allowancePerDay: number | null;
     readonly breakdown: {
@@ -240,6 +257,24 @@ export function buildContext(input: ContextInput): AiContext {
       budget: hasBudget ? pesos(assessment.combined.budget) : null,
       remaining: hasBudget ? pesos(assessment.combined.remaining) : null,
       spendingLeft: assessment.spending.budget > 0 ? pesos(assessment.spending.remaining) : null,
+      pace: (() => {
+        if (assessment.spending.budget <= 0) return null;
+        const day = Number(asOf.slice(8, 10));
+        const days = daysInMonth(year, month);
+        const left = daysLeft(asOf);
+        const rate = day > 0 ? Math.floor(assessment.spending.spent / day) : 0;
+        const perDayLeft = left > 0 ? Math.floor(Math.max(0, assessment.spending.remaining) / left) : 0;
+        return {
+          allowed: pesos(Math.floor((assessment.spending.budget * day) / days)),
+          spent: pesos(assessment.spending.spent),
+          perDay: pesos(rate),
+          perDayLeft: pesos(perDayLeft),
+          // As the alert decides it (`alerts.ts`, budget-pace), so the two never disagree.
+          fast: left > 0 && rate > perDayLeft,
+          day,
+          days,
+        };
+      })(),
       burnRatePerDay: pesos(burnRate(transactions, asOf)),
       /*
        * A day's share of the spending track, the screens' "a day" figure.
@@ -515,6 +550,12 @@ export function contextToText(c: AiContext): string {
    * as "a daily shortfall of PHP -10,218.71 for the remaining day" (30
    * September 2026). Nothing is left to spend a day; the overspend is said once.
    */
+  const pace = c.month.pace;
+  if (pace && pace.day >= PACE_FROM_DAY) {
+    lines.push(
+      `Spending budget pace: ${php(pace.spent)} by day ${pace.day} of ${pace.days}, steady pace ${php(pace.allowed)}; ${php(pace.perDay)} a day so far, ${php(pace.perDayLeft)} a day left: ${pace.fast ? "not on track" : "on track"}.`,
+    );
+  }
   const spendingLeft = c.month.spendingLeft ?? null;
   // The safe section says what the spending budget leaves a day; saying it here too gave the prompt the figure twice.
   const saidBelow = spendingLeft !== null && c.safe != null && c.safe.budgetLeft !== null;
@@ -557,7 +598,12 @@ export function contextToText(c: AiContext): string {
       `Spending wallets ${php(safe.wallets)}, less bills and subscriptions still to pay ${php(safe.billsDue)}${due}${safe.debtDue > 0 ? ` and debt payments due ${php(safe.debtDue)}` : ""}: ${php(safe.safe)} is safe to spend until ${until} ends.`,
     );
     lines.push(
-      `Safe to spend today: ${php(safe.today)} (today's share ${php(safe.todayShare)}, spent today ${php(safe.spentToday)}, bills apart${safe.overToday > 0 ? `, ${php(safe.overToday)} past it` : ""}).${safe.daysLeft > 1 ? ` From tomorrow, ${dayInWords(addDays(c.asOf, 1))}: ${php(safe.perDayAfter)} a day for ${safe.daysLeft - 1} days.` : ""}`,
+      /*
+       * The division said, so the day figure is never explained as the
+       * wallets less the bills, which is the month's figure (backup of 7
+       * October 2026, twice). In centavos, then back to pesos.
+       */
+      `Safe to spend today: ${php(safe.today)}: today's share ${php(safe.todayShare)} (${php(pesos(Math.max(0, toCentavos(safe.safe)) + toCentavos(safe.spentToday)))}, safe to ${until}'s end plus spent today, over ${safe.daysLeft} days) less ${php(safe.spentToday)} spent today${safe.overToday > 0 ? `, ${php(safe.overToday)} past it` : ""}.${safe.daysLeft > 1 ? ` From tomorrow, ${dayInWords(addDays(c.asOf, 1))}: ${php(safe.perDayAfter)} a day for ${safe.daysLeft - 1} days.` : ""}`,
     );
     {
       const week = weekAhead({ perDay: toCentavos(safe.today), perDayAfter: toCentavos(safe.perDayAfter), daysLeft: safe.daysLeft });
@@ -610,7 +656,8 @@ export function contextToText(c: AiContext): string {
   lines.push("");
   lines.push("## Income this year");
   lines.push(
-    `Cash in ${php(c.income.cashIn)}, of which ${php(c.income.borrowed)} was borrowed and ${php(c.income.openingBalance)} was already held when counting started. True income ${php(c.income.trueIncome)}.`,
+    // Draws are Debt rows, outside cash in: "of which" said they were inside it (backup of 7 October 2026).
+    `Cash in ${php(c.income.cashIn)}, ${php(c.income.openingBalance)} of it already held when counting started. True income ${php(c.income.trueIncome)}. Borrowed besides, never income: ${php(c.income.borrowed)}.`,
   );
 
   if (c.topSpending.length > 0) {

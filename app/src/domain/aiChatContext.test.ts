@@ -287,8 +287,9 @@ describe("what the model is given to reason with", () => {
   });
 
   it("sends each item this month against its own last three months", () => {
-    expect(text).toContain("## August 2026 so far, each item against its last three months");
-    expect(text).toContain("Treat: PHP 9,000.00 now. July 2026 PHP 400.00, June 2026 PHP 600.00, May 2026 PHP 500.00, an average of PHP 500.00 a month.");
+    expect(text).toContain("## August 2026 so far, each item against its usual month and its last three months");
+    // One usual figure, the middle month; the three months are their average, never called usual (backup of 7 October 2026).
+    expect(text).toMatch(/Treat: PHP 9,000\.00 now\. Usual month PHP [\d,]+\.\d\d\. July 2026 PHP 400\.00, June 2026 PHP 600\.00, May 2026 PHP 500\.00, an average of the last three months PHP 500\.00\./);
   });
 
   it("names the entries that produced the month", () => {
@@ -354,6 +355,22 @@ describe("any window, and what if", () => {
   it("does not read money coming in as money spent", () => {
     const text = build("what budget do you recommend for October if I only expect 8000 allowance?", { transactions: days }).text;
     expect(text).not.toContain("## What if");
+  });
+
+  /*
+   * Backup of 7 October 2026: a plan to spend, and figures from 2000 to 2099,
+   * had no worked figures, so the model subtracted on its own.
+   */
+  it.each([
+    ["I'm planning to spend 2000 today? Is it possible? I want to eat outside", "PHP 2,000.00"],
+    ["can i spend 2050 on a jacket?", "PHP 2,050.00"],
+    ["I will be spending 1000 cash", "PHP 1,000.00"],
+  ])("works out a plan to spend: %s", (said, figure) => {
+    expect(build(said, { transactions: days }).text).toContain(`## What if ${figure} is spent now`);
+  });
+
+  it("still reads a year as a year", () => {
+    expect(build("what if I spend 500 in October 2026?", { transactions: days }).text).toContain("## What if PHP 500.00 is spent now");
   });
 });
 

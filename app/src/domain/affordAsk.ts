@@ -190,9 +190,21 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
         : known.map((c) => `${c.item} usually costs you ${money(c.cost)}`).join(", and ");
     const room = fromWallet ?? free;
     const after = room - cost;
+    /*
+     * The day decides the first word. "CAN I SPEND 100 TODAY FOR GYM?" was
+     * answered "Yes, going by what you hold today" with PHP 0.00 safe to
+     * spend that day, and the next line then said it was PHP 100.00 more
+     * than today's figure: a yes and a no to one question (backup of 7
+     * October 2026, three times). The month's money is said second.
+     */
+    const tomorrowOnly = ask.when === "tomorrow" && (safe?.daysLeft ?? 0) > 1;
+    const dayFigure = safe && fromWallet === null ? (tomorrowOnly ? safe.perDayAfter : safe.perDay) : null;
+    const pastTheDay = dayFigure !== null && cost > dayFigure;
     if (room >= cost) {
       lines.push(
-        `${ask.yesNo === false ? `${money(cost)} fits what you hold` : "Yes, going by what you hold"}${ask.when ? ` ${ask.when === "tomorrow" ? "for tomorrow" : "today"}` : ""}. ${holding}${fromWallet === null ? dueWords : ""}`,
+        pastTheDay
+          ? `Not within ${tomorrowOnly ? "tomorrow's" : "today's"} figure of ${money(dayFigure)}: ${money(cost)} is ${money(cost - dayFigure)} more. The month's money can cover it. ${holding}${dueWords}`
+          : `${ask.yesNo === false ? `${money(cost)} fits what you hold` : "Yes, going by what you hold"}${ask.when ? ` ${ask.when === "tomorrow" ? "for tomorrow" : "today"}` : ""}. ${holding}${fromWallet === null ? dueWords : ""}`,
       );
       lines.push(
         ask.amount !== null

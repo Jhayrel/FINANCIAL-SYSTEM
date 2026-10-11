@@ -602,6 +602,14 @@ export function judgeWords(
   a: BudgetAdvice,
   tracks: BudgetAssessment,
   daysLeft: number,
+  /**
+   * What is safe to spend until the month ends, for the month running. A
+   * budget raised to PHP 16,700.00 was judged against the usual month alone
+   * and called no more care than usual, while the wallets held thousands
+   * less than the budget left; the next day nothing was safe to spend
+   * (backup of 7 October 2026).
+   */
+  held: { readonly safe: Centavos; readonly perDay: Centavos } | null = null,
 ): string | null {
   const set = tracks.spending.budget + tracks.billsSubs.budget;
   if (set <= 0) return null;
@@ -632,6 +640,15 @@ export function judgeWords(
   } else {
     out.push(`${a.name} is over: ${money(tracks.spending.spent)} of spending against the ${money(tracks.spending.budget)} budget.`);
   }
+  if (held && daysLeft > 0 && tracks.spending.remaining > 0) {
+    const left = tracks.spending.remaining;
+    const safe = Math.max(0, held.safe);
+    out.push(
+      safe < left
+        ? `Against the money: ${money(safe)} is safe to spend until ${a.name} ends, ${money(left - safe)} less than the spending budget left, so the money allows ${money(Math.floor(safe / daysLeft))} a day, not ${money(Math.floor(left / daysLeft))}, unless more comes in. The budget cannot be kept from what is held now.`
+        : `Against the money: ${money(safe)} is safe to spend until ${a.name} ends, which covers the ${money(left)} of the spending budget left.`,
+    );
+  }
   return out.join(" ");
 }
 
@@ -649,6 +666,8 @@ export function whyOver(
   year: number,
   month: number,
   asOf: IsoDate,
+  /** The usual month already worked out for this month, so a caller's figures and these agree. */
+  given?: BudgetAdvice,
 ): string[] {
   const rows = transactions.filter((t) => !(t as Transaction & { deletedAt?: string }).deletedAt);
   const key = `${year}-${String(month).padStart(2, "0")}`;
@@ -658,7 +677,7 @@ export function whyOver(
   const bills = totals.bills + totals.subscriptions;
   const total = budget.spending + budget.billsSubs;
   if (total === 0) return [];
-  const usual = budgetAdvice({ transactions: rows, year, month, asOf });
+  const usual = given && given.year === year && given.month === month ? given : budgetAdvice({ transactions: rows, year, month, asOf });
   const usualOf = new Map([...usual.items, ...usual.sometimes.map((l) => ({ ...l, amount: 0 }))].map((l) => [l.name.toLowerCase(), l.amount]));
   const range = { start: makeDate(year, month, 1), end: makeDate(year, month, daysInMonth(year, month)) };
   const now = [...spendingAttribution(inMonth, range)].filter(([n]) => !/^transaction fee$/i.test(n));
@@ -686,3 +705,15 @@ export function whyOver(
   }
   return lines;
 }
+
+/**
+ * A budget asked for a day or a week, not a month: "Give me a proposed
+ * budget for this week", "what budget do you recommend for today?". It was
+ * answered with next month's whole budget (backup of 7 October 2026). A
+ * month named as well keeps it a month's question.
+ */
+export function asksShortBudget(text: string, asOf: IsoDate): boolean {
+  if (!asksBudgetAdvice(text) || adviceMonthIn(text, asOf) !== null) return false;
+  return /\b(?:this|next|the)\s+week\b|\bweekly\b|\bfor\s+(?:today|tomorrow|tonight)\b|\bper\s+(?:day|week)\b|\b(?:a|each|every)\s+(?:day|week)\b|\bdaily\b|\bngayong\s+(?:araw|linggo)\b|\bbukas\b/i.test(text);
+}
+

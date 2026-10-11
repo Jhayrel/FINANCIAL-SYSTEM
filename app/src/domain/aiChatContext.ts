@@ -53,9 +53,10 @@ import { creditRoom, limitSteps } from "./creditLimit";
 import { assessMonthFor, budgetForMonth } from "./budget";
 import { outlookAhead, outlookFacts } from "./outlook";
 import { moneyFlow, flowWords } from "./moneyFlow";
-import { whyOver } from "./budgetAdvice";
+import { budgetAdvice, whyOver } from "./budgetAdvice";
 import { namesWindow, windowOf } from "./charts";
-import { figuresIn } from "./money";
+import { figuresIn, withoutYears } from "./money";
+import { isPlan } from "./intent";
 import { binForModel } from "./deletedAsk";
 import type { Budgets, DeletedTransaction, IsoDate, Transaction } from "./types";
 import { pointsAt } from "./pointsAt";
@@ -400,11 +401,23 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
    * the forecast" read the same figures, so none of them can disagree.
    */
   const [asOfYear, asOfMonth] = [Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7))];
+  /*
+   * One usual month for the month running, the Budget screen's (each item's
+   * middle month), used wherever the prompt says "usual": the items now, why
+   * the month is over, and the biggest items. Three different figures were
+   * called usual for one item, and each answer quoted a different one
+   * (backup of 7 October 2026).
+   */
+  const usualNow = budgetAdvice({ transactions: rows, year: asOfYear, month: asOfMonth, asOf, stopped: input.stopped ?? [], debts: input.credits ?? [] });
+  const usualOf = new Map(
+    [...usualNow.items, ...usualNow.bills, ...usualNow.subscriptions].map((l) => [l.name.toLowerCase(), l.amount] as const),
+  );
+  const sometimes = new Set(usualNow.sometimes.map((l) => l.name.toLowerCase()));
   const ahead = outlookAhead(rows, input.budgets ?? {}, asOf, 3, { stopped: input.stopped ?? [], debts: input.credits ?? [] });
   out.push("");
   out.push("## The months ahead, as the app plans them");
   if (ahead[0] && ahead[0].read.length > 0 && ahead[0].total > 0) {
-    for (const fact of outlookFacts(ahead, php)) out.push(fact);
+    for (const fact of outlookFacts(ahead, php, usualNow)) out.push(fact);
     out.push(
       `When asked what budget to set for one of these months, recommend its usual month (spending and bills and subscriptions, as above), say it is the app's plan from the usual month, and mention the figure for a month where a one-off comes up. Debt payments due are money needed on top, not part of the budget.`,
     );
@@ -430,9 +443,9 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   const nowByItem = tally(nowRows, (t) => t.item).slice(0, TOP_N);
   if (nowByItem.length > 0) {
     out.push("");
-    out.push(`## ${monthName(monthKey(0))} so far, each item against its last three months`);
+    out.push(`## ${monthName(monthKey(0))} so far, each item against its usual month and its last three months`);
     out.push(
-      "Use these for any claim that a figure is high, low or unusual, and say what it was compared with. An item with fewer than two of those months behind it has too little history to call anything.",
+      `Use these for any claim that a figure is high, low or unusual, and say what it was compared with. "Usual" is only ever the usual month given here (each item's middle month over ${usualNow.read.length > 0 ? usualNow.read.join(", ") : "the months read"}); the average of the last three months is only that, never usual. An item with fewer than two of those months behind it has too little history to call anything.`,
     );
     for (const [name, g] of nowByItem) {
       const before = previous.map((key) =>
@@ -440,10 +453,12 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       );
       const seen = before.filter((v) => v > 0).length;
       const average = Math.round(before.reduce((a, b) => a + b, 0) / previous.length);
+      const usual = usualOf.get(name.toLowerCase());
+      const usualWords = usual !== undefined ? `Usual month ${php(usual)}. ` : sometimes.has(name.toLowerCase()) ? "Not in a usual month (only some months). " : "";
       out.push(
-        `${name}: ${php(g.amount)} now. ${previous
+        `${name}: ${php(g.amount)} now. ${usualWords}${previous
           .map((key, i) => `${monthName(key)} ${php(before[i] ?? 0)}`)
-          .join(", ")}, an average of ${php(average)} a month${seen === 0 ? ". New this month" : seen === 1 ? ". Only one of those months had any" : ""}.`,
+          .join(", ")}, an average of the last three months ${php(average)}${seen === 0 ? ". New this month" : seen === 1 ? ". Only one of those months had any" : ""}.`,
       );
     }
 
@@ -627,7 +642,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     const [ty, tm] = [Number(target.slice(0, 4)), Number(target.slice(5, 7))];
     if (input.budgets && ty && tm) {
       const budget = budgetForMonth(input.budgets, ty, tm);
-      const why = whyOver(rows, budget, ty, tm, asOf);
+      const why = whyOver(rows, budget, ty, tm, asOf, usualNow);
       if (why.length > 0) {
         out.push("");
         out.push(`## ${monthName(target)} against its budget, and why`);
@@ -750,9 +765,17 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   const incomeTalk =
     /\b(expect\w*|allowance|salary|sahod|income|earn\w*|receiv\w*|get paid|coming in)\b/i.test(question) &&
     !/\b(buy|spend|afford|pay for|purchase)\b/i.test(question);
-  const hypothetical = !incomeTalk && /\b(what if|if i|can i (?:afford|buy|spend|pay|get)|should i (?:buy|spend|get|pay)|afford)\b/i.test(question);
+  /*
+   * A plan is a what if too: "I'm planning to spend 2000 today? Is it
+   * possible?" had none, and the model worked out what was left itself
+   * (backup of 7 October 2026).
+   */
+  const hypothetical =
+    !incomeTalk &&
+    (/\b(what if|if i|can i (?:afford|buy|spend|pay|get)|should i (?:buy|spend|get|pay)|afford|is it possible|possible ba|pwede ba|puwede ba|okay lang ba|ok lang ba|kaya ba)\b/i.test(question) ||
+      isPlan(question));
   const amounts = hypothetical
-    ? figuresIn(question.replace(/\b20\d{2}\b/g, " ").replace(/(\d+(?:\.\d+)?)\s*k\b/gi, (_m, n: string) => String(Math.round(Number(n) * 1000))))
+    ? figuresIn(withoutYears(question).replace(/(\d+(?:\.\d+)?)\s*k\b/gi, (_m, n: string) => String(Math.round(Number(n) * 1000))))
     : [];
   const what = amounts.length > 0 ? Math.max(...amounts) : 0;
   if (what > 0) {

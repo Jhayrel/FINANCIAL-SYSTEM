@@ -135,7 +135,7 @@ import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../do
 import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, wantsThoseEntries, type Intent } from "../domain/intent";
 import { monthBrief } from "../domain/monthPlan";
 import { asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
-import { challengesAnswer, challengeWorked } from "../domain/dayFit";
+import { challengedAnswer, challengesAnswer } from "../domain/dayFit";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
 import { planWorked } from "../domain/planRate";
@@ -240,7 +240,7 @@ import {
   editedAsk,
 } from "../domain/budgetAsk";
 import { readSpendAsk, spendAnswer } from "../domain/spendAsk";
-import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, judgeWords, judgesSetBudget, newestBudgetChange, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
+import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksShortBudget, asksForTheSplit, budgetAdvice, expectedIncomeIn, judgeWords, judgesSetBudget, newestBudgetChange, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
 import { asksSettingsChange, asksWhatChartsExist, capabilitiesAnswer, chartsAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { assessMonthFor, budgetForYear } from "../domain/budget";
 import { daysInMonth, daysLeftInMonth, formatMedium, MONTH_NAMES } from "../domain/dates";
@@ -3938,10 +3938,11 @@ export function AskPanel({
      * goes on top, so the reply starts by owning the mistake (`dayFit.ts`).
      */
     if (challengesAnswer(question)) {
-      const before = [...turns].reverse().find((t): t is Said => t.kind === "assistant" && "text" in t);
-      if (before) {
-        const safe = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe;
-        const checked = challengeWorked(before.text, safe ? { today: safe.perDay, after: safe.perDayAfter } : null, formatMoney);
+      // The last few answers, newest first: the one questioned may be two back (`challengedAnswer`).
+      const before = [...turns].reverse().filter((t): t is Said => t.kind === "assistant" && "text" in t).map((t) => t.text);
+      const safe = before.length > 0 ? monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe : null;
+      const checked = challengedAnswer(question, before, safe ? { today: safe.perDay, after: safe.perDayAfter } : null, formatMoney);
+      if (checked) {
         worked = worked
           ? { text: `${checked.text}\n\n${worked.text}`, ...(checked.fallback || worked.fallback ? { fallback: [checked.fallback, worked.fallback].filter(Boolean).join("\n\n") } : {}) }
           : checked;
@@ -4266,7 +4267,8 @@ export function AskPanel({
         return;
       }
     }
-    if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && asksSafeToSpend(note) && !plainlyDone(note)) {
+    // A budget for a day or a week is what is safe to spend over it, never next month's budget (`asksShortBudget`).
+    if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && (asksSafeToSpend(note) || asksShortBudget(ruled, asOf)) && !plainlyDone(note)) {
       setDraft("");
       say({ kind: "you", text: note });
       log(aiEvent("asked", "add", { text: note }));
@@ -4825,11 +4827,13 @@ export function AskPanel({
             const tracks = assessMonthFor(transactions, budgets, target.year, target.month);
             const phase = target.year * 12 + target.month - (thisMonth.year * 12 + thisMonth.month);
             const daysLeft = phase < 0 ? 0 : phase > 0 ? daysInMonth(target.year, target.month) : daysLeftInMonth(asOf);
-            const judged = judgeWords(advice, tracks, daysLeft);
+            // The money as well as the plan, for the month running (`judgeWords`).
+            const running = phase === 0 ? monthBrief({ transactions, reference, budgets, debts, year: target.year, month: target.month, asOf }).safe : null;
+            const judged = judgeWords(advice, tracks, daysLeft, running ? { safe: running.safe, perDay: running.perDay } : null);
             if (judged !== null) {
               await answerWithModel(
                 [
-                  `They are asking whether the budget already set for ${advice.name} is reasonable. The app set it against their usual month and what is left of it; these figures are correct, so quote them and never recompute them. Answer yes or no on whether it can hold, from these, and never from the first days' average. Do not recommend a different budget unless they ask for one.`,
+                  `They are asking whether the budget already set for ${advice.name} is reasonable. The app set it against their usual month, what is left of it and the money they hold; these figures are correct, so quote them and never recompute them. Answer yes or no on whether it can hold, judging the plan and the money both: when the money is less than the budget left, say the budget cannot be kept from what is held, and give the money's figure a day. Never judge from the first days' average. Do not recommend a different budget unless they ask for one.`,
                   judged,
                 ].join("\n"),
                 judged,

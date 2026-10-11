@@ -304,5 +304,9 @@ describe("a question about the budget already set", () => {
     expect(words).toContain("PHP 9,000.00 of the spending budget is left for the 27 days left, today included, PHP 333.33 a day.");
     const none = { ...tracks, spending: { ...tracks.spending, budget: 0 }, billsSubs: { ...tracks.billsSubs, budget: 0 } } as typeof tracks;
     expect(judgeWords(advice, none, 27)).toBeNull();
+    // Backup of 7 October 2026: the money left out, so "no more care than usual" while the wallets could not hold it.
+    const short = judgeWords(advice, tracks, 27, { safe: 661856, perDay: 24513 })!;
+    expect(short).toContain("Against the money: PHP 6,618.56 is safe to spend until October 2026 ends, PHP 2,381.44 less than the spending budget left, so the money allows PHP 245.13 a day, not PHP 333.33, unless more comes in.");
+    expect(judgeWords(advice, tracks, 27, { safe: 1000000, perDay: 37037 })).toContain("which covers the PHP 9,000.00 of the spending budget left.");
   });
 });

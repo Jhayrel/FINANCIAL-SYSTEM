@@ -260,6 +260,22 @@ const MONTHS_NOT_MAY =
  * month only with a year or an ordinal beside it, because in Tagalog "may 30
  * pa ako" is "I still have 30".
  */
+/**
+ * The text with its years taken out, and only its years: a day with its
+ * month, a month with its year, a year after "in", "of", "since" and the
+ * like, and an ISO date. A bare figure stays a figure.
+ *
+ * Every figure from 2000 to 2099 was dropped as a year, so "I'm planning to
+ * spend 2000 today? Is it possible?" had no figure to work out, and the model
+ * did the subtraction itself (backup of 7 October 2026).
+ */
+export function withoutYears(text: string): string {
+  return withoutDays(text)
+    .replace(/\b(?:19|20)\d{2}-\d{2}-\d{2}\b/g, " ")
+    .replace(new RegExp(`\\b(?:${MONTHS_NOT_MAY}|may)\\.?,?\\s+(?:19|20)\\d{2}\\b`, "gi"), " ")
+    .replace(/\b(?:in|of|since|until|till|during|year|back in|for the year|for year)\s+(?:19|20)\d{2}\b/gi, " ");
+}
+
 export function withoutDays(text: string): string {
   const day = "(?:[12]\\d|3[01]|0?[1-9])(?:st|nd|rd|th)?";
   return text

@@ -75,3 +75,52 @@ describe("a can question is about what is safe, never a past sum", () => {
     expect(readSpendAsk(said, ["Gas", "Food"], "2026-10-06")).toBeNull();
   });
 });
+
+describe("the model is told whether the month is on track, as the alert decides it", () => {
+  const spend = (date: string, amount: number) =>
+    ({ id: `p${date}${amount}`, recordNumber: amount, date, type: "Spending", fromWallet: "Cash", toWallet: "", category: "Spending", item: "Food", description: "", amount, fee: 0, total: amount, notes: "", status: "Paid" }) as never;
+  const income = { id: "in", recordNumber: 1, date: "2026-10-01", type: "Revenue", fromWallet: "", toWallet: "Cash", category: "Revenue", item: "Allowance", description: "", amount: 2000000, fee: 0, total: 2000000, notes: "", status: "Received" } as never;
+  const budgets = { "2026": { spending: [0, 0, 0, 0, 0, 0, 0, 0, 0, 1500000, 0, 0], billsSubs: Array(12).fill(0) } };
+  const text = async (rows: never[]) => {
+    const { buildContext, contextToText } = await import("./aiContext");
+    const reference = { wallets: ["Cash"], savings: [], bills: [], subscriptions: [], revenueCategories: ["Allowance"], spendingTypes: [{ name: "Food", remark: "" }] };
+    const c = buildContext({ transactions: [income, ...rows], accounts: [], budgets, credits: [], reference, lowBalanceThreshold: 0, asOf: "2026-10-07" } as never);
+    return { line: contextToText(c).split("\n").find((l) => l.startsWith("Spending budget pace:")) ?? "", alerts: c.alerts };
+  };
+
+  it("says not on track when the pace alert fires", async () => {
+    const got = await text([spend("2026-10-02", 1062605)]);
+    expect(got.line).toMatch(/: not on track\.$/);
+    expect(JSON.stringify(got.alerts)).toContain("Spending faster than the budget allows");
+  });
+
+  it("says on track when it does not", async () => {
+    const got = await text([spend("2026-10-02", 200000)]);
+    expect(got.line).toMatch(/[^t] on track\.$/);
+    expect(JSON.stringify(got.alerts)).not.toContain("Spending faster than the budget allows");
+  });
+});
+
+describe("a budget for a day or a week is not a month's budget", () => {
+  it.each([
+    ["Give me a proposed budget for this week. I have class may b", true],
+    ["can you suggest a budget for this week?", true],
+    ["what budget do you recommend for today?", true],
+    ["what budget do you recommend for November?", false],
+    ["recommend a budget", false],
+  ])("%s", async (said, short) => {
+    const { asksShortBudget } = await import("./budgetAdvice");
+    expect(asksShortBudget(said, "2026-10-05")).toBe(short);
+  });
+});
+
+describe("an opening balance is one whatever its item is called", () => {
+  it("counts a renamed opening row as already held, not income", async () => {
+    const { incomeQuality } = await import("./debt");
+    const row = (item: string, category: string, total: number) =>
+      ({ id: item + total, recordNumber: total, date: "2026-01-01", type: "Revenue", fromWallet: "", toWallet: "Cash", category, item, description: "", amount: total, fee: 0, total, notes: "", status: "Done" }) as never;
+    const q = incomeQuality([row("Random", "Opening", 95389), row("Transfer of balance", "Revenue", 10000), row("Allowance", "Revenue", 500000)], []);
+    expect(q.openingBalance).toBe(105389);
+    expect(q.trueIncome).toBe(500000);
+  });
+});

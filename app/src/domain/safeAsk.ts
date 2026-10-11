@@ -95,6 +95,15 @@ export function safeWords(
     `- Bills and subscriptions still to pay: ${safe.reservedBills > 0 ? `\u2212${money(safe.reservedBills)}${named.length > 0 ? ` (${named.join(", ")})` : ""}` : "none"}`,
     ...(safe.reservedDebt > 0 ? [`- Debt payments due: \u2212${money(safe.reservedDebt)}`] : []),
     `- Safe until ${name} ends: **${money(safe.safe)}**`,
+    /*
+     * How today's figure comes from it: the model twice called it the wallets
+     * less the bills, which is the line above (backup of 7 October 2026).
+     */
+    ...(safe.daysLeft > 0
+      ? [
+          `- Today's share: ${money(Math.max(0, safe.safe) + safe.spentToday)} over the ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"} left, today included: ${money(safe.todayShare)}${safe.spentToday > 0 ? `, less ${money(safe.spentToday)} spent today: ${money(safe.perDay)}` : ""}`,
+        ]
+      : []),
     ...(safe.daysLeft > 1 ? [`- From tomorrow: ${money(safe.perDayAfter)} a day for ${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"}`] : []),
     ...(() => {
       const week = weekAhead(safe);

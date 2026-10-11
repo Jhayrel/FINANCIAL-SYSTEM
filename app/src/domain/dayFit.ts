@@ -30,7 +30,7 @@
 
 import { figuresIn } from "./aiFigures";
 import { addDays } from "./dates";
-import type { Centavos } from "./money";
+import { figuresIn as figuresSaid, type Centavos } from "./money";
 import type { IsoDate, Transaction } from "./types";
 
 // ── The owner's everyday prices ────────────────────────────────────────────
@@ -242,3 +242,34 @@ export function challengeWorked(
     fallback: said,
   };
 }
+
+/**
+ * Which earlier answer a challenge is about, among the last few (newest
+ * first): the one holding a figure the owner names ("you said 65" finds the
+ * answer that said PHP 64.29), else the newest one with a slip in it, else
+ * the newest. Only the last answer was checked, so "But why you suggested
+ * it?", asked after the slip had been owned, defended it (backup of 7
+ * October 2026).
+ */
+export function challengedAnswer(
+  question: string,
+  answers: readonly string[],
+  day: { readonly today: Centavos; readonly after: Centavos } | null,
+  money: (c: Centavos) => string,
+): { readonly text: string; readonly fallback?: string; readonly index: number } | null {
+  const recent = answers.slice(0, 4);
+  if (recent.length === 0) return null;
+  // Bare figures too ("you said 65"), which the answer reader does not take.
+  const named = figuresSaid(question).filter((f) => f >= 100);
+  const holds = (answer: string): boolean => {
+    const said = figuresIn(answer);
+    return named.some((n) => said.some((f) => Math.abs(f - n) <= 200));
+  };
+  let index = named.length > 0 ? recent.findIndex(holds) : -1;
+  if (index < 0) index = day ? recent.findIndex((a) => fitSlips(a, day).length > 0) : -1;
+  if (index < 0) index = 0;
+  const checked = challengeWorked(recent[index] ?? "", day, money);
+  const which = index === 0 ? "" : `The answer being questioned is not the last one but the one ${index + 1} answers back, which began: "${(recent[index] ?? "").slice(0, 160).replace(/\s+/g, " ")}". `;
+  return { ...checked, text: `${which}${checked.text}`, index };
+}
+

@@ -248,7 +248,17 @@ export function outlookWords(list: readonly MonthOutlook[], money: (c: Centavos)
 }
 
 /** The facts the model is given to explain the outlook: nothing else. */
-export function outlookFacts(list: readonly MonthOutlook[], money: (c: Centavos) => string): string[] {
+export function outlookFacts(
+  list: readonly MonthOutlook[],
+  money: (c: Centavos) => string,
+  /**
+   * The usual month to name the biggest items from, when the caller already
+   * has one: the chat hands the month running's, so an item has one usual
+   * figure in the whole prompt (backup of 7 October 2026: Food usually
+   * PHP 1,450.00 in one line and PHP 1,350.00 in another).
+   */
+  usual?: BudgetAdvice,
+): string[] {
   const facts: string[] = [];
   const first = list[0];
   if (first) facts.push(`Worked out from each item's usual month over ${monthsRead(first.read)}, one-offs left out.`);
@@ -263,7 +273,7 @@ export function outlookFacts(list: readonly MonthOutlook[], money: (c: Centavos)
     for (const s of o.seasonal) facts.push(`${o.name}: last year that month also had ${s.item} ${money(s.lastYear)}, usually ${money(s.usual)}.`);
   }
   if (first) {
-    const top = first.advice.items.slice(0, 5).map((l) => `${l.name} ${money(l.amount)}`).join(", ");
+    const top = (usual ?? first.advice).items.slice(0, 5).map((l) => `${l.name} ${money(l.amount)}`).join(", ");
     if (top) facts.push(`The biggest items in a usual month: ${top}.`);
     facts.push(steadyWords(first.steadiness));
   }

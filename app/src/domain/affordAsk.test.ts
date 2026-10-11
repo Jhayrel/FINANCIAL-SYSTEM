@@ -179,3 +179,25 @@ describe("a purchase against today's figure", () => {
     expect(under).toContain(`It fits today's figure of ${formatMoney(safe.perDay)}, so from tomorrow stays ${formatMoney(safe.perDayAfter)} a day.`);
   });
 });
+
+/**
+ * "CAN I SPEND 100 TODAY FOR GYM?" with today's share already spent was
+ * answered "Yes, going by what you hold today", then "It is PHP 100.00 more
+ * than today's figure of PHP 0.00" (backup of 7 October 2026). One question,
+ * one call: the day decides the first words, the month's money comes second.
+ */
+describe("an amount past today's figure is never a yes", () => {
+  const spentToday = [...rows, row({ date: TODAY, item: "Food", fromWallet: "Maya", amount: 200000, total: 200000 })];
+  const today = { ...input, transactions: spentToday };
+
+  it("opens with the day, then says the month can cover it", () => {
+    const text = affordAnswer(readAffordAsk("CAN I SPEND 100 TODAY FOR GYM?", spentToday, reference, TODAY), today);
+    expect(text.startsWith("Not within today's figure of ₱0.00: ₱100.00 is ₱100.00 more. The month's money can cover it.")).toBe(true);
+    expect(text).not.toMatch(/^Yes/);
+  });
+
+  it("still says yes to an amount within today's figure", () => {
+    const text = affordAnswer(readAffordAsk("can I spend 100 today", rows, reference, TODAY), input);
+    expect(text.startsWith("Yes, going by what you hold today.")).toBe(true);
+  });
+});

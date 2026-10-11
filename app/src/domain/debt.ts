@@ -444,8 +444,16 @@ export function incomeQuality(
     cashIn += t.total;
 
     const item = t.item.trim().toLowerCase();
+    /*
+     * An opening balance by its category as well as its old item name. The
+     * owner renamed the item on 4 October 2026, and from then on PHP 953.89
+     * of balances carried in counted as true income, above the year's
+     * received figure (backup of 7 October 2026). The category is the rule
+     * every other income figure uses (`totals.ts`); the item name stays, so
+     * no figure on the historical ledger moves.
+     */
     if (unmigratedNames.has(item)) borrowedInRevenue += t.total;
-    else if (item === "transfer of balance") openingBalance += t.total;
+    else if (t.category === "Opening" || item === "transfer of balance") openingBalance += t.total;
     else if (item === "cash on hand") selfMoves += t.total;
   }
 

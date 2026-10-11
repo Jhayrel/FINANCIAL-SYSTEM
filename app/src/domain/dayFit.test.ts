@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asksWhatTheDayBuys, challengeWorked, challengesAnswer, everydayPrices, fitNote, fitSlips, pricesAgainstDay } from "./dayFit";
+import { asksWhatTheDayBuys, challengedAnswer, challengeWorked, challengesAnswer, everydayPrices, fitNote, fitSlips, pricesAgainstDay } from "./dayFit";
 import { formatMoney } from "./money";
 import { safeAfter } from "./monthPlan";
 import type { Transaction } from "./types";
@@ -108,5 +108,25 @@ describe("what a purchase today leaves", () => {
     expect(after.safe).toBe(0);
     expect(after.short).toBe(98399);
     expect(after.perDayAfter).toBe(0);
+  });
+});
+
+/** Backup of 7 October 2026: the slip was two answers back when it was questioned. */
+describe("which earlier answer a challenge is about", () => {
+  const day = { today: 8064, after: 8064 };
+  const slip = "Yes: a **PHP 95.00** meal is within that daily limit of PHP 80.64.";
+  const owned = "You are right, PHP 95.00 is PHP 14.36 more than PHP 80.64, so it does not fit today.";
+  it("finds the slip when it is not the last answer", () => {
+    const got = challengedAnswer("But why you suggested it?", [owned, slip], day, formatMoney);
+    expect(got?.index).toBe(1);
+    expect(got?.text).toContain("₱95.00 is ₱14.36 more than ₱80.64");
+    expect(got?.text).toContain("not the last one");
+  });
+  it("finds the answer holding the figure the owner names", () => {
+    const got = challengedAnswer("Why 300+ like look earlier you said 65 or something", ["It is PHP 338.40 a day.", "That is about PHP 70.75 a day.", "That leaves PHP 64.29 a day."], day, formatMoney);
+    expect(got?.index).toBe(2);
+  });
+  it("takes the last answer when nothing points elsewhere", () => {
+    expect(challengedAnswer("why did you say that?", ["It is PHP 50.00 a day.", "Something older."], day, formatMoney)?.index).toBe(0);
   });
 });
