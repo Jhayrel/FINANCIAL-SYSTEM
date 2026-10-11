@@ -45,7 +45,8 @@ const ASKS =
   /\b(?:how much|magkano|what did i spend|what have i spent|total (?:spending|spent|expenses?))\b[^?.!]*\b(?:spent|spend|spending|nagastos|ginastos|gastos|nagastusan|gastusin|used|paid)\b|\b(?:magkano|how much)\b[^?.!]*\b(?:nagastos|ginastos|gastos)\b|\bmy (?:total )?spending (?:on|for)\b|^\s*(?:what(?:'s| is| was)\s+)?(?:my\s+)?total (?:spending|spent|expenses?)\b/i;
 
 /** Asking what it could cost, or whether to, rather than what it did. */
-const NOT_THIS = /\b(afford|should|would|will|could|budget|save|saving|left|remaining|if i|what if|plan|limit|owe|debt|credit)\b|\bhow much (?:can|may|might) i\b/i;
+// "how much money i can spend tommorow?" is a can question, never a past sum (backup of 7 October 2026).
+const NOT_THIS = /\b(afford|should|would|will|could|budget|save|saving|left|remaining|if i|what if|plan|limit|owe|debt|credit)\b|\bhow much (?:money |cash |pesos? )?(?:i )?(?:can|could|may|might|pwede)\b/i;
 
 /**
  * The spending question in a sentence, or null when it is not one this can

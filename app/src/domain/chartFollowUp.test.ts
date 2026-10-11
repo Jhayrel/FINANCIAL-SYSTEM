@@ -61,3 +61,18 @@ describe("charts that were one point", () => {
     expect(income?.rows.length).toBe(spending?.rows.length);
   });
 });
+
+/** Backup of 7 October 2026: both were drawn as a chart, overruling the model. */
+describe("a question that says all or everything is not a chart follow-up", () => {
+  it.each([
+    ["If I spend all tomorrow, how will I survive?", false],
+    ["Like look at the prices of everything", false],
+    ["can I spend all of it today", false],
+    ["all", true],
+    ["everything", true],
+    ["all time", true],
+    ["how about this month?", true],
+  ])("%s", (said, follows) => {
+    expect(isChartFollowUp(said, true)).toBe(follows);
+  });
+});

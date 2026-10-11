@@ -165,7 +165,16 @@ export function readAgainst(account: string, drafts: readonly Draft[]): Reading[
       };
     }
 
-    if (clean(has) !== clean(account)) {
+    /*
+     * One app, several accounts: a Maya screenshot also shows Maya's
+     * savings ("Maya Bank (Personal savings)") and Maya Credit. Interest into
+     * the savings, read off a picture named Maya, was flagged as "a different
+     * account than the Maya statement" (7 October 2026). An account whose
+     * name holds the statement's, or the other way round, is the same app.
+     */
+    const word = (a: string): string => ` ${clean(a).replace(/[^a-z0-9]+/g, " ").trim()} `;
+    const sameApp = word(has).includes(word(account)) || word(account).includes(word(has));
+    if (clean(has) !== clean(account) && !sameApp) {
       return {
         draft,
         note: `This came off a ${account} statement but reads as ${has}. Check it before adding.`,

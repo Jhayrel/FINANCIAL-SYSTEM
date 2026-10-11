@@ -184,3 +184,12 @@ describe("money coming into the statement's own account", () => {
     expect(read?.draft.toWallet).toBe("");
   });
 });
+
+describe("one app, several accounts (7 October 2026)", () => {
+  it("does not flag Maya savings interest read off a Maya screenshot", () => {
+    const draft = { flow: "Revenue", toWallet: "Maya Bank (Personal savings)", fromWallet: "", amount: 50 } as never;
+    expect(readAgainst("Maya", [draft])[0]?.note).toBe("");
+    const other = { flow: "Revenue", toWallet: "Gcash", fromWallet: "", amount: 50 } as never;
+    expect(readAgainst("Maya", [other])[0]?.note).toContain("reads as Gcash");
+  });
+});

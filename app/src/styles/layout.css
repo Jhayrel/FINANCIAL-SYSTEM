@@ -4431,24 +4431,29 @@
     padding: var(--space-3) var(--space-4);
   }
 
+  /*
+   * Under `.fms-main`, so these outrank the base rules written further down
+   * the file. Without it the base rules won on order and the phone never got
+   * the tighter spacing meant for it.
+   */
   .fms-dash,
   .fms-kpis,
   .fms-charts,
-  .fms-budgetpage,
-  .fms-budgettop,
-  .fms-budgetrest,
-  .fms-budgetgrid {
+  .fms-main .fms-budgetpage,
+  .fms-main .fms-budgettop,
+  .fms-main .fms-budgetrest,
+  .fms-main .fms-budgetgrid {
     gap: var(--space-3);
   }
 
-  .fms-budgetincome {
+  .fms-main .fms-budgetincome {
     gap: var(--space-3);
     margin-top: var(--space-4);
     padding-top: var(--space-3);
   }
 
   .fms-dbtools,
-  .fms-acttools {
+  .fms-main .fms-acttools {
     padding: var(--space-2) var(--space-3);
   }
 
@@ -5704,12 +5709,8 @@ button.fms-recent-row:disabled {
   container-name: ask;
 }
 
-/* A narrow column (the pop-up chat, a 1280px screen): one field a row, and the list rows lose the day. */
+/* A narrow column (the pop-up chat, a 1280px screen): the list rows lose the day. */
 @container ask (max-width: 440px) {
-  .fms-pdetails {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .fms-batchrow {
     grid-template-columns: 2ch minmax(0, 1fr) auto auto;
   }
@@ -5754,6 +5755,18 @@ button.fms-recent-row:disabled {
   min-width: 0;
   color: var(--ink);
   overflow-wrap: anywhere;
+}
+
+/*
+ * A narrow column: one field a row. After the rule it overrides, which it
+ * must be: it sat above it for weeks, lost on order, and two pairs a row in
+ * the 280px column broke "Food" into "Foo d" and pushed the fee against the
+ * card's edge (owner, 7 October 2026: "its out of the edge").
+ */
+@container ask (max-width: 440px) {
+  .fms-pdetails {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /*

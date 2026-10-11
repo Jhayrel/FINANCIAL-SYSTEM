@@ -283,3 +283,16 @@ describe("words that name no entry", () => {
     expect(found.every((f) => f.row.item === "Food"), found.map((f) => f.row.item).join(", ")).toBe(true);
   });
 });
+
+describe("a record number, however it is said (7 October 2026)", () => {
+  const rows = [
+    { id: "a", recordNumber: 3818, date: "2026-09-18", type: "Transfer", fromWallet: "Maya", toWallet: "Cash", category: "Spending", item: "Transaction Fee", description: "Withdrawal", amount: 100000, fee: 1100, total: 101100, notes: "", status: "Withdrawn" },
+    { id: "b", recordNumber: 500, date: "2026-09-19", type: "Spending", fromWallet: "Cash", toWallet: "", category: "Spending", item: "Food", description: "", amount: 50000, fee: 0, total: 50000, notes: "", status: "Paid" },
+  ] as never[];
+  it.each(["edit entry - 3818", "entry 3818", "record no. 3818", "#3818", "3818"])("finds #3818 in %s", (said) => {
+    expect(findRows(said, rows, "2026-10-07")[0]?.row.recordNumber).toBe(3818);
+  });
+  it("still reads a figure in a sentence as an amount", () => {
+    expect(findRows("the 500 food", rows, "2026-10-07")[0]?.row.id).toBe("b");
+  });
+});

@@ -36,7 +36,7 @@ import { MONTH_NAMES } from "./dates";
  * question too, never a change to Settings.
  */
 const SAFE_ASK =
-  /\bsafe(?:ly)?(?:\s+to)?\s+spend(?:ing)?\b|\bspend(?:ing)?\s+safely\b|\bsafe\s+(?:amount|figure|limit)\b|\bhow\s+much\s+(?:can|could|should|do|may|am)\s+i\s+(?:spend|use|spare|allowed\s+to\s+spend)\b|\bhow\s+much\s+i\s+(?:can|could|should|may)\s+(?:spend|use|spare)\b|\bhow\s+much\s+(?:is\s+)?(?:left|free|available)\s+(?:to|for)\s+(?:spend|use|today)\b|\bwhat\s+can\s+i\s+(?:spend|use)\b|\b(?:free|left|available)\s+to\s+(?:spend|use)\b|\bspendable\b|\b(?:my\s+)?(?:daily|today'?s)\s+(?:allowance|limit)\b|\bmagkano\s+(?:ang\s+)?(?:pwede|puwede|kaya|pede)\s+(?:ko\s+)?(?:gastusin|gamitin|i-?spend|gastos)\b/i;
+  /\bsafe(?:ly)?(?:\s+to)?\s+spend(?:ing)?\b|\bspend(?:ing)?\s+safely\b|\bsafe\s+(?:amount|figure|limit)\b|\bhow\s+much\s+(?:money\s+|cash\s+)?(?:can|could|should|do|may|am)\s+i\s+(?:spend|use|spare|allowed\s+to\s+spend)\b|\bhow\s+much\s+(?:money\s+|cash\s+)?i\s+(?:can|could|should|may)\s+(?:spend|use|spare)\b|\bhow\s+much\s+(?:is\s+)?(?:left|free|available)\s+(?:to|for)\s+(?:spend|use|today)\b|\bwhat\s+can\s+i\s+(?:spend|use)\b|\b(?:free|left|available)\s+to\s+(?:spend|use)\b|\bspendable\b|\b(?:my\s+)?(?:daily|today'?s)\s+(?:allowance|limit)\b|\bmagkano\s+(?:ang\s+)?(?:pwede|puwede|kaya|pede)\s+(?:ko\s+)?(?:gastusin|gamitin|i-?spend|gastos)\b/i;
 
 const TAKES_OUT_BILLS =
   /\b(?:remove|removing|minus|take\s+out|taking\s+out|less|without|exclude|excluding|subtract|deduct|set\s+aside|alis(?:in)?|bawas(?:an)?)\b[^.?!]{0,30}\b(?:bills?|subscriptions?|subs)\b/i;

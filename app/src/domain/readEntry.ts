@@ -38,6 +38,7 @@ import { inferFromHistory, itemFromHistory } from "./infer";
 import { centavosInWords } from "./numberWords";
 import { readMoney } from "./proposal";
 import { withoutDays } from "./money";
+import { carriesIdentifier, withoutIdentifiers } from "./identifiers";
 import type { IsoDate, ReferenceLists, Transaction, TransactionStatus } from "./types";
 
 export interface ReadEntry {
@@ -288,7 +289,7 @@ function flowOf(text: string): Flow | null {
 const SHOP_NUMBERS = /\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]?11|711|24[\s/-]?7)\b/gi;
 
 function amountIn(text: string): number | null {
-  let withoutDates = withoutDays(text.replace(SHOP_NUMBERS, " ")).replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
+  let withoutDates = withoutDays(withoutIdentifiers(text).replace(SHOP_NUMBERS, " ")).replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
 
   /**
    * A year beside a month is a date, not two thousand pesos.
@@ -1244,13 +1245,34 @@ function splitOnAnd(part: string): string[] {
   return out;
 }
 
+/** The distinct figures written as money in a text, read the way `amountIn` reads one. */
+function figuresIn(text: string): Set<string> {
+  const undated = text
+    .replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?/gi, " ")
+    .replace(/\b\d{1,4}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, " ")
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?/gi, " ");
+  return new Set([...undated.matchAll(/(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d{1,2}|\d{2,})/gi)].map((m) => String(readMoney(m[1] ?? ""))));
+}
+
 export function splitEntries(text: string): string[] {
+  /*
+   * A pasted confirmation is one payment, however many sentences it has
+   * (`identifiers.ts`). Its reference and account numbers are taken out, and
+   * when one figure is left, or the same figure said twice ("Amount 500.00",
+   * "Total 500.00"), it is read whole, so the wallet it names reaches the card.
+   */
+  const clean = carriesIdentifier(text) ? withoutIdentifiers(text) : text;
+  if (clean !== text) {
+    const plain = clean.replace(/\s*\n\s*/g, ". ").replace(/\s+/g, " ").trim();
+    if (figuresIn(plain).size <= 1) return plain.length > 2 ? [plain] : [];
+  }
+
   /*
    * A total and a sentence that only says it again are not entries: "I paid
    * 450, 300 for honorarium and 150 for my donation. All school category
    * basically 300 and 150 total of 450" is two payments (`entryTotals.ts`).
    */
-  const lines = withoutTotals(text)
+  const lines = withoutTotals(clean)
     .split(String.fromCharCode(10))
     .map((l) => l.trim())
     .filter(Boolean);

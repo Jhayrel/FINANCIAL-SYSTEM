@@ -430,3 +430,15 @@ describe('answering "the usual"', () => {
     expect(applyReply(asked, "amount", "the usual", reference, income)).toBeNull();
   });
 });
+
+describe("an item corrected the way anyone says it (7 October 2026)", () => {
+  const reference = { wallets: ["Cash", "Maya"], savings: [], bills: ["Electric Bill"], subscriptions: ["Spotify"], revenueCategories: ["Allowance"], spendingTypes: [{ name: "Food", remark: "" }, { name: "Treat", remark: "" }, { name: "Gas", remark: "" }] };
+  const food = { ...emptyDraft("2026-10-07"), flow: "Spending" as const, category: "Spending" as const, item: "Food", fromWallet: "Maya", amount: 70000 };
+  it.each(["That's treat", "thats treat", "it's a treat", "make it treat", "treat not food", "no, treat"])("%s makes the card Treat", (said) => {
+    expect(amend(food, said, reference, "2026-10-07")?.draft.item).toBe("Treat");
+  });
+  it("leaves a 'not' that does not match the card alone, and an ordinary reply", () => {
+    expect(amend(food, "that's gas not treat", reference, "2026-10-07")).toBeNull();
+    expect(amend(food, "thats good", reference, "2026-10-07")).toBeNull();
+  });
+});

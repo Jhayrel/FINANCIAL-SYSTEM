@@ -666,6 +666,31 @@ export function amend(
   const item = matchExact(trimmed, known);
   if (item) return { draft: { ...draft, item }, what: `${item} instead.` };
 
+  /*
+   * "That's treat", "it's treat not food", "make it treat": the item, said
+   * the way anyone corrects one. With a Food card open, "That's treat" went
+   * to the model as a question about Treat spending and the card was saved
+   * as Food (7 October 2026). Only one of the owner's own items, and "not"
+   * only against what the card says now.
+   */
+  const said = /^(?:no[,.!]?\s+|nope[,.!]?\s+|actually[,.!]?\s+|wait[,.!]?\s+|sorry[,.!]?\s+)?(?:that'?s|thats|that is|it'?s|its|it is|this is|make it|change it to|it should be|should be|dapat|ito ay)\s+(?:a\s+|an\s+|the\s+|for\s+)?(.{2,40}?)(?:\s*,?\s+not\s+(?:a\s+|an\s+|the\s+)?(.{2,40}?))?[.!]?$/i.exec(trimmed) ??
+    /^(.{2,40}?)\s*,?\s+not\s+(?:a\s+|an\s+|the\s+)?(.{2,40}?)[.!]?$/i.exec(trimmed) ??
+    /^(?:no|nope|actually|wait|sorry|oops)[,.!]?\s+(?:a\s+|an\s+|the\s+)?(.{2,40}?)[.!]?$/i.exec(trimmed);
+  if (said?.[1] && (draft.flow === "Spending" || draft.flow === "Revenue")) {
+    const right = matchExact(said[1].trim(), known);
+    const wrong = said[2]?.trim().toLowerCase();
+    if (right && right !== draft.item && (!wrong || wrong === draft.item.trim().toLowerCase())) {
+      return { draft: { ...draft, item: right }, what: `${right} instead.` };
+    }
+    if (draft.flow === "Spending" && !right) {
+      const bill = matchExact(said[1].trim(), reference.bills);
+      const sub = bill ? "" : matchExact(said[1].trim(), reference.subscriptions);
+      if ((bill || sub) && (!wrong || wrong === draft.item.trim().toLowerCase())) {
+        return { draft: { ...draft, item: bill || sub, category: bill ? "Bills" : "Subscriptions" }, what: `${bill || sub} instead, as a ${bill ? "bill" : "subscription"}.` };
+      }
+    }
+  }
+
   return null;
 }
 

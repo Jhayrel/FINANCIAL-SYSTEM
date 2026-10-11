@@ -132,13 +132,31 @@ export function transactionToDraft(t: Transaction): Draft {
   const flow: Flow =
     t.category === "Opening" ? "Opening" : (t.type as Flow);
 
+  /*
+   * A category its kind cannot take, from the old workbook: 233 of the
+   * owner's transfers are filed under Spending. The form hides a transfer's
+   * category and then refused every edit to those rows with "Transfer is
+   * filed under Transfer, not Spending" (7 October 2026, #3818: a fee could
+   * not be raised from PHP 11.00 to PHP 18.00). The edit starts from the
+   * category the kind takes; no total moves, since a transfer, spending and
+   * income are each counted by their kind and destination.
+   */
+  const category =
+    flow === "Transfer" && t.category !== "Transfer" && t.category !== ""
+      ? "Transfer"
+      : flow === "Revenue" && t.category !== "Revenue" && t.category !== ""
+        ? "Revenue"
+        : flow === "Spending" && !["Spending", "Bills", "Subscriptions", ""].includes(t.category)
+          ? "Spending"
+          : t.category;
+
   return {
     id: t.id,
     flow,
     date: t.date,
     fromWallet: t.fromWallet,
     toWallet: t.toWallet,
-    category: t.category,
+    category,
     item: t.item,
     description: t.description,
     amount: t.amount,
@@ -177,10 +195,16 @@ export type FieldName =
  */
 export function fieldsFor(flow: Flow | ""): FieldName[] {
   switch (flow) {
+    /*
+     * Notes on every kind. Income and spending had none on the form, so a
+     * card's notes ("2 credits: PHP 0.27 + PHP 0.23") could be saved from the
+     * chat but never seen or changed on the form (7 October 2026). The style
+     * guide folds notes under More details for every entry (§3.3).
+     */
     case "Revenue":
-      return ["date", "toWallet", "category", "item", "description", "amount", "status"];
+      return ["date", "toWallet", "category", "item", "description", "amount", "notes", "status"];
     case "Spending":
-      return ["date", "fromWallet", "category", "item", "description", "amount", "fee", "status"];
+      return ["date", "fromWallet", "category", "item", "description", "amount", "fee", "notes", "status"];
     case "Transfer":
       return ["date", "fromWallet", "toWallet", "description", "amount", "fee", "notes", "status"];
     case "Debt":

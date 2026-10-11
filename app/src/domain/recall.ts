@@ -150,11 +150,20 @@ function amountIn(phrase: string): number | null {
   return Number.isFinite(pesos) ? Math.round(pesos * 100) : null;
 }
 
-/** A record number, said as "#441" or "441". */
-function numberIn(phrase: string): number | null {
-  const hash = /#\s*(\d{1,5})\b/.exec(phrase);
-  return hash?.[1] ? Number(hash[1]) : null;
+/**
+ * A record number: "#441", "entry 3818", "record no. 3818", "edit entry -
+ * 3818", or a number standing alone. Only "#441" was read, so "edit entry -
+ * 3818" was answered "No entry matches that", twice (7 October 2026). A
+ * figure in a sentence about a row ("the 500 food") stays an amount.
+ */
+const RECORD_NUMBER = /#\s*(\d{1,5})\b|\b(?:entry|record|rec|row|number|no\.?|num)\s*(?:no\.?|number|#)?\s*[-:#]?\s*(\d{1,5})\b|^\s*[-:#]?\s*(\d{3,5})\s*$/i;
+
+function numberMatch(phrase: string): { number: number; text: string; bare: boolean } | null {
+  const m = RECORD_NUMBER.exec(phrase);
+  const digits = m?.[1] ?? m?.[2] ?? m?.[3];
+  return m && digits ? { number: Number(digits), text: m[0], bare: m[3] !== undefined } : null;
 }
+
 
 /**
  * A whole set named at once, rather than one row described.
@@ -353,9 +362,12 @@ export function findRows(
   most = MOST,
 ): Candidate[] {
   const { day, rest } = dayIn(phrase, asOf);
-  const number = numberIn(rest);
+  // A number standing alone is a record number only when a row has it; otherwise it is an amount ("1160").
+  const read = numberMatch(rest);
+  const said = read && (!read.bare || rows.some((r) => r.recordNumber === read.number)) ? read : null;
+  const number = said?.number ?? null;
   // A record number is digits too, and it is not a peso figure either.
-  const withoutNumber = number === null ? rest : rest.replace(/#\s*\d{1,5}\b/, " ");
+  const withoutNumber = said === null ? rest : rest.replace(said.text, " ");
   const amount = amountIn(withoutNumber);
 
   const words = [

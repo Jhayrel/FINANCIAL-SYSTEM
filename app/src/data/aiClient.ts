@@ -1205,10 +1205,19 @@ async function extractOnce(options: ExtractOptions): Promise<ExtractResult> {
     .filter((a) => a.kind === "image" && a.dataUrl)
     .map((a) => a.dataUrl as string);
 
+  /*
+   * Stopped before the request went. An abort listener never fires for a
+   * signal that is already aborted, so without this a photo still being read
+   * when Stop was pressed was sent anyway, and its cards landed under
+   * "Stopped. Nothing was saved." (backup of 7 October 2026).
+   */
+  if (options.signal?.aborted) return empty("Stopped.");
+
   const auth = await (options.token ?? idToken)();
   if (!auth) {
     return empty("Not signed in, so nothing was sent anywhere.");
   }
+  if (options.signal?.aborted) return empty("Stopped.");
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? EXTRACT_TIMEOUT_MS);

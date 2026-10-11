@@ -110,6 +110,34 @@ function accountIn(text: string, accounts: readonly string[]): string {
 }
 
 /**
+ * "maya" names the wallet Maya, and is also the first word of "Maya Bank
+ * (Personal savings)". The owner, 5 October 2026, three messages into talking
+ * about interest in Maya Bank: "my real balance in my maya is" and a figure.
+ * It was checked against the Maya wallet, two thousand pesos apart, with an
+ * offer to book that as spending; Maya Bank held within a peso of it.
+ *
+ * So when the word is shared, the account the conversation is about wins,
+ * and failing that the one whose recorded balance is nearest the figure.
+ */
+export function sharedWord(
+  named: string,
+  accounts: readonly string[],
+  figure: Centavos | null,
+  recorded: (account: string) => Centavos,
+  inContext?: string,
+): string {
+  const word = ` ${named.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  const rivals = accounts.filter((a) => a !== named && ` ${a.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `.includes(word));
+  if (rivals.length === 0) return named;
+  if (inContext && rivals.includes(inContext)) return inContext;
+  if (figure === null) return named;
+  const off = (a: string): number => Math.abs(recorded(a) - figure);
+  const nearest = rivals.reduce((best, a) => (off(a) < off(best) ? a : best), rivals[0] as string);
+  // Only a clear winner: within a tenth of the named account's distance.
+  return off(nearest) * 10 < off(named) ? nearest : named;
+}
+
+/**
  * Read it, or return null when it is not a request to find a difference.
  *
  * `recorded` is what the ledger says each account holds, so that when a
@@ -132,7 +160,11 @@ export function readInvestigateAsk(
   const matchedOn = asOf ? matchedOnIn(said, asOf) : null;
   const named = accountIn(text, accounts);
   const figuresSaid = figuresIn(text.replace(NOT_MONEY, (m) => " ".repeat(m.length)));
-  const account = named || (inContext && accounts.includes(inContext) && figuresSaid.length === 1 && BALANCE_SAID.test(text) ? inContext : "");
+  const account = named
+    ? sharedWord(named, accounts, figuresSaid.length === 1 ? (figuresSaid[0]?.value ?? null) : null, recorded, inContext)
+    : inContext && accounts.includes(inContext) && figuresSaid.length === 1 && BALANCE_SAID.test(text)
+      ? inContext
+      : "";
   const figures = figuresSaid;
   const mismatch = MISMATCH.test(text);
   const counted = /\b(counted|count|bilang|binilang)\b/i.test(text) && account !== "";

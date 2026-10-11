@@ -740,7 +740,9 @@ export function isChartFollowUp(question: string, chartOnScreen: boolean): boole
     // character and never a word boundary.
     MONTHS.some((m) => new RegExp(`\\b${m}\\b`, "i").test(trimmed)) ||
     // "by month" was missing, so straight after a chart it went to a model, or with none, nowhere.
-    /\b(this month|last month|this year|last year|the year|ytd|all|everything|(?:by|per) (?:months?|wallets?|accounts?|categor(?:y|ies)|items?)|monthly|month by month|weekly|by week|per week|yearly|by year|per year|20\d{2}|(last|past) \d+ (months?|weeks?|years?))\b/i.test(
+    // "all" and "everything" only nearly alone ("all", "all time"): "If I spend all tomorrow, how will I survive?" is not a period.
+    (trimmed.split(/\s+/).length <= 3 && /\b(?:all|everything)\b/i.test(trimmed)) ||
+    /\b(this month|last month|this year|last year|the year|ytd|all time|(?:by|per) (?:months?|wallets?|accounts?|categor(?:y|ies)|items?)|monthly|month by month|weekly|by week|per week|yearly|by year|per year|20\d{2}|(last|past) \d+ (months?|weeks?|years?))\b/i.test(
       trimmed,
     ) ||
     // The short windows: "how about this week", "today only", "last 10 days".
@@ -764,7 +766,8 @@ export function isChartFollowUp(question: string, chartOnScreen: boolean): boole
    * drawn as September's chart: "didnt" is not "did", and a sentence that
    * judges the figures is a question about them.
    */
-  return !/\b(how much|how many|what|why|when|who|which|did|didn'?t|do|does|doesn'?t|don'?t|is|isn'?t|are|was|wasn'?t|were|have|has|had|haven'?t|should|could|would|good|bad|better|worse)\b/i.test(
+  // "if" and "will" make it a question about money, and "how" is one unless it is "how about" (backup of 7 October 2026).
+  return !/\b(how(?!\s+about)|if|will|won'?t|can|can'?t|survive|how much|how many|what|why|when|who|which|did|didn'?t|do|does|doesn'?t|don'?t|is|isn'?t|are|was|wasn'?t|were|have|has|had|haven'?t|should|could|would|good|bad|better|worse)\b/i.test(
     trimmed,
   );
 }

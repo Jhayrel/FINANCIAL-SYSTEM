@@ -211,6 +211,8 @@ import { splitsWhose } from "../domain/behalfFor";
 import { entryLineIn } from "../domain/intent";
 import { fillDebt, personDebt } from "../domain/debtFill";
 import { foldInterest } from "../domain/interestFold";
+import { afterFigureChange } from "../domain/cardEdit";
+import { accountIn, interestFromBalance } from "../domain/interestAsk";
 import { saysWhen } from "../domain/when";
 import { lessonKey, lessonsFrom } from "../domain/learning";
 import { AmountInput, Field as FormField } from "../components/forms";
@@ -462,7 +464,8 @@ interface Drawn {
 interface DebtChoice {
   readonly kind: "debt";
   readonly draft: Draft;
-  readonly state: "open" | "settled";
+  /** Settled is saved; discarded is thrown away, and is never said to be in the Database. */
+  readonly state: "open" | "settled" | "discarded";
   /** Someone the sentence named who is not on the debt list yet, offered as a button. */
   readonly newPerson?: string | undefined;
   /**
@@ -546,12 +549,13 @@ const isExporting = (t: Turn): t is Exporting => t.kind === "export";
 /**
  * A card still waiting, as it reads once it is thrown away; null for anything else.
  *
- * A debt card has no "discarded": it is settled, which is how pressing its
- * own close button leaves it.
+ * A debt card is discarded like any other. It used to be "settled", the
+ * word for saved, so a cleared card was recorded as "Added: 2026-10-06 Debt
+ * PHP 600.00" with nothing saved (backup of 7 October 2026, three cards).
  */
 function closedCard(t: Turn): Offered | DebtChoice | Changing | Budgeting | Exporting | null {
   if (isOffer(t)) return t.state === "open" ? { ...t, state: "discarded" } : null;
-  if (isDebt(t)) return t.state === "open" ? { ...t, state: "settled" } : null;
+  if (isDebt(t)) return t.state === "open" ? { ...t, state: "discarded" } : null;
   if (isChanging(t) || isBudgeting(t) || isExporting(t)) return t.state === "open" ? { ...t, state: "discarded" } : null;
   return null;
 }
@@ -760,7 +764,7 @@ function turnFromCard(card: StoredCard): Turn {
     return {
       kind: "debt",
       draft,
-      state: card.state === "open" ? "open" : "settled",
+      state: card.state === "open" ? "open" : card.state === "discarded" ? "discarded" : "settled",
       cardId: card.id,
     };
   }
@@ -2177,7 +2181,7 @@ export function AskPanel({
 
   const replaceProposal = (index: number, proposal: Proposal): void =>
     setTurns((prev) =>
-      prev.map((t, i) => (i === index && isOffer(t) ? { ...t, proposal } : t)),
+      prev.map((t, i) => (i === index && isOffer(t) ? { ...t, proposal: afterFigureChange(t.proposal, proposal) } : t)),
     );
 
   /**
@@ -3062,6 +3066,7 @@ export function AskPanel({
 
     const control = new AbortController();
     stopper.current = control;
+    const began = generation.current;
     const read = await during(
       sent.length > 0 ? "Reading what you sent" : "Working out the entry",
       () =>
@@ -3078,6 +3083,13 @@ export function AskPanel({
       "Still reading it",
     );
     stopper.current = null;
+    /*
+     * Stopped, or the view cleared, while it was being read: "Stopped. Nothing
+     * was saved." has already been said, and cards arriving under it would
+     * make it untrue (backup of 7 October 2026: three debt cards for one
+     * repayment, 25 seconds after Stop).
+     */
+    if (control.signal.aborted || generation.current !== began) return true;
     // The cards offered from here on carry their picture's paper (`paperOf`).
     if (sent.length > 0) pictureNow.current = { readings: read.readings ?? [], teach: wantsTraining(note) };
     // A screenful of daily interest is one entry, not sixty cards (domain/interestFold.ts).
@@ -4709,7 +4721,18 @@ export function AskPanel({
      * and answers it. The device's own words are said only when no model
      * answers.
      */
-    if (files.length === 0 && !as && !isNoteLine && (!essay || entriesInside(note) < 2)) {
+    /*
+     * "That's treat", with a Food card open, is a correction to the card. It
+     * was read as a question about Treat spending and answered with the
+     * month's Treat total, and the card was saved as Food (7 October 2026).
+     * A short message that changes something on the open card goes to the
+     * card, further down; a question mark keeps it a question.
+     */
+    const correctsOpenCard = (() => {
+      const card = openCard();
+      return card !== null && files.length === 0 && !as && !/\?\s*$/.test(note) && note.trim().split(/\s+/).length <= 8 && amend(card.turn.proposal.draft, note, reference, asOf) !== null;
+    })();
+    if (files.length === 0 && !as && !isNoteLine && !correctsOpenCard && (!essay || entriesInside(note) < 2)) {
       /** "should I go eat outside today?": a decision about spending, like "can I afford". */
       const SHOULD_I = /\bshould i (?:go|eat|buy|get|order|spend|pay|try|treat|grab|have)\b|\bis it (?:ok|okay|fine|wise) (?:to|if i) (?:buy|eat|spend|get|order|go)\b/i;
       const decides = (t: string): boolean => isAffordQuestion(t) || SHOULD_I.test(t);
@@ -5431,9 +5454,67 @@ export function AskPanel({
     }
 
     const findable = [...reference.wallets, ...reference.savings];
+    /*
+     * The account the last few messages named, for a message that names one
+     * ambiguously ("my maya") or not at all ("Read the chat", "compare that
+     * in the photo"). Backup of 7 October 2026: both were asked which account
+     * it was, one message after naming Maya Bank and its balance.
+     */
+    const recentlySaid = [...turns].reverse().filter((t): t is Said => t.kind === "you").slice(0, 3);
+    const talkedAbout = recentlySaid.map((t) => accountIn(t.text, findable)).find((a) => a !== "") || undefined;
+    /*
+     * "My Maya Bank is 3,500.42 now, I earned interest": the interest is the
+     * balance less what the ledger holds, worked out here. It was made into a
+     * card for the whole balance (7 October 2026). A gap too big to be
+     * interest is a difference to find, and none at all is said plainly.
+     */
+    const interest = !as && files.length === 0 ? interestFromBalance(lead, findable, (a) => walletBalance(transactions, a), talkedAbout) : null;
+    if (interest) {
+      const cap = Math.max(10_000, Math.floor(interest.told / 20));
+      if (interest.gap > 0 && interest.gap <= cap) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const words = `${interest.account} holds ${formatMoney(interest.told)} by your count and ${formatMoney(interest.ledger)} in the ledger, so ${formatMoney(interest.gap)} is the interest to add.`;
+        say({ kind: "assistant", text: words, from: "this device" });
+        log(aiEvent("answered", "add", { text: words, model: "this device" }));
+        const item = reference.revenueCategories.find((c) => /interest/i.test(c)) ?? "Bank interest";
+        await offer(
+          {
+            draft: {
+              ...emptyDraft(asOf),
+              flow: "Revenue",
+              category: "Revenue",
+              toWallet: interest.account,
+              item,
+              description: `Interest earned, ${formatMedium(asOf)}`,
+              amount: interest.gap,
+              notes: `Balance ${formatMoney(interest.told)}; the ledger had ${formatMoney(interest.ledger)}.`,
+              status: "Received",
+            },
+            confidence: "high",
+            sourceRef: "balance",
+            adjustments: [`Worked out from the balance you gave: ${formatMoney(interest.told)} less ${formatMoney(interest.ledger)}.`],
+          },
+          note,
+        );
+        return;
+      }
+      if (interest.gap <= 0) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        const words = `The ledger already has ${formatMoney(interest.ledger)} in ${interest.account}${interest.gap < 0 ? `, ${formatMoney(-interest.gap)} more than the ${formatMoney(interest.told)} you said` : ", the same as you said"}, so there is no interest to add.${interest.gap < 0 ? " Say \"find the difference\" and I will look for why." : ""}`;
+        say({ kind: "assistant", text: words, from: "this device" });
+        log(aiEvent("answered", "add", { text: words, model: "this device" }));
+        return;
+      }
+      // Too big to be interest: what the account holds, against the ledger.
+      await findDifference(note, { account: interest.account, actual: interest.told, gap: null });
+      return;
+    }
     const askedToFind = as
       ? null
-      : readInvestigateAsk(lead, findable, (account) => walletBalance(transactions, account), asOf, lastRead.current?.account) ??
+      : readInvestigateAsk(lead, findable, (account) => walletBalance(transactions, account), asOf, talkedAbout ?? lastRead.current?.account) ??
         (!essay && routed?.intent === "investigate"
           ? (readInvestigateAsk(`${note} doesn't match`, findable, (account) => walletBalance(transactions, account), asOf) ?? {
               account: "",
@@ -5448,7 +5529,23 @@ export function AskPanel({
      * and no figure takes the balance said in the last few messages.
      */
     const withFigure = ((): InvestigateAsk | null => {
-      if (!askedToFind || askedToFind.actual !== null || askedToFind.gap !== null || !askedToFind.account) return askedToFind;
+      if (!askedToFind || askedToFind.actual !== null || askedToFind.gap !== null) return askedToFind;
+      /*
+       * No account at all: "Read the chat", "look how much balance I have in
+       * the system and compare that in the photo". The account and the figure
+       * are the ones said in the last few messages.
+       */
+      if (!askedToFind.account) {
+        for (const t of recentlySaid) {
+          const before =
+            readInvestigateAsk(`${t.text} doesn't match`, findable, (account) => walletBalance(transactions, account), asOf) ??
+            null;
+          if (before?.account) return { ...askedToFind, account: before.account, actual: before.actual, gap: before.gap };
+          const earned = interestFromBalance(t.text, findable, (a) => walletBalance(transactions, a));
+          if (earned) return { ...askedToFind, account: earned.account, actual: earned.told };
+        }
+        return askedToFind;
+      }
       // Putting the account right ("not maya", "I mean maya bank", or the name alone), never a new question about another one.
       const words = note.trim().split(/\s+/).length;
       if (words > 10 || (words > 3 && !/\b(?:not|i mean|i meant|hindi|instead|sorry)\b/i.test(note))) return askedToFind;
@@ -5761,6 +5858,16 @@ export function AskPanel({
      */
     // "should I delete my netflix?" asks; it is not a delete (`asksRatherThanTells`).
     const localRecall = files.length === 0 && !as && !asksRatherThanTells(ruled) ? detectRecall(ruled) : null;
+    /*
+     * "edit entry - 3818", "change #3818": an edit of a saved row named by its
+     * number, read on the device whatever the model makes of it. Twice on 7
+     * October 2026 it came back "No entry matches that".
+     */
+    const localEdit =
+      files.length === 0 && !as && /\b(?:edit|change|update|correct|fix|modify|amend)\b/i.test(ruled) &&
+      /#\s*\d{1,5}\b|\b(?:entry|record|row)\s*(?:no\.?|number|#)?\s*[-:#]?\s*\d{1,5}\b/i.test(ruled)
+        ? { action: "edit" as const, phrase: ruled }
+        : null;
 
     const saysAnswer = routed?.intent === "answer";
     const saysCorrection = routed?.intent === "correction";
@@ -5907,7 +6014,8 @@ export function AskPanel({
      */
     const lastShown = [...turns].reverse().find((t) => t.kind !== "you");
     const narrows = files.length === 0 && !as && lastShown !== undefined && isChart(lastShown) && narrowsChart(ruled);
-    const followUp = isChartFollowUp(ruled, turns.some(isChart)) || narrows;
+    // A chart drawn in the last few turns, not ten hours ago (backup of 7 October 2026).
+    const followUp = isChartFollowUp(ruled, turns.slice(-6).some(isChart)) || narrows;
     const saysChart = routed?.intent === "chart";
 
     /**
@@ -6045,13 +6153,18 @@ export function AskPanel({
        * below (`keptMeasure`); its day is not.
        */
       const snapshot = shown?.measure === "balance" && shown.by === "wallet";
+      /*
+       * Read from the words with their typos mended: "Trand" is "trend", and
+       * read raw it drew spending by item (backup of 7 October 2026). The
+       * text is only read, never shown.
+       */
       const carriedTitle = !shown || snapshot
-        ? note
+        ? ruled
         : !namesPeriod
-          ? `${note} ${title}`
+          ? `${ruled} ${title}`
           : followUp && !saysGrouping
-            ? `${note} ${title.split(",")[0] ?? ""}`
-            : note;
+            ? `${ruled} ${title.split(",")[0] ?? ""}`
+            : ruled;
       /*
        * And its direction, whatever else changes. "show my trend of income"
        * then "by year" drew spending by year (28 September 2026): the new
@@ -6061,7 +6174,7 @@ export function AskPanel({
        */
       const recentChart = turns.slice(-6).some(isChart);
       const carried =
-        shown && recentChart && !namesDirection && carriedTitle === note && chartDirection(shown) === "revenue" ? `${note} income` : carriedTitle;
+        shown && recentChart && !namesDirection && carriedTitle === ruled && chartDirection(shown) === "revenue" ? `${ruled} income` : carriedTitle;
 
       /*
        * "chart what I picked" on Insights is the calendar's pick, not this
@@ -6074,7 +6187,7 @@ export function AskPanel({
         pointsAtScreen(ruled, turns.some(isChart)) &&
         !namesWindow(ruled.replace(/\b(picked|selected|highlighted|those|these)\s+days?\b/gi, " "));
       const asked = onPick
-        ? `${note} ${pick.from === pick.to ? pick.from : `${pick.from} to ${pick.to}`}`
+        ? `${ruled} ${pick.from === pick.to ? pick.from : `${pick.from} to ${pick.to}`}`
         : /*
            * The router's period only when this message names one, or no chart
            * is on screen to follow. It reads the history too, and handed "pie"
@@ -6118,7 +6231,7 @@ export function AskPanel({
       const hint = overTime
         ? ({ money: "balance" } as ChartHint)
         : mergeHint(localHint(ruled, credits) ?? (snapshot ? null : keptMeasure), fresh ? (routed?.draw ?? null) : null, ruled, credits);
-      const askedNow = overTime ? `${note} balance this year` : asked;
+      const askedNow = overTime ? `${ruled} balance this year` : asked;
       let drawn = chartsFor(askedNow, hint, measureOf(hint) ? null : pair);
       /*
        * A window carried over from the chart before, with nothing in it, or a
@@ -6128,9 +6241,9 @@ export function AskPanel({
        */
       let widened = "";
       const noBudget = measureOf(hint) === "budget" && drawn.length > 0 && !drawn.some((c) => c.rows.some((r) => (r.previous ?? 0) > 0));
-      if (!namesPeriod && askedNow !== note && (drawn.length === 0 || noBudget)) {
+      if (!namesPeriod && askedNow !== ruled && (drawn.length === 0 || noBudget)) {
         for (const window of noBudget ? ["this year"] : ["this month", "this year"]) {
-          const wider = chartsFor(`${note} ${window}`, hint, null);
+          const wider = chartsFor(`${ruled} ${window}`, hint, null);
           if (wider.length > 0 && (!noBudget || wider.some((c) => c.rows.some((r) => (r.previous ?? 0) > 0)))) {
             widened = noBudget
               ? `No budget was set in ${shown?.title.split(", ").pop() ?? "that period"}, so this is ${window}.`
@@ -6231,7 +6344,9 @@ export function AskPanel({
     const recall =
       files.length > 0 || as
         ? null
-        : saysRecall
+        : localEdit && !cardTakesIt
+          ? localEdit
+          : saysRecall
           ? {
               action: (routed?.intent === "restore"
                 ? "restore"
@@ -6512,7 +6627,7 @@ export function AskPanel({
         // Written, like the cards above, so the correction survives a refresh.
         recordCard({
           ...card.turn,
-          proposal: { ...card.turn.proposal, draft: change.draft, adjustments: [...card.turn.proposal.adjustments, change.what] },
+          proposal: afterFigureChange(card.turn.proposal, { ...card.turn.proposal, draft: change.draft, adjustments: [...card.turn.proposal.adjustments, change.what] }),
         });
         /**
          * The old card goes, and the corrected one arrives at the bottom.
@@ -6564,11 +6679,11 @@ export function AskPanel({
           { kind: "you", text: note },
           {
             kind: "proposal",
-            proposal: {
+            proposal: afterFigureChange(card.turn.proposal, {
               ...card.turn.proposal,
               draft: change.draft,
               adjustments: [...card.turn.proposal.adjustments, change.what],
-            },
+            }),
             state: "open",
             // The same card, corrected, so it keeps its id.
             cardId: card.turn.cardId,
@@ -7617,10 +7732,12 @@ export function AskPanel({
                 hold(i);
                 // Recorded here, outside the updater, because an updater must
                 // be pure and React may run it more than once.
-                recordCard({ ...turn, draft: final ?? turn.draft, state: "settled" });
+                // No draft back means Discard was pressed: nothing was saved.
+                const state = final ? "settled" : "discarded";
+                recordCard({ ...turn, draft: final ?? turn.draft, state });
                 setTurns((prev) =>
                   prev.map((t, j) =>
-                    j === i && isDebt(t) ? { ...t, draft: final ?? t.draft, state: "settled" } : t,
+                    j === i && isDebt(t) ? { ...t, draft: final ?? t.draft, state } : t,
                   ),
                 );
               }}
@@ -10236,6 +10353,14 @@ function DebtCard({
       ),
     );
   };
+
+  if (state === "discarded") {
+    return (
+      <div ref={hostRef} className="fms-turn t-micro" style={{ color: "var(--ink-3)" }}>
+        Discarded: {debts.find((d) => d.id === draft.debtId)?.name ?? (behalf ? ON_BEHALF.toLowerCase() : "a debt movement")}, {formatMoney(draft.amount ?? 0)}. Nothing was saved.
+      </div>
+    );
+  }
 
   if (state === "settled") {
     return (
