@@ -14,6 +14,8 @@
  */
 
 import { windowOf } from "./charts";
+import { daysIn } from "./readEntry";
+import { formatMedium } from "./dates";
 import { formatMoney, type Centavos } from "./money";
 import { itemHintIn } from "./filipino";
 import { costOf } from "./totals";
@@ -42,7 +44,7 @@ const SLIPS: readonly (readonly [RegExp, string])[] = [
 ];
 
 const ASKS =
-  /\b(?:how much|magkano|what did i spend|what have i spent|total (?:spending|spent|expenses?))\b[^?.!]*\b(?:spent|spend|spending|nagastos|ginastos|gastos|nagastusan|gastusin|used|paid)\b|\b(?:magkano|how much)\b[^?.!]*\b(?:nagastos|ginastos|gastos)\b|\bmy (?:total )?spending (?:on|for)\b|^\s*(?:what(?:'s| is| was)\s+)?(?:my\s+)?total (?:spending|spent|expenses?)\b/i;
+  /\bwhat (?:did|have) i (?:spend|spent)\b|\b(?:how much|magkano|what did i spend|what have i spent|total (?:spending|spent|expenses?))\b[^?.!]*\b(?:spent|spend|spending|nagastos|ginastos|gastos|nagastusan|gastusin|used|paid)\b|\b(?:magkano|how much)\b[^?.!]*\b(?:nagastos|ginastos|gastos)\b|\bmy (?:total )?spending (?:on|for)\b|^\s*(?:what(?:'s| is| was)\s+)?(?:my\s+)?total (?:spending|spent|expenses?)\b/i;
 
 /** Asking what it could cost, or whether to, rather than what it did. */
 // "how much money i can spend tommorow?" is a can question, never a past sum (backup of 7 October 2026).
@@ -75,6 +77,14 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
     if (!period.test(named)) return null;
   }
 
+  /*
+   * A run of days, however it is said ("in span of oct 10 to 12", "between
+   * oct 5 and oct 10", "mula oct 1 hanggang oct 10", "the last 3 days"): the
+   * same reader the entries use, so a question and an entry agree on the
+   * days (12 October 2026). Anything else, the charts' windows.
+   */
+  const span = daysIn(text, asOf);
+  if (span) return { item, from: span.from, to: span.to, name: `${formatMedium(span.from)} to ${formatMedium(span.to)}` };
   const w = windowOf(text, asOf);
   return { item, from: w.from, to: w.to, name: w.name };
 }

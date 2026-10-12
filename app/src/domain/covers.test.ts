@@ -86,3 +86,41 @@ describe("entries already in a range (owner, 12 October 2026)", () => {
     expect(savedInsideWords([row({ amount: 30000, total: 30000 })], 950000, "Cash")).toContain("take ₱300.00 off");
   });
 });
+
+describe("every way a range is said, entry or question (12 October 2026)", () => {
+  const items = ["Food", "Travel", "Treat", "Gas"];
+  it.each([
+    ["I spent 500 in travel in span of October 10 to 12", "2026-10-10", "2026-10-12", 50000],
+    ["spent 500 travel between oct 10 and oct 12", "2026-10-10", "2026-10-12", 50000],
+    ["I spent 900 on food for the last 3 days", "2026-10-10", "2026-10-12", 90000],
+    ["spent 2000 on travel from monday to wednesday", "2026-10-05", "2026-10-07", 200000],
+    ["mula oct 10 hanggang 12 gastos 500 travel", "2026-10-10", "2026-10-12", 50000],
+    ["travel 3000 cash 10/10 to 10/12", "2026-10-10", "2026-10-12", 300000],
+    ["spent 300 food yesterday and today", "2026-10-11", "2026-10-12", 30000],
+  ])("entry: %s", async (said, from, to, amount) => {
+    const { readEntry } = await import("./readEntry");
+    const d = readEntry(said, [], reference as never, "2026-10-12").draft;
+    expect([d.date, d.coversTo, d.amount]).toEqual([from, to, amount]);
+  });
+
+  it.each([
+    ["How much i spend in span of oct 10 to 12", "2026-10-10", "2026-10-12"],
+    ["how much did I spend from oct 1 to oct 10?", "2026-10-01", "2026-10-10"],
+    ["how much did i spend on food between oct 5 and oct 10", "2026-10-05", "2026-10-10"],
+    ["magkano nagastos ko mula oct 1 hanggang oct 10", "2026-10-01", "2026-10-10"],
+    ["what did i spend the last 3 days", "2026-10-10", "2026-10-12"],
+    ["how much did i spend since oct 5", "2026-10-05", "2026-10-12"],
+  ])("question: %s", async (said, from, to) => {
+    const { isQuestion } = await import("./intent");
+    const { readSpendAsk } = await import("./spendAsk");
+    expect(isQuestion(said)).toBe(true);
+    expect(readSpendAsk(said, items, "2026-10-12")).toMatchObject({ from, to });
+  });
+
+  it("counts a range entry's share inside the days asked about", async () => {
+    const { spendAnswer } = await import("./spendAsk");
+    const trip = row({ date: "2026-10-09", coversTo: "2026-10-11", item: "Travel", amount: 900000, total: 900000 });
+    const text = spendAnswer({ item: null, from: "2026-10-10", to: "2026-10-12", name: "October 10 to October 12" }, spreadCovered([trip]), "2026-10-12");
+    expect(text).toContain("PHP 6,000.00");
+  });
+});

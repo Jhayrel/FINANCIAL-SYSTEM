@@ -80,7 +80,7 @@ import {
   nextQuestion,
   type Blank,
 } from "../domain/capture";
-import { readEntry, splitEntries } from "../domain/readEntry";
+import { daysIn, readEntry, splitEntries } from "../domain/readEntry";
 import { namedIn, partsTheModelMissed, readTotals, totalWords, withSaidItem, withoutTheTotal } from "../domain/entryTotals";
 import { cashWallet, slipsIn, withdrawalSource } from "../domain/withdrawal";
 import { cardAccount, cardSlipsIn } from "../domain/cardSlip";
@@ -165,7 +165,7 @@ import {
 import { buildSheet } from "../domain/statementSheet";
 import { asksToAddTheDifference, differenceNextStep, namedForTheDifference } from "../domain/differenceFollowUp";
 import { withoutFalseDenial } from "../domain/aiText";
-import { asksAboutAFile, exportWords, readExportAsk, sheetRequestOf, statementBrief, statementWords, withSheet, type ExportAsk } from "../domain/exportAsk";
+import { asksAboutAFile, exportWords, readExportAsk, sheetRequestOf, statementBrief, statementWords, withCut, withSheet, type ExportAsk } from "../domain/exportAsk";
 import { readInvestigateAsk, type InvestigateAsk } from "../domain/investigateAsk";
 import { affordAnswer, followsUpDecision, goesByBalance, isAffordQuestion, readAffordAsk } from "../domain/affordAsk";
 import {
@@ -2457,7 +2457,11 @@ export function AskPanel({
         : "";
 
     // The words that named it, as the description, when the reading wrote none.
-    const named = proposal.draft.description.trim() ? "" : lessonKey(said, reference);
+    // Without the words of a date range ("span of", "the last 3 days"), which say when, not what (`daysIn`).
+    const rangeSaid = daysIn(said, asOf)?.said ?? "";
+    const named = proposal.draft.description.trim()
+      ? ""
+      : lessonKey((rangeSaid ? said.replace(rangeSaid, " ") : said).replace(/\b(?:in\s+)?(?:a\s+)?span\s+of\b|\b(?:the\s+)?(?:last|past)\s+days?\b/gi, " "), reference);
     const start: Draft = {
       ...proposal.draft,
       ...(named ? { description: named } : {}),
@@ -3136,6 +3140,19 @@ export function AskPanel({
         )
       : folded;
     /*
+     * A run of days the message names ("from October 10 to 12", "the last 3
+     * days"): spending the model read without it gets it here, so a range is
+     * never saved as one day (`covers.ts`, 12 October 2026).
+     */
+    const span = sent.length === 0 && note.trim() !== "" ? daysIn(note, asOf) : null;
+    const ranged = span
+      ? dated.map((p) =>
+          p.draft.flow === "Spending" && !p.draft.coversTo && (p.draft.date === asOf || p.draft.date === span.from)
+            ? { ...p, draft: { ...p.draft, date: span.from, coversTo: span.to }, adjustments: [...p.adjustments.filter((n) => !n.startsWith("Dated today")), `Covers ${span.from} to ${span.to}, as your message said: spread over those days in every report.`] }
+            : p,
+        )
+      : dated;
+    /*
      * A total and its parts (domain/entryTotals.ts): a card that is only the
      * total of the others is the same money twice, and "All school category"
      * files each one as School.
@@ -3143,7 +3160,7 @@ export function AskPanel({
     const typed = sent.length === 0 && note.trim() !== "" ? totalsIn(note) : null;
     const result = {
       ...read,
-      proposals: (typed ? withoutTheTotal(dated, typed.totals).cards : dated).map((p) => {
+      proposals: (typed ? withoutTheTotal(ranged, typed.totals).cards : ranged).map((p) => {
         if (!typed) return p;
         const filed = withSaidItem(p, typed.item);
         return filed === p ? { ...p, typed: true } : { ...filed, typed: true, adjustments: [...p.adjustments, saidItemWords(typed.item ?? "")] };
@@ -5500,7 +5517,9 @@ export function AskPanel({
       return;
     }
 
-    const exportAsked = as || aboutAFile ? null : readExportAsk(ruled, asOf) ?? (routed?.intent === "export" ? readExportAsk(`export ${ruled}`, asOf) : null);
+    const readAsked = as || aboutAFile ? null : readExportAsk(ruled, asOf) ?? (routed?.intent === "export" ? readExportAsk(`export ${ruled}`, asOf) : null);
+    // "Subscriptions only", "Spotify", "cash withdrawals": the part of the statement named (`withCut`).
+    const exportAsked = readAsked ? withCut(readAsked, transactions, reference, debts) : null;
     /*
      * A statement is fitted to what is recorded and said to the day, with what
      * is in it: "Can you be specific? Like look it say January" (the owner, 4

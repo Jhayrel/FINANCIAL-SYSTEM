@@ -1743,8 +1743,10 @@ export default function App() {
     const request = sheetRequestOf(ask, asOf);
     const type = request.type;
     const sheet = buildSheet(transactions, request, reference, settings.credits);
-    const statement = buildStatementBetween(transactions, type, sheet.from, sheet.to, reference, undefined, {
+    const statement = buildStatementBetween(transactions, type, sheet.from, sheet.to, reference, request.debtId, {
       debts: settings.credits,
+      wallet: request.wallet,
+      only: request.only,
     });
     const count = statement.rows.length;
     if (ask.format === "csv") {

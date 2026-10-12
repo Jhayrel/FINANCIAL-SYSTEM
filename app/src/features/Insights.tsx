@@ -285,6 +285,24 @@ export function Insights({
   );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const kinds = useMemo(() => kindsAgainst(transactions, debts, sel), [transactions, debts, selKey]);
+  /*
+   * A kind whose spending on these days is a share of an entry over a date
+   * range says so, rather than "PHP 0.01 more than the day before" between
+   * two shares of one entry (owner, 12 October 2026).
+   */
+  const spreadKinds = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const t of transactions) {
+      if (!t.coveredBy || t.date < sel.start || t.date > sel.end) continue;
+      const parts = transactions.filter((p) => p.coveredBy === t.coveredBy);
+      const first = parts.reduce((m, p) => (p.date < m ? p.date : m), t.date);
+      const last = parts.reduce((m, p) => (p.date > m ? p.date : m), t.date);
+      const whole = parts.reduce((a, p) => a + p.total, 0);
+      out.set(kindOf(t, debts), `#${String(t.recordNumber).padStart(4, "0")}, ${formatMoney(whole)} spread over ${formatMedium(first)} to ${formatMedium(last)}, about ${formatMoney(Math.round(whole / parts.length))} a day`);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, debts, selKey]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const income = useMemo(() => incomeBySource(transactions, sel), [transactions, selKey]);
   const before = previousWords(sel);
@@ -996,8 +1014,9 @@ export function Insights({
               rows={kinds.map((k) => ({
                 name: k.name,
                 amount: k.amount,
-                hint:
-                  k.before === 0
+                hint: spreadKinds.has(k.name)
+                  ? `${spreadKinds.get(k.name)}${k.before > 0 && Math.abs(k.amount - k.before) >= 100 ? `; ${formatMoney(Math.abs(k.amount - k.before))} ${k.amount > k.before ? "more" : "less"} than ${before}` : ""}`
+                  : k.before === 0
                     ? `None in ${before}`
                     : k.amount === k.before
                       ? `No change from ${before}`

@@ -333,3 +333,20 @@ describe("a withdrawal says what was taken out and its fee", () => {
     expect(expense.lines.find((l) => l.date === "2026-09-02")).toMatchObject({ moneyOut: 1500, kind: "Transaction Fee", detail: "Fee on ₱2,000.00 withdrawn" });
   });
 });
+
+describe("a date range on the statement", () => {
+  it("keeps its last day and says the days it covers, the money on the day it left", () => {
+    const rows = [
+      row({ date: "2026-10-01", type: "Revenue", toWallet: "Cash", amount: 1000000 }),
+      row({ date: "2026-10-09", type: "Spending", fromWallet: "Cash", amount: 933700, coversTo: "2026-10-11", description: "Trip" }),
+      row({ date: "2026-10-09", type: "Spending", fromWallet: "Cash", amount: 10000, description: "Food" }),
+    ];
+    const sheet = buildSheet(rows, { type: "account", year: 2026, fromMonth: 10, toMonth: 10 }, reference);
+    const trip = sheet.lines.find((l) => l.description === "Trip");
+    expect(trip?.coversTo).toBe("2026-10-11");
+    expect(trip?.detail).toContain("Covers October 9, 2026 to October 11, 2026, 3 days");
+    expect(trip?.moneyOut).toBe(933700);
+    expect(trip?.balance).toBe(1000000 - 933700);
+    expect(sheet.lines.find((l) => l.description === "Food")?.coversTo).toBeUndefined();
+  });
+});

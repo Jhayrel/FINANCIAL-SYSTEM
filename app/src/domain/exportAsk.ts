@@ -25,8 +25,11 @@ import { describeRange } from "./dayRange";
 import { formatMoney } from "./money";
 import type { SheetRequest, StatementSheet } from "./statementSheet";
 import { spanIn } from "./periodIn";
-import type { StatementType } from "./statements";
-import type { IsoDate } from "./types";
+import type { Debt } from "./debt";
+import { canFilter, filterChoices } from "./statementFilter";
+import { belongsIn, type StatementType } from "./statements";
+import type { IsoDate, ReferenceLists, Transaction } from "./types";
+import { cashWallet } from "./withdrawal";
 
 export type ExportKind =
   /** Everything, as the JSON file a restore reads back. */
@@ -65,6 +68,10 @@ export interface ExportAsk {
   readonly said: string;
   /** What the statement holds, worked out when it was offered: "May 1, 2022 to October 4, 2026 · 3,885 entries". */
   readonly summary?: string;
+  /** Statements only: part of it, as the Show picker cuts it ("cat:Subscriptions", "kind:Spotify"). */
+  readonly only?: string;
+  /** Wallet statements only: the wallet. */
+  readonly wallet?: string;
 }
 
 /** Asking for a file at all. Without one of these, nothing here applies. */
@@ -87,7 +94,9 @@ const STATEMENTS: Readonly<Record<string, StatementType>> = {
   expense: "expense",
   spending: "expense",
   bills: "bills",
+  bill: "bills",
   subscriptions: "bills",
+  subscription: "bills",
   transfers: "transfers",
   transfer: "transfers",
   savings: "savings",
@@ -173,7 +182,83 @@ export function sheetRequestOf(ask: ExportAsk, asOf: IsoDate): SheetRequest {
     fromDate: ask.fromDate,
     toDate: ask.toDate,
     asOf,
+    ...(ask.only ? { only: ask.only } : {}),
+    ...(ask.wallet ? { wallet: ask.wallet } : {}),
   };
+}
+
+const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** A name said as words: "spotify", "globe home wifi", "transaction fees". */
+const says = (text: string, name: string): boolean =>
+  name.trim().length >= 3 && new RegExp(`(?<![\\w-])${escape(name.trim())}s?(?![\\w-])`, "i").test(text);
+
+/** Words that name a statement, never a part of one: "revenue statement" is not the kind called Revenue. */
+const SHEET_WORD = /^(?:account|statement|revenue|income|expense|spending|bills?|subscriptions?|transfers?|savings|borrowed|utang|lent|credit|debts?|loans?|opening)$/i;
+
+/**
+ * The part of a statement the words name, as the Show picker on Statements
+ * cuts it. The owner, 12 October 2026: "bills only, subscription only or a
+ * specific only like specific subscription or bills", and the same for
+ * transfers and the rest. Asked in chat, it is the same cut:
+ * "subscriptions only statement", "Spotify statement this year", "cash
+ * withdrawals in September", "statement of what I owe Maya Credit".
+ *
+ * A statement named only by its period ("statement for October") stays the
+ * account statement. One that names a bill, a kind of spending or income, a
+ * lender or a wallet becomes that statement, cut to it.
+ */
+export function withCut(ask: ExportAsk, transactions: readonly Transaction[], reference: ReferenceLists, debts: readonly Debt[]): ExportAsk {
+  if (ask.kind !== "statement") return ask;
+  const text = ask.said;
+  const savings = new Set(reference.savings);
+  const cash = cashWallet(reference.wallets);
+  const type = ask.type ?? "account";
+
+  const cutIn = (sheet: StatementType): string | null => {
+    if (!canFilter(sheet)) return null;
+    const rows = transactions.filter((t) => belongsIn(t, sheet, savings, { debts }));
+    const { labelOf } = filterChoices(sheet, rows, savings, cash, debts);
+    const keys = [...labelOf.keys()].filter(Boolean);
+    // The shapes of a transfer, before any wallet: "cash withdrawals" is not the Cash wallet.
+    if (sheet === "transfers") {
+      if (keys.includes("withdrawals") && /\b(?:withdr[ae]w\w*|atm|cash ?out)\b/i.test(text)) return "withdrawals";
+      if (keys.includes("out") && /\b(?:sent (?:out|away)|money send|sent to (?:someone|others|people|other people))\b/i.test(text)) return "out";
+      if (keys.includes("between") && /\bbetween (?:my|your|our) (?:own )?(?:accounts|wallets)\b/i.test(text)) return "between";
+    }
+    if (sheet === "bills") {
+      const bill = /\bbills?\b/i.test(text);
+      const sub = /\bsubscriptions?\b/i.test(text);
+      const pick = keys.filter((k) => k.startsWith("kind:")).find((k) => says(text, k.slice(5)) && !SHEET_WORD.test(k.slice(5)));
+      if (pick) return pick;
+      if (sub && !bill && keys.includes("cat:Subscriptions")) return "cat:Subscriptions";
+      if (bill && !sub && keys.includes("cat:Bills")) return "cat:Bills";
+      return null;
+    }
+    const nameOf = (k: string): string =>
+      k.startsWith("debt:") ? (debts.find((d) => d.id === k.slice(5))?.name ?? "") : k.slice(k.indexOf(":") + 1);
+    const rank = (k: string): number => (k.startsWith("kind:") ? 0 : k.startsWith("debt:") ? 1 : 2);
+    const said = keys
+      .filter((k) => !k.startsWith("cat:"))
+      .filter((k) => !SHEET_WORD.test(nameOf(k)) && says(text, nameOf(k)))
+      .sort((a, b) => nameOf(b).length - nameOf(a).length || rank(a) - rank(b));
+    return said[0] ?? null;
+  };
+
+  if (type !== "account") {
+    const only = cutIn(type);
+    return only ? { ...ask, only } : ask;
+  }
+  // "Cash withdrawals in September": the transfers, cut to that shape, before the Cash wallet is read into it.
+  const shape = cutIn("transfers");
+  if (shape === "withdrawals" || shape === "out" || shape === "between") return { ...ask, type: "transfers", only: shape };
+  // "Spotify statement": the statement that holds what was named.
+  for (const sheet of ["bills", "expense", "revenue", "borrowed", "lent", "onbehalf"] as const) {
+    const only = cutIn(sheet);
+    if (only?.startsWith("kind:") || only?.startsWith("debt:")) return { ...ask, type: sheet, only };
+  }
+  // "Maya statement": that wallet, with its balance after each row.
+  const wallet = [...reference.wallets, ...reference.savings].sort((a, b) => b.length - a.length).find((w) => says(text, w));
+  return wallet ? { ...ask, type: "wallet", wallet } : ask;
 }
 
 /** "3,885 entries: money in ₱2,297,460.93, money out ₱2,284,625.34, balance ₱12,835.59 at the end". */
@@ -191,6 +276,12 @@ function holds(sheet: StatementSheet): string {
   return `${n.toLocaleString("en-US")} ${n === 1 ? "entry" : "entries"}: ${parts.join(", ")}`;
 }
 
+/** "Wallet statement for Maya"; a cut one says its part: "Bills and subscriptions, Subscriptions only". */
+function sheetName(sheet: StatementSheet): string {
+  if (!sheet.subject) return sheet.title;
+  return sheet.type === "wallet" || sheet.type === "debt" ? `${sheet.title} for ${sheet.subject}` : `${sheet.title}, ${sheet.subject}`;
+}
+
 /** The period, said to the day, and "(today)" when it ends today. */
 function spanOf(sheet: StatementSheet): string {
   return `${sheet.period}${sheet.fitted?.endsToday ? " (today)" : ""}`;
@@ -201,7 +292,7 @@ function spanOf(sheet: StatementSheet): string {
  * is in it. "Can you be specific?" (the owner, 4 October 2026).
  */
 export function statementWords(sheet: StatementSheet, format: "pdf" | "csv" = "pdf"): string {
-  const name = `${sheet.title}${sheet.subject ? ` for ${sheet.subject}` : ""}`;
+  const name = sheetName(sheet);
   const starts = sheet.fitted?.startsLater ? ` Nothing is recorded before ${formatMedium(sheet.from)}, so it starts there.` : "";
   return `${name}, ${spanOf(sheet)}, as ${format === "csv" ? "a spreadsheet" : "a PDF"}. ${holds(sheet).replace(/^./, (c) => c.toUpperCase())}.${starts}`;
 }
@@ -239,7 +330,7 @@ export function statementBrief(sheet: StatementSheet, forTheOwner = false): stri
   const largestIn = sheet.headings.moneyIn ? top((l) => l.moneyIn) : "";
   const largestOut = sheet.headings.moneyOut ? top((l) => l.moneyOut) : "";
   return [
-    `${forTheOwner ? "Your" : "The statement they mean:"} ${forTheOwner ? sheet.title.charAt(0).toLowerCase() + sheet.title.slice(1) : sheet.title}${sheet.subject ? ` for ${sheet.subject}` : ""}, ${spanOf(sheet)}.`,
+    `${forTheOwner ? "Your" : "The statement they mean:"} ${forTheOwner ? sheetName(sheet).charAt(0).toLowerCase() + sheetName(sheet).slice(1) : sheetName(sheet)}, ${spanOf(sheet)}.`,
     `${holds(sheet).replace(/^./, (c) => c.toUpperCase())}.`,
     sheet.fitted?.startsLater ? `Nothing is recorded before ${formatMedium(sheet.from)}, so it starts there.` : "",
     years.size > 1

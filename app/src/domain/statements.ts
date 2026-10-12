@@ -29,6 +29,8 @@ import { firstOfMonth, lastOfMonth } from "./dates";
 import { owedChange, type Debt } from "./debt";
 import { costOf, incomeOf } from "./totals";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
+import { canFilter, matchesFilter } from "./statementFilter";
+import { cashWallet } from "./withdrawal";
 
 export type StatementType =
   | "account"
@@ -116,6 +118,8 @@ export interface StatementScope {
   readonly wallet?: string | undefined;
   /** The debts the settings hold, for the statements that cover several. */
   readonly debts?: readonly Debt[] | undefined;
+  /** Part of the statement only: "cat:Bills", "kind:Spotify" (`statementFilter.ts`). */
+  readonly only?: string | undefined;
 }
 
 /**
@@ -241,12 +245,14 @@ export function buildStatementBetween(
   scope: StatementScope = {},
 ): Statement {
   const savings = new Set(reference.savings);
+  const cash = cashWallet(reference.wallets);
+  const only = canFilter(type) ? scope.only : undefined;
 
   const inPeriod = transactions
     .filter((t) => {
       if (t.date < from || t.date > to) return false;
       if (type === "debt" && debtId && t.debtId !== debtId) return false;
-      return belongsIn(t, type, savings, scope);
+      return belongsIn(t, type, savings, scope) && matchesFilter(t, only, cash, scope.debts);
     })
     .sort((a, b) =>
       a.date === b.date ? a.recordNumber - b.recordNumber : a.date.localeCompare(b.date),

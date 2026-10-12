@@ -1072,7 +1072,7 @@ a0f15a5.
 | Not reported: a fee saved inside a withdrawal, a day closing below zero | Integrity warnings, the last 90 days only, reported never corrected |
 | Unspent money's effect on tomorrow and on a run of days was never said | `ifNothingMoreToday` and `safeOverDays` in `monthPlan.ts`, in the chat and to the model |
 | The model knew neither the settings nor the budget history | `settingsContext.ts`: every setting in words, every change counted by month |
-| Spending over several days | `covers.ts`: one row with `coversTo`, spread evenly over its days by every report (`reportRows` in `App.tsx`, `useAi`, `AskPanel`); the form's Several days and "Work it out from the money left"; an entry inside one can be taken out of it |
+| Spending over several days | `covers.ts`: one row with `coversTo`, spread evenly over its days by every report (`reportRows` in `App.tsx`, `useAi`, `AskPanel`); the form's One day / Date range choice (the "Work it out from the money left" box was removed at the owner's word: "my goal is just to record a spending in a range"); an entry inside one can be taken out of it |
 
 **Checked:** typecheck (`tsc -b`), the suite (only the 42 files that need the
 private fixture fail), the build, all in a clean copy; the new form controls
@@ -1082,6 +1082,16 @@ of every screen, and any of this against a live model.
 **Database rules:** changed. `coversTo` is validated (spending only, after the
 first day). Publish `firestore.rules` (§6 step 1). Writes work before
 publishing, since the rules check required fields, not the field list.
+
+Then, the same days:
+
+| Asked | Where it lives |
+|---|---|
+| Ranges said in chat, entry or question | `daysIn` (`readEntry.ts`) reads "oct 9 to 11", "span of", "between ... and", "hanggang", weekdays, "last 3 days". An entry fills `coversTo` (`AskPanel` step `ranged`); "how much did I spend from X to Y" is a question (`readSpendAsk`). The model's route and extract rules say the same. |
+| Ranges shown everywhere | Database date on two lines; Statements date column, phone line and PDF ("to Oct 11"), plus "Covers ..." in the detail; Insights says "spread over ..., about X a day" instead of a one-centavo day-on-day change. |
+| Statements cut to part | `statementFilter.ts`: a Show picker on bills and subscriptions (bills only, subscriptions only, one by name), transfers (between your accounts, cash withdrawals, sent out, one wallet), revenue, expense, savings (one account keeps its own balance) and the debt sheets (one lender). Totals, running column, CSV and PDF follow it. Chat reads the same cut (`withCut` in `exportAsk.ts`): "subscriptions only statement", "Spotify statement", "cash withdrawals statement", "Maya statement". |
+
+No further database rule change: the cut is a view, nothing is stored.
 
 ---
 

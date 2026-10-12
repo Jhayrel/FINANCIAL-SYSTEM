@@ -430,22 +430,70 @@ function monthDayIn(text: string, asOf: IsoDate): IsoDate | null {
 export function daysIn(text: string, asOf: IsoDate): { from: IsoDate; to: IsoDate; said: string } | null {
   // A hyphen or the dash a phone keyboard puts between two days, written by its code so no dash sits in the source (W1).
   const DASH = `[-${String.fromCharCode(0x2013)}]`;
-  const iso = new RegExp(`\\b((?:19|20)\\d{2}-\\d{2}-\\d{2})\\s*(?:to|until|till|${DASH})\\s*((?:19|20)\\d{2}-\\d{2}-\\d{2})\\b`, "i").exec(text);
-  if (iso?.[1] && iso[2] && iso[2] > iso[1]) return { from: iso[1], to: iso[2], said: iso[0] };
+  // "to", "until", "hanggang", a dash; "and" only after "between" ("between oct 5 and oct 10").
+  const SEP = `(?:to|until|till|thru|through|hanggang|hangang|${DASH})`;
+  const LEAD = "(?:(?:in\\s+)?(?:a\\s+)?span\\s+of\\s+|from\\s+|mula\\s+(?:sa\\s+|noong\\s+)?|simula\\s+(?:sa\\s+|noong\\s+)?)?";
+  const ok = (from: IsoDate | null, to: IsoDate | null, said: string): { from: IsoDate; to: IsoDate; said: string } | null =>
+    from && to && to > from && daysBetweenIso(from, to) < 92 ? { from, to, said } : null;
+  const month = (m: string | undefined): number => (m ? (MONTH_OF[m.toLowerCase()] ?? MONTH_OF[m.toLowerCase().slice(0, 3)] ?? 0) : 0);
+
+  const iso = new RegExp(`\\b((?:19|20)\\d{2}-\\d{2}-\\d{2})\\s*(?:${SEP}|and)\\s*((?:19|20)\\d{2}-\\d{2}-\\d{2})\\b`, "i").exec(text);
+  if (iso?.[1] && iso[2]) return ok(iso[1], iso[2], iso[0]);
+
   const M = "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec";
   const D = "([12]\\d|3[01]|0?[1-9])(?:st|nd|rd|th)?";
-  const monthFirst = new RegExp(`\\b(?:from\\s+)?(${M})\\.?\\s+${D}\\s*(?:to|until|till|${DASH}|through)\\s*(?:(${M})\\.?\\s+)?${D}\\b`, "i").exec(text);
-  const dayFirst = new RegExp(`\\b(?:from\\s+)?${D}\\s*(?:to|until|till|${DASH}|through)\\s*${D}\\s+(?:of\\s+)?(${M})\\b`, "i").exec(text);
-  const found = monthFirst
-    ? { m1: monthFirst[1], d1: monthFirst[2], m2: monthFirst[3] ?? monthFirst[1], d2: monthFirst[4], said: monthFirst[0] }
-    : dayFirst
-      ? { m1: dayFirst[3], d1: dayFirst[1], m2: dayFirst[3], d2: dayFirst[2], said: dayFirst[0] }
-      : null;
-  if (!found?.m1 || !found.m2 || !found.d1 || !found.d2) return null;
-  const from = dayOfMonth(MONTH_OF[found.m1.toLowerCase()] ?? MONTH_OF[found.m1.toLowerCase().slice(0, 3)] ?? 0, Number(found.d1), undefined, asOf);
-  let to = dayOfMonth(MONTH_OF[found.m2.toLowerCase()] ?? MONTH_OF[found.m2.toLowerCase().slice(0, 3)] ?? 0, Number(found.d2), undefined, asOf);
-  if (from && to && to < from) to = shift(to, 365);
-  return from && to && to > from && daysBetweenIso(from, to) < 92 ? { from, to, said: found.said } : null;
+  const pairs: [RegExp, (m: RegExpExecArray) => [number, string | undefined, number, string | undefined]][] = [
+    // "oct 9 to 11", "from October 9 to October 11", "between oct 5 and oct 10", "mula oct 1 hanggang oct 10"
+    [new RegExp(`\\b${LEAD}(${M})\\.?\\s+${D}\\s*${SEP}\\s*(?:(${M})\\.?\\s+)?${D}\\b`, "i"), (m) => [month(m[1]), m[2], month(m[3] ?? m[1]), m[4]]],
+    [new RegExp(`\\bbetween\\s+(${M})\\.?\\s+${D}\\s+and\\s+(?:(${M})\\.?\\s+)?${D}\\b`, "i"), (m) => [month(m[1]), m[2], month(m[3] ?? m[1]), m[4]]],
+    // "9 to 11 oct", "between 5 and 10 october"
+    [new RegExp(`\\b${LEAD}${D}\\s*${SEP}\\s*${D}\\s+(?:of\\s+)?(${M})\\b`, "i"), (m) => [month(m[3]), m[1], month(m[3]), m[2]]],
+    [new RegExp(`\\bbetween\\s+${D}\\s+and\\s+${D}\\s+(?:of\\s+)?(${M})\\b`, "i"), (m) => [month(m[3]), m[1], month(m[3]), m[2]]],
+    // "10/10 to 10/12", "between 10/5 and 10/10": month first, as the owner's phone writes them
+    [new RegExp(`\\b${LEAD}(?:between\\s+)?(\\d{1,2})/(\\d{1,2})(?:/\\d{2,4})?\\s*(?:${SEP}|and)\\s*(\\d{1,2})/(\\d{1,2})(?:/\\d{2,4})?\\b`, "i"), (m) => [Number(m[1]), m[2], Number(m[3]), m[4]]],
+  ];
+  for (const [re, parts] of pairs) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const [m1, d1, m2, d2] = parts(m);
+    if (!m1 || !m2 || !d1 || !d2) continue;
+    const from = dayOfMonth(m1, Number(d1), undefined, asOf);
+    let to = dayOfMonth(m2, Number(d2), undefined, asOf);
+    if (from && to && to < from) to = shift(to, 365);
+    const found = ok(from, to, m[0]);
+    if (found) return found;
+  }
+
+  // "monday to wednesday", "from mon to wed": the latest such run that has begun.
+  const W = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const WD = "(sun|mon|tue|tues|wed|thu|thur|thurs|fri|sat)(?:day|nesday|sday|rsday|urday)?";
+  const weekdays = new RegExp(`\\b${LEAD}${WD}\\s*(?:${SEP}|and)\\s*${WD}\\b`, "i").exec(text);
+  if (weekdays?.[1] && weekdays[2]) {
+    const index = (w: string): number => W.findIndex((d) => d.startsWith(w.toLowerCase().slice(0, 3)));
+    const dow = new Date(`${asOf}T00:00:00Z`).getUTCDay();
+    const endBack = (dow - index(weekdays[2]) + 7) % 7;
+    const to = shift(asOf, -endBack);
+    const startBack = (index(weekdays[2]) - index(weekdays[1]) + 7) % 7;
+    const found = ok(shift(to, -startBack), to, weekdays[0]);
+    if (found) return found;
+  }
+
+  // "the last 3 days", "past three days", "for 3 days", "these 3 days": ending today.
+  const NUM: Readonly<Record<string, number>> = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, dalawang: 2, tatlong: 3, apat: 4, limang: 5 };
+  const recent = /\b(?:(?:the|these)\s+)?(?:last|past|previous|for|these|nakaraang|sa\s+loob\s+ng)\s+(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|dalawang|tatlong|apat|limang)\s+(?:days?|araw)\b/i.exec(text);
+  if (recent?.[1]) {
+    const n = /^\d+$/.test(recent[1]) ? Number(recent[1]) : (NUM[recent[1].toLowerCase()] ?? 0);
+    if (n > 1) return ok(shift(asOf, -(n - 1)), asOf, recent[0]);
+  }
+
+  // "yesterday and today", "yesterday to today", "kahapon hanggang ngayon"
+  const both = /\b(?:yesterday|kahapon)\s+(?:and|to|until|hanggang|at)\s+(?:today|ngayon)\b/i.exec(text);
+  if (both) return ok(shift(asOf, -1), asOf, both[0]);
+
+  // "since oct 10", "simula oct 10": to today.
+  const since = new RegExp(`\\b(?:since|simula\\s+(?:sa\\s+|noong\\s+)?|mula\\s+(?:sa\\s+|noong\\s+)?)(${M})\\.?\\s+${D}\\b(?!\\s*(?:${SEP}|and))`, "i").exec(text);
+  if (since?.[1] && since[2]) return ok(dayOfMonth(month(since[1]), Number(since[2]), undefined, asOf), asOf, since[0]);
+  return null;
 }
 
 const daysBetweenIso = (a: IsoDate, b: IsoDate): number => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);

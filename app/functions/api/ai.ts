@@ -1010,6 +1010,7 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
    */
   extract: [
     "Read every distinct transaction in what you are given and output one proposal for each.",
+    "Spending over a run of days is one proposal, never one per day: when the money covers several days (spent 9500 on travel from October 9 to 11, in a span of Oct 10 to 12, between Oct 5 and Oct 10, Monday to Wednesday, the last 3 days, 10/10 to 10/12, mula oct 10 hanggang 12), put the first day in date and the last day in coversTo, and the whole amount in amountPesos. The days are never the amount. Leave coversTo empty for one day, and for anything that is not spending.",
     /*
      * Text the device read from a picture (src/data/ocr.ts, 26 September
      * 2026). A wallet app's list reads as a label line then an item and
@@ -1121,7 +1122,7 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
   route: [
     "Decide what the person wants from this one message. You are given the recent conversation and what is currently on their screen.",
     "entry: they are telling you about money that moved, so it can be recorded. Past tense, or an amount with something bought.",
-    "question: they want to be told something about their figures.",
+    "question: they want to be told something about their figures. A message asking how much was spent, received or left over a run of days (how much did I spend in a span of October 10 to 12, from the 1st to the 10th, between Monday and Wednesday, the last 3 days, mula oct 1 hanggang oct 10) is a question, never an entry, and its days go in period. Only money said to have moved (I spent 500 on travel from October 10 to 12) is an entry, even when it names a run of days.",
     "chart: they want to see figures drawn. Also when they name a period on its own straight after a chart, which means the same chart over that period.",
     "correction: they are changing something on the entry card already on screen. A fragment, a different amount, a different wallet, a date.",
     "answer: the assistant asked them a question and this is the reply to it.",

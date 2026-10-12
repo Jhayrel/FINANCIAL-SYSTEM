@@ -10834,3 +10834,10 @@ button.fms-recent-row:disabled {
   gap: var(--space-3);
   min-width: 0;
 }
+
+/* A date range in the Database's date column: the first day, and under it the last. */
+.fms-dbrange {
+  display: grid;
+  line-height: 1.25;
+}
+

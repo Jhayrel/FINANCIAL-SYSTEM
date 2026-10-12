@@ -392,7 +392,16 @@ export function Database({
       width: "116px",
       sortable: true,
       // An entry over several days shows them: "10/09/2026 to 10/11/2026".
-      render: (t) => <span className="t-num-s">{formatShort(t.date)}{t.coversTo && t.coversTo > t.date ? ` to ${formatShort(t.coversTo)}` : ""}</span>,
+      // A date range on two lines, so it keeps to the column (owner, 12 October 2026: it ran into Type).
+      render: (t) =>
+        t.coversTo && t.coversTo > t.date ? (
+          <span className="fms-dbrange">
+            <span className="t-num-s">{formatShort(t.date)}</span>
+            <span className="t-micro" style={{ color: "var(--ink-3)" }}>to {formatShort(t.coversTo)}</span>
+          </span>
+        ) : (
+          <span className="t-num-s">{formatShort(t.date)}</span>
+        ),
     },
     {
       key: "flow",

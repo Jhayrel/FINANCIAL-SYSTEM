@@ -236,6 +236,8 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
 
     const first = y + PAD_Y + LINE - 2.4;
     page.text(x.date, first, shortDate(line.date), { size: BODY, color: INK_2 });
+    // A date range: its last day under the first, as the screen shows it.
+    if (line.coversTo) page.text(x.date, first + desc.length * LINE - 0.5, `to ${shortDate(line.coversTo)}`, { size: META, color: INK_3 });
     desc.forEach((l, i) => page.text(x.details, first + i * LINE, l, { size: BODY, color: INK }));
     metaLines.forEach((m, i) => page.text(x.details, first + desc.length * LINE - 0.5 + i * META_LINE, m, { size: META, color: INK_3 }));
     if (showIn) money(line.moneyIn, x.in, first, "regular", true);

@@ -25,6 +25,8 @@ import { formatShort, MONTH_NAMES } from "../domain/dates";
 import { accountGroups, type Account } from "../domain/accounts";
 import type { Debt } from "../domain/debt";
 import { buildSheet, type SheetLine } from "../domain/statementSheet";
+import { canFilter, filterChoices } from "../domain/statementFilter";
+import { cashWallet } from "../domain/withdrawal";
 import {
   buildStatementBetween,
   debtInScope,
@@ -170,12 +172,46 @@ export function Statements({
   const [making, setMaking] = useState(false);
   const [failed, setFailed] = useState("");
 
-  const sheet = useMemo(
+  const whole = useMemo(
     () => buildSheet(transactions, { type, year, fromMonth: from, toMonth: to, toYear, wallet, debtId: debtId || undefined, asOf }, reference, debts),
     [transactions, type, year, from, to, toYear, wallet, debtId, reference, debts, asOf],
   );
+  /*
+   * The Show picker: part of the statement only (owner, 12 October 2026:
+   * "bills only, subscription only or a specific only", and the same on the
+   * other statements). It offers what the period holds, and a pick the
+   * period no longer has falls back to everything.
+   */
+  const [only, setOnly] = useState("");
+  const choices = useMemo(
+    () =>
+      canFilter(type)
+        ? filterChoices(
+            type,
+            buildStatementBetween(transactions, type, whole.from, whole.to, reference, undefined, { debts }).rows.map((r) => r.transaction),
+            new Set(reference.savings),
+            cashWallet(reference.wallets),
+            debts,
+          )
+        : null,
+    [transactions, type, whole.from, whole.to, reference, debts],
+  );
+  const shown = choices?.labelOf.has(only) ? only : "";
+  const filtered = useMemo(
+    () =>
+      shown
+        ? buildSheet(
+            transactions,
+            { type, year, fromMonth: from, toMonth: to, toYear, wallet, debtId: debtId || undefined, asOf, only: shown },
+            reference,
+            debts,
+          )
+        : null,
+    [shown, transactions, type, year, from, to, toYear, wallet, debtId, reference, debts, asOf],
+  );
+  const sheet = filtered ?? whole;
   const statementNow = () =>
-    buildStatementBetween(transactions, type, sheet.from, sheet.to, reference, debtId || undefined, { wallet, debts });
+    buildStatementBetween(transactions, type, sheet.from, sheet.to, reference, debtId || undefined, { wallet, debts, only: shown || undefined });
 
   // Statements that cover a kind of debt say so when there is none of that kind.
   const noDebtsOfKind =
@@ -208,7 +244,20 @@ export function Statements({
     value === 0 ? <span className="t-num-s" style={{ color: "var(--ink-3)" }}>-</span> : <Money value={value} size="s" tone={tone} />;
 
   const columns: Column<SheetLine>[] = [
-    { key: "date", header: "Date", width: "104px", render: (l) => <span className="t-num-s">{formatShort(l.date)}</span> },
+    {
+      key: "date",
+      header: "Date",
+      width: "104px",
+      render: (l) =>
+        l.coversTo ? (
+          <span className="fms-dbrange">
+            <span className="t-num-s">{formatShort(l.date)}</span>
+            <span className="t-micro" style={{ color: "var(--ink-3)" }}>to {formatShort(l.coversTo)}</span>
+          </span>
+        ) : (
+          <span className="t-num-s">{formatShort(l.date)}</span>
+        ),
+    },
     {
       key: "desc",
       header: "Description",
@@ -282,11 +331,27 @@ export function Statements({
               value={typeLabel}
               onChange={(label) => {
                 const found = STATEMENT_TYPES.find((t) => STATEMENT_LABEL[t] === label);
-                if (found) setType(found);
+                if (found) {
+                  setType(found);
+                  setOnly("");
+                }
               }}
               options={STATEMENT_TYPES.map((t) => STATEMENT_LABEL[t])}
             />
           </label>
+
+          {choices && choices.options.length > 2 && (
+            <label className="fms-stmtfield">
+              <span className="t-label" style={{ color: "var(--ink-2)" }}>Show</span>
+              <Select
+                value={choices.labelOf.get(shown) ?? choices.options[0] ?? ""}
+                onChange={(label) => setOnly(choices.keyOf.get(label) ?? "")}
+                options={choices.options}
+                groups={choices.groups}
+                ariaLabel="Show"
+              />
+            </label>
+          )}
 
           {type === "wallet" && wallets.options.length > 0 && (
             <label className="fms-stmtfield">
@@ -418,7 +483,7 @@ export function Statements({
                     <div className="fms-dbrow-text">
                       <span className="t-body-strong fms-truncate">{l.description}</span>
                       <div className="t-micro" style={{ color: "var(--ink-3)" }}>
-                        {formatShort(l.date)} · {l.kind}
+                        {formatShort(l.date)}{l.coversTo ? ` to ${formatShort(l.coversTo)}` : ""} · {l.kind}
                         {l.fromWallet || l.toWallet ? ` · ${[l.fromWallet, l.toWallet].filter(Boolean).join(" → ")}` : ""}
                       </div>
                       {l.detail && (

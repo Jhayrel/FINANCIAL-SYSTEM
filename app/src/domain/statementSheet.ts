@@ -27,6 +27,8 @@
  *    words are exact.
  */
 
+import { coverWords } from "./covers";
+import { canFilter, filterName, matchesFilter } from "./statementFilter";
 import { formatMoney, type Centavos } from "./money";
 import { allWalletBalances } from "./balances";
 import { addDays, MONTH_NAMES } from "./dates";
@@ -63,6 +65,8 @@ export interface SheetLine {
    * PHP 1,000.00, fee PHP 18.00". Empty when the columns already do.
    */
   readonly detail: string;
+  /** The last day of a date range, shown under the date. Absent on a one-day entry. */
+  readonly coversTo?: IsoDate;
 }
 
 export interface StatementSheet {
@@ -101,6 +105,8 @@ export interface SheetRequest {
   readonly wallet?: string | undefined;
   /** Debt statements. */
   readonly debtId?: string | undefined;
+  /** Part of the statement only, from its Show picker (`statementFilter.ts`). */
+  readonly only?: string | undefined;
   /**
    * Days rather than whole months: "september 1 to 19". When both are set
    * they are the period, and the months above only name its first year.
@@ -304,7 +310,8 @@ export function buildSheet(
 ): StatementSheet {
   const { type, year, fromMonth, toMonth } = request;
   const toYear = request.toYear ?? year;
-  const scope: StatementScope = { wallet: request.wallet, debts };
+  const only = canFilter(type) && request.only ? request.only : undefined;
+  const scope: StatementScope = { wallet: request.wallet, debts, only };
   const byDays = request.fromDate && request.toDate ? { from: request.fromDate, to: request.toDate } : null;
   const asked = byDays ?? rangeOf({ year, month: fromMonth }, { year: toYear, month: toMonth });
   const fitted = request.asOf ? fitPeriod(transactions, type, asked.from, asked.to, reference, request.asOf, request.debtId, scope) : null;
@@ -319,7 +326,8 @@ export function buildSheet(
   const counts = (wallet: string): boolean => {
     if (!wallet) return false;
     if (type === "wallet") return wallet === request.wallet;
-    if (type === "savings") return savings.has(wallet);
+    // One savings account picked: what that account held.
+    if (type === "savings") return only?.startsWith("wallet:") ? wallet === only.slice(7) : savings.has(wallet);
     return true;
   };
   const heldChange = (t: Transaction): Centavos => {
@@ -330,7 +338,11 @@ export function buildSheet(
 
   const debtName = new Map(debts.map((d) => [d.id, d.name]));
   const inScope = (t: Transaction): boolean =>
-    type === "debt" ? (request.debtId ? t.debtId === request.debtId : t.debtId !== undefined) : belongsIn(t, type, savings, scope);
+    type === "debt"
+      ? request.debtId
+        ? t.debtId === request.debtId
+        : t.debtId !== undefined
+      : belongsIn(t, type, savings, scope) && matchesFilter(t, only, cashWallet(reference.wallets), debts);
 
   // Where the running column stood when the period began: every row before
   // it, and the opening rows on its first day, which say where it started.
@@ -468,7 +480,9 @@ export function buildSheet(
       moneyIn,
       moneyOut,
       balance: running,
-      detail,
+      // A date range says its days on the statement too (`covers.ts`).
+      detail: t.coversTo && t.coversTo > t.date ? [detail, `Covers ${coverWords(t)}`].filter(Boolean).join("; ") : detail,
+      ...(t.coversTo && t.coversTo > t.date ? { coversTo: t.coversTo } : {}),
     });
   }
 
@@ -516,7 +530,13 @@ export function buildSheet(
             : owedWords();
 
   const subject =
-    type === "wallet" ? (request.wallet ?? "") : type === "debt" ? (debts.find((d) => d.id === request.debtId)?.name ?? "") : "";
+    type === "wallet"
+      ? (request.wallet ?? "")
+      : type === "debt"
+        ? (debts.find((d) => d.id === request.debtId)?.name ?? "")
+        : only
+          ? filterName(only, debts)
+          : "";
 
   return {
     type,
