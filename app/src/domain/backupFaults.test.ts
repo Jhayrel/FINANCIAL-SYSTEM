@@ -195,3 +195,15 @@ describe("where money sent out went (12 October 2026)", () => {
     expect(placeSentMoney({ ...(sent as object), description: "InstaPay transfer" } as never, [], ["Cash", "Gcash", "Maya"])).toBeNull();
   });
 });
+
+describe("the days ahead a safe question asks about (12 October 2026)", () => {
+  it.each([
+    ["how much can i spend from oct 15 to oct 20?", "2026-10-15", "2026-10-20"],
+    ["how much can i spend next week", "2026-10-19", "2026-10-25"],
+    ["safe to spend this week", "2026-10-12", "2026-10-18"],
+    ["what can i use the next 5 days", "2026-10-13", "2026-10-17"],
+  ])("%s", async (said, from, to) => {
+    const { daysAskedAbout } = await import("./safeAsk");
+    expect(daysAskedAbout(said, "2026-10-12")).toMatchObject({ from, to });
+  });
+});

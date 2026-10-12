@@ -202,6 +202,9 @@ import { aboutTheScreen, screenText } from "../domain/screenContext";
 import { figuresIn } from "../domain/money";
 import { notEditable, transactionToDraft } from "../domain/entry";
 import { notArrivedWords, placeSentMoney } from "../domain/destination";
+import { safeOverDays } from "../domain/monthPlan";
+import { daysAskedAbout } from "../domain/safeAsk";
+import { asksBudgetHistory, budgetChangeWords } from "../domain/settingsContext";
 import { spreadCovered } from "../domain/covers";
 import { rowSavedFor } from "../domain/formSaved";
 import type { Draft } from "../domain/entry";
@@ -4253,7 +4256,22 @@ export function AskPanel({
               from: lenderNames(new Map([...lent.byLender].filter(([id]) => debts.find((d) => d.id === id)?.form !== "pass-through")), debts),
             }
           : null;
-      const words = safeWords(brief, rateIn(question), ownMoney);
+      /*
+       * A run of days asked about ("from oct 15 to oct 20"): what is safe over
+       * it, each day at its figure, and with nothing spent before it starts
+       * (`safeOverDays`, 12 October 2026).
+       */
+      const over =
+        brief.safe && daysAskedAbout(question, asOf)
+          ? (() => {
+              const w = daysAskedAbout(question, asOf)!;
+              const o = safeOverDays(brief.safe, asOf, w.from, w.to);
+              return o
+                ? `**${w.name}, ${o.days} ${o.days === 1 ? "day" : "days"}: ${formatMoney(o.keeping)}** if every day until then keeps to its figure; ${formatMoney(o.saving)} if nothing more is spent before it starts.`
+                : `${w.name} is past this month's last day, and what will be safe then depends on the money that comes in by then.`;
+            })()
+          : "";
+      const words = [over, safeWords(brief, rateIn(question), ownMoney)].filter(Boolean).join("\n\n");
       setBusy(true);
       try {
         await askQuestion(
@@ -4294,6 +4312,23 @@ export function AskPanel({
         }
         return;
       }
+    }
+    /*
+     * "how many times did I change my budget": the history, counted by the
+     * app, never budget advice (12 October 2026).
+     */
+    if (files.length === 0 && !as && asksBudgetHistory(ruled)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      const words = budgetChangeWords(budgets, asOf).join("\n");
+      setBusy(true);
+      try {
+        await askQuestion(note, false, { text: `Every change to a budget or limit made in the app, counted by the app; answer from these, the count first:\n${words}`, fallback: words });
+      } finally {
+        setBusy(false);
+      }
+      return;
     }
     // A budget for a day or a week is what is safe to spend over it, never next month's budget (`asksShortBudget`).
     if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && (asksSafeToSpend(note) || asksShortBudget(ruled, asOf)) && !plainlyDone(note)) {

@@ -136,6 +136,21 @@ export function toDocument(t: Transaction, deletedAt?: string): DocumentData {
   return d;
 }
 
+/**
+ * The row as it is written over a stored one. Writes merge, so a field the
+ * row no longer has would stay behind: an entry changed from several days back
+ * to one kept its last day and covered them again after a reload, and a debt
+ * movement edited into spending kept its debt (12 October 2026). Every
+ * optional field the row does not carry is cleared.
+ */
+export function forWrite(t: Transaction): DocumentData {
+  const d = toDocument(t);
+  for (const key of ["debtId", "debtEffect", "partOf", "coversTo"] as const) {
+    if (!(key in d)) d[key] = deleteField();
+  }
+  return d;
+}
+
 function fromDocument(snap: QueryDocumentSnapshot<DocumentData>): Transaction & {
   deletedAt?: string;
   discardedAt?: string;
@@ -384,7 +399,7 @@ export function firestoreLedger(uid: string): LedgerStore {
 
     async save(t) {
       try {
-        await setDoc(doc(txCollection(db, uid), t.id), stamped(toDocument(t)), { merge: true });
+        await setDoc(doc(txCollection(db, uid), t.id), stamped(forWrite(t)), { merge: true });
         countWrites(1);
       } catch (e) {
         noteError(e, "writes");
@@ -423,7 +438,7 @@ export function firestoreLedger(uid: string): LedgerStore {
         const chunk = transactions.slice(i, i + 450);
         const batch = writeBatch(db);
         for (const t of chunk) {
-          batch.set(doc(txCollection(db, uid), t.id), stamped(toDocument(t)), { merge: true });
+          batch.set(doc(txCollection(db, uid), t.id), stamped(forWrite(t)), { merge: true });
         }
         try {
           await batch.commit();
@@ -438,7 +453,7 @@ export function firestoreLedger(uid: string): LedgerStore {
           }
           for (const t of chunk) {
             try {
-              await setDoc(doc(txCollection(db, uid), t.id), stamped(toDocument(t)), { merge: true });
+              await setDoc(doc(txCollection(db, uid), t.id), stamped(forWrite(t)), { merge: true });
               countWrites(1);
             } catch (one) {
               reason = reasonOf(one);
@@ -462,8 +477,8 @@ export function firestoreLedger(uid: string): LedgerStore {
       const writes: Write[] = [
         ...discard.map((id) => ({ id, data: { discardedAt: at } })),
         // A document reused from the Bin or from an earlier discard comes back live.
-        ...live.map((t) => ({ id: t.id, data: { ...toDocument(t), deletedAt: deleteField(), discardedAt: deleteField() }, row: t })),
-        ...binned.map((t) => ({ id: t.id, data: { ...toDocument(t, t.deletedAt), discardedAt: deleteField() }, row: t })),
+        ...live.map((t) => ({ id: t.id, data: { ...forWrite(t), deletedAt: deleteField(), discardedAt: deleteField() }, row: t })),
+        ...binned.map((t) => ({ id: t.id, data: { ...forWrite(t), deletedAt: t.deletedAt, discardedAt: deleteField() }, row: t })),
       ];
       let done = 0;
       onProgress?.(0, writes.length);

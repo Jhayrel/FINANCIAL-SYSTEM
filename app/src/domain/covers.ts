@@ -1,5 +1,5 @@
 /**
- * Spending that covers several days.
+ * Spending over a date range.
  *
  * The owner, 12 October 2026: on a trip "I cannot count my expenses
  * properly, then when returning home I'll just conclude all expenses: count
@@ -78,7 +78,7 @@ export function insideCoverWords(cover: Transaction, amount: Centavos): string {
   return `${formatMedium(cover.date)} to ${formatMedium(cover.coversTo as IsoDate)} is covered by ${cover.item || "a spending entry"}, ${formatMoney(cover.total)} (#${String(cover.recordNumber).padStart(4, "0")}). If this ${formatMoney(amount)} was paid from that money, it is already counted there: take it out of that entry so it is not counted twice. If it was separate, save it as it is.`;
 }
 
-/** Saved spending from one account on the days a covering entry spans: what counting the money left already includes. */
+/** Saved spending from one account on the days a date range spans: what its amount may already include. */
 export function savedWithin(rows: readonly Transaction[], from: IsoDate, to: IsoDate, wallet: string, except?: string): Transaction[] {
   return rows.filter(
     (t) => t.id !== except && !covers(t) && t.date >= from && t.date <= to && t.fromWallet.trim() === wallet.trim() && wallet.trim() !== "" && (t.type === "Spending" || (t.type === "Transfer" && !t.toWallet.trim())),
@@ -86,9 +86,20 @@ export function savedWithin(rows: readonly Transaction[], from: IsoDate, to: Iso
 }
 
 /**
- * What was spent, from the money counted: what it started with, less what is
- * left, less what was already saved from it on those days. Never below 0.
+ * Entries already saved from the same account inside a date range, named,
+ * and what to do about them. Taking them off is offered only when this
+ * amount is the larger: a PHP 500.00 range was told to take PHP 9,337.00 off
+ * (owner, 12 October 2026).
  */
-export function spentFromCount(started: Centavos, left: Centavos, alreadySaved: Centavos): Centavos {
-  return Math.max(0, started - left - alreadySaved);
+export function savedInsideWords(inside: readonly Transaction[], amount: Centavos, wallet: string): string {
+  const sum = inside.reduce((a, t) => a + t.total, 0);
+  const named = inside
+    .slice(0, 3)
+    .map((t) => `#${String(t.recordNumber).padStart(4, "0")} ${t.item || t.type} ${formatMoney(t.total)} on ${formatMedium(t.date)}`)
+    .join(", ");
+  const more = inside.length > 3 ? ` and ${inside.length - 3} more` : "";
+  return amount > sum
+    ? `Already saved from ${wallet} in this range: ${named}${more}. If this ${formatMoney(amount)} includes ${inside.length === 1 ? "it" : "them"}, take ${formatMoney(sum)} off so nothing is counted twice; if not, save it as it is.`
+    : `Already saved from ${wallet} in this range: ${named}${more}. If this ${formatMoney(amount)} is part of ${inside.length === 1 ? "that" : "those"}, it is already counted; if it is separate, save it as it is.`;
 }
+

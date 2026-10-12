@@ -62,7 +62,11 @@ function read(): Ledger {
 
   return {
     // Surrogate ids until Firestore supplies real ones.
-    transactions: raw.transactions.map((t) => ({ ...t, id: `x${t.recordNumber}` })),
+    // A row's own id when it has one: a borrowing and its fees share a record number, and two rows with one id were edited as one.
+    transactions: raw.transactions.map((t, i, all) => ({
+      ...t,
+      id: (t as { id?: string }).id || (all.findIndex((o) => o.recordNumber === t.recordNumber) === i ? `x${t.recordNumber}` : `x${t.recordNumber}-${i}`),
+    })),
     /**
      * A binned row keeps its old record number, and numbers get reused, so
      * two of them can carry the same one. Deriving the id from the number

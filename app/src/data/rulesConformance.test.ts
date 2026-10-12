@@ -64,6 +64,7 @@ function refusals(d: Record<string, unknown>): string[] {
   if ("discardedAt" in d && typeof d.discardedAt !== "string") out.push("discardedAt");
   if ("entrySource" in d && !["manual", "ai"].includes(d.entrySource as string)) out.push("entrySource");
   if ("partOf" in d && (!str(d.partOf, 200) || (d.partOf as string).length === 0)) out.push("partOf");
+  if ("coversTo" in d && (d.type !== "Spending" || typeof d.coversTo !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(d.coversTo) || d.coversTo <= (d.date as string))) out.push("coversTo");
   if (Object.keys(d).some((k) => SECRET.includes(k))) out.push("secret");
   for (const [k, v] of Object.entries(d)) if (v === undefined) out.push(`undefined ${k}`);
   return out;
@@ -100,6 +101,7 @@ describe("every row the app saves passes the database rules", () => {
     expect(RULES).toContain("'writeoff', 'lend', 'collect']");
     expect(RULES).toContain("'Transfer', 'Opening', '']");
     expect(RULES).toContain("d.partOf.size() <= 200");
+    expect(RULES).toContain("d.coversTo > d.date");
   });
 
   for (const [name, draft, split] of CASES) {
@@ -225,5 +227,14 @@ describe("rows the buttons make, not the form", () => {
         expect(refusals(toDocument({ ...row, entrySource: "ai" })), JSON.stringify(row)).toEqual([]);
       }
     }
+  });
+});
+
+describe("spending over several days, as the rules take it (12 October 2026)", () => {
+  it("writes the last day only on spending that runs past its first day", () => {
+    const base = { id: "c", recordNumber: 1, date: "2026-10-09", type: "Spending", fromWallet: "Cash", toWallet: "", category: "Spending", item: "Trip", description: "", amount: 100, fee: 0, total: 100, notes: "", status: "Paid", entrySource: "manual" } as Transaction;
+    expect(refusals(toDocument({ ...base, coversTo: "2026-10-11" }))).toEqual([]);
+    expect("coversTo" in toDocument({ ...base, coversTo: "2026-10-09" })).toBe(false);
+    expect("coversTo" in toDocument({ ...base, type: "Revenue", category: "Revenue", coversTo: "2026-10-11" } as Transaction)).toBe(false);
   });
 });

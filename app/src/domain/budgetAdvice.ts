@@ -437,6 +437,8 @@ export function adviceWords(a: BudgetAdvice, options: { readonly split?: boolean
 export function asksBudgetAdvice(said: string): boolean {
   const text = said.toLowerCase().replace(/\b(buget|budjet|bugdet|budgt|budet|bujet)\b/g, "budget");
   if (!/\bbudget/.test(text)) return false;
+  // How many times it changed is a question about its history, never a request for advice (`asksBudgetHistory`).
+  if (/\b(how many times|how often|history|when did i)\b/.test(text)) return false;
   if (/^\s*(set|change|update|make|put|copy|apply|use|add)\b/.test(text) && !/\?\s*$/.test(text)) return false;
   if (judgesSetBudget(said)) return true;
   return (

@@ -83,3 +83,9 @@ export function budgetChangeWords(budgets: Budgets, asOf: IsoDate): string[] {
   const newest = [...changes].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, 12);
   return [`${changes.length} changes in all. By month: ${counts.join("; ")}.`, "The newest first:", ...newest.map((c) => `- ${c.words}`)];
 }
+
+/** "how many times did I change my budget", "when did I change the food limit", "budget history". */
+export function asksBudgetHistory(text: string): boolean {
+  return /\b(?:budget|budgets|limit|limits)\b/i.test(text) && /\b(?:how many times|how often|when did i|history|changes|changed|change log|ilang beses|binago)\b/i.test(text) && !/^\s*(?:change|set|update|make|raise|lower)\b/i.test(text);
+}
+

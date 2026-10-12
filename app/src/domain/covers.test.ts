@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { covers, coversOn, daysCovered, savedWithin, spentFromCount, spreadCovered } from "./covers";
+import { covers, coversOn, daysCovered, savedWithin, spreadCovered } from "./covers";
 import { checkDraft, draftToTransactions, emptyDraft, transactionToDraft } from "./entry";
 import { monthTotals } from "./totals";
 import { walletBalance } from "./balances";
@@ -56,10 +56,6 @@ describe("spending over several days (12 October 2026)", () => {
     expect(savedWithin([trip, meal], "2026-10-09", "2026-10-11", "Cash").map((t) => t.id)).toEqual([meal.id]);
   });
 
-  it("works the figure out from the money counted", () => {
-    expect(spentFromCount(1000000, 50000, 30000)).toBe(920000);
-    expect(spentFromCount(1000, 2000, 0)).toBe(0);
-  });
 });
 
 describe("a stretch of days in a typed entry", () => {
@@ -77,5 +73,16 @@ describe("a stretch of days in a typed entry", () => {
   it("leaves a single day alone", async () => {
     const { readEntry } = await import("./readEntry");
     expect(readEntry("spent 500 on food oct 9", [], reference as never, "2026-10-12").draft.coversTo).toBeUndefined();
+  });
+});
+
+describe("entries already in a range (owner, 12 October 2026)", () => {
+  it("never offers to take off more than the range's amount", async () => {
+    const { savedInsideWords } = await import("./covers");
+    const big = row({ recordNumber: 3933, date: "2026-10-12", item: "Travel", amount: 933700, total: 933700 });
+    const words = savedInsideWords([big], 50000, "Cash");
+    expect(words).toContain("#3933 Travel ₱9,337.00 on October 12, 2026");
+    expect(words).not.toContain("take");
+    expect(savedInsideWords([row({ amount: 30000, total: 30000 })], 950000, "Cash")).toContain("take ₱300.00 off");
   });
 });

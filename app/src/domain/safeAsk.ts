@@ -26,7 +26,9 @@
 
 import { formatMoney as money } from "./money";
 import { ifNothingMoreToday, isOpenBill, weekAhead, type MonthBrief } from "./monthPlan";
-import { MONTH_NAMES } from "./dates";
+import { addDays, dayOfWeek, formatMedium, MONTH_NAMES } from "./dates";
+import { daysIn } from "./readEntry";
+import type { IsoDate } from "./types";
 
 /**
  * Asking what is safe, free or left to spend, in the owner's words.
@@ -159,3 +161,29 @@ export function safeWords(
   }
   return [`**Safe to spend today: ${money(safe.perDay)}**`, sum.join("\n"), after.join(" ")].filter(Boolean).join("\n\n");
 }
+
+/**
+ * The days ahead a safe-to-spend question asks about: "from oct 15 to oct
+ * 20", "next week", "this week", "the next 5 days", "this weekend". The
+ * chart reader looks back ("this week" is the last seven days); money to
+ * spend looks forward. Null when it names none.
+ */
+export function daysAskedAbout(text: string, asOf: IsoDate): { from: IsoDate; to: IsoDate; name: string } | null {
+  const span = daysIn(text, asOf);
+  if (span) return { from: span.from, to: span.to, name: `${formatMedium(span.from)} to ${formatMedium(span.to)}` };
+  const dow = dayOfWeek(asOf); // 0 Sunday
+  const toSunday = (7 - dow) % 7;
+  if (/\bnext week\b|\bsusunod na linggo\b/i.test(text)) {
+    const monday = addDays(asOf, toSunday + 1);
+    return { from: monday, to: addDays(monday, 6), name: "next week" };
+  }
+  if (/\bthis week\b|\bngayong linggo\b/i.test(text)) return { from: asOf, to: addDays(asOf, toSunday), name: "the rest of this week" };
+  if (/\b(?:this )?weekend\b/i.test(text)) {
+    const saturday = addDays(asOf, (6 - dow + 7) % 7);
+    return { from: saturday < asOf ? asOf : saturday, to: addDays(saturday, 1), name: "the weekend" };
+  }
+  const next = /\b(?:next|coming)\s+(\d{1,2})\s+days?\b/i.exec(text);
+  if (next?.[1]) return { from: addDays(asOf, 1), to: addDays(asOf, Number(next[1])), name: `the next ${next[1]} days` };
+  return null;
+}
+

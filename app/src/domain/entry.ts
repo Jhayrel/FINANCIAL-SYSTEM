@@ -16,7 +16,7 @@ import { debtNamedBy, effectsFor, outstandingOf, partOf, splitRepayment, withFee
 import { limitOn, takesLimit, usedOn } from "./creditLimit";
 import { stopOf } from "./bills";
 import { daysBetween, formatMedium, getMonth, getYear, monthName, today } from "./dates";
-import { coversOn, insideCoverWords, MOST_DAYS_COVERED, savedWithin } from "./covers";
+import { coversOn, insideCoverWords, MOST_DAYS_COVERED, savedInsideWords, savedWithin } from "./covers";
 import { formatMoney as money, type Centavos } from "./money";
 import { kindKey, unusualAgainst, type Unusual } from "./unusual";
 import type {
@@ -653,11 +653,7 @@ export function checkDraft(
   if (draft.flow === "Spending" && draft.coversTo && draft.coversTo > draft.date && draft.fromWallet.trim()) {
     const inside = savedWithin(transactions, draft.date, draft.coversTo, draft.fromWallet, draft.id);
     if (inside.length > 0) {
-      const sum = inside.reduce((a, t) => a + t.total, 0);
-      warnings.push({
-        field: "amount",
-        message: `${inside.length} ${inside.length === 1 ? "entry is" : "entries are"} already saved from ${draft.fromWallet} on those days, ${money(sum)} in all. If this figure came from counting the money left, they are inside it: take ${money(sum)} off so they are not counted twice. If they were separate, leave it.`,
-      });
+      warnings.push({ field: "amount", message: savedInsideWords(inside, (draft.amount ?? 0) + draft.fee, draft.fromWallet) });
     }
   }
 

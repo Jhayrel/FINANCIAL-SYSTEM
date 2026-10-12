@@ -67,6 +67,7 @@ import { categoryLimits } from "./budgetView";
 import { kindOf, spendingTrackByKind } from "./kinds";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import { safeAfter, safeOverDays } from "./monthPlan";
+import { daysAskedAbout } from "./safeAsk";
 
 /**
  * The ceiling on the ledger half, in bytes.
@@ -759,8 +760,8 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
    */
   {
     const s = input.snapshot.safe;
-    if (s && question && namesWindow(question) && /(safe|spend|spending|use|budget|allowance|afford|daily|a day|per day|gastos|pwede)/i.test(question)) {
-      const w = windowOf(question, asOf);
+    const w = question ? daysAskedAbout(question, asOf) : null;
+    if (s && w && /\b(?:safe|spend|spending|use|budget|allowance|afford|daily|a day|per day|gastos|pwede)\b/i.test(question)) {
       const over = safeOverDays(
         { safe: toCentavos(s.safe), perDay: toCentavos(s.today), perDayAfter: toCentavos(s.perDayAfter), daysLeft: s.daysLeft },
         asOf,
