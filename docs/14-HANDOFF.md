@@ -1161,17 +1161,17 @@ publishing, since the rules check required fields, not the field list.
     everything leaves a budget year the file does not have. Unused helpers
     were kept: `allocation.planDay` is the port of spec rule 5.7, and the
     `accounts.ts` totals are tested.
-13. **"Cash on hand" counts as income** on every screen but is left out of
-    true income. One rule should hold for both; the owner decides which.
-14. **The Add form's "This puts X at" check** compares with today's balance,
-    not the balance on a back-dated entry's own day; a day closing below zero
-    is now reported after saving instead.
 12. **Electric Bill** was last paid in May 2024, so nothing is reserved for
     it in safe to spend; if it is still paid, the owner records it, or
     marks it stopped. **Father's line** is PHP 1.00 below nothing (PHP
     599.00 paid, PHP 600.00 back): an alert now says so; the owner decides
     which row is off.
 
+13. **"Cash on hand" counts as income** on every screen but is left out of
+    true income. One rule should hold for both; the owner decides which.
+14. **The Add form's "This puts X at" check** compares with today's balance,
+    not the balance on a back-dated entry's own day; a day closing below zero
+    is now reported after saving instead.
 ---
 
 ## 8. How the owner likes to be answered
