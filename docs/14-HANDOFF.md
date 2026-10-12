@@ -1048,6 +1048,41 @@ rounds down), `budgetView.test.ts` (kinds add up to the spending track).
 
 **Database rules:** no change.
 
+### 2026-10-11 and 12: the backup's faults, spending over several days, carry-over
+
+Asked: "fix all, specially in AI" with the full backup of 7 October; edit
+not working; "the UI is out of the edge"; then safe to spend "if I didn't
+spend today or yesterday"; "make the AI know everything, even the
+settings" and every budget change; an InstaPay QR Ph card asking "Where did
+it go?"; and spending that covers several days ("dont call it span").
+Two analysis workflows ran over the backup; four of their lenses (capture,
+edit, UI, and the verifiers) stopped at the usage limit, so the device,
+reasoning and ledger findings were fixed after replaying each one on the
+backup at the moment it happened. Pushed as 789b8db, 061c51c, d286538 and
+a0f15a5.
+
+| Found | Now |
+|---|---|
+| A pasted receipt became three cards, one for hundreds of billions read from its reference number | Reference, masked and 10+ digit numbers are never amounts; a confirmation is one entry (`identifiers.ts`) |
+| Chat card fields broke mid-word against the panel edge | The narrow-panel rule sat above the rule it overrides; moved after it. Phone spacing on Budget and Activity had the same fault |
+| "Yes" to an amount above today's safe figure; plans and 2000 to 2099 without worked figures; set budgets judged without the money; a week's budget answered with a month's; challenges checked only the last answer; three "usual" figures per item; on track against the pace alert | Fixed one by one, each with a test (`affordAsk`, `withoutYears`, `judgeWords`, `asksShortBudget`, `challengedAnswer`, one usual month in `aiChatContext`, the pace line decided by the alert's own test) |
+| Opening balances counted as true income once their item was renamed | Found by the Opening category as well as the old item name; no historical figure moves |
+| Year-end rows filed under Opening opened as a starting balance and saved as money credited twice | `notEditable`: not opened for editing, with the reason; income never carries a hidden second account |
+| Borrowed money lost its mark through archived and goal accounts; screens counted different accounts and days | Followed through every named account; one account list and one cut everywhere; needs include bills and fees |
+| Not reported: a fee saved inside a withdrawal, a day closing below zero | Integrity warnings, the last 90 days only, reported never corrected |
+| Unspent money's effect on tomorrow and on a run of days was never said | `ifNothingMoreToday` and `safeOverDays` in `monthPlan.ts`, in the chat and to the model |
+| The model knew neither the settings nor the budget history | `settingsContext.ts`: every setting in words, every change counted by month |
+| Spending over several days | `covers.ts`: one row with `coversTo`, spread evenly over its days by every report (`reportRows` in `App.tsx`, `useAi`, `AskPanel`); the form's Several days and "Work it out from the money left"; an entry inside one can be taken out of it |
+
+**Checked:** typecheck (`tsc -b`), the suite (only the 42 files that need the
+private fixture fail), the build, all in a clean copy; the new form controls
+in a phone browser on the backup. Not seen: the edit and UI lenses' sweep
+of every screen, and any of this against a live model.
+
+**Database rules:** changed. `coversTo` is validated (spending only, after the
+first day). Publish `firestore.rules` (§6 step 1). Writes work before
+publishing, since the rules check required fields, not the field list.
+
 ---
 
 ## 6. What the owner has to do
@@ -1126,6 +1161,11 @@ rounds down), `budgetView.test.ts` (kinds add up to the spending track).
     everything leaves a budget year the file does not have. Unused helpers
     were kept: `allocation.planDay` is the port of spec rule 5.7, and the
     `accounts.ts` totals are tested.
+13. **"Cash on hand" counts as income** on every screen but is left out of
+    true income. One rule should hold for both; the owner decides which.
+14. **The Add form's "This puts X at" check** compares with today's balance,
+    not the balance on a back-dated entry's own day; a day closing below zero
+    is now reported after saving instead.
 12. **Electric Bill** was last paid in May 2024, so nothing is reserved for
     it in safe to spend; if it is still paid, the owner records it, or
     marks it stopped. **Father's line** is PHP 1.00 below nothing (PHP
