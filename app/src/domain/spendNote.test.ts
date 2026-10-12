@@ -121,6 +121,28 @@ describe("borrowed money and limits", () => {
     expect(note?.need).toBe(false);
   });
 
+  it("knows a purchase was borrowed when the loan is saved in the same batch", () => {
+    const treat = { ...spend(asOf, "Treat", 1_200), fromWallet: "Maya", id: "treat" } as Transaction;
+    const note = spendNoteFor([draw, treat], [own], {}, asOf, new Set(), ctx);
+    expect(note?.stage).toBe("borrowed");
+    expect(note?.text).toContain("₱700.00 of this ₱1,200.00 Treat was borrowed money, from Maya Credit.");
+  });
+
+  it("says paid with borrowed money, not partly, when all of it was borrowed", () => {
+    const bill = { ...spend(asOf, "Food", 600), fromWallet: "Maya", id: "bill" } as Transaction;
+    const note = spendNoteFor([bill], [draw], {}, asOf, new Set(), ctx);
+    expect(note?.title).toBe("Paid with borrowed money");
+  });
+
+  it("names what was bought and who the money is held for", () => {
+    const joan = { ...credit, id: "joan", name: "Tita Joan's money", counterparty: "Tita Joan", form: "pass-through" } as Debt;
+    const held = { ...draw, id: "held", debtId: "joan", toWallet: "Cash", amount: 200000, total: 200000 } as Transaction;
+    const treat = { ...spend(asOf, "Treat", 500), fromWallet: "Cash", id: "t" } as Transaction;
+    const note = spendNoteFor([treat], [held], {}, asOf, new Set(), { ...ctx, debts: [credit, joan] });
+    expect(note?.title).toBe("Paid with money held for someone");
+    expect(note?.text).toContain("₱500.00 of this ₱500.00 Treat was money held for Tita Joan, which has to go back.");
+  });
+
   it("is calm about a need", () => {
     const food = { ...spend(asOf, "Food", 800), fromWallet: "Maya", id: "food" } as Transaction;
     const note = spendNoteFor([food], [own, draw], {}, asOf, new Set(), ctx);

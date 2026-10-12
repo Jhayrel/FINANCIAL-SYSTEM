@@ -124,3 +124,35 @@ describe("an opening balance is one whatever its item is called", () => {
     expect(q.trueIncome).toBe(500000);
   });
 });
+
+describe("a year-end row filed under Opening is not opened as a starting balance", () => {
+  it("is refused for editing, and income can never carry a hidden second account", async () => {
+    const { notEditable, transactionToDraft, draftToTransactions } = await import("./entry");
+    const close = { id: "c", recordNumber: 3325, date: "2026-01-01", type: "Spending", fromWallet: "Cash", toWallet: "", category: "Opening", item: "", description: "Balance at the end of 2025", amount: 77900, fee: 0, total: 77900, notes: "", status: "Done" } as never;
+    expect(notEditable(close)).toContain("#3325 is a balance the app carried over");
+    expect(transactionToDraft(close).flow).toBe("Spending");
+    const income = { ...transactionToDraft({ id: "i", recordNumber: 1, date: "2026-10-01", type: "Revenue", fromWallet: "Cash", toWallet: "Maya", category: "Revenue", item: "Allowance", description: "", amount: 1000, fee: 0, total: 1000, notes: "", status: "Received" } as never) };
+    expect(draftToTransactions(income, 1, "i")[0]?.fromWallet).toBe("");
+  });
+});
+
+describe("ledger checks from the backup", () => {
+  const r = (o: object) => ({ id: Math.random().toString(36), recordNumber: 1, date: "2026-09-20", type: "Spending", fromWallet: "", toWallet: "", category: "Spending", item: "", description: "", amount: 0, fee: 0, total: 0, notes: "", status: "", ...o }) as never;
+  it("names a withdrawal with the machine fee inside, and a day that closed below zero", async () => {
+    const { checkIntegrity } = await import("./integrity");
+    const rows = [
+      r({ type: "Revenue", category: "Revenue", item: "Allowance", toWallet: "Maya", amount: 200000, total: 200000, date: "2026-09-01" }),
+      r({ type: "Transfer", category: "", fromWallet: "Maya", toWallet: "Cash", amount: 101800, total: 101800, status: "Withdrawn", description: "ATM withdrawal" }),
+      r({ fromWallet: "Maya", amount: 150000, total: 150000, item: "Food", date: "2026-09-26" }),
+      r({ type: "Revenue", category: "Revenue", item: "Allowance", toWallet: "Maya", amount: 100000, total: 100000, date: "2026-09-27" }),
+    ];
+    const issues = checkIntegrity(rows, { wallets: ["Cash", "Maya"], asOf: "2026-10-07" });
+    expect(issues.some((i) => i.code === "fee-inside-withdrawal" && i.message.includes("₱1,000.00 of cash and a ₱18.00 machine fee"))).toBe(true);
+    expect(issues.find((i) => i.code === "below-zero-day")?.message).toContain("Maya closed September 26, 2026 at −₱518.00");
+  });
+  it("saves income with its category", async () => {
+    const { draftToTransactions, emptyDraft } = await import("./entry");
+    const d = { ...emptyDraft("2026-10-07"), flow: "Revenue" as const, category: "" as never, toWallet: "Maya", item: "Allowance", amount: 1000 };
+    expect(draftToTransactions(d, 1, "x")[0]?.category).toBe("Revenue");
+  });
+});

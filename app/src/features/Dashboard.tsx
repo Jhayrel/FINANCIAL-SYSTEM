@@ -143,9 +143,11 @@ export function Dashboard({
       borrowedAsDebt: quality.borrowed - inRevenue,
       heldForOthers,
       /** What of the accounts is the owner's own, borrowed money followed through every transfer (`borrowed.ts`). */
-      own: borrowedMoney(transactions, debts, [...reference.wallets, ...reference.savings], asOf),
+      // Every row, as the balances beside it count them, so own and borrowed add up to what is shown.
+      own: borrowedMoney(transactions, debts, [...reference.wallets, ...reference.savings]),
       annual: totalSpending(transactions, range),
-      ranking: spendingRanking(transactions, reference.spendingTypes, range).slice(0, 6),
+      // Money Send and fees are derived, not listed, and still money spent: the bars and the total beside them agree.
+      ranking: spendingRanking(transactions, reference.spendingTypes, range, { includeUnlisted: true }).slice(0, 6),
       spendSeries: perMonth.map((m) => m.total),
       revSeries: perMonth.map((m) => m.revenue),
       budgetSeries: budgetSummary(transactions, budgets, year).map((r) => r.budget),

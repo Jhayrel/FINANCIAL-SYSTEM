@@ -61,7 +61,7 @@ import { moveRows, type BillCategory } from "./domain/kindRename";
 import { formatMoney, type Centavos } from "./domain/money";
 import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
-import { debtWalletDirection, emptyDraft, insertChronologically } from "./domain/entry";
+import { debtWalletDirection, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { formatMedium, getYear, today } from "./domain/dates";
 import { systemToCsv } from "./domain/csv";
 import { sheetRequestOf, type ExportAsk } from "./domain/exportAsk";
@@ -1245,6 +1245,12 @@ export default function App() {
    * back, so it is set again after.
    */
   const startEditing = (row: Transaction): void => {
+    // A year-end balance row is worked out, not typed: opened as a starting balance it saved as money twice (`notEditable`).
+    const locked = notEditable(row);
+    if (locked) {
+      flash(locked);
+      return;
+    }
     const from = screen;
     setEditing(row);
     go("add");

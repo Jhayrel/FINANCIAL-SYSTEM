@@ -246,16 +246,31 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
      * through every transfer (`borrowed.ts`).
      */
     if (debts.length > 0 && room >= cost) {
-      const b = borrowedMoney(transactions, debts, [...reference.wallets, ...reference.savings], asOf);
+      const b = borrowedMoney(transactions, debts, [...reference.wallets, ...reference.savings]);
       if (b.inHand > 0 || b.heldForOthers > 0) {
-        const own = ownIn(b, fromWallet !== null && ask.wallet ? [ask.wallet] : reference.wallets, (w) => walletBalance(transactions, w));
-        const past = cost - own;
+        /*
+         * Worked from the wallets asked about: Gcash holding someone's money
+         * was called borrowed from Maya Credit, whose money was in Maya, and
+         * "what you borrowed" was said when nothing was (7 October 2026
+         * engine review). Own money first, then borrowed, then held (B6).
+         */
+        const asked = fromWallet !== null && ask.wallet ? [ask.wallet] : reference.wallets;
+        const lentHere = asked.reduce((s, w) => s + (b.byAccount.get(w) ?? 0), 0);
+        const heldHere = asked.reduce((s, w) => s + (b.notOwnByAccount.get(w) ?? 0), 0) - lentHere;
+        const own = ownIn(b, asked, (w) => walletBalance(transactions, w));
+        const past = Math.min(cost, cost - own);
+        const lenders = lenderNames(new Map([...b.byLender].filter(([id]) => debts.find((d) => d.id === id)?.form !== "pass-through")), debts);
+        const whose = fromWallet !== null ? ask.wallet : "your spending wallets";
         if (past > 0) {
-          lines.push(
-            `But only ${money(own)} of what ${fromWallet !== null ? ask.wallet : "your spending wallets"} ${fromWallet !== null ? "holds" : "hold"} is your own: ${money(Math.min(past, cost))} of this would be ${b.inHand > 0 ? `borrowed money, from ${lenderNames(new Map([...b.byLender].filter(([id]) => debts.find((d) => d.id === id)?.form !== "pass-through")), debts)}` : "money held for someone"}.`,
-          );
-        } else {
-          lines.push(`It is covered by your own money, ${money(own)}, without touching what you borrowed.`);
+          const fromLent = Math.min(past, lentHere);
+          const fromHeld = Math.min(past - fromLent, Math.max(0, heldHere));
+          const parts = [
+            ...(fromLent > 0 ? [`${money(fromLent)} of this would be borrowed money, from ${lenders}`] : []),
+            ...(fromHeld > 0 ? [`${money(fromHeld)}${fromLent > 0 ? "" : " of this"} would be money held for someone, which has to go back`] : []),
+          ];
+          if (parts.length > 0) lines.push(`But only ${money(own)} of what ${whose} ${fromWallet !== null ? "holds" : "hold"} is your own: ${parts.join(", and ")}.`);
+        } else if (lentHere > 0 || heldHere > 0) {
+          lines.push(`It is covered by your own money, ${money(own)}, without touching ${lentHere > 0 ? "what you borrowed" : "the money held for someone"}.`);
         }
       }
     }

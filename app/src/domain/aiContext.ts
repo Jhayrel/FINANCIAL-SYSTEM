@@ -127,7 +127,7 @@ export interface AiContext {
    * (`borrowed.ts`), and the owner's own money beside it. Null when none is
    * borrowed or held.
    */
-  readonly ownMoney?: { readonly own: number; readonly borrowed: number; readonly held: number; readonly from: string } | null;
+  readonly ownMoney?: { readonly own: number; readonly borrowed: number; readonly held: number; readonly from: string; readonly heldFor?: string } | null;
   readonly income: {
     readonly cashIn: number;
     /** Cash in, less borrowing. The figure that is actually income. */
@@ -241,7 +241,13 @@ export function buildContext(input: ContextInput): AiContext {
   const hasBudget = assessment.combined.budget > 0;
   const bills = billStatuses(transactions, reference, asOf);
   const positions = positionsOf(credits, transactions, asOf);
-  const quality = incomeQuality(transactions, credits, { start: `${year}-01-01`, end: asOf });
+  // As the Dashboard counts it: money held for someone is not borrowing (backup of 7 October 2026: PHP 25,000.00 read as borrowed).
+  const behalfIds = new Set(credits.filter((d) => d.form === "pass-through").map((d) => d.id));
+  const quality = incomeQuality(
+    transactions.filter((t) => !(t.type === "Debt" && t.debtId !== undefined && behalfIds.has(t.debtId))),
+    credits,
+    { start: `${year}-01-01`, end: asOf },
+  );
 
   const live = accounts.filter((a) => !a.archived);
 
@@ -338,9 +344,14 @@ export function buildContext(input: ContextInput): AiContext {
     })(),
 
     ownMoney: (() => {
-      const b = borrowedMoney(transactions, credits, [...reference.wallets, ...reference.savings], asOf);
+      // Every row, as the balances count them, so own, borrowed and held add up to what the accounts hold.
+      const b = borrowedMoney(transactions, credits, [...reference.wallets, ...reference.savings]);
       if (b.inHand <= 0 && b.heldForOthers <= 0) return null;
-      return { own: pesos(b.own), borrowed: pesos(b.inHand), held: pesos(b.heldForOthers), from: lenderNames(b.byLender, credits) };
+      // Lenders and the people money is held for, apart: a person money is held for is not a lender (7 October 2026 engine review).
+      const isHeld = (id: string): boolean => credits.find((d) => d.id === id)?.form === "pass-through";
+      const lent = new Map([...b.byLender].filter(([id]) => !isHeld(id)));
+      const heldFor = [...new Set([...b.byLender].filter(([id, v]) => isHeld(id) && v > 0).map(([id]) => credits.find((d) => d.id === id)?.counterparty?.trim() || credits.find((d) => d.id === id)?.name || "someone"))];
+      return { own: pesos(b.own), borrowed: pesos(b.inHand), held: pesos(b.heldForOthers), from: b.inHand > 0 ? lenderNames(lent, credits) : "", heldFor: heldFor.join(" and ") };
     })(),
 
     income: {
@@ -350,10 +361,11 @@ export function buildContext(input: ContextInput): AiContext {
       openingBalance: pesos(quality.openingBalance),
     },
 
+    // Kinds the lists no longer declare (Money Send, Transaction Fee) still hold real money (backup of 7 October 2026).
     topSpending: spendingRanking(transactions, reference.spendingTypes, {
       start: `${year}-01-01`,
       end: asOf,
-    })
+    }, { includeUnlisted: true })
       .slice(0, 8)
       .map((r) => ({ category: r.name, amount: pesos(r.amount) })),
 
@@ -362,7 +374,10 @@ export function buildContext(input: ContextInput): AiContext {
       overdue: overdue(bills)
         .filter((b) => !b.lastPaid || daysBetween(b.lastPaid, asOf) <= STOPPED_AFTER_DAYS)
         .map((b) => b.item),
-      dueSoon: upcoming(bills, 14).map((b) => b.item),
+      // Not a bill that looks stopped: one last paid in May 2024 was "due within two weeks" (backup of 7 October 2026).
+      dueSoon: upcoming(bills, 14)
+        .filter((b) => !b.stopped && (!b.lastPaid || daysBetween(b.lastPaid, asOf) <= STOPPED_AFTER_DAYS))
+        .map((b) => b.item),
       stopped: bills.filter((b) => b.stopped).map((b) => `${b.item} (since ${b.stopped})`),
     },
 
@@ -646,7 +661,7 @@ export function contextToText(c: AiContext): string {
   if (c.ownMoney) {
     const m = c.ownMoney;
     lines.push(
-      `Their own money: ${php(m.own)}.${m.borrowed > 0 ? ` Borrowed and still in the accounts: ${php(m.borrowed)}.` : ""}${m.held > 0 ? ` Held for others: ${php(m.held)}.` : ""} From ${m.from}. Spending past their own money spends that.`,
+      `Their own money: ${php(m.own)}.${m.borrowed > 0 ? ` Borrowed and still in the accounts: ${php(m.borrowed)}, from ${m.from}.` : ""}${m.held > 0 ? ` Held for others${m.heldFor ? ` (${m.heldFor})` : ""}: ${php(m.held)}.` : ""} Spending past their own money spends that.`,
     );
   }
   lines.push(

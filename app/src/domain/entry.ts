@@ -123,14 +123,32 @@ export function emptyDraft(date: IsoDate = today()): Draft {
  * destination, so the category is what identifies it, not the type.
  */
 /**
+ * Why a saved row cannot be opened for editing, or null when it can.
+ *
+ * The rows a year's close writes, filed under Opening but stored as
+ * Spending or Debt ("Balance at the end of 2025"), opened in the form as a
+ * starting balance. Saved, a PHP 779.00 Cash row became income into Cash
+ * twice over, and the opening debt became new money (backup of 7 October
+ * 2026: 22 such rows). They are worked out from the rows before them, so
+ * they are not edited by hand.
+ */
+export function notEditable(t: Pick<Transaction, "type" | "category" | "recordNumber">): string | null {
+  if (t.category === "Opening" && t.type !== "Revenue") {
+    return `#${String(t.recordNumber).padStart(4, "0")} is a balance the app carried over when a year closed. It is worked out from the entries before it, so it is not edited by hand: edit those entries instead.`;
+  }
+  return null;
+}
+
+/**
  * A saved row, back into the form.
  *
  * A Transfer with no destination is read back as Money Send, so editing one
  * does not silently turn into "you forgot to pick a wallet".
  */
 export function transactionToDraft(t: Transaction): Draft {
+  // A starting balance is a Revenue row filed under Opening; a year-end row filed there is not one (`notEditable`).
   const flow: Flow =
-    t.category === "Opening" ? "Opening" : (t.type as Flow);
+    t.category === "Opening" && t.type === "Revenue" ? "Opening" : (t.type as Flow);
 
   /*
    * A category its kind cannot take, from the old workbook: 233 of the
@@ -934,7 +952,12 @@ export function draftToTransactions(
     recordNumber,
     date: draft.date,
     type,
-    fromWallet: debtSide === "in" ? "" : draft.fromWallet,
+    /*
+     * Income and a starting balance land in the "to" account, the only one
+     * the form shows for them. A hidden "from" kept alongside it credited
+     * the account twice (backup of 7 October 2026).
+     */
+    fromWallet: debtSide === "in" || ((type === "Revenue" || opening) && draft.toWallet.trim() !== "") ? "" : draft.fromWallet,
     toWallet: debtSide === "out" ? "" : draft.toWallet,
     category: opening
       ? ("Opening" as const)
@@ -942,7 +965,10 @@ export function draftToTransactions(
         ? derived.category
         : type === "Debt"
           ? debtCategory(draft)
-          : draft.category,
+          : // Income has one category, so it is set rather than left blank: the form hides a field with one choice (backup of 7 October 2026, six rows).
+            type === "Revenue" && draft.category === ""
+            ? "Revenue"
+            : draft.category,
     item: opening ? "Opening balance" : derived ? derived.item : draft.item,
     description: draft.description,
     amount,

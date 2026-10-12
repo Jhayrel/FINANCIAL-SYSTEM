@@ -12,7 +12,11 @@
  */
 
 import type { Centavos } from "./money";
-import type { Transaction } from "./types";
+import type { IsoDate, Transaction } from "./types";
+import { walletDelta } from "./balances";
+import { formatMedium } from "./dates";
+import { formatMoney } from "./money";
+import { cashWallet, feeInside } from "./withdrawal";
 
 export type IssueSeverity = "error" | "warning" | "info";
 
@@ -28,7 +32,9 @@ export type IssueCode =
   | "spending-without-source"
   | "revenue-without-destination"
   | "transfer-same-wallet"
-  | "duplicate-record-number";
+  | "duplicate-record-number"
+  | "fee-inside-withdrawal"
+  | "below-zero-day";
 
 export interface Issue {
   readonly code: IssueCode;
@@ -50,7 +56,11 @@ const isFeeItem = (item: string): boolean =>
  * Ordered most to least severe so the UI can show the top few and collapse
  * the rest.
  */
-export function checkIntegrity(transactions: readonly Transaction[]): Issue[] {
+export function checkIntegrity(
+  transactions: readonly Transaction[],
+  /** The open accounts and the day, for the checks that need them: a fee saved inside a withdrawal, a day closing below zero. */
+  context: { readonly wallets?: readonly string[]; readonly asOf?: IsoDate } = {},
+): Issue[] {
   const issues: Issue[] = [];
 
   const one = (
@@ -149,8 +159,9 @@ export function checkIntegrity(transactions: readonly Transaction[]): Issue[] {
      */
     const named = t.type === "Spending" || t.type === "Revenue";
 
+    // Income with no category is still counted by every income total, so the note says so (backup of 7 October 2026).
     if (named && !t.category) {
-      one(t, "missing-category", "info", `No category, so excluded from category totals.`);
+      one(t, "missing-category", "info", t.type === "Revenue" ? "No category. Every income total still counts it." : `No category, so excluded from category totals.`);
     }
 
     if (named && !t.item) {
@@ -230,6 +241,61 @@ export function checkIntegrity(transactions: readonly Transaction[]): Issue[] {
   }
 
   const rank: Record<IssueSeverity, number> = { error: 0, warning: 1, info: 2 };
+  /*
+   * ── A machine fee saved inside a withdrawal ──────────────────────────────
+   * A machine gives whole hundreds, so PHP 1,018.00 into Cash with no fee is
+   * PHP 1,000.00 of cash and an PHP 18.00 fee: Cash is credited money the
+   * machine never gave (backup of 7 October 2026, three rows). Reported,
+   * never split: the form's Split button does that when the owner says so.
+   */
+  const cash = cashWallet(context.wallets ?? []);
+  if (cash) {
+    for (const t of transactions) {
+      const split = feeInside(t, cash);
+      if (split) {
+        one(t, "fee-inside-withdrawal", "warning", `${formatMoney(t.amount)} into ${cash} with no fee looks like ${formatMoney(split.cash)} of cash and a ${formatMoney(split.fee)} machine fee saved as one amount. Edit it and split the fee out, so ${cash} holds what the machine gave.`, split.fee);
+      }
+    }
+  }
+
+  /*
+   * ── An account that closed a day below zero ──────────────────────────────
+   * Today's balance was the only one looked at, so Maya closing 26 September
+   * at -PHP 207.99 was never said (backup of 7 October 2026). Each time an
+   * account goes from zero or above to below it at the end of a day, once,
+   * with the rows of that day. A missing or misdated entry, never corrected here.
+   */
+  if (context.wallets && context.wallets.length > 0) {
+    const upTo = context.asOf ?? "9999-12-31";
+    const byDay = [...transactions].filter((t) => t.date <= upTo).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    for (const wallet of context.wallets) {
+      let balance = 0;
+      let below = false;
+      for (let i = 0; i < byDay.length; ) {
+        const day = byDay[i]!.date;
+        const rows: Transaction[] = [];
+        while (i < byDay.length && byDay[i]!.date === day) {
+          const t = byDay[i]!;
+          const d = walletDelta(t, (w) => w === wallet);
+          if (d !== 0) rows.push(t);
+          balance += d;
+          i += 1;
+        }
+        if (balance < 0 && !below && rows.length > 0) {
+          issues.push({
+            code: "below-zero-day",
+            severity: "warning",
+            ids: rows.map((t) => t.id),
+            recordNumbers: rows.map((t) => t.recordNumber),
+            message: `${wallet} closed ${formatMedium(day)} at ${formatMoney(balance)}. An entry for money that came in before then may be missing or dated later.`,
+            impact: -balance,
+          });
+        }
+        below = balance < 0;
+      }
+    }
+  }
+
   return issues.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 

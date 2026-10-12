@@ -253,7 +253,7 @@ export function Database({
   /** Issues indexed by transaction id so a row can show its own flags. */
   const issuesById = useMemo(() => {
     const map = new Map<string, Issue[]>();
-    for (const issue of checkIntegrity(transactions)) {
+    for (const issue of checkIntegrity(transactions, { wallets: [...(reference?.wallets ?? []), ...(reference?.savings ?? [])] })) {
       if (issue.severity === "info") continue;
       for (const id of issue.ids) {
         const list = map.get(id);
@@ -262,7 +262,7 @@ export function Database({
       }
     }
     return map;
-  }, [transactions]);
+  }, [transactions, reference]);
 
   /**
    * Search, read the way the workbook's Smart Search read it.

@@ -163,3 +163,57 @@ describe("asking before spending", () => {
     expect(small).toContain("It is covered by your own money, ₱500.00, without touching what you borrowed.");
   });
 });
+
+describe("the order of one day (7 October 2026 engine review)", () => {
+  it("counts a withdrawal before a purchase it paid for, whatever order they were typed in", () => {
+    const treat = spend("2026-10-03", "Cash", 120000);
+    const out = move("2026-10-03", "Maya", "Cash", 100000);
+    const b = of([income("2026-10-01", "Cash", 50000), draw("2026-10-02", "Maya", 500000), treat, out]);
+    expect(b.spent.get(treat.id)?.amount).toBe(70000);
+  });
+
+  it("keeps an edited row in its place by record number, not by where it sits in the list", () => {
+    const rows = [income("2026-10-01", "Cash", 50000), draw("2026-10-02", "Maya", 500000), move("2026-10-03", "Maya", "Cash", 100000)];
+    const first = spend("2026-10-04", "Cash", 40000);
+    const second = spend("2026-10-04", "Cash", 40000);
+    const b = of([...rows, second, first]);
+    expect(b.spent.has(first.id)).toBe(false);
+    expect(b.spent.get(second.id)?.amount).toBe(30000);
+  });
+});
+
+describe("what counts as a need when borrowed money pays (7 October 2026 engine review)", () => {
+  it("never calls a subscription or a transfer fee a want", async () => {
+    const { financeAlerts } = await import("./alerts");
+    const accounts = ACCOUNTS.map((name) => ({ id: name, name, kind: "spending" as const, archived: false }));
+    const sub = row("2026-10-04", { fromWallet: "Maya", amount: 23900, total: 23900, category: "Subscriptions", item: "Office 365" });
+    const fee = move("2026-10-05", "Maya", "Cash", 10000, 1500);
+    const alerts = financeAlerts({ transactions: [draw("2026-10-02", "Maya", 500000), sub, fee], accounts, budgets: {}, debts, bills: [], lowBalanceThreshold: 0, asOf: "2026-10-06", spendingTypes: [] } as never);
+    expect(alerts.find((a) => a.id === "borrowed-wants-2026-10")).toBeUndefined();
+  });
+});
+
+describe("the afford answer names the money in the wallet asked about (7 October 2026 engine review)", () => {
+  const reference = { wallets: ["Cash", "Maya", "Gcash"], savings: [], bills: [], subscriptions: [], revenueCategories: ["Allowance"], spendingTypes: [{ name: "Treat", remark: "" }] };
+  it("calls money held for someone held, not borrowed from a lender whose money is elsewhere", async () => {
+    const { affordAnswer, readAffordAsk } = await import("./affordAsk");
+    const rows = [draw("2026-10-01", "Gcash", 200000, "joan"), draw("2026-10-01", "Maya", 500000)];
+    const text = affordAnswer(readAffordAsk("can I afford 1500 from gcash", rows, reference, "2026-10-06"), { transactions: rows, reference, budgets: {}, debts, asOf: "2026-10-06" });
+    expect(text).toContain("₱1,500.00 of this would be money held for someone, which has to go back.");
+    expect(text).not.toContain("Maya Credit");
+  });
+  it("does not speak of what was borrowed when nothing was", async () => {
+    const { affordAnswer, readAffordAsk } = await import("./affordAsk");
+    const rows = [income("2026-10-01", "Cash", 100000), draw("2026-10-01", "Gcash", 200000, "joan")];
+    const text = affordAnswer(readAffordAsk("can I afford 300 from cash", rows, reference, "2026-10-06"), { transactions: rows, reference, budgets: {}, debts, asOf: "2026-10-06" });
+    expect(text).not.toContain("what you borrowed");
+  });
+});
+
+describe("money that passes through an account no list names (7 October 2026 engine review)", () => {
+  it("keeps its borrowed mark through an archived account", () => {
+    const treat = spend("2026-10-05", "Cash", 300000);
+    const rows = [draw("2026-10-01", "Maya", 500000), move("2026-10-02", "Maya", "PNB", 500000), move("2026-10-03", "PNB", "Cash", 500000), treat];
+    expect(of(rows).spent.get(treat.id)?.amount).toBe(300000);
+  });
+});

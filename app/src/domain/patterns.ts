@@ -49,6 +49,7 @@ import { formatMoney, type Centavos } from "./money";
 import { costOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 import { walletDelta } from "./balances";
+import { kindOf } from "./kinds";
 
 export interface Finding {
   readonly id: string;
@@ -117,7 +118,17 @@ const outflow = costOf;
  * for: it is how Bills and Subscriptions are told apart from discretionary
  * spending. It just cannot be the label.
  */
-const subjectOf = (t: Transaction): string => t.item.trim() || t.category.trim();
+/*
+ * A row's name: its item, else its kind ("Money Send" for a write-off with no
+ * item), never a bare category. A blank-item write-off was "Spending" and
+ * ended a "382 days without a Spending entry" streak on a ledger with
+ * spending on 153 of those days (backup of 7 October 2026).
+ */
+const STRUCTURAL = new Set(["spending", "bills", "subscriptions", "revenue", "transfer", "debt", "opening"]);
+const subjectOf = (t: Transaction): string => {
+  const named = t.item.trim() || kindOf(t);
+  return STRUCTURAL.has(named.toLowerCase()) ? "" : named;
+};
 
 export function isDiscretionary(category: string): boolean {
   const c = category.trim().toLowerCase();

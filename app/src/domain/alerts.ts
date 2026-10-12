@@ -37,7 +37,7 @@ import { addDays, daysBetween, daysLeftInMonth, firstOfMonth, formatMedium, getM
 import { categoryLimits } from "./budgetView";
 import { limitKindOf, spendingTrackByKind } from "./kinds";
 import { borrowedMoney, lenderNames } from "./borrowed";
-import { isNeed } from "./spendNote";
+import { isNeedRow } from "./spendNote";
 import { unusualRows } from "./unusual";
 import { actionableIssues, checkIntegrity } from "./integrity";
 import { monthTotals } from "./totals";
@@ -254,22 +254,30 @@ export function financeAlerts(input: AlertInput): Alert[] {
    * what of this month's spending it paid for, wants named first.
    */
   if (debts.length > 0) {
-    const names = accounts.map((a) => a.name);
-    const b = borrowedMoney(transactions, debts, names, asOf);
+    /*
+     * The accounts the Dashboard counts (open ones, goals and reserves
+     * included) and every row, as the balances count them, so the bell and
+     * the Dashboard give one figure (7 October 2026 engine review).
+     */
+    const names = accounts.filter((a) => !a.archived).map((a) => a.name);
+    const b = borrowedMoney(transactions, debts, names);
     const start = firstOfMonth(year, month);
     const used = new Map<string, Centavos>();
     let wantTotal = 0;
     let needTotal = 0;
+    // The accounts the wants were paid from: own money can run out in one and not another.
+    const paidFrom = new Set<string>();
     const lenders = new Map<string, Centavos>();
     for (const t of transactions) {
       if (t.date < start || t.date > asOf) continue;
       const use = b.spent.get(t.id);
       if (!use) continue;
       const kind = limitKindOf(t) ?? (t.item.trim() || "Other");
-      if (isNeed(kind, input.spendingTypes)) needTotal += use.amount;
+      if (isNeedRow(t, limitKindOf(t), input.spendingTypes)) needTotal += use.amount;
       else {
         wantTotal += use.amount;
         used.set(kind, (used.get(kind) ?? 0) + use.amount);
+        if (t.fromWallet.trim()) paidFrom.add(t.fromWallet.trim());
       }
       for (const [id, v] of use.from) lenders.set(id, (lenders.get(id) ?? 0) + v);
     }
@@ -280,7 +288,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
         level: "warn",
         area: "debt",
         title: `${money(wantTotal)} of borrowed money went to wants this month`,
-        detail: `${list.join(", ")}, from ${lenderNames(lenders, debts)}: your own money had run out.${needTotal > 0 ? ` ${money(needTotal)} more went to needs.` : ""}${b.inHand > 0 ? ` ${money(b.inHand)} borrowed is still in your accounts.` : ""}`,
+        detail: `${list.join(", ")}, from ${lenderNames(lenders, debts)}: your own money in ${[...paidFrom].join(" and ") || "those accounts"} had run out.${needTotal > 0 ? ` ${money(needTotal)} more went to needs.` : ""}${b.inHand > 0 ? ` ${money(b.inHand)} borrowed is still in your accounts.` : ""}`,
         weight: 66,
       });
     } else if (needTotal > 0) {
@@ -800,7 +808,8 @@ export function financeAlerts(input: AlertInput): Alert[] {
   for (const t of transactions) {
     if (t.date > asOf || t.date <= since || t.category === "Opening") continue;
     if (t.type === "Spending" && (t.category === "Bills" || t.category === "Subscriptions")) continue;
-    if (t.type === "Spending" && t.total < REPEAT_FLOOR) continue;
+    // Small income repeats too: centavo interest and cashback credits arrive in identical amounts (backup of 7 October 2026).
+    if ((t.type === "Spending" || t.type === "Revenue") && t.total < REPEAT_FLOOR) continue;
     const key = [t.date, t.type, t.total, t.item.trim().toLowerCase(), t.debtId ?? "", t.debtEffect ?? ""].join("|");
     sameDay.set(key, [...(sameDay.get(key) ?? []), t]);
   }
@@ -857,7 +866,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
   }
 
   // ── Rows the ledger cannot make sense of ─────────────────────────────────
-  const issues = actionableIssues(checkIntegrity(transactions));
+  const issues = actionableIssues(checkIntegrity(transactions, { wallets: accounts.filter((a) => !a.archived).map((a) => a.name), asOf }));
   if (issues.length > 0) {
     const rows = new Set(issues.flatMap((i) => i.recordNumbers));
     out.push({

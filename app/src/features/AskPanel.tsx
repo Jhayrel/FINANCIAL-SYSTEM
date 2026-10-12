@@ -200,7 +200,7 @@ import { clearPick, currentPick, notePick } from "../chartPick";
 import { asksAboutPick, pickAnswer, pickText } from "../domain/chartPick";
 import { aboutTheScreen, screenText } from "../domain/screenContext";
 import { figuresIn } from "../domain/money";
-import { transactionToDraft } from "../domain/entry";
+import { notEditable, transactionToDraft } from "../domain/entry";
 import { rowSavedFor } from "../domain/formSaved";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
@@ -4216,7 +4216,7 @@ export function AskPanel({
     const answerSafe = async (question: string): Promise<void> => {
       const brief = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
       // Their own money beside what is borrowed, in the spending wallets (`borrowed.ts`).
-      const lent = borrowedMoney(transactions, debts, [...reference.wallets, ...reference.savings], asOf);
+      const lent = borrowedMoney(transactions, debts, [...reference.wallets, ...reference.savings]);
       const ownMoney =
         lent.inHand > 0
           ? {
@@ -7766,7 +7766,9 @@ export function AskPanel({
                   sink.bin(id);
                 } else if (turn.action === "edit") {
                   const row = transactions.find((t) => t.id === id);
-                  if (row) sink.use(transactionToDraft(row));
+                  const locked = row ? notEditable(row) : null;
+                  if (locked) say({ kind: "assistant", text: locked, from: "this device" });
+                  else if (row) sink.use(transactionToDraft(row));
                 } else if (turn.action === "bin") {
                   binnedHere.current = [id, ...binnedHere.current];
                   sink.bin(id);

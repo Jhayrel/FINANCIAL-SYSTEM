@@ -17,7 +17,7 @@
  */
 
 import { partOf } from "./debt";
-import { checkDraft, debtWalletDirection, transactionToDraft } from "./entry";
+import { checkDraft, debtWalletDirection, notEditable, transactionToDraft } from "./entry";
 import type { Debt } from "./debt";
 import { formatMoney, type Centavos } from "./money";
 import { findRows } from "./recall";
@@ -231,6 +231,8 @@ export function changeRow(
   reference: ReferenceLists,
   debts: readonly Debt[],
 ): Transaction | { readonly reason: string } {
+  const locked = notEditable(row);
+  if (locked) return { reason: locked };
   let after: Transaction = row;
 
   if (change.amount !== undefined) {

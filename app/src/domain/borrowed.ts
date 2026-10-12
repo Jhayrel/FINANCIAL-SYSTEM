@@ -101,11 +101,19 @@ export function borrowedMoney(
   const heldIds = new Set(debts.filter((d) => d.kind === "payable" && d.form === "pass-through").map((d) => d.id));
   const tracked = (id: string | undefined): id is string => id !== undefined && (loans.has(id) || heldIds.has(id));
 
-  // B5: by day, money in before money out, otherwise in the ledger's own order.
+  /*
+   * B5: by day, money in first, then money moved between their own
+   * accounts, then money going out; within those, by record number, so an
+   * edited row keeps its place wherever it now sits in the list. A purchase
+   * from Cash typed before the withdrawal that paid for it, on the same day,
+   * was counted as their own money, and the account it came from as
+   * overdrawn (7 October 2026 engine review).
+   */
+  const stage = (t: Transaction): number => (comesIn(t) ? 0 : t.type === "Transfer" && t.toWallet.trim() !== "" ? 1 : 2);
   const rows = transactions
     .filter((t) => asOf === undefined || t.date <= asOf)
     .map((t, i) => ({ t, i }))
-    .sort((a, b) => (a.t.date < b.t.date ? -1 : a.t.date > b.t.date ? 1 : Number(comesIn(b.t)) - Number(comesIn(a.t)) || a.i - b.i))
+    .sort((a, b) => (a.t.date < b.t.date ? -1 : a.t.date > b.t.date ? 1 : stage(a.t) - stage(b.t) || a.t.recordNumber - b.t.recordNumber || a.i - b.i))
     .map(({ t }) => t);
 
   const balance = new Map<string, Centavos>();
@@ -161,8 +169,15 @@ export function borrowedMoney(
     const from = t.fromWallet.trim();
     const to = t.toWallet.trim();
 
+    /*
+     * Followed through every account a row names, listed or not: an archived
+     * account or a goal is still theirs (CLAUDE.md, transfers), and borrowed
+     * money that passed through one lost its mark, so the bell and the
+     * Dashboard disagreed (7 October 2026 engine review). `accounts` decides
+     * only which accounts the totals cover.
+     */
     // ── Money out of one of the owner's accounts (B2, B3) ─────────────────
-    if (t.type !== "Revenue" && from && ours.has(from) && t.total > 0) {
+    if (t.type !== "Revenue" && from && t.total > 0) {
       const own = Math.max(0, bal(from) - sum(borrowed.get(from)));
       const fromOwn = Math.min(t.total, own);
       const taken = take(from, t.total - fromOwn, t.type === "Debt" ? t.debtId : undefined);
@@ -172,7 +187,7 @@ export function borrowedMoney(
         // A transfer to another of the owner's accounts carries its borrowed part; the fee is paid from own money first.
         const fee = Math.max(0, t.total - t.amount);
         const feeBorrowed = Math.max(0, fee - fromOwn);
-        const moving = t.type === "Transfer" && to && ours.has(to) ? Math.max(0, takenAll - feeBorrowed) : 0;
+        const moving = t.type === "Transfer" && to ? Math.max(0, takenAll - feeBorrowed) : 0;
         let carry = moving;
         const left: Lenders = new Map();
         for (const [id, v] of taken) {
@@ -203,7 +218,7 @@ export function borrowedMoney(
     if (t.type === "Debt" && tracked(t.debtId)) {
       const id = t.debtId;
       owed.set(id, (owed.get(id) ?? 0) + owedChange(t));
-      if (t.debtEffect === "draw" && to && ours.has(to)) add(lendersIn(to), id, t.amount);
+      if (t.debtEffect === "draw" && to) add(lendersIn(to), id, t.amount);
 
       // B4: never more in hand than is still owed; a repayment frees its own account first.
       const still = Math.max(0, owed.get(id) ?? 0);

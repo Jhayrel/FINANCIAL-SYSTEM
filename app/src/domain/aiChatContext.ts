@@ -62,7 +62,7 @@ import type { Budgets, DeletedTransaction, IsoDate, Transaction } from "./types"
 import { pointsAt } from "./pointsAt";
 import { asksWhatTheDayBuys, everydayPrices, pricesAgainstDay } from "./dayFit";
 import { categoryLimits } from "./budgetView";
-import { spendingTrackByKind } from "./kinds";
+import { kindOf, spendingTrackByKind } from "./kinds";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import { safeAfter } from "./monthPlan";
 
@@ -440,7 +440,9 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   };
   const previous = [monthKey(1), monthKey(2), monthKey(3)];
   const nowRows = rows.filter((t) => monthOf(t.date) === monthKey(0));
-  const nowByItem = tally(nowRows, (t) => t.item).slice(0, TOP_N);
+  // A row with no item by its kind ("Money Send"), not "(blank)": the same name the Dashboard gives it.
+  const nameOf = (t: Transaction): string => t.item.trim() || kindOf(t, input.credits ?? []);
+  const nowByItem = tally(nowRows, nameOf).slice(0, TOP_N);
   if (nowByItem.length > 0) {
     out.push("");
     out.push(`## ${monthName(monthKey(0))} so far, each item against its usual month and its last three months`);
@@ -449,7 +451,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     );
     for (const [name, g] of nowByItem) {
       const before = previous.map((key) =>
-        rows.filter((t) => monthOf(t.date) === key && (t.item || "(blank)") === name).reduce((sum, t) => sum + spendingOf(t), 0),
+        rows.filter((t) => monthOf(t.date) === key && (nameOf(t) || "(blank)") === name).reduce((sum, t) => sum + spendingOf(t), 0),
       );
       const seen = before.filter((v) => v > 0).length;
       const average = Math.round(before.reduce((a, b) => a + b, 0) / previous.length);
@@ -707,8 +709,9 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
    * spending ran past the owner's own money, and whose money paid for it.
    */
   if ((input.credits ?? []).length > 0) {
-    const accounts = input.snapshot.balances.map((b) => b.account);
-    const b = borrowedMoney(rows, input.credits ?? [], accounts, asOf);
+    // Goals as well, as the Dashboard and the bell count them; every row, as the balances do.
+    const accounts = [...input.snapshot.balances.map((b) => b.account), ...input.snapshot.goals.map((g) => g.name)];
+    const b = borrowedMoney(rows, input.credits ?? [], accounts);
     const used = rows.filter((t) => t.date.startsWith(asOf.slice(0, 7)) && t.date <= asOf && (b.spent.has(t.id) || b.spentHeld.has(t.id)));
     if (used.length > 0) {
       out.push("");
@@ -717,7 +720,8 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
         const lent = b.spent.get(t.id);
         const held = b.spentHeld.get(t.id);
         out.push(
-          `- ${formatMedium(t.date)} ${t.item.trim() || t.category || t.type} ${php(t.total)}:${lent ? ` ${php(lent.amount)} borrowed, from ${lenderNames(lent.from, input.credits ?? [])}` : ""}${held ? `${lent ? ";" : ""} ${php(held.amount)} held for ${lenderNames(held.from, input.credits ?? [])}` : ""}.`,
+          // What it cost, never a withdrawal's whole amount (PHP 518.00 for an PHP 18.00 fee).
+          `- ${formatMedium(t.date)} ${t.item.trim() || t.category || t.type} ${php(costOf(t))}:${lent ? ` ${php(lent.amount)} borrowed, from ${lenderNames(lent.from, input.credits ?? [])}` : ""}${held ? `${lent ? ";" : ""} ${php(held.amount)} held for ${lenderNames(held.from, input.credits ?? [])}` : ""}.`,
         );
       }
     }

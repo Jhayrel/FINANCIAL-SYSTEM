@@ -62,6 +62,36 @@ export function isNeed(name: string, spendingTypes: readonly Pick<SpendingType, 
   return NEEDS.test(name);
 }
 
+/**
+ * Whether a row's cost is a need: a bill or a subscription, a fee for moving
+ * money, interest or charges a lender added, or a kind marked as a need.
+ * The borrowed-money alert counted a subscription and a transfer fee as
+ * wants (7 October 2026 engine review); the note and the alert now ask this
+ * one question.
+ */
+export function isNeedRow(
+  t: Pick<Transaction, "type" | "category" | "item" | "debtEffect">,
+  kind: string | null,
+  spendingTypes: readonly Pick<SpendingType, "name" | "necessity">[] = [],
+): boolean {
+  if (t.type === "Spending" && (t.category === "Bills" || t.category === "Subscriptions")) return true;
+  if (kind === "Transaction Fee" || (t.type === "Debt" && t.debtEffect === "charge")) return true;
+  return isNeed(kind ?? t.item, spendingTypes) || (!kind && NEEDS.test(t.item));
+}
+
+/** Who money held for someone is held for: the person, else the line's name. */
+function heldForNames(held: ReadonlyMap<string, number>, debts: readonly Debt[]): string {
+  const names = [...held.entries()]
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => {
+      const d = debts.find((x) => x.id === id);
+      return d?.counterparty?.trim() || d?.name || "someone";
+    });
+  const unique = [...new Set(names)];
+  return unique.length <= 1 ? (unique[0] ?? "someone") : `${unique.slice(0, -1).join(", ")} and ${unique[unique.length - 1]}`;
+}
+
 /** What the note can see beyond the ledger: whose money is borrowed, which accounts are the owner's, and which kinds are needs. */
 export interface NoteContext {
   readonly debts?: readonly Debt[] | undefined;
@@ -117,10 +147,16 @@ export function spendNoteFor(
   const track = bills ? "billsSubs" : "spending";
   const kind = kindOf(main);
   const label = (main.item.trim() || kind || (bills ? main.category : "This")).replace(/^Uncategorised$/, "This entry");
-  const need = bills || isNeed(kind ?? main.item, context.spendingTypes) || (!kind && NEEDS.test(main.item));
+  const need = isNeedRow(main, kind, context.spendingTypes);
 
   const budget = budgetForMonth(budgets, year, m);
-  const after = [...before, ...rows];
+  /*
+   * Every row saved, not only the ones that cost something this month: a
+   * loan drawn or a withdrawal saved in the same batch as the purchase it
+   * paid for is how the note knows the purchase was borrowed money (7
+   * October 2026 engine review). Totals are by month, so nothing else moves.
+   */
+  const after = [...before, ...saved];
   const was = assessMonth(monthTotals(before, year, m), budget)[track];
   const now = assessMonth(monthTotals(after, year, m), budget)[track];
   // Today included, as the Budget screen and the Dashboard count them (6 October 2026 audit).
@@ -166,7 +202,8 @@ export function spendNoteFor(
     }
     if (fromLent > 0 || fromHeld > 0) {
       const whose = fromLent > 0 ? lenderNames(lent, context.debts) : "";
-      const forWhom = fromHeld > 0 ? lenderNames(held, context.debts) : "";
+      // The person it is held for, not the name of its line ("held for Tita Joan's money" read wrong).
+      const forWhom = fromHeld > 0 ? heldForNames(held, context.debts) : "";
       const ownLeft = b.own;
       const facts = [
         `Saved: ${label} ${money(cost)}.`,
@@ -177,7 +214,12 @@ export function spendNoteFor(
       ];
       const parts = [
         fromLent > 0 ? `${money(fromLent)} of this ${money(cost)} ${label} was borrowed money, from ${whose}.` : "",
-        fromHeld > 0 ? `${money(fromHeld)} of it was money held for ${forWhom}, which has to go back.` : "",
+        // Said whole when nothing was borrowed, so "it" always has something to point at (7 October 2026 engine review).
+        fromHeld > 0
+          ? fromLent > 0
+            ? `${money(fromHeld)} more was money held for ${forWhom}, which has to go back.`
+            : `${money(fromHeld)} of this ${money(cost)} ${label} was money held for ${forWhom}, which has to go back.`
+          : "",
         `Your own money left: ${money(ownLeft)}${b.inHand > 0 ? `; borrowed still in your wallets: ${money(b.inHand)}` : ""}.`,
         need ? "It is a need, so this is for knowing." : "",
       ].filter(Boolean);
@@ -185,7 +227,8 @@ export function spendNoteFor(
       const note = pick({
         id: `${asOf}:borrowed:${main.id}`,
         stage: "borrowed",
-        title: fromLent > 0 ? (need ? "Paid partly with borrowed money" : "A want paid with borrowed money") : "Paid with money held for someone",
+        // "Partly" only when part of it was their own: a PHP 239.00 bill all borrowed was called partly (7 October 2026 engine review).
+        title: fromLent > 0 ? (need ? (fromLent + fromHeld < cost ? "Paid partly with borrowed money" : "Paid with borrowed money") : "A want paid with borrowed money") : "Paid with money held for someone",
         text: [...parts, ...extra].join(" "),
         facts: [...facts, ...extra],
         need,
