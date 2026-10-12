@@ -201,6 +201,8 @@ import { asksAboutPick, pickAnswer, pickText } from "../domain/chartPick";
 import { aboutTheScreen, screenText } from "../domain/screenContext";
 import { figuresIn } from "../domain/money";
 import { notEditable, transactionToDraft } from "../domain/entry";
+import { notArrivedWords, placeSentMoney } from "../domain/destination";
+import { spreadCovered } from "../domain/covers";
 import { rowSavedFor } from "../domain/formSaved";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
@@ -999,6 +1001,12 @@ export function AskPanel({
    * model" while the model was perfectly available.
    */
   const ai = useAi({ settings, transactions, budgets, reference, feature: "chat", asOf, deleted });
+  /*
+   * The ledger as reports read it: spending over several days spread over
+   * them (`covers.ts`). Every figure the chat works out reads this; finding,
+   * editing and binning a row read the ledger itself.
+   */
+  const reportRows = useMemo(() => spreadCovered(transactions), [transactions]);
 
   /**
    * A computer's screen, where a card shows every field and a copy is set
@@ -2045,6 +2053,13 @@ export function AskPanel({
   );
 
   /** The card a correction would apply to: the last one still open. */
+  /** The drafts of a batch being offered, and the cards still open: what one card's money can be placed by. */
+  const batchDrafts = useRef<Draft[]>([]);
+  const openDrafts = (): Draft[] => [
+    ...turns.filter((t): t is Offered => isOffer(t) && t.state === "open").map((t) => t.proposal.draft),
+    ...batchDrafts.current,
+  ];
+
   const openCard = (): { index: number; turn: Offered } | null => {
     for (let i = turns.length - 1; i >= 0; i--) {
       const turn = turns[i];
@@ -2600,6 +2615,16 @@ export function AskPanel({
       }
     }
 
+    // Money sent with no destination: placed from the ledger and the other cards before anyone is asked (`destination.ts`).
+    {
+      const placed = placeSentMoney(ready.draft, transactions, [...reference.wallets, ...reference.savings], openDrafts());
+      if (placed) ready = { ...ready, draft: placed.draft, adjustments: [...ready.adjustments, placed.note] };
+      else if (ready.draft.flow === "Transfer" && !ready.draft.toWallet.trim() && !ready.draft.sentOut) {
+        const words = notArrivedWords(ready.draft);
+        if (words) ready = { ...ready, adjustments: [...ready.adjustments, words] };
+      }
+    }
+
     // Whatever filled the item since, it is one of theirs or it is left empty.
     const still = fitItem(ready.draft, "", reference, learnedItems);
     if (still.note) ready = { ...ready, draft: still.draft, adjustments: [...ready.adjustments, still.note] };
@@ -3042,6 +3067,7 @@ export function AskPanel({
   };
 
   const readSent = async (note: string, again?: readonly Attachment[]): Promise<boolean> => {
+    batchDrafts.current = [];
     const sent = again ? [...again] : files;
     if (!again) setFiles([]);
     // Kept for "read it again" and "look at the receipt", which name no file (see READ_AGAIN).
@@ -3574,6 +3600,8 @@ export function AskPanel({
 
     const batch = checked.length + extras.length > 1;
     const made: CardToAsk[] = [];
+    // The whole batch, so one card's money can be placed by another's ("Received" in Gcash the same day).
+    batchDrafts.current = checked.map((p) => p.draft);
     for (const proposal of checked) {
       /*
        * A row of a batch is about its own words, not the whole message: the
@@ -3884,8 +3912,8 @@ export function AskPanel({
     }
     const said = inWords(asked, hint);
     const both = wantsBothDirections(said);
-    const income = buildChart(said, transactions, asOf, both ? "revenue" : undefined, pair);
-    const spending = both ? buildChart(said, transactions, asOf, "spending", pair) : null;
+    const income = buildChart(said, reportRows, asOf, both ? "revenue" : undefined, pair);
+    const spending = both ? buildChart(said, reportRows, asOf, "spending", pair) : null;
     return [spending, income].filter((c): c is Chart => c !== null);
   };
 
@@ -3940,7 +3968,7 @@ export function AskPanel({
     if (challengesAnswer(question)) {
       // The last few answers, newest first: the one questioned may be two back (`challengedAnswer`).
       const before = [...turns].reverse().filter((t): t is Said => t.kind === "assistant" && "text" in t).map((t) => t.text);
-      const safe = before.length > 0 ? monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe : null;
+      const safe = before.length > 0 ? monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe : null;
       const checked = challengedAnswer(question, before, safe ? { today: safe.perDay, after: safe.perDayAfter } : null, formatMoney);
       if (checked) {
         worked = worked
@@ -4214,7 +4242,7 @@ export function AskPanel({
      * card it wrongly made is put aside.
      */
     const answerSafe = async (question: string): Promise<void> => {
-      const brief = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
+      const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
       // Their own money beside what is borrowed, in the spending wallets (`borrowed.ts`).
       const lent = borrowedMoney(transactions, debts, [...reference.wallets, ...reference.savings]);
       const ownMoney =
@@ -4633,7 +4661,7 @@ export function AskPanel({
       const charts = pair
         ? justShown
           ? []
-          : [buildChart(question, transactions, asOf, undefined, pair)].filter((c): c is Chart => c !== null)
+          : [buildChart(question, reportRows, asOf, undefined, pair)].filter((c): c is Chart => c !== null)
         : (() => {
             const hint = mergeHint(localHint(question, credits), routed?.draw ?? null, question, credits);
             return chartHelps(question, hint, justShown) ? chartsFor(question, hint, null) : [];
@@ -4767,7 +4795,7 @@ export function AskPanel({
 
         if (affordish) {
           const asked = readAffordAsk(again ? `${again} ${lead}` : lead, transactions, reference, asOf);
-          const reply = affordAnswer(asked, { transactions, reference, budgets, debts, asOf });
+          const reply = affordAnswer(asked, { transactions: reportRows, reference, budgets, debts, asOf });
           await answerWithModel(
             [
               `Whether they can afford it, as the app reads it: what the spending wallets hold less the bills and debt payments still due, what the thing usually costs going by their own entries, and the budget said apart.${again ? ` This message follows up on "${again}": it is the same decision.` : ""} Use it for the call and for what it would realistically cost; if they ask to go by the budget, give the budget's side too, and then the overall call. Answer what the message actually asks.`,
@@ -4828,7 +4856,7 @@ export function AskPanel({
             const phase = target.year * 12 + target.month - (thisMonth.year * 12 + thisMonth.month);
             const daysLeft = phase < 0 ? 0 : phase > 0 ? daysInMonth(target.year, target.month) : daysLeftInMonth(asOf);
             // The money as well as the plan, for the month running (`judgeWords`).
-            const running = phase === 0 ? monthBrief({ transactions, reference, budgets, debts, year: target.year, month: target.month, asOf }).safe : null;
+            const running = phase === 0 ? monthBrief({ transactions: reportRows, reference, budgets, debts, year: target.year, month: target.month, asOf }).safe : null;
             const judged = judgeWords(advice, tracks, daysLeft, running ? { safe: running.safe, perDay: running.perDay } : null);
             if (judged !== null) {
               await answerWithModel(
@@ -4868,7 +4896,7 @@ export function AskPanel({
         }
 
         if (spent) {
-          const reply = spendAnswer(spent, transactions, asOf);
+          const reply = spendAnswer(spent, reportRows, asOf);
           // "how much did I spend each month this year": the months drawn as well as summed.
           await answerWithModel(`The sum the message asks about, worked out by the app from the ledger. Answer with it, in your own words:\n${reply}`, reply, besideFor(ruled));
           return;
@@ -4906,7 +4934,7 @@ export function AskPanel({
           ? `Subscriptions and bills have no limit of their own: they are budgeted together, ${formatMoney(budgetForYear(budgets, ly).billsSubs[lm - 1] ?? 0)} for ${MONTH_NAMES[lm - 1]}, and each is followed by name on the Budget screen. To change it, say "set bills and subscriptions to 2000".`
           : `There is no kind of spending called "${talk.name}" to limit. Kinds you can limit: ${kinds.slice(0, 10).join(", ")}. Say one of them, for example "limit ${(kinds[0] ?? "Food").toLowerCase()} to 3000".`
         : asksAboutLimit(ruled, kinds)
-          ? limitAnswer(ruled, limitLines(transactions, budgets, debts, ly, lm), lm, asOf, kinds)
+          ? limitAnswer(ruled, limitLines(reportRows, budgets, debts, ly, lm), lm, asOf, kinds)
           : null;
       if (reply) {
         setDraft("");
@@ -6833,7 +6861,7 @@ export function AskPanel({
               transactions,
               budgets,
               asOf,
-              safe: monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe,
+              safe: monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe,
               ...(correctsAnswer || saidBefore.length > 0 ? { before: correctsAnswer ? saidBefore : [] } : {}),
             });
         await askQuestion(
@@ -8605,7 +8633,8 @@ function ProposalCard({
   const walletShown = flow === "Revenue" ? draft.toWallet : flow === "Transfer" ? "" : draft.fromWallet;
   const meta = [
     flow === "Transfer" ? "" : walletShown ? `${flow === "Revenue" ? "Into" : "From"} ${walletShown}` : "No wallet yet",
-    formatMedium(draft.date),
+    // An entry over several days says both ends (`covers.ts`).
+    draft.coversTo && draft.coversTo > draft.date ? `${formatMedium(draft.date)} to ${formatMedium(draft.coversTo)}` : formatMedium(draft.date),
     draft.fee > 0 ? `${formatMoney(draft.fee)} fee` : "",
     state === "added" ? `Added as #${String(recordNumber).padStart(4, "0")}` : state === "used" ? "In the form" : "",
     !settled && confidence !== "clear" ? confidence : "",
@@ -8619,7 +8648,7 @@ function ProposalCard({
    */
   const pad = (n: number): string => `#${String(n).padStart(4, "0")}`;
   const details: readonly Detail[] = [
-    { label: "Date", value: formatMedium(draft.date) },
+    { label: draft.coversTo && draft.coversTo > draft.date ? "Days" : "Date", value: draft.coversTo && draft.coversTo > draft.date ? `${formatMedium(draft.date)} to ${formatMedium(draft.coversTo)}` : formatMedium(draft.date) },
     { label: "Status", value: draft.status || "Not set" },
     ...(flow === "Transfer"
       ? [

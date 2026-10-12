@@ -26,6 +26,7 @@ import { formatMoney, toCentavos } from "../domain/money";
 import { cacheKey, readCache, writeCache } from "../domain/aiCache";
 import { offlineAnswer } from "../domain/aiOffline";
 import { today } from "../domain/dates";
+import { spreadCovered } from "../domain/covers";
 import type { AppSettings } from "../domain/settings";
 import type { Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
 
@@ -99,13 +100,15 @@ export interface UseAi {
 
 export function useAi({
   settings,
-  transactions,
+  transactions: ledger,
   budgets,
   reference,
   feature,
   asOf,
   deleted,
 }: UseAiInput): UseAi {
+  // Spending over several days spread over them, so every figure the model is given counts each day's share (`covers.ts`).
+  const transactions = useMemo(() => spreadCovered(ledger), [ledger]);
   const [answer, setAnswer] = useState<AiAnswer | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -266,6 +269,8 @@ export function useAi({
               budgets,
               // The months ahead leave out what was stopped, as the Budget screen does.
               stopped: settings.stopped,
+              // Every setting and every budget change, in words (`settingsContext.ts`).
+              settings,
               ...(deleted ? { deleted } : {}),
               ...(options.screen ? { screen: options.screen } : {}),
             }).text

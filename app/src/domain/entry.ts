@@ -16,6 +16,7 @@ import { debtNamedBy, effectsFor, outstandingOf, partOf, splitRepayment, withFee
 import { limitOn, takesLimit, usedOn } from "./creditLimit";
 import { stopOf } from "./bills";
 import { daysBetween, formatMedium, getMonth, getYear, monthName, today } from "./dates";
+import { coversOn, insideCoverWords, MOST_DAYS_COVERED, savedWithin } from "./covers";
 import { formatMoney as money, type Centavos } from "./money";
 import { kindKey, unusualAgainst, type Unusual } from "./unusual";
 import type {
@@ -37,6 +38,8 @@ export interface Draft {
   id?: string | undefined;
   flow: Flow | "";
   date: IsoDate;
+  /** Spending only: the last day it covers, when it covers several (`covers.ts`). */
+  coversTo?: IsoDate | undefined;
   fromWallet: string;
   toWallet: string;
   category: TransactionCategory;
@@ -184,6 +187,7 @@ export function transactionToDraft(t: Transaction): Draft {
     ...(t.debtId ? { debtId: t.debtId } : {}),
     ...(t.debtEffect ? { debtEffect: t.debtEffect } : {}),
     ...(flow === "Transfer" && !t.toWallet.trim() ? { sentOut: true } : {}),
+    ...(t.coversTo ? { coversTo: t.coversTo } : {}),
   };
 }
 
@@ -443,6 +447,19 @@ export function checkDraft(
     errors.push({ field: "date", message: "Pick a date." });
   }
 
+  /*
+   * Spending over several days (`covers.ts`): the last day after the first,
+   * within a quarter of a year, and only spending.
+   */
+  // Only spending covers several days; on any other kind the last day is ignored, and never saved.
+  if (draft.coversTo && draft.flow === "Spending") {
+    if (draft.coversTo <= draft.date) {
+      errors.push({ field: "date", message: `The last day, ${formatMedium(draft.coversTo)}, has to be after the first, ${formatMedium(draft.date)}.` });
+    } else if (daysBetween(draft.date, draft.coversTo) + 1 > MOST_DAYS_COVERED) {
+      errors.push({ field: "date", message: `That covers ${daysBetween(draft.date, draft.coversTo) + 1} days. Up to ${MOST_DAYS_COVERED} can be covered by one entry; split it into more.` });
+    }
+  }
+
   /**
    * A kind and a category that disagree.
    *
@@ -622,6 +639,26 @@ export function checkDraft(
       message:
         "No item, so this will not appear in any breakdown by item. Save it without one?",
     });
+  }
+
+  /*
+   * Dated inside an entry that covers several days: counted twice if it was
+   * paid from that money (`covers.ts`). The owner chooses; the form offers to
+   * take it out of that entry.
+   */
+  if (draft.flow === "Spending" && !draft.coversTo && (draft.amount ?? 0) > 0) {
+    const cover = coversOn(draft.date, transactions, draft.id)[0];
+    if (cover) warnings.push({ field: "date", message: insideCoverWords(cover, (draft.amount ?? 0) + draft.fee) });
+  }
+  if (draft.flow === "Spending" && draft.coversTo && draft.coversTo > draft.date && draft.fromWallet.trim()) {
+    const inside = savedWithin(transactions, draft.date, draft.coversTo, draft.fromWallet, draft.id);
+    if (inside.length > 0) {
+      const sum = inside.reduce((a, t) => a + t.total, 0);
+      warnings.push({
+        field: "amount",
+        message: `${inside.length} ${inside.length === 1 ? "entry is" : "entries are"} already saved from ${draft.fromWallet} on those days, ${money(sum)} in all. If this figure came from counting the money left, they are inside it: take ${money(sum)} off so they are not counted twice. If they were separate, leave it.`,
+      });
+    }
   }
 
   const balance = runningBalance(draft, transactions, draft.id);
@@ -978,6 +1015,8 @@ export function draftToTransactions(
     status: draft.status,
     debtId: draft.debtId,
     debtEffect: draft.debtEffect,
+    // Only spending covers several days, and only when the last day is after the first.
+    ...(type === "Spending" && draft.coversTo && draft.coversTo > draft.date ? { coversTo: draft.coversTo } : {}),
   };
 
   /*

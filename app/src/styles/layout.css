@@ -10813,3 +10813,39 @@ button.fms-recent-row:disabled {
   border-top: 1px solid var(--hairline);
   color: var(--ink-2);
 }
+
+/*
+ * A question open under the cards: the list of cards gives way, so the card
+ * being asked about is readable. With both at full height, card 3 showed in a
+ * strip two rows tall between them (owner, 12 October 2026).
+ */
+.fms-ask:has(.fms-askq) .fms-batchbar--wide .fms-batchgroups,
+.fms-ask:has(.fms-askq) .fms-batchbar.is-open .fms-batchgroups {
+  max-height: min(16vh, 132px);
+}
+
+.fms-ask:has(.fms-askq) .fms-askq {
+  max-height: 32vh;
+}
+
+/* Spending over several days: the choice, the last day, and the count that works the figure out. */
+.fms-covers {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fms-covers-count {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+}
+
+.fms-covers-count > .t-label,
+.fms-covers-count > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}

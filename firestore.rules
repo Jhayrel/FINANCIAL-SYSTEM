@@ -136,6 +136,10 @@ service cloud.firestore {
           // The payment an interest row was part of, by that payment's id.
           && (!('partOf' in d) || (d.partOf is string && d.partOf.size() > 0
                                    && d.partOf.size() <= 200))
+          // Spending over several days (12 October 2026): the last day, after the first.
+          && (!('coversTo' in d) || (d.type == 'Spending' && d.coversTo is string
+                && d.coversTo.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                && d.coversTo > d.date))
           && validMarks(d)
           && noSecretKeys(d.keys());
     }

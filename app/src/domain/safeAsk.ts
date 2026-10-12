@@ -25,7 +25,7 @@
  */
 
 import { formatMoney as money } from "./money";
-import { isOpenBill, weekAhead, type MonthBrief } from "./monthPlan";
+import { ifNothingMoreToday, isOpenBill, weekAhead, type MonthBrief } from "./monthPlan";
 import { MONTH_NAMES } from "./dates";
 
 /**
@@ -105,6 +105,10 @@ export function safeWords(
         ]
       : []),
     ...(safe.daysLeft > 1 ? [`- From tomorrow: ${money(safe.perDayAfter)} a day for ${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"}`] : []),
+    // Unspent money carries over: the days after rise by what today leaves (`ifNothingMoreToday`).
+    ...(safe.daysLeft > 1 && ifNothingMoreToday(safe) > safe.perDayAfter
+      ? [`- If nothing more is spent today: ${money(ifNothingMoreToday(safe))} a day from tomorrow, since what is not spent carries over`]
+      : []),
     ...(() => {
       const week = weekAhead(safe);
       return week.days > 1 ? [`- The next ${week.days} days, today included: ${money(week.amount)}${week.days < 7 ? `, to the end of ${name}` : ""}`] : [];

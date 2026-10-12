@@ -391,7 +391,8 @@ export function Database({
       header: "Date",
       width: "116px",
       sortable: true,
-      render: (t) => <span className="t-num-s">{formatShort(t.date)}</span>,
+      // An entry over several days shows them: "10/09/2026 to 10/11/2026".
+      render: (t) => <span className="t-num-s">{formatShort(t.date)}{t.coversTo && t.coversTo > t.date ? ` to ${formatShort(t.coversTo)}` : ""}</span>,
     },
     {
       key: "flow",
@@ -751,7 +752,7 @@ export function Database({
                             </div>
                           )}
                           <div className="t-micro fms-truncate" style={{ color: "var(--ink-3)" }}>
-                            #{String(t.recordNumber).padStart(4, "0")} · {formatShort(t.date)} · {walletPath(t)}
+                            #{String(t.recordNumber).padStart(4, "0")} · {formatShort(t.date)}{t.coversTo && t.coversTo > t.date ? ` to ${formatShort(t.coversTo)}` : ""} · {walletPath(t)}
                           </div>
                         </div>
                         <div className="fms-dbrow-figure">

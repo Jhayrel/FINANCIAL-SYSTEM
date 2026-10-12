@@ -106,7 +106,8 @@ const numbered = (t: Transaction): string => `#${String(t.recordNumber).padStart
  */
 export function describeRow(t: Transaction): string {
   const parts = [
-    t.date,
+    // An entry over several days records both ends.
+    t.coversTo && t.coversTo > t.date ? `${t.date} to ${t.coversTo}` : t.date,
     t.type,
     t.fromWallet || "-",
     t.toWallet || "-",
@@ -122,6 +123,7 @@ export function describeRow(t: Transaction): string {
 export function changedFields(before: Transaction, after: Transaction): string[] {
   const keys = [
     "date",
+    "coversTo",
     "type",
     "fromWallet",
     "toWallet",

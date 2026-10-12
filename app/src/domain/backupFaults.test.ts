@@ -156,3 +156,42 @@ describe("ledger checks from the backup", () => {
     expect(draftToTransactions(d, 1, "x")[0]?.category).toBe("Revenue");
   });
 });
+
+describe("carry-over, ranges, settings and budget history (12 October 2026)", () => {
+  it("raises tomorrow by what today leaves unspent, and works out a run of days", async () => {
+    const { ifNothingMoreToday, safeOverDays } = await import("./monthPlan");
+    const safe = { safe: 300000, perDay: 10000, perDayAfter: 10000, daysLeft: 20 };
+    expect(ifNothingMoreToday(safe)).toBe(15789);
+    const over = safeOverDays(safe, "2026-10-12", "2026-10-15", "2026-10-17");
+    expect(over).toMatchObject({ days: 3, keeping: 30000, saving: Math.floor(300000 / 17) * 3 });
+    expect(safeOverDays(safe, "2026-10-12", "2026-11-02", "2026-11-05")).toBeNull();
+  });
+
+  it("counts every budget change by month", async () => {
+    const { budgetChangeWords } = await import("./settingsContext");
+    const budgets = { "2026": { spending: Array(12).fill(0), billsSubs: Array(12).fill(0), revisions: { "10": [
+      { at: "2026-10-04T10:00:00Z", what: "tracks", spending: 1500000, wasSpending: 770000, billsSubs: 170000, wasBillsSubs: 170000, when: "open" },
+      { at: "2026-10-05T10:00:00Z", what: "limit", name: "Food", limit: 300000, when: "open" },
+    ] } } } as never;
+    const words = budgetChangeWords(budgets, "2026-10-12");
+    expect(words[0]).toBe("2 changes in all. By month: October 2026: 2 changes (1 to limits).");
+    expect(words.join("\n")).toContain("October 2026: spending ₱7,700.00 to ₱15,000.00");
+  });
+});
+
+describe("where money sent out went (12 October 2026)", () => {
+  const sent = { flow: "Transfer", date: "2026-10-11", fromWallet: "Maya", toWallet: "", category: "Transfer", item: "", description: "Sent money via InstaPay QRPh", amount: 80000, fee: 0, notes: "", status: "Transferred" } as never;
+  it("is placed in the account that took the same amount in", async () => {
+    const { placeSentMoney } = await import("./destination");
+    const ledger = [{ id: "g", recordNumber: 3931, date: "2026-10-11", type: "Revenue", fromWallet: "", toWallet: "Gcash", category: "Revenue", item: "Allowance", description: "", amount: 80000, fee: 0, total: 80000, notes: "", status: "Received" }] as never[];
+    expect(placeSentMoney(sent, ledger, ["Cash", "Gcash", "Maya"])?.draft.toWallet).toBe("Gcash");
+  });
+  it("is a purchase when it was a QR payment and nothing of theirs took it in", async () => {
+    const { placeSentMoney } = await import("./destination");
+    expect(placeSentMoney(sent, [], ["Cash", "Gcash", "Maya"])?.draft.flow).toBe("Spending");
+  });
+  it("is left to ask when it was not a QR payment", async () => {
+    const { placeSentMoney } = await import("./destination");
+    expect(placeSentMoney({ ...(sent as object), description: "InstaPay transfer" } as never, [], ["Cash", "Gcash", "Maya"])).toBeNull();
+  });
+});

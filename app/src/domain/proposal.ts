@@ -442,6 +442,12 @@ function readOne(
     ...(leftAccounts ? { sentOut: true } : {}),
   };
   if (leftAccounts && !draft.description) draft = { ...draft, description: `To ${outsideName}` };
+  // Spending over several days: the last day, when the model gave one after the first (`covers.ts`).
+  const lastDay = str(value["coversTo"]);
+  if (flow === "Spending" && ISO.test(lastDay) && lastDay > date) {
+    draft = { ...draft, coversTo: lastDay };
+    adjustments.push(`Covers ${date} to ${lastDay}: spread over those days in every report.`);
+  }
 
   return {
     draft,

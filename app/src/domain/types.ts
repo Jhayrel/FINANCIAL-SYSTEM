@@ -129,6 +129,13 @@ export interface Transaction {
    * end, which is how a pair was found before this field existed.
    */
   readonly partOf?: string | undefined;
+  /**
+   * Spending that covers several days: the last of them, after `date`, the
+   * first. Spread evenly over the days by every report (`covers.ts`).
+   */
+  readonly coversTo?: IsoDate | undefined;
+  /** On a report's day-part of a covering row only: that row's id. Never stored. */
+  readonly coveredBy?: string | undefined;
   /** Cleared through the integrity review queue. */
   readonly reviewed?: boolean | undefined;
   /**

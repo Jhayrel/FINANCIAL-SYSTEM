@@ -42,7 +42,7 @@ import { addDays, dayInWords, daysBetween, daysInMonth, getMonth, getYear, local
 import { financeAlerts, burnRate, daysLeft, dailyAllowance, PACE_FROM_DAY } from "./alerts";
 import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
 import { toCentavos, toPesos } from "./money";
-import { isOpenBill, monthBrief, weekAhead } from "./monthPlan";
+import { ifNothingMoreToday, isOpenBill, monthBrief, weekAhead } from "./monthPlan";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import type { Account } from "./accounts";
 import type { BudgetRevision, Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
@@ -618,11 +618,12 @@ export function contextToText(c: AiContext): string {
        * wallets less the bills, which is the month's figure (backup of 7
        * October 2026, twice). In centavos, then back to pesos.
        */
-      `Safe to spend today: ${php(safe.today)}: today's share ${php(safe.todayShare)} (${php(pesos(Math.max(0, toCentavos(safe.safe)) + toCentavos(safe.spentToday)))}, safe to ${until}'s end plus spent today, over ${safe.daysLeft} days) less ${php(safe.spentToday)} spent today${safe.overToday > 0 ? `, ${php(safe.overToday)} past it` : ""}.${safe.daysLeft > 1 ? ` From tomorrow, ${dayInWords(addDays(c.asOf, 1))}: ${php(safe.perDayAfter)} a day for ${safe.daysLeft - 1} days.` : ""}`,
+      `Safe to spend today: ${php(safe.today)}: today's share ${php(safe.todayShare)} (${php(pesos(Math.max(0, toCentavos(safe.safe)) + toCentavos(safe.spentToday)))}, safe to ${until}'s end plus spent today, over ${safe.daysLeft} days) less ${php(safe.spentToday)} spent today${safe.overToday > 0 ? `, ${php(safe.overToday)} past it` : ""}.${safe.daysLeft > 1 ? ` From tomorrow, ${dayInWords(addDays(c.asOf, 1))}: ${php(safe.perDayAfter)} a day for ${safe.daysLeft - 1} days (${php(pesos(ifNothingMoreToday({ safe: toCentavos(safe.safe), daysLeft: safe.daysLeft })))} if nothing more is spent today: unspent money carries over).` : ""}`,
     );
     {
       const week = weekAhead({ perDay: toCentavos(safe.today), perDayAfter: toCentavos(safe.perDayAfter), daysLeft: safe.daysLeft });
       if (week.days > 1) lines.push(`Next ${week.days} days, today included: ${php(pesos(week.amount))}${week.days < 7 ? `, to ${until}'s end` : ""}.`);
+
     }
     if (safe.budgetLeft !== null) {
       lines.push(
@@ -738,7 +739,8 @@ export function contextToText(c: AiContext): string {
   if (c.alerts.length > 0) {
     lines.push("");
     lines.push("## Already flagged by the app");
-    for (const a of c.alerts) lines.push(`[${a.level}] ${a.title}. ${a.detail}`);
+    // Each cut at 200 characters: one list of stopped bills was 417, and the summary has to stay a summary.
+    for (const a of c.alerts) lines.push(`[${a.level}] ${a.title}. ${a.detail.length > 200 ? `${a.detail.slice(0, 197).trimEnd()}...` : a.detail}`);
   }
 
   return lines.join("\n");

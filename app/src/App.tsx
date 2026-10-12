@@ -62,6 +62,7 @@ import { formatMoney, type Centavos } from "./domain/money";
 import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { debtWalletDirection, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
+import { spreadCovered } from "./domain/covers";
 import { formatMedium, getYear, today } from "./domain/dates";
 import { systemToCsv } from "./domain/csv";
 import { sheetRequestOf, type ExportAsk } from "./domain/exportAsk";
@@ -173,6 +174,7 @@ function changedWords(was: Transaction, now: Transaction): string {
   const fields: readonly (readonly [keyof Transaction, string])[] = [
     ["type", "type"],
     ["date", "date"],
+    ["coversTo", "days covered"],
     ["amount", "amount"],
     ["fee", "fee"],
     ["category", "category"],
@@ -991,10 +993,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [usageAt, usage.day]);
 
+  /*
+   * The ledger as every report reads it: spending over several days spread
+   * over them (`covers.ts`). The Database, the form, the Bin and the
+   * statements read the ledger itself.
+   */
+  const reportRows = useMemo(() => spreadCovered(transactions), [transactions]);
+
   const financeFindings = useMemo(
     () =>
       financeAlerts({
-        transactions,
+        transactions: reportRows,
         accounts: settings.accounts,
         budgets,
         debts: settings.credits,
@@ -1003,7 +1012,7 @@ export default function App() {
         asOf,
         spendingTypes: reference.spendingTypes,
       }),
-    [transactions, settings.accounts, settings.credits, settings.lowBalanceThreshold, budgets, reference, asOf],
+    [reportRows, settings.accounts, settings.credits, settings.lowBalanceThreshold, budgets, reference, asOf],
   );
   const alerts = useMemo(() => (usageAlert ? [usageAlert, ...financeFindings] : financeFindings), [usageAlert, financeFindings]);
 
@@ -2315,7 +2324,7 @@ export default function App() {
           <ScreenBoundary key={screen} where={title} onHome={() => go("dashboard")}>
           {screen === "dashboard" && (
             <Dashboard
-              transactions={transactions}
+              transactions={reportRows}
               reference={reference}
               budgets={budgets}
               debts={settings.credits}
@@ -2432,15 +2441,16 @@ export default function App() {
             <Insights
               key={insightsAt?.at ?? 0}
               initial={insightsAt?.to}
-              transactions={transactions}
+              transactions={reportRows}
               reference={reference}
               budgets={budgets}
               debts={settings.credits}
               asOf={asOf}
               settings={settings}
               onOpenBudget={() => go("budget")}
-              onEditRow={startEditing}
-              onBin={handleDelete}
+              // A day's part of an entry over several days stands for the entry itself.
+              onEditRow={(row) => startEditing(transactions.find((t) => t.id === row.coveredBy) ?? row)}
+              onBin={(id) => handleDelete(reportRows.find((r) => r.id === id)?.coveredBy ?? id)}
               onAdd={(draft) => {
                 setIncoming({ draft, at: Date.now() });
                 go("add");
@@ -2465,7 +2475,7 @@ export default function App() {
           )}
           {screen === "budget" && (
             <Budget
-              transactions={transactions}
+              transactions={reportRows}
               budgets={budgets}
               debts={settings.credits}
               stopped={settings.stopped}

@@ -58,13 +58,15 @@ import { namesWindow, windowOf } from "./charts";
 import { figuresIn, withoutYears } from "./money";
 import { isPlan } from "./intent";
 import { binForModel } from "./deletedAsk";
+import type { AppSettings } from "./settings";
+import { budgetChangeWords, settingsWords } from "./settingsContext";
 import type { Budgets, DeletedTransaction, IsoDate, Transaction } from "./types";
 import { pointsAt } from "./pointsAt";
 import { asksWhatTheDayBuys, everydayPrices, pricesAgainstDay } from "./dayFit";
 import { categoryLimits } from "./budgetView";
 import { kindOf, spendingTrackByKind } from "./kinds";
 import { borrowedMoney, lenderNames } from "./borrowed";
-import { safeAfter } from "./monthPlan";
+import { safeAfter, safeOverDays } from "./monthPlan";
 
 /**
  * The ceiling on the ledger half, in bytes.
@@ -265,6 +267,8 @@ export interface ChatContextInput {
    * 2026: "it should know all the deleted by date").
    */
   readonly deleted?: readonly DeletedTransaction[] | undefined;
+  /** Every setting, in words, so a question about one is answered from it (`settingsContext.ts`). */
+  readonly settings?: AppSettings | undefined;
 }
 
 export interface ChatContext {
@@ -700,6 +704,76 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
             : `- ${kind}: ${php(used)} of a ${php(limit)} limit, ${php(limit - used)} left${days > 0 ? `, ${php(Math.floor((limit - used) / days))} a day for ${days} days` : ""}.`,
         );
       }
+    }
+  }
+
+  /*
+   * ── Spending over several days ──────────────────────────────────────────
+   * The rows below come spread over their days, one part a day under the same
+   * record number (`covers.ts`): said once here, whole, so a trip is not
+   * read as three purchases (12 October 2026).
+   */
+  {
+    const wholes = new Map<string, { first: Transaction; last: IsoDate; total: number; days: number }>();
+    for (const t of rows) {
+      if (!t.coveredBy) continue;
+      const w = wholes.get(t.coveredBy);
+      if (w) {
+        w.total += t.total;
+        w.days += 1;
+        if (t.date > w.last) w.last = t.date;
+      } else wholes.set(t.coveredBy, { first: t, last: t.date, total: t.total, days: 1 });
+    }
+    const recent = [...wholes.values()].filter((w) => w.last >= `${Number(asOf.slice(0, 4)) - 1}-01-01`).slice(-12);
+    if (recent.length > 0) {
+      out.push("");
+      out.push("## Spending over several days");
+      out.push("Each is one entry, spread evenly over its days in every total; below, its parts carry its record number, one a day. Its own entries inside those days were either taken out of it or are separate spending.");
+      for (const w of recent) {
+        out.push(`- #${String(w.first.recordNumber).padStart(4, "0")} ${w.first.item || "Spending"} ${php(w.total)} from ${w.first.fromWallet || "no wallet"}, ${formatMedium(w.first.date)} to ${formatMedium(w.last)}, ${w.days} days, about ${php(Math.round(w.total / w.days))} a day.`);
+      }
+    }
+  }
+
+  /*
+   * ── Settings, and every budget change ───────────────────────────────────
+   * "know everything, even the settings", and "how many times I changed the
+   * budget" (12 October 2026).
+   */
+  if (input.settings) {
+    out.push("");
+    out.push("## Their settings");
+    out.push(...settingsWords(input.settings));
+  }
+  if (input.budgets) {
+    out.push("");
+    out.push("## Budget and limit changes made in the app");
+    out.push(...budgetChangeWords(input.budgets, asOf));
+  }
+
+  /*
+   * ── Safe to spend over the days asked about ─────────────────────────────
+   * "how much can I spend from the 15th to the 20th", "next week": each day
+   * at its figure, and with nothing spent before it starts, so what carries
+   * over is said rather than guessed (12 October 2026).
+   */
+  {
+    const s = input.snapshot.safe;
+    if (s && question && namesWindow(question) && /(safe|spend|spending|use|budget|allowance|afford|daily|a day|per day|gastos|pwede)/i.test(question)) {
+      const w = windowOf(question, asOf);
+      const over = safeOverDays(
+        { safe: toCentavos(s.safe), perDay: toCentavos(s.today), perDayAfter: toCentavos(s.perDayAfter), daysLeft: s.daysLeft },
+        asOf,
+        w.from,
+        w.to,
+      );
+      out.push("");
+      out.push(`## Safe to spend over ${w.name}`);
+      out.push(
+        over
+          ? `${over.days} ${over.days === 1 ? "day" : "days"}, ${over.from} to ${over.to}: ${php(over.keeping)} if every day until then keeps to its figure; ${php(over.saving)} if nothing more is spent before it starts. Worked out by the app from this month's money only; quote these.`
+          : `Those days are outside what is known: safe to spend is worked out for this month's money only, up to its last day.`,
+      );
     }
   }
 

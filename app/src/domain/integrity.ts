@@ -14,7 +14,7 @@
 import type { Centavos } from "./money";
 import type { IsoDate, Transaction } from "./types";
 import { walletDelta } from "./balances";
-import { formatMedium } from "./dates";
+import { addDays, formatMedium } from "./dates";
 import { formatMoney } from "./money";
 import { cashWallet, feeInside } from "./withdrawal";
 
@@ -266,7 +266,9 @@ export function checkIntegrity(
    * with the rows of that day. A missing or misdated entry, never corrected here.
    */
   if (context.wallets && context.wallets.length > 0) {
-    const upTo = context.asOf ?? "9999-12-31";
+    const upTo = context.asOf ?? transactions.reduce((m, t) => (t.date > m ? t.date : m), "");
+    // The last ninety days: years-old imported history is full of gaps nobody can fill now.
+    const since = addDays(upTo || "1970-01-01", -90);
     const byDay = [...transactions].filter((t) => t.date <= upTo).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     for (const wallet of context.wallets) {
       let balance = 0;
@@ -281,7 +283,7 @@ export function checkIntegrity(
           balance += d;
           i += 1;
         }
-        if (balance < 0 && !below && rows.length > 0) {
+        if (balance < 0 && !below && rows.length > 0 && day > since) {
           issues.push({
             code: "below-zero-day",
             severity: "warning",

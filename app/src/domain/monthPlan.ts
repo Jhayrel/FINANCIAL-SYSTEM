@@ -59,7 +59,7 @@ import { totalSavingsBalance, totalWalletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { monthBills, phaseOf, type MonthBill, type MonthBills, type MonthPhase } from "./budgetView";
 import { debtDue, positionsOf, type Debt, type DebtKind, type DueBasis } from "./debt";
-import { addDays, daysInMonth, firstOfMonth, getDay, lastOfMonth, monthName } from "./dates";
+import { addDays, daysBetween, daysInMonth, firstOfMonth, getDay, lastOfMonth, monthName } from "./dates";
 import { formatMoney as money, type Centavos } from "./money";
 import { costByKind } from "./kinds";
 import { monthTotals, totalsFor } from "./totals";
@@ -216,6 +216,43 @@ export function dayFigures(safe: Centavos, spentToday: Centavos, daysLeft: numbe
 export function weekAhead(safe: Pick<SafeToSpend, "perDay" | "perDayAfter" | "daysLeft">): { readonly days: number; readonly amount: Centavos } {
   const days = Math.min(7, Math.max(0, safe.daysLeft));
   return { days, amount: days === 0 ? 0 : safe.perDay + safe.perDayAfter * (days - 1) };
+}
+
+/**
+ * Tomorrow's figure if nothing more is spent today. Money not spent is never
+ * lost: each day's figure is worked out again from what is safe then, over
+ * the days left, so a day with less spent raises every day after it. The
+ * owner, 12 October 2026: "what happens if I didn't spend today or yesterday,
+ * what will happen to the safe to spend tomorrow or next week".
+ */
+export function ifNothingMoreToday(safe: Pick<SafeToSpend, "safe" | "daysLeft">): Centavos {
+  const after = safe.daysLeft - 1;
+  return after > 0 ? Math.floor(Math.max(0, safe.safe) / after) : 0;
+}
+
+/**
+ * What is safe over a run of days this month, `from` to `to` inclusive, cut
+ * to today and the month's end. `keeping`: each day before and during it
+ * keeps to its figure. `saving`: nothing more is spent until it starts, so
+ * everything unspent before then is spread from its first day.
+ */
+export function safeOverDays(
+  safe: Pick<SafeToSpend, "safe" | "perDay" | "perDayAfter" | "daysLeft">,
+  asOf: IsoDate,
+  from: IsoDate,
+  to: IsoDate,
+): { readonly from: IsoDate; readonly to: IsoDate; readonly days: number; readonly keeping: Centavos; readonly saving: Centavos } | null {
+  const monthEnd = addDays(asOf, Math.max(0, safe.daysLeft - 1));
+  const start = from < asOf ? asOf : from;
+  const end = to > monthEnd ? monthEnd : to;
+  if (start > end || safe.daysLeft <= 0) return null;
+  const days = daysBetween(start, end) + 1;
+  const offset = daysBetween(asOf, start);
+  const pool = Math.max(0, safe.safe);
+  const keeping = Math.min(pool, offset === 0 ? safe.perDay + safe.perDayAfter * (days - 1) : safe.perDayAfter * days);
+  const leftThen = safe.daysLeft - offset;
+  const saving = Math.min(pool, leftThen > 0 ? Math.floor(pool / leftThen) * days : 0);
+  return { from: start, to: end, days, keeping, saving: end === monthEnd ? pool : saving };
 }
 
 /** The month's safe figures as they would be after `spend` more goes out of the spending wallets today. */

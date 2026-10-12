@@ -116,6 +116,8 @@ export function toDocument(t: Transaction, deletedAt?: string): DocumentData {
   if (t.debtId !== undefined) d.debtId = t.debtId;
   if (t.debtEffect !== undefined) d.debtEffect = t.debtEffect;
   if (t.partOf !== undefined) d.partOf = t.partOf;
+  // Spending over several days (`covers.ts`): only when it runs past its first day.
+  if (t.type === "Spending" && t.coversTo !== undefined && t.coversTo > t.date) d.coversTo = t.coversTo;
   if (t.reviewed !== undefined) d.reviewed = t.reviewed;
   /*
    * Who filled the row in. It was stamped on every save and never written,
@@ -157,6 +159,7 @@ function fromDocument(snap: QueryDocumentSnapshot<DocumentData>): Transaction & 
     ...(d.debtId !== undefined ? { debtId: String(d.debtId) } : {}),
     ...(d.debtEffect !== undefined ? { debtEffect: d.debtEffect } : {}),
     ...(typeof d.partOf === "string" && d.partOf.length > 0 ? { partOf: d.partOf } : {}),
+    ...(typeof d.coversTo === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.coversTo) ? { coversTo: d.coversTo } : {}),
     ...(d.reviewed !== undefined ? { reviewed: Boolean(d.reviewed) } : {}),
     ...(d.entrySource === "ai" || d.entrySource === "manual" ? { entrySource: d.entrySource } : {}),
     ...(typeof d.deletedAt === "string" && d.deletedAt.length > 0

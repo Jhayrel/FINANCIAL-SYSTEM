@@ -53,6 +53,7 @@ const TRANSACTION_HEADER = [
    */
   "Debt",
   "Part of",
+  "Covers to",
   "Entered by",
 ];
 
@@ -73,6 +74,7 @@ const transactionRow = (t: Transaction): (string | number)[] => [
   t.status,
   t.debtId ?? "",
   t.partOf ?? "",
+  t.coversTo ?? "",
   t.entrySource ?? "",
 ];
 

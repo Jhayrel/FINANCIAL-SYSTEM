@@ -422,6 +422,34 @@ function monthDayIn(text: string, asOf: IsoDate): IsoDate | null {
 }
 
 /** "today", "yesterday", "2026-08-30", "Aug 25", or nothing, in which case today. */
+/**
+ * A stretch of days: "Oct 9 to 11", "oct 9-11", "from October 9 to October
+ * 11", "9 to 11 Oct", "2026-10-09 to 2026-10-11". The first and last day,
+ * and the words, so the figures in them are not read as money.
+ */
+export function daysIn(text: string, asOf: IsoDate): { from: IsoDate; to: IsoDate; said: string } | null {
+  // A hyphen or the dash a phone keyboard puts between two days, written by its code so no dash sits in the source (W1).
+  const DASH = `[-${String.fromCharCode(0x2013)}]`;
+  const iso = new RegExp(`\\b((?:19|20)\\d{2}-\\d{2}-\\d{2})\\s*(?:to|until|till|${DASH})\\s*((?:19|20)\\d{2}-\\d{2}-\\d{2})\\b`, "i").exec(text);
+  if (iso?.[1] && iso[2] && iso[2] > iso[1]) return { from: iso[1], to: iso[2], said: iso[0] };
+  const M = "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec";
+  const D = "([12]\\d|3[01]|0?[1-9])(?:st|nd|rd|th)?";
+  const monthFirst = new RegExp(`\\b(?:from\\s+)?(${M})\\.?\\s+${D}\\s*(?:to|until|till|${DASH}|through)\\s*(?:(${M})\\.?\\s+)?${D}\\b`, "i").exec(text);
+  const dayFirst = new RegExp(`\\b(?:from\\s+)?${D}\\s*(?:to|until|till|${DASH}|through)\\s*${D}\\s+(?:of\\s+)?(${M})\\b`, "i").exec(text);
+  const found = monthFirst
+    ? { m1: monthFirst[1], d1: monthFirst[2], m2: monthFirst[3] ?? monthFirst[1], d2: monthFirst[4], said: monthFirst[0] }
+    : dayFirst
+      ? { m1: dayFirst[3], d1: dayFirst[1], m2: dayFirst[3], d2: dayFirst[2], said: dayFirst[0] }
+      : null;
+  if (!found?.m1 || !found.m2 || !found.d1 || !found.d2) return null;
+  const from = dayOfMonth(MONTH_OF[found.m1.toLowerCase()] ?? MONTH_OF[found.m1.toLowerCase().slice(0, 3)] ?? 0, Number(found.d1), undefined, asOf);
+  let to = dayOfMonth(MONTH_OF[found.m2.toLowerCase()] ?? MONTH_OF[found.m2.toLowerCase().slice(0, 3)] ?? 0, Number(found.d2), undefined, asOf);
+  if (from && to && to < from) to = shift(to, 365);
+  return from && to && to > from && daysBetweenIso(from, to) < 92 ? { from, to, said: found.said } : null;
+}
+
+const daysBetweenIso = (a: IsoDate, b: IsoDate): number => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+
 function dateIn(text: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
   const iso = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(text);
   if (iso?.[1]) return { date: iso[1], said: true };
@@ -832,7 +860,9 @@ export function readEntry(
   }
 
   const accounts = [...reference.wallets, ...reference.savings];
-  const { date, said } = dateIn(text, asOf);
+  // "Oct 9 to 11", "from October 9 to October 11", "9-11 Oct": spending over several days (`covers.ts`).
+  const span = daysIn(text, asOf);
+  const { date, said } = span ? { date: span.from, said: true } : dateIn(text, asOf);
 
   /**
    * The fee, before the amount.
@@ -842,7 +872,8 @@ export function readEntry(
    * before the amount is looked for, so the fee is not mistaken for the
    * amount in "fee 15" and the amount is not mistaken for the fee.
    */
-  const { fee, rest } = feeIn(text);
+  // The days of a stretch are not money: "oct 9-11 travel 9500" is PHP 9,500.00, never PHP 11.00.
+  const { fee, rest } = feeIn(span ? text.replace(span.said, " ") : text);
 
   /**
    * A figure inside the name of a thing is not an amount.
@@ -1107,9 +1138,10 @@ export function readEntry(
    */
   const namedTransfer = draft.flow === "Transfer" && draft.fromWallet.trim() !== "" && draft.toWallet.trim() !== "" && draft.fromWallet !== draft.toWallet;
   const worthOffering = amount !== null || Boolean(draft.item.trim()) || namedTransfer;
+  const spread = span && draft.flow === "Spending" && span.to > span.from;
 
   return {
-    draft,
+    draft: spread ? { ...draft, date: span.from, coversTo: span.to } : draft,
     because: [...because, ...fromHistory],
     worthOffering,
     settled,

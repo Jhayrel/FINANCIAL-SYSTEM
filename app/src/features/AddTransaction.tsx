@@ -52,6 +52,7 @@ import { predictAmount, steadyValue, type DueBill } from "../domain/predict";
 import { monthBills } from "../domain/budgetView";
 import { accountGroups } from "../domain/accounts";
 import { addDays, formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
+import { coversOn, insideCoverWords, savedWithin, spentFromCount } from "../domain/covers";
 import { duplicateHeadline, duplicatesOf } from "../domain/duplicates";
 import { draftChanges } from "../domain/draftChanges";
 import { connectionWords } from "../domain/syncState";
@@ -842,6 +843,21 @@ export function AddTransaction({
    */
   const showWarnings = submitted || draft.amount !== null;
 
+  /*
+   * ── Spending over several days (`covers.ts`) ─────────────────────────────
+   * The owner, 12 October 2026: on a trip the money is counted at the end,
+   * "10,000, 500 left, then I spent 9,500". The days it covers, the count
+   * that works out the figure, and entries already saved in those days.
+   */
+  const [counted, setCounted] = useState<{ started: Centavos | null; left: Centavos | null }>({ started: null, left: null });
+  const [takeOut, setTakeOut] = useState<string | null>(null);
+  const covering = draft.flow === "Spending" && draft.coversTo !== undefined;
+  const coverHere = draft.flow === "Spending" && !covering && (draft.amount ?? 0) > 0 && !draft.id ? (coversOn(draft.date, transactions, draft.id)[0] ?? null) : null;
+  const savedInside =
+    covering && draft.coversTo && draft.coversTo > draft.date && draft.fromWallet.trim() ? savedWithin(transactions, draft.date, draft.coversTo, draft.fromWallet, draft.id) : [];
+  const savedInsideSum = savedInside.reduce((a, t) => a + t.total, 0);
+  const fromCount = counted.started !== null && counted.left !== null ? spentFromCount(counted.started, counted.left, savedInsideSum) : null;
+
   /**
    * Who can be picked. Debt lists banks, credit lines and personal loans; On
    * behalf lists the people on the side chosen. Maya Credit was offered for a
@@ -1194,8 +1210,44 @@ export function AddTransaction({
   if (showWarnings) {
     for (const w of check.warnings) {
       if (check.debtPayment && w.field === "item") continue;
+      // Said below with their own buttons.
+      if (coverHere && w.field === "date" && w.message === insideCoverWords(coverHere, (draft.amount ?? 0) + draft.fee)) continue;
+      if (savedInside.length > 0 && w.field === "amount" && w.message.includes("already saved from")) continue;
       checks.push({ key: w.message, text: w.message });
     }
+  }
+  if (showWarnings && coverHere) {
+    const total = (draft.amount ?? 0) + draft.fee;
+    const name = coverHere.item || "that entry";
+    checks.push({
+      key: "inside-cover",
+      text:
+        takeOut === coverHere.id
+          ? `${formatMoney(total)} will be taken out of ${name} (#${String(coverHere.recordNumber).padStart(4, "0")}) when you save, so it is counted once: ${name} becomes ${formatMoney(Math.max(0, coverHere.amount - total))}.`
+          : insideCoverWords(coverHere, total),
+      action: (
+        <>
+          {" "}
+          <button type="button" className="t-caption fms-linkbtn" onClick={() => setTakeOut(takeOut === coverHere.id ? null : coverHere.id)}>
+            {takeOut === coverHere.id ? "Keep it separate" : `Take it out of ${name}`}
+          </button>
+        </>
+      ),
+    });
+  }
+  if (showWarnings && savedInside.length > 0 && counted.started === null) {
+    checks.push({
+      key: "saved-inside",
+      text: `${savedInside.length} ${savedInside.length === 1 ? "entry is" : "entries are"} already saved from ${draft.fromWallet} on those days, ${formatMoney(savedInsideSum)} in all. If this figure came from counting the money left, they are inside it.`,
+      action: (draft.amount ?? 0) > savedInsideSum ? (
+        <>
+          {" "}
+          <button type="button" className="t-caption fms-linkbtn" onClick={() => set("amount", Math.max(0, (draft.amount ?? 0) - savedInsideSum))}>
+            Take {formatMoney(savedInsideSum)} off
+          </button>
+        </>
+      ) : undefined,
+    });
   }
   if (check.debtPayment) {
     checks.push({
@@ -1346,10 +1398,15 @@ export function AddTransaction({
       const part = partOf(target, transactions);
       if (part && !rows.some((r) => r.id === part.id)) onBin(part.id);
     } else {
-      onSave(
-        draftToTransactions(final, nextRecordNumber, `t-${Date.now()}`, check.repaymentSplit),
-      );
+      const saved = draftToTransactions(final, nextRecordNumber, `t-${Date.now()}`, check.repaymentSplit);
+      onSave(saved);
+      // Paid from the money an entry over several days already counts: taken out of it, so it is counted once.
+      const cover = takeOut ? transactions.find((t) => t.id === takeOut) : undefined;
+      const spent = saved.reduce((a, t) => a + t.total, 0);
+      if (cover && cover.amount > spent) onUpdate([{ ...cover, amount: cover.amount - spent, total: cover.amount - spent + cover.fee }]);
     }
+    setTakeOut(null);
+    setCounted({ started: null, left: null });
 
     // The card that supplied this row can now say it was saved, and as which number.
     onSaved({ draft: final, at: Date.now(), recordNumber: target ? target.recordNumber : nextRecordNumber });
@@ -2169,6 +2226,58 @@ export function AddTransaction({
                   />
                 </div>
               </Field>
+
+              {draft.flow === "Spending" && (
+                <div className="fms-covers">
+                  <div className="fms-datechips" role="radiogroup" aria-label="How many days it covers">
+                    <button type="button" role="radio" className="fms-datechip t-body" aria-checked={!covering} aria-pressed={!covering} onClick={() => set("coversTo", undefined)}>
+                      One day
+                    </button>
+                    <button
+                      type="button"
+                      role="radio"
+                      className="fms-datechip t-body"
+                      aria-checked={covering}
+                      aria-pressed={covering}
+                      onClick={() => set("coversTo", draft.coversTo ?? addDays(draft.date, 2))}
+                    >
+                      Several days
+                    </button>
+                  </div>
+                  {covering && (
+                    <>
+                      <Field label="Last day" required error={errorFor("date")} hint="Spread evenly over the days in every report, the budget and the limits.">
+                        <input
+                          type="date"
+                          aria-label="Last day"
+                          min={addDays(draft.date, 1)}
+                          value={draft.coversTo ?? ""}
+                          onChange={(e) => set("coversTo", e.target.value || undefined)}
+                          className="t-body fms-control"
+                        />
+                      </Field>
+                      <div className="fms-covers-count">
+                        <span className="t-label">Work it out from the money left</span>
+                        <Field label="Started with" half>
+                          <AmountInput value={counted.started} onChange={(v) => setCounted((c) => ({ ...c, started: v }))} ariaLabel="Money it started with" />
+                        </Field>
+                        <Field label="Left now" half>
+                          <AmountInput value={counted.left} onChange={(v) => setCounted((c) => ({ ...c, left: v }))} ariaLabel="Money left now" />
+                        </Field>
+                        {fromCount !== null && (
+                          <p className="t-caption" style={{ color: "var(--ink-2)" }}>
+                            {formatMoney(counted.started ?? 0)} less {formatMoney(counted.left ?? 0)} left
+                            {savedInsideSum > 0 ? `, less ${formatMoney(savedInsideSum)} already saved from ${draft.fromWallet} on those days` : ""}: {formatMoney(fromCount)} spent.{" "}
+                            <button type="button" className="t-caption fms-linkbtn" onClick={() => set("amount", fromCount)}>
+                              Use {formatMoney(fromCount)}
+                            </button>
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
 
               {hasMore && (
                 <button
