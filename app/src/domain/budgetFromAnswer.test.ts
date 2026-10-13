@@ -108,7 +108,8 @@ describe("a yes to the budget just proposed", () => {
 
   it("makes the same request a named one would", () => {
     const ask = readBudgetAsk("set the budget next month ₱41,694.36", REFERENCE, TODAY);
-    expect(ask).toMatchObject({ kind: "tracks", spending: 4_169_436 });
+    // A budget with no line named is the whole month (13 October 2026).
+    expect(ask).toMatchObject({ kind: "tracks", total: 4_169_436 });
   });
 });
 
@@ -162,7 +163,7 @@ describe("budgets over more than one month", () => {
 
   it("plans a range month by month, leaving closed months alone", () => {
     const ask = readBudgetAsk("set my budget to 8814.58 from august to december", REFERENCE, AS_OF);
-    expect(ask).toMatchObject({ kind: "tracks", month: 8, toMonth: 12, spending: 881_458 });
+    expect(ask).toMatchObject({ kind: "tracks", month: 8, toMonth: 12, total: 881_458 });
     const plan = planBudget(ask!, {}, AS_OF, "2026-09-26T00:00:00.000Z");
     expect(plan.outcome.refused).toBeUndefined();
     expect(plan.outcome.written).toEqual([9, 10, 11, 12]);
@@ -173,6 +174,6 @@ describe("budgets over more than one month", () => {
 
   it("does not read the count of months as the figure", () => {
     const ask = readBudgetAsk("set budget 9000 for the next 3 months", REFERENCE, AS_OF);
-    expect(ask).toMatchObject({ spending: 900_000, month: 10, toMonth: 12 });
+    expect(ask).toMatchObject({ total: 900_000, month: 10, toMonth: 12 });
   });
 });

@@ -28,7 +28,7 @@
  * 3 days left" is a fact they can act on.
  */
 
-import { allWalletBalances, walletBalance } from "./balances";
+import { allWalletBalances, walletBalance, walletDelta } from "./balances";
 import { assessMonthFor } from "./budget";
 import { overdue, STOPPED_AFTER_DAYS, upcoming, type BillStatus } from "./bills";
 import { basisWords, billWords, debtDue, debtNamedBy, paymentsFiledAsSpending, positionsOf, type Debt } from "./debt";
@@ -418,24 +418,66 @@ export function financeAlerts(input: AlertInput): Alert[] {
   }
 
   // ── Wallets running low ──────────────────────────────────────────────────
+  /*
+   * By how the wallet is used, not by its balance alone. "Gcash is empty"
+   * led the bell every time, though the owner keeps Gcash empty on purpose
+   * as a backup (13 October 2026): "remind me once in a while, not every
+   * single time". Now:
+   *   below zero        always, red: something saved from it is missing
+   *                     what came in first, or an amount is off;
+   *   just ran low      once, for three days from the day it went under;
+   *   low and in use    while money still leaves it (in the last 7 days);
+   *   resting           nothing at all: low or empty, and nothing has left
+   *                     it since it went under.
+   */
   if (lowBalanceThreshold > 0) {
+    const DAY = 86_400_000;
+    const ago = (iso: IsoDate): number => Math.round((Date.parse(`${asOf}T00:00:00Z`) - Date.parse(`${iso}T00:00:00Z`)) / DAY);
     for (const account of accounts) {
       if (account.archived || account.kind !== "spending") continue;
       const balance = walletBalance(transactions, account.name);
       if (balance >= lowBalanceThreshold) continue;
 
+      // Walk its rows in order: the day it last went under the warning, and the last day money left it.
+      const isIt = (w: string): boolean => w === account.name;
+      const rows = transactions
+        .filter((t) => t.date <= asOf && (t.fromWallet === account.name || t.toWallet === account.name))
+        .sort((x, y) => x.date.localeCompare(y.date) || x.recordNumber - y.recordNumber);
+      let running = 0;
+      let wentUnder: IsoDate | null = null;
+      let lastOut: IsoDate | null = null;
+      for (const t of rows) {
+        const before = running;
+        const delta = walletDelta(t, isIt);
+        running += delta;
+        if (before >= lowBalanceThreshold && running < lowBalanceThreshold) wentUnder = t.date;
+        if (delta < 0) lastOut = t.date;
+      }
+      const usedSince = lastOut !== null && wentUnder !== null && lastOut >= wentUnder && ago(lastOut) <= 7;
+      const justNow = wentUnder !== null && ago(wentUnder) <= 3;
+
+      if (balance < 0) {
+        out.push({
+          id: `low-${account.id}`,
+          level: "over",
+          area: "wallet",
+          title: `${account.name} is below zero`,
+          detail: `−${money(-balance)}. A wallet cannot hold less than nothing: something saved from it is missing the money that came in first, or an amount is off.`,
+          weight: 90,
+          query: account.name,
+        });
+        continue;
+      }
+      if (!usedSince && !justNow) continue;
       out.push({
         id: `low-${account.id}`,
-        level: balance <= 0 ? "over" : "warn",
+        level: usedSince ? "warn" : "info",
         area: "wallet",
-        title:
-          balance < 0
-            ? `${account.name} is below zero`
-            : balance === 0
-              ? `${account.name} is empty`
-              : `${account.name} is running low`,
-        detail: `${balance < 0 ? "−" : ""}${money(balance)}, under the ${money(lowBalanceThreshold)} you asked to be warned at.`,
-        weight: balance <= 0 ? 90 : 60,
+        title: balance === 0 ? `${account.name} is empty` : `${account.name} is running low`,
+        detail: usedSince
+          ? `${money(balance)} left, under the ${money(lowBalanceThreshold)} you want kept, and money still left it on ${formatMedium(lastOut!)}. Top it up before the next payment from it.`
+          : `${money(balance)} left since ${formatMedium(wentUnder!)}. If you keep it low on purpose, this goes quiet by itself.`,
+        weight: usedSince ? 55 : 25,
         query: account.name,
       });
     }

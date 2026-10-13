@@ -4916,7 +4916,13 @@ button.fms-recent-row:disabled {
 .fms-budgetgrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
-  align-items: stretch;
+  /*
+   * Each card as tall as what is in it. Stretched to the tallest column, the
+   * bills card on a wide screen was half empty (owner, 13 October 2026: "in
+   * pc the ui is ugly").
+   */
+  align-items: start;
+  align-content: start;
   gap: var(--space-4);
   min-width: 0;
 }
@@ -10869,3 +10875,38 @@ button.fms-recent-row:disabled {
   line-height: 1.25;
 }
 
+/*
+ * Statement text, every word of it: a long description wraps rather than
+ * ending in an ellipsis (owner, 13 October 2026: "if the text is too long
+ * it just cuts off").
+ */
+.fms-wraptext {
+  display: block;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The kinds of spending on the Budget screen: a name, not a row of
+ * underlined links. Underlined on hover and focus, which is when it matters
+ * that it opens the Database (13 October 2026).
+ */
+.fms-budgetcat-head .fms-linkish {
+  text-decoration: none;
+}
+
+.fms-budgetcat-head .fms-linkish:hover,
+.fms-budgetcat-head .fms-linkish:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* "Budget and your money" as a panel of its own under the planner, not loose text. */
+.fms-budgetrail .fms-incomesplit {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}

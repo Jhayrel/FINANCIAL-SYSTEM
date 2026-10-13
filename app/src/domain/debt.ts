@@ -426,6 +426,7 @@ export function incomeQuality(
     debts.filter((d) => !migrated.has(d.id)).map((d) => d.name.trim().toLowerCase()),
   );
 
+  const passThrough = new Set(debts.filter((d) => d.form === "pass-through").map((d) => d.id));
   let cashIn = 0;
   let borrowedInRevenue = 0;
   let borrowedAsDebt = 0;
@@ -436,6 +437,15 @@ export function incomeQuality(
     if (!inRange(t)) continue;
 
     if (t.type === "Debt") {
+      /*
+       * Money received for someone is held, not borrowed; kept as yours, it
+       * is income, as incomeOf counts it. The chat's income answer called
+       * PHP 25,000.00 held for a relative borrowing (13 October 2026 audit).
+       */
+      if (t.debtId !== undefined && passThrough.has(t.debtId)) {
+        if (t.debtEffect === "writeoff" && t.category === "Revenue") cashIn += t.total;
+        continue;
+      }
       if (t.debtEffect === "draw") borrowedAsDebt += t.amount;
       continue;
     }

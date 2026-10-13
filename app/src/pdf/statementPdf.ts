@@ -227,10 +227,14 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
   }
 
   for (const line of sheet.lines) {
-    const desc = wrap(doc, line.description, "regular", BODY, detailsW - 12, 2);
+    /*
+     * Every word, however long: the row grows instead. Two lines and an
+     * ellipsis cut descriptions off in the exported statement (owner,
+     * 13 October 2026). The cap only stops a runaway row from outgrowing a page.
+     */
+    const desc = wrap(doc, line.description, "regular", BODY, detailsW - 12, 14);
     const meta = metaOf(line);
-    // Two lines when a transfer says what moved and its fee, so the fee is never cut off.
-    const metaLines = meta ? wrap(doc, meta, "regular", META, detailsW - 12, line.detail ? 2 : 1) : [];
+    const metaLines = meta ? wrap(doc, meta, "regular", META, detailsW - 12, 6) : [];
     const h = PAD_Y * 2 + desc.length * LINE + metaLines.length * META_LINE;
     if (y + h > bottom) newPage();
 
@@ -264,7 +268,7 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
 
   // Notes, then the closing line.
   const notes = ["Amounts are in pesos (₱).", ...sheet.notes].flatMap(
-    (n) => wrap(doc, n, "regular", 7, CONTENT_W, 4),
+    (n) => wrap(doc, n, "regular", 7, CONTENT_W, 40),
   );
   const closingHeight = 16 + notes.length * 9.5 + 34;
   if (y + closingHeight > bottom) {

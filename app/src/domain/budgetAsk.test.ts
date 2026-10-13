@@ -17,8 +17,10 @@ const twelve = (v: number) => [v, v, v, v, v, v, v, v, v, v, v, v] as unknown as
 const budgets: Budgets = { "2026": { spending: twelve(700_000), billsSubs: twelve(200_000) } };
 
 describe("reading a budget request", () => {
-  it("reads the spending budget for this month", () => {
-    expect(readBudgetAsk("set my budget to 8000", reference, ASOF)).toEqual({ kind: "tracks", year: 2026, month: 9, spending: 800_000, scope: "month" });
+  // The whole month, bills inside it, as "set November to 8000" is (13 October 2026); "spending budget" is spending alone.
+  it("reads a budget with no line named as the whole month", () => {
+    expect(readBudgetAsk("set my budget to 8000", reference, ASOF)).toEqual({ kind: "tracks", year: 2026, month: 9, total: 800_000, scope: "month" });
+    expect(readBudgetAsk("set my spending budget to 8000", reference, ASOF)).toMatchObject({ spending: 800_000 });
   });
 
   it("reads bills for a named month", () => {
@@ -51,7 +53,8 @@ describe("planning it with the Budget screen's rules", () => {
     const ask = readBudgetAsk("set my budget to 8000", reference, ASOF)!;
     const plan = planBudget(ask, budgets, ASOF, AT);
     expect(plan.outcome.refused).toBeUndefined();
-    expect(plan.outcome.plan.spending[8]).toBe(800_000);
+    // PHP 8,000.00 in all: the PHP 2,000.00 of bills already set stays inside it.
+    expect(plan.outcome.plan.spending[8]).toBe(600_000);
     expect(plan.outcome.plan.billsSubs[8]).toBe(200_000);
     expect(plan.outcome.plan.spending[7]).toBe(700_000);
     expect(plan.changes).toHaveLength(1);
@@ -292,5 +295,16 @@ describe("a budget said as the month's total", () => {
   });
   it("puts a proposal on the month it is for, not the months it was worked from", () => {
     expect(proposedMonthIn("I recommend a budget of PHP 9,000.00 for November 2026, adjusted from the usual month worked from your pattern over May to September 2026.", "2026-10-13")).toMatchObject({ month: 11 });
+  });
+});
+
+// 13 October 2026 audit: the phrases the app and the AI tell the owner to type, each a budget card, never an entry edit.
+describe("the budget phrases the app suggests", () => {
+  const ref = { wallets: ["Cash"], savings: [], bills: [], subscriptions: [], revenueCategories: [], spendingTypes: [{ name: "Food" }], stopped: [] } as never;
+  it("reads each one", () => {
+    expect(readBudgetAsk("set October to December to 9000", ref, "2026-10-13")).toMatchObject({ month: 10, toMonth: 12, total: 900000 });
+    expect(readBudgetAsk("set bills and subscriptions to 2000", ref, "2026-10-13")).toMatchObject({ billsSubs: 200000 });
+    expect(readBudgetAsk("set November spending to 12000 and bills to 2000", ref, "2026-10-13")).toMatchObject({ month: 11, spending: 1200000, billsSubs: 200000 });
+    expect(readBudgetAsk("set the bills of #3929 to 2000", ref, "2026-10-13")).toBeNull();
   });
 });

@@ -104,7 +104,15 @@ const pesosOf = (digits: string, k: string | undefined): Centavos => {
  * round ("1641 for bills", "bills: 1641").
  */
 export function tracksIn(said: string): { spending?: Centavos; billsSubs?: Centavos } {
-  const text = said.toLowerCase().replace(/\b20\d{2}\b/g, " ").replace(/\b\d{1,2}\s+months?\b/g, " ");
+  /*
+   * A year beside a month or after "in", "of", "for" is a date; anywhere else
+   * 2000 to 2099 is money: "bills to 2000" lost its figure (13 October 2026 audit).
+   */
+  const text = said
+    .toLowerCase()
+    .replace(new RegExp(String.raw`\b${MONTH_TOKEN}\s+20\d{2}\b`, "g"), (m) => m.replace(/\s+20\d{2}$/, " "))
+    .replace(/\b(in|of|for|year|since)\s+20\d{2}\b/g, "$1 ")
+    .replace(/\b\d{1,2}\s+months?\b/g, " ");
   const read = (label: string): Centavos | undefined => {
     const before = new RegExp(String.raw`${NUM}\s*(?:pesos?\s*)?(?:for|on|to|sa|as|in|of)\s+(?:the\s+|my\s+|ang\s+)?${label}\b`).exec(text);
     if (before?.[1]) return pesosOf(before[1], before[2]);
@@ -537,8 +545,19 @@ export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: Iso
   const labelled = tracksIn(text);
   const namesLine = labelled.spending !== undefined || labelled.billsSubs !== undefined;
   // "set November to 14000": a month and a figure alone, which the model itself told the owner to type (13 October 2026).
-  const monthOnly = new RegExp(String.raw`^\s*(?:set|make|put|change)\s+(?:the\s+)?${MONTH_TOKEN}(?:\s+20\d{2})?\s+(?:to|at|=)\s+(?:₱|php\s*)?[\d,]+(?:\.\d{1,2})?\s*k?\s*(?:total|in\s+all|all\s+in|overall)?\s*[.!]?\s*$`, "i").test(text);
-  if (!form && !monthOnly && (!/\b(budget|limit|cap)\b/i.test(text) || !(SET.test(text) || /\badd\b/i.test(text) || (namesLine && /\bbudget\b/i.test(text))))) return null;
+  // And "set October to December to 9000", which the app's own examples tell the owner to type (13 October 2026 audit).
+  const monthOnly = new RegExp(
+    String.raw`^\s*(?:please\s+)?(?:set|make|put|change)\s+(?:the\s+)?${MONTH_TOKEN}(?:\s+20\d{2})?(?:\s*(?:to|-|until|through|hanggang)\s*${MONTH_TOKEN}(?:\s+20\d{2})?)?\s+(?:to|at|=)\s+(?:₱|php\s*)?[\d,]+(?:\.\d{1,2})?\s*k?\s*(?:total|in\s+all|all\s+in|overall)?\s*[.!]?\s*$`,
+    "i",
+  ).test(text);
+  /*
+   * "set bills and subscriptions to 2000", "set November spending to 12000
+   * and bills to 2000": a line of the budget named with "set", no word
+   * budget. Both went to the entry editor and offered to change a saved
+   * row's amount (13 October 2026 audit). Never when a row is named.
+   */
+  const lineCommand = namesLine && /^\s*(?:please\s+)?(?:set|make|put|change|update)\b/i.test(text) && !/#\s*\d|\b(?:entry|entries|row|record|paid|spent|bought|received)\b/i.test(text);
+  if (!form && !monthOnly && !lineCommand && (!/\b(budget|limit|cap)\b/i.test(text) || !(SET.test(text) || /\badd\b/i.test(text) || (namesLine && /\bbudget\b/i.test(text))))) return null;
   const span = spanIn(text, asOf);
   const { year, month } = span ?? monthIn(text, asOf);
   const scope = span?.scope ?? scopeIn(text);
@@ -626,7 +645,9 @@ export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: Iso
   if (value === null) return null;
   if ((TOTAL.test(text) || monthOnly) && by === 0) return { kind: "tracks", year, month, total: value, scope, ...(toMonth ? { toMonth } : {}) };
   if (/\b(bills?|subscriptions?|subs)\b/i.test(text)) return { kind: "tracks", year, month, billsSubs: by < 0 ? -value : value, ...(by !== 0 ? { by: true } : {}), scope, ...(toMonth ? { toMonth } : {}) };
-  return { kind: "tracks", year, month, spending: by < 0 ? -value : value, ...(by !== 0 ? { by: true } : {}), scope, ...(toMonth ? { toMonth } : {}) };
+  // A budget with no line named is the whole month, bills inside it, as "set November to 9000" is (13 October 2026 audit).
+  if (by === 0) return { kind: "tracks", year, month, total: value, scope, ...(toMonth ? { toMonth } : {}) };
+  return { kind: "tracks", year, month, spending: by < 0 ? -value : value, by: true, scope, ...(toMonth ? { toMonth } : {}) };
 }
 
 /** The figures typed on a budget card, a month. */

@@ -263,12 +263,12 @@ export function Statements({
       header: "Description",
       render: (l) => (
         <span className="fms-stmtdesc">
-          <span className="t-body fms-truncate" title={l.description}>
+          <span className="t-body fms-wraptext" title={l.description}>
             {l.description}
           </span>
           {/* What a transfer moved and what it cost, which its columns cannot say. */}
           {l.detail && (
-            <span className="t-micro fms-truncate" style={{ color: "var(--ink-3)" }} title={l.detail}>
+            <span className="t-micro fms-wraptext" style={{ color: "var(--ink-3)" }} title={l.detail}>
               {l.detail}
             </span>
           )}
@@ -481,7 +481,7 @@ export function Statements({
                 <li key={l.id} className="fms-dbrow">
                   <div className="fms-dbrow-main">
                     <div className="fms-dbrow-text">
-                      <span className="t-body-strong fms-truncate">{l.description}</span>
+                      <span className="t-body-strong fms-wraptext">{l.description}</span>
                       <div className="t-micro" style={{ color: "var(--ink-3)" }}>
                         {formatShort(l.date)}{l.coversTo ? ` to ${formatShort(l.coversTo)}` : ""} · {l.kind}
                         {l.fromWallet || l.toWallet ? ` · ${[l.fromWallet, l.toWallet].filter(Boolean).join(" → ")}` : ""}
