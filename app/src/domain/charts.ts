@@ -121,8 +121,19 @@ export function chartDirection(chart: Chart): "spending" | "revenue" {
  * A word here is worth more than a line of prompt telling a model not to say
  * something true about itself.
  */
+/*
+ * Only the words that ask for a picture. "Breakdown", "break down" and
+ * "show me" went with them, and "give me a breakdown, very detailed" or
+ * "show my spending this month like detailed" were drawn when the owner
+ * wanted it written (13 October 2026). Those are `presentationFor`'s
+ * "either": written first, with the picture offered.
+ */
 const WANTS_CHART =
-  /\b(chart|graph|pie|bar|bars|breakdown|break down|visual|visuals|visuali[sz]e|plot|show me|diagram|trend|trends|trending|over time|shape of)\b/i;
+  /\b(chart|charts|graph|graphs|pie|bar|bars|bar chart|visual|visuals|visuali[sz]e|plot|diagram|trend|trends|trending|over time|shape of|line chart)\b/i;
+
+/** Asking for it written: a summary, a list, the details, in the chat. */
+const WANTS_TEXT =
+  /\b(summary|summari[sz]e|overview|report|detailed|details|in detail|list|listed|itemi[sz]e|in text|as text|in words|text only|written|write it|explain|tell me|walk me through|plain|here in (?:the )?chat|sa text)\b/i;
 
 /** Asking for the written version. */
 const WANTS_REPORT = /\b(report|summary|summarise|summarize|overview|statement)\b/i;
@@ -717,7 +728,37 @@ export const asksForProse = (question: string): boolean =>
   );
 
 /** True when the message is asking to see a chart at all. */
-export const wantsChart = (question: string): boolean => WANTS_CHART.test(question);
+export const wantsChart = (question: string): boolean => WANTS_CHART.test(question) && !/\b(?:not|no|without|ayoko ng)\s+(?:a |the |any )?(?:chart|graph|pie|bars?)\b/i.test(question);
+
+/**
+ * How the answer should come: drawn, written, or either.
+ *
+ * Asked for by name ("pie", "trend", "chart my food") it is drawn. Asked
+ * for written ("summary", "detailed", "list", "explain", "not a chart") it
+ * is written, and the chart is offered, never pushed. Anything else ("show
+ * me my spending", "breakdown of October") is "either": written, with one
+ * line offering the picture, so the owner chooses (13 October 2026: "they
+ * should communicate, not just show it instantly").
+ */
+export type Presentation = "chart" | "text" | "either";
+export function presentationFor(question: string): Presentation {
+  if (/\b(?:not|no|without|ayoko ng)\s+(?:a |the |any )?(?:chart|graph|pie|bars?)\b/i.test(question)) return "text";
+  if (wantsChart(question)) return "chart";
+  if (WANTS_TEXT.test(question) || asksForProse(question)) return "text";
+  return "either";
+}
+
+/**
+ * A short yes to an offered picture: "pie", "bars please", "yes as a trend",
+ * "sige graph". The kind it names, or "chart" for a plain yes to drawing it.
+ */
+export function drawReply(said: string): "pie" | "bars" | "trend" | "chart" | null {
+  const t = said.trim().toLowerCase().replace(/[.!]+$/, "");
+  if (t.split(/\s+/).length > 7) return null;
+  const m = /^(?:(?:yes|yeah|yep|sure|ok(?:ay)?|sige|oo|go|please|pls)[\s,]+)*(?:(?:draw|show|make|give)(?: me)?(?: it| that)?(?: (?:as|in))?(?: a| an)?\s+)?(?:(?:as|in)\s+(?:a\s+)?)?(pie|pie chart|bars?|bar chart|trend|line|line chart|chart|graph)(?:\s+(?:please|pls|chart|it|po))*$/.exec(t);
+  if (m?.[1]) return /^pie/.test(m[1]) ? "pie" : /^bar/.test(m[1]) ? "bars" : /^(?:trend|line)/.test(m[1]) ? "trend" : "chart";
+  return /^(?:yes|yeah|yep|sure|ok(?:ay)?|sige|oo)[\s,]*(?:please|pls)?[\s,]*(?:draw it|show it|draw|show me)$/.test(t) ? "chart" : null;
+}
 
 /**
  * A period named on its own, with a chart already on screen.

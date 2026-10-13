@@ -148,7 +148,9 @@ describe("what the words say to draw", () => {
   });
 
   it("puts a chart beside a question only when it shows more than one figure", () => {
-    expect(chartHelps("where did my money go this month?", { by: "item", shape: "pie" }, false)).toBe(true);
+    // Not asked for by name and not about change over time: offered after the words, not drawn (13 October 2026).
+    expect(chartHelps("where did my money go this month?", { by: "item", shape: "pie" }, false)).toBe(false);
+    expect(chartHelps("pie of where my money went this month", { by: "item", shape: "pie" }, false)).toBe(true);
     expect(chartHelps("how much did I spend today?", { by: "item" }, false)).toBe(false);
     expect(chartHelps("how much did I spend each month?", { by: "month" }, false)).toBe(true);
     expect(chartHelps("is it a trend??", { by: "month", shape: "line" }, true)).toBe(false);

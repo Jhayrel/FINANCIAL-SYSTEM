@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildChatContext } from "./aiChatContext";
 import { buildContext } from "./aiContext";
-import { asksForProse, wantsChart } from "./charts";
+import { asksForProse, drawReply, presentationFor, wantsChart } from "./charts";
 import type { Budgets, ReferenceLists, Transaction } from "./types";
 
 const reference: ReferenceLists = {
@@ -153,7 +153,28 @@ describe("a request to see something reaches the part that draws", () => {
 
   it("still catches the plain words", () => {
     expect(wantsChart("chart my food")).toBe(true);
-    expect(wantsChart("break down august")).toBe(true);
+    expect(wantsChart("pie of my spending")).toBe(true);
+  });
+
+  // 13 October 2026: written when asked written, drawn when asked drawn, offered when it is not said.
+  it("decides how to answer: drawn, written, or offered", () => {
+    expect(presentationFor("break down august")).toBe("either");
+    expect(presentationFor("show my spending this month")).toBe("either");
+    expect(presentationFor("Can you show my spending this month like detailed")).toBe("text");
+    expect(presentationFor("Give me a breakdown to all very detailed including debt")).toBe("text");
+    expect(presentationFor("summary of my spending")).toBe("text");
+    expect(presentationFor("Not a chart, i want in text here in chat")).toBe("text");
+    expect(presentationFor("pie of my spending this month")).toBe("chart");
+    expect(presentationFor("show me the trend of food")).toBe("chart");
+  });
+
+  it("reads a short reply to an offered picture", () => {
+    expect(drawReply("pie")).toBe("pie");
+    expect(drawReply("bars please")).toBe("bars");
+    expect(drawReply("yes as a trend")).toBe("trend");
+    expect(drawReply("sige graph")).toBe("chart");
+    expect(drawReply("yes draw it")).toBe("chart");
+    expect(drawReply("how much did I spend on pie")).toBeNull();
   });
 
   it("leaves an ordinary question alone", () => {

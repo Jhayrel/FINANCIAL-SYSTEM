@@ -41,6 +41,7 @@ import {
   overTime,
   wantsBothDirections,
   windowOf,
+  presentationFor,
 } from "./charts";
 import { budgetForMonth } from "./budget";
 import { owedChange, type Debt } from "./debt";
@@ -274,8 +275,16 @@ export function chartHelps(question: string, hint: ChartHint | null, chartJustSh
   if (question.trim().split(/\n+/).length >= 3 || question.trim().split(/\s+/).length > 60) return false;
   if (chartJustShown && /\b(?:it|that|this|those|these|the chart|the graph|the trend)\b/i.test(question)) return false;
   if (ONE_FIGURE.test(question) && !SPREAD.test(question)) return false;
-  return true;
+  /*
+   * Drawn beside the words only when asked for by name, or when the question
+   * is about change over time, which a picture shows and a sentence does
+   * not. Anything else is offered, not drawn (13 October 2026).
+   */
+  return presentationFor(question) === "chart" || OVER_TIME.test(question);
 }
+
+/** A question about how something moved across periods. */
+const OVER_TIME = /\b(?:going up|went up|rising|rose|increas\w*|decreas\w*|dropp\w*|falling|fell|month by month|each month|every month|per month|week by week|over the (?:months|weeks|year)|compared? (?:to|with)|vs\.?|versus|than last (?:month|week|year))\b/i;
 
 // ── The charts this file draws ──────────────────────────────────────────────
 

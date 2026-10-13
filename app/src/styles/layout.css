@@ -5152,18 +5152,27 @@ button.fms-recent-row:disabled {
 @media (min-width: 1280px) {
   .fms-budgetpage {
     grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+    /*
+     * Where it went beside the planner, and the bills across the whole width
+     * under both. Side by side, the short bills card left an empty column
+     * under it as tall as the list beside it (owner, 13 October 2026: "I hate
+     * these gaps").
+     */
     grid-template-areas:
       "picker picker"
       "top rail"
-      "grid rail"
+      "cats rail"
+      "bills bills"
       "rest rest";
     /* A planner taller than the month and its detail stretches the detail, not the month. */
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: auto auto 1fr auto auto;
   }
 
   .fms-budgetpicker { grid-area: picker; }
   .fms-budgettop { grid-area: top; }
-  .fms-budgetgrid { grid-area: grid; }
+  .fms-budgetgrid { display: contents; }
+  .fms-budgetgrid > :nth-child(1) { grid-area: cats; }
+  .fms-budgetgrid > :nth-child(2) { grid-area: bills; }
   .fms-budgetrest { grid-area: rest; }
   .fms-budgetrail { grid-area: rail; }
 }

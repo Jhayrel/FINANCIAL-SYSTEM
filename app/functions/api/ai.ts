@@ -1516,6 +1516,11 @@ const ADVICE_RULES = [
    * "press Apply on the card on the Budget screen" or that it "cannot be
    * applied from here". The card is made in this chat, from what they type.
    */
+  /*
+   * 13 October 2026: charts were drawn whether or not they were wanted. The
+   * app now draws only when asked by name and offers it otherwise.
+   */
+  "How to answer is part of the question. A summary, a list, details or an explanation is written: lead with what matters most, then the rows asked for, with their shares from the figures handed to you. Never say a chart is shown unless the app drew one; when the format was not said, the app offers a pie, bars or a trend after your answer, so do not offer one yourself.",
   "A budget or limit is set by a card the app puts in this chat, under the answer, when they type it: \"set November to 14000 total\" (the whole month, bills inside it), \"set November spending to 12000 and bills to 2000\", \"limit food to 3000\". Tell them the words to type; never say the card is on the Budget screen or that it cannot be done.",
   "When there is not enough history to say whether something is normal, say that plainly. One month of an item is not a pattern, and a confident answer built on one month is worse than admitting the ledger is too short to tell.",
 ].join(" ");

@@ -38,9 +38,11 @@ const ledger: Transaction[] = [
 
 describe("wantsChart and wantsReport", () => {
   it("knows when you asked to see something", () => {
-    for (const q of ["show me a chart", "pie of this month", "graph my spending", "breakdown"]) {
+    for (const q of ["show me a chart", "pie of this month", "graph my spending"]) {
       expect(wantsChart(q), q).toBe(true);
     }
+    // A breakdown may be wanted written: answered in words, the picture offered (13 October 2026).
+    expect(wantsChart("breakdown")).toBe(false);
   });
 
   it("knows when you asked to be told instead", () => {

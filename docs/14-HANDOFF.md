@@ -1216,6 +1216,22 @@ held, given, kept, let go, cleared) through every part; the money core held
 | Buttons for each person did not scale, and a picked person beside an empty name box read as two questions | One searchable dropdown: money still open, settled, on the other side, archived, and "Someone new" last (the only way to a name box); the side picked stays |
 | Archived people were refused ("reopen it in Settings") | Saving an entry for them reopens them, from the form or the chat (`handleSave`); the chat's person list shows them as "(archived, reopens)" |
 
+### 2026-10-14: how to answer is part of the question; wallet alerts by use; no gaps
+
+| Asked | Done |
+|---|---|
+| "Know when to draw, communicate, not show it instantly" | `presentationFor`: asked for by name (chart, pie, bars, trend, graph, over time) is drawn; asked written (summary, detailed, list, explain, not a chart) is written from the app's own table, every row with its share; not said ("show my spending", "breakdown", "where did my money go") is written and the picture offered in one line; "pie", "bars", "trend" or "yes draw it" next draws that same question (`drawReply`). A chart beside a written answer only for change over time. The model is told the same |
+| "Gcash is empty every single time" | Wallet alerts by use: below zero always; just ran low, once for three days; low and still spent from in the last 7 days, a warning; left low on purpose, nothing |
+| Statement text cut off | PDF rows grow to fit (description up to 14 lines, notes 40); on screen descriptions wrap |
+| Budget phrases the app suggests | "set October to December to 9000", "set bills and subscriptions to 2000", "set November spending to 12000 and bills to 2000" are budget cards, never an entry edit; 2000 to 2099 are money unless beside a month; a budget with no line named is the whole month |
+| PC Budget gaps | Cards no longer stretch; where it went sits beside the planner and the bills run across the full width under both; kind names are not a row of links; "Budget and your money" is a panel |
+| Income answers | Money held for someone is not borrowing; kept as yours is income |
+
+The 13 October audit's other findings (the model not seeing cards in the
+conversation, raw debt codes in its context, two income figures, chart rows
+without shares, "how to use this system", "can I go to gym" without an
+afford reading) are listed in the session transcript and still open.
+
 ---
 
 ## 6. What the owner has to do

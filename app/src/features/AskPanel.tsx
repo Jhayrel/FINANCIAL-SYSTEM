@@ -116,6 +116,8 @@ import {
   asksForProse,
   wantsReport,
   wantsChart,
+  presentationFor,
+  drawReply,
   overTime,
   asksPie,
   narrowsChart,
@@ -1068,6 +1070,14 @@ export function AskPanel({
    * for nothing.
    */
   const entriesLeftBehind = useRef<string | null>(null);
+  /**
+   * A question answered in words whose picture was offered, not drawn: a
+   * short "pie", "bars" or "trend" next draws that same question
+   * (`drawReply`, 13 October 2026).
+   */
+  const offeredDraw = useRef<string | null>(null);
+  /** Set while an answer is being given, when a picture of it should be offered after it. */
+  const offerAfter = useRef<string | null>(null);
   /**
    * A message the assistant asked about rather than guessed at ("I paid all
    * my balances": which ones?). The short reply after it is read into it.
@@ -4207,6 +4217,28 @@ export function AskPanel({
     const essay = files.length === 0 && isEssay(note);
     const lead = essay ? (ruled.split(/\n/).find((l) => l.trim()) ?? ruled) : ruled;
     /*
+     * "pie", "bars please", "yes as a trend" right after a picture was
+     * offered: the question that was answered in words, drawn that way.
+     */
+    const drawAs = offeredDraw.current && !as && files.length === 0 ? drawReply(lead) : null;
+    // An offer is for the next message only.
+    if (!drawAs) offeredDraw.current = null;
+    if (drawAs && offeredDraw.current) {
+      const question = `${offeredDraw.current} ${drawAs === "pie" ? "as a pie" : drawAs === "trend" ? "trend" : drawAs === "bars" ? "bar chart" : "chart"}`;
+      offeredDraw.current = null;
+      const charts = chartsFor(question, mergeHint(localHint(question, reference.credits ?? []), null, question, reference.credits ?? []), null);
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "insights", { text: note }));
+      if (charts.length === 0) {
+        say({ kind: "assistant", text: "There is nothing in that period to draw.", from: "this device" });
+        return;
+      }
+      for (const chart of charts) drawChart(chart);
+      return;
+    }
+
+    /*
      * "You forgot the 16 fee", straight after an entry the chat added: that
      * entry with the fee, as a change card. It was answered "I could not
      * find an entry in that" (13 October 2026), and the model said the fee
@@ -4920,9 +4952,20 @@ export function AskPanel({
           : [buildChart(question, reportRows, asOf, undefined, pair)].filter((c): c is Chart => c !== null)
         : (() => {
             const hint = mergeHint(localHint(question, credits), routed?.draw ?? null, question, credits);
-            return chartHelps(question, hint, justShown) ? chartsFor(question, hint, null) : [];
+            if (chartHelps(question, hint, justShown)) return chartsFor(question, hint, null);
+            // Not asked for by name: written, and the picture offered rather than pushed.
+            if (hint && !justShown && presentationFor(question) === "either") offerAfter.current = question;
+            return [];
           })();
       return charts.filter((c) => !recent.includes(c.title));
+    };
+    /** One line after a written answer, when its picture was offered rather than drawn. */
+    const offerPicture = (): void => {
+      const question = offerAfter.current;
+      offerAfter.current = null;
+      if (!question) return;
+      offeredDraw.current = question;
+      say({ kind: "assistant", text: 'Want to see it drawn? Say "pie", "bars" or "trend".', from: "this device" });
     };
 
     /**
@@ -4961,6 +5004,7 @@ export function AskPanel({
       setBusy(true);
       try {
         await askQuestion(note, false, { text: worked, fallback }, drawn);
+        offerPicture();
       } finally {
         setBusy(false);
       }
@@ -6572,7 +6616,7 @@ export function AskPanel({
      * words, with no word for a chart, is said, and a chart that helps comes
      * beside it (`besideFor`).
      */
-    const wantsWords = asksForProse(note) || plainQuestion || (wantsReport(note) && !asksPie(note) && !narrows && !followUp);
+    const wantsWords = asksForProse(note) || plainQuestion || presentationFor(note) === "text" || (wantsReport(note) && !asksPie(note) && !narrows && !followUp);
     /*
      * Except a chart of what is owed: "chart my maya credit" is a picture of
      * the line over time, which the app now draws (`chartAsk.ts`). Going
@@ -6580,12 +6624,42 @@ export function AskPanel({
      */
     const owedChart = measureOf(localHint(ruled, credits)) === "owed";
 
+    /*
+     * A summary of spending or income asked for in words, or not said either
+     * way ("show my spending this month like detailed", "where did my money
+     * go?"): the app's own table, every row with its share, written; the
+     * picture offered after it when the format was not said (13 October 2026).
+     */
+    const presentation = presentationFor(note);
+    const writtenHint =
+      files.length === 0 && !as && !aboutADebt && (presentation === "text" || (!followUp && !narrows)) && presentation !== "chart" &&
+      /\b(?:spend|spent|spending|expenses?|gastos|income|incoming|earn\w*|revenue|money (?:went|go))\b/i.test(note) &&
+      /\b(?:summary|summari[sz]e|overview|breakdown|break down|detailed|details|list|show|where|what did i)\b/i.test(note)
+        ? (localHint(ruled, credits) ?? { by: "item" })
+        : null;
+    if (writtenHint && !measureOf(writtenHint)) {
+      const table = buildChart(inWords(ruled, writtenHint), reportRows, asOf, undefined, null, 200);
+      if (table && table.rows.length > 0) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "insights", { text: note }));
+        const words = chartAsText(table);
+        if (presentation === "either") offerAfter.current = ruled;
+        await answerWithModel(
+          `The figures the message asks about, worked out by the app from the ledger, every row. Answer in words with them: lead with what matters most, then the rows they asked for, with each one's share. Do no arithmetic of your own.\n${words}`,
+          words,
+        );
+        return;
+      }
+    }
+
     if (
       files.length === 0 &&
       !as &&
       (!aboutADebt || owedChart) &&
       !wantsWords &&
-      (saysChart ||
+      // The model routing it as a chart is not the owner asking for one: drawn only when asked for by name (13 October 2026).
+      ((saysChart && presentationFor(note) !== "text" && (presentationFor(note) === "chart" || turns.slice(-3).some(isChart))) ||
         narrows ||
         (routed === null && (wantsChart(note) || followUp)) ||
         // The model said prose; a chart is on screen and this names a period.
@@ -7363,6 +7437,7 @@ export function AskPanel({
                 : null,
           besideFor(ruled, pair),
         );
+        offerPicture();
 
         /*
          * A message can be both, and the entries in it must not be lost.
