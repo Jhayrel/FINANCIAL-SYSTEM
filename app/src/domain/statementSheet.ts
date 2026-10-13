@@ -481,7 +481,13 @@ export function buildSheet(
       moneyOut,
       balance: running,
       // A date range says its days on the statement too (`covers.ts`).
-      detail: t.coversTo && t.coversTo > t.date ? [detail, `Covers ${coverWords(t)}`].filter(Boolean).join("; ") : detail,
+      detail: (() => {
+        // Part of a range that runs outside the period: what this period holds of it (`statements.ts`).
+        const whole = t.coversTo || t.id ? transactions.find((o) => o.id === t.id) : undefined;
+        const part = whole && whole.total !== t.total ? `${formatMoney(t.total)} of ${formatMoney(whole.total)} over ${coverWords(whole)}; the rest is in the next or last period` : "";
+        const days = t.coversTo && t.coversTo > t.date ? `Covers ${coverWords(t)}` : "";
+        return [detail, part || days].filter(Boolean).join("; ");
+      })(),
       ...(t.coversTo && t.coversTo > t.date ? { coversTo: t.coversTo } : {}),
     });
   }

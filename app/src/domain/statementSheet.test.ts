@@ -350,3 +350,20 @@ describe("a date range on the statement", () => {
     expect(sheet.lines.find((l) => l.description === "Food")?.coversTo).toBeUndefined();
   });
 });
+
+describe("a range across months on a spending sheet (13 October 2026)", () => {
+  it("counts the days inside the period, and keeps it whole on the account sheet", () => {
+    const rows = [
+      row({ date: "2026-09-01", type: "Revenue", toWallet: "Cash", amount: 1000000 }),
+      row({ date: "2026-09-29", type: "Spending", fromWallet: "Cash", amount: 400000, coversTo: "2026-10-02", description: "Trip" }),
+    ];
+    const october = buildSheet(rows, { type: "expense", year: 2026, fromMonth: 10, toMonth: 10 }, reference);
+    const trip = october.lines.find((l) => l.description === "Trip");
+    expect(trip?.moneyOut).toBe(200000);
+    expect(trip?.detail).toContain("₱2,000.00 of ₱4,000.00");
+    const september = buildSheet(rows, { type: "expense", year: 2026, fromMonth: 9, toMonth: 9 }, reference);
+    expect(september.lines.find((l) => l.description === "Trip")?.moneyOut).toBe(200000);
+    const account = buildSheet(rows, { type: "account", year: 2026, fromMonth: 9, toMonth: 9 }, reference);
+    expect(account.lines.find((l) => l.description === "Trip")?.moneyOut).toBe(400000);
+  });
+});

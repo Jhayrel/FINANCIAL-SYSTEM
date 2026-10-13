@@ -484,6 +484,17 @@ function notesFor(
       }
     }
 
+    if (safe.budgetLeft !== null && safe.budgetLeft > 0 && safe.budgetLeft > Math.max(0, safe.safe) && safe.wallets >= 0) {
+      /*
+       * The plan promises more than the money: what is left of the spending
+       * budget is more than is safe to spend. Said on the Dashboard, in the
+       * chat's safe answer and to the model alike (owner, 13 October 2026:
+       * "make sure the system and ai all parts will know about this").
+       */
+      warn(
+        `The spending budget still has ${money(safe.budgetLeft)} left, but only ${money(Math.max(0, safe.safe))} is safe to spend: it promises ${money(safe.budgetLeft - Math.max(0, safe.safe))} more than your money. The money is the limit; lower the budget on the Budget screen.`,
+      );
+    }
     if (safe.budgetLeft !== null && safe.budgetLeft <= 0) {
       warn("The spending budget is used up: anything more this month is past the plan, even with the money there.");
     } else if (safe.limitedBy === "budget" && safe.budgetLeft !== null) {

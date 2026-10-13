@@ -194,6 +194,21 @@ const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const says = (text: string, name: string): boolean =>
   name.trim().length >= 3 && new RegExp(`(?<![\\w-])${escape(name.trim())}s?(?![\\w-])`, "i").test(text);
 
+/**
+ * A name said the short way: "Maya Bank" for "Maya Bank (Personal savings)",
+ * "dito" for "Dito Prepaid" when no other name starts with that word
+ * (12 October 2026 audit, A16).
+ */
+const namedIn = (text: string, name: string, all: readonly string[]): boolean => {
+  if (says(text, name)) return true;
+  const bare = name.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  if (bare !== name && says(text, bare) && all.filter((n) => n.replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase() === bare.toLowerCase()).length === 1) return true;
+  const first = bare.split(/\s+/)[0] ?? "";
+  if (first.length < 4 || first === bare) return false;
+  const sharing = all.filter((n) => (n.split(/\s+/)[0] ?? "").toLowerCase() === first.toLowerCase());
+  return sharing.length === 1 && says(text, first);
+};
+
 /** Words that name a statement, never a part of one: "revenue statement" is not the kind called Revenue. */
 const SHEET_WORD = /^(?:account|statement|revenue|income|expense|spending|bills?|subscriptions?|transfers?|savings|borrowed|utang|lent|credit|debts?|loans?|opening)$/i;
 
@@ -230,7 +245,8 @@ export function withCut(ask: ExportAsk, transactions: readonly Transaction[], re
     if (sheet === "bills") {
       const bill = /\bbills?\b/i.test(text);
       const sub = /\bsubscriptions?\b/i.test(text);
-      const pick = keys.filter((k) => k.startsWith("kind:")).find((k) => says(text, k.slice(5)) && !SHEET_WORD.test(k.slice(5)));
+      const kindNames = keys.filter((k) => k.startsWith("kind:")).map((k) => k.slice(5));
+      const pick = keys.filter((k) => k.startsWith("kind:")).find((k) => namedIn(text, k.slice(5), kindNames) && !SHEET_WORD.test(k.slice(5)));
       if (pick) return pick;
       if (sub && !bill && keys.includes("cat:Subscriptions")) return "cat:Subscriptions";
       if (bill && !sub && keys.includes("cat:Bills")) return "cat:Bills";
@@ -241,7 +257,7 @@ export function withCut(ask: ExportAsk, transactions: readonly Transaction[], re
     const rank = (k: string): number => (k.startsWith("kind:") ? 0 : k.startsWith("debt:") ? 1 : 2);
     const said = keys
       .filter((k) => !k.startsWith("cat:"))
-      .filter((k) => !SHEET_WORD.test(nameOf(k)) && says(text, nameOf(k)))
+      .filter((k) => !SHEET_WORD.test(nameOf(k)) && namedIn(text, nameOf(k), keys.map(nameOf)))
       .sort((a, b) => nameOf(b).length - nameOf(a).length || rank(a) - rank(b));
     return said[0] ?? null;
   };
@@ -259,7 +275,8 @@ export function withCut(ask: ExportAsk, transactions: readonly Transaction[], re
     if (only?.startsWith("kind:") || only?.startsWith("debt:")) return { ...ask, type: sheet, only };
   }
   // "Maya statement": that wallet, with its balance after each row.
-  const wallet = [...reference.wallets, ...reference.savings].sort((a, b) => b.length - a.length).find((w) => says(text, w));
+  const accounts = [...reference.wallets, ...reference.savings];
+  const wallet = [...accounts].sort((a, b) => b.length - a.length).find((w) => namedIn(text, w, accounts));
   return wallet ? { ...ask, type: "wallet", wallet } : ask;
 }
 

@@ -1402,8 +1402,16 @@ export function buildChart(
     by,
     kind,
     rows: kept.map(([label, g]) => ({
-      label:
-        by === "month"
+      // The bucket for what did not fit is a word, not a date: it read " NaN" by day (12 October 2026 audit, A17).
+      label: !/^\d{4}-\d{2}/.test(label)
+        ? by === "day" && /^other/i.test(label)
+          ? "Other days"
+          : by === "week" && /^other/i.test(label)
+            ? "Other weeks"
+            : by === "month" && /^other/i.test(label)
+              ? "Other months"
+              : label
+        : by === "month"
           ? monthName(label)
           : by === "day"
             ? `${MONTHS[Number(label.slice(5, 7)) - 1]?.slice(0, 3) ?? ""} ${Number(label.slice(8, 10))}`

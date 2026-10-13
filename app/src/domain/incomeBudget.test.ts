@@ -105,3 +105,34 @@ describe("asked in chat", () => {
     for (const q of ["set my budget to 5000", "how many times did I change my budget", "I got 500 from Maya", "what is my income this month"]) expect([q, asksIncomeBudget(q)]).toEqual([q, false]);
   });
 });
+
+describe("the budget from income (owner, 13 October 2026)", () => {
+  it("is what the income leaves after savings and bills, held to the money for a running month", async () => {
+    const { budgetFromIncome } = await import("./incomeBudget");
+    expect(budgetFromIncome({ income: 1000000, keep: 200000, bills: 170000, most: null })).toMatchObject({ ok: true, spending: 630000, capped: false });
+    const held = budgetFromIncome({ income: 1000000, keep: 200000, bills: 170000, most: 500000 });
+    expect(held).toMatchObject({ ok: true, spending: 500000, capped: true, uncapped: 630000 });
+    expect(held.reason).toContain("spending held to ₱5,000.00");
+    expect(budgetFromIncome({ income: 100000, keep: 90000, bills: 20000, most: null }).ok).toBe(false);
+    expect(budgetFromIncome({ income: 0, keep: 0, bills: 0, most: null }).ok).toBe(false);
+  });
+
+  it("reads the income and the savings out of a sentence", async () => {
+    const { readIncomePlan } = await import("./incomeBudget");
+    expect(readIncomePlan("base my budget on my 10k income, save 20%")).toEqual({ income: 1000000, keep: { percent: 20 } });
+    expect(readIncomePlan("set my budget from my salary of 15000, keep 3000 for savings")).toEqual({ income: 1500000, keep: { amount: 300000 } });
+    expect(readIncomePlan("make my november budget income based")).toEqual({ income: null, keep: null });
+    expect(readIncomePlan("plan my budget from income 12,500 and 3k to savings")).toEqual({ income: 1250000, keep: { amount: 300000 } });
+    expect(readIncomePlan("set my budget to 5000")).toBeNull();
+    expect(readIncomePlan("is my budget still right after this income?")).toBeNull();
+  });
+
+  it("knows income saved before the budget change on the same day was already counted", async () => {
+    const { incomeSinceSet } = await import("./incomeBudget");
+    const plan = { spending: zeros(), billsSubs: zeros(), revisions: { "10": [{ at: "2026-10-12T00:25:21.602Z", what: "tracks", spending: 2600000, billsSubs: 170000, wasSpending: 1500000, wasBillsSubs: 170000, when: "open" }] } } as never;
+    const savedBefore = row({ id: "t-1791764228613", date: "2026-10-12", type: "Revenue", category: "Revenue", fromWallet: "", toWallet: "Maya", amount: 140000, total: 140000 });
+    const savedAfter = row({ id: "t-1791800000000", date: "2026-10-12", type: "Revenue", category: "Revenue", fromWallet: "", toWallet: "Maya", amount: 50000, total: 50000 });
+    const nextDay = row({ date: "2026-10-13", type: "Revenue", category: "Revenue", fromWallet: "", toWallet: "Maya", amount: 1000000, total: 1000000 });
+    expect(incomeSinceSet([savedBefore, savedAfter, nextDay], plan, 2026, 10).amount).toBe(1050000);
+  });
+});

@@ -698,7 +698,8 @@ export function whyOver(
     .sort((a, b) => b.amount - b.usual - (a.amount - a.usual));
   if (above.length > 0) {
     lines.push(`Items above their usual month (the median of ${monthsRead(usual.read)}), most above first:`);
-    for (const r of above.slice(0, 8)) lines.push(`- ${r.n}: ${money(r.amount)}, usually ${money(r.usual)}, ${money(r.amount - r.usual)} more`);
+    // Something a usual month does not have is said so, never "usually PHP 0.00" (12 October 2026 audit, A17).
+    for (const r of above.slice(0, 8)) lines.push(r.usual > 0 ? `- ${r.n}: ${money(r.amount)}, usually ${money(r.usual)}, ${money(r.amount - r.usual)} more` : `- ${r.n}: ${money(r.amount)}, not in a usual month`);
   }
   if (totals.interest > 0) lines.push(`- Debt interest and charges: ${money(totals.interest)}, usually ${money(usual.interest)}`);
   const below = now.map(([n, amount]) => ({ n, amount, usual: usualOf.get(n.toLowerCase()) ?? 0 })).filter((r) => r.amount < r.usual);

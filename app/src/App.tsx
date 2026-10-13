@@ -63,7 +63,8 @@ import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { debtWalletDirection, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { spreadCovered } from "./domain/covers";
-import { formatMedium, getYear, today } from "./domain/dates";
+import { formatMedium, getMonth, getYear, today } from "./domain/dates";
+import { monthBrief } from "./domain/monthPlan";
 import { systemToCsv } from "./domain/csv";
 import { sheetRequestOf, type ExportAsk } from "./domain/exportAsk";
 import { buildStatementBetween, statementFilename, statementToCsv } from "./domain/statements";
@@ -1011,6 +1012,7 @@ export default function App() {
         lowBalanceThreshold: settings.lowBalanceThreshold,
         asOf,
         spendingTypes: reference.spendingTypes,
+        safe: monthBrief({ transactions: reportRows, reference, budgets, debts: settings.credits, year: getYear(asOf), month: getMonth(asOf), asOf }).safe,
       }),
     [reportRows, settings.accounts, settings.credits, settings.lowBalanceThreshold, budgets, reference, asOf],
   );

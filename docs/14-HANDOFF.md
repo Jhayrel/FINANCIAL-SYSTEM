@@ -1136,11 +1136,23 @@ chat answers "I got 10k, adjust my budget" from the same figures, and the
 model is given them. Every change is one revision, with the reason. No
 database rule change: the budget rule checks only the two monthly lists.
 
-Not done, and why: statements still show a range whole in its first month on
-spending sheets (D6, an owner decision: account and wallet statements must
-stay whole); a few smaller chat items (weekend as a spend window, "Maya Bank"
-in statement cuts, short bill names, two pace figures in the prompt, retry
-notes when the context is cut).
+Then, the same day (owner: "you haven't implemented ... I can adjust it based
+on income", and the card was "kind of confusing"):
+
+| Asked | Where it lives |
+|---|---|
+| Plan a month from income | The budget editor's "Work it out from income": the income (filled with what came in, or the usual), savings by amount or 10/20/30%, bills; spending = income less savings less bills, held to what the money keeps for the running month (`budgetFromIncome`). Saved with the reason in the history |
+| Chat | "base my budget on my 10k income, save 20%" makes the usual budget card from the same sum (`readIncomePlan`); "I got 10k, adjust my budget" is answered with the figures |
+| The card, clearer | "Budget and your money": four figures, one sentence, one button; the split only when money came in, pre-filled, quiet until typed |
+| Every part knows | A budget that promises more than the money is a Dashboard warning, a bell alert (`budget-beyond-money`), a line in the chat's safe answer and in the AI summary; income after the budget was set is a bell alert (`income-since-budget`) |
+| Same-day income | Income saved before the budget change on the same day is not "since" (the save time is in the row id) |
+| The rest of the list | Spending statements split a range by period (D6); weekends read as Saturday and Sunday; "Maya Bank" and short bill names in statement requests; one pace figure named for the model; cut sections named when the context is trimmed; chips guarded against stray taps; "Other days" for the pie's last slice; "not in a usual month" for "usually PHP 0.00"; no "fits the budget too" after a No |
+| Size | The AI summary was 4,630 bytes on the 13 October data: five alerts at 110 characters, settled debts and empty accounts counted not listed; 3,759 now |
+
+Tested: 2,000 seeded random ledgers each for the split, the from-income sum and
+the range round trip; the owner's October replayed day by day; every screen
+and the bell at 1280 and 390 on the 13 October data; the budget editor, card,
+bell, Dashboard and chat driven in a browser, phone and PC.
 
 ---
 

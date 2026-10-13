@@ -312,7 +312,13 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
     } else if (cost !== null && cost > safe.budgetLeft) {
       lines.push(`It would take ${monthName} ${money(cost - safe.budgetLeft)} past its spending budget, which has ${money(safe.budgetLeft)} left.`);
     } else {
-      lines.push(`It fits the budget too: ${money(safe.budgetLeft)} is left of ${monthName}'s spending budget.`);
+      // "too" only after a yes: after "No" it read as agreeing with itself (12 October 2026 audit, A17).
+      const said = lines[0] ?? "";
+      lines.push(
+        /^(?:\*\*)?(?:No|Not)\b/.test(said)
+          ? `On the budget alone it fits, with ${money(safe.budgetLeft)} left of ${monthName}'s spending budget; the money above is what decides.`
+          : `It fits the budget too: ${money(safe.budgetLeft)} is left of ${monthName}'s spending budget.`,
+      );
     }
   }
   return lines.join("\n\n");

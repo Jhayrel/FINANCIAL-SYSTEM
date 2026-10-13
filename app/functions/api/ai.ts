@@ -291,7 +291,14 @@ export function compactContext(context: string, max: number): string {
     head = dropped.length > 0 ? `${parts.join("\n").replace(/\n+$/, "")}${noteOf()}` : parts.join("\n");
   }
 
-  const keptHead = head.length > share ? `${head.slice(0, share).replace(/\n[^\n]*$/, "")}\n(Cut to fit.)` : head;
+  /*
+   * Cut mid-way, the sections past the cut are named, so the model says it
+   * cannot see them rather than answering as if there were none (12 October
+   * 2026 audit, A7: the settings and budget changes vanished on retries).
+   */
+  const lostTitles = head.length > share ? [...head.slice(share).matchAll(/\n## ([^\n]+)/g)].map((m) => m[1]!.trim()) : [];
+  const cutNote = lostTitles.length > 0 ? `\n(Cut to fit; left out: ${lostTitles.slice(0, 6).join("; ")}${lostTitles.length > 6 ? `, and ${lostTitles.length - 6} more` : ""}. Say so if the answer needs them.)` : "\n(Cut to fit.)";
+  const keptHead = head.length > share ? `${head.slice(0, share - cutNote.length).replace(/\n[^\n]*$/, "")}${cutNote}` : head;
   const room = max - keptHead.length;
   if (!tail || room <= 200) return keptHead.length <= max ? keptHead : `${keptHead.slice(0, max - 14)}\n(Cut to fit.)`;
   const lines = tail.split("\n");

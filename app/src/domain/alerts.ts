@@ -40,6 +40,7 @@ import { borrowedMoney, lenderNames } from "./borrowed";
 import { isNeedRow } from "./spendNote";
 import { unusualRows } from "./unusual";
 import { wholeRows } from "./covers";
+import { incomeSinceSet } from "./incomeBudget";
 import { actionableIssues, checkIntegrity } from "./integrity";
 import { monthTotals } from "./totals";
 import { overdueGoals } from "./goalClose";
@@ -98,6 +99,8 @@ export interface AlertInput {
   readonly asOf: IsoDate;
   /** The kinds of spending, with the owner's needs and wants marked. */
   readonly spendingTypes?: readonly Pick<SpendingType, "name" | "necessity">[] | undefined;
+  /** This month's safe to spend and what is left of the spending budget (`monthBrief`), for the budget against the money. */
+  readonly safe?: { readonly safe: Centavos; readonly budgetLeft: Centavos | null; readonly wallets: Centavos } | null | undefined;
 }
 
 /** Pace of spending so far this month, per day. */
@@ -226,6 +229,43 @@ export function financeAlerts(input: AlertInput): Alert[] {
           weight: 70,
         });
       }
+    }
+  }
+
+  // ── The budget against the money ─────────────────────────────────────────
+  {
+    const sf = input.safe;
+    if (sf && sf.wallets >= 0 && sf.budgetLeft !== null && sf.budgetLeft > 0 && sf.budgetLeft > Math.max(0, sf.safe)) {
+      const beyond = sf.budgetLeft - Math.max(0, sf.safe);
+      out.push({
+        id: "budget-beyond-money",
+        level: "warn",
+        area: "budget",
+        title: `The spending budget promises ${money(beyond)} more than your money`,
+        detail: `${money(sf.budgetLeft)} is left of it, but only ${money(Math.max(0, sf.safe))} is safe to spend. Lower it on the Budget screen, under Budget and your money.`,
+        weight: 72,
+      });
+    }
+  }
+
+  // ── Money that came in after the budget was set ─────────────────────────
+  /*
+   * "Nov 1 budget is 5000, then I earn 10k, then I can adjust" (owner, 12
+   * October 2026). Said once it has come in, so the budget can follow it:
+   * the Budget screen splits it into spending, bills or savings, checked
+   * against the money (`incomeBudget.ts`). Never changed without the owner.
+   */
+  {
+    const since = incomeSinceSet(transactions, budgets[String(year)], year, month);
+    if (since.setOn && since.amount >= 10000) {
+      out.push({
+        id: `income-since-budget-${year}-${month}-${since.amount}`,
+        level: "info",
+        area: "budget",
+        title: `${money(since.amount)} came in since you set the ${monthName(month)} budget`,
+        detail: `Open Budget: under the budget, Money that came in puts it into spending, bills or savings, and checks that the budget never promises more than your money.`,
+        weight: 36,
+      });
     }
   }
 

@@ -134,7 +134,8 @@ import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, saysItWasAStatement, wantsThoseEntries, type Intent } from "../domain/intent";
 import { monthBrief } from "../domain/monthPlan";
-import { asksIncomeBudget, incomeBudget, incomeBudgetWords } from "../domain/incomeBudget";
+import { incomeOf } from "../domain/totals";
+import { asksIncomeBudget, budgetFromIncome, incomeBudget, incomeBudgetWords, readIncomePlan } from "../domain/incomeBudget";
 import { asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer } from "../domain/dayFit";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
@@ -4144,6 +4145,15 @@ export function AskPanel({
     }
   };
 
+  /*
+   * A chip or a choice sends on a tap, and they sit where the page moves when
+   * the keyboard opens or closes: a tap in that moment is not taken (A1).
+   */
+  const tapSend = (text: string, as?: Intent): void => {
+    if (touch && Date.now() - settledAt.current < 350) return;
+    void send(text, as);
+  };
+
   const sendNow = async (typed?: string, as?: Intent): Promise<void> => {
     const began = generation.current;
     const note = (typed ?? draft).trim();
@@ -4387,7 +4397,7 @@ export function AskPanel({
      * came in, worked out by the app (`incomeBudget.ts`), so a raise and a
      * saving are never the same peso (owner, 12 October 2026).
      */
-    if (files.length === 0 && !as && asksIncomeBudget(ruled)) {
+    if (files.length === 0 && !as && asksIncomeBudget(ruled) && !readIncomePlan(ruled)) {
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
       const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
@@ -5061,6 +5071,44 @@ export function AskPanel({
     }
     /** What the card says under its figures: where they came from, when that is worth saying. */
     let budgetNote = "";
+    /*
+     * "base my budget on my 10k income, save 20%": the budget worked out from
+     * income (`budgetFromIncome`), made as the usual card, which the owner
+     * applies. For the month that is running it is held to what the money
+     * keeps; a refused plan says why and makes no card (13 October 2026).
+     */
+    const incomePlan = couldBudget ? readIncomePlan(ruled) : null;
+    // The income plan wins over a figure the budget reader took from the same sentence ("10k" is the income, not the budget).
+    if (incomePlan) {
+      const target = spanIn(ruled, asOf) ?? { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) };
+      const running = target.year === Number(asOf.slice(0, 4)) && target.month === Number(asOf.slice(5, 7));
+      const plan = budgets[String(target.year)];
+      const prefix = `${target.year}-${String(target.month).padStart(2, "0")}`;
+      const cameIn = reportRows.filter((t) => t.date.startsWith(prefix)).reduce((sum, t) => sum + incomeOf(t), 0);
+      const income = incomePlan.income ?? cameIn;
+      const prevBills = target.month > 1 ? (plan?.billsSubs[target.month - 2] ?? 0) : (budgets[String(target.year - 1)]?.billsSubs[11] ?? 0);
+      const bills = (plan?.billsSubs[target.month - 1] ?? 0) || prevBills;
+      const keep = incomePlan.keep ? ("percent" in incomePlan.keep ? Math.floor((income * incomePlan.keep.percent) / 100) : incomePlan.keep.amount) : 0;
+      let most: Centavos | null = null;
+      const spentNow = assessMonthFor(reportRows, budgets, target.year, target.month).spending.spent;
+      if (running) {
+        const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: target.year, month: target.month, asOf });
+        most = incomeBudget({ transactions: reportRows, reference, plan, year: target.year, month: target.month, safe: brief.safe ? brief.safe.safe : null, spent: spentNow })?.most ?? null;
+      }
+      const worked = budgetFromIncome({ income, keep, bills, most });
+      const name = `${MONTH_NAMES[target.month - 1] ?? ""} ${target.year}`;
+      if (!worked.ok) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const words = `${worked.errors.join(" ")}${incomePlan.income === null && cameIn === 0 ? ` Nothing has come in for ${name} yet: say the income you expect, like "base my budget on my 10k income, save 20%".` : ""}`;
+        say({ kind: "assistant", text: words, from: "this device" });
+        log(aiEvent("answered", "add", { text: words, model: "this device" }));
+        return;
+      }
+      budgetAsk = { kind: "tracks", year: target.year, month: target.month, spending: worked.spending, billsSubs: bills, scope: "month" };
+      budgetNote = `${formatMoney(income)} income${incomePlan.income === null ? ` (what came in for ${name} so far)` : ""}, less ${formatMoney(keep)} for savings and ${formatMoney(bills)} for bills and subscriptions, leaves ${formatMoney(worked.uncapped)} to spend.${worked.capped ? ` Your money keeps ${formatMoney(worked.spending)} at most this month, so spending is held to that.` : ""}${spentNow > worked.spending ? ` ${name} has already spent ${formatMoney(spentNow)} on spending, so this budget starts ${formatMoney(spentNow - worked.spending)} over.` : ""}`;
+    }
     /*
      * "thats budget", straight after a message that was read as an entry:
      * that message was a budget. 28 September 2026: the form above became a
@@ -7786,7 +7834,7 @@ export function AskPanel({
                 : "Ask about the month, type an entry, or attach a receipt."}
             </p>
             {STARTERS.map((q) => (
-              <Button key={q} size="sm" onClick={() => void send(q, "ask")}>
+              <Button key={q} size="sm" onClick={() => tapSend(q, "ask")}>
                 {q}
               </Button>
             ))}
@@ -8230,10 +8278,10 @@ export function AskPanel({
               {askedPlace ? `, about card ${askedPlace}` : ""}
             </span>
             <span className="fms-askq-skip">
-              <button type="button" className="t-caption fms-linkbtn" disabled={busy} onClick={() => void send("skip")}>
+              <button type="button" className="t-caption fms-linkbtn" disabled={busy} onClick={() => tapSend("skip")}>
                 Skip
               </button>
-              <button type="button" className="t-caption fms-linkbtn" disabled={busy} onClick={() => void send("stop")}>
+              <button type="button" className="t-caption fms-linkbtn" disabled={busy} onClick={() => tapSend("stop")}>
                 Stop asking
               </button>
             </span>
@@ -8242,7 +8290,7 @@ export function AskPanel({
           {asking.choices.length > 0 && (
             <div className="fms-askq-choices" role="group" aria-label="Answers">
               {asking.choices.map((choice) => (
-                <button key={choice} type="button" className="fms-choice t-body" disabled={busy} onClick={() => void send(choice)}>
+                <button key={choice} type="button" className="fms-choice t-body" disabled={busy} onClick={() => tapSend(choice)}>
                   {choice}
                 </button>
               ))}
@@ -8258,7 +8306,7 @@ export function AskPanel({
       {pending && pendingOptions.length > 0 && (
         <div className="fms-askq-choices fms-pending-choices" role="group" aria-label="Answers">
           {pendingOptions.map((choice) => (
-            <button key={choice} type="button" className="fms-choice t-body" disabled={busy} onClick={() => void send(choice)}>
+            <button key={choice} type="button" className="fms-choice t-body" disabled={busy} onClick={() => tapSend(choice)}>
               {choice}
             </button>
           ))}

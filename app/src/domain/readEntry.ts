@@ -437,6 +437,21 @@ export function daysIn(text: string, asOf: IsoDate): { from: IsoDate; to: IsoDat
     from && to && to > from && daysBetweenIso(from, to) < 92 ? { from, to, said } : null;
   const month = (m: string | undefined): number => (m ? (MONTH_OF[m.toLowerCase()] ?? MONTH_OF[m.toLowerCase().slice(0, 3)] ?? 0) : 0);
 
+  /*
+   * "this weekend", "last weekend": Saturday and Sunday. This weekend is the
+   * one ahead, or the one running on a Saturday or Sunday; last weekend the
+   * one before; next weekend the one after (13 October 2026).
+   */
+  const weekend = /\b(this|last|past|next|the)\s+weekend\b|\bweekend\b/i.exec(text);
+  if (weekend) {
+    const dow = new Date(`${asOf}T00:00:00Z`).getUTCDay();
+    const word = (weekend[1] ?? "this").toLowerCase();
+    const thisSat = dow === 0 ? shift(asOf, -1) : shift(asOf, 6 - dow);
+    const sat = word === "last" || word === "past" ? shift(thisSat, -7) : word === "next" ? shift(thisSat, 7) : thisSat;
+    const found = ok(sat, shift(sat, 1), weekend[0]);
+    if (found) return found;
+  }
+
   const iso = new RegExp(`\\b((?:19|20)\\d{2}-\\d{2}-\\d{2})\\s*(?:${SEP}|and)\\s*((?:19|20)\\d{2}-\\d{2}-\\d{2})\\b`, "i").exec(text);
   if (iso?.[1] && iso[2]) return ok(iso[1], iso[2], iso[0]);
 

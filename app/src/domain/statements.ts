@@ -30,6 +30,7 @@ import { owedChange, type Debt } from "./debt";
 import { costOf, incomeOf } from "./totals";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 import { canFilter, matchesFilter } from "./statementFilter";
+import { spreadCovered, wholeRows } from "./covers";
 import { cashWallet } from "./withdrawal";
 
 export type StatementType =
@@ -248,7 +249,17 @@ export function buildStatementBetween(
   const cash = cashWallet(reference.wallets);
   const only = canFilter(type) ? scope.only : undefined;
 
-  const inPeriod = transactions
+  /*
+   * A spending sheet counts a date range by the days inside its period, as
+   * Budget and Insights do: a trip from 30 September to 2 October is two days
+   * of September and two of October. Sheets of money held (account, wallet,
+   * savings, transfers, debts) keep it whole, on the day the money left.
+   */
+  const source =
+    (type === "expense" || type === "bills") && transactions.some((t) => t.coversTo && t.coversTo > t.date)
+      ? wholeRows(spreadCovered(transactions).filter((t) => t.date >= from && t.date <= to))
+      : transactions;
+  const inPeriod = source
     .filter((t) => {
       if (t.date < from || t.date > to) return false;
       if (type === "debt" && debtId && t.debtId !== debtId) return false;

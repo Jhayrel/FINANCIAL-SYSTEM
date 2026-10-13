@@ -170,7 +170,9 @@ export function safeWords(
           : `Your spending budget still has ${money(safe.budgetLeft)}, so the money is the limit, not the plan.`,
     );
   }
-  return [`**Safe to spend today: ${money(safe.perDay)}**`, sum.join("\n"), after.join(" ")].filter(Boolean).join("\n\n");
+  // The plan promising more than the money, said as the Dashboard says it (`monthPlan.ts` notes).
+  const beyond = (brief.warnings ?? []).find((w) => /promises .* more than your money/.test(w)) ?? "";
+  return [`**Safe to spend today: ${money(safe.perDay)}**`, sum.join("\n"), after.join(" "), beyond].filter(Boolean).join("\n\n");
 }
 
 /**

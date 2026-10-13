@@ -5,6 +5,7 @@ import { asksSettingsChange } from "./assistantScope";
 import { asksShortBudget } from "./budgetAdvice";
 import { namesBudgetCommand, spanIn } from "./budgetAsk";
 import { asksSafeToSpend } from "./safeAsk";
+import { daysIn } from "./readEntry";
 import { asksBudgetHistory } from "./settingsContext";
 
 const reference = { wallets: ["Cash", "Maya"], savings: [], bills: [], subscriptions: [], revenueCategories: [], spendingTypes: [] } as never;
@@ -45,3 +46,10 @@ describe("the owner's own wordings, read the way they meant them (12 October 202
     for (const q of ["what budget should i have for the next 3 days", "recommend a budget for this weekend"]) expect([q, asksShortBudget(q, "2026-10-13")]).toEqual([q, true]);
   });
 });
+
+describe("weekends (13 October 2026)", () => { it("are Saturday and Sunday: this one, the last, and the one running", () => {
+  // 2026-10-13 is a Tuesday.
+  expect(daysIn("how much did i spend this weekend", "2026-10-13")).toMatchObject({ from: "2026-10-17", to: "2026-10-18" });
+  expect(daysIn("how much did i spend last weekend", "2026-10-13")).toMatchObject({ from: "2026-10-10", to: "2026-10-11" });
+  expect(daysIn("spent 2000 on travel this weekend", "2026-10-18")).toMatchObject({ from: "2026-10-17", to: "2026-10-18" });
+}); });

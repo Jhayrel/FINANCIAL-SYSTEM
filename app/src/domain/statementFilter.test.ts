@@ -160,3 +160,20 @@ describe("asked for in chat, cut the same way", () => {
     expect(sheet.lines.every((l) => l.kind === "Subscription")).toBe(true);
   });
 });
+
+describe("short names in a statement request (13 October 2026)", () => {
+  it("knows Maya Bank and a bill by its first word", () => {
+    const ref = { ...reference, wallets: ["Cash", "Maya"], savings: ["Maya Bank (Personal savings)"] };
+    const bills = [
+      ...rows,
+      row({ date: "2026-02-10", type: "Spending", category: "Bills", item: "Dito Prepaid", fromWallet: "Maya", amount: 19900 }),
+    ];
+    const ask = (said: string) => {
+      const read = readExportAsk(said, "2026-10-12");
+      return read ? withCut(read, bills, ref, []) : null;
+    };
+    expect(ask("Maya Bank statement 2026")).toMatchObject({ type: "wallet", wallet: "Maya Bank (Personal savings)" });
+    expect(ask("Maya statement 2026")).toMatchObject({ type: "wallet", wallet: "Maya" });
+    expect(ask("dito bills statement 2026")).toMatchObject({ type: "bills", only: "kind:Dito Prepaid" });
+  });
+});

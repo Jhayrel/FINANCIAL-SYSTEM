@@ -85,7 +85,11 @@ export function incomeBudget(input: {
   const setOn = last ? localDay(last.at) : null;
   const since = setOn && setOn > first ? setOn : first;
 
-  const income = rows.filter((t) => t.date.startsWith(prefix) && t.date >= since && incomeOf(t) > 0);
+  // On the day it was set, only income saved after the change: the change may already have counted it.
+  const setAtMs = last ? new Date(last.at).getTime() : 0;
+  const income = rows.filter(
+    (t) => t.date.startsWith(prefix) && t.date >= since && incomeOf(t) > 0 && (t.date > since || since !== setOn || (savedAt(t) ?? Infinity) > setAtMs),
+  );
   const cameIn = income.reduce((sum, t) => sum + incomeOf(t), 0);
   const sources = [...income]
     .sort((a, b) => incomeOf(b) - incomeOf(a))
@@ -215,4 +219,119 @@ export function asksIncomeBudget(text: string): boolean {
   if (!/\bbudget\b/i.test(t)) return false;
   if (!/\b(?:income|earn(?:ed|ings?)?|salary|sahod|kita|received|receive|got|came in|natanggap|money in|allowance|paid me|payment)\b/i.test(t)) return false;
   return /\b(?:adjust|split|raise|increase|change|update|add|based|put|move|allocate|divide|hati(?:in)?|still|enough|right|reasonable|should|how much|what)\b/i.test(t);
+}
+
+export interface FromIncome {
+  readonly ok: boolean;
+  readonly errors: readonly string[];
+  /** The spending budget the income leaves. */
+  readonly spending: Centavos;
+  /** True when it was lowered to what the money held now can keep (rule 3). */
+  readonly capped: boolean;
+  /** What the income would have left before the cap. */
+  readonly uncapped: Centavos;
+  readonly reason: string;
+}
+
+/**
+ * A month's budget worked out from its income: "Nov 1 budget is 5000 then I
+ * earn 10k" (owner, 12 October 2026). Spending is what the income leaves
+ * after savings and bills. For the month that is running it is never more
+ * than the money held now can keep (`most`); a month ahead is planned from
+ * the income expected, and is checked again by "Money that came in" once
+ * the month runs.
+ */
+export function budgetFromIncome(input: {
+  readonly income: Centavos;
+  readonly keep: Centavos;
+  readonly bills: Centavos;
+  /** The most the spending budget can be with the money held now; null for a month ahead. */
+  readonly most: Centavos | null;
+}): FromIncome {
+  const { income, keep, bills, most } = input;
+  const errors: string[] = [];
+  if (![income, keep, bills].every((v) => Number.isInteger(v) && v >= 0)) errors.push("Each figure must be zero or more.");
+  if (income <= 0) errors.push("Put in the income for the month first.");
+  if (keep + bills > income && income > 0) {
+    errors.push(`Savings and bills come to ${formatMoney(keep + bills)}, more than the ${formatMoney(income)} income: nothing is left to spend. Keep less for savings, or put in more income.`);
+  }
+  const uncapped = Math.max(0, income - keep - bills);
+  const capped = most !== null && uncapped > most;
+  const spending = capped ? Math.max(0, most ?? 0) : uncapped;
+  return {
+    ok: errors.length === 0,
+    errors,
+    spending,
+    capped,
+    uncapped,
+    reason: `From income: ${formatMoney(income)} income, ${formatMoney(keep)} kept for savings, ${formatMoney(bills)} for bills and subscriptions${capped ? `, spending held to ${formatMoney(spending)}, what the money keeps now` : ""}`,
+  };
+}
+
+/** When a row was saved, from its id ("t-1791764690917"); null for rows from the workbook or a card. */
+function savedAt(t: Transaction): number | null {
+  const m = /^t-(\d{13})\b/.exec(t.id);
+  return m ? Number(m[1]) : null;
+}
+
+/** Income dated on or after the day the month's budget was last set: what the bell says came in since. */
+export function incomeSinceSet(transactions: readonly Transaction[], plan: BudgetYear | undefined, year: number, month: number): { readonly setOn: IsoDate | null; readonly amount: Centavos } {
+  const prefix = `${year}-${String(month).padStart(2, "0")}`;
+  const last = [...(plan?.revisions?.[String(month)] ?? [])].filter((r) => r.what === "tracks").sort((a, b) => a.at.localeCompare(b.at)).pop();
+  const setOn = last ? localDay(last.at) : null;
+  if (!setOn) return { setOn: null, amount: 0 };
+  // On the day it was set, only income saved after the change counts: the change may already have used it.
+  const after = new Date(last!.at).getTime();
+  const amount = wholeRows(transactions)
+    .filter((t) => t.date.startsWith(prefix) && t.date >= setOn && incomeOf(t) > 0)
+    .filter((t) => t.date > setOn || (savedAt(t) ?? Infinity) > after)
+    .reduce((sum, t) => sum + incomeOf(t), 0);
+  return { setOn, amount };
+}
+
+export interface IncomePlanAsk {
+  /** The income said, or null to use what has come in this month. */
+  readonly income: Centavos | null;
+  /** Kept for savings, as an amount or a share of the income. */
+  readonly keep: { readonly amount: Centavos } | { readonly percent: number } | null;
+}
+
+const AMOUNT = String.raw`(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*(k\b)?`;
+const toCentavosSaid = (digits: string, k: string | undefined): Centavos => {
+  const value = Number(digits.replace(/,/g, ""));
+  return Math.round(value * (k ? 1000 : 1) * 100);
+};
+
+/**
+ * "base my budget on my 10k income, save 20%", "budget from my salary of
+ * 15000, keep 3000 for savings", "make my budget income based": a budget
+ * worked out from income, made as a card the owner confirms.
+ */
+export function readIncomePlan(text: string): IncomePlanAsk | null {
+  const t = text.trim();
+  if (!/\bbudget\b/i.test(t)) return null;
+  if (!/\b(?:income|salary|sahod|kita|earn(?:ing|ings)?|earned)\b/i.test(t)) return null;
+  if (!/\b(?:base[sd]?|from|out of|using|with|set|make|plan|split|income[- ]based)\b/i.test(t)) return null;
+  // A question about the budget against income is answered, never made a card (`asksIncomeBudget`).
+  if (/\?\s*$/.test(t) && !/\b(?:can you|could you|please|pls)\b/i.test(t)) return null;
+
+  let keep: IncomePlanAsk["keep"] = null;
+  let rest = t;
+  const pct = /(\d{1,2}(?:\.\d+)?)\s*%\s*(?:(?:for|to|in(?:to)?)\s+)?(?:savings?|save|ipon)?|\b(?:save|keep|set aside|ipon)\s+(\d{1,2}(?:\.\d+)?)\s*%/i.exec(t);
+  if (pct) {
+    keep = { percent: Number(pct[1] ?? pct[2]) };
+    rest = t.replace(pct[0], " ");
+  } else {
+    const amt = new RegExp(String.raw`\b(?:save|keep|set aside|ipon)\s+${AMOUNT}|${AMOUNT}\s+(?:for|to|in(?:to)?)\s+savings?`, "i").exec(t);
+    if (amt) {
+      const digits = amt[1] ?? amt[3];
+      const k = amt[1] ? amt[2] : amt[4];
+      if (digits) keep = { amount: toCentavosSaid(digits, k) };
+      rest = t.replace(amt[0], " ");
+    }
+  }
+  const said = new RegExp(AMOUNT, "i").exec(rest.replace(/\b(?:19|20)\d{2}\b/g, " "));
+  const income = said && said[1] ? toCentavosSaid(said[1], said[2]) : null;
+  if (keep && "percent" in keep && (keep.percent <= 0 || keep.percent >= 100)) keep = null;
+  return { income: income !== null && income > 0 ? income : null, keep };
 }

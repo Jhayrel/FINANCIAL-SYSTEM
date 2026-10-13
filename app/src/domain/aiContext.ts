@@ -378,7 +378,7 @@ export function buildContext(input: ContextInput): AiContext {
       dueSoon: upcoming(bills, 14)
         .filter((b) => !b.stopped && (!b.lastPaid || daysBetween(b.lastPaid, asOf) <= STOPPED_AFTER_DAYS))
         .map((b) => b.item),
-      stopped: bills.filter((b) => b.stopped).map((b) => `${b.item} (since ${b.stopped})`),
+      stopped: bills.filter((b) => b.stopped).map((b) => b.item),
     },
 
     debts: positions.map((p) => {
@@ -424,6 +424,7 @@ export function buildContext(input: ContextInput): AiContext {
       lowBalanceThreshold: input.lowBalanceThreshold,
       asOf,
       spendingTypes: reference.spendingTypes,
+      safe: monthBrief({ transactions, reference, budgets, debts: credits, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe,
     }).map((a) => ({ level: a.level, title: a.title, detail: a.detail })),
 
     comparison: recentMonths(transactions, asOf, 6),
@@ -556,7 +557,7 @@ export function contextToText(c: AiContext): string {
   const dayOfMonth = Number(c.asOf.slice(8, 10));
   lines.push(
     `All costs so far: ${php(c.month.burnRatePerDay)} a day over ${dayOfMonth} ${dayOfMonth === 1 ? "day" : "days"}, ${c.month.daysLeft} days left.${
-      dayOfMonth < PACE_FROM_DAY ? " Too early to read as a pace." : ""
+      dayOfMonth < PACE_FROM_DAY ? " Too early to read as a pace." : c.month.pace ? " Bills in; the pace is the next line." : ""
     }`,
   );
   /*
@@ -629,7 +630,7 @@ export function contextToText(c: AiContext): string {
       lines.push(
         safe.budgetLeft <= 0
           ? "The spending budget is used up: the plan, not the money."
-          : `Spending budget left ${php(safe.budgetLeft)}, ${php(safe.budgetPerDay ?? 0)} a day: the plan, not the money.`,
+          : `Spending budget left ${php(safe.budgetLeft)}, ${php(safe.budgetPerDay ?? 0)} a day: the plan, not the money.${safe.budgetLeft > Math.max(0, safe.safe) ? ` It promises ${php(Math.round((safe.budgetLeft - Math.max(0, safe.safe)) * 100) / 100)} more than is safe to spend: say so, and that lowering it is on the Budget screen.` : ""}`,
       );
     }
   }
@@ -654,8 +655,10 @@ export function contextToText(c: AiContext): string {
     const these = c.balances.filter((b) => kinds.includes(kindOf(b)));
     if (these.length === 0) continue;
     const sum = Math.round(these.reduce((total, b) => total + b.balance * 100, 0)) / 100;
-    lines.push(`${title}: ${php(sum)} in all`);
-    for (const b of these) lines.push(`- ${b.account}: ${php(b.balance)}`);
+    // Empty accounts are counted, not listed: the summary has a size limit.
+    const held = these.filter((b) => b.balance !== 0 || kinds.includes("spending"));
+    lines.push(`${title}: ${php(sum)} in all${held.length < these.length ? ` (${these.length - held.length} empty)` : ""}`);
+    for (const b of held) lines.push(`- ${b.account}: ${php(b.balance)}`);
   }
   const owes = [(c.youOwe ?? 0) > 0 ? `you owe ${php(c.youOwe ?? 0)}` : "", (c.heldForOthers ?? 0) > 0 ? `held for others ${php(c.heldForOthers ?? 0)}` : ""].filter(Boolean);
   lines.push(`Net worth after debt: ${php(c.netWorth)}${owes.length > 0 ? ` (${owes.join("; ")})` : ""}`);
@@ -679,13 +682,16 @@ export function contextToText(c: AiContext): string {
   if (c.topSpending.length > 0) {
     lines.push("");
     lines.push("## Biggest spending this year");
-    for (const t of c.topSpending) lines.push(`${t.category}: ${php(t.amount)}`);
+    for (const t of c.topSpending.slice(0, 6)) lines.push(`${t.category}: ${php(t.amount)}`);
   }
 
   if (c.debts.length > 0) {
     lines.push("");
     lines.push("## Debt");
-    for (const d of c.debts) {
+    // A line at nothing is named once, not given a line: settled is all there is to say.
+    const settled = c.debts.filter((d) => d.outstanding === 0 && d.nextDue == null && d.limit == null);
+    if (settled.length > 0) lines.push(`Settled, nothing owed either way: ${settled.map((d) => d.name).join(", ")}.`);
+    for (const d of c.debts.filter((x) => !settled.includes(x))) {
       const due =
         d.nextDue == null || d.daysToDue === null
           ? ""
@@ -739,8 +745,15 @@ export function contextToText(c: AiContext): string {
   if (c.alerts.length > 0) {
     lines.push("");
     lines.push("## Already flagged by the app");
-    // Each cut at 200 characters: one list of stopped bills was 417, and the summary has to stay a summary.
-    for (const a of c.alerts) lines.push(`[${a.level}] ${a.title}. ${a.detail.length > 200 ? `${a.detail.slice(0, 197).trimEnd()}...` : a.detail}`);
+    /*
+     * The five that matter most, each cut at 110 characters: the summary has to
+     * stay a summary (4,630 bytes on the owner's 13 October data, against a
+     * 4,000 limit). The rest are counted, so the model knows they exist.
+     */
+    const order = { over: 0, warn: 1, info: 2 } as Record<string, number>;
+    const shown = [...c.alerts].sort((x, y) => (order[x.level] ?? 3) - (order[y.level] ?? 3)).slice(0, 5);
+    for (const a of shown) lines.push(`[${a.level}] ${a.title}. ${a.detail.length > 110 ? `${a.detail.slice(0, 107).trimEnd()}...` : a.detail}`);
+    if (c.alerts.length > shown.length) lines.push(`And ${c.alerts.length - shown.length} more in the bell.`);
   }
 
   return lines.join("\n");
