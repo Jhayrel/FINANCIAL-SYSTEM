@@ -53,7 +53,7 @@ import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
 import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
-import { asAmountAndFees, isPartOf, netWorth, parentOf, partOf, positionsOf, renameDebtAccount, withDebt, type Debt, type DebtEffect } from "./domain/debt";
+import { asAmountAndFees, isPartOf, netWorth, owedChange, parentOf, partOf, positionsOf, renameDebtAccount, withDebt, type Debt, type DebtEffect } from "./domain/debt";
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
@@ -65,6 +65,7 @@ import { debtWalletDirection, emptyDraft, insertChronologically, notEditable } f
 import { spreadCovered } from "./domain/covers";
 import { formatMedium, getMonth, getYear, today } from "./domain/dates";
 import { monthBrief } from "./domain/monthPlan";
+import { settleLine, type Settlement } from "./domain/settleLine";
 import { systemToCsv } from "./domain/csv";
 import { sheetRequestOf, type ExportAsk } from "./domain/exportAsk";
 import { buildStatementBetween, statementFilename, statementToCsv } from "./domain/statements";
@@ -1144,6 +1145,27 @@ export default function App() {
    * Written through to Firestore by the same `saveMany` an insert uses, which
    * writes by id, so an update overwrites rather than duplicating.
    */
+  /*
+   * What is left on a line, cleared in one step (`settleLine.ts`): Father's
+   * extra PHP 1.00 kept as the owner's (13 October 2026). Offered for money
+   * held or paid for someone and for any line paid past zero; a real loan
+   * only when what is left is PHP 100.00 or less, so a debt is never one
+   * press from being called forgiven.
+   */
+  const settlementFor = (debt: Debt): Settlement | null => {
+    const found = settleLine(debt, transactions, reference, asOf);
+    if (!found) return null;
+    const left = transactions.filter((t) => t.debtId === debt.id).reduce((sum, t) => sum + owedChange(t), 0);
+    return debt.form === "pass-through" || left < 0 || Math.abs(left) <= 10000 ? found : null;
+  };
+  const settleDebt = (debt: Debt): void => {
+    // The limit above is on showing the button; asked for by name in the chat, any line can be cleared.
+    const found = settleLine(debt, transactions, reference, asOf);
+    if (!found) return;
+    if (found.update) handleUpdate([found.update]);
+    handleSave([{ ...found.add, id: `t-${Date.now()}`, recordNumber: sink.nextRecordNumber } as Transaction]);
+  };
+
   const handleUpdate = (rows: Transaction[], by: Provenance = BY_OWNER): void => {
     // Read before the state changes, so the event carries what it replaced.
     const previous = new Map(transactions.map((t) => [t.id, t]));
@@ -1925,6 +1947,10 @@ export default function App() {
     onBudget: handleBudgetYear,
     onAddDebt: (debt) => setSettings((s) => ({ ...s, credits: withDebt(s.credits, debt) })),
     onExport: handleAskedExport,
+    onSettle: (debtId) => {
+      const debt = settings.credits.find((d) => d.id === debtId);
+      if (debt) settleDebt(debt);
+    },
   });
 
   // With Firebase configured, nothing renders until the owner is signed in,
@@ -2328,6 +2354,8 @@ export default function App() {
           <ScreenBoundary key={screen} where={title} onHome={() => go("dashboard")}>
           {screen === "dashboard" && (
             <Dashboard
+              settlementFor={settlementFor}
+              onSettle={settleDebt}
               transactions={reportRows}
               reference={reference}
               budgets={budgets}
@@ -2365,6 +2393,8 @@ export default function App() {
               onUpdate={handleUpdate}
               onBudget={handleBudgetYear}
               onAddDebt={(debt) => setSettings((s) => ({ ...s, credits: withDebt(s.credits, debt) }))}
+              settlementFor={settlementFor}
+              onSettle={settleDebt}
               editing={editing}
               onCancelEdit={() => {
                 setEditing(null);
@@ -2439,6 +2469,8 @@ export default function App() {
                 setDbFilter("all");
                 setDbQuery({ query, at: Date.now() });
               }}
+              settlementFor={settlementFor}
+              onSettle={settleDebt}
             />
           )}
           {screen === "insights" && (

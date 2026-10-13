@@ -1154,6 +1154,27 @@ the range round trip; the owner's October replayed day by day; every screen
 and the bell at 1280 and 390 on the 13 October data; the budget editor, card,
 bell, Dashboard and chat driven in a browser, phone and PC.
 
+### 2026-10-13: On behalf in plain words, and a remainder cleared in one press
+
+The owner paid PHP 599.00 on a relative's phone bill, was given PHP 600.00
+back, and the line read "owes you -PHP 1.00" with no way to clear it. They
+also could not find the person under "You hold theirs", because he was on
+the other side, and found Held, Released and Retained confusing.
+
+| Fault | Fix |
+|---|---|
+| Accounting words | The six On behalf choices are "Paid for them", "Paid you back", "Let it go", "Received for them", "Given to them", "Kept as yours" (`debtWords.ts`), on the form, Home, statements and in what the AI reads. Meanings and figures unchanged |
+| Person not found | Every On behalf person is a button on the form, from either side, with what is left; a tap moves the form to their side and picks them |
+| A minus left on a line | `domain/settleLine.ts` works out the one step that makes a line zero, says it in a sentence before the press, and saves it as one change. Past zero on "they owe you": the latest reimbursement is edited down by the extra and the extra is added as income into the same wallet, so no wallet moves. Past zero on "you hold": the extra counts as money given (spending). A remainder still owed: let it go (spending on behalf, neither for a loan). Still held: kept as yours (income) |
+| Where | Home's On behalf rows, the Add form (beside the picked person and in the side list), and the Debt screen for small remainders on a loan (PHP 100.00 or less, so a debt is never one press from forgiven). The chat: "clear Father", "keep the 1 peso from Father" offers a "Clear a line" card |
+| Every part knows | The AI's context says when a line is past zero and that "clear NAME" makes it zero; the assistant's scope names the plain words. A minus is shown as the extra, never as a minus owed |
+
+Tested: `settleLine.test.ts` (each case, wallets unchanged, the line at zero,
+income up by the extra); in a browser on the 13 October data, Home's press
+took the line to zero with every wallet the same, the phone form showed the
+person from the other side and the step, the chat card cleared it, no page
+errors, no overflow at 390.
+
 ---
 
 ## 6. What the owner has to do

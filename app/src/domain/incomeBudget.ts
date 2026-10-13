@@ -335,3 +335,32 @@ export function readIncomePlan(text: string): IncomePlanAsk | null {
   if (keep && "percent" in keep && (keep.percent <= 0 || keep.percent >= 100)) keep = null;
   return { income: income !== null && income > 0 ? income : null, keep };
 }
+
+export type BudgetMove =
+  /** "lower my budget to what my money can keep", "fit my budget to my money", "lower it". */
+  | { readonly kind: "fit" }
+  /** "add the money that came in to my budget, keep 2000 for savings". */
+  | { readonly kind: "addIncome"; readonly keep: IncomePlanAsk["keep"]; readonly toBills: boolean };
+
+/**
+ * The two budget moves the Budget screen's card makes, said in chat (owner,
+ * 13 October 2026: "make sure ai can do this like lower or add"). Each is
+ * worked out by the app and made as the usual budget card to apply.
+ */
+export function readBudgetMove(text: string, cardJustShown = false): BudgetMove | null {
+  const t = text.trim();
+  if (/\?\s*$/.test(t) && !/\b(?:can you|could you|please|pls)\b/i.test(t)) return null;
+  const budget = /\b(?:budget|it)\b/i.test(t);
+  if (!budget) return null;
+  const fit =
+    /\b(?:lower|reduce|cut|bring\s+down|fit|match|adjust|set|fix)\b[^.]*\b(?:to\s+)?(?:what\s+)?(?:my\s+|the\s+)?(?:money|wallets?|balance|can\s+keep|keeps|afford|safe(?:\s+to\s+spend)?|realistic|what\s+i\s+have)\b/i.test(t) ||
+    /\bfit\s+(?:my\s+|the\s+)?budget\b|\bmake\s+(?:my\s+|the\s+)?budget\s+fit\b/i.test(t) ||
+    (cardJustShown && /^\s*(?:ok(?:ay)?,?\s+)?(?:lower|reduce)\s+it\b/i.test(t));
+  if (fit && /\bbudget\b|\bit\b/i.test(t)) return { kind: "fit" };
+  const addIncome =
+    /\b(?:add|put|move|include|use)\b[^.]*\b(?:income|salary|sahod|money\s+(?:that\s+)?came\s+in|what\s+came\s+in|came\s+in|new\s+money|earnings?|it)\b[^.]*\b(?:to|into|in)\s+(?:my\s+|the\s+)?budget\b/i.test(t) ||
+    /\b(?:add|put)\s+(?:the\s+)?(?:new\s+)?(?:income|money)\s+(?:to|into|in)\b/i.test(t);
+  if (!addIncome) return null;
+  const plan = readIncomePlan(`plan ${t.replace(/\?\s*$/, "")} budget income`);
+  return { kind: "addIncome", keep: plan?.keep ?? null, toBills: /\bbills?\b|\bsubscriptions?\b/i.test(t) };
+}

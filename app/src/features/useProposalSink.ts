@@ -53,6 +53,8 @@ export interface SinkInput {
   readonly onAddDebt?: ((debt: Debt) => void) | undefined;
   /** Write a file to this device: a backup, a spreadsheet, or a statement. */
   readonly onExport?: ((ask: ExportAsk) => void) | undefined;
+  /** Clear what is left on a line in one step (domain/settleLine.ts). */
+  readonly onSettle?: ((debtId: string) => void) | undefined;
 }
 
 /** Makes ids unique within one millisecond, when a batch saves together. */
@@ -124,6 +126,8 @@ export function useProposalSink(input: SinkInput): ProposalSink {
       canAddDebt: Boolean(input.onAddDebt),
       addDebt: (debt) => handlers.current.onAddDebt?.(debt),
       exportFile: (ask) => handlers.current.onExport?.(ask),
+      canSettle: Boolean(input.onSettle),
+      settle: (debtId) => handlers.current.onSettle?.(debtId),
       bin: (id) => handlers.current.onBin(id),
       binMany: (ids) => handlers.current.onBinMany(ids),
       restore: (id) => handlers.current.onRestore(id),

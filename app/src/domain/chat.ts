@@ -121,7 +121,7 @@ export interface StoredCard {
    * is disappearing, it should stay". They come back now, in the state they
    * ended in, like every other card.
    */
-  readonly kind: "proposal" | "debt" | "found" | "change" | "budget" | "export";
+  readonly kind: "proposal" | "debt" | "found" | "change" | "budget" | "export" | "settle";
   readonly state: "open" | "added" | "used" | "discarded" | "settled" | "applied" | "taught";
   /** A card read off a picture: its kind of paper, and whether it was sent to train rather than to add. Never the picture. */
   readonly paper?: { readonly kind: string; readonly teach: boolean };

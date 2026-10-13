@@ -409,7 +409,8 @@ export function financeAlerts(input: AlertInput): Alert[] {
         id: "held-in-hand",
         level: "info",
         area: "debt",
-        title: `${money(b.heldForOthers)} in your accounts is held for ${lenderNames(whose, debts)}`,
+        // Named by the person, as the save note names them, not by the line ("Tita Joan", not "Tita Joan's money").
+        title: `${money(b.heldForOthers)} in your accounts is held for ${[...new Set([...whose.keys()].map((id) => debts.find((d) => d.id === id)).map((d) => d?.counterparty.trim() || d?.name || "someone"))].join(" and ") || lenderNames(whose, debts)}`,
         detail: `It is not yours to spend. Your own money is ${money(b.own)}.`,
         weight: 33,
       });

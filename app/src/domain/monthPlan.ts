@@ -482,6 +482,11 @@ function notesFor(
       if (safe.overToday > 0) {
         warn(`Today's share was ${money(safe.todayShare)} and ${money(safe.spentToday)} went out today, ${money(safe.overToday)} past it.`);
       }
+      // Unspent money carries over, said where the figure is (12 October 2026 audit, B4).
+      if (phase === "current" && safe.daysLeft > 1) {
+        const carried = ifNothingMoreToday({ safe: safe.safe, daysLeft: safe.daysLeft });
+        if (carried > safe.perDayAfter) out.push(`Unspent money carries over: spend nothing more today and from tomorrow it is ${money(carried)} a day, not ${money(safe.perDayAfter)}.`);
+      }
     }
 
     if (safe.budgetLeft !== null && safe.budgetLeft > 0 && safe.budgetLeft > Math.max(0, safe.safe) && safe.wallets >= 0) {

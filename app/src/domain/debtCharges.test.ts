@@ -182,17 +182,18 @@ describe("the choices, in plain words", () => {
     expect(effectMeaning("charge", line)).toContain("No money moves now");
   });
 
-  it("names money on someone's behalf in accounting terms", () => {
+  // Plain words, not accounting terms: the owner found Held, Released and Retained confusing (13 October 2026).
+  it("names money on someone's behalf in plain words", () => {
     expect(choicesFor("receivable", undefined, "pass-through").map((e) => effectLabel(e, mama))).toEqual([
-      "Advance",
-      "Reimbursed",
-      "Write off",
+      "Paid for them",
+      "Paid you back",
+      "Let it go",
     ]);
     const held = { ...mama, kind: "payable" as const };
     expect(choicesFor("payable", undefined, "pass-through").map((e) => effectLabel(e, held))).toEqual([
-      "Held",
-      "Released",
-      "Retained",
+      "Received for them",
+      "Given to them",
+      "Kept as yours",
     ]);
   });
 });

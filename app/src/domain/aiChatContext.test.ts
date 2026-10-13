@@ -384,6 +384,6 @@ describe("a debt row, as the model reads it", () => {
     const transactions = [...ledger, advance];
     const snapshot = buildContext({ transactions, accounts: [], budgets, credits: [friend], reference, lowBalanceThreshold: 0, asOf: "2026-08-31" });
     const context = buildChatContext({ snapshot, transactions, credits: [friend], asOf: "2026-08-31", question: "what needs attention?" });
-    expect(context.text).toContain("#90 | 2026-08-30 | Debt: Advance on Friend loan (on behalf, advanced for someone) | Cash");
+    expect(context.text).toContain("#90 | 2026-08-30 | Debt: Paid for them on Friend loan (on behalf, advanced for someone) | Cash");
   });
 });

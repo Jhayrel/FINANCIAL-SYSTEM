@@ -26,6 +26,7 @@
  * section, because none of it is borrowing.
  */
 
+import type { Settlement } from "../domain/settleLine";
 import { useMemo, useState } from "react";
 
 import { Alert, Button, Card, EmptyState, Money, ProgressBar, StatusPill, type Status } from "../components/primitives";
@@ -104,6 +105,8 @@ export function DebtScreen({
   onUpdateDebt,
   onManage,
   onShowRows,
+  settlementFor,
+  onSettle,
 }: {
   transactions: readonly Transaction[];
   debts: readonly Debt[];
@@ -118,6 +121,9 @@ export function DebtScreen({
   onManage: () => void;
   /** The Database searched for these words. */
   onShowRows: (query: string) => void;
+  /** What is left on a line and the one step that clears it (`settleLine.ts`), when there is one worth offering. */
+  settlementFor?: ((debt: Debt) => Settlement | null) | undefined;
+  onSettle?: ((debt: Debt) => void) | undefined;
 }) {
   /*
    * Debts only: banks, credit lines and loans, with a person or with an
@@ -222,6 +228,8 @@ export function DebtScreen({
       asOf={asOf}
       editing={editId === d.position.debt.id}
       onRecord={(effect, amount) => onRecord(d.position.debt, effect, amount)}
+      settlement={settlementFor ? settlementFor(d.position.debt) : null}
+      onSettle={onSettle ? () => onSettle(d.position.debt) : undefined}
       onEdit={() => setEditId(editId === d.position.debt.id ? null : d.position.debt.id)}
       onSave={(next) => {
         onUpdateDebt(next);
@@ -482,7 +490,11 @@ function DebtCard({
   onSave,
   onOpenRow,
   onFind,
+  settlement = null,
+  onSettle,
 }: {
+  settlement?: Settlement | null | undefined;
+  onSettle?: (() => void) | undefined;
   due: DebtDue;
   transactions: readonly Transaction[];
   asOf: string;
@@ -782,6 +794,17 @@ function DebtCard({
               </li>
             ))}
           </ul>
+        )}
+
+        {settlement && onSettle && (
+          <div className="fms-settle">
+            <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+              {settlement.words}
+            </p>
+            <Button size="sm" onClick={onSettle}>
+              {settlement.action}
+            </Button>
+          </div>
         )}
 
         <div className="fms-debtactions" data-count={actions.length}>

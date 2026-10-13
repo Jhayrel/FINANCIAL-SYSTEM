@@ -63,6 +63,8 @@ export function asksSafeToSpend(text: string): boolean {
   if (ON_ONE_THING.test(t)) return false;
   if (SAFE_ASK.test(t)) return true;
   if (AFTER_BILLS.test(t)) return true;
+  // "what if I didn't spend yesterday", "if I don't spend today": what carries over (12 October 2026 audit, A9).
+  if (/\b(?:what\s+if|if)\s+i\s+(?:didn'?t|did\s+not|hadn'?t|had\s+not|don'?t|do\s+not|won'?t|will\s+not|never)\s+spen[dt]\b/i.test(t)) return true;
   return TAKES_OUT_BILLS.test(t) && (ABOUT_A_SUM.test(t) || ARITHMETIC.test(t) || BOTH_KINDS.test(t));
 }
 

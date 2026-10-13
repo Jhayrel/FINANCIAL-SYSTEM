@@ -58,13 +58,13 @@ export function sideOfEffect(effect: DebtEffect | undefined): BehalfSide | undef
 export function effectLabel(effect: DebtEffect, debt?: Shape): string {
   if (passing(debt)) {
     if (debt?.kind === "receivable") {
-      if (effect === "lend") return "Advance";
-      if (effect === "collect") return "Reimbursed";
-      if (effect === "writeoff") return "Write off";
+      if (effect === "lend") return "Paid for them";
+      if (effect === "collect") return "Paid you back";
+      if (effect === "writeoff") return "Let it go";
     } else {
-      if (effect === "draw") return "Held";
-      if (effect === "repay") return "Released";
-      if (effect === "writeoff") return "Retained";
+      if (effect === "draw") return "Received for them";
+      if (effect === "repay") return "Given to them";
+      if (effect === "writeoff") return "Kept as yours";
     }
   }
   if (effect === "writeoff" && debt?.kind === "receivable") return "Given up";

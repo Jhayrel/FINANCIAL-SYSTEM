@@ -6836,10 +6836,11 @@ button.fms-recent-row:disabled {
 
 /* The page colour for the figure: white on a light theme, dark on a dark one,
    so it reads on the red, amber and blue of either. */
+/* Set up and out to the corner, so the count sits on the bell's edge rather than over a third of it (D1). */
 .fms-notify-count {
   position: absolute;
-  top: 5px;
-  right: 3px;
+  top: 1px;
+  right: -2px;
   display: grid;
   place-items: center;
   min-width: 18px;
@@ -7616,6 +7617,15 @@ button.fms-recent-row:disabled {
   display: grid;
   justify-items: start;
   gap: 2px;
+}
+
+/* What is left on a line and the one step that clears it (`settleLine.ts`). */
+.fms-settle {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--hairline);
 }
 
 .fms-debtactions {

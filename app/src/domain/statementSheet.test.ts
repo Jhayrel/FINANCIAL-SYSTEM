@@ -253,11 +253,11 @@ describe("every row named for what it is", () => {
   const byText = (text: string) => s.lines.find((l) => l.description.startsWith(text));
 
   it("says money held or paid for someone is on their behalf, never borrowing or lending", () => {
-    expect(byText("Kept for a relative")?.kind).toBe("Held (on behalf)");
-    expect(byText("Passed on")?.kind).toBe("Released (on behalf)");
-    expect(byText("His phone plan")?.kind).toBe("Advance (on behalf)");
+    expect(byText("Kept for a relative")?.kind).toBe("Received for them (on behalf)");
+    expect(byText("Passed on")?.kind).toBe("Given to them (on behalf)");
+    expect(byText("His phone plan")?.kind).toBe("Paid for them (on behalf)");
     // No description: named after who it is for, not after the movement.
-    expect(byText("Father")?.kind).toBe("Reimbursed (on behalf)");
+    expect(byText("Father")?.kind).toBe("Paid you back (on behalf)");
   });
 
   it("calls a credit line's movements credit, and says its fees moved no money", () => {

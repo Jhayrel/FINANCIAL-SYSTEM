@@ -53,3 +53,21 @@ describe("weekends (13 October 2026)", () => { it("are Saturday and Sunday: this
   expect(daysIn("how much did i spend last weekend", "2026-10-13")).toMatchObject({ from: "2026-10-10", to: "2026-10-11" });
   expect(daysIn("spent 2000 on travel this weekend", "2026-10-18")).toMatchObject({ from: "2026-10-17", to: "2026-10-18" });
 }); });
+
+describe("spending worked out from what is left (owner, 12 October 2026)", () => {
+  it("is the ledger less what is left, with the kind named", async () => {
+    const { spentFromLeft } = await import("./leftOver");
+    const ref = { wallets: ["Cash", "Maya"], savings: [], spendingTypes: [{ name: "Travel", remark: "" }, { name: "Food", remark: "" }] } as never;
+    const bal = (a: string) => (a === "Cash" ? 985500 : 10000);
+    expect(spentFromLeft("518 is whats left of my cash all use in travel expenses to my grandmother funeral. check how much i spend and add it", ref, bal)).toEqual({ account: "Cash", left: 51800, ledger: 985500, spent: 933700, item: "Travel" });
+    expect(spentFromLeft("I only have 200 left in maya, spent the rest on food", ref, bal)).toMatchObject({ account: "Maya", spent: -10000, item: "Food" });
+    expect(spentFromLeft("518 left in cash", ref, bal)).toBeNull();
+    expect(spentFromLeft("how much did i spend on travel", ref, bal)).toBeNull();
+  });
+});
+
+describe("carry-over questions (12 October 2026)", () => {
+  it("are safe to spend questions", () => {
+    for (const q of ["what if I didn't spend yesterday?", "if i don't spend today what happens tomorrow", "what if I hadn't spent yesterday"]) expect([q, asksSafeToSpend(q)]).toEqual([q, true]);
+  });
+});

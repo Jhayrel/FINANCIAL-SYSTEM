@@ -204,8 +204,8 @@ export function monthsNamedIn(question: string, year: string): string[] {
  *
  * "Debt" alone read as money owed: an advance paid for a friend's repair,
  * written off the same day, was told back as "a new PHP 500.00 debt ...
- * adding to the liability load" (4 October 2026). Said as "Debt: Advance on
- * Renz loan (on behalf, advanced for someone)", it is what it is.
+ * adding to the liability load" (4 October 2026). Said as "Debt: Paid for
+ * them on Renz loan (on behalf, advanced for someone)", it is what it is.
  */
 function typeOf(t: Transaction, debts: ReadonlyMap<string, Debt>): string {
   if (t.type !== "Debt") return t.type;
@@ -1057,6 +1057,12 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
           p.writtenOff,
         )}. ${p.transactionCount} movements, ${p.repaymentCount} of them repayments.`,
       );
+      // Paid past zero, such as PHP 600.00 back on a PHP 599.00 bill: the app clears it in one step (domain/settleLine.ts).
+      if (p.outstanding < 0) {
+        out.push(
+          `Paid past zero by ${php(-p.outstanding)}: ${p.debt.kind === "receivable" ? "they gave back more than was paid for them" : "more was given than was held"}. Saying "clear ${p.debt.counterparty.trim() || p.debt.name}" offers the one step that makes it zero: the extra counts as ${p.debt.kind === "receivable" ? "income" : "spending"}, and no wallet moves.`,
+        );
+      }
       // The next payment as the Debt screen works it out, not only a fixed date nothing sets.
       const due = debtDue(p, rows, asOf);
       if (p.outstanding > 0 && due.nextDue && due.daysToDue !== undefined) {

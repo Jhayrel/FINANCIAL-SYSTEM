@@ -134,8 +134,13 @@ import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, saysItWasAStatement, wantsThoseEntries, type Intent } from "../domain/intent";
 import { monthBrief } from "../domain/monthPlan";
+import { financeAlerts } from "../domain/alerts";
+import { billStatuses } from "../domain/bills";
+import { spentFromLeft } from "../domain/leftOver";
+import { readSettleAsk, settleLine } from "../domain/settleLine";
+import { wholeRows } from "../domain/covers";
 import { incomeOf } from "../domain/totals";
-import { asksIncomeBudget, budgetFromIncome, incomeBudget, incomeBudgetWords, readIncomePlan } from "../domain/incomeBudget";
+import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, readBudgetMove, readIncomePlan } from "../domain/incomeBudget";
 import { asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer } from "../domain/dayFit";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
@@ -204,7 +209,7 @@ import { aboutTheScreen, screenText } from "../domain/screenContext";
 import { figuresIn } from "../domain/money";
 import { notEditable, transactionToDraft } from "../domain/entry";
 import { notArrivedWords, placeSentMoney } from "../domain/destination";
-import { safeOverDays } from "../domain/monthPlan";
+import { dayFigures, safeOverDays } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
 import { asksBudgetHistory, budgetChangeWords } from "../domain/settingsContext";
 import { spreadCovered } from "../domain/covers";
@@ -250,7 +255,7 @@ import { readSpendAsk, spendAnswer } from "../domain/spendAsk";
 import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksShortBudget, asksForTheSplit, budgetAdvice, expectedIncomeIn, judgeWords, judgesSetBudget, newestBudgetChange, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
 import { asksSettingsChange, asksWhatChartsExist, capabilitiesAnswer, chartsAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { assessMonthFor, budgetForYear } from "../domain/budget";
-import { daysInMonth, daysLeftInMonth, formatMedium, MONTH_NAMES } from "../domain/dates";
+import { addDays, daysInMonth, daysLeftInMonth, formatMedium, MONTH_NAMES } from "../domain/dates";
 import { chatHistory, earlierSessions, keepInMind } from "../domain/memory";
 import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, pendingChoices, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
@@ -329,6 +334,19 @@ export interface ProposalSink {
    * third screen. It goes to the browser's own download and nowhere else.
    */
   readonly exportFile: (ask: ExportAsk) => void;
+  /** Whether a line can be cleared from here, and the clearing itself (domain/settleLine.ts). */
+  readonly canSettle?: boolean | undefined;
+  readonly settle?: ((debtId: string) => void) | undefined;
+}
+
+/** A person's or lender's line about to be cleared in one step. See domain/settleLine.ts. */
+interface Settling {
+  readonly kind: "settle";
+  readonly debtId: string;
+  readonly words: string;
+  readonly action: string;
+  readonly state: "open" | "applied" | "discarded";
+  readonly cardId?: string;
 }
 
 /** Saved entries about to change: each one before, and after. */
@@ -537,7 +555,7 @@ interface Offered {
   readonly cardId: string;
 }
 
-type Turn = Said | Offered | Found | Drawn | DebtChoice | Changing | Budgeting | Exporting;
+type Turn = Said | Offered | Found | Drawn | DebtChoice | Changing | Budgeting | Exporting | Settling;
 
 const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
 
@@ -552,6 +570,7 @@ const isDebt = (t: Turn): t is DebtChoice => t.kind === "debt";
 const isChanging = (t: Turn): t is Changing => t.kind === "change";
 const isBudgeting = (t: Turn): t is Budgeting => t.kind === "budget";
 const isExporting = (t: Turn): t is Exporting => t.kind === "export";
+const isSettling = (t: Turn): t is Settling => t.kind === "settle";
 
 /**
  * A card still waiting, as it reads once it is thrown away; null for anything else.
@@ -560,10 +579,10 @@ const isExporting = (t: Turn): t is Exporting => t.kind === "export";
  * word for saved, so a cleared card was recorded as "Added: 2026-10-06 Debt
  * PHP 600.00" with nothing saved (backup of 7 October 2026, three cards).
  */
-function closedCard(t: Turn): Offered | DebtChoice | Changing | Budgeting | Exporting | null {
+function closedCard(t: Turn): Offered | DebtChoice | Changing | Budgeting | Exporting | Settling | null {
   if (isOffer(t)) return t.state === "open" ? { ...t, state: "discarded" } : null;
   if (isDebt(t)) return t.state === "open" ? { ...t, state: "discarded" } : null;
-  if (isChanging(t) || isBudgeting(t) || isExporting(t)) return t.state === "open" ? { ...t, state: "discarded" } : null;
+  if (isChanging(t) || isBudgeting(t) || isExporting(t) || isSettling(t)) return t.state === "open" ? { ...t, state: "discarded" } : null;
   return null;
 }
 
@@ -761,6 +780,14 @@ function turnFromCard(card: StoredCard): Turn {
     };
   }
 
+  if (card.kind === "settle") {
+    const debtId = typeof data["debtId"] === "string" ? data["debtId"] : "";
+    const words = typeof data["words"] === "string" ? data["words"] : "A line to clear.";
+    const action = typeof data["action"] === "string" ? data["action"] : "Clear it";
+    // An open one that comes back is not pressed blind: what is left may have moved since.
+    return { kind: "settle", debtId, words, action, state: card.state === "applied" ? "applied" : "discarded", cardId: card.id };
+  }
+
   if (card.kind === "export") {
     const ask = data["ask"] as ExportAsk | undefined;
     if (!ask || typeof ask.kind !== "string") return { kind: "assistant", text: "A file was offered here.", from: "this device" };
@@ -903,6 +930,10 @@ function storedFrom(turn: Turn): StoredCard | null {
     return { id: turn.cardId, kind: "export", state: turn.state, draft: {}, data: { ask: turn.ask } };
   }
 
+  if (isSettling(turn)) {
+    return { id: turn.cardId, kind: "settle", state: turn.state, draft: {}, data: { debtId: turn.debtId, words: turn.words, action: turn.action } };
+  }
+
   return null;
 }
 
@@ -924,6 +955,7 @@ function cardWords(turn: Turn, state: StoredCard["state"]): string {
   }
   if (isBudgeting(turn)) return `${state === "applied" ? "Budget set" : state === "discarded" ? "Budget left as it was" : "Budget change"}: ${turn.plan.words}`;
   if (isExporting(turn)) return `${state === "applied" ? "File saved" : state === "discarded" ? "File not saved" : "File offered"}: ${turn.ask.said}`;
+  if (isSettling(turn)) return `${state === "applied" ? "Cleared" : state === "discarded" ? "Left as it was" : "To clear"}: ${turn.words}`;
   return "";
 }
 
@@ -1690,7 +1722,7 @@ export function AskPanel({
   /** Cards already written down as added, so a second path never writes the same one again. */
   const addedCards = useRef(new Set<string>());
 
-  const recordCard = (turn: Offered | DebtChoice | Found | Changing | Budgeting | Exporting): void => {
+  const recordCard = (turn: Offered | DebtChoice | Found | Changing | Budgeting | Exporting | Settling): void => {
     const card = storedFrom(turn);
     if (!card) return;
     if (card.state === "added") addedCards.current.add(card.id);
@@ -1757,7 +1789,7 @@ export function AskPanel({
   const say = (given: Turn): void => {
     // Every card gets an id it keeps across a refresh, so its later states replay onto it.
     const turn: Turn =
-      (isFound(given) || isChanging(given) || isBudgeting(given) || isExporting(given)) && !given.cardId
+      (isFound(given) || isChanging(given) || isBudgeting(given) || isExporting(given) || isSettling(given)) && !given.cardId
         ? { ...given, cardId: newCardId() }
         : given;
     if (isOffer(turn) && !firstRead.current.has(turn.cardId)) firstRead.current.set(turn.cardId, turn.proposal.draft);
@@ -1804,7 +1836,7 @@ export function AskPanel({
      * carrying the same card id, and the last one wins. Append only is what
      * makes it a record, so it stays append only.
      */
-    if (isOffer(turn) || isDebt(turn) || isFound(turn) || isChanging(turn) || isBudgeting(turn) || isExporting(turn)) {
+    if (isOffer(turn) || isDebt(turn) || isFound(turn) || isChanging(turn) || isBudgeting(turn) || isExporting(turn) || isSettling(turn)) {
       recordCard(turn);
       return;
     }
@@ -2113,9 +2145,9 @@ export function AskPanel({
    */
   const decide = (index: number, state: "applied" | "discarded"): void => {
     const was = turns[index];
-    if (was && (isChanging(was) || isBudgeting(was) || isExporting(was))) recordCard({ ...was, state });
+    if (was && (isChanging(was) || isBudgeting(was) || isExporting(was) || isSettling(was))) recordCard({ ...was, state });
     setTurns((prev) =>
-      prev.map((t, i) => (i === index && (isChanging(t) || isBudgeting(t) || isExporting(t)) ? { ...t, state } : t)),
+      prev.map((t, i) => (i === index && (isChanging(t) || isBudgeting(t) || isExporting(t) || isSettling(t)) ? { ...t, state } : t)),
     );
   };
 
@@ -4331,7 +4363,33 @@ export function AskPanel({
                 : `${w.name} is past this month's last day, and what will be safe then depends on the money that comes in by then.`;
             })()
           : "";
-      const words = [over, safeWords(brief, rateIn(question), ownMoney)].filter(Boolean).join("\n\n");
+      /*
+       * Money held for someone sits in the wallets and safe to spend counts it
+       * (handoff 7.11, kept on purpose): said by name, borrowed or not, so it
+       * is never spent without knowing (12 October 2026 audit, B1).
+       */
+      const heldIds = [...lent.byLender].filter(([id, v]) => v > 0 && debts.find((d) => d.id === id)?.form === "pass-through");
+      const heldWords =
+        lent.heldForOthers > 0
+          ? `${formatMoney(lent.heldForOthers)} in your accounts is held for ${[...new Set(heldIds.map(([id]) => debts.find((d) => d.id === id)?.counterparty.trim() || debts.find((d) => d.id === id)?.name || "someone"))].join(" and ") || "someone else"}: it is theirs, and safe to spend counts it, so keep that much back.`
+          : "";
+      /*
+       * "What if I didn't spend yesterday?": today's share worked out again as
+       * if yesterday's spending were still in the wallets (12 October 2026
+       * audit, A9). Unspent money carries over, so this is the figure.
+       */
+      const yesterdayAsked = /\b(?:didn'?t|did not|hadn'?t|had not|not|never|no)\s+(?:spen[dt]|gastos)\b[^.?!]*\byesterday\b|\byesterday\b[^.?!]*\b(?:didn'?t|did not|hadn'?t|had not|not)\s+spen[dt]\b/i.test(question);
+      const ifNotYesterday = (() => {
+        if (!yesterdayAsked || !brief.safe) return "";
+        const y = addDays(asOf, -1);
+        const spentY = wholeRows(reportRows)
+          .filter((t) => t.date === y && reference.wallets.includes(t.fromWallet) && t.type === "Spending" && t.category === "Spending")
+          .reduce((sum, t) => sum + t.total, 0);
+        if (spentY <= 0) return `Nothing was spent from your wallets yesterday, so today's figure is already what it would be: ${formatMoney(brief.safe.perDay)}.`;
+        const then = dayFigures(brief.safe.safe + spentY, brief.safe.spentToday, brief.safe.daysLeft);
+        return `Had you spent nothing yesterday (${formatMoney(spentY)} went), ${formatMoney(brief.safe.safe + spentY)} would be safe now and today's figure would be ${formatMoney(then.perDay)} instead of ${formatMoney(brief.safe.perDay)}: unspent money carries over to the days after it.`;
+      })();
+      const words = [over, ifNotYesterday, safeWords(brief, rateIn(question), ownMoney), heldWords].filter(Boolean).join("\n\n");
       setBusy(true);
       try {
         await askQuestion(
@@ -4376,6 +4434,38 @@ export function AskPanel({
       }
     }
     /*
+     * "What needs attention?": the bell's own findings, most urgent first,
+     * handed to the model as the worked answer. Without them it made up its
+     * own figures (backup of 12 October 2026: flagged "not a figure this app
+     * worked out").
+     */
+    if (files.length === 0 && !as && /\b(?:what\s+needs\s+(?:my\s+)?attention|anything\s+(?:i\s+should|to)\s+(?:watch|worry|fix|check)|what\s+should\s+i\s+(?:watch|worry\s+about|fix|check)|any\s+(?:problems?|issues?|warnings?|alerts?))\b/i.test(ruled)) {
+      const found = financeAlerts({
+        transactions: reportRows,
+        accounts: settings.accounts,
+        budgets,
+        debts,
+        bills: billStatuses(transactions, reference, asOf),
+        lowBalanceThreshold: settings.lowBalanceThreshold,
+        asOf,
+        spendingTypes: reference.spendingTypes,
+        safe: monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe,
+      });
+      const order = { over: 0, warn: 1, info: 2 } as Record<string, number>;
+      const top = [...found].sort((x, y) => (order[x.level] ?? 3) - (order[y.level] ?? 3)).slice(0, 6);
+      const words = top.length > 0 ? top.map((a) => `- ${a.title}. ${a.detail}`).join("\n") : "Nothing needs attention: the app has no warnings for you right now.";
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      setBusy(true);
+      try {
+        await askQuestion(note, false, { text: `What needs attention, as the app found it (the bell), most urgent first. Answer from these only, in order, and say what to do about each:\n${words}`, fallback: words });
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    /*
      * "how many times did I change my budget": the history, counted by the
      * app, never budget advice (12 October 2026).
      */
@@ -4397,7 +4487,7 @@ export function AskPanel({
      * came in, worked out by the app (`incomeBudget.ts`), so a raise and a
      * saving are never the same peso (owner, 12 October 2026).
      */
-    if (files.length === 0 && !as && asksIncomeBudget(ruled) && !readIncomePlan(ruled)) {
+    if (files.length === 0 && !as && asksIncomeBudget(ruled) && !readIncomePlan(ruled) && !readBudgetMove(ruled)) {
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
       const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
@@ -5078,6 +5168,52 @@ export function AskPanel({
      * keeps; a refused plan says why and makes no card (13 October 2026).
      */
     const incomePlan = couldBudget ? readIncomePlan(ruled) : null;
+    /*
+     * "lower my budget to what my money can keep", "add the money that came
+     * in to my budget, keep 2000 for savings": the Budget screen's two moves,
+     * worked out by the app and made as the usual card (13 October 2026).
+     */
+    const lastWasBudgetCard = [...turns].reverse().find((t) => t.kind !== "you")?.kind === "budget";
+    const budgetMove = couldBudget && !incomePlan ? readBudgetMove(ruled, lastWasBudgetCard) : null;
+    if (budgetMove) {
+      const y = Number(asOf.slice(0, 4));
+      const m = Number(asOf.slice(5, 7));
+      const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
+      const ib = incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent });
+      const answer = (words: string): void => {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        say({ kind: "assistant", text: words, from: "this device" });
+        log(aiEvent("answered", "add", { text: words, model: "this device" }));
+      };
+      if (!ib) {
+        answer("The budget is moved against the money only for the month that is running.");
+        return;
+      }
+      if (budgetMove.kind === "fit") {
+        if (ib.over <= 0) {
+          answer(`Your spending budget of ${formatMoney(ib.budget)} already fits your money: ${formatMoney(ib.spent)} spent and ${formatMoney(ib.safe)} safe to spend keep up to ${formatMoney(ib.most)}${ib.room > 0 ? `, so it could even rise by ${formatMoney(ib.room)}` : ""}.`);
+          return;
+        }
+        budgetAsk = { kind: "tracks", year: y, month: m, spending: ib.most, billsSubs: ib.billsBudget, scope: "month" };
+        budgetNote = `Lowered to what your money keeps: ${formatMoney(ib.spent)} spent plus ${formatMoney(ib.safe)} safe to spend is ${formatMoney(ib.most)}, ${formatMoney(ib.over)} under the ${formatMoney(ib.budget)} budget.`;
+      } else {
+        if (ib.cameIn <= 0) {
+          answer(`Nothing has come in ${ib.setOn ? `since you set the budget on ${formatMedium(ib.setOn)}` : "this month"}, so there is no new money to add. ${ib.over > 0 ? `The budget is ${formatMoney(ib.over)} more than your money keeps; say "lower my budget to my money" to fit it.` : `It can rise by ${formatMoney(ib.room)} from the money you hold, if you want: say "raise my budget by" a figure.`}`);
+          return;
+        }
+        const keep = budgetMove.keep ? ("percent" in budgetMove.keep ? Math.floor((ib.cameIn * budgetMove.keep.percent) / 100) : budgetMove.keep.amount) : 0;
+        const give = Math.max(0, Math.min(ib.cameIn - keep, ib.room - keep));
+        const check = checkSplit(ib, budgetMove.toBills ? { toSpending: 0, toBills: Math.max(0, ib.cameIn - keep), keepAside: keep } : { toSpending: give, toBills: 0, keepAside: keep });
+        if (!check.ok) {
+          answer(check.errors.join(" "));
+          return;
+        }
+        budgetAsk = { kind: "tracks", year: y, month: m, spending: check.value.spending, billsSubs: check.value.billsSubs, scope: "month" };
+        budgetNote = [`${check.reason}.`, ...check.notes, give < ib.cameIn - keep && !budgetMove.toBills ? `Only ${formatMoney(give)} goes to spending: more would promise more than your money keeps.` : ""].filter(Boolean).join(" ");
+      }
+    }
     // The income plan wins over a figure the budget reader took from the same sentence ("10k" is the income, not the budget).
     if (incomePlan) {
       const target = spanIn(ruled, asOf) ?? { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) };
@@ -5664,6 +5800,67 @@ export function AskPanel({
      * card for the whole balance (7 October 2026). A gap too big to be
      * interest is a difference to find, and none at all is said plainly.
      */
+    /*
+     * "Clear Father", "keep the 1 peso from Father": a line cleared in one
+     * step, the same step as the button beside the name on Home and Debt
+     * (13 October 2026). The words say what happens before the press.
+     */
+    const toClear = !as && files.length === 0 ? readSettleAsk(lead, debts) : null;
+    if (toClear) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      const found = settleLine(toClear, transactions, reference, asOf);
+      const who = toClear.counterparty.trim() || toClear.name;
+      const words = found ? found.words : `${who} reads ${formatMoney(0)}: there is nothing left to clear.`;
+      say({ kind: "assistant", text: words, from: "this device" });
+      log(aiEvent("answered", "add", { text: words, model: "this device" }));
+      if (found) say({ kind: "settle", debtId: toClear.id, words: found.words, action: found.action, state: "open" });
+      return;
+    }
+
+    /*
+     * "518 is what's left of my cash, all used on travel": what went is the
+     * ledger's balance less what is left, worked out here and offered as an
+     * entry. The model was asked this and said it could not (12 October 2026).
+     */
+    const fromLeft = !as && files.length === 0 ? spentFromLeft(lead, reference, (a) => walletBalance(transactions, a)) : null;
+    if (fromLeft) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      if (fromLeft.spent <= 0) {
+        const words = `${fromLeft.account} has ${formatMoney(fromLeft.ledger)} in the ledger, ${fromLeft.spent === 0 ? "the same as" : `${formatMoney(-fromLeft.spent)} less than`} the ${formatMoney(fromLeft.left)} you have left, so there is no spending missing.${fromLeft.spent < 0 ? ' Say "find the difference" and I will look for why.' : ""}`;
+        say({ kind: "assistant", text: words, from: "this device" });
+        log(aiEvent("answered", "add", { text: words, model: "this device" }));
+        return;
+      }
+      const words = `${fromLeft.account} has ${formatMoney(fromLeft.ledger)} in the ledger and ${formatMoney(fromLeft.left)} is left in hand, so ${formatMoney(fromLeft.spent)} went${fromLeft.item ? ` on ${fromLeft.item}` : ""}.`;
+      say({ kind: "assistant", text: words, from: "this device" });
+      log(aiEvent("answered", "add", { text: words, model: "this device" }));
+      const span = daysIn(lead, asOf);
+      await offer(
+        {
+          draft: {
+            ...emptyDraft(asOf),
+            flow: "Spending",
+            category: "Spending",
+            fromWallet: fromLeft.account,
+            item: fromLeft.item,
+            description: note.trim().slice(0, 120),
+            amount: fromLeft.spent,
+            notes: `Worked out from what is left: ${formatMoney(fromLeft.ledger)} in ${fromLeft.account} less ${formatMoney(fromLeft.left)} left.`,
+            status: "Paid",
+            ...(span ? { date: span.from, coversTo: span.to } : {}),
+          },
+          confidence: "high",
+          sourceRef: "balance",
+          adjustments: [`Worked out from what is left: ${formatMoney(fromLeft.ledger)} less ${formatMoney(fromLeft.left)}.`],
+        },
+        note,
+      );
+      return;
+    }
     const interest = !as && files.length === 0 ? interestFromBalance(lead, findable, (a) => walletBalance(transactions, a), talkedAbout) : null;
     if (interest) {
       const cap = Math.max(10_000, Math.floor(interest.told / 20));
@@ -7903,6 +8100,19 @@ export function AskPanel({
                   : undefined
               }
             />
+          ) : isSettling(turn) ? (
+            <SettleCard
+              key={i}
+              turn={turn}
+              canSettle={Boolean(sink.canSettle && sink.settle)}
+              onSettle={() => {
+                // Worked out again at the press, against the ledger as it is now.
+                sink.settle?.(turn.debtId);
+                log(aiEvent("accepted", "add", { entry: turn.words }));
+                decide(i, "applied");
+              }}
+              onDiscard={() => decide(i, "discarded")}
+            />
           ) : isExporting(turn) ? (
             <ExportCard
               key={i}
@@ -9423,6 +9633,36 @@ function ChangeCard({
  * appearing in the downloads folder because of a sentence is a surprise, and
  * this one holds the owner's whole financial history.
  */
+function SettleCard({ turn, canSettle, onSettle, onDiscard }: { turn: Settling; canSettle: boolean; onSettle: () => void; onDiscard: () => void }) {
+  return (
+    <div className="fms-proposal">
+      <div className="fms-proposalhead">
+        <span className="t-label" style={{ color: "var(--ink-2)" }}>
+          Clear a line
+        </span>
+        <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+          {turn.state === "applied" ? "cleared" : turn.state === "discarded" ? "left as it was" : "nothing is saved yet"}
+        </span>
+      </div>
+      <p className="t-body" style={{ margin: 0 }}>
+        {turn.words}
+      </p>
+      {turn.state === "open" && (
+        <div className="fms-proposalactions">
+          {canSettle && (
+            <Button size="sm" variant="primary" onClick={onSettle}>
+              {turn.action}
+            </Button>
+          )}
+          <Button size="sm" onClick={onDiscard}>
+            Not now
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ExportCard({ turn, onSave, onDiscard }: { turn: Exporting; onSave: () => void; onDiscard: () => void }) {
   const { ask, state } = turn;
   const what =

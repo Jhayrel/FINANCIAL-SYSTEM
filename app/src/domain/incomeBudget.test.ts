@@ -136,3 +136,15 @@ describe("the budget from income (owner, 13 October 2026)", () => {
     expect(incomeSinceSet([savedBefore, savedAfter, nextDay], plan, 2026, 10).amount).toBe(1050000);
   });
 });
+
+describe("budget moves said in chat (owner, 13 October 2026)", () => {
+  it("reads lowering to the money and adding the income", async () => {
+    const { readBudgetMove } = await import("./incomeBudget");
+    for (const q of ["lower my budget to what my money can keep", "fit my budget to my money", "make my budget fit", "lower the budget to the safe amount", "adjust my budget to my balance"]) expect([q, readBudgetMove(q)]).toEqual([q, { kind: "fit" }]);
+    expect(readBudgetMove("lower it", true)).toEqual({ kind: "fit" });
+    expect(readBudgetMove("lower it", false)).toBeNull();
+    expect(readBudgetMove("add the money that came in to my budget, keep 2000 for savings")).toEqual({ kind: "addIncome", keep: { amount: 200000 }, toBills: false });
+    expect(readBudgetMove("put my salary into the budget and save 20%")).toEqual({ kind: "addIncome", keep: { percent: 20 }, toBills: false });
+    for (const q of ["set my budget to 5000", "how much is my budget?", "lower my food limit to 2000"]) expect([q, readBudgetMove(q)]).toEqual([q, null]);
+  });
+});

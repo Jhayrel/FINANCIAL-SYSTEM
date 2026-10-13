@@ -10,6 +10,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { changedFields } from "../domain/activity";
 
 import {
   Alert,
@@ -27,6 +28,7 @@ import { archivedNamed } from "../domain/debtFill";
 import { creditRoom, limitOn, takesLimit, usedAfterOne, usedOn } from "../domain/creditLimit";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, partWords, type BehalfSide } from "../domain/debtWords";
 import { formatMoney, type Centavos } from "../domain/money";
+import type { Settlement } from "../domain/settleLine";
 import {
   categoriesFor,
   checkDraft,
@@ -144,6 +146,8 @@ export function AddTransaction({
   onOpenBudget,
   onShowRows,
   sync,
+  settlementFor,
+  onSettle,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -191,6 +195,9 @@ export function AddTransaction({
    * are set up in Settings.
    */
   onAddDebt?: ((debt: Debt) => void) | undefined;
+  /** How to clear what is left on a line in one step, and the step itself. See domain/settleLine.ts. */
+  settlementFor?: ((debt: Debt) => Settlement | null) | undefined;
+  onSettle?: ((debt: Debt) => void) | undefined;
   /** The Budget screen, for a month that has no budget yet. */
   onOpenBudget?: (() => void) | undefined;
   /** The Database searched for these words, such as a record number. */
@@ -457,6 +464,10 @@ export function AddTransaction({
     onUpdate,
     onBudget,
     onAddDebt,
+    onSettle: (debtId) => {
+      const debt = debts.find((d) => d.id === debtId);
+      if (debt) onSettle?.(debt);
+    },
   });
   const nextRecordNumber = sink.nextRecordNumber;
 
@@ -887,6 +898,11 @@ export function AddTransaction({
           : d.form !== "pass-through")),
   );
   const selectedDebt = debts.find((d) => d.id === draft.debtId);
+  /** Money paid, sent or held for someone, every person on both sides, with what is left on each. */
+  const behalfPeople = debts
+    .filter((d) => d.form === "pass-through")
+    .map((d) => ({ debt: d, left: transactions.filter((t) => t.debtId === d.id).reduce((sum, t) => sum + owedChange(t), 0) }))
+    .filter((p) => !p.debt.archived || p.left !== 0);
   /** The debt the choices are worded for: the one picked, or the person being added. */
   const debtShape = selectedDebt ?? (draft.behalf || personKind ? { kind: newKind, form: draft.behalf ? ("pass-through" as const) : ("informal" as const) } : undefined);
   const effects = choicesFor(debtShape?.kind ?? "payable", draft.debtEffect, debtShape?.form);
@@ -978,6 +994,46 @@ export function AddTransaction({
           ) : undefined
         }
       >
+        {/*
+          Everyone money is paid, sent or held for, on either side, by name:
+          the owner could not find Father under "You hold theirs" because he
+          is on "They owe you" (13 October 2026). A tap moves the form to his
+          side and picks him.
+        */}
+        {draft.behalf && behalfPeople.length > 0 && (
+          <div className="fms-planner-chips" role="group" aria-label="People you have">
+            {behalfPeople.map(({ debt, left }) => (
+              <Button
+                key={debt.id}
+                size="sm"
+                variant={draft.debtId === debt.id ? "primary" : "secondary"}
+                onClick={() => {
+                  const side: BehalfSide = debt.kind === "receivable" ? "owed" : "held";
+                  if (draft.behalf !== side) chooseBehalf(side, side === "owed" ? "lend" : "draw");
+                  setNewPerson(null);
+                  setDraft((d) => pickDebt({ ...d, behalf: side }, debt));
+                }}
+              >
+                {debt.counterparty.trim() || debt.name}
+                {left === 0
+                  ? ", settled"
+                  : debt.kind === "receivable"
+                    ? left > 0 ? `, owes you ${formatMoney(left)}` : `, gave you ${formatMoney(-left)} extra`
+                    : left > 0 ? `, you hold ${formatMoney(left)}` : `, you gave ${formatMoney(-left)} extra`}
+              </Button>
+            ))}
+          </div>
+        )}
+        {draft.behalf && selectedDebt && settlementFor && onSettle && settlementFor(selectedDebt) && (
+          <div className="fms-settle">
+            <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+              {settlementFor(selectedDebt)!.words}
+            </p>
+            <Button size="sm" onClick={() => onSettle(selectedDebt)}>
+              {settlementFor(selectedDebt)!.action}
+            </Button>
+          </div>
+        )}
         {typing ? (
           <div className="fms-newperson">
             <TextInput
@@ -1042,12 +1098,13 @@ export function AddTransaction({
               debtOptions.map((d) => {
                 // A limited line says what is left to borrow too, so a borrowing past it is seen before it is typed.
                 const room = creditRoom(d, transactions, draft.date || asOf);
-                return [
-                  d.name,
-                  `${formatMoney(outstandingOf(transactions, d.id))} ${
-                    d.form === "pass-through" ? (d.kind === "payable" ? "held" : "owed to you") : d.kind === "payable" ? "owed" : "owed to you"
-                  }${room ? `, ${formatMoney(room.available)} left to borrow` : ""}`,
-                ];
+                const left = outstandingOf(transactions, d.id);
+                // Past zero reads as the extra, never as a minus owed: "-PHP 1.00 owed to you" confused the owner (13 October 2026).
+                const said =
+                  left < 0
+                    ? `${formatMoney(-left)} extra ${d.kind === "payable" ? "given" : "given back"}`
+                    : `${formatMoney(left)} ${d.form === "pass-through" ? (d.kind === "payable" ? "held" : "owed to you") : d.kind === "payable" ? "owed" : "owed to you"}`;
+                return [d.name, `${said}${room ? `, ${formatMoney(room.available)} left to borrow` : ""}`];
               }),
             )}
             placeholder={draft.behalf ? "Pick a person" : "Pick a debt"}
@@ -1406,7 +1463,13 @@ export function AddTransaction({
        * new one, and reissuing either would break every reference to it.
        */
       const rows = draftToTransactions(final, target.recordNumber, target.id, check.repaymentSplit);
-      onUpdate(rows);
+      /*
+       * Saved with nothing changed: no write and no line in Activity, which
+       * otherwise said "Changed #0123" for a row nobody changed (12 October
+       * 2026 audit, C2).
+       */
+      const unchanged = rows.length === 1 && rows[0] !== undefined && rows[0].id === target.id && changedFields(target, rows[0]).length === 0;
+      if (!unchanged) onUpdate(rows);
       /**
        * A split repayment corrected so it no longer covers interest: its old
        * interest row would stay behind, booking interest that the payment no
@@ -2659,9 +2722,16 @@ export function AddTransaction({
                 <div key={d.id} className="fms-balrow">
                   <span className="t-caption">
                     {d.name}
-                    <span style={{ color: "var(--ink-3)" }}>{d.kind === "receivable" ? " · owes you" : " · you hold"}</span>
+                    <span style={{ color: "var(--ink-3)" }}>
+                      {owed < 0 ? (d.kind === "receivable" ? " · gave you extra" : " · you gave extra") : d.kind === "receivable" ? " · owes you" : " · you hold"}
+                    </span>
                   </span>
-                  <Money value={owed} size="s" tone={d.kind === "payable" ? "var(--flow-debt-text)" : undefined} />
+                  <Money value={Math.abs(owed) as Centavos} size="s" tone={d.kind === "payable" ? "var(--flow-debt-text)" : undefined} />
+                  {owed < 0 && onSettle && settlementFor?.(d) && (
+                    <button type="button" className="t-micro fms-linkbtn" title={settlementFor(d)!.words} onClick={() => onSettle(d)}>
+                      {settlementFor(d)!.action}
+                    </button>
+                  )}
                 </div>
               ))}
             </>

@@ -134,8 +134,8 @@ describe("what it does to the money", () => {
 
 describe("the words, the model and the people", () => {
   it("names each movement in accounting terms", () => {
-    expect(["lend", "collect", "writeoff"].map((e) => effectLabel(e as "lend", friend))).toEqual(["Advance", "Reimbursed", "Write off"]);
-    expect(["draw", "repay", "writeoff"].map((e) => effectLabel(e as "draw", boss))).toEqual(["Held", "Released", "Retained"]);
+    expect(["lend", "collect", "writeoff"].map((e) => effectLabel(e as "lend", friend))).toEqual(["Paid for them", "Paid you back", "Let it go"]);
+    expect(["draw", "repay", "writeoff"].map((e) => effectLabel(e as "draw", boss))).toEqual(["Received for them", "Given to them", "Kept as yours"]);
   });
 
   it("reads the model's OnBehalf rows onto the right side and wallet", () => {

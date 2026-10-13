@@ -46,6 +46,7 @@ import { totalSavingsBalance, totalWalletBalance } from "../domain/balances";
 import { budgetSummary } from "../domain/budget";
 import type { MonthBill } from "../domain/budgetView";
 import { incomeQuality, netWorth, outstandingOf, positionsOf, type Debt, type DebtEffect } from "../domain/debt";
+import type { Settlement } from "../domain/settleLine";
 import { borrowedMoney, lenderNames } from "../domain/borrowed";
 import { ON_BEHALF } from "../domain/debtWords";
 import { getMonth, getYear, MONTH_NAMES_SHORT, monthName } from "../domain/dates";
@@ -86,6 +87,8 @@ export function Dashboard({
   onRecordDebt,
   onGo,
   onOpenInsights,
+  settlementFor,
+  onSettle,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -101,6 +104,9 @@ export function Dashboard({
   onRecordBill: (bill: MonthBill) => void;
   /** The Add form with this debt movement filled in. */
   onRecordDebt: (debtId: string, effect: DebtEffect, amount: Centavos | null) => void;
+  /** Clearing what is left on a line in one step (domain/settleLine.ts). */
+  settlementFor?: ((debt: Debt) => Settlement | null) | undefined;
+  onSettle?: ((debt: Debt) => void) | undefined;
   onGo: (place: Place) => void;
   /** Insights on a month, a year, or a kind of spending's entries. */
   onOpenInsights?: ((at: InsightsAt) => void) | undefined;
@@ -346,7 +352,7 @@ export function Dashboard({
             const open = debts
               .filter((d) => !d.archived && d.form === "pass-through")
               .map((d) => ({ d, owed: outstandingOf(transactions, d.id) }))
-              .filter((x) => x.owed > 0);
+              .filter((x) => x.owed !== 0);
             return open.length === 0 ? null : (
               <div className="fms-behalfhome">
                 <div className="t-label" style={{ color: "var(--ink-2)" }}>
@@ -359,18 +365,33 @@ export function Dashboard({
                       <li key={d.id} className="fms-moneyrow fms-behalfrow">
                         <span className="t-caption fms-truncate">
                           {d.name}
-                          <span style={{ color: "var(--ink-3)" }}>{theirs ? " · you hold" : " · owes you"}</span>
+                          <span style={{ color: "var(--ink-3)" }}>{owed < 0 ? (theirs ? " · you gave extra" : " · gave you extra") : theirs ? " · you hold" : " · owes you"}</span>
                         </span>
                         <span className="fms-moneyrow-end">
-                          <Money value={owed} size="s" tone={theirs ? "var(--flow-debt-text)" : undefined} />
+                          <Money value={Math.abs(owed) as Centavos} size="s" tone={theirs ? "var(--flow-debt-text)" : undefined} />
                         </span>
                         <span className="fms-behalfrow-actions">
-                          <button type="button" className="t-micro fms-linkbtn" onClick={() => onRecordDebt(d.id, theirs ? "repay" : "collect", owed)}>
-                            {theirs ? "Released" : "Reimbursed"}
-                          </button>
-                          <button type="button" className="t-micro fms-linkbtn" onClick={() => onRecordDebt(d.id, "writeoff", owed)}>
-                            {theirs ? "Retained" : "Write off"}
-                          </button>
+                          {/*
+                            Paid past zero (Father gave PHP 600.00 back on a PHP 599.00
+                            bill): passing more on, or writing off a minus, means
+                            nothing. One press clears it instead.
+                          */}
+                          {owed < 0 ? (
+                            onSettle && settlementFor?.(d) ? (
+                              <button type="button" className="t-micro fms-linkbtn" title={settlementFor(d)!.words} onClick={() => onSettle(d)}>
+                                {settlementFor(d)!.action}
+                              </button>
+                            ) : null
+                          ) : (
+                            <>
+                              <button type="button" className="t-micro fms-linkbtn" onClick={() => onRecordDebt(d.id, theirs ? "repay" : "collect", owed)}>
+                                {theirs ? "Given to them" : "Paid you back"}
+                              </button>
+                              <button type="button" className="t-micro fms-linkbtn" onClick={() => onRecordDebt(d.id, "writeoff", owed)}>
+                                {theirs ? "Kept as yours" : "Let it go"}
+                              </button>
+                            </>
+                          )}
                         </span>
                       </li>
                     );

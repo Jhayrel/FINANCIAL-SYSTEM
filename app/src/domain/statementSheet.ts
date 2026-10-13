@@ -205,7 +205,7 @@ const MODE: Record<StatementType, Mode> = {
  *   Money Send        money that left your accounts (`transfers.ts`)
  *   Credit ...        a credit line: drawn, payment, fees added, interest
  *   Loan ...          a bank loan: received, payment, fees added, interest
- *   ... (on behalf)   Held, Released, Retained, Advance, Reimbursed, Write off
+ *   ... (on behalf)   Received for them, Given to them, Kept as yours, Paid for them, Paid you back, Let it go
  */
 
 /** Debt movements on a credit line, a bank loan, and a loan between people. */
