@@ -181,7 +181,7 @@ export function useAi({
           source: "offline",
           reason: ai.enabled
             ? "This surface is switched off in Settings, so the figures were not sent."
-            : "AI is switched off, so nothing was sent anywhere.",
+            : "AI is off, so nothing was sent.",
         });
         return;
       }
@@ -241,7 +241,7 @@ export function useAi({
           source: "offline",
           reason: ai.enabled
             ? "This surface is switched off in Settings, so the figures were not sent."
-            : "AI is switched off, so nothing was sent anywhere.",
+            : "AI is off, so nothing was sent.",
         };
       }
 

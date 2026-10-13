@@ -130,3 +130,20 @@ describe("which earlier answer a challenge is about", () => {
     expect(challengedAnswer("why did you say that?", ["It is PHP 50.00 a day.", "Something older."], day, formatMoney)?.index).toBe(0);
   });
 });
+
+/*
+ * 13 October 2026: three answers carried "Check this ... does not fit that
+ * day's figure" about money nobody spent: a balance, a transfer, and a rate
+ * of overspending. Figures changed; the sentences are the shape that came in.
+ */
+describe("a balance, a transfer or a warning is not something said to fit", () => {
+  const day = { today: 4000, after: 4000 };
+  it("leaves them alone", () => {
+    expect(fitSlips("You are overspending by **PHP 1,500.00** a day and cash is below the ₱500 warning.", day)).toEqual([]);
+    expect(fitSlips("You can pay it today because your usable wallets hold **PHP 1,100.00**, which covers the PHP 200.00 required fee.", day)).toEqual([]);
+    expect(fitSlips("The **PHP 15.00** fee is recorded in your ledger under entry #0101 for today's transfer of PHP 400.00 from Maya to Cash.", day)).toEqual([]);
+  });
+  it("still catches a real one", () => {
+    expect(fitSlips("A PHP 95.00 lunch is within today's figure.", day)).toEqual([{ amount: 9500, limit: 4000 }]);
+  });
+});

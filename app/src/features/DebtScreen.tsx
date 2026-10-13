@@ -26,7 +26,7 @@
  * section, because none of it is borrowing.
  */
 
-import type { Settlement } from "../domain/settleLine";
+import { isClearing, type Settlement } from "../domain/settleLine";
 import { useMemo, useState } from "react";
 
 import { Alert, Button, Card, EmptyState, Money, ProgressBar, StatusPill, type Status } from "../components/primitives";
@@ -1202,7 +1202,7 @@ function History({
 
   const what = (line: Extract<HistoryLine, { kind: "move" }>) => {
     const t = line.m.row;
-    return t.debtEffect ? effectLabel(t.debtEffect, debt) : "Debt";
+    return isClearing(t) ? "Cleared" : t.debtEffect ? effectLabel(t.debtEffect, debt) : "Debt";
   };
   const partText = (line: Extract<HistoryLine, { kind: "move" }>): string => {
     const { m } = line;

@@ -7866,6 +7866,24 @@ button.fms-recent-row:disabled {
 }
 
 /*
+ * Three choices a side, in three equal columns, each free to take two
+ * lines: "Kept as yours" wrapped onto a row of its own on a phone and the
+ * two sides no longer lined up (13 October 2026).
+ */
+.fms-behalf-side .fms-segpills {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.fms-behalf-side .fms-segpill {
+  min-height: 44px;
+  padding: 4px var(--space-2);
+  line-height: 1.2;
+  white-space: normal;
+  text-wrap: balance;
+}
+
+/*
  * The person, and the box for a new one, stacked once the card is narrow.
  *
  * Side by side in a chat card the select showed "School (new, adde..." and

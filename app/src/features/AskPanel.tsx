@@ -106,6 +106,7 @@ import {
   periodsSaid,
   wantsBothDirections,
   chartDirection,
+  chartAsText,
   chartInWords,
   chartLabel,
   isChartFollowUp,
@@ -206,7 +207,7 @@ import { currentScreen } from "./screenReport";
 import { clearPick, currentPick, notePick } from "../chartPick";
 import { asksAboutPick, pickAnswer, pickText } from "../domain/chartPick";
 import { aboutTheScreen, screenText } from "../domain/screenContext";
-import { figuresIn } from "../domain/money";
+import { figuresIn, parseAmount } from "../domain/money";
 import { notEditable, transactionToDraft } from "../domain/entry";
 import { notArrivedWords, placeSentMoney } from "../domain/destination";
 import { dayFigures, safeOverDays } from "../domain/monthPlan";
@@ -241,6 +242,8 @@ import {
   limitTalk,
   planBudget,
   proposedBudgetIn,
+  readBudgetTotal,
+  tracksIn,
   proposedMonthIn,
   readBudgetAsk,
   namesMoneyFigure,
@@ -252,6 +255,8 @@ import {
   editedAsk,
 } from "../domain/budgetAsk";
 import { readSpendAsk, spendAnswer } from "../domain/spendAsk";
+import { earnAnswer, readEarnAsk } from "../domain/earnAsk";
+import { readLedgerSearch, searchLedger } from "../domain/ledgerSearch";
 import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksShortBudget, asksForTheSplit, budgetAdvice, expectedIncomeIn, judgeWords, judgesSetBudget, newestBudgetChange, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
 import { asksSettingsChange, asksWhatChartsExist, capabilitiesAnswer, chartsAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { assessMonthFor, budgetForYear } from "../domain/budget";
@@ -4113,7 +4118,7 @@ export function AskPanel({
      */
     const fallback = worked?.fallback ?? (picked ? pickAnswer(picked) : undefined);
     if (answer.source !== "model" && fallback) {
-      say({ kind: "assistant", text: fallback, from: `this device, because ${(answer.reason ?? "no model answered").replace(/\.$/, "").replace(/^./, (c) => c.toLowerCase())}` });
+      say({ kind: "assistant", text: fallback, from: `this device, because ${(answer.reason ?? "no model answered").replace(/\.$/, "").replace(/^([A-Z])(?![A-Z])/, (c) => c.toLowerCase())}` });
       log(aiEvent("answered", "add", { text: fallback, model: "this device" }));
       return;
     }
@@ -4201,6 +4206,43 @@ export function AskPanel({
      */
     const essay = files.length === 0 && isEssay(note);
     const lead = essay ? (ruled.split(/\n/).find((l) => l.trim()) ?? ruled) : ruled;
+    /*
+     * "You forgot the 16 fee", straight after an entry the chat added: that
+     * entry with the fee, as a change card. It was answered "I could not
+     * find an entry in that" (13 October 2026), and the model said the fee
+     * was already there.
+     */
+    const feeMatch = !as && files.length === 0 && /\bfees?\b/i.test(lead) && /\b(?:forgot|forget|missed|missing|without|left out|no|did ?n'?t (?:add|include|put|count)|add|include|with)\b/i.test(lead)
+      ? /(\d+(?:\.\d{1,2})?)\s*(?:pesos?\s*|php\s*)?(?:transaction\s+|transfer\s+|withdrawal\s+)?fees?\b|\bfees?\b[^\d.?!]{0,16}(?:₱|php\s*)?(\d+(?:\.\d{1,2})?)/i.exec(lead)
+      : null;
+    const lastAdded = feeMatch ? [...turns].reverse().slice(0, 12).find((t): t is Offered => isOffer(t) && t.state === "added" && t.recordNumber !== undefined) : undefined;
+    // By its number, or else the newest row saved in the last three hours (the save time is in the id).
+    const savedAt = (t: Transaction): number => Number(/^t-(\d{13})/.exec(t.id)?.[1] ?? 0);
+    const newest = lastAdded ? transactions.reduce<Transaction | undefined>((best, t) => (savedAt(t) > (best ? savedAt(best) : 0) ? t : best), undefined) : undefined;
+    const feeRow = lastAdded
+      ? ([...transactions].reverse().find((t) => t.recordNumber === lastAdded.recordNumber && Date.now() - savedAt(t) < 3 * 3600_000) ??
+        (newest && Date.now() - savedAt(newest) < 3 * 3600_000 ? newest : undefined))
+      : undefined;
+    if (feeMatch && feeRow) {
+      const fee = parseAmount(feeMatch[1] ?? feeMatch[2] ?? "") ?? 0;
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      const number = `#${String(feeRow.recordNumber).padStart(4, "0")}`;
+      if (fee > 0 && feeRow.fee === fee) {
+        const words = `${number} already has the ${formatMoney(fee)} fee: ${formatMoney(feeRow.amount)} plus ${formatMoney(fee)}, ${formatMoney(feeRow.amount + fee)} in all.`;
+        say({ kind: "assistant", text: words, from: "this device" });
+        log(aiEvent("answered", "add", { text: words, model: "this device" }));
+        return;
+      }
+      if (fee > 0 && fee < feeRow.amount) {
+        say({ kind: "assistant", text: `${number} with the ${formatMoney(fee)} fee. Check it, then apply.`, from: "this device", ephemeral: true });
+        say({ kind: "change", plan: { rows: [{ before: feeRow, after: { ...feeRow, fee, total: feeRow.amount + fee } }], refused: [] }, state: "open" });
+        log(aiEvent("proposed", "add", { entry: `${number} fee ${formatMoney(fee)}`, text: note }));
+        return;
+      }
+    }
+
     if (busy) return;
     if (!note && files.length === 0) return;
     if (typed === undefined) {
@@ -5001,8 +5043,10 @@ export function AskPanel({
         stillHere && income !== null && !asksBudgetAdvice(ruled) && ruled.split(/\s+/).length <= 14 && !saysMoneyMoved(ruled) && !/^\s*(?:please\s+)?(?:remember|tandaan|keep in mind|note that|take note|fyi)\b/i.test(ruled);
       const budgetish = !affordish && (asksBudgetAdvice(ruled) || splitAgain || newIncome);
       const spent = !affordish && !budgetish && !essay && !wantsChart(note) ? readSpendAsk(ruled, knownItems, asOf) : null;
+      // "how much have I earned since the beginning", "all income since 2022, not only Framelink" (earnAsk.ts).
+      const earned = !affordish && !budgetish && !spent && !wantsChart(note) ? readEarnAsk(ruled, reference.revenueCategories, asOf) : null;
 
-      if (affordish || budgetish || spent) {
+      if (affordish || budgetish || spent || earned) {
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", budgetish ? "budget" : "add", { text: note }));
@@ -5106,6 +5150,15 @@ export function AskPanel({
             setsIt ? withoutSetIt(text) : text,
           );
           if (setsIt) offerAdvisedBudget(advice);
+          return;
+        }
+
+        if (earned) {
+          const reply = earnAnswer(earned, reportRows, debts, asOf);
+          await answerWithModel(
+            `The income the message asks about, worked out by the app from the whole ledger, and nothing carried over from an earlier question: a source is counted only if this message names it. Answer with these figures, in your own words, and do no arithmetic of your own:\n${reply}`,
+            reply,
+          );
           return;
         }
 
@@ -5328,6 +5381,20 @@ export function AskPanel({
     const lastBudget = lastBudgetAt >= 0 ? (turns[lastBudgetAt] as Budgeting) : undefined;
     /** A figure of money in the message, leaving out dates and counts of months (budgetAsk.ts). */
     const namesFigure = namesMoneyFigure(ruled);
+    /*
+     * "make it 14000", "make it equal to 14000", "make me a card equal to that
+     * 14000", right after a budget card or a recommended budget: the same
+     * month at that total. Sent to the entry editor three times on 13 October
+     * 2026 ("No saved entry matches that"), and read as spending alone twice.
+     */
+    if (!budgetAsk && couldBudget && (lastBudget?.ask || recentProposal) && !saysMoneyMoved(ruled)) {
+      const total = readBudgetTotal(ruled);
+      if (total !== null) {
+        const from = span ?? (lastBudget?.ask ? { year: lastBudget.ask.year, month: lastBudget.ask.month, scope: "month" as const } : null) ?? (recentProposal ? proposedMonthIn(recentProposal.text, asOf) : null) ?? { ...nextOf(asOf), scope: "month" as const };
+        budgetAsk = { kind: "tracks", year: from.year, month: from.month, total, scope: "month" };
+        if (lastBudget && lastBudget.state === "open") decide(lastBudgetAt, "discarded");
+      }
+    }
     /** Money moving, in the owner's words: an entry, never a budget (budgetAsk.ts). */
     const movesMoney = saysMoneyMoved(ruled);
     /** The span a message names, laid over an ask, so "September to December" moves a card rather than making a new one. */
@@ -5474,7 +5541,20 @@ export function AskPanel({
         const f = forecastFor(target.year, target.month) ?? forecastFor(nextOf(asOf).year, nextOf(asOf).month);
         if (f) budgetAsk = over({ kind: "tracks", year: target.year, month: target.month, spending: f.spending, billsSubs: f.billsSubs, scope: "month" }, target);
       } else if (proposed !== null && (yesToBudget || /\b(it|that|this|those|recommend\w*|suggest\w*|what you said)\b/i.test(ruled))) {
-        budgetAsk = over({ kind: "tracks", year: target.year, month: target.month, spending: proposed, scope: "month" }, target);
+        /*
+         * Both lines when the answer named both ("Bills and subscriptions: PHP
+         * 1,522.00, Spending: PHP 12,478.00"); otherwise the figure is the
+         * month's total with the bills kept. On 13 October 2026 "add that"
+         * made PHP 14,000.00 of spending and PHP 0.00 for bills from an answer
+         * that had split it.
+         */
+        const lines = tracksIn((yesToBudget ? lastAnswer : recentProposal?.text ?? lastAnswer).replace(/\*\*/g, ""));
+        budgetAsk = over(
+          lines.spending !== undefined && lines.billsSubs !== undefined
+            ? { kind: "tracks", year: target.year, month: target.month, spending: lines.spending, billsSubs: lines.billsSubs, scope: "month" }
+            : { kind: "tracks", year: target.year, month: target.month, total: proposed, scope: "month" },
+          target,
+        );
       }
     }
     /*
@@ -5539,6 +5619,18 @@ export function AskPanel({
         say({ kind: "assistant", text: reply, from: "this device", ephemeral: true });
         log(aiEvent("answered", "add", { text: reply, model: "this device" }));
         return;
+      }
+      // A total keeps the bills the usual month plans when the month has none set yet.
+      if (budgetAsk.kind === "tracks" && budgetAsk.total !== undefined && budgetAsk.billsSubs === undefined && budgetAsk.billsHint === undefined) {
+        const f = forecastFor(budgetAsk.year, budgetAsk.month);
+        const latest = (() => {
+          for (let m = budgetAsk.month - 1; m >= 1; m -= 1) {
+            const b = budgets[String(budgetAsk.year)]?.billsSubs?.[m - 1] ?? 0;
+            if (b > 0) return b;
+          }
+          return 0;
+        })();
+        budgetAsk = { ...budgetAsk, billsHint: f?.billsSubs ?? latest };
       }
       const plan = planBudget(budgetAsk, budgets, asOf, new Date().toISOString());
       if (plan.outcome.refused) {
@@ -5805,6 +5897,36 @@ export function AskPanel({
      * step, the same step as the button beside the name on Home and Debt
      * (13 October 2026). The words say what happens before the press.
      */
+    // "Can you search Framelink Media": the ledger searched here; the model said it could not (13 October 2026).
+    const searchFor = !as && files.length === 0 ? readLedgerSearch(lead) : null;
+    if (searchFor) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "insights", { text: note }));
+      const words = searchLedger(searchFor, transactions);
+      say({ kind: "assistant", text: words, from: "this device" });
+      log(aiEvent("answered", "insights", { text: words, model: "this device" }));
+      return;
+    }
+
+    /*
+     * "Not a chart, I want it in text here in chat": the chart just drawn,
+     * written out row by row. It was read as a search for "Chat" (13 October 2026).
+     */
+    const chartShown = [...turns].reverse().slice(0, 6).find(isChart);
+    if (!as && files.length === 0 && chartShown && /\b(?:not? (?:a |the |in )?(?:chart|graph|pie)|no (?:chart|graph)|in text|as text|in words|text only|in a list|as a list|list (?:it|them|all|everything)|write (?:it|them) (?:out|down)|type it|here in (?:the )?chat|sa text)\b/i.test(lead)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "insights", { text: note }));
+      // Every row, not the eight a chart has room for: rebuilt from its own title, and kept only if it is the same chart.
+      const full = chartShown.chart.othersCount > 0 && chartShown.chart.kind !== "pie" && !chartShown.chart.against && !chartShown.chart.measure
+        ? buildChart(chartShown.chart.title, reportRows, asOf, chartShown.chart.direction, null, 200)
+        : null;
+      const words = chartAsText(full && full.total === chartShown.chart.total && full.by === chartShown.chart.by ? full : chartShown.chart);
+      say({ kind: "assistant", text: words, from: "this device" });
+      log(aiEvent("answered", "insights", { text: words, model: "this device" }));
+      return;
+    }
     const toClear = !as && files.length === 0 ? readSettleAsk(lead, debts) : null;
     if (toClear) {
       setDraft("");

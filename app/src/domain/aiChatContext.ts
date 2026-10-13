@@ -42,6 +42,7 @@
  * without it. Everything is redacted on the way out regardless.
  */
 
+import { isClearing } from "./settleLine";
 import { contextToText, phpFigure, type AiContext } from "./aiContext";
 import { addDays, dayInWords, dayOfWeek, formatMedium } from "./dates";
 import { redact } from "./aiRedact";
@@ -210,7 +211,8 @@ export function monthsNamedIn(question: string, year: string): string[] {
 function typeOf(t: Transaction, debts: ReadonlyMap<string, Debt>): string {
   if (t.type !== "Debt") return t.type;
   const debt = t.debtId ? debts.get(t.debtId) : undefined;
-  const what = t.debtEffect ? effectLabel(t.debtEffect, debt) : "movement";
+  // A clearing row moves no money and is neither income nor spending (settleLine.ts).
+  const what = isClearing(t) ? "Cleared, no money moved" : t.debtEffect ? effectLabel(t.debtEffect, debt) : "movement";
   const side = !debt
     ? ""
     : debt.form === "pass-through"
@@ -1060,7 +1062,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       // Paid past zero, such as PHP 600.00 back on a PHP 599.00 bill: the app clears it in one step (domain/settleLine.ts).
       if (p.outstanding < 0) {
         out.push(
-          `Paid past zero by ${php(-p.outstanding)}: ${p.debt.kind === "receivable" ? "they gave back more than was paid for them" : "more was given than was held"}. Saying "clear ${p.debt.counterparty.trim() || p.debt.name}" offers the one step that makes it zero: the extra counts as ${p.debt.kind === "receivable" ? "income" : "spending"}, and no wallet moves.`,
+          `Paid past zero by ${php(-p.outstanding)}: ${p.debt.kind === "receivable" ? "they gave back more than was paid for them" : "more was given than was held"}. Saying "clear ${p.debt.counterparty.trim() || p.debt.name}" offers the one step that makes it zero: a "Cleared" row that moves no money and counts as neither income nor spending, since the extra is already in or out of a wallet.`,
         );
       }
       // The next payment as the Debt screen works it out, not only a fixed date nothing sets.

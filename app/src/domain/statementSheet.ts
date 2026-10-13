@@ -27,6 +27,7 @@
  *    words are exact.
  */
 
+import { isClearing } from "./settleLine";
 import { coverWords } from "./covers";
 import { canFilter, filterName, matchesFilter } from "./statementFilter";
 import { formatMoney, type Centavos } from "./money";
@@ -274,7 +275,7 @@ function debtKind(effect: DebtEffect | undefined, debt: Debt | undefined): strin
  */
 export function kindOf(t: Transaction, debts: readonly Debt[] = [], onlyFee = false): string {
   if (t.category === "Opening") return "Opening balance";
-  if (t.type === "Debt") return debtKind(t.debtEffect, debts.find((d) => d.id === t.debtId));
+  if (t.type === "Debt") return isClearing(t) ? "Cleared, no money moved" : debtKind(t.debtEffect, debts.find((d) => d.id === t.debtId));
   if (t.type === "Transfer") {
     if (!t.toWallet.trim()) return "Money Send";
     return onlyFee || (t.amount === 0 && t.fee > 0) ? "Transaction Fee" : "Transfer";

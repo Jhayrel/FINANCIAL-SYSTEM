@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asksRatherThanTells, editedAsk, limitTalk, isBudgetForm, namesBudgetCommand, namesMoneyFigure, planBudget, tracksIn, proposedBudgetIn, proposedMonthIn, readBudgetAsk, respell, saysMoneyMoved, spanIn } from "./budgetAsk";
+import { asksRatherThanTells, editedAsk, limitTalk, isBudgetForm, namesBudgetCommand, namesMoneyFigure, planBudget, tracksIn, proposedBudgetIn, proposedMonthIn, readBudgetAsk, readBudgetTotal, respell, saysMoneyMoved, spanIn } from "./budgetAsk";
 import type { Budgets, ReferenceLists } from "./types";
 
 const reference: ReferenceLists = {
@@ -266,5 +266,31 @@ describe("a limit said in the chat", () => {
     expect(read("limit food to 3000")).toMatchObject({ month: 10, scope: "rest" });
     expect(read("remove the food limit")).toMatchObject({ value: 0, scope: "rest" });
     expect(read("limit food to 3000 this month only")).toMatchObject({ scope: "month" });
+  });
+});
+
+/*
+ * 13 October 2026: "equal to 14000" meant the whole month, bills inside it,
+ * and was made PHP 14,000.00 of spending with nothing for bills, or sent to
+ * the entry editor; "add that as budget" was put on May because the answer
+ * said the figure was worked from May to September.
+ */
+describe("a budget said as the month's total", () => {
+  const ref = { wallets: ["Cash"], savings: [], bills: [], subscriptions: [], revenueCategories: [], spendingTypes: [{ name: "Food" }], stopped: [] } as never;
+  it("keeps the bills inside the total and gives spending the rest", () => {
+    const ask = readBudgetAsk("I want to set a budget equalling 9000 all total for next month", ref, "2026-10-13");
+    expect(ask).toMatchObject({ kind: "tracks", month: 11, total: 900000 });
+    const plan = planBudget({ ...ask!, billsHint: 150000 } as never, {}, "2026-10-13", "2026-10-13T00:00:00Z");
+    expect(plan.words).toContain("₱9,000.00 in all, ₱7,500.00 for spending and ₱1,500.00 for bills");
+    expect(readBudgetAsk("set November to 9000", ref, "2026-10-13")).toMatchObject({ month: 11, total: 900000 });
+    expect(readBudgetAsk("set spending budget to 9000", ref, "2026-10-13")).toMatchObject({ spending: 900000 });
+  });
+  it("reads a follow-up figure as the total, and never an entry", () => {
+    for (const s of ["make it 9000", "Make it equal to 9000", "Make me a card equal to that 9000", "Thats wrong, I said 9000 means make it equal to 9000"]) expect(readBudgetTotal(s)).toBe(900000);
+    expect(readBudgetTotal("I paid 9000 for school")).toBeNull();
+    expect(readBudgetTotal("make it 500")).toBeNull();
+  });
+  it("puts a proposal on the month it is for, not the months it was worked from", () => {
+    expect(proposedMonthIn("I recommend a budget of PHP 9,000.00 for November 2026, adjusted from the usual month worked from your pattern over May to September 2026.", "2026-10-13")).toMatchObject({ month: 11 });
   });
 });

@@ -150,11 +150,16 @@ export interface FitSlip {
 }
 
 /** A claim that something fits: within, under, covered by, affordable. */
+/*
+ * "Under", "below", "within" only before a figure or a limit: "recorded under
+ * entry #3935" and "cash is below the PHP 500 warning" were read as fits,
+ * and the answers carried a false "Check this" (13 October 2026).
+ */
 const FIT =
-  /\b(?:within|under|below|inside|fits?|fitting|covers?|covered|affordable|can (?:afford|buy|get|cover)|(?:is|are) enough|enough (?:for|to)|stays? (?:under|within)|kasya)\b/i;
+  /\b(?:(?:within|under|below|inside)\s+(?:the\s+|your\s+|today'?s\s+|tomorrow'?s\s+|that\s+|this\s+|a\s+)?(?=\*|₱|php\b|\d|figure|limit|budget|safe|allowance|daily|day'?s|amount|share)|fits?\b|fitting\b|covers?\b|covered\b|affordable\b|can (?:afford|buy|get|cover)\b|(?:is|are) enough\b|enough (?:for|to)\b|stays? (?:under|within)\b|kasya\b)/i;
 /** Any of these and the clause is saying it does not fit, or is hedged. */
 const NOT =
-  /\b(?:not|never|no longer|cannot|exceeds?|exceeding|exceeded|above|beyond|more than|over (?:it|that|this|the|your|today)|shortfall|short|past|outside|too (?:much|expensive|high)|requires?|need(?:s)? (?:to )?sav\w*|saving up|unless|if you)\b|n'?t\b/i;
+  /\b(?:overspend\w*|over-?spending|warning|deficit|burn\w*|not|never|no longer|cannot|exceeds?|exceeding|exceeded|above|beyond|more than|over (?:it|that|this|the|your|today)|shortfall|short|past|outside|too (?:much|expensive|high)|requires?|need(?:s)? (?:to )?sav\w*|saving up|unless|if you)\b|n'?t\b/i;
 const TODAY_WORDS = /\b(?:today'?s|for today|today)\b/i;
 const TOMORROW_WORDS = /\b(?:from tomorrow|tomorrow'?s|after today)\b/i;
 const DAY_WORDS = /\b(?:a day|per day|daily|day'?s|safe[- ]to[- ]spend|safe spend\w*|that (?:limit|amount|figure|allowance)|the limit|allowance)\b/i;
@@ -192,6 +197,14 @@ export function fitSlips(answer: string, day: { readonly today: Centavos; readon
       for (const f of figures) {
         if (f <= limit || dayFigures.has(f) || seen.has(f)) continue;
         if (figures.some((g) => g !== f && g >= f)) continue;
+        /*
+         * A balance or money moved between accounts is not something bought:
+         * "your wallets hold PHP 1,226.51, which covers the PHP 250.00 fee"
+         * was flagged as PHP 1,226.51 that does not fit (13 October 2026).
+         */
+        const at = clause.indexOf(formatPlain(f));
+        const before = at > 0 ? clause.slice(Math.max(0, at - 40), at) : "";
+        if (/\b(?:hold|holds|holding|balance|wallets?|left|leaves|leaving|remaining|transfer(?:red)?\s+of|withdr\w*\s+of|aside)\b[^.]{0,12}$/i.test(before)) continue;
         seen.add(f);
         out.push({ amount: f, limit });
       }
@@ -273,3 +286,8 @@ export function challengedAnswer(
   return { ...checked, text: `${which}${checked.text}`, index };
 }
 
+/** A figure as an answer writes it, without the peso sign: 1,226.51. */
+function formatPlain(c: Centavos): string {
+  const pesos = Math.floor(Math.abs(c) / 100);
+  return `${pesos.toLocaleString("en-US")}.${String(Math.abs(c) % 100).padStart(2, "0")}`;
+}

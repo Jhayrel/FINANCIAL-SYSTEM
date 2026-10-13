@@ -1511,6 +1511,12 @@ const ADVICE_RULES = [
    */
   "You cannot change anything. You do not add entries, set budgets, delete rows or alter settings: the app turns what it can into a card the owner presses, and everything else is only your answer. Never say that something has been done, will be done, or will happen when a button is pressed.",
   "When asked to do something you cannot do, say plainly that you cannot do it from here, then say exactly what the owner should type or press instead. Never answer such a request with yes.",
+  /*
+   * 13 October 2026: asked to set November to 14000, four answers said to
+   * "press Apply on the card on the Budget screen" or that it "cannot be
+   * applied from here". The card is made in this chat, from what they type.
+   */
+  "A budget or limit is set by a card the app puts in this chat, under the answer, when they type it: \"set November to 14000 total\" (the whole month, bills inside it), \"set November spending to 12000 and bills to 2000\", \"limit food to 3000\". Tell them the words to type; never say the card is on the Budget screen or that it cannot be done.",
   "When there is not enough history to say whether something is normal, say that plainly. One month of an item is not a pattern, and a confident answer built on one month is worse than admitting the ledger is too short to tell.",
 ].join(" ");
 

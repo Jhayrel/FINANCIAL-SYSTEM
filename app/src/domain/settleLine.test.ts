@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { walletBalance } from "./balances";
 import { owedChange, type Debt } from "./debt";
-import { readSettleAsk, settleLine } from "./settleLine";
+import { isClearing, readSettleAsk, settleLine } from "./settleLine";
 import { incomeOf, costOf } from "./totals";
 import type { Transaction } from "./types";
 
@@ -21,20 +21,23 @@ const apply = (rows: Transaction[], s: NonNullable<ReturnType<typeof settleLine>
 ];
 
 describe("clearing what is left on a line (owner, 13 October 2026)", () => {
-  it("keeps the extra peso Father gave back as income, and no wallet moves", () => {
-    const father = line({});
+  // Past zero: the extra is already in a wallet, so the clear moves no money and adds no income or spending.
+  it("clears the extra peso a relative gave back with no wallet, income or spending moving", () => {
+    const dad = line({});
     const rows = [
-      row({ debtId: "father", debtEffect: "lend", fromWallet: "Maya", amount: 59900, total: 59900, description: "Globe Postpaid for Father" }),
+      row({ debtId: "father", debtEffect: "lend", fromWallet: "Maya", amount: 59900, total: 59900, description: "Phone bill for Dad" }),
       row({ debtId: "father", debtEffect: "collect", toWallet: "Cash", amount: 60000, total: 60000, date: "2026-10-06" }),
     ];
     expect(owed(rows, "father")).toBe(-100);
-    const s = settleLine(father, rows, ref, "2026-10-13")!;
-    expect(s.action).toBe("Keep the ₱1.00 as yours");
+    const s = settleLine(dad, rows, ref, "2026-10-13")!;
+    expect(s.action).toBe("Clear the ₱1.00 extra");
+    expect(s.update).toBeUndefined();
     const after = apply(rows, s);
     expect(owed(after, "father")).toBe(0);
-    expect(walletBalance(after, "Cash")).toBe(walletBalance(rows, "Cash"));
-    expect(walletBalance(after, "Maya")).toBe(walletBalance(rows, "Maya"));
-    expect(after.reduce((sum, t) => sum + incomeOf(t), 0)).toBe(100);
+    expect(isClearing(after[after.length - 1]!)).toBe(true);
+    for (const w of ["Cash", "Maya"]) expect(walletBalance(after, w)).toBe(walletBalance(rows, w));
+    expect(after.reduce((sum, t) => sum + incomeOf(t), 0)).toBe(0);
+    expect(after.reduce((sum, t) => sum + costOf(t), 0)).toBe(0);
   });
 
   it("writes off what someone still owes, retains what is held, and forgives a loan", () => {
@@ -54,6 +57,7 @@ describe("clearing what is left on a line (owner, 13 October 2026)", () => {
     const g = settleLine(tita, gaveMore, ref, "2026-10-13")!;
     expect(owed(apply(gaveMore, g), "tita")).toBe(0);
     expect(walletBalance(apply(gaveMore, g), "Cash")).toBe(walletBalance(gaveMore, "Cash"));
+    expect(apply(gaveMore, g).reduce((sum, t) => sum + costOf(t), 0)).toBe(0);
 
     const bank = line({ id: "bank", name: "Bank loan", counterparty: "Bank", kind: "payable", form: "term-loan" });
     const loan = [row({ debtId: "bank", debtEffect: "draw", toWallet: "Cash", amount: 30000, total: 30000 })];

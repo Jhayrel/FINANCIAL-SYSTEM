@@ -71,7 +71,14 @@ export function budgetChangeWords(budgets: Budgets, asOf: IsoDate): string[] {
       if (list.length === 0) continue;
       const name = `${MONTH_NAMES[Number(m) - 1] ?? m} ${y}`;
       const limits = list.filter((r) => r.what === "limit").length;
-      counts.push(`${name}: ${list.length} ${list.length === 1 ? "change" : "changes"}${limits > 0 ? ` (${limits} to limits)` : ""}`);
+      /*
+       * What is in force now, beside the count: "the final spending limit
+       * matches the safe figure of PHP 25,403.56" was said of a month whose
+       * budget had since gone back to PHP 26,000.00 (13 October 2026).
+       */
+      const nowSpending = budgets[String(y)]?.spending?.[Number(m) - 1] ?? 0;
+      const nowBills = budgets[String(y)]?.billsSubs?.[Number(m) - 1] ?? 0;
+      counts.push(`${name}: ${list.length} ${list.length === 1 ? "change" : "changes"}${limits > 0 ? ` (${limits} to limits)` : ""}, now ${money(nowSpending)} spending and ${money(nowBills)} bills and subscriptions`);
       for (const r of list) {
         // The owner's own day and time, as the Budget screen shows them: never UTC (12 October 2026 audit).
         const day = localDay(r.at);

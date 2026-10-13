@@ -33,6 +33,15 @@ export type BudgetAsk = (
       readonly scope: PlanScope;
       /** The figures are changes to what is set ("raise spending by 1000"), signed, not the new amounts. */
       readonly by?: boolean | undefined;
+      /**
+       * The whole month, bills and spending together ("14000 all total",
+       * "make it equal to 14000"): bills stay as set, or as planned, and
+       * spending takes the rest. 13 October 2026: "equal to 14000" made
+       * PHP 14,000.00 of spending and PHP 0.00 for bills, three times.
+       */
+      readonly total?: Centavos | undefined;
+      /** The bills to keep inside a total when the month has none set: the usual plan's. */
+      readonly billsHint?: Centavos | undefined;
     }
   | { readonly kind: "copy"; readonly year: number; readonly month: number; readonly scope: PlanScope }
   | {
@@ -49,6 +58,27 @@ export type BudgetAsk = (
   /** The last month of a range ("September to December"), written month by month. */
   readonly toMonth?: number | undefined;
 };
+
+/** The whole month's figure, bills inside it: "14000 all total", "equal to 14000", "14k overall". */
+const TOTAL = /\b(?:all\s+total|in\s+total|total(?:ling|ing)?|overall|all[- ]in|in\s+all|altogether|equal(?:s|ling|ing)?(?:\s+to)?|lahat\s+lahat|kabuuan)\b/i;
+
+/**
+ * A follow-up that remakes the budget just shown at another figure: "make it
+ * 14000", "make it equal to 14000", "make me a card equal to that 14000"
+ * (13 October 2026, each sent to the entry editor or read as spending
+ * alone). The figure is the month's total; the caller checks a budget card
+ * or proposal is just above, and finds the month from it.
+ */
+export function readBudgetTotal(said: string): Centavos | null {
+  const text = respell(said).toLowerCase();
+  if (text.split(/\s+/).length > 24 || asksRatherThanTells(said)) return null;
+  if (/\b(paid|spent|bought|received|bayad|nagastos|from (?:cash|maya|gcash)|#\s*\d)/i.test(text)) return null;
+  if (!/\b(make|set|change|put|gawin|card|equal\w*|total\w*|overall|budget|it|that)\b/.test(text)) return null;
+  const m = new RegExp(NUM, "i").exec(text.replace(/\b20\d{2}\b/g, " "));
+  if (!m?.[1]) return null;
+  const value = pesosOf(m[1], m[2]);
+  return value >= 100000 ? value : null;
+}
 
 const SET = /\b(set|make|change|update|increase|raise|lower|reduce|put|copy|use|same|limit|cap|save|apply|adjust|edit|modify|fix|allocate|assign|decrease|cut)\b/i;
 
@@ -370,7 +400,23 @@ export function proposedBudgetIn(text: string): Centavos | null {
  */
 export function proposedMonthIn(text: string, asOf: IsoDate): BudgetSpan | null {
   const found = proposalIn(text);
-  return found?.sentence ? spanIn(found.sentence, asOf) : null;
+  if (!found?.sentence) return null;
+  /*
+   * "a budget of PHP 14,000.00 for November 2026, adjusted from ... May to
+   * September 2026" was applied to May (13 October 2026): the months the
+   * figure was worked from are not the month it is for. "for <month>" first;
+   * otherwise the sentence without its "over May to September".
+   */
+  const forMonth = new RegExp(String.raw`\bfor\s+(?:the\s+month\s+of\s+)?(${MONTH_TOKEN}(?:\s+20\d{2})?)\b`, "i").exec(found.sentence);
+  if (forMonth?.[1]) {
+    const named = spanIn(forMonth[1], asOf);
+    if (named) return named;
+  }
+  const without = found.sentence.replace(
+    new RegExp(String.raw`\b(?:over|across|during|(?:worked|calculated|built|based|adjusted|averaged|taken|drawn)\s+(?:on|from|over|across))\s+(?:the\s+months?\s+(?:of\s+)?)?${MONTH_TOKEN}\b[^.,;]*`, "gi"),
+    " ",
+  );
+  return spanIn(without, asOf);
 }
 
 function proposalIn(text: string): { readonly value: Centavos; readonly sentence: string } | null {
@@ -490,7 +536,9 @@ export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: Iso
   const form = isBudgetForm(text);
   const labelled = tracksIn(text);
   const namesLine = labelled.spending !== undefined || labelled.billsSubs !== undefined;
-  if (!form && (!/\b(budget|limit|cap)\b/i.test(text) || !(SET.test(text) || /\badd\b/i.test(text) || (namesLine && /\bbudget\b/i.test(text))))) return null;
+  // "set November to 14000": a month and a figure alone, which the model itself told the owner to type (13 October 2026).
+  const monthOnly = new RegExp(String.raw`^\s*(?:set|make|put|change)\s+(?:the\s+)?${MONTH_TOKEN}(?:\s+20\d{2})?\s+(?:to|at|=)\s+(?:₱|php\s*)?[\d,]+(?:\.\d{1,2})?\s*k?\s*(?:total|in\s+all|all\s+in|overall)?\s*[.!]?\s*$`, "i").test(text);
+  if (!form && !monthOnly && (!/\b(budget|limit|cap)\b/i.test(text) || !(SET.test(text) || /\badd\b/i.test(text) || (namesLine && /\bbudget\b/i.test(text))))) return null;
   const span = spanIn(text, asOf);
   const { year, month } = span ?? monthIn(text, asOf);
   const scope = span?.scope ?? scopeIn(text);
@@ -576,6 +624,7 @@ export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: Iso
     };
   }
   if (value === null) return null;
+  if ((TOTAL.test(text) || monthOnly) && by === 0) return { kind: "tracks", year, month, total: value, scope, ...(toMonth ? { toMonth } : {}) };
   if (/\b(bills?|subscriptions?|subs)\b/i.test(text)) return { kind: "tracks", year, month, billsSubs: by < 0 ? -value : value, ...(by !== 0 ? { by: true } : {}), scope, ...(toMonth ? { toMonth } : {}) };
   return { kind: "tracks", year, month, spending: by < 0 ? -value : value, ...(by !== 0 ? { by: true } : {}), scope, ...(toMonth ? { toMonth } : {}) };
 }
@@ -647,7 +696,7 @@ export function planBudget(ask: BudgetAsk, budgets: Budgets, asOf: IsoDate, at: 
     words =
       ask.kind === "copy"
         ? `${span}: the same budget as the month before, ${formatMoney(value.spending)} for spending and ${formatMoney(value.billsSubs)} for bills and subscriptions.`
-        : `${span}: ${formatMoney(value.spending)} for spending and ${formatMoney(value.billsSubs)} for bills and subscriptions, was ${formatMoney(
+        : `${span}: ${ask.kind === "tracks" && ask.total !== undefined ? `${formatMoney(ask.total)} in all, ` : ""}${formatMoney(value.spending)} for spending and ${formatMoney(value.billsSubs)} for bills and subscriptions, was ${formatMoney(
             current.spending,
           )} and ${formatMoney(current.billsSubs)}.`;
   }
@@ -667,6 +716,11 @@ function valueFor(ask: BudgetAsk, budgets: Budgets, month: number): { spending: 
   if (ask.kind === "tracks" && ask.by) {
     // A change to what each month already has, never below nothing.
     return { spending: Math.max(0, current.spending + (ask.spending ?? 0)), billsSubs: Math.max(0, current.billsSubs + (ask.billsSubs ?? 0)) };
+  }
+  if (ask.kind === "tracks" && ask.total !== undefined) {
+    // Bills inside the total: as said, as set for the month, or as the usual plan has them, never more than the total.
+    const bills = Math.min(ask.total, ask.billsSubs ?? (current.billsSubs > 0 ? current.billsSubs : (ask.billsHint ?? 0)));
+    return { spending: ask.total - bills, billsSubs: bills };
   }
   if (ask.kind === "tracks") return { spending: ask.spending ?? current.spending, billsSubs: ask.billsSubs ?? current.billsSubs };
   return current;

@@ -1175,6 +1175,8 @@ export function buildChart(
   only?: "spending" | "revenue",
   /** Two periods to put side by side, when the assistant read them out of the message. */
   said?: ComparedPeriods | null,
+  /** How many rows to keep: every one when the chart is written out as text. */
+  most: number = MOST_ROWS,
 ): Chart | null {
   const focus = focusOf(question, transactions);
   const direction = only ?? directionOf(question);
@@ -1357,7 +1359,7 @@ export function buildChart(
    */
   const PIE_SLICES = 7;
   let kept: [string, { value: number; count: number }][] =
-    overTime(by) ? all : all.slice(0, MOST_ROWS);
+    overTime(by) ? all : all.slice(0, most);
   let folded = 0;
   if (kind === "pie" && all.length > PIE_SLICES) {
     const rest = all.slice(PIE_SLICES - 1);
@@ -1592,4 +1594,19 @@ export function wantsBothDirections(question: string): boolean {
   const incoming = /\b(income|revenue|earnings|money in|received|allowance|salary)\b/.test(q);
   const outgoing = /\b(spending|spent|expenses?|money out|outflow)\b/.test(q);
   return (incoming && outgoing) || /\b(cash ?flow|in and out|ins and outs|coming in and going out)\b/.test(q);
+}
+
+/**
+ * A chart written out in full, one line a row: "Not a chart, I want it in
+ * text here in chat" (13 October 2026) was read as a search for "Chat".
+ */
+export function chartAsText(chart: Chart): string {
+  if (chart.measure) return chartInWords(chart);
+  const lines = chart.rows.map((r) => {
+    const share = chart.total > 0 ? `, ${Math.round((r.value * 100) / chart.total)}%` : "";
+    const count = r.count > 0 ? `, ${r.count} ${r.count === 1 ? "entry" : "entries"}` : "";
+    const was = r.previous !== undefined ? `, was ${chartLabel(r.previous)}` : "";
+    return `- ${r.label}: ${chartLabel(r.value)}${share}${count}${was}`;
+  });
+  return [`${chart.title}: ${chartLabel(chart.total)} in all.`, ...lines, chart.othersCount > 0 ? `And ${chart.othersCount} smaller, counted in the total.` : ""].filter(Boolean).join("\n");
 }

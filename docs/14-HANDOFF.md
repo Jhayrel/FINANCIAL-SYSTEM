@@ -1165,7 +1165,7 @@ the other side, and found Held, Released and Retained confusing.
 |---|---|
 | Accounting words | The six On behalf choices are "Paid for them", "Paid you back", "Let it go", "Received for them", "Given to them", "Kept as yours" (`debtWords.ts`), on the form, Home, statements and in what the AI reads. Meanings and figures unchanged |
 | Person not found | Every On behalf person is a button on the form, from either side, with what is left; a tap moves the form to their side and picks them |
-| A minus left on a line | `domain/settleLine.ts` works out the one step that makes a line zero, says it in a sentence before the press, and saves it as one change. Past zero on "they owe you": the latest reimbursement is edited down by the extra and the extra is added as income into the same wallet, so no wallet moves. Past zero on "you hold": the extra counts as money given (spending). A remainder still owed: let it go (spending on behalf, neither for a loan). Still held: kept as yours (income) |
+| A minus left on a line | `domain/settleLine.ts` works out the one step that makes a line zero, says it in a sentence before the press, and saves it as one change. Past zero, either side: one "Cleared" row on the line (no wallet, notes `Cleared: no money moved.`, `isClearing`), counting as neither income nor spending, because the extra is already in or out of a wallet. A remainder still owed: let it go (spending on behalf, neither for a loan). Still held: kept as yours (income) |
 | Where | Home's On behalf rows, the Add form (beside the picked person and in the side list), and the Debt screen for small remainders on a loan (PHP 100.00 or less, so a debt is never one press from forgiven). The chat: "clear Father", "keep the 1 peso from Father" offers a "Clear a line" card |
 | Every part knows | The AI's context says when a line is past zero and that "clear NAME" makes it zero; the assistant's scope names the plain words. A minus is shown as the extra, never as a minus owed |
 
@@ -1174,6 +1174,30 @@ income up by the extra); in a browser on the 13 October data, Home's press
 took the line to zero with every wallet the same, the phone form showed the
 person from the other side and the step, the chat card cleared it, no page
 errors, no overflow at 390.
+
+### 2026-10-13, later: the 13 October backup's reasoning faults, and the clear redone
+
+The first clear (edit the reimbursement down, add the extra as Revenue into
+the wallet) moved no wallet, but the owner read the "+PHP 1.00 Revenue into
+Cash" row as a peso that was not there and binned it, which did take a peso
+out; restored, the figures are right again. Their record #3938 stays as it
+is. From now on a clear past zero is one "Cleared" row with no wallet, no
+income and no spending (above). On the form, tapping a person keeps the side
+chosen ("Kept as yours" stayed "Kept as yours"); with no line on that side,
+one is started under their name.
+
+| Fault in the 13 October chat | Fix |
+|---|---|
+| "make it equal to 14000", "14000 all total", "set November to 14000" made PHP 14,000.00 of spending and PHP 0.00 for bills, or went to the entry editor | A total (`total` on the ask): bills as set, or as the usual month plans them, and spending the rest; "make it N" after a budget card or proposal remakes that card (`readBudgetTotal`); "add that" after an answer naming both lines takes both |
+| "add that as budget" went to May | The proposal's month is the one after "for", never the months the figure was worked from (`proposedMonthIn`) |
+| The model said it "cannot apply" a budget, or that the card is "on the Budget screen" | Told the card is made in the chat and which words make it |
+| "Check this" under a wallet balance, a transfer and "below the PHP 500 warning" | Under, below and within are fits only before a figure or a limit; balance and transfer figures are not fits (`dayFit.ts`) |
+| "You forgot the 16 fee" | A change card adding the fee to the entry just added, or "already has the fee" |
+| "Not a chart, I want it in text" read as a search for "Chat" | The chart just drawn, written out with every row |
+| "How much have I earned since the beginning", "no Framelink, all incoming" | App-worked true income over the whole ledger or from a year, by source, one source only or left out (`earnAsk.ts`) |
+| "Can you search Framelink Media": "I'm not able to perform searches" | The ledger searched in the chat, falling back to fewer words (`ledgerSearch.ts`) |
+| "the final limit matches the safe figure" of a month since changed | The budget history says what is in force now for each month |
+| "because aI is switched off" | Capitals kept; the line shortened |
 
 ---
 

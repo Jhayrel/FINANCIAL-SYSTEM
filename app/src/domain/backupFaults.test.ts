@@ -174,7 +174,7 @@ describe("carry-over, ranges, settings and budget history (12 October 2026)", ()
       { at: "2026-10-05T10:00:00Z", what: "limit", name: "Food", limit: 300000, when: "open" },
     ] } } } as never;
     const words = budgetChangeWords(budgets, "2026-10-12");
-    expect(words[0]).toBe("2 changes in all. By month: October 2026: 2 changes (1 to limits).");
+    expect(words[0]).toBe("2 changes in all. By month: October 2026: 2 changes (1 to limits), now ₱0.00 spending and ₱0.00 bills and subscriptions.");
     expect(words.join("\n")).toContain("October 2026: spending ₱7,700.00 to ₱15,000.00");
   });
 });

@@ -9,10 +9,10 @@
  *
  * ── The cases ─────────────────────────────────────────────────────────────
  *
- * They gave back more than they owed (owes you below zero): the latest
- * reimbursement is edited down by the extra, and the extra is added as
- * income into the same wallet. The wallet does not move; the line reads
- * zero; the peso counts as theirs given to you.
+ * They gave back more than they owed, or you gave more than you held: one
+ * "Cleared" row on the line brings it to zero. The extra is already in, or
+ * already out of, a wallet, so it moves no money and counts as neither
+ * income nor spending (owner, 13 October 2026).
  *
  * They still owe a little, and the owner lets it go: written off. Money paid
  * on someone's behalf and written off is spending (spec 5.6.1); an ordinary
@@ -21,15 +21,12 @@
  * Money still held for someone, and they let the owner keep it: retained,
  * which is income.
  *
- * More given back than was held (you hold below zero): the latest hand-over
- * is edited down by the extra, and the extra is added as money sent to them,
- * which is spending. The wallet does not move.
  *
  * Nothing is saved here. The caller shows the words and saves on the
  * owner's press, as one change.
  */
 import { owedChange, type Debt } from "./debt";
-import { formatMoney, type Centavos } from "./money";
+import { formatMoney } from "./money";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export interface Settlement {
@@ -45,7 +42,14 @@ export interface Settlement {
 }
 
 const name = (d: Debt): string => d.counterparty.trim() || d.name;
-const number = (t: Transaction): string => `#${String(t.recordNumber).padStart(4, "0")}`;
+
+/** The note on a clearing row, which is how it is told apart from a real movement. */
+export const CLEARED = "Cleared: no money moved.";
+
+/** A row that only brings a line to zero: no wallet, no income, no spending. Shown as "Cleared". */
+export function isClearing(t: Pick<Transaction, "type" | "fromWallet" | "toWallet" | "notes">): boolean {
+  return t.type === "Debt" && !t.fromWallet && !t.toWallet && t.notes === CLEARED;
+}
 
 export function settleLine(debt: Debt, transactions: readonly Transaction[], reference: Pick<ReferenceLists, "revenueCategories">, asOf: IsoDate): Settlement | null {
   const rows = transactions.filter((t) => t.debtId === debt.id && !(t as Transaction & { deletedAt?: string }).deletedAt);
@@ -54,55 +58,40 @@ export function settleLine(debt: Debt, transactions: readonly Transaction[], ref
   const who = name(debt);
   const behalf = debt.form === "pass-through";
   const base = { fee: 0, notes: "Cleared from the line's remainder.", item: "" };
-  const latest = (effect: string, at: Centavos): Transaction | undefined =>
-    [...rows].filter((t) => t.debtEffect === effect && t.amount > at).sort((a, b) => b.date.localeCompare(a.date) || b.recordNumber - a.recordNumber)[0];
   const income = reference.revenueCategories.find((c) => /random|other|gift|misc/i.test(c)) ?? reference.revenueCategories[0] ?? "Revenue";
 
-  if (debt.kind === "receivable" && owed < 0) {
+  /*
+   * Past zero: the extra is already in (or already out of) a wallet, so the
+   * clear moves no money and counts as neither income nor spending. One row
+   * on the line itself brings it to zero. The first version edited the
+   * reimbursement down and added the extra as income into the wallet: the
+   * wallets did not move, but a "+PHP 1.00 Revenue into Cash" row read as a
+   * peso that was not there, and binning it took a real peso out
+   * (owner, 13 October 2026).
+   */
+  if (owed < 0) {
     const extra = -owed;
-    const back = latest("collect", extra);
-    if (!back) return null;
+    const back = debt.kind === "receivable";
     return {
       debtId: debt.id,
-      action: `Keep the ${formatMoney(extra)} as yours`,
-      words: `${who} gave back ${formatMoney(extra)} more than you paid for them. Keep it as yours: ${number(back)} becomes ${formatMoney(back.amount - extra)}, and ${formatMoney(extra)} is added as income in ${back.toWallet || "the same wallet"}. Your wallets do not move, and ${who} reads ${formatMoney(0)}.`,
-      update: { ...back, amount: back.amount - extra, total: back.amount - extra + back.fee },
+      action: `Clear the ${formatMoney(extra)} extra`,
+      words: back
+        ? `${who} gave back ${formatMoney(extra)} more than you paid for them. It is already in your wallet, so clearing it moves no money and adds no income: ${who} reads ${formatMoney(0)}.`
+        : `You gave ${who} ${formatMoney(extra)} more than you ${behalf ? "held for them" : "owed"}. It already left your wallet, so clearing it moves no money and adds no spending: ${who} reads ${formatMoney(0)}.`,
       add: {
         ...base,
-        date: back.date,
-        type: "Revenue",
-        category: "Revenue",
-        item: income,
+        date: asOf,
+        type: "Debt",
+        debtId: debt.id,
+        debtEffect: back ? "lend" : "draw",
+        category: "",
         fromWallet: "",
-        toWallet: back.toWallet,
-        description: `The ${formatMoney(extra)} extra ${who} gave back, kept`,
-        amount: extra,
-        total: extra,
-        status: "Received",
-      },
-    };
-  }
-
-  if (debt.kind === "payable" && owed < 0) {
-    const extra = -owed;
-    const out = latest("repay", extra);
-    if (!out) return null;
-    return {
-      debtId: debt.id,
-      action: `Count the ${formatMoney(extra)} as given`,
-      words: `You gave ${who} ${formatMoney(extra)} more than you ${behalf ? "held for them" : "owed"}. Count it as money given to them: ${number(out)} becomes ${formatMoney(out.amount - extra)}, and ${formatMoney(extra)} is added as money sent, which is spending. Your wallets do not move.`,
-      update: { ...out, amount: out.amount - extra, total: out.amount - extra + out.fee },
-      add: {
-        ...base,
-        date: out.date,
-        type: "Transfer",
-        category: "Transfer",
-        fromWallet: out.fromWallet,
         toWallet: "",
-        description: `The ${formatMoney(extra)} more given to ${who}`,
+        description: back ? `Cleared: the ${formatMoney(extra)} extra ${who} gave back` : `Cleared: the ${formatMoney(extra)} more given to ${who}`,
+        notes: CLEARED,
         amount: extra,
         total: extra,
-        status: "Transferred",
+        status: "",
       },
     };
   }
