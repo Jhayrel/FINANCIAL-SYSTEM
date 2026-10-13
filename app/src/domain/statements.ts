@@ -28,6 +28,7 @@ import type { Centavos } from "./money";
 import { firstOfMonth, lastOfMonth } from "./dates";
 import { owedChange, type Debt } from "./debt";
 import { costOf, incomeOf } from "./totals";
+import { walletDelta } from "./balances";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 import { canFilter, matchesFilter } from "./statementFilter";
 import { spreadCovered, wholeRows } from "./covers";
@@ -291,7 +292,31 @@ export function buildStatementBetween(
 
   let totalIn = 0;
   let totalOut = 0;
+  /*
+   * In and out are money through a wallet. A write-off, a charge and a
+   * "Cleared" row move none: counted as out, "kept as yours" read as money
+   * out on the revenue statement and every On behalf net was off by what
+   * was written off (13 October 2026). On the revenue and expense statements
+   * the figure is what counts there: income in, spending out.
+   */
   for (const { transaction: t } of rows) {
+    if (type === "revenue") {
+      totalIn += incomeOf(t);
+      continue;
+    }
+    if (type === "expense") {
+      totalOut += costOf(t);
+      continue;
+    }
+    // One wallet: exactly what the balance does, a transfer into it is money in.
+    if (type === "wallet" && scope.wallet) {
+      const delta = walletDelta(t, (w) => w === scope.wallet);
+      if (delta > 0) totalIn += delta;
+      else totalOut -= delta;
+      continue;
+    }
+    const noMoney = t.type === "Debt" && !t.fromWallet && !t.toWallet;
+    if (noMoney) continue;
     if (t.type === "Revenue" || t.debtEffect === "draw" || t.debtEffect === "collect") {
       totalIn += t.total;
     } else {

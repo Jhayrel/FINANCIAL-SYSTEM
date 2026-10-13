@@ -131,12 +131,24 @@ export function settleLine(debt: Debt, transactions: readonly Transaction[], ref
 const CLEAR =
   /\b(clear|settle|zero|close|keep (?:the|it|that)|keep (?:the )?(?:extra|sukli|change|remainder|rest)|let (?:it|the [\w₱. ]+) go|write (?:it )?off|forgive|forgiven|sa (?:akin|kin) na|akin na lang|kunin ko na)\b/i;
 
-export function readSettleAsk(text: string, debts: readonly Debt[]): Debt | null {
+export function readSettleAsk(text: string, debts: readonly Debt[], leftOf?: (debt: Debt) => number): Debt | null {
   const t = text.trim();
   if (!CLEAR.test(t) || /\?\s*$/.test(t)) return null;
   const named = debts
     .filter((d) => !d.archived)
     .map((d) => ({ d, words: [d.counterparty.trim(), d.name.trim()].filter((w) => w.length >= 3) }))
-    .filter(({ words }) => words.some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)));
-  return named.length === 1 ? named[0]!.d : null;
+    .filter(({ words }) => words.some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)))
+    .map(({ d }) => d);
+  if (named.length <= 1) return named[0] ?? null;
+  /*
+   * One name, two lines: money paid for Dad and money held for him. The
+   * words say which ("he owes", "gave back", "extra"; "holding", "his
+   * money"), or else the only one with something left on it.
+   */
+  const owedWords = /\b(owe|owes|owed|gave (?:me )?back|paid (?:me )?back|extra|advance|paid for)\b/i.test(t);
+  const heldWords = /\b(hold|holding|held|his money|her money|their money|keep the rest)\b/i.test(t);
+  const bySide = named.filter((d) => (owedWords && !heldWords ? d.kind === "receivable" : heldWords && !owedWords ? d.kind === "payable" : true));
+  if (bySide.length === 1) return bySide[0]!;
+  const open = leftOf ? bySide.filter((d) => leftOf(d) !== 0) : [];
+  return open.length === 1 ? open[0]! : null;
 }

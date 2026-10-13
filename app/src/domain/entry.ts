@@ -135,7 +135,11 @@ export function emptyDraft(date: IsoDate = today()): Draft {
  * 2026: 22 such rows). They are worked out from the rows before them, so
  * they are not edited by hand.
  */
-export function notEditable(t: Pick<Transaction, "type" | "category" | "recordNumber">): string | null {
+export function notEditable(t: Pick<Transaction, "type" | "category" | "recordNumber"> & Partial<Pick<Transaction, "fromWallet" | "toWallet" | "notes">>): string | null {
+  // A "Cleared" row only brings an On behalf line to zero, with no money moving (settleLine.ts).
+  if (t.type === "Debt" && !t.fromWallet && !t.toWallet && t.notes === "Cleared: no money moved.") {
+    return `#${String(t.recordNumber).padStart(4, "0")} only cleared a line to zero and moved no money, so there is nothing in it to edit. Move it to the bin to undo the clear.`;
+  }
   if (t.category === "Opening" && t.type !== "Revenue") {
     return `#${String(t.recordNumber).padStart(4, "0")} is a balance the app carried over when a year closed. It is worked out from the entries before it, so it is not edited by hand: edit those entries instead.`;
   }
@@ -618,11 +622,13 @@ export function checkDraft(
      * filed against a line that no longer shows anywhere. Editing a row that
      * is already filed against it is still allowed.
      */
+    /*
+     * Archived, and named again: saving reopens it, with everything recorded
+     * before (App.tsx handleSave). It was refused with "reopen it in
+     * Settings"; the owner asked for it to reopen by itself (13 October 2026).
+     */
     if (debt?.archived && !draft.id) {
-      errors.push({
-        field: "debt",
-        message: `${debt.name} is archived. Reopen it in Settings, under Credit and loans, to record something new against it.`,
-      });
+      warnings.push({ field: "debt", message: `${debt.counterparty.trim() || debt.name} was archived. Saving this reopens them, with everything recorded before.` });
     }
   }
 

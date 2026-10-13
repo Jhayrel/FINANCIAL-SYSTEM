@@ -655,12 +655,25 @@ export function financeAlerts(input: AlertInput): Alert[] {
   for (const p of positionsOf(debts, transactions, asOf)) {
     if (p.outstanding >= 0) continue;
     const back = p.debt.kind === "receivable" ? "collected than was lent" : "paid than was owed";
+    /*
+     * Money paid or held for someone, past zero (PHP 600.00 back on a PHP
+     * 599.00 bill): said as the extra, with the one step that clears it,
+     * which moves no money (settleLine.ts). A loan keeps its own words.
+     */
+    const who = p.debt.counterparty.trim() || p.debt.name;
+    const behalf = p.debt.form === "pass-through";
     out.push({
       id: `debt-below-zero-${p.debt.id}`,
       level: "info",
       area: "debt",
-      title: `${p.debt.name} is ${money(-p.outstanding)} below nothing`,
-      detail: `${money(-p.outstanding)} more was ${back}, so every total counts this line as settled. Open its rows: an amount may be off, or a row may belong to another line.`,
+      title: behalf
+        ? p.debt.kind === "receivable"
+          ? `${who} gave you ${money(-p.outstanding)} extra`
+          : `You gave ${who} ${money(-p.outstanding)} extra`
+        : `${p.debt.name} is ${money(-p.outstanding)} below nothing`,
+      detail: behalf
+        ? `It is already ${p.debt.kind === "receivable" ? "in" : "out of"} your wallet. If that is right, press "Clear the ${money(-p.outstanding)} extra" beside ${who} on Home, or say "clear ${who}" in the chat: it moves no money. If an amount is off, edit that entry instead.`
+        : `${money(-p.outstanding)} more was ${back}, so every total counts this line as settled. Open its rows: an amount may be off, or a row may belong to another line.`,
       weight: 35,
       query: p.debt.name,
     });

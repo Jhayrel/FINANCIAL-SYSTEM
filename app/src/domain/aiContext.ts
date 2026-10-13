@@ -690,7 +690,9 @@ export function contextToText(c: AiContext): string {
     lines.push("## Debt");
     // A line at nothing is named once, not given a line: settled is all there is to say.
     const settled = c.debts.filter((d) => d.outstanding === 0 && d.nextDue == null && d.limit == null);
-    if (settled.length > 0) lines.push(`Settled, nothing owed either way: ${settled.map((d) => d.name).join(", ")}.`);
+    // Two lines under one name (paid for Dad, and holding Dad's money) are told apart.
+    const named = (d: (typeof settled)[number]): string => (settled.filter((x) => x.name === d.name).length > 1 ? `${d.name} (${d.kind})` : d.name);
+    if (settled.length > 0) lines.push(`Settled, nothing owed either way: ${settled.map(named).join(", ")}.`);
     for (const d of c.debts.filter((x) => !settled.includes(x))) {
       const due =
         d.nextDue == null || d.daysToDue === null

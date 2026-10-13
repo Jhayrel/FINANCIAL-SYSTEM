@@ -11,6 +11,7 @@
  * never alter or drop data, they only report. The user decides what to fix.
  */
 
+import { isClearing } from "./settleLine";
 import type { Centavos } from "./money";
 import type { IsoDate, Transaction } from "./types";
 import { walletDelta } from "./balances";
@@ -178,9 +179,10 @@ export function checkIntegrity(
      * first row, so no wallet received it inside the ledger. Filed Opening, as a
      * wallet's starting balance is (docs/08, rule Y1).
      */
+    // And a "Cleared" row, which only brings an On behalf line past zero back to it (settleLine.ts).
     const movesNoWallet =
       t.type === "Debt" &&
-      (t.debtEffect === "charge" || t.debtEffect === "writeoff" || (t.debtEffect === "draw" && t.category === "Opening"));
+      (t.debtEffect === "charge" || t.debtEffect === "writeoff" || (t.debtEffect === "draw" && t.category === "Opening") || isClearing(t));
     if (!t.fromWallet && !t.toWallet && !movesNoWallet) {
       one(t, "no-wallet", "error", `No wallet on either side, so it affects no balance.`);
     }

@@ -490,6 +490,8 @@ export function AddTransaction({
 
   /** The name typed for someone not on the list yet. Null while picking from the list. */
   const [newPerson, setNewPerson] = useState<string | null>(null);
+  /** "Someone new" chosen on the On behalf dropdown: only then is there a name box to type in. */
+  const [freeName, setFreeName] = useState(false);
   /** For a new person on an ordinary debt: borrowed from them, or lent to them. */
   const [personKind, setPersonKind] = useState<Debt["kind"] | null>(null);
 
@@ -908,7 +910,7 @@ export function AddTransaction({
     for (const d of debts) {
       if (d.form !== "pass-through") continue;
       const left = transactions.filter((t) => t.debtId === d.id).reduce((sum, t) => sum + owedChange(t), 0);
-      if (d.archived && left === 0) continue;
+      // Archived people stay on the list, under Archived: picking one reopens them when the entry saves.
       const name = d.counterparty.trim() || d.name.trim();
       const at = people.get(name.toLowerCase()) ?? { name, lines: [] };
       at.lines.push({ debt: d, left });
@@ -980,14 +982,15 @@ export function AddTransaction({
      * open under Father's button and read as a second question (13 October 2026).
      */
     const known = debtOptions.length > 0 || (Boolean(draft.behalf) && behalfPeople.length > 0);
-    const typing = newPerson !== null || (!known && Boolean(onAddDebt));
+    // On behalf, a person picked from the list who needs a new line here is not typed: the box is for someone new.
+    const typing = (newPerson !== null && (!draft.behalf || freeName || !known)) || (!known && Boolean(onAddDebt));
     return (
       <Field
         label={draft.behalf ? (draft.behalf === "owed" ? "On whose behalf" : "Whose money") : "Which debt"}
         required
         error={errorFor("debt")}
         aside={
-          onAddDebt && newPerson === null && known ? (
+          draft.behalf && known ? undefined : onAddDebt && newPerson === null && known ? (
             <button
               type="button"
               className="t-micro fms-linkbtn"
@@ -1018,53 +1021,86 @@ export function AddTransaction({
           is on "They owe you" (13 October 2026). A tap moves the form to his
           side and picks him.
         */}
-        {draft.behalf && behalfPeople.length > 0 && (
-          <div className="fms-planner-chips" role="group" aria-label="People you have">
-            {behalfPeople.map((person) => {
-              /*
-               * The side picked stays. Tapping Father after "Kept as yours"
-               * moved the form to his other side and chose "Let it go"
-               * (13 October 2026). With no line on this side yet, one is
-               * started under his name; only with nothing picked yet does the
-               * form go to the side he already has.
-               */
-              const kindHere = draft.behalf === "owed" ? "receivable" : "payable";
-              const here = person.lines.find((l) => l.debt.kind === kindHere && !l.debt.archived);
-              const there = person.lines.find((l) => l.debt.kind !== kindHere && !l.debt.archived);
-              const chosen = (here !== undefined && draft.debtId === here.debt.id) || (newPerson ?? "").trim().toLowerCase() === person.name.toLowerCase();
-              const left = here?.left ?? 0;
-              const said = !here
-                ? ""
-                : left === 0
-                  ? ", settled"
-                  : here.debt.kind === "receivable"
-                    ? left > 0 ? `, owes you ${formatMoney(left)}` : `, gave you ${formatMoney(-left)} extra`
-                    : left > 0 ? `, you hold ${formatMoney(left)}` : `, you gave ${formatMoney(-left)} extra`;
-              return (
-                <Button
-                  key={person.name}
-                  size="sm"
-                  variant={chosen ? "primary" : "secondary"}
-                  onClick={() => {
-                    if (here) {
-                      setNewPerson(null);
-                      setDraft((d) => pickDebt(d, here.debt));
-                    } else if (there && !draft.debtEffect) {
-                      const side: BehalfSide = there.debt.kind === "receivable" ? "owed" : "held";
-                      setNewPerson(null);
-                      setDraft((d) => pickDebt({ ...d, behalf: side }, there.debt));
-                    } else {
-                      setNewPerson(person.name);
-                      setDraft((d) => ({ ...d, debtId: undefined }));
-                    }
-                  }}
-                >
-                  {person.name}
-                  {said}
-                </Button>
-              );
-            })}
-          </div>
+        {draft.behalf && behalfPeople.length > 0 && (() => {
+          /*
+           * One dropdown for everyone, however many: who has money on this
+           * side, who is settled, who is only on the other side, who is
+           * archived (picking them reopens them when the entry saves), and
+           * "Someone new" last, which alone opens a name box. Buttons did not
+           * scale, and a picked person beside an empty name box read as two
+           * questions (13 October 2026).
+           *
+           * The side picked stays: picking Father after "Kept as yours" starts
+           * his line on this side rather than moving the form to his other one.
+           */
+          const kindHere = draft.behalf === "owed" ? "receivable" : "payable";
+          const NEW = "Someone new";
+          const lineHere = (p: (typeof behalfPeople)[number]) =>
+            p.lines.find((l) => l.debt.kind === kindHere && !l.debt.archived) ?? p.lines.find((l) => l.debt.kind === kindHere);
+          const statusOf = (p: (typeof behalfPeople)[number]): string => {
+            const here = lineHere(p);
+            if (!here) return p.lines.every((l) => l.debt.archived) ? "archived, reopens" : "new on this side";
+            if (here.debt.archived) return "archived, reopens";
+            const left = here.left;
+            if (left === 0) return "settled";
+            return here.debt.kind === "receivable"
+              ? left > 0 ? `owes you ${formatMoney(left)}` : `gave you ${formatMoney(-left)} extra`
+              : left > 0 ? `you hold ${formatMoney(left)}` : `you gave ${formatMoney(-left)} extra`;
+          };
+          const people = [...behalfPeople].sort((a, b) => {
+            const rank = (p: (typeof behalfPeople)[number]) => {
+              const st = statusOf(p);
+              return st === "archived, reopens" ? 3 : st === "new on this side" ? 2 : st === "settled" ? 1 : 0;
+            };
+            return rank(a) - rank(b) || a.name.localeCompare(b.name);
+          });
+          const groupOf = (p: (typeof behalfPeople)[number]): string => {
+            const st = statusOf(p);
+            return st === "archived, reopens" ? "Archived" : st === "new on this side" ? "On the other side" : st === "settled" ? "Settled" : "Money still open";
+          };
+          const picked = people.find((p) => p.lines.some((l) => l.debt.id === draft.debtId));
+          const value = picked ? picked.name : freeName && newPerson !== null ? NEW : newPerson ? (people.find((p) => p.name.toLowerCase() === newPerson.trim().toLowerCase())?.name ?? "") : "";
+          return (
+            <Select
+              value={value}
+              onChange={(name) => {
+                if (name === NEW) {
+                  setFreeName(true);
+                  setNewPerson("");
+                  setDraft((d) => ({ ...d, debtId: undefined }));
+                  return;
+                }
+                const person = people.find((p) => p.name === name);
+                if (!person) return;
+                setFreeName(false);
+                const here = lineHere(person);
+                const there = person.lines.find((l) => l.debt.kind !== kindHere && !l.debt.archived);
+                if (here) {
+                  setNewPerson(null);
+                  setDraft((d) => pickDebt(d, here.debt));
+                } else if (there && !draft.debtEffect) {
+                  setNewPerson(null);
+                  setDraft((d) => pickDebt({ ...d, behalf: there.debt.kind === "receivable" ? "owed" : "held" }, there.debt));
+                } else {
+                  setNewPerson(person.name);
+                  setDraft((d) => ({ ...d, debtId: undefined }));
+                }
+              }}
+              options={[...people.map((p) => p.name), NEW]}
+              details={Object.fromEntries(people.map((p) => [p.name, statusOf(p)]))}
+              groups={{ ...Object.fromEntries(people.map((p) => [p.name, groupOf(p)])), [NEW]: "Add" }}
+              placeholder="Pick a person"
+              ariaLabel="Which person"
+              invalid={Boolean(errorFor("debt"))}
+            />
+          );
+        })()}
+        {draft.behalf && newPerson && !freeName && known && (
+          <p className="t-micro" style={{ margin: 0, color: "var(--ink-3)" }}>
+            {debts.some((d) => d.archived && d.form === "pass-through" && (d.counterparty.trim() || d.name).toLowerCase() === newPerson.trim().toLowerCase() && d.kind === (draft.behalf === "owed" ? "receivable" : "payable"))
+              ? `${newPerson} was archived. Saving this reopens them, with everything recorded before.`
+              : `${newPerson} has nothing on "${draft.behalf === "owed" ? "They owe you" : "You hold theirs"}" yet. Saving this starts it.`}
+          </p>
         )}
         {draft.behalf && selectedDebt && settlementFor && onSettle && settlementFor(selectedDebt) && (
           <div className="fms-settle">

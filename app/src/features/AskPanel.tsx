@@ -217,7 +217,7 @@ import { spreadCovered } from "../domain/covers";
 import { rowSavedFor } from "../domain/formSaved";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
-import { choicesFor, effectsFor, interestOnTop, outstandingOf, asAmountAndFees, owedParts, type Debt, type DebtEffect } from "../domain/debt";
+import { choicesFor, effectsFor, interestOnTop, outstandingOf, owedChange, asAmountAndFees, owedParts, type Debt, type DebtEffect } from "../domain/debt";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, type BehalfSide } from "../domain/debtWords";
 import { debtCardIntro } from "../domain/debtSentence";
 import { splitsWhose } from "../domain/behalfFor";
@@ -5927,7 +5927,7 @@ export function AskPanel({
       log(aiEvent("answered", "insights", { text: words, model: "this device" }));
       return;
     }
-    const toClear = !as && files.length === 0 ? readSettleAsk(lead, debts) : null;
+    const toClear = !as && files.length === 0 ? readSettleAsk(lead, debts, (d) => transactions.filter((t) => t.debtId === d.id).reduce((sum, t) => sum + owedChange(t), 0)) : null;
     if (toClear) {
       setDraft("");
       say({ kind: "you", text: note });
@@ -10860,7 +10860,8 @@ function DebtCard({
 }) {
   const { draft, state } = turn;
   const behalf = draft.behalf;
-  const live = debts.filter((d) => !d.archived);
+  // Archived people too, last: picking one reopens them when the entry saves (App.tsx handleSave).
+  const live = [...debts].sort((a, b) => Number(a.archived) - Number(b.archived));
   const direction = debtWalletDirection(draft.debtEffect);
   // The wallet on the side this movement uses: a borrowing's "from" is never shown as where it lands.
   const named = direction === "in" ? draft.toWallet : direction === "out" ? draft.fromWallet : draft.fromWallet || draft.toWallet;
@@ -11093,6 +11094,7 @@ function DebtCard({
           {options.map((d) => (
             <option key={d.id} value={d.id}>
               {d.name}
+              {d.archived ? " (archived, reopens)" : ""}
             </option>
           ))}
         </select>

@@ -1199,6 +1199,23 @@ one is started under their name.
 | "the final limit matches the safe figure" of a month since changed | The budget history says what is in force now for each month |
 | "because aI is switched off" | Capitals kept; the line shortened |
 
+### 2026-10-13, last: On behalf end to end, one person dropdown, archived people reopen
+
+A scenario test ran one On behalf cycle (paid for, paid back past zero,
+held, given, kept, let go, cleared) through every part; the money core held
+(wallets, lines, income, spending) and these were fixed:
+
+| Fault | Fix |
+|---|---|
+| Statements counted write-offs and "Cleared" rows as money out: "kept as yours" read as out on the revenue statement, the account net was off by every write-off | In and out are money through a wallet; revenue and expense statements total income and spending; a one-wallet statement follows the balance rule (`walletDelta`) |
+| A "Cleared" row raised "1 row needs review" | It moves no wallet by design (`integrity.ts`) |
+| "Dad is PHP 1.00 below nothing" | For On behalf: "Dad gave you PHP 1.00 extra", with the clear step |
+| "Settled: Dad, Dad" for the AI | Two lines under one name are told apart |
+| A "Cleared" row opened in the form failed with "Pick the wallet" | It is not editable; the reason says to bin it to undo the clear |
+| "clear dad" with two Dad lines found nobody | The words pick the side, else the one line with something left |
+| Buttons for each person did not scale, and a picked person beside an empty name box read as two questions | One searchable dropdown: money still open, settled, on the other side, archived, and "Someone new" last (the only way to a name box); the side picked stays |
+| Archived people were refused ("reopen it in Settings") | Saving an entry for them reopens them, from the form or the chat (`handleSave`); the chat's person list shows them as "(archived, reopens)" |
+
 ---
 
 ## 6. What the owner has to do

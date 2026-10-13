@@ -1094,6 +1094,9 @@ export default function App() {
      * so until the next reload, when the row was simply gone.
      */
     const stamped: Transaction[] = rows.map((r) => ({ ...r, entrySource: by.actor === "ai" ? "ai" : "manual" }));
+    // A new entry for someone archived reopens them, from the form or the chat alike.
+    const reopened = new Set(stamped.flatMap((r) => (r.debtId && settings.credits.some((d) => d.id === r.debtId && d.archived) ? [r.debtId] : [])));
+    if (reopened.size > 0) setSettings((s) => ({ ...s, credits: s.credits.map((d) => (reopened.has(d.id) ? { ...d, archived: false } : d)) }));
 
     setTransactions((prev) => insertChronologically(prev, stamped, { renumber: renumbers }));
     push((l) => l.saveMany(stamped));

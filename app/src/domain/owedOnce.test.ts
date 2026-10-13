@@ -98,7 +98,8 @@ describe("a line below nothing", () => {
     ] as unknown as Parameters<typeof financeAlerts>[0]["transactions"];
     const alerts = financeAlerts({ transactions: rows, accounts: [], budgets: {}, debts: [father], bills: [], lowBalanceThreshold: 0, asOf: "2026-10-06" });
     const below = alerts.find((a) => a.id === "debt-below-zero-father");
-    expect(below?.title).toBe("Father is ₱1.00 below nothing");
-    expect(below?.detail).toContain("₱1.00 more was collected than was lent");
+    // Money paid for someone, past zero: said as the extra, with the step that clears it (13 October 2026).
+    expect(below?.title).toBe("Father gave you ₱1.00 extra");
+    expect(below?.detail).toContain('say "clear Father" in the chat: it moves no money');
   });
 });
