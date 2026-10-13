@@ -1235,10 +1235,13 @@ counts; charts reach it with every row, its share and the sum of the rest;
 gym?" gets the app's afford reading; its instructions use Edit, the plain On
 behalf names and every new command, with one rule about cards instead of two
 that disagreed; alert lines are cut at a sentence; Settings row actions are a
-compact row on a desk. Still open: two income figures for one year (the
-Insights income and the true income), entries spread over days counted once
-in every tally, the realistic-budget check against usual income, "for the
-next 3 months" across a year end.
+compact row on a desk. Then: entries spread over days count once in the AI's
+tallies; "received" says how much of it is Cash on hand, which true income
+leaves out; the plan and pace figures are labelled as the plan; a
+"realistic" budget is held to usual income; "for the next 3 months" across
+a year end says on the card which months are next year's; the AI is pointed
+to "Budget and your money" and the chat commands, never a section that is
+gone.
 
 ---
 

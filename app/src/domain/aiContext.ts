@@ -552,7 +552,8 @@ export function contextToText(c: AiContext): string {
   lines.push(`Spent ${php(c.month.spent)}, received ${php(c.month.revenue)}.`);
   if (c.month.budget !== null) {
     lines.push(
-      `Budget ${php(c.month.budget)}, ${c.month.remaining! < 0 ? "over by" : "remaining"} ${php(Math.abs(c.month.remaining!))}.`,
+      // The plan, said as the plan: "left" read as money to spend beside the safe figure (13 October 2026 audit).
+      `Budget ${php(c.month.budget)} (spending and bills together), ${c.month.remaining! < 0 ? "over by" : "left of the plan"} ${php(Math.abs(c.month.remaining!))}; the plan, never money to spend.`,
     );
   } else {
     lines.push("No budget set for this month.");
@@ -579,7 +580,7 @@ export function contextToText(c: AiContext): string {
   const pace = c.month.pace;
   if (pace && pace.day >= PACE_FROM_DAY) {
     lines.push(
-      `Spending budget pace: ${php(pace.spent)} by day ${pace.day} of ${pace.days}, steady pace ${php(pace.allowed)}; ${php(pace.perDay)} a day so far, ${php(pace.perDayLeft)} a day left: ${pace.fast ? "not on track" : "on track"}.`,
+      `Spending budget pace: ${php(pace.spent)} spent by day ${pace.day} of ${pace.days}, where a steady pace would be ${php(pace.allowed)}; ${php(pace.perDayLeft)} a day is left of the spending budget (an average of ${php(pace.perDay)} a day so far, one-off items included, so not a daily rate to repeat): ${pace.fast ? "not on track" : "on track"}.`,
     );
   }
   const spendingLeft = c.month.spendingLeft ?? null;

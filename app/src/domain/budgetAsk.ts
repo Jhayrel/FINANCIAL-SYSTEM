@@ -238,6 +238,8 @@ export interface BudgetSpan {
    * this one.
    */
   readonly anchored?: boolean;
+  /** Months asked for past December ("the next 3 months" in October): next year's budget, said on the card, never dropped silently. */
+  readonly cut?: number;
 }
 
 const NUMBER_WORDS: Record<string, number> = {
@@ -294,7 +296,9 @@ export function spanIn(said: string, asOf: IsoDate): BudgetSpan | null {
       const first = count[1] ? (now === 12 ? { year: year + 1, month: 1 } : { year, month: now + 1 }) : start();
       const last = Math.min(12, first.month + n - 1);
       const isAnchored = Boolean(count[1]) || anchored;
-      return last > first.month ? { ...first, toMonth: last, scope: "month", anchored: isAnchored } : { ...first, scope: "month", anchored: isAnchored };
+      const cut = first.month + n - 1 - 12;
+      const past = cut > 0 ? { cut } : {};
+      return last > first.month ? { ...first, toMonth: last, scope: "month", anchored: isAnchored, ...past } : { ...first, scope: "month", anchored: isAnchored, ...past };
     }
   }
 

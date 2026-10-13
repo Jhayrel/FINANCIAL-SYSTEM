@@ -263,7 +263,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
         level: "info",
         area: "budget",
         title: `${money(since.amount)} came in since you set the ${monthName(month)} budget`,
-        detail: `Open Budget: under the budget, Money that came in puts it into spending, bills or savings, and checks that the budget never promises more than your money.`,
+        detail: `On the Budget screen, Budget and your money puts it into spending, bills or savings, and checks that the budget never promises more than your money. Or say "add the money that came in to my budget" in the chat.`,
         weight: 36,
       });
     }

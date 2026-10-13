@@ -73,6 +73,21 @@ import { borrowedMoney, lenderNames } from "./borrowed";
 import { safeAfter, safeOverDays } from "./monthPlan";
 import { daysAskedAbout } from "./safeAsk";
 
+
+/**
+ * "Received" counts Cash on hand, money brought from the owner's own pocket;
+ * true income (Insights, "how much have I earned") leaves it out. Said
+ * beside the figure, so two figures for one year read as one figure and a
+ * known part (13 October 2026 audit).
+ */
+const selfNote = (rows: readonly Transaction[]): string => {
+  const own = rows.filter((t) => t.type === "Revenue" && t.item.trim().toLowerCase() === "cash on hand").reduce((sum, t) => sum + t.total, 0);
+  return own > 0 ? ` (of it ${php(own)} Cash on hand, money from your own pocket, which true income leaves out)` : "";
+};
+
+/** Entries, not rows: the days of one entry spread over several count once (13 October 2026 audit). */
+const entriesIn = (rows: readonly Transaction[]): number => new Set(rows.map((t) => t.coveredBy ?? t.id)).size;
+
 /**
  * The ceiling on the ledger half, in bytes.
  *
@@ -308,7 +323,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   const dates = rows.map((t) => t.date).sort();
   out.push("## The ledger");
   out.push(
-    `${rows.length} entries, ${dates[0] ?? "none"} to ${dates[dates.length - 1] ?? "none"}. Every total below is worked out from them and is correct.`,
+    `${entriesIn(rows)} entries, ${dates[0] ?? "none"} to ${dates[dates.length - 1] ?? "none"}. Every total below is worked out from them and is correct.`,
   );
 
   // ── Every month, with counts ─────────────────────────────────────────────
@@ -512,7 +527,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     const spent = inWindow.reduce((sum, t) => sum + spendingOf(t), 0);
     const got = inWindow.reduce((sum, t) => sum + revenueOf(t), 0);
     const when = from === to ? formatMedium(from) : `${from} to ${to}`;
-    return `${label} (${when}): spent ${php(spent)}, received ${php(got)}, ${inWindow.length} entries`;
+    return `${label} (${when}): spent ${php(spent)}, received ${php(got)}${selfNote(inWindow)}, ${entriesIn(inWindow)} entries`;
   };
 
   // Monday as the first day. `dayOfWeek` returns 0 for Sunday.
@@ -596,7 +611,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     if (onDay.length === 0) continue;
     const spent = onDay.reduce((sum, t) => sum + spendingOf(t), 0);
     const got = onDay.reduce((sum, t) => sum + revenueOf(t), 0);
-    daily.push(`${day}: spent ${php(spent)}, received ${php(got)}, ${onDay.length} entries`);
+    daily.push(`${day}: spent ${php(spent)}, received ${php(got)}, ${entriesIn(onDay)} ${entriesIn(onDay) === onDay.length ? "entries" : "entries (a spread entry counts once)"}`);
   }
   if (daily.length > 0) {
     out.push("");
@@ -621,7 +636,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       const got = inWindow.reduce((sum, t) => sum + revenueOf(t), 0);
       out.push("");
       out.push(`## The window asked about: ${w.name}${w.from > "1000" && w.to < "9000" ? ` (${w.from} to ${w.to})` : ""}`);
-      out.push(`Spent ${php(spent)}, received ${php(got)}, ${inWindow.length} entries. Use these for anything about this window.`);
+      out.push(`Spent ${php(spent)}, received ${php(got)}${selfNote(inWindow)}, ${entriesIn(inWindow)} entries. Use these for anything about this window.`);
       for (const [name, g] of tally(inWindow, (t) => t.item).slice(0, 8)) {
         out.push(`${name}: ${php(g.amount)} over ${g.count} entries`);
       }
@@ -800,7 +815,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       out.push("");
       out.push("## The budget and the money that came in");
       out.push(...incomeBudgetWords(ib, MONTH_NAMES[month - 1] ?? "this month"));
-      out.push("To adjust the budget from income: the parts (spending, bills and subscriptions, kept for savings) add up to no more than came in, and the spending budget stays at or under the most the money keeps, less anything kept for savings and not moved yet. Quote these figures; the owner applies it on the Budget screen (Money that came in) or by asking to set the spending budget to a figure.");
+      out.push("To adjust the budget from income: the parts (spending, bills and subscriptions, kept for savings) add up to no more than came in, and the spending budget stays at or under the most the money keeps, less anything kept for savings and not moved yet. Quote these figures; the owner applies it here by typing \"lower my budget to my money\", \"add the money that came in to my budget, keep 2000 for savings\" or \"base my budget on my 10k income, save 20%\", or on the Budget screen under Budget and your money.");
     }
   }
 

@@ -975,7 +975,7 @@ const HISTORY_TURNS = 10;
 
 /** "based on my income", "within my allowance", "income and spending": a budget held to what usually comes in. */
 const BY_INCOME =
-  /\b(?:based on|base(?:d)? sa|from|within|fit(?:s|ting)?(?: in| into| to)?|according to)\s+(?:my\s+|the\s+|ang\s+)?(?:usual\s+|monthly\s+)?(?:income|allowance|salary|sahod|kita|earnings)\b|\bincome and (?:spending|expenses|gastos)\b/i;
+  /\b(?:based on|base(?:d)? sa|from|within|fit(?:s|ting)?(?: in| into| to)?|according to)\s+(?:my\s+|the\s+|ang\s+)?(?:usual\s+|monthly\s+)?(?:income|allowance|salary|sahod|kita|earnings)\b|\bincome and (?:spending|expenses|gastos)\b|\b(?:realistic|kaya ko|can i (?:really )?afford|sustainable)\b[^.?!]{0,30}\bbudget\b|\bbudget\b[^.?!]{0,30}\b(?:realistic|kaya|sustainable)\b/i;
 
 /** Asked to set a budget, not only told one: "can you set a plan", "adjust my budget this month". */
 const SETS_BUDGET = /\b(?:set|adjust\w*|make|create|build|plan|apply|update|change|fix|redo|gawa\w*|ayusin)\b/i;
@@ -4583,7 +4583,7 @@ export function AskPanel({
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", "add", { text: note }));
-        const words = [...incomeBudgetWords(ib, MONTH_NAMES[m - 1] ?? "this month"), "Split it on the Budget screen, under Money that came in: it checks each part before it saves."].join("\n");
+        const words = [...incomeBudgetWords(ib, MONTH_NAMES[m - 1] ?? "this month"), "Split it here, say \"add the money that came in to my budget, keep 2000 for savings\", or on the Budget screen under Budget and your money: it checks each part before it saves."].join("\n");
         setBusy(true);
         try {
           await askQuestion(note, false, {
@@ -5691,6 +5691,10 @@ export function AskPanel({
           return 0;
         })();
         budgetAsk = { ...budgetAsk, billsHint: f?.billsSubs ?? latest };
+      }
+      if (span?.cut) {
+        const next = budgetAsk.year + 1;
+        budgetNote = [budgetNote, `${span.cut === 1 ? "January" : `January to ${MONTH_NAMES[span.cut - 1] ?? ""}`} ${next} ${span.cut === 1 ? "is" : "are"} next year's budget, not on this card: say "set January ${next} to" a figure for ${span.cut === 1 ? "it" : "them"}.`].filter(Boolean).join(" ");
       }
       const plan = planBudget(budgetAsk, budgets, asOf, new Date().toISOString());
       if (plan.outcome.refused) {
