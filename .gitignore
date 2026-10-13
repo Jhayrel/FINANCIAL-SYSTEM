@@ -57,3 +57,6 @@ desktop.ini
 # ── OneDrive / Excel debris ────────────────────────────────────
 ~$*
 *.tmp
+
+# Scratch tests written during a session (they read private data from outside the repo). Never committed.
+app/src/zz-*
