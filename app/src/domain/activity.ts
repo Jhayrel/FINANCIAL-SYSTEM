@@ -120,6 +120,16 @@ export function describeRow(t: Transaction): string {
 }
 
 /** Which fields differ, for the summary line of an edit. */
+/** The owner's words for a field, in the trail: "days covered", never "coversTo" (12 October 2026 audit). */
+const FIELD_WORDS: Readonly<Record<string, string>> = {
+  coversTo: "days covered",
+  fromWallet: "wallet",
+  toWallet: "destination",
+  debtId: "debt",
+  debtEffect: "debt movement",
+  recordNumber: "record number",
+};
+
 export function changedFields(before: Transaction, after: Transaction): string[] {
   const keys = [
     "date",
@@ -184,7 +194,7 @@ export function updated(
     "transaction.update",
     by,
     changed.length > 0
-      ? `Changed ${numbered(after)}: ${changed.join(", ")}.`
+      ? `Changed ${numbered(after)}: ${changed.map((f) => FIELD_WORDS[f] ?? f).join(", ")}.`
       : `Saved ${numbered(after)} with no change.`,
     {
       targetId: after.id,

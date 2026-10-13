@@ -8,7 +8,7 @@
  * and only the newest budget change.
  */
 
-import { formatMedium, MONTH_NAMES } from "./dates";
+import { formatMedium, MONTH_NAMES, localDay } from "./dates";
 import { formatMoney, type Centavos } from "./money";
 import type { AppSettings } from "./settings";
 import type { Budgets, IsoDate } from "./types";
@@ -24,7 +24,7 @@ export function settingsWords(s: AppSettings): string[] {
   const parentOf = (id?: string): string => s.accounts.find((a) => a.id === id)?.name ?? "";
   const out: string[] = [
     `Accounts: ${list(open.map((a) => `${a.name} (${a.kind}${a.kind === "goal" && a.parentId ? ` in ${parentOf(a.parentId)}` : ""}${a.target ? `, target ${formatMoney(a.target)}` : ""})`))}.${shut.length > 0 ? ` Archived: ${list(shut.map((a) => a.name))}.` : ""}`,
-    `Kinds of spending: ${list(s.spendingTypes.map((t) => (t.necessity ? `${t.name} (${NEED[t.necessity] ?? t.necessity})` : t.name)))}.`,
+    `Kinds of spending: ${list(s.spendingTypes.map((t) => { const notes = [t.necessity ? (NEED[t.necessity] ?? t.necessity) : "", t.remark && t.remark.trim().toLowerCase() !== t.name.trim().toLowerCase() ? t.remark.trim() : ""].filter(Boolean); return notes.length > 0 ? `${t.name} (${notes.join(", ")})` : t.name; }))}.`,
     `Bills: ${list(s.bills)}. Subscriptions: ${list(s.subscriptions)}.`,
     `Kinds of income: ${list(s.revenueCategories)}.`,
   ];
@@ -47,6 +47,9 @@ export function settingsWords(s: AppSettings): string[] {
         .join("; ")}.`,
     );
   }
+  // Closed lines are named as closed, so "my PNB loan" is known to be paid off rather than unknown (12 October 2026 audit, A7).
+  const closed = s.credits.filter((d) => d.archived);
+  if (closed.length > 0) out.push(`Closed debt lines, kept for their history: ${list(closed.map((d) => d.name))}.`);
   const off = Object.entries(s.ai.features).filter(([, on]) => on === false).map(([k]) => k);
   out.push(
     `Low balance warning below ${formatMoney(s.lowBalanceThreshold)}. Notes after saving: ${s.budgetNotes === false ? "off" : "on"}. Theme: ${s.theme}. AI: ${s.ai.enabled ? "on" : "off"}${s.ai.model ? `, model ${s.ai.model}` : ""}, tone ${s.ai.tone}${off.length > 0 ? `, switched off: ${off.join(", ")}` : ""}.`,
@@ -70,12 +73,15 @@ export function budgetChangeWords(budgets: Budgets, asOf: IsoDate): string[] {
       const limits = list.filter((r) => r.what === "limit").length;
       counts.push(`${name}: ${list.length} ${list.length === 1 ? "change" : "changes"}${limits > 0 ? ` (${limits} to limits)` : ""}`);
       for (const r of list) {
-        const day = r.at.slice(0, 10);
+        // The owner's own day and time, as the Budget screen shows them: never UTC (12 October 2026 audit).
+        const day = localDay(r.at);
+        const when = new Date(r.at);
+        const time = Number.isNaN(when.getTime()) ? "" : when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
         const words =
           r.what === "limit"
             ? `limit on ${r.name ?? "a kind"} ${money(r.wasLimit)} to ${r.limit ? money(r.limit) : "removed"}`
             : `spending ${money(r.wasSpending)} to ${money(r.spending)}, bills and subscriptions ${money(r.wasBillsSubs)} to ${money(r.billsSubs)}`;
-        changes.push({ month: name, at: day, words: `${formatMedium(day)}, ${name}: ${words}${r.when === "closed" ? ` (a correction after the month closed${r.reason ? `: ${r.reason}` : ""})` : r.when === "grace" ? " (just after the month ended)" : ""}.` });
+        changes.push({ month: name, at: r.at, words: `${formatMedium(day)}${time ? ` ${time}` : ""}, ${name}: ${words}${r.when === "closed" ? ` (a correction after the month closed${r.reason ? `: ${r.reason}` : ""})` : r.when === "grace" ? " (just after the month ended)" : r.reason ? ` (${r.reason})` : ""}.` });
       }
     }
   }
@@ -86,6 +92,10 @@ export function budgetChangeWords(budgets: Budgets, asOf: IsoDate): string[] {
 
 /** "how many times did I change my budget", "when did I change the food limit", "budget history". */
 export function asksBudgetHistory(text: string): boolean {
-  return /\b(?:budget|budgets|limit|limits)\b/i.test(text) && /\b(?:how many times|how often|when did i|history|changes|changed|change log|ilang beses|binago)\b/i.test(text) && !/^\s*(?:change|set|update|make|raise|lower)\b/i.test(text);
+  return (
+    /\b(?:budget|budgets|limit|limits)\b/i.test(text) &&
+    /\b(?:how many times|how often|when did i|did i (?:ever )?change|have i (?:ever )?changed|what did i change|history|changes|changed|change log|revisions?|before|previous|old|used to be|ilang beses|binago)\b/i.test(text) &&
+    !/^\s*(?:change|set|update|make|raise|lower|increase|decrease|reduce|add|remove)\b/i.test(text)
+  );
 }
 

@@ -4021,7 +4021,7 @@
 
 /* The words stand apart from the row of buttons, so a tap meant for the text does not land on Send. */
 .fms-asktools {
-  padding-top: 2px;
+  padding-top: var(--space-3);
 }
 
 .fms-linkish {
@@ -5172,6 +5172,16 @@ button.fms-recent-row:disabled {
   display: grid;
   gap: var(--space-2);
   min-width: 0;
+}
+
+/* Money that came in, split into the budget: under the planner, separated by a hairline (rule D2). */
+.fms-incomesplit {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--hairline);
 }
 
 .fms-planner-chips {
@@ -8252,23 +8262,12 @@ button.fms-recent-row:disabled {
 }
 
 /* ══ Screens that scroll only their rows, beside the AI button ══════════════
-   The button reserves 92px under a page that scrolls, so the last card can
-   rise above it. These screens never scroll as a page, so the reserve showed
-   as a band of nothing under every table. The rows keep the room instead. */
-
-@media (min-width: 1024px) {
-  .fms-app--fab .fms-main--fixed,
-  .fms-app--fab .fms-main--fixed-lg {
-    --main-pad-b: var(--space-8);
-  }
-
-  .fms-app--fab .fms-main--fixed-lg .scroll-slim,
-  .fms-app--fab .fms-main--fixed-lg .fms-binscroll,
-  .fms-app--fab .fms-main--fixed-lg .fms-actlist,
-  .fms-app--fab .fms-main--fixed .fms-panel-scroll {
-    padding-bottom: calc(56px + var(--space-8));
-  }
-}
+   These screens keep the button's whole reserve under the card, as a page
+   that scrolls does. Giving the room to the rows instead left the card's own
+   footer under the button: "Show 25 more", Save changes and Delete forever
+   sat beneath it at 1024px and up (12 October 2026 audit, D1, and the
+   owner's image 9). A band of page under the card is the price of every
+   button staying reachable. */
 
 /* ══ Add: fields in pairs, and one list of checks ═══════════════════════════ */
 
@@ -9777,6 +9776,7 @@ button.fms-recent-row:disabled {
   .fms-askinput {
     font-size: 16px;
     line-height: 22px;
+    min-height: 44px;
   }
 
   .fms-askfield {

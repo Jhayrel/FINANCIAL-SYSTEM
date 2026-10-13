@@ -40,7 +40,8 @@
 
 import type { Centavos } from "./money";
 import { formatMoney } from "./money";
-import { addDays, daysInMonth, localDay, makeDate, monthName } from "./dates";
+import { addDays, daysBetween, daysInMonth, localDay, makeDate, monthName } from "./dates";
+import { daysIn } from "./readEntry";
 import { costOf, incomeOf, spendingAttribution, totalsFor } from "./totals";
 import { forecastYear } from "./forecast";
 import type { Debt } from "./debt";
@@ -716,6 +717,10 @@ export function whyOver(
  */
 export function asksShortBudget(text: string, asOf: IsoDate): boolean {
   if (!asksBudgetAdvice(text) || adviceMonthIn(text, asOf) !== null) return false;
-  return /\b(?:this|next|the)\s+week\b|\bweekly\b|\bfor\s+(?:today|tomorrow|tonight)\b|\bper\s+(?:day|week)\b|\b(?:a|each|every)\s+(?:day|week)\b|\bdaily\b|\bngayong\s+(?:araw|linggo)\b|\bbukas\b/i.test(text);
+  if (/\b(?:this|next|the)\s+week\b|\bweekly\b|\bfor\s+(?:today|tomorrow|tonight)\b|\bper\s+(?:day|week)\b|\b(?:a|each|every)\s+(?:day|week)\b|\bdaily\b|\bngayong\s+(?:araw|linggo)\b|\bbukas\b/i.test(text)) return true;
+  // A run of days, "next 3 days", "this weekend", "oct 13 to 15": what is safe over it, never next month's budget (MODEL-5).
+  if (/\b(?:next|coming|following)\s+(?:\d+|few|two|three|four|five|six|seven|couple(?:\s+of)?)\s+days?\b|\b(?:this|the|next)\s+weekend\b|\bweekend\b/i.test(text)) return true;
+  const days = daysIn(text, asOf);
+  return days !== null && days.to >= days.from && daysBetween(days.from, days.to) < 27;
 }
 

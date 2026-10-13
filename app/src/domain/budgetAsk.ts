@@ -261,7 +261,11 @@ export function spanIn(said: string, asOf: IsoDate): BudgetSpan | null {
   }
 
   // "from october on", "starting october": that month and every one after it.
-  if (new RegExp(String.raw`\b(?:from|starting|beginning)\s+(?:in\s+)?${MONTH_WORD}\b(?:\s+on(?:wards?)?\b)?`, "i").test(text) && !/\b(?:to|until|till|through)\b/.test(text)) {
+  // A "to" before the month is the amount's ("limit food to 3000 from november"); only one after it ends the run.
+  if (
+    new RegExp(String.raw`\b(?:from|starting|beginning)\s+(?:in\s+)?${MONTH_WORD}\b(?:\s+on(?:wards?)?\b)?`, "i").test(text) &&
+    !new RegExp(String.raw`\b(?:from|starting|beginning)\s+(?:in\s+)?${MONTH_WORD}\b.*\b(?:to|until|till|through)\b`, "i").test(text)
+  ) {
     return { ...start(), scope: "rest", anchored: true };
   }
 
@@ -309,6 +313,8 @@ export function spanIn(said: string, asOf: IsoDate): BudgetSpan | null {
 export function namesBudgetCommand(said: string): boolean {
   const text = respell(said).replace(/\b(buget|budjet|bugdet|budgt|budet|bujet|budgets?)\b/gi, "budget");
   if (!/\b(budget|limit|cap)\b/i.test(text)) return false;
+  // "did I change my budget", "what did I change": the history, never a change (`asksBudgetHistory`).
+  if (/^\s*(?:did|have|has|when|how many|how often|what did|what changes|what was)\b/i.test(text)) return false;
 
   /*
    * Asking for advice about the budget is not asking for it to change.

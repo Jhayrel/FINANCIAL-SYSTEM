@@ -89,7 +89,9 @@ import type { Debt } from "../domain/debt";
 import { limitable } from "../domain/kinds";
 import { cashFlow } from "../domain/forecast";
 import type { MonthOutlook } from "../domain/outlook";
-import { getMonth, getYear, MONTH_NAMES } from "../domain/dates";
+import { formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
+import { checkSplit, incomeBudget, type IncomeBudget } from "../domain/incomeBudget";
+import { monthBrief } from "../domain/monthPlan";
 import { formatMoney, type Centavos } from "../domain/money";
 import type {
   BudgetRevision,
@@ -241,6 +243,17 @@ export function Budget({
   const { view, lines, bills, suggestions } = m;
   const previous = suggestions.previous;
   const a = view.assessment;
+  /*
+   * The budget moved by the money that came in (owner, 12 October 2026):
+   * only for the month that is running, where safe to spend is known.
+   */
+  const incomeView = useMemo(() => {
+    if (year !== getYear(asOf) || month !== getMonth(asOf)) return null;
+    const brief = monthBrief({ transactions, reference, budgets, debts, year, month, asOf });
+    return incomeBudget({ transactions, reference, plan: y.plan, year, month, safe: brief.safe ? brief.safe.safe : null, spent: a.spending.spent });
+  }, [transactions, reference, budgets, debts, year, month, asOf, y.plan, a.spending.spent]);
+  const saveFromIncome = (value: { spending: Centavos; billsSubs: Centavos }, reason: string): boolean =>
+    commit(saveTracks(y.plan, year, month, value, "month", asOf, now(), reason), `Saved. ${name}'s budget now has ${formatMoney(value.spending)} for spending and ${formatMoney(value.billsSubs)} for bills and subscriptions, and the reason is kept with it.`, setNote);
   const name = monthLabel(month);
   const noPlan = a.combined.budget === 0;
   const pace = view.phase === "current" ? view.elapsed : undefined;
@@ -605,6 +618,9 @@ export function Budget({
             onUndo={undo}
             spent={{ spending: a.spending.spent, billsSubs: a.billsSubs.spent }}
           />
+          {incomeView && lock.state !== "closed" && (incomeView.cameIn > 0 || incomeView.over > 0) && (
+            <IncomeSplitCard key={`${year}-${month}-${incomeView.cameIn}-${incomeView.budget}`} view={incomeView} monthName={name} onSave={saveFromIncome} />
+          )}
         </aside>
       }
 
@@ -1743,5 +1759,87 @@ function Stat({ label, hint, children }: { label: string; hint: string; children
         {hint}
       </span>
     </div>
+  );
+}
+
+/**
+ * The money that came in since the budget was set, and what to do with it
+ * (`domain/incomeBudget.ts`). Three parts, each checked before the button
+ * works: a split never hands out more than came in, and never promises more
+ * spending than the money can keep.
+ */
+function IncomeSplitCard({
+  view,
+  monthName,
+  onSave,
+}: {
+  view: IncomeBudget;
+  monthName: string;
+  onSave: (value: { spending: Centavos; billsSubs: Centavos }, reason: string) => boolean;
+}) {
+  const [toSpending, setToSpending] = useState<Centavos | null>(view.over > 0 ? null : Math.min(view.room, view.cameIn) || null);
+  const [toBills, setToBills] = useState<Centavos | null>(null);
+  const [keepAside, setKeepAside] = useState<Centavos | null>(null);
+  const split = { toSpending: toSpending ?? 0, toBills: toBills ?? 0, keepAside: keepAside ?? 0 };
+  const check = checkSplit(view, split);
+  const since = view.setOn ? `since you set it on ${formatMedium(view.setOn)}` : `in ${monthName}, with no budget saved yet`;
+  return (
+    <section className="fms-incomesplit" aria-label="Money that came in">
+      <h3 className="t-label" style={{ color: "var(--ink-2)", margin: 0 }}>
+        Money that came in
+      </h3>
+      {view.cameIn > 0 ? (
+        <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
+          {formatMoney(view.cameIn)} came in {since}
+          {view.sources.length > 0 ? `: ${view.sources.map((x) => `${x.name} ${formatMoney(x.amount)}`).join(", ")}` : ""}.
+          {view.toSavings > 0 ? ` ${formatMoney(view.toSavings)} of money has gone into savings since then.` : ""}
+        </p>
+      ) : null}
+      <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
+        With {formatMoney(view.spent)} spent and {formatMoney(view.safe)} safe to spend, your money keeps a spending budget of {formatMoney(view.most)} at most.
+      </p>
+      {view.over > 0 && (
+        <p className="t-caption" style={{ color: "var(--over)", margin: 0 }}>
+          The spending budget of {formatMoney(view.budget)} promises {formatMoney(view.over)} more than that.{" "}
+          <button
+            type="button"
+            className="t-caption fms-linkbtn"
+            onClick={() => onSave({ spending: view.most, billsSubs: view.billsBudget }, `Lowered to the money: ${formatMoney(view.most)} is what is spent plus what is safe to spend`)}
+          >
+            Lower it to {formatMoney(view.most)}
+          </button>
+        </p>
+      )}
+      {view.cameIn > 0 && (
+        <>
+          <div className="fms-planner-field">
+            <span className="t-label" style={{ color: "var(--ink-2)" }}>
+              Add to spending
+            </span>
+            <AmountInput value={toSpending} onChange={setToSpending} ariaLabel="Add to the spending budget" />
+          </div>
+          <div className="fms-planner-field">
+            <span className="t-label" style={{ color: "var(--ink-2)" }}>
+              Add to bills and subscriptions
+            </span>
+            <AmountInput value={toBills} onChange={setToBills} ariaLabel="Add to the bills and subscriptions budget" />
+          </div>
+          <div className="fms-planner-field">
+            <span className="t-label" style={{ color: "var(--ink-2)" }}>
+              Keep for savings
+            </span>
+            <AmountInput value={keepAside} onChange={setKeepAside} ariaLabel="Keep for savings, not in any budget" />
+          </div>
+          {(check.errors.length > 0 ? check.errors : check.notes).map((line) => (
+            <p key={line} className="t-caption" style={{ color: check.errors.length > 0 ? "var(--over)" : "var(--ink-2)", margin: 0 }}>
+              {line}
+            </p>
+          ))}
+          <Button variant="primary" disabled={!check.ok} onClick={() => onSave(check.value, check.reason)}>
+            {check.ok ? `Set spending to ${formatMoney(check.value.spending)}` : "Fix the split first"}
+          </Button>
+        </>
+      )}
+    </section>
   );
 }

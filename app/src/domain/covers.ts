@@ -16,7 +16,7 @@
  * add up to the same total. The Database, Edit and the Bin keep the one row.
  */
 
-import { addDays, daysBetween, formatMedium } from "./dates";
+import { addDays, daysBetween, formatMedium, formatShort } from "./dates";
 import { formatMoney, type Centavos } from "./money";
 import type { IsoDate, Transaction } from "./types";
 
@@ -61,6 +61,54 @@ export function spreadCovered<T extends Transaction>(rows: readonly T[]): T[] {
     }
   }
   return out;
+}
+
+/**
+ * The parts of a spread row put back together: the rows the ledger holds.
+ * A record check (one number, one entry), a wallet, or the money that left
+ * on a day reads these, never the day shares: three days of one trip are not
+ * three entries, and the money left the wallet once, on the first day. Rows
+ * that were never spread pass through unchanged.
+ */
+export function wholeRows<T extends Transaction>(rows: readonly T[]): T[] {
+  if (!rows.some((t) => t.coveredBy)) return rows as T[];
+  const parts = new Map<string, T[]>();
+  const out: T[] = [];
+  for (const t of rows) {
+    if (!t.coveredBy) {
+      out.push(t);
+      continue;
+    }
+    const list = parts.get(t.coveredBy);
+    if (list) list.push(t);
+    else {
+      parts.set(t.coveredBy, [t]);
+      out.push(t);
+    }
+  }
+  return out.map((t) => {
+    if (!t.coveredBy) return t;
+    const list = [...(parts.get(t.coveredBy) ?? [t])].sort((a, b) => a.date.localeCompare(b.date));
+    const first = list[0]!;
+    const last = list[list.length - 1]!;
+    const amount = list.reduce((sum, p) => sum + p.amount, 0);
+    const fee = list.reduce((sum, p) => sum + p.fee, 0);
+    const { coveredBy, ...rest } = first;
+    return {
+      ...rest,
+      id: coveredBy,
+      amount,
+      fee,
+      total: amount + fee,
+      description: first.description.replace(/(?:, )?day \d+ of \d+$/, ""),
+      ...(last.date > first.date ? { coversTo: last.date } : {}),
+    } as T;
+  });
+}
+
+/** "10/09/2026", or "10/09/2026 to 10/11/2026" for a date range: every header that names an entry's day. */
+export function shortDays(t: Pick<Transaction, "type" | "date" | "coversTo">): string {
+  return covers(t as Transaction) ? `${formatShort(t.date)} to ${formatShort(t.coversTo!)}` : formatShort(t.date);
 }
 
 /** Covering rows a day falls inside, other than `except`. */

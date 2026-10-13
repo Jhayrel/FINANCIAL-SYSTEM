@@ -5,6 +5,7 @@
  * sideways on a phone.
  */
 
+import { coverWords, shortDays } from "../domain/covers";
 import { useMemo, useRef, useState } from "react";
 
 import {
@@ -211,7 +212,7 @@ export function Database({
     const part = partOf(t, transactions);
     const ok = await confirm({
       title: `Delete record #${String(t.recordNumber).padStart(4, "0")}?`,
-      body: `${t.item || "This entry"}, ${t.description || "no description"}, ₱${formatAmount(t.total)} on ${formatShort(t.date)}.${
+      body: `${t.item || "This entry"}, ${t.description || "no description"}, ₱${formatAmount(t.total)} on ${shortDays(t)}.${
         part
           ? ` Its ₱${formatAmount(part.total)} of ${t.debtEffect === "draw" ? "fees" : "interest"}, #${String(part.recordNumber).padStart(4, "0")}, was part of the same ${
               t.debtEffect === "draw" ? "borrowing" : "payment"
@@ -280,7 +281,7 @@ export function Database({
       if (filter === "behalf" && !onBehalf(t)) return false;
       if (filter === "Debt" && onBehalf(t)) return false;
       if (filter !== "all" && filter !== "flagged" && filter !== "behalf" && t.type !== filter) return false;
-      if (!inPeriod(t.date, period, asOf)) return false;
+      if (!inPeriod(t.date, period, asOf, t.coversTo)) return false;
       if (year !== "all" && getYear(t.date) !== year) return false;
       if (wallet !== "all" && t.fromWallet !== wallet && t.toWallet !== wallet) return false;
       return matchesSearch(t, terms);
@@ -816,7 +817,7 @@ export function Database({
       {opened && (
         <Sheet
           title={rowTitle(opened)}
-          subtitle={`#${String(opened.recordNumber).padStart(4, "0")} · ${formatShort(opened.date)}`}
+          subtitle={`#${String(opened.recordNumber).padStart(4, "0")} · ${shortDays(opened)}`}
           onClose={() => setOpened(null)}
           actions={
             <>
@@ -858,6 +859,12 @@ export function Database({
               <div>
                 <dt>Fee</dt>
                 <dd className="fms-proposalmoney">{fmtShort(opened.fee)}</dd>
+              </div>
+            )}
+            {opened.coversTo && opened.coversTo > opened.date && (
+              <div>
+                <dt>Days</dt>
+                <dd>{coverWords(opened)}</dd>
               </div>
             )}
             <div>

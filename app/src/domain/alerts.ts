@@ -39,6 +39,7 @@ import { limitKindOf, spendingTrackByKind } from "./kinds";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import { isNeedRow } from "./spendNote";
 import { unusualRows } from "./unusual";
+import { wholeRows } from "./covers";
 import { actionableIssues, checkIntegrity } from "./integrity";
 import { monthTotals } from "./totals";
 import { overdueGoals } from "./goalClose";
@@ -159,6 +160,14 @@ export function dailyAllowance(
 export function financeAlerts(input: AlertInput): Alert[] {
   const { transactions, accounts, budgets, debts, bills, lowBalanceThreshold, asOf } = input;
   const out: Alert[] = [];
+  /*
+   * The ledger as saved, for every check about entries themselves: one record
+   * number, one entry; a date typed wrong; the same bill twice. The rows given
+   * here may be spread over the days a date range covers, and three days of
+   * one trip are not three entries (owner's backup, 12 October 2026: the bell
+   * called #3933 a duplicate saved by two devices and offered to bin it).
+   */
+  const ledger = wholeRows(transactions);
 
   const year = getYear(asOf);
   const month = getMonth(asOf);
@@ -188,11 +197,26 @@ export function financeAlerts(input: AlertInput): Alert[] {
        */
       const ownTrack = assessment.spending.budget > 0;
       const remaining = ownTrack ? assessment.spending.remaining : assessment.combined.remaining;
+      /*
+       * The spending budget can be over while the whole budget is not, when
+       * bills came in under theirs. The bell said "PHP 416.05 left" beside the
+       * Dashboard's "PHP 416.05 over" (12 October 2026 audit).
+       */
+      if (ownTrack && remaining < 0) {
+        out.push({
+          id: "spending-over",
+          level: "over",
+          area: "budget",
+          title: "Spending is over its budget",
+          detail: `${money(assessment.spending.spent)} spent of the ${money(assessment.spending.budget)} spending budget, over by ${money(-remaining)}, with ${left} day${left === 1 ? "" : "s"} left. Bills and subscriptions still have room, which is why the whole budget is not over.`,
+          weight: 90 + fraction(-remaining, assessment.spending.budget),
+        });
+      }
       const perDay = ownTrack ? (left > 0 ? Math.floor(Math.max(0, remaining) / left) : 0) : dailyAllowance(transactions, budgets, asOf);
       const dayOfMonth = Number(asOf.slice(8, 10));
       const rate = ownTrack ? (dayOfMonth > 0 ? Math.floor(assessment.spending.spent / dayOfMonth) : 0) : burnRate(transactions, asOf);
       // Only worth saying when the current pace would actually break it, and once there is a pace to read.
-      if (perDay !== null && rate > perDay && left > 0 && dayOfMonth >= PACE_FROM_DAY) {
+      if (remaining >= 0 && perDay !== null && rate > perDay && left > 0 && dayOfMonth >= PACE_FROM_DAY) {
         out.push({
           id: "budget-pace",
           level: "warn",
@@ -280,6 +304,33 @@ export function financeAlerts(input: AlertInput): Alert[] {
         if (t.fromWallet.trim()) paidFrom.add(t.fromWallet.trim());
       }
       for (const [id, v] of use.from) lenders.set(id, (lenders.get(id) ?? 0) + v);
+    }
+    /*
+     * Money held for someone spent on a want is theirs spent on the owner's
+     * want: the save note said so, the bell did not (12 October 2026 audit, B5).
+     */
+    let heldWants = 0;
+    const heldFor = new Map<string, Centavos>();
+    const heldKinds = new Map<string, Centavos>();
+    for (const t of transactions) {
+      if (t.date < start || t.date > asOf) continue;
+      const use = b.spentHeld.get(t.id);
+      if (!use || isNeedRow(t, limitKindOf(t), input.spendingTypes)) continue;
+      heldWants += use.amount;
+      const kind = limitKindOf(t) ?? (t.item.trim() || "Other");
+      heldKinds.set(kind, (heldKinds.get(kind) ?? 0) + use.amount);
+      for (const [id, v] of use.from) heldFor.set(id, (heldFor.get(id) ?? 0) + v);
+    }
+    if (heldWants > 0) {
+      const people = [...heldFor.keys()].map((id) => debts.find((d) => d.id === id)).map((d) => d?.counterparty.trim() || d?.name || "someone");
+      out.push({
+        id: `held-wants-${year}-${month}`,
+        level: "warn",
+        area: "debt",
+        title: `${money(heldWants)} held for ${[...new Set(people)].join(" and ")} went to wants this month`,
+        detail: `${[...heldKinds].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([k, v]) => `${k} ${money(v)}`).join(", ")}. That money is theirs; your own had run out when it was spent.`,
+        weight: 67,
+      });
     }
     if (wantTotal > 0) {
       const list = [...used].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([k, v]) => `${k} ${money(v)}`);
@@ -730,7 +781,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
    * It sits in a month that has not happened, so every figure for now leaves
    * it out, and nothing on the screens for now shows it.
    */
-  const farAhead = transactions
+  const farAhead = ledger
     .filter((t) => daysBetween(asOf, t.date) > 31)
     .sort((a, b) => b.date.localeCompare(a.date));
   const furthest = farAhead[0];
@@ -748,7 +799,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
   }
 
   // ── Extra zeros ──────────────────────────────────────────────────────────
-  for (const found of unusualRows(transactions, asOf)) {
+  for (const found of unusualRows(ledger, asOf)) {
     /*
      * Money held or paid for someone else is theirs, not a figure of the
      * owner's own to measure against: an aunt's PHP 25,000.00 for a funeral
@@ -774,7 +825,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
    * really do come round more than once.
    */
   const repeats = new Map<string, Transaction[]>();
-  for (const t of transactions) {
+  for (const t of ledger) {
     if (t.type !== "Spending" || (t.category !== "Bills" && t.category !== "Subscriptions")) continue;
     if (!t.item.trim() || getYear(t.date) !== year || getMonth(t.date) !== month) continue;
     const key = `${t.item.trim().toLowerCase()}|${t.total}`;
@@ -839,7 +890,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
    * interest row shares its payment's number by design and is left out.
    */
   const byNumber = new Map<number, Transaction[]>();
-  for (const t of transactions) {
+  for (const t of ledger) {
     /*
      * A movement's part shares its number by design: a payment's interest,
      * and a borrowing's fees. The fees were left in, and every Maya Credit
@@ -866,7 +917,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
   }
 
   // ── Rows the ledger cannot make sense of ─────────────────────────────────
-  const issues = actionableIssues(checkIntegrity(transactions, { wallets: accounts.filter((a) => !a.archived).map((a) => a.name), asOf }));
+  const issues = actionableIssues(checkIntegrity(ledger, { wallets: accounts.filter((a) => !a.archived).map((a) => a.name), asOf }));
   if (issues.length > 0) {
     const rows = new Set(issues.flatMap((i) => i.recordNumbers));
     out.push({

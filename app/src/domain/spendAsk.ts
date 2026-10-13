@@ -101,11 +101,25 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
   const when = /^(?:yesterday|today)$|^the (?:last|past)\b/i.test(ask.name) ? ask.name : /\bto\b/.test(ask.name) ? `from ${ask.name}` : `in ${ask.name}`;
 
   if (rows.length === 0) {
-    return `Nothing${what} ${when}: no spending entry${ask.item ? ` for ${ask.item}` : ""} between ${ask.from > "1000" ? ask.from : "the start"} and ${to}.`;
+    return `Nothing${what} ${when}: no spending entry${ask.item ? ` for ${ask.item}` : ""} between ${ask.from > "1000" ? formatMedium(ask.from) : "the start"} and ${formatMedium(to)}.`;
   }
-  const biggest = [...rows].sort((a, b) => costOf(b) - costOf(a))[0];
+  /*
+   * One entry, however many days it covers: the days of a date range are
+   * shares of one entry, never entries of their own, and the largest is the
+   * entry, said with its days (12 October 2026 audit: "over 7 entries" for 5,
+   * and a day's share named the largest with a broken ", )").
+   */
+  const entries = new Map<string, { cost: Centavos; first: Transaction; last: Transaction }>();
+  for (const t of rows) {
+    const key = t.coveredBy ?? t.id;
+    const at = entries.get(key);
+    if (!at) entries.set(key, { cost: costOf(t), first: t, last: t });
+    else entries.set(key, { cost: at.cost + costOf(t), first: t.date < at.first.date ? t : at.first, last: t.date > at.last.date ? t : at.last });
+  }
+  const count = entries.size;
+  const biggest = [...entries.values()].sort((a, b) => b.cost - a.cost)[0];
   const out = [
-    `You spent **${money(total)}**${what} ${when}, over ${rows.length} ${rows.length === 1 ? "entry" : "entries"}.`,
+    `You spent **${money(total)}**${what} ${when}, over ${count} ${count === 1 ? "entry" : "entries"}.`,
   ];
   /*
    * Entries dated later in the window count on the Budget screen and in a
@@ -120,12 +134,16 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
       out.push(`That is up to today; ${money(sum)} more is entered for later ${ahead.length === 1 ? "date" : "dates"} in the same period, ${money(total + sum)} with it.`);
     }
   }
-  if (biggest && rows.length > 1) {
-    out.push(`The largest was ${money(costOf(biggest))} on ${biggest.date}${biggest.description.trim() ? ` (${biggest.description.trim().slice(0, 50)})` : ""}.`);
+  if (biggest && count > 1) {
+    const said = biggest.first.description.replace(/(?:, )?day \d+ of \d+$/, "").trim();
+    const short = said.length > 50 ? `${said.slice(0, 50).trimEnd()}...` : said;
+    const days = biggest.last.date > biggest.first.date ? `${formatMedium(biggest.first.date)} to ${formatMedium(biggest.last.date)}` : formatMedium(biggest.first.date);
+    out.push(`The largest was ${money(biggest.cost)}, #${String(biggest.first.recordNumber).padStart(4, "0")} on ${days}${short ? ` (${short})` : ""}.`);
   }
 
   // A whole calendar month is compared with the one before it.
-  const whole = /^\d{4}-\d{2}-01$/.test(ask.from) && ask.from.slice(0, 7) === ask.to.slice(0, 7);
+  const lastDay = new Date(Date.UTC(Number(ask.to.slice(0, 4)), Number(ask.to.slice(5, 7)), 0)).toISOString().slice(0, 10);
+  const whole = /^\d{4}-\d{2}-01$/.test(ask.from) && ask.from.slice(0, 7) === ask.to.slice(0, 7) && ask.to === lastDay;
   if (whole) {
     const y = Number(ask.from.slice(0, 4));
     const m = Number(ask.from.slice(5, 7));

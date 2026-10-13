@@ -132,8 +132,9 @@ import { asksAboutDeleted, deletedRows, deletedWindowIn, deletedWords, onlyAWind
 import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
-import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, wantsThoseEntries, type Intent } from "../domain/intent";
+import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, saysItWasAStatement, wantsThoseEntries, type Intent } from "../domain/intent";
 import { monthBrief } from "../domain/monthPlan";
+import { asksIncomeBudget, incomeBudget, incomeBudgetWords } from "../domain/incomeBudget";
 import { asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer } from "../domain/dayFit";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
@@ -1125,6 +1126,12 @@ export function AskPanel({
   };
   const [files, setFiles] = useState<Attachment[]>([]);
   const [busy, setBusy] = useState(false);
+  /*
+   * The message just sent, shown at once while it is read. The box empties on
+   * Send, and the bubble used to wait for the router (up to 3.5 seconds), so
+   * on a phone the message seemed to vanish (12 October 2026 audit, A2).
+   */
+  const [inFlight, setInFlight] = useState<{ readonly text: string; readonly from: number } | null>(null);
   /*
    * Guards on Send and Stop, for a thumb. When Send was pressed, so a second
    * tap of the same thumb is not taken for Stop ("Stopped. Nothing was
@@ -3148,10 +3155,13 @@ export function AskPanel({
     const ranged = span
       ? dated.map((p) =>
           p.draft.flow === "Spending" && !p.draft.coversTo && (p.draft.date === asOf || p.draft.date === span.from)
-            ? { ...p, draft: { ...p.draft, date: span.from, coversTo: span.to }, adjustments: [...p.adjustments.filter((n) => !n.startsWith("Dated today")), `Covers ${span.from} to ${span.to}, as your message said: spread over those days in every report.`] }
+            ? { ...p, draft: { ...p.draft, date: span.from, coversTo: span.to }, adjustments: [...p.adjustments.filter((n) => !n.startsWith("Dated today")), `Covers ${formatMedium(span.from)} to ${formatMedium(span.to)}, as your message said: spread over those days in every report.`] }
             : p,
         )
       : dated;
+    // "note: for the funeral": kept in the entry's Notes, as the Add form keeps it (12 October 2026 audit, A13).
+    const noteSaid = /\b(?:notes?|remarks?)\s*[:=]\s*([^\n]+)$/i.exec(note)?.[1]?.trim() ?? "";
+    const notedCards = noteSaid && ranged.length === 1 ? ranged.map((p) => (p.draft.notes.trim() ? p : { ...p, draft: { ...p.draft, notes: noteSaid.slice(0, 200) } })) : ranged;
     /*
      * A total and its parts (domain/entryTotals.ts): a card that is only the
      * total of the others is the same money twice, and "All school category"
@@ -3160,7 +3170,7 @@ export function AskPanel({
     const typed = sent.length === 0 && note.trim() !== "" ? totalsIn(note) : null;
     const result = {
       ...read,
-      proposals: (typed ? withoutTheTotal(ranged, typed.totals).cards : ranged).map((p) => {
+      proposals: (typed ? withoutTheTotal(notedCards, typed.totals).cards : notedCards).map((p) => {
         if (!typed) return p;
         const filed = withSaidItem(p, typed.item);
         return filed === p ? { ...p, typed: true } : { ...filed, typed: true, adjustments: [...p.adjustments, saidItemWords(typed.item ?? "")] };
@@ -4009,7 +4019,9 @@ export function AskPanel({
      */
     const advised = lastAdvice.current;
     const standing =
-      !worked && advised && turns.slice(-12).some((t) => t.kind === "you" && t.text === advised.asked)
+      // Only for a question about that budget ("why 14K", "is that too much"): an unrelated question was handed it as its own figures (A7).
+      !worked && advised && turns.slice(-12).some((t) => t.kind === "you" && t.text === advised.asked) &&
+      (asksBudgetAdvice(question) || /\b(?:budget|why|how come|too much|too little|too high|too low|enough|recommend\w*|suggest\w*|explain)\b/i.test(question) && question.trim().split(/\s+/).length <= 12)
         ? `The budget recommended earlier in this conversation, as the app worked it out:\n${advised.text}`
         : "";
     const figures = worked?.text ?? standing;
@@ -4128,6 +4140,7 @@ export function AskPanel({
       log(aiEvent("answered", "add", { text: `Fault: ${what}`.slice(0, 400), model: "this device" }));
     } finally {
       sending.current = Math.max(0, sending.current - 1);
+      setInFlight(null);
     }
   };
 
@@ -4151,13 +4164,28 @@ export function AskPanel({
     if (typed === undefined) {
       // The same words again within a few seconds is a double tap, not a second message.
       const now = Date.now();
-      if (files.length === 0 && lastSent.current && lastSent.current.text === note && now - lastSent.current.at < 4000) return;
+      if (files.length === 0 && lastSent.current && lastSent.current.text === note && now - lastSent.current.at < 1500) return;
       lastSent.current = { text: note, at: now };
       sentAt.current = now;
       // Emptied now, so what is typed while this is answered is the next message.
       setDraftState("");
+      if (note) setInFlight({ text: note, from: turns.length });
     }
     setStage("");
+
+    /*
+     * A line starting with "//" is a note to the developer, read before any
+     * other reader: a note about the budget was answered as budget history
+     * or a budget to set (12 October 2026 audit, A5).
+     */
+    if (files.length === 0 && !as && /^\s*\/\//.test(note)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      say({ kind: "assistant", text: "Noted, and kept in the record rather than acted on.", from: "this device", ephemeral: true });
+      log(aiEvent("answered", "add", { text: "Noted, not acted on.", model: "this device" }));
+      return;
+    }
 
     /*
      * "Add them", about the entries inside the last question.
@@ -4283,8 +4311,13 @@ export function AskPanel({
           ? (() => {
               const w = daysAskedAbout(question, asOf)!;
               const o = safeOverDays(brief.safe, asOf, w.from, w.to);
+              // A run past the month's end is worked out to its last day only, and said so (B4).
+              const cut = o && o.to < w.to ? ` That is to ${formatMedium(o.to)}; the days after it depend on the money that comes in next month.` : "";
+              const name = o && (o.from !== w.from || o.to !== w.to) ? `${formatMedium(o.from)} to ${formatMedium(o.to)}` : w.name;
               return o
-                ? `**${w.name}, ${o.days} ${o.days === 1 ? "day" : "days"}: ${formatMoney(o.keeping)}** if every day until then keeps to its figure; ${formatMoney(o.saving)} if nothing more is spent before it starts.`
+                ? o.saving > o.keeping
+                  ? `**${name}, ${o.days} ${o.days === 1 ? "day" : "days"}: ${formatMoney(o.keeping)}** if every day until then keeps to its figure; ${formatMoney(o.saving)} if nothing more is spent before it starts.${cut}`
+                  : `**${name}, ${o.days} ${o.days === 1 ? "day" : "days"}: ${formatMoney(o.keeping)}**, every day keeping to its figure.${cut}`
                 : `${w.name} is past this month's last day, and what will be safe then depends on the money that comes in by then.`;
             })()
           : "";
@@ -4303,10 +4336,11 @@ export function AskPanel({
         setBusy(false);
       }
     };
-    if (files.length === 0 && !as && saysItWasAQuestion(note)) {
+    const remark = files.length === 0 && !as && saysItWasAStatement(note);
+    if (files.length === 0 && !as && (saysItWasAQuestion(note) || remark)) {
       const before = [...turns]
         .reverse()
-        .find((t): t is Said => t.kind === "you" && !saysItWasAQuestion(t.text) && !/^\s*\/\//.test(t.text) && t.text.trim() !== "");
+        .find((t): t is Said => t.kind === "you" && !saysItWasAQuestion(t.text) && !saysItWasAStatement(t.text) && !/^\s*\/\//.test(t.text) && t.text.trim() !== "");
       if (before) {
         setDraft("");
         say({ kind: "you", text: note });
@@ -4317,13 +4351,14 @@ export function AskPanel({
         const from = turns.lastIndexOf(before);
         const open = turns.map((t, i) => ({ open: closedCard(t) !== null, i })).filter((x) => x.open);
         if (open.length > 0 && open.every((x) => x.i > from)) discardEveryOpen(note);
-        if (asksSafeToSpend(before.text)) {
+        if (!remark && asksSafeToSpend(before.text)) {
           await answerSafe(before.text);
           return;
         }
         setBusy(true);
         try {
-          await askQuestion(before.text, false);
+          // A remark is answered as one: never a file, a card or an entry.
+          await askQuestion(remark ? `${before.text}\n(They say this was a remark, not a question or a request: reply to it as a remark.)` : before.text, false);
         } finally {
           setBusy(false);
         }
@@ -4346,6 +4381,33 @@ export function AskPanel({
         setBusy(false);
       }
       return;
+    }
+    /*
+     * "I earned 10k, adjust my budget": the budget against the money that
+     * came in, worked out by the app (`incomeBudget.ts`), so a raise and a
+     * saving are never the same peso (owner, 12 October 2026).
+     */
+    if (files.length === 0 && !as && asksIncomeBudget(ruled)) {
+      const y = Number(asOf.slice(0, 4));
+      const m = Number(asOf.slice(5, 7));
+      const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
+      const ib = incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent });
+      if (ib) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const words = [...incomeBudgetWords(ib, MONTH_NAMES[m - 1] ?? "this month"), "Split it on the Budget screen, under Money that came in: it checks each part before it saves."].join("\n");
+        setBusy(true);
+        try {
+          await askQuestion(note, false, {
+            text: `The budget against the money that came in, worked out by the app. Answer from these, suggest a split that keeps to them, and never add a saving to the spending budget:\n${words}`,
+            fallback: words,
+          });
+        } finally {
+          setBusy(false);
+        }
+        return;
+      }
     }
     // A budget for a day or a week is what is safe to spend over it, never next month's budget (`asksShortBudget`).
     if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && (asksSafeToSpend(note) || asksShortBudget(ruled, asOf)) && !plainlyDone(note)) {
@@ -4894,7 +4956,7 @@ export function AskPanel({
                 : { year: next.year, month: next.month });
           const said = income ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.income : null);
           const keep = savingsGoalIn(ruled) ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.keep : null);
-          const first = budgetAdvice({ transactions, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: said, keep });
+          const first = budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: said, keep });
           /*
            * "based on my income and spending" with no figure: held to the
            * income they usually receive, the median month over the same
@@ -4902,9 +4964,9 @@ export function AskPanel({
            */
           const byIncome = said === null && first.typicalIncome > 0 && BY_INCOME.test(ruled);
           const held = byIncome ? first.typicalIncome : said;
-          const advice = byIncome ? budgetAdvice({ transactions, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: held, keep }) : first;
+          const advice = byIncome ? budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: held, keep }) : first;
           if (judging) {
-            const tracks = assessMonthFor(transactions, budgets, target.year, target.month);
+            const tracks = assessMonthFor(reportRows, budgets, target.year, target.month);
             const phase = target.year * 12 + target.month - (thisMonth.year * 12 + thisMonth.month);
             const daysLeft = phase < 0 ? 0 : phase > 0 ? daysInMonth(target.year, target.month) : daysLeftInMonth(asOf);
             // The money as well as the plan, for the month running (`judgeWords`).
@@ -5257,7 +5319,7 @@ export function AskPanel({
          * question this used to ask instead: "Ai first. Fix this".
          */
         if (!ai.disabled && !yesAfterBudgetTalk) {
-          const advice = budgetAdvice({ transactions, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts });
+          const advice = budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts });
           const text = adviceWords(advice);
           lastAdvice.current = { advice, text, asked: note };
           await answerWithModel(
@@ -8030,6 +8092,13 @@ export function AskPanel({
             </div>
           );
         })}
+        {inFlight && !turns.slice(inFlight.from).some((t) => t.kind === "you" && (t as { text?: string }).text === inFlight.text) && (
+          <div className="fms-turn fms-turn--you" aria-busy="true">
+            <p className="t-caption" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+              {inFlight.text}
+            </p>
+          </div>
+        )}
 
         {busy && (
           <div className="fms-working" role="status" aria-live="polite">
@@ -8291,7 +8360,13 @@ export function AskPanel({
           screenshot is pasted from the keyboard's own Paste, which the box
           is built to take (`PlainBox`).
         */}
-        <div className="fms-askfield">
+        <div
+          className="fms-askfield"
+          onPointerDown={(e) => {
+            // Touching the words, even with the keyboard already up, settles before Send can be taken (A1).
+            if (!(e.target as HTMLElement).closest("button")) settledAt.current = Date.now();
+          }}
+        >
           {/*
             Several entries fit in one message. Enter sends and Shift plus
             Enter starts a line, which is what every chat does. It grows to a

@@ -35,7 +35,12 @@ export const PERIODS: readonly { readonly id: Period; readonly label: string }[]
 ];
 
 /** Whether a date falls in a period, counted back from `asOf`. */
-export function inPeriod(date: IsoDate, period: Period, asOf: IsoDate): boolean {
+export function inPeriod(date: IsoDate, period: Period, asOf: IsoDate, coversTo?: IsoDate): boolean {
+  // A date range is in a period any of its days fall in: "Yesterday" shows the trip that covered yesterday.
+  if (coversTo && coversTo > date && period !== "all") {
+    for (let d = date; d <= coversTo; d = addDays(d, 1)) if (inPeriod(d, period, asOf)) return true;
+    return false;
+  }
   switch (period) {
     case "all":
       return true;

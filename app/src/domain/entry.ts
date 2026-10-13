@@ -411,7 +411,16 @@ export function checkDraft(
   }
 
   // ── Required fields ──────────────────────────────────────────────────────
-  if (draft.amount === null || draft.amount <= 0) {
+  /*
+   * An entry being edited is held to what it was saved with: 389 transfers
+   * from 2022 to 2024 have no source wallet, and a few rows are a fee alone.
+   * Edit refused to save them at all (12 October 2026 audit, C2), so they
+   * could not even be renamed. A side or an amount the saved entry never had
+   * may stay blank; a new entry still needs it.
+   */
+  const stored = draft.id ? transactions.find((t) => t.id === draft.id) : undefined;
+  const feeOnly = !!stored && stored.amount === 0 && draft.amount === 0 && draft.fee > 0;
+  if (draft.amount === null || draft.amount < 0 || (draft.amount === 0 && !feeOnly)) {
     errors.push({ field: "amount", message: "Amount must be more than ₱0.00." });
   }
 
@@ -527,15 +536,17 @@ export function checkDraft(
    */
   const debtSide = draft.flow === "Debt" ? debtWalletDirection(draft.debtEffect) : null;
 
+  const keptBlank = (field: "fromWallet" | "toWallet"): boolean => !!stored && !stored[field].trim();
   if (debtSide) {
-    if (debtSide === "out" && !draft.fromWallet) {
+    if (debtSide === "out" && !draft.fromWallet && !keptBlank("fromWallet")) {
       errors.push({ field: "fromWallet", message: "Pick the wallet the money leaves." });
     }
-    if (debtSide === "in" && !draft.toWallet) {
+    if (debtSide === "in" && !draft.toWallet && !keptBlank("toWallet")) {
       errors.push({ field: "toWallet", message: "Pick the wallet the money lands in." });
     }
   } else if (needs(draft.flow, "fromWallet") && !draft.fromWallet) {
-    errors.push({ field: "fromWallet", message: "Pick the wallet the money leaves." });
+    if (keptBlank("fromWallet")) warnings.push({ field: "fromWallet", message: "Saved with no wallet the money left, as it was. Pick one if you know it." });
+    else errors.push({ field: "fromWallet", message: "Pick the wallet the money leaves." });
   }
   /**
    * A transfer that left your accounts has no destination, and that is the

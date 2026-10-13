@@ -36,7 +36,7 @@ import { walletBalance } from "./balances";
 import { borrowedMoney, lenderNames, ownIn } from "./borrowed";
 import { addDays, getMonth, getYear, MONTH_NAMES } from "./dates";
 import type { Debt } from "./debt";
-import { formatMoney, type Centavos } from "./money";
+import { formatMoney, withoutYears, type Centavos } from "./money";
 import { monthBrief, safeAfter } from "./monthPlan";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -122,7 +122,9 @@ export function readAffordAsk(
     [...reference.wallets, ...reference.savings].find((w) => said.includes(` ${words(w).trim()} `)) ?? null;
   const when = /\b(?:tomorrow|tommorrow|tomorow|tmrw|bukas)\b/i.test(text) ? "tomorrow" : /\b(?:today|now|ngayon)\b/i.test(text) ? "today" : null;
   const yesNo = !/\bhow (?:much|many)\b|\bmagkano\b|\bilan\b/i.test(text);
-  return { items, amount: figureIn(text), wallet, when, yesNo };
+  // A date's day is never money: "on oct 20", "the 20th" (12 October 2026 audit, A9).
+  const undated = withoutYears(text).replace(/\b(?:the\s+)?(?:[12]\d|3[01]|0?[1-9])(?:st|nd|rd|th)\b/gi, " ");
+  return { items, amount: figureIn(undated), wallet, when, yesNo };
 }
 
 /** What one of these usually costs: the middle of the last ninety days' purchases. */

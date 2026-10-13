@@ -51,6 +51,9 @@ import { debtDue, positionsOf, rowsFor, type Debt } from "./debt";
 import { effectLabel } from "./debtWords";
 import { creditRoom, limitSteps } from "./creditLimit";
 import { assessMonthFor, budgetForMonth } from "./budget";
+import { incomeBudget, incomeBudgetWords } from "./incomeBudget";
+import { wholeRows } from "./covers";
+import { walletBalance } from "./balances";
 import { outlookAhead, outlookFacts } from "./outlook";
 import { moneyFlow, flowWords } from "./moneyFlow";
 import { budgetAdvice, whyOver } from "./budgetAdvice";
@@ -552,6 +555,21 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   out.push("Say today, yesterday and tomorrow for these days, as the owner does, and the weekday for the days around them.");
   out.push(dayLine("Today so far", asOf));
   out.push(dayLine("Yesterday", addDays(asOf, -1)));
+  /*
+   * What each spending wallet held when yesterday ended, and holds now, from
+   * the ledger as saved: "yesterday you had ..." had nothing to quote, and the
+   * model called a day's own balance yesterday's (12 October 2026 audit, A6).
+   */
+  {
+    const spendingWallets = (input.settings?.accounts ?? []).filter((a) => a.kind === "spending" && !a.archived).map((a) => a.name);
+    const whole = wholeRows(input.transactions);
+    const endOfYesterday = whole.filter((t) => t.date <= addDays(asOf, -1));
+    if (spendingWallets.length > 0) {
+      out.push(
+        `Wallets at the end of yesterday: ${spendingWallets.map((w) => `${w} ${php(walletBalance(endOfYesterday, w))}`).join(", ")}. Now: ${spendingWallets.map((w) => `${w} ${php(walletBalance(whole, w))}`).join(", ")}.`,
+      );
+    }
+  }
   out.push(
     `Tomorrow, ${dayInWords(tomorrow)}: ${
       dueSoon.length > 0
@@ -753,6 +771,37 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   }
 
   /*
+   * ── The budget and the money that came in ───────────────────────────────
+   * "I set it before the month, then I earn 10k, then I can adjust like
+   * income based ... make sure everything is reasonable" (12 October 2026).
+   * Worked out by the app (`incomeBudget.ts`), so the model never adds a
+   * raise and a saving together into a budget the money cannot keep.
+   */
+  if (input.budgets && input.settings && input.snapshot.safe) {
+    const year = Number(asOf.slice(0, 4));
+    const month = Number(asOf.slice(5, 7));
+    const accounts = input.settings.accounts.filter((a) => !a.archived && a.name.trim());
+    const ib = incomeBudget({
+      transactions: input.transactions,
+      reference: {
+        wallets: accounts.filter((a) => a.kind === "spending").map((a) => a.name),
+        savings: accounts.filter((a) => a.kind !== "spending").map((a) => a.name),
+      },
+      plan: input.budgets[String(year)],
+      year,
+      month,
+      safe: toCentavos(input.snapshot.safe.safe),
+      spent: assessMonthFor(input.transactions, input.budgets, year, month).spending.spent,
+    });
+    if (ib && (ib.cameIn > 0 || ib.over > 0)) {
+      out.push("");
+      out.push("## The budget and the money that came in");
+      out.push(...incomeBudgetWords(ib, MONTH_NAMES[month - 1] ?? "this month"));
+      out.push("To adjust the budget from income: the parts (spending, bills and subscriptions, kept for savings) add up to no more than came in, and the spending budget stays at or under the most the money keeps, less anything kept for savings and not moved yet. Quote these figures; the owner applies it on the Budget screen (Money that came in) or by asking to set the spending budget to a figure.");
+    }
+  }
+
+  /*
    * ── Safe to spend over the days asked about ─────────────────────────────
    * "how much can I spend from the 15th to the 20th", "next week": each day
    * at its figure, and with nothing spent before it starts, so what carries
@@ -772,7 +821,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       out.push(`## Safe to spend over ${w.name}`);
       out.push(
         over
-          ? `${over.days} ${over.days === 1 ? "day" : "days"}, ${over.from} to ${over.to}: ${php(over.keeping)} if every day until then keeps to its figure; ${php(over.saving)} if nothing more is spent before it starts. Worked out by the app from this month's money only; quote these.`
+          ? `${over.days} ${over.days === 1 ? "day" : "days"}, ${formatMedium(over.from)} to ${formatMedium(over.to)}${over.to < w.to ? ` (cut at the month's last day; ${formatMedium(w.to)} is in next month, which depends on the money that comes in)` : ""}: ${php(over.keeping)} if every day until then keeps to its figure${over.saving > over.keeping ? `; ${php(over.saving)} if nothing more is spent before it starts` : ""}. Worked out by the app from this month's money only; quote these.`
           : `Those days are outside what is known: safe to spend is worked out for this month's money only, up to its last day.`,
       );
     }

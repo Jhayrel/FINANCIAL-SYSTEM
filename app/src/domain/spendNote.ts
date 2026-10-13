@@ -39,6 +39,7 @@ import { categoryLimits } from "./budgetView";
 import { daysLeftInMonth, firstOfMonth, getMonth, getYear, lastOfMonth, monthName } from "./dates";
 import { formatMoney, type Centavos } from "./money";
 import { costOf, monthTotals, UNCATEGORISED } from "./totals";
+import { spreadCovered } from "./covers";
 import { limitKindOf, spendingTrackByKind } from "./kinds";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import type { Debt } from "./debt";
@@ -134,7 +135,15 @@ export function spendNoteFor(
   context: NoteContext = {},
 ): SpendNote | null {
   const month = asOf.slice(0, 7);
-  const rows = saved.filter((t) => t.date.startsWith(month) && costOf(t) > 0);
+  /*
+   * A date range counts in each month by the days it covers, as the Budget
+   * screen counts it: a trip from 30 September to 2 October is not all
+   * October's (12 October 2026 audit, the note said PHP 2,416.05 over when
+   * October was PHP 416.05 over).
+   */
+  const inMonth = (t: Transaction): Centavos =>
+    spreadCovered([t]).reduce((sum, p) => sum + (p.date.startsWith(month) ? costOf(p) : 0), 0);
+  const rows = saved.filter((t) => inMonth(t) > 0);
   if (rows.length === 0) return null;
 
   const year = getYear(asOf);
@@ -142,7 +151,7 @@ export function spendNoteFor(
   const name = `${monthName(m)}`;
   const main = [...rows].sort((a, b) => costOf(b) - costOf(a))[0];
   if (!main) return null;
-  const cost = rows.reduce((sum, t) => sum + costOf(t), 0);
+  const cost = rows.reduce((sum, t) => sum + inMonth(t), 0);
   const bills = main.type === "Spending" && (main.category === "Bills" || main.category === "Subscriptions");
   const track = bills ? "billsSubs" : "spending";
   const kind = kindOf(main);
@@ -157,8 +166,9 @@ export function spendNoteFor(
    * October 2026 engine review). Totals are by month, so nothing else moves.
    */
   const after = [...before, ...saved];
-  const was = assessMonth(monthTotals(before, year, m), budget)[track];
-  const now = assessMonth(monthTotals(after, year, m), budget)[track];
+  const spreadAfter = spreadCovered(after);
+  const was = assessMonth(monthTotals(spreadCovered(before), year, m), budget)[track];
+  const now = assessMonth(monthTotals(spreadAfter, year, m), budget)[track];
   // Today included, as the Budget screen and the Dashboard count them (6 October 2026 audit).
   const daysLeft = daysLeftInMonth(asOf);
   const trackName = bills ? "bills and subscriptions" : "spending";
@@ -166,7 +176,7 @@ export function spendNoteFor(
 
   /** The wants this month with the most in them: where there is room, if any is wanted. */
   const wants = (): { words: string; count: number } => {
-    const list = [...spendingTrackByKind(after, range)]
+    const list = [...spendingTrackByKind(spreadAfter, range)]
       .filter(([k, v]) => v > 0 && !isNeed(k, context.spendingTypes) && k !== UNCATEGORISED && !/transaction fee/i.test(k))
       .sort((a, b) => b[1] - a[1])
       .slice(0, 2);
@@ -178,7 +188,7 @@ export function spendNoteFor(
   // Every kind this save touched that is past its limit now, and not yet said.
   const limits = categoryLimits(budgets[String(year)], m);
   const pastLimit = [...new Set(rows.map(kindOf).filter((k): k is string => k !== null))]
-    .map((k) => ({ kind: k, limit: limits.get(k) ?? 0, now: spendingTrackByKind(after, range).get(k) ?? 0 }))
+    .map((k) => ({ kind: k, limit: limits.get(k) ?? 0, now: spendingTrackByKind(spreadAfter, range).get(k) ?? 0 }))
     .filter((x) => x.limit > 0 && x.now > x.limit && !shown.has(`${month}:limit:${x.kind.toLowerCase()}`));
 
   // ── 0. Borrowed money, or money held for someone, paid for it ───────────
@@ -302,7 +312,7 @@ export function spendNoteFor(
   const notSmall = cost >= 50_000 || (now.budget > 0 && cost * 20 >= now.budget);
   if (!need && now.budget > 0 && was.spent > now.budget && notSmall) {
     const over = now.spent - now.budget;
-    const kindNow = kind ? spendingTrackByKind(after, range).get(kind) ?? 0 : 0;
+    const kindNow = kind ? spendingTrackByKind(spreadAfter, range).get(kind) ?? 0 : 0;
     const facts = [
       `Saved: ${label} ${money(cost)}.`,
       `${name}'s ${trackName} was already past its ${money(now.budget)} budget; it is now ${money(over)} past it.`,

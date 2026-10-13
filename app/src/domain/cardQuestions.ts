@@ -166,7 +166,14 @@ export function cardQuestion(
     return { blank: "toWallet", count, text: `${head}. Which account did it land in?`, choices: accounts };
   }
   if (asked.blank === "fromWallet") {
-    return { blank: "fromWallet", count, text: `${head}. Which account paid?`, choices: accounts.filter((a) => a !== draft.toWallet) };
+    // Money in from nowhere named may be income, not one of their own accounts (owner, 12 October 2026: "it should know what the source is, like if income").
+    const comingIn = draft.flow === "Transfer" && draft.toWallet.trim() !== "";
+    return {
+      blank: "fromWallet",
+      count,
+      text: comingIn ? `${head}. Where did it come from?` : `${head}. Which account paid?`,
+      choices: [...accounts.filter((a) => a !== draft.toWallet), ...(comingIn ? ["Income"] : [])],
+    };
   }
   return { blank: asked.blank, count, text: `${head}. ${asked.question}`, choices: [] };
 }
@@ -219,6 +226,12 @@ export function answerCard(
   const text = reply.trim();
   if (!text) return null;
   const accounts = [...reference.wallets, ...reference.savings];
+
+  // "Income", "it was my salary", "payment from a client": money in that is not their own, so it is income.
+  if (blank === "fromWallet" && draft.flow === "Transfer" && draft.toWallet.trim() && /^(?:income|revenue|salary|sahod|allowance|payment|bayad|kita|earnings?)\b/i.test(text)) {
+    const named = reference.revenueCategories.find((c) => new RegExp(`\\b${c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(text));
+    return { ...draft, flow: "Revenue", category: "Revenue", item: named ?? draft.item, fromWallet: "", status: "Received", sentOut: false };
+  }
 
   /*
    * Money in that was borrowed: a draw on the line named, or the one line

@@ -14,6 +14,7 @@
  * what bringing rows back would do to each wallet before you do it.
  */
 
+import { shortDays } from "../domain/covers";
 import { useMemo, useState } from "react";
 
 import {
@@ -27,7 +28,6 @@ import {
 } from "../components/primitives";
 import { SearchInput, TextInput } from "../components/forms";
 import { binCounts, restoreImpact } from "../domain/binView";
-import { formatShort } from "../domain/dates";
 import { formatMoney } from "../domain/money";
 import { matchesSearch, parseSearch } from "../domain/search";
 import type { DeletedTransaction, TransactionType } from "../domain/types";
@@ -251,7 +251,7 @@ export function Bin({
                         {t.description || "No description"}
                       </div>
                       <div className="t-micro" style={{ color: "var(--ink-3)" }}>
-                        #{String(t.recordNumber).padStart(4, "0")} · {formatShort(t.date)}
+                        #{String(t.recordNumber).padStart(4, "0")} · {shortDays(t)}
                         {t.deletedAt && (
                           <>
                             {" · "}

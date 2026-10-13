@@ -894,7 +894,7 @@ export default function App() {
         reference.savings,
       ),
     };
-  }, [transactions, settings.credits, reference]);
+  }, [transactions, settings.credits, reference, asOf]);
 
   /**
    * The balances in the sidebar, on a computer.

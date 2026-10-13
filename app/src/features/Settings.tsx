@@ -1682,7 +1682,7 @@ function CategoriesSection({
       <StringList
         title="Subscriptions"
         singular="Subscription"
-        hint="Same prediction, separate budget line. Stop one you cancelled: its history stays."
+        hint="Same prediction, and the same budget line as bills. Stop one you cancelled: its history stays."
         values={settings.subscriptions}
         onChange={(subscriptions) => patch({ subscriptions })}
         rename={tools("subscriptions")}

@@ -27,8 +27,16 @@ export function placeSentMoney(draft: Draft, ledger: readonly Transaction[], acc
   const from = draft.fromWallet.trim();
   const near = (d: string): boolean => d >= addDays(draft.date, -1) && d <= addDays(draft.date, 1);
   const ours = accounts.filter((a) => a !== from);
+  /*
+   * Only money that arrived with nowhere it came from: income, or a transfer
+   * in with a blank source. A complete transfer between two accounts already
+   * says where its money came from, and taking it as this one's landing
+   * counted the same money in twice (12 October 2026 audit, A12).
+   */
+  const arrivedFromNowhere = (t: Transaction): boolean =>
+    (t.type === "Revenue" || (t.type === "Transfer" && !t.fromWallet.trim())) && !t.debtId;
   const landed =
-    ledger.find((t) => near(t.date) && t.amount === draft.amount && t.type !== "Spending" && ours.includes(t.toWallet.trim())) ??
+    ledger.find((t) => near(t.date) && t.amount === draft.amount && arrivedFromNowhere(t) && ours.includes(t.toWallet.trim())) ??
     null;
   const card = others.find((d) => d !== draft && near(d.date) && d.amount === draft.amount && (d.flow === "Revenue" || d.flow === "Transfer") && ours.includes(d.toWallet.trim()));
   const into = landed?.toWallet.trim() || card?.toWallet.trim() || "";

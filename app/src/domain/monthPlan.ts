@@ -54,6 +54,7 @@
  * Rounded down, so a daily figure never promises a centavo that is not there.
  */
 
+import { wholeRows } from "./covers";
 import { learnPatterns } from "./allocation";
 import { totalSavingsBalance, totalWalletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
@@ -252,7 +253,8 @@ export function safeOverDays(
   const keeping = Math.min(pool, offset === 0 ? safe.perDay + safe.perDayAfter * (days - 1) : safe.perDayAfter * days);
   const leftThen = safe.daysLeft - offset;
   const saving = Math.min(pool, leftThen > 0 ? Math.floor(pool / leftThen) * days : 0);
-  return { from: start, to: end, days, keeping, saving: end === monthEnd ? pool : saving };
+  // A run that starts today has no days before it to save across: today's share is already set, so saving is keeping (12 October 2026 audit, B4).
+  return { from: start, to: end, days, keeping, saving: offset === 0 ? keeping : end === monthEnd ? pool : saving };
 }
 
 /** The month's safe figures as they would be after `spend` more goes out of the spending wallets today. */
@@ -369,7 +371,8 @@ export function monthBrief(input: {
      * counts whole (`totalsFor`).
      */
     const spendingWallets = new Set(reference.wallets);
-    const today = totalsFor(transactions.filter((t) => t.date === asOf && spendingWallets.has(t.fromWallet)));
+    // What left the wallets today: a date range left them whole on its first day, never a share a day (`wholeRows`).
+    const today = totalsFor(wholeRows(transactions).filter((t) => t.date === asOf && spendingWallets.has(t.fromWallet)));
     const spentToday = today.spending + today.fees;
     const day = dayFigures(amount, spentToday, daysLeft);
 

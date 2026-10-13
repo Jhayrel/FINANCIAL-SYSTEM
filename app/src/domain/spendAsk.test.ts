@@ -73,7 +73,7 @@ describe("the answer", () => {
     expect(ask).not.toBeNull();
     const words = spendAnswer(ask!, ledger, asOf);
     expect(words).toContain("You spent **PHP 1,209.00** on Food in August 2026, over 2 entries.");
-    expect(words).toContain("The largest was PHP 809.00 on 2026-08-03 (Food at Mcdo).");
+    expect(words).toContain("The largest was PHP 809.00, #0002 on August 3, 2026 (Food at Mcdo).");
     expect(words).toContain("That is PHP 709.00 more than the month before (PHP 500.00).");
   });
 

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { covers, coversOn, daysCovered, savedWithin, spreadCovered } from "./covers";
+import { covers, coversOn, daysCovered, savedWithin, shortDays, spreadCovered, wholeRows } from "./covers";
+import { financeAlerts } from "./alerts";
+import { monthBrief } from "./monthPlan";
+import { entryImpact } from "./entryImpact";
 import { checkDraft, draftToTransactions, emptyDraft, transactionToDraft } from "./entry";
 import { monthTotals } from "./totals";
 import { walletBalance } from "./balances";
@@ -122,5 +125,51 @@ describe("every way a range is said, entry or question (12 October 2026)", () =>
     const trip = row({ date: "2026-10-09", coversTo: "2026-10-11", item: "Travel", amount: 900000, total: 900000 });
     const text = spendAnswer({ item: null, from: "2026-10-10", to: "2026-10-12", name: "October 10 to October 12" }, spreadCovered([trip]), "2026-10-12");
     expect(text).toContain("PHP 6,000.00");
+  });
+});
+
+describe("a date range read whole where an entry is what counts (13 October 2026 audit)", () => {
+  const trip = row({ amount: 933700, total: 933700, coversTo: "2026-10-11", description: "Funeral" });
+  const income = row({ type: "Revenue", category: "Revenue", item: "Allowance", fromWallet: "", toWallet: "Cash", amount: 2000000, total: 2000000, date: "2026-10-01" });
+
+  it("puts the day shares back into the entry the ledger holds", () => {
+    const whole = wholeRows(spreadCovered([income, trip]));
+    expect(whole).toHaveLength(2);
+    const back = whole.find((t) => t.id === trip.id)!;
+    expect([back.date, back.coversTo, back.amount, back.total, back.description]).toEqual(["2026-10-09", "2026-10-11", 933700, 933700, "Funeral"]);
+    expect(back.coveredBy).toBeUndefined();
+    expect(shortDays(back)).toBe("10/09/2026 to 10/11/2026");
+  });
+
+  it("raises no duplicate-number alert for the days of one trip", () => {
+    const alerts = financeAlerts({
+      transactions: spreadCovered([income, trip]),
+      accounts: [{ id: "a", name: "Cash", kind: "spending", archived: false, channel: "cash" }] as never,
+      budgets: {},
+      debts: [],
+      bills: [],
+      lowBalanceThreshold: 0,
+      asOf: "2026-10-12",
+    });
+    expect(alerts.map((a) => a.id).filter((id) => id.startsWith("shared-number") || id === "far-ahead")).toEqual([]);
+  });
+
+  it("counts a range still running as money out on its first day only", () => {
+    const running = row({ date: "2026-10-12", coversTo: "2026-10-14", amount: 300000, total: 300000 });
+    const rows = spreadCovered([income, running]);
+    const brief = (asOf: string) =>
+      monthBrief({ transactions: rows, reference: reference as never, budgets: {}, debts: [], year: 2026, month: 10, asOf }).safe!;
+    expect(brief("2026-10-12").spentToday).toBe(300000);
+    // The wallet did not move on the 13th: nothing went out that day.
+    expect(brief("2026-10-13").spentToday).toBe(0);
+    expect(brief("2026-10-13").overToday).toBe(0);
+  });
+
+  it("measures a range crossing the month end against each month", () => {
+    const draft = { ...transactionToDraft(row({ date: "2026-10-30", coversTo: "2026-11-02", amount: 400000, total: 400000 })), id: undefined };
+    const impact = entryImpact(draft as never, [income], { "2026": { spending: [0, 0, 0, 0, 0, 0, 0, 0, 0, 500000, 500000, 0], billsSubs: Array(12).fill(0) } } as never, "2026-10-30");
+    expect(impact?.cost).toBe(200000);
+    expect(impact?.later).toBe(200000);
+    expect(impact?.leftAfter).toBe(300000);
   });
 });

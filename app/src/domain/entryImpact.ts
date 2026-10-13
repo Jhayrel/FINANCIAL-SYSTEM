@@ -22,6 +22,7 @@ import { outstandingOf, partOf, splitRepayment, withFeesPaid, type Debt } from "
 import { draftToTransactions, type Draft } from "./entry";
 import type { Centavos } from "./money";
 import { costOf, monthTotals } from "./totals";
+import { spreadCovered } from "./covers";
 import { limitKindOf, spendingTrackByKind } from "./kinds";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import type { Budgets, IsoDate, Transaction } from "./types";
@@ -31,6 +32,8 @@ export interface EntryImpact {
   readonly month: number;
   /** What this entry adds to the month's spending. */
   readonly cost: Centavos;
+  /** What a date range adds to the months after this one. 0 for a one-day entry. */
+  readonly later: Centavos;
   /** Rule 3.6's track it counts against. */
   readonly track: "spending" | "billsSubs";
   /** That track's budget for the month. 0 when none is set. */
@@ -99,14 +102,23 @@ export function entryImpact(
       ? splitRepayment(paid.amount, outstandingOf(others, paid.debtId), paid.interest)
       : undefined;
   const rows = draftToTransactions(paid, 0, draft.id ?? "draft-preview", split);
-  const cost = rows.reduce((sum, r) => sum + costOf(r), 0);
   const main = rows.find((r) => costOf(r) > 0) ?? rows[0];
-  if (!main || cost <= 0) return null;
-
   const year = getYear(draft.date);
   const month = getMonth(draft.date);
+  /*
+   * A date range counts in each month by the days it covers, as the Budget
+   * screen counts it. The month here is the first day's; what falls in a
+   * later month is said apart (12 October 2026 audit: a range crossing the
+   * month end was counted whole in its first month).
+   */
+  const prefix = `${year}-${String(month).padStart(2, "0")}`;
+  const parts = spreadCovered(rows);
+  const cost = parts.reduce((sum, r) => sum + (r.date.startsWith(prefix) ? costOf(r) : 0), 0);
+  const later = parts.reduce((sum, r) => sum + (r.date > lastOfMonth(year, month) ? costOf(r) : 0), 0);
+  if (!main || cost <= 0) return null;
+  const spreadOthers = spreadCovered(others);
 
-  const assessment = assessMonth(monthTotals(others, year, month), budgetForMonth(budgets, year, month));
+  const assessment = assessMonth(monthTotals(spreadOthers, year, month), budgetForMonth(budgets, year, month));
   const track =
     main.type === "Spending" && (main.category === "Bills" || main.category === "Subscriptions")
       ? "billsSubs"
@@ -115,7 +127,7 @@ export function entryImpact(
 
   const kind = kindOf(main);
   const kindBefore = kind
-    ? (spendingTrackByKind(others, { start: firstOfMonth(year, month), end: lastOfMonth(year, month) }).get(kind) ?? 0)
+    ? (spendingTrackByKind(spreadOthers, { start: firstOfMonth(year, month), end: lastOfMonth(year, month) }).get(kind) ?? 0)
     : 0;
 
   const sameBill = (t: Transaction): boolean =>
@@ -133,6 +145,7 @@ export function entryImpact(
     year,
     month,
     cost,
+    later,
     track,
     budget: line.budget,
     spentBefore: line.spent,

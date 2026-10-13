@@ -125,7 +125,9 @@ const MONTHS = [
 function monthIn(text: string): number | null {
   const lower = text.toLowerCase();
   for (const [i, name] of MONTHS.entries()) {
-    if (new RegExp(`\\b${name.slice(0, 3)}[a-z]*\\b`, "i").test(lower)) return i + 1;
+    // "Maya" and "Maya Bank" are accounts, not May (12 October 2026 audit, A16).
+    const word = name === "may" ? "\\bmay\\b(?!\\s*bank)(?!\\s+(?:i|you|we|be|have)\\b)" : `\\b${name.slice(0, 3)}[a-z]*\\b`;
+    if (new RegExp(word, "i").test(lower)) return i + 1;
   }
   return null;
 }

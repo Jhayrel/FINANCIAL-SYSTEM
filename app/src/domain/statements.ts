@@ -310,6 +310,7 @@ export function statementToCsv(statement: Statement): string {
   const header = [
     "Record",
     "Date",
+    "Covers to",
     "Type",
     "From wallet",
     "To wallet",
@@ -331,6 +332,8 @@ export function statementToCsv(statement: Statement): string {
       [
         String(t.recordNumber).padStart(4, "0"),
         t.date,
+        // A date range's last day, as the whole-system spreadsheet writes it (`csv.ts`).
+        t.coversTo && t.coversTo > t.date ? t.coversTo : "",
         t.debtEffect ? `Debt / ${t.debtEffect}` : t.type,
         t.fromWallet,
         t.toWallet,

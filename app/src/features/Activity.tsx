@@ -114,7 +114,9 @@ function factsLine(e: ActivityEvent): string | null {
   const facts = readRow(e.after ?? e.before);
   if (!facts) return null;
   const where = facts.from && facts.to ? `${facts.from} to ${facts.to}` : facts.from || facts.to;
-  return [facts.type, where, facts.date && `for ${shortDate(facts.date)}`].filter(Boolean).join(" · ");
+  // A date range is kept as "2026-10-09 to 2026-10-11": each end said as a date.
+  const days = facts.date ? facts.date.split(" to ").map((d) => shortDate(d.trim())).join(" to ") : "";
+  return [facts.type, where, days && `for ${days}`].filter(Boolean).join(" · ");
 }
 
 export function Activity({

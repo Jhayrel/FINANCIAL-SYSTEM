@@ -539,7 +539,16 @@ const escapeRe = (v: string): string => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
  * October 2026).
  */
 const SAYS_IT_WAS_A_QUESTION =
-  /^\s*(?:no[,.!]?\s+|hindi[,.!]?\s+|bro[,.!]?\s+|wait[,.!]?\s+)?(?:(?:(?:that'?w?s|thats|that\s+is|that\s+was|that|it'?s|its|it\s+is|it\s+was|this\s+is|i\s+said|i\s+asked)\s+)?(?:an?\s+|my\s+)?(?:questions?|tanong(?:\s+(?:lang|yan|ko))?)|(?:i'?m|im|i\s+am|i\s+was|just)\s+asking(?:\s+(?:an?\s+)?questions?)?)\b(?:[\s,.!]+(?:read\s+it(?:\s+again)?|answer\s+it|not\s+an?\s+(?:entry|chart|transaction|setting)|not\s+adding(?:\s+(?:an?\s+)?(?:entry|ledger))?|please|pls|po|lang|lol|again))*\s*[.!?]*\s*$/i;
+  /^\s*(?:no[,.!]?\s+|hindi[,.!]?\s+|bro[,.!]?\s+|wait[,.!]?\s+)?(?:(?:(?:that'?w?s|thats|that\s+is|that\s+was|that|it'?s|its|it\s+is|it\s+was|this\s+is|i\s+said|i\s+asked)\s+)?(?:an?\s+|my\s+)?(?:questions?|tanong(?:\s+(?:lang|yan|ko))?)|(?:i'?m|im|i\s+am|i\s+was|just)\s+(?:just\s+)?asking(?:\s+you)?(?:\s+(?:an?\s+)?questions?)?|i\s+(?:just\s+|only\s+)?asked(?:\s+(?:you|an?\s+questions?))?|nagtatanong(?:\s+(?:ako|lang))*)\b(?:[\s,.!]+(?:read\s+it(?:\s+again)?|answer\s+it|not\s+an?\s+[a-z]+|not\s+adding(?:\s+(?:an?\s+)?(?:entry|ledger))?|please|pls|po|lang|lol|again|bro|naman|nga|ha|ok|okay))*\s*[.!?]*\s*$/i;
+
+/** "That's a statement", "I was just saying": the last message was a remark, never a request for a file or an entry (12 October 2026 audit). */
+const SAYS_IT_WAS_A_STATEMENT =
+  /^\s*(?:no[,.!]?\s+|hindi[,.!]?\s+|bro[,.!]?\s+|wait[,.!]?\s+)?(?:(?:that'?w?s|thats|that\s+is|that\s+was|it'?s|its|it\s+is|it\s+was)\s+(?:just\s+)?(?:a\s+|my\s+)?(?:statement|remark|comment|opinion)|i\s+was\s+(?:just\s+)?(?:saying|commenting|telling\s+you)|(?:that'?s|thats|it'?s|its)\s+not\s+a\s+(?:question|request|command))\b(?:[\s,.!]+(?:not\s+an?\s+[a-z]+|please|pls|po|lang|lol|bro|naman|nga|ha|ok|okay))*\s*[.!?]*\s*$/i;
+
+export function saysItWasAStatement(text: string): boolean {
+  const t = text.trim();
+  return t.split(/\s+/).length <= 10 && SAYS_IT_WAS_A_STATEMENT.test(t);
+}
 
 export function saysItWasAQuestion(text: string): boolean {
   const t = text.trim();

@@ -1093,6 +1093,55 @@ Then, the same days:
 
 No further database rule change: the cut is a view, nothing is stored.
 
+### 2026-10-13: the back-read, and the budget moved by income
+
+Every message of the chat was read back into a list (scratchpad requirements,
+64 messages, sections A to F) and audited against the code with tests on the
+owner's 10-12 backup. Fixed from it:
+
+| Fault | Fix |
+|---|---|
+| Bell called the three days of #3933 a duplicate and offered to bin one (B6) | `wholeRows` (`covers.ts`) puts spread parts back together; record checks, far-ahead, extra zeros and the same bill twice read whole entries |
+| "Safe to spend today PHP 0.00" every day a range was still running (B1) | today's money out reads whole entries: a range leaves the wallet on its first day |
+| A range crossing the month end counted whole in its first month (B8) | the Add preview, save note and chat budget judgement count it by the days in each month; the form says what falls after |
+| Take it out of the trip moved money between wallets, or applied after the date changed (C5) | offered only for the same wallet, dropped when the entry stops matching, re-checked on save |
+| Edit refused 393 real rows (no source wallet, fee only) and a chat edit looked like a new entry (C2) | an edit keeps a side the row never had, with a note; a chat-loaded row shows Editing # and Stop editing |
+| Spending over its own budget said "left" in the bell (B3) | a `spending-over` alert |
+| Held money spent on wants had no alert (B5) | `held-wants` alert, named by the person |
+| The chat box: message vanished while routed, re-touch skipped the guard, Send 4px under the text (A1, A2) | the sent message shows at once; touching the box arms the guard; 12px between the text and Send |
+| "remove the subscription and bills", "after the bills", "minus the bills" sent to Settings or the model (A3) | read as safe to spend |
+| "I'm asking you", "That's a statement" (A4) | re-asked, or answered as a remark, never a PDF card |
+| "//" notes about the budget acted on (A5) | notes are read before every other reader |
+| Budget history in UTC and oldest first within a day; "did I change my budget" made a budget card (A8) | local day and time, newest first by the instant, reason shown; history wordings widened |
+| "oct 20" read as PHP 20.00; "next 5 days" read as one item (A9) | a date's day is never money; runs of days answered |
+| A run starting today gave a saving figure above keeping, and a run past the month end was cut silently (B4) | saving equals keeping; the cut is said |
+| "Maya" read as May in statement requests (A16) | May is only the month as a whole word, never before "Bank" or "I" |
+| Day shares counted as entries in chat and Insights (A14, D7) | counted once by `coveredBy`; the largest is the entry with its days |
+| Activity said "coversTo" and raw dates; statement CSV dropped the last day; Today and Yesterday missed a range (C7) | words, dates, a Covers to column, overlap filter |
+| The detail sheet, delete confirm and Bin showed one day for a range (owner, screenshot 13 October) | `shortDays`, and a Days line in the sheet |
+| The AI button covered Show 25 more and Save on PC (D1) | the card keeps the button's reserve under it |
+| "Where did it go?" matched complete transfers; no Income answer (A12) | only money that arrived from nowhere; Income offered |
+| Notes said in chat were dropped (A13) | "note: ..." goes into the entry's Notes |
+| The AI had no balance for yesterday, no closed credit lines, and an old budget recommendation for unrelated questions (A6, A7) | wallets at the end of yesterday and now; closed lines and kind notes; the recommendation only for questions about it |
+
+**Income-based budgeting** (owner, 12 October 2026). `incomeBudget.ts`: income
+since the budget was last set (never borrowing, opening balances or moves
+between own accounts), moves into savings since then, and the most the
+spending budget can be with the money held now (spent plus safe to spend). A
+split into spending, bills and savings is refused when it hands out more than
+came in, or when a spending raise and money kept for savings would be the same
+peso. The Budget screen shows it as "Money that came in" under the planner,
+with "Lower it to" when the budget already promises more than the money; the
+chat answers "I got 10k, adjust my budget" from the same figures, and the
+model is given them. Every change is one revision, with the reason. No
+database rule change: the budget rule checks only the two monthly lists.
+
+Not done, and why: statements still show a range whole in its first month on
+spending sheets (D6, an owner decision: account and wallet statements must
+stay whole); a few smaller chat items (weekend as a spend window, "Maya Bank"
+in statement cuts, short bill names, two pace figures in the prompt, retry
+notes when the context is cut).
+
 ---
 
 ## 6. What the owner has to do

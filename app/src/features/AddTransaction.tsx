@@ -128,7 +128,7 @@ export function AddTransaction({
   onRestoreRow,
   deleted,
   reserved,
-  editing,
+  editing: editingProp,
   onCancelEdit,
   ai,
   uid,
@@ -207,6 +207,13 @@ export function AddTransaction({
    * majority of entries, so it is the right thing to be ready for.
    */
   const [draft, setDraft] = useState<Draft>(() => restoreDraft() ?? { ...emptyDraft(), flow: "Spending" });
+  /*
+   * The row being edited: the one opened for editing, or the one a chat card
+   * loaded into the form (its draft carries the row's id). A chat edit looked
+   * like a new entry, with no "Editing #" and no Stop editing (12 October
+   * 2026 audit, C2).
+   */
+  const editing: Transaction | null = editingProp ?? (draft.id ? (transactions.find((t) => t.id === draft.id) ?? null) : null);
   /**
    * The entry either side of the last type change, for the tap that was meant
    * for the button beside it. Null once there is nothing to offer.
@@ -314,14 +321,14 @@ export function AddTransaction({
    * while typing into the loaded row does not throw the edits away.
    */
   useEffect(() => {
-    if (!editing) return;
+    if (!editingProp) return;
     // `transactionToDraft` reads a blank destination back as Money Send, so
     // there is nothing to set separately any more.
-    setDraft(withBehalf(draftForEditing(editing, transactions), debts));
+    setDraft(withBehalf(draftForEditing(editingProp, transactions), debts));
     setSuggested(new Set());
     setSubmitted(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing?.id]);
+  }, [editingProp?.id]);
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]): void =>
     setDraft((d) => ({ ...d, [key]: value }));
@@ -852,6 +859,16 @@ export function AddTransaction({
   const [takeOut, setTakeOut] = useState<string | null>(null);
   const covering = draft.flow === "Spending" && draft.coversTo !== undefined;
   const coverHere = draft.flow === "Spending" && !covering && (draft.amount ?? 0) > 0 && !draft.id ? (coversOn(draft.date, transactions, draft.id)[0] ?? null) : null;
+  /*
+   * A take-out applies only to the range it was asked for, and only when the
+   * money left the same wallet: taking a Maya payment out of a Cash trip moved
+   * money between wallets (12 October 2026 audit). A pick the entry no longer
+   * matches, after the date or wallet changed, is dropped.
+   */
+  const sameWallet = !!coverHere && coverHere.fromWallet === draft.fromWallet;
+  useEffect(() => {
+    if (takeOut && (takeOut !== coverHere?.id || !sameWallet)) setTakeOut(null);
+  }, [takeOut, coverHere?.id, sameWallet]);
   const savedInside =
     covering && draft.coversTo && draft.coversTo > draft.date && draft.fromWallet.trim() ? savedWithin(transactions, draft.date, draft.coversTo, draft.fromWallet, draft.id) : [];
   const savedInsideSum = savedInside.reduce((a, t) => a + t.total, 0);
@@ -1222,15 +1239,17 @@ export function AddTransaction({
       text:
         takeOut === coverHere.id
           ? `${formatMoney(total)} will be taken out of ${name} (#${String(coverHere.recordNumber).padStart(4, "0")}) when you save, so it is counted once: ${name} becomes ${formatMoney(Math.max(0, coverHere.amount - total))}.`
-          : insideCoverWords(coverHere, total),
-      action: (
+          : sameWallet
+            ? insideCoverWords(coverHere, total)
+            : `${insideCoverWords(coverHere, total)} ${name} was paid from ${coverHere.fromWallet || "no wallet"} and this is from ${draft.fromWallet || "no wallet yet"}, so it stays a separate entry.`,
+      action: sameWallet ? (
         <>
           {" "}
           <button type="button" className="t-caption fms-linkbtn" onClick={() => setTakeOut(takeOut === coverHere.id ? null : coverHere.id)}>
             {takeOut === coverHere.id ? "Keep it separate" : `Take it out of ${name}`}
           </button>
         </>
-      ),
+      ) : null,
     });
   }
   if (showWarnings && savedInside.length > 0) {
@@ -1399,7 +1418,7 @@ export function AddTransaction({
       const saved = draftToTransactions(final, nextRecordNumber, `t-${Date.now()}`, check.repaymentSplit);
       onSave(saved);
       // Paid from the money an entry over several days already counts: taken out of it, so it is counted once.
-      const cover = takeOut ? transactions.find((t) => t.id === takeOut) : undefined;
+      const cover = takeOut && coverHere?.id === takeOut && sameWallet ? transactions.find((t) => t.id === takeOut) : undefined;
       const spent = saved.reduce((a, t) => a + t.total, 0);
       if (cover && cover.amount > spent) onUpdate([{ ...cover, amount: cover.amount - spent, total: cover.amount - spent + cover.fee }]);
     }
@@ -2451,6 +2470,7 @@ export function AddTransaction({
                   {impact.leftAfter < 0
                     ? `${formatMoney(-impact.leftAfter)} over the ${formatMoney(impact.budget)} budget after this`
                     : `left of the ${formatMoney(impact.budget)} budget after this`}
+                  {impact.later > 0 ? ` The other ${formatMoney(impact.later)} falls in the days after ${MONTH_NAMES[impact.month - 1]}, and counts there.` : ""}
                 </p>
               </>
             ) : (

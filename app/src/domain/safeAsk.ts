@@ -42,17 +42,28 @@ const SAFE_ASK =
 
 const TAKES_OUT_BILLS =
   /\b(?:remove|removing|minus|take\s+out|taking\s+out|less|without|exclude|excluding|subtract|deduct|set\s+aside|alis(?:in)?|bawas(?:an)?)\b[^.?!]{0,30}\b(?:bills?|subscriptions?|subs)\b/i;
-const ABOUT_A_SUM = /\b(?:spend(?:ing)?|left|use|usable|safe|equation|balance|money|wallets?|budget|per\s+day|a\s+day|daily|today|whats?\s+left|what'?s\s+left)\b/i;
+const ABOUT_A_SUM = /\b(?:spend(?:ing)?|left|use|usable|safe|equation|computation|calculation|compute|total|figure|formula|balance|money|wallets?|budget|per\s+day|a\s+day|daily|today|whats?\s+left|what'?s\s+left)\b/i;
+
+/** "minus the bills": arithmetic on its own, never a request to delete one. */
+const ARITHMETIC = /\b(?:minus|subtract|deduct|less|bawas(?:an)?)\b/i;
+
+/** "remove the subscription and bills": both named at once is the sum, not deleting one of them (owner, 5 October 2026). */
+const BOTH_KINDS = /\bbills?\b[^.?!]{0,30}\bsubscriptions?\b|\bsubscriptions?\b[^.?!]{0,30}\bbills?\b/i;
+
+/** "how much is left after paying the bills", "what do I have after bills and subscriptions". */
+const AFTER_BILLS =
+  /\b(?:left|have|remain\w*|natira|matitira|free|usable)\b[^.?!]{0,40}\bafter\s+(?:paying\s+|i\s+pay\s+)?(?:the\s+|my\s+|all\s+)?(?:bills?|subscriptions?|subs)\b/i;
 
 /** "how much can I spend on food": one kind of spending, which the affordability answer knows the usual cost of. */
-const ON_ONE_THING = /\bspend(?:ing)?\s+(?:on|for)\s+(?!today\b|tomorrow\b|the\s+rest\b|this\b|now\b|the\s+day\b|the\s+week\b|the\s+month\b|ngayon\b)[a-z]/i;
+const ON_ONE_THING = /\bspend(?:ing)?\s+(?:on|for)\s+(?!today\b|tomorrow\b|the\s+rest\b|this\b|now\b|the\s+day\b|the\s+week(?:end)?\b|the\s+month\b|ngayon\b|(?:the\s+)?next\b|the\s+coming\b|the\s+whole\b|(?:the\s+)?weekend\b|\d+\s+days?\b|a\s+few\s+days\b|[a-z]+\s+days?\b)[a-z]/i;
 
 export function asksSafeToSpend(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
   if (ON_ONE_THING.test(t)) return false;
   if (SAFE_ASK.test(t)) return true;
-  return TAKES_OUT_BILLS.test(t) && ABOUT_A_SUM.test(t);
+  if (AFTER_BILLS.test(t)) return true;
+  return TAKES_OUT_BILLS.test(t) && (ABOUT_A_SUM.test(t) || ARITHMETIC.test(t) || BOTH_KINDS.test(t));
 }
 
 /**

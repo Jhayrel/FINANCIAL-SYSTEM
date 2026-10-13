@@ -283,6 +283,8 @@ export function Insights({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [transactions, reference, debts, selKey, asOf],
   );
+  // A date range is one entry however many of its days are in the pick (12 October 2026 audit).
+  const entryCount = useMemo(() => new Set(report.rows.map((t) => t.coveredBy ?? t.id)).size, [report.rows]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const kinds = useMemo(() => kindsAgainst(transactions, debts, sel), [transactions, debts, selKey]);
   /*
@@ -442,7 +444,7 @@ export function Insights({
   const panelTabs = [
     { id: "where" as const, label: "Where it went", count: 0, enabled: kinds.length > 0 },
     { id: "came" as const, label: "Came from", count: 0, enabled: income.length > 0 },
-    { id: "entries" as const, label: "Entries", count: shownRows.length, enabled: report.rows.length > 0 },
+    { id: "entries" as const, label: "Entries", count: new Set(shownRows.map((t) => t.coveredBy ?? t.id)).size, enabled: report.rows.length > 0 },
     { id: "ahead" as const, label: "Still ahead", count: report.expected.length, enabled: report.futureDays > 0 },
   ];
   const shownTab = panelTabs.find((x) => x.id === tab && x.enabled)?.id ?? panelTabs.find((x) => x.enabled)?.id ?? null;
@@ -576,7 +578,7 @@ export function Insights({
 
   const reportLines = [
     `Looking at ${periodWords(period)}${picked ? `, narrowed to ${selWords}` : ""} (${when.toLowerCase()}).`,
-    `Went out ${formatMoney(report.spent)}, came in ${formatMoney(report.cameIn)}, ${report.rows.length} entries.`,
+    `Went out ${formatMoney(report.spent)}, came in ${formatMoney(report.cameIn)}, ${entryCount} ${entryCount === 1 ? "entry" : "entries"}.`,
     kinds.length > 0
       ? `Where it went, against ${before}: ${kinds.map((k) => `${k.name} ${formatMoney(k.amount)} (${formatMoney(k.before)} before)`).join(", ")}.`
       : "",
@@ -960,7 +962,7 @@ export function Insights({
           label="Came in"
           value={report.cameIn}
           tone="var(--flow-revenue-text)"
-          hint={`${report.rows.length} ${report.rows.length === 1 ? "entry" : "entries"}`}
+          hint={`${entryCount} ${entryCount === 1 ? "entry" : "entries"}`}
         />
         {report.futureDays > 0 ? (
           <IFig
