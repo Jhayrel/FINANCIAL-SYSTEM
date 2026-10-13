@@ -155,6 +155,9 @@ describe("what the words say to draw", () => {
     expect(chartHelps("how much did I spend each month?", { by: "month" }, false)).toBe(true);
     expect(chartHelps("is it a trend??", { by: "month", shape: "line" }, true)).toBe(false);
     expect(chartHelps("anything", null, false)).toBe(false);
+    // "compare" means two periods: "compare to Elon Musk" drew a budget chart (13 October 2026).
+    expect(chartHelps("my financial budget compare to elon musk", { by: "month", money: "budget" }, false)).toBe(false);
+    expect(chartHelps("food this month compared to last month", { by: "item" }, false)).toBe(true);
   });
 });
 

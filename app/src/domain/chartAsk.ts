@@ -284,7 +284,7 @@ export function chartHelps(question: string, hint: ChartHint | null, chartJustSh
 }
 
 /** A question about how something moved across periods. */
-const OVER_TIME = /\b(?:going up|went up|rising|rose|increas\w*|decreas\w*|dropp\w*|falling|fell|month by month|each month|every month|per month|week by week|over the (?:months|weeks|year)|compared? (?:to|with)|vs\.?|versus|than last (?:month|week|year))\b/i;
+const OVER_TIME = /\b(?:going up|went up|rising|rose|increas\w*|decreas\w*|dropp\w*|falling|fell|month by month|each month|every month|per month|week by week|over the (?:months|weeks|year)|compared? (?:to|with) (?:last|this|the previous|previous|the same) (?:month|week|year|period)|(?:vs\.?|versus) (?:last|this|the previous|previous) (?:month|week|year)|than last (?:month|week|year))\b/i;
 
 // ── The charts this file draws ──────────────────────────────────────────────
 

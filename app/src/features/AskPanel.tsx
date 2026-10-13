@@ -4959,6 +4959,11 @@ export function AskPanel({
     const besideFor = (question: string, pair: ComparedPeriods | null = null): Chart[] => {
       const recent = turns.slice(-4).filter(isChart).map((t) => t.chart.title);
       const justShown = recent.length > 0;
+      // Two periods side by side are drawn when a picture is asked for; otherwise offered, like any other (13 October 2026).
+      if (pair && !justShown && presentationFor(question) !== "chart") {
+        if (presentationFor(question) === "either" && /\b(?:month|week|year|20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december)\b/i.test(question)) offerAfter.current = question;
+        return [];
+      }
       const charts = pair
         ? justShown
           ? []
