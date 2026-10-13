@@ -535,6 +535,14 @@ const DEBT_EFFECTS: Readonly<Record<string, NonNullable<Draft["debtEffect"]> | "
   repay: "repay",
   payment: "repay",
   waived: "writeoff",
+  // A loan to a person, and it coming back (13 October 2026 audit): "lent" fell through to nothing.
+  lent: "lend",
+  lend: "lend",
+  loaned: "lend",
+  collected: "collect",
+  collect: "collect",
+  "paid back": "collect",
+  repaid: "collect",
   bought: "bought",
   purchase: "bought",
 };

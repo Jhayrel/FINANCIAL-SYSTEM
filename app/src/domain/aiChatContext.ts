@@ -180,15 +180,20 @@ interface Group {
   count: number;
 }
 
-function tally(rows: readonly Transaction[], key: (t: Transaction) => string): [string, Group][] {
+function tally(rows: readonly Transaction[], key: (t: Transaction) => string, blank = "(blank)"): [string, Group][] {
   const groups = new Map<string, Group>();
+  // An entry spread over several days is one entry, however many days it covers (13 October 2026 audit).
+  const seen = new Map<string, Set<string>>();
   for (const row of rows) {
-    const name = key(row) || "(blank)";
+    const name = key(row) || blank;
     const spent = spendingOf(row);
     if (spent === 0) continue;
     const found = groups.get(name) ?? { amount: 0, count: 0 };
+    const ids = seen.get(name) ?? new Set<string>();
     found.amount += spent;
-    found.count += 1;
+    ids.add(row.coveredBy ?? row.id);
+    found.count = ids.size;
+    seen.set(name, ids);
     groups.set(name, found);
   }
   return [...groups.entries()].sort((a, b) => b[1].amount - a[1].amount);
@@ -637,7 +642,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       out.push("");
       out.push(`## The window asked about: ${w.name}${w.from > "1000" && w.to < "9000" ? ` (${w.from} to ${w.to})` : ""}`);
       out.push(`Spent ${php(spent)}, received ${php(got)}${selfNote(inWindow)}, ${entriesIn(inWindow)} entries. Use these for anything about this window.`);
-      for (const [name, g] of tally(inWindow, (t) => t.item).slice(0, 8)) {
+      for (const [name, g] of tally(inWindow, nameOf).slice(0, 8)) {
         out.push(`${name}: ${php(g.amount)} over ${g.count} entries`);
       }
     }
@@ -991,7 +996,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
 
     out.push("");
     out.push(`## ${monthName(key)}, spending by item`);
-    for (const [name, g] of tally(inMonth, (t) => t.item).slice(0, TOP_N)) {
+    for (const [name, g] of tally(inMonth, nameOf).slice(0, TOP_N)) {
       out.push(`${name}: ${php(g.amount)} over ${g.count} entries`);
     }
 
@@ -1005,13 +1010,13 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   if (thisYear.length > 0) {
     out.push("");
     out.push(`## ${year}, spending by item`);
-    for (const [name, g] of tally(thisYear, (t) => t.item).slice(0, TOP_N)) {
+    for (const [name, g] of tally(thisYear, nameOf).slice(0, TOP_N)) {
       out.push(`${name}: ${php(g.amount)} over ${g.count} entries`);
     }
 
     out.push("");
     out.push(`## ${year}, spending by wallet`);
-    for (const [name, g] of tally(thisYear, (t) => t.fromWallet)) {
+    for (const [name, g] of tally(thisYear, (t) => t.fromWallet, "no wallet (charges a lender added, amounts let go)")) {
       out.push(`${name}: ${php(g.amount)} over ${g.count} entries`);
     }
   }

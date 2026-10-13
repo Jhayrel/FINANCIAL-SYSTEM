@@ -1241,7 +1241,13 @@ leaves out; the plan and pace figures are labelled as the plan; a
 "realistic" budget is held to usual income; "for the next 3 months" across
 a year end says on the card which months are next year's; the AI is pointed
 to "Budget and your money" and the chat commands, never a section that is
-gone.
+gone. Last: "compare" means two periods ("compare to Elon Musk" drew a
+budget chart), side-by-side charts are offered unless asked for, every
+tally names an item one way and counts a spread entry once, and the picture
+reader knows "lent" and "collected" for a loan to a person. Every finding of
+the 13 October audit is now done; its phone, PC and sync lenses never ran
+(session limit) and were covered by hand: the On behalf scenario test, the
+Budget and Settings layouts, the wallet alerts and the statements.
 
 ---
 
