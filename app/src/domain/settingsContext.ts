@@ -88,7 +88,7 @@ export function budgetChangeWords(budgets: Budgets, asOf: IsoDate): string[] {
           r.what === "limit"
             ? `limit on ${r.name ?? "a kind"} ${money(r.wasLimit)} to ${r.limit ? money(r.limit) : "removed"}`
             : `spending ${money(r.wasSpending)} to ${money(r.spending)}, bills and subscriptions ${money(r.wasBillsSubs)} to ${money(r.billsSubs)}`;
-        changes.push({ month: name, at: r.at, words: `${formatMedium(day)}${time ? ` ${time}` : ""}, ${name}: ${words}${r.when === "closed" ? ` (a correction after the month closed${r.reason ? `: ${r.reason}` : ""})` : r.when === "grace" ? " (just after the month ended)" : r.reason ? ` (${r.reason})` : ""}.` });
+        changes.push({ month: name, at: r.at, words: `${formatMedium(day)}${time ? ` ${time}` : ""}, ${name}: ${words}${r.when === "closed" ? ` (edited after the month closed${r.reason ? `: ${r.reason}` : ""})` : r.when === "grace" ? " (just after the month ended)" : r.reason ? ` (${r.reason})` : ""}.` });
       }
     }
   }

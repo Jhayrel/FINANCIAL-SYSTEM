@@ -4025,12 +4025,12 @@ export function AskPanel({
     const chartJustShown = drawn.length === 0 && !worked ? [...turns.slice(-3)].reverse().find(isChart)?.chart : undefined;
     if (chartJustShown && question.split(/\s+/).length <= 15 && /\b(?:that|this|it|these|those|the (?:chart|graph|trend|pie|bars?|line)|explain|why|what does|what do you (?:think|see)|meaning|mean|summari[sz]e|tell me more|ano ibig)\b/i.test(question)) {
       worked = {
-        text: `The chart just shown, which "that", "this" and "it" in the message mean. Answer about it and its figures, not the whole month:\n${chartsWorked([chartJustShown], chartInWords)}`,
+        text: `The chart just shown, which "that", "this" and "it" in the message mean. Answer about it and its figures, not the whole month:\n${chartsWorked([chartJustShown], chartAsText)}`,
         fallback: chartReading(chartJustShown),
       };
     }
     if (drawn.length > 0) {
-      const shown = chartsWorked(drawn, chartInWords);
+      const shown = chartsWorked(drawn, chartAsText);
       worked = {
         text: worked ? `${worked.text}\n\n${shown}` : shown,
         fallback: worked?.fallback ?? drawn.map(chartReading).filter(Boolean).join(" "),
@@ -4059,7 +4059,20 @@ export function AskPanel({
     stopper.current = control;
 
     // The newest turns whole, so a follow-up is sent what it follows (domain/memory.ts).
-    const history = chatHistory(turns.filter(isSaid).map((t) => ({ role: t.kind, text: t.text })));
+    /*
+     * The cards and charts in the conversation, one line each, beside what
+     * was said: "wrong again, fix it" after a budget card was answered "I
+     * cannot see the card" (13 October 2026), because only spoken turns went.
+     */
+    const history = chatHistory(
+      turns.flatMap((t): { role: "you" | "assistant"; text: string }[] => {
+        if (isSaid(t)) return [{ role: t.kind, text: t.text }];
+        if (isChart(t)) return [{ role: "assistant", text: `(Chart drawn: ${t.chart.title}. ${chartInWords(t.chart)})` }];
+        const state = (t as { state?: string }).state;
+        const words = state ? cardWords(t, state as StoredCard["state"]) : "";
+        return words ? [{ role: "assistant", text: `(Card on screen, ${state}: ${words})` }] : [];
+      }),
+    );
     /*
      * A budget recommended a few messages ago stays in front of the model,
      * so "why 14K" is answered from how 14K was worked out. On 28 September
@@ -5064,8 +5077,11 @@ export function AskPanel({
     })();
     if (files.length === 0 && !as && !isNoteLine && !correctsOpenCard && (!essay || entriesInside(note) < 2)) {
       /** "should I go eat outside today?": a decision about spending, like "can I afford". */
+      // And "can I go to gym?", "pwede ba ako kumain sa labas": the same decision, worked by the app (13 October 2026 audit).
       const SHOULD_I = /\bshould i (?:go|eat|buy|get|order|spend|pay|try|treat|grab|have)\b|\bis it (?:ok|okay|fine|wise) (?:to|if i) (?:buy|eat|spend|get|order|go)\b/i;
-      const decides = (t: string): boolean => isAffordQuestion(t) || SHOULD_I.test(t);
+      const CAN_I = /\b(?:can|could|may) i (?:go|eat|buy|get|order|try|treat|grab|have|afford)\b|\bpwede (?:ba )?(?:ako|akong) (?:mag|kumain|bumili|pumunta)/i;
+      // "how much can I ...", "what can I buy with": the safe figure's question, not one decision.
+      const decides = (t: string): boolean => isAffordQuestion(t) || SHOULD_I.test(t) || (CAN_I.test(t) && !/\b(?:how (?:much|many)|what can i)\b/i.test(t));
       const recentAsked = [...turns].reverse().slice(0, 8).filter((t): t is Said => t.kind === "you").map((t) => t.text);
       const earlierAfford = recentAsked.find((t) => isAffordQuestion(t)) ?? null;
       const decisionBefore = recentAsked.slice(0, 2).find(decides) ?? null;
@@ -6879,7 +6895,7 @@ export function AskPanel({
       if (drawn.length > 0 && asksMore && !ai.disabled) {
         setBusy(true);
         try {
-          await askQuestion(note, false, { text: chartsWorked(drawn, chartInWords), fallback: drawn.map(chartReading).filter(Boolean).join(" ") });
+          await askQuestion(note, false, { text: chartsWorked(drawn, chartAsText), fallback: drawn.map(chartReading).filter(Boolean).join(" ") });
         } finally {
           setBusy(false);
         }

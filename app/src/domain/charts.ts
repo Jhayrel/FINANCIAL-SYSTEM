@@ -1649,5 +1649,14 @@ export function chartAsText(chart: Chart): string {
     const was = r.previous !== undefined ? `, was ${chartLabel(r.previous)}` : "";
     return `- ${r.label}: ${chartLabel(r.value)}${share}${count}${was}`;
   });
-  return [`${chart.title}: ${chartLabel(chart.total)} in all.`, ...lines, chart.othersCount > 0 ? `And ${chart.othersCount} smaller, counted in the total.` : ""].filter(Boolean).join("\n");
+  // The rows left off, as a sum, so nothing in the total is unaccounted for (13 October 2026 audit).
+  const shown = chart.rows.reduce((sum, r) => sum + r.value, 0);
+  const rest = chart.total - shown;
+  return [
+    `${chart.title}: ${chartLabel(chart.total)} in all.`,
+    ...lines,
+    chart.othersCount > 0 ? `- ${chart.othersCount} smaller ones: ${chartLabel(rest)}${chart.total > 0 ? `, ${Math.round((rest * 100) / chart.total)}%` : ""}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

@@ -2116,7 +2116,7 @@ function StringList({
                   ))}
                 {recurring?.move && (
                   <Button size="sm" ariaLabel={`Move ${v} to ${recurring.other.title}`} onClick={() => void moveTo(v)}>
-                    {`Move to ${recurring.other.title}`}
+                    {`To ${recurring.other.title.toLowerCase()}`}
                   </Button>
                 )}
                 <Button size="sm" variant="danger" ariaLabel={`Remove ${v}`} onClick={() => void remove(v)}>

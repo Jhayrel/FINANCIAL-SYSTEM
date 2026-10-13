@@ -41,7 +41,7 @@ import { creditRoom, limitSteps } from "./creditLimit";
 import { addDays, dayInWords, daysBetween, daysInMonth, getMonth, getYear, localDay, monthName } from "./dates";
 import { financeAlerts, burnRate, daysLeft, dailyAllowance, PACE_FROM_DAY } from "./alerts";
 import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
-import { toCentavos, toPesos } from "./money";
+import { formatMoney, toCentavos, toPesos } from "./money";
 import { ifNothingMoreToday, isOpenBill, monthBrief, weekAhead } from "./monthPlan";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import type { Account } from "./accounts";
@@ -387,7 +387,17 @@ export function buildContext(input: ContextInput): AiContext {
       const fees = p.outstanding > 0 && p.debt.kind === "payable" ? unpaidCharges(transactions, p.debt.id, asOf) : 0;
       return {
         name: p.debt.name,
-        kind: p.debt.kind === "payable" ? "I owe" : "owed to me",
+        // On behalf said as what it is, and a line past zero as the extra (13 October 2026 audit).
+        kind:
+          p.debt.form === "pass-through"
+            ? p.outstanding < 0
+              ? `on behalf, paid past zero by ${formatMoney(Math.abs(p.outstanding)).replace("₱", "PHP ")}; "clear ${p.debt.counterparty.trim() || p.debt.name}" zeroes it, no money moves`
+              : p.debt.kind === "payable"
+                ? "on behalf, I hold their money"
+                : "on behalf, they owe me"
+            : p.debt.kind === "payable"
+              ? "I owe"
+              : "owed to me",
         outstanding: pesos(p.outstanding),
         daysToDue: p.outstanding > 0 ? (due.daysToDue ?? null) : null,
         nextDue: p.outstanding > 0 ? (due.nextDue ?? null) : null,
@@ -754,7 +764,14 @@ export function contextToText(c: AiContext): string {
      */
     const order = { over: 0, warn: 1, info: 2 } as Record<string, number>;
     const shown = [...c.alerts].sort((x, y) => (order[x.level] ?? 3) - (order[y.level] ?? 3)).slice(0, 5);
-    for (const a of shown) lines.push(`[${a.level}] ${a.title}. ${a.detail.length > 110 ? `${a.detail.slice(0, 107).trimEnd()}...` : a.detail}`);
+    // At a sentence's end, or a word's, never inside one: "PHP 1,2..." read as a different figure (13 October 2026 audit).
+    const cut = (d: string): string => {
+      if (d.length <= 110) return d;
+      const head = d.slice(0, 110);
+      const stop = head.lastIndexOf(". ");
+      return stop > 40 ? head.slice(0, stop + 1) : `${head.slice(0, head.lastIndexOf(" ")).trimEnd()}...`;
+    };
+    for (const a of shown) lines.push(`[${a.level}] ${a.title}. ${cut(a.detail)}`);
     if (c.alerts.length > shown.length) lines.push(`And ${c.alerts.length - shown.length} more in the bell.`);
   }
 

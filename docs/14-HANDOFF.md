@@ -1227,10 +1227,18 @@ held, given, kept, let go, cleared) through every part; the money core held
 | PC Budget gaps | Cards no longer stretch; where it went sits beside the planner and the bills run across the full width under both; kind names are not a row of links; "Budget and your money" is a panel |
 | Income answers | Money held for someone is not borrowing; kept as yours is income |
 
-The 13 October audit's other findings (the model not seeing cards in the
-conversation, raw debt codes in its context, two income figures, chart rows
-without shares, "how to use this system", "can I go to gym" without an
-afford reading) are listed in the session transcript and still open.
+Later the same day, from the 13 October audit: the model now sees every card
+and chart in the conversation as a line of history; debt movements reach it
+in the owner's words (Paid for them, Cleared), and On behalf lines say what
+counts; charts reach it with every row, its share and the sum of the rest;
+"how to use this system" lists the screens and the commands; "can I go to
+gym?" gets the app's afford reading; its instructions use Edit, the plain On
+behalf names and every new command, with one rule about cards instead of two
+that disagreed; alert lines are cut at a sentence; Settings row actions are a
+compact row on a desk. Still open: two income figures for one year (the
+Insights income and the true income), entries spread over days counted once
+in every tally, the realistic-budget check against usual income, "for the
+next 3 months" across a year end.
 
 ---
 

@@ -1937,7 +1937,33 @@
   min-width: 200px;
 }
 
-.fms-rowactions > button { min-width: 96px; }
+.fms-rowactions > button { min-width: 96px; white-space: nowrap; }
+
+/*
+ * On a desk, row actions are a quiet row of small buttons, each as wide as
+ * its words: four tall boxes a row, one wrapping "Move to Subscriptions"
+ * onto three lines, made the Categories tab the heaviest screen (owner,
+ * 14 October 2026). Phones keep the 44px targets.
+ */
+@media (min-width: 1024px) and (hover: hover) {
+  .fms-rowactions,
+  .fms-rowactions--three,
+  .fms-rowactions--four {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    min-width: 0;
+    gap: var(--space-1);
+  }
+
+  .fms-rowactions > button {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
+    min-height: 32px;
+    padding: 0 var(--space-3);
+  }
+}
 
 /*
  * The Categories tab: Rename, Stop and Remove on a bill, two on the other

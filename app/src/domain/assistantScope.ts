@@ -12,7 +12,7 @@ import { asksSafeToSpend } from "./safeAsk";
 
 /** "what can you do", "what can my ai do", "help". */
 export function wantsCapabilities(text: string): boolean {
-  return /\b(what (can|could) (you|my ai|the ai|the assistant|this ai) do|what are you able to do|what can i ask( you)?|how (do|can) i use (you|the ai|the assistant|this chat)|what do you do|your (features|capabilities)|help me use (you|the ai))\b/i.test(
+  return /\b(what (can|could) (you|my ai|the ai|the assistant|this ai) do|what are you able to do|what can i ask( you)?|how (do|can|should) i use (you|the ai|the assistant|this chat|this system|the system|this app|the app)|how to use (this|the) (system|app|ai|chat)|how does (this|the) (app|system) work|paano gamitin|what do you do|your (features|capabilities)|help me use (you|the ai))\b/i.test(
     text,
   ) || /^\s*(help|\?)\s*$/i.test(text);
 }
@@ -85,6 +85,10 @@ export function capabilitiesAnswer(): string {
     "- **On behalf of someone**, apart from debt: an advance for a friend who pays you back, money sent that your mother repays, money you hold for someone. Paid for them, paid you back, let it go (it becomes spending); received for them, given to them, kept as yours (it becomes income): \"I paid Carlo's food 180 cash, he will pay me back\", \"Carlo will not pay, write it off\". A line paid past zero or with a little left is cleared in one step: \"clear Carlo\", \"keep the 1 peso from Carlo\".",
     "- **Debt** is banks, credit lines and loans, yours or with a person: \"I borrowed 1000 from kuya\", \"I lent 500 to Juan\", \"I paid my credit\".",
     "- **Give you a file**: \"export everything\", \"make me a backup\", \"export september as a spreadsheet\", \"download my debt statement\". It goes to this device and nowhere else.",
+    "- **Budget from your money**: \"set November to 14000\" (the whole month, bills inside it), \"set November spending to 12000 and bills to 2000\", \"base my budget on my 10k income, save 20%\", \"lower my budget to my money\".",
+    "- **Find and total**: \"search Framelink\", \"how much have I earned since 2022\", \"bills only statement for October\", \"518 is what's left of my cash, all on travel\".",
+    "- **Summaries your way**: ask for a summary or the details and it is written; say pie, bars or trend and it is drawn.",
+    "**The screens**: Dashboard (today and the month), Add (a new entry), Database (every entry, search and edit), Debt, Insights (charts over any window), Budget, Statements (PDF and spreadsheet), Bin, Activity (what changed) and Settings.",
     "**Settings stay yours**: accounts, categories, credit lines, alerts, the theme and the AI's own switches are changed on the Settings screen, not by me.",
   ].join("\n");
 }

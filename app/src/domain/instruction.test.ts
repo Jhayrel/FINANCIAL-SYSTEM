@@ -67,7 +67,7 @@ describe("the assistant is not told to deny what the app does", () => {
    */
   it("names every action the app takes from the chat", () => {
     const said = chatInstruction.toLowerCase();
-    for (const action of ["budgets", "brings binned rows back", "corrects saved entries", "spreadsheet", "investigates"]) {
+    for (const action of ["budgets", "brings binned rows back", "edits saved entries", "spreadsheet", "investigates", "clear father", "search framelink"]) {
       expect(said, action).toContain(action);
     }
   });

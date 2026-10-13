@@ -536,12 +536,13 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
    * October 2026). The totals above say how much; these say on what, so an
    * answer about yesterday names yesterday's food, not the month's.
    */
+  const lineOf = new Map((input.credits ?? []).map((d) => [d.id, d] as const));
   const dayEntry = (t: Transaction): string => {
     const what = t.item || t.category || t.type;
     const fee = t.fee > 0 ? `, fee ${php(t.fee)}` : "";
     if (t.type === "Revenue") return `received ${what} ${php(t.amount)} into ${t.toWallet || "-"}`;
     if (t.type === "Transfer") return t.toWallet ? `moved ${php(t.amount)} from ${t.fromWallet || "-"} to ${t.toWallet}${fee}` : `sent ${php(t.amount)} away from ${t.fromWallet || "-"}${fee}`;
-    if (t.type === "Debt") return `${t.debtEffect ?? "debt"} ${php(t.amount)}${t.fromWallet ? ` from ${t.fromWallet}` : t.toWallet ? ` into ${t.toWallet}` : ""}${fee}`;
+    if (t.type === "Debt") return `${isClearing(t) ? "cleared, no money moved," : t.debtEffect ? effectLabel(t.debtEffect, lineOf.get(t.debtId ?? "")).toLowerCase() : "debt"} ${php(t.amount)}${t.fromWallet ? ` from ${t.fromWallet}` : t.toWallet ? ` into ${t.toWallet}` : ""}${fee}`;
     return `${what} ${php(t.total)} from ${t.fromWallet || "-"}`;
   };
   const dayLine = (label: string, day: IsoDate): string => {
@@ -1050,9 +1051,13 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
         })`,
       );
       out.push(
-        `Drawn ${php(p.drawn)}, charged ${php(p.charged)}, repaid ${php(p.repaid)}, interest paid ${php(
-          p.interestPaid,
-        )}, written off ${php(p.writtenOff)}.`,
+        p.debt.form === "pass-through"
+          ? p.debt.kind === "receivable"
+            ? `Paid for them ${php(p.drawn)}, paid you back ${php(p.repaid)}, let go ${php(p.writtenOff)}. None of it is income or spending except what was let go (spending).`
+            : `Received for them ${php(p.drawn)}, given to them ${php(p.repaid)}, kept as yours ${php(p.writtenOff)}. None of it is income or spending except what was kept (income).`
+          : `Drawn ${php(p.drawn)}, charged ${php(p.charged)}, repaid ${php(p.repaid)}, interest paid ${php(
+              p.interestPaid,
+            )}, written off ${php(p.writtenOff)}.`,
       );
       out.push(
         `Outstanding ${php(p.outstanding)} = ${php(p.drawn)} + ${php(p.charged)} - ${php(p.repaid)} - ${php(
@@ -1092,7 +1097,8 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
         out.push("Every movement, oldest first: date | what it does | amount | wallet");
         for (const m of movements) {
           out.push(
-            `${m.date} | ${m.debtEffect ?? "unspecified"} | ${php(m.amount)} | ${
+            // The words the owner sees, not the stored code: "lend" read as a loan for money paid on someone's behalf (13 October 2026 audit).
+            `${m.date} | ${isClearing(m) ? "Cleared, no money moved" : m.debtEffect ? effectLabel(m.debtEffect, p.debt) : "unspecified"} | ${php(m.amount)} | ${
               m.fromWallet || m.toWallet || "no wallet"
             }${m.description ? ` | ${m.description}` : ""}`,
           );
