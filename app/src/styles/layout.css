@@ -10019,13 +10019,19 @@ button.fms-recent-row:disabled {
     margin-left: auto;
   }
 
+  /*
+   * As wide as their words, together at the right: two half-width buttons
+   * a row made the Bin a list of buttons (14 October 2026). Still 44px tall,
+   * Restore still last, under the thumb.
+   */
   .fms-binlist .fms-binactions > .fms-btn {
-    flex: 1 1 40%;
+    flex: 0 0 auto;
     margin-top: var(--space-2);
   }
 
   .fms-binlist .fms-binactions > .fms-btn--danger {
     order: 3;
+    margin-left: auto;
   }
 
   .fms-binlist .fms-binactions > .fms-btn--primary {
