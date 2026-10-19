@@ -143,7 +143,7 @@ import { spentFromLeft } from "../domain/leftOver";
 import { readSettleAsk, settleLine } from "../domain/settleLine";
 import { wholeRows } from "../domain/covers";
 import { incomeOf } from "../domain/totals";
-import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, readBudgetMove, readIncomePlan } from "../domain/incomeBudget";
+import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, readBudgetMove, readIncomePlan, type BudgetMove } from "../domain/incomeBudget";
 import { asksCarryOver, asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer } from "../domain/dayFit";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
@@ -2228,6 +2228,8 @@ export function AskPanel({
 
   /** The last budget this device recommended, so "set it" takes both parts and "the separation" shows them. */
   const lastAdvice = useRef<{ advice: BudgetAdvice; text: string; asked: string } | null>(null);
+  /** The question the budget-against-income answer replied to, for "ok add that new budget" after it. */
+  const incomeAnswered = useRef<string | null>(null);
   /** The budget question just asked, so the next message can answer it. */
   const budgetQuestion = useRef<{ year: number; month: number; toMonth?: number; scope: "month" | "rest" | "year" } | null>(null);
 
@@ -4652,6 +4654,9 @@ export function AskPanel({
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", "add", { text: note }));
+        // The newest budget answer: "add that" after it means this, never an older recommendation (19 October 2026).
+        incomeAnswered.current = note;
+        lastAdvice.current = null;
         const words = [...incomeBudgetWords(ib, MONTH_NAMES[m - 1] ?? "this month"), "Split it here, say \"add the money that came in to my budget, keep 2000 for savings\", or on the Budget screen under Budget and your money: it checks each part before it saves."].join("\n");
         setBusy(true);
         try {
@@ -5306,6 +5311,7 @@ export function AskPanel({
                 : "";
           const text = `${verdict}${adviceWords(advice)}`;
           lastAdvice.current = { advice, text, asked: note };
+          incomeAnswered.current = null;
           await answerWithModel(
             [
               `A budget for ${advice.name}, as the app works it out from the ledger: each item's median month over the months it names, the bills and subscriptions still running, one-offs and stopped ones left out${byIncome ? `, held to the income they usually receive, ${formatMoney(advice.typicalIncome)} a month` : held ? ", held to the income they said" : ""}. Its figures are correct: never change or recompute them.`,
@@ -5404,7 +5410,23 @@ export function AskPanel({
      * worked out by the app and made as the usual card (13 October 2026).
      */
     const lastWasBudgetCard = [...turns].reverse().find((t) => t.kind !== "you")?.kind === "budget";
-    const budgetMove = couldBudget && !incomePlan ? readBudgetMove(ruled, lastWasBudgetCard) : null;
+    /*
+     * "Ok add that new budget" after the budget-against-income answer: the
+     * money that came in added to spending, as far as the money keeps, as
+     * that answer said. It put up an older November recommendation for
+     * October instead, ₱12,528.00 down (19 October 2026).
+     */
+    const afterIncome =
+      incomeAnswered.current !== null &&
+      turns.slice(-12).some((t) => t.kind === "you" && t.text === incomeAnswered.current) &&
+      !/\b(?:lower|reduce|cut)\b/i.test(ruled) &&
+      /\b(?:add|apply|set|use|do|go|yes|ok(?:ay)?|sige|update|change|raise)\b/i.test(ruled) &&
+      /\b(?:that|it|this|budget|suggest\w*|propos\w*|change|raise)\b/i.test(ruled) &&
+      ruled.split(/\s+/).length <= 14;
+    const typedMove = couldBudget && !incomePlan ? readBudgetMove(ruled, lastWasBudgetCard) : null;
+    const byAnswer = !typedMove && couldBudget && !incomePlan && afterIncome;
+    const budgetMove: BudgetMove | null =
+      typedMove ?? (byAnswer ? { kind: "addIncome", keep: readIncomePlan(`plan ${ruled} budget income`)?.keep ?? null, toBills: /\bbills?\b|\bsubscriptions?\b/i.test(ruled) } : null);
     if (budgetMove) {
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
@@ -5421,7 +5443,9 @@ export function AskPanel({
         answer("The budget is moved against the money only for the month that is running.");
         return;
       }
-      if (budgetMove.kind === "fit") {
+      // "Add that" after an answer that said the budget is over the money: what it proposed was lowering it.
+      const move: BudgetMove = byAnswer && ib.over > 0 ? { kind: "fit" } : budgetMove;
+      if (move.kind === "fit") {
         if (ib.over <= 0) {
           answer(`Your spending budget of ${formatMoney(ib.budget)} already fits your money: ${formatMoney(ib.spent)} spent and ${formatMoney(ib.safe)} safe to spend keep up to ${formatMoney(ib.most)}${ib.room > 0 ? `, so it could even rise by ${formatMoney(ib.room)}` : ""}.`);
           return;
@@ -5433,15 +5457,20 @@ export function AskPanel({
           answer(`Nothing has come in ${ib.setOn ? `since you set the budget on ${formatMedium(ib.setOn)}` : "this month"}, so there is no new money to add. ${ib.over > 0 ? `The budget is ${formatMoney(ib.over)} more than your money keeps; say "lower my budget to my money" to fit it.` : `It can rise by ${formatMoney(ib.room)} from the money you hold, if you want: say "raise my budget by" a figure.`}`);
           return;
         }
-        const keep = budgetMove.keep ? ("percent" in budgetMove.keep ? Math.floor((ib.cameIn * budgetMove.keep.percent) / 100) : budgetMove.keep.amount) : 0;
+        const keep = move.keep ? ("percent" in move.keep ? Math.floor((ib.cameIn * move.keep.percent) / 100) : move.keep.amount) : 0;
         const give = Math.max(0, Math.min(ib.cameIn - keep, ib.room - keep));
-        const check = checkSplit(ib, budgetMove.toBills ? { toSpending: 0, toBills: Math.max(0, ib.cameIn - keep), keepAside: keep } : { toSpending: give, toBills: 0, keepAside: keep });
+        // Nothing can go to spending: said plainly, never "Put some of it into a part first".
+        if (give === 0 && keep === 0 && !move.toBills) {
+          answer(`None of the ${formatMoney(ib.cameIn)} that came in can go to spending: the spending budget of ${formatMoney(ib.budget)} ${ib.over > 0 ? `already promises ${formatMoney(ib.over)} more than your money keeps. Say "lower my budget to my money" to fit it.` : "already uses all the money you hold."}`);
+          return;
+        }
+        const check = checkSplit(ib, move.toBills ? { toSpending: 0, toBills: Math.max(0, ib.cameIn - keep), keepAside: keep } : { toSpending: give, toBills: 0, keepAside: keep });
         if (!check.ok) {
           answer(check.errors.join(" "));
           return;
         }
         budgetAsk = { kind: "tracks", year: y, month: m, spending: check.value.spending, billsSubs: check.value.billsSubs, scope: "month" };
-        budgetNote = [`${check.reason}.`, ...check.notes, give < ib.cameIn - keep && !budgetMove.toBills ? `Only ${formatMoney(give)} goes to spending: more would promise more than your money keeps.` : ""].filter(Boolean).join(" ");
+        budgetNote = [`${check.reason}.`, ...check.notes, give < ib.cameIn - keep && !move.toBills ? `Only ${formatMoney(give)} goes to spending: more would promise more than your money keeps.` : ""].filter(Boolean).join(" ");
       }
     }
     // The income plan wins over a figure the budget reader took from the same sentence ("10k" is the income, not the budget).
@@ -5669,6 +5698,11 @@ export function AskPanel({
       advisedHere &&
       recentProposal !== null &&
       !namesFigure &&
+      // The answer above is about the month the recommendation was for, never another month's (19 October 2026).
+      (() => {
+        const named = proposedMonthIn(recentProposal.text, asOf);
+        return !named || (named.year === advisedLast.advice.year && named.month === advisedLast.advice.month);
+      })() &&
       (yesToBudget || saysBudget || confirmsProposal(ruled) || /\b(use|set|apply|add)\b[^.]{0,20}\b(that|it|this|recommend\w*|suggest\w*|what you said)\b/i.test(ruled))
     ) {
       /*
@@ -5763,6 +5797,7 @@ export function AskPanel({
           const advice = budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts });
           const text = adviceWords(advice);
           lastAdvice.current = { advice, text, asked: note };
+          incomeAnswered.current = null;
           await answerWithModel(
             [
               `A budget for ${advice.name}, as the app works it out from the ledger: each item's median month over the months it names, the bills and subscriptions still running, one-offs and stopped ones left out. Its figures are correct: never change or recompute them.`,

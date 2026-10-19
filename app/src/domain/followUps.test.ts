@@ -30,3 +30,14 @@ describe("it was a question to the AI", () => {
     expect(saysItWasAQuestion("what is a question to the ai")).toBe(false);
   });
 });
+
+import { asksIncomeBudget, readIncomePlan } from "./incomeBudget";
+
+describe("a budget question about recent income", () => {
+  it("is the budget against what came in, not a plan to make (19 October 2026)", () => {
+    const q = "With my recent income what can you propose in budget change?";
+    expect(readIncomePlan(q)).toBeNull();
+    expect(asksIncomeBudget(q)).toBe(true);
+    expect(readIncomePlan("base my budget on my 10k income, save 20%")).toEqual({ income: 1000000, keep: { percent: 20 } });
+  });
+});

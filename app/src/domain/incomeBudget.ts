@@ -333,6 +333,14 @@ export function readIncomePlan(text: string): IncomePlanAsk | null {
   const said = new RegExp(AMOUNT, "i").exec(rest.replace(/\b(?:19|20)\d{2}\b/g, " "));
   const income = said && said[1] ? toCentavosSaid(said[1], said[2]) : null;
   if (keep && "percent" in keep && (keep.percent <= 0 || keep.percent >= 100)) keep = null;
+  /*
+   * "With my recent income what can you propose in budget change?" asks, and
+   * names no figure: the budget against what came in answers it
+   * (`asksIncomeBudget`). Read as a plan, it went to next month's
+   * recommendation, and "add that" put November's figures on October
+   * (19 October 2026).
+   */
+  if ((income === null || income <= 0) && keep === null && /\b(?:what|how|propos\w*|suggest\w*|recommend\w*|should|any)\b/i.test(t)) return null;
   return { income: income !== null && income > 0 ? income : null, keep };
 }
 

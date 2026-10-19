@@ -1298,6 +1298,17 @@ Each conversation since the 13 October backup was replayed in the browser
   money that arrived over 14 days ago; it led "What needs attention?" with a
   September event. Insights keeps the history.
 
+### 2026-10-19, third: "add that new budget" applies the answer just given
+
+"With my recent income what can you propose in budget change?" was read as a
+plan to make (the word "with"), so it got next month's recommendation; the
+model answered with October's income figures from its context, and "Ok add
+that new budget" put November's ₱15,172.00 on October, ₱12,528.00 down.
+Now: a question with no figure is not a plan (`readIncomePlan`), so it gets
+the budget against the money that came in; "add that" after that answer is
+its move (raise by what the money keeps, or lower to fit when the answer
+said it is over); a recommendation is applied only to the month it was for.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
