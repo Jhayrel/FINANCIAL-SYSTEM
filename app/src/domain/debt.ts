@@ -745,10 +745,17 @@ export function partOf(parent: Transaction, transactions: readonly Transaction[]
 export function parentOf(row: Transaction, transactions: readonly Transaction[]): Transaction | undefined {
   if (row.debtEffect !== "interest" && row.debtEffect !== "charge") return undefined;
   const suffix = row.debtEffect === "interest" ? "-interest" : "-charge";
-  const id = row.partOf ?? (row.id.endsWith(suffix) ? row.id.slice(0, -suffix.length) : undefined);
-  if (!id) return undefined;
-  const parent = transactions.find((t) => t.id === id);
-  return parent && isPartOf(row, parent) ? parent : undefined;
+  /*
+   * Its own link first, then the id it was saved under: a link naming no row
+   * left the 1 September payment as two lines, "Interest only" and "Paid"
+   * (19 October 2026 audit).
+   */
+  for (const id of [row.partOf, row.id.endsWith(suffix) ? row.id.slice(0, -suffix.length) : undefined]) {
+    if (!id) continue;
+    const parent = transactions.find((t) => t.id === id);
+    if (parent && isPartOf(row, parent)) return parent;
+  }
+  return undefined;
 }
 
 /** Whether `row` is the interest split off the payment `payment`. */
@@ -1138,6 +1145,28 @@ export function debtDue(
     const billed = Math.max(0, owedAtBill - paidAfter);
     const bill = { last: lastBill, billed, next: nextBill };
     const due = debt.dueDay && debt.dueDay >= 1 && debt.dueDay <= 31 ? debt.dueDay : undefined;
+    /*
+     * The bill before stays due until it is paid: on its due day it is due
+     * today, and late after. With the due day on the billing day, the new
+     * bill took it in and the date moved a month on, so an unpaid bill was
+     * never due or late (19 October 2026 audit).
+     */
+    // The oldest bill still unpaid, up to three back, so a late one stays late.
+    for (let back = 3; back >= 1; back -= 1) {
+      const closed = addMonths(lastBill, -back);
+      const prevBill = onDay(getYear(closed), getMonth(closed), billing);
+      const after = addMonths(lastBill, 1 - back);
+      const prevDue = due !== undefined ? nextOnDay(prevBill, due) : onDay(getYear(after), getMonth(after), billing);
+      if (prevDue > asOf) continue;
+      let owedPrev = 0;
+      let paidPrev = 0;
+      for (const t of rows) {
+        if (t.date <= prevBill) owedPrev += owedChange(t);
+        else if (t.date <= asOf && (t.debtEffect === paying || t.debtEffect === "writeoff")) paidPrev += t.amount;
+      }
+      const unpaidPrev = Math.max(0, owedPrev - paidPrev);
+      if (unpaidPrev > 0) return { ...withDate(prevDue, "billing", unpaidPrev), bill: { last: prevBill, billed: unpaidPrev, next: lastBill } };
+    }
     if (billed > 0 && due !== undefined) return { ...withDate(nextOnDay(lastBill, due), "billing", billed), bill };
     if (billed > 0) return { ...withDate(nextBill, "billing", position.outstanding), bill };
     return { ...withDate(due !== undefined ? nextOnDay(nextBill, due) : nextBill, "billing", position.outstanding), bill };
@@ -1155,7 +1184,12 @@ export function debtDue(
     return withDate(next, "due-day", position.outstanding);
   }
 
-  if (form === "informal") return none;
+  /*
+   * On behalf has no schedule either: money held for someone was given a due
+   * date a month on, reserved in safe to spend and flagged as due (19 October
+   * 2026 audit).
+   */
+  if (form === "informal" || form === "pass-through") return none;
   return withDate(addMonths(anchor, 1), paidSince ? "last-payment" : "borrowed", position.outstanding);
 }
 

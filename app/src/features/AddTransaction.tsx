@@ -1704,7 +1704,11 @@ export function AddTransaction({
       ? "Save"
       : `Save ${changes.length} ${changes.length === 1 ? "change" : "changes"}`
     : draft.amount !== null && draft.amount > 0
-      ? `Save ${formatMoney(draft.amount + draft.fee)}`
+      ? // What leaves the wallet, as it is saved: a payment with fees already owed is one payment (19 October 2026 audit, "Save ₱4,000.00" for ₱4,302.06).
+        (() => {
+          const saved = withFeesPaid(draft, transactions);
+          return `Save ${formatMoney((saved.amount ?? draft.amount) + saved.fee)}`;
+        })()
       : "Save";
 
   return (

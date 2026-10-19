@@ -94,3 +94,23 @@ describe("budget sentences from the 19 October audit", () => {
     expect(spanIn("september and december", "2026-10-19")?.toMonth).toBeUndefined();
   });
 });
+
+import { readDebtSentence } from "./debtSentence";
+import { readSettleAsk } from "./settleLine";
+import type { Debt } from "./debt";
+
+describe("debt sentences read by who acts (19 October 2026 audit)", () => {
+  const effect = (t: string) => readDebtSentence(t, () => 50000, () => 50000).effect;
+  it("knows paying back, being lent to and lending", () => {
+    expect(effect("I gave back the 500 I borrowed from Ana")).toBe("repay");
+    expect(effect("I returned the money I borrowed from Ana, 500 cash")).toBe("repay");
+    expect(effect("I owe Ana 500, she lent it to me in cash")).toBe("draw");
+    expect(effect("Ana borrowed 500 from me cash")).toBe("lend");
+    expect(effect("Ana paid me back 200 cash")).toBe("collect");
+  });
+  it("never reads a payment as clearing a lender's line", () => {
+    const credit = { id: "c", name: "Card Credit", counterparty: "Card", kind: "payable", form: "credit-line", archived: false } as unknown as Debt;
+    expect(readSettleAsk("paid 4302.06 from card to clear my card credit", [credit], undefined, ["Card"])).toBeNull();
+    expect(readSettleAsk("clear card credit", [credit], undefined, ["Card"])).toBeNull();
+  });
+});

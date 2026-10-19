@@ -6187,7 +6187,7 @@ export function AskPanel({
       log(aiEvent("answered", "insights", { text: words, model: "this device" }));
       return;
     }
-    const toClear = !as && files.length === 0 ? readSettleAsk(lead, debts, (d) => transactions.filter((t) => t.debtId === d.id).reduce((sum, t) => sum + owedChange(t), 0)) : null;
+    const toClear = !as && files.length === 0 ? readSettleAsk(lead, debts, (d) => transactions.filter((t) => t.debtId === d.id).reduce((sum, t) => sum + owedChange(t), 0), [...reference.wallets, ...reference.savings]) : null;
     if (toClear) {
       setDraft("");
       say({ kind: "you", text: note });

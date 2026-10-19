@@ -136,11 +136,20 @@ export function Dashboard({
      */
     const behalf = new Set(debts.filter((d) => d.form === "pass-through").map((d) => d.id));
     const isBehalf = (t: Transaction): boolean => t.type === "Debt" && t.debtId !== undefined && behalf.has(t.debtId);
-    const quality = incomeQuality(transactions.filter((t) => !isBehalf(t)), debts, range);
+    /*
+     * `incomeQuality` already leaves held money out and counts what was kept
+     * as yours; taking the On behalf rows away first dropped the kept money
+     * from true income (19 October 2026 audit).
+     */
+    const quality = incomeQuality(transactions, debts, range);
     const inRevenue = quality.cashIn - quality.trueIncome - quality.openingBalance - quality.selfMoves;
-    const heldForOthers = transactions
-      .filter((t) => isBehalf(t) && t.debtEffect === "draw" && t.date >= range.start && t.date <= range.end)
-      .reduce((sum, t) => sum + t.amount, 0);
+    // Still held at the end: received for them, less what was passed on or kept.
+    const heldForOthers = Math.max(
+      0,
+      transactions
+        .filter((t) => isBehalf(t) && t.date >= range.start && t.date <= range.end)
+        .reduce((sum, t) => sum + (t.debtEffect === "draw" ? t.amount : t.debtEffect === "repay" || t.debtEffect === "writeoff" ? -t.amount : 0), 0),
+    );
     return {
       worth: netWorth(
         totalWalletBalance(transactions, reference.wallets),

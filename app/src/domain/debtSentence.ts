@@ -169,6 +169,16 @@ export function readDebtSentence(
   readFigure: (raw: string) => Centavos | null,
 ): DebtSentence {
   // Money you lent, going out and coming back. Checked first: "paid me back" is not you paying.
+  /*
+   * Who acts decides the direction (19 October 2026 audit): "I gave back the
+   * 500 I borrowed from Ana" was money coming in, "Ana borrowed 500 from me"
+   * was borrowing, "she lent it to me" was lending. Read before the verbs
+   * alone.
+   */
+  const plain = (effect: "repay" | "lend" | "draw"): DebtSentence => ({ effect, amount: amountOf(text), charges: null, interest: null, interestUnstated: false });
+  if (!/\b(?:me\s+back|back\s+to\s+me|sa\s+akin)\b/i.test(text) && /\b(?:i|ako)\s+(?:already\s+|just\s+)?(?:gave|returned|paid|sent|ibinalik|binalik)\b[^.]*\b(?:back|i\s+borrowed|i\s+owe|utang\s+ko|hiniram\s+ko)\b/i.test(text)) return plain("repay");
+  if (/\bborrow(?:ed|s)?\b[^.]{0,30}\bfrom\s+me\b|\b(?:nangutang|umutang)\s+sa\s+akin\b|\butang\s+(?:niya|nya|nila)\s+sa\s+akin\b/i.test(text)) return plain("lend");
+  if (/\b(?:lent|loaned|lend)\s+(?:it\s+|the\s+money\s+|(?:₱|php\s*)?[\d,.]+k?\s+)?(?:to\s+)?me\b|\bpinahiram\s+(?:niya\s+|nya\s+)?(?:ako|sa\s+akin)\b/i.test(text)) return plain("draw");
   if (COLLECT_VERB.test(text)) {
     return { effect: "collect", amount: amountOf(text), charges: null, interest: null, interestUnstated: false };
   }

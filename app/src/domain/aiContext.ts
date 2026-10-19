@@ -243,13 +243,8 @@ export function buildContext(input: ContextInput): AiContext {
   const hasBudget = assessment.combined.budget > 0;
   const bills = billStatuses(transactions, reference, asOf);
   const positions = positionsOf(credits, transactions, asOf);
-  // As the Dashboard counts it: money held for someone is not borrowing (backup of 7 October 2026: PHP 25,000.00 read as borrowed).
-  const behalfIds = new Set(credits.filter((d) => d.form === "pass-through").map((d) => d.id));
-  const quality = incomeQuality(
-    transactions.filter((t) => !(t.type === "Debt" && t.debtId !== undefined && behalfIds.has(t.debtId))),
-    credits,
-    { start: `${year}-01-01`, end: asOf },
-  );
+  // Held money is left out, and money kept as yours counted, by `incomeQuality` itself (19 October 2026 audit).
+  const quality = incomeQuality(transactions, credits, { start: `${year}-01-01`, end: asOf });
 
   const live = accounts.filter((a) => !a.archived);
 

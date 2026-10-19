@@ -131,12 +131,27 @@ export function settleLine(debt: Debt, transactions: readonly Transaction[], ref
 const CLEAR =
   /\b(clear|settle|zero|close|keep (?:the|it|that)|keep (?:the )?(?:extra|sukli|change|remainder|rest)|let (?:it|the [\w₱. ]+) go|write (?:it )?off|forgive|forgiven|sa (?:akin|kin) na|akin na lang|kunin ko na)\b/i;
 
-export function readSettleAsk(text: string, debts: readonly Debt[], leftOf?: (debt: Debt) => number): Debt | null {
+export function readSettleAsk(
+  text: string,
+  debts: readonly Debt[],
+  leftOf?: (debt: Debt) => number,
+  /** Wallet and savings names: "Maya" the wallet is not Maya Credit. */
+  accounts: readonly string[] = [],
+): Debt | null {
   const t = text.trim();
   if (!CLEAR.test(t) || /\?\s*$/.test(t)) return null;
+  /*
+   * Money paid is a payment to record, never a line to clear: "paid 4302.06
+   * from maya to clear my maya credit" offered to mark the debt forgiven and
+   * dropped the payment (19 October 2026 audit).
+   */
+  if (/\b(?:paid|pay|pays|paying|bayad|binayaran|sent|send|transferr?ed)\b/i.test(t) && /\d/.test(t) && !/\b(?:keep|kept|extra|sukli|change|remainder)\b/i.test(t)) return null;
+  const isAccount = new Set(accounts.map((a) => a.trim().toLowerCase()));
   const named = debts
     .filter((d) => !d.archived)
-    .map((d) => ({ d, words: [d.counterparty.trim(), d.name.trim()].filter((w) => w.length >= 3) }))
+    // A lender's line is not forgiven from a sentence unless it says so.
+    .filter((d) => d.form === "pass-through" || d.kind === "receivable" || /\b(?:forgive|forgiven|write (?:it )?off)\b/i.test(t))
+    .map((d) => ({ d, words: [d.counterparty.trim(), d.name.trim()].filter((w) => w.length >= 3 && !isAccount.has(w.toLowerCase())) }))
     .filter(({ words }) => words.some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)))
     .map(({ d }) => d);
   if (named.length <= 1) return named[0] ?? null;
