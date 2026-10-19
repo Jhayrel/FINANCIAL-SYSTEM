@@ -10,6 +10,7 @@
  */
 import type { Centavos } from "./money";
 import type { Proposal, ReadBalance } from "./proposal";
+import { accountIn } from "./interestAsk";
 
 export interface InterestFromPicture {
   readonly account: string;
@@ -33,7 +34,37 @@ export function interestFromPicture(
   balanceOf: (account: string) => Centavos,
 ): InterestFromPicture | null {
   if (!ASKS.test(note)) return null;
-  const balance = accounts.map((a) => balances.find((b) => b.account === a)).find((b) => b !== undefined);
+  return balanceFromPicture(note, proposals, balances, accounts, balanceOf);
+}
+
+/**
+ * The same sum for a balance sent with no question: a savings screen alone
+ * came back "No transaction was readable" (19 October 2026), though the
+ * model had read its balance.
+ */
+export function balanceFromPicture(
+  note: string,
+  proposals: readonly Proposal[],
+  balances: readonly ReadBalance[],
+  accounts: readonly string[],
+  balanceOf: (account: string) => Centavos,
+): InterestFromPicture | null {
+  /*
+   * The screen's own name for the account ("My Savings", "Maya Savings") is
+   * matched to theirs, the message helping: "my new maya bank balance" with
+   * a Maya savings screen is Maya Bank (Personal savings) (20 October 2026).
+   */
+  const resolve = (b: ReadBalance): ReadBalance | undefined => {
+    if (accounts.includes(b.account)) return b;
+    const both = `${b.account} ${note}`;
+    const saving = /\bsav(?:e|ing|ings)\b|\bbank\b/i.test(both);
+    const named = accountIn(both, accounts) || accountIn(b.account, accounts);
+    const pick = named && saving && !/sav|bank|reserve|fund/i.test(named) ? accounts.find((a) => /sav|bank/i.test(a) && a.toLowerCase().includes(named.toLowerCase().split(/\s+/)[0] ?? "")) ?? named : named;
+    return pick ? { ...b, account: pick } : undefined;
+  };
+  const balance = accounts
+    .map((a) => balances.map(resolve).find((b) => b?.account === a))
+    .find((b): b is ReadBalance => b !== undefined);
   if (!balance) return null;
   const ledger = balanceOf(balance.account);
   // A balance, not a credit: about what the ledger holds, never a few pesos read as one.

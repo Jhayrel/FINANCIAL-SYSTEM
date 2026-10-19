@@ -1342,6 +1342,40 @@ before it, a day's figure, and when a borrowing would be due on each credit
 line. Not re-audited: the AI chat's routing as a whole, and safe to spend's
 edge days (month's first and last day, a bill paid today).
 
+### 2026-10-19, after: the Maya savings screenshot, read and answered
+
+From the second 19 October backup and its screenshots.
+
+- A picture holding only a balance (a savings home screen) was answered
+  "No transaction was readable", though the model had read the balance:
+  the empty check counted rows only. It now compares the balance with the
+  ledger, and a few centavos more on a savings account is offered as
+  interest (`balanceFromPicture`). The interest question with such a
+  picture had the same fault.
+- The reading rules (`ai.ts`) name every kind of balance screen (Total
+  savings, Personal savings, a goal, an app's home figure), say which of
+  the owner's accounts a savings screen is, read figures digit by digit with
+  their centavos, and never return nothing when a peso amount is plainly on
+  the screen. An unpaid bill or checkout still returns nothing.
+- A typed balance with no account named ("its 3543.08 thats my new
+  balance") finds the account (`interestAsk.ts`).
+- Find the difference blamed a doubled PHP 0.23 income for a ledger PHP 1.23
+  short. A duplicate that pulls the other way is now said apart and never
+  counted (`against` in `investigate.ts`), so the PHP 1.23 is offered as
+  interest.
+- "Add it" with a card open names the card and where to press; saving is
+  still the owner's press.
+- "Should I eat outside tomorrow?" is answered by the app from tomorrow's
+  figure and the owner's usual meal price (`eatOutAsk.ts`); the model had
+  quoted PHP 51.97 from an old answer.
+- "3,941 entries" and "#3,948" are no longer read as peso figures by the
+  figure check (`aiFigures.ts`).
+- Needs review (6) in that backup is data for the owner, not an app fault:
+  three withdrawals with the machine fee inside the amount (#3812, #3817,
+  #3824; the Edit form splits it in one press), #3818 whose total leaves out
+  its PHP 18.00 fee (opening it in Edit and saving sets the total), and Maya
+  below zero at the close of 26 September (#3823, #3824, #3831).
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

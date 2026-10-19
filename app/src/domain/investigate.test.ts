@@ -314,12 +314,30 @@ describe("when the findings come to more than the difference", () => {
     expect(rest).toBeNull();
   });
 
-  it("offers nothing worked out from what is left over", () => {
+  it("never counts rows that pull the other way, and says them apart", () => {
+    // Ledger too high; a doubled spend makes it too low, so it cannot be the difference.
     const result = investigate({ transactions: twice, account: "Gcash", actual: 3_500_000, asOf: "2026-09-10" });
     expect(result.gap).toBe(100_000);
-    expect(result.overshoot).toBe(true);
-    expect(result.possible).toEqual([]);
-    expect(investigationWords(result).lines.join(" ")).not.toContain("could be");
+    expect(result.overshoot).toBe(false);
+    expect(result.found).toEqual([]);
+    expect(result.against).toHaveLength(2);
+    expect(result.unexplained).toBe(100_000);
+    const words = investigationWords(result).lines.join(" ");
+    expect(words).toContain("That makes the ledger too low, not too high, so it is not the difference");
+    expect(words).not.toContain("worth looking at");
+  });
+
+  it("does not blame an income entered twice for a ledger that is short", () => {
+    // Invented: a ₱0.25 credit entered twice; the account holds ₱1.50 more than the ledger.
+    const rows = [income("2026-09-01", 100_000, "Salary", "Gcash"), income("2026-09-05", 25, "Interest", "Gcash"), income("2026-09-05", 25, "Interest", "Gcash")];
+    const result = investigate({ transactions: rows, account: "Gcash", actual: 100_200, asOf: "2026-09-10" });
+    expect(result.gap).toBe(-150);
+    expect(result.found).toEqual([]);
+    expect(result.unexplained).toBe(-150);
+    expect(result.possible.some((c) => c.kind === "unrecorded" && c.direction === "in")).toBe(true);
+    const words = investigationWords(result).lines.join(" ");
+    expect(words).toContain("₱0.25 in). That makes the ledger too high, not too low");
+    expect(words).toContain("the difference becomes ₱1.75");
   });
 
   it("still explains the rest when the findings fit inside the difference", () => {

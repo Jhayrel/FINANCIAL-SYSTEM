@@ -124,6 +124,12 @@ export interface Investigation {
    * does not reach. Said, never counted.
    */
   readonly aside: readonly Clue[];
+  /**
+   * Rows entered twice that pull the other way from the difference: a second
+   * income row makes the ledger too high, so it cannot explain the ledger
+   * being too low. Said apart, never counted (20 October 2026).
+   */
+  readonly against?: readonly Clue[];
   /** The part of the gap the found clues account for. */
   readonly explained: Centavos;
   /** What is still unaccounted for. */
@@ -360,6 +366,7 @@ export function investigate(input: InvestigateInput): Investigation {
   let found: Clue[] = [];
   const possible: Clue[] = [];
   let aside: Clue[] = [];
+  const against: Clue[] = [];
   const statement = [...(input.statement ?? [])].filter((l) => l.amount !== 0 && l.date <= asOf);
   let covered: Investigation["covered"];
 
@@ -495,9 +502,16 @@ export function investigate(input: InvestigateInput): Investigation {
        * "Cash matches" was a false alarm (4 October 2026,
        * `monthScenarios.test.ts`). A difference the other way still lists
        * them, as rows worth looking at: on 19 September five such rows were
-       * real duplicates beside a difference they did not explain.
+       * real duplicates beside a difference they did not explain. One that
+       * pulls the other way is said apart and not counted, so it never
+       * stands in for the difference (19 October 2026: a doubled ₱0.23
+       * income was "found" for a ledger ₱1.23 short).
        */
       if (gap === 0) continue;
+      if (Math.sign(explains) !== Math.sign(gap)) {
+        against.push({ kind: "duplicate", row: p.row, twin: p.twin, explains });
+        continue;
+      }
       found.push({ kind: "duplicate", row: p.row, twin: p.twin, explains });
     }
   }
@@ -666,7 +680,7 @@ export function investigate(input: InvestigateInput): Investigation {
         )
     : undefined;
 
-  return { account, asOf, recorded, actual, gap, found, possible, aside, explained, unexplained, overshoot, covered, since, movedSince };
+  return { account, asOf, recorded, actual, gap, found, possible, aside, ...(against.length > 0 ? { against } : {}), explained, unexplained, overshoot, covered, since, movedSince };
 }
 
 /**
@@ -769,7 +783,7 @@ export function investigationWords(result: Investigation): {
   /** What was searched, when the owner gave the day it last matched. */
   readonly since: string | null;
 } {
-  const { account, recorded, actual, gap, found, possible, aside, explained, unexplained, overshoot, covered, since, movedSince } = result;
+  const { account, recorded, actual, gap, found, possible, aside, against = [], explained, unexplained, overshoot, covered, since, movedSince } = result;
   if (gap === 0) {
     return {
       headline: `${account} matches: the ledger and the account both hold ${formatMoney(actual)}.`,
@@ -827,6 +841,13 @@ export function investigationWords(result: Investigation): {
       `Also in the ledger and not in what you sent, though the difference does not need ${aside.length === 1 ? "it" : "them"}, so ${aside.length === 1 ? "it is" : "they are"} most likely past the edge of the picture:`,
     );
     lines.push(...aside.map((c) => ("row" in c ? `${row(c.row)}, ${formatMoney(Math.abs(c.explains))} ${c.explains > 0 ? "in" : "out"}.` : clueWords(c))));
+  }
+  for (const c of against) {
+    if (c.kind !== "duplicate") continue;
+    // 19 October 2026: a doubled ₱0.23 income was blamed for the ledger being ₱1.23 short.
+    lines.push(
+      `Separately, ${row(c.row)} looks like ${row(c.twin)} entered a second time (${formatMoney(Math.abs(c.explains))} ${c.explains > 0 ? "in" : "out"}). That makes the ledger ${c.explains > 0 ? "too high" : "too low"}, not ${gap > 0 ? "too high" : "too low"}, so it is not the difference: if it is a copy, bin it, and the difference becomes ${formatMoney(Math.abs(gap) + Math.abs(c.explains))}.`,
+    );
   }
   if (unexplained !== 0 && !overshoot) {
     if (possible.length > 0) {
@@ -1048,6 +1069,7 @@ export function investigationForModel(result: Investigation): string {
     headline,
     result.found.length > 0 ? `Rows it matched: ${result.found.map(clue).join("; ")}.` : "It matched no rows.",
     result.possible.length > 0 ? `Possibilities it offered: ${result.possible.map(clueWords).join("; ")}.` : "",
+    (result.against ?? []).length > 0 ? `Not the difference, they pull the other way: ${(result.against ?? []).map(clue).join("; ")}. Never name these as the cause.` : "",
     result.overshoot ? "What it matched comes to more than the difference, so some of it is wrong." : "",
     rest ?? "",
     ...lines.slice(0, 2),

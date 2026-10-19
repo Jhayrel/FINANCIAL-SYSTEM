@@ -145,7 +145,8 @@ import { wholeRows } from "../domain/covers";
 import { incomeOf } from "../domain/totals";
 import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, readBudgetMove, readIncomePlan, answerMoveIn, type BudgetMove } from "../domain/incomeBudget";
 import { asksCarryOver, asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
-import { challengedAnswer, challengesAnswer } from "../domain/dayFit";
+import { challengedAnswer, challengesAnswer, everydayPrices } from "../domain/dayFit";
+import { eatOutAnswer, mealPrice, readEatOutAsk } from "../domain/eatOutAsk";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
 import { planWorked } from "../domain/planRate";
@@ -218,7 +219,7 @@ import { typedOnce } from "../domain/typedOnce";
 import { debtAnswer, readDebtAsk } from "../domain/debtAsk";
 import { bridgeAnswer, readBridgeAsk, type BridgeAsk } from "../domain/bridgeAsk";
 import { periodOnly } from "../domain/spendAsk";
-import { interestFromPicture } from "../domain/interestFromPicture";
+import { balanceFromPicture, interestFromPicture } from "../domain/interestFromPicture";
 import { asksBudgetHistory, budgetChangeWords } from "../domain/settingsContext";
 import { spreadCovered } from "../domain/covers";
 import { rowSavedFor } from "../domain/formSaved";
@@ -575,7 +576,7 @@ const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
 const readOffPicture = (p: Proposal): boolean =>
   // "user text" is what a model's card from a typed message is sourced to, kept by cards saved before `typed` was.
   // "the difference" is worked out from the ledger: a card from it was never in a picture (3 October 2026).
-  !p.typed && !/^(user text|this message|the difference)\b/i.test(p.sourceRef.trim()) && (!p.said || /\b(image|picture|photo|screenshot|receipt|statement|part \d)/i.test(p.sourceRef));
+  !p.typed && !/^(user text|this message|the difference|balance\b)/i.test(p.sourceRef.trim()) && (!p.said || /\b(image|picture|photo|screenshot|receipt|statement|part \d)/i.test(p.sourceRef));
 const isFound = (t: Turn): t is Found => t.kind === "found";
 const isChart = (t: Turn): t is Drawn => t.kind === "chart";
 const isDebt = (t: Turn): t is DebtChoice => t.kind === "debt";
@@ -2605,7 +2606,8 @@ export function AskPanel({
       // The clause this row came from, not the whole message. A card the
       // model returned carries no `said`, so it is worked out from the
       // amount; see `clauseFor`.
-      against ?? proposal.said ?? clauseFor(hint, draft.amount, reference),
+      // A figure the app worked out (balance less ledger) is checked by its own sum, not against the sentence's bigger figure (20 October 2026).
+      /^(?:balance|the balance in the picture|the difference)\b/i.test(proposal.sourceRef.trim()) ? "" : (against ?? proposal.said ?? clauseFor(hint, draft.amount, reference)),
       reference,
       asOf,
       proposal.confidence,
@@ -3355,7 +3357,7 @@ export function AskPanel({
       return false;
     }
 
-    if (result.proposals.length === 0 && result.refused.length === 0) {
+    if (result.proposals.length === 0 && result.refused.length === 0 && (result.balances?.length ?? 0) === 0) {
       /*
        * No entry, no figure, nothing done in the past tense: a question
        * worded as a statement, answered as one. The owner, 27 September
@@ -3707,11 +3709,61 @@ export function AskPanel({
           : fromBalance.others;
     }
 
+    /*
+     * A balance and nothing else, sent with no question: what it holds against
+     * the ledger, never "No transaction was readable" (19 October 2026, a Maya
+     * savings screen, twice). A few centavos more on a savings account is its
+     * interest, as `findDifference` offers it; anything else waits to be asked.
+     */
+    const shownOnly =
+      sent.length > 0 && !fromBalance && cards.length === 0 && extras.length === 0
+        ? balanceFromPicture(note, [], read.balances ?? [], [...reference.savings, ...reference.wallets], (a) => walletBalance(transactions, a))
+        : null;
+    if (shownOnly) {
+      const interestItem = reference.revenueCategories.find((c) => /interest/i.test(c)) ?? "";
+      const small = shownOnly.gap > 0 && shownOnly.gap <= 10_000 && reference.savings.includes(shownOnly.account) && interestItem !== "";
+      const words =
+        shownOnly.gap === 0
+          ? `${shownOnly.account} shows ${formatMoney(shownOnly.told)} in the picture, the same as the ledger. Nothing to add.`
+          : `${shownOnly.account} shows ${formatMoney(shownOnly.told)} in the picture and the ledger has ${formatMoney(shownOnly.ledger)}: ${formatMoney(Math.abs(shownOnly.gap))} ${shownOnly.gap > 0 ? "more in the picture" : "less in the picture"}.${
+              small ? " On a savings account that is most likely interest, so the card adds it." : ' Say "find the difference" and I will look for why.'
+            }`;
+      say({ kind: "assistant", text: words, from: "this device" });
+      log(aiEvent("answered", "add", { text: words, model: "this device" }));
+      if (small) {
+        const date = shownOnly.date > asOf ? asOf : shownOnly.date;
+        cards = [
+          {
+            draft: {
+              ...emptyDraft(asOf),
+              flow: "Revenue",
+              category: "Revenue",
+              toWallet: shownOnly.account,
+              item: interestItem,
+              description: `Interest earned, ${formatMedium(date)}`,
+              amount: shownOnly.gap,
+              notes: `Balance ${formatMoney(shownOnly.told)} in the picture; the ledger had ${formatMoney(shownOnly.ledger)}.`,
+              status: "Received",
+              date,
+            },
+            confidence: "medium",
+            sourceRef: "the balance in the picture",
+            adjustments: [`The balance in the picture less the ledger's: ${formatMoney(shownOnly.told)} less ${formatMoney(shownOnly.ledger)}.`],
+          },
+        ];
+      }
+    } else if (sent.length > 0 && cards.length === 0 && extras.length === 0 && !fromBalance && (read.balances?.length ?? 0) > 0) {
+      const b = read.balances![0]!;
+      const words = `The picture shows a balance of ${formatMoney(b.amount)}${b.account ? ` on ${b.account}` : ""}, and none of your accounts matches that name. Say which account it is (it is my Maya savings) and I will compare it with the ledger.`;
+      say({ kind: "assistant", text: words, from: "this device" });
+      log(aiEvent("answered", "add", { text: words, model: "this device" }));
+    }
+
     if (sent.length > 0) {
       const drafts = cards.map((p) => p.draft);
-      const moved = account || read.balances?.[0]?.account || mostMoved(drafts);
+      const moved = account || shownOnly?.account || fromBalance?.account || read.balances?.[0]?.account || mostMoved(drafts);
       // The balance on screen too, for "compared to the screenshot" next (13 October 2026: it was asked for again).
-      const shown = read.balances?.find((b) => b.account === moved);
+      const shown = read.balances?.find((b) => b.account === moved) ?? ((shownOnly ?? fromBalance)?.account === moved ? { amount: (shownOnly ?? fromBalance)!.told } : undefined);
       lastRead.current = moved ? { account: moved, drafts, at: Date.now(), ...(shown ? { balance: shown.amount } : {}) } : null;
     }
 
@@ -4720,6 +4772,25 @@ export function AskPanel({
       return;
     }
     // A budget for a day or a week is what is safe to spend over it, never next month's budget (`asksShortBudget`).
+    /*
+     * "Should I eat outside tomorrow?": the day's figure against what a meal
+     * usually costs, worked out here. The model answered it from an earlier
+     * answer's figure, PHP 51.97, no longer true (19 October 2026).
+     */
+    const eatOut = files.length === 0 && !as ? readEatOutAsk(note) : null;
+    if (eatOut) {
+      const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
+      if (brief.safe) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const reply = eatOutAnswer(eatOut, { today: brief.safe.perDay, after: brief.safe.perDayAfter, daysLeft: brief.safe.daysLeft }, mealPrice(everydayPrices(reportRows, asOf)), formatMoney);
+        say({ kind: "assistant", text: reply, from: "this device" });
+        log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+        return;
+      }
+    }
+
     if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && (asksSafeToSpend(note) || asksShortBudget(ruled, asOf)) && !plainlyDone(note)) {
       setDraft("");
       say({ kind: "you", text: note });
@@ -6521,6 +6592,28 @@ export function AskPanel({
       return;
     }
 
+    /*
+     * "add it" with a card already open: that card, named, and where to press.
+     * 19 October 2026: the model answered "Press the add button" with no word
+     * of which card or what it held. Saving stays the owner's press, so a
+     * card that asks something or warns of a copy is still read first.
+     */
+    if (openCards.length > 0 && files.length === 0 && !as && !heldDifference.current && asksToAddTheDifference(note)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      const named = openCards.map((t) => (isOffer(t) ? t.live ?? t.proposal.draft : null)).filter((d): d is Draft => d !== null);
+      const one = named.length === 1 ? named[0]! : null;
+      say({
+        kind: "assistant",
+        text: one
+          ? `The card above is ready: ${formatMoney(one.amount ?? 0)}, ${one.item || one.flow}, ${one.flow === "Revenue" ? `into ${one.toWallet || "the account"}` : `from ${one.fromWallet || "the account"}`}. Press **Add** on it to save it. Nothing is saved until you do.`
+          : `${named.length} cards above are ready. Press **Add** on each one you want saved, or **Add all**. Nothing is saved until you do.`,
+        from: "this device",
+      });
+      return;
+    }
+
     /**
      * "cancel" with nothing open.
      *
@@ -6568,7 +6661,7 @@ export function AskPanel({
         log(aiEvent("answered", "add", { text: reply, model: "this device" }));
         return;
       }
-      const reply = `${flagged.length} ${flagged.length === 1 ? "entry is" : "entries are"} flagged by the app's checks, the same list as **Needs review** in the Database. Each says what is wrong with it. **Edit this** corrects it and keeps its record number; **Move to bin** removes it, and the Bin can bring it back.`;
+      const reply = `${flagged.length} ${flagged.length === 1 ? "entry is" : "entries are"} flagged by the app's checks, the same list as **Needs review** in the Database. Each says what is wrong with it. **Edit this** changes it and keeps its record number; **Move to bin** removes it, and the Bin can bring it back.`;
       say({ kind: "assistant", text: reply, from: "this device" });
       say({ kind: "found", action: "edit", alsoBin: true, candidates: flagged.map(({ row, why }, i) => ({ row, score: 100 - i, why: [...why] })), done: [] });
       log(aiEvent("answered", "add", { text: `Listed ${flagged.length} flagged rows. Asked: ${note}`, model: "this device" }));

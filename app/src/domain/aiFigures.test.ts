@@ -25,6 +25,11 @@ describe("reading figures out of text", () => {
     expect(figuresIn("spent 39,638.36 against a budget")).toEqual([3963836]);
   });
 
+  it("reads a count or a record number as no money", () => {
+    expect(figuresIn("across 3,941 entries and 1,200 rows, #3,948 among them")).toEqual([]);
+    expect(figuresIn("3,941.50 spent")).toEqual([394150]);
+  });
+
   it("finds nothing in a sentence with no money in it", () => {
     expect(figuresIn("eleven days left in the month")).toEqual([]);
   });

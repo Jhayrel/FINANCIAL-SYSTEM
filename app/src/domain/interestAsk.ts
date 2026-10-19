@@ -45,7 +45,14 @@ export function interestFromBalance(
   inContext?: string,
 ): InterestFromBalance | null {
   if (!EARNS.test(text)) return null;
-  const named = accountIn(text, accounts);
+  /*
+   * No account named ("its 3543.08 thats my new balance see how much i
+   * earned", 20 October 2026): the one the conversation was about, else the
+   * one account whose ledger balance the figure sits just above.
+   */
+  const told0 = Math.max(0, ...[...text.matchAll(/(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/gi)].map((m) => parseAmount(m[1] ?? "") ?? 0));
+  const near = told0 > 0 ? accounts.filter((a) => { const l = balanceOf(a); return l > 0 && told0 >= l && told0 - l <= Math.max(10_000, Math.floor(l / 20)); }) : [];
+  const named = accountIn(text, accounts) || (inContext && accounts.includes(inContext) && /\b(?:balance|holds?|now)\b/i.test(text) ? inContext : "") || (near.length === 1 && /\b(?:balance|holds?|now)\b/i.test(text) ? near[0]! : "");
   if (!named) return null;
   // The balance said: a figure with centavos, or the biggest figure in the sentence.
   const figures = [...text.matchAll(/(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/gi)]
