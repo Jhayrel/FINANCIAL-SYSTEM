@@ -1059,6 +1059,21 @@ function nextOnDay(from: IsoDate, day: number): IsoDate {
 }
 
 /**
+ * When money borrowed on `date` from a line with a billing day falls due:
+ * it goes on the bill that closes on or after that day, due on the due day
+ * after it. Null for a line with no billing day. "Can I borrow before my
+ * salary, my loan is paid on the 6th" (19 October 2026).
+ */
+export function dueIfBorrowedOn(debt: Debt, date: IsoDate): IsoDate | null {
+  const billing = debt.billingDay;
+  if (billing === undefined || billing < 1 || billing > 31) return null;
+  const thisBill = onDay(getYear(date), getMonth(date), billing);
+  const bill = thisBill >= date ? thisBill : monthAfter(date, billing);
+  const due = debt.dueDay && debt.dueDay >= 1 && debt.dueDay <= 31 ? debt.dueDay : undefined;
+  return due !== undefined ? nextOnDay(bill, due) : monthAfter(bill, billing);
+}
+
+/**
  * When the next payment on a debt is due, and how much.
  *
  * ── Why this replaced the fixed due date ─────────────────────────────────

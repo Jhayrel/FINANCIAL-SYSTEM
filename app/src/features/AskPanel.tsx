@@ -216,6 +216,7 @@ import { carryWords, dayFigures, safeOverDays, yesterdayOf } from "../domain/mon
 import { daysAskedAbout } from "../domain/safeAsk";
 import { typedOnce } from "../domain/typedOnce";
 import { debtAnswer, readDebtAsk } from "../domain/debtAsk";
+import { bridgeAnswer, readBridgeAsk, type BridgeAsk } from "../domain/bridgeAsk";
 import { periodOnly } from "../domain/spendAsk";
 import { interestFromPicture } from "../domain/interestFromPicture";
 import { asksBudgetHistory, budgetChangeWords } from "../domain/settingsContext";
@@ -2229,6 +2230,8 @@ export function AskPanel({
 
   /** The last budget this device recommended, so "set it" takes both parts and "the separation" shows them. */
   const lastAdvice = useRef<{ advice: BudgetAdvice; text: string; asked: string } | null>(null);
+  /** The last "money until my salary" question, for its follow-ups ("what about gas", "that's confusing"). */
+  const bridgeRef = useRef<{ readonly ask: BridgeAsk; readonly asked: string } | null>(null);
   /** The question the budget-against-income answer replied to, for "ok add that new budget" after it. */
   const incomeAnswered = useRef<string | null>(null);
   /** The budget question just asked, so the next message can answer it. */
@@ -4678,6 +4681,37 @@ export function AskPanel({
         }
         return;
       }
+    }
+    /*
+     * "I expect 10k salary on the 7th, will I have money the first week,
+     * should I loan?": the money until it arrives, worked out by the app
+     * (`bridgeAsk.ts`), and its follow-ups: "what can you recommend, I have
+     * subscriptions and gas to cover", "that's confusing, fix your response".
+     */
+    const bridge = files.length === 0 && !as && !/^\s*\/\//.test(note) ? readBridgeAsk(note, asOf) : null;
+    const lastBridge = bridgeRef.current && turns.slice(-8).some((t) => t.kind === "you" && t.text === bridgeRef.current?.asked) ? bridgeRef.current : null;
+    const bridgeFollow =
+      !bridge && lastBridge && files.length === 0 && !as && note.split(/\s+/).length <= 30 &&
+      /\b(?:recommend\w*|cover|first week|subscriptions?|gas|food|plan|split|what (?:about|should|can)|how (?:much|do i|will i)|confus\w*|fix (?:your|the|that) (?:response|answer)|explain|again|loan|borrow)\b/i.test(note)
+        ? lastBridge
+        : null;
+    if (bridge || bridgeFollow) {
+      const ask: BridgeAsk = bridge ?? { ...bridgeFollow!.ask, said: `${bridgeFollow!.ask.said ?? ""} ${note}` };
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      bridgeRef.current = { ask, asked: note };
+      const words = bridgeAnswer(ask, { transactions: reportRows, reference, debts, stopped: settings.stopped ?? [], asOf });
+      setBusy(true);
+      try {
+        await askQuestion(note, false, {
+          text: `The money from today until the income they expect arrives, worked out by the app from their wallets, the bills and subscriptions due before it, and their debt lines. Answer with these figures in short, plain sentences, the figure a day first. The wallets hold what is written here: never call them empty. Never say a payment is due when nothing is owed. Never cover days before the money arrives with money that has not arrived yet.${bridgeFollow ? " This follows up the same question: answer what this message asks from the same figures." : ""}\n${words}`,
+          fallback: words,
+        });
+      } finally {
+        setBusy(false);
+      }
+      return;
     }
     // A budget for a day or a week is what is safe to spend over it, never next month's budget (`asksShortBudget`).
     if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && (asksSafeToSpend(note) || asksShortBudget(ruled, asOf)) && !plainlyDone(note)) {
