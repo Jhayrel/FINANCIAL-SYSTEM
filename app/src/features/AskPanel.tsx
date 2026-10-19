@@ -215,6 +215,7 @@ import { notArrivedWords, placeSentMoney } from "../domain/destination";
 import { carryWords, dayFigures, safeOverDays, yesterdayOf } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
 import { typedOnce } from "../domain/typedOnce";
+import { debtAnswer, readDebtAsk } from "../domain/debtAsk";
 import { periodOnly } from "../domain/spendAsk";
 import { interestFromPicture } from "../domain/interestFromPicture";
 import { asksBudgetHistory, budgetChangeWords } from "../domain/settingsContext";
@@ -5219,7 +5220,9 @@ export function AskPanel({
       // "how much have I earned since the beginning", "all income since 2022, not only Framelink" (earnAsk.ts).
       const earned = !affordish && !budgetish && !spent && !wantsChart(note) ? readEarnAsk(ruled, reference.revenueCategories, asOf) : null;
 
-      if (affordish || budgetish || spent || earned) {
+      // "How much do I owe?", "when is my Maya Credit due?", "how much does Father owe me?" (`debtAsk.ts`).
+      const owes = !affordish && !budgetish && !spent && !earned && !wantsChart(note) ? readDebtAsk(ruled, debts) : null;
+      if (affordish || budgetish || spent || earned || owes) {
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", budgetish ? "budget" : "add", { text: note }));
@@ -5349,6 +5352,15 @@ export function AskPanel({
             setsIt ? withoutSetIt(text) : text,
           );
           if (setsIt) offerAdvisedBudget(advice);
+          return;
+        }
+
+        if (owes) {
+          const reply = debtAnswer(owes, debts, reportRows, asOf);
+          await answerWithModel(
+            `What is owed, worked out by the app from the debt and On behalf lines exactly as the Debt screen shows them: each line's balance, its next due date and amount. Answer with these figures, in your own words, and do no arithmetic of your own:\n${reply}`,
+            reply,
+          );
           return;
         }
 
