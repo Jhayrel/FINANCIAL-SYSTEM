@@ -105,6 +105,16 @@ const pesosOf = (digits: string, k: string | undefined): Centavos => {
  */
 export function tracksIn(said: string): { spending?: Centavos; billsSubs?: Centavos } {
   /*
+   * An answer that says what to type ("Type set October spending to 27229.51
+   * and bills to 1700 to apply it") is read from that sentence alone: the
+   * rest of an answer is full of other figures.
+   */
+  const told = /[^.!?\n]*\bset\b[^.!?\n]*\b(?:spending|spend)\b[^.!?\n]*\bto\s+(?:₱|php\s*)?\d[^!?\n]*?(?=\s+to\s+apply\b|[!?\n]|\.(?!\d)|$)/i.exec(said);
+  if (told && told[0].length < said.trim().length) {
+    const inside = tracksIn(told[0]);
+    if (inside.spending !== undefined) return inside;
+  }
+  /*
    * A year beside a month or after "in", "of", "for" is a date; anywhere else
    * 2000 to 2099 is money: "bills to 2000" lost its figure (13 October 2026 audit).
    */
@@ -112,7 +122,14 @@ export function tracksIn(said: string): { spending?: Centavos; billsSubs?: Centa
     .toLowerCase()
     .replace(new RegExp(String.raw`\b${MONTH_TOKEN}\s+20\d{2}\b`, "g"), (m) => m.replace(/\s+20\d{2}$/, " "))
     .replace(/\b(in|of|for|year|since)\s+20\d{2}\b/g, "$1 ")
-    .replace(/\b\d{1,2}\s+months?\b/g, " ");
+    .replace(/\b\d{1,2}\s+months?\b/g, " ")
+    /*
+     * Figures that are not the budget: "your PHP 1,752.46 safe to spend to the
+     * PHP 25,477.05 you have already spent" set spending to what was already
+     * spent (19 October 2026).
+     */
+    .replace(/\bsafe[- ]to[- ]spend\b/g, "safe-figure")
+    .replace(/\b(?:already\s+spent|spent\s+so\s+far|have\s+spent|you\s+spent)\b/g, "used");
   const read = (label: string): Centavos | undefined => {
     const before = new RegExp(String.raw`${NUM}\s*(?:pesos?\s*)?(?:for|on|to|sa|as|in|of)\s+(?:the\s+|my\s+|ang\s+)?${label}\b`).exec(text);
     if (before?.[1]) return pesosOf(before[1], before[2]);

@@ -5790,6 +5790,17 @@ export function AskPanel({
      * it gets the reply below saying what to type, rather than falling
      * through to the model to be answered with a yes it cannot honour.
      */
+    /*
+     * A running month's spending budget under what it already spent cannot be
+     * kept, whoever proposed it: said on the card (19 October 2026, a card
+     * set October to exactly what was spent).
+     */
+    if (budgetAsk && budgetAsk.kind === "tracks" && budgetAsk.spending !== undefined && budgetAsk.year === Number(asOf.slice(0, 4)) && budgetAsk.month === Number(asOf.slice(5, 7))) {
+      const spentSoFar = assessMonthFor(reportRows, budgets, budgetAsk.year, budgetAsk.month).spending.spent;
+      if (budgetAsk.spending <= spentSoFar) {
+        budgetNote = [budgetNote, `${formatMoney(spentSoFar)} is already spent this month, so a spending budget of ${formatMoney(budgetAsk.spending)} leaves nothing to spend. Change the figures before you apply.`].filter(Boolean).join(" ");
+      }
+    }
     if (budgetAsk || saysBudget || yesAfterBudgetTalk || (files.length === 0 && !as && modelSawEntry && isBudgetCommand(ruled))) {
       setDraft("");
       say({ kind: "you", text: note });

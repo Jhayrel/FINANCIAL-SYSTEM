@@ -66,3 +66,15 @@ describe("what the answer proposed for this month's budget", () => {
     expect(answerMoveIn("You can raise your November budget by PHP 500.", 10)).toBeNull();
   });
 });
+
+import { tracksIn } from "./budgetAsk";
+
+describe("the budget an answer proposes", () => {
+  it("is the one it tells you to set, never what was already spent (19 October 2026)", () => {
+    const answer =
+      "I recommend a budget of **PHP 27,229.51** for October 2026 spending. This figure is the most your current money can support, worked out by adding your **PHP 1,752.46** safe to spend to the **PHP 25,477.05** you have already spent this month. Type set October spending to 27229.51 and bills to 1700 to apply it.";
+    expect(tracksIn(answer.replace(/\*\*/g, ""))).toEqual({ spending: 2722951, billsSubs: 170000 });
+    expect(tracksIn("Your PHP 1,752.46 safe to spend to the PHP 25,477.05 you have already spent.").spending).toBeUndefined();
+    expect(tracksIn("Spending: PHP 12,478.00, Bills and subscriptions: PHP 1,522.00")).toEqual({ spending: 1247800, billsSubs: 152200 });
+  });
+});
