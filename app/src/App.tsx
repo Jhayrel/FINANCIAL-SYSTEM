@@ -2116,6 +2116,20 @@ export default function App() {
       setSettingsOpenTab({ tab: "data", at: Date.now() });
       return;
     }
+    /*
+     * Where the alert says the fix is (19 October 2026 audit): a bill that
+     * stopped or lapsed is marked in Settings, Categories; a line past zero
+     * is cleared from the Dashboard's On behalf list.
+     */
+    if (finding.id.startsWith("bills-lapsed") || finding.id.startsWith("bills-overdue")) {
+      go("settings");
+      setSettingsOpenTab({ tab: "categories", at: Date.now() });
+      return;
+    }
+    if (finding.id.startsWith("debt-below-zero")) {
+      go("dashboard");
+      return;
+    }
     if (finding.query) {
       go("database");
       setDbFilter("all");

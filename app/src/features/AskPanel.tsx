@@ -4601,7 +4601,7 @@ export function AskPanel({
      * own figures (backup of 12 October 2026: flagged "not a figure this app
      * worked out").
      */
-    if (files.length === 0 && !as && /\b(?:what\s+needs\s+(?:my\s+)?attention|anything\s+(?:i\s+should|to)\s+(?:watch|worry|fix|check)|what\s+should\s+i\s+(?:watch|worry\s+about|fix|check)|any\s+(?:problems?|issues?|warnings?|alerts?))\b/i.test(ruled)) {
+    if (files.length === 0 && !as && /\b(?:what\s+needs\s+(?:my\s+)?attention|anything\s+(?:i\s+should|to)\s+(?:watch|worry|fix|check)|what\s+should\s+i\s+(?:watch|worry\s+about|fix|check)|any\s+(?:problems?|issues?|warnings?|alerts?)|(?:my|any|the)\s+notifications?|what\s+(?:are\s+)?(?:my\s+)?notifications?|anything\s+urgent|what(?:'s|\s+is)\s+urgent|the\s+bell)\b/i.test(ruled)) {
       const found = financeAlerts({
         transactions: reportRows,
         accounts: settings.accounts,
@@ -4614,7 +4614,13 @@ export function AskPanel({
         safe: monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe,
       });
       const order = { over: 0, warn: 1, info: 2 } as Record<string, number>;
-      const top = [...found].sort((x, y) => (order[x.level] ?? 3) - (order[y.level] ?? 3)).slice(0, 6);
+      /*
+       * What has a date comes first, whatever its level: the subscription due
+       * in two days was cut for two "reached zero" patterns (19 October 2026
+       * audit). Patterns last.
+       */
+      const dated = (a: (typeof found)[number]): number => (a.area === "bills" || a.id.startsWith("debt-") ? 0 : a.area === "pattern" ? 2 : 1);
+      const top = [...found].sort((x, y) => dated(x) - dated(y) || (order[x.level] ?? 3) - (order[y.level] ?? 3) || y.weight - x.weight).slice(0, 6);
       const words = top.length > 0 ? top.map((a) => `- ${a.title}. ${a.detail}`).join("\n") : "Nothing needs attention: the app has no warnings for you right now.";
       setDraft("");
       say({ kind: "you", text: note });

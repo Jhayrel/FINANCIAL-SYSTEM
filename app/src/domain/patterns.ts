@@ -256,12 +256,18 @@ function discretionaryByCategory(
   transactions: readonly Transaction[],
   year: number,
   month: number,
+  /** Only the month's first days, to compare like for like with a month still running. */
+  upToDay = 31,
+  asOf?: IsoDate,
 ): Map<string, Centavos> {
   const out = new Map<string, Centavos>();
 
   for (const t of transactions) {
     if (getYear(t.date) !== year || getMonth(t.date) !== month) continue;
+    if (Number(t.date.slice(8, 10)) > upToDay || (asOf && t.date > asOf)) continue;
     if (!isDiscretionary(t.category)) continue;
+    // Money Send is worked out from where money went, not a kind of spending (CLAUDE.md, transfers are derived).
+    if (/^money send$/i.test(t.item.trim())) continue;
 
     const cost = outflow(t);
     if (cost === 0) continue;
@@ -293,8 +299,13 @@ export function categoryMigration(
   const previousMonth = month === 1 ? 12 : month - 1;
   const previousYear = month === 1 ? year - 1 : year;
 
-  const now = discretionaryByCategory(transactions, year, month);
-  const before = discretionaryByCategory(transactions, previousYear, previousMonth);
+  /*
+   * The same days of each month: 19 days of October against all of September
+   * said spending "fell" with twelve days still to come (19 October 2026 audit).
+   */
+  const day = Number(asOf.slice(8, 10));
+  const now = discretionaryByCategory(transactions, year, month, day, asOf);
+  const before = discretionaryByCategory(transactions, previousYear, previousMonth, day);
 
   const names = new Set([...now.keys(), ...before.keys()]);
 
@@ -365,6 +376,12 @@ export function zeroBalanceCount(
      */
     balance += walletDelta(t, (w) => w === wallet);
 
+    /*
+     * Read at the day's close only: money out saved before money in on the
+     * same day is not the wallet reaching zero (19 October 2026 audit).
+     */
+    const next = rows[rows.indexOf(t) + 1];
+    if (next && next.date === t.date) continue;
     const atZero = balance <= 0;
     if (atZero && !wasZero && t.date >= start && t.date <= asOf) hits++;
     wasZero = atZero;

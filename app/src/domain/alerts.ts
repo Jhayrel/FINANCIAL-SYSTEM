@@ -163,6 +163,8 @@ export function dailyAllowance(
 export function financeAlerts(input: AlertInput): Alert[] {
   const { transactions, accounts, budgets, debts, bills, lowBalanceThreshold, asOf } = input;
   const out: Alert[] = [];
+  /** Wallets kept low or empty on purpose: nothing about them nags, the zero count included (19 October 2026 audit). */
+  const restingWallets = new Set<string>();
   /*
    * The ledger as saved, for every check about entries themselves: one record
    * number, one entry; a date typed wrong; the same bill twice. The rows given
@@ -437,6 +439,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
       if (account.archived || account.kind !== "spending") continue;
       const balance = walletBalance(transactions, account.name);
       if (balance >= lowBalanceThreshold) continue;
+      restingWallets.add(account.name);
 
       // Walk its rows in order: the day it last went under the warning, and the last day money left it.
       const isIt = (w: string): boolean => w === account.name;
@@ -469,6 +472,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
         continue;
       }
       if (!usedSince && !justNow) continue;
+      restingWallets.delete(account.name);
       out.push({
         id: `low-${account.id}`,
         level: usedSince ? "warn" : "info",
@@ -555,12 +559,19 @@ export function financeAlerts(input: AlertInput): Alert[] {
   // The rest of the week, which is information rather than a deadline.
   const soon = upcoming(bills, 7).filter((b) => dated(b) > 1);
   if (soon.length > 0) {
+    /*
+     * Each one with its day and amount, called what it is: "1 more bill due
+     * this week" gave no day, said "more" with nothing before it and called a
+     * subscription a bill (19 October 2026 audit).
+     */
+    const more = dueToday.length > 0 || dueTomorrow.length > 0 ? "more " : "";
+    const kind = soon.every((b) => b.category === "Subscriptions") ? "subscription" : soon.every((b) => b.category === "Bills") ? "bill" : "bill or subscription";
     out.push({
       id: "bills-soon",
       level: "info",
       area: "bills",
-      title: `${soon.length} more bill${soon.length === 1 ? "" : "s"} due this week`,
-      detail: `${soon.map((b) => b.item).join(", ")}. ${money(sumOf(soon))} in total.`,
+      title: soon.length === 1 ? `${soon[0]!.item} is due ${soon[0]!.nextDue ? formatMedium(soon[0]!.nextDue) : "this week"}` : `${soon.length} ${more}${kind === "bill or subscription" ? "bills and subscriptions" : `${kind}s`} due this week`,
+      detail: `${soon.map((b) => `${b.item} ${money(b.lastAmount)}${b.nextDue ? ` on ${formatMedium(b.nextDue)}` : ""}`).join(", ")}${soon.length > 1 ? `: ${money(sumOf(soon))} in total` : ""}, going by what ${soon.length === 1 ? "it" : "each"} cost last time.`,
       weight: 40,
     });
   }
@@ -585,6 +596,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
      */
     const on = /^velocity-(\d{4}-\d{2}-\d{2})$/.exec(finding.id)?.[1];
     if (on && daysBetween(on, asOf) > 14) continue;
+    if (finding.id.startsWith("zeroes-") && restingWallets.has(finding.id.slice("zeroes-".length))) continue;
     out.push({
       id: finding.id,
       level: finding.weight >= 80 ? "warn" : "info",
@@ -1028,7 +1040,18 @@ export function financeAlerts(input: AlertInput): Alert[] {
       level: "warn",
       area: "review",
       title: `${rows.size} row${rows.size === 1 ? "" : "s"} need review`,
-      detail: issues[0]?.message ?? "Money that left a wallet without counting as spending.",
+      /*
+       * Every kind of problem, each with how many and its first row: only the
+       * first message was shown, so a wallet closing a day below zero went
+       * unsaid (19 October 2026 audit).
+       */
+      detail: `${[...issues.reduce((m, i) => m.set(i.code, [...(m.get(i.code) ?? []), i]), new Map<string, typeof issues>()).values()]
+        .map((group) => {
+          const first = group[0]!;
+          const nums = [...new Set(group.flatMap((i) => i.recordNumbers))];
+          return `${first.message.replace(/\.$/, "")}${nums.length > 0 ? ` (${nums.length === 1 ? `#${String(nums[0]).padStart(4, "0")}` : `${nums.length} rows, first #${String(Math.min(...nums)).padStart(4, "0")}`})` : ""}`;
+        })
+        .join("; ")}. Open them in the Database and edit what is wrong.`,
       weight: 55,
     });
   }

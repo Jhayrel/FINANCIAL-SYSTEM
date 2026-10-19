@@ -203,7 +203,7 @@ export function Notifications({
                       <span className="t-caption" style={{ color: "var(--ink-2)" }}>
                         {a.detail}
                       </span>
-                      <span className="t-micro fms-notify-go">{a.area === "review" && a.query ? "Show the rows" : GO[a.area]}</span>
+                      <span className="t-micro fms-notify-go">{a.id.startsWith("bills-lapsed") || a.id.startsWith("bills-overdue") ? "Open Settings, Categories" : a.id.startsWith("debt-below-zero") ? "Open the Dashboard" : a.query ? "Show the rows" : GO[a.area]}</span>
                     </span>
                   </button>
                 </li>
