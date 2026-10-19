@@ -1329,6 +1329,19 @@ Checked and fine: safe to spend, can I afford, school today, gym, spending
 by week and by year, a debt payment card (the harness cannot read form
 fields; a screenshot showed it filled), delete the last entry, compare months.
 
+### 2026-10-19, last: the final audit, and money until the next income
+
+Six auditors were run on the 19 October data; budget, debt and
+notifications reported (24 faults, all fixed: c57a7e8, 9ff9050, 0fdec32,
+79751bf); safe to spend, Insights and the AI were stopped to save the
+owner's credits (Insights was checked by hand at month level and agrees).
+New: debt questions answered by the app (`debtAsk.ts`), and "salary on the
+7th, will I have money the first week, should I loan?" worked out by the app
+(`bridgeAsk.ts`, `dueIfBorrowedOn`): days until the money, what falls due
+before it, a day's figure, and when a borrowing would be due on each credit
+line. Not re-audited: the AI chat's routing as a whole, and safe to spend's
+edge days (month's first and last day, a bill paid today).
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
