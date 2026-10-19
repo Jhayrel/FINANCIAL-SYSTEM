@@ -42,7 +42,7 @@ import { addDays, dayInWords, daysBetween, daysInMonth, getMonth, getYear, local
 import { financeAlerts, burnRate, daysLeft, dailyAllowance, PACE_FROM_DAY } from "./alerts";
 import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
 import { formatMoney, toCentavos, toPesos } from "./money";
-import { ifNothingMoreToday, isOpenBill, monthBrief, weekAhead } from "./monthPlan";
+import { carryWords, ifNothingMoreToday, isOpenBill, monthBrief, weekAhead, yesterdayOf } from "./monthPlan";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import type { Account } from "./accounts";
 import type { BudgetRevision, Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
@@ -211,6 +211,8 @@ export interface AiContext {
     readonly daysLeft: number;
     readonly budgetLeft: number | null;
     readonly budgetPerDay: number | null;
+    /** What yesterday's unspent share did, in sentences (`carryWords`). */
+    readonly carry: readonly string[];
   } | null;
 }
 
@@ -480,6 +482,7 @@ export function buildContext(input: ContextInput): AiContext {
         daysLeft: safe.daysLeft,
         budgetLeft: safe.budgetLeft === null ? null : pesos(safe.budgetLeft),
         budgetPerDay: safe.budgetPerDay === null ? null : pesos(safe.budgetPerDay),
+        carry: carryWords(safe, yesterdayOf({ transactions, reference, budgets, debts: credits, year, month, asOf }), (c) => formatMoney(c).replace("₱", "PHP ")),
       };
     })(),
   };
@@ -631,6 +634,7 @@ export function contextToText(c: AiContext): string {
        * October 2026, twice). In centavos, then back to pesos.
        */
       `Safe to spend today: ${php(safe.today)}: today's share ${php(safe.todayShare)} (${php(pesos(Math.max(0, toCentavos(safe.safe)) + toCentavos(safe.spentToday)))}, safe to ${until}'s end plus spent today, over ${safe.daysLeft} days) less ${php(safe.spentToday)} spent today${safe.overToday > 0 ? `, ${php(safe.overToday)} past it` : ""}.${safe.daysLeft > 1 ? ` From tomorrow, ${dayInWords(addDays(c.asOf, 1))}: ${php(safe.perDayAfter)} a day for ${safe.daysLeft - 1} days (${php(pesos(ifNothingMoreToday({ safe: toCentavos(safe.safe), daysLeft: safe.daysLeft })))} if nothing more is spent today: unspent money carries over).` : ""}`,
+      ...(safe.carry ?? []),
     );
     {
       const week = weekAhead({ perDay: toCentavos(safe.today), perDayAfter: toCentavos(safe.perDayAfter), daysLeft: safe.daysLeft });

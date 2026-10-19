@@ -1251,6 +1251,29 @@ Budget and Settings layouts, the wallet alerts and the statements.
 
 ---
 
+### 2026-10-19: safe to spend carries over, read from the 19 October backup
+
+- **Carry-over said, not hidden.** "I didn't spend yesterday, should it be
+  72?" was told "today's allowance is unchanged". `monthPlan.ts` now has
+  `yesterdayOf` (yesterday's share and spending, worked out from the entries
+  up to yesterday), `carryOver` and `carryWords`: what carried over, today's
+  figure beside what it would have been, the most that can go today if the
+  owner uses all of it (and the rate after), and tomorrow's figure if nothing
+  more is spent. The rule is unchanged (an even share of what is safe, over
+  the days left); both views of the one pool are now said. Dashboard caption
+  and line, the chat's safe answer and the model's context read the same
+  function. `carryOver.test.ts`.
+- **Carry-over questions route to the safe answer** (`asksCarryOver`), and are
+  never a card's answer (`looksLikeAnswer`). A card's question older than two
+  hours no longer takes the next message (`ASKING_GOES_STALE_MS`): one from the
+  night before took "but look I havent spend yesterday" as its answer.
+- **Two pictures, one message:** each picture was read with the typed words,
+  so the words' entries came back once per picture (five cards for three).
+  `typedOnce.ts` keeps them once when the message says the amount; two
+  pictures' own amounts are left alone.
+- **Reconcile:** a statement line read twice word for word is said once, "listed
+  twice: if the picture shows the same line again, add it once".
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

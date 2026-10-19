@@ -18,6 +18,7 @@ import { MONTH_NAMES } from "./dates";
 import { allOf, applyReply, asksToRename, NAMES_A_FIELD, nextQuestion, walletInside, type Blank } from "./capture";
 import { itemsFor, type Draft } from "./entry";
 import { formatMoney } from "./money";
+import { asksSafeToSpend } from "./safeAsk";
 import type { ReferenceLists, Transaction } from "./types";
 
 /** A card waiting for an answer, as it was when the questions began. */
@@ -74,6 +75,8 @@ export function looksLikeAnswer(note: string, blank: Blank): boolean {
   if (text.startsWith("//")) return false;
   if (SKIP_CARD.test(text) || STOP_ASKING.test(text)) return true;
   if (/\?\s*$/.test(text)) return false;
+  // "but look I havent spend yesterday": about the money, not the card (15 October 2026).
+  if (asksSafeToSpend(text)) return false;
   // "Change the title", "edit the date": an instruction about the card, not the answer to its question.
   if (NAMES_A_FIELD.test(text) || asksToRename(text)) return false;
   if (/^(?:what|how|why|when|where|who|which|can|could|should|would|will|is|are|do|does|did|show|chart|graph|delete|remove|bin|restore|export|download|undo|add all|save all)\b/i.test(text)) return false;

@@ -801,7 +801,26 @@ export function investigationWords(result: Investigation): {
           ? `Found all ${formatMoney(Math.abs(gap))}, in ${found.length} ${found.length === 1 ? "place" : "places"}:`
           : `Found ${formatMoney(Math.abs(explained))} of it, in ${found.length} ${found.length === 1 ? "place" : "places"}:`,
     );
-    lines.push(...found.map(clueWords));
+    /*
+     * The same line read twice, same day, amount and words, is said once
+     * with how many times: a stitched screenshot repeats its rows, and on
+     * 17 October 2026 "₱0.23 came in on October 15" was listed twice, word
+     * for word, and added twice.
+     */
+    const lineKey = (c: Clue): string | null => (c.kind === "missing" ? `${c.line.date}|${c.line.amount}|${c.line.description.trim().toLowerCase()}` : null);
+    const times = new Map<string, number>();
+    for (const c of found) {
+      const k = lineKey(c);
+      if (k) times.set(k, (times.get(k) ?? 0) + 1);
+    }
+    const said = new Set<string>();
+    for (const c of found) {
+      const k = lineKey(c);
+      if (k && said.has(k)) continue;
+      if (k) said.add(k);
+      const n = k ? (times.get(k) ?? 1) : 1;
+      lines.push(n > 1 ? `${clueWords(c)} It is listed ${n === 2 ? "twice" : `${n} times`} in what you sent: if the picture shows the same line again, add it once.` : clueWords(c));
+    }
   }
   if (aside.length > 0) {
     lines.push(

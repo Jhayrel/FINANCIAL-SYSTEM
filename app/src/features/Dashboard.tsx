@@ -51,7 +51,7 @@ import { borrowedMoney, lenderNames } from "../domain/borrowed";
 import { ON_BEHALF } from "../domain/debtWords";
 import { getMonth, getYear, MONTH_NAMES_SHORT, monthName } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
-import { isOpenBill, monthBrief } from "../domain/monthPlan";
+import { carryOver, carryWords, ifNothingMoreToday, isOpenBill, monthBrief, yesterdayOf } from "../domain/monthPlan";
 import { monthlyTotalsForYear, spendingRanking, totalSpending } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction, WalletBalance } from "../domain/types";
 import type { InsightsAt } from "./Insights";
@@ -118,6 +118,11 @@ export function Dashboard({
     () => monthBrief({ transactions, reference, budgets, debts, year, month, asOf }),
     [transactions, reference, budgets, debts, year, month, asOf],
   );
+  // "I didn't spend yesterday, should it be 72?" (15 October 2026): what carried over, said where the figure is.
+  const yesterday = useMemo(
+    () => (brief.safe ? yesterdayOf({ transactions, reference, budgets, debts, year, month, asOf }) : null),
+    [brief.safe, transactions, reference, budgets, debts, year, month, asOf],
+  );
 
   const v = useMemo(() => {
     const range = { start: `${year}-01-01`, end: `${year}-12-31` };
@@ -165,6 +170,7 @@ export function Dashboard({
   const over = !noBudget && t.combined.remaining < 0;
   const elapsed = (brief.daysInMonth - brief.daysLeft + 1) / brief.daysInMonth;
   const safe = brief.safe;
+  const carried = safe ? carryOver(safe, yesterday) : null;
   const name = monthName(month);
   const previous = monthName(month === 1 ? 12 : month - 1);
 
@@ -200,7 +206,7 @@ export function Dashboard({
       lines: [
         `${name} ${year}, ${brief.daysLeft} days left.`,
         safe
-          ? `Safe to spend today ${formatMoney(safe.perDay)} (today's share ${formatMoney(safe.todayShare)}, ${formatMoney(safe.spentToday)} spent today). Safe until the month ends ${formatMoney(safe.safe)}: wallets ${formatMoney(safe.wallets)}, less bills and subscriptions still to pay ${formatMoney(safe.reservedBills)} and debt payments due ${formatMoney(safe.reservedDebt)}. From tomorrow ${formatMoney(safe.perDayAfter)} a day.`
+          ? `Safe to spend today ${formatMoney(safe.perDay)} (today's share ${formatMoney(safe.todayShare)}, ${formatMoney(safe.spentToday)} spent today). Safe until the month ends ${formatMoney(safe.safe)}: wallets ${formatMoney(safe.wallets)}, less bills and subscriptions still to pay ${formatMoney(safe.reservedBills)} and debt payments due ${formatMoney(safe.reservedDebt)}. From tomorrow ${formatMoney(safe.perDayAfter)} a day. ${carryWords(safe, yesterday, formatMoney).join(" ")}`
           : "",
         noBudget
           ? `No budget set for ${name}. Spent ${formatMoney(t.combined.spent)}.`
@@ -214,7 +220,7 @@ export function Dashboard({
         brief.kinds.length > 0 ? `Where it went: ${brief.kinds.map((k) => `${k.name} ${formatMoney(k.amount)}`).join(", ")}.` : "",
       ],
     }),
-    [brief, v, alerts, name, year, noBudget],
+    [brief, v, alerts, name, year, noBudget, yesterday],
   );
 
   return (
@@ -253,6 +259,11 @@ export function Dashboard({
                       ? `${formatMoney(safe.spentToday)} of today's ${formatMoney(safe.todayShare)} spent`
                       : `Today's share of ${formatMoney(safe.safe)}, over ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"}`}
               </span>
+              {safe && carried && safe.daysLeft > 1 && (
+                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                  {`Yesterday's unspent ${formatMoney(yesterday?.unspent ?? 0)} is spread over these days. To use it today instead: up to ${formatMoney(carried.useToday)}.`}
+                </span>
+              )}
               <div className="fms-month-lines">
                 <Line label="In your wallets" value={safe?.wallets ?? brief.wallets} />
                 <Line
@@ -264,6 +275,10 @@ export function Dashboard({
                 <Line label={`Safe until ${name} ends`} value={safe?.safe ?? 0} strong total />
                 {safe && safe.daysLeft > 1 && (
                   <Line label={`From tomorrow, a day (${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"})`} value={safe.perDayAfter} quiet />
+                )}
+                {/* Unspent money carries over: what tomorrow is if nothing more goes today. */}
+                {safe && safe.daysLeft > 1 && ifNothingMoreToday(safe) > safe.perDayAfter && (
+                  <Line label="Spend nothing more today, from tomorrow" value={ifNothingMoreToday(safe)} quiet />
                 )}
               </div>
             </div>

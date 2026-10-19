@@ -144,7 +144,7 @@ import { readSettleAsk, settleLine } from "../domain/settleLine";
 import { wholeRows } from "../domain/covers";
 import { incomeOf } from "../domain/totals";
 import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, readBudgetMove, readIncomePlan } from "../domain/incomeBudget";
-import { asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
+import { asksCarryOver, asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer } from "../domain/dayFit";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
@@ -212,8 +212,9 @@ import { aboutTheScreen, screenText } from "../domain/screenContext";
 import { figuresIn, parseAmount } from "../domain/money";
 import { notEditable, transactionToDraft } from "../domain/entry";
 import { notArrivedWords, placeSentMoney } from "../domain/destination";
-import { dayFigures, safeOverDays } from "../domain/monthPlan";
+import { carryWords, dayFigures, safeOverDays, yesterdayOf } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
+import { typedOnce } from "../domain/typedOnce";
 import { asksBudgetHistory, budgetChangeWords } from "../domain/settingsContext";
 import { spreadCovered } from "../domain/covers";
 import { rowSavedFor } from "../domain/formSaved";
@@ -989,6 +990,9 @@ const ASKS_ONLY = /\b(?:re?c+om+e?n?d\w*|sug+est\w*|propos\w*|should i|what budg
 /** Openers, because a blank box invites nothing. */
 const STARTERS = ["How is this month going?", "What needs attention?"] as const;
 
+/** How long a card's question waits for its answer before the next message is read on its own. */
+const ASKING_GOES_STALE_MS = 2 * 60 * 60_000;
+
 export function AskPanel({
   settings,
   transactions,
@@ -1277,6 +1281,8 @@ export function AskPanel({
     /** Its answers, as buttons, and which question of how many it is. */
     readonly choices: readonly string[];
     readonly count: string;
+    /** When it was asked: a question hours old is not what the next message answers. */
+    readonly since: number;
   } | null>(null);
   /** A file is over the panel right now. */
   const [dragging, setDragging] = useState(false);
@@ -2774,7 +2780,7 @@ export function AskPanel({
        * Asked once, in the bar above the box, with its answers as buttons.
        * It was said in the thread as well, the same words twice on screen.
        */
-      setAsking({ cards, at: i, blank: q.blank, skipped, text: q.text, choices: q.choices, count: q.count });
+      setAsking({ cards, at: i, blank: q.blank, skipped, text: q.text, choices: q.choices, count: q.count, since: Date.now() });
       return;
     }
     setAsking(null);
@@ -3181,7 +3187,8 @@ export function AskPanel({
     // The cards offered from here on carry their picture's paper (`paperOf`).
     if (sent.length > 0) pictureNow.current = { readings: read.readings ?? [], teach: wantsTraining(note) };
     // A screenful of daily interest is one entry, not sixty cards (domain/interestFold.ts).
-    const folded = foldInterest(read.proposals, transactions, reference);
+    // The typed words' entries once, however many pictures came with them (`typedOnce.ts`).
+    const folded = foldInterest(typedOnce(read.proposals, sent.map((f) => f.name), note), transactions, reference);
     /*
      * A typed message that names no day is today's, whatever the model dated
      * it (domain/when.ts). Pictures keep the dates printed on them.
@@ -4472,18 +4479,25 @@ export function AskPanel({
         const spentY = wholeRows(reportRows)
           .filter((t) => t.date === y && reference.wallets.includes(t.fromWallet) && t.type === "Spending" && t.category === "Spending")
           .reduce((sum, t) => sum + t.total, 0);
-        if (spentY <= 0) return `Nothing was spent from your wallets yesterday, so today's figure is already what it would be: ${formatMoney(brief.safe.perDay)}.`;
+        // Nothing went yesterday: what carried over is said below (`carryWords`), never "today is unchanged".
+        if (spentY <= 0) return "";
         const then = dayFigures(brief.safe.safe + spentY, brief.safe.spentToday, brief.safe.daysLeft);
         return `Had you spent nothing yesterday (${formatMoney(spentY)} went), ${formatMoney(brief.safe.safe + spentY)} would be safe now and today's figure would be ${formatMoney(then.perDay)} instead of ${formatMoney(brief.safe.perDay)}: unspent money carries over to the days after it.`;
       })();
-      const words = [over, ifNotYesterday, safeWords(brief, rateIn(question), ownMoney), heldWords].filter(Boolean).join("\n\n");
+      /*
+       * What yesterday's unspent share did, and what using it today would
+       * leave (`carryWords`): "I didn't spend yesterday, should it be 72?"
+       * was told "today's allowance is unchanged" (15 October 2026).
+       */
+      const carry = brief.safe && (yesterdayAsked || asksCarryOver(question)) ? carryWords(brief.safe, yesterdayOf({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }), formatMoney).join(" ") : "";
+      const words = [over, ifNotYesterday, carry, safeWords(brief, rateIn(question), ownMoney), heldWords].filter(Boolean).join("\n\n");
       setBusy(true);
       try {
         await askQuestion(
           question,
           false,
           {
-            text: `Safe to spend, worked out by the app exactly as the Dashboard shows it: the spending wallets less the bills, subscriptions and debt payments still to pay this month; today's share less what today already spent; then a day from tomorrow; the spending budget said apart, as the plan. Answer with these figures, today's first. If the message proposes its own figure a day, say whether it fits, using the line that checks it. Never answer with the budget's pace in place of these.\n${words}`,
+            text: `Safe to spend, worked out by the app exactly as the Dashboard shows it: the spending wallets less the bills, subscriptions and debt payments still to pay this month; today's share less what today already spent; then a day from tomorrow; the spending budget said apart, as the plan. Answer with these figures, today's first. If the message proposes its own figure a day, say whether it fits, using the line that checks it. Never answer with the budget's pace in place of these. When they ask what happens to money not spent, or say they did not spend, answer with the carry-over lines and their figures as they are: unspent money is never lost and never "unchanged", it is spread over the days left, and the owner may use it today instead.\n${words}`,
             fallback: words,
           },
         );
@@ -4641,7 +4655,14 @@ export function AskPanel({
      * the question above it; a question or a new entry typed instead is not
      * an answer and goes on as usual (`looksLikeAnswer`).
      */
-    if (asking && files.length === 0 && !as && !wantsDiscardOpen(note) && looksLikeAnswer(note, asking.blank)) {
+    /*
+     * A question asked hours ago stops waiting: on 15 October 2026 one left
+     * from a picture the night before took "but look I havent spend
+     * yesterday" as its answer. The card stays open to fix by hand.
+     */
+    const askedLongAgo = asking !== null && Date.now() - asking.since > ASKING_GOES_STALE_MS;
+    if (askedLongAgo) setAsking(null);
+    if (asking && !askedLongAgo && files.length === 0 && !as && !wantsDiscardOpen(note) && looksLikeAnswer(note, asking.blank)) {
       setBusy(true);
       try {
         if (await during("Checking your answer", () => answerAsked(note), "Still checking it")) return;

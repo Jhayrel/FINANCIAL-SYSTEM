@@ -231,6 +231,77 @@ export function ifNothingMoreToday(safe: Pick<SafeToSpend, "safe" | "daysLeft">)
   return after > 0 ? Math.floor(Math.max(0, safe.safe) / after) : 0;
 }
 
+/** Yesterday's share and what became of it, as the Dashboard showed it at the end of yesterday. */
+export interface Yesterday {
+  readonly date: IsoDate;
+  readonly share: Centavos;
+  readonly spent: Centavos;
+  /** Share less spent: above 0 carried over, below 0 went past it. */
+  readonly unspent: Centavos;
+}
+
+/**
+ * Yesterday's figure, worked out again from the entries up to yesterday.
+ * Null on the month's first day: yesterday was another month's money.
+ *
+ * The owner, 15 October 2026: "I didn't spend yesterday, should it be 72?",
+ * expecting yesterday's ₱36 on top of today's. The model said "today's
+ * allowance is unchanged". Both views are true of one pool of money, so both
+ * are worked out here and said: what carried over, and what using it today
+ * would leave for the days after (`carryOver`).
+ */
+export function yesterdayOf(input: Parameters<typeof monthBrief>[0]): Yesterday | null {
+  const { asOf } = input;
+  if (getDay(asOf) === 1) return null;
+  const date = addDays(asOf, -1);
+  const then = monthBrief({ ...input, transactions: input.transactions.filter((t) => t.date <= date), asOf: date }).safe;
+  return then ? { date, share: then.todayShare, spent: then.spentToday, unspent: then.todayShare - then.spentToday } : null;
+}
+
+/** What yesterday's unspent share does today, and the two ways to use it. */
+export interface CarryOver {
+  /** Today's figure had yesterday spent all of its share: the difference is what carried over to today. */
+  readonly todayHadItGone: Centavos;
+  /** Today's figure with all of yesterday's unspent share on it. */
+  readonly useToday: Centavos;
+  /** A day from tomorrow after that. */
+  readonly afterUse: Centavos;
+  /** A day from tomorrow if nothing more is spent today. */
+  readonly nothingMore: Centavos;
+}
+
+export function carryOver(safe: SafeToSpend, yesterday: Yesterday | null): CarryOver | null {
+  if (!yesterday || yesterday.unspent <= 0 || safe.daysLeft < 1) return null;
+  const useToday = Math.min(safe.safe, safe.perDay + yesterday.unspent);
+  const after = safe.daysLeft - 1;
+  return {
+    todayHadItGone: dayFigures(Math.max(0, safe.safe - yesterday.unspent), safe.spentToday, safe.daysLeft).perDay,
+    useToday,
+    afterUse: after > 0 ? Math.floor(Math.max(0, safe.safe - useToday) / after) : 0,
+    nothingMore: ifNothingMoreToday(safe),
+  };
+}
+
+/** The carry-over in sentences, the same on the Dashboard, in the chat and to the model. */
+export function carryWords(safe: SafeToSpend, yesterday: Yesterday | null, money: (c: Centavos) => string): string[] {
+  if (!yesterday || safe.daysLeft < 1) return [];
+  if (yesterday.unspent < 0) {
+    return [
+      `Yesterday went ${money(-yesterday.unspent)} past its share of ${money(yesterday.share)}. That is taken from every day left, a little each, not all from today.`,
+    ];
+  }
+  const c = carryOver(safe, yesterday);
+  if (!c) return [`Yesterday spent all of its ${money(yesterday.share)} share, so nothing carried over.`];
+  const out = [
+    `Yesterday's share was ${money(yesterday.share)} and ${money(yesterday.spent)} of it was spent, so ${money(yesterday.unspent)} carried over. It is not added to today alone: it stays in what is safe and is spread over the ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"} left, so today is ${money(safe.perDay)} instead of ${money(c.todayHadItGone)}.`,
+  ];
+  if (safe.daysLeft > 1) {
+    out.push(`To use all of it today instead: up to ${money(c.useToday)} today, then ${money(c.afterUse)} a day for the ${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"} after.`);
+    if (c.nothingMore > safe.perDayAfter) out.push(`Spend nothing more today and it carries over again: ${money(c.nothingMore)} a day from tomorrow.`);
+  }
+  return out;
+}
+
 /**
  * What is safe over a run of days this month, `from` to `to` inclusive, cut
  * to today and the month's end. `keeping`: each day before and during it

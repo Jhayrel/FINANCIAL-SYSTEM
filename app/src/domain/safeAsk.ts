@@ -57,10 +57,26 @@ const AFTER_BILLS =
 /** "how much can I spend on food": one kind of spending, which the affordability answer knows the usual cost of. */
 const ON_ONE_THING = /\bspend(?:ing)?\s+(?:on|for)\s+(?!today\b|tomorrow\b|the\s+rest\b|this\b|now\b|the\s+day\b|the\s+week(?:end)?\b|the\s+month\b|ngayon\b|(?:the\s+)?next\b|the\s+coming\b|the\s+whole\b|(?:the\s+)?weekend\b|\d+\s+days?\b|a\s+few\s+days\b|[a-z]+\s+days?\b)[a-z]/i;
 
+/**
+ * What happens to money not spent: "I didn't spend yesterday", "should it be
+ * 72, I have not spent yesterday", "if I don't spend today does it add
+ * tomorrow", "does it carry over". 15 October 2026: the second was taken as
+ * the answer to a card's question from the night before.
+ */
+export function asksCarryOver(text: string): boolean {
+  const t = text.trim();
+  return (
+    /\b(?:didn'?t|did\s+not|don'?t|do\s+not|won'?t|will\s+not|haven'?t|have\s+not|hadn'?t|had\s+not|not|never|no|wala(?:ng)?|hindi)\s+(?:(?:yet|even|really)\s+)?(?:spen[dt]|spending|gastos|gumastos|nagastos|used?\s+(?:it|the\s+money))\b[^.?!]{0,40}\b(?:yesterday|today|kahapon|ngayon|this\s+week|for\s+\d+\s+days)\b/i.test(t) ||
+    /\b(?:yesterday|kahapon)\b[^.?!]{0,30}\b(?:didn'?t|did\s+not|haven'?t|have\s+not|not|never|no|hindi)\s+(?:spen[dt]|gumastos)\b/i.test(t) ||
+    /\b(?:carr(?:y|ies|ied)\s+over|roll(?:s|ed)?\s+over|add(?:s|ed)?\s+(?:it\s+|up\s+)?(?:(?:to|on|into)\s+)?(?:tomorrow|the\s+next\s+day|bukas)|(?:unspent|unused|leftover|left\s+over|natira)\b[^.?!]{0,30}\b(?:tomorrow|bukas|next\s+day|go|goes|happen))/i.test(t)
+  );
+}
+
 export function asksSafeToSpend(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
   if (ON_ONE_THING.test(t)) return false;
+  if (asksCarryOver(t)) return true;
   if (SAFE_ASK.test(t)) return true;
   if (AFTER_BILLS.test(t)) return true;
   // "what if I didn't spend yesterday", "if I don't spend today": what carries over (12 October 2026 audit, A9).
