@@ -215,6 +215,8 @@ import { notArrivedWords, placeSentMoney } from "../domain/destination";
 import { carryWords, dayFigures, safeOverDays, yesterdayOf } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
 import { typedOnce } from "../domain/typedOnce";
+import { periodOnly } from "../domain/spendAsk";
+import { interestFromPicture } from "../domain/interestFromPicture";
 import { asksBudgetHistory, budgetChangeWords } from "../domain/settingsContext";
 import { spreadCovered } from "../domain/covers";
 import { rowSavedFor } from "../domain/formSaved";
@@ -978,6 +980,9 @@ const HISTORY_TURNS = 10;
 const BY_INCOME =
   /\b(?:based on|base(?:d)? sa|from|within|fit(?:s|ting)?(?: in| into| to)?|according to)\s+(?:my\s+|the\s+|ang\s+)?(?:usual\s+|monthly\s+)?(?:income|allowance|salary|sahod|kita|earnings)\b|\bincome and (?:spending|expenses|gastos)\b|\b(?:realistic|kaya ko|can i (?:really )?afford|sustainable)\b[^.?!]{0,30}\bbudget\b|\bbudget\b[^.?!]{0,30}\b(?:realistic|kaya|sustainable)\b/i;
 
+/** "that would fit", "does it fit", "can I afford it": with no income named, the usual income is the measure. */
+const FITS = /\b(?:fit(?:s|ting)?|afford\w*|kaya|realistic|sustainable|validat\w*)\b/i;
+
 /** Asked to set a budget, not only told one: "can you set a plan", "adjust my budget this month". */
 const SETS_BUDGET = /\b(?:set|adjust\w*|make|create|build|plan|apply|update|change|fix|redo|gawa\w*|ayusin)\b/i;
 
@@ -1735,7 +1740,7 @@ export function AskPanel({
    * Maya's, and its rows are the history to check the ledger against, those
    * already in as much as those added (2 October 2026).
    */
-  const lastRead = useRef<{ readonly account: string; readonly drafts: readonly Draft[]; readonly at: number } | null>(null);
+  const lastRead = useRef<{ readonly account: string; readonly drafts: readonly Draft[]; readonly at: number; readonly balance?: Centavos } | null>(null);
   /** A told balance's guess at the difference, made a card only when the next message asks (`differenceFollowUp.ts`). */
   const heldDifference = useRef<{ readonly draft: Draft; readonly at: number } | null>(null);
   /** A bill, a fee assessment or a checkout just read, held for "paid it" (`domain/notPaid.ts`). */
@@ -3653,10 +3658,55 @@ export function AskPanel({
             };
           });
 
+    /*
+     * A balance screenshot and "how much interest did I earn": the balance on
+     * screen less the ledger's, one card, never the month's interest total
+     * the screen also shows (`interestFromPicture.ts`).
+     */
+    const fromBalance = sent.length > 0 ? interestFromPicture(note, checked, read.balances ?? [], [...reference.savings, ...reference.wallets], (a) => walletBalance(transactions, a)) : null;
+    let cards: readonly Proposal[] = checked;
+    if (fromBalance) {
+      const cap = Math.max(10_000, Math.floor(fromBalance.told / 20));
+      const words =
+        fromBalance.gap <= 0
+          ? `${fromBalance.account} shows ${formatMoney(fromBalance.told)} in the picture and the ledger has ${formatMoney(fromBalance.ledger)}${fromBalance.gap < 0 ? `, ${formatMoney(-fromBalance.gap)} more than the picture` : ""}, so there is no interest to add.${fromBalance.gap < 0 ? ' Say "find the difference" and I will look for why.' : ""}`
+          : fromBalance.gap > cap
+            ? `${fromBalance.account} shows ${formatMoney(fromBalance.told)} in the picture and the ledger has ${formatMoney(fromBalance.ledger)}: ${formatMoney(fromBalance.gap)} more, too much to be interest alone. Say "find the difference" and I will look for where it came from.`
+            : `${fromBalance.account} shows ${formatMoney(fromBalance.told)} in the picture and the ledger has ${formatMoney(fromBalance.ledger)}, so ${formatMoney(fromBalance.gap)} is the interest to add.`;
+      say({ kind: "assistant", text: words, from: "this device" });
+      log(aiEvent("answered", "add", { text: words, model: "this device" }));
+      const item = reference.revenueCategories.find((c) => /interest/i.test(c)) ?? "Bank interest";
+      cards =
+        fromBalance.gap > 0 && fromBalance.gap <= cap
+          ? [
+              ...fromBalance.others,
+              {
+                draft: {
+                  ...emptyDraft(asOf),
+                  flow: "Revenue",
+                  category: "Revenue",
+                  toWallet: fromBalance.account,
+                  item,
+                  description: `Interest earned, ${formatMedium(fromBalance.date > asOf ? asOf : fromBalance.date)}`,
+                  amount: fromBalance.gap,
+                  notes: `Balance ${formatMoney(fromBalance.told)} in the picture; the ledger had ${formatMoney(fromBalance.ledger)}.`,
+                  status: "Received",
+                  date: fromBalance.date > asOf ? asOf : fromBalance.date,
+                },
+                confidence: "high",
+                sourceRef: "the balance in the picture",
+                adjustments: [`The balance in the picture less the ledger's: ${formatMoney(fromBalance.told)} less ${formatMoney(fromBalance.ledger)}.`],
+              },
+            ]
+          : fromBalance.others;
+    }
+
     if (sent.length > 0) {
-      const drafts = checked.map((p) => p.draft);
-      const moved = account || mostMoved(drafts);
-      lastRead.current = moved ? { account: moved, drafts, at: Date.now() } : null;
+      const drafts = cards.map((p) => p.draft);
+      const moved = account || read.balances?.[0]?.account || mostMoved(drafts);
+      // The balance on screen too, for "compared to the screenshot" next (13 October 2026: it was asked for again).
+      const shown = read.balances?.find((b) => b.account === moved);
+      lastRead.current = moved ? { account: moved, drafts, at: Date.now(), ...(shown ? { balance: shown.amount } : {}) } : null;
     }
 
     /*
@@ -3665,10 +3715,10 @@ export function AskPanel({
      * (domain/checkPicture.ts).
      */
     if (sent.length > 0 && asksWhetherAdded(note)) {
-      const verdict = inLedgerOrNot(checked.map((p) => p.draft), transactions);
+      const verdict = inLedgerOrNot(cards.map((p) => p.draft), transactions);
       say({ kind: "assistant", text: verdict.words, from: "this device" });
       log(aiEvent("answered", "add", { text: verdict.words, model: "this device" }));
-      const missing = verdict.missing.map((i) => checked[i]).filter((p): p is Proposal => p !== undefined);
+      const missing = verdict.missing.map((i) => cards[i]).filter((p): p is Proposal => p !== undefined);
       for (const proposal of missing) await offer(proposal, note, true, missing.length > 1, []);
       return true;
     }
@@ -3683,11 +3733,11 @@ export function AskPanel({
       });
     }
 
-    const batch = checked.length + extras.length > 1;
+    const batch = cards.length + extras.length > 1;
     const made: CardToAsk[] = [];
     // The whole batch, so one card's money can be placed by another's ("Received" in Gcash the same day).
-    batchDrafts.current = checked.map((p) => p.draft);
-    for (const proposal of checked) {
+    batchDrafts.current = cards.map((p) => p.draft);
+    for (const proposal of cards) {
       /*
        * A row of a batch is about its own words, not the whole message: the
        * ledger, the owner's lessons and the checks read "Purchased on
@@ -3696,7 +3746,7 @@ export function AskPanel({
       const own = batch && sent.length > 0 && !proposal.said && proposal.draft.description.trim() ? proposal.draft.description.trim() : "";
       /*
        * Its words are the shop's name, not something the owner wrote, so the
-       * reading is not checked against them: "7-Eleven-ST4817" is a store
+       * reading is not cards against them: "7-Eleven-ST4817" is a store
        * code, not a figure of PHP 4,817.00 that the ₱174.00 was misread from.
        */
       const card = await offer(own ? { ...proposal, said: own } : proposal, own || note, true, batch, [], own ? "" : undefined);
@@ -3755,7 +3805,7 @@ export function AskPanel({
        * waiting for a wallet, and the owner went looking for a picker that
        * was already filled in.
        */
-      const missing = checked
+      const missing = cards
         .map((p) => nextQuestion(p.draft, reference)?.blank)
         .filter((b): b is NonNullable<typeof b> => Boolean(b));
 
@@ -3854,6 +3904,11 @@ export function AskPanel({
     // Nothing sent and nothing pasted: the picture just read, when it was this account's (`lastRead`).
     const recent = lastRead.current;
     let fromPicture = false;
+    // "Compared to the screenshot": the balance the picture just showed is what it really holds.
+    if (sent.length === 0 && actual === null && recent && recent.balance !== undefined && (!account || recent.account === account) && Date.now() - recent.at < 60 * 60_000) {
+      account = recent.account;
+      actual = recent.balance;
+    }
     if (sent.length === 0 && account && statement.length === 0 && recent && recent.account === account && Date.now() - recent.at < 60 * 60_000) {
       statement = linesFromDrafts(recent.drafts, account);
       fromPicture = statement.length > 0;
@@ -4632,6 +4687,18 @@ export function AskPanel({
     const waiting = pending !== null || asking !== null || turns.some((t) => (isOffer(t) || isDebt(t)) && t.state === "open");
     const clarified = clarifying.current;
     clarifying.current = null;
+    /*
+     * "All years", "this year", "2025" alone: the question before, over that
+     * period. "All years" after a school total was answered "I do not have
+     * the figures for all years" (13 October 2026).
+     */
+    const period = files.length === 0 && !as && !waiting ? periodOnly(note) : null;
+    const periodOf = period ? ([...turns].reverse().find((t): t is Said => t.kind === "you" && !periodOnly(t.text) && !/^\s*\/\//.test(t.text))?.text ?? "") : "";
+    if (period && periodOf.trim().split(/\s+/).length >= 3) {
+      setDraft("");
+      await send(`${periodOf.trim().replace(/[\s?.!]+$/, "")} ${period}`);
+      return;
+    }
     if (files.length === 0 && !as && !waiting) {
       const meant = meantInstead(note);
       const lastSaid = [...turns].reverse().find((t): t is Said => t.kind === "you")?.text ?? "";
@@ -5127,7 +5194,14 @@ export function AskPanel({
       // "what if I get 10000 instead": the same month again, held to the new figure.
       const newIncome =
         stillHere && income !== null && !asksBudgetAdvice(ruled) && ruled.split(/\s+/).length <= 14 && !saysMoneyMoved(ruled) && !/^\s*(?:please\s+)?(?:remember|tandaan|keep in mind|note that|take note|fyi)\b/i.test(ruled);
-      const budgetish = !affordish && (asksBudgetAdvice(ruled) || splitAgain || newIncome);
+      /*
+       * "Can you run some checks and validate that budget if fits?" after a
+       * recommendation: the same month, checked against the income, by the
+       * app. It went to the model, which then offered the same budget again
+       * and invented a ₱14,000 limit (13 October 2026).
+       */
+      const checksFit = stillHere && income === null && !splitAgain && /\b(?:validat\w*|verify|check\w*|fits?|fitting|realistic|sustainable|kaya)\b/i.test(ruled) && ruled.split(/\s+/).length <= 18;
+      const budgetish = !affordish && (asksBudgetAdvice(ruled) || splitAgain || newIncome || checksFit);
       const spent = !affordish && !budgetish && !essay && !wantsChart(note) ? readSpendAsk(ruled, knownItems, asOf) : null;
       // "how much have I earned since the beginning", "all income since 2022, not only Framelink" (earnAsk.ts).
       const earned = !affordish && !budgetish && !spent && !wantsChart(note) ? readEarnAsk(ruled, reference.revenueCategories, asOf) : null;
@@ -5179,7 +5253,7 @@ export function AskPanel({
           const target =
             named ??
             (judging ? (newestBudgetChange(budgets, asOf) ?? thisMonth) : null) ??
-            ((splitAgain || newIncome) && advised
+            ((splitAgain || newIncome || checksFit) && advised
               ? { year: advised.advice.year, month: advised.advice.month }
               : arrivesNow
                 ? { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) }
@@ -5192,7 +5266,8 @@ export function AskPanel({
            * income they usually receive, the median month over the same
            * months the spending is read from (4 October 2026).
            */
-          const byIncome = said === null && first.typicalIncome > 0 && BY_INCOME.test(ruled);
+          // "one that would fit my needs", "does it fit" when it does not: held to the usual income too.
+          const byIncome = said === null && first.typicalIncome > 0 && (BY_INCOME.test(ruled) || (FITS.test(ruled) && first.total + first.debtDue > first.typicalIncome));
           const held = byIncome ? first.typicalIncome : said;
           const advice = byIncome ? budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: held, keep }) : first;
           if (judging) {
@@ -5213,7 +5288,23 @@ export function AskPanel({
               return;
             }
           }
-          const text = adviceWords(advice);
+          /*
+           * "validate that budget if it fits": yes or no on the one recommended
+           * before, then the one held to the income (13 October 2026).
+           */
+          const php = (c: Centavos): string => formatMoney(c).replace("₱", "PHP ");
+          const prior = checksFit && advised ? advised.advice : null;
+          const priorTotal = prior ? (prior.fit && !prior.fit.fits ? prior.fit.spending : prior.spending) + prior.billsSubs : 0;
+          const verdict = !prior
+            ? ""
+            : prior.fit
+              ? `${prior.fit.fits ? "Yes" : "No"}: the ${php(priorTotal)} budget ${prior.fit.fits ? "fits" : "does not fit"} the ${php(prior.fit.income)} you expect. `
+              : prior.typicalIncome > 0
+                ? priorTotal + prior.debtDue > prior.typicalIncome
+                  ? `No: the ${php(priorTotal)} budget is ${php(priorTotal + prior.debtDue - prior.typicalIncome)} more than your usual month brings in (${php(prior.typicalIncome)}). Held to that income instead: `
+                  : `Yes: the ${php(priorTotal)} budget fits your usual month's ${php(prior.typicalIncome)}, with ${php(prior.typicalIncome - priorTotal - prior.debtDue)} to spare. `
+                : "";
+          const text = `${verdict}${adviceWords(advice)}`;
           lastAdvice.current = { advice, text, asked: note };
           await answerWithModel(
             [
@@ -6004,7 +6095,7 @@ export function AskPanel({
      * written out row by row. It was read as a search for "Chat" (13 October 2026).
      */
     const chartShown = [...turns].reverse().slice(0, 6).find(isChart);
-    if (!as && files.length === 0 && chartShown && /\b(?:not? (?:a |the |in )?(?:chart|graph|pie)|no (?:chart|graph)|in text|as text|in words|text only|in a list|as a list|list (?:it|them|all|everything)|write (?:it|them) (?:out|down)|type it|here in (?:the )?chat|sa text)\b/i.test(lead)) {
+    if (!as && files.length === 0 && chartShown && /\b(?:not? (?:a |the |in )?(?:chart|graph|pie)|no (?:chart|graph)|in text|as text|in words|text only|in a list|as a list|list (?:it|them|all|everything)|write (?:it|them) (?:out|down)|type it|here in (?:the )?chat|sa text)\b|^\s*(?:(?:show|give|send)\s+(?:me\s+)?(?:the\s+)?)?(?:data|the data|raw data|numbers|the numbers|figures|the figures|table|as a table|in a table|details?|breakdown)\s*[?.!]*\s*$/i.test(lead)) {
       setDraft("");
       say({ kind: "you", text: note });
       log(aiEvent("asked", "insights", { text: note }));

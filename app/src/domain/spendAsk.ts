@@ -57,7 +57,9 @@ const NOT_THIS = /\b(afford|should|would|will|could|budget|save|saving|left|rema
 export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDate): SpendAsk | null {
   let text = said.trim();
   for (const [slip, word] of SLIPS) text = text.replace(slip, word);
-  if (!ASKS.test(text) || NOT_THIS.test(text)) return null;
+  // "Total summary of school spending": a sum too, once an item on the list is named (13 October 2026).
+  const summed = /\b(?:total|summary|sum|overall)\b[^?.!]*\b(?:spending|spent|expenses?|gastos)\b/i.test(text);
+  if (NOT_THIS.test(text) || (!ASKS.test(text) && !summed)) return null;
 
   // The thing, after "on", "for" or "sa": a name on the owner's list, or a word that means one.
   const after = /\b(?:on|for|sa|sa mga|in the way of)\s+(?:my\s+|the\s+|mga\s+)?([a-z][a-z &'-]{1,40}?)(?=\s+(?:in|during|last|this|from|since|over|for|between|today|yesterday|so far|ngayon)\b|[?.!,]|$)/i.exec(text);
@@ -69,6 +71,7 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
   const hint = itemHintIn(text);
   const byHint = hint ? items.find((name) => name.trim().toLowerCase() === hint) : undefined;
   const item = byName ?? byHint ?? null;
+  if (!ASKS.test(text) && !item) return null;
 
   // Something was named that is not on the list: not a question to answer as nothing.
   if (!item && after?.[1]) {
@@ -155,4 +158,13 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
     }
   }
   return out.join(" ");
+}
+
+/**
+ * A period said on its own, as a follow-up: "All years", "this year", "how
+ * about 2025?". The phrase to add to the question before, or null.
+ */
+export function periodOnly(said: string): string | null {
+  const m = /^\s*(?:(?:and|what about|how about|for|in|over|ok(?:ay)?|then|now),?\s+)*((?:all|every)\s+(?:years?|time)|all-time|ever|overall|(?:this|last|past)\s+(?:year|month|week)|20\d{2}|since\s+20\d{2}|the\s+whole\s+(?:year|ledger|time))\s*[?.!]*\s*$/i.exec(said);
+  return m?.[1] ? (/^20\d{2}$/.test(m[1]) ? `in ${m[1]}` : m[1].toLowerCase()) : null;
 }

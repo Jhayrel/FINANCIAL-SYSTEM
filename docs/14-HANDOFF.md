@@ -1274,6 +1274,30 @@ Budget and Settings layouts, the wallet alerts and the statements.
 - **Reconcile:** a statement line read twice word for word is said once, "listed
   twice: if the picture shows the same line again, add it once".
 
+### 2026-10-19, second pass: the 13 October chat back-read, replayed on today's code
+
+Each conversation since the 13 October backup was replayed in the browser
+(`chat3.cjs`, the 19 October data). What still failed, and the fix:
+
+- **Interest from a balance screenshot** was the month's interest total read
+  off the screen (₱5.27); the balance less the ledger was ₱0.77.
+  `interestFromPicture.ts` replaces the interest readings for that account
+  with one card for the difference. The picture's balance is remembered for
+  an hour, so "compared to the screenshot" uses it instead of asking again.
+- **Budget:** "validate that budget if it fits" after a recommendation is
+  answered by the app, yes or no first, then the one held to the usual
+  income; "one that would fit my needs" is held to income when the usual
+  month is more. "Add that" then applies the held one. The model had offered
+  the same over-income budget twice and invented a ₱14,000 limit.
+- **Follow-ups:** a period alone ("All years", "how about 2025") asks the
+  question before over it (`periodOnly`); "Data", "the numbers", "table"
+  after a chart write it out row by row; "Total summary of school spending"
+  is a sum (`readSpendAsk`), not a by-day list of zeros; "That's a question to
+  the AI" asks the question before again.
+- **The bell** no longer shows "Money left quickly after it arrived" for
+  money that arrived over 14 days ago; it led "What needs attention?" with a
+  September event. Insights keeps the history.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

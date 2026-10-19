@@ -578,6 +578,13 @@ export function financeAlerts(input: AlertInput): Alert[] {
     asOf,
     wallets: accounts.filter((a) => a.kind === "spending" && !a.archived).map((a) => a.name),
   })) {
+    /*
+     * The bell is for now: money that left quickly a month ago led "What
+     * needs attention?" on 13 October 2026, above what was due that week.
+     * Insights keeps the history.
+     */
+    const on = /^velocity-(\d{4}-\d{2}-\d{2})$/.exec(finding.id)?.[1];
+    if (on && daysBetween(on, asOf) > 14) continue;
     out.push({
       id: finding.id,
       level: finding.weight >= 80 ? "warn" : "info",
