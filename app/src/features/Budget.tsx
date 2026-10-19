@@ -89,7 +89,8 @@ import type { Debt } from "../domain/debt";
 import { limitable } from "../domain/kinds";
 import { cashFlow } from "../domain/forecast";
 import type { MonthOutlook } from "../domain/outlook";
-import { formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
+import { daysInMonth, formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
+import { PACE_FROM_DAY } from "../domain/alerts";
 import { budgetFromIncome, checkSplit, incomeBudget, type IncomeBudget } from "../domain/incomeBudget";
 import { monthBrief } from "../domain/monthPlan";
 import { formatMoney, type Centavos } from "../domain/money";
@@ -549,18 +550,27 @@ export function Budget({
             </p>
           )}
 
-          {view.projected !== null &&
-            a.combined.budget > 0 &&
-            a.combined.remaining >= 0 &&
-            view.projected > a.combined.budget && (
+          {/*
+            The bell's test, on the spending track, from day 7: "October ends
+            near PHP 43,661.02" came from a repair and the bills read as a
+            daily rate, beside wallets that held PHP 1,991.46, and it showed
+            from the 1st (19 October 2026 audit).
+          */}
+          {(() => {
+            if (view.phase !== "current" || a.spending.budget <= 0 || a.spending.remaining < 0 || view.daysLeft <= 0) return null;
+            const day = Math.round(view.elapsed * daysInMonth(year, month));
+            if (day < PACE_FROM_DAY) return null;
+            const soFar = Math.floor(a.spending.spent / day);
+            if (soFar <= view.perDay) return null;
+            return (
               <div style={{ marginTop: "var(--space-4)" }}>
-                <Alert status="warn" title="On pace to go over">
-                  At the rate so far {name} ends near {formatMoney(view.projected)},{" "}
-                  {formatMoney(view.projected - a.combined.budget)} past the budget. Keeping to{" "}
-                  {formatMoney(view.perDay)} a day holds it inside.
+                <Alert status="warn" title="Spending faster than the budget allows">
+                  {formatMoney(soFar)} a day so far. Keeping to {formatMoney(view.perDay)} a day for the {view.daysLeft}{" "}
+                  {view.daysLeft === 1 ? "day" : "days"} left holds the spending budget.
                 </Alert>
               </div>
-            )}
+            );
+          })()}
 
           <div className="fms-budgetincome">
             <Stat label="Came in" hint="Income, not counting starting balances">

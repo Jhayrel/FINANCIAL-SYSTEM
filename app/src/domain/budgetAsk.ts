@@ -130,8 +130,22 @@ export function tracksIn(said: string): { spending?: Centavos; billsSubs?: Centa
      */
     .replace(/\bsafe[- ]to[- ]spend\b/g, "safe-figure")
     .replace(/\b(?:already\s+spent|spent\s+so\s+far|have\s+spent|you\s+spent)\b/g, "used");
+  // Which way round the figures are written: "12000 spending 2000 bills" or "spending 9000 bills 1500".
+  const figureFirst = new RegExp(String.raw`${NUM}\s*(?:pesos?\s*)?(?:the\s+|my\s+)?(?:${SPENDING_LABEL}|${BILLS_LABEL})\b`).exec(text);
+  const labelFirst = new RegExp(String.raw`\b(?:${SPENDING_LABEL}|${BILLS_LABEL})\b(?:\s+budget)?\s*[:=]?\s*(?:to\s+|is\s+)?(?:₱|php\s*)?\d`).exec(text);
+  const numbersLead = figureFirst !== null && (labelFirst === null || figureFirst.index < labelFirst.index);
   const read = (label: string): Centavos | undefined => {
-    const before = new RegExp(String.raw`${NUM}\s*(?:pesos?\s*)?(?:for|on|to|sa|as|in|of)\s+(?:the\s+|my\s+|ang\s+)?${label}\b`).exec(text);
+    /*
+     * "12k spending and 2k bills" has no word between: the figure before the
+     * label is its own (19 October 2026 audit). Not when the figure follows a
+     * label itself: in "spending 9000 bills 1500" the 9000 is spending's.
+     */
+    const before =
+      new RegExp(String.raw`${NUM}\s*(?:pesos?\s*)?(?:for|on|to|sa|as|in|of)\s+(?:the\s+|my\s+|ang\s+)?${label}\b`).exec(text) ??
+      new RegExp(
+        (numbersLead ? "" : String.raw`(?<!\b(?:${SPENDING_LABEL}|${BILLS_LABEL})(?:\s+budget)?\s*[:=]?\s*(?:to\s+|is\s+)?(?:₱|php\s*)?[\d,.]*)`) +
+          String.raw`${NUM}\s*(?:pesos?\s*)?(?:the\s+|my\s+|ang\s+)?${label}\b`,
+      ).exec(text);
     if (before?.[1]) return pesosOf(before[1], before[2]);
     const after = new RegExp(String.raw`\b${label}\b(?:\s+budget)?[^\d\n]{0,28}?${NUM}`).exec(text);
     if (after?.[1]) return pesosOf(after[1], after[2]);
@@ -297,6 +311,16 @@ export function spanIn(said: string, asOf: IsoDate): BudgetSpan | null {
     const inYear = range[2] ? Number(range[2]) : year;
     // A range that runs past December stops at December: a budget belongs to its year.
     return to > from ? { year: inYear, month: from, toMonth: to, scope: "month", anchored: true } : { year: inYear, month: from, scope: "rest", anchored: true };
+  }
+
+  /*
+   * "november and december": two months side by side are a run of them. Only
+   * when they follow each other: "september and december" are two months,
+   * not four (19 October 2026 audit, December left with no budget).
+   */
+  const pair = new RegExp(String.raw`\b${MONTH_WORD}\b(?:\s+(20\d{2}))?\s*(?:and|&|,)\s*\b${MONTH_WORD}\b`, "i").exec(text);
+  if (pair?.[1] && pair[3] && monthNumber(pair[3]) === monthNumber(pair[1]) + 1) {
+    return { year: pair[2] ? Number(pair[2]) : year, month: monthNumber(pair[1]), toMonth: monthNumber(pair[3]), scope: "month", anchored: true };
   }
 
   if (/\b(whole|all|entire)\s+year\b|\ball of 20\d{2}\b|\bevery month (of|in) 20\d{2}\b/.test(text)) {
@@ -568,7 +592,7 @@ export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: Iso
   // "set November to 14000": a month and a figure alone, which the model itself told the owner to type (13 October 2026).
   // And "set October to December to 9000", which the app's own examples tell the owner to type (13 October 2026 audit).
   const monthOnly = new RegExp(
-    String.raw`^\s*(?:please\s+)?(?:set|make|put|change)\s+(?:the\s+)?${MONTH_TOKEN}(?:\s+20\d{2})?(?:\s*(?:to|-|until|through|hanggang)\s*${MONTH_TOKEN}(?:\s+20\d{2})?)?\s+(?:to|at|=)\s+(?:₱|php\s*)?[\d,]+(?:\.\d{1,2})?\s*k?\s*(?:total|in\s+all|all\s+in|overall)?\s*[.!]?\s*$`,
+    String.raw`^\s*(?:please\s+)?(?:set|make|put|change)\s+(?:the\s+)?${MONTH_TOKEN}(?:\s+20\d{2})?(?:\s*(?:to|-|until|through|hanggang|and|&)\s*${MONTH_TOKEN}(?:\s+20\d{2})?)?\s+(?:to|at|=)\s+(?:₱|php\s*)?[\d,]+(?:\.\d{1,2})?\s*k?\s*(?:total|in\s+all|all\s+in|overall)?\s*[.!]?\s*$`,
     "i",
   ).test(text);
   /*
@@ -649,6 +673,23 @@ export function readBudgetAsk(said: string, reference: ReferenceLists, asOf: Iso
       ...(by !== 0 && !removing ? { by: true } : {}),
       ...(toMonth ? { toMonth } : {}),
     };
+  }
+  /*
+   * "budget 14000 for november, 1500 for bills": one line named and the
+   * month's whole beside it. The 14000 was dropped and only the bills set
+   * (19 October 2026 audit).
+   */
+  const oneLine = (labelled.spending === undefined) !== (labelled.billsSubs === undefined);
+  if (namesLine && oneLine && by === 0 && /\bbudget\b/i.test(text)) {
+    const named = labelled.spending ?? labelled.billsSubs ?? 0;
+    const whole = [...withoutDates.matchAll(/(?:₱|php\s*)?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?\s*k?\b/gi)]
+      .map((m) => figure(m[0]))
+      .find((v): v is Centavos => v !== null && v !== named && v > named);
+    if (whole !== undefined) {
+      return labelled.billsSubs !== undefined
+        ? { kind: "tracks", year, month, total: whole, billsSubs: labelled.billsSubs, scope, ...(toMonth ? { toMonth } : {}) }
+        : { kind: "tracks", year, month, spending: named, billsSubs: whole - named, scope, ...(toMonth ? { toMonth } : {}) };
+    }
   }
   if (namesLine) {
     const sign = (c: Centavos | undefined): Centavos | undefined => (c === undefined ? undefined : by < 0 ? -c : c);

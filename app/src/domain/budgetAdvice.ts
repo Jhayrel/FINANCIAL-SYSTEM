@@ -45,7 +45,7 @@ import { daysIn } from "./readEntry";
 import { costOf, incomeOf, spendingAttribution, totalsFor } from "./totals";
 import { forecastYear } from "./forecast";
 import type { Debt } from "./debt";
-import type { BudgetAssessment, Budgets, IsoDate, Transaction } from "./types";
+import type { BudgetAssessment, Budgets, IsoDate, Necessity, Transaction } from "./types";
 import { notTheMonth } from "./budgetAsk";
 
 /** Months read, at most, before the one being planned. */
@@ -81,6 +81,8 @@ export interface OneOff {
 }
 
 export interface BudgetAdvice {
+  /** The items counted as wants, by the owner's marks first. */
+  readonly wants?: readonly string[];
   readonly year: number;
   readonly month: number;
   /** "October 2026". */
@@ -164,10 +166,26 @@ export interface AdviceInput {
    * December is not planned from fewer months than October.
    */
   readonly readBefore?: { readonly year: number; readonly month: number };
+  /**
+   * The owner's own marks: a kind marked discretionary is a want, essential
+   * or emergency a need. Home Needs, marked discretionary, was kept as a need
+   * and the shortfall overstated (19 October 2026 audit).
+   */
+  readonly spendingTypes?: readonly { readonly name: string; readonly necessity?: Necessity | undefined }[];
+}
+
+/** A want, by the owner's mark, else by its name. */
+function wantBy(types: AdviceInput["spendingTypes"]): (name: string) => boolean {
+  const marks = new Map((types ?? []).filter((t) => t.necessity).map((t) => [t.name.trim().toLowerCase(), t.necessity]));
+  return (name) => {
+    const mark = marks.get(name.trim().toLowerCase());
+    return mark ? mark === "discretionary" : WANTS.test(name);
+  };
 }
 
 export function budgetAdvice(input: AdviceInput): BudgetAdvice {
   const { year, month, asOf } = input;
+  const isWant = wantBy(input.spendingTypes);
   const rows = input.transactions.filter((t) => !(t as Transaction & { deletedAt?: string }).deletedAt);
 
   // ── 1. The months read ─────────────────────────────────────────────────────
@@ -302,7 +320,7 @@ export function budgetAdvice(input: AdviceInput): BudgetAdvice {
        * cut but reported as the gap.
        */
       const over = spending - Math.max(0, room);
-      const wants = items.filter((l) => WANTS.test(l.name));
+      const wants = items.filter((l) => isWant(l.name));
       const wanted = wants.reduce((sum, l) => sum + l.amount, 0);
       const cuts: { name: string; from: Centavos; to: Centavos }[] =
         wanted <= over
@@ -314,6 +332,7 @@ export function budgetAdvice(input: AdviceInput): BudgetAdvice {
   }
 
   return {
+    wants: items.filter((l) => isWant(l.name)).map((l) => l.name),
     year,
     month,
     name: `${monthName(month)} ${year}`,
@@ -382,7 +401,7 @@ export function adviceWords(a: BudgetAdvice, options: { readonly split?: boolean
         `Your usual month (${money(a.total)}) is more than the ${money(a.fit.income)} you expect${kept}${a.debtDue > 0 ? ` less ${money(a.debtDue)} of debt payments due` : ""}, so the spending part is held to ${money(spendingAt)}${cuts.length > 0 ? `, by cutting ${cuts.join(", ")}` : ""}.`,
       );
       if (a.fit.short > 0) {
-        out.push(`Even with every want cut it is **${money(a.fit.short)}** short: the needs alone (${a.items.filter((l) => !WANTS.test(l.name)).map((l) => l.name).join(", ")}) cost more than that leaves. The gap has to come from ${a.fit.keep > 0 ? "saving less this month, " : ""}savings or more income.`);
+        out.push(`Even with every want cut it is **${money(a.fit.short)}** short: the needs alone (${a.items.filter((l) => !(a.wants ? a.wants.includes(l.name) : WANTS.test(l.name))).map((l) => l.name).join(", ")}) cost more than that leaves. The gap has to come from ${a.fit.keep > 0 ? "saving less this month, " : ""}savings or more income.`);
       }
     }
   } else if (a.typicalIncome > 0) {
@@ -624,16 +643,33 @@ export function judgeWords(
     out.push(
       `The usual month, each item's middle month over ${monthsRead(a.read)} with one-offs left out: ${money(a.spending)} of spending and ${money(a.billsSubs)} of bills and subscriptions still running.`,
     );
+    /*
+     * A month that is running is judged by what is left a day against the
+     * usual day, not by the budget's size: with 98% of it spent and 13 days
+     * to go it was called "no more care than a usual month" (19 October 2026
+     * audit).
+     */
+    const inMonth = daysInMonth(a.year, a.month);
+    const running = daysLeft > 0 && daysLeft < inMonth;
+    const usualDay = Math.floor(a.spending / inMonth);
+    const leftDay = running ? Math.floor(Math.max(0, tracks.spending.remaining) / daysLeft) : 0;
     const gap = tracks.spending.budget - a.spending;
     out.push(
-      gap >= 0
-        ? `The spending budget is ${money(gap)} above the usual month, so keeping to it needs no more care than a usual month.`
-        : `The spending budget is ${money(-gap)} below the usual month, so keeping to it means spending less than usual.`,
+      running
+        ? leftDay >= usualDay
+          ? `What is left of the spending budget is ${money(leftDay)} a day, at or above a usual ${money(usualDay)} a day, so keeping to it needs no more care than usual.`
+          : `What is left of the spending budget is ${money(leftDay)} a day against a usual ${money(usualDay)} a day, so keeping to it means spending ${usualDay > 0 && leftDay * 2 < usualDay ? "far " : ""}less than usual for the rest of ${a.name}.`
+        : gap >= 0
+          ? `The spending budget is ${money(gap)} above the usual month, so keeping to it needs no more care than a usual month.`
+          : `The spending budget is ${money(-gap)} below the usual month, so keeping to it means spending less than usual.`,
     );
     const bills = tracks.billsSubs.budget - a.billsSubs;
     if (bills < 0) out.push(`The bills and subscriptions budget is ${money(-bills)} less than the ones still running cost in a usual month.`);
   }
-  if (daysLeft > 0) {
+  if (daysLeft > 0 && daysLeft >= daysInMonth(a.year, a.month)) {
+    // Not started: no "so far", no "today included".
+    out.push(`That is ${money(Math.floor(Math.max(0, tracks.spending.budget) / daysLeft))} a day for the ${daysLeft} days of ${a.name}.`);
+  } else if (daysLeft > 0) {
     const left = tracks.spending.remaining;
     out.push(
       left >= 0

@@ -4645,7 +4645,15 @@ export function AskPanel({
      * came in, worked out by the app (`incomeBudget.ts`), so a raise and a
      * saving are never the same peso (owner, 12 October 2026).
      */
-    if (files.length === 0 && !as && asksIncomeBudget(ruled) && !readIncomePlan(ruled) && !readBudgetMove(ruled)) {
+    /*
+     * Not when it asks about another month, or for a recommendation held to
+     * an income it names: "what budget do you recommend for november if I
+     * only expect 8000" got October's money-in figures (19 October 2026 audit).
+     */
+    const askedMonth = adviceMonthIn(ruled, asOf);
+    const aboutAnotherMonth = (askedMonth !== null && (askedMonth.year !== Number(asOf.slice(0, 4)) || askedMonth.month !== Number(asOf.slice(5, 7)))) || /\bnext\s+month\b/i.test(ruled);
+    const plansFromIncome = expectedIncomeIn(ruled) !== null && asksBudgetAdvice(ruled);
+    if (files.length === 0 && !as && asksIncomeBudget(ruled) && !aboutAnotherMonth && !plansFromIncome && !readIncomePlan(ruled) && !readBudgetMove(ruled)) {
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
       const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
@@ -5265,7 +5273,15 @@ export function AskPanel({
                 : { year: next.year, month: next.month });
           const said = income ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.income : null);
           const keep = savingsGoalIn(ruled) ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.keep : null);
-          const first = budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: said, keep });
+          /*
+           * A month after next is read from the same months next month is, as
+           * the Budget screen's forecast reads it: December said a usual month
+           * of PHP 14,672.00 in the chat and PHP 15,172.00 there (19 October
+           * 2026 audit).
+           */
+          const nextUp = nextOf(asOf);
+          const readFrom = target.year * 12 + target.month > nextUp.year * 12 + nextUp.month ? { readBefore: { year: nextUp.year, month: nextUp.month } } : {};
+          const first = budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes, income: said, keep, ...readFrom });
           /*
            * "based on my income and spending" with no figure: held to the
            * income they usually receive, the median month over the same
@@ -5274,7 +5290,7 @@ export function AskPanel({
           // "one that would fit my needs", "does it fit" when it does not: held to the usual income too.
           const byIncome = said === null && first.typicalIncome > 0 && (BY_INCOME.test(ruled) || (FITS.test(ruled) && first.total + first.debtDue > first.typicalIncome));
           const held = byIncome ? first.typicalIncome : said;
-          const advice = byIncome ? budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, income: held, keep }) : first;
+          const advice = byIncome ? budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes, income: held, keep, ...readFrom }) : first;
           if (judging) {
             const tracks = assessMonthFor(reportRows, budgets, target.year, target.month);
             const phase = target.year * 12 + target.month - (thisMonth.year * 12 + thisMonth.month);
@@ -5822,7 +5838,7 @@ export function AskPanel({
          * question this used to ask instead: "Ai first. Fix this".
          */
         if (!ai.disabled && !yesAfterBudgetTalk) {
-          const advice = budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts });
+          const advice = budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes });
           const text = adviceWords(advice);
           lastAdvice.current = { advice, text, asked: note };
           incomeAnswered.current = null;

@@ -78,3 +78,19 @@ describe("the budget an answer proposes", () => {
     expect(tracksIn("Spending: PHP 12,478.00, Bills and subscriptions: PHP 1,522.00")).toEqual({ spending: 1247800, billsSubs: 152200 });
   });
 });
+
+import { readBudgetAsk, spanIn } from "./budgetAsk";
+
+describe("budget sentences from the 19 October audit", () => {
+  const ref = { wallets: ["Cash"], savings: [], spendingTypes: [], bills: [], subscriptions: [], revenueCategories: [] } as unknown as ReferenceLists;
+  it("reads each figure beside its own line, either way round", () => {
+    expect(tracksIn("set november budget 12k spending and 2k bills")).toEqual({ spending: 1200000, billsSubs: 200000 });
+    expect(tracksIn("split my november budget 12000 spending 2000 bills")).toEqual({ spending: 1200000, billsSubs: 200000 });
+    expect(tracksIn("spending 9000 bills 1500")).toEqual({ spending: 900000, billsSubs: 150000 });
+  });
+  it("keeps a total said beside one line, and two months side by side", () => {
+    expect(readBudgetAsk("budget 14000 for november, 1500 for bills", ref, "2026-10-19")).toMatchObject({ month: 11, total: 1400000, billsSubs: 150000 });
+    expect(spanIn("make november and december budget 14000 each", "2026-10-19")).toMatchObject({ month: 11, toMonth: 12 });
+    expect(spanIn("september and december", "2026-10-19")?.toMonth).toBeUndefined();
+  });
+});
