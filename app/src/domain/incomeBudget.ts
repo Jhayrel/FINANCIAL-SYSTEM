@@ -33,7 +33,7 @@
  */
 import { wholeRows } from "./covers";
 import { formatMedium, localDay } from "./dates";
-import { formatMoney, type Centavos } from "./money";
+import { formatMoney, parseAmount, type Centavos } from "./money";
 import { incomeOf } from "./totals";
 import type { BudgetYear, IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -105,9 +105,27 @@ export function incomeBudget(input: {
     if (savings.has(t.fromWallet) && wallets.has(t.toWallet)) toSavings -= t.amount;
   }
 
+  /*
+   * Money a split kept for savings and not moved yet is spoken for: it came
+   * back as room to rise the moment the split was saved (19 October 2026
+   * audit). Read from the saved reasons, less what went to savings since.
+   */
+  const keptRevs = [...(plan?.revisions?.[String(month)] ?? [])].filter((r) => r.what === "tracks" && /kept for savings/.test(r.reason ?? ""));
+  const kept = keptRevs.reduce((sum, r) => sum + (parseAmount(/(?:₱|PHP\s*)([\d,]+(?:\.\d{1,2})?)\s+kept for savings/.exec(r.reason ?? "")?.[1] ?? "") ?? 0), 0);
+  const keptFrom = keptRevs.map((r) => localDay(r.at)).sort()[0];
+  let movedSince = 0;
+  if (keptFrom) {
+    for (const t of rows) {
+      if (t.type !== "Transfer" || t.date < keptFrom || !t.date.startsWith(prefix)) continue;
+      if (wallets.has(t.fromWallet) && savings.has(t.toWallet)) movedSince += t.amount;
+      if (savings.has(t.fromWallet) && wallets.has(t.toWallet)) movedSince -= t.amount;
+    }
+  }
+  const pending = Math.max(0, kept - Math.max(0, movedSince));
+
   const budget = plan?.spending[month - 1] ?? 0;
   const billsBudget = plan?.billsSubs[month - 1] ?? 0;
-  const most = spent + Math.max(0, safe);
+  const most = spent + Math.max(0, safe - pending);
   return {
     year,
     month,
