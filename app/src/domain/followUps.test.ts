@@ -54,3 +54,15 @@ describe("an edit said without 'to'", () => {
     expect(readEditAsk("I paid 500 for food", ref, "2026-10-19")).toBeNull();
   });
 });
+
+import { answerMoveIn } from "./incomeBudget";
+
+describe("what the answer proposed for this month's budget", () => {
+  it("reads a raise or a cut, only for the running month (19 October 2026)", () => {
+    expect(answerMoveIn("You can raise your October spending budget by **PHP 1,229.51** at most, which sets it to PHP 27,229.51.", 10)).toBe("raise");
+    expect(answerMoveIn("Yes, the calculations are correct: you could raise the October spending budget by up to PHP 1,229.51.", 10)).toBe("raise");
+    expect(answerMoveIn("The budget promises more than your money: lower it to PHP 25,907.51.", 10)).toBe("fit");
+    expect(answerMoveIn("I recommend a budget of PHP 15,172.00 for November 2026.", 10)).toBeNull();
+    expect(answerMoveIn("You can raise your November budget by PHP 500.", 10)).toBeNull();
+  });
+});

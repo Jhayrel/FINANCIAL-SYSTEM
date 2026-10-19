@@ -372,3 +372,24 @@ export function readBudgetMove(text: string, cardJustShown = false): BudgetMove 
   const plan = readIncomePlan(`plan ${t.replace(/\?\s*$/, "")} budget income`);
   return { kind: "addIncome", keep: plan?.keep ?? null, toBills: /\bbills?\b|\bsubscriptions?\b/i.test(t) };
 }
+
+const MONTH_WORDS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
+/**
+ * What an answer proposed doing to the running month's budget, so "add the
+ * proposed budget changes" does that: "raise your October spending budget by
+ * PHP 1,229.51 at most" is a raise, "lower it to PHP 25,907.51" is a fit.
+ * Null when it names another month, proposes both, or neither.
+ *
+ * 19 October 2026: the model proposed October's raise, and "add the proposed
+ * budget changes" put November's recommendation on October.
+ */
+export function answerMoveIn(text: string, monthIndex: number): "raise" | "fit" | null {
+  const t = text.replace(/\*\*/g, "").toLowerCase();
+  const named = MONTH_WORDS.filter((m) => new RegExp(`\\b${m}\\b`).test(t));
+  if (named.length > 0 && !named.includes(MONTH_WORDS[monthIndex - 1] ?? "")) return null;
+  const raise = /\b(?:raise|increase|add)\w*\b[^.]{0,80}\bbudget\b[^.]{0,80}\bby\s+(?:up\s+to\s+|at\s+most\s+)?(?:php|₱)|\bbudget\b[^.]{0,40}\bcan\s+(?:rise|go\s+up)\s+by\b/.test(t);
+  const fit = /\b(?:lower|reduce|cut|bring\s+down)\w*\b[^.]{0,80}\bbudget\b|\bbudget\b[^.]{0,60}\b(?:lower|reduce)\w*\s+(?:it\s+)?to\b/.test(t);
+  return raise === fit ? null : raise ? "raise" : "fit";
+}
+

@@ -143,7 +143,7 @@ import { spentFromLeft } from "../domain/leftOver";
 import { readSettleAsk, settleLine } from "../domain/settleLine";
 import { wholeRows } from "../domain/covers";
 import { incomeOf } from "../domain/totals";
-import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, readBudgetMove, readIncomePlan, type BudgetMove } from "../domain/incomeBudget";
+import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, readBudgetMove, readIncomePlan, answerMoveIn, type BudgetMove } from "../domain/incomeBudget";
 import { asksCarryOver, asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer } from "../domain/dayFit";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
@@ -5423,10 +5423,27 @@ export function AskPanel({
       /\b(?:add|apply|set|use|do|go|yes|ok(?:ay)?|sige|update|change|raise)\b/i.test(ruled) &&
       /\b(?:that|it|this|budget|suggest\w*|propos\w*|change|raise)\b/i.test(ruled) &&
       ruled.split(/\s+/).length <= 14;
+    /*
+     * The model's own last answer proposing this month's raise or cut ("you
+     * can raise your October spending budget by PHP 1,229.51 at most"): "add
+     * the proposed budget changes" does that, the app working the figures out.
+     */
+    const answered = [...turns].reverse().slice(0, 6).find((t): t is Said => t.kind === "assistant" && "text" in t && (t as Said).from !== "this device");
+    const modelMove = answered ? answerMoveIn(answered.text, Number(asOf.slice(5, 7))) : null;
+    const asksToApply =
+      !/\b(?:lower|reduce|cut)\b/i.test(ruled) &&
+      /\b(?:add|apply|set|use|do|go|yes|ok(?:ay)?|sige|update|change|raise)\b/i.test(ruled) &&
+      /\b(?:that|it|this|budget|suggest\w*|propos\w*|change|raise)\b/i.test(ruled) &&
+      ruled.split(/\s+/).length <= 14;
     const typedMove = couldBudget && !incomePlan ? readBudgetMove(ruled, lastWasBudgetCard) : null;
-    const byAnswer = !typedMove && couldBudget && !incomePlan && afterIncome;
+    const byAnswer = !typedMove && couldBudget && !incomePlan && (afterIncome || (modelMove !== null && asksToApply));
     const budgetMove: BudgetMove | null =
-      typedMove ?? (byAnswer ? { kind: "addIncome", keep: readIncomePlan(`plan ${ruled} budget income`)?.keep ?? null, toBills: /\bbills?\b|\bsubscriptions?\b/i.test(ruled) } : null);
+      typedMove ??
+      (byAnswer
+        ? modelMove === "fit" && !afterIncome
+          ? { kind: "fit" }
+          : { kind: "addIncome", keep: readIncomePlan(`plan ${ruled} budget income`)?.keep ?? null, toBills: /\bbills?\b|\bsubscriptions?\b/i.test(ruled) }
+        : null);
     if (budgetMove) {
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
