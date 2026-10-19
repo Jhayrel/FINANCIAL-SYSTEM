@@ -86,6 +86,11 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
    * same reader the entries use, so a question and an entry agree on the
    * days (12 October 2026). Anything else, the charts' windows.
    */
+  // "this month vs last month": this month, and the answer says the month before beside it (19 October 2026).
+  if (/\bthis month\b/i.test(text) && /\b(?:last|previous)\s+month\b/i.test(text)) {
+    const w = windowOf("this month", asOf);
+    return { item, from: w.from, to: w.to, name: w.name };
+  }
   const span = daysIn(text, asOf);
   if (span) return { item, from: span.from, to: span.to, name: `${formatMedium(span.from)} to ${formatMedium(span.to)}` };
   const w = windowOf(text, asOf);

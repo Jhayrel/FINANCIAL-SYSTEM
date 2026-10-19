@@ -268,7 +268,7 @@ export function Dashboard({
                       ? `${formatMoney(safe.spentToday)} of today's ${formatMoney(safe.todayShare)} spent`
                       : `Today's share of ${formatMoney(safe.safe)}, over ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"}`}
               </span>
-              {safe && carried && safe.daysLeft > 1 && (
+              {safe && carried && safe.daysLeft > 1 && safe.overToday === 0 && (
                 <span className="t-caption" style={{ color: "var(--ink-3)" }}>
                   {`Yesterday's unspent ${formatMoney(yesterday?.unspent ?? 0)} is spread over these days. To use it today instead: up to ${formatMoney(carried.useToday)}.`}
                 </span>

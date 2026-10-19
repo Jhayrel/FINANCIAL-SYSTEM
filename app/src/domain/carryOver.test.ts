@@ -33,7 +33,7 @@ describe("safe to spend carries over", () => {
     expect(c.afterUse).toBe(Math.floor((31000 - 2033) / 29));
     const words = carryWords(safe, yesterday, formatMoney).join(" ");
     expect(words).toContain("₱10.00 carried over");
-    expect(words).toContain("today is ₱10.33 instead of ₱10.00");
+    expect(words).toContain("today's share is ₱10.33 instead of ₱10.00");
     expect(words).toContain("up to ₱20.33 today");
   });
 

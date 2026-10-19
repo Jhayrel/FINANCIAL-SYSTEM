@@ -275,7 +275,8 @@ export function carryOver(safe: SafeToSpend, yesterday: Yesterday | null): Carry
   const useToday = Math.min(safe.safe, safe.perDay + yesterday.unspent);
   const after = safe.daysLeft - 1;
   return {
-    todayHadItGone: dayFigures(Math.max(0, safe.safe - yesterday.unspent), safe.spentToday, safe.daysLeft).perDay,
+    // Today's share, which is set before today's spending: perDay is 0 once today went past it (19 October 2026).
+    todayHadItGone: dayFigures(Math.max(0, safe.safe - yesterday.unspent), safe.spentToday, safe.daysLeft).todayShare,
     useToday,
     afterUse: after > 0 ? Math.floor(Math.max(0, safe.safe - useToday) / after) : 0,
     nothingMore: ifNothingMoreToday(safe),
@@ -293,9 +294,11 @@ export function carryWords(safe: SafeToSpend, yesterday: Yesterday | null, money
   const c = carryOver(safe, yesterday);
   if (!c) return [`Yesterday spent all of its ${money(yesterday.share)} share, so nothing carried over.`];
   const out = [
-    `Yesterday's share was ${money(yesterday.share)} and ${money(yesterday.spent)} of it was spent, so ${money(yesterday.unspent)} carried over. It is not added to today alone: it stays in what is safe and is spread over the ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"} left, so today is ${money(safe.perDay)} instead of ${money(c.todayHadItGone)}.`,
+    `Yesterday's share was ${money(yesterday.share)} and ${money(yesterday.spent)} of it was spent, so ${money(yesterday.unspent)} carried over. It is not added to today alone: it stays in what is safe and is spread over the ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"} left, so today's share is ${money(safe.todayShare)} instead of ${money(c.todayHadItGone)}.`,
   ];
-  if (safe.daysLeft > 1) {
+  if (safe.daysLeft > 1 && safe.overToday > 0) {
+    out.push(`Today already went ${money(safe.overToday)} past its share, so what carried over now goes to the days after: ${money(safe.perDayAfter)} a day from tomorrow.`);
+  } else if (safe.daysLeft > 1) {
     out.push(`To use all of it today instead: up to ${money(c.useToday)} today, then ${money(c.afterUse)} a day for the ${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"} after.`);
     if (c.nothingMore > safe.perDayAfter) out.push(`Spend nothing more today and it carries over again: ${money(c.nothingMore)} a day from tomorrow.`);
   }

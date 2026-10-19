@@ -17,7 +17,7 @@ const rows = [
 
 describe("debt questions", () => {
   it("are read as questions, never entries", () => {
-    expect(readDebtAsk("How much do I owe?", [card, friend])).toEqual({ debt: null });
+    expect(readDebtAsk("How much do I owe?", [card, friend])?.debt).toBeNull();
     expect(readDebtAsk("When is my Card Credit due?", [card, friend])?.debt?.id).toBe("card");
     expect(readDebtAsk("How much does Pal owe me?", [card, friend])?.debt?.id).toBe("pal");
     expect(readDebtAsk("I owe Pal 500, he lent it to me", [card, friend])).toBeNull();

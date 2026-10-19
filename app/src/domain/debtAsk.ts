@@ -12,6 +12,8 @@ import type { IsoDate, Transaction } from "./types";
 export interface DebtAsk {
   /** The line named, or null for all of them. */
   readonly debt: Debt | null;
+  /** The words asked, for what to lead with. */
+  readonly said?: string;
 }
 
 const ASKS =
@@ -32,7 +34,7 @@ export function readDebtAsk(said: string, debts: readonly Debt[]): DebtAsk | nul
         .filter((w) => w.length >= 3)
         .some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)),
     );
-  return { debt: named ?? null };
+  return { debt: named ?? null, said: t };
 }
 
 export function debtAnswer(ask: DebtAsk, debts: readonly Debt[], transactions: readonly Transaction[], asOf: IsoDate): string {
@@ -67,8 +69,14 @@ export function debtAnswer(ask: DebtAsk, debts: readonly Debt[], transactions: r
   const owedYou = lines.filter((p) => p.debt.kind === "receivable").reduce((s, p) => s + Math.max(0, p.outstanding), 0);
   const held = lines.filter((p) => p.debt.form === "pass-through" && p.debt.kind === "payable").reduce((s, p) => s + Math.max(0, p.outstanding), 0);
   const open = lines.filter((p) => p.outstanding !== 0);
+  // Led by what was asked: "how much do I hold for others" was answered "You owe PHP 0.00".
+  const lead = /\b(?:hold|holding|held)\b/i.test(ask.said ?? "")
+    ? `You hold **${money(held)}** for others${youOwe > 0 ? `; you owe ${money(youOwe)}` : ""}${owedYou > 0 ? `; owed to you: ${money(owedYou)}` : ""}.`
+    : /\bowes?\s+me\b|\bowed\s+to\s+me\b|\bwho\s+owes\b/i.test(ask.said ?? "")
+      ? `Owed to you: **${money(owedYou)}**${youOwe > 0 ? `; you owe ${money(youOwe)}` : ""}${held > 0 ? `; held for others: ${money(held)}` : ""}.`
+      : `You owe **${money(youOwe)}** in all${owedYou > 0 ? `; owed to you: ${money(owedYou)}` : ""}${held > 0 ? `; held for others: ${money(held)}` : ""}.`;
   return [
-    `You owe **${money(youOwe)}** in all${owedYou > 0 ? `; owed to you: ${money(owedYou)}` : ""}${held > 0 ? `; held for others: ${money(held)}` : ""}.`,
+    lead,
     ...(open.length > 0 ? open.map(describe) : ["Every line is at PHP 0.00."]),
   ].join(" ");
 }
