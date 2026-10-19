@@ -99,8 +99,11 @@ function nameIn(text: string, names: readonly string[]): string {
  * wallets and nothing already saved. An edit names something already there:
  * a record number, "all", "last", "yesterday", "the grab ride on aug 3".
  */
+/** "#3948 should be 0.27": a record named and what it should be, with no verb (19 October 2026). */
+const SHOULD_BE = /#\s*\d{1,5}\b[^.?!]{0,40}\b(?:should|must)\s+(?:be|have\s+been)\b/i;
+
 export function readEditAsk(text: string, reference: ReferenceLists, asOf: IsoDate): EditAsk | null {
-  if (!VERB.test(text)) return null;
+  if (!VERB.test(text) && !SHOULD_BE.test(text)) return null;
   const accounts = [...reference.wallets, ...reference.savings];
   const items = [...reference.spendingTypes.map((t) => t.name), ...reference.bills, ...reference.subscriptions, ...reference.revenueCategories];
 
@@ -177,7 +180,8 @@ export function readEditAsk(text: string, reference: ReferenceLists, asOf: IsoDa
 
   // An amount: "to 1,200", "should be 1200", "make it 1200", "1200 instead".
   const amountTo =
-    /\b(?:to|should be|make it|it was|was actually|instead of \S+ it'?s|amount to)\s+((?:₱|php\s*)?\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|(?:₱|php\s*)?\d+(?:\.\d{1,2})?)\b/i.exec(rest) ??
+    // "edit #3948 amount 0.27", "edit the last entry with 1000 not 1050" (19 October 2026).
+    /\b(?:to|should be|must be|make it|it was|was actually|instead of \S+ it'?s|amount(?:\s+(?:to|of|is|=|:))?|with)\s+((?:₱|php\s*)?\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|(?:₱|php\s*)?\d+(?:\.\d{1,2})?)\b/i.exec(rest) ??
     /\b((?:₱|php\s*)?\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|(?:₱|php\s*)?\d+(?:\.\d{1,2})?)\s+instead\b/i.exec(rest);
   if (amountTo?.[1]) {
     const value = money(amountTo[1]);

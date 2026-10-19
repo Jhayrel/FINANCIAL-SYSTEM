@@ -6810,12 +6810,22 @@ export function AskPanel({
         ? (localHint(ruled, credits) ?? { by: "item" })
         : null;
     if (writtenHint && !measureOf(writtenHint)) {
-      const table = buildChart(inWords(ruled, writtenHint), reportRows, asOf, undefined, null, 200);
+      /*
+       * "Show my income vs spending this year": both sides and what was kept.
+       * Only the income was written (19 October 2026).
+       */
+      const asked = inWords(ruled, writtenHint);
+      const both = wantsBothDirections(asked);
+      const table = buildChart(asked, reportRows, asOf, both ? "revenue" : undefined, null, 200);
+      const out = both ? buildChart(asked, reportRows, asOf, "spending", null, 200) : null;
       if (table && table.rows.length > 0) {
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", "insights", { text: note }));
-        const words = chartAsText(table);
+        const php = (c: Centavos): string => formatMoney(c).replace(/^([−-]?)₱/, "$1PHP ");
+        const words = out
+          ? [chartAsText(table), chartAsText(out), `Came in ${php(table.total)}, went out ${php(out.total)}: ${table.total >= out.total ? `${php(table.total - out.total)} kept` : `${php(out.total - table.total)} more went out than came in`}.`].join("\n\n")
+          : chartAsText(table);
         if (presentation === "either") offerAfter.current = ruled;
         await answerWithModel(
           `The figures the message asks about, worked out by the app from the ledger, every row. Answer in words with them: lead with what matters most, then the rows they asked for, with each one's share. Do no arithmetic of your own.\n${words}`,

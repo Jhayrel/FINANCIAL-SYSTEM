@@ -110,7 +110,8 @@ export function itemHintIn(text: string): string {
  */
 export const DAY_WORDS: readonly (readonly [RegExp, number])[] = [
   [/\bkamakalawa\b/i, -2],
-  [/\bkahapon\b/i, -1],
+  // "Kagabi" is last night: yesterday (19 October 2026).
+  [/\b(?:kahapon|kagabi)\b/i, -1],
   [/\b(kanina|ngayon|ngayong araw|kanina lang|kaninang umaga|kaninang hapon)\b/i, 0],
 ];
 

@@ -41,3 +41,16 @@ describe("a budget question about recent income", () => {
     expect(readIncomePlan("base my budget on my 10k income, save 20%")).toEqual({ income: 1000000, keep: { percent: 20 } });
   });
 });
+
+import { readEditAsk } from "./chatChanges";
+import type { ReferenceLists } from "./types";
+
+describe("an edit said without 'to'", () => {
+  const ref = { wallets: ["Cash"], savings: [], spendingTypes: [], bills: [], subscriptions: [], revenueCategories: [] } as unknown as ReferenceLists;
+  it("reads the amount (19 October 2026)", () => {
+    expect(readEditAsk("Edit #3948 amount 0.27", ref, "2026-10-19")?.change.amount).toBe(27);
+    expect(readEditAsk("#3948 should be 0.27", ref, "2026-10-19")?.change.amount).toBe(27);
+    expect(readEditAsk("Edit the last entry with 1000 not 1050", ref, "2026-10-19")?.change.amount).toBe(100000);
+    expect(readEditAsk("I paid 500 for food", ref, "2026-10-19")).toBeNull();
+  });
+});

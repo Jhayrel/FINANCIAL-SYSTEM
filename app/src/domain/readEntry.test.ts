@@ -100,6 +100,11 @@ describe("the sentences that used to fail", () => {
     expect(checkDraft(draft, [], reference, []).ok).toBe(true);
   });
 
+  it('"last night" and "kagabi" are yesterday (19 October 2026: "I gas last night 200" was dated today)', () => {
+    expect(read("I spend 100 on restaurant last night").draft.date).toBe("2026-08-30");
+    expect(read("100 restaurant kagabi").draft.date).toBe("2026-08-30");
+  });
+
   it('"I spend 100 on restaurant yesterday" dates itself and finds the item', () => {
     const { draft } = read("I spend 100 on restaurant yesterday");
     expect(draft.date).toBe("2026-08-30");

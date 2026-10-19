@@ -1309,6 +1309,26 @@ the budget against the money that came in; "add that" after that answer is
 its move (raise by what the money keeps, or lower to fit when the answer
 said it is over); a recommendation is applied only to the month it was for.
 
+### 2026-10-19, fourth: the owner's own past questions replayed
+
+Every distinct question in the chat log was sent again on the 19 October data
+(`chat5.cjs`). App-made answers that were wrong, and the fix:
+
+- A pie has to be parts (`buildChart`): "pie of food" drew 31 days with empty
+  slices; it is now the weeks of the same month. A one-slice pie (Framelink
+  income by item, 100%) is split by year or month. Zero slices are dropped.
+- "Show my income vs spending this year" wrote only the income: both sides
+  are written now, with what was kept.
+- "I gas last night 200" was dated today: "last night" and "kagabi" are
+  yesterday (`readEntry`, `filipino.ts`).
+- "Edit #3948 amount 0.27", "#3948 should be 0.27", "edit the last entry
+  with 1000 not 1050" found the row but made no change card
+  (`readEditAsk`): they make one now.
+
+Checked and fine: safe to spend, can I afford, school today, gym, spending
+by week and by year, a debt payment card (the harness cannot read form
+fields; a screenshot showed it filled), delete the last entry, compare months.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

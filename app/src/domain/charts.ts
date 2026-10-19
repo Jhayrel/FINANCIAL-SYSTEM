@@ -1392,6 +1392,18 @@ export function buildChart(
   const total = all.reduce((sum, [, g]) => sum + g.value, 0);
   const kind = kindOf(question, by);
   /*
+   * A pie has to be parts. "Pie of food" drew October's 31 days, empty ones
+   * and an "Other days" slice; Framelink income by item was one slice at
+   * 100% (19 October 2026). Days become weeks, and one slice becomes the
+   * months or years it came in.
+   */
+  const oneSlice = !overTime(by) && total > 0 && (all[0]?.[1].value ?? 0) >= total * 0.98;
+  if (kind === "pie" && (by === "day" || oneSlice) && !/\b(?:by|per)\s+(?:weeks?|months?|years?)\b/i.test(question)) {
+    // The same period: "by week" alone reads as the last twelve weeks.
+    const same = by === "day" && !namesWindow(question) ? ` in ${period.name}` : "";
+    return buildChart(`${question} by ${by === "day" ? "week" : span > 400 ? "year" : "month"}${same}`, transactions, asOf, only, said, most);
+  }
+  /*
    * A pie is the whole, so what does not get a slice of its own goes into
    * one "Other" slice rather than being left off. Leaving it off drew a
    * circle that did not close and shares that did not add up to the total
@@ -1413,6 +1425,8 @@ export function buildChart(
     ];
     folded = rest.length;
   }
+  // A slice of nothing is no slice.
+  if (kind === "pie") kept = kept.filter(([, g]) => g.value > 0);
   const largest = Math.max(...kept.map(([, g]) => g.value), 1);
   /*
    * The last period is still running when today is inside it. October read

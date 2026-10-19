@@ -533,6 +533,8 @@ function dateIn(text: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
   // testing the shorter one first reads it as one day back instead of two.
   if (/\bday before yesterday\b/i.test(text)) return { date: shift(asOf, -2), said: true };
   if (/\byesterday\b/i.test(text)) return { date: shift(asOf, -1), said: true };
+  // "I gas last night 200" was dated today (19 October 2026). "Kagabi" is the same night.
+  if (/\blast\s+night\b|\bkagabi\b/i.test(text)) return { date: shift(asOf, -1), said: true };
   if (/\btoday\b|\bjust now\b|\bearlier\b/i.test(text)) return { date: asOf, said: true };
 
   /**
