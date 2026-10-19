@@ -1420,9 +1420,8 @@ edge days (month's first and last day, a bill paid today).
     `accounts.ts` totals are tested.
 12. **Electric Bill** was last paid in May 2024, so nothing is reserved for
     it in safe to spend; if it is still paid, the owner records it, or
-    marks it stopped. **Father's line** is PHP 1.00 below nothing (PHP
-    599.00 paid, PHP 600.00 back): an alert now says so; the owner decides
-    which row is off.
+    marks it stopped. **Father's line**: the owner confirmed on 19 October 2026 that the PHP
+    1.00 is right as it stands. Nothing to do.
 
 13. **"Cash on hand" counts as income** on every screen but is left out of
     true income. One rule should hold for both; the owner decides which.

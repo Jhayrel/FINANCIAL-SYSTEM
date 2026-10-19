@@ -518,8 +518,8 @@ export function patternFindings({ transactions, asOf, wallets }: PatternInput): 
   if (moved) {
     const direction =
       moved.netChange >= 0
-        ? `Total discretionary spending is ${php(moved.netChange)} higher than last month`
-        : `Total discretionary spending is ${php(-moved.netChange)} lower than last month`;
+        ? `Total discretionary spending is ${php(moved.netChange)} higher than in the same days last month`
+        : `Total discretionary spending is ${php(-moved.netChange)} lower than in the same days last month`;
 
     out.push({
       id: "migration",
