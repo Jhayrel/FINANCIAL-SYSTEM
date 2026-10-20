@@ -332,10 +332,12 @@ export function changeWords({ before, after }: ChangedRow): string {
   if (before.amount !== after.amount) parts.push(`${formatMoney(before.amount)} to ${formatMoney(after.amount)}`);
   // "You forgot the 16 fee" made a card that named the row and not the change (20 October 2026).
   if (before.fee !== after.fee) parts.push(`fee ${formatMoney(before.fee)} to ${formatMoney(after.fee)}, ${formatMoney(after.amount + after.fee)} in all`);
+  // A total put right on its own (Needs review, `reviewFixes.ts`).
+  else if (before.total !== after.total && before.amount === after.amount) parts.push(`total ${formatMoney(before.total)} to ${formatMoney(after.total)}`);
   if (before.fromWallet !== after.fromWallet) parts.push(`from ${before.fromWallet || "no wallet"} to ${after.fromWallet || "no wallet"}`);
   if (before.toWallet !== after.toWallet) parts.push(`into ${after.toWallet || "no wallet"} instead of ${before.toWallet || "no wallet"}`);
   if (before.date !== after.date) parts.push(`dated ${after.date} instead of ${before.date}`);
-  if (before.item !== after.item) parts.push(`${before.item || "no item"} to ${after.item}`);
+  if (before.item !== after.item) parts.push(after.item ? `${before.item || "no item"} to ${after.item}` : `${before.item} taken off`);
   if (before.description !== after.description) parts.push(`described as "${after.description}"`);
   return parts.join(", ");
 }

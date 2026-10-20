@@ -916,7 +916,7 @@ export function Database({
           {(issuesById.get(opened.id)?.length ?? 0) > 0 && (
             <p className="t-caption fms-dbrow-todo">
               <strong>What to do:</strong> {[...new Set(issuesById.get(opened.id)!.map((i) => todoFor(i.code)))].join(" ")}
-              {onEdit ? " Edit opens it in the form; saving runs the checks again." : ""}
+              {onEdit ? " Edit opens it in the form; saving runs the checks again." : ""} Or ask the AI "fix the rows that need review": it shows each fix ready to apply in one press.
             </p>
           )}
           {onDeleteMany && (

@@ -275,6 +275,7 @@ import { discardedWords } from "../domain/discarded";
 import { outlookFor } from "../domain/outlook";
 import { withCommandWordsFixed } from "../domain/typos";
 import { asksForWrongRows, asksWhetherToDelete, flaggedRows } from "../domain/integrity";
+import { reviewFixes } from "../domain/reviewFixes";
 
 /**
  * What the panel is allowed to do with a proposal.
@@ -367,6 +368,8 @@ interface Changing {
   readonly kind: "change";
   readonly plan: EditPlan;
   readonly state: "open" | "applied" | "discarded";
+  /** Fixes of one row that exclude each other: applying one sets the others aside. */
+  readonly group?: string;
   /** Stable across a refresh. See `DebtChoice.cardId`. Given by `say` when missing. */
   readonly cardId?: string;
   /**
@@ -763,6 +766,7 @@ function turnFromCard(card: StoredCard): Turn {
       plan: { rows: [], refused: [] },
       state: settled(card.state),
       cardId: card.id,
+      ...(typeof data["group"] === "string" ? { group: data["group"] } : {}),
       restored: {
         rows: list<StoredChange["rows"][number]>(data["rows"]).filter((r) => r && typeof r.id === "string"),
         refused: list<StoredChange["refused"][number]>(data["refused"]).filter((r) => r && typeof r.id === "string"),
@@ -922,7 +926,7 @@ function storedFrom(turn: Turn): StoredCard | null {
             refused: turn.plan.refused.map((r) => ({ id: r.row.id, reason: r.reason })),
           }
         : (turn.restored ?? { rows: [], refused: [] });
-    return { id: turn.cardId, kind: "change", state: turn.state, draft: {}, data: { ...change } };
+    return { id: turn.cardId, kind: "change", state: turn.state, draft: {}, data: { ...change, ...(turn.group !== undefined ? { group: turn.group } : {}) } };
   }
 
   if (isBudgeting(turn)) {
@@ -2235,6 +2239,8 @@ export function AskPanel({
   const lastAdvice = useRef<{ advice: BudgetAdvice; text: string; asked: string } | null>(null);
   /** The last "money until my salary" question, for its follow-ups ("what about gas", "that's confusing"). */
   const bridgeRef = useRef<{ readonly ask: BridgeAsk; readonly asked: string } | null>(null);
+  /** When Needs review was last asked about here, for "fix it" and "what to do" after it. */
+  const reviewAsked = useRef<number | null>(null);
   /** The question the budget-against-income answer replied to, for "ok add that new budget" after it. */
   const incomeAnswered = useRef<string | null>(null);
   /** The budget question just asked, so the next message can answer it. */
@@ -6684,7 +6690,28 @@ export function AskPanel({
      * with the check that caught it and a button to correct it or bin it.
      * Never binned as a set: a flagged row is often right and merely odd.
      */
-    if (files.length === 0 && !as && !pending && asksForWrongRows(ruled)) {
+    /*
+     * "Like what to do?", "Can you implement a fix so I can just click it",
+     * "do I re-enter it?", straight after that list: the same answer with its
+     * fix cards. The model said it could not fix rows from here and named
+     * rows that were not on the list (20 October 2026).
+     */
+    const reviewFollow =
+      reviewAsked.current !== null &&
+      Date.now() - reviewAsked.current < 30 * 60_000 &&
+      /\b(?:fix\w*|what to do|implement|click|re-?add|re-?enter|edit what|how (?:do i|to|can i)|do (?:it|that|them)|apply|ayusin)\b/i.test(ruled) &&
+      ruled.split(/\s+/).length <= 20;
+    const fixesOpen = turns.filter((t) => isChanging(t) && t.state === "open").length;
+    if (files.length === 0 && !as && !pending && reviewFollow && !asksForWrongRows(ruled) && fixesOpen > 0) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      const reply = `They are ready: the ${fixesOpen === 1 ? "card" : `${fixesOpen} cards`} just above, each with **Apply**. One press edits the entry itself and keeps its record number, so there is nothing to re-enter. Where two cards fix the same entry, apply the one that is true and the other is set aside.`;
+      say({ kind: "assistant", text: reply, from: "this device" });
+      log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+      return;
+    }
+    if (files.length === 0 && !as && !pending && (asksForWrongRows(ruled) || reviewFollow)) {
+      reviewAsked.current = Date.now();
       const flagged = flaggedRows(transactions, { wallets: [...reference.wallets, ...reference.savings] });
       setDraft("");
       say({ kind: "you", text: note });
@@ -6703,17 +6730,46 @@ export function AskPanel({
           : keep === 0
             ? "Some of these may be copies: each card says how to tell, and Move to bin is there for those."
             : `Do not delete the ${keep} that only need editing: they are real entries. The other ${flagged.length - keep} may be copies, and their cards say how to tell.`;
-      const reply = asksWhetherToDelete(note) || keep > 0 ? `${advice} ${count}` : `${count} Each says what is wrong with it and what to do.`;
+      /*
+       * The fix for each, ready to apply: the same entries edited, record
+       * numbers kept, what each does to the wallets said, nothing changed
+       * until Apply (`reviewFixes.ts`). The checks still only report.
+       */
+      const ready = reviewFixes(transactions, { wallets: [...reference.wallets, ...reference.savings] });
+      const fixing = ready.fixes.length > 0;
+      const reply = [
+        asksWhetherToDelete(note) || keep > 0 ? `${advice} ${count}` : `${count} Each says what is wrong with it and what to do.`,
+        fixing
+          ? `Do not re-enter them: that would count the money twice. Each fix below edits the entry itself and keeps its record number. Press **Apply** on the ones that are true; nothing changes until you do, and Undo is on the notice after.${ready.leftAfter === 0 ? " With them applied, Needs review is empty." : ""}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
       say({ kind: "assistant", text: reply, from: "this device" });
-      say({
-        kind: "found",
-        action: "edit",
-        alsoBin: true,
-        review: true,
-        candidates: flagged.map(({ row, why, todo, binnable }, i) => ({ row, score: 100 - i, why: [...why], todo: [...todo], noBin: !binnable })),
-        done: [],
-      });
-      log(aiEvent("answered", "add", { text: `Listed ${flagged.length} flagged rows. Asked: ${note}`, model: "this device" }));
+      const groups = new Set<string>();
+      for (const fix of ready.fixes) {
+        const twin = fix.group !== undefined && groups.has(fix.group);
+        if (fix.group !== undefined) groups.add(fix.group);
+        say({
+          kind: "assistant",
+          text: `${twin ? "Or, " : ""}${fix.words}${fix.onlyIf ? ` Apply this only if ${fix.onlyIf}.` : ""}`,
+          from: "this device",
+        });
+        say({ kind: "change", plan: { rows: fix.rows, refused: [] }, state: "open", ...(fix.group !== undefined ? { group: fix.group } : {}) });
+      }
+      const rest = fixing ? flagged.filter((f) => ready.unfixed.some((u) => u.row.id === f.row.id)) : flagged;
+      if (rest.length > 0) {
+        if (fixing) say({ kind: "assistant", text: `${rest.length === 1 ? "This one has" : "These have"} no fix the app can work out from the ledger alone:`, from: "this device" });
+        say({
+          kind: "found",
+          action: "edit",
+          alsoBin: true,
+          review: true,
+          candidates: rest.map(({ row, why, todo, binnable }, i) => ({ row, score: 100 - i, why: [...why], todo: [...todo], noBin: !binnable })),
+          done: [],
+        });
+      }
+      log(aiEvent("answered", "add", { text: `Listed ${flagged.length} flagged rows with ${ready.fixes.length} fixes. Asked: ${note}`, model: "this device" }));
       return;
     }
 
@@ -8668,6 +8724,12 @@ export function AskPanel({
                   .join("; ")}.`;
                 log(aiEvent("accepted", "add", { entry: done }));
                 decide(i, "applied");
+                // The other fix for the same row no longer applies (`reviewFixes`).
+                if (turn.group !== undefined) {
+                  turns.forEach((other, j) => {
+                    if (j !== i && isChanging(other) && other.group === turn.group && other.state === "open") decide(j, "discarded");
+                  });
+                }
                 say({ kind: "assistant", text: done, from: "this device" });
               }}
               onDiscard={() => decide(i, "discarded")}

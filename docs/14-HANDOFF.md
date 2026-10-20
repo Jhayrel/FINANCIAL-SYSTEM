@@ -1406,6 +1406,29 @@ message that could still go wrong was replayed on today's code.
 - "within the PHP 27,700.00 budget" is no longer flagged as something that
   does not fit the day.
 
+### 2026-10-20, later: Needs review fixed in one press
+
+"I want something to fix it" (the owner, after the list said what to do).
+`reviewFixes.ts` works out, for each finding with a fix that follows from
+the ledger, the same entry edited, shown as the chat's change card: record
+number kept, what it does to each wallet said, nothing changed until Apply,
+Undo after. Every fix is tried on a copy and the checks run again; one that
+would be flagged another way is not offered. The checks themselves still
+only report.
+
+- Fee inside a withdrawal: split out and filed as Spending / Transaction Fee,
+  as the form files it (Cash goes down by the fees).
+- Total without its fee: two cards for the same entry, "fee counted" and
+  "no fee", each saying its wallet effect; applying one sets the other aside.
+- A wallet below zero at a day's close: the next money in, dated that day,
+  when that clears it and breaks nothing; else that day's payments dated the
+  day the money came. Each says "apply this only if" what must be true.
+- "Like what to do?", "can you fix it so I can click it" after the list
+  point to the open cards, or show them again.
+
+On the 19 October data all six rows have a fix, and with them applied the
+checks find nothing.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
