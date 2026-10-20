@@ -2201,6 +2201,34 @@ export function AskPanel({
    * Written from `turns` rather than inside the updater, for the reason given
    * at `settle`: an updater must be pure.
    */
+  /**
+   * Applied changes as they were before, from each card's own before and
+   * after, for "put it back" (20 October 2026: review fixes moved balances
+   * that were right). A row edited again since is left alone and named.
+   */
+  const putBackRows = (cards: readonly Changing[]): { back: { before: Transaction; after: Transaction }[]; moved: string[] } => {
+    const byId = new Map(transactions.map((t) => [t.id, t] as const));
+    const keys = (a: Transaction, b: Transaction): (keyof Transaction)[] =>
+      (Object.keys({ ...a, ...b }) as (keyof Transaction)[]).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+    const back: { before: Transaction; after: Transaction }[] = [];
+    const moved: string[] = [];
+    for (const card of cards) {
+      for (const r of card.plan.rows) {
+        const now = byId.get(r.before.id);
+        if (!now || back.some((x) => x.before.id === now.id)) continue;
+        const fields = keys(r.before, r.after);
+        if (fields.some((k) => JSON.stringify(now[k]) !== JSON.stringify(r.after[k]))) {
+          moved.push(`#${String(now.recordNumber).padStart(4, "0")}`);
+          continue;
+        }
+        const original = { ...now } as Record<string, unknown>;
+        for (const k of fields) original[k] = r.before[k];
+        back.push({ before: now, after: original as unknown as Transaction });
+      }
+    }
+    return { back, moved };
+  };
+
   const decide = (index: number, state: "applied" | "discarded"): void => {
     const was = turns[index];
     if (was && (isChanging(was) || isBudgeting(was) || isExporting(was) || isSettling(was))) recordCard({ ...was, state });
@@ -6431,6 +6459,39 @@ export function AskPanel({
       );
       return;
     }
+    /*
+     * "My balance is off now", "undo the fixes": the review fixes applied
+     * here, put back exactly as they were, from each card's own before and
+     * after. 20 October 2026: the owner's Cash and Maya matched their real
+     * balances, and the fee fixes took PHP 52.00 and PHP 18.00 off them.
+     */
+    // Cards made before fixes carried their own heading count too: every change applied after the review answer.
+    const reviewAt = turns.reduce((at, t, i) => (t.kind === "assistant" && "text" in t && /flagged by the app's checks/.test((t as Said).text) ? i : at), -1);
+    const appliedFixes = turns
+      .map(current)
+      .filter((t, i): t is Changing => isChanging(t) && t.state === "applied" && (t.title !== undefined || t.group !== undefined || (reviewAt >= 0 && i > reviewAt)));
+    const wantsUndo =
+      /\b(?:undo|revert|put (?:it|them|those|these|everything|all) back|restore (?:it|them|my balances?|the balances?)|go back to (?:the )?(?:original|before))\b|\bba\w{0,3}nces?\b[^.?!]{0,30}\b(?:off|wrong|changed|incorrect|back)\b|\b(?:off|wrong)\b[^.?!]{0,20}\bba\w{0,3}nces?\b|\b(?:fix|correct|repair|return|ayusin)\w*\b[^.?!]{0,15}\bba\w{0,3}nces?\b/i.test(ruled);
+    if (files.length === 0 && !as && !pending && wantsUndo && appliedFixes.length > 0) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      const { back, moved } = putBackRows(appliedFixes);
+      if (back.length === 0) {
+        const words = moved.length > 0 ? `${moved.join(", ")} were edited again since the fixes, so they are left as they are. Open them in the Database to check them.` : "Nothing from the review fixes is left to put back: each entry already reads as it did before.";
+        say({ kind: "assistant", text: words, from: "this device" });
+        return;
+      }
+      const effect = editImpact(back, [...reference.wallets, ...reference.savings]);
+      say({
+        kind: "assistant",
+        text: `Sorry: those fixes moved money your real balances did not. Here they are put back exactly as they were before, ${back.length} ${back.length === 1 ? "entry" : "entries"}, in one press.${moved.length > 0 ? ` ${moved.join(", ")} ${moved.length === 1 ? "was" : "were"} edited again since and ${moved.length === 1 ? "is" : "are"} left as ${moved.length === 1 ? "it is" : "they are"}.` : ""}`,
+        from: "this device",
+      });
+      say({ kind: "change", plan: { rows: back, refused: [] }, state: "open", title: "Put the review fixes back", note: effect.words });
+      log(aiEvent("proposed", "add", { text: `Put back ${back.length} rows from the review fixes. Asked: ${note}` }));
+      return;
+    }
+
     const interest = !as && files.length === 0 ? interestFromBalance(lead, findable, (a) => walletBalance(transactions, a), talkedAbout) : null;
     if (interest) {
       const cap = Math.max(10_000, Math.floor(interest.told / 20));
@@ -6722,58 +6783,6 @@ export function AskPanel({
      * fix cards. The model said it could not fix rows from here and named
      * rows that were not on the list (20 October 2026).
      */
-    /*
-     * "My balance is off now", "undo the fixes": the review fixes applied
-     * here, put back exactly as they were, from each card's own before and
-     * after. 20 October 2026: the owner's Cash and Maya matched their real
-     * balances, and the fee fixes took PHP 52.00 and PHP 18.00 off them.
-     */
-    // Cards made before fixes carried their own heading count too: every change applied after the review answer.
-    const reviewAt = turns.reduce((at, t, i) => (t.kind === "assistant" && "text" in t && /flagged by the app's checks/.test((t as Said).text) ? i : at), -1);
-    const appliedFixes = turns
-      .map(current)
-      .filter((t, i): t is Changing => isChanging(t) && t.state === "applied" && (t.title !== undefined || t.group !== undefined || (reviewAt >= 0 && i > reviewAt)));
-    const wantsUndo =
-      /\b(?:undo|revert|put (?:it|them|those|these|everything|all) back|restore (?:it|them|my balances?|the balances?)|go back to (?:the )?(?:original|before))\b|\bba\w{0,3}nces?\b[^.?!]{0,30}\b(?:off|wrong|changed|incorrect)\b|\b(?:off|wrong)\b[^.?!]{0,20}\bba\w{0,3}nces?\b/i.test(ruled);
-    if (files.length === 0 && !as && !pending && wantsUndo && appliedFixes.length > 0) {
-      setDraft("");
-      say({ kind: "you", text: note });
-      const byId = new Map(transactions.map((t) => [t.id, t] as const));
-      const keys = (a: Transaction, b: Transaction): (keyof Transaction)[] =>
-        (Object.keys({ ...a, ...b }) as (keyof Transaction)[]).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
-      const back: { before: Transaction; after: Transaction }[] = [];
-      const moved: string[] = [];
-      for (const card of appliedFixes) {
-        for (const r of card.plan.rows) {
-          const now = byId.get(r.before.id);
-          if (!now || back.some((x) => x.before.id === now.id)) continue;
-          const fields = keys(r.before, r.after);
-          // Edited again since: left alone rather than overwritten.
-          if (fields.some((k) => JSON.stringify(now[k]) !== JSON.stringify(r.after[k]))) {
-            moved.push(`#${String(now.recordNumber).padStart(4, "0")}`);
-            continue;
-          }
-          const original = { ...now } as Record<string, unknown>;
-          for (const k of fields) original[k] = r.before[k];
-          back.push({ before: now, after: original as unknown as Transaction });
-        }
-      }
-      if (back.length === 0) {
-        const words = moved.length > 0 ? `${moved.join(", ")} were edited again since the fixes, so they are left as they are. Open them in the Database to check them.` : "Nothing from the review fixes is left to put back: each entry already reads as it did before.";
-        say({ kind: "assistant", text: words, from: "this device" });
-        return;
-      }
-      const effect = editImpact(back, [...reference.wallets, ...reference.savings]);
-      say({
-        kind: "assistant",
-        text: `Sorry: those fixes moved money your real balances did not. Here they are put back exactly as they were before, ${back.length} ${back.length === 1 ? "entry" : "entries"}, in one press.${moved.length > 0 ? ` ${moved.join(", ")} ${moved.length === 1 ? "was" : "were"} edited again since and ${moved.length === 1 ? "is" : "are"} left as ${moved.length === 1 ? "it is" : "they are"}.` : ""}`,
-        from: "this device",
-      });
-      say({ kind: "change", plan: { rows: back, refused: [] }, state: "open", title: "Put the review fixes back", note: effect.words });
-      log(aiEvent("proposed", "add", { text: `Put back ${back.length} rows from the review fixes. Asked: ${note}` }));
-      return;
-    }
-
     // Recent here, or a review list or fix card still in the conversation after a reload.
     const reviewRecent =
       (reviewAsked.current !== null && Date.now() - reviewAsked.current < 30 * 60_000) ||
@@ -8853,6 +8862,18 @@ export function AskPanel({
               }}
               onDiscard={() => decide(i, "discarded")}
               onOpen={(row) => sink.use(transactionToDraft(row))}
+              onPutBack={() => {
+                const { back, moved } = putBackRows([turn]);
+                if (back.length === 0) {
+                  say({ kind: "assistant", text: moved.length > 0 ? `${moved.join(", ")} ${moved.length === 1 ? "was" : "were"} edited again since, so ${moved.length === 1 ? "it is" : "they are"} left as ${moved.length === 1 ? "it is" : "they are"}.` : "Already as it was: nothing to put back.", from: "this device" });
+                  return;
+                }
+                sink.update(back.map((r) => r.after), { actor: "ai", via: "ai_chat" });
+                const effect = editImpact(back, [...reference.wallets, ...reference.savings]);
+                log(aiEvent("accepted", "add", { entry: `Put back ${back.map((r) => `#${String(r.before.recordNumber).padStart(4, "0")}`).join(", ")}` }));
+                decide(i, "discarded");
+                say({ kind: "assistant", text: `Put back as it was: ${back.map((r) => `#${String(r.before.recordNumber).padStart(4, "0")}`).join(", ")}. ${effect.words}${moved.length > 0 ? ` ${moved.join(", ")} edited again since, left as ${moved.length === 1 ? "it is" : "they are"}.` : ""}`, from: "this device" });
+              }}
             />
           ) : isBudgeting(turn) ? (
             <BudgetCard
@@ -10360,11 +10381,14 @@ function ChangeCard({
   onApply,
   onDiscard,
   onOpen,
+  onPutBack,
 }: {
   turn: Changing;
   onApply: () => void;
   onDiscard: () => void;
   onOpen: (row: Transaction) => void;
+  /** An applied change undone from its own card, any time later (`putBackRows`). */
+  onPutBack?: () => void;
 }) {
   const { plan, state } = turn;
   const number = (t: Transaction): string => `#${String(t.recordNumber).padStart(4, "0")}`;
@@ -10423,8 +10447,18 @@ function ChangeCard({
           </Button>
         </div>
       )}
+      {/* Applied and later found wrong: one press puts every entry back (20 October 2026). */}
+      {state === "applied" && onPutBack && (
+        <div className="fms-proposalactions">
+          <Button size="sm" onClick={onPutBack}>
+            Put it back as it was
+          </Button>
+        </div>
+      )}
       <p className="t-micro fms-proposalfrom">
-        A change keeps each entry's record number and goes in the activity trail. Undo is on the notice that appears when it is applied.
+        {state === "applied"
+          ? "Applied. Put it back as it was undoes it at any time, entry by entry, as long as the entry has not been edited since."
+          : "A change keeps each entry's record number and goes in the activity trail. Undo is on the notice that appears when it is applied."}
       </p>
     </div>
   );
