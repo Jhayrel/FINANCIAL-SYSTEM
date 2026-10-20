@@ -6460,6 +6460,35 @@ export function AskPanel({
       return;
     }
     /*
+     * "What do you recommend?", "what's this?", "should I apply it?" with a
+     * change card open just above: answered about that card. 20 October
+     * 2026: asked beside the put-back card, the model recommended a budget
+     * for November.
+     */
+    const openChange = [...turns].slice(-4).reverse().map(current).find((t): t is Changing => isChanging(t) && t.state === "open");
+    if (
+      files.length === 0 &&
+      !as &&
+      !pending &&
+      openChange &&
+      !/\d/.test(ruled) &&
+      /\b(?:what (?:do|d|would|should) (?:you|u|i) (?:recommend|suggest|do|press)|what should i do|should i (?:apply|press|click|accept|discard|do (?:it|this|that))|which (?:one|should)|what(?:'s| is|s)? (?:this|that|it)\b|whats this|what does (?:this|it|that) do|explain (?:this|it|that)|is (?:this|it|that) (?:safe|right|ok|okay|correct)|do i (?:apply|press|click))/i.test(ruled)
+    ) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      const ids = openChange.plan.rows.map((r) => `#${String(r.before.recordNumber).padStart(4, "0")}`).join(", ");
+      const effect = editImpact(openChange.plan.rows, [...reference.wallets, ...reference.savings]);
+      const fromTo = effect.wallets.map((w) => `${w.name} ${formatMoney(walletBalance(transactions, w.name))} → ${formatMoney(walletBalance(transactions, w.name) + w.change)}`).join(", ");
+      const putBack = openChange.title === "Put the review fixes back";
+      const reply = putBack
+        ? `It puts ${ids} back exactly as they were before the review fixes${fromTo ? `: ${fromTo}` : ""}. My recommendation: press **Apply** if ${effect.wallets.map((w) => `${w.name} really holds ${formatMoney(walletBalance(transactions, w.name) + w.change)}`).join(" and ") || "those are your real figures"}, which is what your balances were before the fixes. Nothing changes until you press it; Discard leaves everything as it is now.`
+        : `${openChange.title ? `${openChange.title}. ` : ""}It changes ${ids}${fromTo ? `: ${fromTo}` : ""}. ${effect.words}${openChange.onlyIf ? ` Apply it only if ${openChange.onlyIf}.` : ""} Nothing changes until you press Apply; Discard leaves everything as it is now.`;
+      say({ kind: "assistant", text: reply, from: "this device" });
+      log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+      return;
+    }
+
+    /*
      * "My balance is off now", "undo the fixes": the review fixes applied
      * here, put back exactly as they were, from each card's own before and
      * after. 20 October 2026: the owner's Cash and Maya matched their real
@@ -6482,12 +6511,14 @@ export function AskPanel({
         return;
       }
       const effect = editImpact(back, [...reference.wallets, ...reference.savings]);
+      // Where each balance stands now and where the card takes it, so the card says what pressing it does.
+      const fromTo = effect.wallets.map((w) => `${w.name} ${formatMoney(walletBalance(transactions, w.name))} → ${formatMoney(walletBalance(transactions, w.name) + w.change)}`).join(", ");
       say({
         kind: "assistant",
-        text: `Sorry: those fixes moved money your real balances did not. Here they are put back exactly as they were before, ${back.length} ${back.length === 1 ? "entry" : "entries"}, in one press.${moved.length > 0 ? ` ${moved.join(", ")} ${moved.length === 1 ? "was" : "were"} edited again since and ${moved.length === 1 ? "is" : "are"} left as ${moved.length === 1 ? "it is" : "they are"}.` : ""}`,
+        text: `Sorry: those fixes moved money your real balances did not. Press **Apply ${back.length === 1 ? "the change" : `${back.length} changes`}** on the card below to put ${back.length === 1 ? "it" : "them"} back exactly as before${fromTo ? `: ${fromTo}` : ""}. Discard leaves everything as it is now.${moved.length > 0 ? ` ${moved.join(", ")} ${moved.length === 1 ? "was" : "were"} edited again since and ${moved.length === 1 ? "is" : "are"} left as ${moved.length === 1 ? "it is" : "they are"}.` : ""}`,
         from: "this device",
       });
-      say({ kind: "change", plan: { rows: back, refused: [] }, state: "open", title: "Put the review fixes back", note: effect.words });
+      say({ kind: "change", plan: { rows: back, refused: [] }, state: "open", title: "Put the review fixes back", note: `${fromTo ? `Balances: ${fromTo}. ` : ""}${effect.words}` });
       log(aiEvent("proposed", "add", { text: `Put back ${back.length} rows from the review fixes. Asked: ${note}` }));
       return;
     }
