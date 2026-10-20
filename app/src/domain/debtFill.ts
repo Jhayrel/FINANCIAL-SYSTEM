@@ -43,6 +43,8 @@ const NOT_A_NAME = new Set([
   "this", "next", "week", "month", "already", "just", "also", "all", "half", "full", "rest", "interest", "fee",
   "fees", "lent", "lend", "paid", "pay", "borrowed", "borrow", "gave", "sent", "returned", "collected", "owe",
   "owes", "owed", "will", "going", "later", "sa", "ng", "ang", "ko", "kay", "ni", "mga", "po",
+  // How it was paid, never who: "to Tita using cash" was read as "Tita Using" (20 October 2026).
+  "using", "via", "thru", "through", "gamit", "gcash", "maya",
 ]);
 
 const cap = (w: string): string => w.charAt(0).toUpperCase() + w.slice(1);
@@ -77,13 +79,12 @@ export function personIn(text: string, accounts: readonly string[]): string | nu
   const byOwe = fits(owe?.[1]);
   if (byOwe) return byOwe;
 
-  for (const m of text.matchAll(/\b(?:to|from|kay|ni|for)\s+(?:my\s+|ate\s+|kuya\s+|tita\s+|tito\s+)?([a-z][a-z'-]*)/gi)) {
-    const found = fits(m[1]);
-    if (found) {
-      // "kuya", "ate", "tita" are how a person is named here, and are kept as the name.
-      const title = /\b(?:to|from|kay|ni|for)\s+(ate|kuya|tita|tito)\s+/i.exec(m[0]);
-      return title?.[1] ? `${cap(title[1])} ${found}` : found;
-    }
+  for (const m of text.matchAll(/\b(?:to|from|kay|ni|for)\s+(?:my\s+)?(?:(ate|kuya|tita|tito)\s+)?([a-z][a-z'-]*)/gi)) {
+    const found = fits(m[2]);
+    // "kuya", "ate", "tita" are how a person is named here, and are kept as the name.
+    if (found) return m[1] ? `${cap(m[1])} ${found}` : found;
+    // "to Tita using cash": the title alone is the person.
+    if (m[1]) return cap(m[1]);
   }
   const titled = /\b(kuya|ate|tita|tito|lola|lolo|mama|papa|nanay|tatay|mom|dad|mother|father)\b/i.exec(text);
   return titled?.[1] ? cap(titled[1]) : null;
@@ -110,19 +111,25 @@ export function fillDebt(
 
   if (!next.debtId) {
     const person = personIn(text, [...accounts, ...live.filter((d) => d.counterpartyType !== "person").map((d) => d.name)]);
-    const byName = person
-      ? live.find((d) => {
-          const name = d.name.trim().toLowerCase();
-          const said = person.toLowerCase();
-          return (
-            name === said ||
-            name.split(/[^a-z0-9]+/).includes(said) ||
-            said.split(" ").includes(name) ||
-            // "papa" is Father: what the family calls them names them too.
-            (d.counterpartyType === "person" && namesPerson(person, d.name))
-          );
-        })
-      : undefined;
+    const named = (d: Debt): boolean => {
+      const name = d.name.trim().toLowerCase();
+      const who = (d.counterparty ?? "").trim().toLowerCase();
+      const said = person!.toLowerCase();
+      return (
+        name === said ||
+        who === said ||
+        name.split(/[^a-z0-9]+/).includes(said) ||
+        said.split(" ").includes(name) ||
+        // "papa" is Father: what the family calls them names them too.
+        (d.counterpartyType === "person" && namesPerson(person!, d.name))
+      );
+    };
+    /*
+     * An archived line named outright is that line: saving reopens it, with
+     * its history (App's `reopened`). "I paid 1000 to PNB loan" asked which
+     * debt, and "lent 300 to Tita" offered a second Tita (20 October 2026).
+     */
+    const byName = person ? (live.find(named) ?? debts.find((d) => d.archived && named(d))) : undefined;
 
     if (byName && (!next.behalf || byName.form === "pass-through")) {
       // Someone on the list for money on their behalf makes the card On behalf, on their side.

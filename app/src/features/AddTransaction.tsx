@@ -918,6 +918,8 @@ export function AddTransaction({
           : d.form !== "pass-through")),
   );
   const selectedDebt = debts.find((d) => d.id === draft.debtId);
+  /** The Debt dropdown: every loan and credit line, archived ones too (they reopen when an entry saves). */
+  const debtChoices = debts.filter((d) => d.form !== "pass-through" && d.name.trim() !== "");
   /**
    * Everyone money is paid, sent or held for, once each by name, with their
    * line on each side and what is left on it. One person can have both: a
@@ -1008,7 +1010,7 @@ export function AddTransaction({
         required
         error={errorFor("debt")}
         aside={
-          draft.behalf && known ? undefined : onAddDebt && newPerson === null && known ? (
+          draft.behalf && known ? undefined : draft.behalf && onAddDebt && newPerson === null && known ? (
             <button
               type="button"
               className="t-micro fms-linkbtn"
@@ -1176,11 +1178,11 @@ export function AddTransaction({
                     : "A person. Banks, credit lines and bank loans are added in Settings, under Credit and loans."}
             </p>
           </div>
-        ) : draft.behalf && behalfPeople.length > 0 ? null : debtOptions.length === 0 ? (
+        ) : draft.behalf && behalfPeople.length > 0 ? null : debtOptions.length === 0 && debtChoices.length === 0 ? (
           <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
             Nothing to file this against yet. Add a bank loan or credit line in Settings, under Credit and loans.
           </p>
-        ) : (
+        ) : draft.behalf ? (
           <Select
             value={selectedDebt?.name ?? ""}
             onChange={(name) =>
@@ -1190,23 +1192,66 @@ export function AddTransaction({
               })
             }
             options={debtOptions.map((d) => d.name)}
-            details={Object.fromEntries(
-              debtOptions.map((d) => {
-                // A limited line says what is left to borrow too, so a borrowing past it is seen before it is typed.
-                const room = creditRoom(d, transactions, draft.date || asOf);
-                const left = outstandingOf(transactions, d.id);
-                // Past zero reads as the extra, never as a minus owed: "-PHP 1.00 owed to you" confused the owner (13 October 2026).
-                const said =
-                  left < 0
-                    ? `${formatMoney(-left)} extra ${d.kind === "payable" ? "given" : "given back"}`
-                    : `${formatMoney(left)} ${d.form === "pass-through" ? (d.kind === "payable" ? "held" : "owed to you") : d.kind === "payable" ? "owed" : "owed to you"}`;
-                return [d.name, `${said}${room ? `, ${formatMoney(room.available)} left to borrow` : ""}`];
-              }),
-            )}
-            placeholder={draft.behalf ? "Pick a person" : "Pick a debt"}
-            ariaLabel={draft.behalf ? "Which person" : "Which debt"}
+            placeholder="Pick a person"
+            ariaLabel="Which person"
             invalid={Boolean(errorFor("debt"))}
           />
+        ) : (() => {
+          /*
+           * Every loan and credit line in one dropdown, as On behalf lists its
+           * people: what is owed now, what is owed to you, what is paid off,
+           * what is archived (picking it reopens it when the entry saves, with
+           * its history), and a new personal loan last. Archived loans could
+           * not be picked at all (20 October 2026).
+           */
+          const NEW = "New personal loan";
+          const leftOf = (d: Debt): Centavos => outstandingOf(transactions, d.id);
+          const statusOf = (d: Debt): string => {
+            if (d.archived) return "archived, reopens";
+            const left = leftOf(d);
+            const room = creditRoom(d, transactions, draft.date || asOf);
+            // Past zero reads as the extra, never as a minus owed: "-PHP 1.00 owed to you" confused the owner (13 October 2026).
+            const said =
+              left === 0
+                ? "paid off"
+                : left < 0
+                  ? `${formatMoney(-left)} extra ${d.kind === "payable" ? "given" : "given back"}`
+                  : `${formatMoney(left)} ${d.kind === "payable" ? "owed" : "owed to you"}`;
+            return `${said}${room ? `, ${formatMoney(room.available)} left to borrow` : ""}`;
+          };
+          const groupOf = (d: Debt): string =>
+            d.archived ? "Archived" : leftOf(d) === 0 ? "Paid off" : d.kind === "receivable" ? "Owed to you" : "You owe";
+          const rank = (d: Debt): number => ({ "You owe": 0, "Owed to you": 1, "Paid off": 2, Archived: 3 })[groupOf(d)] ?? 4;
+          const listed = [...debtChoices].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+          return (
+            <Select
+              value={selectedDebt?.name ?? ""}
+              onChange={(name) => {
+                if (name === NEW) {
+                  setNewPerson("");
+                  setDraft((d) => ({ ...d, debtId: undefined }));
+                  return;
+                }
+                setNewPerson(null);
+                setPersonKind(null);
+                setDraft((d) => {
+                  const debt = listed.find((x) => x.name === name);
+                  return debt ? pickDebt(d, debt) : { ...d, debtId: undefined };
+                });
+              }}
+              options={[...listed.map((d) => d.name), ...(onAddDebt ? [NEW] : [])]}
+              details={Object.fromEntries(listed.map((d) => [d.name, statusOf(d)]))}
+              groups={{ ...Object.fromEntries(listed.map((d) => [d.name, groupOf(d)])), [NEW]: "Add" }}
+              placeholder="Pick a debt"
+              ariaLabel="Which debt"
+              invalid={Boolean(errorFor("debt"))}
+            />
+          );
+        })()}
+        {!draft.behalf && selectedDebt?.archived && newPerson === null && (
+          <p className="t-micro" style={{ margin: 0, color: "var(--ink-3)" }}>
+            {selectedDebt.name} is archived. Saving this reopens it, with everything recorded before.
+          </p>
         )}
       </Field>
     );

@@ -275,7 +275,7 @@ import { discardedWords } from "../domain/discarded";
 import { outlookFor } from "../domain/outlook";
 import { withCommandWordsFixed } from "../domain/typos";
 import { asksForWrongRows, asksWhetherToDelete, flaggedRows } from "../domain/integrity";
-import { reviewFixes } from "../domain/reviewFixes";
+import { consistentRow, reviewFixes } from "../domain/reviewFixes";
 import { editImpact } from "../domain/editImpact";
 
 /**
@@ -2218,12 +2218,15 @@ export function AskPanel({
         if (!now || back.some((x) => x.before.id === now.id)) continue;
         const fields = keys(r.before, r.after);
         if (fields.some((k) => JSON.stringify(now[k]) !== JSON.stringify(r.after[k]))) {
-          moved.push(`#${String(now.recordNumber).padStart(4, "0")}`);
+          if (!fields.every((k) => JSON.stringify(now[k]) === JSON.stringify(r.before[k]))) moved.push(`#${String(now.recordNumber).padStart(4, "0")}`);
           continue;
         }
+        // Already back as it was: nothing to do and nothing to say.
+        if (fields.every((k) => JSON.stringify(now[k]) === JSON.stringify(r.before[k]))) continue;
         const original = { ...now } as Record<string, unknown>;
         for (const k of fields) original[k] = r.before[k];
-        back.push({ before: now, after: original as unknown as Transaction });
+        // In the shape the database takes, every wallet moved as before (`consistentRow`).
+        back.push({ before: now, after: consistentRow(original as unknown as Transaction) });
       }
     }
     return { back, moved };
@@ -6498,7 +6501,8 @@ export function AskPanel({
     const reviewAt = turns.reduce((at, t, i) => (t.kind === "assistant" && "text" in t && /flagged by the app's checks/.test((t as Said).text) ? i : at), -1);
     const appliedFixes = turns
       .map(current)
-      .filter((t, i): t is Changing => isChanging(t) && t.state === "applied" && (t.title !== undefined || t.group !== undefined || (reviewAt >= 0 && i > reviewAt)));
+      // A put-back card is never itself put back: that would apply the fixes again.
+      .filter((t, i): t is Changing => isChanging(t) && t.state === "applied" && t.title !== "Put the review fixes back" && (t.title !== undefined || t.group !== undefined || (reviewAt >= 0 && i > reviewAt)));
     const wantsUndo =
       /\b(?:undo|revert|put (?:it|them|those|these|everything|all) back|restore (?:it|them|my balances?|the balances?)|go back to (?:the )?(?:original|before))\b|\bba\w{0,3}nces?\b[^.?!]{0,30}\b(?:off|wrong|changed|incorrect|back)\b|\b(?:off|wrong)\b[^.?!]{0,20}\bba\w{0,3}nces?\b|\b(?:fix|correct|repair|return|ayusin)\w*\b[^.?!]{0,15}\bba\w{0,3}nces?\b/i.test(ruled);
     if (files.length === 0 && !as && !pending && wantsUndo && appliedFixes.length > 0) {

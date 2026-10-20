@@ -94,6 +94,16 @@ export function reviewFixes(
       const t = byId.get(id);
       if (!t || fixed.has(id)) continue;
       const counted = { before: t, after: { ...t, total: t.amount + t.fee } };
+      // Balances as they are, first: a notes-only "keep" would be refused by the database for this row too.
+      const asTheyAre = consistentRow(t);
+      if (asTheyAre.fee !== t.fee) {
+        fixes.push({
+          rows: [{ before: t, after: asTheyAre }],
+          group: t.id,
+          title: `${no(t)}: keep the balances as they are`,
+          words: `${no(t)}: saved with a ${formatMoney(asTheyAre.fee)} fee, so its total is its amount plus its fee and every wallet reads as now. ${walletEffects([{ before: t, after: asTheyAre }], context.wallets)}`,
+        });
+      }
       fixes.push({
         rows: [counted],
         group: t.id,
@@ -101,7 +111,7 @@ export function reviewFixes(
         words: `${no(t)}: its ${formatMoney(t.fee)} fee counted in its total, ${formatMoney(t.amount + t.fee)} in all. ${walletEffects([counted], context.wallets)}`,
         onlyIf: `the ${formatMoney(t.fee)} fee was charged`,
       });
-      if (t.fee > 0) {
+      if (t.fee > 0 && asTheyAre.fee !== 0) {
         // A move between their own accounts with no fee carries no item, as the form saves it.
         const plain = t.type === "Transfer" && t.toWallet.trim() !== "" && t.item.trim().toLowerCase() === "transaction fee";
         const noFee = { before: t, after: { ...t, fee: 0, total: t.amount, ...(plain ? { item: "", category: "" } : {}) } as Transaction };
@@ -213,7 +223,9 @@ export function reviewFixes(
       group,
       ...(where ? { onlyIf: `${fix.onlyIf ? `${fix.onlyIf}, and ` : ""}${where}` } : {}),
     };
-    if (!seenGroups.has(group)) {
+    // A row the database refuses as it is cannot be kept by a note: its own balance-keeping fix leads instead.
+    const refusedAsIs = fix.rows.some((r) => r.before.total !== r.before.amount + r.before.fee);
+    if (!seenGroups.has(group) && !refusedAsIs) {
       seenGroups.add(group);
       const rows = fix.rows.map((r) => ({ before: r.before, after: { ...r.before, notes: [r.before.notes.trim(), KEPT_NOTE].filter(Boolean).join(" ") } }));
       ordered.push({
@@ -243,4 +255,23 @@ function clearsWithoutNew(
   const stillThere = after.some((i) => i.code === issue.code && i.message.split(" closed ")[0] === issue.message.split(" closed ")[0] && i.ids.some((id) => issue.ids.includes(id)));
   const fresh = after.some((i) => !had.has(key(i)));
   return !stillThere && !fresh;
+}
+
+/**
+ * A row as the database will take it, moving every wallet as it did before.
+ *
+ * The database accepts a row only when its total is its amount plus its fee
+ * (`firestore.rules`). A row imported with a fee outside its total (#3818:
+ * PHP 1,000.00 with an PHP 18.00 fee, total PHP 1,000.00) could not be put
+ * back as it was: the write was refused and Maya stayed PHP 18.00 short (20
+ * October 2026). The wallet it left is moved by the total and the one it
+ * reached by the amount, so the fee is set to what the total says, and a move
+ * between the owner's own accounts with no fee carries no fee item.
+ */
+export function consistentRow(t: Transaction): Transaction {
+  if (t.total === t.amount + t.fee) return t;
+  const fee = Math.max(0, t.total - t.amount);
+  const amount = t.total - fee;
+  const plain = fee === 0 && t.type === "Transfer" && t.toWallet.trim() !== "" && t.item.trim().toLowerCase() === "transaction fee";
+  return { ...t, amount, fee, total: amount + fee, ...(plain ? { item: "", category: "" } : {}) } as Transaction;
 }

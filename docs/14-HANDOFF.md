@@ -1470,6 +1470,25 @@ on trust.
   notice per Apply names every entry ("Edited #3817 and 2 more"); a total
   changed alone is named, and the Edit form no longer skips saving it.
 
+### 2026-10-20, later: put-back refused by the database; loans like On behalf
+
+- The put-back of #3818 was refused: `firestore.rules` takes a row only when
+  total equals amount plus fee, and the imported original (PHP 1,000.00 with
+  an PHP 18.00 fee, total PHP 1,000.00) breaks it. `consistentRow` writes
+  such a row with the fee its total implies, which moves every wallet as
+  before (#3818: no fee, Maya and Cash as the owner had them). The put-back
+  skips rows already back and never puts back a put-back card. On the 20
+  October backup this gives Cash 594.00, Gcash 751.00, Maya 302.46.
+- A total that leaves out its fee is offered "keep the balances as they
+  are" first (the same `consistentRow`); a notes-only keep would be refused.
+- "fix my balance" puts the fixes back (before Find the difference); every
+  applied change card has "Put it back as it was"; a question asked with a
+  card open ("what do you recommend?") is answered about the card.
+- Debt in the form is one grouped dropdown like On behalf: You owe, Owed to
+  you, Paid off, Archived (reopens on save), New personal loan. The chat
+  matches an archived line named outright ("paid 1000 to PNB loan") and a
+  person named by title alone ("lent 300 to Tita using cash").
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
