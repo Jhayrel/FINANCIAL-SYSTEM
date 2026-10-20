@@ -155,7 +155,13 @@ function figuresIn(said: string, reference?: ReferenceLists): number[] {
       text = text.replace(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), " ");
     }
   }
-  const found = text.match(/\d[\d,]*(?:\.\d{1,2})?/g) ?? [];
+  /*
+   * A message that marks its money (PHP239.00, ₱239, P239) says which figures
+   * are money: the rest are names and numbers. "You paid PHP239.00 at
+   * MICROSOFT*MICROSOFT 365" was told "You wrote PHP 365.00" (20 October 2026).
+   */
+  const marked = [...text.matchAll(/(?:\bphp|₱|\bp)\s?(\d[\d,]*(?:\.\d{1,2})?)/gi)].map((m) => m[1] ?? "");
+  const found = marked.length > 0 ? marked : (text.match(/\d[\d,]*(?:\.\d{1,2})?/g) ?? []);
   return found
     .map(centavosIn)
     .filter((c): c is number => c !== null)

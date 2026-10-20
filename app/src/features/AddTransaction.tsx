@@ -1257,8 +1257,13 @@ export function AddTransaction({
     );
   };
 
-  /** One debt open: choosing Debt picks it, since there is nothing to choose between. */
-  const onlyDebt = debtOptions.length === 1 ? debtOptions[0] : undefined;
+  /**
+   * One debt open: choosing Debt picks it, since there is nothing to choose
+   * between. Not a line that is paid off: with archived loans and a new one
+   * in the same dropdown, "Maya Credit, paid off" came up already chosen
+   * (20 October 2026).
+   */
+  const onlyDebt = debtOptions.length === 1 && outstandingOf(transactions, debtOptions[0]!.id) !== 0 ? debtOptions[0] : undefined;
   useEffect(() => {
     /*
      * Not while a person is being added, and not when the movement already

@@ -45,6 +45,17 @@ describe("the figure in the sentence against the figure that was read", () => {
     expect(v.confidence).toBe("low");
   });
 
+  it("counts only the marked money when a message marks it", () => {
+    // A bank text: the 365 is in the merchant's name (20 October 2026). Invented reference numbers.
+    const v = verifyReading(
+      spending({ amount: 23900, category: "Subscriptions", item: "Spotify", fromWallet: "Maya" }),
+      "Success! You paid PHP239.00 at MICROSOFT*MICROSOFT 365 P. Maya account: 111111******0000. Ref. No. 123456789012",
+      reference,
+      ASOF,
+    );
+    expect(v.findings.filter((f) => f.check === "figure")).toHaveLength(0);
+  });
+
   it("stays quiet when the figures agree", () => {
     const v = verifyReading(spending(), "I paid 500 for food from gcash", reference, ASOF);
     expect(v.findings.filter((f) => f.check === "figure")).toHaveLength(0);

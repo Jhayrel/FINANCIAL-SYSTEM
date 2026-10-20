@@ -69,6 +69,7 @@ import {
   getYear,
   lastOfMonth,
   makeDate,
+  MONTH_NAMES,
   MONTH_NAMES_SHORT,
   monthName,
 } from "../domain/dates";
@@ -844,6 +845,20 @@ export function Insights({
               : `By ${BUCKET_WORD[bucket]}. Tap one to read it and narrow everything to it.`}
           </span>
         </div>
+        {/*
+          A month picked on the year's chart opens as the Dashboard opens it:
+          its calendar, its day and range picks and its brief. Here it only
+          narrowed the panel, and the owner found the month's view only by
+          going through the Dashboard (20 October 2026).
+        */}
+        {bucket === "month" && picked && picked.start.slice(0, 7) === picked.end.slice(0, 7) && (
+          <Button
+            size="sm"
+            onClick={() => setPeriod({ kind: "month", year: Number(picked.start.slice(0, 4)), month: Number(picked.start.slice(5, 7)) })}
+          >
+            Open {MONTH_NAMES[Number(picked.start.slice(5, 7)) - 1]} {picked.start.slice(0, 4)}
+          </Button>
+        )}
       </div>
       <div className="fms-ical-chartbox">
         {/*
