@@ -6009,6 +6009,19 @@ button.fms-recent-row:disabled {
   overflow-wrap: anywhere;
 }
 
+/* A fix card's own explanation, and the condition that makes it right. */
+.fms-changenote {
+  margin: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.fms-changeonlyif {
+  margin: 0;
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
+
 /* What saving an edit does to the money, under the list of changes (`editImpact.ts`). */
 .fms-changes-effect {
   margin: var(--space-2) 0 0;

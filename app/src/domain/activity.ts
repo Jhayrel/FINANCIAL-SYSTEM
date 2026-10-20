@@ -142,6 +142,8 @@ export function changedFields(before: Transaction, after: Transaction): string[]
     "description",
     "amount",
     "fee",
+    // The saved total alone: "open it in Edit and save" put #3818's right and was skipped as unchanged (20 October 2026).
+    "total",
     "notes",
     "status",
   ] as const;
@@ -189,7 +191,9 @@ export function updated(
   after: Transaction,
   by: Provenance = BY_OWNER,
 ): ActivityEvent {
-  const changed = changedFields(before, after);
+  // The total is named only when it changed alone: beside the amount or fee it says nothing new.
+  const all = changedFields(before, after);
+  const changed = all.includes("amount") || all.includes("fee") ? all.filter((f) => f !== "total") : all;
   return build(
     "transaction.update",
     by,

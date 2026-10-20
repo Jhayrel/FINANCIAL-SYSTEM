@@ -276,6 +276,7 @@ import { outlookFor } from "../domain/outlook";
 import { withCommandWordsFixed } from "../domain/typos";
 import { asksForWrongRows, asksWhetherToDelete, flaggedRows } from "../domain/integrity";
 import { reviewFixes } from "../domain/reviewFixes";
+import { editImpact } from "../domain/editImpact";
 
 /**
  * What the panel is allowed to do with a proposal.
@@ -370,6 +371,11 @@ interface Changing {
   readonly state: "open" | "applied" | "discarded";
   /** Fixes of one row that exclude each other: applying one sets the others aside. */
   readonly group?: string;
+  /** A fix's own heading and what it does, said inside the card rather than in a message above it. */
+  readonly title?: string;
+  readonly note?: string;
+  /** What must be true for it to be right, shown apart. */
+  readonly onlyIf?: string;
   /** Stable across a refresh. See `DebtChoice.cardId`. Given by `say` when missing. */
   readonly cardId?: string;
   /**
@@ -768,6 +774,9 @@ function turnFromCard(card: StoredCard): Turn {
       state: settled(card.state),
       cardId: card.id,
       ...(typeof data["group"] === "string" ? { group: data["group"] } : {}),
+      ...(typeof data["title"] === "string" ? { title: data["title"] } : {}),
+      ...(typeof data["note"] === "string" ? { note: data["note"] } : {}),
+      ...(typeof data["onlyIf"] === "string" ? { onlyIf: data["onlyIf"] } : {}),
       restored: {
         rows: list<StoredChange["rows"][number]>(data["rows"]).filter((r) => r && typeof r.id === "string"),
         refused: list<StoredChange["refused"][number]>(data["refused"]).filter((r) => r && typeof r.id === "string"),
@@ -928,7 +937,19 @@ function storedFrom(turn: Turn): StoredCard | null {
             refused: turn.plan.refused.map((r) => ({ id: r.row.id, reason: r.reason })),
           }
         : (turn.restored ?? { rows: [], refused: [] });
-    return { id: turn.cardId, kind: "change", state: turn.state, draft: {}, data: { ...change, ...(turn.group !== undefined ? { group: turn.group } : {}) } };
+    return {
+      id: turn.cardId,
+      kind: "change",
+      state: turn.state,
+      draft: {},
+      data: {
+        ...change,
+        ...(turn.group !== undefined ? { group: turn.group } : {}),
+        ...(turn.title ? { title: turn.title } : {}),
+        ...(turn.note ? { note: turn.note } : {}),
+        ...(turn.onlyIf ? { onlyIf: turn.onlyIf } : {}),
+      },
+    };
   }
 
   if (isBudgeting(turn)) {
@@ -6701,10 +6722,64 @@ export function AskPanel({
      * fix cards. The model said it could not fix rows from here and named
      * rows that were not on the list (20 October 2026).
      */
+    /*
+     * "My balance is off now", "undo the fixes": the review fixes applied
+     * here, put back exactly as they were, from each card's own before and
+     * after. 20 October 2026: the owner's Cash and Maya matched their real
+     * balances, and the fee fixes took PHP 52.00 and PHP 18.00 off them.
+     */
+    // Cards made before fixes carried their own heading count too: every change applied after the review answer.
+    const reviewAt = turns.reduce((at, t, i) => (t.kind === "assistant" && "text" in t && /flagged by the app's checks/.test((t as Said).text) ? i : at), -1);
+    const appliedFixes = turns
+      .map(current)
+      .filter((t, i): t is Changing => isChanging(t) && t.state === "applied" && (t.title !== undefined || t.group !== undefined || (reviewAt >= 0 && i > reviewAt)));
+    const wantsUndo =
+      /\b(?:undo|revert|put (?:it|them|those|these|everything|all) back|restore (?:it|them|my balances?|the balances?)|go back to (?:the )?(?:original|before))\b|\bba\w{0,3}nces?\b[^.?!]{0,30}\b(?:off|wrong|changed|incorrect)\b|\b(?:off|wrong)\b[^.?!]{0,20}\bba\w{0,3}nces?\b/i.test(ruled);
+    if (files.length === 0 && !as && !pending && wantsUndo && appliedFixes.length > 0) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      const byId = new Map(transactions.map((t) => [t.id, t] as const));
+      const keys = (a: Transaction, b: Transaction): (keyof Transaction)[] =>
+        (Object.keys({ ...a, ...b }) as (keyof Transaction)[]).filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+      const back: { before: Transaction; after: Transaction }[] = [];
+      const moved: string[] = [];
+      for (const card of appliedFixes) {
+        for (const r of card.plan.rows) {
+          const now = byId.get(r.before.id);
+          if (!now || back.some((x) => x.before.id === now.id)) continue;
+          const fields = keys(r.before, r.after);
+          // Edited again since: left alone rather than overwritten.
+          if (fields.some((k) => JSON.stringify(now[k]) !== JSON.stringify(r.after[k]))) {
+            moved.push(`#${String(now.recordNumber).padStart(4, "0")}`);
+            continue;
+          }
+          const original = { ...now } as Record<string, unknown>;
+          for (const k of fields) original[k] = r.before[k];
+          back.push({ before: now, after: original as unknown as Transaction });
+        }
+      }
+      if (back.length === 0) {
+        const words = moved.length > 0 ? `${moved.join(", ")} were edited again since the fixes, so they are left as they are. Open them in the Database to check them.` : "Nothing from the review fixes is left to put back: each entry already reads as it did before.";
+        say({ kind: "assistant", text: words, from: "this device" });
+        return;
+      }
+      const effect = editImpact(back, [...reference.wallets, ...reference.savings]);
+      say({
+        kind: "assistant",
+        text: `Sorry: those fixes moved money your real balances did not. Here they are put back exactly as they were before, ${back.length} ${back.length === 1 ? "entry" : "entries"}, in one press.${moved.length > 0 ? ` ${moved.join(", ")} ${moved.length === 1 ? "was" : "were"} edited again since and ${moved.length === 1 ? "is" : "are"} left as ${moved.length === 1 ? "it is" : "they are"}.` : ""}`,
+        from: "this device",
+      });
+      say({ kind: "change", plan: { rows: back, refused: [] }, state: "open", title: "Put the review fixes back", note: effect.words });
+      log(aiEvent("proposed", "add", { text: `Put back ${back.length} rows from the review fixes. Asked: ${note}` }));
+      return;
+    }
+
     // Recent here, or a review list or fix card still in the conversation after a reload.
     const reviewRecent =
       (reviewAsked.current !== null && Date.now() - reviewAsked.current < 30 * 60_000) ||
-      turns.slice(-20).some((t) => (isFound(t) && t.review === true) || (isChanging(t) && t.group !== undefined));
+      turns.slice(-20).some((t) => (isFound(t) && t.review === true) || (isChanging(t) && t.group !== undefined)) ||
+      // "FIX THIS" straight after an answer about the flagged rows, the model's included.
+      turns.slice(-4).some((t) => t.kind === "assistant" && "text" in t && /\bneeds review\b|\bflagged\b/i.test((t as Said).text));
     const reviewFollow =
       reviewRecent &&
       /\b(?:fix\w*|what to do|implement|click|re-?add|re-?enter|edit what|how (?:do i|to|can i)|do (?:it|that|them)|apply|ayusin)\b/i.test(ruled) &&
@@ -6783,22 +6858,23 @@ export function AskPanel({
             ? `${advice} ${count}`
             : `${count} Each says what is wrong with it and what to do.`,
         fixing
-          ? `Do not re-enter them: that would count the money twice. Each fix below edits the entry itself and keeps its record number. Press **Apply** on the ones that are true; nothing changes until you do, and Undo is on the notice after.${ready.leftAfter === 0 ? " With them applied, Needs review is empty." : ""}`
+          ? "Do not re-enter them: that would count the money twice. Check your real balances first. If they already match what the app shows, press **Keep** on each card: nothing moves, and Needs review stops listing them. Apply a fix only if it is true, and only one that moves money once you have checked that balance: each card says where it ends up. Nothing changes until you press, and Undo is on the notice after."
           : "",
       ]
         .filter(Boolean)
         .join(" ");
       say({ kind: "assistant", text: reply, from: "this device" });
-      const groups = new Set<string>();
+      // One card per fix, its heading, what it does and when it is right inside it: no message above each (20 October 2026, "the UI is messy").
       for (const fix of ready.fixes) {
-        const twin = fix.group !== undefined && groups.has(fix.group);
-        if (fix.group !== undefined) groups.add(fix.group);
         say({
-          kind: "assistant",
-          text: `${twin ? "Or, " : ""}${fix.words}${fix.onlyIf ? ` Apply this only if ${fix.onlyIf}.` : ""}`,
-          from: "this device",
+          kind: "change",
+          plan: { rows: fix.rows, refused: [] },
+          state: "open",
+          title: fix.title,
+          note: fix.words.replace(/^[^:]*#\d{4}[^:]*:\s*/, ""),
+          ...(fix.onlyIf ? { onlyIf: fix.onlyIf } : {}),
+          ...(fix.group !== undefined ? { group: fix.group } : {}),
         });
-        say({ kind: "change", plan: { rows: fix.rows, refused: [] }, state: "open", ...(fix.group !== undefined ? { group: fix.group } : {}) });
       }
       const rest = fixing ? flagged.filter((f) => ready.unfixed.some((u) => u.row.id === f.row.id)) : flagged;
       if (rest.length > 0) {
@@ -10296,12 +10372,14 @@ function ChangeCard({
     <div className="fms-proposal">
       <div className="fms-proposalhead">
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
-          {plan.rows.length === 1 ? "Change one entry" : `Change ${plan.rows.length} entries`}
+          {turn.title ?? (plan.rows.length === 1 ? "Change one entry" : `Change ${plan.rows.length} entries`)}
         </span>
         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
           {state === "applied" ? "changed" : state === "discarded" ? "left as it was" : "nothing is changed yet"}
         </span>
       </div>
+      {turn.note && <p className="t-caption fms-changenote">{turn.note}</p>}
+      {turn.onlyIf && state === "open" && <p className="t-caption fms-changeonlyif">Apply this only if {turn.onlyIf}.</p>}
       <ul className="fms-changelist">
         {plan.rows.map((r) => (
           <li key={r.before.id} className="fms-changerow">
@@ -10332,7 +10410,13 @@ function ChangeCard({
       {state === "open" && (
         <div className="fms-proposalactions">
           <Button size="sm" variant="primary" onClick={onApply}>
-            {plan.rows.length === 1 ? "Apply the change" : `Apply ${plan.rows.length} changes`}
+            {turn.title && /^keep|: keep it as it is$/i.test(turn.title)
+              ? plan.rows.length === 1
+                ? "Keep it as it is"
+                : "Keep them as they are"
+              : plan.rows.length === 1
+                ? "Apply the change"
+                : `Apply ${plan.rows.length} changes`}
           </Button>
           <Button size="sm" onClick={onDiscard}>
             Discard

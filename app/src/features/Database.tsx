@@ -670,7 +670,9 @@ export function Database({
             message={
               query
                 ? `No results for “${query}”. Check the spelling or clear the filters.`
-                : "Nothing matches these filters."
+                : filter === "flagged"
+                  ? "Nothing needs review: every check passes. Clear the filters to see every entry."
+                  : "Nothing matches these filters."
             }
             action={
               (query || filter !== "all" || period !== "all") && (

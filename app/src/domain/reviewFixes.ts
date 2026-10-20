@@ -17,7 +17,7 @@
 import { walletDelta } from "./balances";
 import { editImpact } from "./editImpact";
 import { addDays, formatMedium } from "./dates";
-import { actionableIssues, checkIntegrity, type Issue } from "./integrity";
+import { actionableIssues, checkIntegrity, KEPT_NOTE, type Issue } from "./integrity";
 import { formatMoney } from "./money";
 import type { IsoDate, Transaction } from "./types";
 import { cashWallet, feeInside } from "./withdrawal";
@@ -27,6 +27,8 @@ export interface ReviewFix {
   readonly rows: readonly { readonly before: Transaction; readonly after: Transaction }[];
   /** What it changes, in a sentence, with what it does to each wallet. */
   readonly words: string;
+  /** The card's heading, a few words. */
+  readonly title: string;
   /** Fixes for the same row that exclude each other share a group: applying one sets the others aside. */
   readonly group?: string;
   /** Only right when what the sentence says is true: said so on the card. */
@@ -80,6 +82,7 @@ export function reviewFixes(
     const fees = splits.reduce((s, r) => s + r.after.fee, 0);
     fixes.push({
       rows: splits,
+      title: `Split the machine fee out of ${splits.length === 1 ? "a withdrawal" : `${splits.length} withdrawals`}`,
       words: `${splits.map((r) => no(r.before)).join(", ")}: the machine's fee split out of the cash, ${formatMoney(fees)} in fees in all. ${walletEffects(splits, context.wallets)}`,
     });
     for (const r of splits) fixed.add(r.before.id);
@@ -94,6 +97,7 @@ export function reviewFixes(
       fixes.push({
         rows: [counted],
         group: t.id,
+        title: `${no(t)}: the ${formatMoney(t.fee)} fee was charged`,
         words: `${no(t)}: its ${formatMoney(t.fee)} fee counted in its total, ${formatMoney(t.amount + t.fee)} in all. ${walletEffects([counted], context.wallets)}`,
         onlyIf: `the ${formatMoney(t.fee)} fee was charged`,
       });
@@ -104,6 +108,7 @@ export function reviewFixes(
         fixes.push({
           rows: [noFee],
           group: t.id,
+          title: `${no(t)}: no fee was charged`,
           words: `${no(t)}: no fee, ${formatMoney(t.amount)} in all. ${walletEffects([noFee], context.wallets)}`,
           onlyIf: "no fee was charged",
         });
@@ -137,6 +142,7 @@ export function reviewFixes(
     if (moved && clears && !fixes.some((f) => f.rows.some((r) => r.before.id === moved.before.id))) {
       fixes.push({
         rows: [moved],
+        title: `${wallet} below zero on ${formatMedium(day)}: date ${no(next!)} that day`,
         words: `${wallet} closed ${formatMedium(day)} at ${formatMoney(-(issue.impact ?? 0))}, and nothing in that day's ${rows.length === 1 ? "row" : "rows"} (${rows.map(no).join(", ")}) is wrong. The next money into ${wallet} is ${no(next!)}, ${formatMoney(walletDelta(next!, (w) => w === wallet))} on ${formatMedium(next!.date)}: dated ${formatMedium(day)}, ${wallet} never goes below zero.`,
         onlyIf: `that money really reached ${wallet} by ${formatMedium(day)}`,
       });
@@ -152,6 +158,7 @@ export function reviewFixes(
     if (next && later.length > 0 && clearsWithoutNew(firstChoice, later, issue, context)) {
       fixes.push({
         rows: later,
+        title: `${wallet} below zero on ${formatMedium(day)}: date ${later.length === 1 ? "its payment" : `${later.length} payments`} ${formatMedium(next.date)}`,
         words: `${wallet} closed ${formatMedium(day)} at ${formatMoney(-(issue.impact ?? 0))}. The next money into ${wallet} is ${no(next)}, ${formatMoney(walletDelta(next, (w) => w === wallet))} on ${formatMedium(next.date)}: with ${later.map((r) => no(r.before)).join(", ")} dated ${formatMedium(next.date)}, ${wallet} never goes below zero. Balances today stay the same.`,
         onlyIf: `${later.length === 1 ? "it was" : "they were"} paid on ${formatMedium(next.date)}, after that money came in`,
       });
@@ -187,7 +194,38 @@ export function reviewFixes(
     withRows(transactions, fixes.filter((f, n) => !f.group || fixes.findIndex((g) => g.group === f.group) === n).flatMap((f) => f.rows)),
     context,
   ).size;
-  return { fixes, unfixed, leftAfter };
+  /*
+   * Never money moved on trust. 20 October 2026: the owner's Cash and Maya
+   * matched what they held, and the fee fixes took PHP 52.00 and PHP 18.00
+   * off them. A fix that moves a balance says where the balance ends up, and
+   * every finding is offered first as "keep it as it is", which only adds a
+   * note the checks read; whichever is applied sets the others aside.
+   */
+  const balance = (w: string): number => transactions.reduce((sum, t) => sum + walletDelta(t, (x) => x === w), 0);
+  const ordered: ReviewFix[] = [];
+  const seenGroups = new Set<string>();
+  fixes.forEach((fix, n) => {
+    const group = fix.group ?? `fix-${n}-${fix.rows[0]?.before.id ?? ""}`;
+    const moves = editImpact(fix.rows, context.wallets).wallets;
+    const where = moves.map((w) => `${w.name} really holds ${formatMoney(balance(w.name) + w.change)} once it is applied (it shows ${formatMoney(balance(w.name))} now)`).join(", and ");
+    const withBalance: ReviewFix = {
+      ...fix,
+      group,
+      ...(where ? { onlyIf: `${fix.onlyIf ? `${fix.onlyIf}, and ` : ""}${where}` } : {}),
+    };
+    if (!seenGroups.has(group)) {
+      seenGroups.add(group);
+      const rows = fix.rows.map((r) => ({ before: r.before, after: { ...r.before, notes: [r.before.notes.trim(), KEPT_NOTE].filter(Boolean).join(" ") } }));
+      ordered.push({
+        rows,
+        group,
+        title: rows.length === 1 ? `${no(rows[0]!.before)}: keep it as it is` : `Keep ${rows.map((r) => no(r.before)).join(", ")} as they are`,
+        words: `Your balances already match what you hold, so nothing moves: a note on ${rows.length === 1 ? "it" : "each"} says it was checked, and Needs review stops listing ${rows.length === 1 ? "it" : "them"}.`,
+      });
+    }
+    ordered.push(withBalance);
+  });
+  return { fixes: ordered, unfixed, leftAfter };
 }
 
 const issueKey = (i: Issue): string => `${i.code}|${[...i.ids].sort().join(",")}`;

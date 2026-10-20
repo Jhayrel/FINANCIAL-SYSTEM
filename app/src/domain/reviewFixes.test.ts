@@ -29,7 +29,9 @@ const ledger = [
 ];
 
 describe("Needs review, fixed in one press", () => {
-  const ready = reviewFixes(ledger, { wallets, asOf: "2026-09-20" });
+  const all = reviewFixes(ledger, { wallets, asOf: "2026-09-20" });
+  // The fixes themselves; each finding's "keep it as it is" card is tested below.
+  const ready = { ...all, fixes: all.fixes.filter((f) => !/keep/i.test(f.title)) };
 
   it("splits the fee out, says what Cash does, and files it as the form would", () => {
     const split = ready.fixes.find((f) => f.rows.some((r) => r.before.recordNumber === 2))!;
@@ -55,9 +57,31 @@ describe("Needs review, fixed in one press", () => {
 
   it("moves the money that came in next instead, when that clears it and breaks nothing", () => {
     const early = [...ledger.slice(0, 5), { ...ledger[5]!, date: "2026-08-01" }];
-    const moved = reviewFixes(early, { wallets, asOf: "2026-09-20" }).fixes.find((f) => f.rows.some((r) => r.before.recordNumber === 5))!;
+    const moved = reviewFixes(early, { wallets, asOf: "2026-09-20" }).fixes.find((f) => !/keep/i.test(f.title) && f.rows.some((r) => r.before.recordNumber === 5))!;
     expect(moved.rows[0]!.after.date).toBe("2026-09-10");
     expect(moved.onlyIf).toContain("really reached Bank");
+  });
+
+  it("offers every finding as kept as it is first, moving nothing, in the same group as its fixes", () => {
+    for (const f of ready.fixes) {
+      const keep = all.fixes.find((k) => /keep/i.test(k.title) && k.group === f.group)!;
+      expect(all.fixes.indexOf(keep)).toBeLessThan(all.fixes.indexOf(f));
+      expect(keep.words).toContain("nothing moves");
+      for (const r of keep.rows) expect(r.after).toEqual({ ...r.before, notes: expect.stringContaining("kept as it is") });
+    }
+  });
+
+  it("says where a balance ends up before it moves", () => {
+    const split = ready.fixes.find((f) => f.rows.some((r) => r.before.recordNumber === 2))!;
+    expect(split.onlyIf).toMatch(/Cash really holds ₱\S+ once it is applied \(it shows ₱\S+ now\)/);
+  });
+
+  it("stops listing a finding once kept", () => {
+    const keep = all.fixes.find((k) => /keep/i.test(k.title))!;
+    const byId = new Map(keep.rows.map((r) => [r.after.id, r.after] as const));
+    const after = ledger.map((t) => byId.get(t.id) ?? t);
+    const ids = new Set(actionableIssues(checkIntegrity(after, { wallets, asOf: "2026-09-20" })).flatMap((i) => i.ids));
+    for (const r of keep.rows) expect(ids.has(r.before.id)).toBe(false);
   });
 
   it("never offers a fix the checks would flag in turn", () => {

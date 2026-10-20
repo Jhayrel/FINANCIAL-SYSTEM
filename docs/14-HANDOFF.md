@@ -1447,6 +1447,29 @@ checks find nothing.
   upright turn scored 99 against 49 to 55 for the others. The picture prompt
   says the same, and that a wallet the message names wins over the slip's.
 
+### 2026-10-20, fault: the review fixes moved balances that were right
+
+The owner applied the fee fixes and their Cash and Maya, which matched what
+they held, went down PHP 52.00 and PHP 18.00. The checks were right that
+the rows looked odd and wrong that the balances were: the money had already
+been squared elsewhere. Lesson: a fix that moves a balance is never offered
+on trust.
+
+- "My balance is off now", "undo the fixes": a "Put the review fixes back"
+  card restores every entry from the fix cards' own before and after,
+  including cards made before fixes carried a heading (any change applied
+  after the review answer). Rows edited again since are left alone.
+- Every finding is offered first as "keep it as it is": it adds
+  `KEPT_NOTE` to the entry's notes, moves nothing, and the checks stop
+  listing it. It shares a group with the finding's fixes, so one press sets
+  the others aside.
+- A fix that moves a balance says where it ends up ("Cash really holds X
+  once it is applied (it shows Y now)"), and the chat says to check real
+  balances first.
+- The explanation sits inside each card, not in a message above it; one
+  notice per Apply names every entry ("Edited #3817 and 2 more"); a total
+  changed alone is named, and the Edit form no longer skips saving it.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

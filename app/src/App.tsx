@@ -179,6 +179,7 @@ function changedWords(was: Transaction, now: Transaction): string {
     ["coversTo", "days covered"],
     ["amount", "amount"],
     ["fee", "fee"],
+    ["total", "total"],
     ["category", "category"],
     ["item", "item"],
     ["description", "description"],
@@ -186,7 +187,8 @@ function changedWords(was: Transaction, now: Transaction): string {
     ["toWallet", "destination"],
     ["status", "status"],
   ];
-  const words = [...new Set(fields.filter(([key]) => was[key] !== now[key]).map(([, word]) => word))];
+  const moved = was.amount !== now.amount || was.fee !== now.fee;
+  const words = [...new Set(fields.filter(([key]) => was[key] !== now[key] && !(key === "total" && moved)).map(([, word]) => word))];
   if (words.length === 0) return "nothing changed";
   if (words.length === 1) return words[0] ?? "";
   return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
@@ -1220,10 +1222,17 @@ export default function App() {
     // Says what changed, and takes it back in one tap when every row was already there.
     const first = rows[0];
     const was = first ? previous.get(first.id) : undefined;
-    const changed = first && was ? changedWords(was, first) : "";
+    // Every row the edit touched, not only the first: three fixed together read "Edited #3817" (20 October 2026).
+    const touched = rows.filter((r) => previous.has(r.id));
+    const changed =
+      touched.length > 1
+        ? [...new Set(touched.flatMap((r) => changedWords(previous.get(r.id)!, r).split(/, | and /)).filter((w) => w && w !== "nothing changed"))].join(", ")
+        : first && was
+          ? changedWords(was, first)
+          : "";
     const undoable = rows.every((r) => previous.has(r.id));
     flash(
-      `Edited #${String(first?.recordNumber ?? 0).padStart(4, "0")}${changed ? `: ${changed}` : ""}.`,
+      `Edited #${String(first?.recordNumber ?? 0).padStart(4, "0")}${touched.length > 1 ? ` and ${touched.length - 1} more` : ""}${changed ? `: ${changed}` : ""}.`,
       undoable ? { label: "Undo", run: () => handleUpdate(rows.map((r) => previous.get(r.id) ?? r), by) } : undefined,
     );
     /*

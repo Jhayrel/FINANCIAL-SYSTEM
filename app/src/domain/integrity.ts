@@ -57,6 +57,14 @@ const isFeeItem = (item: string): boolean =>
  * Ordered most to least severe so the UI can show the top few and collapse
  * the rest.
  */
+/**
+ * The note an entry carries once the owner has looked at what the checks
+ * said and kept it as it is ("my balances are right"). Visible in the entry's
+ * notes, editable like any note; the checks stop listing it (20 October 2026:
+ * fee fixes the owner applied took PHP 70.00 off balances that matched).
+ */
+export const KEPT_NOTE = "Checked in Needs review: kept as it is.";
+
 export function checkIntegrity(
   transactions: readonly Transaction[],
   /** The open accounts and the day, for the checks that need them: a fee saved inside a withdrawal, a day closing below zero. */
@@ -300,7 +308,9 @@ export function checkIntegrity(
     }
   }
 
-  return issues.sort((a, b) => rank[a.severity] - rank[b.severity]);
+  // Kept as it is by the owner: every row of the finding carries the note.
+  const kept = new Set(transactions.filter((t) => (t.notes ?? "").includes(KEPT_NOTE)).map((t) => t.id));
+  return issues.filter((i) => kept.size === 0 || !i.ids.every((id) => kept.has(id))).sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 
 export interface IntegritySummary {
