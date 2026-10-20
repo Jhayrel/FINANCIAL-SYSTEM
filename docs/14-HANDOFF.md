@@ -1429,6 +1429,24 @@ only report.
 On the 19 October data all six rows have a fix, and with them applied the
 checks find nothing.
 
+### 2026-10-20, last: what an edit does, the said wallet, sideways photos
+
+- `editImpact.ts`: what an edit does to each balance and each month's
+  spending, from `walletDelta` and `costOf`. The Edit form says it under the
+  changes ("When saved: Cash goes down PHP 18.00; September 2026 spending
+  goes up PHP 18.00"), including a save with nothing typed that only puts a
+  stored total right (#3818's case). The fix cards and "would that break my
+  budget or balances?" use the same words.
+- "Can you implement a fix?" goes to the Needs review fixes whenever rows
+  are flagged, after a reload too; restored review cards keep What to do.
+- "I use gcash" with a receipt: the wallet the message names fills the card
+  before the usual wallet does (`infer.ts`, `saidAccount`).
+- Sideways or upside-down photos: when the device's reading is poor it reads
+  the picture turned a quarter each way and half round, and keeps the most
+  readable (`readableScore`). On the owner's sideways 7-Eleven slip the
+  upright turn scored 99 against 49 to 55 for the others. The picture prompt
+  says the same, and that a wallet the message names wins over the slip's.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

@@ -15,6 +15,7 @@
  * offers a change that the checks would flag in its turn.
  */
 import { walletDelta } from "./balances";
+import { editImpact } from "./editImpact";
 import { addDays, formatMedium } from "./dates";
 import { actionableIssues, checkIntegrity, type Issue } from "./integrity";
 import { formatMoney } from "./money";
@@ -42,15 +43,9 @@ export interface ReviewFixes {
 
 const no = (t: Transaction): string => `#${String(t.recordNumber).padStart(4, "0")}`;
 
-/** What a set of edits does to each wallet, as "Cash goes down ₱52.00". */
+/** What a set of edits does to each wallet and each month's spending (`editImpact.ts`). */
 export function walletEffects(rows: readonly { readonly before: Transaction; readonly after: Transaction }[], wallets: readonly string[]): string {
-  const parts: string[] = [];
-  for (const w of wallets) {
-    const counts = (x: string): boolean => x === w;
-    const change = rows.reduce((s, r) => s + walletDelta(r.after, counts) - walletDelta(r.before, counts), 0);
-    if (change !== 0) parts.push(`${w} goes ${change > 0 ? "up" : "down"} ${formatMoney(Math.abs(change))}`);
-  }
-  return parts.length > 0 ? `${parts.join(", ")}.` : "No wallet changes: only the entry's own figures are put right.";
+  return editImpact(rows, wallets).words;
 }
 
 const flaggedIds = (transactions: readonly Transaction[], context: { readonly wallets: readonly string[]; readonly asOf?: IsoDate }): Set<string> =>

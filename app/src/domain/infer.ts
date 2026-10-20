@@ -364,6 +364,21 @@ export function inferFromHistory(
   // ── The wallet ───────────────────────────────────────────────────────────
   // Only when the sentence did not name one. A stated wallet is a fact.
   const accounts = [...reference.wallets, ...reference.savings];
+  /*
+   * Named in the message with the picture: "I use gcash" under a receipt
+   * came back "Paid from Cash, which is where 197 of these came from", and a
+   * warning that Gcash was named (20 October 2026). One account named, and no
+   * credit line, is the wallet; the habit is only for when nothing was said.
+   */
+  const named = saidAccount(hint, accounts, reference.credits ?? []);
+  if (named && flow !== "Revenue" && !next.fromWallet && next.toWallet !== named) {
+    next = { ...next, fromWallet: named };
+    because.push(`Paid from ${named}, as you said.`);
+  }
+  if (named && flow === "Revenue" && !next.toWallet) {
+    next = { ...next, toWallet: named };
+    because.push(`Into ${named}, as you said.`);
+  }
   if (flow !== "Revenue" && !next.fromWallet) {
     const { value, count } = commonest(past, (t) => t.fromWallet);
     if (value && accounts.includes(value)) {
@@ -528,4 +543,16 @@ function namedInLists(
       .sort((a, b) => b.length - a.length)
       .find((name) => namesIt(hint, name)) ?? ""
   );
+}
+
+/** The one account a message names, as a whole word, longest name first; none when it names two or a credit line. */
+function saidAccount(text: string, accounts: readonly string[], credits: readonly string[]): string {
+  const said = ` ${text.toLowerCase().replace(/[^a-z0-9()]+/g, " ")} `;
+  const has = (name: string): boolean => said.includes(` ${name.toLowerCase().replace(/[^a-z0-9()]+/g, " ").trim()} `);
+  if (credits.some(has)) return "";
+  const found: string[] = [];
+  for (const name of [...accounts].sort((a, b) => b.length - a.length)) {
+    if (has(name) && !found.some((f) => f.toLowerCase().includes(name.toLowerCase()))) found.push(name);
+  }
+  return found.length === 1 ? found[0]! : "";
 }

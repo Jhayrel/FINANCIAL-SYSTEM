@@ -132,6 +132,15 @@ describe("inferFromHistory fills the blanks and says why", () => {
     row({ item: "Load", fromWallet: "Cash", category: "Spending", status: "Paid" }),
   ];
 
+  it("takes the wallet the message names over the usual one", () => {
+    // "I use gcash" under a receipt: the habit said Cash (20 October 2026).
+    const habit = [row({ item: "Load", fromWallet: "Cash", category: "Spending", status: "Paid" }), row({ item: "Load", fromWallet: "Cash", category: "Spending", status: "Paid" })];
+    const { draft: filled, because } = inferFromHistory(spend({ amount: 24900, item: "Load", fromWallet: "" }), habit, reference, "I use gcash");
+    expect(filled.fromWallet).toBe("Gcash");
+    expect(because.join(" ")).toContain("as you said");
+    expect(inferFromHistory(spend({ amount: 24900, item: "Load", fromWallet: "" }), habit, reference, "").draft.fromWallet).toBe("Cash");
+  });
+
   it("answers the question it used to ask", () => {
     // What the model reads off the sentence: spending, 100, Maya, no item.
     const draft = spend({ amount: 10000, fromWallet: "Maya" });

@@ -34,7 +34,7 @@ describe("Needs review, fixed in one press", () => {
   it("splits the fee out, says what Cash does, and files it as the form would", () => {
     const split = ready.fixes.find((f) => f.rows.some((r) => r.before.recordNumber === 2))!;
     expect(split.rows[0]!.after).toMatchObject({ amount: 50_000, fee: 1_600, total: 51_600, item: "Transaction Fee", category: "Spending" });
-    expect(split.words).toContain("Cash goes down ₱16.00");
+    expect(split.words).toContain("Cash goes down ₱16.00. September 2026 spending goes up ₱16.00");
   });
 
   it("offers both readings of a total without its fee, one group", () => {
@@ -42,7 +42,8 @@ describe("Needs review, fixed in one press", () => {
     expect(both).toHaveLength(2);
     expect(new Set(both.map((f) => f.group)).size).toBe(1);
     expect(both[0]!.words).toContain("Bank goes down ₱18.00");
-    expect(both[1]!.words).toContain("No wallet changes");
+    expect(both[0]!.words).toContain("No spending changes");
+    expect(both[1]!.words).toContain("No balance changes. September 2026 spending goes down ₱18.00");
   });
 
   it("dates the day's payment to when the money came, on that condition, and leaves nothing flagged", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { binarize, cutRows, darkBars, dropRepeats, invertBoxes, joinPieces, piecesOf, readingFor, rowsIn, tidyReading, worthSending } from "./ocrText";
+import { binarize, cutRows, darkBars, dropRepeats, invertBoxes, joinPieces, piecesOf, readableScore, readingFor, readsPoorly, rowsIn, tidyReading, worthSending } from "./ocrText";
 
 describe("the clean-up before reading", () => {
   it("turns grey text on white black, and the white around it white", () => {
@@ -211,5 +211,20 @@ describe("dropRepeats: a stitched screenshot read once", () => {
   it("keeps the same row on two different days", () => {
     const days = ["September 20, 2026", "Withdrawal from 07:31 PM", "TANQUI SFLU - ₱1,018.00", "September 18, 2026", "Withdrawal from 07:31 PM", "TANQUI SFLU - ₱1,018.00"].join("\n");
     expect(dropRepeats(days).dropped).toBe(0);
+  });
+});
+
+describe("the right way up reads better than sideways", () => {
+  // Invented slip text, and what a sideways reading of it looks like.
+  const upright = "TOTAL AMOUNT DUE 249.00\nCASH 0.00\nCard 249.00\nVatable 222.32\nVAT Amt 26.68\nJuice 49.00 Sprite 45.00 Apple 145.00";
+  const sideways = "l1 ;| ' ii 0 ::. ~ I| 2 | ,, 4 ; ' l";
+
+  it("scores the upright reading above the sideways one", () => {
+    expect(readableScore(upright, 70)).toBeGreaterThan(readableScore(sideways, 40) + 10);
+  });
+
+  it("calls the sideways reading poor and the upright one fine", () => {
+    expect(readsPoorly(sideways, 40)).toBe(true);
+    expect(readsPoorly(upright, 80)).toBe(false);
   });
 });

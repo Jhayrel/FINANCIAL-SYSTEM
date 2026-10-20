@@ -26,7 +26,7 @@
 
 import type { Scheduler } from "tesseract.js";
 
-import { binarize, cutRows, darkBars, invertBoxes, joinPieces, skewAngle, tidyReading } from "../domain/ocrText";
+import { binarize, cutRows, darkBars, invertBoxes, joinPieces, readableScore, readsPoorly, skewAngle, tidyReading } from "../domain/ocrText";
 
 /** Kept in step with `OCR_BASE` in tools/ocrAssets.ts, which serves the files. */
 const BASE = "/ocr/v7";
@@ -253,6 +253,26 @@ async function readCanvas(
   };
 }
 
+/** The picture turned a quarter, a half or three quarters round, then read as any other. */
+async function readQuarter(
+  image: CanvasImageSource,
+  width: number,
+  height: number,
+  quarter: 90 | 180 | 270,
+): Promise<(Reading & { readonly confidence: number }) | null> {
+  const c = document.createElement("canvas");
+  c.width = quarter === 180 ? width : height;
+  c.height = quarter === 180 ? height : width;
+  const ctx = c.getContext("2d");
+  if (!ctx) return null;
+  ctx.translate(c.width / 2, c.height / 2);
+  ctx.rotate((quarter * Math.PI) / 180);
+  ctx.drawImage(image, -width / 2, -height / 2, width, height);
+  // Wider than the reader needs once turned: brought back to the usual width.
+  const scale = c.width > MAX_WIDTH ? MAX_WIDTH / c.width : 1;
+  return readCanvas(c, Math.round(c.width * scale), Math.round(c.height * scale), 0, () => undefined);
+}
+
 async function readOnce(src: string): Promise<Reading | null> {
   let limitMs = 12_000;
   const work = (async () => {
@@ -274,11 +294,29 @@ async function readOnce(src: string): Promise<Reading | null> {
      */
     const tilt = height <= width * TALL ? tiltOf(image, width, height) : 0;
     const first = await readCanvas(image, width, height, 0, (ms) => (limitMs = ms));
-    if (!first || Math.abs(tilt) < 2) return first ? { plain: first.plain, raised: first.raised } : null;
-    limitMs += 12_000;
-    const turned = await readCanvas(image, width, height, tilt, () => undefined);
-    const best = turned && turned.confidence > first.confidence + 2 ? turned : first;
-    return { plain: best.plain, raised: best.raised };
+    let best = first;
+    if (first && Math.abs(tilt) >= 2) {
+      limitMs += 12_000;
+      const turned = await readCanvas(image, width, height, tilt, () => undefined);
+      if (turned && turned.confidence > first.confidence + 2) best = turned;
+    }
+    /*
+     * Sideways or upside down: a receipt photographed held across the phone
+     * read as scattered letters (20 October 2026). When the reading is poor,
+     * the picture is read again turned a quarter each way and half round,
+     * and the most readable reading is kept (`readableScore`). A screenshot
+     * is the right way up and reads well, so it is never turned.
+     */
+    const scoreOf = (r: typeof first): number => (r ? readableScore(`${r.plain}\n${r.raised}`, r.confidence) : -1);
+    if (best && readsPoorly(`${best.plain}\n${best.raised}`, best.confidence)) {
+      for (const quarter of [270, 90, 180] as const) {
+        limitMs += 8_000;
+        const turned = await readQuarter(image, width, height, quarter);
+        if (turned && scoreOf(turned) > scoreOf(best) + 10) best = turned;
+        if (best !== first && !readsPoorly(`${best.plain}\n${best.raised}`, best.confidence)) break;
+      }
+    }
+    return best ? { plain: best.plain, raised: best.raised } : null;
   })();
 
   // The limit is read when it fires, so a long picture's larger allowance counts.

@@ -9,6 +9,7 @@
  * rules live in `domain/entry.ts`; this file renders and decides nothing.
  */
 
+import { editImpact } from "../domain/editImpact";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { changedFields } from "../domain/activity";
 
@@ -803,6 +804,23 @@ export function AddTransaction({
   /** The row as it was saved, so a correction can say what it changes. */
   const original = useMemo(() => (editing ? draftForEditing(editing, transactions) : null), [editing, transactions]);
   const changes = original ? draftChanges(original, draft) : [];
+  /*
+   * What saving this edit does to the balances and to each month's spending,
+   * said before Save (`editImpact.ts`). "If I edit it manually then save,
+   * does it count as an expense? Minus balance? Break my budget?" (20
+   * October 2026). An entry saved with linked rows is left to the lines below.
+   */
+  const editEffect = useMemo(() => {
+    if (!editing || draft.amount === null) return null;
+    try {
+      const rows = draftToTransactions(draft, editing.recordNumber, editing.id);
+      if (rows.length !== 1 || rows[0]?.id !== editing.id) return null;
+      return editImpact([{ before: editing, after: rows[0] }], [...reference.wallets, ...reference.savings]);
+    } catch {
+      return null;
+    }
+  }, [editing, draft, reference]);
+  const editMoves = editEffect !== null && editEffect.wallets.length + editEffect.spending.length > 0;
 
   /** A change in words: a debt by its name, an effect by its label, a date as a date. */
   const changeWords = (field: string, value: string): string => {
@@ -2486,7 +2504,9 @@ export function AddTransaction({
               <div className={changes.length > 0 ? "fms-changes has-changes" : "fms-changes"} role="status" aria-live="polite">
                 <span className="t-label" style={{ color: "var(--ink-2)" }}>
                   {changes.length === 0
-                    ? `Nothing changed yet. Change what is wrong in #${String(editingNumber).padStart(4, "0")}, then save.`
+                    ? editMoves
+                      ? `Saving #${String(editingNumber).padStart(4, "0")} as it is puts its saved total right.`
+                      : `Nothing changed yet. Change what is wrong in #${String(editingNumber).padStart(4, "0")}, then save.`
                     : `${changes.length} ${changes.length === 1 ? "change" : "changes"} to #${String(editingNumber).padStart(4, "0")}`}
                 </span>
                 {changes.length > 0 && (
@@ -2500,6 +2520,12 @@ export function AddTransaction({
                       </li>
                     ))}
                   </ul>
+                )}
+                {editEffect && (changes.length > 0 || editMoves) && (
+                  <p className="t-caption fms-changes-effect">
+                    <strong>When saved:</strong> {editEffect.words}
+                    {editEffect.spending.length > 0 ? " The budget's own figures stay as they are." : ""}
+                  </p>
                 )}
               </div>
             )}

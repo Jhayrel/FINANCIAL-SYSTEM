@@ -727,3 +727,21 @@ export function skewAngle(rgba: Uint8ClampedArray, width: number, height: number
   for (let a = coarse - 0.75; a <= coarse + 0.75 + 1e-9; a += 0.25) tryAngle(a);
   return Math.round(best * 100) / 100;
 }
+
+/**
+ * How readable a reading is, to choose between the same picture read the
+ * right way up and turned: the reader's own confidence, with the money-shaped
+ * figures and the real words it found. A receipt photographed sideways reads
+ * as scattered letters and no figures; the right way up it is full of both
+ * (20 October 2026, a 7-Eleven slip held sideways).
+ */
+export function readableScore(text: string, confidence: number): number {
+  const amounts = Math.min(20, (text.match(/\d[\d,]*\.\d{2}(?!\d)/g) ?? []).length);
+  const words = Math.min(40, (text.match(/\b[A-Za-z]{3,}\b/g) ?? []).filter((w) => /[aeiou]/i.test(w)).length);
+  return confidence + amounts * 4 + words * 0.5;
+}
+
+/** A reading too poor to trust, worth reading again turned a quarter or upside down. */
+export function readsPoorly(text: string, confidence: number): boolean {
+  return confidence < 62 || readableScore(text, confidence) < 75;
+}

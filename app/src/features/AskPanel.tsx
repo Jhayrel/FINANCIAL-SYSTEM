@@ -754,6 +754,7 @@ function turnFromCard(card: StoredCard): Turn {
       candidates: [],
       done: list<string>(data["done"]),
       ...(data["alsoBin"] === true ? { alsoBin: true } : {}),
+      ...(data["review"] === true ? { review: true } : {}),
       ...(data["sweep"] === true ? { sweep: true } : {}),
       cardId: card.id,
       restored,
@@ -913,6 +914,7 @@ function storedFrom(turn: Turn): StoredCard | null {
         ...(shared ? { why: shared } : {}),
         done: turn.done.filter((id) => kept.some((r) => r.id === id)),
         ...(turn.alsoBin ? { alsoBin: true } : {}),
+        ...(turn.review ? { review: true } : {}),
         ...(turn.sweep ? { sweep: true } : {}),
       },
     };
@@ -2200,9 +2202,12 @@ export function AskPanel({
       const everywhere = new Map<string, Transaction>();
       for (const row of deleted) everywhere.set(row.id, row);
       for (const row of transactions) everywhere.set(row.id, row);
+      // A review list keeps its "What to do" and its Edit-only rows after a reload, read from the checks as they are now.
+      const flaggedNow = turn.review ? new Map(flaggedRows(transactions, { wallets: [...reference.wallets, ...reference.savings] }).map((f) => [f.row.id, f] as const)) : null;
       const candidates = turn.restored.flatMap(({ id, why }, n) => {
         const row = everywhere.get(id);
-        return row ? [{ row, score: 100 - n, why: [...why] }] : [];
+        const f = flaggedNow?.get(id);
+        return row ? [{ row, score: 100 - n, why: [...why], ...(f ? { todo: [...f.todo], noBin: !f.binnable } : flaggedNow ? { noBin: true } : {}) }] : [];
       });
       return { ...turn, candidates };
     }
@@ -6696,11 +6701,44 @@ export function AskPanel({
      * fix cards. The model said it could not fix rows from here and named
      * rows that were not on the list (20 October 2026).
      */
+    // Recent here, or a review list or fix card still in the conversation after a reload.
+    const reviewRecent =
+      (reviewAsked.current !== null && Date.now() - reviewAsked.current < 30 * 60_000) ||
+      turns.slice(-20).some((t) => (isFound(t) && t.review === true) || (isChanging(t) && t.group !== undefined));
     const reviewFollow =
-      reviewAsked.current !== null &&
-      Date.now() - reviewAsked.current < 30 * 60_000 &&
+      reviewRecent &&
       /\b(?:fix\w*|what to do|implement|click|re-?add|re-?enter|edit what|how (?:do i|to|can i)|do (?:it|that|them)|apply|ayusin)\b/i.test(ruled) &&
       ruled.split(/\s+/).length <= 20;
+    /*
+     * "Can you implement a fix?" with rows waiting in Needs review: those
+     * rows' fixes, whatever came before. The model said it could not fix rows
+     * from here (20 October 2026, after a reload lost the thread).
+     */
+    const asksForFixes =
+      /\b(?:implement|apply|make|give me|show me)\s+(?:a |the |some )?fix(?:es)?\b|\bfix (?:them|those|these|the (?:rows|entries|flagged|review\w*|errors?|problems?|data|mistakes?))\b|\bcan you fix\b/i.test(ruled) &&
+      ruled.split(/\s+/).length <= 20;
+    /*
+     * "Should I just click Edit and Save? Would that break my budget or my
+     * balances?": what each fix and the same edit by hand do, worked out
+     * (`editImpact.ts`). The model answered with the month's totals (20
+     * October 2026).
+     */
+    if (files.length === 0 && !as && !pending && reviewRecent && /\b(?:break|budget|balances?|expense|affect\w*|happen\w*|minus|negative|safe|count(?:ed|s)? as|mess(?: up)?|ruin|change (?:my|the) (?:money|balance|budget))\b/i.test(ruled) && /\?|\b(?:would|will|does|do|is|should|what)\b/i.test(ruled)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      const ready = reviewFixes(transactions, { wallets: [...reference.wallets, ...reference.savings] });
+      const reply =
+        ready.fixes.length === 0
+          ? "Nothing in Needs review has a fix waiting. Editing a saved entry changes only that entry: the Edit form says, under the changes, what saving does to each balance and to each month's spending before you press Save."
+          : [
+              "No, nothing breaks: an edit changes only what that entry itself changes, and the budget's figures never change, only what is counted against them. Here is what each fix does:",
+              ...ready.fixes.map((f) => `- ${f.words.replace(/^.*?:\s/, (m) => m)}`),
+              "Pressing **Apply** on a card and making the same edit by hand (Database, Edit, Save) give the same result. The Edit form now says this under the changes, before you save. Re-entering them instead would count the money twice.",
+            ].join("\n");
+      say({ kind: "assistant", text: reply, from: "this device" });
+      log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+      return;
+    }
     const fixesOpen = turns.filter((t) => isChanging(t) && t.state === "open").length;
     if (files.length === 0 && !as && !pending && reviewFollow && !asksForWrongRows(ruled) && fixesOpen > 0) {
       setDraft("");
@@ -6710,7 +6748,7 @@ export function AskPanel({
       log(aiEvent("answered", "add", { text: reply, model: "this device" }));
       return;
     }
-    if (files.length === 0 && !as && !pending && (asksForWrongRows(ruled) || reviewFollow)) {
+    if (files.length === 0 && !as && !pending && (asksForWrongRows(ruled) || reviewFollow || (asksForFixes && flaggedRows(transactions, { wallets: [...reference.wallets, ...reference.savings] }).length > 0))) {
       reviewAsked.current = Date.now();
       const flagged = flaggedRows(transactions, { wallets: [...reference.wallets, ...reference.savings] });
       setDraft("");
@@ -6737,8 +6775,13 @@ export function AskPanel({
        */
       const ready = reviewFixes(transactions, { wallets: [...reference.wallets, ...reference.savings] });
       const fixing = ready.fixes.length > 0;
+      const askedToFix = (asksForFixes || reviewFollow) && !asksWhetherToDelete(note);
       const reply = [
-        asksWhetherToDelete(note) || keep > 0 ? `${advice} ${count}` : `${count} Each says what is wrong with it and what to do.`,
+        askedToFix && fixing
+          ? `Yes. ${count}`
+          : asksWhetherToDelete(note) || keep > 0
+            ? `${advice} ${count}`
+            : `${count} Each says what is wrong with it and what to do.`,
         fixing
           ? `Do not re-enter them: that would count the money twice. Each fix below edits the entry itself and keeps its record number. Press **Apply** on the ones that are true; nothing changes until you do, and Undo is on the notice after.${ready.leftAfter === 0 ? " With them applied, Needs review is empty." : ""}`
           : "",
