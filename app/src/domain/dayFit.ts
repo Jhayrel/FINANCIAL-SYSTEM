@@ -205,6 +205,9 @@ export function fitSlips(answer: string, day: { readonly today: Centavos; readon
         const at = clause.indexOf(formatPlain(f));
         const before = at > 0 ? clause.slice(Math.max(0, at - 40), at) : "";
         if (/\b(?:hold|holds|holding|balance|wallets?|left|leaves|leaving|remaining|transfer(?:red)?\s+of|withdr\w*\s+of|aside)\b[^.]{0,12}$/i.test(before)) continue;
+        // "within the PHP 27,700.00 budget" is the month's plan, not a purchase (13 October 2026, replayed 20 October).
+        const after = at >= 0 ? clause.slice(at + formatPlain(f).length, at + formatPlain(f).length + 24) : "";
+        if (/^[*\s]*(?:(?:spending|monthly|month'?s|october|november|december|\w+ber)\s+)?(?:budget|plan|limit|allowance)\b/i.test(after)) continue;
         seen.add(f);
         out.push({ amount: f, limit });
       }

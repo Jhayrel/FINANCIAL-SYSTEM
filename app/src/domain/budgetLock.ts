@@ -115,7 +115,7 @@ function gate(plan: BudgetYear, year: number, month: number, scope: PlanScope, a
   if (scope !== "month") {
     return {
       lock,
-      refused: `${name} is closed, so it can only be corrected on its own. Pick "only" and give a reason.`,
+      refused: `${name} is closed, so it can only be edited on its own. Pick "only" and give a reason.`,
     };
   }
   if (reason.length < MIN_REASON) {

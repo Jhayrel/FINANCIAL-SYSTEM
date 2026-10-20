@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { asksForWrongRows, flaggedRows } from "./integrity";
+import { asksForWrongRows, asksWhetherToDelete, checkIntegrity, flaggedRows } from "./integrity";
 import type { Transaction } from "./types";
 
 const row = (over: Partial<Transaction>): Transaction => ({
@@ -42,5 +42,31 @@ describe("the rows the checks flag", () => {
     expect(ids).toContain("t3");
     expect(ids).not.toContain("t1");
     for (const f of found) expect(f.why.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the same list as the Database, each with what to do", () => {
+  const withdrawal = row({ recordNumber: 4, type: "Transfer", category: "", item: "", fromWallet: "Bank", toWallet: "Cash", amount: 101_800, total: 101_800 });
+  const badTotal = row({ recordNumber: 3, amount: 10_000, fee: 1_800, total: 10_000 });
+  const wallets = ["Bank", "Cash"];
+
+  it("finds what the Database finds when given the same accounts", () => {
+    const database = new Set(checkIntegrity([withdrawal, badTotal], { wallets }).filter((i) => i.severity !== "info").flatMap((i) => i.ids));
+    const chat = flaggedRows([withdrawal, badTotal], { wallets });
+    expect(new Set(chat.map((f) => f.row.id))).toEqual(database);
+    expect(chat.some((f) => f.row.id === "t4")).toBe(true);
+  });
+
+  it("says to edit, never to bin, a row with one part saved wrong", () => {
+    const chat = flaggedRows([withdrawal, badTotal], { wallets });
+    for (const f of chat) {
+      expect(f.binnable).toBe(false);
+      expect(f.todo.join(" ")).toMatch(/^Edit it|^Open it in Edit/);
+    }
+  });
+
+  it("hears whether to delete them", () => {
+    expect(asksWhetherToDelete("What do you recommend in the 6 data need to review in the database? Should I delete it")).toBe(true);
+    expect(asksWhetherToDelete("what needs review")).toBe(false);
   });
 });

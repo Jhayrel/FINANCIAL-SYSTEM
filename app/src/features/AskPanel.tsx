@@ -274,7 +274,7 @@ import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, kee
 import { discardedWords } from "../domain/discarded";
 import { outlookFor } from "../domain/outlook";
 import { withCommandWordsFixed } from "../domain/typos";
-import { asksForWrongRows, flaggedRows } from "../domain/integrity";
+import { asksForWrongRows, asksWhetherToDelete, flaggedRows } from "../domain/integrity";
 
 /**
  * What the panel is allowed to do with a proposal.
@@ -470,6 +470,8 @@ interface Found {
   readonly candidates: readonly Candidate[];
   /** An edit list that also offers the bin: "that last entry is a mistake" can mean either. */
   readonly alsoBin?: boolean;
+  /** The app's checks' list, Needs review: each row says what to do. */
+  readonly review?: boolean;
   /** A whole named set, so the card offers one button for all of them. */
   readonly sweep?: boolean;
   /** Ids already acted on, so a button does not offer the same row twice. */
@@ -2543,9 +2545,9 @@ export function AskPanel({
       ...(toTaught ? { toWallet: toTaught } : {}),
     };
     const learned = [
-      ...(teachable ? [`Booked as ${taught}, which is what you corrected this to last time.`] : []),
-      ...(fromTaught ? [`Paid from ${fromTaught}, which is what you corrected this to last time.`] : []),
-      ...(toTaught ? [`Into ${toTaught}, which is what you corrected this to last time.`] : []),
+      ...(teachable ? [`Booked as ${taught}, which is what you changed this to last time.`] : []),
+      ...(fromTaught ? [`Paid from ${fromTaught}, which is what you changed this to last time.`] : []),
+      ...(toTaught ? [`Into ${toTaught}, which is what you changed this to last time.`] : []),
     ];
 
     /**
@@ -4747,12 +4749,19 @@ export function AskPanel({
      * subscriptions and gas to cover", "that's confusing, fix your response".
      */
     const bridge = files.length === 0 && !as && !/^\s*\/\//.test(note) ? readBridgeAsk(note, asOf) : null;
-    const lastBridge = bridgeRef.current && turns.slice(-8).some((t) => t.kind === "you" && t.text === bridgeRef.current?.asked) ? bridgeRef.current : null;
-    const bridgeFollow =
-      !bridge && lastBridge && files.length === 0 && !as && note.split(/\s+/).length <= 30 &&
-      /\b(?:recommend\w*|cover|first week|subscriptions?|gas|food|plan|split|what (?:about|should|can)|how (?:much|do i|will i)|confus\w*|fix (?:your|the|that) (?:response|answer)|explain|again|loan|borrow)\b/i.test(note)
-        ? lastBridge
-        : null;
+    /*
+     * Only straight after that answer, and only about it. It held for eight
+     * turns and took any "how much" or "what can": "How much did I spend this
+     * month?" and the Needs review question were each given the salary
+     * answer again (20 October 2026 replay).
+     */
+    const lastYou = [...turns].reverse().find((t): t is Said => t.kind === "you")?.text ?? "";
+    const lastBridge = bridgeRef.current && lastYou === bridgeRef.current.asked ? bridgeRef.current : null;
+    const aboutBridge =
+      (/\b(?:recommend\w*|cover|first week|subscriptions?|gas|food|loan|borrow|confus\w*|fix (?:your|the|that) (?:response|answer)|(?:until|before) (?:the |my )?(?:salary|allowance|pay\w*))\b/i.test(note) ||
+        (note.split(/\s+/).length <= 6 && /\b(?:explain|again|why|how come|so what)\b/i.test(note))) &&
+      !/\b(?:database|review|earn\w*|income|this month|last month|budget|chart|pie|trend|delete|edit)\b/i.test(note);
+    const bridgeFollow = !bridge && lastBridge && files.length === 0 && !as && note.split(/\s+/).length <= 30 && aboutBridge ? lastBridge : null;
     if (bridge || bridgeFollow) {
       const ask: BridgeAsk = bridge ?? { ...bridgeFollow!.ask, said: `${bridgeFollow!.ask.said ?? ""} ${note}` };
       setDraft("");
@@ -5501,7 +5510,16 @@ export function AskPanel({
      * everything but Settings, so the change is worked out with the Budget
      * screen's own rules and shown on a card to apply.
      */
-    const couldBudget = files.length === 0 && !as && !isNoteLine && sink.canBudget;
+    /*
+     * "So why did you add that?", "Now are you sure with that? Look 28k all
+     * total": questions about what was just done, answered, never a card. The
+     * second made a budget card for the wrong month, and the owner had to say
+     * "I am asking a question" (19 October 2026).
+     */
+    const challenges =
+      /\b(?:why|how come|are you (?:sure|certain)|is (?:that|it|this) (?:right|correct|true|enough)|did you)\b/i.test(ruled) &&
+      !/^\s*(?:please\s+|pls\s+)?(?:set|make|change|put|raise|lower)\b/i.test(ruled);
+    const couldBudget = files.length === 0 && !as && !isNoteLine && sink.canBudget && !challenges;
     // Kinds already limited are limitable by name, whatever the list says (7 October 2026 limits audit).
     const limited = Object.keys(budgets[asOf.slice(0, 4)]?.categories ?? {});
     // A form of lines ("Bills and subscriptions: 1641", "Spending: 6359") is read whole, not by its first line.
@@ -6017,7 +6035,7 @@ export function AskPanel({
       }
       const plan = planBudget(budgetAsk, budgets, asOf, new Date().toISOString());
       if (plan.outcome.refused) {
-        say({ kind: "assistant", text: `${plan.outcome.refused} Corrections to a closed month are made on the Budget screen, where the reason is kept with them.`, from: "this device" });
+        say({ kind: "assistant", text: `${plan.outcome.refused} Edits to a closed month are made on the Budget screen, where the reason is kept with them.`, from: "this device" });
         log(aiEvent("answered", "add", { text: plan.outcome.refused, model: "this device" }));
         return;
       }
@@ -6308,6 +6326,21 @@ export function AskPanel({
       const words = chartAsText(full && full.total === chartShown.chart.total && full.by === chartShown.chart.by ? full : chartShown.chart);
       say({ kind: "assistant", text: words, from: "this device" });
       log(aiEvent("answered", "insights", { text: words, model: "this device" }));
+      return;
+    }
+    /*
+     * The same words with no chart on screen: the question before, answered in
+     * words. Replayed on 20 October 2026, it was read as an entry and asked
+     * "How much was it?".
+     */
+    const textBefore = [...turns].reverse().find((t): t is Said => t.kind === "you" && t.text.trim() !== note.trim())?.text ?? "";
+    if (!as && files.length === 0 && !chartShown && textBefore.trim().split(/\s+/).length >= 3 && /\b(?:not? (?:a |the |in )?(?:chart|graph|pie)|no (?:chart|graph)|in text|as text|in words|text only|here in (?:the )?chat|sa text)\b/i.test(lead) && !/\d/.test(lead)) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "insights", { text: note }));
+      await askQuestion(`${textBefore.trim().replace(/[\s?.!]+$/, "")}. ${note.trim()}`, false, {
+        text: "They want this answered in words in the chat, as a list with each figure on its own line, not as a chart.",
+      });
       return;
     }
     const toClear = !as && files.length === 0 ? readSettleAsk(lead, debts, (d) => transactions.filter((t) => t.debtId === d.id).reduce((sum, t) => sum + owedChange(t), 0), [...reference.wallets, ...reference.savings]) : null;
@@ -6652,7 +6685,7 @@ export function AskPanel({
      * Never binned as a set: a flagged row is often right and merely odd.
      */
     if (files.length === 0 && !as && !pending && asksForWrongRows(ruled)) {
-      const flagged = flaggedRows(transactions);
+      const flagged = flaggedRows(transactions, { wallets: [...reference.wallets, ...reference.savings] });
       setDraft("");
       say({ kind: "you", text: note });
       if (flagged.length === 0) {
@@ -6661,9 +6694,25 @@ export function AskPanel({
         log(aiEvent("answered", "add", { text: reply, model: "this device" }));
         return;
       }
-      const reply = `${flagged.length} ${flagged.length === 1 ? "entry is" : "entries are"} flagged by the app's checks, the same list as **Needs review** in the Database. Each says what is wrong with it. **Edit this** changes it and keeps its record number; **Move to bin** removes it, and the Bin can bring it back.`;
+      const keep = flagged.filter((f) => !f.binnable).length;
+      const count = `${flagged.length} ${flagged.length === 1 ? "entry is" : "entries are"} flagged by the app's checks, the same list as **Needs review** in the Database.`;
+      // "Should I delete it?" is answered first: most flagged rows are real entries with one part wrong.
+      const advice =
+        keep === flagged.length
+          ? `No, do not delete ${flagged.length === 1 ? "it" : "them"}: ${flagged.length === 1 ? "it is a real entry" : "they are real entries"} with one part saved wrong, and binning would take real money out of your balances. Edit each one as its card says.`
+          : keep === 0
+            ? "Some of these may be copies: each card says how to tell, and Move to bin is there for those."
+            : `Do not delete the ${keep} that only need editing: they are real entries. The other ${flagged.length - keep} may be copies, and their cards say how to tell.`;
+      const reply = asksWhetherToDelete(note) || keep > 0 ? `${advice} ${count}` : `${count} Each says what is wrong with it and what to do.`;
       say({ kind: "assistant", text: reply, from: "this device" });
-      say({ kind: "found", action: "edit", alsoBin: true, candidates: flagged.map(({ row, why }, i) => ({ row, score: 100 - i, why: [...why] })), done: [] });
+      say({
+        kind: "found",
+        action: "edit",
+        alsoBin: true,
+        review: true,
+        candidates: flagged.map(({ row, why, todo, binnable }, i) => ({ row, score: 100 - i, why: [...why], todo: [...todo], noBin: !binnable })),
+        done: [],
+      });
       log(aiEvent("answered", "add", { text: `Listed ${flagged.length} flagged rows. Asked: ${note}`, model: "this device" }));
       return;
     }
@@ -10508,7 +10557,13 @@ function FoundList({
     <div className="fms-proposal">
       <div className="fms-proposalhead">
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
-          {candidates.length === 1 ? "One entry matches" : `${candidates.length} entries match`}
+          {found.review
+            ? candidates.length === 1
+              ? "One entry to review"
+              : `${candidates.length} entries to review`
+            : candidates.length === 1
+              ? "One entry matches"
+              : `${candidates.length} entries match`}
         </span>
         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
           {/* Past tense once it has happened: "nothing is deleted yet" stayed
@@ -10546,7 +10601,7 @@ function FoundList({
         </div>
       )}
 
-      {shown.map(({ row, why }) => {
+      {shown.map(({ row, why, todo, noBin }) => {
         const settled = done.includes(row.id);
         return (
           <div key={row.id} className="fms-foundrow">
@@ -10560,23 +10615,34 @@ function FoundList({
                 ? why.join(" ")
                 : `Matched on ${why.map((w) => w.replace(/\.+$/, "")).join(", ")}.`}
             </p>
+            {todo && todo.length > 0 && !settled && (
+              <p className="t-micro fms-foundtodo">
+                <strong>What to do:</strong> {todo.join(" ")}
+              </p>
+            )}
             {settled ? (
               <p className="t-micro fms-proposalfrom">
                 {found.alsoBin
-                  ? "Done. A corrected entry keeps its number, and a binned one can be restored from the Bin screen."
+                  ? "Done. An edited entry keeps its number, and a binned one can be restored from the Bin screen."
                   : action === "edit"
                   ? "Loaded into the form beside this. Change it and press Save transaction."
                   : action === "bin"
                     ? "Moved to the bin. It is restorable from the Bin screen."
                     : "Restored. It is back in the Database."}
               </p>
-            ) : sweep ? null : found.alsoBin ? (
+            ) : sweep ? null : found.alsoBin && !noBin ? (
               <div className="fms-proposalactions">
                 <Button size="sm" onClick={() => onAct(row.id)}>
                   {verb}
                 </Button>
                 <Button size="sm" variant="danger" onClick={() => onAct(row.id, "bin")}>
                   Move to bin
+                </Button>
+              </div>
+            ) : found.review ? (
+              <div className="fms-proposalactions">
+                <Button size="sm" onClick={() => onAct(row.id)}>
+                  {verb}
                 </Button>
               </div>
             ) : (
@@ -10596,7 +10662,9 @@ function FoundList({
 
       <p className="t-micro fms-proposalfrom">
         {action === "edit"
-          ? "Editing keeps the same record number: it is the entry corrected, not a new one."
+          ? found.review
+            ? "Edit this opens the entry in the form. Editing keeps its record number, and the check runs again when you save."
+            : "Editing keeps the same record number: it is the same entry, edited, not a new one."
           : action === "bin"
             ? "A deleted entry moves to the Bin and can be brought back. Nothing is ever removed."
             : "Restoring puts it back where it was, with its own record number."}

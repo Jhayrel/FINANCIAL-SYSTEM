@@ -1376,6 +1376,36 @@ From the second 19 October backup and its screenshots.
   its PHP 18.00 fee (opening it in Edit and saving sets the total), and Maya
   below zero at the close of 26 September (#3823, #3824, #3831).
 
+### 2026-10-20: the chat history back-read, and Needs review that says what to do
+
+All 400 chat turns of the 19 October backup were read, and every owner
+message that could still go wrong was replayed on today's code.
+
+- Needs review: the chat ran the checks without the accounts and found 1
+  where the Database found 6. Both now use one definition (`flaggedRows`
+  with the accounts). "Should I delete it?" is answered first ("No, do not
+  delete them"), each row says **What to do** (`todoFor`), Edit is the button,
+  and Move to bin is offered only where a check can mean a copy. The
+  Database's flagged rows and their sheet say the same.
+- "Edit, never Correct" (W4): the found-rows card footer, the learning lines,
+  Settings' list of what the owner changed, and two closed-month refusals.
+- A question about what was just done ("so why did you add that?", "are you
+  sure? look 28k all total") never makes a budget card; the second made a
+  November card in an October conversation.
+- The salary-gap follow-up held for eight turns and took any "how much":
+  "How much did I spend this month?" was given the salary answer again. It now
+  follows only straight after, and only about that money.
+- "You forgot the 16 fee": the change card now says "fee PHP 0.00 to PHP
+  16.00".
+- "Can I go to gym?": things named only in descriptions (Self Care, "Gym")
+  have a usual cost; the wallet list names a wallet below zero.
+- "No framelink media like all incoming" is all income, not all but
+  Framelink; "Like since 2022" re-asks the question before with the period;
+  "not a chart, in text" with no chart on screen answers the question before
+  in words.
+- "within the PHP 27,700.00 budget" is no longer flagged as something that
+  does not fit the day.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

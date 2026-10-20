@@ -854,7 +854,7 @@ function planRange(ask: BudgetAsk, budgets: Budgets, start: ReturnType<typeof bu
     written,
     skipped,
     revisions,
-    ...(allClosed ? { refused: `Every month from ${from} to ${to} ${ask.year} is closed. Closed months are corrected one at a time on the Budget screen, with a reason.` } : {}),
+    ...(allClosed ? { refused: `Every month from ${from} to ${to} ${ask.year} is closed. Closed months are edited one at a time on the Budget screen, with a reason.` } : {}),
   };
   const changes = revisions.map((r, i) => revisionSummary(ask.year, written[i] ?? ask.month, r));
   return { year: ask.year, outcome, words, changes };

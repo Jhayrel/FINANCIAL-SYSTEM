@@ -118,6 +118,20 @@ export function readAffordAsk(
     const w = words(n).trim();
     return w.length >= 3 && said.includes(` ${w} `);
   });
+  /*
+   * A word their descriptions use when no item matches: "can I go to gym?"
+   * is Self Care described "Gym", and the answer had no gym in it at all
+   * (12 October 2026, replayed 20 October). At least two rows in a year.
+   */
+  if (items.length === 0) {
+    const yearAgo = addDays(asOf, -365);
+    const described = transactions.filter((t) => t.type === "Spending" && t.date >= yearAgo && t.date <= asOf && t.description.trim());
+    for (const w of new Set(words(text).trim().split(/\s+/))) {
+      if (w.length < 3 || NOT_A_THING.has(w)) continue;
+      const hits = described.filter((t) => ` ${words(t.description)} `.includes(` ${w} `)).length;
+      if (hits >= 2) items.push(w.charAt(0).toUpperCase() + w.slice(1));
+    }
+  }
   const wallet =
     [...reference.wallets, ...reference.savings].find((w) => said.includes(` ${words(w).trim()} `)) ?? null;
   const when = /\b(?:tomorrow|tommorrow|tomorow|tmrw|bukas)\b/i.test(text) ? "tomorrow" : /\b(?:today|now|ngayon)\b/i.test(text) ? "today" : null;
@@ -127,14 +141,26 @@ export function readAffordAsk(
   return { items, amount: figureIn(undated), wallet, when, yesNo };
 }
 
-/** What one of these usually costs: the middle of the last ninety days' purchases. */
+/** Words of a question that are never the thing bought. */
+const NOT_A_THING = new Set(
+  "can could should would will the and for but with from into look usual usually expense expenses cost costs much how what when where today tomorrow tommorrow now this that these those you your mine afford buy get pay paid spend spent money cash balance budget go going went want need still also just like please pls".split(" "),
+);
+
+/** What one of these usually costs: the middle of the last ninety days' purchases, or by description over a year. */
 export function usualCost(transactions: readonly Transaction[], item: string, asOf: IsoDate): Centavos | null {
   const since = addDays(asOf, -90);
   const key = item.toLowerCase();
-  const paid = transactions
+  let paid = transactions
     .filter((t) => t.type === "Spending" && t.date >= since && t.date <= asOf && t.item.trim().toLowerCase() === key && t.total > 0)
     .map((t) => t.total)
     .sort((a, b) => a - b);
+  if (paid.length === 0) {
+    const yearAgo = addDays(asOf, -365);
+    paid = transactions
+      .filter((t) => t.type === "Spending" && t.date >= yearAgo && t.date <= asOf && t.total > 0 && ` ${words(t.description)} `.includes(` ${words(key).trim()} `))
+      .map((t) => t.total)
+      .sort((a, b) => a - b);
+  }
   if (paid.length === 0) return null;
   const mid = Math.floor(paid.length / 2);
   return paid.length % 2 === 1 ? paid[mid]! : Math.round((paid[mid - 1]! + paid[mid]!) / 2);
@@ -175,7 +201,8 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
   const cost = ask.amount ?? (known.length > 0 ? known.reduce((s, c) => s + c.cost, 0) : null);
 
   const lines: string[] = [];
-  const walletWords = held.filter((w) => w.balance > 0).map((w) => `${w.name} ${money(w.balance)}`);
+  // A wallet below zero is named too, or the parts do not add up to the whole ("₱941.46 (Gcash ₱1,000.00, Maya ₱302.46)").
+  const walletWords = held.map((w) => `${w.name} ${money(w.balance)}`);
   const holding =
     fromWallet !== null
       ? `${ask.wallet} holds ${money(fromWallet)}.`

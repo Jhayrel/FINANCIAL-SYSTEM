@@ -201,3 +201,15 @@ describe("an amount past today's figure is never a yes", () => {
     expect(text.startsWith("Yes, going by what you hold today.")).toBe(true);
   });
 });
+
+describe("a thing their descriptions name, not an item", () => {
+  const row = (date: string, total: number, description: string): Transaction =>
+    ({ id: `${date}-${total}`, recordNumber: 1, date, type: "Spending", fromWallet: "Cash", toWallet: "", category: "Spending", item: "Self Care", description, amount: total, fee: 0, total, notes: "", status: "Paid" }) as Transaction;
+  const rows = [row("2026-01-13", 5_000, "Went to the gym"), row("2026-07-30", 21_000, "Gym session"), row("2026-09-10", 7_000, "Gym")];
+
+  it("finds the gym in the descriptions, and its usual cost", () => {
+    const ask = readAffordAsk("Can I go to gym? look at my usual gym expense", rows, { wallets: ["Cash"], savings: [], spendingTypes: [{ name: "Self Care" }] as never }, "2026-10-12");
+    expect(ask.items).toEqual(["Gym"]);
+    expect(usualCost(rows, "Gym", "2026-10-12")).toBe(7_000);
+  });
+});

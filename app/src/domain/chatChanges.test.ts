@@ -85,6 +85,11 @@ describe("planning the change", () => {
     expect(changeWords(plan.rows[0]!)).toBe("₱1,100.00 to ₱1,200.00");
   });
 
+  it("names a fee added to a row", () => {
+    const before = ledger[0]!;
+    expect(changeWords({ before: { ...before, amount: 50_000, fee: 0 }, after: { ...before, amount: 50_000, fee: 1_600, total: 51_600 } })).toBe("fee ₱0.00 to ₱16.00, ₱516.00 in all");
+  });
+
   it("moves the wallet on the side that held it", () => {
     const ask = readEditAsk("move my spotify payment from gcash to maya", reference, ASOF)!;
     const plan = planEdit(ask, ledger, reference, [], ASOF);

@@ -16,6 +16,9 @@ describe("a sum asked as a summary, and a period said on its own", () => {
   it("finds the period in a follow-up that is only a period", () => {
     expect(periodOnly("All years")).toBe("all years");
     expect(periodOnly("how about 2025?")).toBe("in 2025");
+    expect(periodOnly("Like since 2022")).toBe("since 2022");
+    expect(periodOnly("I mean since 2022")).toBe("since 2022");
+    expect(periodOnly("like the food")).toBeNull();
     expect(periodOnly("and last month")).toBe("last month");
     expect(periodOnly("All years of school")).toBeNull();
     expect(periodOnly("Framelink Media")).toBeNull();

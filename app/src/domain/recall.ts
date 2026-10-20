@@ -323,6 +323,10 @@ export interface Candidate {
   readonly score: number;
   /** What matched, so the card can say why this one is here. */
   readonly why: readonly string[];
+  /** What to do about it, for a row the app's checks flagged (`flaggedRows`). */
+  readonly todo?: readonly string[];
+  /** Edit alone: the bin is never the answer for what is wrong with it. */
+  readonly noBin?: boolean;
 }
 
 /** How many to put in front of someone. More than this is not a choice. */

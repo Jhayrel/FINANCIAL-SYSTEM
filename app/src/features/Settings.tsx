@@ -4442,7 +4442,7 @@ function AiLearningGroup({
                     ) : (
                       <span className="t-caption fms-actsummary">
                         {e.action === "edited" && e.field
-                          ? `Corrected the ${e.field}: ${e.proposed} became ${e.corrected}`
+                          ? `Changed the ${e.field}: ${e.proposed} became ${e.corrected}`
                           : e.action === "uploaded"
                             ? (e.files ?? [])
                                 .map((f) => `${f.name} (${f.kind}): ${f.details}`)

@@ -142,6 +142,7 @@ describe("a balance, a transfer or a warning is not something said to fit", () =
     expect(fitSlips("You are overspending by **PHP 1,500.00** a day and cash is below the ₱500 warning.", day)).toEqual([]);
     expect(fitSlips("You can pay it today because your usable wallets hold **PHP 1,100.00**, which covers the PHP 200.00 required fee.", day)).toEqual([]);
     expect(fitSlips("The **PHP 15.00** fee is recorded in your ledger under entry #0101 for today's transfer of PHP 400.00 from Maya to Cash.", day)).toEqual([]);
+    expect(fitSlips("While you are within the PHP 20,000.00 budget by **PHP 1,000.00**, you are spending **PHP 1,200.00** a day.", day)).toEqual([]);
   });
   it("still catches a real one", () => {
     expect(fitSlips("A PHP 95.00 lunch is within today's figure.", day)).toEqual([{ amount: 9500, limit: 4000 }]);

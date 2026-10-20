@@ -6009,6 +6009,17 @@ button.fms-recent-row:disabled {
   overflow-wrap: anywhere;
 }
 
+/* What to do about a flagged row, and its buttons the card's full width, as on every other card. */
+.fms-foundtodo {
+  margin: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.fms-foundrow > .fms-proposalactions {
+  justify-self: stretch;
+}
+
 /* ── A chart, as bars ─────────────────────────────────────────────────────
    One ink, because flow colour means direction of money (rule D3) and cannot
    also mean "this bar rather than that one". Length carries the comparison,
@@ -9663,6 +9674,13 @@ button.fms-recent-row:disabled {
 .fms-dbrow-issue {
   margin: var(--space-2) 0 0;
   color: var(--warn);
+}
+
+/* What to do about a flagged row: ink, not warning colour, so it reads as the answer. */
+.fms-dbrow-todo {
+  margin: var(--space-1) 0 0;
+  color: var(--ink-2);
+  text-align: left;
 }
 
 .fms-dbcheck {

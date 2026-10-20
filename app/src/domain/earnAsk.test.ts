@@ -13,7 +13,9 @@ describe("income over the whole ledger, worked out by the app", () => {
   it("reads the questions that came in on 13 October 2026", () => {
     expect(readEarnAsk("How much i earned since the beginning of this database?", SOURCES, "2026-10-13")).toEqual({ from: null, only: null, except: null });
     expect(readEarnAsk("How much I earned since 2022?", SOURCES, "2026-10-13")).toMatchObject({ from: "2022-01-01", only: null });
-    expect(readEarnAsk("No studio work like all incoming in the system", SOURCES, "2026-10-13")).toMatchObject({ only: null, except: "Studio Work" });
+    // "No, not just that one: all of it", after an answer about one source (the owner asked for the total next).
+    expect(readEarnAsk("No studio work like all incoming in the system", SOURCES, "2026-10-13")).toMatchObject({ only: null, except: null });
+    expect(readEarnAsk("all income in the system except studio work", SOURCES, "2026-10-13")).toMatchObject({ only: null, except: "Studio Work" });
     expect(readEarnAsk("how much did studio work bring in all time? total income", SOURCES, "2026-10-13")).toMatchObject({ only: "Studio Work" });
   });
   it("leaves the month, the plans and the spending to the other readers", () => {

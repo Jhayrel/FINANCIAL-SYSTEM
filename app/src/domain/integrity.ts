@@ -346,18 +346,69 @@ export function actionableIssues(issues: readonly Issue[]): Issue[] {
  * above, the same ones that fill "Needs review" in the Database. So that is
  * the list, each row with the check that caught it, worst first.
  */
+/*
+ * What to do about each check, said once per row. Only two checks can mean a
+ * row should go; every other one is a real entry saved with a part wrong, and
+ * the card offers Edit alone (20 October 2026: "Should I delete it?" was
+ * answered with a red Move to bin beside a withdrawal that only needed its
+ * fee split out).
+ */
+const TODO: Record<IssueCode, { readonly todo: string; readonly bin?: boolean }> = {
+  "total-mismatch": { todo: "Open it in Edit and save: the total is set again from the amount and the fee." },
+  "fee-inside-withdrawal": { todo: "Edit it and split the fee out (the form has a button for it), so Cash holds what the machine gave." },
+  "below-zero-day": { todo: "This row may be right: money that came in before that day is missing, or dated later. Add it, or edit its date." },
+  "uncategorised-fee": { todo: "Edit it and pick its item." },
+  "missing-category": { todo: "Edit it and pick its item." },
+  "missing-item": { todo: "Edit it and pick its item." },
+  "fee-row-with-amount": { todo: "Edit it: a fee belongs in the fee box of the movement that charged it." },
+  "no-wallet": { todo: "Edit it and pick the wallet." },
+  "spending-without-source": { todo: "Edit it and pick the wallet it came out of." },
+  "revenue-without-destination": { todo: "Edit it and pick the wallet it went into." },
+  "negative-amount": { todo: "Edit it: amounts are saved without a minus sign, and the kind says which way the money went." },
+  "transfer-same-wallet": { todo: "Edit it and set the other wallet. If no money moved, move it to the bin.", bin: true },
+  "debt-same-wallet": { todo: "Edit it and set the other wallet." },
+  "duplicate-record-number": { todo: "If one of these is a copy, move it to the bin; if both are real, leave them.", bin: true },
+};
+
+/** What to do about one check's finding, as the Database and the chat both say it. */
+export function todoFor(code: IssueCode): string {
+  return TODO[code].todo;
+}
+
+export interface FlaggedRow {
+  readonly row: Transaction;
+  readonly why: readonly string[];
+  /** What to do, one line per check that caught it. */
+  readonly todo: readonly string[];
+  /** Whether the bin is ever the answer for it; otherwise Edit alone. */
+  readonly binnable: boolean;
+}
+
 export function flaggedRows(
   transactions: readonly Transaction[],
-): { readonly row: Transaction; readonly why: readonly string[] }[] {
+  /** The same as the Database's Needs review, so the two never disagree (20 October 2026: 1 in the chat, 6 there). */
+  context: { readonly wallets?: readonly string[]; readonly asOf?: IsoDate } = {},
+): FlaggedRow[] {
   const byId = new Map(transactions.map((t) => [t.id, t] as const));
-  const found = new Map<string, string[]>();
-  for (const issue of actionableIssues(checkIntegrity(transactions))) {
+  const found = new Map<string, { why: string[]; todo: string[]; binnable: boolean }>();
+  for (const issue of actionableIssues(checkIntegrity(transactions, context))) {
     for (const id of issue.ids) {
       if (!byId.has(id)) continue;
-      found.set(id, [...(found.get(id) ?? []), issue.message]);
+      const seen = found.get(id) ?? { why: [], todo: [], binnable: false };
+      const what = TODO[issue.code];
+      found.set(id, {
+        why: [...seen.why, issue.message],
+        todo: seen.todo.includes(what.todo) ? seen.todo : [...seen.todo, what.todo],
+        binnable: seen.binnable || what.bin === true,
+      });
     }
   }
-  return [...found.entries()].map(([id, why]) => ({ row: byId.get(id) as Transaction, why }));
+  return [...found.entries()].map(([id, f]) => ({ row: byId.get(id) as Transaction, ...f }));
+}
+
+/** "Should I delete them?", "what do you recommend", asked about the flagged rows. */
+export function asksWhetherToDelete(said: string): boolean {
+  return /\b(?:should i|do i|shall i|can i|must i|better to|recommend|advise|suggest|what (?:should|do) i do)\b[^?.!]*\b(?:delete|remove|bin|erase|tanggal|burahin)\b|\bwhat do you (?:recommend|suggest|advise)\b|\bshould i delete\b/i.test(said);
 }
 
 /** Asking for the wrong rows as a set, rather than for one row by its description. */

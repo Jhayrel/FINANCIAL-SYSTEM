@@ -30,7 +30,7 @@ import { DataTable, type Column } from "../components/DataTable";
 import { formatShort, getYear } from "../domain/dates";
 import { inPeriod, matchesSearch, parseSearch, PERIODS, type Period } from "../domain/search";
 import { yearsCovered } from "../domain/year";
-import { checkIntegrity, type Issue } from "../domain/integrity";
+import { checkIntegrity, todoFor, type Issue } from "../domain/integrity";
 import type { ReferenceLists, Transaction, TransactionType } from "../domain/types";
 import { accountGroups, type Account } from "../domain/accounts";
 import type { Debt } from "../domain/debt";
@@ -779,6 +779,12 @@ export function Database({
                           ⚠ {i.message}
                         </p>
                       ))}
+                      {/* What to do about it, under what is wrong (20 October 2026: "add an option or something like what to do"). */}
+                      {issues && issues.length > 0 && (
+                        <p className="t-micro fms-dbrow-todo">
+                          <strong>What to do:</strong> {[...new Set(issues.map((i) => todoFor(i.code)))].join(" ")} Tap the row, then Edit.
+                        </p>
+                      )}
                     </button>
                   </li>
                 );
@@ -907,6 +913,12 @@ export function Database({
               ⚠ {i.message}
             </p>
           ))}
+          {(issuesById.get(opened.id)?.length ?? 0) > 0 && (
+            <p className="t-caption fms-dbrow-todo">
+              <strong>What to do:</strong> {[...new Set(issuesById.get(opened.id)!.map((i) => todoFor(i.code)))].join(" ")}
+              {onEdit ? " Edit opens it in the form; saving runs the checks again." : ""}
+            </p>
+          )}
           {onDeleteMany && (
             <Button
               fullWidth

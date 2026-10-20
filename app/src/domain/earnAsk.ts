@@ -40,7 +40,16 @@ export function readEarnAsk(said: string, sources: readonly string[], asOf: IsoD
     .filter((k) => k.trim().length >= 3)
     .sort((a, b) => b.length - a.length)
     .find((k) => named(k).test(text) || (k.trim().split(/\s+/)[0]?.length ?? 0) >= 4 && firstWord(k).test(text));
-  const excluded = source && new RegExp(String.raw`\b(?:no|not|except|excluding|without|other than|apart from|besides|hindi)\b[^.?!]{0,24}$`, "i").test(text.slice(0, text.search(firstWord(source))));
+  const before = source ? text.slice(0, text.search(firstWord(source))) : "";
+  /*
+   * "No framelink media like all incoming in the system" is "no, not just
+   * Framelink: all of it", after an answer about Framelink alone. A bare
+   * leading "no" with "all" after the name is that correction, never an
+   * exclusion (20 October 2026 replay of 13 October).
+   */
+  const correctsToAll = source !== undefined && /^\s*no\b[,.!]?\s*$/i.test(before) && /\b(?:all|every\w*|lahat|whole|total)\b/i.test(text.slice(before.length));
+  if (correctsToAll) return { from: year !== null ? `${year}-01-01` : null, only: null, except: null };
+  const excluded = source && new RegExp(String.raw`\b(?:no|not|except|excluding|without|other than|apart from|besides|hindi)\b[^.?!]{0,24}$`, "i").test(before);
   return { from: year !== null ? `${year}-01-01` : null, only: source && !excluded ? source : null, except: source && excluded ? source : null };
 }
 

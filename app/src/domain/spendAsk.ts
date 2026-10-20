@@ -170,6 +170,6 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
  * about 2025?". The phrase to add to the question before, or null.
  */
 export function periodOnly(said: string): string | null {
-  const m = /^\s*(?:(?:and|what about|how about|for|in|over|ok(?:ay)?|then|now),?\s+)*((?:all|every)\s+(?:years?|time)|all-time|ever|overall|(?:this|last|past)\s+(?:year|month|week)|20\d{2}|since\s+20\d{2}|the\s+whole\s+(?:year|ledger|time))\s*[?.!]*\s*$/i.exec(said);
+  const m = /^\s*(?:(?:and|what about|how about|for|in|over|ok(?:ay)?|then|now|like|i mean|i meant|no|so|but|just|only),?\s+)*((?:all|every)\s+(?:years?|time)|all-time|ever|overall|(?:this|last|past)\s+(?:year|month|week)|20\d{2}|since\s+20\d{2}|from\s+20\d{2}|the\s+whole\s+(?:year|ledger|time)|since\s+the\s+(?:beginning|start))\s*[?.!]*\s*$/i.exec(said);
   return m?.[1] ? (/^20\d{2}$/.test(m[1]) ? `in ${m[1]}` : m[1].toLowerCase()) : null;
 }

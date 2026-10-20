@@ -330,6 +330,8 @@ export function planEdit(
 export function changeWords({ before, after }: ChangedRow): string {
   const parts: string[] = [];
   if (before.amount !== after.amount) parts.push(`${formatMoney(before.amount)} to ${formatMoney(after.amount)}`);
+  // "You forgot the 16 fee" made a card that named the row and not the change (20 October 2026).
+  if (before.fee !== after.fee) parts.push(`fee ${formatMoney(before.fee)} to ${formatMoney(after.fee)}, ${formatMoney(after.amount + after.fee)} in all`);
   if (before.fromWallet !== after.fromWallet) parts.push(`from ${before.fromWallet || "no wallet"} to ${after.fromWallet || "no wallet"}`);
   if (before.toWallet !== after.toWallet) parts.push(`into ${after.toWallet || "no wallet"} instead of ${before.toWallet || "no wallet"}`);
   if (before.date !== after.date) parts.push(`dated ${after.date} instead of ${before.date}`);
