@@ -309,7 +309,7 @@ export function applyReply(
     case "amount": {
       // "999, 199, 239" is three payments, not PHP 999,199,239.00. A list is not one amount.
       if (figuresIn(text).length > 1) return null;
-      const amount = readMoney(text) ?? firstAmountIn(text);
+      const amount = /\d\s*k\b/i.test(text) ? firstAmountIn(text) : (readMoney(text) ?? firstAmountIn(text));
       if (amount !== null && amount > 0) return { ...draft, amount };
 
       // "All of it": what the account it comes out of holds, less its fee.
@@ -410,8 +410,11 @@ export function leftoverFigure(said: string, taken: readonly (number | null | un
  * "about 500 I think", which is how people answer.
  */
 function firstAmountIn(text: string): number | null {
-  const match = /\d[\d,]*(?:\.\d+)?/.exec(text);
-  return match ? readMoney(match[0]) : null;
+  // "28k" is PHP 28,000.00: it was read as PHP 28.00 (20 October 2026). Centavos times a thousand, exact.
+  const match = /(\d[\d,]*(?:\.\d+)?)(\s*k\b)?/i.exec(text);
+  if (!match) return null;
+  const base = readMoney(match[1] ?? "");
+  return base !== null && match[2] ? base * 1000 : base;
 }
 
 /**
@@ -511,6 +514,12 @@ export function amend(
   if (!trimmed) return null;
   // What an account holds is never a card's amount (`statesBalance`).
   if (statesBalance(trimmed)) return null;
+  /*
+   * A question about what was just done is answered, never applied: "Now are
+   * you sure with that? Look 28k all total" turned an open PHP 1.23 interest
+   * card into PHP 28.00 (20 October 2026 replay).
+   */
+  if (/\b(?:why|how come|are you (?:sure|certain)|is (?:that|it|this) (?:right|correct|true)|did you)\b/i.test(trimmed)) return null;
 
   /*
    * "change the description to Buy food" was typed with the card open and
@@ -614,7 +623,7 @@ export function amend(
   }
 
   // A figure, with or without "make it" in front of it.
-  const amount = readMoney(trimmed) ?? firstAmountIn(trimmed);
+  const amount = /\d\s*k\b/i.test(trimmed) ? firstAmountIn(trimmed) : (readMoney(trimmed) ?? firstAmountIn(trimmed));
   if (amount !== null && amount > 0 && /\d/.test(trimmed)) {
     return { draft: { ...draft, amount }, what: "Amount changed." };
   }

@@ -150,6 +150,14 @@ describe("the whole loop", () => {
 });
 
 describe("amend: correcting a card already on screen", () => {
+  it("reads 28k as a thousand times, and never takes a question as an edit", () => {
+    const c = { ...emptyDraft(ASOF), flow: "Spending" as const, item: "Food", amount: 12_300, fromWallet: "Cash" };
+    expect(amend(c, "make it 28k", reference, ASOF)?.draft.amount).toBe(2_800_000);
+    expect(amend(c, "it should be 1.5k", reference, ASOF)?.draft.amount).toBe(150_000);
+    expect(amend(c, "Now are you sure with that? Look 28k all total", reference, ASOF)).toBeNull();
+    expect(amend(c, "why 123?", reference, ASOF)).toBeNull();
+  });
+
   const card = spend({ amount: 34000, fromWallet: "Cash", item: "Food", date: "2022-10-07" });
   const ASOF = "2026-08-31";
 
