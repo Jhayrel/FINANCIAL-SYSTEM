@@ -1576,6 +1576,22 @@ Read from the 76 chat turns since 20 October in the owner's backup.
   friday?" lists that day's entries; "2 days ago" is that day, not the two
   days up to today.
 
+### 2026-10-26, last: Needs review explained, and kept without moving money
+
+- The owner: "just keep the ai for now" (the own-AI plan waits), and Needs
+  review was confusing: "what am I reviewing, what's the problem", and fixing
+  rows moved balances that were already right.
+- Each flagged row has an "i" before the pencil on a computer (hover: one
+  line; press: the whole of it) and, on a phone, the same in the row's sheet:
+  what was noticed, why it matters, what fixing it moves (`reviewFixes`
+  words, "Fix it only if ..."), and that keeping it moves nothing
+  (`reviewExplain.ts`).
+- **Keep as it is** adds `KEPT_NOTE` to the row and to every row flagged
+  with it (a below-zero day flags its rows together), nothing else: no
+  balance, spending or budget changes. Undo is on the notice. A row whose
+  total is not its amount plus fee cannot be kept (the database refuses it);
+  it says so and offers Edit.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

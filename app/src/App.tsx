@@ -1179,7 +1179,7 @@ export default function App() {
     handleSave([{ ...found.add, id: `t-${Date.now()}`, recordNumber: sink.nextRecordNumber } as Transaction]);
   };
 
-  const handleUpdate = (rows: Transaction[], by: Provenance = BY_OWNER): void => {
+  const handleUpdate = (rows: Transaction[], by: Provenance = BY_OWNER, said?: string): void => {
     // Read before the state changes, so the event carries what it replaced.
     const previous = new Map(transactions.map((t) => [t.id, t]));
     record(
@@ -1240,7 +1240,7 @@ export default function App() {
           : "";
     const undoable = rows.every((r) => previous.has(r.id));
     flash(
-      `Edited #${String(first?.recordNumber ?? 0).padStart(4, "0")}${touched.length > 1 ? ` and ${touched.length - 1} more` : ""}${changed ? `: ${changed}` : ""}.`,
+      said ?? `Edited #${String(first?.recordNumber ?? 0).padStart(4, "0")}${touched.length > 1 ? ` and ${touched.length - 1} more` : ""}${changed ? `: ${changed}` : ""}.`,
       undoable ? { label: "Undo", run: () => handleUpdate(rows.map((r) => previous.get(r.id) ?? r), by) } : undefined,
     );
     /*
@@ -2483,6 +2483,13 @@ export default function App() {
               onDelete={handleDelete}
               onDeleteMany={handleDeleteMany}
               onEdit={startEditing}
+              onKeep={(rows) =>
+                handleUpdate(
+                  rows,
+                  BY_OWNER,
+                  `Kept ${rows.map((r) => `#${String(r.recordNumber).padStart(4, "0")}`).join(", ")} as ${rows.length > 1 ? "they are" : "it is"}: nothing moved, and Needs review stops listing ${rows.length > 1 ? "them" : "it"}.`,
+                )
+              }
               asOf={asOf}
             />
           )}

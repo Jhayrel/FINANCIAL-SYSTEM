@@ -30,7 +30,8 @@ import { DataTable, type Column } from "../components/DataTable";
 import { formatShort, getYear } from "../domain/dates";
 import { inPeriod, matchesSearch, parseSearch, PERIODS, type Period } from "../domain/search";
 import { yearsCovered } from "../domain/year";
-import { checkIntegrity, todoFor, type Issue } from "../domain/integrity";
+import { checkIntegrity, type Issue } from "../domain/integrity";
+import { explainFlag, firstSentence, flagSummary } from "../domain/reviewExplain";
 import type { ReferenceLists, Transaction, TransactionType } from "../domain/types";
 import { accountGroups, type Account } from "../domain/accounts";
 import type { Debt } from "../domain/debt";
@@ -77,6 +78,7 @@ export function Database({
   onDelete,
   onDeleteMany,
   onEdit,
+  onKeep,
   asOf,
   debts = [],
   reference,
@@ -96,6 +98,8 @@ export function Database({
   onDeleteMany?: ((ids: readonly string[]) => void) | undefined;
   /** Loads the row back into the Add form, the way the Excel arrows did. */
   onEdit?: (row: Transaction) => void;
+  /** Saves flagged rows as they are with a note, which moves no money (`reviewExplain.ts`). */
+  onKeep?: ((rows: Transaction[]) => void) | undefined;
   /** Today, for the Today, Yesterday, Last 7 days and This month shortcuts. */
   asOf: string;
 }) {
@@ -139,6 +143,8 @@ export function Database({
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
   /** The row whose sheet is open on a phone. */
   const [opened, setOpened] = useState<Transaction | null>(null);
+  /** The flagged row whose "i" was pressed on a computer: what is wrong, and keep it or fix it. */
+  const [reviewing, setReviewing] = useState<Transaction | null>(null);
   const phone = useMediaQuery("(max-width: 639px)");
   const { confirm, dialog } = useConfirm();
 
@@ -264,6 +270,50 @@ export function Database({
     }
     return map;
   }, [transactions, reference]);
+
+  /*
+   * What a flagged row's problem is, why it matters, what fixing it moves and
+   * that keeping it moves nothing (26 October 2026: "I am confused what am I
+   * reviewing"). Worked out only for the row open, never for every row.
+   */
+  const explainOf = (t: Transaction) =>
+    explainFlag(t, issuesById.get(t.id) ?? [], transactions, { wallets: [...(reference?.wallets ?? []), ...(reference?.savings ?? [])], asOf });
+  const explained = useMemo(() => {
+    const t = reviewing ?? opened;
+    return t && issuesById.has(t.id) ? explainOf(t) : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewing, opened, issuesById, transactions, reference, asOf]);
+  const keep = (rows: readonly Transaction[]): void => {
+    setReviewing(null);
+    setOpened(null);
+    onKeep?.([...rows]);
+  };
+  const reviewBody = (t: Transaction) =>
+    explained && (
+      <div className="fms-review">
+        {explained.problems.map((p) => (
+          <section key={p.what} className="fms-review-part">
+            <h3 className="t-label">What was noticed</h3>
+            <p className="t-body">{p.what}</p>
+            <p className="t-caption fms-review-why">Why it matters: {p.why}</p>
+          </section>
+        ))}
+        <section className="fms-review-part">
+          <h3 className="t-label">If you fix it</h3>
+          <p className="t-caption">
+            {explained.fix}
+            {onEdit ? " Edit opens it in the form, which shows what saving moves before you save." : ""}
+          </p>
+        </section>
+        <section className="fms-review-part fms-review-keep">
+          <h3 className="t-label">If you keep it as it is</h3>
+          <p className="t-caption">{explained.keep}</p>
+        </section>
+        <p className="t-micro fms-review-row">
+          #{String(t.recordNumber).padStart(4, "0")} · {formatShort(t.date)} · {walletPath(t)} · ₱{formatAmount(t.total)}
+        </p>
+      </div>
+    );
 
   /**
    * Search, read the way the workbook's Smart Search read it.
@@ -501,7 +551,8 @@ export function Database({
           key: "actions",
           header: "",
           align: "right" as const,
-          width: "104px",
+          // Room for the "i" while any flagged row is on screen.
+          width: shown.some((t) => issuesById.has(t.id)) ? "148px" : "104px",
           render: (t: Transaction) => (
             /*
              * Not `.fms-rowactions`: that reserves 200px and gives every
@@ -515,6 +566,17 @@ export function Database({
              * came straight out of the item and the description.
              */
             <span className="fms-tableactions">
+              {/* What is wrong, before the pencil (26 October 2026): hover for one line, press for all of it. */}
+              {issuesById.has(t.id) && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  ariaLabel={`Why record ${t.recordNumber} needs review`}
+                  title={flagSummary(issuesById.get(t.id) ?? [])}
+                  iconLeft={<Icon name="statusInfo" size={18} />}
+                  onClick={() => setReviewing(t)}
+                />
+              )}
               {onEdit && (
                 <Button
                   size="sm"
@@ -776,15 +838,11 @@ export function Database({
                           )}
                         </div>
                       </div>
-                      {issues?.map((i) => (
-                        <p key={i.code} className="t-micro fms-dbrow-issue">
-                          ⚠ {i.message}
-                        </p>
-                      ))}
-                      {/* What to do about it, under what is wrong (20 October 2026: "add an option or something like what to do"). */}
+                      {/* What is wrong in a line; the sheet says why it matters, and keeps it or fixes it (26 October 2026). */}
                       {issues && issues.length > 0 && (
-                        <p className="t-micro fms-dbrow-todo">
-                          <strong>What to do:</strong> {[...new Set(issues.map((i) => todoFor(i.code)))].join(" ")} Tap the row, then Edit.
+                        <p className="t-micro fms-dbrow-issue">
+                          <Icon name="statusInfo" size={14} /> {firstSentence(issues[0]?.message ?? "")}
+                          {issues.length > 1 ? ` (and ${issues.length - 1} more)` : ""} <strong>Tap to see why, and keep it or fix it.</strong>
                         </p>
                       )}
                     </button>
@@ -822,12 +880,61 @@ export function Database({
         )}
       </Card>
 
+      {reviewing && (
+        <Sheet
+          title={`Why #${String(reviewing.recordNumber).padStart(4, "0")} needs review`}
+          subtitle={rowTitle(reviewing)}
+          onClose={() => setReviewing(null)}
+          actions={
+            <>
+              {onEdit && (
+                <Button
+                  onClick={() => {
+                    const t = reviewing;
+                    setReviewing(null);
+                    onEdit(t);
+                  }}
+                >
+                  Edit to fix it
+                </Button>
+              )}
+              {onKeep && explained && explained.kept.length > 0 && (
+                <Button variant="primary" onClick={() => keep(explained.kept)}>
+                  {explained.kept.length > 1 ? `Keep these ${explained.kept.length} as they are` : "Keep as it is"}
+                </Button>
+              )}
+            </>
+          }
+        >
+          {reviewBody(reviewing)}
+        </Sheet>
+      )}
+
       {opened && (
         <Sheet
           title={rowTitle(opened)}
           subtitle={`#${String(opened.recordNumber).padStart(4, "0")} · ${shortDays(opened)}`}
           onClose={() => setOpened(null)}
           actions={
+            issuesById.has(opened.id) && onKeep && explained && explained.kept.length > 0 ? (
+              // A flagged row: fix it, or keep it as it is, under the thumb (26 October 2026).
+              <>
+                {onEdit && (
+                  <Button
+                    onClick={() => {
+                      const t = opened;
+                      setOpened(null);
+                      onEdit(t);
+                    }}
+                  >
+                    Edit to fix it
+                  </Button>
+                )}
+                <Button variant="primary" onClick={() => keep(explained.kept)}>
+                  {explained.kept.length > 1 ? `Keep these ${explained.kept.length}` : "Keep as it is"}
+                </Button>
+              </>
+            ) : (
             <>
               {onDelete && (
                 <Button
@@ -854,8 +961,10 @@ export function Database({
                 </Button>
               )}
             </>
+            )
           }
         >
+          {issuesById.has(opened.id) && reviewBody(opened)}
           <dl className="fms-rowfacts">
             <div>
               <dt>Amount</dt>
@@ -910,16 +1019,20 @@ export function Database({
               </div>
             )}
           </dl>
-          {issuesById.get(opened.id)?.map((i) => (
-            <p key={i.code} className="t-caption fms-dbrow-issue">
-              ⚠ {i.message}
-            </p>
-          ))}
-          {(issuesById.get(opened.id)?.length ?? 0) > 0 && (
-            <p className="t-caption fms-dbrow-todo">
-              <strong>What to do:</strong> {[...new Set(issuesById.get(opened.id)!.map((i) => todoFor(i.code)))].join(" ")}
-              {onEdit ? " Edit opens it in the form; saving runs the checks again." : ""} Or ask the AI "fix the rows that need review": it shows each fix ready to apply in one press.
-            </p>
+          {/* With Keep and Edit at the bottom of a flagged row, the bin is still here. */}
+          {issuesById.has(opened.id) && onKeep && explained && explained.kept.length > 0 && onDelete && (
+            <Button
+              fullWidth
+              variant="ghost"
+              tone="danger"
+              onClick={() => {
+                const t = opened;
+                setOpened(null);
+                void askDelete(t);
+              }}
+            >
+              Move to bin
+            </Button>
           )}
           {onDeleteMany && (
             <Button

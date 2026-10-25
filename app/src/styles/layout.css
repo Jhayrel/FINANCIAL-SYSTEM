@@ -9673,6 +9673,57 @@ button.fms-recent-row:disabled {
   color: var(--warn);
 }
 
+.fms-dbrow-issue svg {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+
+.fms-dbrow-issue strong {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+/* A flagged row explained: what was noticed, fixing it, keeping it (26 October 2026). */
+.fms-review {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fms-review-part {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-review-part:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.fms-review-part h3 {
+  margin: 0;
+  color: var(--ink-3);
+}
+
+.fms-review-part p {
+  margin: 0;
+}
+
+.fms-review-why {
+  color: var(--ink-2);
+}
+
+.fms-review-keep p {
+  color: var(--ink);
+}
+
+.fms-review-row {
+  margin: 0;
+  color: var(--ink-3);
+}
+
 /* What to do about a flagged row: ink, not warning colour, so it reads as the answer. */
 .fms-dbrow-todo {
   margin: var(--space-1) 0 0;
