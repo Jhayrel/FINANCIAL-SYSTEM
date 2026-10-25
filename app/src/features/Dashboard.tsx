@@ -328,13 +328,9 @@ export function Dashboard({
           */}
           {next && (
             <p className="t-body fms-month-next">
-              <span>{`From 1 ${monthName(next.month)}: `}</span>
+              {`From 1 ${monthName(next.month)}: `}
               <strong>{`${formatMoney(next.perDay)} a day`}</strong>
-              <span style={{ color: "var(--ink-3)" }}>
-                {next.safe > 0
-                  ? `. What is left carries over, less ${monthName(next.month)}'s bills (${formatMoney(next.reservedBills + next.reservedDebt)}).`
-                  : `. What is left carries over, but ${monthName(next.month)}'s bills (${formatMoney(next.reservedBills + next.reservedDebt)}) take all of it until money comes in.`}
-              </span>
+              <span style={{ color: "var(--ink-3)" }}>{next.safe > 0 ? ", after its bills." : " until money comes in."}</span>
             </p>
           )}
 
