@@ -15,7 +15,8 @@
 
 import { windowOf } from "./charts";
 import { daysIn } from "./readEntry";
-import { formatMedium } from "./dates";
+import { dayInWords, formatMedium } from "./dates";
+import { dayFromWords } from "./dayWords";
 import { formatMoney, type Centavos } from "./money";
 import { itemHintIn } from "./filipino";
 import { costOf } from "./totals";
@@ -27,6 +28,8 @@ export interface SpendAsk {
   readonly from: IsoDate;
   readonly to: IsoDate;
   readonly name: string;
+  /** "What did I buy last friday?": the entries, not only their sum. */
+  readonly list?: boolean;
 }
 
 /** Common slips, only in the words this reader looks for. */
@@ -44,7 +47,7 @@ const SLIPS: readonly (readonly [RegExp, string])[] = [
 ];
 
 const ASKS =
-  /\bwhat (?:did|have) i (?:spend|spent)\b|\b(?:how much|magkano|what did i spend|what have i spent|total (?:spending|spent|expenses?))\b[^?.!]*\b(?:spent|spend|spending|nagastos|ginastos|gastos|nagastusan|gastusin|used|paid)\b|\b(?:magkano|how much)\b[^?.!]*\b(?:nagastos|ginastos|gastos)\b|\bmy (?:total )?spending (?:on|for)\b|^\s*(?:what(?:'s| is| was)\s+)?(?:my\s+)?total (?:spending|spent|expenses?)\b/i;
+  /\bwhat (?:did|have) i (?:spend|spent|buy|bought|purchase|pay for)\b|\b(?:how much|magkano|what did i spend|what have i spent|total (?:spending|spent|expenses?))\b[^?.!]*\b(?:spent|spend|spending|nagastos|ginastos|gastos|nagastusan|gastusin|used|paid)\b|\b(?:magkano|how much)\b[^?.!]*\b(?:nagastos|ginastos|gastos)\b|\bmy (?:total )?spending (?:on|for)\b|^\s*(?:what(?:'s| is| was)\s+)?(?:my\s+)?total (?:spending|spent|expenses?)\b/i;
 
 /** Asking what it could cost, or whether to, rather than what it did. */
 // "how much money i can spend tommorow?" is a can question, never a past sum (backup of 7 October 2026).
@@ -91,10 +94,14 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
     const w = windowOf("this month", asOf);
     return { item, from: w.from, to: w.to, name: w.name };
   }
+  // One day by its weekday, "2 days ago" or "the 23rd": that day, not the days up to it (26 October 2026).
+  const oneDay = dayFromWords(said, asOf);
+  const list = /\bwhat (?:did|have) i (?:buy|bought|purchase|pay for)\b/i.test(text);
+  if (oneDay && !/\b(?:since|from|until|to|hanggang)\b/i.test(text)) return { item, from: oneDay, to: oneDay, name: dayInWords(oneDay), list: true };
   const span = daysIn(text, asOf);
-  if (span) return { item, from: span.from, to: span.to, name: `${formatMedium(span.from)} to ${formatMedium(span.to)}` };
+  if (span) return { item, from: span.from, to: span.to, name: `${formatMedium(span.from)} to ${formatMedium(span.to)}`, ...(list ? { list } : {}) };
   const w = windowOf(text, asOf);
-  return { item, from: w.from, to: w.to, name: w.name };
+  return { item, from: w.from, to: w.to, name: w.name, ...(list || w.from === w.to ? { list: true } : {}) };
 }
 
 /** What was spent, in one or two sentences, with the figure bolded. */
@@ -106,10 +113,27 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
   const total: Centavos = rows.reduce((sum, t) => sum + costOf(t), 0);
   const money = (c: Centavos): string => formatMoney(c).replace(/^₱/, "PHP ");
   const what = ask.item ? ` on ${ask.item}` : "";
-  const when = /^(?:yesterday|today)$|^the (?:last|past)\b/i.test(ask.name) ? ask.name : /\bto\b/.test(ask.name) ? `from ${ask.name}` : `in ${ask.name}`;
+  /*
+   * "on Friday, October 23", "this week (Oct 19 to Oct 25)": "Nothing in
+   * Friday, October 23 ... between October 23, 2026 and October 23, 2026"
+   * and "from this week, Oct 19 to Oct 25" read badly (26 October 2026).
+   */
+  const weekday = /^(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),/.test(ask.name);
+  const week = /^(this|last) week, (.+)$/.exec(ask.name);
+  const when = /^(?:yesterday|today)$|^the (?:last|past)\b/i.test(ask.name)
+    ? ask.name
+    : weekday
+      ? `on ${ask.name}`
+      : week
+        ? `${week[1]} week (${week[2]})`
+        : /\bto\b/.test(ask.name)
+          ? `from ${ask.name}`
+          : `in ${ask.name}`;
 
   if (rows.length === 0) {
-    return `Nothing${what} ${when}: no spending entry${ask.item ? ` for ${ask.item}` : ""} between ${ask.from > "1000" ? formatMedium(ask.from) : "the start"} and ${formatMedium(to)}.`;
+    return ask.from === to
+      ? `Nothing${what} ${when}: no spending entry${ask.item ? ` for ${ask.item}` : ""} that day.`
+      : `Nothing${what} ${when}: no spending entry${ask.item ? ` for ${ask.item}` : ""} between ${ask.from > "1000" ? formatMedium(ask.from) : "the start"} and ${formatMedium(to)}.`;
   }
   /*
    * One entry, however many days it covers: the days of a date range are
@@ -141,6 +165,16 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
       const sum = ahead.reduce((s, t) => s + costOf(t), 0);
       out.push(`That is up to today; ${money(sum)} more is entered for later ${ahead.length === 1 ? "date" : "dates"} in the same period, ${money(total + sum)} with it.`);
     }
+  }
+  // The entries themselves, for one day or "what did I buy" (26 October 2026).
+  if (ask.list && count > 1 && count <= 10) {
+    const each = [...entries.values()].sort((a, b) => a.first.date.localeCompare(b.first.date) || a.first.recordNumber - b.first.recordNumber);
+    out.push(
+      each
+        .map((e) => `\n- #${String(e.first.recordNumber).padStart(4, "0")} ${e.first.item || "(no item)"}${e.first.description.trim() && e.first.description.trim().toLowerCase() !== e.first.item.trim().toLowerCase() ? `, ${e.first.description.trim().slice(0, 50)}` : ""}: ${money(e.cost)}${ask.from === to ? "" : `, ${formatMedium(e.first.date)}`}`)
+        .join(""),
+    );
+    return out.join(" ").replace(/ \n/g, "\n");
   }
   if (biggest && count > 1) {
     const said = biggest.first.description.replace(/(?:, )?day \d+ of \d+$/, "").trim();

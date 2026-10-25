@@ -88,3 +88,21 @@ describe("the answer", () => {
     expect(words).toContain("PHP 1,209.00");
   });
 });
+
+describe("one day by its weekday or 'days ago' (26 October 2026)", () => {
+  // 28 September 2026 is a Monday.
+  it("reads the day, not the days up to it, and lists what was bought", () => {
+    const rows = [...ledger, spend("2026-09-25", "Food", 120, "Lunch"), spend("2026-09-25", "Gas", 200)];
+    const friday = readSpendAsk("what did i buy last friday?", items, asOf);
+    expect(friday).toMatchObject({ item: null, from: "2026-09-25", to: "2026-09-25", name: "Friday, September 25", list: true });
+    const text = spendAnswer(friday!, rows, asOf);
+    expect(text).toContain("on Friday, September 25, over 2 entries.");
+    expect(text).toMatch(/\n- #\d{4} Food, Lunch: PHP 120\.00\n- #\d{4} Gas: PHP 200\.00$/);
+    expect(readSpendAsk("what did I spend 3 days ago?", items, asOf)).toMatchObject({ from: "2026-09-25", to: "2026-09-25" });
+    expect(spendAnswer(readSpendAsk("what did I spend 2 days ago?", items, asOf)!, rows, asOf)).toBe("Nothing on Saturday, September 26: no spending entry that day.");
+  });
+
+  it("reads this week as Monday to today", () => {
+    expect(readSpendAsk("how much did I spend this week?", items, asOf)).toMatchObject({ from: "2026-09-28", to: "2026-09-28", name: "this week, today" });
+  });
+});

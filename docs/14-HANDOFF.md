@@ -1568,6 +1568,13 @@ Read from the 76 chat turns since 20 October in the owner's backup.
   would leave), a word model trained on the phone, examples from the owner's
   corrections, an answer bank, "AI first" order, and who decides what when
   the AI and the app disagree. **Waiting on the owner's five answers.**
+- One week everywhere: "this week" is Monday to today and "last week" the
+  Monday to Sunday before, in charts and spending answers too (they were the
+  last seven days, while the AI and the week comparison used Monday). "the
+  past week" and "the last 7 days" are still seven days.
+- The app's own spending answer reads one day: "what did i buy last
+  friday?" lists that day's entries; "2 days ago" is that day, not the two
+  days up to today.
 
 ## 6. What the owner has to do
 

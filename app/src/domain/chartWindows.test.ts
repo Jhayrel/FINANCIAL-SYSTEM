@@ -39,8 +39,10 @@ const CASES: [string, string, string, string][] = [
   // asked, from, to, what the title calls it
   ["chart my spending today", AS_OF, AS_OF, "today"],
   ["chart yesterday", "2026-09-25", "2026-09-25", "yesterday"],
-  ["chart this week", "2026-09-20", AS_OF, "the last 7 days"],
-  ["chart last week", "2026-09-13", "2026-09-19", "Sep 13 to Sep 19"],
+  // A week is Monday to Sunday (26 October 2026); 26 September 2026 is a Saturday.
+  ["chart this week", "2026-09-21", AS_OF, "this week, Sep 21 to Sep 26"],
+  ["chart last week", "2026-09-14", "2026-09-20", "last week, Sep 14 to Sep 20"],
+  ["chart the past week", "2026-09-20", AS_OF, "the last 7 days"],
   ["chart the last 10 days", "2026-09-17", AS_OF, "the last 10 days"],
   ["chart sep 1 to sep 15", "2026-09-01", "2026-09-15", "Sep 1 to Sep 15 2026"],
   ["chart september 5-12", "2026-09-05", "2026-09-12", "Sep 5 to Sep 12 2026"],
@@ -75,7 +77,7 @@ describe("a trend over a short window is day by day", () => {
     const chart = buildChart("show my spending trend this week", ledger, AS_OF)!;
     expect(chart.by).toBe("day");
     expect(chart.kind).toBe("line");
-    expect(chart.rows.map((r) => r.label)).toEqual(["Sep 20", "Sep 21", "Sep 22", "Sep 23", "Sep 24", "Sep 25", "Sep 26"]);
+    expect(chart.rows.map((r) => r.label)).toEqual(["Sep 21", "Sep 22", "Sep 23", "Sep 24", "Sep 25", "Sep 26"]);
   });
 
   it("draws daily spending for a month when asked for daily", () => {
@@ -87,7 +89,7 @@ describe("a trend over a short window is day by day", () => {
 
   it("shows a quiet day as zero, so a week with one spending day is still a week", () => {
     const sparse = ledger.filter((t) => t.date !== "2026-09-22" && t.date !== "2026-09-24");
-    const chart = buildChart("show my spending trend this week", sparse, AS_OF)!;
+    const chart = buildChart("show my spending trend the last 7 days", sparse, AS_OF)!;
     expect(chart.rows).toHaveLength(7);
     expect(chart.rows.find((r) => r.label === "Sep 22")).toMatchObject({ value: 0, count: 0 });
     expect(chart.total).toBe(chart.rows.reduce((s, r) => s + r.value, 0));

@@ -538,11 +538,18 @@ export function windowOf(
     return { from: `${y}-01-01`, to: `${y}-12-31`, name: y };
   }
 
-  // "last week" is the seven days before these seven.
+  /*
+   * "last week" is Monday to Sunday of the week before this one, as the
+   * AI's recent windows and the week comparison already count it. It was the
+   * seven days before these seven, so the chat and the chart named two
+   * different weeks for one question (26 October 2026). "the past week" and
+   * "the last 7 days" are still the last seven days.
+   */
+  const monday = shift(asOf, -((new Date(`${asOf}T00:00:00Z`).getUTCDay() + 6) % 7));
   if (/\b(last|previous)\s+week\b/i.test(question) && !/\blast\s+\d/.test(question)) {
-    const from = shift(asOf, -13);
-    const to = shift(asOf, -7);
-    return { from, to, name: `${short(from)} to ${short(to)}` };
+    const from = shift(monday, -7);
+    const to = shift(monday, -1);
+    return { from, to, name: `last week, ${short(from)} to ${short(to)}` };
   }
 
   const back = /\b(?:past|last|previous|recent)\s+(\d{1,2})\s*(month|months|week|weeks|year|years)\b/i.exec(
@@ -591,9 +598,8 @@ export function windowOf(
    * this function. "Last month" being off by a whole month is the worst of
    * the three, because the answer looks entirely reasonable.
    *
-   * A week is the last seven days rather than a calendar week, matching how
-   * the rest of the app answers "this week": the ledger has no week column,
-   * and inventing one that starts on a Monday would disagree with itself.
+   * This week is Monday to today, the week the AI is told about and the
+   * week comparison uses (26 October 2026); "the last 7 days" is said so.
    */
   const day = (from: IsoDate, days: number): IsoDate => {
     const at = new Date(`${from}T00:00:00Z`);
@@ -624,7 +630,11 @@ export function windowOf(
     return { from: asOf, to: asOf, name: "today" };
   }
 
-  if (/\b(this week|the week|past week|last week|last 7 days)\b/i.test(question)) {
+  // This week is Monday to today (above: one week for the chat, the chart and the comparison).
+  if (/\b(this week|the week)\b/i.test(question)) {
+    return { from: monday, to: asOf, name: monday === asOf ? "this week, today" : `this week, ${short(monday)} to ${short(asOf)}` };
+  }
+  if (/\b(past week|last 7 days)\b/i.test(question)) {
     return { from: day(asOf, -6), to: asOf, name: "the last 7 days" };
   }
 
