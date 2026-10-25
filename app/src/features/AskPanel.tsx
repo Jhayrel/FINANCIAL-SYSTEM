@@ -119,6 +119,7 @@ import {
   wantsChart,
   presentationFor,
   drawReply,
+  drawsBack,
   overTime,
   asksPie,
   narrowsChart,
@@ -1142,6 +1143,8 @@ export function AskPanel({
    * replaces it, and it lapses after a quarter of an hour.
    */
   const drawnNext = useRef<{ readonly question: string; readonly at: number } | null>(null);
+  /** When the chat last drew a chart: a question answered after it is what "chart it" means, not the chart. */
+  const lastDrawnAt = useRef(0);
   /** Set while an answer is being given, when a picture of it should be offered after it. */
   const offerAfter = useRef<string | null>(null);
   /**
@@ -4207,6 +4210,7 @@ export function AskPanel({
 
   /** A chart said in the conversation, and kept in the record with its figures. */
   const drawChart = (chart: Chart): void => {
+    lastDrawnAt.current = Date.now();
     say({ kind: "chart", chart });
     log(aiEvent("answered", "add", { text: `Drew ${chart.title}. ${chartInWords(chart)}`, entry: chart.title }));
   };
@@ -4451,9 +4455,9 @@ export function AskPanel({
     const emptyBox = (): void => {
       if (typed === undefined) setDraftState("");
     };
-    const lastAnswered = drawnNext.current && Date.now() - drawnNext.current.at < 15 * 60_000 && !turns.slice(-3).some(isChart) ? drawnNext.current.question : null;
+    const lastAnswered = drawnNext.current && Date.now() - drawnNext.current.at < 15 * 60_000 && drawnNext.current.at > lastDrawnAt.current ? drawnNext.current.question : null;
     const drawTopic = offeredDraw.current ?? lastAnswered;
-    const drawAs = drawTopic && !as && files.length === 0 ? drawReply(lead) : null;
+    const drawAs = drawTopic && !as && files.length === 0 ? (drawReply(lead) ?? drawsBack(lead)) : null;
     // An offer is for the next message only.
     if (!drawAs) offeredDraw.current = null;
     if (drawAs && drawTopic) {
@@ -5478,9 +5482,13 @@ export function AskPanel({
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", budgetish ? "budget" : "add", { text: note }));
+        // A chart asked for next ("chart it", "in a pie") is of this.
+        if (spent || earned || owes) drawnNext.current = { question: ruled, at: Date.now() };
 
         if (affordish) {
           const asked = readAffordAsk(again ? `${again} ${lead}` : lead, transactions, reference, asOf);
+          // What "see it in trend" next is about: the things named, not all spending (26 October 2026).
+          drawnNext.current = { question: asked.items.length > 0 ? `${asked.items.join(" and ")} spending` : ruled, at: Date.now() };
           const reply = affordAnswer(asked, { transactions: reportRows, reference, budgets, debts, asOf });
           await answerWithModel(
             [

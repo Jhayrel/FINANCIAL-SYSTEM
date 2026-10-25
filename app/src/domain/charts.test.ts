@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asksChartColour, buildChart, pointsAtScreen, chartLabel, isChartFollowUp, wantsChart, wantsReport } from "./charts";
+import { asksChartColour, buildChart, drawsBack, pointsAtScreen, chartLabel, isChartFollowUp, wantsChart, wantsReport } from "./charts";
 import { totalsFor } from "./totals";
 import type { Transaction } from "./types";
 
@@ -297,5 +297,26 @@ describe("pointsAtScreen", () => {
 
   it("is nothing for a chart that points at nothing", () => {
     expect(pointsAtScreen("chart my spending", false)).toBe(false);
+  });
+});
+
+describe("the answer just given, drawn (26 October 2026)", () => {
+  it("reads 'let see it in trend' and its kin as a picture of it", () => {
+    expect(drawsBack("let see it in trend")).toBe("trend");
+    expect(drawsBack("show that in a pie")).toBe("pie");
+    expect(drawsBack("chart it")).toBe("chart");
+    expect(drawsBack("can I see it as bars")).toBe("bars");
+    expect(drawsBack("show my food spending as a trend")).toBeNull();
+    expect(drawsBack("what is it")).toBeNull();
+  });
+
+  it("charts a three-letter subject the entries mention, not all spending", () => {
+    const rows: Transaction[] = [
+      { id: "g1", recordNumber: 1, date: "2026-07-03", type: "Spending", fromWallet: "Cash", toWallet: "", category: "Spending", item: "Self Care", description: "gym day pass", amount: 7000, fee: 0, total: 7000, notes: "", status: "Paid" },
+      { id: "f1", recordNumber: 2, date: "2026-07-04", type: "Spending", fromWallet: "Cash", toWallet: "", category: "Spending", item: "Food", description: "lunch", amount: 20000, fee: 0, total: 20000, notes: "", status: "Paid" },
+    ];
+    const chart = buildChart("Gym spending trend", rows, "2026-07-31");
+    expect(chart?.title).toContain("Gym");
+    expect(chart?.total).toBe(7000);
   });
 });

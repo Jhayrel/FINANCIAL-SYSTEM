@@ -765,6 +765,21 @@ export function drawReply(said: string): "pie" | "bars" | "trend" | "chart" | nu
 }
 
 /**
+ * "let see it in trend", "show that in a pie", "can I see it as a chart":
+ * the answer just given, drawn, said with "it" or "that" and a kind of
+ * picture. The kind, or null. 26 October 2026: after "can I afford the gym
+ * today?", "let see it in trend" drew all of 2026's spending.
+ */
+export function drawsBack(said: string): "pie" | "bars" | "trend" | "chart" | null {
+  const t = said.trim().toLowerCase().replace(/[.!?]+$/, "");
+  if (t.split(/\s+/).length > 8 || !/\b(?:it|that|this|those|them)\b/.test(t)) return null;
+  if (/\b(?:pie|donut|doughnut)\b/.test(t)) return "pie";
+  if (/\bbars?\b/.test(t)) return "bars";
+  if (/\b(?:trend|line|over time|by month|monthly)\b/.test(t)) return "trend";
+  return /\b(?:chart|graph|plot|visuali[sz]e|draw)\b/.test(t) ? "chart" : null;
+}
+
+/**
  * A period named on its own, with a chart already on screen.
  *
  * "How about this month?" straight after a chart is asking for the same
@@ -919,7 +934,9 @@ function aboutOf(question: string, transactions: readonly Transaction[], taken: 
     const found = places.filter((w) => used(w) > 0).sort((a, b) => used(a) - used(b))[0];
     return found ?? places[places.length - 1] ?? "";
   }
-  const asked = [...new Set(question.toLowerCase().match(/[a-z]{4,}/g) ?? [])].filter((w) => !skip.has(w));
+  // Three letters too ("gym", "bus", "tax"), with the little words and the ones that ask left out: "Gym spending trend" drew all spending (26 October 2026).
+  const SHORT_ASKING = new Set("and for the you can how see let its are was not but has had did get got put use say all any too why who now new old way per via day".split(" "));
+  const asked = [...new Set(question.toLowerCase().match(/[a-z]{3,}/g) ?? [])].filter((w) => !skip.has(w) && !LITTLE_WORDS.has(w) && !SHORT_ASKING.has(w));
   if (asked.length === 0) return "";
   const limit = Math.max(12, Math.floor(transactions.length * 0.02));
   let best = "";
