@@ -261,10 +261,12 @@ describe("the short periods, which all drew the whole month", () => {
     expect(chart?.total).toBe(30000);
   });
 
-  it("reads a week as the last seven days", () => {
+  // One week everywhere: Monday to today, as the AI and the week comparison count it (26 October 2026).
+  it("reads this week as Monday to today, and the past week as seven days", () => {
     const chart = buildChart("chart this week", spread, ASOF);
-    expect(chart?.title).toContain("the last 7 days");
+    expect(chart?.title).toContain("this week, Aug 24 to Aug 29");
     expect(chart?.total).toBe(30000);
+    expect(buildChart("chart the past week", spread, ASOF)?.title).toContain("the last 7 days");
   });
 });
 
