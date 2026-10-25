@@ -51,7 +51,7 @@ import { borrowedMoney, lenderNames } from "../domain/borrowed";
 import { ON_BEHALF } from "../domain/debtWords";
 import { getMonth, getYear, MONTH_NAMES_SHORT, monthName } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
-import { carryOver, carryWords, ifNothingMoreToday, isOpenBill, monthBrief, yesterdayOf } from "../domain/monthPlan";
+import { carryOver, carryWords, ifNothingMoreToday, isOpenBill, monthBrief, nextMonthStart, yesterdayOf } from "../domain/monthPlan";
 import { monthlyTotalsForYear, spendingRanking, totalSpending } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction, WalletBalance } from "../domain/types";
 import type { InsightsAt } from "./Insights";
@@ -122,6 +122,12 @@ export function Dashboard({
   const yesterday = useMemo(
     () => (brief.safe ? yesterdayOf({ transactions, reference, budgets, debts, year, month, asOf }) : null),
     [brief.safe, transactions, reference, budgets, debts, year, month, asOf],
+  );
+
+  // "What happens to the available to spend if the next month sets in??" (25 October 2026): said in the month's last week.
+  const next = useMemo(
+    () => (brief.safe && brief.safe.daysLeft <= 7 ? nextMonthStart({ transactions, reference, budgets, debts, asOf }, brief.safe) : null),
+    [brief.safe, transactions, reference, budgets, debts, asOf],
   );
 
   const v = useMemo(() => {
@@ -215,7 +221,7 @@ export function Dashboard({
       lines: [
         `${name} ${year}, ${brief.daysLeft} days left.`,
         safe
-          ? `Safe to spend today ${formatMoney(safe.perDay)} (today's share ${formatMoney(safe.todayShare)}, ${formatMoney(safe.spentToday)} spent today). Safe until the month ends ${formatMoney(safe.safe)}: wallets ${formatMoney(safe.wallets)}, less bills and subscriptions still to pay ${formatMoney(safe.reservedBills)} and debt payments due ${formatMoney(safe.reservedDebt)}. From tomorrow ${formatMoney(safe.perDayAfter)} a day. ${carryWords(safe, yesterday, formatMoney).join(" ")}`
+          ? `Safe to spend today ${formatMoney(safe.perDay)} (today's share ${formatMoney(safe.todayShare)}, ${formatMoney(safe.spentToday)} spent today). Safe until the month ends ${formatMoney(safe.safe)}: wallets ${formatMoney(safe.wallets)}, less bills and subscriptions still to pay ${formatMoney(safe.reservedBills)} and debt payments due ${formatMoney(safe.reservedDebt)}. From tomorrow ${formatMoney(safe.perDayAfter)} a day. ${carryWords(safe, yesterday, formatMoney).join(" ")}${next ? ` From 1 ${monthName(next.month)}: ${formatMoney(next.perDay)} a day over ${next.days} days, if nothing more is spent and nothing comes in.` : ""}`
           : "",
         noBudget
           ? `No budget set for ${name}. Spent ${formatMoney(t.combined.spent)}.`
@@ -229,7 +235,7 @@ export function Dashboard({
         brief.kinds.length > 0 ? `Where it went: ${brief.kinds.map((k) => `${k.name} ${formatMoney(k.amount)}`).join(", ")}.` : "",
       ],
     }),
-    [brief, v, alerts, name, year, noBudget, yesterday],
+    [brief, v, alerts, name, year, noBudget, yesterday, next],
   );
 
   return (
@@ -289,7 +295,15 @@ export function Dashboard({
                 {safe && safe.daysLeft > 1 && ifNothingMoreToday(safe) > safe.perDayAfter && (
                   <Line label="Spend nothing more today, from tomorrow" value={ifNothingMoreToday(safe)} quiet />
                 )}
+                {next && <Line label={`From 1 ${monthName(next.month)}, a day (${next.days} days)`} value={next.perDay} quiet />}
               </div>
+              {next && (
+                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                  {next.safe > 0
+                    ? `Nothing resets on the 1st: the ${formatMoney(Math.max(0, next.carried))} left now carries into ${monthName(next.month)}, less its bills and subscriptions${next.reservedDebt > 0 ? " and debt payments" : ""} (${formatMoney(next.reservedBills + next.reservedDebt)}), spread over all ${next.days} days. That is if nothing more is spent and nothing comes in before then.`
+                    : `Nothing resets on the 1st: the ${formatMoney(Math.max(0, next.carried))} left now carries into ${monthName(next.month)}, but its bills and subscriptions${next.reservedDebt > 0 ? " and debt payments" : ""} come to ${formatMoney(next.reservedBills + next.reservedDebt)}, so it starts at ${formatMoney(0)} a day until money comes in.`}
+                </span>
+              )}
             </div>
 
             <div className="fms-month-half">

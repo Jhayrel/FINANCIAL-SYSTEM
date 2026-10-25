@@ -367,6 +367,8 @@ export function applyReply(
           .replace(/[\s,&]+(?:and|in|into|to|from|using|via|thru|sa)?[\s,&]*$/i, "")
           .trim();
         if (!rest) return null;
+        // "Its cash" (21 October 2026): which wallet, said again, not what it was for. The caller keeps the wallet and asks again.
+        if (/^(?:(?:it'?s|it|is|was|that'?s|thats|this|paid|pay|with|using|in|from|my|the|wallet|account|only|lang|po|yung|ang|sa|na)\b[\s,.!]*)+$/i.test(rest)) return null;
       }
       const match = matchItem(rest, draft.flow as Flow, draft.category, reference);
       if (match.matched) return { ...next, item: match.item };

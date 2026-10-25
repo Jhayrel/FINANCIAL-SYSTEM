@@ -387,3 +387,22 @@ describe("a debt row, as the model reads it", () => {
     expect(context.text).toContain("#90 | 2026-08-30 | Debt: Paid for them on Friend loan (on behalf, advanced for someone) | Cash");
   });
 });
+
+describe("Needs review, as the Database lists it", () => {
+  it("names the flagged rows and only those, with what to do", () => {
+    const off = row({ recordNumber: 7, date: "2026-08-20", item: "Food", amount: 10000, fee: 0, total: 12000 });
+    const { text } = build("which rows need review?", { transactions: [...ledger, off] });
+    expect(text).toContain("## Needs review (the Database's list, worked out by the app)");
+    expect(text).toContain("1 row is flagged. These and only these");
+    expect(text).toMatch(/^- #0007 2026-08-20 Spending Food PHP 120\.00: .+ What to do: .+$/m);
+    expect(text).not.toMatch(/^- #0004 /m);
+  });
+
+  it("says nothing is flagged when every check passes", () => {
+    expect(build("anything flagged?").text).toContain("Nothing is flagged: every check passes.");
+  });
+
+  it("is left out of a question that is not about it", () => {
+    expect(build("how much did I spend on food?").text).not.toContain("## Needs review");
+  });
+});

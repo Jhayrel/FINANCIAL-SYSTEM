@@ -229,6 +229,32 @@ export function itemFromHistory(
    * 2026). The habit is the item it went with most.
    */
   const SPREAD = 3;
+
+  /*
+   * The entry that says the most of the same words. "i used 25 pesos in
+   * carwash earlier in my motorcycle" was booked as Repairs, because
+   * "motorcycle" sat under two Repairs rows, when the owner's own "Carwash
+   * for motorcycle" says both words and is Random necessities (22 October
+   * 2026, edited by the owner on the form). Two words or more in one entry,
+   * and every entry that says as many agreeing, is the owner's own answer.
+   */
+  const telling = new Set([...itemsPerWord].filter(([, items]) => items.size < SPREAD).map(([w]) => w));
+  let closest = 0;
+  const closestItems = new Map<string, number>();
+  for (const row of spending) {
+    const shared = new Set(words(row.description).filter((w) => telling.has(w))).size;
+    if (shared < 2 || shared < closest) continue;
+    if (shared > closest) {
+      closest = shared;
+      closestItems.clear();
+    }
+    closestItems.set(row.item.trim(), (closestItems.get(row.item.trim()) ?? 0) + 1);
+  }
+  if (closestItems.size === 1) {
+    const [only, rows] = [...closestItems][0] ?? ["", 0];
+    if (only) return { item: only, seen: rows, how: "pattern" };
+  }
+
   const rowsBehind = new Map<string, number>();
   for (const [, items] of itemsPerWord) {
     if (items.size >= SPREAD) continue;

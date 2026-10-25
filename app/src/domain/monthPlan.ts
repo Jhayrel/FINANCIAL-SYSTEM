@@ -593,3 +593,57 @@ function notesFor(
 
   return out;
 }
+
+/**
+ * What safe to spend starts at on the first of next month, from the money
+ * there now.
+ *
+ * The owner, 25 October 2026: "what happens to the available to spend if
+ * the next month sets in??". Nothing resets and nothing is lost: what is not
+ * spent this month is still in the wallets on the 1st. That day the figure
+ * is worked out again, the same way, over the new month's days and less the
+ * new month's bills, subscriptions and debt payments, which this month's
+ * figure did not hold back. So it usually starts lower a day than it ends,
+ * until money comes in.
+ *
+ * From this month's `free` (the wallets less what is still due this month,
+ * negative when they cannot cover it, so a shortfall carries), as if nothing
+ * more is spent this month and nothing comes in. A debt payment already late
+ * is this month's, so only payments falling due on or after the 1st count.
+ */
+export interface NextMonthStart {
+  readonly year: number;
+  readonly month: number;
+  readonly first: IsoDate;
+  readonly days: number;
+  /** What carries over: this month's `free`, the wallets less what is still due this month. */
+  readonly carried: Centavos;
+  readonly reservedBills: Centavos;
+  readonly reservedDebt: Centavos;
+  /** Never below zero. */
+  readonly safe: Centavos;
+  /** A day, over every day of the month. */
+  readonly perDay: Centavos;
+}
+
+export function nextMonthStart(
+  input: {
+    readonly transactions: readonly Transaction[];
+    readonly reference: ReferenceLists;
+    readonly budgets: Budgets;
+    readonly debts: readonly Debt[];
+    readonly asOf: IsoDate;
+  },
+  now: Pick<SafeToSpend, "free">,
+): NextMonthStart {
+  const at = Number(input.asOf.slice(0, 4)) * 12 + Number(input.asOf.slice(5, 7));
+  const year = Math.floor(at / 12);
+  const month = (at % 12) + 1;
+  const first = firstOfMonth(year, month);
+  const days = daysInMonth(year, month);
+  const brief = monthBrief({ ...input, year, month, asOf: first });
+  const reservedBills = brief.bills.bills.filter(isOpenBill).reduce((s, b) => s + b.amount, 0);
+  const reservedDebt = brief.debts.filter((d) => d.kind === "payable" && d.dueOn >= first).reduce((s, d) => s + d.amount, 0);
+  const safe = Math.max(0, now.free - reservedBills - reservedDebt);
+  return { year, month, first, days, carried: now.free, reservedBills, reservedDebt, safe, perDay: Math.floor(safe / days) };
+}

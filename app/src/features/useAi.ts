@@ -324,7 +324,7 @@ export function useAi({
        * when the model repeats it.
        */
       const said = options.trusted ?? [options.earlier ?? "", ...(options.history ?? []).map((h) => h.text)].join("\n");
-      const note = untracedNote(answered.text, [withWorked ?? contextToText(context), said, saidAsFigures(said), options.pinned ?? ""].join("\n"), formatMoney);
+      const note = untracedNote(answered.text, [withWorked ?? contextToText(context), said, saidAsFigures(said), options.pinned ?? ""].join("\n"), formatMoney, [options.worked ?? "", options.pinned ?? "", saidAsFigures(options.question ?? "")].join("\n"));
       /*
        * Every figure can be real and the answer still wrong: "a PHP 95.00
        * meal is within that daily limit" of PHP 80.64 (7 October 2026). A

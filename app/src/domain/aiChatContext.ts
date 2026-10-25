@@ -42,6 +42,7 @@
  * without it. Everything is redacted on the way out regardless.
  */
 
+import { flaggedRows } from "./integrity";
 import { isClearing } from "./settleLine";
 import { contextToText, phpFigure, type AiContext } from "./aiContext";
 import { addDays, dayInWords, dayOfWeek, formatMedium } from "./dates";
@@ -323,6 +324,29 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   // "Earlier", "that", "the treat": what the device can tell the question points at (`pointsAt.ts`).
   const pointed = pointsAt(question, rows, asOf);
   if (pointed.length > 0) out.push(...pointed, "");
+
+  /*
+   * ── Needs review, as the Database lists it ───────────────────────────────
+   * Asked about the flagged rows, the model named #3819, #3806, #3800, #3835
+   * and #3833 and an electric bill, none of them flagged: it had never been
+   * given the list (20 October 2026). The same list, with what to do.
+   */
+  if (question && /\b(?:needs? (?:to )?review|review(?:ed)?|flagged|wrong (?:rows|entries|data)|errors? in (?:the|my) (?:data|database|ledger)|fix (?:them|those|these|the (?:rows|entries|data)))\b/i.test(question)) {
+    // The Database's own wallets (every live account, names trimmed), so the two lists never disagree.
+    const wallets = input.settings?.accounts?.filter((a) => !a.archived).map((a) => a.name.trim()).filter(Boolean) ?? snapshot.balances.map((b) => b.account);
+    const flagged = flaggedRows(rows, { wallets });
+    out.push("## Needs review (the Database's list, worked out by the app)");
+    if (flagged.length === 0) {
+      out.push("Nothing is flagged: every check passes. Never name a row as needing review.");
+    } else {
+      out.push(`${flagged.length} ${flagged.length === 1 ? "row is" : "rows are"} flagged. These and only these: never name another record number as needing review. The app offers each a card that fixes it or keeps it as it is in one press ("fix the rows that need review"); keeping it moves no money, and the owner should keep any whose balances already match.`);
+      for (const f of flagged) {
+        const t = f.row;
+        out.push(`- #${String(t.recordNumber).padStart(4, "0")} ${t.date} ${t.type} ${t.item || t.description || ""} ${php(t.total)}: ${f.why.join(" ")} What to do: ${f.todo.join(" ")}`);
+      }
+    }
+    out.push("");
+  }
 
   // ── The ledger, described ────────────────────────────────────────────────
   const dates = rows.map((t) => t.date).sort();

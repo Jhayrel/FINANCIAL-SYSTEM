@@ -332,3 +332,15 @@ describe("the same word written apart or together", () => {
     expect(itemFromHistory("Your ₱3.99 cash-back from Maya", earlier)?.item).toBe("Random");
   });
 });
+
+describe("the entry that says the most of the same words", () => {
+  it("files a carwash for the motorcycle where the owner filed it, not under Repairs (22 October 2026)", () => {
+    const history = [
+      row({ item: "Repairs", description: "emergency motorcycle repair" }),
+      row({ item: "Repairs", description: "motorcycle brake pads" }),
+      row({ item: "Random necessities", description: "Carwash for motorcycle" }),
+    ];
+    expect(itemFromHistory("i used 25 pesos in carwash earlier in my motorcycle", history)?.item).toBe("Random necessities");
+    expect(itemFromHistory("motorcycle brake fixed", history)?.item).toBe("Repairs");
+  });
+});

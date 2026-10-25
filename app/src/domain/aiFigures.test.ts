@@ -123,3 +123,17 @@ describe("what the owner said", () => {
   });
 });
 
+
+describe("two made-up figures that vouch for each other", () => {
+  const rows = Array.from({ length: 60 }, (_, i) => `PHP ${(400 + i * 11).toFixed(2)}`).join(", ");
+  const given = `${rows}. Food October PHP 8,470.00, September PHP 3,374.00. Entries PHP 2,475.00, PHP 1,000.00, PHP 495.00, PHP 1,058.00.`;
+  const answer = "Food is PHP 8,470.00 this month against PHP 1,417.00 last month, an increase of PHP 7,053.00, with PHP 2,475.00 on 6 Oct, PHP 1,000.00 on 9 Oct and PHP 495.00 on 15 Oct.";
+
+  it("names both (21 October 2026)", () => {
+    expect(untracedFigures(answer, given)).toEqual([141700, 705300]);
+  });
+
+  it("still allows a step whose other part the app worked out for the question", () => {
+    expect(untracedFigures("Food rose by PHP 5,096.00 to PHP 8,470.00.", given, "Food PHP 8,470.00 (was PHP 3,374.00)")).toEqual([]);
+  });
+});

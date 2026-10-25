@@ -155,3 +155,13 @@ describe("splitEntries lends the first verb to a clause that has none", () => {
     ]);
   });
 });
+
+describe("a shop's number is not a second entry", () => {
+  it("reads 'I bought food 711, 100 pesos' as one purchase (25 October 2026)", () => {
+    expect(splitEntries("I bought food 711, 100 pesos")).toEqual(["I bought food 711, 100 pesos"]);
+  });
+
+  it("still splits two purchases that each have a figure", () => {
+    expect(splitEntries("I bought food at 711 for 100, 50 for water")).toHaveLength(2);
+  });
+});

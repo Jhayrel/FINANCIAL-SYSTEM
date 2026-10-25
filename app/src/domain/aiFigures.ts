@@ -108,9 +108,15 @@ export function figuresIn(text: string): number[] {
  * centavos. An empty list means every figure in the answer can be pointed
  * at, which is the normal case and the one that prints nothing.
  */
-export function untracedFigures(answer: string, given: string): readonly number[] {
-  const known = new Set(figuresIn(given).map(Math.abs));
+export function untracedFigures(
+  answer: string,
+  given: string,
+  /** What the app worked out for this question, which a step may reach into as well as the answer (`near` below). */
+  worked = "",
+): readonly number[] {
+  const known = new Set([...figuresIn(given), ...figuresIn(worked)].map(Math.abs));
   if (known.size === 0) return [];
+  const near = new Set(figuresIn(worked).map(Math.abs));
 
   /**
    * One step from two known figures.
@@ -127,12 +133,22 @@ export function untracedFigures(answer: string, given: string): readonly number[
    * on 3 October 2026: with hundreds of figures, nearly any figure is one
    * step from two of them. A short context keeps the step it always had.
    */
+  /*
+   * And the other part must be written too, or be in what the app worked out
+   * for this question. "Food PHP 8,470.00, against PHP 1,417.00 last month,
+   * an increase of PHP 7,053.00" (21 October 2026): September's food was
+   * PHP 3,374.00, and both made-up figures got through, 1,417 as 2,475 less
+   * a PHP 1,058.00 somewhere among the rows and 7,053 as 8,470 less the
+   * invented 1,417. Two parts in the answer, or one in the answer and one
+   * the app worked out for the question, is a step that can be seen.
+   */
   const written = new Set(figuresIn(answer).map(Math.abs));
   const crowded = known.size > 40;
+  const seenPart = (b: number): boolean => known.has(b) && (written.has(b) || near.has(b));
   const oneStepAway = (f: number): boolean => {
     for (const a of known) {
       if (crowded && (!written.has(a) || a === f)) continue;
-      if (known.has(f - a) || known.has(a - f)) return true;
+      if (crowded ? seenPart(f - a) || seenPart(a - f) : known.has(f - a) || known.has(a - f)) return true;
     }
     return false;
   };
@@ -166,8 +182,8 @@ export function untracedFigures(answer: string, given: string): readonly number[
  * the data does not hold and leaves the reading to the owner, the same way
  * the integrity checks report rather than change anything.
  */
-export function untracedNote(answer: string, given: string, money: (c: number) => string): string {
-  const loose = untracedFigures(answer, given);
+export function untracedNote(answer: string, given: string, money: (c: number) => string, worked = ""): string {
+  const loose = untracedFigures(answer, given, worked);
   if (loose.length === 0) return "";
 
   const list = loose.map(money).join(", ");

@@ -161,8 +161,16 @@ const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean }[] = 
  * holds four or five of them; the rest are in the "More" sheet.
  */
 
-/** The phone bar, left to right. Add is drawn raised; with the AI tab it is dead centre. */
-const BAR: readonly Screen[] = ["dashboard", "database", "add", "budget"];
+/**
+ * The phone bar, left to right, with Add raised in the centre of five.
+ *
+ * With AI off the bar held four, and Add had no centre: a raised button sat
+ * right of it, then a level green pill, and the owner found both unbalanced
+ * (25 October 2026: "make it balance or still in the center like before then
+ * add another part from the system"). Insights takes the AI tab's place, so
+ * Add stays in the middle and the other four keep their slots.
+ */
+const BAR: readonly Screen[] = ["dashboard", "database", "add", "budget", "insights"];
 const BAR_WITH_AI: readonly Screen[] = ["dashboard", "database", "add", "budget", "ai"];
 
 /** Whether this device last saw the chat on, for the moment before the settings arrive. */
@@ -2219,7 +2227,6 @@ export default function App() {
       className={[
         "fms-app",
         !compact && chatOn && screen !== "add" && "fms-app--fab",
-        (chatOn ? BAR_WITH_AI : BAR).length % 2 === 0 && "fms-app--evennav",
         typing && "fms-app--typing",
       ]
         .filter(Boolean)
@@ -2645,15 +2652,8 @@ export default function App() {
         Add sits raised and round, per style guide §3.8: it is the action this
         app exists for. The AI tab is there only while AI is on.
       */}
-      <nav
-        className={
-          (chatOn ? BAR_WITH_AI : BAR).length % 2 === 0
-            ? "fms-bottomnav fms-bottomnav--even safe-b"
-            : "fms-bottomnav safe-b"
-        }
-        aria-label="Screens"
-      >
-        {(chatOn ? BAR_WITH_AI : BAR).map((id, _, bar) => {
+      <nav className="fms-bottomnav safe-b" aria-label="Screens">
+        {(chatOn ? BAR_WITH_AI : BAR).map((id) => {
           const n = NAV.find((x) => x.id === id);
           const label = id === "ai" ? "AI" : (n?.label ?? "");
           const icon: IconName = id === "ai" ? "ai" : (n?.icon ?? "dashboard");
@@ -2670,14 +2670,8 @@ export default function App() {
                 className={`t-micro fms-bnitem fms-bnitem--add${active ? " fms-bnitem--on" : ""}`}
               >
                 <span aria-hidden className="fms-bnadd">
-                  <Icon name="add" size={bar.length % 2 === 0 ? 22 : 26} />
+                  <Icon name="add" size={26} />
                 </span>
-                {/* Level with the others, it is labelled like them. */}
-                {bar.length % 2 === 0 && (
-                  <span aria-hidden className="fms-bnlabel">
-                    Add
-                  </span>
-                )}
               </button>
             );
           }
@@ -2702,7 +2696,7 @@ export default function App() {
           <div className="fms-scrim" aria-hidden onClick={() => setMoreOpen(false)} />
           <div className="fms-sheet" role="dialog" aria-label="More screens">
             <div className="fms-sheethandle" aria-hidden />
-            {NAV.filter((n) => !BAR_WITH_AI.includes(n.id)).map((n) => (
+            {NAV.filter((n) => !(chatOn ? BAR_WITH_AI : BAR).includes(n.id)).map((n) => (
               <button
                 key={n.id}
                 type="button"

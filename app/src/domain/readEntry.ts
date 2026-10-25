@@ -1333,7 +1333,9 @@ function splitOnAnd(part: string): string[] {
       VERB_PHRASE.test(piece.split(/\s+/).slice(0, 3).join(" ")) ||
       /^\s*(?:[a-z][a-z'-]*\s+){1,3}(?:₱|php\s*)?\d/i.test(piece) ||
       /^\s*(?:₱|php\s*)?\d/i.test(piece);
-    if (namesMoney(before) && namesMoney(piece) && opensAsEntry && !FEE_ONLY.test(piece)) {
+    // A shop's number is not a figure: "I bought food 711, 100 pesos" is one purchase at 7-Eleven, not a ₱0.00 card and a ₱100.00 one (25 October 2026).
+    const money = (s: string): boolean => namesMoney(s.replace(SHOP_NUMBERS, " "));
+    if (money(before) && money(piece) && opensAsEntry && !FEE_ONLY.test(piece)) {
       out.push(piece);
     } else {
       out[out.length - 1] = `${before}${joint}${piece}`;

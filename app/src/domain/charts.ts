@@ -741,6 +741,10 @@ export const wantsChart = (question: string): boolean => WANTS_CHART.test(questi
  * should communicate, not just show it instantly").
  */
 export type Presentation = "chart" | "text" | "either";
+
+/** Said in so many words that no picture is wanted: "not a chart", "text only", "in words". */
+export const noPicture = (question: string): boolean =>
+  /\b(?:not|no|without|ayoko ng)\s+(?:a |the |any )?(?:chart|graph|pie|bars?)\b|\b(?:text only|in text|as text|in words|written|sa text|here in (?:the )?chat)\b/i.test(question);
 export function presentationFor(question: string): Presentation {
   if (/\b(?:not|no|without|ayoko ng)\s+(?:a |the |any )?(?:chart|graph|pie|bars?)\b/i.test(question)) return "text";
   if (wantsChart(question)) return "chart";
@@ -953,6 +957,20 @@ function named(question: string, names: readonly string[]): string {
   for (const name of byLength) {
     const escaped = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (new RegExp(`(?<![a-z0-9])${escaped}s?(?![a-z0-9])`).test(asked)) return name;
+  }
+  /*
+   * A one-word name typed with a letter too many: "compare my spending on
+   * foodo this month and last month" compared everything, not Food (21
+   * October 2026). One extra letter at the end, or a letter doubled, and
+   * only for a name of four letters or more, so "good" is never "Food".
+   */
+  const squash = (w: string): string => w.replace(/(.)\1+/g, "$1");
+  // Words of their own that look like a name typed long: "grabe" (Tagalog, "wow") is not Grab.
+  const words = asked.split(/[^a-z0-9]+/).filter((w) => w.length >= 5 && !/^(?:grabe|sanaa?|ganun|foodie)$/.test(w));
+  for (const name of byLength) {
+    const n = name.toLowerCase();
+    if (n.length < 4 || !/^[a-z]+$/.test(n)) continue;
+    if (words.some((w) => (w.length === n.length + 1 && w.startsWith(n)) || (w !== n && squash(w) === squash(n) && w.length <= n.length + 2))) return name;
   }
   return "";
 }
@@ -1204,6 +1222,26 @@ export function comparisonWorked(question: string, transactions: readonly Transa
   if (lines.length === 0) return "";
   if (pair.now.name.includes("so far") || pair.before.name.startsWith("the same days")) {
     lines.push("A period still running is set against the same days of the one before, so the two compare fairly.");
+  }
+  /*
+   * And the whole of last month, so "last month" can be said as well:
+   * September's food was PHP 3,374.00 in all and PHP 2,010.00 to the 25th,
+   * and the model, given only the second, made up a third (21 October 2026).
+   */
+  const sameDaysOf = /^the same days of (.+)$/.exec(pair.before.name)?.[1];
+  if (sameDaysOf) {
+    const y = Number(pair.before.from.slice(0, 4));
+    const m = Number(pair.before.from.slice(5, 7));
+    const end = `${pair.before.from.slice(0, 8)}${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
+    if (end !== pair.before.to) {
+      const whole: ComparedPeriods = { now: pair.now, before: { from: pair.before.from, to: end, name: `all of ${sameDaysOf}` } };
+      for (const direction of ["spending", "revenue"] as const) {
+        const chart = buildComparison(question, transactions, whole, direction, focus, dimensionOf(question, false));
+        if (!chart?.against) continue;
+        const narrowed = [focus.item, focus.wallet].filter(Boolean).join(", ");
+        lines.push(`${direction === "revenue" ? "Received" : "Spent"}${narrowed ? ` on ${narrowed}` : ""} in all of ${sameDaysOf} (${pair.before.from} to ${end}): ${chartLabel(chart.against.total)}.`);
+      }
+    }
   }
   return lines.join("\n");
 }

@@ -103,6 +103,7 @@ import {
   chartTopic,
   comparedPeriods,
   comparisonWorked,
+  noPicture,
   periodsSaid,
   wantsBothDirections,
   chartDirection,
@@ -632,6 +633,21 @@ function closedCard(t: Turn): Offered | DebtChoice | Changing | Budgeting | Expo
  */
 const isSaid = (t: Turn): t is Said => t.kind === "you" || t.kind === "assistant";
 
+/**
+ * A question about what was spent or earned: the kind a chart or a table can
+ * show. Not one about cooking that happens to say "my budget 500", which was
+ * offered a chart (21 October 2026).
+ */
+const aboutMoney = (q: string): boolean =>
+  /\b(?:spend\w*|spent|expens\w*|gastos|gastusin|income|earn\w*|revenue|received|bills?|subscriptions?|where (?:did )?(?:my |the )?money)\b/i.test(q) &&
+  !/\b(?:recipes?|cook\w*|luto\w*|lutuin)\b/i.test(q);
+
+/** "I want to see that in figures", "show it in numbers", "as a table": the last answer's figures, laid out. */
+const asksForFigures = (q: string): boolean => {
+  const t = q.trim().replace(/[.!?]+$/, "");
+  return t.split(/\s+/).length <= 9 && /\b(?:figures|numbers|digits|table|breakdown)\b/i.test(t) && /\b(?:that|it|this|them|those|in|as)\b/i.test(t) && !/\d/.test(t) && !aboutMoney(t);
+};
+
 /** The conversation, as the model should see it: words, in order, no gaps. */
 const spokenHistory = (turns: readonly Turn[], most: number) =>
   turns
@@ -1117,6 +1133,15 @@ export function AskPanel({
    * (`drawReply`, 13 October 2026).
    */
   const offeredDraw = useRef<string | null>(null);
+  /**
+   * The last question about money answered in words, offered or not, so
+   * "In pie", "Chart" or "in figures" after it is about it (21 October 2026:
+   * "In pie" after a summary by item drew the kinds; "Chart" after a food
+   * comparison drew all spending; "I want to see that in figures" got the
+   * same two figures again). A follow-up with no subject of its own never
+   * replaces it, and it lapses after a quarter of an hour.
+   */
+  const drawnNext = useRef<{ readonly question: string; readonly at: number } | null>(null);
   /** Set while an answer is being given, when a picture of it should be offered after it. */
   const offerAfter = useRef<string | null>(null);
   /**
@@ -3079,7 +3104,7 @@ export function AskPanel({
         ? reply
             .toLowerCase()
             .replace(wallet.toLowerCase(), " ")
-            .replace(/\b(?:from|using|via|thru|in|into|to|sa|gamit|my|the|wallet|account|only|lang|po)\b|[^a-z0-9]+/g, " ")
+            .replace(/\b(?:from|using|via|thru|in|into|to|sa|gamit|my|the|wallet|account|only|lang|po|its|it|is|was|that|thats|s|this|paid|pay|with|yung|ang|na)\b|[^a-z0-9]+/g, " ")
             .trim()
         : "x";
       if (wallet && !rest) {
@@ -3310,7 +3335,7 @@ export function AskPanel({
       }),
     };
     /** Read on this device and then by a text model, said wherever the answer is (data/aiClient.ts). */
-    const route = result.readOnDevice ? `, read on this device${result.sightMissed ? ` (Gemini could not: ${result.sightMissed})` : ""}` : "";
+    const route = result.readOnDevice ? `, read on this device${result.sightMissed ? ` (Gemini could not: ${result.sightMissed.split(/[.:]/)[0]?.trim() ?? result.sightMissed})` : ""}` : "";
 
     /**
      * The photo, as a description of itself.
@@ -4418,14 +4443,27 @@ export function AskPanel({
      * "pie", "bars please", "yes as a trend" right after a picture was
      * offered: the question that was answered in words, drawn that way.
      */
-    const drawAs = offeredDraw.current && !as && files.length === 0 ? drawReply(lead) : null;
+    /*
+     * The routes above the line that empties the box (below) empty it
+     * themselves: `setDraft("")` is ignored while a message is on its way, so
+     * "pie" and "in figures" stayed in the box after they were answered.
+     */
+    const emptyBox = (): void => {
+      if (typed === undefined) setDraftState("");
+    };
+    const lastAnswered = drawnNext.current && Date.now() - drawnNext.current.at < 15 * 60_000 && !turns.slice(-3).some(isChart) ? drawnNext.current.question : null;
+    const drawTopic = offeredDraw.current ?? lastAnswered;
+    const drawAs = drawTopic && !as && files.length === 0 ? drawReply(lead) : null;
     // An offer is for the next message only.
     if (!drawAs) offeredDraw.current = null;
-    if (drawAs && offeredDraw.current) {
-      const question = `${offeredDraw.current} ${drawAs === "pie" ? "as a pie" : drawAs === "trend" ? "trend" : drawAs === "bars" ? "bar chart" : "chart"}`;
+    if (drawAs && drawTopic) {
+      const question = `${drawTopic} ${drawAs === "pie" ? "as a pie" : drawAs === "trend" ? "trend" : drawAs === "bars" ? "bar chart" : "chart"}`;
       offeredDraw.current = null;
-      const charts = chartsFor(question, mergeHint(localHint(question, reference.credits ?? []), null, question, reference.credits ?? []), null);
-      setDraft("");
+      drawnNext.current = null;
+      // Two periods asked about are drawn side by side, not as one (21 October 2026).
+      const pair = drawAs === "pie" ? null : comparedPeriods(drawTopic, asOf);
+      const charts = chartsFor(question, mergeHint(localHint(question, reference.credits ?? []), null, question, reference.credits ?? []), pair);
+      emptyBox();
       say({ kind: "you", text: note });
       log(aiEvent("asked", "insights", { text: note }));
       if (charts.length === 0) {
@@ -4434,6 +4472,31 @@ export function AskPanel({
       }
       for (const chart of charts) drawChart(chart);
       return;
+    }
+
+    /*
+     * "I want to see that in figures", straight after a question answered in
+     * words: the app's own table for that question, every row, and for two
+     * periods the whole of the earlier one too. The model was asked and gave
+     * the same two figures again, one of them "≈ 1,417.00" (21 October 2026).
+     */
+    if (lastAnswered && !as && files.length === 0 && asksForFigures(lead)) {
+      const pair = comparedPeriods(lastAnswered, asOf);
+      const table = buildChart(lastAnswered, reportRows, asOf, undefined, pair, 200);
+      if (table && table.rows.length > 0) {
+        emptyBox();
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "insights", { text: note }));
+        const whole = pair
+          ? comparisonWorked(lastAnswered, reportRows, pair)
+              .split("\n")
+              .filter((l) => /^(?:Spent|Received)(?: on [^:]+)? in all of /.test(l))
+          : [];
+        const words = [chartAsText(table), ...whole].join("\n");
+        say({ kind: "assistant", text: words, from: "this device" });
+        log(aiEvent("answered", "insights", { text: words, model: "this device" }));
+        return;
+      }
     }
 
     /*
@@ -4455,7 +4518,7 @@ export function AskPanel({
       : undefined;
     if (feeMatch && feeRow) {
       const fee = parseAmount(feeMatch[1] ?? feeMatch[2] ?? "") ?? 0;
-      setDraft("");
+      emptyBox();
       say({ kind: "you", text: note });
       log(aiEvent("asked", "add", { text: note }));
       const number = `#${String(feeRow.recordNumber).padStart(4, "0")}`;
@@ -5244,11 +5307,14 @@ export function AskPanel({
     const besideFor = (question: string, pair: ComparedPeriods | null = null): Chart[] => {
       const recent = turns.slice(-4).filter(isChart).map((t) => t.chart.title);
       const justShown = recent.length > 0;
-      // Two periods side by side are drawn when a picture is asked for; otherwise offered, like any other (13 October 2026).
-      if (pair && !justShown && presentationFor(question) !== "chart") {
-        if (presentationFor(question) === "either" && /\b(?:month|week|year|20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december)\b/i.test(question)) offerAfter.current = question;
-        return [];
-      }
+      /*
+       * Two periods side by side are drawn beside the words, unless a picture
+       * was said not to be wanted. They were only offered (13 October 2026);
+       * then "compare my food this month and last month" was answered in
+       * words alone, and the owner: "the ai and system should know if to see
+       * a chart or text or combine" (21 October 2026). A comparison is both.
+       */
+      if (pair && !justShown && noPicture(question)) return [];
       const charts = pair
         ? justShown
           ? []
@@ -5257,7 +5323,8 @@ export function AskPanel({
             const hint = mergeHint(localHint(question, credits), routed?.draw ?? null, question, credits);
             if (chartHelps(question, hint, justShown)) return chartsFor(question, hint, null);
             // Not asked for by name: written, and the picture offered rather than pushed.
-            if (hint && !justShown && presentationFor(question) === "either") offerAfter.current = question;
+            // A question about cooking with "my budget 500" in it is not one to draw (21 October 2026).
+            if (hint && !justShown && presentationFor(question) === "either" && aboutMoney(question)) offerAfter.current = question;
             return [];
           })();
       return charts.filter((c) => !recent.includes(c.title));
@@ -7283,9 +7350,23 @@ export function AskPanel({
         const words = out
           ? [chartAsText(table), chartAsText(out), `Came in ${php(table.total)}, went out ${php(out.total)}: ${table.total >= out.total ? `${php(table.total - out.total)} kept` : `${php(out.total - table.total)} more went out than came in`}.`].join("\n\n")
           : chartAsText(table);
-        if (presentation === "either") offerAfter.current = ruled;
+        // Offered after the words, unless a picture was said not to be wanted ("Summary my spending", then "In pie", 21 October 2026).
+        if (!noPicture(note)) offerAfter.current = ruled;
+        // A pie or a chart said next draws this table, offered or not ("In pie" drew the kinds instead, 21 October 2026).
+        drawnNext.current = { question: asked, at: Date.now() };
+        /*
+         * The smaller rows, added up here: "Other smaller items: PHP 1,452.05"
+         * was the model's own sum, and flagged as one (21 October 2026).
+         */
+        const restOf = (c: Chart): string => {
+          const after = [...c.rows].sort((a, b) => b.value - a.value).slice(8);
+          if (after.length === 0) return "";
+          const sum = after.reduce((x, r) => x + r.value, 0) + Math.max(0, c.total - c.rows.reduce((x, r) => x + r.value, 0));
+          return `To group the smaller ones, the rows after the largest 8 come to ${php(sum)} (${after.length + c.othersCount} rows, ${after.reduce((x, r) => x + r.count, 0)} entries).`;
+        };
+        const rests = [restOf(table), out ? restOf(out) : ""].filter(Boolean).join(" ");
         await answerWithModel(
-          `The figures the message asks about, worked out by the app from the ledger, every row. Answer in words with them: lead with what matters most, then the rows they asked for, with each one's share. Do no arithmetic of your own.\n${words}`,
+          `The figures the message asks about, worked out by the app from the ledger, every row. Answer in words with them: lead with what matters most, then the rows they asked for, with each one's share. Do no arithmetic of your own.${rests ? ` ${rests}` : ""}\n${words}`,
           words,
         );
         return;
@@ -8044,6 +8125,7 @@ export function AskPanel({
         const [laterSaid, earlierSaid] = routed?.compare ?? [];
         const pair = (laterSaid && earlierSaid ? periodsSaid(laterSaid, earlierSaid, asOf) : null) ?? comparedPeriods(ruled, asOf);
         const compared = pair ? comparisonWorked(ruled, transactions, pair) : "";
+        if (pair || aboutMoney(ruled)) drawnNext.current = { question: ruled, at: Date.now() };
         /*
          * A plan said by the week or the day ("250 per week ... would that
          * work?"), and a correction of one ("I said 250 not 450"): the app's

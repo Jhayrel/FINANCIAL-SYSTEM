@@ -450,3 +450,15 @@ describe("an item corrected the way anyone says it (7 October 2026)", () => {
     expect(amend(food, "thats good", reference, "2026-10-07")).toBeNull();
   });
 });
+
+describe("a wallet said again when asked what it was for", () => {
+  it("is not taken as the answer: 'Its cash' (21 October 2026)", () => {
+    const withExtra: ReferenceLists = { ...reference, wallets: ["Cash", "Gcash", "Maya", "Extra Cash"] };
+    expect(applyReply(spend({ amount: 10000, fromWallet: "Extra Cash" }), "item", "Its cash", withExtra)).toBeNull();
+    expect(applyReply(spend({ amount: 10000, fromWallet: "Extra Cash" }), "item", "it was gcash", withExtra)).toBeNull();
+  });
+
+  it("still takes the wallet and the thing together", () => {
+    expect(applyReply(spend({ amount: 10000 }), "item", "cash, food", reference)).toMatchObject({ fromWallet: "Cash", item: "Food" });
+  });
+});

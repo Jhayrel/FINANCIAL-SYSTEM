@@ -1489,6 +1489,56 @@ on trust.
   matches an archived line named outright ("paid 1000 to PNB loan") and a
   person named by title alone ("lent 300 to Tita using cash").
 
+### 2026-10-20, last: Insights opens a month; marked money only
+
+- Insights: a month picked on the year chart offers "Open <Month YYYY>", as
+  a Dashboard click does. A message that marks its money (PHP239.00) counts
+  only those figures, so "MICROSOFT 365" is a name, not PHP 365.00. A
+  paid-off debt line is no longer picked for you in Add.
+
+### 2026-10-25: the 25 October backup, the phone bar, next month
+
+Read from the 76 chat turns since 20 October in the owner's backup.
+
+- **Phone bar.** Always five, Add raised in the middle in ink, not green
+  (owner: "dont use green anymore in add"). With AI off, Insights takes the
+  AI tab's slot. The level green pill and its CSS are gone. Style guide 3.8
+  says so.
+- **Next month.** `nextMonthStart` (monthPlan.ts): nothing resets on the
+  1st; what is not spent carries over, less the new month's bills,
+  subscriptions and debt payments, over all its days. The Dashboard shows it
+  in a month's last seven days, and the AI context carries it every day.
+  On the 25 October backup November starts at PHP 0.00 a day: PHP 700.85
+  left against PHP 1,522.00 of November bills, until money comes in.
+- **"I bought food 711, 100 pesos"** made a PHP 0.00 card and a PHP 100.00
+  one: the comma split read 7-Eleven's number as a figure. One entry now.
+- **Charts after words.** "In pie" after "Summary my spending" drew the
+  kinds (Spending, Bills, Subscriptions), not the items just listed; "Chart"
+  after a food comparison drew all spending. The last money question
+  answered in words is kept a quarter of an hour (`drawnNext`), so "pie",
+  "chart" and "in figures" are about it. "I want to see that in figures"
+  is the app's own table. Comparisons are drawn beside the words unless a
+  picture is refused ("not a chart", "in words"); summaries offer one.
+- **Made-up figures.** "Food PHP 8,470.00 against PHP 1,417.00 last month,
+  up PHP 7,053.00": September's food was PHP 3,374.00. The two invented
+  figures traced each other. In a crowded context a step now needs both
+  parts in the answer, or one in what the app worked out for the question.
+  The comparison also gives the whole of last month, and "foodo" is Food.
+- **"Its cash"** to "What was it for?" made a card with no item; it is now
+  taken as the wallet and the question asked again.
+- **Carwash** went to Repairs because "motorcycle" sat under two Repairs
+  rows; the owner's own "Carwash for motorcycle" (Random necessities, the
+  owner's edit) says both words and now wins.
+- **Recipes.** "Can I cook spaghetti, my budget 500, recipes and prices"
+  got "the ledger has no recipes" and a chart offer. The prompt now answers
+  the recipe from general knowledge, says it cannot see shop prices, and
+  judges the 500 against today's figure. No chart is offered for it.
+- The chat's Needs review list is the Database's (same wallets), and the
+  boxes clear after "pie" and "in figures" (they used to stay filled).
+- Data: five rows still flagged (three ATM withdrawals with the fee inside,
+  two Maya rows on 26 September). Both have keep-as-is cards; nothing moves
+  money unless pressed.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

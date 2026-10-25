@@ -142,7 +142,18 @@ describe("two periods asked about in words", () => {
       "Spent: PHP 470.00 in October 2026 so far, the 1st to the 3rd (2026-10-01 to 2026-10-03), against PHP 700.00 in the same days of September 2026 (2026-09-01 to 2026-09-03). PHP 230.00 less now.",
       "By item: Fun PHP 0.00 (was PHP 500.00), Food PHP 420.00 (was PHP 200.00), Travel PHP 50.00 (was PHP 0.00).",
       "A period still running is set against the same days of the one before, so the two compare fairly.",
+      "Spent in all of September 2026 (2026-09-01 to 2026-09-30): PHP 9,700.00.",
     ]);
+  });
+
+  it("reads a name typed with a letter too many, and gives the whole of last month (21 October 2026)", () => {
+    const q = "Can you compare my spending on foodo this month and last month? Also explain what changes";
+    const pair = comparedPeriods(q, ASOF);
+    const words = pair ? comparisonWorked(q, ledger, pair) : "";
+    expect(words).toContain("Spent: PHP 420.00 in October 2026 so far");
+    expect(words).toContain("against PHP 200.00 in the same days of September 2026");
+    expect(words).toContain("Spent on Food in all of September 2026 (2026-09-01 to 2026-09-30): PHP 9,200.00.");
+    expect(words).not.toContain("Travel");
   });
 });
 

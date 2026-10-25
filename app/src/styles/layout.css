@@ -376,47 +376,20 @@
   height: 56px;
   margin-top: -28px;
   border-radius: var(--radius-full);
-  background: var(--brand-700);
-  color: var(--on-brand);
+  /*
+   * Ink, not green. The owner, 25 October 2026: "dont use green anymore in
+   * add, it's very ugly to look at". Green stays the mark of the screen you
+   * are on; the button that adds is the page's own ink, in either theme.
+   */
+  background: var(--ink);
+  color: var(--surface);
   box-shadow: var(--shadow-raised);
   transition: background var(--motion-hover) var(--ease-out);
 }
 
 .fms-bnitem--add:hover .fms-bnadd,
 .fms-bnitem--add.fms-bnitem--on .fms-bnadd {
-  background: var(--brand-hover);
-}
-
-/*
- * Four items have no middle.
- *
- * With AI switched off the bar holds four, and a raised button in the third
- * of four slots sat right of centre, two tabs on one side of it and one on
- * the other, which read as a slot gone missing. Four share the bar equally
- * and Add keeps its green, level with the others and labelled like them.
- */
-.fms-bottomnav--even .fms-bnadd {
-  width: 56px;
-  height: 32px;
-  margin-top: 0;
-  box-shadow: none;
-}
-
-/* Nothing stands above a level bar, so nothing needs clearing under it. */
-@media (max-width: 1023px) {
-  .fms-app--evennav .fms-main {
-    --main-pad-b: var(--space-5);
-  }
-
-  .fms-app--evennav .fms-actions {
-    padding-bottom: var(--space-3);
-  }
-}
-
-@media (max-width: 639px) {
-  .fms-app--evennav .fms-main {
-    --main-pad-b: var(--space-4);
-  }
+  background: var(--ink-2);
 }
 
 /*
@@ -4430,10 +4403,6 @@
     padding-bottom: var(--main-pad-b);
   }
 
-  .fms-app--evennav .fms-main {
-    --main-pad-b: var(--space-3);
-  }
-
   /* The Save bar reaches the screen's edges through the page padding, which is 12px here, not 16px:
      at 16px it ran 4px past each side and the whole Add screen scrolled sideways. */
   .fms-actions {
@@ -4497,11 +4466,6 @@
     margin-top: -20px;
   }
 
-  .fms-bottomnav--even .fms-bnadd {
-    width: 52px;
-    height: 30px;
-    margin-top: 0;
-  }
 
   .fms-content {
     padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px));

@@ -42,7 +42,7 @@ import { addDays, dayInWords, daysBetween, daysInMonth, getMonth, getYear, local
 import { financeAlerts, burnRate, daysLeft, dailyAllowance, PACE_FROM_DAY } from "./alerts";
 import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
 import { formatMoney, toCentavos, toPesos } from "./money";
-import { carryWords, ifNothingMoreToday, isOpenBill, monthBrief, weekAhead, yesterdayOf } from "./monthPlan";
+import { carryWords, ifNothingMoreToday, isOpenBill, monthBrief, nextMonthStart, weekAhead, yesterdayOf } from "./monthPlan";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import type { Account } from "./accounts";
 import type { BudgetRevision, Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
@@ -213,6 +213,8 @@ export interface AiContext {
     readonly budgetPerDay: number | null;
     /** What yesterday's unspent share did, in sentences (`carryWords`). */
     readonly carry: readonly string[];
+    /** What it starts at on the 1st of next month, from the money there now (`nextMonthStart`). */
+    readonly next?: { readonly month: string; readonly days: number; readonly carried: number; readonly bills: number; readonly debt: number; readonly safe: number; readonly perDay: number } | undefined;
   } | null;
 }
 
@@ -478,6 +480,10 @@ export function buildContext(input: ContextInput): AiContext {
         budgetLeft: safe.budgetLeft === null ? null : pesos(safe.budgetLeft),
         budgetPerDay: safe.budgetPerDay === null ? null : pesos(safe.budgetPerDay),
         carry: carryWords(safe, yesterdayOf({ transactions, reference, budgets, debts: credits, year, month, asOf }), (c) => formatMoney(c).replace("₱", "PHP ")),
+        next: (() => {
+          const n = nextMonthStart({ transactions, reference, budgets, debts: credits, asOf }, safe);
+          return { month: `${monthName(n.month)} ${n.year}`, days: n.days, carried: pesos(n.carried), bills: pesos(n.reservedBills), debt: pesos(n.reservedDebt), safe: pesos(n.safe), perDay: pesos(n.perDay) };
+        })(),
       };
     })(),
   };
@@ -635,6 +641,12 @@ export function contextToText(c: AiContext): string {
       const week = weekAhead({ perDay: toCentavos(safe.today), perDayAfter: toCentavos(safe.perDayAfter), daysLeft: safe.daysLeft });
       if (week.days > 1) lines.push(`Next ${week.days} days, today included: ${php(pesos(week.amount))}${week.days < 7 ? `, to ${until}'s end` : ""}.`);
 
+    }
+    if (safe.next) {
+      const n = safe.next;
+      lines.push(
+        `When ${n.month} starts nothing resets: what is not spent is still in the wallets. On its 1st, if nothing more is spent and nothing comes in: ${php(n.carried)} carries over (the wallets less what is still due in ${until}), less ${n.month.split(" ")[0]}'s bills and subscriptions ${php(n.bills)}${n.debt > 0 ? ` and debt payments ${php(n.debt)}` : ""}, leaves ${php(n.safe)}: ${php(n.perDay)} a day over ${n.days} days. Money that comes in before then raises it.`,
+      );
     }
     if (safe.budgetLeft !== null) {
       lines.push(
