@@ -38,6 +38,7 @@ import { inferFromHistory, itemFromHistory } from "./infer";
 import { centavosInWords } from "./numberWords";
 import { readMoney } from "./proposal";
 import { withoutDays } from "./money";
+import { dayFromWords, withoutDayWords } from "./dayWords";
 import { carriesIdentifier, withoutIdentifiers } from "./identifiers";
 import type { IsoDate, ReferenceLists, Transaction, TransactionStatus } from "./types";
 
@@ -289,7 +290,7 @@ function flowOf(text: string): Flow | null {
 const SHOP_NUMBERS = /\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]?11|711|24[\s/-]?7)\b/gi;
 
 function amountIn(text: string): number | null {
-  let withoutDates = withoutDays(withoutIdentifiers(text).replace(SHOP_NUMBERS, " ")).replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
+  let withoutDates = withoutDays(withoutDayWords(withoutIdentifiers(text).replace(SHOP_NUMBERS, " "))).replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
 
   /**
    * A year beside a month is a date, not two thousand pesos.
@@ -535,6 +536,9 @@ function dateIn(text: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
   if (/\byesterday\b/i.test(text)) return { date: shift(asOf, -1), said: true };
   // "I gas last night 200" was dated today (19 October 2026). "Kagabi" is the same night.
   if (/\blast\s+night\b|\bkagabi\b/i.test(text)) return { date: shift(asOf, -1), said: true };
+  // "last friday", "noong lunes", "2 days ago", "on the 23rd" (`dayWords.ts`, 26 October 2026).
+  const worded = dayFromWords(text, asOf);
+  if (worded) return { date: worded, said: true };
   if (/\btoday\b|\bjust now\b|\bearlier\b/i.test(text)) return { date: asOf, said: true };
 
   /**

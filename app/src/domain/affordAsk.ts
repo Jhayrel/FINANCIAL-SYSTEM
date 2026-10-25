@@ -217,6 +217,8 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
       ask.amount !== null
         ? money(ask.amount)
         : known.map((c) => `${c.item} usually costs you ${money(c.cost)}`).join(", and ");
+    // "Gym usually costs you ₱70.00, so about ₱70.00" said the figure twice (26 October 2026): once, or the sum of several.
+    const whatCost = ask.amount !== null ? what : known.length > 1 ? `${what}: together ${money(cost)}` : what;
     const room = fromWallet ?? free;
     const after = room - cost;
     /*
@@ -238,14 +240,14 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
       lines.push(
         ask.amount !== null
           ? `After ${what} you would have ${money(after)} left${fromWallet !== null ? ` in ${ask.wallet}` : " free"}.`
-          : `${what}, so ${known.length > 1 ? "together about " : "about "}${money(cost)}, which leaves ${money(after)}${fromWallet !== null ? ` in ${ask.wallet}` : " free"}.`,
+          : `${whatCost}, which leaves ${money(after)}${fromWallet !== null ? ` in ${ask.wallet}` : " free"}.`,
       );
     } else if (fromWallet === null && inWallets >= cost) {
       lines.push(`Only by using money that is already spoken for. ${holding}${dueWords}`);
-      lines.push(`${ask.amount !== null ? what : `${what}, about ${money(cost)}`} is ${money(cost - Math.max(0, free))} more than is free.`);
+      lines.push(`${ask.amount !== null ? `${what} is` : `${whatCost}: that is`} ${money(cost - Math.max(0, free))} more than is free.`);
     } else {
       lines.push(`${ask.yesNo === false ? `${money(cost)} does not fit what you hold.` : "No."} ${holding}${fromWallet === null ? dueWords : ""}`);
-      lines.push(`${ask.amount !== null ? what : `${what}, about ${money(cost)}`} is ${money(cost - Math.max(0, room))} more than that.`);
+      lines.push(`${ask.amount !== null ? `${what} is` : `${whatCost}: that is`} ${money(cost - Math.max(0, room))} more than that.`);
     }
     /*
      * The day, as the Dashboard has it. "Yes, going by what you hold" is the

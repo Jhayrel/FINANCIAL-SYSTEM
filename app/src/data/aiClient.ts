@@ -62,6 +62,7 @@ import type { Attachment } from "./attachments";
 import { hintFrom, type ChartHint } from "../domain/chartAsk";
 import type { IsoDate } from "../domain/types";
 import { stopOf } from "../domain/bills";
+import { calendarLines } from "../domain/dates";
 
 export type { AiTask };
 
@@ -677,7 +678,8 @@ function extractContext(options: ExtractOptions): string {
     .map((a) => [`File: ${a.name}`, a.text ?? ""].join(nl));
 
   const lines = [
-    `Today is ${asOf}.`,
+    // The weekday, the time and the last seven days by date, so "last friday" is read, not worked out (26 October 2026).
+    ...calendarLines(asOf, new Date()),
     `Their wallets: ${[...reference.wallets, ...reference.savings].join(", ") || "none set up yet"}`,
     `Their credit lines, loans and people they hold or send money for: ${(reference.credits ?? []).join(", ") || "none"}`,
     // Their own name on a statement is them: "Received money from" it is a transfer from another of their accounts. Only with a statement attached, which carries the name anyway.

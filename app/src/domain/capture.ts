@@ -23,6 +23,7 @@
  * The model reads pictures and sentences. Filling in one blank is not that.
  */
 
+import { dayFromWords } from "./dayWords";
 import { walletBalance } from "./balances";
 import { debtWalletDirection, itemsFor, needs, type Draft, type Flow } from "./entry";
 import { figuresIn } from "./money";
@@ -730,7 +731,10 @@ function dateFrom(text: string, current: IsoDate, asOf: IsoDate): IsoDate | null
   };
 
   if (/\bday before yesterday\b/i.test(text)) return shift(-2);
-  if (/\byesterday\b/i.test(text)) return shift(-1);
+  if (/\byesterday\b|\blast\s+night\b|\bkagabi\b|\bkahapon\b/i.test(text)) return shift(-1);
+  // "no, it was last friday", "2 days ago" (`dayWords.ts`).
+  const worded = dayFromWords(text, asOf);
+  if (worded) return worded;
   if (/\btoday\b/i.test(text)) return asOf;
 
   /**

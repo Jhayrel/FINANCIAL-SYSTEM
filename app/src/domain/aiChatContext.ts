@@ -45,7 +45,7 @@
 import { flaggedRows } from "./integrity";
 import { isClearing } from "./settleLine";
 import { contextToText, phpFigure, type AiContext } from "./aiContext";
-import { addDays, dayInWords, dayOfWeek, formatMedium } from "./dates";
+import { addDays, calendarLines, dayInWords, dayOfWeek, formatMedium } from "./dates";
 import { redact } from "./aiRedact";
 import { toCentavos, toPesos } from "./money";
 import { costOf, incomeOf } from "./totals";
@@ -296,6 +296,8 @@ export interface ChatContextInput {
   readonly deleted?: readonly DeletedTransaction[] | undefined;
   /** Every setting, in words, so a question about one is answered from it (`settingsContext.ts`). */
   readonly settings?: AppSettings | undefined;
+  /** The phone's clock when asked, for the time of day (`calendarLines`). Left out, the calendar still says the days. */
+  readonly now?: Date | undefined;
 }
 
 export interface ChatContext {
@@ -320,7 +322,15 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
   const year = asOf.slice(0, 4);
   const thisYear = rows.filter((t) => t.date.startsWith(year));
 
-  const out: string[] = [...(input.screen ? [input.screen, ""] : []), contextToText(snapshot), ""];
+  const out: string[] = [
+    ...(input.screen ? [input.screen, ""] : []),
+    contextToText(snapshot),
+    "",
+    // The time, the last seven days by date and the weeks (26 October 2026: "make the ai knows days, time").
+    "## The time and the calendar",
+    ...calendarLines(asOf, input.now),
+    "",
+  ];
   // "Earlier", "that", "the treat": what the device can tell the question points at (`pointsAt.ts`).
   const pointed = pointsAt(question, rows, asOf);
   if (pointed.length > 0) out.push(...pointed, "");

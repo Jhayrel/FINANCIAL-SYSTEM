@@ -145,7 +145,7 @@ describe("the answer goes by what is held, and says the budget apart", () => {
 
   it("adds up two things named together", () => {
     const text = affordAnswer(readAffordAsk("can I afford gas and food?", rows, reference, TODAY), input);
-    expect(text).toContain("Gas usually costs you ₱200.00, and Food usually costs you ₱125.00, so together about ₱325.00");
+    expect(text).toContain("Gas usually costs you ₱200.00, and Food usually costs you ₱125.00: together ₱325.00, which leaves");
   });
 });
 

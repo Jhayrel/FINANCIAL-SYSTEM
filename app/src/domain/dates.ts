@@ -159,3 +159,39 @@ export function eachDay(start: IsoDate, end: IsoDate): IsoDate[] {
   for (let d = start; d <= end; d = addDays(d, 1)) out.push(d);
   return out;
 }
+
+/** "9:42 PM, evening": the clock and the part of the day, from a local time. */
+export function timeInWords(now: Date): string {
+  const h = now.getHours();
+  const m = now.getMinutes();
+  const clock = `${h % 12 === 0 ? 12 : h % 12}:${pad(m)} ${h < 12 ? "AM" : "PM"}`;
+  const part = h < 5 ? "night, after midnight" : h < 12 ? "morning" : h < 13 ? "noon" : h < 18 ? "afternoon" : h < 22 ? "evening" : "night";
+  return `${clock}, ${part}`;
+}
+
+/**
+ * Today, the time, the last seven days and the weeks, as lines for a model.
+ *
+ * The owner, 26 October 2026: "make the ai etc knows days, time etc". A
+ * model given "Today is 2026-10-25" has to work out on its own that "last
+ * friday" is the 23rd, and that is where it goes wrong. Every date it needs
+ * for a weekday, "two days ago", "this week" or "tonight" is written here.
+ */
+export function calendarLines(asOf: IsoDate, now?: Date): string[] {
+  const week = (d: IsoDate): IsoDate => addDays(d, -((dayOfWeek(d) + 6) % 7));
+  const monday = week(asOf);
+  const y = getYear(asOf);
+  const m = getMonth(asOf);
+  const inMonth = daysInMonth(y, m);
+  const next = m === 12 ? makeDate(y + 1, 1, 1) : makeDate(y, m + 1, 1);
+  const back = [1, 2, 3, 4, 5, 6, 7].map((n) => {
+    const d = addDays(asOf, -n);
+    return `${dayInWords(d)} (${d}${n === 1 ? ", yesterday" : n === 2 ? ", the day before yesterday" : `, ${n} days ago`})`;
+  });
+  return [
+    `Today is ${dayInWords(asOf)}, ${y} (${asOf})${now ? `, ${timeInWords(now)} by the phone's clock` : ""}. Tomorrow is ${dayInWords(addDays(asOf, 1))} (${addDays(asOf, 1)}).`,
+    `The days before it: ${back.join("; ")}.`,
+    `A weekday said without a date is the latest one on or before today (Friday is ${addDays(asOf, -((dayOfWeek(asOf) - 5 + 7) % 7))}); last Friday is the latest before today. A week runs Monday to Sunday: this week ${monday} to ${addDays(monday, 6)}, last week ${addDays(monday, -7)} to ${addDays(monday, -1)}, next week ${addDays(monday, 7)} to ${addDays(monday, 13)}.`,
+    `${MONTH_NAMES[m - 1] ?? ""} ${y} has ${inMonth} days: today is day ${getDay(asOf)}, with ${inMonth - getDay(asOf) + 1} left counting today. ${MONTH_NAMES[getMonth(next) - 1] ?? ""} ${getYear(next)} starts on ${dayInWords(next)}.`,
+  ];
+}

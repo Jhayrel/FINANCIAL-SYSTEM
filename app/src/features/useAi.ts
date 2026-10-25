@@ -271,6 +271,7 @@ export function useAi({
               stopped: settings.stopped,
               // Every setting and every budget change, in words (`settingsContext.ts`).
               settings,
+              now: new Date(),
               ...(deleted ? { deleted } : {}),
               ...(options.screen ? { screen: options.screen } : {}),
             }).text
