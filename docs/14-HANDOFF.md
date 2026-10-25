@@ -1542,6 +1542,16 @@ Read from the 76 chat turns since 20 October in the owner's backup.
   two Maya rows on 26 September). Both have keep-as-is cards; nothing moves
   money unless pressed.
 
+### 2026-10-26: the month card made clean again
+
+- The owner: "this ui is now too messy". Under Safe to spend today: one
+  caption and one short carry-over line; the sum is wallets, bills, safe
+  until the month ends, from tomorrow. "Spend nothing more today" left the
+  card (the chat still says it). Next month is one line under both halves,
+  so the right half no longer has a gap. The budget-beyond-the-money
+  warning (and its bell alert) shows only past a day's share
+  (`budgetBeyondMoney`), so PHP 14.61 is no longer a warning.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

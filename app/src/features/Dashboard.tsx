@@ -51,7 +51,7 @@ import { borrowedMoney, lenderNames } from "../domain/borrowed";
 import { ON_BEHALF } from "../domain/debtWords";
 import { getMonth, getYear, MONTH_NAMES_SHORT, monthName } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
-import { carryOver, carryWords, ifNothingMoreToday, isOpenBill, monthBrief, nextMonthStart, yesterdayOf } from "../domain/monthPlan";
+import { carryOver, carryWords, isOpenBill, monthBrief, nextMonthStart, yesterdayOf } from "../domain/monthPlan";
 import { monthlyTotalsForYear, spendingRanking, totalSpending } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction, WalletBalance } from "../domain/types";
 import type { InsightsAt } from "./Insights";
@@ -274,9 +274,10 @@ export function Dashboard({
                       ? `${formatMoney(safe.spentToday)} of today's ${formatMoney(safe.todayShare)} spent`
                       : `Today's share of ${formatMoney(safe.safe)}, over ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"}`}
               </span>
+              {/* One short line on what carried over; the chat says the rest (26 October 2026: "too messy"). */}
               {safe && carried && safe.daysLeft > 1 && safe.overToday === 0 && (
                 <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                  {`Yesterday's unspent ${formatMoney(yesterday?.unspent ?? 0)} is spread over these days. To use it today instead: up to ${formatMoney(carried.useToday)}.`}
+                  {`Yesterday's unspent ${formatMoney(yesterday?.unspent ?? 0)} is spread over these days; up to ${formatMoney(carried.useToday)} if used today.`}
                 </span>
               )}
               <div className="fms-month-lines">
@@ -291,19 +292,7 @@ export function Dashboard({
                 {safe && safe.daysLeft > 1 && (
                   <Line label={`From tomorrow, a day (${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"})`} value={safe.perDayAfter} quiet />
                 )}
-                {/* Unspent money carries over: what tomorrow is if nothing more goes today. */}
-                {safe && safe.daysLeft > 1 && ifNothingMoreToday(safe) > safe.perDayAfter && (
-                  <Line label="Spend nothing more today, from tomorrow" value={ifNothingMoreToday(safe)} quiet />
-                )}
-                {next && <Line label={`From 1 ${monthName(next.month)}, a day (${next.days} days)`} value={next.perDay} quiet />}
               </div>
-              {next && (
-                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                  {next.safe > 0
-                    ? `Nothing resets on the 1st: the ${formatMoney(Math.max(0, next.carried))} left now carries into ${monthName(next.month)}, less its bills and subscriptions${next.reservedDebt > 0 ? " and debt payments" : ""} (${formatMoney(next.reservedBills + next.reservedDebt)}), spread over all ${next.days} days. That is if nothing more is spent and nothing comes in before then.`
-                    : `Nothing resets on the 1st: the ${formatMoney(Math.max(0, next.carried))} left now carries into ${monthName(next.month)}, but its bills and subscriptions${next.reservedDebt > 0 ? " and debt payments" : ""} come to ${formatMoney(next.reservedBills + next.reservedDebt)}, so it starts at ${formatMoney(0)} a day until money comes in.`}
-                </span>
-              )}
             </div>
 
             <div className="fms-month-half">
@@ -332,6 +321,22 @@ export function Dashboard({
               </div>
             </div>
           </div>
+
+          {/*
+            Next month, in the month's last week: one line under both halves,
+            so neither runs longer than the other (26 October 2026).
+          */}
+          {next && (
+            <p className="t-body fms-month-next">
+              <span>{`From 1 ${monthName(next.month)}: `}</span>
+              <strong>{`${formatMoney(next.perDay)} a day`}</strong>
+              <span style={{ color: "var(--ink-3)" }}>
+                {next.safe > 0
+                  ? `. What is left carries over, less ${monthName(next.month)}'s bills (${formatMoney(next.reservedBills + next.reservedDebt)}).`
+                  : `. What is left carries over, but ${monthName(next.month)}'s bills (${formatMoney(next.reservedBills + next.reservedDebt)}) take all of it until money comes in.`}
+              </span>
+            </p>
+          )}
 
           {brief.warnings.length > 0 && (
             <ul className="fms-month-notes">

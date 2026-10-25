@@ -652,7 +652,7 @@ export function contextToText(c: AiContext): string {
       lines.push(
         safe.budgetLeft <= 0
           ? "The spending budget is used up: the plan, not the money."
-          : `Spending budget left ${php(safe.budgetLeft)}, ${php(safe.budgetPerDay ?? 0)} a day: the plan, not the money.${safe.budgetLeft > Math.max(0, safe.safe) ? ` It promises ${php(Math.round((safe.budgetLeft - Math.max(0, safe.safe)) * 100) / 100)} more than is safe to spend: say so, and that lowering it is on the Budget screen.` : ""}`,
+          : `Spending budget left ${php(safe.budgetLeft)}, ${php(safe.budgetPerDay ?? 0)} a day: the plan, not the money.${safe.budgetLeft - Math.max(0, safe.safe) > safe.todayShare ? ` It promises ${php(Math.round((safe.budgetLeft - Math.max(0, safe.safe)) * 100) / 100)} more than is safe to spend: say so, and that lowering it is on the Budget screen.` : ""}`,
       );
     }
   }

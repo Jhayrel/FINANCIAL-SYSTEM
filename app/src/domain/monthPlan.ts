@@ -163,6 +163,25 @@ export interface MonthBrief {
 const TOP_KINDS = 6;
 const HABITS = 3;
 
+/**
+ * How much more the spending budget promises than is safe to spend, or 0.
+ *
+ * Said only when it is more than a day's share: "it promises ₱14.61 more
+ * than your money" under a ₱116.80 day was a warning about nothing, and the
+ * owner called the card too messy (26 October 2026). The Dashboard, the
+ * bell and the chat all ask here, so they agree.
+ */
+export function budgetBeyondMoney(safe: {
+  readonly safe: Centavos;
+  readonly budgetLeft: Centavos | null;
+  readonly wallets: Centavos;
+  readonly todayShare?: Centavos | undefined;
+}): Centavos {
+  if (safe.budgetLeft === null || safe.budgetLeft <= 0 || safe.wallets < 0) return 0;
+  const beyond = safe.budgetLeft - Math.max(0, safe.safe);
+  return beyond > (safe.todayShare ?? 0) ? beyond : 0;
+}
+
 /** A bill still to pay this month: late, due soon, or due. */
 export const isOpenBill = (b: MonthBill): boolean =>
   b.state === "late" || b.state === "soon" || b.state === "due";
@@ -563,7 +582,7 @@ function notesFor(
       }
     }
 
-    if (safe.budgetLeft !== null && safe.budgetLeft > 0 && safe.budgetLeft > Math.max(0, safe.safe) && safe.wallets >= 0) {
+    if (safe.budgetLeft !== null && budgetBeyondMoney(safe) > 0) {
       /*
        * The plan promises more than the money: what is left of the spending
        * budget is more than is safe to spend. Said on the Dashboard, in the

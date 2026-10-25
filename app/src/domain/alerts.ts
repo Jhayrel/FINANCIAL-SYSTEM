@@ -38,6 +38,7 @@ import { categoryLimits } from "./budgetView";
 import { limitKindOf, spendingTrackByKind } from "./kinds";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import { isNeedRow } from "./spendNote";
+import { budgetBeyondMoney } from "./monthPlan";
 import { unusualRows } from "./unusual";
 import { wholeRows } from "./covers";
 import { incomeSinceSet } from "./incomeBudget";
@@ -100,7 +101,7 @@ export interface AlertInput {
   /** The kinds of spending, with the owner's needs and wants marked. */
   readonly spendingTypes?: readonly Pick<SpendingType, "name" | "necessity">[] | undefined;
   /** This month's safe to spend and what is left of the spending budget (`monthBrief`), for the budget against the money. */
-  readonly safe?: { readonly safe: Centavos; readonly budgetLeft: Centavos | null; readonly wallets: Centavos } | null | undefined;
+  readonly safe?: { readonly safe: Centavos; readonly budgetLeft: Centavos | null; readonly wallets: Centavos; readonly todayShare?: Centavos | undefined } | null | undefined;
 }
 
 /** Pace of spending so far this month, per day. */
@@ -237,8 +238,8 @@ export function financeAlerts(input: AlertInput): Alert[] {
   // ── The budget against the money ─────────────────────────────────────────
   {
     const sf = input.safe;
-    if (sf && sf.wallets >= 0 && sf.budgetLeft !== null && sf.budgetLeft > 0 && sf.budgetLeft > Math.max(0, sf.safe)) {
-      const beyond = sf.budgetLeft - Math.max(0, sf.safe);
+    const beyond = sf ? budgetBeyondMoney(sf) : 0;
+    if (sf && sf.budgetLeft !== null && beyond > 0) {
       out.push({
         id: "budget-beyond-money",
         level: "warn",

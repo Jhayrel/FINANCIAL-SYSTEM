@@ -7171,6 +7171,20 @@ button.fms-recent-row:disabled {
   color: var(--ink-2);
 }
 
+/* Next month, one line under both halves of the month card. */
+.fms-month-next {
+  margin: var(--space-4) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
+  color: var(--ink-2);
+}
+
+.fms-month-next + .fms-month-notes {
+  margin-top: var(--space-3);
+  padding-top: 0;
+  border-top: 0;
+}
+
 .fms-month-notes li::marker {
   color: var(--ink-3);
 }

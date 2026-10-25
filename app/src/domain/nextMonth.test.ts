@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { monthBrief, nextMonthStart } from "./monthPlan";
+import { budgetBeyondMoney, monthBrief, nextMonthStart } from "./monthPlan";
 import { asksNextMonth, nextMonthWords } from "./safeAsk";
 import type { ReferenceLists, Transaction } from "./types";
 
@@ -96,5 +96,14 @@ describe("asked in the chat", () => {
     const { next } = start(thin, "2026-10-25");
     expect(nextMonthWords(next)).toContain("**From 1 November: ₱0.00 a day** until money comes in.");
     expect(nextMonthWords(next)).toContain("Nothing resets on the 1st, and nothing is left over now for November's bills and subscriptions (₱3,000.00).");
+  });
+});
+
+describe("the budget promising more than the money", () => {
+  it("is said only when it is more than a day's share (26 October 2026: PHP 14.61 under a PHP 116.80 day)", () => {
+    expect(budgetBeyondMoney({ safe: 70085, budgetLeft: 71546, wallets: 70085, todayShare: 11680 })).toBe(0);
+    expect(budgetBeyondMoney({ safe: 70085, budgetLeft: 90000, wallets: 70085, todayShare: 11680 })).toBe(19915);
+    expect(budgetBeyondMoney({ safe: 0, budgetLeft: 500, wallets: 0, todayShare: 0 })).toBe(500);
+    expect(budgetBeyondMoney({ safe: 70085, budgetLeft: null, wallets: 70085, todayShare: 11680 })).toBe(0);
   });
 });
