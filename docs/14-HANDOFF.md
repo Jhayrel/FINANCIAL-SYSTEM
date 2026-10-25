@@ -1552,6 +1552,23 @@ Read from the 76 chat turns since 20 October in the owner's backup.
   warning (and its bell alert) shows only past a day's share
   (`budgetBeyondMoney`), so PHP 14.61 is no longer a warning.
 
+### 2026-10-26, later: days and time; charts of what was just answered; an AI of our own
+
+- Typed entries read weekdays ("last friday", "noong lunes"), "2 days ago",
+  "a week ago" and "on the 23rd" (`dayWords.ts`); all were dated today. A
+  card's "no, it was last friday" moves its date.
+- The AI gets `calendarLines` (dates.ts): the phone's clock and part of the
+  day, the last seven days by weekday and date, and this, last and next week,
+  in the chat and when it reads an entry.
+- "let see it in trend" after the gym question drew all spending: the
+  subject of the last money question answered is what "it" draws, until a
+  chart is drawn after it (`drawnNext`, `lastDrawnAt`, `drawsBack`).
+- The owner asked to train our own AI on the data. `15-OWN-AI.md` is the
+  proposal: no cloud fine-tuning (the providers do not train, and the data
+  would leave), a word model trained on the phone, examples from the owner's
+  corrections, an answer bank, "AI first" order, and who decides what when
+  the AI and the app disagree. **Waiting on the owner's five answers.**
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
