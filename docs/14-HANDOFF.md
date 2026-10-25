@@ -1508,6 +1508,9 @@ Read from the 76 chat turns since 20 October in the owner's backup.
   1st; what is not spent carries over, less the new month's bills,
   subscriptions and debt payments, over all its days. The Dashboard shows it
   in a month's last seven days, and the AI context carries it every day.
+  Asked in the chat ("what happens to the available to spend if the next
+  month sets in"), the app's own answer leads with it (`asksNextMonth`,
+  `nextMonthWords` in safeAsk.ts).
   On the 25 October backup November starts at PHP 0.00 a day: PHP 700.85
   left against PHP 1,522.00 of November bills, until money comes in.
 - **"I bought food 711, 100 pesos"** made a PHP 0.00 card and a PHP 100.00

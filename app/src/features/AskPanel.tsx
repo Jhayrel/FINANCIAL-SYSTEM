@@ -145,7 +145,7 @@ import { readSettleAsk, settleLine } from "../domain/settleLine";
 import { wholeRows } from "../domain/covers";
 import { incomeOf } from "../domain/totals";
 import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, readBudgetMove, readIncomePlan, answerMoveIn, type BudgetMove } from "../domain/incomeBudget";
-import { asksCarryOver, asksSafeToSpend, rateIn, safeWords } from "../domain/safeAsk";
+import { asksCarryOver, asksNextMonth, asksSafeToSpend, nextMonthWords, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer, everydayPrices } from "../domain/dayFit";
 import { eatOutAnswer, mealPrice, readEatOutAsk } from "../domain/eatOutAsk";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
@@ -214,7 +214,7 @@ import { aboutTheScreen, screenText } from "../domain/screenContext";
 import { figuresIn, parseAmount } from "../domain/money";
 import { notEditable, transactionToDraft } from "../domain/entry";
 import { notArrivedWords, placeSentMoney } from "../domain/destination";
-import { carryWords, dayFigures, safeOverDays, yesterdayOf } from "../domain/monthPlan";
+import { carryWords, dayFigures, nextMonthStart, safeOverDays, yesterdayOf } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
 import { typedOnce } from "../domain/typedOnce";
 import { debtAnswer, readDebtAsk } from "../domain/debtAsk";
@@ -4731,14 +4731,16 @@ export function AskPanel({
        * was told "today's allowance is unchanged" (15 October 2026).
        */
       const carry = brief.safe && (yesterdayAsked || asksCarryOver(question)) ? carryWords(brief.safe, yesterdayOf({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }), formatMoney).join(" ") : "";
-      const words = [over, ifNotYesterday, carry, safeWords(brief, rateIn(question), ownMoney), heldWords].filter(Boolean).join("\n\n");
+      // "What happens to it when next month sets in?" is answered first (25 October 2026).
+      const nextAsked = brief.safe && asksNextMonth(question, asOf) ? nextMonthWords(nextMonthStart({ transactions: reportRows, reference, budgets, debts, asOf }, brief.safe)) : "";
+      const words = [nextAsked, over, ifNotYesterday, carry, safeWords(brief, rateIn(question), ownMoney), heldWords].filter(Boolean).join("\n\n");
       setBusy(true);
       try {
         await askQuestion(
           question,
           false,
           {
-            text: `Safe to spend, worked out by the app exactly as the Dashboard shows it: the spending wallets less the bills, subscriptions and debt payments still to pay this month; today's share less what today already spent; then a day from tomorrow; the spending budget said apart, as the plan. Answer with these figures, today's first. If the message proposes its own figure a day, say whether it fits, using the line that checks it. Never answer with the budget's pace in place of these. When they ask what happens to money not spent, or say they did not spend, answer with the carry-over lines and their figures as they are: unspent money is never lost and never "unchanged", it is spread over the days left, and the owner may use it today instead.\n${words}`,
+            text: `Safe to spend, worked out by the app exactly as the Dashboard shows it: the spending wallets less the bills, subscriptions and debt payments still to pay this month; today's share less what today already spent; then a day from tomorrow; the spending budget said apart, as the plan. Answer with these figures, today's first. If the message proposes its own figure a day, say whether it fits, using the line that checks it. Never answer with the budget's pace in place of these. When they ask what happens to money not spent, or say they did not spend, answer with the carry-over lines and their figures as they are: unspent money is never lost and never "unchanged", it is spread over the days left, and the owner may use it today instead. When they ask about next month, answer with the From 1 lines first: nothing resets on the 1st.\n${words}`,
             fallback: words,
           },
         );

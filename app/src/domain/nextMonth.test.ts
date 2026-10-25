@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import { monthBrief, nextMonthStart } from "./monthPlan";
+import { asksNextMonth, nextMonthWords } from "./safeAsk";
 import type { ReferenceLists, Transaction } from "./types";
 
 const reference: ReferenceLists = {
@@ -71,5 +72,29 @@ describe("safe to spend when the next month starts", () => {
     expect(next.carried).toBe(-200000);
     expect(next.safe).toBe(0);
     expect(next.perDay).toBe(0);
+  });
+});
+
+describe("asked in the chat", () => {
+  it("knows the question, in the owner's words or by the month's name", () => {
+    expect(asksNextMonth("what happen to the available to spend if the next month sets in??", "2026-10-25")).toBe(true);
+    expect(asksNextMonth("what happens to my safe to spend when november starts?", "2026-10-25")).toBe(true);
+    expect(asksNextMonth("how much can I spend today?", "2026-10-25")).toBe(false);
+    expect(asksNextMonth("how much did I spend in november 2025?", "2026-10-25")).toBe(false);
+    expect(asksNextMonth("safe to spend when january comes?", "2026-12-28")).toBe(true);
+  });
+
+  it("says nothing resets, and the figure from the 1st", () => {
+    const { next } = start([income, rentSep, rentOct, food], "2026-10-25");
+    expect(nextMonthWords(next)).toBe(
+      "**From 1 November: ₱333.33 a day** for 30 days, if nothing more is spent and nothing comes in before then. Nothing resets on the 1st: the ₱13,000.00 not spent now carries over, less November's bills and subscriptions (₱3,000.00), leaving ₱10,000.00 safe for the month. Money that comes in before then raises it.",
+    );
+  });
+
+  it("says when next month's bills take all of it", () => {
+    const thin = [row({ date: "2026-09-01", type: "Revenue", fromWallet: "", toWallet: "Cash", category: "Revenue", item: "Allowance", amount: 500000 }), rentSep, rentOct];
+    const { next } = start(thin, "2026-10-25");
+    expect(nextMonthWords(next)).toContain("**From 1 November: ₱0.00 a day** until money comes in.");
+    expect(nextMonthWords(next)).toContain("Nothing resets on the 1st, and nothing is left over now for November's bills and subscriptions (₱3,000.00).");
   });
 });

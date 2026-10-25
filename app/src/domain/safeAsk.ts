@@ -25,7 +25,7 @@
  */
 
 import { formatMoney as money } from "./money";
-import { ifNothingMoreToday, isOpenBill, weekAhead, type MonthBrief } from "./monthPlan";
+import { ifNothingMoreToday, isOpenBill, weekAhead, type MonthBrief, type NextMonthStart } from "./monthPlan";
 import { addDays, dayOfWeek, formatMedium, MONTH_NAMES } from "./dates";
 import { daysIn } from "./readEntry";
 import type { IsoDate } from "./types";
@@ -70,6 +70,32 @@ export function asksCarryOver(text: string): boolean {
     /\b(?:yesterday|kahapon)\b[^.?!]{0,30}\b(?:didn'?t|did\s+not|haven'?t|have\s+not|not|never|no|hindi)\s+(?:spen[dt]|gumastos)\b/i.test(t) ||
     /\b(?:carr(?:y|ies|ied)\s+over|roll(?:s|ed)?\s+over|add(?:s|ed)?\s+(?:it\s+|up\s+)?(?:(?:to|on|into)\s+)?(?:tomorrow|the\s+next\s+day|bukas)|(?:unspent|unused|leftover|left\s+over|natira)\b[^.?!]{0,30}\b(?:tomorrow|bukas|next\s+day|go|goes|happen))/i.test(t)
   );
+}
+
+/**
+ * What happens when the next month starts: "what happen to the available to
+ * spend if the next month sets in??" (25 October 2026). The next month by
+ * name counts too, from the month `asOf` is in.
+ */
+export function asksNextMonth(text: string, asOf: IsoDate): boolean {
+  const next = MONTH_NAMES[Number(asOf.slice(5, 7)) % 12] ?? "";
+  return (
+    /\b(?:next|new|following|coming)\s+month\b|\b(?:on|from|by|after)\s+the\s+(?:1st|first)\b|\bstart\s+of\s+(?:the\s+)?(?:next\s+)?month\b|\bmonth\s+(?:ends|is\s+over|starts|begins|sets\s+in|changes)\b|\bsusunod\s+na\s+buwan\b/i.test(text) ||
+    (next !== "" && new RegExp(`\\b${next}\\b`, "i").test(text) && /\b(?:start|starts|begin|begins|comes|sets\s+in|when)\b/i.test(text))
+  );
+}
+
+/** The next month's start, in words: nothing resets, what carries over, less its bills, over its days (`nextMonthStart`). */
+export function nextMonthWords(next: NextMonthStart): string {
+  const name = MONTH_NAMES[next.month - 1] ?? "next month";
+  const due = next.reservedBills + next.reservedDebt;
+  const what = next.reservedDebt > 0 ? "bills, subscriptions and debt payments" : "bills and subscriptions";
+  const carried = Math.max(0, next.carried);
+  return next.safe > 0
+    ? `**From 1 ${name}: ${money(next.perDay)} a day** for ${next.days} days, if nothing more is spent and nothing comes in before then. Nothing resets on the 1st: the ${money(carried)} not spent now carries over, less ${name}'s ${what} (${money(due)}), leaving ${money(next.safe)} safe for the month. Money that comes in before then raises it.`
+    : carried > 0
+      ? `**From 1 ${name}: ${money(0)} a day** until money comes in. Nothing resets on the 1st: the ${money(carried)} not spent now carries over, but ${name}'s ${what} come to ${money(due)}, which is more, so all of it is set aside for them.`
+      : `**From 1 ${name}: ${money(0)} a day** until money comes in. Nothing resets on the 1st, and nothing is left over now for ${name}'s ${what} (${money(due)}).`;
 }
 
 export function asksSafeToSpend(text: string): boolean {
