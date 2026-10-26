@@ -15,6 +15,7 @@
  * `buildSheet`, the same figures the PDF prints, row for row.
  */
 
+import { saveFile } from "../data/download";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button, Card, EmptyState, Money, StatusPill } from "../components/primitives";
@@ -54,18 +55,6 @@ export function readIssued(): { to: string; by: string } {
   }
 }
 
-function saveFile(name: string, data: BlobPart, type: string): void {
-  const blob = new Blob([data], { type });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Revoked a moment later: a phone can still be reading it when click() returns.
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
-}
 
 export function Statements({
   transactions,

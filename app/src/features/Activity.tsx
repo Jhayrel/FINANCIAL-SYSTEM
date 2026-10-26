@@ -14,8 +14,10 @@ import { Alert, Button, Card, EmptyState } from "../components/primitives";
 import { FilterChip } from "../components/FilterChip";
 import { LoadingRows } from "../components/LoadingScreen";
 import { activityStore } from "../data/activityStore";
+import { saveFile } from "../data/download";
 import type { ActivityEvent, Actor } from "../domain/activity";
 import { factChanges, readRow } from "../domain/activityRead";
+import { eventDetails, trailFilename, trailSummary } from "../domain/activityExport";
 
 type Who = Actor | "all";
 type Kind = "all" | "added" | "changed" | "binned" | "budget" | "settings";
@@ -123,11 +125,14 @@ export function Activity({
   uid,
   reloadKey,
   onAdd,
+  ownerName = "",
 }: {
   uid: string | null;
   reloadKey: number;
   /** Where the empty trail sends you: the one thing that fills it. */
   onAdd?: (() => void) | undefined;
+  /** Who the PDF is issued to. */
+  ownerName?: string;
 }) {
   const [events, setEvents] = useState<ActivityEvent[] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -135,6 +140,8 @@ export function Activity({
   const [kind, setKind] = useState<Kind>("all");
   const [limit, setLimit] = useState(PAGE);
   const [attempt, setAttempt] = useState(0);
+  const [making, setMaking] = useState(false);
+  const [pdfFailed, setPdfFailed] = useState("");
 
   useEffect(() => {
     let live = true;
@@ -232,6 +239,25 @@ export function Activity({
   }, [events]);
 
   const filtered = who !== "all" || kind !== "all";
+
+  /*
+   * What is shown, every one of it and not only the page on screen, as a PDF
+   * (26 October 2026: "i can export it as pdf with all details").
+   */
+  const savePdf = async (): Promise<void> => {
+    setMaking(true);
+    setPdfFailed("");
+    try {
+      const { activityPdf } = await import("../pdf/activityPdf");
+      const showing = `${WHO.find((w) => w.id === who)?.label ?? "Everyone"}, ${kind === "all" ? "all changes" : (KIND.find((k) => k.id === kind)?.label ?? "").toLowerCase()}`;
+      const bytes = await activityPdf({ events: shown, showing, issuedTo: ownerName, issuedAt: new Date() });
+      saveFile(trailFilename(trailSummary(shown)), bytes as BlobPart, "application/pdf");
+    } catch (e) {
+      setPdfFailed(`The PDF could not be made (${(e as Error).message || "no reason given"}). Reload the page and try again; nothing in the trail is affected.`);
+    } finally {
+      setMaking(false);
+    }
+  };
   const now = new Date();
 
   const nothingMatches = `${KIND.find((k) => k.id === kind)?.phrase ?? "Nothing done"}${
@@ -252,8 +278,15 @@ export function Activity({
         subtitle="Newest first. Nothing here can be edited or deleted, by you or by anything else."
         action={
           total > 0 ? (
-            <span className="t-micro fms-badge fms-badge--count">
-              {filtered ? `${shown.length} of ${total}` : `${total} ${total === 1 ? "event" : "events"}`}
+            <span className="fms-actactions">
+              <span className="t-micro fms-badge fms-badge--count">
+                {filtered ? `${shown.length} of ${total}` : `${total} ${total === 1 ? "event" : "events"}`}
+              </span>
+              {!failed && shown.length > 0 && (
+                <Button size="sm" onClick={() => void savePdf()} loading={making} title="Every change shown, with all its details, as a PDF">
+                  Save as PDF
+                </Button>
+              )}
             </span>
           ) : undefined
         }
@@ -283,9 +316,24 @@ export function Activity({
                 onChange={(id) => setKind(id as Kind)}
               />
             </div>
+            {/* A phone has no card heading to hold it, so it sits under the filters there. */}
+            {shown.length > 0 && (
+              <div className="fms-actpdf-phone">
+                <Button size="sm" fullWidth onClick={() => void savePdf()} loading={making}>
+                  Save {shown.length === total ? "all" : `these ${shown.length}`} as PDF
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
+        {pdfFailed && (
+          <div className="fms-actlist">
+            <Alert status="over" title="The PDF was not made">
+              {pdfFailed}
+            </Alert>
+          </div>
+        )}
         {events === null ? (
           <div className="fms-actlist">
             <LoadingRows count={6} label="Loading the activity trail" />
@@ -421,6 +469,12 @@ export function Activity({
 function EventRow({ event: e }: { event: ActivityEvent }) {
   const changes = e.action === "transaction.update" ? factChanges(e.before, e.after) : [];
   const facts = factsLine(e);
+  /*
+   * Everything the event holds, opened with a tap on the row: when to the
+   * second, how it came in, which model, and the entry field by field
+   * (26 October 2026: "add more details"). Closed, the row reads as before.
+   */
+  const [open, setOpen] = useState(false);
 
   return (
     <li className="fms-act">
@@ -428,19 +482,24 @@ function EventRow({ event: e }: { event: ActivityEvent }) {
         <Icon name={iconFor(e.action)} size={16} />
       </span>
       <div className="fms-actmain">
-        <div className="fms-acthead">
-          <span className="t-body fms-actsummary">{e.summary}</span>
-          <time className="t-caption fms-actwhen" dateTime={e.at}>
-            {timeOf(e.at)}
-          </time>
-        </div>
-        <div className="t-caption fms-actmeta">
-          <span className={e.actor === "ai" ? "t-micro fms-actor fms-actor--ai" : "t-micro fms-actor"}>
-            {e.actor === "ai" ? "Assistant" : "You"}
+        <button type="button" className="fms-actrow" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+          <span className="fms-acthead">
+            <span className="t-body fms-actsummary">{e.summary}</span>
+            <time className="t-caption fms-actwhen" dateTime={e.at}>
+              {timeOf(e.at)}
+            </time>
           </span>
-          {facts && <span>{facts}</span>}
-          {e.model && <span>{e.model}</span>}
-        </div>
+          <span className="t-caption fms-actmeta">
+            <span className={e.actor === "ai" ? "t-micro fms-actor fms-actor--ai" : "t-micro fms-actor"}>
+              {e.actor === "ai" ? "Assistant" : "You"}
+            </span>
+            {facts && <span>{facts}</span>}
+            {e.model && <span>{e.model}</span>}
+            <span aria-hidden className="fms-actchevron">
+              <Icon name="chevronDown" size={14} />
+            </span>
+          </span>
+        </button>
         {changes.length > 0 && (
           <dl className="t-caption fms-actchanges">
             {changes.map((c) => (
@@ -453,6 +512,16 @@ function EventRow({ event: e }: { event: ActivityEvent }) {
                   </span>
                   <span>{c.after || "blank"}</span>
                 </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {open && (
+          <dl className="t-caption fms-actfacts">
+            {eventDetails(e).map((d) => (
+              <div key={d.label} className="fms-actfact">
+                <dt>{d.label}</dt>
+                <dd>{d.value}</dd>
               </div>
             ))}
           </dl>

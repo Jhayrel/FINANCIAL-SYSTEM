@@ -4811,6 +4811,87 @@ button.fms-recent-row:disabled {
   color: var(--ink-3);
 }
 
+/* The count and Save as PDF, side by side in the card's corner. */
+.fms-actactions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/*
+ * The row is a button: a tap opens everything the event holds. Reset to read
+ * as the row it was, with a 44px floor for a finger (rule D10).
+ */
+.fms-actrow {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-actchevron {
+  display: inline-flex;
+  margin-left: auto;
+  color: var(--ink-3);
+  transition: transform var(--motion-hover) var(--ease-out);
+}
+
+/* The arrow is not one of the words, so no dot before it. */
+.fms-actmeta > span:not(.fms-actor) + span.fms-actchevron::before {
+  content: none;
+}
+
+/* Save as PDF under the filters: a phone only, where the card heading is not shown. */
+.fms-actpdf-phone {
+  display: none;
+}
+
+.fms-actrow[aria-expanded="true"] .fms-actchevron {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fms-actchevron {
+    transition: none;
+  }
+}
+
+/* Every detail, label and value, on the sunk surface under the row. */
+.fms-actfacts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+  gap: var(--space-1) var(--space-4);
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunk);
+}
+
+.fms-actfact {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-actfact dt {
+  color: var(--ink-3);
+}
+
+.fms-actfact dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
 .fms-actmore {
   display: flex;
   flex-wrap: wrap;
@@ -9622,6 +9703,11 @@ button.fms-recent-row:disabled {
 
   .fms-main .fms-section--page > .fms-section-head {
     display: none;
+  }
+
+  .fms-actpdf-phone {
+    display: block;
+    margin-top: var(--space-2);
   }
 }
 

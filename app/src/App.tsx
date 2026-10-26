@@ -2625,7 +2625,7 @@ export default function App() {
             />
           )}
           {screen === "activity" && (
-            <Activity uid={cloud.uid ?? null} reloadKey={activityKey} onAdd={() => go("add")} />
+            <Activity uid={cloud.uid ?? null} reloadKey={activityKey} onAdd={() => go("add")} ownerName={cloud.auth.status === "ready" ? cloud.auth.name : ""} />
           )}
           {screen === "settings" && (
             <Settings

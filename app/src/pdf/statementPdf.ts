@@ -39,21 +39,21 @@ import { fromBase64, parseTtf, PdfDocument, type FontName, type PdfPage, type Rg
 
 export const SYSTEM_NAME = "Financial Management System";
 
-const GREEN: Rgb = [0.184, 0.42, 0.129];
-const GREEN_SOFT: Rgb = [0.8, 0.88, 0.78];
-const TINT: Rgb = [0.945, 0.96, 0.94];
-const WHITE: Rgb = [1, 1, 1];
-const INK: Rgb = [0.1, 0.11, 0.1];
-const INK_2: Rgb = [0.36, 0.38, 0.36];
-const INK_3: Rgb = [0.56, 0.58, 0.56];
-const RULE: Rgb = [0.87, 0.89, 0.87];
-const RED: Rgb = [0.72, 0.13, 0.11];
+export const GREEN: Rgb = [0.184, 0.42, 0.129];
+export const GREEN_SOFT: Rgb = [0.8, 0.88, 0.78];
+export const TINT: Rgb = [0.945, 0.96, 0.94];
+export const WHITE: Rgb = [1, 1, 1];
+export const INK: Rgb = [0.1, 0.11, 0.1];
+export const INK_2: Rgb = [0.36, 0.38, 0.36];
+export const INK_3: Rgb = [0.56, 0.58, 0.56];
+export const RULE: Rgb = [0.87, 0.89, 0.87];
+export const RED: Rgb = [0.72, 0.13, 0.11];
 
-const PAGE_W = 595.28;
-const PAGE_H = 841.89;
-const MARGIN = 36;
-const CONTENT_W = PAGE_W - MARGIN * 2;
-const FOOTER = 30;
+export const PAGE_W = 595.28;
+export const PAGE_H = 841.89;
+export const MARGIN = 36;
+export const CONTENT_W = PAGE_W - MARGIN * 2;
+export const FOOTER = 30;
 
 const BODY = 8;
 const META = 6.8;

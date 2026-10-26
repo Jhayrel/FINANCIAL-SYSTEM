@@ -1727,6 +1727,25 @@ to that cut budget (PHP 17,772.00). Fixed:
   and "let see it in trend" after the gym answer all take the subject from
   the last questions (`subjectSaid`), the gym found in the descriptions.
 
+### 2026-10-26, later: Activity in full, and as a PDF
+
+The owner, on the Activity screen: "Add more details also i can export it as
+pdf with all details also make the ui cleaner in pdf".
+
+- A tap on a change opens everything it holds (`activityExport.ts`,
+  `eventDetails`): when to the second, who, how it came in (typed, the chat, a
+  picture, a backup), the kind, the model, and the entry field by field. The
+  row reads as before when closed.
+- **Save as PDF** (the card's corner on a computer, under the filters on a
+  phone) saves every change the filters show, not only the page on screen
+  (`pdf/activityPdf.ts`). Drawn as the statement is, the style the owner
+  shaped: the green band with the period and who it is issued to, the counts
+  in boxes, a green heading row, a tinted line per day, rules only between
+  rows, each change's how, entry and field-by-field edit small under it, and
+  "Nothing Follows". The palette and helpers are the statement's own, now
+  exported from `statementPdf.ts`.
+- `data/download.ts` holds the one `saveFile`; Statements uses it too.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
