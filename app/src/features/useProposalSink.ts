@@ -15,6 +15,7 @@
  * an AI row is a typed row that someone else did the typing for.
  */
 
+import type { OwnerDetails } from "../domain/owner";
 import { useEffect, useMemo, useRef } from "react";
 
 import type { Provenance } from "../domain/activity";
@@ -67,6 +68,8 @@ export interface SinkInput {
   readonly onSavePlan?: ((plan: Plan, action: PlanAction, summary: string) => void) | undefined;
   /** A plan paid: the entry saved and linked. Returns what stopped it, or null. */
   readonly onPayPlan?: ((plan: Plan, draft: Draft, settles: boolean) => string | null) | undefined;
+  /** The owner's details saved from the chat (domain/owner.ts). */
+  readonly onSaveOwner?: ((owner: OwnerDetails) => void) | undefined;
 }
 
 export type PlanAction = "plan.create" | "plan.update" | "plan.move" | "plan.paid" | "plan.skip" | "plan.remove" | "plan.restore";
@@ -152,6 +155,8 @@ export function useProposalSink(input: SinkInput): ProposalSink {
       canPlan: Boolean(input.onSavePlan),
       savePlan: (plan, action, summary) => handlers.current.onSavePlan?.(plan, action, summary),
       payPlan: (plan, draft, settles) => handlers.current.onPayPlan?.(plan, draft, settles) ?? "The Planner cannot be reached from here.",
+      canSaveOwner: Boolean(input.onSaveOwner),
+      saveOwner: (owner) => handlers.current.onSaveOwner?.(owner),
       /**
        * Save it, and say which number it got.
        *

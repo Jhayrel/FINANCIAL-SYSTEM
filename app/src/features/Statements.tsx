@@ -68,6 +68,7 @@ export function Statements({
   year: initialYear,
   asOf,
   plans = [],
+  ownerName = "",
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -80,6 +81,8 @@ export function Statements({
   asOf?: IsoDate;
   /** The Planner's plans, for the Plans statement (`planSheet.ts`). */
   plans?: readonly Plan[];
+  /** The name in Settings, Data, You: Issued to, until another is typed here. */
+  ownerName?: string;
 }) {
   const [type, setTypeState] = useState<StatementType>("account");
   /*
@@ -204,7 +207,10 @@ export function Statements({
   const [wallet, setWallet] = useState(reference.wallets[0] ?? "");
   const [debtId, setDebtId] = useState(debts[0]?.id ?? "");
 
-  const [issued, setIssued] = useState(readIssued);
+  const [issued, setIssued] = useState(() => {
+    const last = readIssued();
+    return { ...last, to: last.to || ownerName };
+  });
   useEffect(() => {
     try {
       localStorage.setItem(ISSUED_KEY, JSON.stringify(issued));

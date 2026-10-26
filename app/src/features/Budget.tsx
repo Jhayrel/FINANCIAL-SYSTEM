@@ -2023,6 +2023,22 @@ function IncomeSplitCard({
   onSave: (value: { spending: Centavos; billsSubs: Centavos }, reason: string) => boolean;
 }) {
   const suggested = Math.min(view.room, view.cameIn);
+  /*
+   * A tap that changes the month's budget asks first, saying from what to
+   * what: "Lower it to" changed October's budget on a stray tap and only the
+   * activity trail said so (owner, 27 October 2026: "Add validation to button
+   * like I accidentally click this").
+   */
+  const { confirm, dialog } = useConfirm();
+  const ask = async (value: { spending: Centavos; billsSubs: Centavos }, reason: string, title: string): Promise<void> => {
+    const ok = await confirm({
+      title,
+      body: `${monthName}'s spending budget goes from ${formatMoney(view.budget)} to ${formatMoney(value.spending)}${value.billsSubs !== view.billsBudget ? `, and bills and subscriptions from ${formatMoney(view.billsBudget)} to ${formatMoney(value.billsSubs)}` : ""}. Undo the last change puts it back.`,
+      confirmLabel: "Change the budget",
+      tone: "normal",
+    });
+    if (ok) onSave(value, reason);
+  };
   const [splitting, setSplitting] = useState(false);
   const [toSpending, setToSpending] = useState<Centavos | null>(suggested > 0 ? suggested : null);
   const [toBills, setToBills] = useState<Centavos | null>(null);
@@ -2033,6 +2049,7 @@ function IncomeSplitCard({
   const since = view.setOn ? `since you set the budget on ${formatMedium(view.setOn)}` : `in ${monthName}`;
   return (
     <section className="fms-incomesplit" aria-label="Budget and your money">
+      {dialog}
       <h3 className="t-label" style={{ color: "var(--ink-2)", margin: 0 }}>
         Budget and your money
       </h3>
@@ -2061,7 +2078,13 @@ function IncomeSplitCard({
           </p>
           <Button
             variant="primary"
-            onClick={() => onSave({ spending: view.most, billsSubs: view.billsBudget }, `Lowered to the money: ${formatMoney(view.most)} is what is spent plus what is safe to spend`)}
+            onClick={() =>
+              void ask(
+                { spending: view.most, billsSubs: view.billsBudget },
+                `Lowered to the money: ${formatMoney(view.most)} is what is spent plus what is safe to spend`,
+                `Lower ${monthName}'s spending budget to ${formatMoney(view.most)}?`,
+              )
+            }
           >
             Lower it to {formatMoney(view.most)}
           </Button>
@@ -2106,7 +2129,7 @@ function IncomeSplitCard({
                     {line}
                   </p>
                 ))}
-              <Button variant="primary" disabled={!check.ok} onClick={() => onSave(check.value, check.reason)}>
+              <Button variant="primary" disabled={!check.ok} onClick={() => void ask(check.value, check.reason, `Split the money into ${monthName}'s budget?`)}>
                 {check.ok ? `Save: spending budget ${formatMoney(check.value.spending)}` : "Type how to split it"}
               </Button>
             </>

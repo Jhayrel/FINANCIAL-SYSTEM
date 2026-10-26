@@ -1560,6 +1560,8 @@ const SYSTEM_BASE_LINES = [
   "Every number you are given is correct. Repeat figures exactly; never round or estimate, and never redo a total that has already been worked out for you.",
   "If a figure is not in the data, say you do not have it rather than inferring one.",
   "The currency is Philippine Pesos, written PHP.",
+  // Settings, Data, You (src/domain/owner.ts): said ahead of the figures when the owner filled it in.
+  "The figures may open with who the owner is, in their own words: their name, what to call them, a few words about them, and how to reach them only when they allowed it. Call them by the name they want now and then, never in every sentence; use what they said about themselves where it helps the answer; and repeat their e-mail, phone or address only when they ask for it.",
   NO_ADVICE,
 
   /**

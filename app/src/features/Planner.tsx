@@ -28,6 +28,7 @@ import { AmountInput, Field, Switch, TextInput } from "../components/forms";
 import { Alert, Button, Card, EmptyState, Money, ProgressBar, SegmentedControl, StatusPill, Tabs } from "../components/primitives";
 import { Select } from "../components/Select";
 import { Sheet } from "../components/Sheet";
+import { useConfirm } from "../components/Confirm";
 import type { Account } from "../domain/accounts";
 import { walletBalance } from "../domain/balances";
 import { addDays, formatMedium, lastOfMonth, MONTH_NAMES } from "../domain/dates";
@@ -660,6 +661,8 @@ function PlanSheet(props: {
 }) {
   const { view: v, transactions } = props;
   const p = v.plan;
+  // A one-tap link marks a plan paid: asked first (owner, 27 October 2026: "Add validation to button").
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const open = isOpen(v);
   const pill = PILL[v.state];
   const paidRows = p.entryIds.map((id) => transactions.find((t) => t.id === id)).filter((t): t is Transaction => t !== undefined);
@@ -731,6 +734,9 @@ function PlanSheet(props: {
   );
 
   return (
+    <>
+    {/* Outside the sheet, so the question sits over it rather than inside its scrolling. */}
+    {confirmDialog}
     <Sheet title={p.title} subtitle={open ? whenWords(v, props.asOf) : v.words} onClose={props.onClose} actions={actions} dialog={props.dialog}>
       <div className="fms-plansheet">
         <div className="fms-plansheet-figure">
@@ -812,7 +818,19 @@ function PlanSheet(props: {
                     {no(t.recordNumber)} · {formatMedium(t.date)} · {t.description && t.description !== t.item ? t.description.slice(0, 48) : t.item}
                   </span>
                   <Money value={t.total} size="s" />
-                  <Button size="sm" onClick={() => props.onLinkOne(t.id)}>
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      void confirm({
+                        title: `Link ${no(t.recordNumber)} as its payment?`,
+                        body: `${no(t.recordNumber)}, ${formatMoney(t.total)} on ${formatMedium(t.date)}, counts as paying "${p.title}"${t.total >= v.left ? ", and the plan is marked paid" : `, ${formatMoney(v.left - t.total)} still to pay`}. No money moves: the entry is already in your records. Unlink puts it back.`,
+                        confirmLabel: "Link it",
+                        tone: "normal",
+                      }).then((ok) => {
+                        if (ok) props.onLinkOne(t.id);
+                      })
+                    }
+                  >
                     This is it
                   </Button>
                 </li>
@@ -838,6 +856,7 @@ function PlanSheet(props: {
         )}
       </div>
     </Sheet>
+    </>
   );
 }
 

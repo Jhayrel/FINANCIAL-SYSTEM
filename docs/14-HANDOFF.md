@@ -1900,6 +1900,30 @@ style guide's Bin, Planner and sidebar lines say how each now works.
   line), and a Forecast month is a card, one figure to a line, its note under
   its figure.
 
+### 2026-10-27, last: You in Settings, and a question before one-tap changes
+
+- **You** (Settings, Data, first; owner: "add a section to add owners
+  information address gmail ... make sure it sync to the whole system and
+  even ai knows me"). Name, what to call you, contact e-mail, phone,
+  address, about you, and a switch for the assistant seeing contact details
+  (off by default). Kept as `settings.owner` (`domain/owner.ts`), so it syncs,
+  backs up, survives a merge restore and a file without it. The Google
+  account is shown with Sign out and cannot be changed here: the database is
+  locked to it. The name is "Issued to" on statements (until another is
+  typed there) and the activity PDF; the chat knows it as the owner's own
+  name; the AI gets name, what to call them and about, ahead of the figures
+  where no trimming drops it, and contact details only with the switch on.
+  The chat answers "who am I", "what's my email", and makes "my email is
+  ...", "call me Jay", "change my address to ..." a card to press. The trail
+  says which parts changed, never their values. `firestore.rules` bounds the
+  map (publish the rules; nothing breaks before then).
+- **Asked first** (owner: "Add validation to button like I accidentally
+  click this", after a stray tap lowered October's budget): Lower it to,
+  the income split's Save, the screens' one-tap Clear of a line, and the
+  Planner's This is it. Budget's own Save already asks (above).
+- **The plan dialog on a computer**: actions on its footer line, the rarer
+  ones under More.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

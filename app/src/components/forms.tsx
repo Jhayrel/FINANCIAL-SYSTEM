@@ -69,6 +69,9 @@ export function TextInput({
   ariaLabel,
   onKeyDown,
   maxLength,
+  type = "text",
+  inputMode,
+  autoComplete,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -82,10 +85,17 @@ export function TextInput({
   onKeyDown?: ((e: React.KeyboardEvent<HTMLInputElement>) => void) | undefined;
   /** The longest text that means something here; a pasted page is not a description. */
   maxLength?: number | undefined;
+  /** An e-mail or a phone number: the phone shows the keyboard for it (rule D10). */
+  type?: "text" | "email" | "tel" | undefined;
+  inputMode?: "text" | "email" | "tel" | undefined;
+  autoComplete?: string | undefined;
 }) {
   return (
     <input
       id={id}
+      type={type}
+      inputMode={inputMode}
+      autoComplete={autoComplete}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={onKeyDown}

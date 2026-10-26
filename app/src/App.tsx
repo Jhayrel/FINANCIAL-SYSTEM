@@ -66,6 +66,7 @@ import { checkDraft, debtWalletDirection, draftToTransactions, emptyDraft, inser
 import { Planner } from "./features/Planner";
 import { linkPayments, NO_DATE, renamePlans, type Plan } from "./domain/planner";
 import { buildPlanSheet, planSheetCsv, planSheetFilename } from "./domain/planSheet";
+import { NO_OWNER, ownerChanges, ownerName as nameOfOwner } from "./domain/owner";
 import { spreadCovered } from "./domain/covers";
 import { formatMedium, getMonth, getYear, lastOfMonth, today } from "./domain/dates";
 import { monthBrief, nextMonthStart } from "./domain/monthPlan";
@@ -1202,6 +1203,26 @@ export default function App() {
     handleSave([{ ...found.add, id: `t-${Date.now()}`, recordNumber: sink.nextRecordNumber } as Transaction]);
   };
 
+  /*
+   * The screens' one-tap Clear asks first, saying what it writes: a stray tap
+   * saved an entry with no question (owner, 27 October 2026: "Add validation
+   * to button like I accidentally click this"). The chat's card is its own
+   * question, so it clears without a second one.
+   */
+  const { confirm: confirmSettle, dialog: settleDialog } = useConfirm();
+  const settleAsked = (debt: Debt): void => {
+    const found = settlementFor(debt);
+    if (!found) return;
+    void confirmSettle({
+      title: `${found.action}?`,
+      body: `${found.words} It is saved as an entry, in the Database and the activity trail, and can be moved to the bin.`,
+      confirmLabel: found.action,
+      tone: "normal",
+    }).then((ok) => {
+      if (ok) settleDebt(debt);
+    });
+  };
+
   const handleUpdate = (rows: Transaction[], by: Provenance = BY_OWNER, said?: string): void => {
     // Read before the state changes, so the event carries what it replaced.
     const previous = new Map(transactions.map((t) => [t.id, t]));
@@ -1797,6 +1818,12 @@ export default function App() {
    * for a period. Every one of them is the existing path, so a file asked for
    * in the chat is the same file the screen gives.
    */
+  /** Who a statement or PDF is issued to: the name this device last typed, else the one in Settings, Data, You. */
+  const issuedNow = (): { to: string; by: string } => {
+    const last = readIssued();
+    return { ...last, to: last.to || theOwner };
+  };
+
   const handleAskedExport = (ask: ExportAsk): void => {
     if (ask.kind === "backup") {
       void handleBackup();
@@ -1821,7 +1848,7 @@ export default function App() {
         flash(`Saved ${sheet.lines.length.toLocaleString()} ${sheet.lines.length === 1 ? "plan" : "plans"} as a spreadsheet.`);
         return;
       }
-      const issued = readIssued();
+      const issued = issuedNow();
       void import("./pdf/statementPdf")
         .then(({ statementPdf }) => statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() }))
         .then((bytes) => {
@@ -1853,7 +1880,7 @@ export default function App() {
     }
 
     // The same PDF the Statements screen makes, with the name it last used.
-    const issued = readIssued();
+    const issued = issuedNow();
     void import("./pdf/statementPdf")
       .then(({ statementPdf }) => statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() }))
       .then((bytes) => {
@@ -2048,7 +2075,9 @@ export default function App() {
    * there was answered "The Planner cannot be changed from this view"
    * (27 October 2026, the owner: "all should ai can do not redirect me").
    */
-  const assist: Pick<SinkInput, "onExport" | "onRestoreMany" | "onUpdateDebt" | "onGo" | "onSavePlan" | "onPayPlan"> = {
+  /** The owner's name: the one in Settings, Data, You, else the Google account's (`domain/owner.ts`). */
+  const theOwner = nameOfOwner(settings.owner, cloud.auth.status === "ready" ? cloud.auth.name : "");
+  const assist: Pick<SinkInput, "onExport" | "onRestoreMany" | "onUpdateDebt" | "onGo" | "onSavePlan" | "onPayPlan" | "onSaveOwner"> = {
     onExport: handleAskedExport,
     onRestoreMany: handleRestoreMany,
     onUpdateDebt: (next) => setSettings((s) => ({ ...s, credits: s.credits.map((c) => (c.id === next.id ? next : c)) })),
@@ -2056,6 +2085,12 @@ export default function App() {
     // The Planner from the chat: recorded as the assistant's, which it was (docs/16-PLANNER.md, P4.23).
     onSavePlan: (plan, action, summary) => changePlan(plan, action, summary, { actor: "ai", via: "ai_chat" }),
     onPayPlan: (plan, draft, settles) => payPlan(plan, draft, settles, { actor: "ai", via: "ai_chat" }),
+    // The owner's details from the chat: which parts changed goes on the trail, never what they now say.
+    onSaveOwner: (owner) => {
+      const touched = ownerChanges(settings.owner ?? NO_OWNER, owner);
+      setSettings((s) => ({ ...s, owner }));
+      if (touched.length > 0) record(settingsChanged(`Changed your details from the chat: ${touched.join(", ")}`, { actor: "ai", via: "ai_chat" }));
+    },
   };
   const sink = useProposalSink({
     transactions,
@@ -2509,7 +2544,7 @@ export default function App() {
           {screen === "dashboard" && (
             <Dashboard
               settlementFor={settlementFor}
-              onSettle={settleDebt}
+              onSettle={settleAsked}
               transactions={reportRows}
               reference={reference}
               budgets={budgets}
@@ -2552,7 +2587,7 @@ export default function App() {
               onBudget={handleBudgetYear}
               onAddDebt={(debt) => setSettings((s) => ({ ...s, credits: withDebt(s.credits, debt) }))}
               settlementFor={settlementFor}
-              onSettle={settleDebt}
+              onSettle={settleAsked}
               assist={assist}
               editing={editing}
               onCancelEdit={() => {
@@ -2593,7 +2628,7 @@ export default function App() {
                 budgets={budgets}
                 reference={reference}
                 asOf={asOf}
-                ownerName={cloud.auth.status === "ready" ? cloud.auth.name : ""}
+                ownerName={theOwner}
               />
             </div>
           )}
@@ -2636,7 +2671,7 @@ export default function App() {
                 setDbQuery({ query, at: Date.now() });
               }}
               settlementFor={settlementFor}
-              onSettle={settleDebt}
+              onSettle={settleAsked}
             />
           )}
           {screen === "insights" && (
@@ -2749,6 +2784,7 @@ export default function App() {
               year={getYear(asOf)}
               asOf={asOf}
               plans={settings.plans ?? []}
+              ownerName={theOwner}
             />
           )}
           {screen === "bin" && (
@@ -2761,7 +2797,7 @@ export default function App() {
             />
           )}
           {screen === "activity" && (
-            <Activity uid={cloud.uid ?? null} reloadKey={activityKey} onAdd={() => go("add")} ownerName={cloud.auth.status === "ready" ? cloud.auth.name : ""} />
+            <Activity uid={cloud.uid ?? null} reloadKey={activityKey} onAdd={() => go("add")} ownerName={theOwner} />
           )}
           {screen === "settings" && (
             <Settings
@@ -2785,6 +2821,9 @@ export default function App() {
               uploading={uploading}
               onUpload={cloud.uid ? () => void handleUpload() : undefined}
               onChange={(next) => {
+                // The owner's details changed: which parts, never what they now say (the trail is a record, not a copy).
+                const touched = ownerChanges(settings.owner ?? NO_OWNER, next.owner ?? NO_OWNER);
+                if (touched.length > 0) record(settingsChanged(`Changed your details: ${touched.join(", ")}`));
                 // An account renamed a moment ago: its debts and the plans paid from it follow it; a kind's plans follow the kind.
                 const renames = pendingAccountRenames.current;
                 pendingAccountRenames.current = [];
@@ -2907,7 +2946,7 @@ export default function App() {
                   budgets={budgets}
                   reference={reference}
                   asOf={asOf}
-                  ownerName={cloud.auth.status === "ready" ? cloud.auth.name : ""}
+                  ownerName={theOwner}
                 />
               </AppBoundary>
             </div>
@@ -2987,6 +3026,7 @@ export default function App() {
           </Notice>
         )}
         {usageDialog}
+        {settleDialog}
         {toasts.map((t) => (
           <Notice
             key={t.id}

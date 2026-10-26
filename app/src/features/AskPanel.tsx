@@ -159,6 +159,7 @@ import { numbersInWords, readReviewRowAsk, reviewRowAnswer } from "../domain/rev
 import { activityAnswer, asksUndoLast, readActivityAsk } from "../domain/activityAsk";
 import { activityStore } from "../data/activityStore";
 import type { PlanAction } from "./useProposalSink";
+import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
 import { kindFromHistory, makePlan, movePlan, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
 import { plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
 import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
@@ -380,6 +381,9 @@ export interface ProposalSink {
   readonly canPlan?: boolean | undefined;
   readonly savePlan?: ((plan: Plan, action: PlanAction, summary: string) => void) | undefined;
   readonly payPlan?: ((plan: Plan, draft: Draft, settles: boolean) => string | null) | undefined;
+  /** The owner's details (Settings, Data, You; domain/owner.ts). */
+  readonly canSaveOwner?: boolean | undefined;
+  readonly saveOwner?: ((owner: OwnerDetails) => void) | undefined;
 }
 
 /** A person's or lender's line about to be cleared in one step. See domain/settleLine.ts. */
@@ -402,6 +406,8 @@ interface Settling {
    * rows are what the card shows; `save` and `pay` live in this session
    * only, so a card that comes back from the record is shown, not applied.
    */
+  /** A part of the owner's details changed from the chat; `next` lives in this session only. */
+  readonly owner?: { readonly next?: OwnerDetails };
   readonly planner?: {
     readonly rows: readonly { readonly label: string; readonly value: string }[];
     readonly save?: { readonly plan: Plan; readonly action: PlanAction; readonly summary: string; readonly before?: Plan | undefined } | undefined;
@@ -4796,6 +4802,46 @@ export function AskPanel({
       log(aiEvent("asked", "add", { text: note }));
       say({ kind: "assistant", text: "Noted, and kept in the record rather than acted on.", from: "this device", ephemeral: true });
       log(aiEvent("answered", "add", { text: "Noted, not acted on.", model: "this device" }));
+      return;
+    }
+
+    /*
+     * The owner's own details (Settings, Data, You): "who am I", "what's my
+     * email", answered from them; "my email is ...", "call me Jay", "change
+     * my address to ...", a card to press (owner, 27 October 2026: "even ai
+     * knows me ... make it all parts"). Read early: "my phone is 0917 123
+     * 4567" is not an entry of PHP 9,171,234,567.
+     */
+    const ownerAsk = files.length === 0 && !as ? readOwnerAsk(lead) : null;
+    if (ownerAsk) {
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      const yours: GoPlace = { screen: "settings", label: "Settings, Data", tab: "data" };
+      if (ownerAsk.kind === "show") {
+        const reply = ownerAnswer(settings.owner, ownerAsk.field, ownerName);
+        say({ kind: "assistant", text: reply, from: "this device", go: yours });
+        log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+        return;
+      }
+      const before = settings.owner ?? NO_OWNER;
+      const next = normaliseOwner({ ...before, [ownerAsk.field]: ownerAsk.value });
+      const label = OWNER_FIELD_LABEL[ownerAsk.field];
+      say({
+        kind: "settle",
+        debtId: "",
+        words: `${label}, saved with your settings on every device.${ownerAsk.field === "email" ? " This is the e-mail you can be reached at; the Google account you sign in with stays as it is, since only it opens your ledger." : ""}${
+          ownerAsk.field === "email" || ownerAsk.field === "phone" || ownerAsk.field === "address"
+            ? before.shareContact
+              ? " The AI model sees it with your questions, as you allowed."
+              : " The AI model is not given it unless you turn that on in Settings, Data, You."
+            : ""
+        }`,
+        action: "Save it",
+        state: "open",
+        detail: { label, now: before[ownerAsk.field] || "Not set", then: next[ownerAsk.field] },
+        owner: { next },
+      });
       return;
     }
 
@@ -10051,13 +10097,22 @@ export function AskPanel({
               key={i}
               turn={turn}
               canSettle={
-                turn.planner
+                turn.owner
+                  ? Boolean(sink.canSaveOwner && turn.owner.next)
+                  : turn.planner
                   ? Boolean(sink.canPlan && (turn.planner.save || turn.planner.pay))
                   : turn.detail
                     ? Boolean(sink.canUpdateDebt && sink.updateDebt && turn.detail.next)
                     : Boolean(sink.canSettle && sink.settle)
               }
               onSettle={() => {
+                if (turn.owner) {
+                  if (!turn.owner.next) return;
+                  sink.saveOwner?.(turn.owner.next);
+                  log(aiEvent("accepted", "add", { entry: turn.words }));
+                  decide(i, "applied");
+                  return;
+                }
                 if (turn.planner) {
                   const op = turn.planner;
                   if (op.save) sink.savePlan?.(op.save.plan, op.save.action, op.save.summary);
@@ -11675,15 +11730,15 @@ function ChangeCard({
  * this one holds the owner's whole financial history.
  */
 function SettleCard({ turn, canSettle, onSettle, onDiscard }: { turn: Settling; canSettle: boolean; onSettle: () => void; onDiscard: () => void }) {
-  const { detail, planner } = turn;
+  const { detail, planner, owner } = turn;
   return (
     <div className="fms-proposal">
       <div className="fms-proposalhead">
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
-          {planner ? "Planner" : detail ? "Change a line" : "Clear a line"}
+          {owner ? "Your details" : planner ? "Planner" : detail ? "Change a line" : "Clear a line"}
         </span>
         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-          {turn.state === "applied" ? (planner ? "done" : detail ? "changed" : "cleared") : turn.state === "discarded" ? "left as it was" : "nothing is saved yet"}
+          {turn.state === "applied" ? (owner ? "saved" : planner ? "done" : detail ? "changed" : "cleared") : turn.state === "discarded" ? "left as it was" : "nothing is saved yet"}
         </span>
       </div>
       {planner && planner.rows.length > 0 && (

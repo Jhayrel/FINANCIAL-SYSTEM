@@ -69,6 +69,7 @@ import {
   type DebtForm,
 } from "../domain/debtForms";
 import { daysBetween, formatMedium, today } from "../domain/dates";
+import { checkOwner, NO_OWNER, normaliseOwner, OWNER_LIMITS, type OwnerDetails } from "../domain/owner";
 import {
   AI_CONNECTED_PROVIDERS,
   AI_DEFAULT_MODEL,
@@ -312,8 +313,19 @@ export function Settings({
 
         {tab === "appearance" && <AppearanceSection settings={settings} patch={patch} />}
 
-        {/* Sign out lives in Data only (the owner, 6 October 2026), first, where it is seen. */}
-        {tab === "data" && onSignOut && <SignOutRow who={signedInAs ?? ""} onSignOut={onSignOut} />}
+        {/*
+          You, first in Data: the Google account signed in with and Sign out
+          (the owner, 6 October 2026: Sign out in Data only, first, where it
+          is seen), then the owner's own details (27 October 2026).
+        */}
+        {tab === "data" && (
+          <OwnerSection
+            settings={settings}
+            patch={patch}
+            signedInAs={signedInAs ?? ""}
+            signOut={onSignOut ? <SignOutRow who={signedInAs ?? ""} onSignOut={onSignOut} /> : null}
+          />
+        )}
         {tab === "data" && (
           <DataSection
             transactions={transactions}
@@ -344,6 +356,133 @@ export function Settings({
         asOf={asOf}
       />
     </div>
+  );
+}
+
+/**
+ * You: who the ledger belongs to.
+ *
+ * The owner, 27 October 2026: "IN DATA lets add a section to add owners
+ * information address gmail use etc change gmail etc / also make sure it sync
+ * to the whole system and even ai knows me". Saved with the settings, so it
+ * is on every device and in a backup (`domain/owner.ts`). The name goes on
+ * statements and the activity PDF; the assistant is told the name, what to
+ * call them and what they wrote about themselves, and their e-mail, phone
+ * and address only with the switch on.
+ *
+ * The Google account is shown, not edited: the database lets in only that
+ * account, so "change gmail" is done at Google, and a different account
+ * would open nothing here.
+ */
+function OwnerSection({
+  settings,
+  patch,
+  signedInAs,
+  signOut,
+}: {
+  settings: AppSettings;
+  patch: (part: Partial<AppSettings>) => void;
+  signedInAs: string;
+  signOut: React.ReactNode;
+}) {
+  const saved = settings.owner ?? NO_OWNER;
+  const [draft, setDraft] = useState<OwnerDetails>(saved);
+  const [tried, setTried] = useState(false);
+  const [done, setDone] = useState("");
+  const clean = normaliseOwner(draft);
+  const dirty = JSON.stringify(clean) !== JSON.stringify(saved);
+  // A change saved on another device arrives here while nothing is being typed.
+  const savedKey = JSON.stringify(saved);
+  const typing = useRef(false);
+  useEffect(() => {
+    if (!typing.current) setDraft(saved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedKey]);
+  const problems = checkOwner(clean);
+  const set =
+    <K extends keyof OwnerDetails>(key: K) =>
+    (value: OwnerDetails[K]): void => {
+      typing.current = true;
+      setDraft((d) => ({ ...d, [key]: value }));
+      setDone("");
+    };
+  const save = (): void => {
+    setTried(true);
+    if (Object.keys(problems).length > 0) return;
+    patch({ owner: clean });
+    typing.current = false;
+    setTried(false);
+    setDone("Saved. Statements, the activity PDF and the assistant use it from now on, on every device you sign in on.");
+  };
+  const err = (k: keyof OwnerDetails): string | undefined => (tried || clean[k] !== saved[k] ? problems[k] : undefined);
+
+  return (
+    <Group title="You" hint="Who this ledger belongs to. Kept with your settings on every device, and in a backup.">
+      {signOut}
+      {signedInAs && (
+        <p className="t-caption fms-ownernote">
+          Only this Google account opens your ledger: the database is locked to it. Its address is changed in your Google account, not here, and signing in with another Google account opens nothing. For an e-mail to be reached at, use Contact e-mail below.
+        </p>
+      )}
+      <div className="fms-ownerform">
+        <div className="fms-ownerform-pair">
+          <Field label="Your name" htmlFor="owner-name" help="On statements and the activity PDF, as Issued to." error={err("name")}>
+            <TextInput id="owner-name" value={draft.name} onChange={set("name")} maxLength={OWNER_LIMITS.name} autoComplete="name" placeholder="As it should read on a statement" />
+          </Field>
+          <Field label="What to call you" optional htmlFor="owner-call" help="What the assistant calls you.">
+            <TextInput id="owner-call" value={draft.callMe} onChange={set("callMe")} maxLength={OWNER_LIMITS.callMe} autoComplete="nickname" placeholder="A first name or a nickname" />
+          </Field>
+        </div>
+        <div className="fms-ownerform-pair">
+          <Field label="Contact e-mail" optional htmlFor="owner-email" error={err("email")}>
+            <TextInput id="owner-email" type="email" inputMode="email" autoComplete="email" value={draft.email} onChange={set("email")} maxLength={OWNER_LIMITS.email} placeholder="name@gmail.com" invalid={Boolean(err("email"))} />
+            {signedInAs && !draft.email && (
+              <button type="button" className="t-caption fms-linkbtn" onClick={() => set("email")(signedInAs)}>
+                Use {signedInAs}
+              </button>
+            )}
+          </Field>
+          <Field label="Phone" optional htmlFor="owner-phone" error={err("phone")}>
+            <TextInput id="owner-phone" type="tel" inputMode="tel" autoComplete="tel" value={draft.phone} onChange={set("phone")} maxLength={OWNER_LIMITS.phone} placeholder="0917 123 4567" invalid={Boolean(err("phone"))} />
+          </Field>
+        </div>
+        <Field label="Address" optional htmlFor="owner-address">
+          <TextInput id="owner-address" value={draft.address} onChange={set("address")} maxLength={OWNER_LIMITS.address} autoComplete="street-address" placeholder="Street, barangay, city" />
+        </Field>
+        <Field label="About you" optional htmlFor="owner-about" help="A few words the assistant keeps in mind with every question: what you do, when money comes in, what you are saving for.">
+          <textarea
+            id="owner-about"
+            value={draft.about}
+            onChange={(e) => set("about")(e.target.value)}
+            maxLength={OWNER_LIMITS.about}
+            rows={3}
+            placeholder="A student, allowance every 15th and 30th, saving for a laptop"
+            className="t-body fms-input fms-ownerabout"
+          />
+        </Field>
+        <div className="fms-planform-switch">
+          <span className="fms-planform-switchtext">
+            <span className="t-body">Let the assistant see my e-mail, phone and address</span>
+            <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+              {draft.shareContact
+                ? "On: they go with each question to the AI provider you picked, so it can use them when you ask."
+                : "Off: the assistant gets your name and what you wrote about yourself, never how to reach you."}
+            </span>
+          </span>
+          <Switch checked={draft.shareContact} onChange={set("shareContact")} label="Let the assistant see my e-mail, phone and address" />
+        </div>
+        <div className="fms-ownerform-actions">
+          {done && (
+            <p className="t-caption" role="status" style={{ margin: 0, color: "var(--ink-2)" }}>
+              {done}
+            </p>
+          )}
+          <Button variant="primary" disabled={!dirty} onClick={save}>
+            {dirty ? "Save my details" : "Saved"}
+          </Button>
+        </div>
+      </div>
+    </Group>
   );
 }
 

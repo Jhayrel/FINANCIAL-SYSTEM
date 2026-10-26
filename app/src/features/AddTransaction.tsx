@@ -201,7 +201,7 @@ export function AddTransaction({
   settlementFor?: ((debt: Debt) => Settlement | null) | undefined;
   onSettle?: ((debt: Debt) => void) | undefined;
   /** What the assistant beside the form can do beyond entries, as everywhere else (App.tsx). */
-  assist?: Pick<SinkInput, "onExport" | "onRestoreMany" | "onUpdateDebt" | "onGo" | "onSavePlan" | "onPayPlan"> | undefined;
+  assist?: Pick<SinkInput, "onExport" | "onRestoreMany" | "onUpdateDebt" | "onGo" | "onSavePlan" | "onPayPlan" | "onSaveOwner"> | undefined;
   /** The Budget screen, for a month that has no budget yet. */
   onOpenBudget?: (() => void) | undefined;
   /** The Database searched for these words, such as a record number. */
