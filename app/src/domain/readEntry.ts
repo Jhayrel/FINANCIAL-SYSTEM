@@ -40,6 +40,7 @@ import { readMoney } from "./proposal";
 import { withoutDays } from "./money";
 import { dayFromWords, withoutDayWords } from "./dayWords";
 import { carriesIdentifier, withoutIdentifiers } from "./identifiers";
+import { saysItHappened } from "./intent";
 import type { IsoDate, ReferenceLists, Transaction, TransactionStatus } from "./types";
 
 export interface ReadEntry {
@@ -1213,7 +1214,19 @@ export function readEntry(
    * with one question, how much, which "all of it" can answer.
    */
   const namedTransfer = draft.flow === "Transfer" && draft.fromWallet.trim() !== "" && draft.toWallet.trim() !== "" && draft.fromWallet !== draft.toWallet;
-  const worthOffering = amount !== null || Boolean(draft.item.trim()) || namedTransfer;
+  /*
+   * An item the ledger guessed from habit, with no figure and nothing said to
+   * have happened, is not an entry: "income vs spending this year" became a
+   * Random card and "look for a pattern in my spending" an Unknown one, each
+   * asking "How much was it?" (26 October 2026). The item has to be in the
+   * words ("I paid spotify", "gas usual amount cash"), or something has to
+   * have happened ("I bought lunch").
+   */
+  const itemSaid = draft.item
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .some((w) => w.length >= 3 && text.toLowerCase().includes(w));
+  const worthOffering = amount !== null || (Boolean(draft.item.trim()) && (itemSaid || saysItHappened(text))) || namedTransfer;
   const spread = span && draft.flow === "Spending" && span.to > span.from;
 
   return {

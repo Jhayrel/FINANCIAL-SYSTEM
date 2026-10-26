@@ -64,12 +64,12 @@ export function asksSettingsChange(text: string): boolean {
   if (/\b(settings?|dark mode|light mode|theme)\b/i.test(text) && /\b(change|set|switch|turn|make|update|enable|disable|open)\b/i.test(text)) {
     return true;
   }
-  return /\b(add|create|rename|archive|remove|delete)\s+(a\s+|an\s+|the\s+|my\s+|new\s+)*(account|wallet|savings account|category|spending type|bill|subscription|credit line|loan account|goal)\b/i.test(text)
+  return /\b(add|create|open|rename|archive|remove|delete)\s+(a\s+|an\s+|the\s+|my\s+|new\s+)*(account|wallet|savings account|category|spending type|bill|subscription|credit line|loan account|goal)\b/i.test(text)
     || /\b(change|switch|set)\s+(the\s+|my\s+)?(ai\s+)?(provider|model|api key|low balance (alert|warning)|alert threshold)\b/i.test(text);
 }
 
 export const SETTINGS_ARE_YOURS =
-  "Settings are yours to change: accounts, categories, bills and subscriptions, credit lines, alerts, the theme and the AI itself. Open Settings for those. Everything else I can do from here: add, edit, move, bin and restore entries, set budgets and limits, find where a difference went, and hand you a backup or a spreadsheet.";
+  "Settings are yours to change: accounts, categories, bills and subscriptions, a credit line's rate, alerts, the theme and the AI itself. The button below opens the right tab. Everything else I can do from here: add, edit, move, bin and restore entries, set budgets and limits, a credit line's limit and due day, find where a difference went, and hand you a backup or a spreadsheet.";
 
 /** The answer to "what can you do", with the one restriction said plainly. */
 export function capabilitiesAnswer(): string {
@@ -93,7 +93,11 @@ export function capabilitiesAnswer(): string {
     "- **Your week**: \"how was my week?\", \"review last week\": what went out, against the week before, where it went and the busiest day.",
     "- **The last time**: \"how much did I pay for gas last time?\", \"when did I last buy Jollibee?\", \"how much do I usually pay for load?\"",
     "- **Days and dates**: \"what did I buy last friday?\", \"gas 200 2 days ago\", \"food 150 noong lunes\": the day is read from your words.",
+    "- **Open any screen**: \"open the budget\", \"go to needs review\", \"open insights for september\", \"open settings categories\".",
+    "- **Needs review, one entry at a time**: \"what's wrong with #3831?\" says what the check found and both ways out; \"keep #3831 as it is\" marks it checked and moves no money.",
+    "- **Credit lines**: \"set my Maya Credit limit to 15000\", \"Maya Credit is due on the 5th\", \"the billing day is the 6th\", \"how much is left on my limit?\"",
+    "- **What changed, and undo**: \"what did I change today?\", \"what did the AI add this week?\", and \"undo that\" for the last thing done here. A list from the bin has **Restore all**.",
     "**The screens**: Dashboard (today and the month), Add (a new entry), Database (every entry, search and edit), Debt, Insights (charts over any window), Budget, Statements (PDF and spreadsheet), Bin, Activity (what changed) and Settings.",
-    "**Settings stay yours**: accounts, categories, credit lines, alerts, the theme and the AI's own switches are changed on the Settings screen, not by me.",
+    "**Settings stay yours**: accounts, categories, a credit line's rate, alerts, the theme and the AI's own switches are changed on the Settings screen, not by me. Ask for one and I open the right tab.",
   ].join("\n");
 }

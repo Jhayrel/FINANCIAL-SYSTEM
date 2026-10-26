@@ -153,6 +153,11 @@ import { billsAnswer, readBillsAsk } from "../domain/billsAsk";
 import { goalAnswer, readGoalAsk } from "../domain/goalAsk";
 import { readWeekAsk, weekAnswer } from "../domain/weekAsk";
 import { lastTimeAnswer, readLastTimeAsk } from "../domain/lastTimeAsk";
+import { asksToSignOut, asksToStopBill, readGoAsk, settingsPlaceFor, type GoPlace } from "../domain/goAsk";
+import { creditRoomAnswer, debtDetailChange, readDebtDetailAsk } from "../domain/debtDetailAsk";
+import { numbersInWords, readReviewRowAsk, reviewRowAnswer } from "../domain/reviewAsk";
+import { activityAnswer, asksUndoLast, readActivityAsk } from "../domain/activityAsk";
+import { activityStore } from "../data/activityStore";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
 import { planWorked } from "../domain/planRate";
@@ -206,7 +211,7 @@ import { readOriginal, readPicture } from "../data/ocr";
 import { holdUpdates } from "../data/updateCheck";
 import { useBackToClose } from "../data/backButton";
 import { aiLogStore } from "../data/aiLogStore";
-import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AttachmentNote } from "../domain/aiLog";
+import { aiEvent, correctionsFrom, taughtFor, type AiEvent, type AiWhere, type AttachmentNote } from "../domain/aiLog";
 import { clauseFor, verifyReading } from "../domain/verify";
 import { fitItem, itemOnList } from "../domain/onList";
 import { carded, cardsIn, drawn, drew, proposed, said, type ChatMessage, type StoredCard } from "../domain/chat";
@@ -358,6 +363,13 @@ export interface ProposalSink {
   /** Whether a line can be cleared from here, and the clearing itself (domain/settleLine.ts). */
   readonly canSettle?: boolean | undefined;
   readonly settle?: ((debtId: string) => void) | undefined;
+  /** Several rows out of the bin at once, as one move. */
+  readonly restoreMany?: ((ids: readonly string[]) => void) | undefined;
+  /** Whether a line's details can be saved from here, and the saving (domain/debtDetailAsk.ts). */
+  readonly canUpdateDebt?: boolean | undefined;
+  readonly updateDebt?: ((debt: Debt) => void) | undefined;
+  /** Open a screen (domain/goAsk.ts). Changes nothing. */
+  readonly go?: ((place: GoPlace) => void) | undefined;
 }
 
 /** A person's or lender's line about to be cleared in one step. See domain/settleLine.ts. */
@@ -368,6 +380,13 @@ interface Settling {
   readonly action: string;
   readonly state: "open" | "applied" | "discarded";
   readonly cardId?: string;
+  /**
+   * A detail of the line changed rather than the line cleared: its limit,
+   * due day or billing day (domain/debtDetailAsk.ts). `next` and `before`
+   * live in this session only, so one that comes back from the record is
+   * shown and never applied blind.
+   */
+  readonly detail?: { readonly label: string; readonly now: string; readonly then: string; readonly next?: Debt; readonly before?: Debt };
 }
 
 /** Saved entries about to change: each one before, and after. */
@@ -455,6 +474,8 @@ interface Said {
   readonly ephemeral?: boolean;
   /** Assistant turns: which model, or that this device wrote it. */
   readonly from?: string;
+  /** A screen this answer offers to open, as a button under it (domain/goAsk.ts). Not kept across a refresh. */
+  readonly go?: GoPlace;
   /**
    * The pictures that went with it, for this session only.
    *
@@ -835,7 +856,10 @@ function turnFromCard(card: StoredCard): Turn {
     const words = typeof data["words"] === "string" ? data["words"] : "A line to clear.";
     const action = typeof data["action"] === "string" ? data["action"] : "Clear it";
     // An open one that comes back is not pressed blind: what is left may have moved since.
-    return { kind: "settle", debtId, words, action, state: card.state === "applied" ? "applied" : "discarded", cardId: card.id };
+    const kept = data["detail"] as { label?: unknown; now?: unknown; then?: unknown } | undefined;
+    const detail =
+      kept && typeof kept.label === "string" && typeof kept.now === "string" && typeof kept.then === "string" ? { label: kept.label, now: kept.now, then: kept.then } : undefined;
+    return { kind: "settle", debtId, words, action, state: card.state === "applied" ? "applied" : "discarded", cardId: card.id, ...(detail ? { detail } : {}) };
   }
 
   if (card.kind === "export") {
@@ -994,7 +1018,18 @@ function storedFrom(turn: Turn): StoredCard | null {
   }
 
   if (isSettling(turn)) {
-    return { id: turn.cardId, kind: "settle", state: turn.state, draft: {}, data: { debtId: turn.debtId, words: turn.words, action: turn.action } };
+    return {
+      id: turn.cardId,
+      kind: "settle",
+      state: turn.state,
+      draft: {},
+      data: {
+        debtId: turn.debtId,
+        words: turn.words,
+        action: turn.action,
+        ...(turn.detail ? { detail: { label: turn.detail.label, now: turn.detail.now, then: turn.detail.then } } : {}),
+      },
+    };
   }
 
   return null;
@@ -1018,6 +1053,7 @@ function cardWords(turn: Turn, state: StoredCard["state"]): string {
   }
   if (isBudgeting(turn)) return `${state === "applied" ? "Budget set" : state === "discarded" ? "Budget left as it was" : "Budget change"}: ${turn.plan.words}`;
   if (isExporting(turn)) return `${state === "applied" ? "File saved" : state === "discarded" ? "File not saved" : "File offered"}: ${turn.ask.said}`;
+  if (isSettling(turn) && turn.detail) return `${state === "applied" ? "Changed" : state === "discarded" ? "Left as it was" : "To change"}: ${turn.words}`;
   if (isSettling(turn)) return `${state === "applied" ? "Cleared" : state === "discarded" ? "Left as it was" : "To clear"}: ${turn.words}`;
   return "";
 }
@@ -4976,6 +5012,227 @@ export function AskPanel({
     }
 
     /*
+     * Every screen's own moves, from the chat (26 October 2026: "look at all
+     * the features of my system and make sure ai can do it all like
+     * everything"). Each is read before the model is asked and before the
+     * entry, edit and budget readers, which took three of them for something
+     * else: a credit limit became a budget card, a billing day an edit to a
+     * PHP 0.10 entry, and "undo the last change" an offer to bin the newest
+     * entry.
+     */
+    if (files.length === 0 && !as && pending === null && !/^\s*\/\//.test(note) && !isEssay(note)) {
+      const answer = (text: string, where: AiWhere, go?: GoPlace): void => {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", where, { text: note }));
+        say({ kind: "assistant", text, from: "this device", ...(go ? { go } : {}) });
+        log(aiEvent("answered", where, { text, model: "this device" }));
+      };
+
+      // "Undo", "undo that": the last thing done from this chat, as a card that puts it back.
+      if (asksUndoLast(lead)) {
+        const done = turns
+          .map(current)
+          .map((t, i) => ({ t, i }))
+          .reverse()
+          .find(
+            ({ t }) =>
+              (isOffer(t) && t.state === "added") ||
+              (isChanging(t) && t.state === "applied") ||
+              (isSettling(t) && t.state === "applied") ||
+              (isBudgeting(t) && t.state === "applied") ||
+              (isDebt(t) && t.state === "settled") ||
+              (isFound(t) && t.done.length > 0 && t.action !== "edit"),
+          )?.t;
+        // The review fixes are put back together, by their own reader further down.
+        const reviewFix = done && isChanging(done) && (done.group !== undefined || (done.title !== undefined && done.title !== "Put it back as it was"));
+        if (!reviewFix) {
+          const activity: GoPlace = { screen: "activity", label: "Activity" };
+          if (!done) {
+            answer("Nothing has been changed from this chat yet, so there is nothing here to undo. A change made on a screen is undone with Undo on the notice that appears, or with Edit in the Database. Activity lists every change, newest first.", "add", activity);
+            return;
+          }
+          if (isOffer(done)) {
+            /*
+             * The row the card saved: what it is, saved in the last day (the save
+             * time is in the id), newest first. A copy without the database
+             * renumbers on every save, so the card's number alone can miss it.
+             */
+            const d = done.live ?? done.proposal.draft;
+            const savedAt = (t: Transaction): number => Number(/^t-(\d{13})/.exec(t.id)?.[1] ?? 0);
+            const row =
+              [...transactions]
+                .filter((t) => Date.now() - savedAt(t) < 24 * 3600_000 && t.date === d.date && t.amount === d.amount && t.item === d.item)
+                .sort((a, b) => savedAt(b) - savedAt(a))[0] ?? transactions.find((t) => t.recordNumber === done.recordNumber && t.date === d.date);
+            if (!row) {
+              answer(`#${String(done.recordNumber ?? 0).padStart(4, "0")} is no longer in the ledger: it was moved to the bin or edited since. Activity says which.`, "add", activity);
+              return;
+            }
+            setDraft("");
+            say({ kind: "you", text: note });
+            log(aiEvent("asked", "add", { text: note }));
+            say({ kind: "assistant", text: `The last thing done here was adding #${String(row.recordNumber).padStart(4, "0")}. Moving it to the bin takes it back out of your balances; it stays restorable from the Bin.`, from: "this device", ephemeral: true });
+            say({ kind: "found", action: "bin", candidates: [{ row, score: 100, why: ["Added from this chat."] }], done: [] });
+            return;
+          }
+          if (isChanging(done)) {
+            const { back, moved } = putBackRows([done]);
+            if (back.length === 0) {
+              answer(moved.length > 0 ? `${moved.join(", ")} ${moved.length === 1 ? "was" : "were"} edited again since, so ${moved.length === 1 ? "it is" : "they are"} left as ${moved.length === 1 ? "it is" : "they are"}. Open ${moved.length === 1 ? "it" : "them"} in the Database to check.` : "That change is already undone: each entry reads as it did before.", "add", activity);
+              return;
+            }
+            setDraft("");
+            say({ kind: "you", text: note });
+            log(aiEvent("asked", "add", { text: note }));
+            say({ kind: "assistant", text: `This puts ${back.map((r) => `#${String(r.before.recordNumber).padStart(4, "0")}`).join(", ")} back as ${back.length === 1 ? "it was" : "they were"} before the change. Check it, then apply.`, from: "this device", ephemeral: true });
+            say({ kind: "change", plan: { rows: back, refused: [] }, state: "open", title: "Put it back as it was" });
+            return;
+          }
+          if (isSettling(done) && done.detail?.before && done.detail.next) {
+            setDraft("");
+            say({ kind: "you", text: note });
+            log(aiEvent("asked", "debt", { text: note }));
+            say({
+              kind: "settle",
+              debtId: done.debtId,
+              words: `Puts it back as it was before the change: ${done.detail.now}.`,
+              action: "Put it back",
+              state: "open",
+              detail: { label: done.detail.label, now: done.detail.then, then: done.detail.now, next: done.detail.before, before: done.detail.next },
+            });
+            return;
+          }
+          if (isFound(done)) {
+            const back = done.action === "bin" ? deleted.filter((t) => done.done.includes(t.id)) : transactions.filter((t) => done.done.includes(t.id));
+            if (back.length === 0) {
+              answer("That is already undone: nothing from it is left to put back.", "add", activity);
+              return;
+            }
+            setDraft("");
+            say({ kind: "you", text: note });
+            log(aiEvent("asked", "add", { text: note }));
+            say({ kind: "assistant", text: done.action === "bin" ? `${back.length === 1 ? "That entry is" : `Those ${back.length} are`} in the bin. Restore puts ${back.length === 1 ? "it" : "them"} back with ${back.length === 1 ? "its number" : "their numbers"}.` : `${back.length === 1 ? "That entry is" : `Those ${back.length} are`} back in the ledger. Moving ${back.length === 1 ? "it" : "them"} to the bin again undoes the restore.`, from: "this device", ephemeral: true });
+            say({ kind: "found", action: done.action === "bin" ? "restore" : "bin", candidates: back.map((row, n) => ({ row, score: 100 - n, why: [done.action === "bin" ? "Moved to the bin from this chat." : "Restored from this chat."] })), done: [] });
+            return;
+          }
+          // A budget, a cleared line or a debt movement: undone where it was made, with what that screen shows.
+          answer(
+            isBudgeting(done)
+              ? `The last thing done here was a budget change: ${done.plan.words} To undo it, say the figure it was before ("set October to 15000"), or change it on the Budget screen. Activity has the figures before and after.`
+              : isSettling(done)
+                ? "The last thing done here was clearing a line, which added an entry. Open Activity to see it, then move that entry to the bin in the Database to undo it."
+                : "The last thing done here was a debt movement. Open Activity to see the entry it added, then move it to the bin in the Database to undo it.",
+            isBudgeting(done) ? "budget" : "debt",
+            isBudgeting(done) ? { screen: "budget", label: "Budget" } : activity,
+          );
+          return;
+        }
+      }
+
+      // "Open the budget", "go to needs review": done at once, since opening a screen changes nothing.
+      const place = readGoAsk(lead, asOf);
+      if (place && sink.go) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        say({ kind: "assistant", text: `Opened ${place.label}.`, from: "this device", go: place });
+        log(aiEvent("answered", "dashboard", { text: `Opened ${place.label}.`, model: "this device" }));
+        sink.go(place);
+        return;
+      }
+
+      if (asksToSignOut(lead)) {
+        answer("Sign out is on Settings, under Data, so it is never pressed by mistake from here. It signs this device out only; your entries stay in the database.", "settings", { screen: "settings", tab: "data", label: "Settings, Data" });
+        return;
+      }
+
+      // "Stop my electric bill": Settings, Categories, never an entry with no amount.
+      const stopping = asksToStopBill(lead, [...reference.bills, ...reference.subscriptions]);
+      if (stopping) {
+        const resume = /\b(?:resume|start again|restart)\b/i.test(lead);
+        answer(
+          `${resume ? "Starting" : "Stopping"} ${stopping} is done on Settings, under Categories, beside the bill: press ${resume ? "Start again" : "Stop"} there. ${resume ? "It is expected again from its next payment." : "It is then no longer expected: safe to spend stops setting money aside for it, and the bell stops asking. Its past payments stay as they are."}`,
+          "settings",
+          { screen: "settings", tab: "categories", label: "Settings, Categories" },
+        );
+        return;
+      }
+
+      // A credit line's limit, due day or billing day, as the Debt screen's Details form sets them.
+      const detailAsk = readDebtDetailAsk(lead, debts);
+      if (detailAsk) {
+        const change = debtDetailChange(detailAsk, debts, asOf);
+        if ("refused" in change) {
+          answer(change.refused, "debt", detailAsk.detail === "rate" ? { screen: "settings", tab: "credit", label: "Settings, Credit and loans" } : undefined);
+          return;
+        }
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "debt", { text: note }));
+        if (!sink.canUpdateDebt) {
+          say({ kind: "assistant", text: `${change.words} Set it on the Debt screen: this view cannot change a line.`, from: "this device", go: { screen: "debt", label: "Debt" } });
+          return;
+        }
+        say({
+          kind: "settle",
+          debtId: change.debt.id,
+          words: change.words,
+          action: "Apply",
+          state: "open",
+          detail: { label: `${change.debt.name}: ${change.label}`, now: change.now, then: change.then, next: change.next, before: change.debt },
+        });
+        log(aiEvent("proposed", "debt", { entry: change.words, text: note }));
+        return;
+      }
+
+      const room = creditRoomAnswer(lead, debts, reportRows, asOf);
+      if (room) {
+        answer(room, "debt");
+        return;
+      }
+
+      // "What's wrong with #3831?", "keep #3831 as it is": the Database's "i" and Keep.
+      const reviewAsk = readReviewRowAsk(lead);
+      if (reviewAsk) {
+        const reply = reviewRowAnswer(reviewAsk, transactions, { wallets: [...reference.wallets, ...reference.savings], asOf });
+        if (reply.keep && sink.canUpdate) {
+          setDraft("");
+          say({ kind: "you", text: note });
+          log(aiEvent("asked", "database", { text: note }));
+          say({ kind: "assistant", text: reply.words, from: "this device", ephemeral: true });
+          say({ kind: "change", plan: { rows: reply.keep.rows, refused: [] }, state: "open", title: `Keep ${numbersInWords(reply.keep.rows.map((r) => r.before))} as ${reply.keep.rows.length > 1 ? "they are" : "it is"}`, note: reply.keep.note });
+          log(aiEvent("proposed", "database", { entry: `Keep ${reply.keep.rows.length} as they are`, text: note }));
+          return;
+        }
+        answer(reply.words, "database", reply.flagged && !reply.keep ? { screen: "database", review: true, label: "Needs review" } : undefined);
+        return;
+      }
+
+      // "What did I change today?", "what did the AI add this week?": the activity trail, read here.
+      const activityAsked = readActivityAsk(lead, asOf);
+      if (activityAsked) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "dashboard", { text: note }));
+        setBusy(true);
+        let events: Awaited<ReturnType<ReturnType<typeof activityStore>["recent"]>> = [];
+        let loaded = true;
+        try {
+          setStage("Reading the activity trail");
+          events = await activityStore(uid).recent();
+        } catch {
+          loaded = false;
+        } finally {
+          setBusy(false);
+        }
+        if (generation.current !== began) return;
+        const reply = activityAnswer(activityAsked, events, loaded);
+        say({ kind: "assistant", text: reply, from: "this device", go: { screen: "activity", label: "Activity" } });
+        log(aiEvent("answered", "dashboard", { text: reply, model: "this device" }));
+        return;
+      }
+    }
+
+    /*
      * A follow-up that only makes sense with the message before it.
      *
      * The owner, 27 September 2026: "I paid all my balances", then "I mean
@@ -5401,7 +5658,7 @@ export function AskPanel({
     if (files.length === 0 && !as && !isNoteLine && asksSettingsChange(note)) {
       setDraft("");
       say({ kind: "you", text: note });
-      say({ kind: "assistant", text: SETTINGS_ARE_YOURS, from: "this device" });
+      say({ kind: "assistant", text: SETTINGS_ARE_YOURS, from: "this device", go: settingsPlaceFor(note) });
       log(aiEvent("asked", "add", { text: note }));
       log(aiEvent("answered", "add", { text: "Settings are changed on the Settings screen.", model: "this device" }));
       return;
@@ -5893,7 +6150,13 @@ export function AskPanel({
      * say to set something; anything else goes to the model as talk.
      */
     const namesTheBudget = /\b(?:budget|buget|budjet|bugdet|limit|allocation|allot\w*)\b|\b(?:set|apply|use|change|update|adjust|raise|lower|increase|decrease|cut)\b/i.test(ruled);
-    const saysBudget = couldBudget && (namesBudgetCommand(lead) || (!essay && routed?.intent === "budget" && !asksAboutBudget && namesTheBudget));
+    /*
+     * "Use the forecast for November" is the Budget screen's own button said
+     * in words, budget or no budget in the sentence: it went to the month's
+     * headline (26 October 2026).
+     */
+    const usesForecast = !essay && /^\s*(?:(?:please|pls|ok(?:ay)?|sige|can you|could you)[\s,]+)*(?:use|apply|take|set(?: it to)?|go with)\s+(?:the\s+)?(?:forecast|forecasted|projection)\b/i.test(lead);
+    const saysBudget = couldBudget && (namesBudgetCommand(lead) || usesForecast || (!essay && routed?.intent === "budget" && !asksAboutBudget && namesTheBudget));
 
     /**
      * "add that budget", with the figure sitting in the answer above it.
@@ -7375,7 +7638,7 @@ export function AskPanel({
     const writtenHint =
       files.length === 0 && !as && !aboutADebt && (presentation === "text" || (!followUp && !narrows)) && presentation !== "chart" &&
       /\b(?:spend|spent|spending|expenses?|gastos|income|incoming|earn\w*|revenue|money (?:went|go))\b/i.test(note) &&
-      /\b(?:summary|summari[sz]e|overview|breakdown|break down|detailed|details|list|show|where|what did i)\b/i.test(note)
+      /\b(?:summary|summari[sz]e|overview|breakdown|break down|detailed|details|list|show|where|what did i|vs\.?|versus|compared?)\b/i.test(note)
         ? (localHint(ruled, credits) ?? { by: "item" })
         : null;
     if (writtenHint && !measureOf(writtenHint)) {
@@ -9085,8 +9348,16 @@ export function AskPanel({
             <SettleCard
               key={i}
               turn={turn}
-              canSettle={Boolean(sink.canSettle && sink.settle)}
+              canSettle={turn.detail ? Boolean(sink.canUpdateDebt && sink.updateDebt && turn.detail.next) : Boolean(sink.canSettle && sink.settle)}
               onSettle={() => {
+                if (turn.detail) {
+                  // The line as the Details form would save it, and the change on the trail.
+                  if (!turn.detail.next) return;
+                  sink.updateDebt?.(turn.detail.next);
+                  log(aiEvent("accepted", "debt", { entry: turn.words }));
+                  decide(i, "applied");
+                  return;
+                }
                 // Worked out again at the press, against the ledger as it is now.
                 sink.settle?.(turn.debtId);
                 log(aiEvent("accepted", "add", { entry: turn.words }));
@@ -9160,6 +9431,14 @@ export function AskPanel({
                 }
                 settleFound(i, id);
               }}
+              onRestoreAll={
+                turn.action === "restore" && sink.restoreMany
+                  ? (ids) => {
+                      sink.restoreMany?.(ids);
+                      settleFound(i, ...ids);
+                    }
+                  : undefined
+              }
               onActAll={(ids) => {
                 /**
                  * One move, one record of it.
@@ -9252,7 +9531,16 @@ export function AskPanel({
           ) : (
             <div key={i} className={turn.kind === "you" ? "fms-turn fms-turn--you" : "fms-turn"}>
               {turn.kind === "assistant" ? (
-                <Rich text={turn.text} />
+                <>
+                  <Rich text={turn.text} />
+                  {turn.go && sink.go && (
+                    <div className="fms-proposalactions">
+                      <Button size="sm" onClick={() => turn.go && sink.go?.(turn.go)}>
+                        Open {turn.go.label}
+                      </Button>
+                    </div>
+                  )}
+                </>
               ) : (
                 <>
                   {turn.shown && turn.shown.length > 0 && (
@@ -10636,16 +10924,34 @@ function ChangeCard({
  * this one holds the owner's whole financial history.
  */
 function SettleCard({ turn, canSettle, onSettle, onDiscard }: { turn: Settling; canSettle: boolean; onSettle: () => void; onDiscard: () => void }) {
+  const { detail } = turn;
   return (
     <div className="fms-proposal">
       <div className="fms-proposalhead">
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
-          Clear a line
+          {detail ? "Change a line" : "Clear a line"}
         </span>
         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-          {turn.state === "applied" ? "cleared" : turn.state === "discarded" ? "left as it was" : "nothing is saved yet"}
+          {turn.state === "applied" ? (detail ? "changed" : "cleared") : turn.state === "discarded" ? "left as it was" : "nothing is saved yet"}
         </span>
       </div>
+      {detail && (
+        <>
+          <p className="t-body-strong" style={{ margin: 0 }}>
+            {detail.label}
+          </p>
+          <dl className="fms-pdetails">
+            <div className="fms-pdetail">
+              <dt className="t-micro">Now</dt>
+              <dd className="t-caption">{detail.now}</dd>
+            </div>
+            <div className="fms-pdetail">
+              <dt className="t-micro">New</dt>
+              <dd className="t-caption">{detail.then}</dd>
+            </div>
+          </dl>
+        </>
+      )}
       <p className="t-body" style={{ margin: 0 }}>
         {turn.words}
       </p>
@@ -10918,10 +11224,13 @@ function FoundList({
   found,
   onAct,
   onActAll,
+  onRestoreAll,
 }: {
   found: Found;
   onAct: (id: string, how?: "bin") => void;
   onActAll: (ids: readonly string[]) => void;
+  /** Every row still in the bin, out at once. Absent where several cannot be restored together. */
+  onRestoreAll?: ((ids: readonly string[]) => void) | undefined;
 }) {
   const { action, candidates, done, sweep } = found;
   const verb = action === "edit" ? "Edit this" : action === "bin" ? "Move to bin" : "Restore";
@@ -10967,6 +11276,19 @@ function FoundList({
                 : "from the bin"}
         </span>
       </div>
+
+      {/*
+        Several rows out of the bin with one press, as the Bin screen does.
+        "Restore all deleted entries from last week" offered them one at a
+        time (26 October 2026).
+      */}
+      {action === "restore" && onRestoreAll && candidates.filter((c) => !done.includes(c.row.id)).length > 1 && (
+        <div className="fms-proposalactions">
+          <Button size="sm" variant="primary" onClick={() => onRestoreAll(candidates.filter((c) => !done.includes(c.row.id)).map((c) => c.row.id))}>
+            Restore all {candidates.filter((c) => !done.includes(c.row.id)).length}
+          </Button>
+        </div>
+      )}
 
       {sweep && action === "bin" && (
         <div className="fms-proposalactions">

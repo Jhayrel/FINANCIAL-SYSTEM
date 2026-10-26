@@ -26,6 +26,7 @@ import { AlertsSummary } from "./features/AlertsSummary";
 import { Database } from "./features/Database";
 import { DebtScreen } from "./features/DebtScreen";
 import { Insights, type InsightsAt } from "./features/Insights";
+import type { GoPlace } from "./domain/goAsk";
 import { Settings } from "./features/Settings";
 import { readIssued, Statements } from "./features/Statements";
 import { Button, Card, EmptyState, Money, Notice } from "./components/primitives";
@@ -213,7 +214,7 @@ export default function App() {
   const cloud = useCloud();
   const [screen, setScreen] = useState<Screen>("dashboard");
   /** `go`, for the Back button, whose hook runs before `go` is defined (see useScreenHistory below). */
-  const goRef = useRef<(id: Screen) => void>(() => {});
+  const goRef = useRef<(id: Screen, place?: GoPlace) => void>(() => {});
   const [dbFilter, setDbFilter] = useState<"all" | "flagged">("all");
   /** A search another screen opened the Database with, such as a kind of spending on Budget. */
   const [dbQuery, setDbQuery] = useState<{ query: string; at: number } | null>(null);
@@ -1974,6 +1975,9 @@ export default function App() {
       const debt = settings.credits.find((d) => d.id === debtId);
       if (debt) settleDebt(debt);
     },
+    onRestoreMany: handleRestoreMany,
+    onUpdateDebt: (next) => setSettings((s) => ({ ...s, credits: s.credits.map((c) => (c.id === next.id ? next : c)) })),
+    onGo: (place) => goRef.current(place.screen as Screen, place),
   });
 
   // With Firebase configured, nothing renders until the owner is signed in,
@@ -2127,7 +2131,17 @@ export default function App() {
     if (id !== "add") setEditing(null);
   };
 
-  goRef.current = go;
+  /*
+   * A screen opened from the chat ("open the budget", "go to needs review"):
+   * the same move as a tap, then the tab, the list or the month it named.
+   */
+  goRef.current = (id, place) => {
+    go(id);
+    if (!place) return;
+    if (place.tab) setSettingsOpenTab({ tab: place.tab, at: Date.now() });
+    if (place.screen === "database") setDbFilter(place.review ? "flagged" : "all");
+    if (place.month) setInsightsAt({ to: { period: { kind: "month", year: Number(place.month.slice(0, 4)), month: Number(place.month.slice(5, 7)) } }, at: Date.now() });
+  };
 
   /** Where a finding is dealt with: its rows when it names some, otherwise its screen. */
   const openAlert = (finding: Finding): void => {

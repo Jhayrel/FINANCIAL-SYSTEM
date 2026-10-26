@@ -1654,6 +1654,50 @@ model is asked (`AskPanel`, after safe to spend; `moreAsks.test.ts`):
 - And "I paid globe 999 using maya" books Globe at Home Wifi: one word that
   fits two bills goes to the one still paid (`recurringIn`).
 
+### 2026-10-26, last: every screen's moves, from the chat
+
+The owner: "look at all the features of my system and make sure ai can do it
+all like everything". Every screen's buttons were listed against the chat
+and each request was put through the real chat with the model off
+(`chatParity.test.ts`; the scripts are in the session scratchpad). Three
+did the wrong thing, not just nothing:
+
+- "set my maya credit limit to 15000" offered October's budget at
+  PHP 15,000.00;
+- "change my maya credit billing day to 6" offered to change a PHP 0.10
+  interest entry to PHP 6.00;
+- "undo the last change" offered to bin the newest entry.
+
+And "income vs spending this year", "look for a pattern in my spending"
+and "stop my electric bill" each became an entry asking "How much was it?":
+the entry reader offered an item guessed from habit with no figure and
+nothing said to have happened. It no longer does (`readEntry.ts`,
+`worthOffering`); an item said in the words, or "paid", "bought" and the
+rest, still makes a card.
+
+New, all read before the model and before the entry, edit and budget
+readers, each changing nothing until a button is pressed:
+
+| Screen | Its move | From the chat |
+|---|---|---|
+| Every screen | open it | "open the budget", "go to needs review", "open insights for september", "open settings categories", "go home" (`goAsk.ts`; done at once, opening changes nothing) |
+| Database, Needs review | the "i" and Keep | "what's wrong with #3831?", "keep #3831 as it is" (`reviewAsk.ts`, the "i"'s own `explainFlag`, Keep as a change card that adds the note only) |
+| Debt, Details | limit, due day, billing day | "set my Maya Credit limit to 15000", "Maya Credit is due on the 5th" (`debtDetailAsk.ts`, the Details form's own `withLimit` rule; a card with Now and New) |
+| Debt | the room left | "how much is left on my Maya Credit limit?" |
+| Bin | Restore several | **Restore all** on any list from the bin |
+| Activity | the trail | "what did I change today?", "what did the AI add this week?" (`activityAsk.ts`, the same store the screen reads) |
+| Every card | Undo | "undo that": the last thing done in this chat as a card that puts it back (an added entry to the bin, an edit to how it was, a line's detail to what it was, a bin to a restore). A budget says the figure to set back; the review fixes keep their own put-back. |
+| Budget, Outlook | Use as budget | "use the forecast for November" |
+| Settings | (the owner's) | "add a bill", "stop my electric bill", "switch to dark mode", "sign out": said plainly, with a button that opens the right tab |
+
+Settings stays the owner's, as they set on 17 September 2026 ("it can do
+everything, not in Settings, it's restricted"). A line's interest rate is
+set with the line in Settings, so it is said so. If the owner wants the
+assistant to change Settings too, that is a rule change for them to make.
+
+The bin's list said "Deleted 0, 0," for a row kept without its deletion
+time (a local copy loads none); it says the day is not recorded now.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

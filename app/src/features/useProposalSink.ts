@@ -20,6 +20,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { Provenance } from "../domain/activity";
 import { withFeesPaid, type Debt } from "../domain/debt";
 import type { ExportAsk } from "../domain/exportAsk";
+import type { GoPlace } from "../domain/goAsk";
 import {
   checkDraft,
   draftToTransactions,
@@ -55,6 +56,12 @@ export interface SinkInput {
   readonly onExport?: ((ask: ExportAsk) => void) | undefined;
   /** Clear what is left on a line in one step (domain/settleLine.ts). */
   readonly onSettle?: ((debtId: string) => void) | undefined;
+  /** Several rows out of the bin at once, as the Bin screen's own Restore does. */
+  readonly onRestoreMany?: ((ids: readonly string[]) => void) | undefined;
+  /** A line's details saved, as the Debt screen's Details form saves them. */
+  readonly onUpdateDebt?: ((debt: Debt) => void) | undefined;
+  /** Open a screen. Changes nothing. */
+  readonly onGo?: ((place: GoPlace) => void) | undefined;
 }
 
 /** Makes ids unique within one millisecond, when a batch saves together. */
@@ -131,6 +138,10 @@ export function useProposalSink(input: SinkInput): ProposalSink {
       bin: (id) => handlers.current.onBin(id),
       binMany: (ids) => handlers.current.onBinMany(ids),
       restore: (id) => handlers.current.onRestore(id),
+      restoreMany: (ids) => (handlers.current.onRestoreMany ? handlers.current.onRestoreMany(ids) : ids.forEach((id) => handlers.current.onRestore(id))),
+      canUpdateDebt: Boolean(input.onUpdateDebt),
+      updateDebt: (debt) => handlers.current.onUpdateDebt?.(debt),
+      go: (place) => handlers.current.onGo?.(place),
       /**
        * Save it, and say which number it got.
        *

@@ -31,7 +31,7 @@ import type { DeletedTransaction, IsoDate } from "./types";
 
 /** Having deleted, in the past, or the bin itself. Never an instruction to delete. */
 const DELETED =
-  /\b(?:deleted|i\s+delete|did\s+i\s+delete|have\s+i\s+deleted|binned|removed|nadelete|na-?delete|nabura|binura|tinanggal|in\s+the\s+bin|from\s+the\s+bin|recycle\s+bin|the\s+bin|trash)\b/i;
+  /\b(?:deleted|i\s+delete|did\s+i\s+delete|have\s+i\s+deleted|binned|removed|nadelete|na-?delete|nabura|binura|tinanggal|in\s+the\s+bin|from\s+the\s+bin|recycle\s+bin|the\s+bin|in\s+my\s+bin|my\s+bin|trash)\b/i;
 
 /** Looking for something in it. */
 const LOOKING =
@@ -131,7 +131,12 @@ export function deletedRows(
     .map((row) => ({
       row,
       // One sentence, which the list shows as it is.
-      why: [`Deleted ${formatMedium(dayOf(row.deletedAt))}${row.date !== dayOf(row.deletedAt) ? `, for ${formatMedium(row.date)}` : ""}.`],
+      // A row kept without the day it was deleted (a local copy loads none) says so, not "Deleted 0, 0".
+      why: [
+        row.deletedAt
+          ? `Deleted ${formatMedium(dayOf(row.deletedAt))}${row.date !== dayOf(row.deletedAt) ? `, for ${formatMedium(row.date)}` : ""}.`
+          : `For ${formatMedium(row.date)}. The day it was deleted is not recorded.`,
+      ],
     }));
 }
 
