@@ -144,11 +144,10 @@ type Screen =
  * came out at mismatched sizes and, on some phones, as colour emoji.
  */
 /*
- * `records` starts the second group in the sidebar: the screens kept for
- * looking back and setting up, set apart by space, not a line (owner, 27
- * October 2026: "the side panel is now overcrowded fix it").
+ * One even list. A gap before Statements, to set the record screens apart,
+ * read as a mistake (owner, 27 October 2026: "why the spacing is off? fix it").
  */
-const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean; records?: boolean }[] = [
+const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean }[] = [
   { id: "dashboard", label: "Dashboard", icon: "dashboard", primary: true },
   { id: "add", label: "Add", icon: "add", primary: true },
   { id: "database", label: "Database", icon: "ledger", primary: true },
@@ -156,7 +155,7 @@ const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean; recor
   { id: "insights", label: "Insights", icon: "insights" },
   { id: "budget", label: "Budget", icon: "budget" },
   { id: "planner", label: "Planner", icon: "planner" },
-  { id: "statements", label: "Statements", icon: "statements", records: true },
+  { id: "statements", label: "Statements", icon: "statements" },
   { id: "bin", label: "Bin", icon: "bin" },
   { id: "activity", label: "Activity", icon: "activity" },
   { id: "settings", label: "Settings", icon: "settings" },
@@ -2339,7 +2338,7 @@ export default function App() {
               type="button"
               onClick={() => go(n.id)}
               aria-current={screen === n.id ? "page" : undefined}
-              className={n.records ? "fms-navitem fms-navitem--apart" : "fms-navitem"}
+              className="fms-navitem"
             >
               <span aria-hidden className="fms-navicon">
                 <Icon name={n.icon} />

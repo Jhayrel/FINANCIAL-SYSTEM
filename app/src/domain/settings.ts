@@ -12,6 +12,7 @@
  * configured here. Rule AI4.
  */
 
+import { NO_OWNER, normaliseOwner, type OwnerDetails } from "./owner";
 import type { Plan } from "./planner";
 import type { Account } from "./accounts";
 import type { Debt } from "./debt";
@@ -186,6 +187,11 @@ export interface AppSettings {
    * docs/16-PLANNER.md). Its own section, so it syncs like the rest.
    */
   readonly plans?: readonly Plan[];
+  /**
+   * Who the ledger belongs to: name, what to call them, contact details and a
+   * few words about them (`domain/owner.ts`). Its own section, so it syncs.
+   */
+  readonly owner?: OwnerDetails;
   /** Bumped whenever the shape changes, so a stored blob can be upgraded. */
   readonly version: number;
 }
@@ -205,6 +211,7 @@ export function defaultSettings(): AppSettings {
     theme: "system",
     lowBalanceThreshold: 50000,
     plans: [],
+    owner: NO_OWNER,
     version: SETTINGS_VERSION,
   };
 }
@@ -295,6 +302,7 @@ export function normaliseSettings(raw: unknown): AppSettings {
             createdBy: p.createdBy === "ai" ? "ai" : "owner",
           }))
       : [],
+    owner: normaliseOwner(input.owner),
     version: SETTINGS_VERSION,
   };
 }

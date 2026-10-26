@@ -206,6 +206,8 @@ service cloud.firestore {
           // The Planner (docs/16-PLANNER.md): a list, bounded, when present.
           // Older documents have none, which is allowed.
           && (!('plans' in d) || (d.plans is list && d.plans.size() <= 500))
+          // The owner's own details (src/domain/owner.ts): a small map, when present.
+          && (!('owner' in d) || (d.owner is map && d.owner.size() <= 10))
           // There is no API key field in the app, and none may be introduced
           // by writing one straight into the console. Rule AI4.
           && noSecretKeys(d.keys())

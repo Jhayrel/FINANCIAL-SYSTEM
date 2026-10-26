@@ -42,6 +42,7 @@ import type { Account } from "./accounts";
 import type { Debt } from "./debt";
 import type { AppSettings, ThemePreference } from "./settings";
 import { normaliseSettings, SETTINGS_VERSION } from "./settings";
+import { isBlankOwner, NO_OWNER, type OwnerDetails } from "./owner";
 import type { Budgets, DeletedTransaction, Transaction } from "./types";
 
 /**
@@ -413,6 +414,8 @@ export function restore(
         subscriptions: keep(b.settings.subscriptions, current.settings.subscriptions),
         revenueCategories: keep(b.settings.revenueCategories, current.settings.revenueCategories),
         spendingTypes: keep(b.settings.spendingTypes, current.settings.spendingTypes),
+        // A file from before the owner's details were kept has none: this device's stay.
+        owner: b.settings.owner && !isBlankOwner(b.settings.owner) ? b.settings.owner : (current.settings.owner ?? NO_OWNER),
         version: SETTINGS_VERSION,
       },
       preferences: b.preferences,
@@ -682,5 +685,23 @@ function mergeSettings(current: AppSettings, incoming: AppSettings): AppSettings
     revenueCategories: strings(current.revenueCategories, incoming.revenueCategories),
     spendingTypes: byName([...current.spendingTypes], [...incoming.spendingTypes]),
     stopped: byName([...(current.stopped ?? [])], [...(incoming.stopped ?? [])]),
+    // Plans by id: the file's plans this device does not have are added, its own kept as they are.
+    plans: [...(current.plans ?? []), ...(incoming.plans ?? []).filter((p) => !(current.plans ?? []).some((c) => c.id === p.id))],
+    // The owner's details here win; a part left empty here is taken from the file.
+    owner: mergeOwner(current.owner, incoming.owner),
+  };
+}
+
+function mergeOwner(here: OwnerDetails | undefined, file: OwnerDetails | undefined): OwnerDetails {
+  const a = here ?? NO_OWNER;
+  const b = file ?? NO_OWNER;
+  return {
+    name: a.name || b.name,
+    callMe: a.callMe || b.callMe,
+    email: a.email || b.email,
+    phone: a.phone || b.phone,
+    address: a.address || b.address,
+    about: a.about || b.about,
+    shareContact: isBlankOwner(a) ? b.shareContact : a.shareContact,
   };
 }

@@ -33,6 +33,7 @@
  * model decides to say.
  */
 
+import { ownerLines, type OwnerDetails } from "./owner";
 import { byWhen, viewOf } from "./planner";
 import { totalSavingsBalance, totalWalletBalance, walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
@@ -54,6 +55,12 @@ const pesos = (centavos: number): number => Number(toPesos(centavos).toFixed(2))
 export interface AiContext {
   readonly asOf: IsoDate;
   readonly currency: "PHP";
+  /**
+   * Who they are, in their own words from Settings, Data (`domain/owner.ts`):
+   * name, what to call them, about them, and contact details only when they
+   * allowed it. Said ahead of the figures, so no trimming for length drops it.
+   */
+  readonly owner?: readonly string[];
   readonly month: {
     readonly name: string;
     readonly daysLeft: number;
@@ -245,6 +252,8 @@ export interface ContextInput {
   readonly reference: ReferenceLists;
   readonly lowBalanceThreshold: number;
   readonly asOf: IsoDate;
+  /** The owner's details from Settings, Data. */
+  readonly owner?: OwnerDetails | undefined;
 }
 
 /**
@@ -272,6 +281,7 @@ export function buildContext(input: ContextInput): AiContext {
   return {
     asOf,
     currency: "PHP",
+    owner: ownerLines(input.owner),
 
     month: {
       name: `${monthName(month)} ${year}`,
@@ -592,6 +602,8 @@ export function contextToText(c: AiContext): string {
   lines.push(
     `Today is ${dayInWords(c.asOf)}, ${getYear(c.asOf)} (${c.asOf}). Yesterday was ${dayInWords(addDays(c.asOf, -1))}; tomorrow is ${dayInWords(addDays(c.asOf, 1))}. Currency: Philippine Peso.`,
   );
+  // Who they are, before any heading, so the server's trimming for length never drops it.
+  for (const line of c.owner ?? []) lines.push(line);
   lines.push("");
   lines.push(`## ${c.month.name}`);
   lines.push(`Spent ${php(c.month.spent)}, received ${php(c.month.revenue)}.`);

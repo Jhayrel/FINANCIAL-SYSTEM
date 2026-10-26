@@ -133,6 +133,7 @@ export function useAi({
         reference,
         lowBalanceThreshold: settings.lowBalanceThreshold,
         asOf: asOf ?? today(),
+        owner: settings.owner,
       }),
     [transactions, budgets, settings, reference, asOf],
   );

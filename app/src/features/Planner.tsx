@@ -198,6 +198,8 @@ function OutlookHead({ o, asOf }: { o: Outlook; asOf: IsoDate }) {
 }
 
 /** From 1280px: the side panel, as the Bin's and Activity's are. */
+const AHEAD_SHOWN = 6;
+
 function OutlookRail({ o, asOf }: { o: Outlook; asOf: IsoDate }) {
   const after = o.free === null ? null : o.free - o.counted;
   return (
@@ -233,7 +235,8 @@ function OutlookRail({ o, asOf }: { o: Outlook; asOf: IsoDate }) {
       {o.ahead.length > 0 && (
         <Card title="Further ahead" subtitle="Open plans after this month">
           <ul className="fms-binsum">
-            {o.ahead.map((g) => (
+            {/* Six months by name, the rest as one line, so a long Planner never makes a panel taller than the screen. */}
+            {o.ahead.slice(0, AHEAD_SHOWN).map((g) => (
               <li key={g.key}>
                 <span className="fms-binsum-type">
                   <span className="t-body">{g.title}</span>
@@ -244,6 +247,17 @@ function OutlookRail({ o, asOf }: { o: Outlook; asOf: IsoDate }) {
                 <Money value={g.left} size="s" />
               </li>
             ))}
+            {o.ahead.length > AHEAD_SHOWN && (
+              <li>
+                <span className="fms-binsum-type">
+                  <span className="t-body">Later</span>
+                  <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                    {plural(o.ahead.slice(AHEAD_SHOWN).reduce((n, g) => n + g.views.length, 0), "plan")}, {plural(o.ahead.length - AHEAD_SHOWN, "month")}
+                  </span>
+                </span>
+                <Money value={o.ahead.slice(AHEAD_SHOWN).reduce((n, g) => n + g.left, 0)} size="s" />
+              </li>
+            )}
             {o.perMonth > 0 && (
               <li>
                 <span className="t-body-strong">To save a month</span>
@@ -554,9 +568,9 @@ function PlanRow({ view: v, asOf, short, onOpen }: { view: PlanView; asOf: IsoDa
 }
 
 /** A fact in the plan's sheet, laid out as a Database row's (label left, value right). */
-function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+function Fact({ label, children, long = false }: { label: string; children: React.ReactNode; long?: boolean }) {
   return (
-    <div>
+    <div className={long ? "fms-rowfacts-long" : undefined}>
       <dt>{label}</dt>
       <dd>{children}</dd>
     </div>
@@ -646,7 +660,11 @@ function PlanSheet(props: {
           )}
           {v.perMonth > 0 && <Fact label="To save">{`${formatMoney(v.perMonth)} a month`}</Fact>}
           {p.moves.length > 0 && <Fact label="Moved">{movesWords(p)}</Fact>}
-          {p.notes && <Fact label="Notes">{p.notes}</Fact>}
+          {p.notes && (
+            <Fact label="Notes" long>
+              {p.notes}
+            </Fact>
+          )}
           <Fact label="Planned on">{`${formatMedium(p.createdOn)}${p.createdBy === "ai" ? ", from the chat" : ""}`}</Fact>
         </dl>
 

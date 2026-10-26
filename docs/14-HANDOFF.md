@@ -1833,8 +1833,9 @@ style guide's Bin, Planner and sidebar lines say how each now works.
   and small Delete forever on a computer, a sheet on a phone; Delete forever
   wants the record number typed. Its container query is 520px: at 600px the
   card on a computer sat at the threshold and hid the actions.
-- **Sidebar**: record screens set apart; Spending open, the other groups
-  folded with their totals; all-zero groups hidden; 36px items under 820px.
+- **Sidebar**: Spending open, the other groups folded with their totals;
+  all-zero groups hidden; 36px items under 820px. A gap before Statements
+  was tried and taken out the same day ("why the spacing is off?").
 - **The sync fault**: the Dashboard said a paid ₱9,000.00 plan still needed
   ₱11,200.00 and the Planner ₱2,200.00. `paidSoFar` and `likelyPayments`
   read the Database's spread rows, so a paid entry spread over months looked

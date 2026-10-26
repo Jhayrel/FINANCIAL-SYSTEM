@@ -109,11 +109,6 @@
   font-weight: 600;
 }
 
-/* Statements, the Bin, Activity and Settings: a second group, set apart by space alone. */
-.fms-navitem--apart {
-  margin-top: var(--space-3);
-}
-
 /*
  * A short window: the menu tightens before the balances lose their room.
  * A laptop with its toolbars showing is about 760px tall.
@@ -129,10 +124,6 @@
 
   .fms-navitem {
     min-height: 36px;
-  }
-
-  .fms-navitem--apart {
-    margin-top: var(--space-2);
   }
 }
 
@@ -10046,6 +10037,12 @@ button.fms-recent-row:disabled {
 .fms-rowsheet-titles {
   flex: 1 1 auto;
   min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A grid's items are as wide as their longest word unless told otherwise: one long name pushed a sheet off the screen. */
+.fms-rowsheet > * {
+  min-width: 0;
 }
 
 .fms-rowsheet-sub {
@@ -10161,6 +10158,19 @@ button.fms-recent-row:disabled {
   min-width: 0;
   text-align: right;
   font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+/* A long value (notes): under its label and read left to right, as text is. */
+.fms-rowfacts > div.fms-rowfacts-long {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.fms-rowfacts-long dd {
+  text-align: left;
+  font-weight: 400;
+  white-space: pre-line;
 }
 
 /* ── The AI tab on a phone: the screen is the conversation ────────────────── */
@@ -11386,10 +11396,21 @@ button.fms-recent-row:disabled {
   outline-offset: 2px;
 }
 
+/*
+ * Long data (owner, 27 October 2026: "make sure the table is adaptable and
+ * can handle long data"). The parts stretch to the column rather than size to
+ * their text: sized to their text (justify-items: start), a name with no
+ * spaces stayed one line and ran under the amount on a phone. A long name
+ * wraps, breaking a word only when it must; the date, kind and wallet line
+ * stops at two lines; the amount never wraps.
+ */
 .fms-planrow-main {
   display: grid;
-  justify-items: start;
   gap: 2px;
+  min-width: 0;
+}
+
+.fms-planrow-main > * {
   min-width: 0;
 }
 
@@ -11399,13 +11420,20 @@ button.fms-recent-row:disabled {
 }
 
 .fms-planrow-meta {
+  display: -webkit-box;
+  overflow: hidden;
   color: var(--ink-3);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .fms-planrow-side {
   display: grid;
   justify-items: end;
   gap: var(--space-1);
+  white-space: nowrap;
 }
 
 .fms-plansheet {
