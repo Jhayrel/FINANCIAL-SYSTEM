@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Account } from "./accounts";
+import { spreadCovered } from "./covers";
 import { monthBrief, nextMonthStart } from "./monthPlan";
 import {
   checkPlan,
@@ -15,6 +16,11 @@ import {
   linkPayments,
   makePlan,
   movePlan,
+  byWhen,
+  NO_DATE,
+  plannedByDay,
+  plannedForBudget,
+  whenOf,
   movesWords,
   plannedIn,
   plansSetAside,
@@ -116,6 +122,63 @@ describe("paying it (P4.2 to P4.8)", () => {
     expect(likelyPayments(plan, [...ledger, byHand, other], [plan]).map((t) => t.id)).toEqual(["h1"]);
     const linkedElsewhere = { ...plan, id: "x", entryIds: ["h1"] };
     expect(likelyPayments(plan, [...ledger, byHand], [plan, linkedElsewhere])).toEqual([]);
+  });
+});
+
+describe("no date, or only a month (owner, 27 October 2026: \"LIKE NO DATE LIKE NO IDEA WHEN\")", () => {
+  const someday = makePlan(input({ title: "Laptop", amount: 3_500_000, due: "", dueKind: "none", item: "Online Buy" }), asOf, "owner");
+  const november = makePlan(input({ due: "2026-11-05", dueKind: "month" }), asOf, "owner");
+  it("is kept with no date and counted nowhere", () => {
+    expect(someday).toMatchObject({ due: NO_DATE, dueKind: "none" });
+    expect(viewOf(someday, ctx)).toMatchObject({ state: "later", words: "No date yet", counts: false, perMonth: 0 });
+    expect(whenOf(someday)).toBe("No date yet");
+    expect(byWhen(someday)).toBe("with no date yet");
+    const brief = monthBrief({ transactions: ledger, reference: { ...reference, plans: [someday] }, budgets: {}, debts: [], year: 2026, month: 10, asOf });
+    expect(brief.safe?.reservedPlans).toBe(0);
+    expect(plannedForBudget([viewOf(someday, ctx)], 2026, 10, reference, asOf).total).toBe(0);
+    expect(groupOpen([viewOf(someday, ctx), viewOf(november, ctx)], asOf).map((g) => g.title)).toEqual(["November 2026", "No date yet"]);
+    expect(checkPlan(input({ due: "", dueKind: "none" }), { plans: [], reference, asOf }).problems).toEqual([]);
+  });
+  it("a month is that month, said as one", () => {
+    expect(november).toMatchObject({ due: "2026-11-30", dueKind: "month" });
+    expect(viewOf(november, ctx).words).toBe("Sometime in November 2026");
+    expect(byWhen(november)).toBe("sometime in November 2026");
+    expect(plannedForBudget([viewOf(november, ctx)], 2026, 11, reference, asOf).total).toBe(900_000);
+    // Not a day on the calendar.
+    expect(plannedByDay([viewOf(november, ctx)], asOf).size).toBe(0);
+  });
+  it("moves to a day, a month or no date, and only a day changing is a move", () => {
+    const dated = movePlan(someday, "2026-12-20", asOf);
+    expect(dated).toMatchObject({ due: "2026-12-20", moves: [] });
+    expect("dueKind" in dated).toBe(false);
+    const again = movePlan(dated, "", asOf, "none");
+    expect(again).toMatchObject({ due: NO_DATE, dueKind: "none", moves: [] });
+    expect(movePlan(november, "2026-12-01", asOf, "month")).toMatchObject({ due: "2026-12-31", dueKind: "month", moves: [{ from: "2026-11-30", to: "2026-12-31" }] });
+  });
+  it("from the chat: no date added, moved, or taken away", () => {
+    const c = { plans: [november], reference, transactions: ledger, asOf };
+    expect(readPlannerAsk("plan laptop 35000", c)).toMatchObject({ kind: "add", input: { due: NO_DATE, dueKind: "none" } });
+    expect(readPlannerAsk("plan laptop 35000 in december", c)).toMatchObject({ kind: "add", input: { due: "2026-12-31", dueKind: "month" } });
+    expect(readPlannerAsk("move the tuition plan to december", c)).toMatchObject({ kind: "move", to: "2026-12-31", toKind: "month" });
+    expect(readPlannerAsk("move the tuition plan to no date yet", c)).toMatchObject({ kind: "move", to: NO_DATE, toKind: "none" });
+    expect(readPlannerAsk("the tuition plan has no date yet", c)).toMatchObject({ kind: "edit", input: { due: NO_DATE, dueKind: "none" } });
+  });
+});
+
+describe("one answer on every screen", () => {
+  it("is paid whether the ledger is read whole or a day at a time (27 October 2026: ₱11,200.00 on the Dashboard, ₱2,200.00 on the Planner)", () => {
+    const trip = tx({ id: "abra", item: "Travel", description: "Travel to Abra", amount: 933_700, fromWallet: "Cash", date: "2026-10-09", coversTo: "2026-10-11" });
+    const plan = linkPayments(makePlan(input({ title: "Trip to Abra", amount: 900_000, due: "2026-10-10", item: "Travel" }), "2026-10-01", "owner"), ["abra"], [...ledger, trip], asOf);
+    const whole = viewOf(plan, { ...ctx, transactions: [...ledger, trip] });
+    const daily = viewOf(plan, { ...ctx, transactions: spreadCovered([...ledger, trip]) });
+    expect(spreadCovered([trip]).length).toBe(3);
+    expect(daily).toMatchObject({ state: whole.state, paid: whole.paid, left: 0, counts: false });
+    expect(daily.words).toBe(whole.words);
+    const brief = monthBrief({ transactions: spreadCovered([...ledger, trip]), reference: { ...reference, plans: [plan] }, budgets: {}, debts: [], year: 2026, month: 10, asOf });
+    expect(brief.safe?.reservedPlans).toBe(0);
+    // And a day's share of it is never offered as some other plan's payment.
+    const other = makePlan(input({ title: "Travel", amount: 933_700, due: "2026-10-30", item: "Travel" }), "2026-10-01", "owner");
+    expect(likelyPayments(other, spreadCovered([...ledger, trip]), [plan, other])).toEqual([]);
   });
 });
 

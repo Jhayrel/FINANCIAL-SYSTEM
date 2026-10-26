@@ -33,7 +33,7 @@
  * model decides to say.
  */
 
-import { viewOf } from "./planner";
+import { byWhen, viewOf } from "./planner";
 import { totalSavingsBalance, totalWalletBalance, walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { billStatuses, overdue, STOPPED_AFTER_DAYS, upcoming } from "./bills";
@@ -181,6 +181,8 @@ export interface AiContext {
     readonly amount: number;
     readonly left: number;
     readonly due: string;
+    /** "by November 15, 2026", "sometime in November 2026", "with no date yet". */
+    readonly when?: string | undefined;
     readonly state: string;
     readonly words: string;
     readonly kind: string;
@@ -452,6 +454,7 @@ export function buildContext(input: ContextInput): AiContext {
         amount: pesos(v.plan.amount),
         left: pesos(v.left),
         due: v.plan.due,
+        when: byWhen(v.plan),
         state: v.state,
         words: v.words,
         kind: v.plan.item,
@@ -796,7 +799,7 @@ export function contextToText(c: AiContext): string {
     lines.push("A plan is not an entry: nothing has moved until it is paid. Plans counted in safe to spend are already in its figure above; do not take them off again.");
     for (const p of c.plans ?? []) {
       lines.push(
-        `- ${p.title}: ${php(p.amount)} by ${p.due}${p.kind ? `, ${p.kind}` : ""}${p.from ? `, from ${p.from}` : ""}. ${p.words}${p.left > 0 && p.left !== p.amount ? `, ${php(p.left)} left` : ""}${p.counted ? ", set aside in safe to spend" : ""}${p.goal ? `. ${p.goal}` : ""}.`,
+        `- ${p.title}: ${php(p.amount)} ${p.when ?? `by ${p.due}`}${p.kind ? `, ${p.kind}` : ""}${p.from ? `, from ${p.from}` : ""}. ${p.words}${p.left > 0 && p.left !== p.amount ? `, ${php(p.left)} left` : ""}${p.counted ? ", set aside in safe to spend" : ""}${p.goal ? `. ${p.goal}` : ""}.`,
       );
     }
   }

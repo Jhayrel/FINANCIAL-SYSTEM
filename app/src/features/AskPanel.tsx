@@ -159,9 +159,9 @@ import { numbersInWords, readReviewRowAsk, reviewRowAnswer } from "../domain/rev
 import { activityAnswer, asksUndoLast, readActivityAsk } from "../domain/activityAsk";
 import { activityStore } from "../data/activityStore";
 import type { PlanAction } from "./useProposalSink";
-import { kindFromHistory, makePlan, movePlan, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, type Plan, type PlanInput } from "../domain/planner";
+import { kindFromHistory, makePlan, movePlan, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
 import { plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
-import { askAmountWords, asksToPlan, costHint, dayFor, namesIt, nextMonthEnd, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
+import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
 import { planWorked } from "../domain/planRate";
@@ -4496,10 +4496,10 @@ export function AskPanel({
   const planRows = (plan: Plan): { label: string; value: string }[] => [
     { label: "What", value: plan.title },
     { label: "Amount", value: formatMoney(plan.amount) },
-    { label: "Pay by", value: formatMedium(plan.due) },
+    { label: "Pay by", value: whenOf(plan) },
     ...(plan.item ? [{ label: "Kind", value: plan.item }] : []),
     ...(plan.wallet ? [{ label: "From", value: plan.wallet }] : []),
-    { label: "Safe to spend", value: plan.setAside ? "Counted in its month" : "Not counted" },
+    { label: "Safe to spend", value: countedWords(plan) },
   ];
 
   /** A Planner card for a new plan (docs/16-PLANNER.md, P4.23). Nothing is saved until it is pressed. */
@@ -4510,7 +4510,7 @@ export function AskPanel({
       words,
       action: "Add to the planner",
       state: "open",
-      planner: { rows: planRows(plan), save: { plan, action: "plan.create", summary: `Planned "${plan.title}", ${formatMoney(plan.amount)} by ${formatMedium(plan.due)}, from the chat.` } },
+      planner: { rows: planRows(plan), save: { plan, action: "plan.create", summary: `Planned "${plan.title}", ${formatMoney(plan.amount)} ${byWhen(plan)}, from the chat.` } },
     });
     log(aiEvent("proposed", "budget", { entry: `Plan ${plan.title}, ${formatMoney(plan.amount)}`, text: words }));
   };
@@ -5440,26 +5440,24 @@ export function AskPanel({
         if (planAsk.kind === "add") {
           const plan = makePlan(planAsk.input, asOf, "ai");
           card(
-            `A new plan. Nothing moves until it is paid.${plan.setAside ? " It is counted in safe to spend in its month, like a bill still to pay." : ""}`,
+            `A new plan${plan.due === NO_DATE ? " with no date yet" : ""}. Nothing moves until it is paid. ${countsSentence(plan)}`,
             "Add to the planner",
-            [
-              { label: "What", value: plan.title },
-              { label: "Amount", value: money(plan.amount) },
-              { label: "Pay by", value: formatMedium(plan.due) },
-              ...(plan.item ? [{ label: "Kind", value: plan.item }] : []),
-              ...(plan.wallet ? [{ label: "From", value: plan.wallet }] : []),
-              { label: "Safe to spend", value: plan.setAside ? "Counted in its month" : "Not counted" },
-            ],
-            { rows: [], save: { plan, action: "plan.create", summary: `Planned "${plan.title}", ${money(plan.amount)} by ${formatMedium(plan.due)}, from the chat.` } },
+            planRows(plan),
+            { rows: [], save: { plan, action: "plan.create", summary: `Planned "${plan.title}", ${money(plan.amount)} ${byWhen(plan)}, from the chat.` } },
           );
           return;
         }
         const p = planAsk.plan;
         if (planAsk.kind === "move") {
-          const next = movePlan(p, planAsk.to, asOf);
-          card(`"${p.title}" from ${formatMedium(p.due)} to ${formatMedium(planAsk.to)}. The move is kept on the plan.`, "Move it", [{ label: "Pay by, now", value: formatMedium(p.due) }, { label: "New", value: formatMedium(planAsk.to) }], {
+          const next = movePlan(p, planAsk.to, asOf, planAsk.toKind);
+          const lower = (w: string): string => w.replace(/^(Sometime|No)/, (m) => m.toLowerCase());
+          card(
+            `"${p.title}" from ${lower(whenOf(p))} to ${lower(whenOf(next))}.${next.due === NO_DATE ? " With no date it is counted nowhere until it has one." : p.due === NO_DATE ? ` ${countsSentence(next)}` : " The move is kept on the plan."}`,
+            next.due === NO_DATE ? "Save with no date" : "Move it",
+            [{ label: "Pay by, now", value: whenOf(p) }, { label: "New", value: whenOf(next) }],
+            {
             rows: [],
-            save: { plan: next, action: "plan.move", summary: `Moved "${p.title}" from ${formatMedium(p.due)} to ${formatMedium(planAsk.to)}, from the chat.`, before: p },
+            save: { plan: next, action: "plan.move", summary: `Moved "${p.title}" from ${lower(whenOf(p))} to ${lower(whenOf(next))}, from the chat.`, before: p },
           });
           return;
         }
@@ -5472,7 +5470,7 @@ export function AskPanel({
           return;
         }
         if (planAsk.kind === "skip") {
-          card(`Skip "${p.title}" (${money(p.amount)}, by ${formatMedium(p.due)}). It stays under Done as skipped and can be put back.`, "Skip it", [], {
+          card(`Skip "${p.title}" (${money(p.amount)}, ${byWhen(p)}). It stays under Done as skipped and can be put back.`, "Skip it", [], {
             rows: [],
             save: { plan: skipPlan(p, asOf), action: "plan.skip", summary: `Skipped "${p.title}", from the chat.`, before: p },
           });
@@ -5488,7 +5486,7 @@ export function AskPanel({
         if (planAsk.kind === "edit") {
           const next = editPlan(p, planAsk.input, asOf);
           const said = planAsk.changes.map((c) => `${c.label.toLowerCase()} "${c.before}" to "${c.after}"`).join(", ");
-          const WORD: Record<string, string> = { Name: "name", "Need or want": "need or want", "Safe to spend": "counting in safe to spend", Kind: "kind", "Pay from": "wallet", Goal: "goal", Notes: "note" };
+          const WORD: Record<string, string> = { Name: "name", "Need or want": "need or want", "Safe to spend": "counting in safe to spend", Kind: "kind", "Pay from": "wallet", Goal: "goal", Notes: "note", "Pay by": "date" };
           const what = planAsk.changes.map((c) => WORD[c.label] ?? c.label.toLowerCase());
           card(
             `Edit "${p.title}": its ${what.length > 1 ? `${what.slice(0, -1).join(", ")} and ${what[what.length - 1]}` : what[0]}, as below. Nothing else about it changes.${planAsk.changes.some((c) => c.label === "Goal") ? " Its money is in the goal, so it is no longer counted in safe to spend." : ""}`,
@@ -5499,7 +5497,7 @@ export function AskPanel({
           return;
         }
         if (planAsk.kind === "restore") {
-          card(`Put "${p.title}" back on the Planner as open, ${money(p.amount)} by ${formatMedium(p.due)}.`, "Put it back", [], {
+          card(`Put "${p.title}" back on the Planner as open, ${money(p.amount)} ${byWhen(p)}.`, "Put it back", [], {
             rows: [],
             save: { plan: reopenPlan(p), action: "plan.restore", summary: `Put "${p.title}" back on the plan list, from the chat.`, before: p },
           });
@@ -5583,8 +5581,20 @@ export function AskPanel({
         const gap = a.typicalIncome - need;
         return ` With it, ${a.name} needs ${formatMoney(need)} (your usual month${others.length > 0 ? ", its other plans" : ""} and this), against the ${formatMoney(a.typicalIncome)} you usually receive: ${gap >= 0 ? `${formatMoney(gap)} to spare` : `${formatMoney(-gap)} short`}.`;
       };
-      const planCardWords = (plan: Plan, dueSaid: boolean): string =>
-        `A new plan${dueSaid ? "" : `, set for ${formatMedium(plan.due)} as no day was said; say another day to move it`}. Nothing moves until it is paid.${plan.setAside ? " It is counted in safe to spend in its month, like a bill still to pay." : ""}${fitWords(plan)}${monthWords(plan)}`;
+      /*
+       * Said as the plan's own when: a day, sometime in a month or a year, or
+       * no date yet, which is counted nowhere. It said "set for November 30,
+       * 2026 as no day was said" and passed a day nobody chose off as the
+       * plan's (owner, 27 October 2026).
+       */
+      const planCardWords = (plan: Plan, _dueSaid?: boolean): string => {
+        const kind = plan.dueKind ?? "day";
+        const lead =
+          plan.due === NO_DATE
+            ? `A new plan with no date yet, kept on the Planner. ${countsSentence(plan)}`
+            : `A new plan${kind === "day" ? "" : ` for ${whenOf(plan).replace(/^S/, "s")}`}. Nothing moves until it is paid. ${countsSentence(plan)}`;
+        return `${lead}${fitWords(plan)}${monthWords(plan)}`;
+      };
       const youAsked = (): void => {
         setDraft("");
         say({ kind: "you", text: note });
@@ -5598,8 +5608,8 @@ export function AskPanel({
         pendingPlan.current = null;
         const amount = sumIn(lead);
         if (amount !== null && lead.split(/\s+/).length <= 10 && !/\?/.test(lead) && !asksToPlan(lead) && sink.canPlan) {
-          const said = dayFor(lead, asOf);
-          const plan = makePlan({ ...waitingPlan.input, amount, due: said ?? waitingPlan.input.due }, asOf, "ai");
+          const said = whenFor(lead, asOf);
+          const plan = makePlan({ ...waitingPlan.input, amount, ...(said ? { due: said.due, dueKind: said.kind } : {}) }, asOf, "ai");
           youAsked();
           offerPlan(plan, planCardWords(plan, said !== null || waitingPlan.dueSaid));
           return;
@@ -5611,8 +5621,9 @@ export function AskPanel({
         const intent = readPlanIntent(text, planCtx);
         if (intent?.kind === "later") return intent.plans.filter((p) => p.amount !== null);
         const ahead = aheadMonthIn(text, asOf);
-        const due = dayFor(text, asOf) ?? (ahead ? lastOfMonth(ahead.year, ahead.month) : nextMonthEnd(asOf));
-        return plannedSpendIn(text).map((x) => planInputFor(x.name, x.amount, due, planCtx, text));
+        const said = whenFor(text, asOf);
+        const when = said ?? (ahead ? { due: lastOfMonth(ahead.year, ahead.month), kind: "month" as const } : { due: NO_DATE, kind: "none" as const });
+        return plannedSpendIn(text).map((x) => planInputFor(x.name, x.amount, when.due, planCtx, text, when.kind));
       };
 
       if (asksToPlan(lead)) {
@@ -5643,10 +5654,11 @@ export function AskPanel({
         // "Add the tuition as a plan" with nothing said before it: the amount is asked, with what it cost before.
         const namedThing = inputs.length === 0 ? thingToPlan(lead) : "";
         if (inputs.length === 0 && namedThing) {
-          const input = planInputFor(namedThing, null, dayFor(lead, asOf) ?? nextMonthEnd(asOf), planCtx, lead);
-          pendingPlan.current = { input, dueSaid: dayFor(lead, asOf) !== null, at: Date.now() };
+          const said = whenFor(lead, asOf);
+          const input = planInputFor(namedThing, null, said?.due ?? NO_DATE, planCtx, lead, said?.kind ?? "none");
+          pendingPlan.current = { input, dueSaid: said !== null, at: Date.now() };
           youAsked();
-          say({ kind: "assistant", text: askAmountWords(input.title, costHint(namedThing, input.item, planCtx), input.due, dayFor(lead, asOf) !== null), from: "this device", go: plannerPlace });
+          say({ kind: "assistant", text: askAmountWords(input.title, costHint(namedThing, input.item, planCtx), input.due, said !== null), from: "this device", go: plannerPlace });
           return;
         }
         if (inputs.length === 0) {
@@ -5665,11 +5677,11 @@ export function AskPanel({
         if (fresh.length === 0) {
           youAsked();
           const p = plans.find((x) => x.status === "open" && inputs.some((i) => i.amount === x.amount && namesIt(x.title, i.title)));
-          say({ kind: "assistant", text: p ? `"${p.title}" is on the Planner already: ${formatMoney(p.amount)} by ${formatMedium(p.due)}.` : "That is on the Planner already.", from: "this device", go: plannerPlace });
+          say({ kind: "assistant", text: p ? `"${p.title}" is on the Planner already: ${formatMoney(p.amount)} ${byWhen(p)}.` : "That is on the Planner already.", from: "this device", go: plannerPlace });
           return;
         }
         const made = fresh.map((i) => makePlan(i, asOf, "ai"));
-        const dueSaid = dayFor(lead, asOf) !== null || aheadMonthIn(lead, asOf) !== null;
+        const dueSaid = whenFor(lead, asOf) !== null || aheadMonthIn(lead, asOf) !== null;
         if (questionToo) {
           // Answered first, by whichever route the question takes; the cards come after it.
           queuedPlans.current = made.map((plan) => ({ plan, words: planCardWords(plan, dueSaid) }));
@@ -5687,7 +5699,7 @@ export function AskPanel({
             if (!intent.asked) {
               youAsked();
               const p = plans.find((x) => x.status === "open" && intent.plans.some((i) => i.amount === x.amount && namesIt(x.title, i.title)));
-              say({ kind: "assistant", text: p ? `"${p.title}" is on the Planner already: ${formatMoney(p.amount)} by ${formatMedium(p.due)}. Say "move the ${p.title.toLowerCase()} plan to" a day, or open the Planner to change it.` : "That is on the Planner already.", from: "this device", go: plannerPlace });
+              say({ kind: "assistant", text: p ? `"${p.title}" is on the Planner already: ${formatMoney(p.amount)} ${byWhen(p)}. Say "move the ${p.title.toLowerCase()} plan to" a day, or open the Planner to change it.` : "That is on the Planner already.", from: "this device", go: plannerPlace });
               return;
             }
           } else if (!intent.amountSaid) {

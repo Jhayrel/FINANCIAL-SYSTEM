@@ -281,7 +281,19 @@ export function normaliseSettings(raw: unknown): AppSettings {
               /^\d{4}-\d{2}-\d{2}$/.test(p.due) &&
               ["open", "done", "skipped", "removed"].includes(p.status),
           )
-          .map((p) => ({ ...p, entryIds: Array.isArray(p.entryIds) ? p.entryIds : [], moves: Array.isArray(p.moves) ? p.moves : [], item: p.item ?? "", wallet: p.wallet ?? "", notes: p.notes ?? "", need: p.need !== false, setAside: p.setAside !== false }))
+          .map((p) => ({
+            ...p,
+            entryIds: Array.isArray(p.entryIds) ? p.entryIds : [],
+            moves: Array.isArray(p.moves) ? p.moves : [],
+            item: p.item ?? "",
+            wallet: p.wallet ?? "",
+            notes: p.notes ?? "",
+            need: p.need !== false,
+            setAside: p.setAside !== false,
+            // An older copy without these still matches payments and reads its history.
+            createdOn: typeof p.createdOn === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.createdOn) ? p.createdOn : p.due,
+            createdBy: p.createdBy === "ai" ? "ai" : "owner",
+          }))
       : [],
     version: SETTINGS_VERSION,
   };

@@ -77,8 +77,12 @@
   align-items: center;
   gap: var(--space-3);
   width: 100%;
-  /* 44px, the touch target D10 asks for, and easier to hit with a mouse too. */
-  min-height: 44px;
+  /*
+   * 40px, the style guide's sidebar item (3.8). It was 44px; with the
+   * Planner the menu ran to eleven and crowded the balances (27 October
+   * 2026). The sidebar is a computer's: a phone has its bottom bar.
+   */
+  min-height: 40px;
   padding: 0 var(--space-3);
   border: none;
   border-radius: var(--radius-md);
@@ -103,6 +107,33 @@
   background: var(--brand-100);
   color: var(--brand-700);
   font-weight: 600;
+}
+
+/* Statements, the Bin, Activity and Settings: a second group, set apart by space alone. */
+.fms-navitem--apart {
+  margin-top: var(--space-3);
+}
+
+/*
+ * A short window: the menu tightens before the balances lose their room.
+ * A laptop with its toolbars showing is about 760px tall.
+ */
+@media (max-height: 820px) {
+  .fms-sidebar {
+    padding-top: var(--space-4);
+  }
+
+  .fms-brand {
+    padding-bottom: var(--space-3);
+  }
+
+  .fms-navitem {
+    min-height: 36px;
+  }
+
+  .fms-navitem--apart {
+    margin-top: var(--space-2);
+  }
 }
 
 /* Fixed-width icon column so every label starts at the same x. */
@@ -842,32 +873,105 @@
   }
 }
 
-.fms-binactions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-2) var(--space-3);
-  margin-left: auto;
+/*
+ * A bin row (owner, 27 October 2026: "Fix the bin ui more cleaner"): the
+ * pick, the entry, its amount in one right-aligned column, and on a computer
+ * a quiet Restore and a small Delete forever on the same line, lined up down
+ * the list. No main-coloured button a row; the bar's "Restore N" is the one.
+ */
+.fms-binlist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-/*
- * A bin row is four things wide, and a phone is not.
- *
- * The amount, Restore and Delete forever sat on the same line as the item, in
- * a row that refused to wrap: at 375px the buttons ran off the right of the
- * card and the amount landed on top of the record number. So on a narrow card
- * the row stacks, and the actions take a line of their own.
- */
-@container (max-width: 600px) {
-  .fms-binactions {
-    width: 100%;
-    justify-content: space-between;
-    margin-top: var(--space-2);
+.fms-binrow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(6.5rem, auto) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-binlist > .fms-binrow:first-child {
+  border-top: none;
+}
+
+.fms-binrow-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .fms-binrow-main:hover .fms-binrow-title > .t-body-strong {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+
+.fms-binrow-main:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.fms-binrow-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.fms-binrow-desc {
+  color: var(--ink-2);
+}
+
+.fms-binrow-meta {
+  color: var(--ink-3);
+}
+
+.fms-binrow-amount {
+  justify-self: end;
+}
+
+.fms-binrow-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* A narrow card: the actions go to the row's sheet, and the row is the entry and its amount. */
+@container (max-width: 520px) {
+  .fms-binrow {
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
-  .fms-binlist .fms-dbpick + div {
-    flex: 1 1 60%;
+  .fms-binrow-actions {
+    display: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .fms-binrow {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    padding-inline: var(--space-3);
+  }
+
+  .fms-binrow-actions {
+    display: none;
+  }
+
+  /* The pick reaches 44px with padding (D10); the box stays 20px. */
+  .fms-binrow-pick {
+    min-height: 44px;
   }
 }
 
@@ -882,7 +986,7 @@
  */
 @media (max-width: 1023px), (pointer: coarse) {
   .fms-dbrow-actions button,
-  .fms-binactions button,
+  .fms-binrow-actions button,
   .fms-bulkbar button {
     min-height: 44px;
   }
@@ -9073,6 +9177,40 @@ button.fms-recent-row:disabled {
   background: var(--flow-revenue);
 }
 
+/*
+ * A plan on a day still to come: a ring, not a dot, since no money has moved
+ * (a filled dot is money that came in). Neutral ink, never a flow colour (D3).
+ */
+.fms-ical-plan,
+.fms-ical-planmark {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--ink-2);
+  border-radius: var(--radius-full);
+  background: transparent;
+}
+
+.fms-ical-plan {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+/* Money in and a plan on the same day: side by side, not on top of each other. */
+.fms-ical-in + .fms-ical-plan {
+  right: 16px;
+}
+
+/* The legend's ring: its own class, as .fms-ical-ring is Today's. */
+.fms-ical-planmark {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.fms-ical-amt.is-planned {
+  color: var(--ink-3);
+}
+
 @container (max-width: 459px) {
   .fms-ical-amt {
     display: none;
@@ -10192,49 +10330,6 @@ button.fms-recent-row:disabled {
   }
 }
 
-/* ── The Bin on a phone ──────────────────────────────────────────────────── */
-
-/*
- * The amount beside the name, like every other list, and the two buttons
- * under it at half the width each: Delete forever on the left, Restore on
- * the right under the thumb. Restore sat on the left, so the thumb's easy
- * reach was the one button that cannot be taken back.
- */
-@media (max-width: 639px) {
-  .fms-binlist .fms-binactions {
-    display: contents;
-  }
-
-  .fms-binlist .fms-dbrow-text {
-    order: 1;
-    flex: 1 1 0;
-  }
-
-  .fms-binlist .fms-binactions > [class^="t-num"] {
-    order: 2;
-    margin-left: auto;
-  }
-
-  /*
-   * As wide as their words, together at the right: two half-width buttons
-   * a row made the Bin a list of buttons (14 October 2026). Still 44px tall,
-   * Restore still last, under the thumb.
-   */
-  .fms-binlist .fms-binactions > .fms-btn {
-    flex: 0 0 auto;
-    margin-top: var(--space-2);
-  }
-
-  .fms-binlist .fms-binactions > .fms-btn--danger {
-    order: 3;
-    margin-left: auto;
-  }
-
-  .fms-binlist .fms-binactions > .fms-btn--primary {
-    order: 4;
-  }
-}
-
 /* ── The Database's filters: one row of dropdowns, phone and computer ────── */
 
 .fms-dbfilterrow {
@@ -11231,19 +11326,24 @@ button.fms-recent-row:disabled {
   padding-top: var(--space-4);
 }
 
+/*
+ * A month's heading: a quiet label with its total, as the sidebar names its
+ * groups. The 2px ink rule under it went at the owner's word (27 October
+ * 2026: "I dont like the line ... make the ui cleaner"); the rows keep their
+ * hairlines.
+ */
 .fms-plangroup {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: var(--space-3);
   margin: 0;
-  padding-bottom: var(--space-1);
-  border-bottom: 2px solid var(--ink);
-  color: var(--ink);
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .fms-plangroup-count {
-  color: var(--ink-3);
   font-weight: 400;
 }
 
@@ -11377,6 +11477,25 @@ button.fms-recent-row:disabled {
   color: var(--ink-3);
 }
 
+/* When: a day, a month, or no date yet. The label sits over the three choices like any field's. */
+.fms-planform-when {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fms-planform-whenlabel {
+  color: var(--ink-2);
+}
+
+.fms-planwhen {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fms-planwhen .fms-planform-hint {
+  color: var(--ink-3);
+}
+
 .fms-planform-switch {
   display: flex;
   align-items: center;
@@ -11413,6 +11532,57 @@ button.fms-recent-row:disabled {
 
   .fms-planlist {
     gap: var(--space-4);
+  }
+}
+
+/* The month's plans on the Budget screen: under the tracks, hairlines only (D2). */
+.fms-budgetplanned {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
+  justify-items: start;
+}
+
+.fms-budgetplanned-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  width: 100%;
+  color: var(--ink-2);
+}
+
+.fms-budgetplanned-rows {
+  display: grid;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fms-budgetplanned-rows > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 6px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-budgetplanned-when {
+  color: var(--ink-3);
+}
+
+@media (max-width: 639px) {
+  .fms-budgetplanned-rows > li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .fms-budgetplanned-when {
+    grid-column: 1;
+    grid-row: 2;
   }
 }
 

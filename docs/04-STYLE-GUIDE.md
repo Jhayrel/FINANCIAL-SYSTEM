@@ -186,7 +186,8 @@ One face. Self-hosted via `@fontsource` so the PWA keeps its type offline.
 | Add | The five flows are one row, a symbol over each name, so Amount is on screen from the first frame. Save is the larger button, on the right. |
 | AI tab | The whole screen is the conversation: no card, no "Ask" heading. It starts at the bottom by the composer, which sits on the surface above the navigation: one rounded field holding the text with attach and the camera inside it at the right, and Send beside it. Three separate round buttons left the text so narrow that its placeholder wrapped and the composer read as zoomed in (owner, 2026-09-26). The camera opens straight to a picture (`capture="environment"`) and is drawn on phones and touch tablets only. Clear this view is at the top right. |
 | Pictures | Any size can be attached. A photo is shrunk on the device until it fits its share of what one message may carry (the endpoint takes about 4.5 MB of pictures a request), first by quality and then by size, and nothing is stored. Settings' "Largest picture sent" caps what is sent, not what is picked. A text file is read only as far as it is used. |
-| Bin | The amount beside the name; Delete forever on the left and Restore on the right, half the width each. |
+| Bin | A row is the entry: its name, description and date, the amount in one right-aligned column. On a computer a quiet Restore and a small red Delete forever sit on the row's own line, lined up down the list; on a phone the row opens its sheet, where Delete forever is on the left and Restore on the right, half the width each. Delete forever is a dialog wanting the record number typed (owner, 27 October 2026: "Fix the bin ui more cleaner"). |
+| Planner | Rows as the Bin's. Month groups are a quiet uppercase label with the count and the total, no rule under them (owner, 27 October 2026: "I dont like the line"). A pill only when the state needs one. The sheet's lesser actions (Link a payment I added, Skip it, Remove) are outlined buttons, Remove with red text, so they read in both themes (owner: "i CANNOT SEE THE BUTTONS"). |
 
 ### 2.4 Radius, borders, elevation
 
@@ -465,7 +466,7 @@ All badges: `micro`, 22px tall, 8px horizontal padding, never interactive unless
 
 ### 3.8 Navigation
 
-**Desktop sidebar**: 240px, `--surface`, 1px right hairline. Items 40px, `radius-md`, icon + label. Active: `--brand-100` fill, `--brand-700` text, `body-strong`. Hover: `--surface-hover`.
+**Desktop sidebar**: 240px, `--surface`, 1px right hairline. Items 40px, `radius-md`, icon + label. Active: `--brand-100` fill, `--brand-700` text, `body-strong`. Hover: `--surface-hover`. The record screens (Statements, Bin, Activity, Settings) sit a little apart from the money screens. Under them the balances show Spending open and the other groups folded, each with its total, and a group that is all zero is not shown; a fold the owner opens stays open on that device. On a window under 820px tall the items are 36px (owner, 27 October 2026: "the side panel is now overcrowded").
 
 **Phone bottom nav**: 5 items max, 56px + safe area, `--surface`, 1px top hairline. Icon 24px + `micro` label. Active in `--brand-700`. The centre slot is a raised circular **＋** in `--ink` with the plus in `--surface` (`--ink-2` on hover and while Add is open), 56px, `--shadow-raised`, the most-used action gets the best position. It is not green: the owner found the green Add ugly on 25 October 2026, and green stays the mark of the screen you are on. The bar always holds five, so Add always has a centre: with AI switched off, Insights takes the AI tab's slot (Dashboard, Database, Add, Budget, Insights).
 

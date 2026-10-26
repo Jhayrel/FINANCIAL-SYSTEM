@@ -164,7 +164,13 @@
 .fms-btn--danger:hover:not(:disabled) { background: var(--over-bg); }
 .fms-btn--danger:active:not(:disabled) { filter: brightness(0.96); }
 
-/* A quiet button whose action removes something turns red when you reach for it. */
+/*
+ * A quiet button whose action removes something is red at rest, on a
+ * computer too: grey until hovered, "Delete forever" and "Remove" read as
+ * labels, and on the dark theme as nothing at all (owner, 27 October 2026:
+ * "i CANNOT SEE THE BUTTONS"). Red text only; still no border or fill.
+ */
+.fms-btn--ghost.fms-btn--tone-danger { color: var(--over); }
 .fms-btn--tone-danger:hover:not(:disabled) { color: var(--over); }
 
 /* ══ Fields, §3.2 ═══════════════════════════════════════════════════════════ */

@@ -5,8 +5,8 @@
 import { describe, expect, it } from "vitest";
 
 import { addDays } from "./dates";
-import { asksToPlan, costHint, dayFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "./planIntent";
-import { planKinds, planWallets } from "./planner";
+import { asksToPlan, costHint, dayFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan, whenFor } from "./planIntent";
+import { NO_DATE, planKinds, planWallets } from "./planner";
 import type { ReferenceLists, Transaction } from "./types";
 
 const asOf = "2026-10-26";
@@ -79,15 +79,32 @@ describe("a plan for a later day goes on the Planner", () => {
     expect(read("I am planning to buy a new phone in 2027")).toMatchObject({ kind: "later", plans: [{ due: "2027-12-31" }] });
   });
 
-  it("takes the thing from the first clause, and a day not known as not said (owner, 27 October 2026)", () => {
+  it("takes the thing from the first clause; a month with no day is that month, and no idea when is no date (owner, 27 October 2026)", () => {
     expect(read("I plan to pay my tuition next month but the date is unknown")).toMatchObject({
       kind: "later",
       title: "Tuition",
       amountSaid: false,
-      dueSaid: false,
-      plans: [{ title: "Tuition", amount: null, due: "2026-11-30", item: "School" }],
+      plans: [{ title: "Tuition", amount: null, due: "2026-11-30", dueKind: "month", item: "School" }],
     });
-    expect(read("I plan to pay my tuition next month, 9k, not sure when exactly")).toMatchObject({ kind: "later", dueSaid: false, plans: [{ amount: 900_000, due: "2026-11-30" }] });
+    expect(read("I plan to pay my tuition next month, 9k, not sure when exactly")).toMatchObject({ kind: "later", plans: [{ amount: 900_000, due: "2026-11-30", dueKind: "month" }] });
+    // Nothing said, or "no idea when": no date at all, never a day picked for them.
+    expect(read("I'm planning to buy a laptop, no idea when")).toMatchObject({ kind: "later", dueSaid: false, plans: [{ due: NO_DATE, dueKind: "none" }] });
+    expect(read("I'm planning a trip to Baguio, 5000")).toMatchObject({ kind: "later", dueSaid: false, plans: [{ amount: 500_000, due: NO_DATE, dueKind: "none" }] });
+    expect(read("I'm planning a trip to Baguio in December, 5000")).toMatchObject({ kind: "later", plans: [{ due: "2026-12-31", dueKind: "month" }] });
+    expect(read("I'm planning a trip to Baguio on Dec 20, 5000")).toMatchObject({ kind: "later", plans: [{ due: "2026-12-20", dueKind: "day" }] });
+    expect(read("I am planning to buy a new phone next year, 25k")).toMatchObject({ kind: "later", plans: [{ due: "2027-12-31", dueKind: "year" }] });
+  });
+
+  it("reads how much of the date is known", () => {
+    expect(whenFor("by nov 15", asOf)).toEqual({ due: "2026-11-15", kind: "day" });
+    expect(whenFor("tomorrow", asOf)).toEqual({ due: "2026-10-27", kind: "day" });
+    expect(whenFor("on friday", asOf)).toEqual({ due: "2026-10-30", kind: "day" });
+    expect(whenFor("next month", asOf)).toEqual({ due: "2026-11-30", kind: "month" });
+    expect(whenFor("in december", asOf)).toEqual({ due: "2026-12-31", kind: "month" });
+    expect(whenFor("in 2 months", asOf)).toEqual({ due: "2026-12-31", kind: "month" });
+    expect(whenFor("in 2027", asOf)).toEqual({ due: "2027-12-31", kind: "year" });
+    expect(whenFor("no idea when", asOf)).toBeNull();
+    expect(whenFor("nothing said", asOf)).toBeNull();
   });
 
   it("says it was asked too, so the question is answered first", () => {
@@ -149,6 +166,9 @@ describe("a Plan line from the model", () => {
     expect(line).toBe("Tuition, PHP 9,000.00, by 2026-11-15");
     expect(readPlanLine(line, ctx)).toMatchObject({ title: "Tuition", amount: 900_000, due: "2026-11-15", item: "School" });
     expect(readPlanLine("Trip, by 2026-12-20", ctx)).toBeNull();
+    expect(readPlanLine("Tuition, PHP 9,000.00, in November 2026", ctx)).toMatchObject({ due: "2026-11-30", dueKind: "month" });
+    expect(readPlanLine("New phone, PHP 25,000.00, in 2027", ctx)).toMatchObject({ amount: 2_500_000, due: "2027-12-31", dueKind: "year" });
+    expect(readPlanLine("Trip, PHP 5,000.00, no date yet", ctx)).toMatchObject({ amount: 500_000, due: NO_DATE, dueKind: "none" });
     expect(readPlanLine("Tuition, PHP 9,000.00, by 2026-01-15", ctx)).toBeNull();
   });
 });

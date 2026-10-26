@@ -12,6 +12,19 @@
  * each Restore button a hand's width from the item it restores, so the space
  * goes to what the list could not say: how much of each kind is binned, and
  * what bringing rows back would do to each wallet before you do it.
+ *
+ * ── The rows (owner, 27 October 2026: "Fix the bin ui more cleaner") ──────
+ *
+ * Every row carried a green Restore and a red Delete forever, with the amount
+ * on a line of its own and the Restore wandering left and right with it: one
+ * main button a row, against the style guide's one a region. Now a row is the
+ * entry, its amount in one right-aligned column, and on a computer a quiet
+ * Restore and a small Delete forever on the same line, lined up down the list.
+ * A tap on the entry opens its sheet with everything about it; on a phone that
+ * sheet is where the two actions are, side by side, Restore under the thumb,
+ * as a Database row's. Deleting forever is a dialog that wants the record
+ * number typed, never a box opening inside the list. The type filter is the
+ * Database's dropdown chip on a phone.
  */
 
 import { shortDays } from "../domain/covers";
@@ -26,7 +39,11 @@ import {
   Money,
   SegmentedControl,
 } from "../components/primitives";
-import { SearchInput, TextInput } from "../components/forms";
+import { FilterChip } from "../components/FilterChip";
+import { Field, SearchInput, TextInput } from "../components/forms";
+import { Sheet } from "../components/Sheet";
+import type { Plan } from "../domain/planner";
+import { useMediaQuery } from "./useMediaQuery";
 import { binCounts, restoreImpact } from "../domain/binView";
 import { formatMoney } from "../domain/money";
 import { matchesSearch, parseSearch } from "../domain/search";
@@ -59,6 +76,7 @@ export function Bin({
   onRestore,
   onRestoreMany,
   onPurge,
+  plans = [],
 }: {
   deleted: readonly DeletedTransaction[];
   onRestore: (id: string) => void;
@@ -66,7 +84,11 @@ export function Bin({
   onRestoreMany?: ((ids: readonly string[]) => void) | undefined;
   /** Absent when the ledger is in Firestore, where nothing can be destroyed. */
   onPurge?: ((id: string) => void) | undefined;
+  /** The Planner's plans, so a binned payment says which plan it paid. */
+  plans?: readonly Plan[] | undefined;
 }) {
+  const phone = useMediaQuery("(max-width: 639px)");
+  const [opened, setOpened] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
@@ -104,6 +126,10 @@ export function Bin({
 
   const target = deleted.find((d) => d.id === confirming);
   const expected = target ? String(target.recordNumber).padStart(4, "0") : "";
+  const open = opened ? deleted.find((d) => d.id === opened) ?? null : null;
+  /** The plan a binned entry paid: restoring it marks the plan paid again (docs/16-PLANNER.md, P4.8). */
+  const planOf = (id: string): Plan | undefined => plans.find((p) => p.entryIds.includes(id));
+  const no = (n: number): string => `#${String(n).padStart(4, "0")}`;
 
   const filterOptions: { id: TypeFilter; label: string }[] = [
     { id: "all", label: `All ${counts.all.count}` },
@@ -146,16 +172,32 @@ export function Bin({
               }}
               placeholder="Search words, #0442, >1000, P500"
             />
-            <SegmentedControl
-              options={filterOptions}
-              value={type}
-              onChange={(id) => {
-                setType(id);
-                setLimit(PAGE);
-              }}
-              scroll
-              label="Type"
-            />
+            {phone ? (
+              // One dropdown chip on a phone, as the Database and Activity have (style guide 3.14c).
+              <div className="fms-dbfilterrow" role="group" aria-label="Filters">
+                <FilterChip
+                  label="Type"
+                  value={type}
+                  on={type !== "all"}
+                  options={filterOptions.map((o) => ({ id: o.id, label: o.id === "all" ? `All types (${counts.all.count})` : `${o.id} (${counts[o.id].count})` }))}
+                  onChange={(id) => {
+                    setType(id as TypeFilter);
+                    setLimit(PAGE);
+                  }}
+                />
+              </div>
+            ) : (
+              <SegmentedControl
+                options={filterOptions}
+                value={type}
+                onChange={(id) => {
+                  setType(id);
+                  setLimit(PAGE);
+                }}
+                scroll
+                label="Type"
+              />
+            )}
           </div>
         )}
 
@@ -228,48 +270,40 @@ export function Bin({
         ) : (
           /* The one part that scrolls on a desktop: the title, search and Select all stay put. */
           <div className="fms-binscroll">
-            <ul className="fms-binlist" style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {shown.map((t) => (
-                <li key={t.id} className="fms-dbrow">
-                  <div className="fms-dbrow-main">
+            <ul className="fms-binlist">
+              {shown.map((t) => {
+                const paidPlan = planOf(t.id);
+                return (
+                  <li key={t.id} className="fms-binrow">
                     {onRestoreMany && (
-                      <label className="fms-dbpick">
-                        <input
-                          type="checkbox"
-                          checked={picked.has(t.id)}
-                          onChange={() => toggle(t.id)}
-                          aria-label={`Select record ${t.recordNumber}`}
-                        />
+                      <label className="fms-dbpick fms-binrow-pick">
+                        <input type="checkbox" checked={picked.has(t.id)} onChange={() => toggle(t.id)} aria-label={`Select record ${t.recordNumber}`} />
                       </label>
                     )}
-                    <div className="fms-dbrow-text">
-                      <div className="fms-dbrow-title">
+                    <button type="button" className="fms-binrow-main" onClick={() => setOpened(t.id)} aria-label={`${t.item || "Uncategorised"}, ${no(t.recordNumber)}: open its details`}>
+                      <span className="fms-binrow-title">
                         <span className="t-body-strong fms-truncate">{t.item || "Uncategorised"}</span>
                         <FlowBadge flow={TONE[t.type]} />
-                      </div>
-                      <div className="t-caption fms-truncate" style={{ color: "var(--ink-2)" }}>
-                        {t.description || "No description"}
-                      </div>
-                      <div className="t-micro" style={{ color: "var(--ink-3)" }}>
-                        #{String(t.recordNumber).padStart(4, "0")} · {shortDays(t)}
-                        {t.deletedAt && (
-                          <>
-                            {" · "}
-                            <span style={{ whiteSpace: "nowrap" }}>deleted {t.deletedAt.slice(0, 10)}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="fms-binactions">
+                      </span>
+                      <span className="t-caption fms-truncate fms-binrow-desc">{t.description || "No description"}</span>
+                      <span className="t-micro fms-binrow-meta">
+                        {no(t.recordNumber)} · {shortDays(t)}
+                        {t.deletedAt ? ` · binned ${binnedOn(t.deletedAt)}` : ""}
+                        {paidPlan ? ` · paid "${paidPlan.title}"` : ""}
+                      </span>
+                    </button>
+                    <span className="fms-binrow-amount">
                       <Money value={t.total} />
-                      <Button size="sm" variant="primary" onClick={() => onRestore(t.id)}>
+                    </span>
+                    <span className="fms-binrow-actions">
+                      <Button size="sm" onClick={() => onRestore(t.id)}>
                         Restore
                       </Button>
                       {onPurge && (
                         <Button
                           size="sm"
-                          variant="danger"
+                          variant="ghost"
+                          tone="danger"
                           onClick={() => {
                             setConfirming(t.id);
                             setTyped("");
@@ -278,47 +312,10 @@ export function Bin({
                           Delete forever
                         </Button>
                       )}
-                    </div>
-                  </div>
-
-                  {confirming === t.id && onPurge && (
-                    <div style={{ marginTop: "var(--space-3)" }}>
-                      <Alert status="over" title={`Permanently delete record #${expected}?`}>
-                        This cannot be undone. Type <strong>{expected}</strong> to confirm.
-                        <div
-                          style={{
-                            display: "flex",
-                            flexWrap: "wrap",
-                            gap: "var(--space-2)",
-                            marginTop: "var(--space-3)",
-                            maxWidth: 420,
-                          }}
-                        >
-                          <span style={{ flex: "1 1 8rem", minWidth: 0 }}>
-                            <TextInput
-                              value={typed}
-                              onChange={setTyped}
-                              placeholder={expected}
-                              ariaLabel={`Type ${expected} to confirm`}
-                            />
-                          </span>
-                          <Button
-                            variant="danger"
-                            disabled={typed.trim() !== expected}
-                            onClick={() => {
-                              onPurge(t.id);
-                              setConfirming(null);
-                            }}
-                          >
-                            Delete
-                          </Button>
-                          <Button onClick={() => setConfirming(null)}>Cancel</Button>
-                        </div>
-                      </Alert>
-                    </div>
-                  )}
-                </li>
-              ))}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
 
             {matching.length > shown.length && (
@@ -334,6 +331,121 @@ export function Bin({
           </div>
         )}
       </Card>
+
+      {open && !confirming && (
+        <Sheet
+          title={open.item || "Uncategorised"}
+          subtitle={`${no(open.recordNumber)} · ${shortDays(open)}`}
+          dialog={!phone}
+          onClose={() => setOpened(null)}
+          actions={
+            <>
+              {onPurge && (
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    setConfirming(open.id);
+                    setTyped("");
+                  }}
+                >
+                  Delete forever
+                </Button>
+              )}
+              <Button
+                variant="primary"
+                onClick={() => {
+                  onRestore(open.id);
+                  setOpened(null);
+                }}
+              >
+                Restore
+              </Button>
+            </>
+          }
+        >
+          <dl className="fms-rowfacts">
+            <div>
+              <dt>Amount</dt>
+              <dd>
+                <Money value={open.total} />
+              </dd>
+            </div>
+            {open.fee > 0 && (
+              <div>
+                <dt>Fee</dt>
+                <dd>{formatMoney(open.fee)}</dd>
+              </div>
+            )}
+            <div>
+              <dt>Type</dt>
+              <dd>
+                <FlowBadge flow={TONE[open.type]} />
+              </dd>
+            </div>
+            {(open.fromWallet || open.toWallet) && (
+              <div>
+                <dt>{open.fromWallet && open.toWallet ? "From, to" : open.toWallet ? "Into" : "From"}</dt>
+                <dd>{[open.fromWallet, open.toWallet].filter(Boolean).join(" to ")}</dd>
+              </div>
+            )}
+            {open.description.trim() && (
+              <div>
+                <dt>Description</dt>
+                <dd>{open.description}</dd>
+              </div>
+            )}
+            {open.notes.trim() && (
+              <div>
+                <dt>Notes</dt>
+                <dd>{open.notes}</dd>
+              </div>
+            )}
+            {open.deletedAt && (
+              <div>
+                <dt>Binned</dt>
+                <dd>{binnedOn(open.deletedAt)}</dd>
+              </div>
+            )}
+          </dl>
+          <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+            {planOf(open.id)
+              ? `It paid the plan "${planOf(open.id)?.title}". While it is here the plan reads as open again; restoring it marks the plan paid again.`
+              : "It counts toward no balance or total while it is here. Restoring puts it back exactly as it was."}
+          </p>
+        </Sheet>
+      )}
+
+      {target && onPurge && (
+        <Sheet
+          title={`Delete ${no(target.recordNumber)} forever?`}
+          subtitle={`${target.item || "Uncategorised"}, ${formatMoney(target.total)}`}
+          dialog={!phone}
+          onClose={() => setConfirming(null)}
+          actions={
+            <>
+              <Button onClick={() => setConfirming(null)}>Keep it</Button>
+              <Button
+                variant="danger"
+                disabled={typed.trim() !== expected}
+                onClick={() => {
+                  onPurge(target.id);
+                  setConfirming(null);
+                  setOpened(null);
+                }}
+              >
+                Delete forever
+              </Button>
+            </>
+          }
+        >
+          <Alert status="over" title="This cannot be undone">
+            It leaves the bin and the ledger for good. Restore puts it back instead.
+          </Alert>
+          <Field label={`Type ${expected} to confirm`} htmlFor="bin-confirm">
+            <TextInput id="bin-confirm" value={typed} onChange={setTyped} placeholder={expected} ariaLabel={`Type ${expected} to confirm`} />
+          </Field>
+        </Sheet>
+      )}
 
       {deleted.length > 0 && (
         <aside className="fms-binrail" aria-label="About the bin">

@@ -15,11 +15,74 @@
  */
 import { addDays, daysBetween, formatMedium, lastOfMonth, MONTH_NAMES } from "./dates";
 import { walletBalance } from "./balances";
+import { wholeRows } from "./covers";
 import { formatMoney, type Centavos } from "./money";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 import type { Account } from "./accounts";
 
 export type PlanStatus = "open" | "done" | "skipped" | "removed";
+
+/**
+ * How much of the day is known (owner, 27 October 2026: "WHAT IF I DONT HAVE
+ * A DAY SPECIFICS YET LIKE NO DATE LIKE NO IDEA WHEN"). A day; a month, with
+ * `due` its last day ("sometime in November", counted in November); a year,
+ * with `due` its last day; or none, with `due` NO_DATE, counted nowhere until
+ * it has one. Absent is a day, as every plan before this was.
+ */
+export type DueKind = "day" | "month" | "year" | "none";
+
+/** The day a plan with no date holds: after every real day, so it is never due, never counted, and sorts last. */
+export const NO_DATE: IsoDate = "9999-12-31";
+
+export const dueKindOf = (p: { readonly dueKind?: DueKind | undefined }): DueKind => p.dueKind ?? "day";
+
+/** The `due` a kind of date stands for: a month's or a year's last day, or NO_DATE. */
+export function dueFor(kind: DueKind, due: IsoDate): IsoDate {
+  if (kind === "none") return NO_DATE;
+  if (!ISO.test(due)) return due;
+  if (kind === "month") return lastOfMonth(Number(due.slice(0, 4)), Number(due.slice(5, 7)));
+  if (kind === "year") return `${due.slice(0, 4)}-12-31`;
+  return due;
+}
+
+/** The end of the month after this one: where "next month" lands. */
+export function nextMonthEnd(asOf: IsoDate): IsoDate {
+  const y = Number(asOf.slice(0, 4));
+  const m = Number(asOf.slice(5, 7));
+  return m === 12 ? lastOfMonth(y + 1, 1) : lastOfMonth(y, m + 1);
+}
+
+/** When it is to be paid, in words: "November 15, 2026", "Sometime in November 2026", "Sometime in 2027", "No date yet". */
+export function whenOf(plan: { readonly due: IsoDate; readonly dueKind?: DueKind | undefined }): string {
+  const kind = dueKindOf(plan);
+  if (kind === "none" || plan.due === NO_DATE) return "No date yet";
+  if (kind === "month") return `Sometime in ${MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1] ?? ""} ${plan.due.slice(0, 4)}`;
+  if (kind === "year") return `Sometime in ${plan.due.slice(0, 4)}`;
+  return formatMedium(plan.due);
+}
+
+/** "by November 15, 2026", "sometime in November 2026", "with no date yet": a sentence's when. */
+export function byWhen(plan: { readonly due: IsoDate; readonly dueKind?: DueKind | undefined }): string {
+  const when = whenOf(plan);
+  if (when === "No date yet") return "with no date yet";
+  return dueKindOf(plan) === "day" ? `by ${when}` : when.charAt(0).toLowerCase() + when.slice(1);
+}
+
+/** Where a plan counts, for a card's row: "Counted in November 2026", "Not counted until it has a date". */
+export function countedWords(plan: Pick<Plan, "due" | "dueKind" | "setAside" | "goalId">): string {
+  if (!plan.setAside || plan.goalId) return "Not counted";
+  if (plan.due === NO_DATE) return "Not counted until it has a date";
+  return dueKindOf(plan) === "day" ? "Counted in its month" : `Counted in ${MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1] ?? ""} ${plan.due.slice(0, 4)}`;
+}
+
+/** The sentence a card says about where a new plan counts. */
+export function countsSentence(plan: Pick<Plan, "due" | "dueKind" | "setAside" | "goalId" | "title">): string {
+  if (plan.due === NO_DATE) return `With no date it is counted nowhere, not in safe to spend and not in a month's budget, until it has one: say "move the ${plan.title.toLowerCase()} plan to December", or a day, when you know.`;
+  if (!plan.setAside || plan.goalId) return "It is not counted in safe to spend.";
+  return dueKindOf(plan) === "day"
+    ? "It is counted in safe to spend in its month, like a bill still to pay."
+    : `It is counted in ${MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1] ?? ""}'s safe to spend; set the day when you know.`;
+}
 
 export interface PlanMove {
   readonly from: IsoDate;
@@ -34,8 +97,10 @@ export interface Plan {
   readonly title: string;
   /** What it is planned to cost. */
   readonly amount: Centavos;
-  /** The day it is to be paid by. */
+  /** The day it is to be paid by: a month's or year's last day for those, NO_DATE for none (`dueKind`). */
   readonly due: IsoDate;
+  /** How much of the date is known; absent is a day. */
+  readonly dueKind?: DueKind | undefined;
   /** The kind of spending, from the owner's list (School, Food, a bill), or "". */
   readonly item: string;
   /** The wallet it should come out of, or "" for not said. */
@@ -65,6 +130,8 @@ export interface PlanInput {
   readonly title: string;
   readonly amount: Centavos | null;
   readonly due: IsoDate;
+  /** Absent is a day. */
+  readonly dueKind?: DueKind | undefined;
   readonly item: string;
   readonly wallet: string;
   readonly goalId?: string | undefined;
@@ -155,6 +222,19 @@ export function planWallets(reference: Pick<ReferenceLists, "wallets" | "savings
   );
 }
 
+/**
+ * Plans after a rename in Settings: a wallet's name on the plans paid from
+ * it, a kind's on the plans filed under it. Entries, debts and limits were
+ * renamed and plans were not, so a plan kept the old name and its wallet or
+ * kind stopped matching (27 October 2026 sync audit). The same array back
+ * when nothing names it.
+ */
+export function renamePlans(plans: readonly Plan[], field: "wallet" | "item", from: string, to: string): readonly Plan[] {
+  const same = (v: string): boolean => v.trim().toLowerCase() === from.trim().toLowerCase();
+  if (!plans.some((p) => same(p[field]))) return plans;
+  return plans.map((p) => (same(p[field]) ? { ...p, [field]: to } : p));
+}
+
 /** A bill or subscription is set aside already every month (P4.16). */
 export function isRecurringKind(item: string, reference: Pick<ReferenceLists, "bills" | "subscriptions">): boolean {
   const name = item.trim().toLowerCase();
@@ -183,13 +263,16 @@ export function checkPlan(
   const notes: string[] = [];
   if (!input.title.trim()) problems.push("Say what it is for.");
   if (input.amount === null || !Number.isInteger(input.amount) || input.amount <= 0) problems.push("Put in how much it will cost.");
-  if (!ISO.test(input.due)) problems.push("Pick the day it is to be paid by.");
+  const kind = dueKindOf(input);
+  const due = dueFor(kind, input.due);
+  if (!ISO.test(due)) problems.push(kind === "month" ? "Pick the month it is to be paid in." : "Pick the day it is to be paid by.");
   if (problems.length > 0) return { problems, notes };
-  if (input.due < context.asOf) notes.push(`${formatMedium(input.due)} has already passed. If it is already paid, record the payment instead, so the money leaves its wallet.`);
+  if (due < context.asOf) notes.push(`${whenOf({ due, dueKind: kind })} has already passed. If it is already paid, record the payment instead, so the money leaves its wallet.`);
   const same = context.plans.find(
-    (p) => p.id !== context.editing && p.status === "open" && p.title.trim().toLowerCase() === input.title.trim().toLowerCase() && p.due.slice(0, 7) === input.due.slice(0, 7),
+    (p) => p.id !== context.editing && p.status === "open" && p.title.trim().toLowerCase() === input.title.trim().toLowerCase() && p.due.slice(0, 7) === due.slice(0, 7),
   );
-  if (same) notes.push(`"${same.title}" is already planned for ${MONTH_NAMES[Number(same.due.slice(5, 7)) - 1]}, ${formatMoney(same.amount)}. Saving this makes a second one.`);
+  if (same) notes.push(`"${same.title}" is already planned${same.due === NO_DATE ? ", with no date yet" : ` for ${MONTH_NAMES[Number(same.due.slice(5, 7)) - 1]}`}, ${formatMoney(same.amount)}. Saving this makes a second one.`);
+  if (kind === "none" && input.setAside && !input.goalId) notes.push("With no date it is counted nowhere yet: not in safe to spend, not in a month's budget. Give it a month or a day when you know, and it counts there.");
   if (input.setAside && isRecurringKind(input.item, context.reference)) {
     notes.push(`${input.item} is a bill or subscription, already set aside every month. Counting this plan in safe to spend too would set the money aside twice.`);
   }
@@ -203,7 +286,8 @@ export function makePlan(input: PlanInput, asOf: IsoDate, by: "owner" | "ai", id
     id,
     title: input.title.trim(),
     amount: input.amount ?? 0,
-    due: input.due,
+    due: dueFor(dueKindOf(input), input.due),
+    ...(dueKindOf(input) !== "day" ? { dueKind: dueKindOf(input) } : {}),
     item: input.item.trim(),
     wallet: input.wallet.trim(),
     ...(input.goalId ? { goalId: input.goalId } : {}),
@@ -221,24 +305,40 @@ export function makePlan(input: PlanInput, asOf: IsoDate, by: "owner" | "ai", id
 
 /** The plan with what was changed, its history kept. A new date is a move (P4.12). */
 export function editPlan(plan: Plan, input: PlanInput, asOf: IsoDate): Plan {
-  const moved = input.due !== plan.due ? [...plan.moves, { from: plan.due, to: input.due, on: asOf }] : plan.moves;
+  const kind = dueKindOf(input);
+  const due = dueFor(kind, input.due);
   return tidy({
     ...plan,
     title: input.title.trim(),
     amount: input.amount ?? plan.amount,
-    due: input.due,
+    due,
+    dueKind: kind === "day" ? undefined : kind,
     item: input.item.trim(),
     wallet: input.wallet.trim(),
     goalId: input.goalId || undefined,
     need: input.need,
     setAside: input.setAside && !input.goalId,
     notes: input.notes.trim(),
-    moves: moved,
+    moves: movesAfter(plan, due, asOf),
   });
 }
 
-export const movePlan = (plan: Plan, to: IsoDate, asOf: IsoDate): Plan =>
-  to === plan.due ? plan : { ...plan, due: to, moves: [...plan.moves, { from: plan.due, to, on: asOf }] };
+/**
+ * The moves after a new date: one more when a real day changed. Giving a
+ * plan with no date its first one, or taking a date away, is not a move
+ * (there was no day to move from, or to).
+ */
+function movesAfter(plan: Plan, to: IsoDate, asOf: IsoDate): readonly PlanMove[] {
+  if (to === plan.due || plan.due === NO_DATE || to === NO_DATE) return plan.moves;
+  return [...plan.moves, { from: plan.due, to, on: asOf }];
+}
+
+/** To a day, a month, a year, or no date (`kind`, a day when not said). */
+export const movePlan = (plan: Plan, to: IsoDate, asOf: IsoDate, kind: DueKind = "day"): Plan => {
+  const due = dueFor(kind, to);
+  if (due === plan.due && kind === dueKindOf(plan)) return plan;
+  return tidy({ ...plan, due, dueKind: kind === "day" ? undefined : kind, moves: movesAfter(plan, due, asOf) });
+};
 
 /** Payments linked. Done when they cover it, or when the owner says the last one settled it (P4.5). */
 export function linkPayments(plan: Plan, ids: readonly string[], transactions: readonly Transaction[], asOf: IsoDate, settles = false): Plan {
@@ -273,7 +373,14 @@ export const planAgain = (plan: Plan, due: IsoDate, asOf: IsoDate, by: "owner" |
 
 /** What the linked entries still in the ledger paid, and when the last was. */
 export function paidSoFar(plan: Plan, transactions: readonly Transaction[]): { readonly amount: Centavos; readonly lastOn: IsoDate | null; readonly gone: readonly string[] } {
-  const byId = new Map(transactions.map((t) => [t.id, t] as const));
+  /*
+   * Whole rows: an entry covering several days is spread into a row a day
+   * (`spreadCovered`, ids "t1@0", "t1@1") for the daily figures, and the
+   * Dashboard reads those. Looked up by the spread ids, the paid ₱9,000.00
+   * "Trip to Abra" read as unpaid and was set aside a second time
+   * (27 October 2026: ₱11,200.00 on the Dashboard, ₱2,200.00 on the Planner).
+   */
+  const byId = new Map(wholeRows(transactions).map((t) => [t.id, t] as const));
   let amount = 0;
   let lastOn: IsoDate | null = null;
   const gone: string[] = [];
@@ -350,9 +457,14 @@ export function viewOf(
     state = "paid";
     const on = paid.lastOn ?? plan.closedOn ?? asOf;
     const late = daysBetween(plan.due, on);
-    const when = late > 0 ? `${plural(late, "day")} late` : late < 0 ? "early" : "on the day";
+    // With no date it was neither early nor late; a month's is late only after the month.
+    const when = plan.due === NO_DATE ? "" : late > 0 ? `${plural(late, "day")} late` : late < 0 ? (dueKindOf(plan) === "day" ? "early" : "in time") : "on the day";
     const diff = paid.amount - plan.amount;
-    words = `Paid ${when}, ${shortDay(on)}${paid.amount > 0 && diff > 0 ? `, ${formatMoney(diff)} more than planned` : paid.amount > 0 && diff < 0 ? `, ${formatMoney(-diff)} less than planned` : ""}`;
+    words = `Paid${when ? ` ${when}` : ""}, ${shortDay(on)}${paid.amount > 0 && diff > 0 ? `, ${formatMoney(diff)} more than planned` : paid.amount > 0 && diff < 0 ? `, ${formatMoney(-diff)} less than planned` : ""}`;
+  } else if (plan.due === NO_DATE) {
+    // No date: never due, never late, counted nowhere (DueKind).
+    state = paid.amount > 0 ? "partly" : "later";
+    words = paid.amount > 0 ? `Paid ${formatMoney(paid.amount)} of ${formatMoney(plan.amount)}, no date yet for the rest` : "No date yet";
   } else if (daysTo < 0) {
     state = "overdue";
     words = `${plural(-daysTo, "day")} late${paid.amount > 0 ? `, ${formatMoney(paid.amount)} of ${formatMoney(plan.amount)} paid` : ""}`;
@@ -364,10 +476,18 @@ export function viewOf(
     words = "Due today";
   } else if (daysTo <= 7) {
     state = "soon";
-    words = daysTo === 1 ? "Due tomorrow" : `Due in ${plural(daysTo, "day")}`;
+    words = dueKindOf(plan) !== "day" ? `By the end of ${MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1]}, in ${plural(daysTo, "day")}` : daysTo === 1 ? "Due tomorrow" : `Due in ${plural(daysTo, "day")}`;
   } else {
     state = "later";
-    words = daysTo <= 60 ? `Due in ${plural(daysTo, "day")}` : `Due ${MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1]} ${plan.due.slice(0, 4)}`;
+    // A month or a year is said as one: "in 35 days" read as a day nobody chose.
+    words =
+      dueKindOf(plan) !== "day"
+        ? plan.due.slice(0, 7) === asOf.slice(0, 7)
+          ? "Sometime this month"
+          : whenOf(plan)
+        : daysTo <= 60
+          ? `Due in ${plural(daysTo, "day")}`
+          : `Due ${MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1]} ${plan.due.slice(0, 4)}`;
   }
 
   const goalAccount = plan.goalId ? accounts.find((a) => a.id === plan.goalId) : undefined;
@@ -376,7 +496,7 @@ export function viewOf(
       ? (() => {
           const holds = walletBalance(transactions, goalAccount.name);
           const still = Math.max(0, left - holds);
-          return { name: goalAccount.name, holds, perMonth: still > 0 && daysTo > 0 ? Math.ceil(still / monthsTo(asOf, plan.due)) : 0, missing: false };
+          return { name: goalAccount.name, holds, perMonth: still > 0 && daysTo > 0 && plan.due !== NO_DATE && monthsTo(asOf, plan.due) >= 2 ? Math.ceil(still / monthsTo(asOf, plan.due)) : 0, missing: false };
         })()
       : { name: "", holds: 0, perMonth: 0, missing: true }
     : null;
@@ -391,7 +511,8 @@ export function viewOf(
     words,
     goneNote,
     goal,
-    perMonth: open && !plan.goalId && daysTo > 31 ? Math.ceil(left / monthsTo(asOf, plan.due)) : 0,
+    // Only when it spreads over two months or more: "₱9,000.00 a month" for one 35 days off said nothing (27 October 2026).
+    perMonth: open && !plan.goalId && plan.due !== NO_DATE && daysTo > 31 && monthsTo(asOf, plan.due) >= 2 ? Math.ceil(left / monthsTo(asOf, plan.due)) : 0,
     counts: open && plan.setAside && !plan.goalId && plan.due <= monthEnd && left > 0,
   };
 }
@@ -413,9 +534,17 @@ export function groupOpen(views: readonly PlanView[], asOf: IsoDate): PlanGroup[
   const yearOut = addDays(asOf, 365).slice(0, 7);
   for (const v of open) {
     const month = v.plan.due.slice(0, 7);
-    const key = v.state === "overdue" ? "0-overdue" : month === thisMonth ? `1-${month}` : month <= yearOut ? `2-${month}` : "3-later";
+    const key = v.plan.due === NO_DATE ? "4-nodate" : v.state === "overdue" ? "0-overdue" : month === thisMonth ? `1-${month}` : month <= yearOut ? `2-${month}` : "3-later";
     const title =
-      key === "0-overdue" ? "Overdue" : key.startsWith("1-") ? "This month" : key === "3-later" ? "Later" : `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+      key === "4-nodate"
+        ? "No date yet"
+        : key === "0-overdue"
+          ? "Overdue"
+          : key.startsWith("1-")
+            ? "This month"
+            : key === "3-later"
+              ? "Later"
+              : `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
     const g = groups.get(key) ?? { title, views: [] };
     g.views.push(v);
     groups.set(key, g);
@@ -448,6 +577,69 @@ export function plannedIn(views: readonly PlanView[], year: number, month: numbe
     .map((v) => ({ name: v.plan.title, amount: v.left }));
 }
 
+/** What is planned in a month, by the Budget's two parts. */
+export interface PlannedMonth {
+  /** Spending: everything filed under a kind of spending, or under no kind. */
+  readonly spending: Centavos;
+  /** Bills and subscriptions: plans filed under one. */
+  readonly billsSubs: Centavos;
+  readonly total: Centavos;
+  /** Soonest first. */
+  readonly views: readonly PlanView[];
+  /** The ones counted in spending, soonest first. */
+  readonly spendingViews: readonly PlanView[];
+}
+
+/**
+ * The open plans a month's budget will have to carry: what is left of each
+ * due in the month, and for the month running the overdue ones too, which
+ * will be paid in it if they are paid at all. Budget, Insights and the
+ * Dashboard read this one figure (27 October 2026: "Add also the planned in
+ * budget and insight and other parts like make sure it makes sense").
+ *
+ * Unlike safe to spend, a plan saved in a goal counts here: safe to spend
+ * asks what the spending wallets can let go of, and a goal's money is apart
+ * from them; a budget measures spending, and paying for the phone from the
+ * goal is spending all the same.
+ */
+export function plannedForBudget(
+  views: readonly PlanView[],
+  year: number,
+  month: number,
+  reference: Pick<ReferenceLists, "bills" | "subscriptions">,
+  asOf: IsoDate,
+): PlannedMonth {
+  const key = `${year}-${String(month).padStart(2, "0")}`;
+  const running = key === asOf.slice(0, 7);
+  const open = views
+    .filter((v) => v.state !== "paid" && v.state !== "skipped" && v.state !== "removed" && v.left > 0)
+    .filter((v) => v.plan.due.slice(0, 7) === key || (running && v.plan.due < `${key}-01`))
+    .sort((a, b) => a.plan.due.localeCompare(b.plan.due));
+  let spending = 0;
+  let billsSubs = 0;
+  const spendingViews: PlanView[] = [];
+  for (const v of open) {
+    if (isRecurringKind(v.plan.item, reference)) billsSubs += v.left;
+    else {
+      spending += v.left;
+      spendingViews.push(v);
+    }
+  }
+  return { spending, billsSubs, total: spending + billsSubs, views: open, spendingViews };
+}
+
+/** What is planned on each day from a day on: the Insights calendar's marks. Open plans only, what is left of each. */
+export function plannedByDay(views: readonly PlanView[], from: IsoDate): Map<IsoDate, Centavos> {
+  const out = new Map<IsoDate, Centavos>();
+  for (const v of views) {
+    if (v.state === "paid" || v.state === "skipped" || v.state === "removed" || v.left <= 0 || v.plan.due < from) continue;
+    // Only a day is a day on the calendar: "sometime in November" is not November 30.
+    if (dueKindOf(v.plan) !== "day") continue;
+    out.set(v.plan.due, (out.get(v.plan.due) ?? 0) + v.left);
+  }
+  return out;
+}
+
 /**
  * Whether the money covers each open plan this month and the overdue ones, in
  * due order, after the bills and debt payments and the plans before it (P4.4).
@@ -473,14 +665,16 @@ export function coverage(views: readonly PlanView[], free: Centavos): Map<string
  * filed as School was offered as the PHP 9,000.00 tuition (owner's screen,
  * 27 October 2026).
  */
-export function likelyPayments(plan: Plan, transactions: readonly Transaction[], allPlans: readonly Plan[]): Transaction[] {
+export function likelyPayments(plan: Plan, rows: readonly Transaction[], allPlans: readonly Plan[]): Transaction[] {
+  // The entries the ledger holds, not a day's share of one (see `paidSoFar`).
+  const transactions = wholeRows(rows);
   const linked = new Set(allPlans.flatMap((p) => p.entryIds));
   const words = plan.title
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((w) => w.length >= 3);
   const from = addDays(plan.createdOn < plan.due ? plan.createdOn : plan.due, -7);
-  const to = addDays(plan.due, 60);
+  const to = plan.due === NO_DATE ? NO_DATE : addDays(plan.due, 60);
   const left = Math.max(0, plan.amount - paidSoFar(plan, transactions).amount) || plan.amount;
   const scored = transactions
     .filter((t) => t.type === "Spending" && !linked.has(t.id) && t.date >= from && t.date <= to)
@@ -507,7 +701,7 @@ export function movesWords(plan: Plan): string {
 
 /** One line for the activity trail and the chat. */
 export function planLine(plan: Plan): string {
-  return `${plan.title}, ${formatMoney(plan.amount)}, by ${formatMedium(plan.due)}${plan.item ? `, ${plan.item}` : ""}${plan.wallet ? `, from ${plan.wallet}` : ""}`;
+  return `${plan.title}, ${formatMoney(plan.amount)}, ${byWhen(plan)}${plan.item ? `, ${plan.item}` : ""}${plan.wallet ? `, from ${plan.wallet}` : ""}`;
 }
 
 /**

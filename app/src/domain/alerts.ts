@@ -47,7 +47,7 @@ import { monthTotals } from "./totals";
 import { overdueGoals } from "./goalClose";
 import { patternFindings, type Finding } from "./patterns";
 import type { Account } from "./accounts";
-import { coverage, likelyPayments, viewOf, type Plan } from "./planner";
+import { byWhen, coverage, likelyPayments, viewOf, whenOf, type Plan } from "./planner";
 import type { Centavos } from "./money";
 import type { Budgets, IsoDate, SpendingType, Transaction } from "./types";
 
@@ -1136,7 +1136,7 @@ export function planAlerts(plans: readonly Plan[], transactions: readonly Transa
         id: `plan-overdue-${p.id}`,
         level: "over",
         area: "planner",
-        title: `${p.title} was due ${formatMedium(p.due)}`,
+        title: `${p.title} was due ${whenOf(p).replace(/^Sometime in /, "in ")}`,
         detail: `${money(v.left)} not paid yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} on. Pay it, move the date or skip it in the Planner.${short.get(p.id) ? ` The wallets are ${money(short.get(p.id) ?? 0)} short for it after the bills.` : ""}`,
         weight: 92,
       });
@@ -1149,7 +1149,7 @@ export function planAlerts(plans: readonly Plan[], transactions: readonly Transa
         level: gap > 0 ? "warn" : "info",
         area: "planner",
         title: `${p.title} is due ${v.daysTo === 0 ? "today" : v.daysTo === 1 ? "tomorrow" : `in ${v.daysTo} days`}`,
-        detail: `${money(v.left)} by ${formatMedium(p.due)}. ${gap > 0 ? `The wallets are ${money(gap)} short for it after the bills and the plans before it: pay part, move the date, or pay it from savings.` : p.setAside && !p.goalId ? "Set aside already: the money is there." : "Record it in the Planner when it is paid."}`,
+        detail: `${money(v.left)} ${byWhen(p)}. ${gap > 0 ? `The wallets are ${money(gap)} short for it after the bills and the plans before it: pay part, move the date, or pay it from savings.` : p.setAside && !p.goalId ? "Set aside already: the money is there." : "Record it in the Planner when it is paid."}`,
         weight: gap > 0 ? 80 : 55,
       });
     }
@@ -1173,7 +1173,7 @@ export function planAlerts(plans: readonly Plan[], transactions: readonly Transa
         level: "info",
         area: "planner",
         title: `${v.goal.name} needs ${money(v.goal.perMonth)} a month for ${p.title}`,
-        detail: `It holds ${money(v.goal.holds)} of the ${money(v.left)} to pay by ${formatMedium(p.due)}.`,
+        detail: `It holds ${money(v.goal.holds)} of the ${money(v.left)} to pay ${byWhen(p)}.`,
         weight: 40,
       });
     }

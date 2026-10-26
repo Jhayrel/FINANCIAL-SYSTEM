@@ -137,6 +137,14 @@ owner's own choice on each plan. With no plans, every figure is unchanged.
 - **Planner** (sidebar on a computer, More on a phone): the list by month,
   the summary, and every action.
 - **Dashboard**: the month card says what is planned this month, set aside.
+  Plans due in the next days are in its "coming up" list beside the bills,
+  with Pay. P9 says how every screen reads the same figure.
+- **Budget**: "Planned this month" under the tracks, and the planner's
+  chips "Usual + plans" and "With plans" for a month ahead (P9).
+- **Insights**: the calendar rings a day with a plan due and says the
+  amount; Still ahead lists the plans with Pay now.
+- **Bin**: a binned entry that paid a plan says so in its sheet, and the
+  plan goes back to unpaid only by what that entry paid.
 - **Bell**: due soon, due today, overdue, short, a payment to link, a goal
   behind.
 - **Chat and AI**: everything above, in words and cards.
@@ -220,3 +228,54 @@ and subscriptions; Pay from is grouped Spending wallets, Savings.
 Classes are `fms-plans` and `fms-plan*`. `fms-planner` is the Budget
 screen's panel: the first Planner shared it and squeezed Budget's "Budget for
 the month" into a narrow column.
+
+## P9. A day, a month, or no date yet; and one figure on every screen (owner, 27 October 2026)
+
+"WHAT IF I DONT HAVE A DAY SPECIFICS YET LIKE NO DATE LIKE NO IDEA WHEN /
+FIX ALSO THE AI", with a screenshot of a card that had picked November 30
+"as no day was said". A plan's `dueKind` says how much of the date is known:
+
+| Kind | `due` | Shown as | Counted |
+|---|---|---|---|
+| day | the day | "November 15, 2026" | in its month, as before |
+| month | the month's last day | "Sometime in November 2026" | in that month: its safe to spend once it is the running month, its budget always |
+| year | 31 December | "Sometime in 2027" | as a month plan in December |
+| none | `9999-12-31` (`NO_DATE`) | "No date yet" | nowhere: not safe to spend, not a month's budget, never late, never in the bell |
+
+- **Nothing is invented.** No day said is no date, never the month's end.
+  "Next month" or "in December" is a month plan; "next year" or "in 2027" a
+  year plan. Plans saved before this have no `dueKind` and read as day plans,
+  so nothing that was counted stops counting.
+- **The form**: When is three choices, A day, A month (a list of months, not
+  the browser's month box, which desktop Safari and Firefox show as text) and
+  No date yet. A new plan starts on A month, next month.
+- **Moving**: Move the date takes any of the three; a no-date plan given a
+  month or a day starts counting there. A move is kept on the plan only
+  between real days.
+- **The chat**: "I'm planning to buy a laptop, no idea when" is a no-date
+  card; "move the laptop plan to December" and "the laptop plan has no date
+  yet" are cards. Every card and list says the when as above, and the card's
+  Safe to spend row says "Not counted until it has a date" or "Counted in
+  November 2026".
+- **The model** writes "Plan: Laptop, PHP 35,000.00, no date yet", "in
+  November 2026" or "in 2027", and never invents a day.
+
+**One figure on every screen** (owner: "Make everything sync properly all
+parts / Add also the planned in budget and insight and other aparts"). Two
+functions, used everywhere:
+
+- `plannedForBudget(views, year, month, reference, asOf)`: open plans due in
+  the month, and in the running month the overdue ones too, split into
+  spending and bills/subscriptions. Budget, the month note, the next-month
+  answer and the AI read it.
+- `plannedByDay`: day plans only, for the Insights calendar and the
+  Dashboard's coming up.
+
+Safe to spend still sets aside only plans with Count it in safe to spend on
+and no goal (P5). A spread payment (one entry split over months on the
+Database) is folded back into its whole entry before a plan is matched to
+it: on 27 October the Dashboard said a paid ₱9,000.00 plan still needed
+₱11,200.00 while the Planner said ₱2,200.00, because one read the spread
+rows and the other the entry. A renamed kind or wallet in Settings renames it
+on every plan too (`renamePlans`).
+

@@ -52,6 +52,7 @@ import { ON_BEHALF } from "../domain/debtWords";
 import { getMonth, getYear, MONTH_NAMES_SHORT, monthName } from "../domain/dates";
 import { formatMoney, type Centavos } from "../domain/money";
 import { carryOver, carryWords, isOpenBill, monthBrief, nextMonthStart, yesterdayOf } from "../domain/monthPlan";
+import { plannedForBudget, viewOf } from "../domain/planner";
 import { monthlyTotalsForYear, spendingRanking, totalSpending } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction, WalletBalance } from "../domain/types";
 import type { InsightsAt } from "./Insights";
@@ -87,6 +88,7 @@ export function Dashboard({
   onRecordDebt,
   onGo,
   onOpenInsights,
+  onOpenPlan,
   settlementFor,
   onSettle,
 }: {
@@ -110,6 +112,8 @@ export function Dashboard({
   onGo: (place: Place) => void;
   /** Insights on a month, a year, or a kind of spending's entries. */
   onOpenInsights?: ((at: InsightsAt) => void) | undefined;
+  /** A plan on the Planner, opened to record its payment. */
+  onOpenPlan?: ((planId: string, pay: boolean) => void) | undefined;
 }) {
   const year = getYear(asOf);
   const month = getMonth(asOf);
@@ -211,6 +215,30 @@ export function Dashboard({
       action: "Record payment",
       record: () => onRecordBill(b),
     })),
+    /*
+     * The Planner's plans due by the month's end, overdue ones too: still to
+     * pay this month as much as a bill is (27 October 2026). The same plans
+     * the Budget screen and Insights list (`plannedForBudget`); one filed
+     * under a bill is that bill, above, so it is not listed twice.
+     */
+    ...(onOpenPlan
+      ? plannedForBudget(
+          (reference.plans ?? []).map((p) => viewOf(p, { transactions, accounts: [], asOf })),
+          year,
+          month,
+          reference,
+          asOf,
+        ).spendingViews.map((v) => ({
+          key: `plan-${v.plan.id}`,
+          name: v.plan.title,
+          what: v.paid > 0 ? `Planned, ${formatMoney(v.paid)} paid` : "Planned",
+          amount: v.left,
+          days: v.daysTo as number | undefined,
+          on: v.plan.due as IsoDate | undefined,
+          action: "Pay",
+          record: () => onOpenPlan(v.plan.id, true),
+        }))
+      : []),
   ].sort((a, b) => (a.days ?? 99) - (b.days ?? 99));
 
   const paidBills = brief.bills.bills.filter((b) => b.state === "paid");
@@ -469,7 +497,7 @@ export function Dashboard({
           subtitle={
             brief.bills.bills.length > 0
               ? `${paidBills.length} of ${brief.bills.bills.length} bills paid, ${formatMoney(brief.bills.paid)} so far`
-              : "Bills, subscriptions and debt payments"
+              : "Bills, subscriptions, debt payments and plans"
           }
         >
           {upcoming.length === 0 ? (

@@ -93,6 +93,8 @@ import { daysInMonth, formatMedium, getMonth, getYear, MONTH_NAMES } from "../do
 import { PACE_FROM_DAY } from "../domain/alerts";
 import { budgetFromIncome, checkSplit, incomeBudget, type IncomeBudget } from "../domain/incomeBudget";
 import { monthBrief } from "../domain/monthPlan";
+import { plannedForBudget, viewOf, whenOf, type PlannedMonth } from "../domain/planner";
+import { Icon } from "../components/Icon";
 import { formatMoney, type Centavos } from "../domain/money";
 import type {
   BudgetRevision,
@@ -171,6 +173,7 @@ export function Budget({
   onReplaceYear,
   onRecordBill,
   onShowRows,
+  onOpenPlanner,
   stopped = NO_STOPPED,
   ai,
 }: {
@@ -189,6 +192,8 @@ export function Budget({
   onRecordBill?: ((bill: MonthBill) => void) | undefined;
   /** Opens the Database searched for these words. */
   onShowRows?: ((query: string) => void) | undefined;
+  /** The Planner, where the month's plans are kept. */
+  onOpenPlanner?: (() => void) | undefined;
 }) {
   const asOfYear = getYear(asOf);
   const asOfMonth = getMonth(asOf);
@@ -244,6 +249,24 @@ export function Budget({
   const { view, lines, bills, suggestions } = m;
   const previous = suggestions.previous;
   const a = view.assessment;
+  /*
+   * The Planner's open plans this month's budget will have to carry
+   * (`plannedForBudget`, the same figure Insights and the Dashboard read).
+   * A month that is over has none: what was paid is in its spending.
+   */
+  const planned = useMemo(
+    () =>
+      view.phase === "past"
+        ? null
+        : plannedForBudget(
+            (reference.plans ?? []).map((p) => viewOf(p, { transactions, accounts: [], asOf })),
+            year,
+            month,
+            reference,
+            asOf,
+          ),
+    [view.phase, reference, transactions, year, month, asOf],
+  );
   /*
    * The budget moved by the money that came in (owner, 12 October 2026):
    * only for the month that is running, where safe to spend is known.
@@ -550,6 +573,10 @@ export function Budget({
             </p>
           )}
 
+          {planned && planned.total > 0 && (
+            <PlannedInMonth planned={planned} name={name} noPlan={noPlan} spendingLeft={a.spending.remaining} billsLeft={a.billsSubs.remaining} asOf={asOf} onOpenPlanner={onOpenPlanner} />
+          )}
+
           {/*
             The bell's test, on the spending track, from day 7: "October ends
             near PHP 43,661.02" came from a repair and the bills read as a
@@ -628,6 +655,7 @@ export function Budget({
             onUndo={undo}
             spent={{ spending: a.spending.spent, billsSubs: a.billsSubs.spent }}
             most={incomeView ? incomeView.most : null}
+            planned={planned}
           />
           {incomeView && lock.state !== "closed" && (incomeView.budget > 0 || incomeView.cameIn > 0) && (
             <IncomeSplitCard key={`${year}-${month}-${incomeView.cameIn}-${incomeView.budget}`} view={incomeView} monthName={name} onSave={saveFromIncome} />
@@ -1076,6 +1104,7 @@ function Planner({
   onUndo,
   spent,
   most = null,
+  planned = null,
 }: {
   year: number;
   month: number;
@@ -1090,6 +1119,8 @@ function Planner({
   spent: { spending: Centavos; billsSubs: Centavos };
   /** The most the spending budget can be with the money held now; null for a month that is not running. */
   most?: Centavos | null | undefined;
+  /** The Planner's plans still to pay in the month, by part (`plannedForBudget`). */
+  planned?: PlannedMonth | null | undefined;
 }) {
   const name = monthLabel(month);
   const hasPlan = s.current.spending + s.current.billsSubs > 0;
@@ -1280,6 +1311,11 @@ function Planner({
                     <Button size="sm" onClick={() => setBills(s.bills.total)}>
                       {name}'s bills, {formatMoney(s.bills.total)}
                     </Button>
+                    {planned && planned.billsSubs > 0 && (
+                      <Button size="sm" onClick={() => setBills(s.bills.total + planned.billsSubs)}>
+                        With plans, {formatMoney(s.bills.total + planned.billsSubs)}
+                      </Button>
+                    )}
                   </div>
                   <p className="t-caption fms-planner-note">{billNames}.</p>
                 </>
@@ -1310,7 +1346,18 @@ function Planner({
                       Keep a fifth, {formatMoney(s.spendingKeepFifth)}
                     </Button>
                   )}
+                  {/* The usual month with what the Planner has for this one on top (27 October 2026). */}
+                  {planned && planned.spending > 0 && s.spendingUsual !== null && (
+                    <Button size="sm" onClick={() => setSpending((s.spendingUsual ?? 0) + planned.spending)}>
+                      Usual + plans, {formatMoney(s.spendingUsual + planned.spending)}
+                    </Button>
+                  )}
                 </div>
+              )}
+              {planned && planned.spending > 0 && (
+                <p className="t-caption fms-planner-note">
+                  Planned in {name}: {planned.spendingViews.map((v) => `${v.plan.title} ${formatMoney(v.left)}`).join(", ")}.
+                </p>
               )}
               <p className="t-caption fms-planner-note">
                 {limitsTotal > 0
@@ -1613,6 +1660,71 @@ function LimitEditor({
 // ── Parts ──────────────────────────────────────────────────────────────────
 
 /** One track: what went out, the budget, a bar with today's pace on it, and the verdict. */
+/**
+ * What the Planner has for the month, against what its budget has left: the
+ * plans, and how much of the budget they take (27 October 2026, "Add also
+ * the planned in budget"). Nothing here is spent yet, so the bars above do
+ * not move; this says what is coming out of what they show as left.
+ */
+function PlannedInMonth({
+  planned,
+  name,
+  noPlan,
+  spendingLeft,
+  billsLeft,
+  asOf,
+  onOpenPlanner,
+}: {
+  planned: PlannedMonth;
+  name: string;
+  noPlan: boolean;
+  spendingLeft: Centavos;
+  billsLeft: Centavos;
+  asOf: string;
+  onOpenPlanner?: (() => void) | undefined;
+}) {
+  const fit = (part: string, plannedPart: Centavos, left: Centavos): string =>
+    plannedPart <= 0
+      ? ""
+      : left >= plannedPart
+        ? `The ${part} budget has ${formatMoney(left)} left; with ${formatMoney(plannedPart)} planned, ${formatMoney(left - plannedPart)} is free for the rest.`
+        : `${formatMoney(plannedPart)} planned is ${formatMoney(plannedPart - Math.max(0, left))} more than the ${part} budget has left. Raise it on the right, or move a plan to another month.`;
+  const words = noPlan
+    ? `No budget for ${name} yet: "Usual + plans" on the right sets one with them in it.`
+    : [fit("spending", planned.spending, spendingLeft), fit("bills", planned.billsSubs, billsLeft)].filter(Boolean).join(" ");
+  const over = !noPlan && (planned.spending > Math.max(0, spendingLeft) || planned.billsSubs > Math.max(0, billsLeft));
+  return (
+    <section className="fms-budgetplanned" aria-label={`Planned in ${name}`}>
+      <div className="fms-budgetplanned-head">
+        <span className="t-label">Planned in {name}, not paid yet</span>
+        <Money value={planned.total} size="s" />
+      </div>
+      <ul className="fms-budgetplanned-rows">
+        {planned.views.map((v) => (
+          <li key={v.plan.id}>
+            <span className="t-body fms-truncate">{v.plan.title}</span>
+            <span className="t-caption fms-budgetplanned-when">{v.plan.due < asOf ? `${whenOf(v.plan)}, overdue` : whenOf(v.plan)}</span>
+            <Money value={v.left} size="s" />
+          </li>
+        ))}
+      </ul>
+      <p className="t-caption fms-plannote">
+        {over && (
+          <span className="fms-plannote-icon" style={{ color: "var(--over)" }} aria-hidden>
+            <Icon name="statusOver" size={16} />
+          </span>
+        )}
+        <span>{words}</span>
+      </p>
+      {onOpenPlanner && (
+        <button type="button" className="t-caption fms-linkbtn" onClick={onOpenPlanner}>
+          Open the Planner
+        </button>
+      )}
+    </section>
+  );
+}
+
 function TrackRow({ label, track, pace }: { label: string; track: BudgetTrack; pace?: number | undefined }) {
   const none = track.status === "NO BUDGET SET";
   const over = track.status === "OVER THE BUDGET";

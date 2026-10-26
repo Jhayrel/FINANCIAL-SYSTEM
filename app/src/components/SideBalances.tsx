@@ -13,7 +13,13 @@
  *     away with one click. What was folded is remembered on this device.
  *   - A group shows four accounts, the largest first (Spending keeps the
  *     order Settings gives it), and the rest behind "Show 3 more".
- *   - Accounts at nothing, outside Spending, are one quiet line.
+ *   - Accounts at nothing, outside Spending, are one quiet line, and a
+ *     group with nothing in any of its accounts is left out: it is on the
+ *     Dashboard and in Settings (owner, 27 October 2026: "the side panel is
+ *     now overcrowded fix it", over Reserve ₱0.00 and Extra Cash ₱0.00).
+ *   - Every group but Spending starts folded to its heading and total; the
+ *     spending wallets are the ones looked at every day. One click opens a
+ *     group, and that is remembered on this device.
  *
  * Nothing here is stored in the database: which groups are folded is a
  * preference of this screen, like "Clear this view".
@@ -38,6 +44,8 @@ export interface SideOwed {
 /** Accounts shown in a group before "Show N more". */
 const VISIBLE = 4;
 const FOLDED_KEY = "fms.side.folded";
+/** Groups other than Spending start folded; the ones opened are kept here. */
+const UNFOLDED_KEY = "fms.side.unfolded";
 const OPENED_KEY = "fms.side.opened";
 
 function readSet(key: string): Set<string> {
@@ -95,6 +103,7 @@ export function SideBalances({
   lowThreshold: number;
 }) {
   const [folded, setFolded] = useState<Set<string>>(() => readSet(FOLDED_KEY));
+  const [unfolded, setUnfolded] = useState<Set<string>>(() => readSet(UNFOLDED_KEY));
   const [opened, setOpened] = useState<Set<string>>(() => readSet(OPENED_KEY));
 
   const toggle = (set: Set<string>, key: string, store: string, apply: (next: Set<string>) => void): void => {
@@ -106,14 +115,16 @@ export function SideBalances({
   };
 
   const group = (heading: string, total: number | null, count: number, body: ReactNode) => {
-    const isFolded = folded.has(heading);
+    // Spending is open until folded; every other group is folded until opened.
+    const daily = heading === spendingHeading;
+    const isFolded = daily ? folded.has(heading) : !unfolded.has(heading);
     return (
       <div key={heading} className="fms-sidegroup">
         <button
           type="button"
           className="fms-sidegroup-head"
           aria-expanded={!isFolded}
-          onClick={() => toggle(folded, heading, FOLDED_KEY, setFolded)}
+          onClick={() => (daily ? toggle(folded, heading, FOLDED_KEY, setFolded) : toggle(unfolded, heading, UNFOLDED_KEY, setUnfolded))}
           title={isFolded ? `Show ${heading.toLowerCase()}` : `Fold ${heading.toLowerCase()} away`}
         >
           <Chevron open={!isFolded} />
@@ -137,6 +148,8 @@ export function SideBalances({
 
       {groups.map(([heading, list]) => {
         const spending = heading === spendingHeading;
+        // A group with nothing in it says nothing worth the room.
+        if (!spending && list.every((w) => w.balance === 0)) return null;
         const full = spending ? [...list] : list.filter((w) => w.balance !== 0).sort((a, b) => b.balance - a.balance);
         const empty = spending ? [] : list.filter((w) => w.balance === 0);
         const showAll = opened.has(heading);

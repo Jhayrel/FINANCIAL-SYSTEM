@@ -568,13 +568,23 @@ function notesFor(
   }
 
   if (safe) {
-    const reserved = safe.reservedBills + safe.reservedDebt;
-    const what =
+    /*
+     * Everything still due, plans set aside included, named as what it is.
+     * With only plans due it said "The ₱0.00 of bills and subscriptions
+     * still due this month is ₱1,499.15 more than your wallets hold"
+     * (27 October 2026).
+     */
+    const reserved = safe.reservedBills + safe.reservedDebt + safe.reservedPlans;
+    // Worded as before when no plan is set aside, so every figure without plans reads exactly as it did.
+    const owed =
       safe.reservedDebt > 0
         ? safe.reservedBills > 0
           ? "bills, subscriptions and debt payments"
           : "debt payments"
-        : "bills and subscriptions";
+        : safe.reservedBills > 0 || safe.reservedPlans === 0
+          ? "bills and subscriptions"
+          : "";
+    const what = safe.reservedPlans > 0 ? (owed ? `${owed.replace(" and debt payments", ", debt payments")} and plans set aside` : "plans set aside") : owed;
 
     if (safe.wallets < 0) {
       // Said as what it is. "The ₱0.00 of bills still due is more than your wallets hold" was true and meant nothing.

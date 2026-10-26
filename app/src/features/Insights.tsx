@@ -91,6 +91,7 @@ import {
 } from "../domain/insightWindow";
 import { kindOf } from "../domain/kinds";
 import { formatMoney, type Centavos } from "../domain/money";
+import { plannedByDay, viewOf } from "../domain/planner";
 import { isOpenBill, monthBrief } from "../domain/monthPlan";
 import { costOf, incomeOf } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "../domain/types";
@@ -178,6 +179,7 @@ export function Insights({
   onEditRow,
   onAdd,
   onBin,
+  onOpenPlan,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -197,6 +199,8 @@ export function Insights({
   onAdd?: ((draft: Draft) => void) | undefined;
   /** A row to the bin. */
   onBin?: ((id: string) => void) | undefined;
+  /** A plan on the Planner, opened, or opened to record its payment. */
+  onOpenPlan?: ((planId: string, pay: boolean) => void) | undefined;
 }) {
   const nowYear = getYear(asOf);
   const nowMonth = getMonth(asOf);
@@ -333,8 +337,13 @@ export function Insights({
       const got = incomeOf(t);
       if (got > 0) came.set(t.date, (came.get(t.date) ?? 0) + got);
     }
-    return { spent, came };
-  }, [transactions, monthStart]);
+    // The Planner's open plans on the days still to come: marked, with what is left of each (docs/16-PLANNER.md, P6).
+    const planned = plannedByDay(
+      (reference.plans ?? []).map((p) => viewOf(p, { transactions, accounts: [], asOf })),
+      asOf,
+    );
+    return { spent, came, planned };
+  }, [transactions, monthStart, reference.plans, asOf]);
 
   /** Months of the shown year with anything in them, for the month strip. */
   const activeMonths = useMemo(() => {
@@ -778,6 +787,7 @@ export function Insights({
           const spent = days.spent.get(date) ?? 0;
           const came = days.came.get(date) ?? 0;
           const ahead = date > asOf;
+          const planned = date >= asOf ? (days.planned.get(date) ?? 0) : 0;
           const heat = ahead || spent === 0 ? 0 : Math.min(4, Math.ceil((spent / maxDay) * 4));
           const inPick = picked !== null && date >= sel.start && date <= sel.end;
           const edge = inPick && (date === sel.start || date === sel.end);
@@ -801,12 +811,13 @@ export function Insights({
               aria-pressed={inPick}
               aria-label={`${formatMedium(date)}: ${spent > 0 ? `spent ${formatMoney(spent)}` : "nothing spent"}${
                 came > 0 ? `, ${formatMoney(came)} came in` : ""
-              }${ahead ? ", still ahead" : ""}`}
+              }${planned > 0 ? `, ${formatMoney(planned)} planned` : ""}${ahead ? ", still ahead" : ""}`}
               onClick={(e) => pickDay(date, e.shiftKey)}
             >
               <span className="fms-ical-num">{Number(date.slice(8))}</span>
               {came > 0 && <span aria-hidden className="fms-ical-in" />}
-              {spent > 0 && <span className="fms-ical-amt">{compactPeso(spent)}</span>}
+              {planned > 0 && <span aria-hidden className="fms-ical-plan" />}
+              {spent > 0 ? <span className="fms-ical-amt">{compactPeso(spent)}</span> : planned > 0 && <span className="fms-ical-amt is-planned">{compactPeso(planned)}</span>}
             </button>
           );
         })}
@@ -827,6 +838,11 @@ export function Insights({
         <span>
           <span className="fms-ical-dot" /> Money came in
         </span>
+        {days.planned.size > 0 && (
+          <span>
+            <span className="fms-ical-planmark" /> Planned
+          </span>
+        )}
         <span>
           <span className="fms-ical-ring" /> Today
         </span>
@@ -1127,7 +1143,7 @@ export function Insights({
           <>
             {report.expected.length === 0 ? (
               <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-                No bill, debt payment or usual spending falls on {multi ? "these days" : "that day"}.
+                No bill, debt payment, plan or usual spending falls on {multi ? "these days" : "that day"}.
               </p>
             ) : (
               <ul className="fms-ical-rows">
@@ -1142,13 +1158,20 @@ export function Insights({
                             : "Bill"
                           : e.kind === "debt"
                             ? "Debt payment"
-                            : "Usual spending, about"}
+                            : e.kind === "plan"
+                              ? "Planned"
+                              : "Usual spending, about"}
                         {" · "}
                         {e.times > 1 ? `${e.times} times from ${shortDay(e.on)}` : shortDay(e.on)}
                       </span>
                     </div>
                     <div className="fms-ical-row-end">
                       <Money value={e.amount} size="s" tone="var(--ink-2)" />
+                      {e.kind === "plan" && e.planId && onOpenPlan && (
+                        <button type="button" className="t-caption fms-linkbtn" onClick={() => onOpenPlan(e.planId ?? "", true)}>
+                          Pay now
+                        </button>
+                      )}
                       {e.kind === "bill" && onRecordBill && (
                         <button
                           type="button"

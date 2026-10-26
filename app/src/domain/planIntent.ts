@@ -29,11 +29,11 @@
  * Nothing here saves anything. Today's answer is the afford answer with the
  * day's figures; a later one is a Planner card to press.
  */
-import { addDays, dayOfWeek, formatMedium, lastOfMonth, MONTH_NAMES } from "./dates";
+import { addDays, MONTH_NAMES } from "./dates";
 import { formatMoney, withoutYears, type Centavos } from "./money";
 import { aheadMonthIn, plannedSpendIn } from "./plannedSpend";
-import { isRecurringKind, kindFromHistory, planKinds, type PlanInput } from "./planner";
-import { dayIn, sumIn } from "./plannerAsk";
+import { dueFor, isRecurringKind, kindFromHistory, NO_DATE, planKinds, type DueKind, type PlanInput } from "./planner";
+import { NO_DAY, sumIn, whenFor } from "./plannerAsk";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export interface PlanContext {
@@ -90,32 +90,8 @@ const ASKED = /\?|^\s*(?:what|how|can|could|should|would|will|is|am|do|does)\b|\
 
 const WANTS = /\b(?:want|treat|gadget|trip|travel|vacation|outing|concert|party|shopping|game|shoes|clothes|bag)\b/i;
 
-const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
-/** The day it is for, when one is said; null when none is. */
-export function dayFor(text: string, asOf: IsoDate): IsoDate | null {
-  const t = text.toLowerCase();
-  const said = dayIn(t, asOf);
-  if (said) return said;
-  const y = Number(asOf.slice(0, 4));
-  const wd = /\b(?:this\s+|next\s+|on\s+|sa\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/.exec(t);
-  if (wd) {
-    const want = WEEKDAYS.indexOf(wd[1] ?? "");
-    const now = dayOfWeek(asOf);
-    let ahead = (want - now + 7) % 7;
-    if (ahead === 0) ahead = 7;
-    return addDays(asOf, ahead);
-  }
-  if (/\bthis\s+weekend\b/.test(t)) return addDays(asOf, Math.max(1, (6 - dayOfWeek(asOf) + 7) % 7 || 7));
-  if (/\bthis\s+week\b/.test(t)) return addDays(asOf, (7 - dayOfWeek(asOf)) % 7 || 7);
-  if (/\bthis\s+month\b/.test(t)) return lastOfMonth(y, Number(asOf.slice(5, 7)));
-  if (/\bnext\s+year\b/.test(t)) return `${y + 1}-12-31`;
-  const year = /\b(?:in|by|for|on|this|sa|of)\s+(20\d{2})\b/.exec(t);
-  if (year && Number(year[1]) >= y) return `${year[1]}-12-31`;
-  if (/\b(?:christmas|pasko)\b/.test(t)) return `${asOf.slice(5) > "12-25" ? y + 1 : y}-12-25`;
-  if (/\bnew\s+year\b/.test(t)) return `${y}-12-31`;
-  return null;
-}
+export { dayFor, whenFor } from "./plannerAsk";
 
 /** What it is for, from the words after the verb: "a trip to Baguio", "my motor registration". */
 function thingIn(text: string): string {
@@ -133,6 +109,7 @@ function thingIn(text: string): string {
     .replace(/\b(?:on|by|for|in|due|before|sa)?\s*(?:next\s+(?:month|week|year)|this\s+(?:month|week|weekend|year)|end\s+of\s+(?:the\s+|this\s+)?month|tomorrow|bukas|today|tonight|now|ngayon|mamaya|later|this\s+(?:morning|afternoon|evening|noon)|in\s+\w+\s+(?:days?|weeks?|months?)|(?:on\s+)?the\s+\d{1,2}(?:st|nd|rd|th)|(?:this\s+|next\s+|on\s+)?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)|in\s+20\d{2}|christmas|pasko)\b/gi, " ")
     .replace(/(?:₱|php\s*)?\d[\d,]*(?:\.\d{1,2})?\s*k?\b/gi, " ")
     .replace(/\b(?:from|using|with|via)\s+(?:my\s+)?(?:cash|gcash|maya|bank|card|wallet|savings)\b/gi, " ")
+    .replace(new RegExp(NO_DAY.source, "gi"), " ")
     .replace(/\b(?:around|about|approximately|roughly|maybe|probably|worth|pesos?|php|for\s+it|for\s+now|na|po|lang|siguro)\b/gi, " ")
     .replace(/[,.:;!]+/g, " ")
     .replace(/\s+/g, " ")
@@ -206,13 +183,14 @@ export function costHint(thing: string, kind: string, ctx: PlanContext): string 
 }
 
 /** The plan for one thing, filled in as the Planner's form would be. */
-export function planInputFor(title: string, amount: Centavos | null, due: IsoDate, ctx: PlanContext, said = ""): PlanInput {
+export function planInputFor(title: string, amount: Centavos | null, due: IsoDate, ctx: PlanContext, said = "", dueKind: DueKind = "day"): PlanInput {
   const kind = kindOf(title, ctx);
   const wallet = [...ctx.reference.wallets, ...ctx.reference.savings].find((w) => new RegExp(`\\b(?:from|using|with|via)\\s+(?:my\\s+)?${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(said)) ?? "";
   return {
     title: titleOf(title),
     amount,
-    due,
+    due: dueFor(dueKind, due),
+    dueKind,
     item: kind,
     wallet,
     need: !WANTS.test(`${title} ${said}`),
@@ -221,12 +199,7 @@ export function planInputFor(title: string, amount: Centavos | null, due: IsoDat
   };
 }
 
-/** The end of the month after this one: the Planner's own default. */
-export function nextMonthEnd(asOf: IsoDate): IsoDate {
-  const y = Number(asOf.slice(0, 4));
-  const m = Number(asOf.slice(5, 7));
-  return m === 12 ? lastOfMonth(y + 1, 1) : lastOfMonth(y, m + 1);
-}
+export { nextMonthEnd } from "./planner";
 
 export function readPlanIntent(text: string, ctx: PlanContext): PlanIntent | null {
   const t = text.trim();
@@ -247,29 +220,35 @@ export function readPlanIntent(text: string, ctx: PlanContext): PlanIntent | nul
    * off as theirs (owner, 27 October 2026: "I plan to pay my tuition next
    * month but the date is unknown").
    */
-  const noDay = /\b(?:date|day|when)\b[^.?!]{0,20}\b(?:unknown|not\s+(?:sure|known|yet|set|final)|tba|tbd|undecided|walang\s+petsa|di\s+pa\s+alam|hindi\s+pa\s+alam)\b|\bnot\s+sure\s+(?:when|what\s+day|of\s+the\s+date)\b|\bno\s+(?:exact\s+)?(?:date|day)\s+yet\b/i.test(t);
-  const due = dayFor(t, ctx.asOf);
+  const noDay = NO_DAY.test(t);
+  const when = whenFor(t, ctx.asOf);
+  const due = when?.due ?? null;
   // A day already gone is not a plan: it is an entry to add, or a question about it.
   if (due !== null && due < ctx.asOf) return null;
-  if (due === ctx.asOf) return { kind: "today", thing, why: "day" };
-  if (due === null) {
+  if (due === ctx.asOf && when?.kind === "day") return { kind: "today", thing, why: "day" };
+  if (due === null && !noDay) {
     if (TODAY.test(t) || DAYS_PLACES.test(t)) return { kind: "today", thing, why: "words" };
     if (timesBought(thing || t, ctx) >= EVERYDAY) return { kind: "today", thing, why: "often" };
   }
   if (!thing) return null;
 
   const asked = ASKED.test(t);
-  // The month a question names, else the end of next month; said in the card.
+  /*
+   * The day, month or year said; else the month a question names; else no
+   * date at all. Nothing is given a day nobody said (owner, 27 October 2026:
+   * "LIKE NO DATE LIKE NO IDEA WHEN").
+   */
   const ahead = aheadMonthIn(t, ctx.asOf);
-  const payBy = due ?? (ahead ? lastOfMonth(ahead.year, ahead.month) : nextMonthEnd(ctx.asOf));
+  const dueKind: DueKind = when ? when.kind : ahead ? "month" : "none";
+  const payBy = due ?? (ahead ? dueFor("month", `${ahead.year}-${String(ahead.month).padStart(2, "0")}-01`) : NO_DATE);
   const sums = plannedSpendIn(t);
   if (sums.length > 1) {
     return {
       kind: "later",
-      plans: sums.map((s) => planInputFor(s.name, s.amount, payBy, ctx, t)),
+      plans: sums.map((s) => planInputFor(s.name, s.amount, payBy, ctx, t, dueKind)),
       title: titleOf(thing),
       amountSaid: true,
-      dueSaid: due !== null && !noDay,
+      dueSaid: dueKind !== "none",
       hint: "",
       asked,
     };
@@ -277,10 +256,10 @@ export function readPlanIntent(text: string, ctx: PlanContext): PlanIntent | nul
   const amount = sums[0]?.amount ?? sumIn(t);
   return {
     kind: "later",
-    plans: [planInputFor(thing, amount, payBy, ctx, t)],
+    plans: [planInputFor(thing, amount, payBy, ctx, t, dueKind)],
     title: titleOf(thing),
     amountSaid: amount !== null,
-    dueSaid: due !== null && !noDay,
+    dueSaid: dueKind !== "none",
     hint: amount === null ? costHint(thing, kind, ctx) : "",
     asked,
   };
@@ -323,9 +302,9 @@ export function namesIt(text: string, name: string): boolean {
 }
 
 /** "How much will it be?": the question when a plan was said with no amount, with what it cost before. */
-export function askAmountWords(title: string, hint: string, due: IsoDate, dueSaid: boolean): string {
+export function askAmountWords(title: string, hint: string, _due: IsoDate, dueSaid: boolean): string {
   return [
-    `How much will ${title.toLowerCase().startsWith("my ") ? title : `the ${title.charAt(0).toLowerCase()}${title.slice(1)}`} be? Say the amount${dueSaid ? "" : " and the day"}, like "5000${dueSaid ? "" : ` by ${formatMedium(due).replace(/, \d{4}$/, "")}`}", and it goes on the Planner as a card to press. Nothing is saved until you press it.`,
+    `How much will ${title.toLowerCase().startsWith("my ") ? title : `the ${title.charAt(0).toLowerCase()}${title.slice(1)}`} be? Say the amount${dueSaid ? "" : ", and when if you know it"}, like "5000"${dueSaid ? "" : ', "5000 by December 20" or "5000 in December"'}.${dueSaid ? "" : " With no date it is kept on the Planner and counted nowhere until it has one."} It comes back as a card to press; nothing is saved until you press it.`,
     hint,
   ]
     .filter(Boolean)
@@ -345,12 +324,15 @@ export function planLineIn(text: string): string {
 
 /** A "Plan:" line read into the Planner's form: what, how much, by when. Null when it says too little. */
 export function readPlanLine(line: string, ctx: PlanContext): PlanInput | null {
+  // "by 2026-11-15", "in November 2026", "in 2027", "no date yet".
   const iso = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(line)?.[1];
-  const due = iso ?? dayFor(line, ctx.asOf) ?? nextMonthEnd(ctx.asOf);
-  const amount = sumIn(line.replace(/\b20\d{2}-\d{2}-\d{2}\b/g, " "));
+  const when = iso ? { due: iso, kind: "day" as const } : NO_DAY.test(line) ? null : whenFor(line, ctx.asOf);
+  const kind: DueKind = when ? when.kind : "none";
+  const due = when ? when.due : NO_DATE;
+  const amount = sumIn(line.replace(/\b20\d{2}-\d{2}-\d{2}\b/g, " ").replace(/\b(?:in|by|of)\s+20\d{2}\b/gi, " "));
   const title = (line.split(/,|\s+(?:php|₱)\s*\d|\s+\d/i)[0] ?? "").replace(/^\s*(?:a|an|the|my)\s+/i, "").trim();
   if (!title || amount === null || due < ctx.asOf) return null;
   const wallet = /\bfrom\s+([^,]+?)\s*(?:,|$)/i.exec(line)?.[1]?.trim() ?? "";
-  const input = planInputFor(title, amount, due, ctx, line);
+  const input = planInputFor(title, amount, due, ctx, line, kind);
   return { ...input, wallet: [...ctx.reference.wallets, ...ctx.reference.savings].find((w) => w.toLowerCase() === wallet.toLowerCase()) ?? input.wallet };
 }

@@ -1820,6 +1820,39 @@ say how each now works.
   word now needs the noun ("the tuition plan"), not "I plan to".
 - Tests: `planIntent.test.ts` (37), `planner.test.ts` (22).
 
+### 2026-10-27, later: the Bin, plans on every screen, and plans with no date
+
+The owner: "Fix the bin ui more cleaner / Make everything sync properly all
+parts / Add also the planned in budget and insight and other aparts", then
+the sidebar ("overcrowded"), the Planner's group rule ("I dont like the
+line"), the sheet's buttons in dark mode ("i CANNOT SEE THE BUTTONS") and
+"WHAT IF I DONT HAVE A DAY SPECIFICS YET". `16-PLANNER.md` P6 and P9 and the
+style guide's Bin, Planner and sidebar lines say how each now works.
+
+- **Bin**: a row is the entry with its amount in one column; quiet Restore
+  and small Delete forever on a computer, a sheet on a phone; Delete forever
+  wants the record number typed. Its container query is 520px: at 600px the
+  card on a computer sat at the threshold and hid the actions.
+- **Sidebar**: record screens set apart; Spending open, the other groups
+  folded with their totals; all-zero groups hidden; 36px items under 820px.
+- **The sync fault**: the Dashboard said a paid ₱9,000.00 plan still needed
+  ₱11,200.00 and the Planner ₱2,200.00. `paidSoFar` and `likelyPayments`
+  read the Database's spread rows, so a paid entry spread over months looked
+  partly unpaid. Both now fold spread rows back (`wholeRows`); a test pins it.
+- **Plans everywhere**: Budget ("Planned this month", "Usual + plans"),
+  Insights (a ring on the day, Still ahead), the Dashboard's coming up, the
+  Bin's sheet, the month note ("plans set aside", its old words kept with no
+  plans). `plannedForBudget` and `plannedByDay` are the one source.
+- **No date, a month, a year** (`dueKind`, `NO_DATE`): the form's When, Move,
+  the chat and the model's Plan line. Old plans read as day plans.
+- **Renames**: a kind or wallet renamed in Settings is renamed on plans too.
+- Seen in the browser on a local copy of the owner's data, PC and phone,
+  light and dark: the Bin, the sidebar at 1000px and 760px tall, the Planner
+  form and sheet, Budget, Insights, the Dashboard, and the chat flows (today
+  and later, add it as a plan, edits, undo, no date, month, move). Not seen
+  against a live model.
+- Tests: `planIntent.test.ts` (38), `planner.test.ts` (27).
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

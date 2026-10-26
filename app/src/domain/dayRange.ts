@@ -16,6 +16,7 @@
  * due, `debtDue` for a debt, `learnPatterns` for a habit.
  */
 
+import { isRecurringKind, viewOf } from "./planner";
 import { learnPatterns } from "./allocation";
 import { billStatuses } from "./bills";
 import { debtDue, positionsOf, type Debt } from "./debt";
@@ -48,7 +49,9 @@ export function describeRange({ start, end }: DayRange): string {
 }
 
 export interface ExpectedItem {
-  readonly kind: "bill" | "debt" | "habit";
+  readonly kind: "bill" | "debt" | "habit" | "plan";
+  /** A plan's id, to open it on the Planner. */
+  readonly planId?: string | undefined;
   readonly name: string;
   /** The first day it is expected in the range. */
   readonly on: IsoDate;
@@ -179,6 +182,16 @@ export function rangeReport(input: {
       if (first) {
         expected.push({ kind: "habit", name: habit.name, on: first, amount: habit.averageAmount * times, times });
       }
+    }
+
+    /*
+     * The Planner's open plans due on these days, what is left of each (docs/16-PLANNER.md, P6).
+     * One filed under a bill or subscription is that bill, already above, so it is not said twice.
+     */
+    for (const v of (reference.plans ?? []).map((p) => viewOf(p, { transactions, accounts: [], asOf }))) {
+      if (v.state === "paid" || v.state === "skipped" || v.state === "removed" || v.left <= 0) continue;
+      if (v.plan.due < from || v.plan.due > end || isRecurringKind(v.plan.item, reference)) continue;
+      expected.push({ kind: "plan", planId: v.plan.id, name: v.plan.title, on: v.plan.due, amount: v.left, times: 1 });
     }
 
     expected.sort((a, b) => a.on.localeCompare(b.on) || b.amount - a.amount);

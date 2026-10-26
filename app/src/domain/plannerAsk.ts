@@ -9,15 +9,15 @@
  * 3000 on a trip next month, what budget should I set?" stay the questions
  * they are (`plannedSpend.ts`). Each change is a card to press.
  */
-import { addDays, formatMedium, lastOfMonth, MONTH_NAMES } from "./dates";
+import { addDays, dayOfWeek, lastOfMonth, MONTH_NAMES } from "./dates";
 import { formatMoney, parseAmount, withoutYears, type Centavos } from "./money";
-import { kindFromHistory, planKinds, type Plan, type PlanInput, type PlanView } from "./planner";
+import { byWhen, dueFor, kindFromHistory, NO_DATE, planKinds, whenOf, type DueKind, type Plan, type PlanInput, type PlanView } from "./planner";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export type PlannerAsk =
   | { readonly kind: "list" }
   | { readonly kind: "add"; readonly input: PlanInput }
-  | { readonly kind: "move"; readonly plan: Plan; readonly to: IsoDate }
+  | { readonly kind: "move"; readonly plan: Plan; readonly to: IsoDate; readonly toKind: DueKind }
   | { readonly kind: "amount"; readonly plan: Plan; readonly amount: Centavos }
   | { readonly kind: "skip"; readonly plan: Plan }
   | { readonly kind: "remove"; readonly plan: Plan }
@@ -64,6 +64,62 @@ export function dayIn(text: string, asOf: IsoDate): IsoDate | null {
   }
   return null;
 }
+
+const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+/** The day it is for, when one is said; null when none is. */
+export function dayFor(text: string, asOf: IsoDate): IsoDate | null {
+  const t = text.toLowerCase();
+  const said = dayIn(t, asOf);
+  if (said) return said;
+  const y = Number(asOf.slice(0, 4));
+  const wd = /\b(?:this\s+|next\s+|on\s+|sa\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/.exec(t);
+  if (wd) {
+    const want = WEEKDAYS.indexOf(wd[1] ?? "");
+    const now = dayOfWeek(asOf);
+    let ahead = (want - now + 7) % 7;
+    if (ahead === 0) ahead = 7;
+    return addDays(asOf, ahead);
+  }
+  if (/\bthis\s+weekend\b/.test(t)) return addDays(asOf, Math.max(1, (6 - dayOfWeek(asOf) + 7) % 7 || 7));
+  if (/\bthis\s+week\b/.test(t)) return addDays(asOf, (7 - dayOfWeek(asOf)) % 7 || 7);
+  if (/\bthis\s+month\b/.test(t)) return lastOfMonth(y, Number(asOf.slice(5, 7)));
+  if (/\bnext\s+year\b/.test(t)) return `${y + 1}-12-31`;
+  const year = /\b(?:in|by|for|on|this|sa|of)\s+(20\d{2})\b/.exec(t);
+  if (year && Number(year[1]) >= y) return `${year[1]}-12-31`;
+  if (/\b(?:christmas|pasko)\b/.test(t)) return `${asOf.slice(5) > "12-25" ? y + 1 : y}-12-25`;
+  if (/\bnew\s+year\b/.test(t)) return `${y}-12-31`;
+  return null;
+}
+
+/**
+ * The day said and how much of it: a day ("nov 15", "tomorrow", "friday",
+ * "the 30th"), a month ("next month", "in december", "in 2 months"), or a
+ * year ("next year", "in 2027"). Null when nothing is said. The owner, 27
+ * October 2026: "WHAT IF I DONT HAVE A DAY SPECIFICS YET LIKE NO DATE LIKE NO
+ * IDEA WHEN": a month said is a month, not its last day passed off as the
+ * day they chose.
+ */
+export function whenFor(text: string, asOf: IsoDate): { readonly due: IsoDate; readonly kind: DueKind } | null {
+  const t = text.toLowerCase();
+  if (NO_DAY.test(t) && !new RegExp(String.raw`\b${MONTH_RE}\b|\bnext\s+month\b|\bthis\s+month\b|\b20\d{2}\b`).test(withoutDays(t))) return null;
+  const due = dayFor(t, asOf);
+  if (due === null) return null;
+  const dayish =
+    /\b20\d{2}-\d{2}-\d{2}\b|\b(?:tomorrow|bukas|today|tonight|next\s+week|this\s+week(?:end)?|christmas|pasko|new\s+year|end\s+of\s+(?:the\s+|this\s+)?month)\b|\bin\s+(?:\d{1,2}|a|one|two|three)\s+(?:days?|weeks?)\b|\bthe\s+\d{1,2}(?:st|nd|rd|th)\b|\b(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/.test(t) ||
+    new RegExp(String.raw`\b${MONTH_RE}\.?\s+\d{1,2}(?:st|nd|rd|th)?\b(?!\d)`).test(t);
+  // A day said but "not sure of the exact day": the month, not the day.
+  if (dayish && !NO_DAY.test(t)) return { due, kind: "day" };
+  if (!new RegExp(String.raw`\b${MONTH_RE}\b|\bnext\s+month\b|\bthis\s+month\b|\bin\s+\w+\s+months?\b`).test(t) && /\b(?:next\s+year|20\d{2})\b/.test(t)) return { due: dueFor("year", due), kind: "year" };
+  return { due: dueFor("month", due), kind: "month" };
+}
+
+/** "No idea when", "the date is unknown", "not sure when", "no date yet", "someday". */
+export const NO_DAY =
+  /\b(?:date|day|when)\b[^.?!]{0,20}\b(?:unknown|not\s+(?:sure|known|yet|set|final)|tba|tbd|undecided|walang\s+petsa|di\s+pa\s+alam|hindi\s+pa\s+alam)\b|\bnot\s+sure\s+(?:when|what\s+day|of\s+the\s+date)\b|\bno\s+(?:exact\s+)?(?:date|day)(?:\s+yet)?\b|\bno\s+idea\s+(?:when|yet)\b|\bdon'?t\s+know\s+when\b|\bsomeday\b|\bsome\s+day\b|\bundated\b|\banytime\b|\bkahit\s+kailan\b/i;
+
+const NO_DAY_G = new RegExp(NO_DAY.source, "gi");
+const withoutDays = (t: string): string => t.replace(NO_DAY_G, " ");
 
 /** A sum said: "9000", "9k", "PHP 9,000". */
 export function sumIn(text: string): Centavos | null {
@@ -113,7 +169,7 @@ function editIn(
   reference: ReferenceLists,
   goals: readonly { readonly id: string; readonly name: string }[],
 ): { readonly input: PlanInput; readonly changes: { label: string; before: string; after: string }[] } | null {
-  const input: { -readonly [K in keyof PlanInput]: PlanInput[K] } = { title: plan.title, amount: plan.amount, due: plan.due, item: plan.item, wallet: plan.wallet, goalId: plan.goalId, need: plan.need, setAside: plan.setAside, notes: plan.notes };
+  const input: { -readonly [K in keyof PlanInput]: PlanInput[K] } = { title: plan.title, amount: plan.amount, due: plan.due, dueKind: plan.dueKind ?? "day", item: plan.item, wallet: plan.wallet, goalId: plan.goalId, need: plan.need, setAside: plan.setAside, notes: plan.notes };
   const changes: { label: string; before: string; after: string }[] = [];
   const counted = (b: boolean): string => (b ? "Counted in its month" : "Not counted");
   const titleWords = new Set(plan.title.toLowerCase().split(/[^a-z0-9]+/));
@@ -155,6 +211,12 @@ function editIn(
       input.wallet = wallet;
     }
   }
+  // "The trip plan has no date yet", "no idea when for the phone plan": the date taken away.
+  if (NO_DAY.test(t) && plan.due !== NO_DATE) {
+    changes.push({ label: "Pay by", before: whenOf(plan), after: "No date yet" });
+    input.due = NO_DATE;
+    input.dueKind = "none";
+  }
   const note = /\bnotes?\b[^:]{0,40}:\s*(.+)$/i.exec(t) ?? /\b(?:add|put|write)\s+(?:a\s+)?note\b[^.?!]*?\b(?:saying|that)\s+(.+)$/i.exec(t);
   if (note?.[1]) {
     const notes = note[1].trim().slice(0, 300);
@@ -190,7 +252,9 @@ export function readPlannerAsk(
     /\b(?:to|in|into|on)\s+(?:my|the)\s+planner\b|\badd\s+(?:a\s+)?(?:new\s+)?plan\b|\bnew\s+plan\b|^\s*remind\s+me\s+to\s+pay\b/i.test(t);
   if (adds && !QUESTIONISH.test(t)) {
     const amount = sumIn(t);
-    const due = dayIn(t, asOf) ?? lastOfMonth(Number(asOf.slice(0, 4)) + (Number(asOf.slice(5, 7)) === 12 ? 1 : 0), (Number(asOf.slice(5, 7)) % 12) + 1);
+    // The day, month or year said; with none, no date (counted nowhere until it has one).
+    const when = whenFor(t, asOf);
+    const due = when?.due ?? NO_DATE;
     const wallet = [...reference.wallets, ...reference.savings].find((w) => new RegExp(`\\b(?:from|using|with|via)\\s+${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) ?? "";
     const title = t
       .replace(/^\s*(?:please\s+|pls\s+)?(?:plan|schedule|add|put|remind\s+me\s+to\s+pay)\s+/i, "")
@@ -198,7 +262,8 @@ export function readPlannerAsk(
       .replace(/\b(?:a\s+)?(?:new\s+)?plan\s+(?:for\s+)?/gi, " ")
       .replace(/(?:₱|php\s*)?\d[\d,]*(?:\.\d{1,2})?\s*k?\b/gi, " ")
       .replace(new RegExp(String.raw`\b(?:on|by|for|in|until|before|this|next)?\s*${MONTH_RE}\.?(?:\s+\d{1,2}(?:st|nd|rd|th)?)?(?:,?\s+20\d{2})?\b`, "gi"), " ")
-      .replace(/\b(?:by|on|for|in|due|before)?\s*(?:next\s+(?:month|week)|end of (?:the |this )?month|tomorrow|in\s+\w+\s+(?:days?|weeks?|months?))\b/gi, " ")
+      .replace(/\b(?:by|on|for|in|due|before)?\s*(?:next\s+(?:month|week|year)|this\s+(?:month|year)|end of (?:the |this )?month|tomorrow|in\s+\w+\s+(?:days?|weeks?|months?)|in\s+20\d{2})\b/gi, " ")
+      .replace(NO_DAY_G, " ")
       .replace(/\b(?:from|using|with|via)\s+\S+/gi, " ")
       .replace(/\b(?:pesos?|php|worth|of|to pay|pay|for|by|on|due|the|my|a|an)\b/gi, " ")
       .replace(/[,.:;!]+/g, " ")
@@ -210,7 +275,7 @@ export function readPlannerAsk(
     const recurring = [...reference.bills, ...reference.subscriptions].some((b) => b.toLowerCase() === (kindFromHistory(name, transactions, kinds) ?? "").toLowerCase());
     return {
       kind: "add",
-      input: { title: name, amount, due, item: kindFromHistory(name, transactions, kinds) ?? "", wallet, need: !/\b(?:want|treat|gadget|trip|vacation|concert)\b/i.test(t), setAside: !recurring, notes: "" },
+      input: { title: name, amount, due, dueKind: when?.kind ?? "none", item: kindFromHistory(name, transactions, kinds) ?? "", wallet, need: !/\b(?:want|treat|gadget|trip|vacation|concert)\b/i.test(t), setAside: !recurring, notes: "" },
     };
   }
 
@@ -238,8 +303,10 @@ export function readPlannerAsk(
   }
   if (/\b(?:move|extend|push|postpone|resched\w*|delay|change\s+the\s+date|later\s+to)\b/i.test(t)) {
     const plan = planNamed(t, open, ["open"]);
-    const to = dayIn(t, asOf);
-    return plan && to ? { kind: "move", plan, to } : plan ? null : { kind: "none", said: t };
+    // "Move the trip plan to december" is a month; "... to no date yet" takes the date away.
+    const when = NO_DAY.test(t) ? null : whenFor(t, asOf);
+    if (plan && NO_DAY.test(t)) return { kind: "move", plan, to: NO_DATE, toKind: "none" };
+    return plan && when ? { kind: "move", plan, to: when.due, toKind: when.kind } : plan ? null : { kind: "none", said: t };
   }
   if (/\b(?:paid|pay|settle|mark\b[^.?!]{0,30}\bpaid)\b/i.test(t)) {
     const plan = planNamed(t, open, ["open"]);
@@ -260,7 +327,14 @@ export function plansWords(views: readonly PlanView[], setAside: Centavos): stri
   const open = views.filter((v) => v.state !== "paid" && v.state !== "skipped" && v.state !== "removed").sort((a, b) => a.plan.due.localeCompare(b.plan.due));
   if (open.length === 0) return 'Nothing is planned. Say "plan tuition 9000 by November 15" and it goes on the Planner, or open the Planner to add one.';
   const total = open.reduce((s, v) => s + v.left, 0);
-  const lines = open.slice(0, 12).map((v) => `- ${v.plan.title}: ${formatMoney(v.left)} by ${formatMedium(v.plan.due)}. ${v.words}${v.counts ? ", set aside" : ""}${v.goal && !v.goal.missing ? `, ${v.goal.name} holds ${formatMoney(v.goal.holds)}` : ""}.`);
+  const lines = open.slice(0, 12).map((v) => {
+    const more = [
+      v.words === whenOf(v.plan) || v.words === "No date yet" ? "" : v.words,
+      v.counts ? "set aside" : "",
+      v.goal && !v.goal.missing ? `${v.goal.name} holds ${formatMoney(v.goal.holds)}` : "",
+    ].filter(Boolean).join(", ");
+    return `- ${v.plan.title}: ${formatMoney(v.left)} ${byWhen(v.plan)}.${more ? ` ${more.charAt(0).toUpperCase()}${more.slice(1)}.` : ""}`;
+  });
   return [
     `**${open.length} ${open.length === 1 ? "plan" : "plans"} open, ${formatMoney(total)} still to pay.**${setAside > 0 ? ` ${formatMoney(setAside)} of it is set aside from this month's safe to spend.` : ""}`,
     ...lines,

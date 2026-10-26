@@ -64,7 +64,7 @@ import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { checkDraft, debtWalletDirection, draftToTransactions, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { Planner } from "./features/Planner";
-import { linkPayments, type Plan } from "./domain/planner";
+import { linkPayments, renamePlans, type Plan } from "./domain/planner";
 import { spreadCovered } from "./domain/covers";
 import { formatMedium, getMonth, getYear, today } from "./domain/dates";
 import { monthBrief, nextMonthStart } from "./domain/monthPlan";
@@ -143,7 +143,12 @@ type Screen =
  * characters, which each device draws from whichever font it has, so they
  * came out at mismatched sizes and, on some phones, as colour emoji.
  */
-const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean }[] = [
+/*
+ * `records` starts the second group in the sidebar: the screens kept for
+ * looking back and setting up, set apart by space, not a line (owner, 27
+ * October 2026: "the side panel is now overcrowded fix it").
+ */
+const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean; records?: boolean }[] = [
   { id: "dashboard", label: "Dashboard", icon: "dashboard", primary: true },
   { id: "add", label: "Add", icon: "add", primary: true },
   { id: "database", label: "Database", icon: "ledger", primary: true },
@@ -151,7 +156,7 @@ const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean }[] = 
   { id: "insights", label: "Insights", icon: "insights" },
   { id: "budget", label: "Budget", icon: "budget" },
   { id: "planner", label: "Planner", icon: "planner" },
-  { id: "statements", label: "Statements", icon: "statements" },
+  { id: "statements", label: "Statements", icon: "statements", records: true },
   { id: "bin", label: "Bin", icon: "bin" },
   { id: "activity", label: "Activity", icon: "activity" },
   { id: "settings", label: "Settings", icon: "settings" },
@@ -270,6 +275,10 @@ export default function App() {
   const activityWarned = useRef(false);
   /** Accounts renamed in Settings, waiting for the settings object that renames them. See `handleRename`. */
   const pendingAccountRenames = useRef<[string, string][]>([]);
+  /** A kind renamed a moment ago: its plans follow it onto the settings Settings sends next, as the debts follow an account. */
+  const pendingItemRenames = useRef<[string, string][]>([]);
+  /** A plan another screen opened on the Planner ("Pay" on the Dashboard or in Insights). */
+  const [planFocus, setPlanFocus] = useState<{ readonly id: string; readonly pay: boolean; readonly at: number } | null>(null);
   /** The floating chat on a computer: open now, and mounted since it was first opened. */
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMounted, setChatMounted] = useState(false);
@@ -1499,6 +1508,7 @@ export default function App() {
     if (kind === "account") {
       pendingAccountRenames.current.push([from, to]);
     } else {
+      pendingItemRenames.current.push([from, to]);
       const moved = renameLimitKind(budgets, from, to);
       if (moved.years.length > 0) {
         setBudgets(moved.budgets);
@@ -2329,7 +2339,7 @@ export default function App() {
               type="button"
               onClick={() => go(n.id)}
               aria-current={screen === n.id ? "page" : undefined}
-              className="fms-navitem"
+              className={n.records ? "fms-navitem fms-navitem--apart" : "fms-navitem"}
             >
               <span aria-hidden className="fms-navicon">
                 <Icon name={n.icon} />
@@ -2483,6 +2493,10 @@ export default function App() {
                 go("insights");
                 setInsightsAt({ to, at: Date.now() });
               }}
+              onOpenPlan={(id, pay) => {
+                go("planner");
+                setPlanFocus({ id, pay, at: Date.now() });
+              }}
             />
           )}
           {screen === "add" && (
@@ -2600,6 +2614,10 @@ export default function App() {
               asOf={asOf}
               settings={settings}
               onOpenBudget={() => go("budget")}
+              onOpenPlan={(id, pay) => {
+                go("planner");
+                setPlanFocus({ id, pay, at: Date.now() });
+              }}
               // A day's part of an entry over several days stands for the entry itself.
               onEditRow={(row) => startEditing(transactions.find((t) => t.id === row.coveredBy) ?? row)}
               onBin={(id) => handleDelete(reportRows.find((r) => r.id === id)?.coveredBy ?? id)}
@@ -2663,6 +2681,7 @@ export default function App() {
                 setDbFilter("all");
                 setDbQuery({ query, at: Date.now() });
               }}
+              onOpenPlanner={() => go("planner")}
             />
           )}
           {screen === "planner" && (
@@ -2677,6 +2696,7 @@ export default function App() {
               onChange={(plan, action, summary) => changePlan(plan, action, summary, BY_OWNER)}
               onPay={(plan, draft, settles) => payPlan(plan, draft, settles, BY_OWNER)}
               onMakeGoal={makeGoalFor}
+              focus={planFocus}
               onShowEntry={(n) => {
                 go("database");
                 setDbFilter("all");
@@ -2700,6 +2720,7 @@ export default function App() {
               onRestore={handleRestore}
               onRestoreMany={handleRestoreMany}
               onPurge={handlePurge}
+              plans={settings.plans ?? []}
             />
           )}
           {screen === "activity" && (
@@ -2727,15 +2748,16 @@ export default function App() {
               uploading={uploading}
               onUpload={cloud.uid ? () => void handleUpload() : undefined}
               onChange={(next) => {
-                // An account renamed a moment ago: its debts follow it onto this object.
+                // An account renamed a moment ago: its debts and the plans paid from it follow it; a kind's plans follow the kind.
                 const renames = pendingAccountRenames.current;
                 pendingAccountRenames.current = [];
-                setSettings(
-                  renames.reduce<AppSettings>(
-                    (s, [from, to]) => ({ ...s, credits: renameDebtAccount(s.credits, from, to) }),
-                    next,
-                  ),
+                const kinds = pendingItemRenames.current;
+                pendingItemRenames.current = [];
+                const withAccounts = renames.reduce<AppSettings>(
+                  (s, [from, to]) => ({ ...s, credits: renameDebtAccount(s.credits, from, to), plans: renamePlans(s.plans ?? [], "wallet", from, to) }),
+                  next,
                 );
+                setSettings(kinds.reduce<AppSettings>((s, [from, to]) => ({ ...s, plans: renamePlans(s.plans ?? [], "item", from, to) }), withAccounts));
               }}
               onRenameAccount={(from, to) => handleRename("account", from, to)}
               onRenameItem={(from, to) => handleRename("item", from, to)}

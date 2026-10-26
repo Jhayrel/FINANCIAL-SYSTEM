@@ -21,7 +21,7 @@
  * Class names are `fms-plans` and `fms-plan*`: `fms-planner` is the Budget
  * screen's panel, and sharing it squeezed that panel's figures.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Icon } from "../components/Icon";
 import { AmountInput, Field, Switch, TextInput } from "../components/forms";
@@ -47,6 +47,14 @@ import {
   makePlan,
   movePlan,
   movesWords,
+  byWhen,
+  countedWords,
+  dueFor,
+  dueKindOf,
+  NO_DATE,
+  nextMonthEnd,
+  whenOf,
+  type DueKind,
   planAgain,
   planKinds,
   planWallets,
@@ -83,6 +91,8 @@ export interface PlannerProps {
   readonly onMakeGoal: (name: string, target: Centavos, deadline: IsoDate) => string;
   /** Open an entry in the Database. */
   readonly onShowEntry?: ((recordNumber: number) => void) | undefined;
+  /** A plan another screen sent here: opened, or opened to record its payment (the Dashboard's and Insights' Pay). */
+  readonly focus?: { readonly id: string; readonly pay: boolean; readonly at: number } | null | undefined;
 }
 
 type Tab = "open" | "done" | "removed";
@@ -112,6 +122,9 @@ function dayWords(day: IsoDate, asOf: IsoDate): string {
 /** The row's when: "Oct 28, in 2 days", "Oct 22, 4 days late"; a closed plan says how it closed. */
 function whenWords(v: PlanView, asOf: IsoDate): string {
   if (!isOpen(v)) return v.words;
+  // A month, a year or no date says so, never a day nobody chose.
+  if (v.plan.due === NO_DATE) return "No date yet";
+  if (dueKindOf(v.plan) !== "day" && v.daysTo >= 0) return v.words.startsWith("Paid") ? whenOf(v.plan) : v.words;
   const day = dayWords(v.plan.due, asOf);
   if (v.daysTo < 0) return `${day}, ${plural(-v.daysTo, "day")} late`;
   if (v.daysTo === 0) return `${day}, today`;
@@ -262,6 +275,20 @@ export function Planner(props: PlannerProps) {
   const [closing, setClosing] = useState<{ plan: Plan; how: "skip" | "remove" } | null>(null);
 
   const views = useMemo(() => plans.map((p) => viewOf(p, { transactions, accounts, asOf })), [plans, transactions, accounts, asOf]);
+
+  // Sent here from another screen: that plan, and its payment when Pay was pressed.
+  const focusAt = props.focus?.at ?? 0;
+  useEffect(() => {
+    const f = props.focus;
+    if (!f) return;
+    const plan = plans.find((p) => p.id === f.id);
+    if (!plan) return;
+    setTab(plan.status === "removed" ? "removed" : plan.status === "open" ? "open" : "done");
+    setOpenId(plan.id);
+    if (f.pay && plan.status === "open") setPaying(plan);
+    // Once per press: the plans changing after it must not open it again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusAt]);
   const groups = useMemo(() => groupOpen(views, asOf), [views, asOf]);
   const closed = useMemo(() => closedViews(views), [views]);
 
@@ -320,12 +347,12 @@ export function Planner(props: PlannerProps) {
             <div className="fms-planlist">
               {groups.map((g) => (
                 <section key={g.key} aria-label={g.title}>
-                  <h3 className="t-label fms-plangroup">
+                  <h3 className="t-micro fms-plangroup">
                     <span>
                       {g.title}
                       <span className="fms-plangroup-count"> · {g.views.length}</span>
                     </span>
-                    <Money value={g.left} size="s" />
+                    <Money value={g.left} size="s" tone="var(--ink-3)" />
                   </h3>
                   <ul className="fms-planrows">
                     {g.views.map((v) => (
@@ -371,7 +398,7 @@ export function Planner(props: PlannerProps) {
           onReopen={() => props.onChange(reopenPlan(current.plan), "plan.restore", `Put "${current.plan.title}" back on the plan list.`)}
           onAgain={() => {
             const next = planAgain(current.plan, addDays(asOf, 30) > current.plan.due ? addDays(asOf, 30) : addDays(current.plan.due, 30), asOf, "owner");
-            props.onChange(next, "plan.create", `Planned "${next.title}" again, ${formatMoney(next.amount)} by ${formatMedium(next.due)}.`);
+            props.onChange(next, "plan.create", `Planned "${next.title}" again, ${formatMoney(next.amount)} ${byWhen(next)}.`);
             setOpenId(next.id);
             setForm({ editing: next });
           }}
@@ -398,13 +425,13 @@ export function Planner(props: PlannerProps) {
               const next = editPlan(was, input, asOf);
               const changed: string[] = [];
               if (was.amount !== next.amount) changed.push(`amount ${formatMoney(was.amount)} to ${formatMoney(next.amount)}`);
-              if (was.due !== next.due) changed.push(`date ${formatMedium(was.due)} to ${formatMedium(next.due)}`);
+              if (was.due !== next.due || was.dueKind !== next.dueKind) changed.push(`when ${whenOf(was)} to ${whenOf(next)}`);
               if (was.title !== next.title) changed.push(`name to "${next.title}"`);
               props.onChange(next, was.due !== next.due && changed.length === 1 ? "plan.move" : "plan.update", `Edited "${next.title}"${changed.length > 0 ? `: ${changed.join(", ")}` : ""}.`);
               setOpenId(next.id);
             } else {
               const next = makePlan(input, asOf, "owner");
-              props.onChange(next, "plan.create", `Planned "${next.title}", ${formatMoney(next.amount)} by ${formatMedium(next.due)}.`);
+              props.onChange(next, "plan.create", `Planned "${next.title}", ${formatMoney(next.amount)} ${byWhen(next)}.`);
               setOpenId(next.id);
               setTab("open");
             }
@@ -437,8 +464,9 @@ export function Planner(props: PlannerProps) {
           asOf={asOf}
           dialog={!phone}
           onClose={() => setMoving(null)}
-          onMove={(to) => {
-            props.onChange(movePlan(moving, to, asOf), "plan.move", `Moved "${moving.title}" from ${formatMedium(moving.due)} to ${formatMedium(to)}.`);
+          onMove={(to, kind) => {
+            const next = movePlan(moving, to, asOf, kind);
+            props.onChange(next, "plan.move", `Moved "${moving.title}" from ${whenOf(moving).replace(/^S/, "s")} to ${whenOf(next).replace(/^S/, "s")}.`);
             setMoving(null);
           }}
         />
@@ -604,11 +632,11 @@ function PlanSheet(props: {
         {v.goneNote && <Alert status="warn" title="A payment is gone">{v.goneNote}</Alert>}
 
         <dl className="fms-rowfacts">
-          <Fact label="Pay by">{formatMedium(p.due)}</Fact>
+          <Fact label="Pay by">{whenOf(p)}</Fact>
           {p.item && <Fact label="Kind">{p.item}</Fact>}
           {p.wallet && <Fact label="Pay from">{p.wallet}</Fact>}
           <Fact label="Need or want">{p.need ? "A need" : "A want"}</Fact>
-          <Fact label="Safe to spend">{p.goalId ? "Not counted, saved in a goal" : p.setAside ? (v.counts ? "Set aside now" : "Set aside in its month") : "Not counted"}</Fact>
+          <Fact label="Safe to spend">{p.goalId ? "Not counted, saved in a goal" : p.setAside && v.counts ? "Set aside now" : countedWords(p).replace(/^Counted in its month$/, "Set aside in its month").replace(/^Counted in /, "Set aside in ")}</Fact>
           {v.goal && (
             <Fact label="Goal">
               {v.goal.missing
@@ -633,7 +661,7 @@ function PlanSheet(props: {
                   </button>
                   <Money value={t.total} size="s" />
                   {open && (
-                    <Button size="sm" variant="ghost" onClick={() => props.onUnlink(t.id)}>
+                    <Button size="sm" onClick={() => props.onUnlink(t.id)}>
                       Unlink
                     </Button>
                   )}
@@ -662,25 +690,104 @@ function PlanSheet(props: {
           </div>
         )}
 
+        {/*
+          Outlined, not bare text: on the dark theme the three read as words,
+          not buttons (owner, 27 October 2026: "i CANNOT SEE THE BUTTONS FIX IT
+          MAKE IT GOOD"). Remove keeps the danger outline; it can be put back.
+        */}
         <div className="fms-plansheet-more">
           {open && (
             <>
-              <Button size="sm" variant="ghost" onClick={props.onLink}>
-                Link one I already added
+              <Button size="sm" onClick={props.onLink}>
+                Link a payment I added
               </Button>
-              <Button size="sm" variant="ghost" onClick={props.onSkip}>
+              <Button size="sm" onClick={props.onSkip}>
                 Skip it
               </Button>
             </>
           )}
           {v.state !== "removed" && (
-            <Button size="sm" variant="ghost" tone="danger" onClick={props.onRemove}>
+            <Button size="sm" variant="danger" onClick={props.onRemove}>
               Remove
             </Button>
           )}
         </div>
       </div>
     </Sheet>
+  );
+}
+
+/** When a plan is to be paid: a day, a month, or no date yet (`DueKind`). */
+interface When {
+  readonly kind: DueKind;
+  readonly due: IsoDate;
+}
+
+const WHEN_KINDS: { id: "day" | "month" | "none"; label: string }[] = [
+  { id: "day", label: "A day" },
+  { id: "month", label: "A month" },
+  { id: "none", label: "No date yet" },
+];
+
+const monthLabel = (date: IsoDate): string => `${MONTH_NAMES[Number(date.slice(5, 7)) - 1] ?? ""} ${date.slice(0, 4)}`;
+
+/** This month and the next two years, plus the plan's own month when it is outside them. */
+function monthsFrom(asOf: IsoDate, keep: IsoDate): IsoDate[] {
+  const out: IsoDate[] = [];
+  let y = Number(asOf.slice(0, 4));
+  let m = Number(asOf.slice(5, 7));
+  for (let i = 0; i < 25; i += 1) {
+    out.push(`${y}-${String(m).padStart(2, "0")}-01`);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  if (keep !== NO_DATE && /^\d{4}-\d{2}/.test(keep) && !out.some((d) => d.slice(0, 7) === keep.slice(0, 7))) out.unshift(`${keep.slice(0, 7)}-01`);
+  return out;
+}
+
+/**
+ * The owner, 27 October 2026: "WHAT IF I DONT HAVE A DAY SPECIFICS YET LIKE
+ * NO DATE LIKE NO IDEA WHEN". A day, a month ("sometime in November", counted
+ * in November), or no date at all (counted nowhere until it has one).
+ */
+function WhenPicker({ value, onChange, asOf, id, error }: { value: When; onChange: (w: When) => void; asOf: IsoDate; id: string; error?: string | undefined }) {
+  const kind = value.kind === "year" ? "month" : value.kind;
+  const fallback = value.due !== NO_DATE ? value.due : nextMonthEnd(asOf);
+  return (
+    <div className="fms-planwhen">
+      <SegmentedControl
+        options={WHEN_KINDS}
+        value={kind}
+        onChange={(k) => onChange({ kind: k, due: k === "none" ? NO_DATE : dueFor(k, fallback) })}
+      />
+      {kind === "day" && (
+        <Field label="Pay by" htmlFor={id} error={error}>
+          <input id={id} type="date" value={value.due === NO_DATE ? "" : value.due} onChange={(e) => onChange({ kind: "day", due: e.target.value })} className="t-body fms-control" />
+        </Field>
+      )}
+      {kind === "month" && (
+        // A list of months, not <input type="month">, which desktop Safari and Firefox show as a bare text box.
+        <Field label="Sometime in" htmlFor={id} error={error}>
+          <Select
+            id={id}
+            value={monthLabel(value.due === NO_DATE ? fallback : value.due)}
+            onChange={(v) => {
+              const m = monthsFrom(asOf, value.due).find((x) => monthLabel(x) === v);
+              if (m) onChange({ kind: "month", due: dueFor("month", m) });
+            }}
+            options={monthsFrom(asOf, value.due).map(monthLabel)}
+          />
+        </Field>
+      )}
+      {kind === "none" && (
+        <p className="t-caption fms-planform-hint" style={{ margin: 0 }}>
+          Kept on the Planner, counted nowhere until you give it a month or a day.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -706,7 +813,9 @@ function PlanForm(props: {
   const goals = accounts.filter((a) => a.kind === "goal" && !a.archived);
   const [title, setTitle] = useState(editing?.title ?? "");
   const [amount, setAmount] = useState<Centavos | null>(editing ? editing.amount : null);
-  const [due, setDue] = useState<IsoDate>(editing?.due ?? lastOfMonth(Number(asOf.slice(0, 4)) + (Number(asOf.slice(5, 7)) === 12 ? 1 : 0), (Number(asOf.slice(5, 7)) % 12) + 1));
+  // A new plan starts as "sometime next month"; the day, or no date at all, is a tap away.
+  const [when, setWhen] = useState<When>(editing ? { kind: dueKindOf(editing), due: editing.due } : { kind: "month", due: nextMonthEnd(asOf) });
+  const due = when.due;
   const [item, setItem] = useState(editing?.item ?? "");
   const [wallet, setWallet] = useState(editing?.wallet ?? "");
   const [goalId, setGoalId] = useState(editing?.goalId ?? "");
@@ -725,14 +834,14 @@ function PlanForm(props: {
   const suggested = !picked && !item ? kindFromHistory(title, props.transactions, kinds) : null;
   const kind = item || suggested || "";
   const recurring = isRecurringKind(kind, reference);
-  const input: PlanInput = { title, amount, due, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !recurring, notes };
+  const input: PlanInput = { title, amount, due, dueKind: when.kind, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !recurring, notes };
   const check = checkPlan({ ...input, setAside }, { plans: props.plans, reference, asOf, editing: editing?.id });
   const goalName = goals.find((g) => g.id === goalId)?.name ?? "";
   const counted = setAside && !goalId && !recurring;
 
   // The rest folds under More details, as on the Add form; open when something in it is set.
   const [moreOpen, setMoreOpen] = useState(Boolean(editing && (!editing.need || editing.goalId || !editing.setAside || editing.notes)));
-  const moreSummary = [need ? "A need" : "A want", goalName ? `saved in ${goalName}` : "", counted ? "counted in safe to spend" : "not counted", notes ? "a note" : ""].filter(Boolean).join(", ");
+  const moreSummary = [need ? "A need" : "A want", goalName ? `saved in ${goalName}` : "", counted ? (when.kind === "none" ? "counted once it has a date" : "counted in safe to spend") : "not counted", notes ? "a note" : ""].filter(Boolean).join(", ");
 
   const save = (): void => {
     setTried(true);
@@ -759,13 +868,18 @@ function PlanForm(props: {
         <Field label="What is it for" htmlFor="plan-title" error={tried && !title.trim() ? "Say what it is for." : undefined}>
           <TextInput id="plan-title" value={title} onChange={setTitle} placeholder="Tuition, new phone, a trip" maxLength={80} />
         </Field>
-        <div className="fms-planform-pair">
-          <Field label="How much" htmlFor="plan-amount" error={tried && (amount === null || amount <= 0) ? "Put in how much it will cost." : undefined}>
-            <AmountInput id="plan-amount" value={amount} onChange={setAmount} />
-          </Field>
-          <Field label="Pay by" htmlFor="plan-due" error={tried && !/^\d{4}-\d{2}-\d{2}$/.test(due) ? "Pick the day it is to be paid by." : undefined}>
-            <input id="plan-due" type="date" value={due} onChange={(e) => setDue(e.target.value)} className="t-body fms-control" />
-          </Field>
+        <Field label="How much" htmlFor="plan-amount" error={tried && (amount === null || amount <= 0) ? "Put in how much it will cost." : undefined}>
+          <AmountInput id="plan-amount" value={amount} onChange={setAmount} />
+        </Field>
+        <div className="fms-planform-when">
+          <span className="t-label fms-planform-whenlabel">When</span>
+          <WhenPicker
+            value={when}
+            onChange={setWhen}
+            asOf={asOf}
+            id="plan-due"
+            error={tried && when.kind !== "none" && !/^\d{4}-\d{2}-\d{2}$/.test(due) ? (when.kind === "month" ? "Pick the month." : "Pick the day it is to be paid by.") : undefined}
+          />
         </div>
         <div className="fms-planform-pair">
           <Field label="Kind">
@@ -844,7 +958,9 @@ function PlanForm(props: {
                     ? "Its money is in the goal already, so it is not counted."
                     : recurring
                       ? "Bills and subscriptions are set aside already every month."
-                      : "Set aside in its month like a bill still to pay, so today's figure stays honest."}
+                      : when.kind === "none"
+                        ? "Once it has a month or a day, it is set aside there like a bill still to pay."
+                        : "Set aside in its month like a bill still to pay, so today's figure stays honest."}
                 </span>
               </span>
               <Switch checked={counted} onChange={setSetAside} label="Count it in safe to spend" />
@@ -854,7 +970,7 @@ function PlanForm(props: {
             </Field>
           </>
         )}
-        {check.notes.map((n) => (
+        {check.notes.filter((n) => !n.startsWith("With no date")).map((n) => (
           <Alert key={n} status="info">
             {n}
           </Alert>
@@ -971,36 +1087,43 @@ function PaySheet(props: {
   );
 }
 
-function MoveSheet(props: { plan: Plan; asOf: IsoDate; dialog: boolean; onClose: () => void; onMove: (to: IsoDate) => void }) {
+function MoveSheet(props: { plan: Plan; asOf: IsoDate; dialog: boolean; onClose: () => void; onMove: (to: IsoDate, kind: DueKind) => void }) {
   const { plan, asOf } = props;
-  const base = plan.due > asOf ? plan.due : asOf;
-  const [to, setTo] = useState<IsoDate>(addDays(base, 7));
-  const quick: [string, IsoDate][] = [
-    ["A week later", addDays(base, 7)],
-    ["Two weeks later", addDays(base, 14)],
-    ["A month later", addDays(base, 30)],
-  ];
+  const undated = plan.due === NO_DATE;
+  const base = !undated && plan.due > asOf ? plan.due : asOf;
+  const [when, setWhen] = useState<When>(undated ? { kind: "month", due: nextMonthEnd(asOf) } : { kind: "day", due: addDays(base, 7) });
+  const to = when.due;
+  // The quick steps move a day; a plan with no date, or only a month, picks one below.
+  const quick: [string, IsoDate][] = undated || dueKindOf(plan) !== "day"
+    ? []
+    : [
+        ["A week later", addDays(base, 7)],
+        ["Two weeks later", addDays(base, 14)],
+        ["A month later", addDays(base, 30)],
+      ];
+  const valid = when.kind === "none" || /^\d{4}-\d{2}-\d{2}$/.test(to);
+  const same = to === plan.due && when.kind === dueKindOf(plan);
   return (
     <Sheet
       title={`Move "${plan.title}"`}
-      subtitle={`Now by ${formatMedium(plan.due)}. Every move is kept.`}
+      subtitle={`Now ${byWhen(plan)}. Every move is kept.`}
       onClose={props.onClose}
       dialog={props.dialog}
       actions={
         <>
           <Button onClick={props.onClose}>Cancel</Button>
           {/* A cleared date picker gives "": never saved as a day (27 October 2026 error pass). */}
-          <Button variant="primary" onClick={() => props.onMove(to)} disabled={to === plan.due || !/^\d{4}-\d{2}-\d{2}$/.test(to)}>
-            {/^\d{4}-\d{2}-\d{2}$/.test(to) ? `Move to ${formatMedium(to)}` : "Pick a day"}
+          <Button variant="primary" onClick={() => props.onMove(to, when.kind)} disabled={same || !valid}>
+            {!valid ? "Pick a day" : when.kind === "none" ? "Save with no date" : `Move to ${whenOf({ due: to, dueKind: when.kind })}`}
           </Button>
         </>
       }
     >
       <div className="fms-planform">
-        <SegmentedControl options={quick.map(([label, d]) => ({ id: d, label }))} value={quick.find(([, d]) => d === to)?.[1] ?? ""} onChange={(d) => setTo(d)} />
-        <Field label="Or a day" htmlFor="move-to">
-          <input id="move-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="t-body fms-control" />
-        </Field>
+        {quick.length > 0 && (
+          <SegmentedControl options={quick.map(([label, d]) => ({ id: d, label }))} value={when.kind === "day" ? (quick.find(([, d]) => d === to)?.[1] ?? "") : ""} onChange={(d) => setWhen({ kind: "day", due: d })} />
+        )}
+        <WhenPicker value={when} onChange={setWhen} asOf={asOf} id="move-to" />
         {movesWords(plan) && <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>{movesWords(plan)}.</p>}
       </div>
     </Sheet>
