@@ -25,7 +25,7 @@
  * and in the fixture, where there is nothing to write to.
  */
 
-import { collection, doc, getDocs, limit, orderBy, query, setDoc } from "firebase/firestore";
+import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc } from "firebase/firestore";
 
 import { firestore } from "./firebase";
 import { byNewest, type ActivityEvent } from "../domain/activity";
@@ -47,6 +47,14 @@ const memory: ActivityEvent[] = [];
 export interface ActivityStore {
   record(event: ActivityEvent): Promise<void>;
   recent(): Promise<ActivityEvent[]>;
+  /**
+   * The newest events, kept up to date as they happen on any device. The
+   * screen read them once when it opened, so an entry added on the phone
+   * was missing on a computer showing Activity until it was opened again
+   * (26 October 2026: "how about the connectivity and syncing of data").
+   * Null when there is nothing to listen to: read once instead.
+   */
+  subscribe(onChange: (events: ActivityEvent[]) => void, onError: (e: Error) => void): (() => void) | null;
 }
 
 export function activityStore(uid: string | null): ActivityStore {
@@ -58,6 +66,9 @@ export function activityStore(uid: string | null): ActivityStore {
       },
       async recent() {
         return [...memory].sort(byNewest);
+      },
+      subscribe() {
+        return null;
       },
     };
   }
@@ -74,6 +85,15 @@ export function activityStore(uid: string | null): ActivityStore {
         Object.entries(fields).filter(([, v]) => v !== undefined),
       );
       await setDoc(doc(collection(db, path(uid)), id), document);
+    },
+
+    subscribe(onChange, onError) {
+      if (!db) return null;
+      return onSnapshot(
+        query(collection(db, path(uid)), orderBy("at", "desc"), limit(PAGE)),
+        (snapshot) => onChange(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as ActivityEvent).sort(byNewest)),
+        onError,
+      );
     },
 
     async recent() {

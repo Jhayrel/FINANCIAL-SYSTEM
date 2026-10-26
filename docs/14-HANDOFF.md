@@ -1618,6 +1618,22 @@ Read from the 76 chat turns since 20 October in the owner's backup.
   (the stricter figure check flags both now), the "other smaller items"
   sum, the 51.97 day figure, "an edit recalculates the budget".
 
+### 2026-10-26, last: what syncs, checked
+
+- Live on every device, offline-first (`persistentLocalCache`): entries and
+  the bin, settings, budgets and the chat (all `onSnapshot`).
+- Fixed: the corrections the assistant learns from were the last 400 AI
+  events, read once a session. In the 25 October backup that window held
+  13 to 24 October only, so older lessons were forgotten, and a correction
+  on the phone reached the computer only after a reload. Now every
+  correction ever made, live (`subscribeCorrections`, a one-field query, no
+  index or rule to deploy).
+- Fixed: Activity read once when opened; it now follows the trail live
+  (`activityStore.subscribe`).
+- Per device on purpose: the bell's "seen" (style guide §3.7), Clear this
+  view in the chat, the theme, folded account groups, a statement's names.
+  The first two could follow the owner across devices if they want.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

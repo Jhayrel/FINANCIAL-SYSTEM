@@ -1442,16 +1442,15 @@ export function AskPanel({
     void aiLogStore(uid).record(event).catch(() => {});
   };
 
-  // What was corrected before, read once, so a guess already put right is
-  // not made a second time.
+  /*
+   * Every correction ever made, on any device, kept up to date, so a guess
+   * already put right is not made a second time. It was the last 400 events
+   * read once a session: older lessons fell out, and one made on the phone
+   * reached the computer only after a reload (26 October 2026).
+   */
+  useEffect(() => aiLogStore(uid).subscribeCorrections((events) => setLearnedEvents(events)), [uid]);
   useEffect(() => {
     let live = true;
-    aiLogStore(uid)
-      .recentOnce()
-      .then((events) => {
-        if (live) setLearnedEvents(events);
-      })
-      .catch(() => {});
     // Every paper taught, however far back: the reader is trained on them.
     aiLogStore(uid)
       .papers()

@@ -139,6 +139,24 @@ export function Activity({
   useEffect(() => {
     let live = true;
     setFailed(null);
+    // Signed in: kept up to date as events happen on any device. In the browser alone: read once.
+    const stop = activityStore(uid).subscribe(
+      (found) => {
+        if (live) setEvents(found);
+      },
+      (e) => {
+        if (live) {
+          setEvents((was) => was ?? []);
+          setFailed(e.message);
+        }
+      },
+    );
+    if (stop) {
+      return () => {
+        live = false;
+        stop();
+      };
+    }
     activityStore(uid)
       .recent()
       .then((found) => {

@@ -11,7 +11,7 @@
  * whole.
  */
 
-import { collection, doc, getDocs, limit, orderBy, query, setDoc, where } from "firebase/firestore";
+import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc, where } from "firebase/firestore";
 
 import { firestore } from "./firebase";
 import { countReads, noteError } from "./usage";
@@ -90,6 +90,14 @@ export interface AiLogStore {
    * the last 400 events of everything else would push them out.
    */
   papers(): Promise<AiEvent[]>;
+  /**
+   * Every correction the owner ever made, kept up to date as they are made
+   * on any device: what the assistant learns from. Read from the last 400
+   * events of everything, a correction older than that was forgotten (in
+   * the 25 October 2026 backup, everything before 13 October), and one made
+   * on the phone was not known on the computer until it reloaded.
+   */
+  subscribeCorrections(onChange: (events: AiEvent[]) => void): () => void;
 }
 
 /** The session's one read, per account. */
@@ -111,6 +119,10 @@ export function aiLogStore(uid: string | null): AiLogStore {
       },
       async papers() {
         return memory.filter((e) => e.field === PAPER_FIELD);
+      },
+      subscribeCorrections(onChange) {
+        onChange(memory.filter((e) => e.action === "edited"));
+        return () => {};
       },
     };
   }
@@ -172,6 +184,22 @@ export function aiLogStore(uid: string | null): AiLogStore {
         noteError(e, "reads");
         return [];
       }
+    },
+
+    subscribeCorrections(onChange) {
+      if (!db) {
+        onChange([]);
+        return () => {};
+      }
+      // One field, one value: the index Firestore keeps for every field, so nothing has to be deployed.
+      return onSnapshot(
+        query(collection(db, path(uid)), where("action", "==", "edited"), limit(2000)),
+        (snapshot) => {
+          if (!snapshot.metadata.fromCache) countReads(snapshot.docChanges().length);
+          onChange(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as AiEvent));
+        },
+        (e) => noteError(e, "reads"),
+      );
     },
 
     recentOnce() {
