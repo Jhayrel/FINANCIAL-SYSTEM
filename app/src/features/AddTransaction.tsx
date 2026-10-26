@@ -59,7 +59,7 @@ import { coversOn, insideCoverWords, savedInsideWords, savedWithin } from "../do
 import { duplicateHeadline, duplicatesOf } from "../domain/duplicates";
 import { draftChanges } from "../domain/draftChanges";
 import { connectionWords } from "../domain/syncState";
-import { entryImpact } from "../domain/entryImpact";
+import { entryImpact, limitLine } from "../domain/entryImpact";
 import { whenWords } from "./Dashboard";
 import { useReportScreen } from "./screenReport";
 import { cashAndFee, cashWallet } from "../domain/withdrawal";
@@ -2708,19 +2708,15 @@ export function AddTransaction({
                 )}
               </p>
             )}
-            {impact.kind && impact.limit !== null && (
-              <p
-                className="t-caption"
-                style={{ color: impact.limit - impact.kindBefore - impact.cost < 0 ? "var(--over)" : "var(--ink-2)" }}
-              >
-                {/* Over said as over, never as a negative "left" (7 October 2026 limits audit). */}
-                {impact.kindBefore > impact.limit
-                  ? `${impact.kind} is ${formatMoney(impact.kindBefore - impact.limit)} over its ${formatMoney(impact.limit)} limit, ${formatMoney(impact.kindBefore + impact.cost - impact.limit)} after this`
-                  : impact.kindBefore + impact.cost > impact.limit
-                    ? `${impact.kind} limit: ${formatMoney(impact.limit - impact.kindBefore)} left; this takes it ${formatMoney(impact.kindBefore + impact.cost - impact.limit)} over`
-                    : `${impact.kind} limit: ${formatMoney(impact.limit - impact.kindBefore)} left, then ${formatMoney(impact.limit - impact.kindBefore - impact.cost)}`}
-              </p>
-            )}
+            {(() => {
+              // The same line the chat's entry card says (`limitLine`).
+              const line = limitLine(impact);
+              return line ? (
+                <p className="t-caption" style={{ color: line.over ? "var(--over)" : "var(--ink-2)" }}>
+                  {line.text}
+                </p>
+              ) : null;
+            })()}
             {impact.borrowed && (
               <p className="t-caption" style={{ color: "var(--warn)" }}>
                 {formatMoney(impact.borrowed.amount)} of this would be{" "}

@@ -159,6 +159,7 @@ import { numbersInWords, readReviewRowAsk, reviewRowAnswer } from "../domain/rev
 import { activityAnswer, asksUndoLast, readActivityAsk } from "../domain/activityAsk";
 import { activityStore } from "../data/activityStore";
 import type { PlanAction } from "./useProposalSink";
+import { entryImpact, limitLine } from "../domain/entryImpact";
 import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
 import { kindFromHistory, makePlan, movePlan, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
 import { plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
@@ -5467,7 +5468,7 @@ export function AskPanel({
         return;
       }
 
-      const room = creditRoomAnswer(lead, debts, reportRows, asOf);
+      const room = creditRoomAnswer(lead, debts, reportRows, asOf, limitKinds(reference, Object.keys(budgets[asOf.slice(0, 4)]?.categories ?? {})));
       if (room) {
         answer(room, "debt");
         return;
@@ -6719,7 +6720,15 @@ export function AskPanel({
       const reply = talk
         ? talk.kind === "structural"
           ? `Subscriptions and bills have no limit of their own: they are budgeted together, ${formatMoney(budgetForYear(budgets, ly).billsSubs[lm - 1] ?? 0)} for ${MONTH_NAMES[lm - 1]}, and each is followed by name on the Budget screen. To change it, say "set bills and subscriptions to 2000".`
-          : `There is no kind of spending called "${talk.name}" to limit. Kinds you can limit: ${kinds.slice(0, 10).join(", ")}. Say one of them, for example "limit ${(kinds[0] ?? "Food").toLowerCase()} to 3000".`
+          : (() => {
+              // A bill or subscription by name ("limit spotify to 100"): its own track, followed one by one (27 October 2026).
+              const recurring = [...reference.bills, ...reference.subscriptions].find((b) => b.toLowerCase() === talk.name.toLowerCase());
+              if (recurring) {
+                const isSub = reference.subscriptions.some((b) => b.toLowerCase() === talk.name.toLowerCase());
+                return `${recurring} is a ${isSub ? "subscription" : "bill"}, so it has no limit of its own: bills and subscriptions share one budget, ${formatMoney(budgetForYear(budgets, ly).billsSubs[lm - 1] ?? 0)} for ${MONTH_NAMES[lm - 1]}, and each is checked by name on the Budget screen. To change that budget, say "set bills and subscriptions to 2000".`;
+              }
+              return `There is no kind of spending called "${talk.name}" to limit. Kinds you can limit: ${kinds.slice(0, 10).join(", ")}. Say one of them, for example "limit ${(kinds[0] ?? "Food").toLowerCase()} to 3000".`;
+            })()
         : asksAboutLimit(ruled, kinds)
           ? limitAnswer(ruled, limitLines(reportRows, budgets, debts, ly, lm), lm, asOf, kinds)
           : null;
@@ -10241,6 +10250,10 @@ export function AskPanel({
               offered={turn}
               sink={sink}
               reference={reference}
+              limitNote={turn.state === "open" ? (() => {
+                const impact = entryImpact(turn.proposal.draft, transactions, budgets, asOf);
+                return impact ? limitLine(impact) : null;
+              })() : null}
               hostRef={(el) => keepCard(i, el)}
               alreadyInLedger={alreadyInLedger.get(i) ?? []}
               repeatOfCard={repeatOfCard.get(i)}
@@ -10894,6 +10907,7 @@ function ProposalCard({
   offered,
   sink,
   reference,
+  limitNote = null,
   hostRef,
   alreadyInLedger,
   repeatOfCard,
@@ -10910,6 +10924,8 @@ function ProposalCard({
   offered: Offered;
   sink: ProposalSink;
   reference: ReferenceLists;
+  /** The entry against its kind's limit, as the Add form says it (`limitLine`). */
+  limitNote?: { readonly text: string; readonly over: boolean } | null;
   /** So the panel can measure this card and hold it still when it changes. */
   hostRef: (el: HTMLDivElement | null) => void;
   /** Rows in the ledger this card looks like it repeats. Usually empty. */
@@ -11446,6 +11462,9 @@ function ProposalCard({
           {w}
         </p>
       ))}
+      {!settled && limitNote && (
+        <p className={limitNote.over ? "t-micro fms-proposalnote fms-proposalnote--warn" : "t-micro fms-proposalnote"}>{limitNote.text}</p>
+      )}
 
       {/*
         Already got this one.

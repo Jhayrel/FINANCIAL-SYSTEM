@@ -774,6 +774,8 @@ export interface RankRow {
   amount?: Centavos;
   /** A line under the bar: "₱83.00 more than July". */
   hint?: string | undefined;
+  /** A second line, for the kind's limit: "₱120.00 left of its ₱2,000.00 limit". */
+  limit?: { readonly text: string; readonly over: boolean } | undefined;
 }
 
 const rowValue = (r: RankRow): Centavos => r.value ?? r.amount ?? 0;
@@ -872,6 +874,7 @@ export function RankBars({
               />
             </div>
             {r.hint && <span className="t-micro fms-rankhint">{r.hint}</span>}
+            {r.limit && <span className={r.limit.over ? "t-micro fms-rankhint is-over" : "t-micro fms-rankhint"}>{r.limit.text}</span>}
           </>
         );
         return onPick ? (

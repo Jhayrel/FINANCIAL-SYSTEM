@@ -1942,6 +1942,37 @@ style guide's Bin, Planner and sidebar lines say how each now works.
   (Dashboard, chat), plans set aside (Dashboard, Planner) and came in
   (Dashboard, Insights) read the same on both data sets.
 
+### 2026-10-27, last: the Planner list holds its size; limits followed through
+
+- **Planner list** (owner: "The table container in planner make it like in
+  the other table when empty its not gonna change size"): on a screen 1024
+  wide or more the Planner is one screen tall like Database and Activity.
+  The list card fills the height and only its rows scroll; with no plans the
+  empty state sits in the middle of the same card. Checked at 1024, 1280 and
+  1920 with none, one and many plans: the card is the same height each time.
+- **Limits** (owner: "I haven't seen also the logic of limits in the system
+  can you make sure it works also overthink some scenarios too"). Limits
+  were set and read on Budget and in the bell. What was missing, now done:
+  - "how much is left of my food limit?" was answered about Maya Credit's
+    credit line. A kind of spending named with no debt named is a spending
+    limit (`creditRoomAnswer`, kinds passed in).
+  - "limit spotify to 100" now says Spotify is a subscription and is checked
+    by name inside the bills and subscriptions budget.
+  - An entry card in the chat says the kind's limit, as the Add form does
+    (`limitLine`, one wording for both).
+  - "Can I buy food for 500?" says the Food limit after the budget.
+  - The Dashboard's Where it went says each kind's limit under its bar, red
+    when over, and names a kind over its limit that is not in the top list.
+  - Budget counts plans still to pay against a kind's limit: "PHP 1,800.00
+    planned: with it, PHP 165.00 over".
+  - The plan form says when a plan takes its kind past its limit, counting
+    what is spent and the other plans for that month.
+  - "Am I near any of my limits?" names kinds at 90% or more, the bell's
+    rule; a kind with nothing left reads "has reached its limit" in the bell.
+  - A question about a kind with no limit, when no limit is set at all,
+    names that kind.
+  Tests: `limitAsk.test.ts`, `affordAsk.test.ts`, `chatParity.test.ts`.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

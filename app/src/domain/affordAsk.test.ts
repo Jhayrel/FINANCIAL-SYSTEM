@@ -213,3 +213,28 @@ describe("a thing their descriptions name, not an item", () => {
     expect(usualCost(rows, "Gym", "2026-10-12")).toBe(7_000);
   });
 });
+
+/*
+ * 27 October 2026 limits audit: "can I buy food for 500?" said nothing of
+ * Food being PHP 5,570.00 past its limit. A limit on the kind asked about is
+ * said after the budget, with the Budget screen's figures.
+ */
+describe("a limit on the kind asked about", () => {
+  const limited: Budgets = {
+    "2026": { ...budgets["2026"]!, categories: { Food: [0, 0, 0, 0, 0, 0, 0, 0, 30000, 0, 0, 0], Gas: [0, 0, 0, 0, 0, 0, 0, 0, 50000, 0, 0, 0] } },
+  } as unknown as Budgets;
+  const withLimits = { ...input, budgets: limited };
+
+  it("says what is left, and when this takes it over", () => {
+    const text = affordAnswer(readAffordAsk("can I spend 100 on food today", rows, reference, TODAY), withLimits);
+    expect(text).toContain("Food has ₱50.00 left of its ₱300.00 limit for September; this would take it ₱50.00 over.");
+    const fits = affordAnswer(readAffordAsk("can I spend 20 on food today", rows, reference, TODAY), withLimits);
+    expect(fits).toContain("Food has ₱50.00 left of its ₱300.00 limit for September, ₱30.00 after this.");
+  });
+
+  it("says a kind already over, and says nothing for a kind with no limit", () => {
+    const text = affordAnswer(readAffordAsk("can I spend 100 on gas today", rows, reference, TODAY), withLimits);
+    expect(text).toContain("Gas is already ₱200.00 over its ₱500.00 limit for September; this would make it ₱300.00 over.");
+    expect(affordAnswer(readAffordAsk("can I spend 100 on food today", rows, reference, TODAY), input)).not.toContain("limit");
+  });
+});

@@ -2523,7 +2523,7 @@ export default function App() {
           className={`fms-main${
             screen === "settings" || screen === "ai"
               ? " fms-main--fixed"
-              : screen === "database" || screen === "statements" || screen === "bin" || screen === "activity"
+              : screen === "database" || screen === "statements" || screen === "bin" || screen === "activity" || screen === "planner"
                 ? " fms-main--fixed-lg"
                 : ""
           }`}

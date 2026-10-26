@@ -143,6 +143,8 @@ describe("a credit line's details", () => {
     expect(creditRoomAnswer("how much is left on my maya credit limit?", [limited], [draw], asOf)).toMatch(/^\*\*Maya Credit: ₱6,000\.00 of ₱10,000\.00 left to borrow\.\*\*/);
     expect(creditRoomAnswer("how much is left on my maya credit limit?", [line], [], asOf)).toMatch(/has no limit set/);
     expect(creditRoomAnswer("how much is left in my food budget?", [limited], [draw], asOf)).toBeNull();
+    // A kind of spending named with no debt named is a spending limit, never the credit line (27 October 2026).
+    expect(creditRoomAnswer("how much is left of my food limit?", [limited], [draw], asOf, ["Food"])).toBeNull();
   });
 });
 

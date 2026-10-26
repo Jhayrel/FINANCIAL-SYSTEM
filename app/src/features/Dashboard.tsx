@@ -50,6 +50,7 @@ import type { Settlement } from "../domain/settleLine";
 import { borrowedMoney, lenderNames } from "../domain/borrowed";
 import { ON_BEHALF } from "../domain/debtWords";
 import { getMonth, getYear, MONTH_NAMES_SHORT, monthName } from "../domain/dates";
+import { limitLines, limitWords } from "../domain/limitAsk";
 import { formatMoney, type Centavos } from "../domain/money";
 import { carryOver, carryWords, isOpenBill, monthBrief, nextMonthStart, yesterdayOf } from "../domain/monthPlan";
 import { plannedForBudget, viewOf } from "../domain/planner";
@@ -121,6 +122,11 @@ export function Dashboard({
   const brief = useMemo(
     () => monthBrief({ transactions, reference, budgets, debts, year, month, asOf }),
     [transactions, reference, budgets, debts, year, month, asOf],
+  );
+  // The month's limits on kinds of spending, the Budget screen's figures, said under each kind's bar.
+  const limits = useMemo(
+    () => new Map(limitLines(transactions, budgets, debts, year, month).map((l) => [l.kind, l])),
+    [transactions, budgets, debts, year, month],
   );
   // "I didn't spend yesterday, should it be 72?" (15 October 2026): what carried over, said where the figure is.
   const yesterday = useMemo(
@@ -608,6 +614,7 @@ export function Dashboard({
             <RankBars
               rows={brief.kinds.map((k) => {
                 const diff = k.amount - k.lastMonth;
+                const limit = limits.get(k.name);
                 return {
                   name: k.name,
                   amount: k.amount,
@@ -617,6 +624,7 @@ export function Dashboard({
                       : diff === 0
                         ? `No change from ${previous}`
                         : `${formatMoney(Math.abs(diff))} ${diff > 0 ? "more" : "less"} than ${previous}`,
+                  limit: limit ? limitWords(limit) : undefined,
                 };
               })}
               {...(onOpenInsights
@@ -624,6 +632,17 @@ export function Dashboard({
                 : {})}
             />
           )}
+          {(() => {
+            // A kind over its limit that is not among the largest above is still said, so no overspend goes unseen here.
+            const shown = new Set(brief.kinds.map((k) => k.name));
+            const hidden = [...limits.values()].filter((l) => !shown.has(l.kind) && l.spent > l.limit);
+            if (hidden.length === 0) return null;
+            return (
+              <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--over)" }}>
+                Also over its limit: {hidden.map((l) => `${l.kind}, ${formatMoney(l.spent - l.limit)} over`).join("; ")}.
+              </p>
+            );
+          })()}
         </Card>
       </div>
 

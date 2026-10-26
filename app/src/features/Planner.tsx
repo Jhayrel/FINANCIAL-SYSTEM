@@ -58,6 +58,7 @@ import {
   type DueKind,
   planAgain,
   planKinds,
+  plannedForBudget,
   planWallets,
   removePlan,
   reopenPlan,
@@ -71,6 +72,7 @@ import {
   type PlanView,
 } from "../domain/planner";
 import type { Debt } from "../domain/debt";
+import { limitLines, planLimitNote } from "../domain/limitAsk";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "../domain/types";
 import { useMediaQuery } from "./useMediaQuery";
 
@@ -428,6 +430,8 @@ export function Planner(props: PlannerProps) {
           editing={form.editing}
           plans={plans}
           transactions={transactions}
+          budgets={props.budgets}
+          debts={props.debts}
           reference={reference}
           accounts={accounts}
           asOf={asOf}
@@ -943,6 +947,8 @@ function PlanForm(props: {
   editing: Plan | null;
   plans: readonly Plan[];
   transactions: readonly Transaction[];
+  budgets: Budgets;
+  debts: readonly Debt[];
   reference: ReferenceLists;
   accounts: readonly Account[];
   asOf: IsoDate;
@@ -981,6 +987,28 @@ function PlanForm(props: {
   const check = checkPlan({ ...input, setAside }, { plans: props.plans, reference, asOf, editing: editing?.id, closed: Boolean(isEdit && editing && editing.status !== "open") });
   const goalName = goals.find((g) => g.id === goalId)?.name ?? "";
   const counted = setAside && !goalId && !recurring;
+
+  /*
+   * The kind's limit in the plan's month, with what is spent and the other
+   * plans still to pay, as the Budget screen counts them. A plan already
+   * late counts in this month, as it does there.
+   */
+  const { transactions, budgets, debts, plans } = props;
+  const limitNote = useMemo(() => {
+    if (!kind || recurring || amount === null || amount <= 0 || when.kind === "none" || when.kind === "year" || !/^\d{4}-\d{2}/.test(due)) return null;
+    const at = due.slice(0, 7) < asOf.slice(0, 7) ? asOf : due;
+    const year = Number(at.slice(0, 4));
+    const month = Number(at.slice(5, 7));
+    const line = limitLines(transactions, budgets, debts, year, month).find((l) => l.kind === kind);
+    if (!line) return null;
+    const others = plans.filter((p) => p.id !== editing?.id).map((p) => viewOf(p, { transactions, accounts, asOf }));
+    const planned = plannedForBudget(others, year, month, reference, asOf)
+      .spendingViews.filter((v) => v.plan.item.trim() === kind)
+      .reduce((sum, v) => sum + v.left, 0);
+    // An edited plan's payments are in what is spent already; only what is left of it is still to come.
+    const paid = editing && isEdit ? viewOf(editing, { transactions, accounts, asOf }).paid : 0;
+    return planLimitNote(line, planned, Math.max(0, amount - paid), month);
+  }, [kind, recurring, amount, when.kind, due, asOf, transactions, budgets, debts, plans, editing, isEdit, accounts, reference]);
 
   // The rest folds under More details, as on the Add form; open when something in it is set.
   const [moreOpen, setMoreOpen] = useState(Boolean(editing && (!editing.need || editing.goalId || !editing.setAside || editing.notes)));
@@ -1113,6 +1141,7 @@ function PlanForm(props: {
             </Field>
           </>
         )}
+        {limitNote && <Alert status={limitNote.over ? "warn" : "info"}>{limitNote.text}</Alert>}
         {check.notes.filter((n) => !n.startsWith("With no date")).map((n) => (
           <Alert key={n} status="info">
             {n}

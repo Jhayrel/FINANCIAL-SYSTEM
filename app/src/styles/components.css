@@ -1387,6 +1387,10 @@ button.fms-rankrow:hover .fms-ranktrack {
   color: var(--ink-3);
 }
 
+.fms-rankhint.is-over {
+  color: var(--over);
+}
+
 /* Chart axis labels: caption-sized, and at least 12px on a phone (owner, 26 September 2026). */
 .fms-axislabel {
   font-size: 11px;

@@ -32,9 +32,11 @@
  * by the ledger. The budget is said on its own line, as the budget.
  */
 
+import { categoryLimits } from "./budgetView";
+import { spendingTrackByKind } from "./kinds";
 import { walletBalance } from "./balances";
 import { borrowedMoney, lenderNames, ownIn } from "./borrowed";
-import { addDays, getMonth, getYear, MONTH_NAMES } from "./dates";
+import { addDays, firstOfMonth, getMonth, getYear, lastOfMonth, MONTH_NAMES } from "./dates";
 import type { Debt } from "./debt";
 import { formatMoney, withoutYears, type Centavos } from "./money";
 import { monthBrief, safeAfter } from "./monthPlan";
@@ -348,6 +350,30 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
         /^(?:\*\*)?(?:No|Not)\b/.test(said)
           ? `On the budget alone it fits, with ${money(safe.budgetLeft)} left of ${monthName}'s spending budget; the money above is what decides.`
           : `It fits the budget too: ${money(safe.budgetLeft)} is left of ${monthName}'s spending budget.`,
+      );
+    }
+  }
+
+  /*
+   * A limit on the kind asked about, with the Budget screen's figures. "Can I
+   * buy food for 500?" with Food PHP 5,570.00 past its PHP 3,000.00 limit
+   * said nothing of it (27 October 2026). Said after the budget, as the
+   * budget is: a limit is the plan for that kind, the money still decides.
+   */
+  const limits = categoryLimits(budgets[String(year)], month);
+  if (limits.size > 0 && ask.items.length > 0) {
+    const spentByKind = spendingTrackByKind(transactions, { start: firstOfMonth(year, month), end: lastOfMonth(year, month) }, debts);
+    for (const item of ask.items) {
+      const limit = limits.get(item);
+      if (limit === undefined) continue;
+      const used = spentByKind.get(item) ?? 0;
+      const after = used + (cost ?? 0);
+      lines.push(
+        used > limit
+          ? `${item} is already ${money(used - limit)} over its ${money(limit)} limit for ${monthName}${cost !== null ? `; this would make it ${money(after - limit)} over` : ""}.`
+          : cost !== null && after > limit
+            ? `${item} has ${money(limit - used)} left of its ${money(limit)} limit for ${monthName}; this would take it ${money(after - limit)} over.`
+            : `${item} has ${money(limit - used)} left of its ${money(limit)} limit for ${monthName}${cost !== null ? `, ${money(limit - after)} after this` : ""}.`,
       );
     }
   }

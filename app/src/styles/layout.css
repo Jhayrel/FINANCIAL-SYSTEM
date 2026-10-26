@@ -4370,6 +4370,59 @@
   }
 }
 
+/*
+ * The Planner, the same: one screen tall on a computer whatever it holds,
+ * its plans scrolling inside the card and the side panel beside it. With one
+ * plan it was a short card at the top of an empty page, and it grew with
+ * every plan added (owner, 27 October 2026: "make it like in the other table
+ * when empty its not gonna change size").
+ */
+@media (min-width: 1024px) {
+  .fms-plans {
+    height: 100%;
+    min-height: 0;
+    align-items: stretch;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .fms-plans > .fms-section {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .fms-plans > .fms-section > .fms-section-body {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .fms-plans > .fms-section > .fms-section-body > .fms-planlist {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--hairline-strong) transparent;
+  }
+
+  .fms-plans > .fms-section > .fms-section-body > .fms-empty {
+    flex: 1 1 auto;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+  }
+
+  .fms-plans > .fms-plansrail {
+    position: static;
+    align-self: start;
+    max-height: 100%;
+    overflow-y: auto;
+  }
+}
+
 /* One screen tall, a list has no room for a panel under it: the panel is beside it or not at all. */
 @media (min-width: 1024px) and (max-width: 1279px) {
   .fms-binrail,

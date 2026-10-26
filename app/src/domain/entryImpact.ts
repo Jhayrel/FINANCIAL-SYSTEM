@@ -14,6 +14,7 @@
  * spending is the attribution bucket the limits are keyed by.
  */
 
+import { formatMoney } from "./money";
 import { assessMonth, budgetForMonth } from "./budget";
 import { monthLock, type MonthLock } from "./budgetLock";
 import { categoryLimits } from "./budgetView";
@@ -172,4 +173,23 @@ export function entryImpact(
       return lent + held > 0 ? { amount: lent + held, from: lenderNames(from, debts), held: lent === 0 } : null;
     })(),
   };
+}
+
+/**
+ * The entry against its kind's limit, in one line, or null when the kind has
+ * no limit. Over is said as over, never as a negative left (7 October 2026
+ * limits audit). The Add form and the chat's entry card say the same line,
+ * so a Food entry made in the chat says Food is past its limit too (27
+ * October 2026).
+ */
+export function limitLine(impact: Pick<EntryImpact, "kind" | "limit" | "kindBefore" | "cost">): { readonly text: string; readonly over: boolean } | null {
+  if (!impact.kind || impact.limit === null) return null;
+  const after = impact.kindBefore + impact.cost;
+  if (impact.kindBefore > impact.limit) {
+    return { text: `${impact.kind} is ${formatMoney(impact.kindBefore - impact.limit)} over its ${formatMoney(impact.limit)} limit, ${formatMoney(after - impact.limit)} after this.`, over: true };
+  }
+  if (after > impact.limit) {
+    return { text: `${impact.kind} limit: ${formatMoney(impact.limit - impact.kindBefore)} left; this takes it ${formatMoney(after - impact.limit)} over.`, over: true };
+  }
+  return { text: `${impact.kind} limit: ${formatMoney(impact.limit - impact.kindBefore)} left, then ${formatMoney(impact.limit - after)}.`, over: false };
 }

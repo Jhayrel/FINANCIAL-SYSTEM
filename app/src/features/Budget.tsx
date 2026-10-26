@@ -267,6 +267,15 @@ export function Budget({
           ),
     [view.phase, reference, transactions, year, month, asOf],
   );
+  /** The month's plans still to pay, by kind, for the limits (`CategoryRow`). */
+  const plannedByKind = useMemo(() => {
+    const out = new Map<string, Centavos>();
+    for (const v of planned?.spendingViews ?? []) {
+      const kind = v.plan.item.trim();
+      if (kind) out.set(kind, (out.get(kind) ?? 0) + v.left);
+    }
+    return out;
+  }, [planned]);
   /*
    * The budget moved by the money that came in (owner, 12 October 2026):
    * only for the month that is running, where safe to spend is known.
@@ -732,6 +741,7 @@ export function Budget({
                     <CategoryRow
                       key={l.name}
                       line={l}
+                      planned={plannedByKind.get(l.name) ?? 0}
                       onShow={onShowRows}
                       onLimit={
                         limitable(l.name) && (limitsOpen || (limitsClosed && l.limit !== null))
@@ -1811,12 +1821,15 @@ function TrackRow({ label, track, pace }: { label: string; track: BudgetTrack; p
  */
 function CategoryRow({
   line,
+  planned = 0,
   onShow,
   onLimit,
   limitWord,
   editor,
 }: {
   line: CategoryLine;
+  /** Plans still to pay in this kind this month (Planner), counted against its limit before they are paid. */
+  planned?: Centavos;
   onShow?: ((query: string) => void) | undefined;
   onLimit?: (() => void) | undefined;
   /** The words on the limit button, when not the usual ones. */
@@ -1871,6 +1884,19 @@ function CategoryRow({
             : over
               ? `${formatMoney(line.spent - line.limit)} over the limit`
               : `${formatMoney(line.limit - line.spent)} left of the limit`}
+          {/*
+            Plans in this kind still to pay this month, against the limit: a
+            ₱1,500.00 groceries plan in Food was not counted until it was paid,
+            and the limit read as having room it did not (27 October 2026).
+          */}
+          {line.limit !== null && planned > 0 && (
+            <span style={{ display: "block", color: line.spent + planned > line.limit ? "var(--over)" : "var(--ink-3)" }}>
+              {formatMoney(planned)} planned:{" "}
+              {line.spent + planned > line.limit
+                ? `with it, ${formatMoney(line.spent + planned - line.limit)} over`
+                : `with it, ${formatMoney(line.limit - line.spent - planned)} left`}
+            </span>
+          )}
         </span>
         <span className="fms-budgetcat-actions">
           {notable && <span className="t-micro fms-budgetcat-flag">{formatMoney(above)} more than usual</span>}

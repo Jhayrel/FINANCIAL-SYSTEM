@@ -35,6 +35,30 @@ export function limitLines(
   return [...limits].map(([kind, limit]) => ({ kind, limit, spent: spent.get(kind) ?? 0 }));
 }
 
+/** One limit in a few words, for under a kind's bar: "₱120.00 left of its ₱2,000.00 limit". */
+export function limitWords(l: LimitLine): { readonly text: string; readonly over: boolean } {
+  const left = l.limit - l.spent;
+  if (left < 0) return { text: `${formatMoney(-left)} over its ${formatMoney(l.limit)} limit`, over: true };
+  if (left === 0) return { text: `At its ${formatMoney(l.limit)} limit, nothing left`, over: false };
+  return { text: `${formatMoney(left)} left of its ${formatMoney(l.limit)} limit`, over: false };
+}
+
+/**
+ * A plan against its kind's limit, for the plan form. Planning PHP 1,800.00
+ * of a kind past its limit said nothing until the Budget screen (27 October
+ * 2026 limits audit). Counts what the kind has spent that month, the other
+ * plans still to pay under it, and this one, as the Budget screen does.
+ */
+export function planLimitNote(line: LimitLine, planned: Centavos, amount: Centavos, month: number): { readonly text: string; readonly over: boolean } {
+  const name = MONTH_NAMES[month - 1] ?? "that month";
+  const before = line.spent + planned;
+  const after = before + amount;
+  const has = `${line.kind} has a ${formatMoney(line.limit)} limit in ${name}: ${formatMoney(line.spent)} spent${planned > 0 ? `, ${formatMoney(planned)} in other plans` : ""}.`;
+  if (before > line.limit) return { text: `${has} It is already ${formatMoney(before - line.limit)} over; with this plan, ${formatMoney(after - line.limit)} over.`, over: true };
+  if (after > line.limit) return { text: `${has} This plan takes it ${formatMoney(after - line.limit)} over.`, over: true };
+  return { text: `${has} ${formatMoney(line.limit - after)} is left after this plan.`, over: false };
+}
+
 /** Asking about a limit rather than setting one: "did I go over my food limit?", "how much of my limit is left". */
 export function asksAboutLimit(text: string, kinds: readonly string[] = []): boolean {
   const t = text.trim();
@@ -69,7 +93,8 @@ export function limitAnswer(question: string, lines: readonly LimitLine[], month
       ? `${l.kind}: ${formatMoney(l.spent)} of its ${formatMoney(l.limit)} limit, ${formatMoney(l.spent - l.limit)} over.`
       : `${l.kind}: ${formatMoney(l.spent)} of its ${formatMoney(l.limit)} limit, ${formatMoney(l.limit - l.spent)} left${days > 0 ? `, ${formatMoney(Math.floor((l.limit - l.spent) / days))} a day for the ${days} ${days === 1 ? "day" : "days"} left` : ""}.`;
   if (lines.length === 0) {
-    return `No kind of spending has a limit in ${name}. Set one on the Budget screen, or say "limit ${(unlimited ?? "food").toLowerCase()} to 3000".`;
+    const how = `Set one on the Budget screen, or say "limit ${(unlimited ?? "food").toLowerCase()} to 3000".`;
+    return unlimited ? `${unlimited} has no limit in ${name}, and no other kind has one. ${how}` : `No kind of spending has a limit in ${name}. ${how}`;
   }
   const wantsOne = named.length > 0;
   if (!wantsOne && unlimited) {
@@ -77,10 +102,15 @@ export function limitAnswer(question: string, lines: readonly LimitLine[], month
   }
   const shown = wantsOne ? named : lines;
   const over = shown.filter((l) => l.spent > l.limit);
+  // Close: 90% or more used, the bell's "near its limit" (`alerts.ts`).
+  const near = shown.filter((l) => l.spent <= l.limit && l.spent * 10 >= l.limit * 9);
+  const nearWords = near.length > 0 ? ` ${near.length === 1 ? `${near[0]?.kind} is` : `${near.map((l) => l.kind).join(" and ")} are`} close to ${near.length === 1 ? "its limit" : "their limits"}.` : "";
   const head = wantsOne
     ? ""
     : over.length > 0
-      ? `${over.length === 1 ? `${over[0]?.kind} is` : `${over.length} kinds are`} over ${over.length === 1 ? "its limit" : "their limits"} in ${name}.\n\n`
-      : `Every kind with a limit is within it in ${name}.\n\n`;
+      ? `${over.length === 1 ? `${over[0]?.kind} is` : `${over.length} kinds are`} over ${over.length === 1 ? "its limit" : "their limits"} in ${name}.${nearWords}\n\n`
+      : near.length > 0
+        ? `No kind is over its limit in ${name}.${nearWords}\n\n`
+        : `Every kind with a limit is well within it in ${name}.\n\n`;
   return `${head}${shown.map((l) => (shown.length > 1 ? `- ${one(l)}` : one(l))).join("\n")}`;
 }

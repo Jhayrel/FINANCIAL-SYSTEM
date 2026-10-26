@@ -173,14 +173,30 @@ export function debtDetailChange(ask: DebtDetailAsk, debts: readonly Debt[], asO
  * It was answered "No kind of spending has a limit in October" (26 October
  * 2026), the reading for a category's limit.
  */
-export function creditRoomAnswer(text: string, debts: readonly Debt[], rows: readonly Transaction[], asOf: IsoDate): string | null {
+export function creditRoomAnswer(text: string, debts: readonly Debt[], rows: readonly Transaction[], asOf: IsoDate, kinds: readonly string[] = []): string | null {
   const t = text.trim();
   if (/\d/.test(t)) return null;
   const asks =
     (/\blimit\b/i.test(t) && /\b(?:left|remaining|room|available|how much|used|what(?:'s| is))\b/i.test(t)) ||
     /\bhow much (?:can|could) i (?:still )?borrow\b|\b(?:available|remaining) credit\b|\bcredit (?:left|available|remaining)\b/i.test(t);
   if (!asks) return null;
-  const debt = debtNamed(t, debts) ?? (debts.filter((d) => !d.archived && takesLimit(d)).length === 1 ? (debts.find((d) => !d.archived && takesLimit(d)) ?? null) : null);
+  const named = debtNamed(t, debts);
+  /*
+   * A limit on a kind of spending is the Budget's, not a credit line's: "how
+   * much is left of my food limit?" was answered about Maya Credit, the only
+   * line with a limit (27 October 2026). Without a line named, a kind named,
+   * or spending, or no word of credit at all with a kind limited, leaves it
+   * to the kind's answer (`limitAsk.ts`).
+   */
+  if (!named) {
+    const flat = ` ${t.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
+    const kindSaid = kinds.some((k) => {
+      const w = k.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      return w.length > 0 && (flat.includes(` ${w} `) || flat.includes(` ${w}s `));
+    });
+    if (kindSaid || /\b(?:spending|budget)\b/i.test(t)) return null;
+  }
+  const debt = named ?? (debts.filter((d) => !d.archived && takesLimit(d)).length === 1 ? (debts.find((d) => !d.archived && takesLimit(d)) ?? null) : null);
   if (!debt) {
     const lines = debts.filter((d) => !d.archived && takesLimit(d));
     if (lines.length === 0) return null;

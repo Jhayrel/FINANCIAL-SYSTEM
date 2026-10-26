@@ -333,8 +333,11 @@ export function financeAlerts(input: AlertInput): Alert[] {
             id: `limit-near-${kind.toLowerCase()}`,
             level: "info",
             area: "budget",
-            title: `${kind} is near its limit`,
-            detail: `${money(used)} of the ${money(limit)} limit: ${money(room)} left for ${left} day${left === 1 ? "" : "s"}, ${money(Math.floor(room / left))} a day.`,
+            title: room === 0 ? `${kind} has reached its limit` : `${kind} is near its limit`,
+            detail:
+              room === 0
+                ? `The whole ${money(limit)} limit is spent, with ${left} day${left === 1 ? "" : "s"} left in ${monthName(month)}.`
+                : `${money(used)} of the ${money(limit)} limit: ${money(room)} left for ${left} day${left === 1 ? "" : "s"}, ${money(Math.floor(room / left))} a day.`,
             weight: 42,
             query: kind,
           });
