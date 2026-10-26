@@ -1924,6 +1924,24 @@ style guide's Bin, Planner and sidebar lines say how each now works.
 - **The plan dialog on a computer**: actions on its footer line, the rarer
   ones under More.
 
+### 2026-10-27, last: Insights buttons, big numbers, figures in step
+
+- **Insights on a phone** (owner: "Fix ui the buttons etc"): the four tabs
+  under a period are one segmented box, the chosen one raised; the three
+  figures are one to a line, name and note left, figure right, so millions
+  fit; Find a difference shows Clear only when there is something to clear.
+- **Big numbers** (owner: "make sure my system ui can handle big numbers
+  even in phone or pc"): a copy of the data with PHP 12,345,678.90 in and
+  PHP 9,876,543.21 out was opened on every screen at 320, 360, 1024 and
+  1280 wide, checking for a page that scrolls sideways, a figure outside its
+  card, or a figure over another word in its row. None found after the
+  Insights change; the Dashboard wraps a long figure under its label.
+- **In step** (owner: "every part of the system sync properly and
+  accurately"): net worth (sidebar, header), usable now and wallets
+  (sidebar, Dashboard, chat), safe to spend today and to the month's end
+  (Dashboard, chat), plans set aside (Dashboard, Planner) and came in
+  (Dashboard, Insights) read the same on both data sets.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

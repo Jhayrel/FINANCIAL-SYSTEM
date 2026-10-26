@@ -8373,6 +8373,13 @@ button.fms-recent-row:disabled {
   flex: 0 0 auto;
 }
 
+/* Under the fields on a phone: Find it the width of the card, Clear a quiet word beside it only once there is something to clear. */
+@container (max-width: 560px) {
+  .fms-find-go > .fms-btn--primary {
+    flex: 1 1 auto;
+  }
+}
+
 /* The way out of an answer, under it. */
 /*
  * What the assistant makes of the finding, under the figures it read.
@@ -11111,22 +11118,76 @@ button.fms-recent-row:disabled {
     mask-image: none;
   }
 
+  /*
+   * The four tabs, two to a line, in one box like every segmented choice
+   * (Budget's "Save it to"): the chosen one raised, the rest on the box. Bare
+   * tabs in a grid with one shaded read as stray buttons (owner, 27 October
+   * 2026: "Fix ui the buttons etc").
+   */
   .fms-ical-tabs {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3px;
+    padding: 3px;
     overflow: visible;
     mask-image: none;
+    background: var(--surface-sunk);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-md);
   }
 
   .fms-ical-tabs > .fms-ical-tab {
     justify-content: center;
     min-height: 44px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+  }
+
+  .fms-ical-tabs > .fms-ical-tab[aria-selected="true"] {
+    background: var(--surface);
+    border-color: var(--hairline-strong);
+    box-shadow: var(--shadow-card);
   }
 
   .fms-ical-fig > .t-caption {
     white-space: normal;
     overflow: visible;
     text-overflow: clip;
+  }
+
+  /*
+   * The three figures, one to a line: the name and its note on the left, the
+   * figure on the right. Three to a line, a figure of millions ran into the
+   * next one (owner, 27 October 2026: "make sure my system ui can handle big
+   * numbers even in phone").
+   */
+  .fms-ical-figs {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+
+  .fms-ical-fig {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    column-gap: var(--space-3);
+  }
+
+  .fms-ical-fig > .t-label {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .fms-ical-fig > .fms-amount,
+  .fms-ical-fig > :nth-child(2) {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    justify-self: end;
+  }
+
+  .fms-ical-fig > .t-caption {
+    grid-column: 1;
+    grid-row: 2;
   }
 
   /*

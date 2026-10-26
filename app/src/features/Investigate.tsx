@@ -290,9 +290,12 @@ export function Investigate({
               <Button variant="primary" onClick={run} disabled={!account || actual === null}>
                 Find it
               </Button>
-              <Button variant="ghost" onClick={clear} disabled={actual === null && !history && !matchedOn && date === asOf}>
-                Clear
-              </Button>
+              {/* Only when there is something to clear: a greyed-out Clear beside a greyed-out Find it read as two broken buttons. */}
+              {!(actual === null && !history && !matchedOn && date === asOf) && (
+                <Button variant="ghost" onClick={clear}>
+                  Clear
+                </Button>
+              )}
             </div>
           </div>
 
