@@ -9847,69 +9847,48 @@ button.fms-recent-row:disabled {
   background: var(--surface-hover);
 }
 
-/* A panel in the middle of a computer's screen (26 October 2026: "this isn't the phone"). */
+/*
+ * A panel in the middle of a computer's screen: the style guide's modal
+ * (§3.11), 560px at most, its actions at the bottom right (26 October 2026:
+ * "this isn't the phone", then "only follow branding").
+ */
 .fms-rowsheet--dialog {
   inset: 0;
   margin: auto;
-  width: min(760px, calc(100vw - var(--space-8)));
+  width: min(560px, calc(100vw - var(--space-8)));
   height: fit-content;
-  max-height: min(86dvh, 760px);
-  padding: var(--space-5);
+  max-height: min(86dvh, 720px);
+  padding: var(--space-5) var(--space-5) 0;
   gap: var(--space-4);
-  border: 1px solid var(--hairline-strong);
+  border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
 }
 
-.fms-reviewdesk {
-  display: grid;
-  gap: var(--space-4);
+.fms-rowsheet--dialog .fms-rowsheet-actions {
+  bottom: 0;
+  justify-content: flex-end;
+  margin: 0 calc(var(--space-5) * -1);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border-top: 0;
 }
 
-.fms-reviewdesk-found {
-  display: grid;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--warn-bg);
-  border-left: 3px solid var(--warn);
-  border-radius: var(--radius-md);
+.fms-rowsheet--dialog .fms-rowsheet-actions > .fms-btn {
+  flex: 0 0 auto;
+  min-height: 40px;
 }
 
-.fms-reviewdesk-found p {
+/* A choice in words: its name, then what it does. No box around it. */
+.fms-reviewchoice {
+  display: grid;
+  gap: 2px;
+}
+
+.fms-reviewchoice p {
   margin: 0;
 }
 
-.fms-reviewdesk-found .t-caption {
-  margin-top: 2px;
+.fms-reviewchoice .t-caption {
   color: var(--ink-2);
-}
-
-.fms-reviewdesk-choices {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  gap: var(--space-3);
-}
-
-.fms-reviewdesk-choice {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  gap: var(--space-2);
-  padding: var(--space-4);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-md);
-}
-
-.fms-reviewdesk-choice h3 {
-  margin: 0;
-  color: var(--ink);
-}
-
-.fms-reviewdesk-choice p {
-  margin: 0;
-  color: var(--ink-2);
-}
-
-.fms-reviewdesk-choice .fms-btn {
-  justify-self: start;
 }
 
 .fms-rowsheet-body {
