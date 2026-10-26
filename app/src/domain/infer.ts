@@ -110,6 +110,34 @@ const words = (text: string): string[] =>
     .split(/\s+/)
     .filter((w) => w.length > 2 && !NOISE.has(w) && !/^\d+$/.test(w));
 
+/**
+ * The account a shop is usually paid from, by a word its entries share:
+ * at least two entries mention it, no more than forty (a common word says
+ * nothing), and at least three in four of them came out of one account.
+ */
+// Tried on the owner's 353 spending entries of 2026: 269 wallets right, against 263 by the item alone.
+const SHOP_MIN = 2;
+const SHOP_MAX = 40;
+const SHOP_SHARE = 0.75;
+function shopWallet(
+  said: string,
+  rows: readonly Transaction[],
+  accounts: readonly string[],
+  item: string,
+): { readonly wallet: string; readonly count: number; readonly word: string } | null {
+  const skip = new Set([...accounts.flatMap((a) => words(a)), ...words(item), "purchase", "payment", "paid", "food", "lunch", "dinner", "breakfast", "snack", "snacks", "drinks", "store", "shop", "meal", "meals", "bought", "buy", "from", "with", "for", "the", "and"]);
+  const asked = [...new Set(words(said))].filter((w) => w.length >= 4 && !skip.has(w));
+  let best: { wallet: string; count: number; word: string } | null = null;
+  for (const w of asked) {
+    const mentioning = rows.filter((t) => words(t.description).includes(w) && accounts.includes(t.fromWallet));
+    if (mentioning.length < SHOP_MIN || mentioning.length > SHOP_MAX) continue;
+    const { value, count } = commonest(mentioning, (t) => t.fromWallet);
+    if (!value || count < mentioning.length * SHOP_SHARE) continue;
+    if (!best || count > best.count) best = { wallet: value, count, word: w };
+  }
+  return best;
+}
+
 /** The most common value among rows, and how many had it. */
 function commonest<T extends string>(rows: readonly Transaction[], pick: (t: Transaction) => T): {
   value: T | null;
@@ -404,6 +432,22 @@ export function inferFromHistory(
   if (named && flow === "Revenue" && !next.toWallet) {
     next = { ...next, toWallet: named };
     because.push(`Into ${named}, as you said.`);
+  }
+  /*
+   * The shop before the item. A Jollibee receipt came back "Paid from Cash,
+   * which is where 197 of these came from" (Food, mostly cash), and the
+   * owner moved it to Maya: every Jollibee entry before it was Maya (15
+   * October 2026, from the 25 October backup). A word in the description
+   * that names few entries, all or nearly all paid from one account, is
+   * the shop's habit, and it is the better guess.
+   */
+  if (flow !== "Revenue" && !next.fromWallet) {
+    const shop = shopWallet(`${hint} ${next.description}`, transactions.filter((t) => t.type === flow), accounts, item);
+    if (shop) {
+      next = { ...next, fromWallet: shop.wallet };
+      unsure.push("fromWallet");
+      because.push(`Paid from ${shop.wallet}, which is where your ${shop.count} entries mentioning "${shop.word}" came from.`);
+    }
   }
   if (flow !== "Revenue" && !next.fromWallet) {
     const { value, count } = commonest(past, (t) => t.fromWallet);

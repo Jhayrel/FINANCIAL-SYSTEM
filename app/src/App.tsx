@@ -64,7 +64,7 @@ import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domai
 import { debtWalletDirection, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { spreadCovered } from "./domain/covers";
 import { formatMedium, getMonth, getYear, today } from "./domain/dates";
-import { monthBrief } from "./domain/monthPlan";
+import { monthBrief, nextMonthStart } from "./domain/monthPlan";
 import { settleLine, type Settlement } from "./domain/settleLine";
 import { systemToCsv } from "./domain/csv";
 import { sheetRequestOf, type ExportAsk } from "./domain/exportAsk";
@@ -1012,19 +1012,22 @@ export default function App() {
    */
   const reportRows = useMemo(() => spreadCovered(transactions), [transactions]);
 
-  const financeFindings = useMemo(
-    () =>
-      financeAlerts({
-        transactions: reportRows,
-        accounts: settings.accounts,
-        budgets,
-        debts: settings.credits,
-        bills: billStatuses(transactions, reference, asOf),
-        lowBalanceThreshold: settings.lowBalanceThreshold,
-        asOf,
-        spendingTypes: reference.spendingTypes,
-        safe: monthBrief({ transactions: reportRows, reference, budgets, debts: settings.credits, year: getYear(asOf), month: getMonth(asOf), asOf }).safe,
-      }),
+  const financeFindings = useMemo(() => {
+    const safe = monthBrief({ transactions: reportRows, reference, budgets, debts: settings.credits, year: getYear(asOf), month: getMonth(asOf), asOf }).safe;
+    return financeAlerts({
+      transactions: reportRows,
+      accounts: settings.accounts,
+      budgets,
+      debts: settings.credits,
+      bills: billStatuses(transactions, reference, asOf),
+      lowBalanceThreshold: settings.lowBalanceThreshold,
+      asOf,
+      spendingTypes: reference.spendingTypes,
+      safe,
+      // The month's last week, as the Dashboard shows it.
+      next: safe && safe.daysLeft <= 7 ? nextMonthStart({ transactions: reportRows, reference, budgets, debts: settings.credits, asOf }, safe) : null,
+    });
+  },
     [reportRows, settings.accounts, settings.credits, settings.lowBalanceThreshold, budgets, reference, asOf],
   );
   const alerts = useMemo(() => (usageAlert ? [usageAlert, ...financeFindings] : financeFindings), [usageAlert, financeFindings]);

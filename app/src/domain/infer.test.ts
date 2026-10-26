@@ -344,3 +344,26 @@ describe("the entry that says the most of the same words", () => {
     expect(itemFromHistory("motorcycle brake fixed", history)?.item).toBe("Repairs");
   });
 });
+
+describe("the shop's wallet before the item's (25 October 2026 backup)", () => {
+  it("pays a Jollibee receipt from Maya when every Jollibee entry was Maya, though most food is cash", () => {
+    const history = [
+      ...Array.from({ length: 10 }, (_, i) => row({ item: "Food", fromWallet: "Cash", description: `lunch ${i}` })),
+      row({ item: "Food", fromWallet: "Maya", description: "Lunch at Jollibee" }),
+      row({ item: "Food", fromWallet: "Maya", description: "JOLLIBEE JB3829" }),
+      row({ item: "Food", fromWallet: "Maya", description: "Jollibee JB0892" }),
+    ];
+    const read = inferFromHistory(spend({ item: "Food", amount: 49500, description: "Jollibee 2pc cknjoy, rice, coke zero" }), history, reference, "");
+    expect(read.draft.fromWallet).toBe("Maya");
+    expect(read.because.join(" ")).toContain('Paid from Maya, which is where your 3 entries mentioning "jollibee" came from.');
+  });
+
+  it("keeps the item's habit when the shop has none", () => {
+    const history = [
+      ...Array.from({ length: 5 }, () => row({ item: "Food", fromWallet: "Cash", description: "lunch" })),
+      row({ item: "Food", fromWallet: "Maya", description: "7-Eleven purchase" }),
+      row({ item: "Food", fromWallet: "Gcash", description: "7-Eleven drinks" }),
+    ];
+    expect(inferFromHistory(spend({ item: "Food", amount: 10000, description: "7-Eleven ice cream" }), history, reference, "").draft.fromWallet).toBe("Cash");
+  });
+});

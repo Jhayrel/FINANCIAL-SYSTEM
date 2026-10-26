@@ -28,6 +28,9 @@ describe("reading figures out of text", () => {
   it("reads a count or a record number as no money", () => {
     expect(figuresIn("across 3,941 entries and 1,200 rows, #3,948 among them")).toEqual([]);
     expect(figuresIn("3,941.50 spent")).toEqual([394150]);
+    // Bold, and a word between (19 October 2026, in the 25 October backup).
+    expect(figuresIn("your **3,941** ledger entries from May 2022")).toEqual([]);
+    expect(figuresIn("PHP 1,200.00 for 3 items")).toEqual([120000]);
   });
 
   it("finds nothing in a sentence with no money in it", () => {

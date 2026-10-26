@@ -107,3 +107,17 @@ describe("the budget promising more than the money", () => {
     expect(budgetBeyondMoney({ safe: 70085, budgetLeft: null, wallets: 70085, todayShare: 11680 })).toBe(0);
   });
 });
+
+describe("the bell, when next month's bills need more than is left (26 October 2026)", () => {
+  it("says by how much, and is silent when the money covers them", async () => {
+    const { financeAlerts } = await import("./alerts");
+    const thin = [row({ date: "2026-09-01", type: "Revenue", fromWallet: "", toWallet: "Cash", category: "Revenue", item: "Allowance", amount: 700000 }), rentSep, rentOct];
+    const { now, next } = start(thin, "2026-10-25");
+    const base = { transactions: thin, accounts: [], budgets: {}, debts: [], bills: [], lowBalanceThreshold: 0, asOf: "2026-10-25", safe: now };
+    const short = financeAlerts({ ...base, next }).find((a) => a.id.startsWith("next-month-short"));
+    expect(short?.title).toBe("November's bills need ₱2,000.00 more than is left");
+    expect(short?.detail).toContain("Until money comes in, November starts at ₱0.00 a day.");
+    const { now: rich, next: fine } = start([income, rentSep, rentOct, food], "2026-10-25");
+    expect(financeAlerts({ ...base, safe: rich, next: fine }).some((a) => a.id.startsWith("next-month-short"))).toBe(false);
+  });
+});

@@ -1599,6 +1599,22 @@ Read from the 76 chat turns since 20 October in the owner's backup.
   filter and says what Keep does; the chat's context says the Database has
   the i and Keep.
 
+### 2026-10-26, after: the 25 October backup read again, reasoning measured
+
+- Measured on the owner's own 2026 entries, not guessed: the wallet a
+  receipt is paid from now follows the shop before the item (`shopWallet`
+  in infer.ts: 269 of 353 right, against 263 by the item alone). The
+  Jollibee receipt the owner moved from Cash to Maya is the case: all three
+  Jollibee entries before it were Maya. The carwash item rule holds too
+  (278 of 350 items right, 276 without it).
+- "**3,941** ledger entries" was flagged as PHP 3,941.00 not worked out:
+  bold and a word between now count as a count (`aiFigures.ts`).
+- The bell warns in a month's last week when next month's bills need more
+  than is left ("November's bills need PHP 821.15 more than is left").
+- Read and found already fixed: September food invented as 1,022 and 1,417
+  (the stricter figure check flags both now), the "other smaller items"
+  sum, the 51.97 day figure, "an edit recalculates the budget".
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

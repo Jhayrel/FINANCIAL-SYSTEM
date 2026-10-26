@@ -42,7 +42,8 @@
  *
  * A bare number followed by what it counts ("3,941 entries", "1,200 rows")
  * or a record number ("#3,948") is a count, not money: "3,941 entries" was
- * flagged as PHP 3,941.00 that the app had not worked out (19 October 2026).
+ * flagged as PHP 3,941.00 that the app had not worked out (19 October 2026),
+ * and so was "**3,941** ledger entries", bold and with a word between.
  *
  * "PHP 1,234.56", "₱1,234.56", "-PHP 33,478.39", "PHP -33,478.39", and the
  * bare "1,234.56" that turns up inside a sentence already talking about
@@ -50,7 +51,7 @@
  * says PHP -33,478.39 and the data says the same.
  */
 const FIGURE =
-  /(?:[-\u2212]\s*)?(?:php|₱)\s*(?:[-\u2212]\s*)?\d[\d,]*(?:\.\d{1,2})?|(?<![\d.,#])\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?(?![\d.,])(?!\s*(?:entries|entry|records?|rows?|items?|transactions?|movements?|times|days?|weeks?|months?|years?|people|persons?|pcs|pieces)\b)/gi;
+  /(?:[-\u2212]\s*)?(?:php|₱)\s*(?:[-\u2212]\s*)?\d[\d,]*(?:\.\d{1,2})?|(?<![\d.,#])\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?(?![\d.,])(?!\**\s*(?:[a-z]+\s+)?(?:entries|entry|records?|rows?|items?|transactions?|movements?|times|days?|weeks?|months?|years?|people|persons?|pcs|pieces)\b)/gi;
 
 /**
  * The owner's own figures, written the way the figure reader reads them.

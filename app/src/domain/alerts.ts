@@ -38,7 +38,7 @@ import { categoryLimits } from "./budgetView";
 import { limitKindOf, spendingTrackByKind } from "./kinds";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import { isNeedRow } from "./spendNote";
-import { budgetBeyondMoney } from "./monthPlan";
+import { budgetBeyondMoney, type NextMonthStart } from "./monthPlan";
 import { unusualRows } from "./unusual";
 import { wholeRows } from "./covers";
 import { incomeSinceSet } from "./incomeBudget";
@@ -102,6 +102,8 @@ export interface AlertInput {
   readonly spendingTypes?: readonly Pick<SpendingType, "name" | "necessity">[] | undefined;
   /** This month's safe to spend and what is left of the spending budget (`monthBrief`), for the budget against the money. */
   readonly safe?: { readonly safe: Centavos; readonly budgetLeft: Centavos | null; readonly wallets: Centavos; readonly todayShare?: Centavos | undefined } | null | undefined;
+  /** What next month starts at, in this month's last week (`nextMonthStart`). */
+  readonly next?: NextMonthStart | null | undefined;
 }
 
 /** Pace of spending so far this month, per day. */
@@ -247,6 +249,29 @@ export function financeAlerts(input: AlertInput): Alert[] {
         title: `The spending budget promises ${money(beyond)} more than your money`,
         detail: `${money(sf.budgetLeft)} is left of it, but only ${money(Math.max(0, sf.safe))} is safe to spend. Lower it on the Budget screen, under Budget and your money.`,
         weight: 72,
+      });
+    }
+  }
+
+  // ── Next month's bills against what is left ──────────────────────────────
+  /*
+   * The Dashboard says what next month starts at; the bell says so when its
+   * bills need more than is left, so it is seen before the 1st, not on it
+   * (26 October 2026: "make sure all parts of the system are connected").
+   */
+  {
+    const n = input.next;
+    const due = n ? n.reservedBills + n.reservedDebt : 0;
+    if (n && due > 0 && n.safe === 0) {
+      const short = due - Math.max(0, n.carried);
+      const name = monthName(n.month);
+      out.push({
+        id: `next-month-short-${n.first}`,
+        level: "warn",
+        area: "budget",
+        title: `${name}'s bills need ${money(short)} more than is left`,
+        detail: `On 1 ${name} its bills, subscriptions${n.reservedDebt > 0 ? " and debt payments" : ""} come to ${money(due)}, and ${money(Math.max(0, n.carried))} is left now if nothing more is spent. Until money comes in, ${name} starts at ${money(0)} a day.`,
+        weight: 50,
       });
     }
   }
