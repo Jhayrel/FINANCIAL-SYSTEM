@@ -1746,6 +1746,47 @@ pdf with all details also make the ui cleaner in pdf".
   exported from `statementPdf.ts`.
 - `data/download.ts` holds the one `saveFile`; Statements uses it too.
 
+### 2026-10-26, later: the Planner
+
+The owner: "add a feature for plan spending like spending planner ... I am
+planning to pay my tuition next month ... make sure all sync like ai,
+notifications, database settings", with paying from a plan, a goal link,
+moving the date, and every what-if thought through. The design, its states
+and 23 what-ifs are `16-PLANNER.md`, binding; read it before changing any of
+this.
+
+- **Where**: its own screen, Planner, after Budget in the sidebar and under
+  More on a phone (`features/Planner.tsx`). Not the Budget screen's month
+  planner, which is a different thing with an older name.
+- **Stored** as `settings.plans` in the one settings document, so it syncs,
+  backs up and restores with everything else. A plan is never an entry: no
+  money moves until **Record payment** saves a real entry (`payPlan` in
+  `App.tsx`, through the same save as the Add screen) and links it.
+- **Rules**: plans save under the rules already published. The guard line in
+  `firestore.rules` (a list of at most 500) is optional; the whole file to
+  paste is `docs/firestore-rules-planner.txt`, identical to `firestore.rules`.
+- **Safe to spend**: an open plan counted ("Count it in safe to spend", on by
+  default except bills, subscriptions and goal plans) is set aside in its
+  month, what is left of it only (`SafeToSpend.reservedPlans`). The
+  Dashboard, the chat's safe answer, next month's start, the bell and the
+  model's figures all read the same field.
+- **States** are worked out, never stored (`viewOf`): later, soon, due today,
+  overdue, part paid, paid early, on time or late, skipped, removed. A plan
+  whose payment went to the bin reads open again and says why. Nothing ever
+  skips, moves or closes a plan by itself.
+- **The bell** (`planAlerts`): overdue, due within three days with the money
+  short, and an entry that looks like a plan's payment, to link in one tap.
+- **Goals**: a plan can point at a goal account and shows what the goal holds
+  and what it takes a month; its money is in the goal, so it never counts in
+  safe to spend.
+- **The chat** (`plannerAsk.ts`): add, list, move, change the amount, pay,
+  skip, remove and put back, each as a card, and undo. A question with a
+  sum ("I plan to spend 3000 on a trip, what budget?") is left to the money
+  readers, as before. Budget advice for a month ahead counts that month's
+  open plans as coming (`plannedIn`).
+- **Activity** records every plan change as `plan.*`, filtered as Planner.
+- Tests: `planner.test.ts`, what-if by what-if.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

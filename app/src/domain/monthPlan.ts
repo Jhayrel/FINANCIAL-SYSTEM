@@ -54,6 +54,7 @@
  * Rounded down, so a daily figure never promises a centavo that is not there.
  */
 
+import { plansSetAside, viewOf } from "./planner";
 import { wholeRows } from "./covers";
 import { learnPatterns } from "./allocation";
 import { totalSavingsBalance, totalWalletBalance } from "./balances";
@@ -100,6 +101,14 @@ export interface SafeToSpend {
   readonly wallets: Centavos;
   readonly reservedBills: Centavos;
   readonly reservedDebt: Centavos;
+  /**
+   * What is left of the Planner's plans counted in safe to spend this month:
+   * open, "Count it in safe to spend" on, due this month or overdue, not
+   * saved in a goal (docs/16-PLANNER.md, P5). 0 with none.
+   */
+  readonly reservedPlans: Centavos;
+  /** Those plans, due order, each with what is left of it. */
+  readonly plansDue: readonly { readonly id: string; readonly title: string; readonly left: Centavos; readonly due: IsoDate }[];
   /** Wallets less everything still due. Negative when they cannot cover it. */
   readonly free: Centavos;
   /** What is left of the spending budget, or null with none set. Negative when over. */
@@ -450,7 +459,11 @@ export function monthBrief(input: {
   if (phase === "current") {
     const reservedBills = bills.bills.filter(isOpenBill).reduce((s, b) => s + b.amount, 0);
     const reservedDebt = due.filter((d) => d.kind === "payable").reduce((s, d) => s + d.amount, 0);
-    const free = wallets - reservedBills - reservedDebt;
+    // Plans the owner chose to count, as bills still to pay are (docs/16-PLANNER.md, P5).
+    const planned = plansSetAside((reference.plans ?? []).map((p) => viewOf(p, { transactions, accounts: [], asOf })));
+    const reservedPlans = planned.total;
+    const plansDue = planned.views.map((v) => ({ id: v.plan.id, title: v.plan.title, left: v.left, due: v.plan.due }));
+    const free = wallets - reservedBills - reservedDebt - reservedPlans;
     const budgetLeft = tracks.spending.budget > 0 ? tracks.spending.remaining : null;
     const amount = Math.max(0, free);
     const limitedBy = budgetLeft !== null && budgetLeft < amount ? "budget" : "wallets";
@@ -484,6 +497,8 @@ export function monthBrief(input: {
       wallets,
       reservedBills,
       reservedDebt,
+      reservedPlans,
+      plansDue,
       free,
       budgetLeft,
       budgetPerDay,
@@ -639,6 +654,8 @@ export interface NextMonthStart {
   readonly carried: Centavos;
   readonly reservedBills: Centavos;
   readonly reservedDebt: Centavos;
+  /** The month's plans counted in safe to spend (docs/16-PLANNER.md, P5). */
+  readonly reservedPlans: Centavos;
   /** Never below zero. */
   readonly safe: Centavos;
   /** A day, over every day of the month. */
@@ -663,6 +680,11 @@ export function nextMonthStart(
   const brief = monthBrief({ ...input, year, month, asOf: first });
   const reservedBills = brief.bills.bills.filter(isOpenBill).reduce((s, b) => s + b.amount, 0);
   const reservedDebt = brief.debts.filter((d) => d.kind === "payable" && d.dueOn >= first).reduce((s, d) => s + d.amount, 0);
-  const safe = Math.max(0, now.free - reservedBills - reservedDebt);
-  return { year, month, first, days, carried: now.free, reservedBills, reservedDebt, safe, perDay: Math.floor(safe / days) };
+  // Next month's plans that count, what is left of each (docs/16-PLANNER.md, P5).
+  const reservedPlans = (input.reference.plans ?? [])
+    .map((p) => viewOf(p, { transactions: input.transactions, accounts: [], asOf: input.asOf }))
+    .filter((v) => v.plan.setAside && !v.plan.goalId && v.plan.due.slice(0, 7) === first.slice(0, 7) && v.left > 0 && v.state !== "paid" && v.state !== "skipped" && v.state !== "removed")
+    .reduce((s, v) => s + v.left, 0);
+  const safe = Math.max(0, now.free - reservedBills - reservedDebt - reservedPlans);
+  return { year, month, first, days, carried: now.free, reservedBills, reservedDebt, reservedPlans, safe, perDay: Math.floor(safe / days) };
 }

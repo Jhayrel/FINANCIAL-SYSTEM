@@ -47,7 +47,15 @@ export type Action =
   | "budget.update"
   | "backup.restore"
   | "ai.proposal.accepted"
-  | "ai.proposal.discarded";
+  | "ai.proposal.discarded"
+  /** The Planner (docs/16-PLANNER.md): a plan added, edited, moved, paid, skipped, removed or put back. */
+  | "plan.create"
+  | "plan.update"
+  | "plan.move"
+  | "plan.paid"
+  | "plan.skip"
+  | "plan.remove"
+  | "plan.restore";
 
 export interface ActivityEvent {
   readonly id: string;
@@ -249,6 +257,16 @@ export function settingsChanged(what: string, by: Provenance = BY_OWNER): Activi
  * A budget or a limit set, changed, corrected once its month closed, or undone.
  * The summary names the month and says what moved (`revisionSummary`).
  */
+/** A plan in the Planner changed. The amount, when there is one, is the plan's or the payment's. */
+export function planChanged(
+  action: "plan.create" | "plan.update" | "plan.move" | "plan.paid" | "plan.skip" | "plan.remove" | "plan.restore",
+  summary: string,
+  by: Provenance = BY_OWNER,
+  extra: { readonly amount?: Centavos; readonly targetId?: string; readonly before?: string; readonly after?: string } = {},
+): ActivityEvent {
+  return build(action, by, summary, extra);
+}
+
 export function budgetChanged(summary: string, by: Provenance = BY_OWNER): ActivityEvent {
   return build("budget.update", by, summary);
 }

@@ -54,7 +54,7 @@ import { applyDebtMigration, planDebtMigration } from "./domain/debtMigration";
 import { applyOpeningMigration, planOpeningMigration } from "./domain/year";
 import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
-import { asAmountAndFees, isPartOf, netWorth, owedChange, parentOf, partOf, positionsOf, renameDebtAccount, withDebt, type Debt, type DebtEffect } from "./domain/debt";
+import { asAmountAndFees, isPartOf, netWorth, owedChange, parentOf, partOf, positionsOf, renameDebtAccount, withDebt, withFeesPaid, type Debt, type DebtEffect } from "./domain/debt";
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
@@ -62,7 +62,9 @@ import { moveRows, type BillCategory } from "./domain/kindRename";
 import { formatMoney, type Centavos } from "./domain/money";
 import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
-import { debtWalletDirection, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
+import { checkDraft, debtWalletDirection, draftToTransactions, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
+import { Planner } from "./features/Planner";
+import { linkPayments, type Plan } from "./domain/planner";
 import { spreadCovered } from "./domain/covers";
 import { formatMedium, getMonth, getYear, today } from "./domain/dates";
 import { monthBrief, nextMonthStart } from "./domain/monthPlan";
@@ -110,12 +112,13 @@ import {
   created as createdEvent,
   restored as restoredEvent,
   settingsChanged,
+  planChanged,
   updated as updatedEvent,
   BY_OWNER,
   type ActivityEvent,
   type Provenance,
 } from "./domain/activity";
-import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction } from "./domain/types";
+import type { BudgetYear, Budgets, DeletedTransaction, IsoDate, ReferenceLists, Transaction } from "./domain/types";
 
 type Screen =
   | "dashboard"
@@ -124,6 +127,8 @@ type Screen =
   | "debt"
   | "insights"
   | "budget"
+  /** What is planned to be paid later (docs/16-PLANNER.md). */
+  | "planner"
   | "statements"
   | "bin"
   | "activity"
@@ -145,6 +150,7 @@ const NAV: { id: Screen; label: string; icon: IconName; primary?: boolean }[] = 
   { id: "debt", label: "Debt", icon: "debt", primary: true },
   { id: "insights", label: "Insights", icon: "insights" },
   { id: "budget", label: "Budget", icon: "budget" },
+  { id: "planner", label: "Planner", icon: "planner" },
   { id: "statements", label: "Statements", icon: "statements" },
   { id: "bin", label: "Bin", icon: "bin" },
   { id: "activity", label: "Activity", icon: "activity" },
@@ -873,6 +879,8 @@ export default function App() {
       onBehalf: settings.credits
         .filter((c) => !c.archived && c.form === "pass-through")
         .map((c) => ({ id: c.id, name: c.name, side: c.kind === "receivable" ? ("owed" as const) : ("held" as const) })),
+      // The Planner, so every figure that sets money aside reads the same plans (docs/16-PLANNER.md, P5).
+      plans: settings.plans ?? [],
     };
   }, [settings, transactions]);
 
@@ -1027,9 +1035,11 @@ export default function App() {
       safe,
       // The month's last week, as the Dashboard shows it.
       next: safe && safe.daysLeft <= 7 ? nextMonthStart({ transactions: reportRows, reference, budgets, debts: settings.credits, asOf }, safe) : null,
+      plans: settings.plans ?? [],
+      freeBeforePlans: safe ? safe.free + safe.reservedPlans : null,
     });
   },
-    [reportRows, settings.accounts, settings.credits, settings.lowBalanceThreshold, budgets, reference, asOf],
+    [reportRows, settings.accounts, settings.credits, settings.lowBalanceThreshold, settings.plans, budgets, reference, asOf],
   );
   const alerts = useMemo(() => (usageAlert ? [usageAlert, ...financeFindings] : financeFindings), [usageAlert, financeFindings]);
 
@@ -1953,6 +1963,49 @@ export default function App() {
    * "Edit first" cannot fill a form that is not on screen, so it opens the Add
    * screen with the card already in it.
    */
+  /*
+   * The Planner (docs/16-PLANNER.md): a plan saved, new or changed, into its
+   * own section of settings, and the change on the activity trail.
+   */
+  const changePlan = (plan: Plan, action: Parameters<typeof planChanged>[0], summary: string, by: Provenance): void => {
+    setSettings((s) => {
+      const list = s.plans ?? [];
+      return { ...s, plans: list.some((p) => p.id === plan.id) ? list.map((p) => (p.id === plan.id ? plan : p)) : [...list, plan] };
+    });
+    record(planChanged(action, summary, by, { amount: plan.amount, targetId: plan.id }));
+  };
+
+  /**
+   * A plan paid: an ordinary entry, checked as the Add form checks one,
+   * saved through the one writer, then linked to the plan. Returns what
+   * stopped it, or null when saved (P1, P4.2 to P4.6).
+   */
+  const payPlan = (plan: Plan, draft: Draft, settles: boolean, by: Provenance): string | null => {
+    const c = checkDraft(draft, transactions, reference, settings.credits);
+    if (!c.ok) return c.errors.map((e) => e.message).join(" ");
+    const rows = draftToTransactions(withFeesPaid(draft, transactions), sink.nextRecordNumber, `t-${Date.now()}-plan`, c.repaymentSplit);
+    handleSave(rows, by);
+    const linked = linkPayments(plan, rows.map((r) => r.id), [...transactions, ...rows], asOf, settles);
+    const paid = rows.reduce((sum, r) => sum + r.total, 0);
+    changePlan(
+      linked,
+      "plan.paid",
+      `Paid "${plan.title}": ${formatMoney(paid)} on ${formatMedium(draft.date)}, #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}${linked.status === "done" ? "" : ", more to pay"}.`,
+      by,
+    );
+    return null;
+  };
+
+  /** A goal for a plan, in Settings' accounts like any other (P4.17). Returns its id. */
+  const makeGoalFor = (name: string, target: Centavos, deadline: IsoDate): string => {
+    const taken = new Set(settings.accounts.map((a) => a.name.trim().toLowerCase()));
+    const unique = taken.has(name.trim().toLowerCase()) ? `${name.trim()} fund` : name.trim();
+    const id = `goal-${Date.now().toString(36)}`;
+    setSettings((s) => ({ ...s, accounts: [...s.accounts, { id, name: unique, kind: "goal", target, deadline, openedDate: asOf, archived: false }] }));
+    record(settingsChanged(`Made the goal "${unique}" for a plan: ${formatMoney(target)} by ${formatMedium(deadline)}`));
+    return id;
+  };
+
   const sink = useProposalSink({
     transactions,
     reference,
@@ -1978,6 +2031,9 @@ export default function App() {
     onRestoreMany: handleRestoreMany,
     onUpdateDebt: (next) => setSettings((s) => ({ ...s, credits: s.credits.map((c) => (c.id === next.id ? next : c)) })),
     onGo: (place) => goRef.current(place.screen as Screen, place),
+    // The Planner from the chat: recorded as the assistant's, which it was (docs/16-PLANNER.md, P4.23).
+    onSavePlan: (plan, action, summary) => changePlan(plan, action, summary, { actor: "ai", via: "ai_chat" }),
+    onPayPlan: (plan, draft, settles) => payPlan(plan, draft, settles, { actor: "ai", via: "ai_chat" }),
   });
 
   // With Firebase configured, nothing renders until the owner is signed in,
@@ -2186,6 +2242,9 @@ export default function App() {
         break;
       case "pattern":
         go("insights");
+        break;
+      case "planner":
+        go("planner");
         break;
       case "review":
         setDbFilter("flagged");
@@ -2603,6 +2662,25 @@ export default function App() {
                 go("database");
                 setDbFilter("all");
                 setDbQuery({ query, at: Date.now() });
+              }}
+            />
+          )}
+          {screen === "planner" && (
+            <Planner
+              plans={settings.plans ?? []}
+              transactions={transactions}
+              reference={reference}
+              accounts={settings.accounts}
+              budgets={budgets}
+              debts={settings.credits}
+              asOf={asOf}
+              onChange={(plan, action, summary) => changePlan(plan, action, summary, BY_OWNER)}
+              onPay={(plan, draft, settles) => payPlan(plan, draft, settles, BY_OWNER)}
+              onMakeGoal={makeGoalFor}
+              onShowEntry={(n) => {
+                go("database");
+                setDbFilter("all");
+                setDbQuery({ query: `#${n}`, at: Date.now() });
               }}
             />
           )}

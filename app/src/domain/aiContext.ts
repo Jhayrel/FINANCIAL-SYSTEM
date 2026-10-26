@@ -33,6 +33,7 @@
  * model decides to say.
  */
 
+import { viewOf } from "./planner";
 import { totalSavingsBalance, totalWalletBalance, walletBalance } from "./balances";
 import { assessMonthFor } from "./budget";
 import { billStatuses, overdue, STOPPED_AFTER_DAYS, upcoming } from "./bills";
@@ -174,6 +175,19 @@ export interface AiContext {
     readonly target: number;
     readonly deadline: string | null;
   }[];
+  /** The Planner: what the owner means to pay later and what became of it (docs/16-PLANNER.md). */
+  readonly plans?: readonly {
+    readonly title: string;
+    readonly amount: number;
+    readonly left: number;
+    readonly due: string;
+    readonly state: string;
+    readonly words: string;
+    readonly kind: string;
+    readonly from: string;
+    readonly counted: boolean;
+    readonly goal: string;
+  }[];
   readonly alerts: readonly { readonly level: string; readonly title: string; readonly detail: string }[];
   /** Same month last year and the month before, for "is this normal". */
   readonly comparison: readonly { readonly month: string; readonly spent: number }[];
@@ -202,6 +216,9 @@ export interface AiContext {
     readonly billsDue: number;
     readonly due: readonly { readonly name: string; readonly amount: number; readonly on: string | null }[];
     readonly debtDue: number;
+    /** The Planner's plans counted this month, and each (docs/16-PLANNER.md, P5). */
+    readonly plansDue?: number;
+    readonly plans?: readonly { readonly name: string; readonly left: number; readonly on: string }[];
     readonly safe: number;
     readonly today: number;
     readonly todayShare: number;
@@ -214,7 +231,7 @@ export interface AiContext {
     /** What yesterday's unspent share did, in sentences (`carryWords`). */
     readonly carry: readonly string[];
     /** What it starts at on the 1st of next month, from the money there now (`nextMonthStart`). */
-    readonly next?: { readonly month: string; readonly days: number; readonly carried: number; readonly bills: number; readonly debt: number; readonly safe: number; readonly perDay: number } | undefined;
+    readonly next?: { readonly month: string; readonly days: number; readonly carried: number; readonly bills: number; readonly debt: number; readonly plans?: number; readonly safe: number; readonly perDay: number } | undefined;
   } | null;
 }
 
@@ -424,6 +441,25 @@ export function buildContext(input: ContextInput): AiContext {
         deadline: g.deadline ?? null,
       })),
 
+    // Open plans and the last few closed ones, the same views the Planner shows.
+    plans: (reference.plans ?? [])
+      .map((p) => viewOf(p, { transactions, accounts, asOf }))
+      .filter((v) => v.state !== "removed")
+      .sort((a, b) => a.plan.due.localeCompare(b.plan.due))
+      .slice(0, 40)
+      .map((v) => ({
+        title: v.plan.title,
+        amount: pesos(v.plan.amount),
+        left: pesos(v.left),
+        due: v.plan.due,
+        state: v.state,
+        words: v.words,
+        kind: v.plan.item,
+        from: v.plan.wallet,
+        counted: v.counts,
+        goal: v.goal && !v.goal.missing ? `${v.goal.name} holds ${formatMoney(v.goal.holds)}` : "",
+      })),
+
     alerts: financeAlerts({
       transactions,
       accounts,
@@ -470,6 +506,8 @@ export function buildContext(input: ContextInput): AiContext {
         billsDue: pesos(safe.reservedBills),
         due: brief.bills.bills.filter(isOpenBill).map((b) => ({ name: b.item, amount: pesos(b.amount), on: b.dueOn ?? null })),
         debtDue: pesos(safe.reservedDebt),
+        plansDue: pesos(safe.reservedPlans),
+        plans: safe.plansDue.map((p) => ({ name: p.title, left: pesos(p.left), on: p.due })),
         safe: pesos(safe.safe),
         today: pesos(safe.perDay),
         todayShare: pesos(safe.todayShare),
@@ -482,7 +520,7 @@ export function buildContext(input: ContextInput): AiContext {
         carry: carryWords(safe, yesterdayOf({ transactions, reference, budgets, debts: credits, year, month, asOf }), (c) => formatMoney(c).replace("₱", "PHP ")),
         next: (() => {
           const n = nextMonthStart({ transactions, reference, budgets, debts: credits, asOf }, safe);
-          return { month: `${monthName(n.month)} ${n.year}`, days: n.days, carried: pesos(n.carried), bills: pesos(n.reservedBills), debt: pesos(n.reservedDebt), safe: pesos(n.safe), perDay: pesos(n.perDay) };
+          return { month: `${monthName(n.month)} ${n.year}`, days: n.days, carried: pesos(n.carried), bills: pesos(n.reservedBills), debt: pesos(n.reservedDebt), plans: pesos(n.reservedPlans), safe: pesos(n.safe), perDay: pesos(n.perDay) };
         })(),
       };
     })(),
@@ -626,7 +664,7 @@ export function contextToText(c: AiContext): string {
     lines.push("");
     lines.push("## Safe to spend, the Dashboard's figure");
     lines.push(
-      `Spending wallets ${php(safe.wallets)}, less bills and subscriptions still to pay ${php(safe.billsDue)}${due}${safe.debtDue > 0 ? ` and debt payments due ${php(safe.debtDue)}` : ""}: ${php(safe.safe)} is safe to spend until ${until} ends.`,
+      `Spending wallets ${php(safe.wallets)}, less bills and subscriptions still to pay ${php(safe.billsDue)}${due}${safe.debtDue > 0 ? `, debt payments due ${php(safe.debtDue)}` : ""}${(safe.plansDue ?? 0) > 0 ? ` and planned spending set aside ${php(safe.plansDue ?? 0)} (${(safe.plans ?? []).map((p) => `${p.name} ${php(p.left)} by ${p.on}`).join(", ")}, from the Planner)` : ""}: ${php(safe.safe)} is safe to spend until ${until} ends.`,
     );
     lines.push(
       /*
@@ -645,7 +683,7 @@ export function contextToText(c: AiContext): string {
     if (safe.next) {
       const n = safe.next;
       lines.push(
-        `When ${n.month} starts nothing resets: what is not spent is still in the wallets. On its 1st, if nothing more is spent and nothing comes in: ${php(n.carried)} carries over (the wallets less what is still due in ${until}), less ${n.month.split(" ")[0]}'s bills and subscriptions ${php(n.bills)}${n.debt > 0 ? ` and debt payments ${php(n.debt)}` : ""}, leaves ${php(n.safe)}: ${php(n.perDay)} a day over ${n.days} days. Money that comes in before then raises it.`,
+        `When ${n.month} starts nothing resets: what is not spent is still in the wallets. On its 1st, if nothing more is spent and nothing comes in: ${php(n.carried)} carries over (the wallets less what is still due in ${until}), less ${n.month.split(" ")[0]}'s bills and subscriptions ${php(n.bills)}${n.debt > 0 ? `, debt payments ${php(n.debt)}` : ""}${(n.plans ?? 0) > 0 ? ` and planned spending ${php(n.plans ?? 0)}` : ""}, leaves ${php(n.safe)}: ${php(n.perDay)} a day over ${n.days} days. Money that comes in before then raises it.`,
       );
     }
     if (safe.budgetLeft !== null) {
@@ -748,6 +786,17 @@ export function contextToText(c: AiContext): string {
     for (const g of c.goals) {
       lines.push(
         `${g.name}: ${php(g.saved)} of ${php(g.target)}${g.deadline ? `, by ${g.deadline}` : ""}`,
+      );
+    }
+  }
+
+  if ((c.plans ?? []).length > 0) {
+    lines.push("");
+    lines.push("## The Planner: what they mean to pay later");
+    lines.push("A plan is not an entry: nothing has moved until it is paid. Plans counted in safe to spend are already in its figure above; do not take them off again.");
+    for (const p of c.plans ?? []) {
+      lines.push(
+        `- ${p.title}: ${php(p.amount)} by ${p.due}${p.kind ? `, ${p.kind}` : ""}${p.from ? `, from ${p.from}` : ""}. ${p.words}${p.left > 0 && p.left !== p.amount ? `, ${php(p.left)} left` : ""}${p.counted ? ", set aside in safe to spend" : ""}${p.goal ? `. ${p.goal}` : ""}.`,
       );
     }
   }

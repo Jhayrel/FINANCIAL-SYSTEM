@@ -21,6 +21,7 @@ import type { Provenance } from "../domain/activity";
 import { withFeesPaid, type Debt } from "../domain/debt";
 import type { ExportAsk } from "../domain/exportAsk";
 import type { GoPlace } from "../domain/goAsk";
+import type { Plan } from "../domain/planner";
 import {
   checkDraft,
   draftToTransactions,
@@ -62,7 +63,13 @@ export interface SinkInput {
   readonly onUpdateDebt?: ((debt: Debt) => void) | undefined;
   /** Open a screen. Changes nothing. */
   readonly onGo?: ((place: GoPlace) => void) | undefined;
+  /** A plan saved in the Planner, with its line for the activity trail (docs/16-PLANNER.md). */
+  readonly onSavePlan?: ((plan: Plan, action: PlanAction, summary: string) => void) | undefined;
+  /** A plan paid: the entry saved and linked. Returns what stopped it, or null. */
+  readonly onPayPlan?: ((plan: Plan, draft: Draft, settles: boolean) => string | null) | undefined;
 }
+
+export type PlanAction = "plan.create" | "plan.update" | "plan.move" | "plan.paid" | "plan.skip" | "plan.remove" | "plan.restore";
 
 /** Makes ids unique within one millisecond, when a batch saves together. */
 let proposed = 0;
@@ -142,6 +149,9 @@ export function useProposalSink(input: SinkInput): ProposalSink {
       canUpdateDebt: Boolean(input.onUpdateDebt),
       updateDebt: (debt) => handlers.current.onUpdateDebt?.(debt),
       go: (place) => handlers.current.onGo?.(place),
+      canPlan: Boolean(input.onSavePlan),
+      savePlan: (plan, action, summary) => handlers.current.onSavePlan?.(plan, action, summary),
+      payPlan: (plan, draft, settles) => handlers.current.onPayPlan?.(plan, draft, settles) ?? "The Planner cannot be reached from here.",
       /**
        * Save it, and say which number it got.
        *

@@ -38,6 +38,7 @@ export function kindOf(action: string): string {
   if (action === "budget.update") return "Budget";
   if (action.startsWith("settings.")) return "Settings";
   if (action === "backup.restore") return "Backup restored";
+  if (action.startsWith("plan.")) return "Planner";
   if (action === "ai.proposal.accepted") return "Card accepted";
   if (action === "ai.proposal.discarded") return "Card discarded";
   return "Change";

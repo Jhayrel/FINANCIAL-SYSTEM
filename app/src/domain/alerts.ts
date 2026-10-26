@@ -47,6 +47,7 @@ import { monthTotals } from "./totals";
 import { overdueGoals } from "./goalClose";
 import { patternFindings, type Finding } from "./patterns";
 import type { Account } from "./accounts";
+import { coverage, likelyPayments, viewOf, type Plan } from "./planner";
 import type { Centavos } from "./money";
 import type { Budgets, IsoDate, SpendingType, Transaction } from "./types";
 
@@ -62,6 +63,8 @@ export type AlertArea =
   /** How the money moved, rather than what it came to. */
   | "pattern"
   | "review"
+  /** The Planner: a plan due, overdue, short, or paid without being linked (docs/16-PLANNER.md). */
+  | "planner"
   /** Accounts and lists, fixed in Settings. */
   | "settings";
 
@@ -104,6 +107,9 @@ export interface AlertInput {
   readonly safe?: { readonly safe: Centavos; readonly budgetLeft: Centavos | null; readonly wallets: Centavos; readonly todayShare?: Centavos | undefined } | null | undefined;
   /** What next month starts at, in this month's last week (`nextMonthStart`). */
   readonly next?: NextMonthStart | null | undefined;
+  /** The Planner's plans, and what the wallets hold after the bills and debt payments, before any plan. */
+  readonly plans?: readonly Plan[] | undefined;
+  readonly freeBeforePlans?: Centavos | null | undefined;
 }
 
 /** Pace of spending so far this month, per day. */
@@ -261,7 +267,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
    */
   {
     const n = input.next;
-    const due = n ? n.reservedBills + n.reservedDebt : 0;
+    const due = n ? n.reservedBills + n.reservedDebt + n.reservedPlans : 0;
     if (n && due > 0 && n.safe === 0) {
       const short = due - Math.max(0, n.carried);
       const name = monthName(n.month);
@@ -1082,6 +1088,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
     });
   }
 
+  out.push(...planAlerts(input.plans ?? [], transactions, accounts, asOf, input.freeBeforePlans ?? null));
   return out.sort((a, b) => b.weight - a.weight);
 }
 
@@ -1111,3 +1118,65 @@ const money = (c: Centavos): string =>
 /** 0 to 20, so a bigger overrun sorts above a smaller one. */
 const fraction = (part: Centavos, whole: Centavos): number =>
   whole <= 0 ? 0 : Math.min(20, Math.round((part / whole) * 20));
+
+/**
+ * The Planner in the bell (docs/16-PLANNER.md, P4.1, P4.4, P4.9, P4.17): a
+ * plan overdue, due within three days with whether the money is there, a
+ * payment added by hand that looks like a plan's, and a goal that will not
+ * get there at the pace it needs. Each says what to do; none does it.
+ */
+export function planAlerts(plans: readonly Plan[], transactions: readonly Transaction[], accounts: readonly Account[], asOf: IsoDate, freeBeforePlans: Centavos | null): Alert[] {
+  const out: Alert[] = [];
+  const views = plans.map((p) => viewOf(p, { transactions, accounts, asOf }));
+  const short = freeBeforePlans === null ? new Map<string, Centavos>() : coverage(views, freeBeforePlans);
+  for (const v of views) {
+    const p = v.plan;
+    if (v.state === "overdue") {
+      out.push({
+        id: `plan-overdue-${p.id}`,
+        level: "over",
+        area: "planner",
+        title: `${p.title} was due ${formatMedium(p.due)}`,
+        detail: `${money(v.left)} not paid yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} on. Pay it, move the date or skip it in the Planner.${short.get(p.id) ? ` The wallets are ${money(short.get(p.id) ?? 0)} short for it after the bills.` : ""}`,
+        weight: 92,
+      });
+      continue;
+    }
+    if ((v.state === "today" || v.state === "soon" || v.state === "partly") && v.daysTo <= 3) {
+      const gap = short.get(p.id) ?? 0;
+      out.push({
+        id: `plan-due-${p.id}-${p.due}`,
+        level: gap > 0 ? "warn" : "info",
+        area: "planner",
+        title: `${p.title} is due ${v.daysTo === 0 ? "today" : v.daysTo === 1 ? "tomorrow" : `in ${v.daysTo} days`}`,
+        detail: `${money(v.left)} by ${formatMedium(p.due)}. ${gap > 0 ? `The wallets are ${money(gap)} short for it after the bills and the plans before it: pay part, move the date, or pay it from savings.` : p.setAside && !p.goalId ? "Set aside already: the money is there." : "Record it in the Planner when it is paid."}`,
+        weight: gap > 0 ? 80 : 55,
+      });
+    }
+    // A payment added by hand that looks like this one: same kind or words, the same amount.
+    if (v.state !== "paid" && v.state !== "skipped" && v.state !== "removed") {
+      const match = likelyPayments(p, transactions, plans).find((t) => t.total === v.left && t.date >= p.createdOn);
+      if (match) {
+        out.push({
+          id: `plan-link-${p.id}-${match.id}`,
+          level: "info",
+          area: "planner",
+          title: `Is #${String(match.recordNumber).padStart(4, "0")} the ${p.title} payment?`,
+          detail: `${match.item}, ${money(match.total)} on ${formatMedium(match.date)}: the same kind and amount as the plan. Link it in the Planner so the plan shows as paid and nothing is entered twice.`,
+          weight: 60,
+        });
+      }
+    }
+    if (v.goal && !v.goal.missing && v.goal.perMonth > 0 && v.daysTo > 0 && v.daysTo <= 92) {
+      out.push({
+        id: `plan-goal-${p.id}`,
+        level: "info",
+        area: "planner",
+        title: `${v.goal.name} needs ${money(v.goal.perMonth)} a month for ${p.title}`,
+        detail: `It holds ${money(v.goal.holds)} of the ${money(v.left)} to pay by ${formatMedium(p.due)}.`,
+        weight: 40,
+      });
+    }
+  }
+  return out;
+}

@@ -88,8 +88,9 @@ export function asksNextMonth(text: string, asOf: IsoDate): boolean {
 /** The next month's start, in words: nothing resets, what carries over, less its bills, over its days (`nextMonthStart`). */
 export function nextMonthWords(next: NextMonthStart): string {
   const name = MONTH_NAMES[next.month - 1] ?? "next month";
-  const due = next.reservedBills + next.reservedDebt;
-  const what = next.reservedDebt > 0 ? "bills, subscriptions and debt payments" : "bills and subscriptions";
+  const due = next.reservedBills + next.reservedDebt + next.reservedPlans;
+  const parts = ["bills", "subscriptions", ...(next.reservedDebt > 0 ? ["debt payments"] : []), ...(next.reservedPlans > 0 ? ["planned spending"] : [])];
+  const what = `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1] ?? ""}`;
   const carried = Math.max(0, next.carried);
   return next.safe > 0
     ? `**From 1 ${name}: ${money(next.perDay)} a day** for ${next.days} days, if nothing more is spent and nothing comes in before then. Nothing resets on the 1st: the ${money(carried)} not spent now carries over, less ${name}'s ${what} (${money(due)}), leaving ${money(next.safe)} safe for the month. Money that comes in before then raises it.`
@@ -151,6 +152,7 @@ export function safeWords(
     `- In your wallets: ${money(safe.wallets)}`,
     `- Bills and subscriptions still to pay: ${safe.reservedBills > 0 ? `\u2212${money(safe.reservedBills)}${named.length > 0 ? ` (${named.join(", ")})` : ""}` : "none"}`,
     ...(safe.reservedDebt > 0 ? [`- Debt payments due: \u2212${money(safe.reservedDebt)}`] : []),
+    ...(safe.reservedPlans > 0 ? [`- Planned, set aside: \u2212${money(safe.reservedPlans)} (${safe.plansDue.map((p) => `${p.title} ${money(p.left)}`).join(", ")})`] : []),
     `- Safe until ${name} ends: **${money(safe.safe)}**`,
     /*
      * How today's figure comes from it: the model twice called it the wallets

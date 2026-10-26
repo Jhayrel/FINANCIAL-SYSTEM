@@ -6,6 +6,7 @@
  * read that document before changing anything here.
  */
 
+import type { Plan } from "./planner";
 import type { Centavos } from "./money";
 
 /** Re-exported so consumers have a single domain import surface. */
@@ -228,6 +229,12 @@ export interface ReferenceLists {
    * cash is a saving", of a Reserve account).
    */
   readonly accountKinds?: Readonly<Record<string, "spending" | "savings" | "goal" | "reserve">>;
+  /**
+   * The Planner's plans (`domain/planner.ts`), so safe to spend, the bell,
+   * the chat and the AI all read the same list. Optional: most callers and
+   * every fixture before 26 October 2026 have none.
+   */
+  readonly plans?: readonly Plan[];
   /**
    * The people money is paid or held for (On behalf), with their side.
    *

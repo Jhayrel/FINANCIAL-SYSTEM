@@ -190,7 +190,7 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
     .map((w) => ({ name: w, balance: walletBalance(transactions, w) }))
     .filter((w) => w.balance !== 0);
   const inWallets = safe?.wallets ?? held.reduce((s, w) => s + w.balance, 0);
-  const due = safe ? safe.reservedBills + safe.reservedDebt : 0;
+  const due = safe ? safe.reservedBills + safe.reservedDebt + safe.reservedPlans : 0;
   const free = inWallets - due;
 
   // The one wallet asked about, when one is named: only what it holds can pay.

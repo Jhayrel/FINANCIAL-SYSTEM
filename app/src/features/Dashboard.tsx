@@ -288,6 +288,8 @@ export function Dashboard({
                   quiet={!safe || safe.reservedBills === 0}
                 />
                 {safe && safe.reservedDebt > 0 && <Line label="Debt payments due" value={-safe.reservedDebt} />}
+                {/* The Planner's plans counted this month (docs/16-PLANNER.md, P5). */}
+                {safe && safe.reservedPlans > 0 && <Line label="Planned, set aside" value={-safe.reservedPlans} />}
                 <Line label={`Safe until ${name} ends`} value={safe?.safe ?? 0} strong total />
                 {safe && safe.daysLeft > 1 && (
                   <Line label={`From tomorrow, a day (${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"})`} value={safe.perDayAfter} quiet />

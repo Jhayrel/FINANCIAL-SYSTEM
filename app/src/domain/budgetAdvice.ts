@@ -437,7 +437,7 @@ export function needWords(
       : "";
   lines.push(`**${call}You need ${money(need)} for ${a.name}.** Worked out:`);
   lines.push(`- Your usual month: ${money(usual)} (${money(a.spending - plannedTotal)} spending, ${money(a.billsSubs)} bills and subscriptions), the middle of ${monthsRead(a.read)}.`);
-  for (const l of a.planned ?? []) lines.push(`- ${l.name}, which you said is coming: ${money(l.amount)}.`);
+  for (const l of a.planned ?? []) lines.push(`- ${l.name}, coming on top: ${money(l.amount)}.`);
   if (a.debtDue > 0) lines.push(`- Debt payments due in ${monthName(a.month)}: ${money(a.debtDue)}.`);
   const parts = [money(usual), ...(a.planned ?? []).map((l) => money(l.amount)), ...(a.debtDue > 0 ? [money(a.debtDue)] : [])];
   if (parts.length > 1) lines.push(`- Together: ${parts.join(" + ")} = **${money(need)}**.`);
@@ -553,7 +553,7 @@ export function adviceWords(a: BudgetAdvice, options: { readonly split?: boolean
   const plannedTotal = (a.planned ?? []).reduce((sum, l) => sum + l.amount, 0);
   // Said already when the answer opened with what the month needs (`needWords`).
   if (plannedTotal > 0 && !options.plannedSaid) {
-    out.push(`On top of it is what you said is coming: ${(a.planned ?? []).map((l) => `${l.name} ${money(l.amount)}`).join(", ")}. That is spending, counted in full and never cut.${overlapWords(a)}`);
+    out.push(`On top of it is what is coming: ${(a.planned ?? []).map((l) => `${l.name} ${money(l.amount)}`).join(", ")}. That is spending, counted in full and never cut.${overlapWords(a)}`);
   }
 
   if (a.fit) {
@@ -581,7 +581,7 @@ export function adviceWords(a: BudgetAdvice, options: { readonly split?: boolean
   if (split) {
     out.push("");
     out.push(`**Spending, ${money(spendingAt)}**, each item's usual month${plannedTotal > 0 ? ", and what is coming" : ""}:`);
-    for (const l of a.planned ?? []) out.push(`- ${l.name}: ${money(l.amount)} (you said it is coming)`);
+    for (const l of a.planned ?? []) out.push(`- ${l.name}: ${money(l.amount)} (coming)`);
     const cutTo = new Map((a.fit?.cuts ?? []).map((c) => [c.name, c.to]));
     for (const l of a.items) {
       const to = cutTo.get(l.name);

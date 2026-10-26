@@ -20,7 +20,7 @@ import { factChanges, readRow } from "../domain/activityRead";
 import { eventDetails, trailFilename, trailSummary } from "../domain/activityExport";
 
 type Who = Actor | "all";
-type Kind = "all" | "added" | "changed" | "binned" | "budget" | "settings";
+type Kind = "all" | "added" | "changed" | "binned" | "budget" | "planner" | "settings";
 
 /** Enough to scan in one go. Three hundred rows at once was a wall. */
 const PAGE = 50;
@@ -48,6 +48,8 @@ const KIND: readonly {
   },
   // Budgets and limits: set, changed, corrected once closed, or undone.
   { id: "budget", label: "Budget", phrase: "No budget changed", match: (a) => a === "budget.update" },
+  // The Planner: plans added, moved, paid, skipped or removed (docs/16-PLANNER.md).
+  { id: "planner", label: "Planner", phrase: "Nothing planned or changed in the Planner", match: (a) => a.startsWith("plan.") },
   { id: "settings", label: "Settings", phrase: "No settings changed", match: (a) => a.startsWith("settings.") },
 ];
 
@@ -102,6 +104,7 @@ function iconFor(action: string): IconName {
   if (action === "transaction.bin") return "bin";
   if (action === "transaction.restore") return "ledger";
   if (action.startsWith("ai.")) return "ai";
+  if (action.startsWith("plan.")) return "planner";
   return "settings";
 }
 

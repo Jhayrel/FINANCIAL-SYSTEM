@@ -97,7 +97,8 @@ export function capabilitiesAnswer(): string {
     "- **Needs review, one entry at a time**: \"what's wrong with #3831?\" says what the check found and both ways out; \"keep #3831 as it is\" marks it checked and moves no money.",
     "- **Credit lines**: \"set my Maya Credit limit to 15000\", \"Maya Credit is due on the 5th\", \"the billing day is the 6th\", \"how much is left on my limit?\"",
     "- **What changed, and undo**: \"what did I change today?\", \"what did the AI add this week?\", and \"undo that\" for the last thing done here. A list from the bin has **Restore all**.",
-    "**The screens**: Dashboard (today and the month), Add (a new entry), Database (every entry, search and edit), Debt, Insights (charts over any window), Budget, Statements (PDF and spreadsheet), Bin, Activity (what changed) and Settings.",
+    "- **The Planner**, for spending ahead: \"plan tuition 9000 by nov 15\", \"add a new phone 25k for march 2027 to my planner\", \"what is planned?\", \"move the tuition plan to nov 30\", \"the tuition plan is now 9500\", \"I paid the tuition plan from maya\", \"skip the tuition plan\", \"remove the tuition plan\", \"put back the tuition plan\". A plan counts in safe to spend in its month until it is paid.",
+    "**The screens**: Dashboard (today and the month), Add (a new entry), Database (every entry, search and edit), Debt, Insights (charts over any window), Budget, Statements (PDF and spreadsheet), Planner (spending ahead), Bin, Activity (what changed) and Settings.",
     "**Settings stay yours**: accounts, categories, a credit line's rate, alerts, the theme and the AI's own switches are changed on the Settings screen, not by me. Ask for one and I open the right tab.",
   ].join("\n");
 }

@@ -36,6 +36,7 @@ const GO: Record<AlertArea, string> = {
   settings: "Open Settings",
   pattern: "Open Insights",
   review: "Review in the Database",
+  planner: "Open the Planner",
 };
 
 function readSeen(): ReadonlySet<string> {

@@ -42,6 +42,7 @@ export type IconName =
   | "chevronLeft"
   | "chevronRight"
   | "chevronDown"
+  | "planner"
   | "bell"
   | "statusOk"
   | "statusWarn"
@@ -147,6 +148,13 @@ const SHAPES: Record<IconName, ReactNode> = {
   chevronLeft: <path d="M14.5 6l-6 6 6 6" />,
   chevronRight: <path d="M9.5 6l6 6-6 6" />,
   chevronDown: <path d="M6 9.5l6 6 6-6" />,
+  // The Planner: a calendar page with a tick, drawn as one outline like the rest.
+  planner: (
+    <>
+      <rect x="4" y="5.5" width="16" height="14.5" rx="2" />
+      <path d="M8 3.5v4M16 3.5v4M4 10.5h16M9 15.25l2 2 4-4" />
+    </>
+  ),
   // What needs attention, in the top bar.
   bell: (
     <>

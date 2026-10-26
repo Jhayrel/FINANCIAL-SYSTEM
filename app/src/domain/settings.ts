@@ -12,6 +12,7 @@
  * configured here. Rule AI4.
  */
 
+import type { Plan } from "./planner";
 import type { Account } from "./accounts";
 import type { Debt } from "./debt";
 import type { Centavos } from "./money";
@@ -180,6 +181,11 @@ export interface AppSettings {
    * budget or a limit (`domain/spendNote.ts`). Absent means on.
    */
   readonly budgetNotes?: boolean;
+  /**
+   * The Planner: money the owner means to spend later (`domain/planner.ts`,
+   * docs/16-PLANNER.md). Its own section, so it syncs like the rest.
+   */
+  readonly plans?: readonly Plan[];
   /** Bumped whenever the shape changes, so a stored blob can be upgraded. */
   readonly version: number;
 }
@@ -198,6 +204,7 @@ export function defaultSettings(): AppSettings {
     ai: DEFAULT_AI,
     theme: "system",
     lowBalanceThreshold: 50000,
+    plans: [],
     version: SETTINGS_VERSION,
   };
 }
@@ -261,6 +268,21 @@ export function normaliseSettings(raw: unknown): AppSettings {
       typeof input.lowBalanceThreshold === "number" && Number.isInteger(input.lowBalanceThreshold)
         ? input.lowBalanceThreshold
         : base.lowBalanceThreshold,
+    // A plan missing what makes it one is left out rather than shown broken.
+    plans: Array.isArray(input.plans)
+      ? input.plans
+          .filter(
+            (p): p is Plan =>
+              Boolean(p) &&
+              typeof p.id === "string" &&
+              typeof p.title === "string" &&
+              Number.isInteger(p.amount) &&
+              typeof p.due === "string" &&
+              /^\d{4}-\d{2}-\d{2}$/.test(p.due) &&
+              ["open", "done", "skipped", "removed"].includes(p.status),
+          )
+          .map((p) => ({ ...p, entryIds: Array.isArray(p.entryIds) ? p.entryIds : [], moves: Array.isArray(p.moves) ? p.moves : [], item: p.item ?? "", wallet: p.wallet ?? "", notes: p.notes ?? "", need: p.need !== false, setAside: p.setAside !== false }))
+      : [],
     version: SETTINGS_VERSION,
   };
 }

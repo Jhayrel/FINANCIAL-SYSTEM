@@ -11,7 +11,7 @@
  * button, rather than the change.
  */
 
-export type GoScreen = "dashboard" | "add" | "database" | "debt" | "insights" | "budget" | "statements" | "bin" | "activity" | "settings";
+export type GoScreen = "dashboard" | "add" | "database" | "debt" | "insights" | "budget" | "planner" | "statements" | "bin" | "activity" | "settings";
 
 export type SettingsTab = "accounts" | "goals" | "credit" | "categories" | "alerts" | "ai" | "appearance" | "data";
 
@@ -58,6 +58,7 @@ const SCREENS: readonly (readonly [RegExp, Omit<GoPlace, "label"> & { readonly l
   [/database|ledger|(?:all\s+)?(?:my\s+)?(?:entries|records|transactions)(?:\s+list)?/i, { screen: "database", label: "Database" }],
   [/debts?|credit|loans?|debt\s+screen/i, { screen: "debt", label: "Debt" }],
   [/insights?|charts?|graphs?/i, { screen: "insights", label: "Insights" }],
+  [/planner|(?:my\s+)?plans|planned(?:\s+spending)?/i, { screen: "planner", label: "Planner" }],
   [/budgets?|(?:the\s+)?plan/i, { screen: "budget", label: "Budget" }],
   [/statements?/i, { screen: "statements", label: "Statements" }],
   [/(?:recycle\s+)?bin|trash|deleted(?:\s+(?:entries|rows|items|list))?/i, { screen: "bin", label: "Bin" }],

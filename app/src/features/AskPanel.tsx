@@ -158,6 +158,9 @@ import { creditRoomAnswer, debtDetailChange, readDebtDetailAsk } from "../domain
 import { numbersInWords, readReviewRowAsk, reviewRowAnswer } from "../domain/reviewAsk";
 import { activityAnswer, asksUndoLast, readActivityAsk } from "../domain/activityAsk";
 import { activityStore } from "../data/activityStore";
+import type { PlanAction } from "./useProposalSink";
+import { kindFromHistory, makePlan, movePlan, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, type Plan } from "../domain/planner";
+import { plansWords, readPlannerAsk } from "../domain/plannerAsk";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
 import { planWorked } from "../domain/planRate";
@@ -371,6 +374,10 @@ export interface ProposalSink {
   readonly updateDebt?: ((debt: Debt) => void) | undefined;
   /** Open a screen (domain/goAsk.ts). Changes nothing. */
   readonly go?: ((place: GoPlace) => void) | undefined;
+  /** The Planner (docs/16-PLANNER.md): save a plan, or pay one. */
+  readonly canPlan?: boolean | undefined;
+  readonly savePlan?: ((plan: Plan, action: PlanAction, summary: string) => void) | undefined;
+  readonly payPlan?: ((plan: Plan, draft: Draft, settles: boolean) => string | null) | undefined;
 }
 
 /** A person's or lender's line about to be cleared in one step. See domain/settleLine.ts. */
@@ -388,6 +395,16 @@ interface Settling {
    * shown and never applied blind.
    */
   readonly detail?: { readonly label: string; readonly now: string; readonly then: string; readonly next?: Debt; readonly before?: Debt };
+  /**
+   * A plan added, changed or paid from the chat (domain/plannerAsk.ts). The
+   * rows are what the card shows; `save` and `pay` live in this session
+   * only, so a card that comes back from the record is shown, not applied.
+   */
+  readonly planner?: {
+    readonly rows: readonly { readonly label: string; readonly value: string }[];
+    readonly save?: { readonly plan: Plan; readonly action: PlanAction; readonly summary: string; readonly before?: Plan | undefined } | undefined;
+    readonly pay?: { readonly plan: Plan; readonly draft: Draft; readonly settles: boolean } | undefined;
+  };
 }
 
 /** Saved entries about to change: each one before, and after. */
@@ -865,7 +882,9 @@ function turnFromCard(card: StoredCard): Turn {
     const kept = data["detail"] as { label?: unknown; now?: unknown; then?: unknown } | undefined;
     const detail =
       kept && typeof kept.label === "string" && typeof kept.now === "string" && typeof kept.then === "string" ? { label: kept.label, now: kept.now, then: kept.then } : undefined;
-    return { kind: "settle", debtId, words, action, state: card.state === "applied" ? "applied" : "discarded", cardId: card.id, ...(detail ? { detail } : {}) };
+    const keptPlanner = data["planner"] as { rows?: unknown } | undefined;
+    const planner = keptPlanner && Array.isArray(keptPlanner.rows) ? { rows: (keptPlanner.rows as { label?: unknown; value?: unknown }[]).filter((r) => typeof r.label === "string" && typeof r.value === "string") as { label: string; value: string }[] } : undefined;
+    return { kind: "settle", debtId, words, action, state: card.state === "applied" ? "applied" : "discarded", cardId: card.id, ...(detail ? { detail } : {}), ...(planner ? { planner } : {}) };
   }
 
   if (card.kind === "export") {
@@ -1034,6 +1053,7 @@ function storedFrom(turn: Turn): StoredCard | null {
         words: turn.words,
         action: turn.action,
         ...(turn.detail ? { detail: { label: turn.detail.label, now: turn.detail.now, then: turn.detail.then } } : {}),
+        ...(turn.planner ? { planner: { rows: turn.planner.rows } } : {}),
       },
     };
   }
@@ -1059,6 +1079,7 @@ function cardWords(turn: Turn, state: StoredCard["state"]): string {
   }
   if (isBudgeting(turn)) return `${state === "applied" ? "Budget set" : state === "discarded" ? "Budget left as it was" : "Budget change"}: ${turn.plan.words}`;
   if (isExporting(turn)) return `${state === "applied" ? "File saved" : state === "discarded" ? "File not saved" : "File offered"}: ${turn.ask.said}`;
+  if (isSettling(turn) && turn.planner) return `${state === "applied" ? "Planner, done" : state === "discarded" ? "Planner, left as it was" : "Planner"}: ${turn.words}`;
   if (isSettling(turn) && turn.detail) return `${state === "applied" ? "Changed" : state === "discarded" ? "Left as it was" : "To change"}: ${turn.words}`;
   if (isSettling(turn)) return `${state === "applied" ? "Cleared" : state === "discarded" ? "Left as it was" : "To clear"}: ${turn.words}`;
   return "";
@@ -5144,6 +5165,27 @@ export function AskPanel({
             say({ kind: "change", plan: { rows: back, refused: [] }, state: "open", title: "Put it back as it was" });
             return;
           }
+          if (isSettling(done) && done.planner?.save) {
+            const was = done.planner.save;
+            setDraft("");
+            say({ kind: "you", text: note });
+            log(aiEvent("asked", "budget", { text: note }));
+            const current = (settings.plans ?? []).find((x) => x.id === was.plan.id);
+            const back = was.before ?? (current ? removePlan(current, asOf) : null);
+            if (!back) {
+              say({ kind: "assistant", text: "That plan is no longer on the Planner, so there is nothing to put back.", from: "this device" });
+              return;
+            }
+            say({
+              kind: "settle",
+              debtId: "",
+              words: was.before ? `"${was.before.title}" back as it was before the change.` : `Take "${was.plan.title}" off the Planner again: it was just added. It is kept under Removed.`,
+              action: "Put it back",
+              state: "open",
+              planner: { rows: [], save: { plan: back, action: was.before ? "plan.update" : "plan.remove", summary: was.before ? `Put "${was.before.title}" back as it was, from the chat.` : `Removed "${was.plan.title}", just added, from the chat.` } },
+            });
+            return;
+          }
           if (isSettling(done) && done.detail?.before && done.detail.next) {
             setDraft("");
             say({ kind: "you", text: note });
@@ -5284,6 +5326,126 @@ export function AskPanel({
         const reply = activityAnswer(activityAsked, events, loaded);
         say({ kind: "assistant", text: reply, from: "this device", go: { screen: "activity", label: "Activity" } });
         log(aiEvent("answered", "dashboard", { text: reply, model: "this device" }));
+        return;
+      }
+
+      /*
+       * The Planner from the chat (docs/16-PLANNER.md, P4.23): list, add, move,
+       * change, pay, skip, remove and put back, each change a card to press.
+       */
+      const plans = settings.plans ?? [];
+      const planAsk = readPlannerAsk(lead, { plans, reference, transactions, asOf });
+      if (planAsk) {
+        const planner: GoPlace = { screen: "planner", label: "the Planner" };
+        const views = plans.map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf }));
+        if (planAsk.kind === "list") {
+          answer(plansWords(views, plansSetAside(views).total), "budget", planner);
+          return;
+        }
+        if (planAsk.kind === "none") {
+          answer(`No plan by that name is on the Planner. ${plans.filter((p) => p.status === "open").length > 0 ? `Open ones: ${plans.filter((p) => p.status === "open").map((p) => p.title).join(", ")}.` : "Nothing is planned yet."}`, "budget", planner);
+          return;
+        }
+        if (!sink.canPlan) {
+          answer("The Planner cannot be changed from this view. Open it to make the change.", "budget", planner);
+          return;
+        }
+        const card = (words: string, action: string, rows: { label: string; value: string }[], op: Settling["planner"]): void => {
+          setDraft("");
+          say({ kind: "you", text: note });
+          log(aiEvent("asked", "budget", { text: note }));
+          say({ kind: "settle", debtId: "", words, action, state: "open", planner: { ...(op ?? {}), rows } });
+          log(aiEvent("proposed", "budget", { entry: words, text: note }));
+        };
+        const money = formatMoney;
+        if (planAsk.kind === "add") {
+          const plan = makePlan(planAsk.input, asOf, "ai");
+          card(
+            `A new plan. Nothing moves until it is paid.${plan.setAside ? " It is counted in safe to spend in its month, like a bill still to pay." : ""}`,
+            "Add to the planner",
+            [
+              { label: "What", value: plan.title },
+              { label: "Amount", value: money(plan.amount) },
+              { label: "Pay by", value: formatMedium(plan.due) },
+              ...(plan.item ? [{ label: "Kind", value: plan.item }] : []),
+              ...(plan.wallet ? [{ label: "From", value: plan.wallet }] : []),
+              { label: "Safe to spend", value: plan.setAside ? "Counted in its month" : "Not counted" },
+            ],
+            { rows: [], save: { plan, action: "plan.create", summary: `Planned "${plan.title}", ${money(plan.amount)} by ${formatMedium(plan.due)}, from the chat.` } },
+          );
+          return;
+        }
+        const p = planAsk.plan;
+        if (planAsk.kind === "move") {
+          const next = movePlan(p, planAsk.to, asOf);
+          card(`"${p.title}" from ${formatMedium(p.due)} to ${formatMedium(planAsk.to)}. The move is kept on the plan.`, "Move it", [{ label: "Pay by, now", value: formatMedium(p.due) }, { label: "New", value: formatMedium(planAsk.to) }], {
+            rows: [],
+            save: { plan: next, action: "plan.move", summary: `Moved "${p.title}" from ${formatMedium(p.due)} to ${formatMedium(planAsk.to)}, from the chat.`, before: p },
+          });
+          return;
+        }
+        if (planAsk.kind === "amount") {
+          const next = editPlan(p, { title: p.title, amount: planAsk.amount, due: p.due, item: p.item, wallet: p.wallet, goalId: p.goalId, need: p.need, setAside: p.setAside, notes: p.notes }, asOf);
+          card(`"${p.title}" from ${money(p.amount)} to ${money(planAsk.amount)}.`, "Change it", [{ label: "Amount, now", value: money(p.amount) }, { label: "New", value: money(planAsk.amount) }], {
+            rows: [],
+            save: { plan: next, action: "plan.update", summary: `Edited "${p.title}": amount ${money(p.amount)} to ${money(planAsk.amount)}, from the chat.`, before: p },
+          });
+          return;
+        }
+        if (planAsk.kind === "skip") {
+          card(`Skip "${p.title}" (${money(p.amount)}, by ${formatMedium(p.due)}). It stays under Done as skipped and can be put back.`, "Skip it", [], {
+            rows: [],
+            save: { plan: skipPlan(p, asOf), action: "plan.skip", summary: `Skipped "${p.title}", from the chat.`, before: p },
+          });
+          return;
+        }
+        if (planAsk.kind === "remove") {
+          card(`Take "${p.title}" off the Planner. It is kept under Removed and can be put back; nothing is deleted.`, "Remove it", [], {
+            rows: [],
+            save: { plan: removePlan(p, asOf), action: "plan.remove", summary: `Removed "${p.title}" from the plan list, from the chat. It can be put back.`, before: p },
+          });
+          return;
+        }
+        if (planAsk.kind === "restore") {
+          card(`Put "${p.title}" back on the Planner as open, ${money(p.amount)} by ${formatMedium(p.due)}.`, "Put it back", [], {
+            rows: [],
+            save: { plan: reopenPlan(p), action: "plan.restore", summary: `Put "${p.title}" back on the plan list, from the chat.`, before: p },
+          });
+          return;
+        }
+        // Paying: the entry it makes, checked as the Add form checks one.
+        const view = views.find((v) => v.plan.id === p.id);
+        const left = view?.left ?? p.amount;
+        const amount = planAsk.amount ?? left;
+        const kinds = [...new Set([...reference.spendingTypes.map((x) => x.name), ...reference.bills, ...reference.subscriptions])];
+        const item = p.item || kindFromHistory(p.title, transactions, kinds) || "";
+        const goalName = p.goalId ? settings.accounts.find((a) => a.id === p.goalId)?.name : undefined;
+        const from = planAsk.wallet || goalName || walletToPayFrom({ wallet: p.wallet, item }, amount, transactions, reference.wallets);
+        const draft: Draft = {
+          ...emptyDraft(asOf),
+          flow: "Spending",
+          date: asOf,
+          fromWallet: from,
+          category: reference.bills.includes(item) ? "Bills" : reference.subscriptions.includes(item) ? "Subscriptions" : "Spending",
+          item,
+          description: p.title,
+          amount,
+          status: "Paid",
+          notes: `Paid from the Planner: ${p.title}.`,
+        };
+        const checked = sink.check(draft);
+        card(
+          `Pay "${p.title}": ${money(amount)} from ${from || "a wallet to pick"}, today. Saved as an entry, checked as the Add form checks one, and linked to the plan.${amount < left ? ` ${money(left - amount)} is left after it; the plan stays open.` : ""}${checked.warnings.length > 0 ? ` ${checked.warnings.join(" ")}` : ""}`,
+          checked.ok ? "Pay it" : "Fix it in the Planner",
+          [
+            { label: "Amount", value: money(amount) },
+            { label: "From", value: from || "not picked" },
+            ...(item ? [{ label: "Kind", value: item }] : []),
+            { label: "On", value: formatMedium(asOf) },
+          ],
+          checked.ok ? { rows: [], pay: { plan: p, draft, settles: amount >= left } } : { rows: [] },
+        );
+        if (!checked.ok) say({ kind: "assistant", text: `${checked.problems.join(" ")} Open the Planner to pay it with a wallet picked.`, from: "this device", go: planner });
         return;
       }
     }
@@ -5908,7 +6070,14 @@ export function AskPanel({
           const keep = savingsGoalIn(ruled) ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.keep : null);
           // What they said is coming (tuition, a trip), kept for the follow-ups on the same budget.
           const saidComing = plannedSpendIn(ruled);
-          const planned = saidComing.length > 0 ? saidComing : advised && stillHere ? (advised.advice.planned ?? []) : [];
+          const typedPlans = saidComing.length > 0 ? saidComing : advised && stillHere ? (advised.advice.planned ?? []) : [];
+          /*
+           * And the Planner's own plans for that month, so "how much do I need
+           * next month" counts the tuition already planned (docs/16-PLANNER.md,
+           * P5). One said now with the same amount is not counted twice.
+           */
+          const onPlanner = plannedIn((settings.plans ?? []).map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf })), target.year, target.month);
+          const planned = [...typedPlans, ...onPlanner.filter((p) => !typedPlans.some((x) => x.amount === p.amount))];
           /*
            * A month after next is read from the same months next month is, as
            * the Budget screen's forecast reads it: December said a usual month
@@ -9471,8 +9640,28 @@ export function AskPanel({
             <SettleCard
               key={i}
               turn={turn}
-              canSettle={turn.detail ? Boolean(sink.canUpdateDebt && sink.updateDebt && turn.detail.next) : Boolean(sink.canSettle && sink.settle)}
+              canSettle={
+                turn.planner
+                  ? Boolean(sink.canPlan && (turn.planner.save || turn.planner.pay))
+                  : turn.detail
+                    ? Boolean(sink.canUpdateDebt && sink.updateDebt && turn.detail.next)
+                    : Boolean(sink.canSettle && sink.settle)
+              }
               onSettle={() => {
+                if (turn.planner) {
+                  const op = turn.planner;
+                  if (op.save) sink.savePlan?.(op.save.plan, op.save.action, op.save.summary);
+                  if (op.pay) {
+                    const stopped = sink.payPlan?.(op.pay.plan, op.pay.draft, op.pay.settles) ?? null;
+                    if (stopped) {
+                      say({ kind: "assistant", text: `Not paid: ${stopped}`, from: "this device", go: { screen: "planner", label: "the Planner" } });
+                      return;
+                    }
+                  }
+                  log(aiEvent("accepted", "budget", { entry: turn.words }));
+                  decide(i, "applied");
+                  return;
+                }
                 if (turn.detail) {
                   // The line as the Details form would save it, and the change on the trail.
                   if (!turn.detail.next) return;
@@ -11047,17 +11236,27 @@ function ChangeCard({
  * this one holds the owner's whole financial history.
  */
 function SettleCard({ turn, canSettle, onSettle, onDiscard }: { turn: Settling; canSettle: boolean; onSettle: () => void; onDiscard: () => void }) {
-  const { detail } = turn;
+  const { detail, planner } = turn;
   return (
     <div className="fms-proposal">
       <div className="fms-proposalhead">
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
-          {detail ? "Change a line" : "Clear a line"}
+          {planner ? "Planner" : detail ? "Change a line" : "Clear a line"}
         </span>
         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-          {turn.state === "applied" ? (detail ? "changed" : "cleared") : turn.state === "discarded" ? "left as it was" : "nothing is saved yet"}
+          {turn.state === "applied" ? (planner ? "done" : detail ? "changed" : "cleared") : turn.state === "discarded" ? "left as it was" : "nothing is saved yet"}
         </span>
       </div>
+      {planner && planner.rows.length > 0 && (
+        <dl className="fms-pdetails">
+          {planner.rows.map((r) => (
+            <div key={r.label} className="fms-pdetail">
+              <dt className="t-micro">{r.label}</dt>
+              <dd className="t-caption">{r.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
       {detail && (
         <>
           <p className="t-body-strong" style={{ margin: 0 }}>
