@@ -11557,6 +11557,38 @@ button.fms-recent-row:disabled {
   color: var(--over);
 }
 
+/* A dialog's footer: the actions on the left, the main one pushed right. */
+.fms-actspacer {
+  flex: 1 1 auto;
+}
+
+.fms-moremenu {
+  position: relative;
+}
+
+.fms-moremenu > .fms-btn {
+  gap: var(--space-1);
+}
+
+/* Opens upward from the footer, over the sheet, never past its edge. */
+.fms-moremenu-list {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 5;
+  display: grid;
+  min-width: 240px;
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-raised);
+}
+
+.fms-moremenu-list > .fms-actionrow:last-child {
+  border-bottom: 0;
+}
+
 .fms-planform {
   display: grid;
   gap: var(--space-4);

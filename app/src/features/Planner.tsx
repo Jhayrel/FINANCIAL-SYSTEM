@@ -21,7 +21,7 @@
  * Class names are `fms-plans` and `fms-plan*`: `fms-planner` is the Budget
  * screen's panel, and sharing it squeezed that panel's figures.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Icon, type IconName } from "../components/Icon";
 import { AmountInput, Field, Switch, TextInput } from "../components/forms";
@@ -577,6 +577,67 @@ function Fact({ label, children, long = false }: { label: string; children: Reac
   );
 }
 
+interface SheetAction {
+  readonly label: string;
+  readonly icon: IconName;
+  readonly run: () => void;
+  readonly danger?: boolean;
+}
+
+/**
+ * More, on a dialog's footer: the rarer actions in a short menu that opens
+ * upward, closed by a choice, a click outside or Escape.
+ */
+function MoreMenu({ items }: { items: readonly SheetAction[] }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent): void => {
+      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+    };
+    const key = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", key, true);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", key, true);
+    };
+  }, [open]);
+  return (
+    <div className="fms-moremenu" ref={box}>
+      <Button aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <Icon name="more" size={18} />
+        More
+      </Button>
+      {open && (
+        <div className="fms-moremenu-list" role="menu">
+          {items.map((r) => (
+            <button
+              key={r.label}
+              type="button"
+              role="menuitem"
+              className={r.danger ? "fms-actionrow fms-actionrow--danger" : "fms-actionrow"}
+              onClick={() => {
+                setOpen(false);
+                r.run();
+              }}
+            >
+              <Icon name={r.icon} size={18} />
+              <span className="t-body">{r.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PlanSheet(props: {
   view: PlanView;
   asOf: IsoDate;
@@ -612,7 +673,7 @@ function PlanSheet(props: {
    * two lines, read as clutter (owner, 27 October 2026: "The buttons are so
    * ugly ang messy even in pc").
    */
-  const actions =
+  const primary =
     open ? (
       <Button variant="primary" onClick={props.onPay}>
         {v.paid > 0 ? "Pay the rest" : "Record payment"}
@@ -626,7 +687,7 @@ function PlanSheet(props: {
         Plan it again
       </Button>
     );
-  const rows: { label: string; icon: IconName; run: () => void; danger?: boolean }[] = open
+  const rows: SheetAction[] = open
     ? [
         { label: "Edit", icon: "edit", run: props.onEdit },
         { label: "Move the date", icon: "planner", run: props.onMove },
@@ -642,6 +703,32 @@ function PlanSheet(props: {
           { label: v.state === "skipped" ? "Put it back" : "Open it again", icon: "planner", run: props.onReopen },
           { label: "Remove", icon: "bin", run: props.onRemove, danger: true },
         ];
+  /*
+   * A phone lists the actions above one wide button. A computer's dialog
+   * keeps them on its footer line: the two most used as buttons, the rest
+   * under More, the main one on the right. The phone's list in a dialog read
+   * as a page of rows (owner, 27 October 2026: "good in phone but messy in pc").
+   */
+  const actions = props.dialog ? (
+    <>
+      {rows.length > 3 && <MoreMenu items={rows.slice(2)} />}
+      {/* One more is a button of its own, not a menu of one. */}
+      {rows.length === 3 && (
+        <Button {...(rows[2]!.danger ? { variant: "ghost" as const, tone: "danger" as const } : {})} onClick={rows[2]!.run}>
+          {rows[2]!.label}
+        </Button>
+      )}
+      {rows.slice(0, 2).map((r) => (
+        <Button key={r.label} onClick={r.run}>
+          {r.label}
+        </Button>
+      ))}
+      <span className="fms-actspacer" aria-hidden />
+      {primary}
+    </>
+  ) : (
+    primary
+  );
 
   return (
     <Sheet title={p.title} subtitle={open ? whenWords(v, props.asOf) : v.words} onClose={props.onClose} actions={actions} dialog={props.dialog}>
@@ -739,7 +826,7 @@ function PlanSheet(props: {
           not buttons (owner, 27 October 2026: "i CANNOT SEE THE BUTTONS FIX IT
           MAKE IT GOOD"). Remove keeps the danger outline; it can be put back.
         */}
-        {rows.length > 0 && (
+        {!props.dialog && rows.length > 0 && (
           <div className="fms-actionlist" role="group" aria-label="More for this plan">
             {rows.map((r) => (
               <button key={r.label} type="button" className={r.danger ? "fms-actionrow fms-actionrow--danger" : "fms-actionrow"} onClick={r.run}>
