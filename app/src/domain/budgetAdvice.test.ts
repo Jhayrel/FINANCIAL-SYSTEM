@@ -301,7 +301,7 @@ describe("a question about the budget already set", () => {
     const words = judgeWords(advice, tracks, 27)!;
     expect(words).toContain("The budget set for October 2026: PHP 15,000.00 for spending and PHP 1,700.00 for bills and subscriptions, PHP 16,700.00 in all.");
     expect(words).toContain("The spending budget is PHP 3,000.00 above the usual month");
-    expect(words).toContain("PHP 9,000.00 of the spending budget is left for the 27 days left, today included, PHP 333.33 a day.");
+    expect(words).toContain("PHP 9,000.00 of the spending budget is left for the 27 days left, including today, PHP 333.33 a day.");
     const none = { ...tracks, spending: { ...tracks.spending, budget: 0 }, billsSubs: { ...tracks.billsSubs, budget: 0 } } as typeof tracks;
     expect(judgeWords(advice, none, 27)).toBeNull();
     // Backup of 7 October 2026: the money left out, so "no more care than usual" while the wallets could not hold it.

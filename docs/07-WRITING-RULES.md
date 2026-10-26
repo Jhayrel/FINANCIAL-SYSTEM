@@ -80,6 +80,33 @@ correct as an adjective ("the figures are correct") is unaffected.
 
 ---
 
+## W5. Simple and professional
+
+The owner, 27 October 2026: "use professional but simple words like make
+everything understandable not too cringe words etc just professional wording
+but not too professional". Every label, hint, message and chat reply:
+
+- Uses everyday words and short sentences. No slang, jokes, cheerleading or
+  figures of speech ("runs dry", "give way", "stays honest", "the money is
+  the limit").
+- Names the thing plainly instead of describing it sideways.
+- Is not stiff either: no legal or bookkeeping jargon where a plain word
+  works ("authoritative", "clamped", "two tracks").
+
+| Do not write | Write |
+|---|---|
+| `Cash set aside and hidden from yourself` | `Cash set aside and kept out of daily spending` |
+| `Nothing here needs a look.` | `Nothing needs attention.` |
+| `The worst 3 of 11. The bell at the top has every one.` | `The 3 most urgent of 11. See them all under the bell at the top.` |
+| `It promises ₱715.46 more than your money. The money is the limit` | `The budget is ₱715.46 more than your money can cover` |
+| `When money is short, they give way first.` | `When money is short, put these off first.` |
+| `It really holds` | `Actual balance` |
+| `6 days left, today included` | `6 days left, including today` |
+
+The AI model is told the same in its system prompt (`functions/api/ai.ts`).
+
+---
+
 ## Checking
 
 ```bash

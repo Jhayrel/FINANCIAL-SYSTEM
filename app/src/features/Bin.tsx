@@ -478,7 +478,7 @@ export function Bin({
                   ? `Restoring the ${matching.length} shown`
                   : "Restoring everything"
             }
-            subtitle="What each wallet's balance would move by"
+            subtitle="How each wallet's balance would change"
           >
             {impact.length === 0 ? (
               <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
@@ -502,7 +502,7 @@ export function Bin({
               </div>
             ) : (
               <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-3)" }}>
-                Tick rows to see what bringing back just those would do.
+                Select rows to see what restoring them would change.
               </p>
             )}
           </Card>

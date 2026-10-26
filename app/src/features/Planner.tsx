@@ -229,7 +229,7 @@ function OutlookRail({ o, asOf }: { o: Outlook; asOf: IsoDate }) {
           {o.dueNow === 0
             ? "Nothing due this month."
             : o.overdue > 0
-              ? `${plural(o.overdue, "plan")} past ${o.overdue === 1 ? "its" : "their"} day. Record the payment, move the date or skip it.`
+              ? `${plural(o.overdue, "plan")} overdue. Record the payment, move the date, or skip ${o.overdue === 1 ? "it" : "them"}.`
               : o.dueNow > o.counted
                 ? `${formatMoney(o.dueNow - o.counted)} of it is not counted in safe to spend.`
                 : "Counted plans are set aside from safe to spend until they are paid."}
@@ -270,7 +270,7 @@ function OutlookRail({ o, asOf }: { o: Outlook; asOf: IsoDate }) {
           </ul>
           {o.wants > 0 && (
             <p className="t-caption fms-plansrail-foot">
-              {formatMoney(o.wants)} of the open plans are wants. When money is short, they give way first.
+              {formatMoney(o.wants)} of the open plans are wants. When money is short, put these off first.
             </p>
           )}
         </Card>
@@ -333,7 +333,7 @@ export function Planner(props: PlannerProps) {
   return (
     <div className="fms-plans">
       {/* One primary per region: with nothing planned, the empty state carries the button. */}
-      <Card page title="Plans" subtitle="What you mean to pay later. Nothing moves until it is paid." action={anything ? addButton : undefined}>
+      <Card page title="Plans" subtitle="Payments you plan to make. No money moves until you pay." action={anything ? addButton : undefined}>
         {anything && openCount > 0 && !wide && <OutlookHead o={outlook} asOf={asOf} />}
         {/* A phone has no card heading, so the button sits under the figures, above the list. */}
         {phone && anything && <div className="fms-plans-add">{addButton}</div>}
@@ -355,8 +355,8 @@ export function Planner(props: PlannerProps) {
             <EmptyState
               message={
                 anything
-                  ? "Nothing coming up. Plan the next thing you mean to pay, and it shows here with its day and whether the money is there."
-                  : "Nothing planned. Plan something you mean to pay later, like tuition next month or a phone next year, and it shows here with its day and whether the money is there."
+                  ? "Nothing coming up. Add the next payment you plan to make, and it shows here with its date and whether you have the money."
+                  : "Nothing planned yet. Add a payment you plan to make, such as tuition next month or a phone next year. It shows here with its date and whether you have the money."
               }
               action={anything ? undefined : addButton}
             />
@@ -536,7 +536,7 @@ function PlanRow({ view: v, asOf, short, onOpen }: { view: PlanView; asOf: IsoDa
   const pill = PILL[v.state];
   const note =
     short > 0
-      ? { status: "over" as const, words: `${formatMoney(short)} short of safe to spend` }
+      ? { status: "over" as const, words: `${formatMoney(short)} more than safe to spend` }
       : v.goneNote && open
         ? { status: "warn" as const, words: "A payment linked to it is in the bin" }
         : v.paid > 0 && open
@@ -835,7 +835,7 @@ function PlanSheet(props: {
                       })
                     }
                   >
-                    This is it
+                    Link this entry
                   </Button>
                 </li>
               ))}
@@ -1023,7 +1023,7 @@ function PlanForm(props: {
   return (
     <Sheet
       title={isEdit && editing ? `Edit "${editing.title}"` : "Plan something"}
-      subtitle={isEdit && editing && editing.status !== "open" ? `It stays ${editing.status === "done" ? "paid" : "skipped"}; its payments are not changed.` : "Nothing moves until it is paid."}
+      subtitle={isEdit && editing && editing.status !== "open" ? `It stays ${editing.status === "done" ? "paid" : "skipped"}; its payments are not changed.` : "No money moves until you pay."}
       onClose={props.onClose}
       dialog={props.dialog}
       actions={
@@ -1089,7 +1089,7 @@ function PlanForm(props: {
 
         {moreOpen && (
           <>
-            <Field label="Need or want" help="When money is short, the wants give way first.">
+            <Field label="Need or want" help="When money is short, put wants off first.">
               <SegmentedControl
                 options={[
                   { id: "need", label: "A need" },
@@ -1130,8 +1130,8 @@ function PlanForm(props: {
                     : recurring
                       ? "Bills and subscriptions are set aside already every month."
                       : when.kind === "none"
-                        ? "Once it has a month or a day, it is set aside there like a bill still to pay."
-                        : "Set aside in its month like a bill still to pay, so today's figure stays honest."}
+                        ? "Once it has a month or a day, it is set aside like a bill still to pay."
+                        : "Set aside in its month like a bill still to pay, so safe to spend stays accurate."}
                 </span>
               </span>
               <Switch checked={counted} onChange={setSetAside} label="Count it in safe to spend" />
@@ -1278,7 +1278,7 @@ function MoveSheet(props: { plan: Plan; asOf: IsoDate; dialog: boolean; onClose:
   return (
     <Sheet
       title={`Move "${plan.title}"`}
-      subtitle={`Now ${byWhen(plan)}. Every move is kept.`}
+      subtitle={`Now ${byWhen(plan)}. Each date change is kept in its history.`}
       onClose={props.onClose}
       dialog={props.dialog}
       actions={

@@ -692,7 +692,7 @@ export function contextToText(c: AiContext): string {
     );
     {
       const week = weekAhead({ perDay: toCentavos(safe.today), perDayAfter: toCentavos(safe.perDayAfter), daysLeft: safe.daysLeft });
-      if (week.days > 1) lines.push(`Next ${week.days} days, today included: ${php(pesos(week.amount))}${week.days < 7 ? `, to ${until}'s end` : ""}.`);
+      if (week.days > 1) lines.push(`Next ${week.days} days, including today: ${php(pesos(week.amount))}${week.days < 7 ? `, to ${until}'s end` : ""}.`);
 
     }
     if (safe.next) {
@@ -716,7 +716,7 @@ export function contextToText(c: AiContext): string {
     `Today so far: spent ${php(c.recent.today.spent)}, received ${php(c.recent.today.received)}, across ${c.recent.today.entries} ${c.recent.today.entries === 1 ? "entry" : "entries"}.`,
   );
   lines.push(`Yesterday: spent ${php(c.recent.yesterday.spent)}.`);
-  lines.push(`The last seven days, today included: spent ${php(c.recent.lastSevenDays.spent)}.`);
+  lines.push(`The last seven days, including today: spent ${php(c.recent.lastSevenDays.spent)}.`);
 
   lines.push("");
   lines.push("## Accounts, by what each is for");

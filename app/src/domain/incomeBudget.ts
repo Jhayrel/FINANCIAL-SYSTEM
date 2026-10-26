@@ -183,7 +183,7 @@ export function checkSplit(ib: IncomeBudget, split: IncomeSplit): SplitCheck {
     errors.push(
       split.keepAside > 0
         ? `A spending budget of ${formatMoney(spending)} would count the ${formatMoney(split.keepAside)} kept for savings twice: with it set aside, your money keeps a spending budget of ${formatMoney(Math.max(0, ceiling))} at most.`
-        : `A spending budget of ${formatMoney(spending)} promises more than your money: ${formatMoney(ib.spent)} is spent and ${formatMoney(ib.safe)} is safe to spend, so ${formatMoney(Math.max(0, ceiling))} at most.`,
+        : `A spending budget of ${formatMoney(spending)} is more than your money can cover: ${formatMoney(ib.spent)} is spent and ${formatMoney(ib.safe)} is safe to spend, so ${formatMoney(Math.max(0, ceiling))} at most.`,
     );
   }
   if (given === 0) errors.push("Put some of it into a part first.");
@@ -222,7 +222,7 @@ export function incomeBudgetWords(ib: IncomeBudget, monthName: string): string[]
   out.push(
     `Spending budget ${formatMoney(ib.budget)}, ${formatMoney(ib.spent)} spent; safe to spend ${formatMoney(ib.safe)}. The most the spending budget can be with the money held now: ${formatMoney(ib.most)} (spent plus safe to spend).`,
   );
-  if (ib.over > 0) out.push(`The spending budget already promises ${formatMoney(ib.over)} more than the money. Lower it to ${formatMoney(ib.most)}, or it cannot be kept.`);
+  if (ib.over > 0) out.push(`The spending budget is already ${formatMoney(ib.over)} more than your money can cover. Lower it to ${formatMoney(ib.most)} to make it workable.`);
   else if (ib.cameIn > 0) out.push(`It can rise by ${formatMoney(Math.min(ib.room, ib.cameIn))} at most from this income; any part kept for savings comes off that.`);
   return out;
 }

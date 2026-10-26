@@ -385,7 +385,7 @@ export function Statements({
 
   return (
     <div className="fms-db">
-      <Card page title="Statements" subtitle="Any period, printed the way your Excel printed it" padded={false}>
+      <Card page title="Statements" subtitle="Any period, in the same layout as your Excel statements" padded={false}>
         <div className="fms-stmttools">
           <label className="fms-stmtfield fms-stmtfield--wide">
             <span className="t-label" style={{ color: "var(--ink-2)" }}>Statement</span>

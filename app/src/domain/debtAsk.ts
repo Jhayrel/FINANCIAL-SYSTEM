@@ -77,6 +77,6 @@ export function debtAnswer(ask: DebtAsk, debts: readonly Debt[], transactions: r
       : `You owe **${money(youOwe)}** in all${owedYou > 0 ? `; owed to you: ${money(owedYou)}` : ""}${held > 0 ? `; held for others: ${money(held)}` : ""}.`;
   return [
     lead,
-    ...(open.length > 0 ? open.map(describe) : ["Every line is at PHP 0.00."]),
+    ...(open.length > 0 ? open.map(describe) : ["Every debt is at PHP 0.00."]),
   ].join(" ");
 }

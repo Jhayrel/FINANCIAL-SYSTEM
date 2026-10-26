@@ -114,7 +114,7 @@ describe("one long gone is asked about, not called late", () => {
       asOf: TODAY,
     });
     expect(bell.find((a) => a.id === "bills-overdue")?.detail).not.toContain("Movie Plus");
-    expect(bell.find((a) => a.id === "bills-lapsed")?.title).toBe("Movie Plus looks stopped");
+    expect(bell.find((a) => a.id === "bills-lapsed")?.title).toBe("Movie Plus may have stopped");
   });
 });
 

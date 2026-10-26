@@ -687,7 +687,7 @@ export function Database({
             <span>
               {rows.length.toLocaleString()} {rows.length === 1 ? "entry" : "entries"}
               {rows.length !== transactions.length && ` of ${transactions.length.toLocaleString()}`}
-              {onDeleteMany && " · hold a row to pick several"}
+              {onDeleteMany && " · press and hold a row to select several"}
             </span>
             {filtered && (
               <button

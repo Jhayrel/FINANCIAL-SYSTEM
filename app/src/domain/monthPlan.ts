@@ -615,13 +615,13 @@ function notesFor(
        * "make sure the system and ai all parts will know about this").
        */
       warn(
-        `The spending budget still has ${money(safe.budgetLeft)} left, but only ${money(Math.max(0, safe.safe))} is safe to spend: it promises ${money(safe.budgetLeft - Math.max(0, safe.safe))} more than your money. The money is the limit; lower the budget on the Budget screen.`,
+        `The spending budget has ${money(safe.budgetLeft)} left, but only ${money(Math.max(0, safe.safe))} is safe to spend. The budget is ${money(safe.budgetLeft - Math.max(0, safe.safe))} more than your money can cover; lower it on the Budget screen.`,
       );
     }
     if (safe.budgetLeft !== null && safe.budgetLeft <= 0) {
-      warn("The spending budget is used up: anything more this month is past the plan, even with the money there.");
+      warn("The spending budget is used up. Anything more this month goes over the budget, even if the money is there.");
     } else if (safe.limitedBy === "budget" && safe.budgetLeft !== null) {
-      warn(`The spending budget has less left than this, ${money(safe.budgetLeft)}: ${money(safe.budgetPerDay ?? 0)} a day keeps to it.`);
+      warn(`The spending budget has less left than this, ${money(safe.budgetLeft)}: spend ${money(safe.budgetPerDay ?? 0)} a day to stay within it.`);
     }
   }
 

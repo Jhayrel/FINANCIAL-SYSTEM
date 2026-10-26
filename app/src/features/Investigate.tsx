@@ -249,7 +249,7 @@ export function Investigate({
   return (
     <Card
       title="Find a difference"
-      subtitle="An account holds a different amount than the ledger says? This finds where the difference went."
+      subtitle="If an account's actual balance differs from the ledger, this finds where the difference came from."
     >
       {dialog}
       <div className="fms-find">
@@ -273,8 +273,8 @@ export function Investigate({
                 ariaLabel="Which account"
               />
             </Field>
-            <Field label="It really holds">
-              <AmountInput value={actual} onChange={(v) => change({ actual: v })} ariaLabel="What the account really holds" />
+            <Field label="Actual balance">
+              <AmountInput value={actual} onChange={(v) => change({ actual: v })} ariaLabel="The account's actual balance" />
             </Field>
             <Field label="On">
               <input
@@ -302,9 +302,9 @@ export function Investigate({
           <p className="t-caption fms-find-says">
             The ledger says <strong>{formatMoney(recordedNow)}</strong> for {account || "this account"} on that day
             {actual !== null && actual !== recordedNow
-              ? `: ${formatMoney(Math.abs(recordedNow - actual))} ${recordedNow > actual ? "more" : "less"} than it really holds.`
+              ? `: ${formatMoney(Math.abs(recordedNow - actual))} ${recordedNow > actual ? "more" : "less"} than the actual balance.`
               : actual !== null
-                ? ", the same as it really holds."
+                ? ", the same as the actual balance."
                 : "."}
           </p>
 

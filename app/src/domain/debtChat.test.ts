@@ -177,14 +177,14 @@ describe("a draw comes from the credit line, not from a wallet", () => {
     const messages = checkDraft(drawn(), ledger, reference, debts)
       .errors.map((e) => e.message)
       .join(" ");
-    expect(messages).not.toContain("money leaves");
+    expect(messages).not.toContain("money comes from");
   });
 
   it("still needs somewhere for a draw to land", () => {
     const nowhere = { ...drawn(), toWallet: "" };
     const check = checkDraft(nowhere, ledger, reference, debts);
     expect(check.ok).toBe(false);
-    expect(check.errors.map((e) => e.message).join(" ")).toContain("money lands in");
+    expect(check.errors.map((e) => e.message).join(" ")).toContain("money goes to");
   });
 
   /** The other direction is unchanged: a repayment leaves an account. */
@@ -198,7 +198,7 @@ describe("a draw comes from the credit line, not from a wallet", () => {
     };
     const check = checkDraft(repaid, ledger, reference, debts);
     expect(check.ok).toBe(false);
-    expect(check.errors.map((e) => e.message).join(" ")).toContain("money leaves");
+    expect(check.errors.map((e) => e.message).join(" ")).toContain("money comes from");
   });
 
   it("a repayment saves with only a source", () => {

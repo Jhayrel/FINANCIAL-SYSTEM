@@ -326,8 +326,8 @@ export function DebtScreen({
 
       <p className="t-caption fms-debtfoot">
         <span>
-          {archived > 0 ? `${archived} archived, kept with their history. ` : ""}
-          Adding, archiving and removing debts is in Settings.
+          {archived > 0 ? `${archived} archived, with their history kept. ` : ""}
+          Add, archive or remove debts in Settings.
         </span>
         <button type="button" className="t-caption fms-linkbtn" onClick={onManage}>
           Open Credit and loans
@@ -411,7 +411,7 @@ function DebtRows({
   onOpen: (id: string) => void;
 }) {
   return (
-    <Card title="Your debts" subtitle="Pick one to see it in full, with its history" action={<span className="t-caption">{dues.length}</span>}>
+    <Card title="Your debts" subtitle="Select one to see its details and history" action={<span className="t-caption">{dues.length}</span>}>
       <div className="fms-debtrows">
         <div className="fms-debtrows-head t-label" aria-hidden="true">
           <span>Debt</span>
@@ -876,7 +876,7 @@ function LimitQuick({
   if (!open && first) {
     return (
       <p className="t-caption fms-limitline">
-        <span style={{ color: "var(--ink-3)" }}>No credit limit set, so nothing says what is left to borrow.</span>
+        <span style={{ color: "var(--ink-3)" }}>No credit limit set, so the amount left to borrow is unknown.</span>
         <button type="button" className="t-caption fms-linkbtn" onClick={() => setOpen(true)}>
           Set limit
         </button>
@@ -1078,7 +1078,7 @@ function DebtDetails({
           )}
           <p className="t-caption fms-debtdetails-note">
             {(limit ?? 0) > 0
-              ? "A new figure is kept as a step from the day it changed, so earlier borrowing is judged by the limit it had. Pick what your lender's app counts as used: if it let you borrow again while its fees were still owed, it counts only what was borrowed."
+              ? "A new limit applies from the day it changed, so earlier borrowing is checked against the limit at that time. Choose what your lender's app counts as used: if it let you borrow again while fees were still owed, it counts only what was borrowed."
               : "Leave it empty if this lender sets no limit."}
           </p>
         </div>

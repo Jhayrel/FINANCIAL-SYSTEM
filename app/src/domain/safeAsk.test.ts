@@ -65,7 +65,7 @@ describe("the device's answer", () => {
   });
 
   it("checks a figure a day against it", () => {
-    expect(safeWords(brief, 30_000)).toContain("₱300.00 a day for the 10 days left, today included, is ₱3,000.00: it fits, with ₱800.00 to spare.");
+    expect(safeWords(brief, 30_000)).toContain("₱300.00 a day for the 10 days left, including today, is ₱3,000.00: it fits, with ₱800.00 to spare.");
     expect(safeWords(brief, 50_000)).toContain("₱1,200.00 more than is safe. ₱380.00 a day fits.");
   });
 });

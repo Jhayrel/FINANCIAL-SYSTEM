@@ -46,7 +46,7 @@ export function offlineAnswer(c: AiContext, task: AiTask): string {
    * than guessing at what was asked.
    */
   if (task === "chat") {
-    return `I cannot read your question without the model, so here is where the month stands. ${offlineSummary(c)}`;
+    return `I need the AI model to understand that question, so here is a summary of the month instead. ${offlineSummary(c)}`;
   }
   return offlineSummary(c);
 }
@@ -66,7 +66,7 @@ function offlineSummary(c: AiContext): string {
    */
   if (c.safe) {
     parts.push(
-      `Safe to spend today is ${php(c.safe.today)}, and ${php(c.safe.safe)} until the month ends once the ${php(c.safe.billsDue + c.safe.debtDue)} still to pay is set aside.${
+      `Safe to spend today is ${php(c.safe.today)}, and ${php(c.safe.safe)} until the month ends${c.safe.billsDue + c.safe.debtDue > 0 ? `, after setting aside the ${php(c.safe.billsDue + c.safe.debtDue)} still to pay` : ""}.${
         c.safe.daysLeft > 1 ? ` From tomorrow, ${php(c.safe.perDayAfter)} a day.` : ""
       }`,
     );
@@ -85,8 +85,8 @@ function offlineSummary(c: AiContext): string {
       const forSpending = month.spendingLeft ?? null;
       parts.push(
         forSpending !== null && forSpending !== month.remaining
-          ? `On the plan, ${php(month.remaining)} of the ${php(month.budget)} budget is left; ${php(Math.max(0, forSpending))} of it is for spending, ${php(Math.max(0, month.allowancePerDay))} a day for the ${month.daysLeft} days remaining.`
-          : `On the plan, ${php(month.remaining)} of the ${php(month.budget)} budget is left, bills and subscriptions included.`,
+          ? `${php(month.remaining)} of the ${php(month.budget)} budget is left; ${php(Math.max(0, forSpending))} of it is for spending, ${php(Math.max(0, month.allowancePerDay))} a day for the ${month.daysLeft} days remaining.`
+          : `${php(month.remaining)} of the ${php(month.budget)} budget is left, including bills and subscriptions.`,
       );
     } else {
       parts.push(`${php(month.remaining)} of the ${php(month.budget)} budget is left.`);

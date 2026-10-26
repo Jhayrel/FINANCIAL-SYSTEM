@@ -160,7 +160,7 @@ export function safeWords(
      */
     ...(safe.daysLeft > 0
       ? [
-          `- Today's share: ${money(Math.max(0, safe.safe) + safe.spentToday)} over the ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"} left, today included: ${money(safe.todayShare)}${safe.spentToday > 0 ? `, less ${money(safe.spentToday)} spent today: ${money(safe.perDay)}` : ""}`,
+          `- Today's share: ${money(Math.max(0, safe.safe) + safe.spentToday)} split over the ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"} left, including today: ${money(safe.todayShare)}${safe.spentToday > 0 ? `, less ${money(safe.spentToday)} spent today: ${money(safe.perDay)}` : ""}`,
         ]
       : []),
     ...(safe.daysLeft > 1 ? [`- From tomorrow: ${money(safe.perDayAfter)} a day for ${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"}`] : []),
@@ -170,7 +170,7 @@ export function safeWords(
       : []),
     ...(() => {
       const week = weekAhead(safe);
-      return week.days > 1 ? [`- The next ${week.days} days, today included: ${money(week.amount)}${week.days < 7 ? `, to the end of ${name}` : ""}`] : [];
+      return week.days > 1 ? [`- The next ${week.days} days, including today: ${money(week.amount)}${week.days < 7 ? `, to the end of ${name}` : ""}`] : [];
     })(),
   ];
 
@@ -198,7 +198,7 @@ export function safeWords(
     const pastToday = safe.spentToday > rate;
     const what = pastToday
       ? `Today already spent ${money(safe.spentToday)}, so ${money(rate)} a day from tomorrow for ${days - 1} ${days - 1 === 1 ? "day" : "days"} comes to ${money(need)} with today`
-      : `${money(rate)} a day for the ${days} ${days === 1 ? "day" : "days"} left, today included, is ${money(need)}`;
+      : `${money(rate)} a day for the ${days} ${days === 1 ? "day" : "days"} left, including today, is ${money(need)}`;
     const fits = safe.overToday > 0 ? `${money(safe.perDayAfter)} a day from tomorrow fits.` : `${money(safe.todayShare)} a day fits.`;
     after.push(need <= room ? `${what}: it fits, with ${money(room - need)} to spare.` : `${what}: ${money(need - room)} more than is safe. ${fits}`);
   }
@@ -212,12 +212,12 @@ export function safeWords(
       safe.budgetLeft <= 0
         ? "Your spending budget is used up, so this is past the plan even with the money there."
         : safe.limitedBy === "budget"
-          ? `Your spending budget has less left, ${money(safe.budgetLeft)}: ${money(safe.budgetPerDay ?? 0)} a day keeps to it.`
-          : `Your spending budget still has ${money(safe.budgetLeft)}, so the money is the limit, not the plan.`,
+          ? `Your spending budget has less left, ${money(safe.budgetLeft)}: spend ${money(safe.budgetPerDay ?? 0)} a day to stay within it.`
+          : `Your spending budget still has ${money(safe.budgetLeft)}, so your money is what limits you, not the budget.`,
     );
   }
   // The plan promising more than the money, said as the Dashboard says it (`monthPlan.ts` notes).
-  const beyond = (brief.warnings ?? []).find((w) => /promises .* more than your money/.test(w)) ?? "";
+  const beyond = (brief.warnings ?? []).find((w) => /more than your money can cover/.test(w)) ?? "";
   return [`**Safe to spend today: ${money(safe.perDay)}**`, sum.join("\n"), after.join(" "), beyond].filter(Boolean).join("\n\n");
 }
 

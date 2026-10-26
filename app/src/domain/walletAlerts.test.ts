@@ -26,7 +26,7 @@ describe("a low wallet, by how it is used", () => {
     const used = [...rows, row("2026-10-10", { type: "Revenue", category: "Revenue", item: "Allowance", toWallet: "Gcash", amount: 20000, total: 20000 }), row("2026-10-11", { fromWallet: "Gcash", amount: 10000, total: 10000 })];
     const [alert] = alertsOn(used, "2026-10-13");
     expect(alert?.level).toBe("warn");
-    expect(alert?.detail).toContain("money still left it on October 11, 2026");
+    expect(alert?.detail).toContain("it was last used on October 11, 2026");
   });
   it("always says when it is below zero", () => {
     expect(alertsOn([row("2026-01-01", { fromWallet: "Gcash", amount: 500, total: 500 })], "2026-10-13").map((a) => a.level)).toEqual(["over"]);

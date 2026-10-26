@@ -958,9 +958,9 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
    * alloting budget ... make it ai powered".
    */
   outlook:
-    "Explain these planning figures to the owner in three to five short sentences, as a friend who keeps their books: what a usual month costs and what it usually brings in, whether each month's budget is realistic against the usual month, and what to plan for. Use only the figures given, exactly as written, and never add, subtract or invent one. A usual month leaves one-offs out, so say plainly that a month with a one-off costs more, using the figure given for that. Calm and practical: no scolding, no exclamation marks, no emoji. Do not mention the app, a model or yourself.",
+    "Explain these planning figures to the owner in three to five short sentences, as a careful bookkeeper would: what a usual month costs and what it usually brings in, whether each month's budget is realistic against the usual month, and what to plan for. Use only the figures given, exactly as written, and never add, subtract or invent one. A usual month leaves one-offs out, so say plainly that a month with a one-off costs more, using the figure given for that. Calm and practical: no scolding, no exclamation marks, no emoji. Do not mention the app, a model or yourself.",
   note:
-    "Word this note about a purchase just saved, in one or two short sentences, as a friend who keeps their books would say it to them. Use only the figures given, exactly as written, and add none. Calm and plain: no scolding, no guilt, no warnings, no commands, no should or must, no exclamation marks, no emoji. A need (food, fuel, health, school, bills, home needs) is never judged: say it is counted, and at most mention where the month's wants have room if that is given. For a want, say the fact and leave the choice to them. Do not mention the app, a model or yourself.",
+    "Word this note about a purchase just saved, in one or two short sentences, as a careful bookkeeper would say it. Use only the figures given, exactly as written, and add none. Calm and plain: no scolding, no guilt, no warnings, no commands, no should or must, no exclamation marks, no emoji. A need (food, fuel, health, school, bills, home needs) is never judged: say it is counted, and at most mention where the month's wants have room if that is given. For a want, say the fact and leave the choice to them. Do not mention the app, a model or yourself.",
   patterns:
     "Point out at most two things about the spending pattern that the figures support, using the whole span of months provided rather than only the latest. Say which period you looked at. If nothing stands out across that span, say so plainly.",
   /**
@@ -1594,6 +1594,8 @@ const SYSTEM_BASE_LINES = [
    * stated rather than left to be worked out.
    */
   "Never use an em dash. Use a comma, a colon, or a full stop.",
+  // The owner, 27 October 2026: "use professional but simple words ... not too cringe".
+  "Write in simple, professional English: clear everyday words, short sentences, no slang, no jokes, no cheerleading, and no figures of speech.",
 ];
 
 const SYSTEM_BASE = SYSTEM_BASE_LINES.join(" ");

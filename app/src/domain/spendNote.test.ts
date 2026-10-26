@@ -40,7 +40,7 @@ describe("when the month goes past its budget", () => {
 
   it("says a want plainly, and leaves the call to the owner", () => {
     const note = spendNoteFor([spend(asOf, "Treat", 500)], month, budgets, asOf, new Set());
-    expect(note?.text).toBe("Treat ₱500.00 takes September's spending ₱400.00 past its ₱7,000.00 budget, with 3 days left. Your call; the Budget screen shows where the month went.");
+    expect(note?.text).toBe("Treat ₱500.00 takes September's spending ₱400.00 past its ₱7,000.00 budget, with 3 days left. The Budget screen shows where the money went.");
   });
 
   it("is said once a month", () => {

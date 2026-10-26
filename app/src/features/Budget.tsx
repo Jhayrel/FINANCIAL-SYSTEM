@@ -601,8 +601,8 @@ export function Budget({
             return (
               <div style={{ marginTop: "var(--space-4)" }}>
                 <Alert status="warn" title="Spending faster than the budget allows">
-                  {formatMoney(soFar)} a day so far. Keeping to {formatMoney(view.perDay)} a day for the {view.daysLeft}{" "}
-                  {view.daysLeft === 1 ? "day" : "days"} left holds the spending budget.
+                  {formatMoney(soFar)} a day so far. Spend {formatMoney(view.perDay)} a day or less for the {view.daysLeft}{" "}
+                  {view.daysLeft === 1 ? "day" : "days"} left to stay within the spending budget.
                 </Alert>
               </div>
             );
@@ -612,7 +612,7 @@ export function Budget({
             <Stat label="Came in" hint="Income, not counting starting balances">
               <Money value={view.revenue} size="m" tone="var(--flow-revenue-text)" />
             </Stat>
-            <Stat label="Went out" hint="Everything the two tracks count">
+            <Stat label="Went out" hint="Everything the budget counts">
               <Money value={a.combined.spent} size="m" tone="var(--flow-spending-text)" />
             </Stat>
             <Stat
@@ -626,8 +626,8 @@ export function Budget({
                 label="Budget against income"
                 hint={
                   view.planShareOfIncome > 1
-                    ? "The budget spends more than came in"
-                    : "Of what came in is budgeted to go out"
+                    ? "The budget is more than what came in"
+                    : "Of what came in is budgeted to be spent"
                 }
               >
                 <span className="t-num-m" style={{ color: "var(--ink)" }}>
@@ -715,8 +715,8 @@ export function Budget({
                 </div>
               ) : lock.state !== "closed" ? (
                 <p className="t-caption fms-planner-note fms-limitintro">
-                  Any kind of spending can have its own limit inside the spending budget: food, travel,
-                  whatever moves month to month. Bills are followed one by one in their own card.
+                  Set a limit on any kind of spending, such as food or travel, within the spending budget.
+                  Bills are tracked one by one in their own card.
                 </p>
               ) : null}
 
@@ -1197,13 +1197,13 @@ function Planner({
     const reach = reachNow;
     setProblem("");
     if (closed && !reason.trim()) {
-      setProblem(`Say why ${name}'s budget needs changing: it is kept with the edit, so the month is not judged against a plan set afterwards without a reason.`);
+      setProblem(`Give a reason for changing ${name}'s budget. It is saved with the edit, so any change to a past month is explained.`);
       return;
     }
     if (value.spending + value.billsSubs <= 0) {
       const ok = await confirm({
         title: `Set ${name}'s budget to ₱0.00?`,
-        body: "With no budget every peso spent shows as over, and the month cannot be judged against a plan. To clear it, Undo the last change instead.",
+        body: "With no budget, everything spent shows as over budget and the month has nothing to compare against. To remove a change, use Undo the last change instead.",
         confirmLabel: "Set it to ₱0.00",
         tone: "danger",
       });
@@ -1385,7 +1385,7 @@ function Planner({
                   )}
                   {s.spendingKeepFifth !== null && s.spendingKeepFifth > 0 && (
                     <Button size="sm" onClick={() => setSpending(s.spendingKeepFifth)}>
-                      Keep a fifth, {formatMoney(s.spendingKeepFifth)}
+                      Keep 20% of income, {formatMoney(s.spendingKeepFifth)}
                     </Button>
                   )}
                   {/* The usual month with what the Planner has for this one on top (27 October 2026). */}
@@ -1891,10 +1891,10 @@ function CategoryRow({
           */}
           {line.limit !== null && planned > 0 && (
             <span style={{ display: "block", color: line.spent + planned > line.limit ? "var(--over)" : "var(--ink-3)" }}>
-              {formatMoney(planned)} planned:{" "}
+              {formatMoney(planned)} more planned:{" "}
               {line.spent + planned > line.limit
-                ? `with it, ${formatMoney(line.spent + planned - line.limit)} over`
-                : `with it, ${formatMoney(line.limit - line.spent - planned)} left`}
+                ? `${formatMoney(line.spent + planned - line.limit)} over the limit once paid`
+                : `${formatMoney(line.limit - line.spent - planned)} left once paid`}
             </span>
           )}
         </span>
@@ -2100,14 +2100,14 @@ function IncomeSplitCard({
       {view.over > 0 ? (
         <>
           <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
-            Your budget is {formatMoney(view.over)} more than your money can keep: spent so far plus safe to spend is {formatMoney(view.most)}.
+            Your budget is {formatMoney(view.over)} more than your money can cover. Spent so far plus safe to spend is {formatMoney(view.most)}.
           </p>
           <Button
             variant="primary"
             onClick={() =>
               void ask(
                 { spending: view.most, billsSubs: view.billsBudget },
-                `Lowered to the money: ${formatMoney(view.most)} is what is spent plus what is safe to spend`,
+                `Lowered to match your money: ${formatMoney(view.most)} is what is spent plus what is safe to spend`,
                 `Lower ${monthName}'s spending budget to ${formatMoney(view.most)}?`,
               )
             }
@@ -2117,7 +2117,7 @@ function IncomeSplitCard({
         </>
       ) : (
         <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
-          Your budget fits your money{view.room > 0 ? `, with room to rise by ${formatMoney(view.room)}` : ""}.
+          Your budget fits your money{view.room > 0 ? `, with room to raise it by ${formatMoney(view.room)}` : ""}.
         </p>
       )}
       {view.cameIn > 0 && (
@@ -2128,7 +2128,7 @@ function IncomeSplitCard({
             {view.toSavings > 0 ? ` ${formatMoney(view.toSavings)} has gone into savings since then.` : ""}
           </p>
           {!splitting ? (
-            <Button onClick={() => setSplitting(true)}>Split this money into the budget</Button>
+            <Button onClick={() => setSplitting(true)}>Add this money to the budget</Button>
           ) : (
             <>
               <div className="fms-planner-field">

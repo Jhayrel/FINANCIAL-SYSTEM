@@ -268,7 +268,7 @@ export function spendNoteFor(
       ? `${label} ${money(cost)} takes ${name}'s bills and subscriptions ${money(past)} past their ${money(now.budget)} budget. A bill has to be paid; the budget may simply be set too low for it.`
       : need
         ? `${label} ${money(cost)} takes ${name}'s spending ${money(past)} past its ${money(now.budget)} budget. It is a need, so it is counted and that is all.${room.words ? ` If you want to make up for it, ${room.words} ${room.count === 1 ? "is this month's biggest want" : "are this month's biggest wants"}.` : ""}`
-        : `${label} ${money(cost)} takes ${name}'s spending ${money(past)} past its ${money(now.budget)} budget, with ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left. Your call; the Budget screen shows where the month went.`;
+        : `${label} ${money(cost)} takes ${name}'s spending ${money(past)} past its ${money(now.budget)} budget, with ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left. The Budget screen shows where the money went.`;
     // A kind past its limit in the same save is said in the same note (7 October 2026 limits audit).
     const extra = pastLimit.map((x) => `${x.kind} is ${money(x.now)}, past its ${money(x.limit)} limit too.`);
     const note = pick({

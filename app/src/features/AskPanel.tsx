@@ -4580,7 +4580,7 @@ export function AskPanel({
     const plans = settings.plans ?? [];
     if (plans.some((p) => p.status === "open" && p.amount === input.amount && namesIt(p.title, input.title))) return false;
     const plan = makePlan(input, asOf, "ai");
-    offerPlan(plan, `A new plan from the answer above. Nothing moves until it is paid.${plan.setAside ? " It is counted in safe to spend in its month, like a bill still to pay." : ""}`);
+    offerPlan(plan, `A new plan from the answer above. No money moves until you pay.${plan.setAside ? " It is counted in safe to spend in its month, like a bill still to pay." : ""}`);
     return true;
   };
 
@@ -5553,7 +5553,7 @@ export function AskPanel({
         if (planAsk.kind === "add") {
           const plan = makePlan(planAsk.input, asOf, "ai");
           card(
-            `A new plan${plan.due === NO_DATE ? " with no date yet" : ""}. Nothing moves until it is paid. ${countsSentence(plan, asOf)}${pastLooksPaid(plan)}`,
+            `A new plan${plan.due === NO_DATE ? " with no date yet" : ""}. No money moves until you pay. ${countsSentence(plan, asOf)}${pastLooksPaid(plan)}`,
             "Add to the planner",
             planRows(plan),
             { rows: [], save: { plan, action: "plan.create", summary: `Planned "${plan.title}", ${money(plan.amount)} ${byWhen(plan)}, from the chat.` } },
@@ -5705,7 +5705,7 @@ export function AskPanel({
         const lead =
           plan.due === NO_DATE
             ? `A new plan with no date yet, kept on the Planner. ${countsSentence(plan)}`
-            : `A new plan${kind === "day" ? "" : ` for ${whenOf(plan).replace(/^S/, "s")}`}. Nothing moves until it is paid. ${countsSentence(plan, asOf)}`;
+            : `A new plan${kind === "day" ? "" : ` for ${whenOf(plan).replace(/^S/, "s")}`}. No money moves until you pay. ${countsSentence(plan, asOf)}`;
         return plan.due < asOf ? `${lead}${pastLooksPaid(plan)}` : `${lead}${fitWords(plan)}${monthWords(plan)}`;
       };
       const youAsked = (): void => {
@@ -6824,7 +6824,7 @@ export function AskPanel({
         const give = Math.max(0, Math.min(ib.cameIn - keep, ib.room - keep));
         // Nothing can go to spending: said plainly, never "Put some of it into a part first".
         if (give === 0 && keep === 0 && !move.toBills) {
-          answer(`None of the ${formatMoney(ib.cameIn)} that came in can go to spending: the spending budget of ${formatMoney(ib.budget)} ${ib.over > 0 ? `already promises ${formatMoney(ib.over)} more than your money keeps. Say "lower my budget to my money" to fit it.` : "already uses all the money you hold."}`);
+          answer(`None of the ${formatMoney(ib.cameIn)} that came in can go to spending: the spending budget of ${formatMoney(ib.budget)} ${ib.over > 0 ? `is already ${formatMoney(ib.over)} more than your money can cover. Say "lower my budget to my money" to fit it.` : "already uses all the money you hold."}`);
           return;
         }
         const check = checkSplit(ib, move.toBills ? { toSpending: 0, toBills: Math.max(0, ib.cameIn - keep), keepAside: keep } : { toSpending: give, toBills: 0, keepAside: keep });
@@ -6833,7 +6833,7 @@ export function AskPanel({
           return;
         }
         budgetAsk = { kind: "tracks", year: y, month: m, spending: check.value.spending, billsSubs: check.value.billsSubs, scope: "month" };
-        budgetNote = [`${check.reason}.`, ...check.notes, give < ib.cameIn - keep && !move.toBills ? `Only ${formatMoney(give)} goes to spending: more would promise more than your money keeps.` : ""].filter(Boolean).join(" ");
+        budgetNote = [`${check.reason}.`, ...check.notes, give < ib.cameIn - keep && !move.toBills ? `Only ${formatMoney(give)} goes to spending: more would be more than your money can cover.` : ""].filter(Boolean).join(" ");
       }
     }
     // The income plan wins over a figure the budget reader took from the same sentence ("10k" is the income, not the budget).
@@ -9413,7 +9413,7 @@ export function AskPanel({
             {
               draft: local.draft,
               confidence: "high",
-              sourceRef: "read on this device",
+              sourceRef: "your message, read on this device",
               said: note,
               adjustments: local.because,
             },
@@ -9566,7 +9566,7 @@ export function AskPanel({
           {
             draft: offline.draft,
             confidence: "low",
-            sourceRef: "read on this device, without the model",
+            sourceRef: "your message, read on this device without the model",
             said: note,
             adjustments: [
               ...offline.because,
@@ -9888,7 +9888,7 @@ export function AskPanel({
           Ask
         </div>
         <p className="t-caption" style={{ margin: "2px 0 0", color: "var(--ink-3)" }}>
-          Reads your figures and your receipts. It proposes; you save.
+          Reads your figures and receipts. It suggests; you decide what to save.
         </p>
       </div>
 
@@ -10410,7 +10410,7 @@ export function AskPanel({
               )}
               {turn.from && (
                 <p className="t-micro" style={{ margin: "var(--space-1) 0 0", color: "var(--ink-3)" }}>
-                  {turn.from}
+                  {answeredBy(turn.from)}
                 </p>
               )}
             </div>
@@ -10855,9 +10855,16 @@ export function AskPanel({
  * "Pick the wallet the money lands in." (owner, 27 September 2026: "fix the
  * ui its ugly"). The line says it once, and the question above the box asks.
  */
+/** The line under an answer: "this device" said as a sentence; a model's name as it is. */
+function answeredBy(from: string): string {
+  if (from === "this device") return "Answered on this device";
+  const because = /^this device, because (.+)$/.exec(from);
+  return because ? `Answered on this device: ${because[1]?.replace(/\.$/, "")}.` : from;
+}
+
 const RESTATES_BLANK: ReadonlySet<string> = new Set([
-  "Pick the wallet the money lands in.",
-  "Pick the wallet the money leaves.",
+  "Pick the wallet the money goes to.",
+  "Pick the wallet the money comes from.",
   "Pick a date.",
 ]);
 

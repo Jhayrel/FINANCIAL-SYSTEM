@@ -290,7 +290,7 @@ export function Activity({
 
       <Card page
         title="What happened"
-        subtitle="Newest first. Nothing here can be edited or deleted, by you or by anything else."
+        subtitle="Newest first. Entries here cannot be edited or deleted."
         action={
           total > 0 ? (
             <span className="fms-actactions">
@@ -373,7 +373,7 @@ export function Activity({
           </div>
         ) : total === 0 ? (
           <EmptyState
-            message="Nothing recorded yet. Add, change or bin an entry and it shows here, with the time and whether you typed it or the assistant read it."
+            message="Nothing recorded yet. When you add, edit or delete an entry, it shows here with the time and whether you or the assistant made it."
             action={
               onAdd ? (
                 <Button variant="primary" onClick={onAdd}>

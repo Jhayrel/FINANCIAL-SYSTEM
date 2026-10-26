@@ -233,13 +233,13 @@ export function healthWords(health: MoneyHealth, months = WINDOW_MONTHS): string
   if (health.discretionary.value !== null) {
     out.push(
       `${pct(health.discretionary.value)} of the spending you have marked was discretionary${
-        health.untagged > 0 ? `, with ${health.untagged} kinds not marked yet` : ""
+        health.untagged > 0 ? `, with ${health.untagged} ${health.untagged === 1 ? "kind" : "kinds"} not marked yet` : ""
       }.`,
     );
   }
 
   if (health.straightOut !== null) {
-    out.push(`On average, ${pct(health.straightOut)} of each payment left again within two days.`);
+    out.push(`On average, ${pct(health.straightOut)} of the money you received was spent again within two days.`);
   }
 
   return out;

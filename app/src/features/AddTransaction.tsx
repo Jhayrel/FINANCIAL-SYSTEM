@@ -2327,7 +2327,7 @@ export function AddTransaction({
                     value={draft.fromWallet}
                     onChange={(v) => set("fromWallet", v)}
                     placeholder="Pick a wallet"
-                    ariaLabel="The wallet the money leaves"
+                    ariaLabel="The wallet the money comes from"
                     invalid={Boolean(errorFor("fromWallet"))}
                     {...walletSelect(ghost.fromWallet)}
                   />
@@ -2378,7 +2378,7 @@ export function AddTransaction({
                           value={draft.toWallet}
                           onChange={(v) => set("toWallet", v)}
                           placeholder="Pick a wallet"
-                          ariaLabel="The wallet the money lands in"
+                          ariaLabel="The wallet the money goes to"
                           invalid={Boolean(errorFor("toWallet"))}
                           {...walletSelect(ghost.toWallet, draft.fromWallet)}
                         />
@@ -2403,7 +2403,7 @@ export function AddTransaction({
                         value={draft.toWallet}
                         onChange={(v) => set("toWallet", v)}
                         placeholder="Pick a wallet"
-                        ariaLabel="The wallet the money lands in"
+                        ariaLabel="The wallet the money goes to"
                         invalid={Boolean(errorFor("toWallet"))}
                         {...walletSelect(ghost.toWallet)}
                       />

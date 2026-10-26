@@ -26,8 +26,8 @@ export const KIND_LABEL: Record<AccountKind, string> = {
 
 export const KIND_HINT: Record<AccountKind, string> = {
   spending: "Money you spend from day to day",
-  reserve: "Cash set aside and hidden from yourself",
-  savings: "Held somewhere longer-term",
+  reserve: "Cash set aside and kept out of daily spending",
+  savings: "Money kept for the longer term",
   goal: "A savings target inside a parent account",
 };
 

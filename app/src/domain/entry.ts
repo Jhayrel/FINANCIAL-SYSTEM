@@ -543,14 +543,14 @@ export function checkDraft(
   const keptBlank = (field: "fromWallet" | "toWallet"): boolean => !!stored && !stored[field].trim();
   if (debtSide) {
     if (debtSide === "out" && !draft.fromWallet && !keptBlank("fromWallet")) {
-      errors.push({ field: "fromWallet", message: "Pick the wallet the money leaves." });
+      errors.push({ field: "fromWallet", message: "Pick the wallet the money comes from." });
     }
     if (debtSide === "in" && !draft.toWallet && !keptBlank("toWallet")) {
-      errors.push({ field: "toWallet", message: "Pick the wallet the money lands in." });
+      errors.push({ field: "toWallet", message: "Pick the wallet the money goes to." });
     }
   } else if (needs(draft.flow, "fromWallet") && !draft.fromWallet) {
     if (keptBlank("fromWallet")) warnings.push({ field: "fromWallet", message: "Saved with no wallet the money left, as it was. Pick one if you know it." });
-    else errors.push({ field: "fromWallet", message: "Pick the wallet the money leaves." });
+    else errors.push({ field: "fromWallet", message: "Pick the wallet the money comes from." });
   }
   /**
    * A transfer that left your accounts has no destination, and that is the
@@ -558,7 +558,7 @@ export function checkDraft(
    */
   const moneySend = draft.flow === "Transfer" && draft.sentOut === true;
   if (needs(draft.flow, "toWallet") && !draft.toWallet && draft.flow !== "Debt" && !moneySend) {
-    errors.push({ field: "toWallet", message: "Pick the wallet the money lands in." });
+    errors.push({ field: "toWallet", message: "Pick the wallet the money goes to." });
   }
 
   if (draft.flow === "Transfer" && draft.fromWallet && draft.fromWallet === draft.toWallet) {

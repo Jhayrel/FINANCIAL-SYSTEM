@@ -119,7 +119,7 @@ export function SignIn({
             {auth.status === "wrong-account"
               ? `Signed in as ${auth.email || auth.uid}, which is not the account that owns this ledger.`
               : checking
-                ? "This is taking longer than usual. If you are signed in it opens by itself; if not, sign in."
+                ? "This is taking longer than usual. If you are signed in, it opens automatically. If not, sign in."
                 : "Sign in with the Google account that owns this ledger."}
           </p>
         )}

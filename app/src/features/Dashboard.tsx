@@ -278,7 +278,7 @@ export function Dashboard({
       <div className="fms-home-month">
         <Card
           title={`${name} ${year}`}
-          subtitle={`${brief.daysLeft} ${brief.daysLeft === 1 ? "day" : "days"} left, today included`}
+          subtitle={`${brief.daysLeft} ${brief.daysLeft === 1 ? "day" : "days"} left, including today`}
           action={
             <Button size="sm" variant={noBudget ? "primary" : "secondary"} onClick={() => onGo("budget")}>
               {noBudget ? "Set a budget" : "Open Budget"}
@@ -303,15 +303,15 @@ export function Dashboard({
                 {!safe
                   ? ""
                   : safe.overToday > 0
-                    ? `${formatMoney(safe.spentToday)} spent today, bills apart: ${formatMoney(safe.overToday)} past today's ${formatMoney(safe.todayShare)}`
+                    ? `${formatMoney(safe.spentToday)} spent today, not counting bills: ${formatMoney(safe.overToday)} over today's ${formatMoney(safe.todayShare)}`
                     : safe.spentToday > 0
                       ? `${formatMoney(safe.spentToday)} of today's ${formatMoney(safe.todayShare)} spent`
-                      : `Today's share of ${formatMoney(safe.safe)}, over ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"}`}
+                      : `${formatMoney(safe.safe)} split over ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"}, including today`}
               </span>
               {/* One short line on what carried over; the chat says the rest (26 October 2026: "too messy"). */}
               {safe && carried && safe.daysLeft > 1 && safe.overToday === 0 && (
                 <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                  {`Yesterday's unspent ${formatMoney(yesterday?.unspent ?? 0)} is spread over these days; up to ${formatMoney(carried.useToday)} if used today.`}
+                  {`Yesterday's unspent ${formatMoney(yesterday?.unspent ?? 0)} is split over these days. You can use up to ${formatMoney(carried.useToday)} of it today.`}
                 </span>
               )}
               <div className="fms-month-lines">
@@ -323,10 +323,10 @@ export function Dashboard({
                 />
                 {safe && safe.reservedDebt > 0 && <Line label="Debt payments due" value={-safe.reservedDebt} />}
                 {/* The Planner's plans counted this month (docs/16-PLANNER.md, P5). */}
-                {safe && safe.reservedPlans > 0 && <Line label="Planned, set aside" value={-safe.reservedPlans} />}
-                <Line label={`Safe until ${name} ends`} value={safe?.safe ?? 0} strong total />
+                {safe && safe.reservedPlans > 0 && <Line label="Set aside for plans" value={-safe.reservedPlans} />}
+                <Line label={`Safe to spend until ${name} ends`} value={safe?.safe ?? 0} strong total />
                 {safe && safe.daysLeft > 1 && (
-                  <Line label={`From tomorrow, a day (${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"})`} value={safe.perDayAfter} quiet />
+                  <Line label={`Per day from tomorrow (${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"})`} value={safe.perDayAfter} quiet />
                 )}
               </div>
             </div>
@@ -384,7 +384,7 @@ export function Dashboard({
 
       {/* ── Your money ─────────────────────────────────────────────────── */}
       <div className="fms-home-money">
-        <Card title="Your money" subtitle="Net worth, and where it is">
+        <Card title="Your money" subtitle="Net worth and where your money is">
           <Money value={v.worth.total} size="xl" />
           <div className="fms-month-lines">
             {/*
@@ -567,8 +567,8 @@ export function Dashboard({
             alerts.length === 0
               ? "Checked every time the ledger changes"
               : alerts.length > 3
-                ? `The worst 3 of ${alerts.length}. The bell at the top has every one.`
-                : "Worst first. The bell at the top has these too."
+                ? `The 3 most urgent of ${alerts.length}. See them all under the bell at the top.`
+                : "Most urgent first. These are also under the bell at the top."
           }
         >
           {alerts.length === 0 ? (
@@ -651,7 +651,7 @@ export function Dashboard({
       {
         <>
           <div className="fms-home-top">
-            <Card title="Top spending" subtitle={`${year} so far. Select one for its entries.`} action={<CountChip>{formatMoney(v.annual)}</CountChip>}>
+            <Card title="Top spending" subtitle={`${year} so far. Select one to see its entries.`} action={<CountChip>{formatMoney(v.annual)}</CountChip>}>
               <RankBars
                 rows={v.ranking}
                 total={v.annual}
@@ -662,11 +662,11 @@ export function Dashboard({
             </Card>
           </div>
           <div className="fms-home-income">
-            <Card title="Income quality" subtitle={`What came in during ${year}, and how much of it is really income`}>
+            <Card title="Income quality" subtitle={`Money received in ${year}, and how much of it is true income`}>
               <div className="fms-incomehead">
                 <Money value={v.income.cashIn} size="l" />
                 <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                  Cash in on the revenue line
+                  Recorded as revenue
                 </span>
               </div>
               {/*
@@ -692,10 +692,10 @@ export function Dashboard({
               <div className="fms-month-lines">
                 <Line label={<Keyed colour="var(--flow-revenue)">True income</Keyed>} value={v.income.trueIncome} tone="var(--flow-revenue-text)" strong />
                 {v.borrowedInRevenue > 0 && (
-                  <Line label={<Keyed colour="var(--flow-debt)">Borrowed, filed as revenue</Keyed>} value={v.borrowedInRevenue} tone="var(--flow-debt-text)" />
+                  <Line label={<Keyed colour="var(--flow-debt)">Borrowed, recorded as revenue</Keyed>} value={v.borrowedInRevenue} tone="var(--flow-debt-text)" />
                 )}
-                <Line label={<Keyed colour="var(--hairline-strong)">Opening balance, not income</Keyed>} value={v.income.openingBalance} quiet />
-                <Line label={<Keyed colour="var(--ink-3)">Self-moves, not income</Keyed>} value={v.income.selfMoves} quiet />
+                <Line label={<Keyed colour="var(--hairline-strong)">Opening balance</Keyed>} value={v.income.openingBalance} quiet />
+                <Line label={<Keyed colour="var(--ink-3)">Moved between your own accounts</Keyed>} value={v.income.selfMoves} quiet />
               </div>
               <div className="fms-month-lines fms-income-beside">
                 <Line
@@ -708,8 +708,8 @@ export function Dashboard({
               </div>
               <p className="t-micro" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-3)" }}>
                 {v.heldForOthers > 0
-                  ? "Neither is in cash in: borrowing is owed back, and money held for someone is theirs."
-                  : "Not in cash in: borrowing is owed back."}
+                  ? "Neither counts as revenue: borrowed money is paid back, and money held for someone belongs to them."
+                  : "Not counted as revenue: borrowed money is paid back."}
               </p>
             </Card>
           </div>

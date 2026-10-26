@@ -162,7 +162,7 @@ describe("safe to spend", () => {
     expect(safe?.safe).toBe(120000);
     expect(safe?.perDay).toBe(8000);
     expect(safe?.budgetPerDay).toBe(2000);
-    expect(brief.notes.some((note) => note.includes("₱20.00 a day keeps to it"))).toBe(true);
+    expect(brief.notes.some((note) => note.includes("spend ₱20.00 a day to stay within it"))).toBe(true);
   });
 
   it("says plainly when the wallets cannot cover what is due, and offers nothing a day", () => {

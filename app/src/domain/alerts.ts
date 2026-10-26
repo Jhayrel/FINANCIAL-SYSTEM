@@ -87,7 +87,7 @@ export interface Alert {
  */
 const PATTERN_TITLE: Record<Finding["kind"], string> = {
   velocity: "Money left quickly after it arrived",
-  migration: "Spending moved rather than stopped",
+  migration: "Spending shifted rather than dropped",
   repetition: "This has happened before",
   streak: "A long gap ended",
   uncategorised: "Rows with no category",
@@ -252,7 +252,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
         id: "budget-beyond-money",
         level: "warn",
         area: "budget",
-        title: `The spending budget promises ${money(beyond)} more than your money`,
+        title: `The spending budget is ${money(beyond)} more than your money can cover`,
         detail: `${money(sf.budgetLeft)} is left of it, but only ${money(Math.max(0, sf.safe))} is safe to spend. Lower it on the Budget screen, under Budget and your money.`,
         weight: 72,
       });
@@ -297,7 +297,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
         level: "info",
         area: "budget",
         title: `${money(since.amount)} came in since you set the ${monthName(month)} budget`,
-        detail: `On the Budget screen, Budget and your money puts it into spending, bills or savings, and checks that the budget never promises more than your money. Or say "add the money that came in to my budget" in the chat.`,
+        detail: `On the Budget screen, Budget and your money puts it into spending, bills or savings, and checks that the budget is never more than your money can cover. Or say "add the money that came in to my budget" in the chat.`,
         weight: 36,
       });
     }
@@ -514,8 +514,8 @@ export function financeAlerts(input: AlertInput): Alert[] {
         area: "wallet",
         title: balance === 0 ? `${account.name} is empty` : `${account.name} is running low`,
         detail: usedSince
-          ? `${money(balance)} left, under the ${money(lowBalanceThreshold)} you want kept, and money still left it on ${formatMedium(lastOut!)}. Top it up before the next payment from it.`
-          : `${money(balance)} left since ${formatMedium(wentUnder!)}. If you keep it low on purpose, this goes quiet by itself.`,
+          ? `${money(balance)} left, below your ${money(lowBalanceThreshold)} minimum, and it was last used on ${formatMedium(lastOut!)}. Top it up before the next payment from it.`
+          : `${money(balance)} left since ${formatMedium(wentUnder!)}. If you keep it low on purpose, this warning clears on its own.`,
         weight: usedSince ? 55 : 25,
         query: account.name,
       });
@@ -547,7 +547,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
       id: "bills-lapsed",
       level: "warn",
       area: "bills",
-      title: `${gone.length === 1 ? `${gone[0]!.item} looks` : `${gone.length} bills look`} stopped`,
+      title: `${gone.length === 1 ? `${gone[0]!.item} may have` : `${gone.length} bills may have`} stopped`,
       detail: `${gone.map((b) => `${b.item}, last paid ${formatMedium(b.lastPaid!)}`).join("; ")}. If you no longer pay ${gone.length === 1 ? "it" : "them"}, press Stop in Settings, under Categories, and ${gone.length === 1 ? "it is" : "they are"} no longer expected.`,
       weight: 50,
     });
@@ -1140,7 +1140,7 @@ export function planAlerts(plans: readonly Plan[], transactions: readonly Transa
         level: "over",
         area: "planner",
         title: `${p.title} was due ${whenOf(p).replace(/^Sometime in /, "in ")}`,
-        detail: `${money(v.left)} not paid yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} on. Pay it, move the date or skip it in the Planner.${short.get(p.id) ? ` The wallets are ${money(short.get(p.id) ?? 0)} short for it after the bills.` : ""}`,
+        detail: `${money(v.left)} not paid yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} late. Pay it, move the date, or skip it in the Planner.${short.get(p.id) ? ` The wallets are ${money(short.get(p.id) ?? 0)} short for it after the bills.` : ""}`,
         weight: 92,
       });
       continue;

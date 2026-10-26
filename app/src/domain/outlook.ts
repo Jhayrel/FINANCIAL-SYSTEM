@@ -192,7 +192,7 @@ export const steadyWords = (s: Steadiness): string => STEADY_WORDS[s];
 
 /** How the outlook was made, in one line, for under the table. */
 export function basisWords(o: MonthOutlook): string {
-  return `Each item's usual month over ${monthsRead(o.read)}, the middle value so one big month does not set it, one-offs left out, and the bills still running at their last amount.`;
+  return `Based on ${monthsRead(o.read)}: the middle value for each item, so one big month does not skew it, without one-offs, and with bills at their latest amount.`;
 }
 
 /** Months side by side that say the same, run by run, so three alike months are one line. */

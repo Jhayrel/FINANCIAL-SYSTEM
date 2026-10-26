@@ -1973,6 +1973,27 @@ style guide's Bin, Planner and sidebar lines say how each now works.
     names that kind.
   Tests: `limitAsk.test.ts`, `affordAsk.test.ts`, `chatParity.test.ts`.
 
+### 2026-10-27, last: simple, professional wording
+
+- Owner: "fix the wording in the system use professional but simple words".
+  Every screen was opened on a computer and a phone, the text read line by
+  line, and the odd phrasing rewritten: Dashboard, Insights, Budget,
+  Planner, Debt, Bin, Activity, Statements, Settings, the bell, the chat's
+  own answers and the AI's system prompt. New rule W5 in
+  `docs/07-WRITING-RULES.md` with examples.
+- Labels that changed meaning nothing, only words: "Safe until October
+  ends" is "Safe to spend until October ends", "From tomorrow, a day" is
+  "Per day from tomorrow", "Planned, set aside" is "Set aside for plans",
+  "How the money is doing" is "Financial health", "This is it" is "Link
+  this entry", "Keep a fifth" is "Keep 20% of income". True income and
+  Income quality keep their names, which the spec uses.
+- The budget warning that said the budget "promises" more than the money
+  now says it is "more than your money can cover", everywhere it is said
+  (Dashboard, bell, Budget, chat); `safeAsk.ts` matches the new words.
+- Under a chat answer, "this device" reads "Answered on this device".
+- Two real faults found on the way: "1 kinds not marked yet" (plural), and
+  "once the PHP 0.00 still to pay is set aside" in the offline summary.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

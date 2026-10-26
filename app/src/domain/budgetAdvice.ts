@@ -847,13 +847,13 @@ export function judgeWords(
     if (bills < 0) out.push(`The bills and subscriptions budget is ${money(-bills)} less than the ones still running cost in a usual month.`);
   }
   if (daysLeft > 0 && daysLeft >= daysInMonth(a.year, a.month)) {
-    // Not started: no "so far", no "today included".
+    // Not started: no "so far", no "including today".
     out.push(`That is ${money(Math.floor(Math.max(0, tracks.spending.budget) / daysLeft))} a day for the ${daysLeft} days of ${a.name}.`);
   } else if (daysLeft > 0) {
     const left = tracks.spending.remaining;
     out.push(
       left >= 0
-        ? `So far ${money(tracks.spending.spent)} of spending: ${money(left)} of the spending budget is left for the ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left, today included, ${money(Math.floor(left / daysLeft))} a day.`
+        ? `So far ${money(tracks.spending.spent)} of spending: ${money(left)} of the spending budget is left for the ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left, including today, ${money(Math.floor(left / daysLeft))} a day.`
         : `So far ${money(tracks.spending.spent)} of spending: already ${money(-left)} over the spending budget, with ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left.`,
     );
   } else {

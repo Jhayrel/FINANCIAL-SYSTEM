@@ -1042,7 +1042,7 @@ export function Insights({
 
         {shownTab === "where" && (
           <>
-            <p className="t-micro fms-ical-lead">Against {before}. Select one for its entries.</p>
+            <p className="t-micro fms-ical-lead">Compared with {before}. Select one to see its entries.</p>
             <RankBars
               rows={kinds.map((k) => ({
                 name: k.name,
@@ -1068,7 +1068,7 @@ export function Insights({
 
         {shownTab === "came" && (
           <>
-            <p className="t-micro fms-ical-lead">Starting balances left out. Select one for its entries.</p>
+            <p className="t-micro fms-ical-lead">Starting balances left out. Select one to see its entries.</p>
             <RankBars
               rows={income}
               flow="revenue"
@@ -1211,7 +1211,7 @@ export function Insights({
   // ── The cards under the frame ────────────────────────────────────────────
 
   const health = (
-    <Card title="How the money is doing" subtitle="The last three months, and what is owed against a year of income">
+    <Card title="Financial health" subtitle="The last three months, and debt compared with a year of income">
       {healthLines.length === 0 ? (
         <EmptyState message="Not enough recorded yet to say." />
       ) : (
@@ -1328,8 +1328,8 @@ export function Insights({
             title={`Spending through ${name}`}
             subtitle={
               burn.budget > 0
-                ? "Added up day by day, against a steady pace to the budget"
-                : "Added up day by day. Set a budget to see a pace beside it."
+                ? "Running total by day, against an even pace to the budget"
+                : "Running total by day. Set a budget to compare it with a pace."
             }
           >
             <AreaChart
@@ -1388,14 +1388,14 @@ export function Insights({
                 .map((d) => (
                   <Row key={`debt-${d.debtId}`} label={`${d.name}, ${whenWords(d.daysToDue).toLowerCase()}`} value={-d.amount} quiet />
                 ))}
-              <Row label="Safe until the month ends" value={safe.safe} strong />
-              {safe.daysLeft > 1 && <Row label="From tomorrow, a day" value={safe.perDayAfter} quiet />}
-              {safe.budgetLeft !== null && <Row label="Left of the spending budget (the plan)" value={safe.budgetLeft} quiet />}
+              <Row label="Safe to spend until the month ends" value={safe.safe} strong />
+              {safe.daysLeft > 1 && <Row label="Per day from tomorrow" value={safe.perDayAfter} quiet />}
+              {safe.budgetLeft !== null && <Row label="Left in the spending budget" value={safe.budgetLeft} quiet />}
             </div>
             {safe.habits.length > 0 && (
               <div style={{ marginTop: "var(--space-4)" }}>
                 <div className="t-label" style={{ color: "var(--ink-2)", marginBottom: "var(--space-2)" }}>
-                  Usually comes round before the month ends
+                  Usually spent before the month ends
                 </div>
                 <div className="fms-month-lines">
                   {safe.habits.map((h) => (

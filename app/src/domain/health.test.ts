@@ -128,8 +128,8 @@ describe("how the money is doing", () => {
     expect(words).toContain("would last about 7.5 months");
     expect(words).toContain("25% of a year of income");
     expect(words).toContain("40% of the spending you have marked was discretionary");
-    expect(words).toContain("1 kinds not marked yet");
-    expect(words).toContain("25% of each payment left again within two days");
+    expect(words).toContain("1 kind not marked yet");
+    expect(words).toContain("25% of the money you received was spent again within two days");
   });
 });
 

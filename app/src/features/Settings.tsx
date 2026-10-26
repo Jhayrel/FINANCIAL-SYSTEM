@@ -417,7 +417,7 @@ function OwnerSection({
   const err = (k: keyof OwnerDetails): string | undefined => (tried || clean[k] !== saved[k] ? problems[k] : undefined);
 
   return (
-    <Group title="You" hint="Who this ledger belongs to. Kept with your settings on every device, and in a backup.">
+    <Group title="You" hint="Your details. Saved with your settings on every device and in backups.">
       {signOut}
       {signedInAs && (
         <p className="t-caption fms-ownernote">
@@ -426,7 +426,7 @@ function OwnerSection({
       )}
       <div className="fms-ownerform">
         <div className="fms-ownerform-pair">
-          <Field label="Your name" htmlFor="owner-name" help="On statements and the activity PDF, as Issued to." error={err("name")}>
+          <Field label="Your name" htmlFor="owner-name" help="Shown as Issued to on statements and the activity PDF." error={err("name")}>
             <TextInput id="owner-name" value={draft.name} onChange={set("name")} maxLength={OWNER_LIMITS.name} autoComplete="name" placeholder="As it should read on a statement" />
           </Field>
           <Field label="What to call you" optional htmlFor="owner-call" help="What the assistant calls you.">
@@ -689,7 +689,7 @@ function SettingsRail({
           </div>
           {findings.length === 0 ? (
             <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-              Nothing here needs a look.
+              Nothing needs attention.
             </p>
           ) : (
             <ul className="fms-setrail-findings">
@@ -787,10 +787,9 @@ function DatabaseUse() {
         {bar(usage.writes, FREE_WRITES, "Writes on this device")}
       </div>
       <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-3)" }}>
-        Counted here as Firestore bills it: every document read from the server, and nothing from this device's own copy. Your
-        phone and this computer each count their own, so the project's total is the two together; the Firebase console shows it
-        under Firestore, Usage. Opening the app now reads only what changed since this device last read the ledger, and the whole
-        ledger once a week.
+        Counted the way Firestore bills it: documents read from the server, not from this device's copy. Each device counts
+        its own, so the project's total is the sum of all of them; the Firebase console shows it under Firestore, Usage.
+        Opening the app reads only what changed since this device last loaded the ledger, and the whole ledger once a week.
       </p>
     </Group>
   );
@@ -928,7 +927,7 @@ function AccountsSection({
       {inactive.length > 0 && (
         <Group
           title="Inactive"
-          hint="Hidden from pickers. Still counted in history and net worth."
+          hint="Hidden from lists when adding entries. Still counted in history and net worth."
           action={<CountChip>{inactive.length}</CountChip>}
         >
           <table className="fms-table">
@@ -1803,7 +1802,7 @@ function CategoriesSection({
       <StringList
         title="Bills"
         singular="Bill"
-        hint="Recurring. Predicted one month after the last payment. Stop one you no longer pay: its history stays."
+        hint="Recurring. Expected one month after the last payment. Stop any you no longer pay; their history stays."
         values={settings.bills}
         onChange={(bills) => patch({ bills })}
         rename={tools("bills")}
@@ -1821,7 +1820,7 @@ function CategoriesSection({
       <StringList
         title="Subscriptions"
         singular="Subscription"
-        hint="Same prediction, and the same budget line as bills. Stop one you cancelled: its history stays."
+        hint="Expected the same way as bills, and part of the same budget. Stop any you cancelled; their history stays."
         values={settings.subscriptions}
         onChange={(subscriptions) => patch({ subscriptions })}
         rename={tools("subscriptions")}
@@ -2008,7 +2007,7 @@ function UnlistedKinds({
   return (
     <Group
       title="Kinds on no list"
-      hint="Your entries use these, but none of your lists has them, so no total or filter that goes by your kinds finds those rows. Move each into one of yours, or put it on its list."
+      hint="Some entries use kinds that are not on any of your lists, so totals and filters by kind miss them. Move each to a kind on your lists, or add it to a list."
       action={<CountChip>{kinds.length}</CountChip>}
     >
       {dialog}
@@ -2283,7 +2282,7 @@ function StringList({
           {stopped.length > 0 && (
             <>
               <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-3)" }}>
-                Not expected any more. Their history stays, and paying one again, or Start again, brings it back.
+                No longer expected. Their history stays. Paying one again, or pressing Start again, brings it back.
               </p>
               {rows(stopped, true)}
             </>
@@ -2380,7 +2379,7 @@ function SpendingTypes({
   return (
     <Group
       title="Spending types"
-      hint={`The authoritative list for every ranking. Notes are capped at ${MAX_REMARK} characters.`}
+      hint={`The main list used for every ranking. Notes can be up to ${MAX_REMARK} characters.`}
       action={<CountChip>{shown.length}</CountChip>}
       wide
     >
@@ -2722,7 +2721,7 @@ function CreditLines({
                   options={FORMS.map((f) => DEBT_FORM_LABEL[f])}
                 />
               </Field>
-              <Field label="Account" help="New movements are filed against it. What is recorded keeps its account.">
+              <Field label="Account" help="New entries use this account. Existing entries keep theirs.">
                 <Select
                   value={c.wallet}
                   ariaLabel={`Account for ${c.name}`}
@@ -2837,7 +2836,7 @@ function CreditLines({
 
       {section("owing", "What is owed to me", "Money you lent out. It is still yours, so it counts towards your net worth.", owing)}
 
-      <Group title="Add one" hint="Two questions: which way, and what shape" wide>
+      <Group title="Add one" hint="Two questions: who owes whom, and what kind of debt" wide>
         <div className="fms-addrow" style={{ borderTop: 0, marginTop: 0, paddingTop: 0 }}>
           <span className="fms-grow">
             <TextInput
@@ -2936,7 +2935,7 @@ function AlertsSection({
     <>
       {dialog}
 
-      <Group title="Low balance" hint="Warns you before a spending wallet runs dry">
+      <Group title="Low balance" hint="Warns you when a spending wallet runs low">
         <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "flex-end", flexWrap: "wrap" }}>
           <span style={{ width: 160 }}>
             <Field label="Warn below" htmlFor="low-balance">
@@ -2944,8 +2943,7 @@ function AlertsSection({
             </Field>
           </span>
           <p className="t-caption" style={{ margin: "0 0 var(--space-3)", color: "var(--ink-3)", flex: "1 1 200px" }}>
-            ₱0 turns it off. Anything over {formatAmount(MAX_LOW_BALANCE)} is clamped, because it would
-            flag every wallet you own.
+            Set ₱0 to turn it off. The highest you can set is ₱{formatAmount(MAX_LOW_BALANCE)}.
           </p>
         </div>
 
@@ -2961,18 +2959,18 @@ function AlertsSection({
         budget or a limit you set (domain/spendNote.ts). Calm by design: said
         once, never about a need once the month is already over.
       */}
-      <Group title="Notes after spending" hint="A short, calm note when a purchase takes the month past its budget or a limit">
+      <Group title="Notes after spending" hint="A short note when a purchase takes the month over its budget or a limit">
         <div style={{ display: "flex", gap: "var(--space-3)", alignItems: "flex-start", justifyContent: "space-between" }}>
           <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)", flex: "1 1 auto" }}>
             {settings.budgetNotes === false
-              ? "Off. Saving says only that it saved."
-              : "On. Each note is said once a month; a need such as food, fuel or a bill is counted, never judged, and says nothing once the month is already over."}
+              ? "Off. Saving an entry shows only that it was saved."
+              : "On. Each note shows once a month. Needs such as food, fuel and bills are counted but never flagged, and no note shows once the month is already over."}
           </p>
           <Switch checked={settings.budgetNotes !== false} label="Notes after spending" onChange={(v) => patch({ budgetNotes: v })} />
         </div>
       </Group>
 
-      <Group title="Always on" hint="Checks you cannot switch off">
+      <Group title="Always on" hint="These checks always run">
         <dl className="fms-deflist">
           <dt className="t-body">Budget overrun</dt>
           <dd className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
@@ -3301,7 +3299,7 @@ function AiSection({
         </div>
       </Group>
 
-      <Group title="Where it is used" hint="Each surface is separate">
+      <Group title="Where it is used" hint="Turn each part on or off separately">
         <table className="fms-table">
           <tbody>
             {AI_FEATURES.map((f) => (
@@ -3342,7 +3340,7 @@ function AiSection({
         the version worth reading. The endpoint keeps its own ceiling
         regardless: a limit set here is a preference, never a control.
       */}
-      <Group title="Photos and files" hint="What one message may carry">
+      <Group title="Photos and files" hint="What one message can include">
         <div className="fms-addrow">
           <label className="t-caption" style={{ color: "var(--ink-2)" }}>
             Most files in one message
@@ -3384,7 +3382,7 @@ function AiSection({
         </p>
       </Group>
 
-      <Group title="Try it" hint="Runs a real call against your own figures" wide>
+      <Group title="Try it" hint="Sends a real test request using your figures" wide>
         <p className="t-body" style={{ margin: "0 0 var(--space-3)", color: "var(--ink-2)" }}>
           This sends the same summary every other screen sends, so whatever comes back tells you
           exactly what the AI can and cannot see.
@@ -3409,7 +3407,7 @@ function AiSection({
 
       <AiHistoryGroup uid={signedInUid} />
 
-      <Group title="API key" hint="Not stored here, on purpose">
+      <Group title="API key" hint="Not stored in the app, for security">
         <Alert status="info" title="The key goes in Cloudflare, not in this app">
           A browser app has to hand the key to the browser, which puts it in devtools and in every
           export. Set <code>GROQ_API_KEY</code> or <code>OPENROUTER_API_KEY</code> under Cloudflare
@@ -4040,10 +4038,10 @@ function DataSection({
         )}
       </Group>
 
-      <Group title="Deleting" hint="Nothing is ever removed outright">
+      <Group title="Deleting" hint="Nothing is deleted permanently">
         <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
-          A deleted transaction moves to the Bin and stays restorable. Balances exclude it from the
-          moment you delete it, so the numbers are right without the row being gone.
+          A deleted transaction moves to the Bin, where you can restore it. Balances leave it out as
+          soon as it is deleted.
         </p>
       </Group>
     </>
@@ -4222,10 +4220,9 @@ function Tidy({
 
   if (!report.changed) {
     return (
-      <Group title="Category lists" hint="Nothing to tidy" wide>
+      <Group title="Category lists" hint="Nothing to clean up" wide>
         <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
-          No blanks, no duplicates, and nothing that belongs somewhere else. The same checks run
-          every time the app loads, so this stays true on its own.
+          No blanks, duplicates or misplaced items. These checks run every time the app opens.
         </p>
       </Group>
     );
@@ -4393,8 +4390,8 @@ function AiHistoryGroup({ uid }: { uid: string | null }) {
 
       {!uid && messages !== null && (
         <p className="t-caption" style={{ marginTop: "var(--space-3)", color: "var(--ink-3)" }}>
-          You are not signed in, so this is only for this session. Signed in, it is written to your
-          own database, where it can be added to and never changed.
+          You are not signed in, so this is kept for this session only. When you are signed in, it is saved
+          to your database, where entries can be added but never changed.
         </p>
       )}
     </Group>

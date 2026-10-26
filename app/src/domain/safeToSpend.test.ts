@@ -111,7 +111,7 @@ describe("safe to spend is the money there, less what is still to pay", () => {
     expect(brief.safe?.budgetLeft).toBe(60000);
     expect(brief.safe?.budgetPerDay).toBe(6000);
     expect(brief.safe?.limitedBy).toBe("budget");
-    expect(brief.notes.some((note) => note.includes("₱60.00 a day keeps to it"))).toBe(true);
+    expect(brief.notes.some((note) => note.includes("spend ₱60.00 a day to stay within it"))).toBe(true);
   });
 
   it("offers nothing when what is due is more than the wallets hold", () => {
