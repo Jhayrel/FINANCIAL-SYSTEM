@@ -11,7 +11,7 @@
  */
 import { addDays, formatMedium, lastOfMonth, MONTH_NAMES } from "./dates";
 import { formatMoney, parseAmount, withoutYears, type Centavos } from "./money";
-import { kindFromHistory, type Plan, type PlanInput, type PlanView } from "./planner";
+import { kindFromHistory, planKinds, type Plan, type PlanInput, type PlanView } from "./planner";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export type PlannerAsk =
@@ -23,6 +23,8 @@ export type PlannerAsk =
   | { readonly kind: "remove"; readonly plan: Plan }
   | { readonly kind: "restore"; readonly plan: Plan }
   | { readonly kind: "pay"; readonly plan: Plan; readonly amount: Centavos | null; readonly wallet: string }
+  /** Anything else about it: its name, kind, wallet, need or want, safe to spend, goal or note. */
+  | { readonly kind: "edit"; readonly plan: Plan; readonly input: PlanInput; readonly changes: readonly { readonly label: string; readonly before: string; readonly after: string }[] }
   /** It names a plan that is not there. */
   | { readonly kind: "none"; readonly said: string };
 
@@ -64,7 +66,7 @@ export function dayIn(text: string, asOf: IsoDate): IsoDate | null {
 }
 
 /** A sum said: "9000", "9k", "PHP 9,000". */
-function sumIn(text: string): Centavos | null {
+export function sumIn(text: string): Centavos | null {
   const m = /(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*(k)?\b(?!\s*(?:st|nd|rd|th|days?|weeks?|months?|%))/i.exec(withoutYears(text).replace(new RegExp(String.raw`\b${MONTH_RE}\.?\s+\d{1,2}(?:st|nd|rd|th)?\b`, "gi"), " "));
   if (!m?.[1]) return null;
   const base = parseAmount(m[1]);
@@ -86,12 +88,92 @@ export function planNamed(text: string, plans: readonly Plan[], prefer: readonly
   return (preferred ?? scored[0])?.p ?? null;
 }
 
-const PLANNER = /\b(?:planner|plans?|planned)\b/i;
+/*
+ * The Planner or a plan by name: "the tuition plan", "my plans", "planned".
+ * Not "I plan to pay my registration on the 30th", which is a plan being
+ * made (planIntent.ts) and was answered "No plan by that name is on the
+ * Planner" (27 October 2026).
+ */
+const PLANNER = /\b(?:planner|plans|planned)\b|(?<!\b(?:i|we|they|you|to|also|still|really|will|i'?ll|we'?ll)\s)\bplan\b/i;
 const QUESTIONISH = /\?\s*$|^\s*(?:what|how|can|could|should|would|will|is|am|do|does)\b/i;
+
+const esc = (v: string): string => v.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * A change to a plan other than its date, amount or payment: "rename the
+ * trip plan to Baguio trip", "the trip plan is a want", "don't count the
+ * trip plan in safe to spend", "the trip plan is Travel", "change the
+ * tuition plan to gcash", "note on the trip plan: bring a jacket", "save for
+ * the phone plan in Phone fund". Every field the Planner's Edit form has
+ * (owner, 26 October 2026: "any type of edit").
+ */
+function editIn(
+  t: string,
+  plan: Plan,
+  reference: ReferenceLists,
+  goals: readonly { readonly id: string; readonly name: string }[],
+): { readonly input: PlanInput; readonly changes: { label: string; before: string; after: string }[] } | null {
+  const input: { -readonly [K in keyof PlanInput]: PlanInput[K] } = { title: plan.title, amount: plan.amount, due: plan.due, item: plan.item, wallet: plan.wallet, goalId: plan.goalId, need: plan.need, setAside: plan.setAside, notes: plan.notes };
+  const changes: { label: string; before: string; after: string }[] = [];
+  const counted = (b: boolean): string => (b ? "Counted in its month" : "Not counted");
+  const titleWords = new Set(plan.title.toLowerCase().split(/[^a-z0-9]+/));
+
+  const renamed = /\b(?:rename|re-name|call)\b[^.?!]*?\b(?:to|as)\s+["']?(.+?)["']?\s*[.!]?\s*$/i.exec(t);
+  if (renamed?.[1] && /\b(?:rename|re-name)\b|\bcall\s+(?:it|the\s+\w+(?:\s+\w+)?\s+plan)\b/i.test(t)) {
+    const title = renamed[1].trim().replace(/^./, (c) => c.toUpperCase()).slice(0, 80);
+    if (title && title !== plan.title) {
+      changes.push({ label: "Name", before: plan.title, after: title });
+      input.title = title;
+    }
+  }
+  const nw = /\b(?:is|as|it'?s|mark\w*(?:\s+it)?|make\s+it|change\s+it\s+to|just)\s+(?:a\s+|only\s+a\s+)?(want|need)\b/i.exec(t);
+  if (nw && (nw[1]?.toLowerCase() === "need") !== plan.need) {
+    input.need = nw[1]?.toLowerCase() === "need";
+    changes.push({ label: "Need or want", before: plan.need ? "A need" : "A want", after: input.need ? "A need" : "A want" });
+  }
+  const off = /\b(?:don'?t|do\s+not|stop|no\s+longer|never)\s+count(?:ing)?\b|\bnot\s+(?:be\s+)?counted\b|\b(?:take|leave)\b[^.?!]{0,30}\bout\s+of\s+safe\s+to\s+spend\b/i.test(t);
+  const on = !off && /\b(?:count|set\s+aside)\b[^.?!]{0,40}\b(?:in|from)\s+safe\s+to\s+spend\b|\bcount\s+it\b/i.test(t);
+  if ((off && plan.setAside) || (on && !plan.setAside && !plan.goalId)) {
+    input.setAside = on;
+    changes.push({ label: "Safe to spend", before: counted(plan.setAside), after: counted(on) });
+  }
+  const kind = planKinds(reference).options.find((k) => k.toLowerCase() !== plan.item.toLowerCase() && !titleWords.has(k.toLowerCase()) && new RegExp(`\\b${esc(k)}\\b`, "i").test(t));
+  if (kind && /\b(?:kind|is|as|under|file\w*|categor\w*|put\s+it\s+(?:in|under)|type)\b/i.test(t)) {
+    changes.push({ label: "Kind", before: plan.item || "Not said", after: kind });
+    input.item = kind;
+  }
+  const goal = goals.find((g) => new RegExp(`\\b${esc(g.name)}\\b`, "i").test(t));
+  if (goal && goal.id !== plan.goalId && /\b(?:link|save|saving|connect|goal|in|into|from)\b/i.test(t)) {
+    changes.push({ label: "Goal", before: plan.goalId ? "Another goal" : "Not saved in a goal", after: goal.name });
+    input.goalId = goal.id;
+    input.wallet = goal.name;
+    input.setAside = false;
+  } else {
+    const wallet = [...reference.wallets, ...reference.savings].find((w) => w.toLowerCase() !== plan.wallet.toLowerCase() && new RegExp(`\\b${esc(w)}\\b`, "i").test(t));
+    if (wallet && /\b(?:change|switch|use|set|take\s+it\s+from|come\s+from|pay\s+(?:it\s+)?with|from)\b/i.test(t) && !/\b(?:paid|i\s+pay|settle|already)\b/i.test(t)) {
+      changes.push({ label: "Pay from", before: plan.wallet || "Not decided", after: wallet });
+      input.wallet = wallet;
+    }
+  }
+  const note = /\bnotes?\b[^:]{0,40}:\s*(.+)$/i.exec(t) ?? /\b(?:add|put|write)\s+(?:a\s+)?note\b[^.?!]*?\b(?:saying|that)\s+(.+)$/i.exec(t);
+  if (note?.[1]) {
+    const notes = note[1].trim().slice(0, 300);
+    changes.push({ label: "Notes", before: plan.notes || "None", after: notes });
+    input.notes = notes;
+  }
+  return changes.length > 0 ? { input, changes } : null;
+}
 
 export function readPlannerAsk(
   text: string,
-  context: { readonly plans: readonly Plan[]; readonly reference: ReferenceLists; readonly transactions: readonly Transaction[]; readonly asOf: IsoDate },
+  context: {
+    readonly plans: readonly Plan[];
+    readonly reference: ReferenceLists;
+    readonly transactions: readonly Transaction[];
+    readonly asOf: IsoDate;
+    /** Goal accounts, for "save for the phone plan in Phone fund". */
+    readonly goals?: readonly { readonly id: string; readonly name: string }[] | undefined;
+  },
 ): PlannerAsk | null {
   const t = text.trim();
   if (!t || t.split(/\s+/).length > 30) return null;
@@ -123,7 +205,7 @@ export function readPlannerAsk(
       .replace(/\s+/g, " ")
       .trim();
     if (amount === null || !title) return null;
-    const kinds = [...new Set([...reference.spendingTypes.map((s) => s.name), ...reference.bills, ...reference.subscriptions])];
+    const kinds = planKinds(reference).options;
     const name = title.replace(/^./, (c) => c.toUpperCase());
     const recurring = [...reference.bills, ...reference.subscriptions].some((b) => b.toLowerCase() === (kindFromHistory(name, transactions, kinds) ?? "").toLowerCase());
     return {
@@ -134,6 +216,13 @@ export function readPlannerAsk(
 
   if (!PLANNER.test(t)) return null;
   const open = plans.filter((p) => p.status === "open");
+
+  // A field other than the date, the amount or a payment ("the trip plan is a want", "don't count the trip plan").
+  if (!/\b(?:put\s+back|restore|bring\s+back|reopen|paid|move|extend|postpone)\b/i.test(t)) {
+    const plan = planNamed(t, open, ["open"]);
+    const edit = plan ? editIn(t, plan, reference, context.goals ?? []) : null;
+    if (plan && edit) return { kind: "edit", plan, input: edit.input, changes: edit.changes };
+  }
 
   if (/\b(?:put\s+back|restore|bring\s+back|un-?skip|reopen)\b/i.test(t)) {
     const plan = planNamed(t, plans, ["removed", "skipped", "done"]);

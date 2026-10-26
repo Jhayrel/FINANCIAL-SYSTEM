@@ -159,8 +159,9 @@ import { numbersInWords, readReviewRowAsk, reviewRowAnswer } from "../domain/rev
 import { activityAnswer, asksUndoLast, readActivityAsk } from "../domain/activityAsk";
 import { activityStore } from "../data/activityStore";
 import type { PlanAction } from "./useProposalSink";
-import { kindFromHistory, makePlan, movePlan, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, type Plan } from "../domain/planner";
-import { plansWords, readPlannerAsk } from "../domain/plannerAsk";
+import { kindFromHistory, makePlan, movePlan, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, type Plan, type PlanInput } from "../domain/planner";
+import { plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
+import { askAmountWords, asksToPlan, costHint, dayFor, namesIt, nextMonthEnd, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
 import { planWorked } from "../domain/planRate";
@@ -283,7 +284,7 @@ import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksShortBudget, asksForT
 import { aheadMonthIn, asksWhatItNeeds, plannedSpendIn } from "../domain/plannedSpend";
 import { asksSettingsChange, asksWhatChartsExist, capabilitiesAnswer, chartsAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
 import { assessMonthFor, budgetForMonth, budgetForYear } from "../domain/budget";
-import { addDays, daysInMonth, daysLeftInMonth, formatMedium, MONTH_NAMES } from "../domain/dates";
+import { addDays, daysInMonth, daysLeftInMonth, formatMedium, lastOfMonth, MONTH_NAMES } from "../domain/dates";
 import { chatHistory, earlierSessions, keepInMind } from "../domain/memory";
 import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, pendingChoices, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
 import { discardedWords } from "../domain/discarded";
@@ -2420,6 +2421,18 @@ export function AskPanel({
 
   /** The last budget this device recommended, so "set it" takes both parts and "the separation" shows them. */
   const lastAdvice = useRef<{ advice: BudgetAdvice; text: string; asked: string } | null>(null);
+  /**
+   * A plan said with no amount ("I'm planning a trip next month"): asked
+   * for, and the next short reply with a figure ("5000", "around 5k by dec
+   * 20") makes its Planner card (planIntent.ts).
+   */
+  const pendingPlan = useRef<{ readonly input: PlanInput; readonly dueSaid: boolean; readonly at: number } | null>(null);
+  /**
+   * Planner cards to show under the answer being worked out, so "how much do
+   * I need next month? add it as a plan" is answered and then carded, in that
+   * order (27 October 2026).
+   */
+  const queuedPlans = useRef<({ readonly plan: Plan; readonly words: string } | { readonly ask: string })[]>([]);
   /** The last "money until my salary" question, for its follow-ups ("what about gas", "that's confusing"). */
   const bridgeRef = useRef<{ readonly ask: BridgeAsk; readonly asked: string } | null>(null);
   /** When Needs review was last asked about here, for "fix it" and "what to do" after it. */
@@ -4475,6 +4488,59 @@ export function AskPanel({
      * 2026). It is a decision; it becomes an entry when the money moves.
      */
     if (answer.source === "model" && !isPlan(question)) await offerFromAnswer(answerText);
+    // A plan for today is today's money: a Plan line under it is not offered.
+    if (answer.source === "model" && readPlanIntent(question, { reference, transactions, asOf })?.kind !== "today") offerPlanFromAnswer(answerText);
+  };
+
+  /** A new plan's card rows, the same on every route that offers one. */
+  const planRows = (plan: Plan): { label: string; value: string }[] => [
+    { label: "What", value: plan.title },
+    { label: "Amount", value: formatMoney(plan.amount) },
+    { label: "Pay by", value: formatMedium(plan.due) },
+    ...(plan.item ? [{ label: "Kind", value: plan.item }] : []),
+    ...(plan.wallet ? [{ label: "From", value: plan.wallet }] : []),
+    { label: "Safe to spend", value: plan.setAside ? "Counted in its month" : "Not counted" },
+  ];
+
+  /** A Planner card for a new plan (docs/16-PLANNER.md, P4.23). Nothing is saved until it is pressed. */
+  const offerPlan = (plan: Plan, words: string): void => {
+    say({
+      kind: "settle",
+      debtId: "",
+      words,
+      action: "Add to the planner",
+      state: "open",
+      planner: { rows: planRows(plan), save: { plan, action: "plan.create", summary: `Planned "${plan.title}", ${formatMoney(plan.amount)} by ${formatMedium(plan.due)}, from the chat.` } },
+    });
+    log(aiEvent("proposed", "budget", { entry: `Plan ${plan.title}, ${formatMoney(plan.amount)}`, text: words }));
+  };
+
+  /** The Planner cards waiting on an answer, shown now, in order. */
+  const flushPlans = (): void => {
+    const waiting = queuedPlans.current;
+    queuedPlans.current = [];
+    for (const q of waiting) {
+      if ("ask" in q) say({ kind: "assistant", text: q.ask, from: "this device", go: { screen: "planner", label: "the Planner" } });
+      else offerPlan(q.plan, q.words);
+    }
+  };
+
+  /**
+   * The "Plan:" line of a model's answer, as a Planner card: "Plan: Tuition,
+   * PHP 9,000.00, by 2026-11-15". Before it, the model could only tell the
+   * owner to type "plan tuition 9000 by nov 15" (27 October 2026).
+   */
+  const offerPlanFromAnswer = (text: string): boolean => {
+    if (!sink.canPlan || queuedPlans.current.length > 0) return false;
+    const line = planLineIn(text);
+    if (!line) return false;
+    const input = readPlanLine(line, { reference, transactions, asOf });
+    if (!input || input.amount === null) return false;
+    const plans = settings.plans ?? [];
+    if (plans.some((p) => p.status === "open" && p.amount === input.amount && namesIt(p.title, input.title))) return false;
+    const plan = makePlan(input, asOf, "ai");
+    offerPlan(plan, `A new plan from the answer above. Nothing moves until it is paid.${plan.setAside ? " It is counted in safe to spend in its month, like a bill still to pay." : ""}`);
+    return true;
   };
 
   /** The "Entry:" line of an answer, as a card. False when there is none, or it reads as nothing. */
@@ -4498,9 +4564,13 @@ export function AskPanel({
    */
   const send = async (typed?: string, as?: Intent): Promise<void> => {
     sending.current += 1;
+    queuedPlans.current = [];
     try {
       await sendNow(typed, as);
+      // A Planner card waiting on an answer that took a route of its own still comes.
+      flushPlans();
     } catch (error) {
+      queuedPlans.current = [];
       if (stopper.current) stopper.current = null;
       setBusy(false);
       setStage("");
@@ -5033,7 +5103,9 @@ export function AskPanel({
       }
     }
 
-    if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && (asksSafeToSpend(note) || asksShortBudget(ruled, asOf)) && !plainlyDone(note)) {
+    // "Don't count the trip plan in safe to spend" is a change to a plan, not the safe-to-spend question.
+    const editsAPlanCount = /\bplan\b/i.test(note) && /\b(?:count|counted|counting|set\s+aside)\b/i.test(note);
+    if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && (asksSafeToSpend(note) || asksShortBudget(ruled, asOf)) && !plainlyDone(note) && !editsAPlanCount) {
       setDraft("");
       say({ kind: "you", text: note });
       log(aiEvent("asked", "add", { text: note }));
@@ -5097,6 +5169,13 @@ export function AskPanel({
      * PHP 0.10 entry, and "undo the last change" an offer to bin the newest
      * entry.
      */
+    /**
+     * A plan for today said in passing ("I plan to buy food at the mall
+     * today", "my plan today is to buy groceries"): the thing, answered with
+     * today's money further down, as the afford question is. Never an entry
+     * or a Planner card (planIntent.ts, 27 October 2026).
+     */
+    let todayPlan: string | null = null;
     if (files.length === 0 && !as && pending === null && !/^\s*\/\//.test(note) && !isEssay(note)) {
       const answer = (text: string, where: AiWhere, go?: GoPlace): void => {
         setDraft("");
@@ -5334,7 +5413,7 @@ export function AskPanel({
        * change, pay, skip, remove and put back, each change a card to press.
        */
       const plans = settings.plans ?? [];
-      const planAsk = readPlannerAsk(lead, { plans, reference, transactions, asOf });
+      const planAsk = readPlannerAsk(lead, { plans, reference, transactions, asOf, goals: settings.accounts.filter((a) => a.kind === "goal" && !a.archived).map((a) => ({ id: a.id, name: a.name })) });
       if (planAsk) {
         const planner: GoPlace = { screen: "planner", label: "the Planner" };
         const views = plans.map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf }));
@@ -5406,6 +5485,19 @@ export function AskPanel({
           });
           return;
         }
+        if (planAsk.kind === "edit") {
+          const next = editPlan(p, planAsk.input, asOf);
+          const said = planAsk.changes.map((c) => `${c.label.toLowerCase()} "${c.before}" to "${c.after}"`).join(", ");
+          const WORD: Record<string, string> = { Name: "name", "Need or want": "need or want", "Safe to spend": "counting in safe to spend", Kind: "kind", "Pay from": "wallet", Goal: "goal", Notes: "note" };
+          const what = planAsk.changes.map((c) => WORD[c.label] ?? c.label.toLowerCase());
+          card(
+            `Edit "${p.title}": its ${what.length > 1 ? `${what.slice(0, -1).join(", ")} and ${what[what.length - 1]}` : what[0]}, as below. Nothing else about it changes.${planAsk.changes.some((c) => c.label === "Goal") ? " Its money is in the goal, so it is no longer counted in safe to spend." : ""}`,
+            "Save the change",
+            planAsk.changes.flatMap((c) => [{ label: `${c.label}, now`, value: c.before }, { label: "New", value: c.after }]),
+            { rows: [], save: { plan: next, action: "plan.update", summary: `Edited "${p.title}": ${said}, from the chat.`, before: p } },
+          );
+          return;
+        }
         if (planAsk.kind === "restore") {
           card(`Put "${p.title}" back on the Planner as open, ${money(p.amount)} by ${formatMedium(p.due)}.`, "Put it back", [], {
             rows: [],
@@ -5417,8 +5509,7 @@ export function AskPanel({
         const view = views.find((v) => v.plan.id === p.id);
         const left = view?.left ?? p.amount;
         const amount = planAsk.amount ?? left;
-        const kinds = [...new Set([...reference.spendingTypes.map((x) => x.name), ...reference.bills, ...reference.subscriptions])];
-        const item = p.item || kindFromHistory(p.title, transactions, kinds) || "";
+        const item = p.item || kindFromHistory(p.title, transactions, planKinds(reference).options) || "";
         const goalName = p.goalId ? settings.accounts.find((a) => a.id === p.goalId)?.name : undefined;
         const from = planAsk.wallet || goalName || walletToPayFrom({ wallet: p.wallet, item }, amount, transactions, reference.wallets);
         const draft: Draft = {
@@ -5447,6 +5538,181 @@ export function AskPanel({
         );
         if (!checked.ok) say({ kind: "assistant", text: `${checked.problems.join(" ")} Open the Planner to pay it with a wallet picked.`, from: "this device", go: planner });
         return;
+      }
+
+      /*
+       * Plans said in passing (planIntent.ts). The owner, 27 October 2026:
+       * "make sure it knows if I want to plan something like 'I am planning a
+       * trip or etc or tuition etc' ... But be careful what if I said I plan
+       * to buy good today at mall but what I meant is just a budget breakdown
+       * for today". A later one is a Planner card to press; one for today is
+       * today's money, answered below as the afford question is. And "add it
+       * as a plan", which made a Budget change card the same day, puts on the
+       * Planner what was just said.
+       */
+      const planCtx = { reference, transactions, asOf, debtNames: debts.flatMap((d) => [d.name, d.counterparty]) };
+      const onPlanner = (input: PlanInput): boolean => plans.some((p) => p.status === "open" && p.amount === input.amount && namesIt(p.title, input.title));
+      const nowBrief = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
+      const monthEnd = lastOfMonth(Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)));
+      // Due this month and counted: what safe to spend has for it, said on the card.
+      const fitWords = (plan: Plan): string => {
+        const free = nowBrief.safe?.free;
+        if (free === undefined || plan.due > monthEnd || !plan.setAside) return "";
+        const after = free - plan.amount;
+        return after >= 0
+          ? ` Safe to spend until ${formatMedium(monthEnd)} is ${formatMoney(free)}; with this set aside, ${formatMoney(after)} is left.`
+          : ` Safe to spend until ${formatMedium(monthEnd)} is ${formatMoney(Math.max(0, free))}, ${formatMoney(-after)} less than this.`;
+      };
+      /*
+       * A later month within a year: what that month needs with it, against
+       * what usually comes in, as "how much do I need" works it out
+       * (budgetAdvice, with the month's other plans). "I'm planning a trip
+       * next month, can I afford it?" then "4000" is answered on the card.
+       */
+      const monthWords = (plan: Plan): string => {
+        if (plan.due <= monthEnd || !plan.setAside) return "";
+        const y = Number(plan.due.slice(0, 4));
+        const m = Number(plan.due.slice(5, 7));
+        if (y * 12 + m - (Number(asOf.slice(0, 4)) * 12 + Number(asOf.slice(5, 7))) > 12) return "";
+        const others = plannedIn(plans.map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf })), y, m).filter((o) => !(o.amount === plan.amount && namesIt(o.name, plan.title)));
+        const nextUp = nextOf(asOf);
+        const readFrom = y * 12 + m > nextUp.year * 12 + nextUp.month ? { readBefore: { year: nextUp.year, month: nextUp.month } } : {};
+        const a = budgetAdvice({ transactions: reportRows, year: y, month: m, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes, planned: [...others, { name: plan.title, amount: plan.amount }], ...readFrom });
+        if (a.typicalIncome <= 0) return "";
+        const need = a.total + a.debtDue;
+        const gap = a.typicalIncome - need;
+        return ` With it, ${a.name} needs ${formatMoney(need)} (your usual month${others.length > 0 ? ", its other plans" : ""} and this), against the ${formatMoney(a.typicalIncome)} you usually receive: ${gap >= 0 ? `${formatMoney(gap)} to spare` : `${formatMoney(-gap)} short`}.`;
+      };
+      const planCardWords = (plan: Plan, dueSaid: boolean): string =>
+        `A new plan${dueSaid ? "" : `, set for ${formatMedium(plan.due)} as no day was said; say another day to move it`}. Nothing moves until it is paid.${plan.setAside ? " It is counted in safe to spend in its month, like a bill still to pay." : ""}${fitWords(plan)}${monthWords(plan)}`;
+      const youAsked = (): void => {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "budget", { text: note }));
+      };
+      const plannerPlace: GoPlace = { screen: "planner", label: "the Planner" };
+
+      // The amount for a plan said a moment ago with none: "5000", "around 5k by dec 20".
+      const waitingPlan = pendingPlan.current && Date.now() - pendingPlan.current.at < 20 * 60_000 ? pendingPlan.current : null;
+      if (waitingPlan) {
+        pendingPlan.current = null;
+        const amount = sumIn(lead);
+        if (amount !== null && lead.split(/\s+/).length <= 10 && !/\?/.test(lead) && !asksToPlan(lead) && sink.canPlan) {
+          const said = dayFor(lead, asOf);
+          const plan = makePlan({ ...waitingPlan.input, amount, due: said ?? waitingPlan.input.due }, asOf, "ai");
+          youAsked();
+          offerPlan(plan, planCardWords(plan, said !== null || waitingPlan.dueSaid));
+          return;
+        }
+      }
+
+      /** What a message says to plan: the plans it reads as, else each sum it says is coming. */
+      const plansIn = (text: string): PlanInput[] => {
+        const intent = readPlanIntent(text, planCtx);
+        if (intent?.kind === "later") return intent.plans.filter((p) => p.amount !== null);
+        const ahead = aheadMonthIn(text, asOf);
+        const due = dayFor(text, asOf) ?? (ahead ? lastOfMonth(ahead.year, ahead.month) : nextMonthEnd(asOf));
+        return plannedSpendIn(text).map((x) => planInputFor(x.name, x.amount, due, planCtx, text));
+      };
+
+      if (asksToPlan(lead)) {
+        // This message first, then the last few things said, then the budget just worked out.
+        let inputs = plansIn(lead);
+        if (inputs.length === 0) {
+          for (const said of [...turns].reverse().filter((t): t is Said => t.kind === "you").slice(0, 6).map((t) => t.text)) {
+            inputs = plansIn(said);
+            if (inputs.length > 0) break;
+          }
+        }
+        const advised = lastAdvice.current;
+        if (inputs.length === 0 && advised?.advice.planned && advised.advice.planned.length > 0) {
+          inputs = advised.advice.planned.map((x) => planInputFor(x.name, x.amount, lastOfMonth(advised.advice.year, advised.advice.month), planCtx, advised.asked));
+        }
+        // "Add the tuition as a plan": the one named, when several were said.
+        const named = inputs.filter((i) => namesIt(lead, i.title));
+        if (named.length > 0) inputs = named;
+        const fresh = inputs.filter((i) => !onPlanner(i));
+        // The rest of the message, with the asking-to-plan part taken out: is there a question to answer first?
+        const rest = lead.replace(/[^.?!]*\b(?:add|put|save|make|plan|include|schedule|ilagay)\b[^.?!]*\b(?:plan|planner|it|that|this)\b[^.?!]*[.?!]?\s*$/i, " ").trim();
+        const questionToo = rest.split(/\s+/).length >= 4 && (asksWhatItNeeds(rest) || asksBudgetAdvice(rest) || isAffordQuestion(rest) || /\?/.test(rest));
+        if (!sink.canPlan) {
+          youAsked();
+          say({ kind: "assistant", text: "The Planner cannot be changed from this view. Open it to add the plan.", from: "this device", go: plannerPlace });
+          return;
+        }
+        // "Add the tuition as a plan" with nothing said before it: the amount is asked, with what it cost before.
+        const namedThing = inputs.length === 0 ? thingToPlan(lead) : "";
+        if (inputs.length === 0 && namedThing) {
+          const input = planInputFor(namedThing, null, dayFor(lead, asOf) ?? nextMonthEnd(asOf), planCtx, lead);
+          pendingPlan.current = { input, dueSaid: dayFor(lead, asOf) !== null, at: Date.now() };
+          youAsked();
+          say({ kind: "assistant", text: askAmountWords(input.title, costHint(namedThing, input.item, planCtx), input.due, dayFor(lead, asOf) !== null), from: "this device", go: plannerPlace });
+          return;
+        }
+        if (inputs.length === 0) {
+          const pendingThing = pendingPlan.current;
+          youAsked();
+          say({
+            kind: "assistant",
+            text: pendingThing
+              ? askAmountWords(pendingThing.input.title, "", pendingThing.input.due, pendingThing.dueSaid)
+              : 'What should go on the Planner, how much, and by when? Like "tuition, 9000, by November 15". It comes back as a card to press.',
+            from: "this device",
+            go: plannerPlace,
+          });
+          return;
+        }
+        if (fresh.length === 0) {
+          youAsked();
+          const p = plans.find((x) => x.status === "open" && inputs.some((i) => i.amount === x.amount && namesIt(x.title, i.title)));
+          say({ kind: "assistant", text: p ? `"${p.title}" is on the Planner already: ${formatMoney(p.amount)} by ${formatMedium(p.due)}.` : "That is on the Planner already.", from: "this device", go: plannerPlace });
+          return;
+        }
+        const made = fresh.map((i) => makePlan(i, asOf, "ai"));
+        const dueSaid = dayFor(lead, asOf) !== null || aheadMonthIn(lead, asOf) !== null;
+        if (questionToo) {
+          // Answered first, by whichever route the question takes; the cards come after it.
+          queuedPlans.current = made.map((plan) => ({ plan, words: planCardWords(plan, dueSaid) }));
+        } else {
+          youAsked();
+          for (const plan of made) offerPlan(plan, planCardWords(plan, dueSaid));
+          return;
+        }
+      } else {
+        const intent = readPlanIntent(lead, planCtx);
+        if (intent?.kind === "today") todayPlan = intent.thing || "it";
+        else if (intent?.kind === "later" && sink.canPlan) {
+          const fresh = intent.plans.filter((p) => p.amount === null || !onPlanner(p));
+          if (fresh.length === 0) {
+            if (!intent.asked) {
+              youAsked();
+              const p = plans.find((x) => x.status === "open" && intent.plans.some((i) => i.amount === x.amount && namesIt(x.title, i.title)));
+              say({ kind: "assistant", text: p ? `"${p.title}" is on the Planner already: ${formatMoney(p.amount)} by ${formatMedium(p.due)}. Say "move the ${p.title.toLowerCase()} plan to" a day, or open the Planner to change it.` : "That is on the Planner already.", from: "this device", go: plannerPlace });
+              return;
+            }
+          } else if (!intent.amountSaid) {
+            const first = fresh[0]!;
+            pendingPlan.current = { input: first, dueSaid: intent.dueSaid, at: Date.now() };
+            /*
+             * Asked too ("I'm planning a trip next month, can I afford it?"):
+             * with no amount there is nothing to judge, and today's wallets
+             * are not next month's money, so the amount comes first.
+             */
+            const ask = `${intent.asked ? `To say whether ${first.due > monthEnd ? `${MONTH_NAMES[Number(first.due.slice(5, 7)) - 1] ?? "that month"} can cover it` : "the money covers it"}, I need the amount first. ` : ""}${askAmountWords(intent.title, intent.hint, first.due, intent.dueSaid)}`;
+            youAsked();
+            say({ kind: "assistant", text: ask, from: "this device", go: plannerPlace });
+            log(aiEvent("answered", "budget", { text: ask, model: "this device" }));
+            return;
+          } else {
+            const made = fresh.map((i) => makePlan(i, asOf, "ai"));
+            if (intent.asked) queuedPlans.current = made.map((plan) => ({ plan, words: planCardWords(plan, intent.dueSaid) }));
+            else {
+              youAsked();
+              for (const plan of made) offerPlan(plan, planCardWords(plan, intent.dueSaid));
+              return;
+            }
+          }
+        }
       }
     }
 
@@ -5779,7 +6045,7 @@ export function AskPanel({
      * still answered by one: only the sorting is skipped.
      */
     // `waiting`, above: a question, a card or a debt card still open.
-    const sortedAlready = !waiting && (isPlan(note) || plainlyDone(note));
+    const sortedAlready = !waiting && (isPlan(note) || plainlyDone(note) || todayPlan !== null);
     // A "//" line is a note to the developer: nothing to route, and nothing to wait on a model for.
     if (files.length === 0 && !as && !ai.disabled && !/^\s*\/\//.test(note) && !sortedAlready) {
       setBusy(true);
@@ -5890,6 +6156,7 @@ export function AskPanel({
       setBusy(true);
       try {
         await askQuestion(note, false, { text: worked, fallback }, drawn);
+        flushPlans();
         offerPicture();
       } finally {
         setBusy(false);
@@ -5981,7 +6248,7 @@ export function AskPanel({
         !essay && comingSaid.length > 0 && ahead && (isQuestion(ruled) || /\b(?:can|could|will|would|should|is|am|do)\s+(?:i|it|that|my)\b/i.test(ruled)) && !/^\s*(?:please\s+|pls\s+)?(?:set|make|change|put|raise|lower|use)\b/i.test(ruled);
       const keepsBudget =
         planQuestion && /\b(?:keep|stay\s+(?:within|in|under|on)|fit|within|over|break|blow|still\s+(?:in|on|within))\b[^?.!]{0,30}\bbudget\b|\bbudget\b[^?.!]{0,25}\b(?:enough|hold|still|ok(?:ay)?|cover)\b/i.test(ruled);
-      const affordish = !essay && !planQuestion && !asksWhatItNeeds(ruled) && (decides(lead) || again !== null);
+      const affordish = (!essay && !planQuestion && !asksWhatItNeeds(ruled) && (decides(lead) || again !== null)) || todayPlan !== null;
 
       const advised = lastAdvice.current;
       const stillHere = advised !== null && turns.slice(-12).some((t) => t.kind === "you" && t.text === advised.asked);
@@ -6018,13 +6285,17 @@ export function AskPanel({
         if (spent || earned || owes) drawnNext.current = { question: ruled, at: Date.now() };
 
         if (affordish) {
-          const asked = readAffordAsk(again ? `${again} ${lead}` : lead, transactions, reference, asOf);
+          const read = readAffordAsk(again ? `${again} ${lead}` : lead, transactions, reference, asOf);
+          // A plan for today is a breakdown, not a yes or no: "Food usually costs you", the day's figures after it.
+          const asked = todayPlan !== null ? { ...read, yesNo: false, when: read.when ?? ("today" as const) } : read;
           // What "see it in trend" next is about: the things named, not all spending (26 October 2026).
           drawnNext.current = { question: asked.items.length > 0 ? `${asked.items.join(" and ")} spending` : ruled, at: Date.now() };
           const reply = affordAnswer(asked, { transactions: reportRows, reference, budgets, debts, asOf });
           await answerWithModel(
             [
-              `Whether they can afford it, as the app reads it: what the spending wallets hold less the bills and debt payments still due, what the thing usually costs going by their own entries, and the budget said apart.${again ? ` This message follows up on "${again}": it is the same decision.` : ""} Use it for the call and for what it would realistically cost; if they ask to go by the budget, give the budget's side too, and then the overall call. Answer what the message actually asks.`,
+              todayPlan !== null
+                ? `They are planning to spend today (${todayPlan}) and want today's money laid out, not an entry and not a plan for the Planner: nothing has moved. Give today's breakdown from these figures: what it usually costs them going by their own entries, whether it fits today's safe to spend, what the month's money can cover and what that leaves a day from tomorrow, and the budget said apart. Never write an Entry line or a Plan line under it.`
+                : `Whether they can afford it, as the app reads it: what the spending wallets hold less the bills and debt payments still due, what the thing usually costs going by their own entries, and the budget said apart.${again ? ` This message follows up on "${again}": it is the same decision.` : ""} Use it for the call and for what it would realistically cost; if they ask to go by the budget, give the budget's side too, and then the overall call. Answer what the message actually asks.`,
               reply,
             ].join("\n"),
             reply,
@@ -6038,7 +6309,8 @@ export function AskPanel({
            * my budget this month". The answer recommends it and the card to
            * apply it comes with the answer, one step rather than "add it".
            */
-          const setsIt = !splitAgain && SETS_BUDGET.test(ruled) && !ASKS_ONLY.test(ruled);
+          // "Add it as a plan" is the Planner, never a budget to set (27 October 2026: it made a Budget change card).
+          const setsIt = !splitAgain && SETS_BUDGET.test(ruled) && !ASKS_ONLY.test(ruled) && !asksToPlan(ruled);
           // The month beside the word budget first: a long message names others.
           const named = adviceMonthIn(ruled, asOf) ?? (planQuestion ? aheadMonthIn(ruled, asOf) : null) ?? (essay ? null : (() => {
             const span = spanIn(lead, asOf);
@@ -6187,6 +6459,9 @@ export function AskPanel({
                 ? "They asked how much the month needs: open with that figure and keep every step of the working as it is laid out (each part, the total, the money for it, short or to spare, what carries over, the savings), then the budget held to the money. Never skip a step or combine figures yourself."
                 : "",
               setsIt ? "A card with these figures is shown under your answer for them to apply: say so in one short sentence, and never say it is set or applied." : "",
+              queuedPlans.current.some((q) => "plan" in q)
+                ? `A Planner card for ${queuedPlans.current.flatMap((q) => ("plan" in q ? [`${q.plan.title} ${formatMoney(q.plan.amount)}`] : [])).join(" and ")} is shown under your answer for them to press: say so in one short sentence at the end. Never tell them to type a command, and never write a Plan line.`
+                : "",
               splitAgain
                 ? "They are asking for the parts of the budget recommended earlier: give the split, grouped as it is."
                 : `If they are asking for a budget, open with "I recommend a budget of" and its total and month, give the split, and explain why in your own words, naming the months it read and what was left out. If the message asks something else, answer that and use this only where it helps.`,

@@ -90,6 +90,71 @@ export const newPlanId = (): string => {
   return `plan-${Date.now().toString(36)}-${made.toString(36)}`;
 };
 
+/** A picker's choices with the heading each sits under, for `Select`'s `groups`. */
+export interface Choices {
+  readonly options: readonly string[];
+  readonly groups: Readonly<Record<string, string>>;
+}
+
+function grouped(lists: readonly (readonly [string, readonly string[]])[], keep: string, keepHeading: string): Choices {
+  const seen = new Set<string>();
+  const options: string[] = [];
+  const groups: Record<string, string> = {};
+  for (const [heading, names] of lists) {
+    for (const raw of names) {
+      const name = raw.trim();
+      if (!name || seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      options.push(name);
+      groups[name] = heading;
+    }
+  }
+  const kept = keep.trim();
+  if (kept && !seen.has(kept.toLowerCase())) {
+    options.push(kept);
+    groups[kept] = keepHeading;
+  }
+  return { options, groups };
+}
+
+/**
+ * What a plan can be filed under, as the Add form files spending: the kinds
+ * of spending, then the bills, then the subscriptions, each under its own
+ * heading. Stopped bills and subscriptions are left out, and so is Unknown,
+ * which is a gap in the ledger and nothing anyone plans to buy. A kind the
+ * plan already has stays, at the end, so editing never loses it.
+ *
+ * The owner, 27 October 2026, on the Planner's Kind list: "Fix the kind, why
+ * its a mixed". It was one list, the spending kinds running straight into
+ * Globe at Home Wifi, Spotify and Netflix (stopped), with nothing to say
+ * which was which.
+ */
+export function planKinds(reference: Pick<ReferenceLists, "spendingTypes" | "bills" | "subscriptions" | "stopped">, keep = ""): Choices {
+  const stopped = new Set((reference.stopped ?? []).map((x) => x.name.trim().toLowerCase()));
+  const live = (n: string): boolean => !stopped.has(n.trim().toLowerCase());
+  return grouped(
+    [
+      ["Spending", reference.spendingTypes.map((x) => x.name).filter((n) => n.trim().toLowerCase() !== "unknown")],
+      ["Bills", reference.bills.filter(live)],
+      ["Subscriptions", reference.subscriptions.filter(live)],
+    ],
+    keep,
+    "This plan's",
+  );
+}
+
+/** Where a plan is paid from: the spending wallets, then savings; the one the plan has stays, under Goal when it is its goal. */
+export function planWallets(reference: Pick<ReferenceLists, "wallets" | "savings">, keep = "", keepHeading = "Goal"): Choices {
+  return grouped(
+    [
+      ["Spending wallets", reference.wallets],
+      ["Savings", reference.savings],
+    ],
+    keep,
+    keepHeading,
+  );
+}
+
 /** A bill or subscription is set aside already every month (P4.16). */
 export function isRecurringKind(item: string, reference: Pick<ReferenceLists, "bills" | "subscriptions">): boolean {
   const name = item.trim().toLowerCase();
@@ -401,8 +466,12 @@ export function coverage(views: readonly PlanView[], free: Centavos): Map<string
 /**
  * Entries that may be a plan's payment, best first: not linked to any plan,
  * spending, dated from a week before it was planned to two months after it
- * was due, named alike (its kind, or a word of its title) and close in amount
- * (P4.7, P4.9).
+ * was due (P4.7, P4.9). One that only shares the plan's kind must be close
+ * to what is left of it (within a fifth) and dated after the plan was made;
+ * one that names the plan (a word of its title) may be a part of it, a
+ * quarter or more. A PHP 300.00 club fee
+ * filed as School was offered as the PHP 9,000.00 tuition (owner's screen,
+ * 27 October 2026).
  */
 export function likelyPayments(plan: Plan, transactions: readonly Transaction[], allPlans: readonly Plan[]): Transaction[] {
   const linked = new Set(allPlans.flatMap((p) => p.entryIds));
@@ -412,16 +481,19 @@ export function likelyPayments(plan: Plan, transactions: readonly Transaction[],
     .filter((w) => w.length >= 3);
   const from = addDays(plan.createdOn < plan.due ? plan.createdOn : plan.due, -7);
   const to = addDays(plan.due, 60);
-  const left = plan.amount;
+  const left = Math.max(0, plan.amount - paidSoFar(plan, transactions).amount) || plan.amount;
   const scored = transactions
     .filter((t) => t.type === "Spending" && !linked.has(t.id) && t.date >= from && t.date <= to)
     .map((t) => {
       const text = `${t.item} ${t.description}`.toLowerCase();
-      const named = (plan.item && t.item.trim().toLowerCase() === plan.item.trim().toLowerCase() ? 2 : 0) + (words.some((w) => text.includes(w)) ? 2 : 0);
-      const close = t.total === left ? 3 : Math.abs(t.total - left) <= left * 0.2 ? 2 : t.total < left ? 1 : 0;
-      return { t, score: named + close, named };
+      const sameKind = Boolean(plan.item) && t.item.trim().toLowerCase() === plan.item.trim().toLowerCase();
+      const saysIt = words.some((w) => text.includes(w));
+      const close = t.total === left ? 3 : Math.abs(t.total - left) <= left * 0.2 ? 2 : t.total < left && t.total * 4 >= left ? 1 : 0;
+      // Only the kind in common: it must also come after the plan was made.
+      const fits = saysIt ? close >= 1 : sameKind && close >= 2 && t.date >= plan.createdOn;
+      return { t, score: (sameKind ? 2 : 0) + (saysIt ? 2 : 0) + close, fits };
     })
-    .filter((s) => s.named > 0 && s.score >= 3)
+    .filter((s) => s.fits)
     .sort((a, b) => b.score - a.score || Math.abs(daysBetween(plan.due, a.t.date)) - Math.abs(daysBetween(plan.due, b.t.date)));
   return scored.slice(0, 6).map((s) => s.t);
 }

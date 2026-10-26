@@ -228,6 +228,22 @@ describe("from the chat (P4.23)", () => {
     const removed = { ...c, plans: [removePlan(plans[0]!, asOf)] };
     expect(readPlannerAsk("put back the tuition plan", removed)).toMatchObject({ kind: "restore" });
   });
+  it("edits every other field: name, need or want, safe to spend, kind, wallet, goal, note", () => {
+    const edit = (text: string) => {
+      const r = readPlannerAsk(text, { ...c, goals: [{ id: "g1", name: "Phone fund" }] });
+      return r?.kind === "edit" ? { changes: r.changes.map((x) => `${x.label}: ${x.after}`), input: r.input } : r;
+    };
+    expect(edit("rename the tuition plan to Second sem tuition")).toMatchObject({ changes: ["Name: Second sem tuition"] });
+    expect(edit("the tuition plan is a want")).toMatchObject({ changes: ["Need or want: A want"] });
+    expect(edit("don't count the tuition plan in safe to spend")).toMatchObject({ changes: ["Safe to spend: Not counted"] });
+    expect(edit("the tuition plan is Food")).toMatchObject({ changes: ["Kind: Food"] });
+    expect(edit("change the tuition plan to cash")).toMatchObject({ changes: ["Pay from: Cash"] });
+    expect(edit("save for the tuition plan in Phone fund")).toMatchObject({ changes: ["Goal: Phone fund"], input: { goalId: "g1", wallet: "Phone fund", setAside: false } });
+    expect(edit("note on the tuition plan: pay at the cashier")).toMatchObject({ changes: ["Notes: pay at the cashier"] });
+    // Paying and moving stay what they are.
+    expect(readPlannerAsk("I paid the tuition plan from cash", c)).toMatchObject({ kind: "pay", wallet: "Cash" });
+    expect(readPlannerAsk("move the tuition plan to nov 30", c)).toMatchObject({ kind: "move" });
+  });
   it("leaves plans to spend, said as questions, to the money readers", () => {
     expect(readPlannerAsk("I plan to spend 1000 cash on dinner tonight", c)).toBeNull();
     expect(readPlannerAsk("I plan to spend 3000 on a trip next month, what budget should I set?", c)).toBeNull();

@@ -143,3 +143,80 @@ owner's own choice on each plan. With no plans, every figure is unchanged.
 - **Activity**: every plan added, edited, moved, paid, skipped, removed or
   restored.
 - **Backup**: whole.
+
+## P7. From the chat: today or later (owner, 27 October 2026)
+
+"Make sure it knows if I want to plan something like 'I am planning a trip
+or etc or tuition etc' ... But be careful what if I said I plan to buy good
+today at mall but what I meant is just a budget breakdown for today."
+`domain/planIntent.ts`, in this order:
+
+1. **Money that moved is an entry.** "I paid", "I bought": the entry readers.
+   Income, saving towards a goal, a debt or On behalf line, a bill or
+   subscription already tracked, and setting a budget are their own readers'.
+2. **A day said decides it.** Today is today's money. Any later day (a date,
+   tomorrow, a weekday, next month, a month by name, next year, "in 2027",
+   Christmas) is the Planner. A day already gone is neither.
+3. **No day said.** "Tonight", "later", "for lunch", the mall, the market or
+   eating out are today. So is a thing the ledger shows bought eight times
+   or more in sixty days, counted by its kind when the words name the kind
+   ("food" is Food) and by its own words otherwise (a laptop filed under
+   Online Buy is not everyday because Online Buy is). Anything else is the
+   Planner.
+
+**Today** is answered as "can I afford it" is, as a breakdown: what it
+usually costs going by the owner's entries, against today's safe to spend,
+what the month's money can cover and what that leaves a day from tomorrow,
+with the budget said apart. Never an entry card, never a plan card.
+
+**Later** with an amount is a Planner card to press. Its words say the day
+when none was said, what safe to spend has for it when it is due this month,
+and for a later month within a year what that month needs with it against
+the usual income (the same working as "how much do I need"). Without an
+amount the chat asks for it, with what it cost before (the latest entries
+that name it, small change and the app's own carry-forward rows left out),
+and the next short reply with a figure ("5000 by dec 20") makes the card.
+Said with a question ("can I afford it?", "what budget should I set?"), the
+question is answered first and the card follows it. Already on the Planner,
+it says so instead of offering it twice.
+
+**"Add it as a plan"**, "put it on my planner", "plan it": what this message
+said is coming, else the last few messages, else the budget just worked out.
+"Add the tuition as a plan" picks the one named, and with nothing said
+before asks the amount. "Set a plan" alone is still a budget: on 27 October
+2026 "add it as a plan" made a Budget change card, because the budget rule
+read "plan" as "set a budget".
+
+**Edits from the chat**: date, amount, payment, skip, remove, put back, and
+every other field: "rename the trip plan to Baguio trip", "the trip plan is a
+want", "don't count the trip plan in safe to spend", "the trip plan is
+Travel", "change the tuition plan to gcash", "note on the trip plan: bring a
+jacket", "save for the phone plan in Phone fund". Each is a card with the
+field before and after, and "undo that" puts it back.
+
+**The model** ends an answer with "Plan: Tuition, PHP 9,000.00, by
+2026-11-15" when it worked out a plan, and the app makes the card, as it does
+an "Entry:" line. Never under a plan for today, never twice for one already
+planned, and never "type plan tuition 9000".
+
+## P8. The screen (owner, 27 October 2026: "more cleaner ui like the rest of the system")
+
+Laid out as the Bin and Activity are. One list card, titled Plans, with Plan
+something beside the title; from 1280px a side panel: **Due by** the month's
+end (the figure, safe to spend before plans, set aside for plans, left or
+short) and **Further ahead** (each month's total, what it takes a month to
+save for the far ones, how much of it is wants). Narrower, the same figures
+head the list. A row: the name and what is left; the day ("Oct 28, in 2
+days"), kind and wallet; one line with an icon only when there is something
+to act on (short of safe to spend, a payment gone, part paid, a goal or what
+it takes a month). A pill only when the state needs one: Due soon and Due
+today amber, Overdue red, Part paid blue, Paid green, Skipped and Removed
+grey; a plan simply later has none. The sheet lays its facts out as a
+Database row's. The form folds Need or want, the goal, Count it in safe to
+spend and Notes under More details. Kind is grouped as the Add form files
+spending (Spending, Bills, Subscriptions), without Unknown or stopped bills
+and subscriptions; Pay from is grouped Spending wallets, Savings.
+
+Classes are `fms-plans` and `fms-plan*`. `fms-planner` is the Budget
+screen's panel: the first Planner shared it and squeezed Budget's "Budget for
+the month" into a narrow column.

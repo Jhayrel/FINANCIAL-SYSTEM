@@ -1787,6 +1787,39 @@ this.
 - **Activity** records every plan change as `plan.*`, filtered as Planner.
 - Tests: `planner.test.ts`, what-if by what-if.
 
+### 2026-10-27: the Planner, cleaner, and plans read from the chat
+
+The owner: "consider more cleaner ui like the rest of the system ...
+overthink some scenarios ... make sure it knows if I want to plan something
+... be careful what if I said I plan to buy good today at mall but what I
+meant is just a budget breakdown for today", then, mid-way, "Fix the kind,
+why its a mixed" and "Overthink errors too and make a fix" with a screenshot
+of "add it as a plan" making a Budget change card. `16-PLANNER.md` P7 and P8
+say how each now works.
+
+- **A fault the first Planner shipped**: it used `fms-planner`, the Budget
+  screen's class, and its 4-column summary squeezed Budget's "Budget for the
+  month" into a narrow column. Renamed to `fms-plans` / `fms-plan*`.
+- **Screen**: Plans card plus, from 1280px, a side panel (Due by, Further
+  ahead), as the Bin. Rows: a pill only when the state needs one, Due soon in
+  amber (the style guide's warn, it was blue), no red text lines (the icon
+  is the only colour). One primary button when nothing is planned. The sheet
+  uses `fms-rowfacts`, as a Database row's. The form folds the rarer fields
+  under More details.
+- **Kind** (`planKinds`): grouped Spending, Bills, Subscriptions, no Unknown,
+  nothing stopped; the form, the pay sheet and the chat use the same list.
+  Pay from is grouped too (`planWallets`).
+- **"Already paid it?"** (`likelyPayments`): a ₱300.00 club fee filed as
+  School was offered as the ₱9,000.00 tuition. Sharing the kind now needs an
+  amount within a fifth of what is left and a date after the plan was made.
+- **The chat** (`planIntent.ts`): today's plan is the afford breakdown, a
+  later one a Planner card, no amount asks for it with what it cost before.
+  "Add it as a plan" takes what was just said. Chat edits cover every field.
+  The model has a "Plan:" line, as it has "Entry:". "I plan to pay my motor
+  registration" was read by `plannerAsk` as a plan by name; its `PLANNER`
+  word now needs the noun ("the tuition plan"), not "I plan to".
+- Tests: `planIntent.test.ts` (37), `planner.test.ts` (22).
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
