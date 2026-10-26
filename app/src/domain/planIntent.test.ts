@@ -188,3 +188,14 @@ describe("the Kind and Pay from lists (owner, 27 October 2026: 'why its a mixed'
     });
   });
 });
+
+describe("a plan for a day already gone (owner, 27 October 2026)", () => {
+  it("is neither a plan for later nor money moved: it is asked about", () => {
+    expect(read("I'm planning a trip on october 10, 9337")).toMatchObject({ kind: "past", title: "Trip", plan: { amount: 933_700, due: "2026-10-10" } });
+    expect(read("I'm planning to buy shoes yesterday")).toMatchObject({ kind: "past", title: "Shoes", plan: { amount: null, due: "2026-10-25" } });
+  });
+  it("reads yesterday as a day, not as a month", () => {
+    expect(whenFor("yesterday", asOf)).toEqual({ due: "2026-10-25", kind: "day" });
+    expect(whenFor("last week", asOf)).toEqual({ due: "2026-10-19", kind: "day" });
+  });
+});

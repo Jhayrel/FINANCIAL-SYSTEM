@@ -47,6 +47,12 @@ export interface PlanContext {
 export type PlanIntent =
   /** For today: answered from today's money, never saved as a plan or an entry. */
   | { readonly kind: "today"; readonly thing: string; readonly why: "day" | "words" | "often" }
+  /**
+   * A day already gone: "I'm planning a trip on October 10" on the 26th. Not
+   * a plan for later, and not money moved either; the chat asks which it is,
+   * naming an entry that looks like it (27 October 2026).
+   */
+  | { readonly kind: "past"; readonly title: string; readonly plan: PlanInput }
   /** For a later day: a Planner card, or a question for the amount when none was said. */
   | {
       readonly kind: "later";
@@ -110,6 +116,7 @@ function thingIn(text: string): string {
     .replace(/(?:₱|php\s*)?\d[\d,]*(?:\.\d{1,2})?\s*k?\b/gi, " ")
     .replace(/\b(?:from|using|with|via)\s+(?:my\s+)?(?:cash|gcash|maya|bank|card|wallet|savings)\b/gi, " ")
     .replace(new RegExp(NO_DAY.source, "gi"), " ")
+    .replace(/\b(?:(?:the\s+day\s+before\s+)?yesterday|kahapon|last\s+week)\b/gi, " ")
     .replace(/\b(?:around|about|approximately|roughly|maybe|probably|worth|pesos?|php|for\s+it|for\s+now|na|po|lang|siguro)\b/gi, " ")
     .replace(/[,.:;!]+/g, " ")
     .replace(/\s+/g, " ")
@@ -223,8 +230,11 @@ export function readPlanIntent(text: string, ctx: PlanContext): PlanIntent | nul
   const noDay = NO_DAY.test(t);
   const when = whenFor(t, ctx.asOf);
   const due = when?.due ?? null;
-  // A day already gone is not a plan: it is an entry to add, or a question about it.
-  if (due !== null && due < ctx.asOf) return null;
+  // A day already gone is not a plan for later: paid already (an entry), or still to pay (a new day).
+  if (due !== null && due < ctx.asOf) {
+    if (!thing) return null;
+    return { kind: "past", title: titleOf(thing), plan: planInputFor(thing, plannedSpendIn(t)[0]?.amount ?? sumIn(t), due, ctx, t, when?.kind ?? "day") };
+  }
   if (due === ctx.asOf && when?.kind === "day") return { kind: "today", thing, why: "day" };
   if (due === null && !noDay) {
     if (TODAY.test(t) || DAYS_PLACES.test(t)) return { kind: "today", thing, why: "words" };

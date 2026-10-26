@@ -47,7 +47,7 @@ import {
 import type { AiSettings, AppSettings } from "../domain/settings";
 import { describeDraft, suggestCategory } from "../data/aiClient";
 import { AskPanel } from "./AskPanel";
-import { useProposalSink } from "./useProposalSink";
+import { useProposalSink, type SinkInput } from "./useProposalSink";
 import { useConfirm } from "../components/Confirm";
 import type { Provenance } from "../domain/activity";
 import type { CategoryResult } from "../data/aiClient";
@@ -149,6 +149,7 @@ export function AddTransaction({
   sync,
   settlementFor,
   onSettle,
+  assist,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -199,6 +200,8 @@ export function AddTransaction({
   /** How to clear what is left on a line in one step, and the step itself. See domain/settleLine.ts. */
   settlementFor?: ((debt: Debt) => Settlement | null) | undefined;
   onSettle?: ((debt: Debt) => void) | undefined;
+  /** What the assistant beside the form can do beyond entries, as everywhere else (App.tsx). */
+  assist?: Pick<SinkInput, "onExport" | "onRestoreMany" | "onUpdateDebt" | "onGo" | "onSavePlan" | "onPayPlan"> | undefined;
   /** The Budget screen, for a month that has no budget yet. */
   onOpenBudget?: (() => void) | undefined;
   /** The Database searched for these words, such as a record number. */
@@ -469,6 +472,7 @@ export function AddTransaction({
       const debt = debts.find((d) => d.id === debtId);
       if (debt) onSettle?.(debt);
     },
+    ...assist,
   });
   const nextRecordNumber = sink.nextRecordNumber;
 

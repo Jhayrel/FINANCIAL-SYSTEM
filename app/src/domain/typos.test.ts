@@ -44,3 +44,12 @@ describe("command words spelled the way they were meant", () => {
     expect(meant("bin")).toBe("bin");
   });
 });
+
+describe("a short month word the word before explains (27 October 2026)", () => {
+  it("reads next moth as next month", () => {
+    expect(withCommandWordsFixed("does my plan next moth and my budget align")).toBe("does my plan next month and my budget align");
+    expect(withCommandWordsFixed("this mnth")).toBe("this month");
+    // A moth on its own is a moth.
+    expect(withCommandWordsFixed("a moth in my wallet")).toBe("a moth in my wallet");
+  });
+});

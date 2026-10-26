@@ -279,3 +279,32 @@ it: on 27 October the Dashboard said a paid ₱9,000.00 plan still needed
 rows and the other the entry. A renamed kind or wallet in Settings renames it
 on every plan too (`renamePlans`).
 
+## P10. A day already gone (owner, 27 October 2026)
+
+"what happen if I plan in the past?? ... be carefull what if the entry is
+allready added and the day is allready ended then I click edit then I cannot
+edit it anymore ... creating, editing, restoring it from delete".
+
+- **Creating** with a past day is allowed. The form says the day has passed,
+  that the plan will show as overdue, and that a plan already paid is linked
+  or paid with the day it was paid, so nothing is entered twice.
+- **Its payment, already in the entries**: "Already paid it?" offers an entry
+  of the same kind and close amount from up to a week before the plan's day,
+  even though the plan was made after it. A plan made before its own day
+  still only takes a kind-only match from after it was made (P4.9). The
+  overdue sheet names the likely entry first and does not call the plan
+  short while one looks like its payment.
+- **Editing** is never locked: a paid or skipped plan has Edit too (its name,
+  kind, note, amount or date), and stays paid or skipped. A past day is no
+  news on a closed plan, so its form says nothing about it.
+- **Put back** after its day: open again, overdue, with what to do.
+- **Entries**: a payment binned leaves the plan unpaid by that amount and
+  says a payment is gone; restoring the entry pays it again. Nothing is
+  stored twice: a plan holds the entry's id, and the ledger holds the money.
+- **The chat**: "I'm planning a trip on October 10" on the 26th is neither a
+  plan for later nor money moved. With an entry that looks like it (#3933,
+  October 9, PHP 9,337.00) it says so and adds nothing; otherwise it says how
+  to add it as an entry, and offers a plan card that shows as overdue.
+  "Yesterday" and "last week" are read as days, and "plan tuition 9000 by oct
+  20" or "move the tuition plan to oct 1" says the day has passed.
+

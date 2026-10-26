@@ -50,6 +50,10 @@ export function dayIn(text: string, asOf: IsoDate): IsoDate | null {
   if (/\bnext\s+month\b/.test(t)) return m === 12 ? lastOfMonth(y + 1, 1) : lastOfMonth(y, m + 1);
   if (/\bend of (?:the |this )?month\b/.test(t)) return lastOfMonth(y, m);
   if (/\btomorrow\b/.test(t)) return addDays(asOf, 1);
+  // A day gone, read as gone, so the card can say so rather than file it with no date (27 October 2026).
+  if (/\b(?:the\s+day\s+before\s+yesterday)\b/.test(t)) return addDays(asOf, -2);
+  if (/\b(?:yesterday|kahapon)\b/.test(t)) return addDays(asOf, -1);
+  if (/\blast\s+week\b/.test(t)) return addDays(asOf, -7);
   if (/\bnext\s+week\b/.test(t)) return addDays(asOf, 7);
   const span = /\bin\s+(\d{1,2}|a|one|two|three)\s+(days?|weeks?|months?)\b/.exec(t);
   if (span) {
@@ -106,7 +110,7 @@ export function whenFor(text: string, asOf: IsoDate): { readonly due: IsoDate; r
   const due = dayFor(t, asOf);
   if (due === null) return null;
   const dayish =
-    /\b20\d{2}-\d{2}-\d{2}\b|\b(?:tomorrow|bukas|today|tonight|next\s+week|this\s+week(?:end)?|christmas|pasko|new\s+year|end\s+of\s+(?:the\s+|this\s+)?month)\b|\bin\s+(?:\d{1,2}|a|one|two|three)\s+(?:days?|weeks?)\b|\bthe\s+\d{1,2}(?:st|nd|rd|th)\b|\b(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/.test(t) ||
+    /\b20\d{2}-\d{2}-\d{2}\b|\b(?:tomorrow|bukas|today|tonight|yesterday|kahapon|last\s+week|next\s+week|this\s+week(?:end)?|christmas|pasko|new\s+year|end\s+of\s+(?:the\s+|this\s+)?month)\b|\bin\s+(?:\d{1,2}|a|one|two|three)\s+(?:days?|weeks?)\b|\bthe\s+\d{1,2}(?:st|nd|rd|th)\b|\b(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/.test(t) ||
     new RegExp(String.raw`\b${MONTH_RE}\.?\s+\d{1,2}(?:st|nd|rd|th)?\b(?!\d)`).test(t);
   // A day said but "not sure of the exact day": the month, not the day.
   if (dayish && !NO_DAY.test(t)) return { due, kind: "day" };
@@ -262,7 +266,7 @@ export function readPlannerAsk(
       .replace(/\b(?:a\s+)?(?:new\s+)?plan\s+(?:for\s+)?/gi, " ")
       .replace(/(?:₱|php\s*)?\d[\d,]*(?:\.\d{1,2})?\s*k?\b/gi, " ")
       .replace(new RegExp(String.raw`\b(?:on|by|for|in|until|before|this|next)?\s*${MONTH_RE}\.?(?:\s+\d{1,2}(?:st|nd|rd|th)?)?(?:,?\s+20\d{2})?\b`, "gi"), " ")
-      .replace(/\b(?:by|on|for|in|due|before)?\s*(?:next\s+(?:month|week|year)|this\s+(?:month|year)|end of (?:the |this )?month|tomorrow|in\s+\w+\s+(?:days?|weeks?|months?)|in\s+20\d{2})\b/gi, " ")
+      .replace(/\b(?:by|on|for|in|due|before)?\s*(?:next\s+(?:month|week|year)|this\s+(?:month|year)|end of (?:the |this )?month|tomorrow|(?:the\s+day\s+before\s+)?yesterday|kahapon|last\s+week|in\s+\w+\s+(?:days?|weeks?|months?)|in\s+20\d{2})\b/gi, " ")
       .replace(NO_DAY_G, " ")
       .replace(/\b(?:from|using|with|via)\s+\S+/gi, " ")
       .replace(/\b(?:pesos?|php|worth|of|to pay|pay|for|by|on|due|the|my|a|an)\b/gi, " ")

@@ -156,5 +156,11 @@ export function meant(word: string): string {
  * exactly as typed, so an amount can never be changed by this.
  */
 export function withCommandWordsFixed(text: string): string {
-  return text.replace(/[A-Za-z]+/g, (word) => meant(word));
+  /*
+   * A short word is left alone, except where the word before it says what it
+   * is: "next moth" is next month (27 October 2026: "does my plan next moth
+   * and my spanding and budget align properly?" was read as no month at all).
+   */
+  const months = text.replace(/\b(next|this|last|nxt)\s+(?:moth|mont|mnth|monht|montj|mpnth)\b/gi, (_, w: string) => `${w.toLowerCase() === "nxt" ? "next" : w} month`);
+  return months.replace(/[A-Za-z]+/g, (word) => meant(word));
 }

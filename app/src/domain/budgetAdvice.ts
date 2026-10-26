@@ -493,16 +493,29 @@ export function keepWords(a: BudgetAdvice, held: BudgetAdvice, set: { readonly s
   const plannedTotal = (a.planned ?? []).reduce((sum, l) => sum + l.amount, 0);
   const setTotal = set.spending + set.billsSubs;
   const usual = a.total - plannedTotal;
-  const what = (a.planned ?? []).map((l) => l.name.toLowerCase()).join(" and ") || "what is coming";
+  const planned = a.planned ?? [];
+  const what = planned.map((l) => l.name.toLowerCase()).join(" and ") || "what is coming";
+  const withWhat = planned.length > 0 ? `your usual month with the ${what}` : "your usual month";
+  // With nothing planned the sum is the usual month alone, said as such (27 October 2026: it printed "+  =").
+  const sum = planned.length > 0 ? `- Usual month ${money(usual)} + ${planned.map((l) => `${l.name} ${money(l.amount)}`).join(" + ")} = ${money(a.total)}.` : `- Nothing is planned for ${a.name} on the Planner, so this is your usual month alone.`;
+  // The money beside the plan: what usually comes in, against what the month takes.
+  const income =
+    a.typicalIncome > 0
+      ? a.typicalIncome >= a.total + a.debtDue
+        ? `- You usually receive ${money(a.typicalIncome)} a month, which covers it${a.debtDue > 0 ? ` and the ${money(a.debtDue)} of debt payments due` : ""} with ${money(a.typicalIncome - a.total - a.debtDue)} to spare.`
+        : `- You usually receive ${money(a.typicalIncome)} a month, ${money(a.total + a.debtDue - a.typicalIncome)} short of it${a.debtDue > 0 ? ` with the ${money(a.debtDue)} of debt payments due` : ""}: the rest would come from what carries over or from savings.`
+      : "";
   const lines: string[] = [];
   if (a.total <= setTotal) {
-    lines.push(`**Yes: ${a.name}'s budget is ${money(setTotal)}, and your usual month with the ${what} comes to ${money(a.total)}, ${money(setTotal - a.total)} under it.**`);
-    lines.push(`- Usual month ${money(usual)} + ${(a.planned ?? []).map((l) => `${l.name} ${money(l.amount)}`).join(" + ")} = ${money(a.total)}.`);
+    lines.push(`**Yes: ${a.name}'s budget is ${money(setTotal)}, and ${withWhat} comes to ${money(a.total)}, ${money(setTotal - a.total)} under it.**`);
+    lines.push(sum);
+    if (income) lines.push(income);
     return lines.join("\n");
   }
-  lines.push(`**Not as things usually go: ${a.name}'s budget is ${money(setTotal)}, and your usual month with the ${what} comes to ${money(a.total)}, ${money(a.total - setTotal)} over it.**`);
-  lines.push(`- Usual month ${money(usual)} + ${(a.planned ?? []).map((l) => `${l.name} ${money(l.amount)}`).join(" + ")} = ${money(a.total)}.`);
-  if (usual > setTotal) lines.push(`- Your usual month alone is already ${money(usual - setTotal)} over it, before the ${what}.`);
+  lines.push(`**Not as things usually go: ${a.name}'s budget is ${money(setTotal)}, and ${withWhat} comes to ${money(a.total)}, ${money(a.total - setTotal)} over it.**`);
+  lines.push(sum);
+  if (income) lines.push(income);
+  if (usual > setTotal && planned.length > 0) lines.push(`- Your usual month alone is already ${money(usual - setTotal)} over it, before the ${what}.`);
   const fit = held.fit;
   if (fit && fit.cuts.length > 0) {
     lines.push(

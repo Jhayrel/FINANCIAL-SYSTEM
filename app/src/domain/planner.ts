@@ -75,8 +75,10 @@ export function countedWords(plan: Pick<Plan, "due" | "dueKind" | "setAside" | "
   return dueKindOf(plan) === "day" ? "Counted in its month" : `Counted in ${MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1] ?? ""} ${plan.due.slice(0, 4)}`;
 }
 
-/** The sentence a card says about where a new plan counts. */
-export function countsSentence(plan: Pick<Plan, "due" | "dueKind" | "setAside" | "goalId" | "title">): string {
+/** The sentence a card says about where a new plan counts. With `asOf`, a day already gone is said first. */
+export function countsSentence(plan: Pick<Plan, "due" | "dueKind" | "setAside" | "goalId" | "title">, asOf?: IsoDate): string {
+  if (asOf && plan.due !== NO_DATE && plan.due < asOf)
+    return `${whenOf(plan)} has already passed: kept as a plan, it shows as overdue until it is paid. Already paid? Say "I paid the ${plan.title.toLowerCase()} plan", or link the entry on the Planner, so nothing is entered twice.`;
   if (plan.due === NO_DATE) return `With no date it is counted nowhere, not in safe to spend and not in a month's budget, until it has one: say "move the ${plan.title.toLowerCase()} plan to December", or a day, when you know.`;
   if (!plan.setAside || plan.goalId) return "It is not counted in safe to spend.";
   return dueKindOf(plan) === "day"
@@ -257,6 +259,8 @@ export function checkPlan(
     readonly asOf: IsoDate;
     /** The plan being edited, so it is not its own duplicate. */
     readonly editing?: string | undefined;
+    /** Editing a plan already paid or skipped. */
+    readonly closed?: boolean | undefined;
   },
 ): PlanCheck {
   const problems: string[] = [];
@@ -267,7 +271,11 @@ export function checkPlan(
   const due = dueFor(kind, input.due);
   if (!ISO.test(due)) problems.push(kind === "month" ? "Pick the month it is to be paid in." : "Pick the day it is to be paid by.");
   if (problems.length > 0) return { problems, notes };
-  if (due < context.asOf) notes.push(`${whenOf({ due, dueKind: kind })} has already passed. If it is already paid, record the payment instead, so the money leaves its wallet.`);
+  // A plan already paid or skipped is a record: its day passing is no news.
+  if (due < context.asOf && kind !== "none" && !context.closed)
+    notes.push(
+      `${whenOf({ due, dueKind: kind })} has already passed. Saved, it shows as overdue. If it is already paid, open it after saving: link the entry if it is in your records, or record the payment with the day you paid, so nothing is entered twice.`,
+    );
   const same = context.plans.find(
     (p) => p.id !== context.editing && p.status === "open" && p.title.trim().toLowerCase() === input.title.trim().toLowerCase() && p.due.slice(0, 7) === due.slice(0, 7),
   );
@@ -683,8 +691,12 @@ export function likelyPayments(plan: Plan, rows: readonly Transaction[], allPlan
       const sameKind = Boolean(plan.item) && t.item.trim().toLowerCase() === plan.item.trim().toLowerCase();
       const saysIt = words.some((w) => text.includes(w));
       const close = t.total === left ? 3 : Math.abs(t.total - left) <= left * 0.2 ? 2 : t.total < left && t.total * 4 >= left ? 1 : 0;
-      // Only the kind in common: it must also come after the plan was made.
-      const fits = saysIt ? close >= 1 : sameKind && close >= 2 && t.date >= plan.createdOn;
+      /*
+       * Only the kind in common: it must also come after the plan was made,
+       * or, for a plan made after its own day (planned in the past), around
+       * that day: the entry was there first (27 October 2026).
+       */
+      const fits = saysIt ? close >= 1 : sameKind && close >= 2 && t.date >= (plan.due < plan.createdOn ? from : plan.createdOn);
       return { t, score: (sameKind ? 2 : 0) + (saysIt ? 2 : 0) + close, fits };
     })
     .filter((s) => s.fits)

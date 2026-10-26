@@ -39,7 +39,7 @@ import { holdUpdates, useUpdateAvailable } from "./data/updateCheck";
 import { useBackToClose, useScreenHistory } from "./data/backButton";
 import { Icon, type IconName } from "./components/Icon";
 import { AskPanel } from "./features/AskPanel";
-import { useProposalSink } from "./features/useProposalSink";
+import { useProposalSink, type SinkInput } from "./features/useProposalSink";
 import { useReportScreenFallback } from "./features/screenReport";
 import { ScreenBoundary } from "./components/ScreenBoundary";
 import { AppBoundary } from "./components/AppBoundary";
@@ -2015,6 +2015,22 @@ export default function App() {
     return id;
   };
 
+  /*
+   * What the assistant can do beyond entries, the same wherever it is open:
+   * the floating chat, the AI tab and the panel beside the Add form. The Add
+   * form's panel had its own list without these, so "I paid my tuition"
+   * there was answered "The Planner cannot be changed from this view"
+   * (27 October 2026, the owner: "all should ai can do not redirect me").
+   */
+  const assist: Pick<SinkInput, "onExport" | "onRestoreMany" | "onUpdateDebt" | "onGo" | "onSavePlan" | "onPayPlan"> = {
+    onExport: handleAskedExport,
+    onRestoreMany: handleRestoreMany,
+    onUpdateDebt: (next) => setSettings((s) => ({ ...s, credits: s.credits.map((c) => (c.id === next.id ? next : c)) })),
+    onGo: (place) => goRef.current(place.screen as Screen, place),
+    // The Planner from the chat: recorded as the assistant's, which it was (docs/16-PLANNER.md, P4.23).
+    onSavePlan: (plan, action, summary) => changePlan(plan, action, summary, { actor: "ai", via: "ai_chat" }),
+    onPayPlan: (plan, draft, settles) => payPlan(plan, draft, settles, { actor: "ai", via: "ai_chat" }),
+  };
   const sink = useProposalSink({
     transactions,
     reference,
@@ -2032,17 +2048,11 @@ export default function App() {
     onUpdate: handleUpdate,
     onBudget: handleBudgetYear,
     onAddDebt: (debt) => setSettings((s) => ({ ...s, credits: withDebt(s.credits, debt) })),
-    onExport: handleAskedExport,
     onSettle: (debtId) => {
       const debt = settings.credits.find((d) => d.id === debtId);
       if (debt) settleDebt(debt);
     },
-    onRestoreMany: handleRestoreMany,
-    onUpdateDebt: (next) => setSettings((s) => ({ ...s, credits: s.credits.map((c) => (c.id === next.id ? next : c)) })),
-    onGo: (place) => goRef.current(place.screen as Screen, place),
-    // The Planner from the chat: recorded as the assistant's, which it was (docs/16-PLANNER.md, P4.23).
-    onSavePlan: (plan, action, summary) => changePlan(plan, action, summary, { actor: "ai", via: "ai_chat" }),
-    onPayPlan: (plan, draft, settles) => payPlan(plan, draft, settles, { actor: "ai", via: "ai_chat" }),
+    ...assist,
   });
 
   // With Firebase configured, nothing renders until the owner is signed in,
@@ -2517,6 +2527,7 @@ export default function App() {
               onAddDebt={(debt) => setSettings((s) => ({ ...s, credits: withDebt(s.credits, debt) }))}
               settlementFor={settlementFor}
               onSettle={settleDebt}
+              assist={assist}
               editing={editing}
               onCancelEdit={() => {
                 setEditing(null);

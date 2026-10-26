@@ -1854,6 +1854,29 @@ style guide's Bin, Planner and sidebar lines say how each now works.
   against a live model.
 - Tests: `planIntent.test.ts` (38), `planner.test.ts` (27).
 
+### 2026-10-27, last: the AI never leaves a question hanging; plans in the past
+
+- **Try again** (owner: "what happen if a promnt is not answered like is
+  there an option to try again??"). A question waits at most a minute
+  (`CHAT_DEADLINE_MS`; three tries of 25 seconds could take well over one).
+  A model that fails or runs out of time leaves the device's own answer, or
+  says it was not answered, with Try again under it; Try again takes the
+  failed pair out and asks once more. A question left with no answer at all
+  (the app closed or reloaded on the way, or Stop) says "Not answered" with
+  Try again. A failed answer read back from the database gets its button back.
+- **"all should ai can do not redirect me"**: the panel beside the Add form
+  had its own short list of abilities, without the Planner, exports, many
+  restores, debt details or opening a screen, so "I paid my tuition check my
+  plan" there said the Planner could not be changed from that view. Both now
+  share one list (`assist` in `App.tsx`).
+- **"does my plan next moth and my spanding and budget align properly?"**
+  and "can I afford my plan next month?" got the running month's headline,
+  or went to the model with nothing worked out (two figures came back
+  untraced). They are now the "does the budget hold" answer for that month:
+  the Planner's plans, the usual month, the budget set and what usually
+  comes in. "next moth" is read as next month (`typos.ts`).
+- **Plans in the past**: `16-PLANNER.md` P10.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

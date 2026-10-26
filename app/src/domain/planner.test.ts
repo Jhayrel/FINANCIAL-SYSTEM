@@ -331,3 +331,50 @@ describe("in the bell (P4.1, P4.4, P4.9)", () => {
     expect(found[1]?.detail).toMatch(/Set aside already|short/);
   });
 });
+
+describe("a plan for a day already gone (owner, 27 October 2026: \"what happen if I plan in the past?\")", () => {
+  const input: PlanInput = { title: "Haircut", amount: 15_000, due: "2026-10-20", item: "Self Care", wallet: "Cash", need: true, setAside: true, notes: "" };
+  const paidBefore = tx({ id: "cut", item: "Self Care", description: "Barber", amount: 15_000, date: "2026-10-19" });
+
+  it("is allowed, says it shows as overdue and how not to pay it twice", () => {
+    const check = checkPlan(input, { plans: [], reference, asOf });
+    expect(check.problems).toEqual([]);
+    expect(check.notes.join(" ")).toMatch(/has already passed\. Saved, it shows as overdue/);
+    const v = viewOf(makePlan(input, asOf, "owner"), { transactions: [], accounts: [], asOf });
+    expect(v.state).toBe("overdue");
+  });
+
+  it("finds the entry made before the plan was, by its kind and amount", () => {
+    const plan = makePlan(input, asOf, "owner");
+    expect(plan.createdOn).toBe(asOf);
+    expect(likelyPayments(plan, [paidBefore], [plan]).map((t) => t.id)).toEqual(["cut"]);
+    // A plan made before its own day still wants its payment after it was made.
+    const ahead = makePlan({ ...input, due: "2026-11-20" }, "2026-10-21", "owner");
+    expect(likelyPayments(ahead, [paidBefore], [ahead])).toEqual([]);
+  });
+
+  it("can be edited after it is paid, and stays paid", () => {
+    const plan = linkPayments(makePlan(input, asOf, "owner"), ["cut"], [paidBefore], asOf);
+    expect(plan.status).toBe("done");
+    const check = checkPlan({ ...input, title: "Haircut, barber" }, { plans: [plan], reference, asOf, editing: plan.id, closed: true });
+    expect(check.problems).toEqual([]);
+    expect(check.notes.join(" ")).not.toMatch(/already passed/);
+  });
+
+  it("put back after its day is open again, overdue, with its payments as they were", () => {
+    const removed = removePlan(makePlan(input, "2026-10-10", "owner"), asOf);
+    const back = reopenPlan(removed);
+    expect(back.status).toBe("open");
+    expect(viewOf(back, { transactions: [], accounts: [], asOf }).state).toBe("overdue");
+  });
+
+  it("a binned payment leaves it unpaid, and restoring the entry pays it again", () => {
+    const plan = linkPayments(makePlan(input, asOf, "owner"), ["cut"], [paidBefore], asOf);
+    const binned = viewOf(plan, { transactions: [], accounts: [], asOf });
+    expect(binned.paid).toBe(0);
+    expect(binned.goneNote).toBeTruthy();
+    const restored = viewOf(plan, { transactions: [paidBefore], accounts: [], asOf });
+    expect(restored.paid).toBe(15_000);
+    expect(restored.state).toBe("paid");
+  });
+});

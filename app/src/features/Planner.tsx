@@ -619,6 +619,13 @@ function PlanSheet(props: {
     </Button>
   ) : (
     <>
+      {/*
+        A paid or skipped plan can still be edited: its name, kind, note or
+        date, after its day has ended (owner, 27 October 2026: "what if the
+        entry is allready added and the day is allready ended then I click
+        edit then I cannot edit it anymore"). It stays paid or skipped.
+      */}
+      <Button onClick={props.onEdit}>Edit</Button>
       <Button onClick={props.onReopen}>{v.state === "skipped" ? "Put it back" : "Open it again"}</Button>
       <Button variant="primary" onClick={props.onAgain}>
         Plan it again
@@ -638,19 +645,28 @@ function PlanSheet(props: {
         </div>
         {v.paid > 0 && open && <ProgressBar value={v.paid} max={p.amount} label="paid so far" />}
 
-        {props.short > 0 && (
+        {/* Not while an entry looks like its payment already: the money may have gone, not be short. */}
+        {props.short > 0 && !(v.state === "overdue" && maybe.length > 0) && (
           <Alert status="over" title={`${formatMoney(props.short)} short for it`}>
             After the bills and debt payments still due and the plans before it, safe to spend does not cover all of it. Pay part now, move the date, or pay it from savings.
           </Alert>
         )}
         {v.goneNote && <Alert status="warn" title="A payment is gone">{v.goneNote}</Alert>}
+        {/* Past its day and open: what to do, the already-paid case first, so nothing is entered twice. */}
+        {v.state === "overdue" && (
+          <Alert status="warn" title={`${formatMedium(p.due)} has passed`}>
+            {maybe.length > 0
+              ? `Already paid? ${no(maybe[0]!.recordNumber)} on ${formatMedium(maybe[0]!.date)} looks like it: link it below, so it is not entered twice. Not paid yet? Move the date or skip it.`
+              : "Already paid and in your entries? Link a payment I added, so it is not entered twice. Paid and not entered? Record payment, with the day you paid. Not paid yet? Move the date or skip it."}
+          </Alert>
+        )}
 
         <dl className="fms-rowfacts">
           <Fact label="Pay by">{whenOf(p)}</Fact>
           {p.item && <Fact label="Kind">{p.item}</Fact>}
           {p.wallet && <Fact label="Pay from">{p.wallet}</Fact>}
           <Fact label="Need or want">{p.need ? "A need" : "A want"}</Fact>
-          <Fact label="Safe to spend">{p.goalId ? "Not counted, saved in a goal" : p.setAside && v.counts ? "Set aside now" : countedWords(p).replace(/^Counted in its month$/, "Set aside in its month").replace(/^Counted in /, "Set aside in ")}</Fact>
+          <Fact label="Safe to spend">{!open ? (v.state === "paid" ? "Nothing set aside: it is paid" : "Not counted") : p.goalId ? "Not counted, saved in a goal" : p.setAside && v.counts ? "Set aside now" : countedWords(p).replace(/^Counted in its month$/, "Set aside in its month").replace(/^Counted in /, "Set aside in ")}</Fact>
           {v.goal && (
             <Fact label="Goal">
               {v.goal.missing
@@ -853,7 +869,7 @@ function PlanForm(props: {
   const kind = item || suggested || "";
   const recurring = isRecurringKind(kind, reference);
   const input: PlanInput = { title, amount, due, dueKind: when.kind, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !recurring, notes };
-  const check = checkPlan({ ...input, setAside }, { plans: props.plans, reference, asOf, editing: editing?.id });
+  const check = checkPlan({ ...input, setAside }, { plans: props.plans, reference, asOf, editing: editing?.id, closed: Boolean(isEdit && editing && editing.status !== "open") });
   const goalName = goals.find((g) => g.id === goalId)?.name ?? "";
   const counted = setAside && !goalId && !recurring;
 
@@ -870,7 +886,7 @@ function PlanForm(props: {
   return (
     <Sheet
       title={isEdit && editing ? `Edit "${editing.title}"` : "Plan something"}
-      subtitle="Nothing moves until it is paid."
+      subtitle={isEdit && editing && editing.status !== "open" ? `It stays ${editing.status === "done" ? "paid" : "skipped"}; its payments are not changed.` : "Nothing moves until it is paid."}
       onClose={props.onClose}
       dialog={props.dialog}
       actions={

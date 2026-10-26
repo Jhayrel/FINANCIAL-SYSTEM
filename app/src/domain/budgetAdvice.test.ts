@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { whyOver, adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, judgesSetBudget, judgeWords, median, newestBudgetChange, savingsGoalIn } from "./budgetAdvice";
+import { whyOver, adviceMonthIn, adviceWords, asksBudgetAdvice, asksForTheSplit, budgetAdvice, expectedIncomeIn, judgesSetBudget, judgeWords, keepWords, median, newestBudgetChange, savingsGoalIn } from "./budgetAdvice";
 import { proposedBudgetIn, proposedMonthIn } from "./budgetAsk";
 import type { Transaction } from "./types";
 
@@ -308,5 +308,22 @@ describe("a question about the budget already set", () => {
     const short = judgeWords(advice, tracks, 27, { safe: 661856, perDay: 24513 })!;
     expect(short).toContain("Against the money: PHP 6,618.56 is safe to spend until October 2026 ends, PHP 2,381.44 less than the spending budget left, so the money allows PHP 245.13 a day, not PHP 333.33, unless more comes in.");
     expect(judgeWords(advice, tracks, 27, { safe: 1000000, perDay: 37037 })).toContain("which covers the PHP 9,000.00 of the spending budget left.");
+  });
+});
+
+describe("does the budget hold with the plans (27 October 2026: \"does my plan next moth and my spanding and budget align properly?\")", () => {
+  it("says the usual month alone when nothing is planned, never an empty sum", () => {
+    const a = budgetAdvice({ transactions: ledger, year: 2026, month: 10, asOf: "2026-09-28", stopped });
+    const words = keepWords(a, a, { spending: a.total, billsSubs: 0 });
+    expect(words).toMatch(/^\*\*Yes/);
+    expect(words).toMatch(/Nothing is planned for/);
+    expect(words).not.toMatch(/\+\s+=/);
+  });
+  it("adds the plans to the usual month and says what usually comes in", () => {
+    const a = budgetAdvice({ transactions: ledger, year: 2026, month: 10, asOf: "2026-09-28", stopped, planned: [{ name: "Tuition", amount: 900_000 }] });
+    const words = keepWords(a, a, { spending: 100_000, billsSubs: 0 });
+    expect(words).toMatch(/^\*\*Not as things usually go/);
+    expect(words).toMatch(/\+ Tuition PHP 9,000\.00 =/);
+    if (a.typicalIncome > 0) expect(words).toMatch(/You usually receive/);
   });
 });

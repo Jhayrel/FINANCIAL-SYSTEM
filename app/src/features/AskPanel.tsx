@@ -159,7 +159,7 @@ import { numbersInWords, readReviewRowAsk, reviewRowAnswer } from "../domain/rev
 import { activityAnswer, asksUndoLast, readActivityAsk } from "../domain/activityAsk";
 import { activityStore } from "../data/activityStore";
 import type { PlanAction } from "./useProposalSink";
-import { kindFromHistory, makePlan, movePlan, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
+import { kindFromHistory, makePlan, movePlan, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
 import { plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
 import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
@@ -207,6 +207,7 @@ import {
   extractProposals,
   itemsLastUsed,
   downSentence,
+  MODEL_DOWN,
   routeMessage,
   type Intent as Routed,
 } from "../data/aiClient";
@@ -496,6 +497,12 @@ interface Said {
   /** A screen this answer offers to open, as a button under it (domain/goAsk.ts). Not kept across a refresh. */
   readonly go?: GoPlace;
   /**
+   * The question this answer failed to answer, for its Try again button
+   * (27 October 2026, the owner: "what happen if a promnt is not answered
+   * like is there an option to try again??").
+   */
+  readonly retry?: string;
+  /**
    * The pictures that went with it, for this session only.
    *
    * A row of filenames tells you what you sent; the pictures show you, which
@@ -626,6 +633,12 @@ interface Offered {
 }
 
 type Turn = Said | Offered | Found | Drawn | DebtChoice | Changing | Budgeting | Exporting | Settling;
+
+/** How an answer that never came starts, so a reload can find it and give it back its Try again. */
+const NOT_ANSWERED = "That one was not answered:";
+
+/** The longest a question waits for the AI before it is called off with Try again under it. */
+const CHAT_DEADLINE_MS = 60_000;
 
 /** Words a question is never about, however often the entries use them. */
 const SUBJECT_STOP = new Set(
@@ -797,11 +810,15 @@ function rebuildThread(all: readonly ChatMessage[], since: string | null): Turn[
       continue;
     }
 
+    // A failed answer comes back with its Try again: the question is the one said just before it.
+    const before = rebuilt[rebuilt.length - 1];
+    const failedBefore = m.role === "assistant" && (m.text === MODEL_DOWN || m.text.startsWith(NOT_ANSWERED)) && before?.kind === "you" ? (before as Said).text : "";
     rebuilt.push({
       kind: m.role,
       text: m.text,
       ...(m.from ? { from: m.from } : {}),
       ...(m.files && m.files.length > 0 ? { described: m.files } : {}),
+      ...(failedBefore ? { retry: failedBefore } : {}),
     });
   }
   return rebuilt;
@@ -1317,6 +1334,8 @@ export function AskPanel({
    * on a phone the message seemed to vanish (12 October 2026 audit, A2).
    */
   const [inFlight, setInFlight] = useState<{ readonly text: string; readonly from: number } | null>(null);
+  /** Messages still being worked on, so a question is called unanswered only once nothing is. */
+  const [answering, setAnswering] = useState(0);
   /*
    * Guards on Send and Stop, for a thumb. When Send was pressed, so a second
    * tap of the same thumb is not taken for Stop ("Stopped. Nothing was
@@ -4382,6 +4401,17 @@ export function AskPanel({
     const asked = generation.current;
     const control = new AbortController();
     stopper.current = control;
+    /*
+     * One minute at most. Three tries of 25 seconds each meant a question
+     * could sit on "Reading your ledger" for well over a minute, long enough
+     * to look stuck and be sent again (27 October 2026). Past this it is
+     * called off and said so, with Try again under it.
+     */
+    let tookTooLong = false;
+    const deadline = setTimeout(() => {
+      tookTooLong = true;
+      control.abort();
+    }, CHAT_DEADLINE_MS);
 
     // The newest turns whole, so a follow-up is sent what it follows (domain/memory.ts).
     /*
@@ -4391,7 +4421,8 @@ export function AskPanel({
      */
     const history = chatHistory(
       turns.flatMap((t): { role: "you" | "assistant"; text: string }[] => {
-        if (isSaid(t)) return [{ role: t.kind, text: t.text }];
+        // A failed answer says nothing about the question, so the model is not shown it.
+        if (isSaid(t)) return t.retry ? [] : [{ role: t.kind, text: t.text }];
         if (isChart(t)) return [{ role: "assistant", text: `(Chart drawn: ${t.chart.title}. ${chartInWords(t.chart)})` }];
         const state = (t as { state?: string }).state;
         const words = state ? cardWords(t, state as StoredCard["state"]) : "";
@@ -4443,8 +4474,11 @@ export function AskPanel({
           signal: control.signal,
         }),
       "Still waiting on the model",
-    );
+    ).finally(() => clearTimeout(deadline));
     if (stopper.current === control) stopper.current = null;
+    // Asked of a model that is on, and none answered: Try again goes under what is said instead.
+    const failed = answer.source !== "model" && settings.ai.enabled && settings.ai.features.chat !== false && !/^Not signed in/i.test(answer.reason ?? "");
+    const why = tookTooLong ? `no answer came within ${CHAT_DEADLINE_MS / 1000} seconds` : (answer.reason ?? "no model answered");
     // Stopped, or the view cleared, while it was on its way: it is not said.
     if (generation.current !== asked) {
       log(aiEvent("answered", "add", { text: `Not shown, stopped before it arrived: ${answer.text.slice(0, 160)}`, model: "this device" }));
@@ -4466,13 +4500,13 @@ export function AskPanel({
      */
     const fallback = worked?.fallback ?? (picked ? pickAnswer(picked) : undefined);
     if (answer.source !== "model" && fallback) {
-      say({ kind: "assistant", text: fallback, from: `this device, because ${(answer.reason ?? "no model answered").replace(/\.$/, "").replace(/^([A-Z])(?![A-Z])/, (c) => c.toLowerCase())}` });
+      say({ kind: "assistant", text: fallback, from: `this device, because ${why.replace(/\.$/, "").replace(/^([A-Z])(?![A-Z])/, (c) => c.toLowerCase())}`, ...(failed ? { retry: question } : {}) });
       log(aiEvent("answered", "add", { text: fallback, model: "this device" }));
       return;
     }
-    const from = answer.source === "model" ? model : (answer.reason ?? model);
-    const answerText = answer.source === "model" ? withoutFalseDenial(answer.text) : answer.text;
-    say({ kind: "assistant", text: answerText, from });
+    const from = answer.source === "model" ? model : tookTooLong ? `No answer came within ${CHAT_DEADLINE_MS / 1000} seconds.` : (answer.reason ?? model);
+    const answerText = answer.source === "model" ? withoutFalseDenial(answer.text) : tookTooLong ? `${NOT_ANSWERED} the AI took too long. Your question is kept; press Try again.` : answer.text;
+    say({ kind: "assistant", text: answerText, from, ...(failed ? { retry: question } : {}) });
     log(aiEvent("answered", "add", { text: answerText, model }));
     /*
      * An entry the answer worked out, offered as a card at once.
@@ -4564,6 +4598,7 @@ export function AskPanel({
    */
   const send = async (typed?: string, as?: Intent): Promise<void> => {
     sending.current += 1;
+    setAnswering((n) => n + 1);
     queuedPlans.current = [];
     try {
       await sendNow(typed, as);
@@ -4583,6 +4618,7 @@ export function AskPanel({
       log(aiEvent("answered", "add", { text: `Fault: ${what}`.slice(0, 400), model: "this device" }));
     } finally {
       sending.current = Math.max(0, sending.current - 1);
+      setAnswering((n) => Math.max(0, n - 1));
       setInFlight(null);
     }
   };
@@ -4591,6 +4627,30 @@ export function AskPanel({
    * A chip or a choice sends on a tap, and they sit where the page moves when
    * the keyboard opens or closes: a tap in that moment is not taken (A1).
    */
+  /**
+   * Ask a question again that got no answer. The failed answer and the
+   * question leave the view, and the question is sent as if just typed, so
+   * the conversation reads as one question and its answer.
+   */
+  const tryAgain = (index: number, question: string): void => {
+    if (busy) return;
+    setTurns((prev) => {
+      const drop = new Set<number>([index]);
+      if (prev[index]?.kind === "assistant") {
+        for (let k = index - 1; k >= 0; k -= 1) {
+          const t = prev[k];
+          if (t?.kind === "you") {
+            if ((t as Said).text === question) drop.add(k);
+            break;
+          }
+        }
+      }
+      return prev.filter((_, k) => !drop.has(k));
+    });
+    log(aiEvent("asked", "add", { text: `Try again: ${question}`.slice(0, 400) }));
+    void send(question);
+  };
+
   const tapSend = (text: string, as?: Intent): void => {
     if (touch && Date.now() - settledAt.current < 350) return;
     void send(text, as);
@@ -5413,6 +5473,12 @@ export function AskPanel({
        * change, pay, skip, remove and put back, each change a card to press.
        */
       const plans = settings.plans ?? [];
+      /** A plan for a day gone, and an entry that looks like its payment already: said, so it is not paid twice. */
+      const pastLooksPaid = (plan: Plan): string => {
+        if (plan.due === NO_DATE || plan.due >= asOf) return "";
+        const seen = likelyPayments(plan, transactions, plans)[0];
+        return seen ? ` #${String(seen.recordNumber).padStart(4, "0")} on ${formatMedium(seen.date)}, ${seen.item} ${formatMoney(seen.total)}, looks like it is paid already: after adding, link it on the Planner instead of paying again.` : "";
+      };
       const planAsk = readPlannerAsk(lead, { plans, reference, transactions, asOf, goals: settings.accounts.filter((a) => a.kind === "goal" && !a.archived).map((a) => ({ id: a.id, name: a.name })) });
       if (planAsk) {
         const planner: GoPlace = { screen: "planner", label: "the Planner" };
@@ -5440,7 +5506,7 @@ export function AskPanel({
         if (planAsk.kind === "add") {
           const plan = makePlan(planAsk.input, asOf, "ai");
           card(
-            `A new plan${plan.due === NO_DATE ? " with no date yet" : ""}. Nothing moves until it is paid. ${countsSentence(plan)}`,
+            `A new plan${plan.due === NO_DATE ? " with no date yet" : ""}. Nothing moves until it is paid. ${countsSentence(plan, asOf)}${pastLooksPaid(plan)}`,
             "Add to the planner",
             planRows(plan),
             { rows: [], save: { plan, action: "plan.create", summary: `Planned "${plan.title}", ${money(plan.amount)} ${byWhen(plan)}, from the chat.` } },
@@ -5452,7 +5518,7 @@ export function AskPanel({
           const next = movePlan(p, planAsk.to, asOf, planAsk.toKind);
           const lower = (w: string): string => w.replace(/^(Sometime|No)/, (m) => m.toLowerCase());
           card(
-            `"${p.title}" from ${lower(whenOf(p))} to ${lower(whenOf(next))}.${next.due === NO_DATE ? " With no date it is counted nowhere until it has one." : p.due === NO_DATE ? ` ${countsSentence(next)}` : " The move is kept on the plan."}`,
+            `"${p.title}" from ${lower(whenOf(p))} to ${lower(whenOf(next))}.${next.due === NO_DATE ? " With no date it is counted nowhere until it has one." : next.due < asOf ? " That day has passed, so it shows as overdue until it is paid." : p.due === NO_DATE ? ` ${countsSentence(next)}` : " The move is kept on the plan."}`,
             next.due === NO_DATE ? "Save with no date" : "Move it",
             [{ label: "Pay by, now", value: whenOf(p) }, { label: "New", value: whenOf(next) }],
             {
@@ -5592,8 +5658,8 @@ export function AskPanel({
         const lead =
           plan.due === NO_DATE
             ? `A new plan with no date yet, kept on the Planner. ${countsSentence(plan)}`
-            : `A new plan${kind === "day" ? "" : ` for ${whenOf(plan).replace(/^S/, "s")}`}. Nothing moves until it is paid. ${countsSentence(plan)}`;
-        return `${lead}${fitWords(plan)}${monthWords(plan)}`;
+            : `A new plan${kind === "day" ? "" : ` for ${whenOf(plan).replace(/^S/, "s")}`}. Nothing moves until it is paid. ${countsSentence(plan, asOf)}`;
+        return plan.due < asOf ? `${lead}${pastLooksPaid(plan)}` : `${lead}${fitWords(plan)}${monthWords(plan)}`;
       };
       const youAsked = (): void => {
         setDraft("");
@@ -5693,6 +5759,30 @@ export function AskPanel({
       } else {
         const intent = readPlanIntent(lead, planCtx);
         if (intent?.kind === "today") todayPlan = intent.thing || "it";
+        else if (intent?.kind === "past" && sink.canPlan) {
+          /*
+           * A plan for a day already gone (27 October 2026, the owner: "what
+           * happen if I plan in the past?"). Paid already is an entry, and one
+           * that looks like it is named so it is not added twice; still to pay
+           * is a plan that shows as overdue, or a new day.
+           */
+          youAsked();
+          const day = formatMedium(intent.plan.due);
+          const short = `${MONTH_NAMES[Number(intent.plan.due.slice(5, 7)) - 1]?.slice(0, 3).toLowerCase() ?? ""} ${Number(intent.plan.due.slice(8, 10))}`;
+          const thing = intent.title.toLowerCase();
+          const plan = intent.plan.amount !== null ? makePlan(intent.plan, asOf, "ai") : null;
+          const seen = plan ? likelyPayments(plan, transactions, plans)[0] : undefined;
+          if (seen) {
+            say({ kind: "assistant", text: `${day} has passed, and #${String(seen.recordNumber).padStart(4, "0")} on ${formatMedium(seen.date)}, ${seen.item} ${formatMoney(seen.total)}, looks like it: it is in your entries already, so nothing needs adding. If this is another one still to pay, say the new day, like "plan ${thing} ${Math.round((plan?.amount ?? 0) / 100)} by" a day ahead.`, from: "this device", go: plannerPlace });
+            return;
+          }
+          if (!plan) {
+            say({ kind: "assistant", text: `${day} has passed, so it is not a plan for later. Paid already? Type it as an entry, like "${thing} 500 cash ${short}". Still to pay? Say the new day, like "plan ${thing} 500 by" a day ahead.`, from: "this device", go: plannerPlace });
+            return;
+          }
+          offerPlan(plan, `${day} has passed. Paid already? Then it is an entry, not a plan: type it like "${thing} ${Math.round(plan.amount / 100)} cash ${short}". Still to pay? Add it here and it shows as overdue until it is paid, or say a new day.`);
+          return;
+        }
         else if (intent?.kind === "later" && sink.canPlan) {
           const fresh = intent.plans.filter((p) => p.amount === null || !onPlanner(p));
           if (fresh.length === 0) {
@@ -6258,9 +6348,25 @@ export function AskPanel({
       const ahead = aheadMonthIn(ruled, asOf) !== null;
       const planQuestion =
         !essay && comingSaid.length > 0 && ahead && (isQuestion(ruled) || /\b(?:can|could|will|would|should|is|am|do)\s+(?:i|it|that|my)\b/i.test(ruled)) && !/^\s*(?:please\s+|pls\s+)?(?:set|make|change|put|raise|lower|use)\b/i.test(ruled);
+      /*
+       * "does my plan next month and my spending and budget align properly?"
+       * (27 October 2026): the Planner's plans, the usual month and the budget
+       * set, side by side for that month. It got the running month's headline.
+       * With a budget set it is the "does it hold" answer; without one, what
+       * the month needs.
+       */
+      const plansAlign =
+        !essay &&
+        todayPlan === null &&
+        /\b(?:my|the|these|those|our)\s+(?:\w+\s+)?(?:plans?|planner)\b|\bplanned\b/i.test(ruled) &&
+        // "let me know if I can afford my plan next month?" (27 October 2026) is the same question without the word budget.
+        ((/\bbudget/i.test(ruled) &&
+          /\b(?:align\w*|aligned|match\w*|line\s+up|in\s+line|fit\w*|on\s+track|add\s+up|work\s+out|enough|cover\w*|ok(?:ay)?|balanced?|consistent|make\s+sense|realistic|kaya|tugma)\b/i.test(ruled)) ||
+          /\b(?:afford|enough\s+(?:money|for)|cover|kaya(?:ng|ko)?|pay\s+for)\b/i.test(ruled)) &&
+        !/^\s*(?:please\s+)?(?:add|put|move|change|edit|rename|skip|remove|delete|pay|mark)\b/i.test(ruled);
       const keepsBudget =
-        planQuestion && /\b(?:keep|stay\s+(?:within|in|under|on)|fit|within|over|break|blow|still\s+(?:in|on|within))\b[^?.!]{0,30}\bbudget\b|\bbudget\b[^?.!]{0,25}\b(?:enough|hold|still|ok(?:ay)?|cover)\b/i.test(ruled);
-      const affordish = (!essay && !planQuestion && !asksWhatItNeeds(ruled) && (decides(lead) || again !== null)) || todayPlan !== null;
+        (planQuestion && /\b(?:keep|stay\s+(?:within|in|under|on)|fit|within|over|break|blow|still\s+(?:in|on|within))\b[^?.!]{0,30}\bbudget\b|\bbudget\b[^?.!]{0,25}\b(?:enough|hold|still|ok(?:ay)?|cover)\b/i.test(ruled)) || plansAlign;
+      const affordish = (!essay && !planQuestion && !plansAlign && !asksWhatItNeeds(ruled) && (decides(lead) || again !== null)) || todayPlan !== null;
 
       const advised = lastAdvice.current;
       const stillHere = advised !== null && turns.slice(-12).some((t) => t.kind === "you" && t.text === advised.asked);
@@ -6281,7 +6387,7 @@ export function AskPanel({
        * to survive next month?": what the month takes against the money for it,
        * worked out step by step (26 October 2026). Not a question about today.
        */
-      const needs = !affordish && !essay && !keepsBudget && (asksWhatItNeeds(ruled) || planQuestion);
+      const needs = !affordish && !essay && ((!keepsBudget && (asksWhatItNeeds(ruled) || planQuestion)) || plansAlign);
       const budgetish = !affordish && (asksBudgetAdvice(ruled) || splitAgain || newIncome || checksFit || needs || keepsBudget);
       const spent = !affordish && !budgetish && !essay && !wantsChart(note) ? readSpendAsk(ruled, knownItems, asOf) : null;
       // "how much have I earned since the beginning", "all income since 2022, not only Framelink" (earnAsk.ts).
@@ -6324,7 +6430,7 @@ export function AskPanel({
           // "Add it as a plan" is the Planner, never a budget to set (27 October 2026: it made a Budget change card).
           const setsIt = !splitAgain && SETS_BUDGET.test(ruled) && !ASKS_ONLY.test(ruled) && !asksToPlan(ruled);
           // The month beside the word budget first: a long message names others.
-          const named = adviceMonthIn(ruled, asOf) ?? (planQuestion ? aheadMonthIn(ruled, asOf) : null) ?? (essay ? null : (() => {
+          const named = adviceMonthIn(ruled, asOf) ?? (planQuestion || plansAlign ? aheadMonthIn(ruled, asOf) : null) ?? (essay ? null : (() => {
             const span = spanIn(lead, asOf);
             return span && span.anchored !== false ? { year: span.year, month: span.month } : null;
           })());
@@ -6342,8 +6448,22 @@ export function AskPanel({
            */
           const judging = judgesSetBudget(ruled) && !splitAgain && !newIncome;
           const thisMonth = { year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)) };
+          /*
+           * "can I afford my plan?" with no month said: the month of the plan
+           * it names ("my tuition plan"), else of the next open plan ahead.
+           */
+          const planMonth = (() => {
+            if (!plansAlign || named) return null;
+            const ahead = (settings.plans ?? [])
+              .filter((p) => p.status === "open" && p.due !== NO_DATE && p.due.slice(0, 7) > asOf.slice(0, 7))
+              .sort((a, b) => (a.due < b.due ? -1 : 1));
+            const lowered = ruled.toLowerCase();
+            const pick = ahead.find((p) => p.title.toLowerCase().split(/\s+/).some((w) => w.length > 3 && lowered.includes(w))) ?? ahead[0];
+            return pick ? { year: Number(pick.due.slice(0, 4)), month: Number(pick.due.slice(5, 7)) } : null;
+          })();
           const target =
             named ??
+            planMonth ??
             (judging ? (newestBudgetChange(budgets, asOf) ?? thisMonth) : null) ??
             ((splitAgain || newIncome || checksFit) && advised
               ? { year: advised.advice.year, month: advised.advice.month }
@@ -6390,7 +6510,10 @@ export function AskPanel({
               await answerWithModel(
                 [
                   `Whether the budget already set for ${first.name} holds with what they said is coming, worked out by the app: the budget set, their usual month, what is coming on top, and what keeping it would take. These figures are correct: quote them, never recompute them, and never recommend setting the budget to the planned amount alone.`,
-                  `What they said is coming (${planned.map((l) => `${l.name} ${formatMoney(l.amount)}`).join(", ")}) is money they will pay out, on top of the usual month.`,
+                  planned.length > 0
+                    ? `What is coming (${planned.map((l) => `${l.name} ${formatMoney(l.amount)}`).join(", ")}, from what they said and the Planner) is money they will pay out, on top of the usual month.`
+                    : `Nothing is planned for ${first.name} on the Planner and they said nothing coming: say so, and judge the budget against the usual month alone.`,
+                  ...(plansAlign ? ["They asked whether their plans, their spending and the budget line up: answer yes or no first, then each of the three in one line, from these figures."] : []),
                   kept,
                 ].join("\n"),
                 kept,
@@ -10139,6 +10262,13 @@ export function AskPanel({
                       </Button>
                     </div>
                   )}
+                  {turn.retry && !turns.slice(i + 1).some((t) => t.kind === "you" && (t as Said).text === turn.retry) && (
+                    <div className="fms-proposalactions">
+                      <Button size="sm" disabled={busy} onClick={() => turn.retry && tryAgain(i, turn.retry)}>
+                        Try again
+                      </Button>
+                    </div>
+                  )}
                 </>
               ) : (
                 <>
@@ -10218,6 +10348,28 @@ export function AskPanel({
             </div>
           );
         })}
+        {/*
+          A question left with no answer: the app was closed or reloaded while
+          it was on its way, or it was stopped. Said, with Try again, rather
+          than left looking as if it is still being worked on.
+        */}
+        {(() => {
+          const last = turns[turns.length - 1];
+          if (!last || last.kind !== "you" || busy || inFlight || answering > 0 || !(last as Said).text) return null;
+          const question = (last as Said).text;
+          return (
+            <div className="fms-turn fms-turn--unanswered" role="status">
+              <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+                Not answered. Nothing was saved from it.
+              </p>
+              <div className="fms-proposalactions">
+                <Button size="sm" onClick={() => tryAgain(turns.length - 1, question)}>
+                  Try again
+                </Button>
+              </div>
+            </div>
+          );
+        })()}
         {inFlight && !turns.slice(inFlight.from).some((t) => t.kind === "you" && (t as { text?: string }).text === inFlight.text) && (
           <div className="fms-turn fms-turn--you" aria-busy="true">
             <p className="t-caption" style={{ margin: 0, whiteSpace: "pre-wrap" }}>
