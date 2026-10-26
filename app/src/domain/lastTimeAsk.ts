@@ -25,6 +25,28 @@ const ASKS =
 
 const LITTLE = new Set("the a an my i me on for at in of to and how much did do was is when last time usually usual pay paid spend spent buy bought got had what it this that".split(" "));
 
+/**
+ * "How much I spent last time?", naming nothing: the thing is the one the
+ * conversation is about. Answered with September's total, then with the
+ * gym's price today, before the third try got the gym's last time (26
+ * October 2026).
+ */
+export function asksLastTime(text: string): boolean {
+  const t = text.trim();
+  return ASKS.test(t) && !/\d/.test(t) && !/\byou\b/i.test(t);
+}
+
+/** The longest item on the list a sentence names, as a whole word. */
+export function itemNamed(text: string, items: readonly string[]): string | null {
+  const lower = text.toLowerCase();
+  return (
+    [...items]
+      .filter((n) => n.trim().length > 2 && !/^(?:unknown|random|spending|revenue|transfer)$/i.test(n.trim()))
+      .sort((a, b) => b.length - a.length)
+      .find((n) => new RegExp(`\\b${n.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`).test(lower)) ?? null
+  );
+}
+
 export function readLastTimeAsk(text: string, items: readonly string[]): LastTimeAsk | null {
   const t = text.trim();
   // "same as last time 200" is an entry, and "last time you said" is about the answer, not the money.

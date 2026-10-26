@@ -152,7 +152,7 @@ import { eatOutAnswer, mealPrice, readEatOutAsk } from "../domain/eatOutAsk";
 import { billsAnswer, readBillsAsk } from "../domain/billsAsk";
 import { goalAnswer, readGoalAsk } from "../domain/goalAsk";
 import { readWeekAsk, weekAnswer } from "../domain/weekAsk";
-import { lastTimeAnswer, readLastTimeAsk } from "../domain/lastTimeAsk";
+import { asksLastTime, itemNamed, lastTimeAnswer, readLastTimeAsk } from "../domain/lastTimeAsk";
 import { asksToSignOut, asksToStopBill, readGoAsk, settingsPlaceFor, type GoPlace } from "../domain/goAsk";
 import { creditRoomAnswer, debtDetailChange, readDebtDetailAsk } from "../domain/debtDetailAsk";
 import { numbersInWords, readReviewRowAsk, reviewRowAnswer } from "../domain/reviewAsk";
@@ -276,9 +276,10 @@ import {
 import { readSpendAsk, spendAnswer } from "../domain/spendAsk";
 import { earnAnswer, readEarnAsk } from "../domain/earnAsk";
 import { readLedgerSearch, searchLedger } from "../domain/ledgerSearch";
-import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksShortBudget, asksForTheSplit, budgetAdvice, expectedIncomeIn, judgeWords, judgesSetBudget, newestBudgetChange, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
+import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksShortBudget, asksForTheSplit, budgetAdvice, expectedIncomeIn, judgeWords, judgesSetBudget, keepWords, needWords, newestBudgetChange, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
+import { aheadMonthIn, asksWhatItNeeds, plannedSpendIn } from "../domain/plannedSpend";
 import { asksSettingsChange, asksWhatChartsExist, capabilitiesAnswer, chartsAnswer, SETTINGS_ARE_YOURS, wantsCapabilities } from "../domain/assistantScope";
-import { assessMonthFor, budgetForYear } from "../domain/budget";
+import { assessMonthFor, budgetForMonth, budgetForYear } from "../domain/budget";
 import { addDays, daysInMonth, daysLeftInMonth, formatMedium, MONTH_NAMES } from "../domain/dates";
 import { chatHistory, earlierSessions, keepInMind } from "../domain/memory";
 import { alikeKey, answerCard, cardAnswerNote, cardQuestion, confirmsIncome, keepTheMoney, looksLikeAnswer, pendingChoices, SKIP_CARD, STOP_ASKING, whatChanged, type CardToAsk, type LineToName } from "../domain/cardQuestions";
@@ -607,6 +608,11 @@ interface Offered {
 }
 
 type Turn = Said | Offered | Found | Drawn | DebtChoice | Changing | Budgeting | Exporting | Settling;
+
+/** Words a question is never about, however often the entries use them. */
+const SUBJECT_STOP = new Set(
+  "the and for with from that this what how much many can could would should will did does have has had was were are you your my mine our today yesterday tomorrow tonight morning usual usually last time times month months week weeks year years day days spend spent spending pay paid buy bought afford cost costs money budget going based consistent see trend chart show again more less also just only really like want need get got make made take took give gave keep left still about over under into onto then than when where which who why not yes okay please pls lang naman yung ang mga sa ng na po".split(" "),
+);
 
 const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
 
@@ -2207,6 +2213,38 @@ export function AskPanel({
     ],
     [transactions, reference],
   );
+
+  /** How many spending entries use each word, item and description, for finding what a question is about. */
+  const ledgerWords = useMemo(() => {
+    const count = new Map<string, number>();
+    for (const t of transactions) {
+      if (t.type !== "Spending") continue;
+      for (const w of new Set(`${t.item} ${t.description}`.toLowerCase().replace(/[^a-z\s-]/g, " ").split(/\s+/))) {
+        if (w.length >= 3) count.set(w, (count.get(w) ?? 0) + 1);
+      }
+    }
+    return count;
+  }, [transactions]);
+
+  /**
+   * What the conversation is about: the item the last few questions named,
+   * newest first. "Let see it in trend" after a gym question drew all
+   * spending, and "how much i spent last time?" after the gym chart gave
+   * September's total (26 October 2026). Read from what was said, so it
+   * holds across a reload and however long ago it was asked.
+   */
+  const subjectSaid = (): string | null => {
+    const asked = turns.filter((t): t is Said => t.kind === "you").slice(-3).reverse();
+    for (const t of asked) {
+      const item = itemNamed(t.text, knownItems);
+      if (item) return item;
+      // Or a word the spending entries use, "gym" for Self Care (Gym): the rarest one said.
+      const said = t.text.toLowerCase().replace(/[^a-z\s-]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !SUBJECT_STOP.has(w) && (ledgerWords.get(w) ?? 0) >= 2);
+      const word = said.sort((a, b) => (ledgerWords.get(a) ?? 0) - (ledgerWords.get(b) ?? 0))[0];
+      if (word) return word;
+    }
+    return null;
+  };
   /** When each item was last used, so the reader is told which ones are years old (aiClient.ts). */
   const lastUsed = useMemo(() => itemsLastUsed(transactions), [transactions]);
 
@@ -4495,7 +4533,10 @@ export function AskPanel({
       if (typed === undefined) setDraftState("");
     };
     const lastAnswered = drawnNext.current && Date.now() - drawnNext.current.at < 15 * 60_000 && drawnNext.current.at > lastDrawnAt.current ? drawnNext.current.question : null;
-    const drawTopic = offeredDraw.current ?? lastAnswered;
+    // Else the item the last questions named, when this names none ("let see it in trend" after the gym).
+    const bareDraw = !offeredDraw.current && !lastAnswered && files.length === 0 && (drawReply(lead) ?? drawsBack(lead)) !== null && itemNamed(lead, knownItems) === null;
+    const subjectNow = bareDraw ? subjectSaid() : null;
+    const drawTopic = offeredDraw.current ?? lastAnswered ?? (subjectNow ? `${subjectNow} spending` : null);
     const drawAs = drawTopic && !as && files.length === 0 ? (drawReply(lead) ?? drawsBack(lead)) : null;
     // An offer is for the next message only.
     if (!drawAs) offeredDraw.current = null;
@@ -4988,7 +5029,22 @@ export function AskPanel({
       const billsAsked = readBillsAsk(lead, [...reference.bills, ...reference.subscriptions]);
       const goalAsked = billsAsked ? null : readGoalAsk(lead, asOf);
       const weekAsked = billsAsked || goalAsked ? null : readWeekAsk(lead);
-      const lastAsked = billsAsked || goalAsked || weekAsked ? null : readLastTimeAsk(lead, knownItems);
+      /*
+       * "How much i spent last time?" naming nothing is about what the
+       * conversation is about, and "I mean on gym" straight after it names
+       * the thing (26 October 2026).
+       */
+      const prevYou = [...turns].reverse().find((t): t is Said => t.kind === "you")?.text ?? "";
+      const meantNow = meantInstead(lead);
+      const lastAsked =
+        billsAsked || goalAsked || weekAsked
+          ? null
+          : (readLastTimeAsk(lead, knownItems) ??
+            (asksLastTime(lead) ? (() => {
+              const subject = subjectSaid();
+              return subject ? readLastTimeAsk(`${lead} ${subject}`, knownItems) : null;
+            })() : null) ??
+            (meantNow && asksLastTime(prevYou) ? readLastTimeAsk(`${prevYou} ${meantNow}`, knownItems) : null));
       const reply = billsAsked
         ? billsAnswer(billsAsked, { transactions: reportRows, reference, asOf }, formatMoney)
         : goalAsked
@@ -5747,7 +5803,23 @@ export function AskPanel({
           : !decides(lead) && decisionBefore && followsUpDecision(lead)
             ? decisionBefore
             : null;
-      const affordish = !essay && (decides(lead) || again !== null);
+      /*
+       * Spending said to be coming in a month ahead, asked about: "If I expect
+       * 15000 allowance and have 9k tuition pending, is it enough for
+       * November?", "can I afford a 9k tuition next month?", "I will spend
+       * 2000 for my birthday on November 5, can I still keep my budget?". Each
+       * is about that month's money and budget, never about today's wallets
+       * (the first two were answered against today's PHP 700.85) and never a
+       * budget to set (the third made a PHP 2,000.00 budget card), 26 October
+       * 2026.
+       */
+      const comingSaid = plannedSpendIn(ruled);
+      const ahead = aheadMonthIn(ruled, asOf) !== null;
+      const planQuestion =
+        !essay && comingSaid.length > 0 && ahead && (isQuestion(ruled) || /\b(?:can|could|will|would|should|is|am|do)\s+(?:i|it|that|my)\b/i.test(ruled)) && !/^\s*(?:please\s+|pls\s+)?(?:set|make|change|put|raise|lower|use)\b/i.test(ruled);
+      const keepsBudget =
+        planQuestion && /\b(?:keep|stay\s+(?:within|in|under|on)|fit|within|over|break|blow|still\s+(?:in|on|within))\b[^?.!]{0,30}\bbudget\b|\bbudget\b[^?.!]{0,25}\b(?:enough|hold|still|ok(?:ay)?|cover)\b/i.test(ruled);
+      const affordish = !essay && !planQuestion && !asksWhatItNeeds(ruled) && (decides(lead) || again !== null);
 
       const advised = lastAdvice.current;
       const stillHere = advised !== null && turns.slice(-12).some((t) => t.kind === "you" && t.text === advised.asked);
@@ -5763,7 +5835,13 @@ export function AskPanel({
        * and invented a ₱14,000 limit (13 October 2026).
        */
       const checksFit = stillHere && income === null && !splitAgain && /\b(?:validat\w*|verify|check\w*|fits?|fitting|realistic|sustainable|kaya)\b/i.test(ruled) && ruled.split(/\s+/).length <= 18;
-      const budgetish = !affordish && (asksBudgetAdvice(ruled) || splitAgain || newIncome || checksFit);
+      /*
+       * "If I have 9k in tuition pending how much do i need including my budget
+       * to survive next month?": what the month takes against the money for it,
+       * worked out step by step (26 October 2026). Not a question about today.
+       */
+      const needs = !affordish && !essay && !keepsBudget && (asksWhatItNeeds(ruled) || planQuestion);
+      const budgetish = !affordish && (asksBudgetAdvice(ruled) || splitAgain || newIncome || checksFit || needs || keepsBudget);
       const spent = !affordish && !budgetish && !essay && !wantsChart(note) ? readSpendAsk(ruled, knownItems, asOf) : null;
       // "how much have I earned since the beginning", "all income since 2022, not only Framelink" (earnAsk.ts).
       const earned = !affordish && !budgetish && !spent && !wantsChart(note) ? readEarnAsk(ruled, reference.revenueCategories, asOf) : null;
@@ -5800,7 +5878,7 @@ export function AskPanel({
            */
           const setsIt = !splitAgain && SETS_BUDGET.test(ruled) && !ASKS_ONLY.test(ruled);
           // The month beside the word budget first: a long message names others.
-          const named = adviceMonthIn(ruled, asOf) ?? (essay ? null : (() => {
+          const named = adviceMonthIn(ruled, asOf) ?? (planQuestion ? aheadMonthIn(ruled, asOf) : null) ?? (essay ? null : (() => {
             const span = spanIn(lead, asOf);
             return span && span.anchored !== false ? { year: span.year, month: span.month } : null;
           })());
@@ -5828,6 +5906,9 @@ export function AskPanel({
                 : { year: next.year, month: next.month });
           const said = income ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.income : null);
           const keep = savingsGoalIn(ruled) ?? (advised && stillHere && advised.advice.fit ? advised.advice.fit.keep : null);
+          // What they said is coming (tuition, a trip), kept for the follow-ups on the same budget.
+          const saidComing = plannedSpendIn(ruled);
+          const planned = saidComing.length > 0 ? saidComing : advised && stillHere ? (advised.advice.planned ?? []) : [];
           /*
            * A month after next is read from the same months next month is, as
            * the Budget screen's forecast reads it: December said a usual month
@@ -5836,16 +5917,34 @@ export function AskPanel({
            */
           const nextUp = nextOf(asOf);
           const readFrom = target.year * 12 + target.month > nextUp.year * 12 + nextUp.month ? { readBefore: { year: nextUp.year, month: nextUp.month } } : {};
-          const first = budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes, income: said, keep, ...readFrom });
+          const first = budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes, income: said, keep, planned, ...readFrom });
           /*
            * "based on my income and spending" with no figure: held to the
            * income they usually receive, the median month over the same
            * months the spending is read from (4 October 2026).
            */
           // "one that would fit my needs", "does it fit" when it does not: held to the usual income too.
-          const byIncome = said === null && first.typicalIncome > 0 && (BY_INCOME.test(ruled) || (FITS.test(ruled) && first.total + first.debtDue > first.typicalIncome));
+          // "How much do I need" is answered against the money too, so its budget is held to the income as well.
+          const byIncome = said === null && first.typicalIncome > 0 && (needs || BY_INCOME.test(ruled) || (FITS.test(ruled) && first.total + first.debtDue > first.typicalIncome));
           const held = byIncome ? first.typicalIncome : said;
-          const advice = byIncome ? budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes, income: held, keep, ...readFrom }) : first;
+          const advice = byIncome ? budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes, income: held, keep, planned, ...readFrom }) : first;
+          if (keepsBudget) {
+            const set = budgetForMonth(budgets, target.year, target.month);
+            if (set.spending + set.billsSubs > 0) {
+              const held = budgetAdvice({ transactions: reportRows, year: target.year, month: target.month, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes, income: set.spending + set.billsSubs + first.debtDue, planned, ...readFrom });
+              const kept = keepWords(first, held, set);
+              lastAdvice.current = { advice: first, text: kept, asked: note };
+              await answerWithModel(
+                [
+                  `Whether the budget already set for ${first.name} holds with what they said is coming, worked out by the app: the budget set, their usual month, what is coming on top, and what keeping it would take. These figures are correct: quote them, never recompute them, and never recommend setting the budget to the planned amount alone.`,
+                  `What they said is coming (${planned.map((l) => `${l.name} ${formatMoney(l.amount)}`).join(", ")}) is money they will pay out, on top of the usual month.`,
+                  kept,
+                ].join("\n"),
+                kept,
+              );
+              return;
+            }
+          }
           if (judging) {
             const tracks = assessMonthFor(reportRows, budgets, target.year, target.month);
             const phase = target.year * 12 + target.month - (thisMonth.year * 12 + thisMonth.month);
@@ -5880,7 +5979,25 @@ export function AskPanel({
                   ? `No: the ${php(priorTotal)} budget is ${php(priorTotal + prior.debtDue - prior.typicalIncome)} more than your usual month brings in (${php(prior.typicalIncome)}). Held to that income instead: `
                   : `Yes: the ${php(priorTotal)} budget fits your usual month's ${php(prior.typicalIncome)}, with ${php(prior.typicalIncome - priorTotal - prior.debtDue)} to spare. `
                 : "";
-          const text = `${verdict}${adviceWords(advice)}`;
+          /*
+           * What the month needs, step by step, before the budget: the usual
+           * month, what is coming, the debt due, against the income, what
+           * carries over and the savings (`needWords`).
+           */
+          const nextUpMonth = nextOf(asOf);
+          const isNext = target.year === nextUpMonth.year && target.month === nextUpMonth.month;
+          const carry = isNext
+            ? (monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe?.safe ?? null)
+            : null;
+          const needText = needs
+            ? needWords(first, {
+                incomeSaid: said,
+                carry,
+                savings: reference.savings.map((name) => ({ name, amount: walletBalance(transactions, name) })),
+                verdict: /\b(?:afford|enough|kaya|kakayanin|can\s+i|will\s+i\s+(?:have|make|survive))\b/i.test(ruled),
+              })
+            : "";
+          const text = `${verdict}${needText ? `${needText}\n\n` : ""}${adviceWords(advice, { plannedSaid: needText !== "" })}`;
           lastAdvice.current = { advice, text, asked: note };
           incomeAnswered.current = null;
           await answerWithModel(
@@ -5893,6 +6010,12 @@ export function AskPanel({
                */
               held
                 ? `It is held to ${byIncome ? "their usual income" : "the income they said"}: the total to recommend is the one in its first sentence, never the usual month's, and money already in their wallets is not part of it. Say what the income covers first (bills, then spending), and what is left to save.`
+                : "",
+              planned.length > 0
+                ? `What they said is coming (${planned.map((l) => `${l.name} ${formatMoney(l.amount)}`).join(", ")}) is money they will pay out, counted in full on top of the usual month and never cut: never call it income, money they have or money they expect to receive.`
+                : "",
+              needs
+                ? "They asked how much the month needs: open with that figure and keep every step of the working as it is laid out (each part, the total, the money for it, short or to spare, what carries over, the savings), then the budget held to the money. Never skip a step or combine figures yourself."
                 : "",
               setsIt ? "A card with these figures is shown under your answer for them to apply: say so in one short sentence, and never say it is set or applied." : "",
               splitAgain

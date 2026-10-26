@@ -87,12 +87,13 @@ const words = (s: string): string => s.toLowerCase().replace(/[^a-z0-9 ]+/g, " "
 
 /** The figure in a sentence, in centavos: "100", "₱1,500", "250.50". Not a date or a count of days. */
 function figureIn(text: string): Centavos | null {
-  const m = /(?:₱|php|p)?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?!\s*(?:days?|weeks?|months?|years?|am|pm|th|st|nd|rd)\b)/i.exec(text);
+  // "9k" is nine thousand: it was read as PHP 9.00 ("can I afford a 9k tuition next month?", 26 October 2026).
+  const m = /(?:₱|php|p)?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?:\s*(k)\b)?(?!\s*(?:days?|weeks?|months?|years?|am|pm|th|st|nd|rd)\b)/i.exec(text);
   if (!m) return null;
   const whole = Number(m[1]!.replace(/,/g, ""));
   if (!Number.isFinite(whole) || whole <= 0) return null;
   const cents = m[2] ? Number(m[2].padEnd(2, "0")) : 0;
-  return whole * 100 + cents;
+  return m[3] ? (whole * 100 + cents) * 1000 : whole * 100 + cents;
 }
 
 /**

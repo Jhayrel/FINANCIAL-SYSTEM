@@ -10,7 +10,7 @@
  */
 import { addDays, daysBetween, formatMedium, MONTH_NAMES } from "./dates";
 import { monthBrief } from "./monthPlan";
-import { parseAmount, type Centavos } from "./money";
+import { parseAmount, withoutYears, type Centavos } from "./money";
 import type { Debt } from "./debt";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -36,7 +36,7 @@ export function readGoalAsk(text: string, asOf: IsoDate): GoalAsk | null {
   if (!SAVE.test(t)) return null;
   // Asking about what was saved already, or a budget, is another question.
   if (/\b(?:how much (?:did|have) i (?:save|saved)|budget|limit|interest)\b/i.test(t)) return null;
-  const figure = /(?:₱|php\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(k)?\b(?!\s*(?:days?|weeks?|months?|years?|%))/i.exec(t.replace(/\b20\d{2}\b/g, " "));
+  const figure = /(?:₱|php\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(k)?\b(?!\s*(?:days?|weeks?|months?|years?|%))/i.exec(withoutYears(t));
   if (!figure?.[1]) return null;
   const base = parseAmount(figure[1]);
   if (base === null || base <= 0) return null;

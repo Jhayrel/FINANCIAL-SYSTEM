@@ -1698,6 +1698,35 @@ assistant to change Settings too, that is a rule change for them to make.
 The bin's list said "Deleted 0, 0," for a row kept without its deletion
 time (a local copy loads none); it says the day is not recorded now.
 
+### 2026-10-26, later: a month ahead, with what is coming
+
+The 26 October backup's last question: "If I have 9k in tuition pending how
+much do i need including my budget to survive next month? Do some
+calculations". "If I have 9k" was read as income (`expectedIncomeIn`), the
+budget was held to PHP 9,000.00 and cut, and the model then added the 9,000
+to that cut budget (PHP 17,772.00). Fixed:
+
+- `plannedSpend.ts` reads a sum beside a thing that costs money, or beside
+  pending, due, to pay or plan to spend, as spending that is coming. It is
+  taken out before income is read, so it is never income.
+- `budgetAdvice` takes `planned`: added on top of the usual month in full,
+  never cut; held to an income, the wants give way first.
+- "How much do I need", "is it enough", "can I afford X next month" answer
+  with `needWords`: each part, the total, the income said (else the usual
+  month's), short or to spare, what carries over if nothing more is spent,
+  and the savings named and not counted. Tuition beside the usual School line
+  is said with both totals, not guessed.
+- "Can I still keep my budget?" with a plan answers from the budget set for
+  that month (`keepWords`): over or under, what keeping it takes, or the
+  figure to raise it to. It made a PHP 2,000.00 budget card before.
+- `aheadMonthIn`: "November 5" is a month ahead, not only "next month".
+- Two thousand pesos was read as the year 2000 in the planned reader and in
+  the savings goal ("save 2000 by december"); both use `withoutYears` now.
+- "9k" was PHP 9.00 in the afford reader.
+- "How much i spent last time?" naming nothing, "I mean on gym" after it,
+  and "let see it in trend" after the gym answer all take the subject from
+  the last questions (`subjectSaid`), the gym found in the descriptions.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

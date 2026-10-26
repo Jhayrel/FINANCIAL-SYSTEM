@@ -47,6 +47,7 @@ import { forecastYear } from "./forecast";
 import type { Debt } from "./debt";
 import type { BudgetAssessment, Budgets, IsoDate, Necessity, Transaction } from "./types";
 import { notTheMonth } from "./budgetAsk";
+import { withoutPlannedSpend } from "./plannedSpend";
 
 /** Months read, at most, before the one being planned. */
 const WINDOW = 6;
@@ -100,7 +101,12 @@ export interface BudgetAdvice {
   readonly subscriptions: readonly AdviceLine[];
   /** Subscriptions marked stopped, and so left out. */
   readonly stopped: readonly string[];
-  /** The spending track: items, fees and interest. */
+  /**
+   * What the owner said is coming in the month on top of the usual ("9k in
+   * tuition pending"): spending, never cut, never income (`plannedSpend.ts`).
+   */
+  readonly planned?: readonly AdviceLine[];
+  /** The spending track: items, fees and interest, and anything planned. */
   readonly spending: Centavos;
   /** The bills and subscriptions track. */
   readonly billsSubs: Centavos;
@@ -172,6 +178,8 @@ export interface AdviceInput {
    * and the shortfall overstated (19 October 2026 audit).
    */
   readonly spendingTypes?: readonly { readonly name: string; readonly necessity?: Necessity | undefined }[];
+  /** Spending the owner said is coming in the month, on top of the usual: tuition, a trip. */
+  readonly planned?: readonly { readonly name: string; readonly amount: Centavos }[];
 }
 
 /** A want, by the owner's mark, else by its name. */
@@ -299,7 +307,10 @@ export function budgetAdvice(input: AdviceInput): BudgetAdvice {
   oneOffs.sort((a, b) => b.amount - a.amount);
 
   // ── The totals, as the sums of the lines ───────────────────────────────────
-  const spending = items.reduce((sum, l) => sum + l.amount, 0) + feeLine + interestLine;
+  const usualSpending = items.reduce((sum, l) => sum + l.amount, 0) + feeLine + interestLine;
+  const planned: AdviceLine[] = (input.planned ?? []).filter((p) => p.amount > 0).map((p) => ({ name: p.name, amount: p.amount }));
+  const plannedTotal = planned.reduce((sum, l) => sum + l.amount, 0);
+  const spending = usualSpending + plannedTotal;
   const billsSubs = [...bills, ...subscriptions].reduce((sum, l) => sum + l.amount, 0);
   const debts = input.debts ?? [];
   const asOfMonth = year === Number(asOf.slice(0, 4)) ? Number(asOf.slice(5, 7)) : year < Number(asOf.slice(0, 4)) ? 12 : 0;
@@ -309,8 +320,9 @@ export function budgetAdvice(input: AdviceInput): BudgetAdvice {
   let fit: BudgetAdvice["fit"];
   if (input.income && input.income > 0) {
     const keep = Math.max(0, input.keep ?? 0);
-    const room = down(input.income - billsSubs - debtDue - keep);
-    if (spending <= room) {
+    // What is planned is paid whatever happens: the usual spending gives way to it, never the other way.
+    const room = down(input.income - billsSubs - debtDue - keep - plannedTotal);
+    if (usualSpending <= room) {
       fit = { income: input.income, room, fits: true, spending, cuts: [], short: 0, keep };
     } else {
       /*
@@ -319,15 +331,15 @@ export function budgetAdvice(input: AdviceInput): BudgetAdvice {
        * Only when every want is gone is a need touched, and then it is not
        * cut but reported as the gap.
        */
-      const over = spending - Math.max(0, room);
+      const over = usualSpending - Math.max(0, room);
       const wants = items.filter((l) => isWant(l.name));
       const wanted = wants.reduce((sum, l) => sum + l.amount, 0);
       const cuts: { name: string; from: Centavos; to: Centavos }[] =
         wanted <= over
           ? wants.map((l) => ({ name: l.name, from: l.amount, to: 0 }))
           : wants.map((l) => ({ name: l.name, from: l.amount, to: down(Math.floor((l.amount * (wanted - over)) / wanted)) }));
-      const after = spending - cuts.reduce((sum, c) => sum + (c.from - c.to), 0);
-      fit = { income: input.income, room, fits: false, spending: after, cuts, short: Math.max(0, after - Math.max(0, room)), keep };
+      const after = usualSpending - cuts.reduce((sum, c) => sum + (c.from - c.to), 0);
+      fit = { income: input.income, room, fits: false, spending: after + plannedTotal, cuts, short: Math.max(0, after - Math.max(0, room)), keep };
     }
   }
 
@@ -344,6 +356,7 @@ export function budgetAdvice(input: AdviceInput): BudgetAdvice {
     bills,
     subscriptions,
     stopped: leftOut,
+    ...(planned.length > 0 ? { planned } : {}),
     spending,
     billsSubs,
     total: spending + billsSubs,
@@ -353,6 +366,153 @@ export function budgetAdvice(input: AdviceInput): BudgetAdvice {
     oneOffs: oneOffs.slice(0, 5),
     ...(fit ? { fit } : {}),
   };
+}
+
+/** The kind of usual spending each planned thing may already be part of. */
+const FAMILIES: readonly (readonly [RegExp, RegExp])[] = [
+  [/\b(?:tuition|school|enrol+ment|matriculation|miscellaneous|books?|uniform|thesis|exam|graduation|project|review|registration)\b/i, /\b(?:school|tuition|education|stud(?:y|ies))\b/i],
+  [/\b(?:trip|travel|vacation|outing)\b/i, /\b(?:travel|trip)\b/i],
+  [/\b(?:rent|upa)\b/i, /\brent\b/i],
+  [/\brepairs?\b/i, /\brepair/i],
+  [/\b(?:medical|hospital|dentist|check-?up|medicine|gamot)\b/i, /\b(?:medical|health|medicine|hospital)\b/i],
+  [/\b(?:groceries|grocery)\b/i, /\b(?:grocer\w*|home needs)\b/i],
+];
+
+/**
+ * Where something planned may already be inside the usual month: tuition and
+ * the usual School line. Said, with what it does to the total, rather than
+ * guessed either way: the owner knows whether the tuition is that spending.
+ */
+export function overlapWords(a: BudgetAdvice): string {
+  const said: string[] = [];
+  for (const p of a.planned ?? []) {
+    const family = FAMILIES.find(([planned]) => planned.test(p.name));
+    const usual = family ? a.items.find((l) => family[1].test(l.name) && l.amount > 0) : undefined;
+    if (usual) {
+      said.push(
+        ` Your usual month already has ${usual.name} at ${money(usual.amount)}: if the ${p.name.toLowerCase()} is that spending rather than on top of it, the total is ${money(a.total - usual.amount)}.`,
+      );
+    }
+  }
+  return said.join("");
+}
+
+/**
+ * "How much do I need to survive next month?": what the month takes, and the
+ * money for it, said step by step so every figure can be checked.
+ *
+ * What it takes is the usual month (spending, bills and subscriptions), what
+ * the owner said is coming on top, and the debt payments due. The money for
+ * it is the income they said, else the income of their usual month, then
+ * what carries over from now if nothing more is spent, then their savings,
+ * named and never counted as spending money. Each is a line, so the answer
+ * is the sums and not a summary of them (26 October 2026: "do some
+ * calculations").
+ */
+export function needWords(
+  a: BudgetAdvice,
+  money_: {
+    /** The income they said for the month, or null to go by the usual month's. */
+    readonly incomeSaid: Centavos | null;
+    /** What is safe until this month ends: what carries over if nothing more is spent. Null when the month asked about is not the next one. */
+    readonly carry: Centavos | null;
+    /** Savings and reserve accounts, by name, with what they hold. */
+    readonly savings: readonly { readonly name: string; readonly amount: Centavos }[];
+    /** "Can I afford it?", "is it enough?": a yes or no first. */
+    readonly verdict?: boolean;
+  },
+): string {
+  const plannedTotal = (a.planned ?? []).reduce((sum, l) => sum + l.amount, 0);
+  const usual = a.total - plannedTotal;
+  const need = a.total + a.debtDue;
+  const lines: string[] = [];
+  const income0 = money_.incomeSaid ?? a.typicalIncome;
+  const call =
+    money_.verdict && income0 > 0
+      ? need <= income0
+        ? "Yes, going by what comes in. "
+        : need <= income0 + Math.max(0, money_.carry ?? 0)
+          ? "Only with what carries over from now. "
+          : "Not as things usually go. "
+      : "";
+  lines.push(`**${call}You need ${money(need)} for ${a.name}.** Worked out:`);
+  lines.push(`- Your usual month: ${money(usual)} (${money(a.spending - plannedTotal)} spending, ${money(a.billsSubs)} bills and subscriptions), the middle of ${monthsRead(a.read)}.`);
+  for (const l of a.planned ?? []) lines.push(`- ${l.name}, which you said is coming: ${money(l.amount)}.`);
+  if (a.debtDue > 0) lines.push(`- Debt payments due in ${monthName(a.month)}: ${money(a.debtDue)}.`);
+  const parts = [money(usual), ...(a.planned ?? []).map((l) => money(l.amount)), ...(a.debtDue > 0 ? [money(a.debtDue)] : [])];
+  if (parts.length > 1) lines.push(`- Together: ${parts.join(" + ")} = **${money(need)}**.`);
+  const overlap = overlapWords(a).trim();
+  if (overlap) lines.push(overlap);
+
+  const income = money_.incomeSaid ?? a.typicalIncome;
+  if (income <= 0) {
+    lines.push(`There is no income in ${monthsRead(a.read)} to set against it. Tell me what you expect to receive ("I expect 10000") and I will work out what is left.`);
+    return lines.join("\n");
+  }
+  lines.push("");
+  lines.push(
+    money_.incomeSaid !== null
+      ? `**The money for it:** the ${money(income)} you said you expect.`
+      : `**The money for it:** your usual month brings in ${money(income)}, the middle of the same months. If ${monthName(a.month)} will bring in a different amount, say it and I will work it out again.`,
+  );
+  const gap = need - income;
+  lines.push(gap > 0 ? `${money(need)} − ${money(income)}: **${money(gap)} short**.` : `${money(income)} − ${money(need)}: **${money(-gap)} to spare**.`);
+  if (gap > 0 && money_.carry !== null && money_.carry > 0) {
+    const after = gap - money_.carry;
+    lines.push(
+      after > 0
+        ? `If nothing more is spent this month, ${money(money_.carry)} carries over from your wallets: still **${money(after)} short**.`
+        : `If nothing more is spent this month, the ${money(money_.carry)} that carries over from your wallets covers it, with ${money(-after)} to spare.`,
+    );
+  }
+  const stillShort = gap - Math.max(0, money_.carry ?? 0);
+  if (gap > 0 && stillShort > 0) {
+    const held = money_.savings.filter((x) => x.amount > 0);
+    const heldTotal = held.reduce((sum, x) => sum + x.amount, 0);
+    if (heldTotal > 0) {
+      lines.push(
+        `Your savings hold ${money(heldTotal)} (${held.map((x) => `${x.name} ${money(x.amount)}`).join(", ")}): ${heldTotal >= stillShort ? "enough to cover the gap, if you choose to use them" : `${money(stillShort - heldTotal)} less than the gap even if all of it were used`}. They are not counted above.`,
+      );
+    }
+    lines.push("Or the wants give way: the budget below is held to the money, with the cuts named.");
+  }
+  return lines.join("\n");
+}
+
+/**
+ * "I will spend 2000 for my birthday on November 5, can I still keep my
+ * budget?": the budget already set for the month, against the usual month
+ * with what is coming, and what keeping it would take. It made a card setting
+ * November's budget to PHP 2,000.00 (26 October 2026).
+ *
+ * `held` is the same advice held to the budget set, so its cuts are what
+ * keeping the budget means: the wants give way, never the needs or what is
+ * coming.
+ */
+export function keepWords(a: BudgetAdvice, held: BudgetAdvice, set: { readonly spending: Centavos; readonly billsSubs: Centavos }): string {
+  const plannedTotal = (a.planned ?? []).reduce((sum, l) => sum + l.amount, 0);
+  const setTotal = set.spending + set.billsSubs;
+  const usual = a.total - plannedTotal;
+  const what = (a.planned ?? []).map((l) => l.name.toLowerCase()).join(" and ") || "what is coming";
+  const lines: string[] = [];
+  if (a.total <= setTotal) {
+    lines.push(`**Yes: ${a.name}'s budget is ${money(setTotal)}, and your usual month with the ${what} comes to ${money(a.total)}, ${money(setTotal - a.total)} under it.**`);
+    lines.push(`- Usual month ${money(usual)} + ${(a.planned ?? []).map((l) => `${l.name} ${money(l.amount)}`).join(" + ")} = ${money(a.total)}.`);
+    return lines.join("\n");
+  }
+  lines.push(`**Not as things usually go: ${a.name}'s budget is ${money(setTotal)}, and your usual month with the ${what} comes to ${money(a.total)}, ${money(a.total - setTotal)} over it.**`);
+  lines.push(`- Usual month ${money(usual)} + ${(a.planned ?? []).map((l) => `${l.name} ${money(l.amount)}`).join(" + ")} = ${money(a.total)}.`);
+  if (usual > setTotal) lines.push(`- Your usual month alone is already ${money(usual - setTotal)} over it, before the ${what}.`);
+  const fit = held.fit;
+  if (fit && fit.cuts.length > 0) {
+    lines.push(
+      `To keep it, the wants give way: ${fit.cuts.map((c) => `${c.name} from ${money(c.from)} to ${money(c.to)}`).join(", ")}.${fit.short > 0 ? ` Even then it is **${money(fit.short)}** over: the needs and the ${what} cost more than the budget.` : ""}`,
+    );
+  } else if (fit && fit.short > 0) {
+    lines.push(`Even with every want cut it is **${money(fit.short)}** over: the needs and the ${what} cost more than the budget.`);
+  }
+  lines.push(`Or raise the budget to fit it: say "set ${monthName(a.month)} to ${Math.ceil(a.total / 100)}".`);
+  return lines.join("\n");
 }
 
 /** "April to September 2026", or "November 2025 to April 2026". */
@@ -376,7 +536,7 @@ const money = (c: Centavos): string => formatMoney(c).replace(/^₱/, "PHP ").re
  * budget of PHP 14,450.00 for October 2026"), so "set it" after it becomes
  * a card, as it does after a model's recommendation.
  */
-export function adviceWords(a: BudgetAdvice, options: { readonly split?: boolean } = {}): string {
+export function adviceWords(a: BudgetAdvice, options: { readonly split?: boolean; readonly plannedSaid?: boolean } = {}): string {
   const split = options.split ?? true;
   if (a.read.length === 0) {
     return `There is nothing recorded before ${a.name} to work a budget out from. Add a month of entries, or tell me a figure: "set ${monthName(a.month)} to 9000".`;
@@ -390,6 +550,11 @@ export function adviceWords(a: BudgetAdvice, options: { readonly split?: boolean
   out.push(
     `It is each item's usual month over ${monthsRead(a.read)}${a.read.length < ENOUGH ? ` (only ${a.read.length} month${a.read.length === 1 ? "" : "s"} with entries, so treat it as rough)` : ""}, the middle value rather than the average, so one big month does not set it.`,
   );
+  const plannedTotal = (a.planned ?? []).reduce((sum, l) => sum + l.amount, 0);
+  // Said already when the answer opened with what the month needs (`needWords`).
+  if (plannedTotal > 0 && !options.plannedSaid) {
+    out.push(`On top of it is what you said is coming: ${(a.planned ?? []).map((l) => `${l.name} ${money(l.amount)}`).join(", ")}. That is spending, counted in full and never cut.${overlapWords(a)}`);
+  }
 
   if (a.fit) {
     const kept = a.fit.keep > 0 ? ` with ${money(a.fit.keep)} kept to save` : "";
@@ -398,7 +563,7 @@ export function adviceWords(a: BudgetAdvice, options: { readonly split?: boolean
     } else {
       const cuts = a.fit.cuts.map((c) => `${c.name} from ${money(c.from)} to ${money(c.to)}`);
       out.push(
-        `Your usual month (${money(a.total)}) is more than the ${money(a.fit.income)} you expect${kept}${a.debtDue > 0 ? ` less ${money(a.debtDue)} of debt payments due` : ""}, so the spending part is held to ${money(spendingAt)}${cuts.length > 0 ? `, by cutting ${cuts.join(", ")}` : ""}.`,
+        `Your usual month${plannedTotal > 0 ? ` with what is coming` : ""} (${money(a.total)}) is more than the ${money(a.fit.income)} you expect${kept}${a.debtDue > 0 ? ` less ${money(a.debtDue)} of debt payments due` : ""}, so the spending part is held to ${money(spendingAt)}${cuts.length > 0 ? `, by cutting ${cuts.join(", ")}` : ""}.`,
       );
       if (a.fit.short > 0) {
         out.push(`Even with every want cut it is **${money(a.fit.short)}** short: the needs alone (${a.items.filter((l) => !(a.wants ? a.wants.includes(l.name) : WANTS.test(l.name))).map((l) => l.name).join(", ")}) cost more than that leaves. The gap has to come from ${a.fit.keep > 0 ? "saving less this month, " : ""}savings or more income.`);
@@ -415,7 +580,8 @@ export function adviceWords(a: BudgetAdvice, options: { readonly split?: boolean
 
   if (split) {
     out.push("");
-    out.push(`**Spending, ${money(spendingAt)}**, each item's usual month:`);
+    out.push(`**Spending, ${money(spendingAt)}**, each item's usual month${plannedTotal > 0 ? ", and what is coming" : ""}:`);
+    for (const l of a.planned ?? []) out.push(`- ${l.name}: ${money(l.amount)} (you said it is coming)`);
     const cutTo = new Map((a.fit?.cuts ?? []).map((c) => [c.name, c.to]));
     for (const l of a.items) {
       const to = cutTo.get(l.name);
@@ -487,7 +653,8 @@ export function asksBudgetAdvice(said: string): boolean {
  * "my allowance is 8k", "I'll get 12,000 next month", "sahod ko 15000".
  */
 export function expectedIncomeIn(said: string): Centavos | null {
-  const text = said.toLowerCase().replace(/(\d+(?:\.\d+)?)\s*k\b/g, (_m, n: string) => String(Math.round(Number(n) * 1000)));
+  // A sum that is going out ("9k in tuition pending") is never what comes in (26 October 2026).
+  const text = withoutPlannedSpend(said).toLowerCase().replace(/(\d+(?:\.\d+)?)\s*k\b/g, (_m, n: string) => String(Math.round(Number(n) * 1000)));
   const NUM = String.raw`(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)`;
   const INCOME = String.raw`(?:allowance|income|salary|sahod|kita|pay(?:check)?|budget money|money coming in|revenue)`;
   const patterns = [
