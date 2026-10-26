@@ -1877,6 +1877,29 @@ style guide's Bin, Planner and sidebar lines say how each now works.
   comes in. "next moth" is read as next month (`typos.ts`).
 - **Plans in the past**: `16-PLANNER.md` P10.
 
+### 2026-10-27, last: filters, plans in Statements, cleaner sheets and Budget
+
+- **Activity** (owner: "the pdf in activity add filter"): a When filter (any
+  time, today, the last 7 days, this month, last month, this year) and a
+  search (words, #0442, an amount). The list and its PDF follow both, and the
+  PDF says which (`domain/activityFilter.ts`).
+- **Statements, Plans** (owner: "in statement add plans too"): a statement of
+  the plans due in a period, Planned, Paid and Still to pay, removed ones left
+  out, no-date ones last; its months are the ones plans are due in, ahead
+  included. The PDF and spreadsheet come from the same lines, and the chat
+  makes it too ("plans statement as pdf"). Figures stay in ink: nothing in a
+  plan moved money (D3). `domain/planSheet.ts`.
+- **Plan sheet buttons**: one button at the foot, the rest as a list of rows
+  (style guide, Planner line).
+- **Budget checks** (owner: "Add validation to some buttons"): Save is greyed
+  out with nothing changed; a budget above the money coming in, or of
+  nothing, is asked about first; a closed month's edit needs its reason;
+  Undo the last change says which change it undoes before it does.
+- **Budget on a phone** (owner: "Fix ui"): the year's Total is one figure to
+  a line (an empty desktop cell was taken for an action and took half the
+  line), and a Forecast month is a card, one figure to a line, its note under
+  its figure.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

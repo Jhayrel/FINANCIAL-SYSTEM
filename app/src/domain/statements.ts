@@ -46,7 +46,9 @@ export type StatementType =
   | "borrowed"
   | "credit"
   | "lent"
-  | "onbehalf";
+  | "onbehalf"
+  /** The Planner's plans: not entries, laid out as a statement (`planSheet.ts`). */
+  | "plans";
 
 /** In the order a picker offers them: money first, then what is owed. */
 export const STATEMENT_TYPES: readonly StatementType[] = [
@@ -62,6 +64,7 @@ export const STATEMENT_TYPES: readonly StatementType[] = [
   "credit",
   "lent",
   "onbehalf",
+  "plans",
 ];
 
 export const STATEMENT_LABEL: Record<StatementType, string> = {
@@ -77,6 +80,7 @@ export const STATEMENT_LABEL: Record<StatementType, string> = {
   credit: "Credit cards and lines",
   lent: "Everything lent",
   onbehalf: "On behalf",
+  plans: "Plans",
 };
 
 export const STATEMENT_HINT: Record<StatementType, string> = {
@@ -92,6 +96,7 @@ export const STATEMENT_HINT: Record<StatementType, string> = {
   credit: "Credit cards and credit lines only, with the total owed",
   lent: "Money you lent, with what is still owed to you",
   onbehalf: "Money paid or held for someone else",
+  plans: "What you planned, what is paid and what is still to pay, by the day it is due",
 };
 
 /** A statement that follows one wallet or one debt needs it named. */
@@ -172,6 +177,10 @@ export function belongsIn(
       const debt = scope.debts?.find((d) => d.id === t.debtId);
       return !!debt && debtInScope(debt, type);
     }
+
+    // Plans are not entries: their sheet is built from the Planner (`planSheet.ts`).
+    case "plans":
+      return false;
   }
 }
 

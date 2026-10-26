@@ -23,7 +23,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 
-import { Icon } from "../components/Icon";
+import { Icon, type IconName } from "../components/Icon";
 import { AmountInput, Field, Switch, TextInput } from "../components/forms";
 import { Alert, Button, Card, EmptyState, Money, ProgressBar, SegmentedControl, StatusPill, Tabs } from "../components/primitives";
 import { Select } from "../components/Select";
@@ -605,33 +605,43 @@ function PlanSheet(props: {
   // A payment added by hand that looks like this one (P4.9): asked, never linked by itself.
   const maybe = open ? likelyPayments(p, transactions, props.plans).slice(0, 2) : [];
 
-  const actions = open ? (
-    <>
-      <Button onClick={props.onEdit}>Edit</Button>
-      <Button onClick={props.onMove}>Move the date</Button>
+  /*
+   * One button at the foot, the thing most often done next, and every other
+   * action as a list of rows above it, the way the phone's More sheet lists
+   * screens. Two rows of buttons of every width, with labels wrapping onto
+   * two lines, read as clutter (owner, 27 October 2026: "The buttons are so
+   * ugly ang messy even in pc").
+   */
+  const actions =
+    open ? (
       <Button variant="primary" onClick={props.onPay}>
         {v.paid > 0 ? "Pay the rest" : "Record payment"}
       </Button>
-    </>
-  ) : v.state === "removed" ? (
-    <Button variant="primary" onClick={props.onReopen}>
-      Put it back
-    </Button>
-  ) : (
-    <>
-      {/*
-        A paid or skipped plan can still be edited: its name, kind, note or
-        date, after its day has ended (owner, 27 October 2026: "what if the
-        entry is allready added and the day is allready ended then I click
-        edit then I cannot edit it anymore"). It stays paid or skipped.
-      */}
-      <Button onClick={props.onEdit}>Edit</Button>
-      <Button onClick={props.onReopen}>{v.state === "skipped" ? "Put it back" : "Open it again"}</Button>
+    ) : v.state === "removed" ? (
+      <Button variant="primary" onClick={props.onReopen}>
+        Put it back
+      </Button>
+    ) : (
       <Button variant="primary" onClick={props.onAgain}>
         Plan it again
       </Button>
-    </>
-  );
+    );
+  const rows: { label: string; icon: IconName; run: () => void; danger?: boolean }[] = open
+    ? [
+        { label: "Edit", icon: "edit", run: props.onEdit },
+        { label: "Move the date", icon: "planner", run: props.onMove },
+        { label: "Link a payment I added", icon: "ledger", run: props.onLink },
+        { label: "Skip it", icon: "close", run: props.onSkip },
+        { label: "Remove", icon: "bin", run: props.onRemove, danger: true },
+      ]
+    : v.state === "removed"
+      ? []
+      : [
+          // A paid or skipped plan can still be edited, and stays paid or skipped (16-PLANNER.md P10).
+          { label: "Edit", icon: "edit", run: props.onEdit },
+          { label: v.state === "skipped" ? "Put it back" : "Open it again", icon: "planner", run: props.onReopen },
+          { label: "Remove", icon: "bin", run: props.onRemove, danger: true },
+        ];
 
   return (
     <Sheet title={p.title} subtitle={open ? whenWords(v, props.asOf) : v.words} onClose={props.onClose} actions={actions} dialog={props.dialog}>
@@ -729,23 +739,16 @@ function PlanSheet(props: {
           not buttons (owner, 27 October 2026: "i CANNOT SEE THE BUTTONS FIX IT
           MAKE IT GOOD"). Remove keeps the danger outline; it can be put back.
         */}
-        <div className="fms-plansheet-more">
-          {open && (
-            <>
-              <Button size="sm" onClick={props.onLink}>
-                Link a payment I added
-              </Button>
-              <Button size="sm" onClick={props.onSkip}>
-                Skip it
-              </Button>
-            </>
-          )}
-          {v.state !== "removed" && (
-            <Button size="sm" variant="danger" onClick={props.onRemove}>
-              Remove
-            </Button>
-          )}
-        </div>
+        {rows.length > 0 && (
+          <div className="fms-actionlist" role="group" aria-label="More for this plan">
+            {rows.map((r) => (
+              <button key={r.label} type="button" className={r.danger ? "fms-actionrow fms-actionrow--danger" : "fms-actionrow"} onClick={r.run}>
+                <Icon name={r.icon} size={18} />
+                <span className="t-body">{r.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </Sheet>
   );

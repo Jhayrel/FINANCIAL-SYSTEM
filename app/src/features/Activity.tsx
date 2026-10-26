@@ -18,6 +18,8 @@ import { saveFile } from "../data/download";
 import type { ActivityEvent, Actor } from "../domain/activity";
 import { factChanges, readRow } from "../domain/activityRead";
 import { eventDetails, trailFilename, trailSummary } from "../domain/activityExport";
+import { inPeriod, matchesSearch, PERIODS, type Period } from "../domain/activityFilter";
+import { SearchInput } from "../components/forms";
 
 type Who = Actor | "all";
 type Kind = "all" | "added" | "changed" | "binned" | "budget" | "planner" | "settings";
@@ -141,6 +143,9 @@ export function Activity({
   const [failed, setFailed] = useState<string | null>(null);
   const [who, setWho] = useState<Who>("all");
   const [kind, setKind] = useState<Kind>("all");
+  // When and what words: the list and its PDF follow both (owner, 27 October 2026: "the pdf in activity add filter").
+  const [period, setPeriod] = useState<Period>("all");
+  const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(PAGE);
   const [attempt, setAttempt] = useState(0);
   const [making, setMaking] = useState(false);
@@ -184,14 +189,14 @@ export function Activity({
   }, [uid, reloadKey, attempt]);
 
   // A new filter starts from the top of its own list.
-  useEffect(() => setLimit(PAGE), [who, kind]);
+  useEffect(() => setLimit(PAGE), [who, kind, period, query]);
 
   const total = events?.length ?? 0;
 
-  const byWho = useMemo(
-    () => (events ?? []).filter((e) => who === "all" || e.actor === who),
-    [events, who],
-  );
+  const byWho = useMemo(() => {
+    const now = new Date();
+    return (events ?? []).filter((e) => (who === "all" || e.actor === who) && inPeriod(e, period, now) && matchesSearch(e, query));
+  }, [events, who, period, query]);
 
   /** How many of each kind, for whoever is picked: the filter says what it holds. */
   const kindCounts = useMemo(
@@ -241,7 +246,7 @@ export function Activity({
     };
   }, [events]);
 
-  const filtered = who !== "all" || kind !== "all";
+  const filtered = who !== "all" || kind !== "all" || period !== "all" || query.trim() !== "";
 
   /*
    * What is shown, every one of it and not only the page on screen, as a PDF
@@ -252,7 +257,14 @@ export function Activity({
     setPdfFailed("");
     try {
       const { activityPdf } = await import("../pdf/activityPdf");
-      const showing = `${WHO.find((w) => w.id === who)?.label ?? "Everyone"}, ${kind === "all" ? "all changes" : (KIND.find((k) => k.id === kind)?.label ?? "").toLowerCase()}`;
+      const showing = [
+        WHO.find((w) => w.id === who)?.label ?? "Everyone",
+        kind === "all" ? "all changes" : (KIND.find((k) => k.id === kind)?.label ?? "").toLowerCase(),
+        period === "all" ? "" : (PERIODS.find((p) => p.id === period)?.label ?? "").toLowerCase(),
+        query.trim() ? `matching "${query.trim()}"` : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
       const bytes = await activityPdf({ events: shown, showing, issuedTo: ownerName, issuedAt: new Date() });
       saveFile(trailFilename(trailSummary(shown)), bytes as BlobPart, "application/pdf");
     } catch (e) {
@@ -263,9 +275,9 @@ export function Activity({
   };
   const now = new Date();
 
-  const nothingMatches = `${KIND.find((k) => k.id === kind)?.phrase ?? "Nothing done"}${
-    WHO.find((w) => w.id === who)?.phrase ?? ""
-  } in this trail.`;
+  const nothingMatches = `${KIND.find((k) => k.id === kind)?.phrase ?? "Nothing done"}${WHO.find((w) => w.id === who)?.phrase ?? ""}${
+    period === "all" ? "" : ` ${PERIODS.find((p) => p.id === period)?.phrase ?? ""}`
+  }${query.trim() ? ` matching "${query.trim()}"` : ""} in this trail.`;
 
   return (
     <div className={uid ? "fms-activity" : "fms-activity fms-activity--note"}>
@@ -303,7 +315,11 @@ export function Activity({
               rows of buttons, so it showed every filter twice (owner, 28
               September 2026: "fix the ui it broke like this").
             */}
+            <div className="fms-actsearch">
+              <SearchInput value={query} onChange={setQuery} placeholder="Search words, #0442 or an amount" />
+            </div>
             <div className="fms-dbfilterrow" role="group" aria-label="Filters">
+              <FilterChip label="When" value={period} on={period !== "all"} options={PERIODS} onChange={(id) => setPeriod(id as Period)} />
               <FilterChip
                 label="Who did it"
                 value={who}

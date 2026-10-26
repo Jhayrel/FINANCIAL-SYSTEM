@@ -114,6 +114,10 @@ const STATEMENTS: Readonly<Record<string, StatementType>> = {
   debts: "borrowed",
   loan: "borrowed",
   loans: "borrowed",
+  // The Planner as a statement (27 October 2026). "Plan" alone is left out: "my budget plan" is a budget.
+  plans: "plans",
+  planner: "plans",
+  planned: "plans",
 };
 
 const MONTHS = [
@@ -461,6 +465,7 @@ export function exportWords(ask: ExportAsk, asOf: IsoDate): string {
     borrowed: "every loan and credit line you owe, with the total owed",
     credit: "the credit lines, with the total owed",
     lent: "money you lent, with what is still owed to you",
+    plans: "every plan due in it, what is paid and what is still to pay",
   };
   const sheet = SHEET[ask.type ?? "account"] ?? "every entry in the period, with the balance after each";
 

@@ -955,7 +955,8 @@ export function Budget({
                       <td className="fms-rnum" data-label="Left">
                         <Money value={y.totals.remaining} />
                       </td>
-                      <td />
+                      {/* Labelled, though empty: on a phone an unlabelled cell is the row's action and took the Total line's right half. */}
+                      <td data-label="" />
                     </tr>
                   </tbody>
                 </table>
@@ -1172,9 +1173,40 @@ function Planner({
       .map((b) => `${b.item} ${formatMoney(b.amount)}`)
       .join(", ") + (s.bills.bills.length > 4 ? `, and ${s.bills.bills.length - 4} more` : "");
 
+  /*
+   * Checked before it is saved (owner, 27 October 2026: "Add validation to
+   * some buttons"): a closed month's edit needs its reason, a budget of
+   * nothing or one above the money coming in is asked about first, and with
+   * nothing changed there is nothing to press.
+   */
+  const [problem, setProblem] = useState("");
+  const reachNow: PlanScope = manyMonths ? scope : "month";
+  const nothingToSave = hasPlan && !changed && reachNow === "month" && !closed;
   const save = async (): Promise<void> => {
     const value = { spending: spending ?? 0, billsSubs: bills ?? 0 };
-    const reach = manyMonths ? scope : "month";
+    const reach = reachNow;
+    setProblem("");
+    if (closed && !reason.trim()) {
+      setProblem(`Say why ${name}'s budget needs changing: it is kept with the edit, so the month is not judged against a plan set afterwards without a reason.`);
+      return;
+    }
+    if (value.spending + value.billsSubs <= 0) {
+      const ok = await confirm({
+        title: `Set ${name}'s budget to ₱0.00?`,
+        body: "With no budget every peso spent shows as over, and the month cannot be judged against a plan. To clear it, Undo the last change instead.",
+        confirmLabel: "Set it to ₱0.00",
+        tone: "danger",
+      });
+      if (!ok) return;
+    } else if (keep !== null && keep < 0) {
+      const ok = await confirm({
+        title: `Budget ${formatMoney(total)}, more than comes in?`,
+        body: `It is ${formatMoney(-keep)} more than ${incomeWords}. Kept, the month is planned to spend money it does not have: it would come from what carries over or from savings. Lower it to ${formatMoney(s.expectedIncome ?? 0)} or less to keep within it.`,
+        confirmLabel: "Save it anyway",
+        tone: "normal",
+      });
+      if (!ok) return;
+    }
     if (reach !== "month") {
       const ok = await confirm({
         title:
@@ -1441,8 +1473,13 @@ function Planner({
             ) : null}
 
             <div className="fms-limitedit-actions">
-              <Button variant="primary" fullWidth onClick={() => void save()}>
-                {closed ? "Save the edit" : hasPlan ? "Save changes" : "Save budget"}
+              {problem && (
+                <p className="t-caption" role="alert" style={{ margin: 0, color: "var(--over)" }}>
+                  {problem}
+                </p>
+              )}
+              <Button variant="primary" fullWidth disabled={nothingToSave} onClick={() => void save()}>
+                {closed ? "Save the edit" : nothingToSave ? "No change to save" : hasPlan ? "Save changes" : "Save budget"}
               </Button>
               {closed && (
                 <Button
@@ -1476,7 +1513,23 @@ function Planner({
                 Changes to {name}'s budget
               </span>
               {!closed && (
-                <button type="button" className="t-caption fms-linkbtn" onClick={onUndo}>
+                <button
+                  type="button"
+                  className="t-caption fms-linkbtn"
+                  onClick={() =>
+                    void (async () => {
+                      // What is undone, said before it is (the change itself is the newest in the list below).
+                      const last = history[0];
+                      const ok = await confirm({
+                        title: `Undo the last change to ${name}'s budget?`,
+                        body: last ? `${describeRevision(last)}, on ${changedAt(last.at)}. Undoing it puts back what was there before; the undo is kept in this list and in Activity.` : "It puts back what was there before.",
+                        confirmLabel: "Undo it",
+                        tone: "normal",
+                      });
+                      if (ok) onUndo();
+                    })()
+                  }
+                >
                   Undo the last change
                 </button>
               )}

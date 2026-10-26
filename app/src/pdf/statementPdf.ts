@@ -239,7 +239,7 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
     if (y + h > bottom) newPage();
 
     const first = y + PAD_Y + LINE - 2.4;
-    page.text(x.date, first, shortDate(line.date), { size: BODY, color: INK_2 });
+    page.text(x.date, first, line.date ? shortDate(line.date) : "No date", { size: BODY, color: INK_2 });
     // A date range: its last day under the first, as the screen shows it.
     if (line.coversTo) page.text(x.date, first + desc.length * LINE - 0.5, `to ${shortDate(line.coversTo)}`, { size: META, color: INK_3 });
     desc.forEach((l, i) => page.text(x.details, first + i * LINE, l, { size: BODY, color: INK }));
@@ -341,9 +341,11 @@ function header(page: PdfPage, doc: PdfDocument, o: StatementPdfOptions): number
 function summary(page: PdfPage, sheet: StatementSheet, top: number): number {
   const boxes: [string, Centavos | string][] = [];
   if (sheet.broughtForward !== null) boxes.push(["Brought forward", sheet.broughtForward]);
-  else boxes.push(["Entries", sheet.lines.length.toLocaleString("en-US")]);
+  else boxes.push([sheet.type === "plans" ? "Plans" : "Entries", sheet.lines.length.toLocaleString("en-US")]);
   if (sheet.headings.moneyIn) boxes.push([sheet.headings.moneyIn, sheet.totalIn]);
   if (sheet.headings.moneyOut) boxes.push([sheet.headings.moneyOut, sheet.totalOut]);
+  // Plans: what is still to pay, which no running balance carries (`planSheet.ts`).
+  if (sheet.type === "plans") boxes.push([sheet.headings.balance, sheet.closing]);
   // Where a running balance is carried, where it ended. On a sheet that only
   // adds up (income, bills), the running total is the total already shown.
   if (sheet.broughtForward !== null) {

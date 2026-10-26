@@ -4695,6 +4695,12 @@ button.fms-recent-row:disabled {
   border-bottom: 1px solid var(--hairline);
 }
 
+/* The search takes the room the filters leave, and a line of its own on a phone. */
+.fms-actsearch {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
 /* A segmented control that scrolls sideways rather than running off the card. */
 .fms-segmented--scroll {
   max-width: 100%;
@@ -11180,6 +11186,32 @@ button.fms-recent-row:disabled {
     gap: var(--space-2);
     padding: var(--space-3) var(--space-4);
   }
+
+  /*
+   * A month a card: its name and Use as budget on the first line, then one
+   * figure to a line with its note under the figure. Two to a line, a figure
+   * and its note ("with one-offs", "covers a usual month") wrapped apart and
+   * the labels lost their figures (owner, 27 October 2026: "Fix ui").
+   */
+  .fms-rtable.fms-outlook tr {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px var(--space-3);
+  }
+
+  .fms-rtable.fms-outlook tr > td[data-label] {
+    grid-column: 1 / -1;
+  }
+
+  .fms-rtable.fms-outlook tr > td.fms-rhead {
+    display: block;
+    text-align: left;
+    align-self: center;
+  }
+
+  .fms-rtable.fms-outlook td[data-label] > div {
+    flex-basis: 100%;
+    text-align: right;
+  }
 }
 
 /* Their own money beside what is borrowed or held for someone (Dashboard, Your money). */
@@ -11479,14 +11511,50 @@ button.fms-recent-row:disabled {
   min-width: 0;
 }
 
-.fms-plansheet-more {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+/*
+ * A sheet's lesser actions as rows: an icon and a word, full width, 48px,
+ * on hairlines, as the phone's More sheet lists screens. The one main action
+ * stays the button at the foot. A row that removes is red (style guide 3.1).
+ */
+.fms-actionlist {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--hairline);
 }
 
-.fms-plansheet-more:empty {
-  display: none;
+.fms-actionrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 48px;
+  padding: 0 var(--space-1);
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fms-actionrow > svg {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+}
+
+.fms-actionrow:hover {
+  background: var(--surface-hover);
+}
+
+.fms-actionrow:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.fms-actionrow--danger,
+.fms-actionrow--danger > svg {
+  color: var(--over);
 }
 
 .fms-planform {

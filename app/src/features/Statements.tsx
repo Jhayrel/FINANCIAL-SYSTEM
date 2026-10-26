@@ -22,15 +22,19 @@ import { Button, Card, EmptyState, Money, StatusPill } from "../components/primi
 import { Select } from "../components/Select";
 import { TextInput } from "../components/forms";
 import { DataTable, type Column } from "../components/DataTable";
-import { formatShort, MONTH_NAMES } from "../domain/dates";
+import { formatShort, MONTH_NAMES, today } from "../domain/dates";
+import { formatMoney } from "../domain/money";
 import { accountGroups, type Account } from "../domain/accounts";
 import type { Debt } from "../domain/debt";
-import { buildSheet, type SheetLine } from "../domain/statementSheet";
+import { buildSheet, periodLabel, type SheetLine } from "../domain/statementSheet";
+import { buildPlanSheet, planSheetCsv, planSheetFilename } from "../domain/planSheet";
+import { NO_DATE, type Plan } from "../domain/planner";
 import { canFilter, filterChoices } from "../domain/statementFilter";
 import { cashWallet } from "../domain/withdrawal";
 import {
   buildStatementBetween,
   debtInScope,
+  rangeOf,
   statementFilename,
   statementToCsv,
   STATEMENT_HINT,
@@ -63,6 +67,7 @@ export function Statements({
   debts,
   year: initialYear,
   asOf,
+  plans = [],
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -73,7 +78,10 @@ export function Statements({
   year: number;
   /** Today: a statement starts at the first entry it covers and ends today at the latest (`fitPeriod`). */
   asOf?: IsoDate;
+  /** The Planner's plans, for the Plans statement (`planSheet.ts`). */
+  plans?: readonly Plan[];
 }) {
+  const [type, setTypeState] = useState<StatementType>("account");
   /*
    * Only the months the ledger has. Every month of every year was offered,
    * so a statement could be asked for a period with nothing in it and came
@@ -82,7 +90,7 @@ export function Statements({
    * year lists the months it has rows in, a later end cannot be put before
    * the start, and it opens on the months this year has so far.
    */
-  const monthsByYear = useMemo(() => {
+  const ledgerMonths = useMemo(() => {
     const out = new Map<number, Set<number>>();
     for (const t of transactions) {
       const y = Number(t.date.slice(0, 4));
@@ -92,11 +100,24 @@ export function Statements({
     }
     return out;
   }, [transactions]);
+  // The Plans statement offers the months plans are due in, ahead ones too, and this month.
+  const planMonths = useMemo(() => {
+    const out = new Map<number, Set<number>>();
+    const add = (d: string): void => {
+      const y = Number(d.slice(0, 4));
+      const m = Number(d.slice(5, 7));
+      if (Number.isInteger(y) && m >= 1 && m <= 12) out.set(y, (out.get(y) ?? new Set()).add(m));
+    };
+    for (const p of plans) if (p.status !== "removed" && p.due !== NO_DATE) add(p.due);
+    if (asOf) add(asOf);
+    return out;
+  }, [plans, asOf]);
+  const monthsByYear = type === "plans" ? planMonths : ledgerMonths;
   /** Newest first. An imported year appears here as soon as its rows do. */
   const years = useMemo(() => {
-    const list = [...new Set([...yearsCovered(transactions), ...monthsByYear.keys()])].sort((a, b) => b - a);
+    const list = type === "plans" ? [...planMonths.keys()].sort((a, b) => b - a) : [...new Set([...yearsCovered(transactions), ...ledgerMonths.keys()])].sort((a, b) => b - a);
     return list.length > 0 ? list : [initialYear];
-  }, [transactions, monthsByYear, initialYear]);
+  }, [type, transactions, ledgerMonths, planMonths, initialYear]);
   const monthsOf = (y: number): number[] => {
     const set = monthsByYear.get(y);
     return set && set.size > 0 ? [...set].sort((a, b) => a - b) : [];
@@ -104,7 +125,6 @@ export function Statements({
   const openYear = years.includes(initialYear) ? initialYear : (years[0] ?? initialYear);
   const [year, setYearState] = useState(openYear);
   const [toYear, setToYearState] = useState(openYear);
-  const [type, setType] = useState<StatementType>("account");
   const [from, setFrom] = useState(() => monthsOf(openYear)[0] ?? 1);
   const [to, setTo] = useState(() => monthsOf(openYear).at(-1) ?? 12);
 
@@ -135,6 +155,41 @@ export function Statements({
     setTo(allowed.includes(to) ? to : (allowed.at(-1) ?? 12));
   };
 
+  /*
+   * Into or out of the Plans statement, the months change: plans are mostly
+   * ahead, the ledger's months are behind. Plans open on the first month with
+   * an open plan or this month, whichever is earlier, through the last month
+   * planned; the ledger as it opens, this year's months.
+   */
+  const setType = (next: StatementType): void => {
+    setTypeState(next);
+    if ((next === "plans") === (type === "plans")) return;
+    const key = (y: number, m: number): number => y * 12 + m;
+    const flat = (map: Map<number, Set<number>>): { y: number; m: number }[] =>
+      [...map.entries()].flatMap(([y, ms]) => [...ms].map((m) => ({ y, m }))).sort((a, b) => key(a.y, a.m) - key(b.y, b.m));
+    if (next === "plans") {
+      const all = flat(planMonths);
+      const openDue = plans.filter((p) => p.status === "open" && p.due !== NO_DATE).map((p) => ({ y: Number(p.due.slice(0, 4)), m: Number(p.due.slice(5, 7)) }));
+      const now = asOf ? { y: Number(asOf.slice(0, 4)), m: Number(asOf.slice(5, 7)) } : all[0];
+      const first = [...openDue, ...(now ? [now] : [])].sort((a, b) => key(a.y, a.m) - key(b.y, b.m))[0] ?? all[0];
+      const last = all.at(-1);
+      if (first && last) {
+        setYearState(first.y);
+        setFrom(first.m);
+        setToYearState(last.y);
+        setTo(last.m);
+      }
+      return;
+    }
+    const back = [...new Set([...yearsCovered(transactions), ...ledgerMonths.keys()])].sort((a, b) => b - a);
+    const y = back.includes(initialYear) ? initialYear : (back[0] ?? initialYear);
+    const months = [...(ledgerMonths.get(y) ?? [])].sort((a, b) => a - b);
+    setYearState(y);
+    setToYearState(y);
+    setFrom(months[0] ?? 1);
+    setTo(months.at(-1) ?? 12);
+  };
+
   // Every wallet the settings list or the year's rows name, the everyday ones first.
   const wallets = useMemo(() => {
     const named = new Set<string>([...reference.wallets, ...reference.savings]);
@@ -162,8 +217,11 @@ export function Statements({
   const [failed, setFailed] = useState("");
 
   const whole = useMemo(
-    () => buildSheet(transactions, { type, year, fromMonth: from, toMonth: to, toYear, wallet, debtId: debtId || undefined, asOf }, reference, debts),
-    [transactions, type, year, from, to, toYear, wallet, debtId, reference, debts, asOf],
+    () =>
+      type === "plans"
+        ? buildPlanSheet(plans, { transactions, accounts, asOf: asOf ?? today() }, rangeOf({ year, month: from }, { year: toYear, month: to }), periodLabel(year, from, to, toYear))
+        : buildSheet(transactions, { type, year, fromMonth: from, toMonth: to, toYear, wallet, debtId: debtId || undefined, asOf }, reference, debts),
+    [transactions, type, year, from, to, toYear, wallet, debtId, reference, debts, asOf, plans, accounts],
   );
   /*
    * The Show picker: part of the statement only (owner, 12 October 2026:
@@ -208,6 +266,10 @@ export function Statements({
     !debts.some((d) => debtInScope(d, type));
 
   const downloadCsv = (): void => {
+    if (type === "plans") {
+      saveFile(planSheetFilename(sheet, "csv"), planSheetCsv(sheet), "text/csv;charset=utf-8");
+      return;
+    }
     const statement = statementNow();
     saveFile(statementFilename(statement, "csv", sheet.subject), statementToCsv(statement), "text/csv;charset=utf-8");
   };
@@ -218,8 +280,7 @@ export function Statements({
     try {
       const { statementPdf } = await import("../pdf/statementPdf");
       const bytes = await statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() });
-      const statement = statementNow();
-      saveFile(statementFilename(statement, "pdf", sheet.subject), bytes as BlobPart, "application/pdf");
+      saveFile(type === "plans" ? planSheetFilename(sheet, "pdf") : statementFilename(statementNow(), "pdf", sheet.subject), bytes as BlobPart, "application/pdf");
     } catch (e) {
       setFailed(
         `The PDF could not be made (${(e as Error).message || "no reason given"}). The CSV has the same rows; try the PDF again after reloading the page.`,
@@ -229,6 +290,12 @@ export function Statements({
     }
   };
 
+  /*
+   * Plans are not money moving: nothing in a plan's row is income or spending
+   * (rule D3), so its figures stay in ink.
+   */
+  const inTone = type === "plans" ? "var(--ink)" : "var(--flow-revenue-text)";
+  const outTone = type === "plans" ? "var(--ink)" : "var(--flow-spending-text)";
   const signedCell = (value: number, tone: string) =>
     value === 0 ? <span className="t-num-s" style={{ color: "var(--ink-3)" }}>-</span> : <Money value={value} size="s" tone={tone} />;
 
@@ -240,11 +307,11 @@ export function Statements({
       render: (l) =>
         l.coversTo ? (
           <span className="fms-dbrange">
-            <span className="t-num-s">{formatShort(l.date)}</span>
+            <span className="t-num-s">{(l.date ? formatShort(l.date) : "No date")}</span>
             <span className="t-micro" style={{ color: "var(--ink-3)" }}>to {formatShort(l.coversTo)}</span>
           </span>
         ) : (
-          <span className="t-num-s">{formatShort(l.date)}</span>
+          <span className="t-num-s">{(l.date ? formatShort(l.date) : "No date")}</span>
         ),
     },
     {
@@ -287,7 +354,7 @@ export function Statements({
           header: sheet.headings.moneyIn,
           align: "right" as const,
           width: "128px",
-          render: (l: SheetLine) => signedCell(l.moneyIn, "var(--flow-revenue-text)"),
+          render: (l: SheetLine) => signedCell(l.moneyIn, inTone),
         }]
       : []),
     ...(sheet.headings.moneyOut
@@ -296,7 +363,7 @@ export function Statements({
           header: sheet.headings.moneyOut,
           align: "right" as const,
           width: "128px",
-          render: (l: SheetLine) => signedCell(l.moneyOut, "var(--flow-spending-text)"),
+          render: (l: SheetLine) => signedCell(l.moneyOut, outTone),
         }]
       : []),
     {
@@ -437,12 +504,12 @@ export function Statements({
             )}
             {sheet.headings.moneyIn && (
               <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-                {sheet.headings.moneyIn} <Money value={sheet.totalIn} size="s" tone="var(--flow-revenue-text)" />
+                {sheet.headings.moneyIn} <Money value={sheet.totalIn} size="s" tone={inTone} />
               </span>
             )}
             {sheet.headings.moneyOut && (
               <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-                {sheet.headings.moneyOut} <Money value={sheet.totalOut} size="s" tone="var(--flow-spending-text)" />
+                {sheet.headings.moneyOut} <Money value={sheet.totalOut} size="s" tone={outTone} />
               </span>
             )}
             <span className="t-caption" style={{ color: "var(--ink-2)" }}>
@@ -472,7 +539,7 @@ export function Statements({
                     <div className="fms-dbrow-text">
                       <span className="t-body-strong fms-wraptext">{l.description}</span>
                       <div className="t-micro" style={{ color: "var(--ink-3)" }}>
-                        {formatShort(l.date)}{l.coversTo ? ` to ${formatShort(l.coversTo)}` : ""} · {l.kind}
+                        {(l.date ? formatShort(l.date) : "No date")}{l.coversTo ? ` to ${formatShort(l.coversTo)}` : ""} · {l.kind}
                         {l.fromWallet || l.toWallet ? ` · ${[l.fromWallet, l.toWallet].filter(Boolean).join(" → ")}` : ""}
                       </div>
                       {l.detail && (
@@ -482,9 +549,23 @@ export function Statements({
                       )}
                     </div>
                     <div className="fms-dbrow-figure fms-stmtfigure">
-                      {l.moneyIn > 0 && <Money value={l.moneyIn} size="s" signed tone="var(--flow-revenue-text)" />}
-                      {l.moneyOut > 0 && <Money value={-l.moneyOut} size="s" tone="var(--flow-spending-text)" />}
-                      {l.balance !== null && (
+                      {type === "plans" ? (
+                        // A plan: what was planned, and what is left of it; no sign, nothing moved.
+                        <>
+                          <Money value={l.moneyIn} size="s" />
+                          {l.moneyOut > 0 && (
+                            <span className="t-micro" style={{ color: "var(--ink-3)" }}>
+                              {formatMoney(l.moneyOut)} paid
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {l.moneyIn > 0 && <Money value={l.moneyIn} size="s" signed tone="var(--flow-revenue-text)" />}
+                          {l.moneyOut > 0 && <Money value={-l.moneyOut} size="s" tone="var(--flow-spending-text)" />}
+                        </>
+                      )}
+                      {l.balance !== null && type !== "plans" && (
                         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
                           <Money value={l.balance} size="s" tone="var(--ink-3)" />
                         </span>

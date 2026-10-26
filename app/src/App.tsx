@@ -64,15 +64,16 @@ import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { checkDraft, debtWalletDirection, draftToTransactions, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { Planner } from "./features/Planner";
-import { linkPayments, renamePlans, type Plan } from "./domain/planner";
+import { linkPayments, NO_DATE, renamePlans, type Plan } from "./domain/planner";
+import { buildPlanSheet, planSheetCsv, planSheetFilename } from "./domain/planSheet";
 import { spreadCovered } from "./domain/covers";
-import { formatMedium, getMonth, getYear, today } from "./domain/dates";
+import { formatMedium, getMonth, getYear, lastOfMonth, today } from "./domain/dates";
 import { monthBrief, nextMonthStart } from "./domain/monthPlan";
 import { settleLine, type Settlement } from "./domain/settleLine";
 import { systemToCsv } from "./domain/csv";
 import { sheetRequestOf, type ExportAsk } from "./domain/exportAsk";
-import { buildStatementBetween, statementFilename, statementToCsv } from "./domain/statements";
-import { buildSheet } from "./domain/statementSheet";
+import { buildStatementBetween, rangeOf, statementFilename, statementToCsv } from "./domain/statements";
+import { buildSheet, periodLabel } from "./domain/statementSheet";
 import { browserSettingsStore, type SettingsStore } from "./data/settingsStore";
 import {
   checksum,
@@ -1806,6 +1807,31 @@ export default function App() {
       return;
     }
 
+    // The plans: the period asked, or with none said, every month something is planned in (`planSheet.ts`).
+    if (ask.type === "plans") {
+      const all = settings.plans ?? [];
+      const dated = all.filter((p) => p.status !== "removed" && p.due !== NO_DATE).map((p) => p.due).sort();
+      const said = ask.fromDate && ask.toDate ? { from: ask.fromDate, to: ask.toDate } : ask.fromMonth !== undefined ? rangeOf({ year: ask.year, month: ask.fromMonth }, { year: ask.toYear ?? ask.year, month: ask.toMonth ?? ask.fromMonth }) : null;
+      const first = [dated[0] ?? asOf, asOf].sort()[0] ?? asOf;
+      const range = said ?? { from: `${first.slice(0, 7)}-01`, to: lastOfMonth(Number((dated.at(-1) ?? asOf).slice(0, 4)), Number((dated.at(-1) ?? asOf).slice(5, 7))) };
+      const label = periodLabel(Number(range.from.slice(0, 4)), Number(range.from.slice(5, 7)), Number(range.to.slice(5, 7)), Number(range.to.slice(0, 4)));
+      const sheet = buildPlanSheet(all, { transactions, accounts: settings.accounts, asOf }, range, label);
+      if (ask.format === "csv") {
+        download(planSheetFilename(sheet, "csv"), planSheetCsv(sheet), "text/csv;charset=utf-8");
+        flash(`Saved ${sheet.lines.length.toLocaleString()} ${sheet.lines.length === 1 ? "plan" : "plans"} as a spreadsheet.`);
+        return;
+      }
+      const issued = readIssued();
+      void import("./pdf/statementPdf")
+        .then(({ statementPdf }) => statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() }))
+        .then((bytes) => {
+          download(planSheetFilename(sheet, "pdf"), bytes as BlobPart, "application/pdf");
+          flash(sheet.lines.length === 0 ? "Nothing is planned in that period, so the statement says so." : `Saved the plans as a PDF: ${sheet.lines.length.toLocaleString()} ${sheet.lines.length === 1 ? "plan" : "plans"}.`);
+        })
+        .catch((e: unknown) => flash(`The PDF could not be made (${(e as Error).message}). Statements on the menu can save the same plans as CSV.`));
+      return;
+    }
+
     // The period as asked, fitted to what is recorded and ending today at the latest (`fitPeriod`).
     const request = sheetRequestOf(ask, asOf);
     const type = request.type;
@@ -2722,6 +2748,7 @@ export default function App() {
               debts={settings.credits}
               year={getYear(asOf)}
               asOf={asOf}
+              plans={settings.plans ?? []}
             />
           )}
           {screen === "bin" && (

@@ -1096,6 +1096,11 @@
     background: var(--surface-sunk);
   }
 
+  /* The totals are larger figures: one to a line, so a label and its figure never wrap apart. */
+  .fms-rtable tr.fms-rtotal {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .fms-rtable .fms-rtotal td {
     background: none;
   }

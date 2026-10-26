@@ -188,6 +188,8 @@ const MODE: Record<StatementType, Mode> = {
   credit: "owed",
   lent: "owed",
   onbehalf: "owed",
+  // Never built here: `planSheet.ts` lays the plans out. Listed so every type has a mode.
+  plans: "cost",
 };
 
 /*
