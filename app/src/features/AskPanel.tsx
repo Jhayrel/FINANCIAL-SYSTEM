@@ -149,6 +149,10 @@ import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBud
 import { asksCarryOver, asksNextMonth, asksSafeToSpend, nextMonthWords, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer, everydayPrices } from "../domain/dayFit";
 import { eatOutAnswer, mealPrice, readEatOutAsk } from "../domain/eatOutAsk";
+import { billsAnswer, readBillsAsk } from "../domain/billsAsk";
+import { goalAnswer, readGoalAsk } from "../domain/goalAsk";
+import { readWeekAsk, weekAnswer } from "../domain/weekAsk";
+import { lastTimeAnswer, readLastTimeAsk } from "../domain/lastTimeAsk";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
 import { planWorked } from "../domain/planRate";
@@ -4937,6 +4941,38 @@ export function AskPanel({
       log(aiEvent("asked", "add", { text: note }));
       await answerSafe(note);
       return;
+    }
+
+    /*
+     * Four things the app answers itself, worked out from the entries (26
+     * October 2026: "I want it to do more"): what bills are due, a savings
+     * goal, how the week went, and the last time something was bought.
+     */
+    if (files.length === 0 && !as && pending === null && !/^\s*\/\//.test(note) && !isEssay(note) && !plainlyDone(note)) {
+      const billsAsked = readBillsAsk(lead, [...reference.bills, ...reference.subscriptions]);
+      const goalAsked = billsAsked ? null : readGoalAsk(lead, asOf);
+      const weekAsked = billsAsked || goalAsked ? null : readWeekAsk(lead);
+      const lastAsked = billsAsked || goalAsked || weekAsked ? null : readLastTimeAsk(lead, knownItems);
+      const reply = billsAsked
+        ? billsAnswer(billsAsked, { transactions: reportRows, reference, asOf }, formatMoney)
+        : goalAsked
+          ? goalAnswer(goalAsked, { transactions: reportRows, reference, budgets, debts, asOf }, formatMoney)
+          : weekAsked
+            ? weekAnswer(weekAsked, reportRows, asOf, formatMoney)
+            : lastAsked
+              ? lastTimeAnswer(lastAsked, reportRows, asOf, formatMoney)
+              : null;
+      if (reply) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", billsAsked || goalAsked ? "budget" : "insights", { text: note }));
+        say({ kind: "assistant", text: reply, from: "this device" });
+        log(aiEvent("answered", billsAsked || goalAsked ? "budget" : "insights", { text: reply, model: "this device" }));
+        // "Chart it" next draws the same subject.
+        if (weekAsked) drawnNext.current = { question: weekAsked.last ? "spending last week" : "spending this week", at: Date.now() };
+        if (lastAsked) drawnNext.current = { question: `${lastAsked.item ?? lastAsked.word ?? ""} spending`, at: Date.now() };
+        return;
+      }
     }
 
     /*

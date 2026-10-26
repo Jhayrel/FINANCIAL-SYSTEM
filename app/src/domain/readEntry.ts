@@ -1075,7 +1075,14 @@ export function readEntry(
    * Online Buy, where its budget line and due date never saw it (4 October
    * 2026, `monthScenarios.test.ts`).
    */
-  const recurringNamed = flow === "Spending" ? recurringIn(text, [...reference.bills, ...reference.subscriptions]) : "";
+  const recurringNamed =
+    flow === "Spending"
+      ? recurringIn(
+          text,
+          [...reference.bills, ...reference.subscriptions],
+          [...new Set(transactions.filter((t) => t.type === "Spending" && (t.category === "Bills" || t.category === "Subscriptions") && t.date >= shift(asOf, -62)).map((t) => t.item))],
+        )
+      : "";
   const statesAnItem = recurringNamed !== "" || itemsHere.some((name) => namesCredit(text, name));
   const hint = statesAnItem ? "" : itemHintIn(text);
   const filipinoItem =
@@ -1473,7 +1480,16 @@ const GENERIC_NAME_WORDS = new Set(["home", "bill", "bills", "plan", "monthly", 
  * leaves no doubt: every word that tells the bill apart, or the name less its
  * last word, or one such word beside "bill"; and only when one name fits.
  */
-export function recurringIn(text: string, names: readonly string[]): string {
+export function recurringIn(
+  text: string,
+  names: readonly string[],
+  /**
+   * Bills and subscriptions paid in the last two months. "I paid globe 999
+   * using maya" fitted both Globe at Home Wifi and Globe Postpaid, so it
+   * asked what it was for (26 October 2026); only one of them is still paid.
+   */
+  recent: readonly string[] = [],
+): string {
   const flat = (v: string): string => ` ${v.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
   const said = flat(text);
   const listed = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
@@ -1488,7 +1504,15 @@ export function recurringIn(text: string, names: readonly string[]): string {
     const lessLast = words.length >= 3 && said.includes(` ${words.slice(0, -1).join(" ")} `);
     return allTelling || lessLast || (saysBill && hits.length > 0);
   });
-  return fits.length === 1 ? (fits[0] ?? "") : "";
+  if (fits.length === 1) return fits[0] ?? "";
+  if (fits.length > 1) return "";
+  // One telling word ("globe"), when exactly one name with it is still being paid.
+  const paying = /\b(?:paid|pay|payed|bayad|nagbayad|settled)\b/i.test(text);
+  const alive = listed.filter((name) => {
+    const telling = flat(name).trim().split(" ").filter((w) => w.length >= 4 && !GENERIC_NAME_WORDS.has(w));
+    return telling.some((w) => said.includes(` ${w} `)) && recent.includes(name);
+  });
+  return paying && alive.length === 1 ? (alive[0] ?? "") : "";
 }
 
 function namesCredit(text: string, name: string): boolean {

@@ -88,6 +88,11 @@ export function capabilitiesAnswer(): string {
     "- **Budget from your money**: \"set November to 14000\" (the whole month, bills inside it), \"set November spending to 12000 and bills to 2000\", \"base my budget on my 10k income, save 20%\", \"lower my budget to my money\".",
     "- **Find and total**: \"search Framelink\", \"how much have I earned since 2022\", \"bills only statement for October\", \"518 is what's left of my cash, all on travel\".",
     "- **Summaries your way**: ask for a summary or the details and it is written; say pie, bars or trend and it is drawn.",
+    "- **Bills due**: \"what bills are due?\", \"anything to pay this week?\", \"did I pay Globe this month?\", each with its date and amount.",
+    "- **Savings goals**: \"I want to save 5000 by December\", \"how long to save 10k?\": what it takes a day, a week and a month, against what your last three months kept.",
+    "- **Your week**: \"how was my week?\", \"review last week\": what went out, against the week before, where it went and the busiest day.",
+    "- **The last time**: \"how much did I pay for gas last time?\", \"when did I last buy Jollibee?\", \"how much do I usually pay for load?\"",
+    "- **Days and dates**: \"what did I buy last friday?\", \"gas 200 2 days ago\", \"food 150 noong lunes\": the day is read from your words.",
     "**The screens**: Dashboard (today and the month), Add (a new entry), Database (every entry, search and edit), Debt, Insights (charts over any window), Budget, Statements (PDF and spreadsheet), Bin, Activity (what changed) and Settings.",
     "**Settings stay yours**: accounts, categories, credit lines, alerts, the theme and the AI's own switches are changed on the Settings screen, not by me.",
   ].join("\n");

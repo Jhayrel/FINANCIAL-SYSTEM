@@ -1634,6 +1634,26 @@ Read from the 76 chat turns since 20 October in the owner's backup.
   view in the chat, the theme, folded account groups, a statement's names.
   The first two could follow the owner across devices if they want.
 
+### 2026-10-26, later: four more things the assistant does itself
+
+The owner: "fix more the ai capabilities like I want it to do more". Each is
+worked out by the app from the entries and answered at once, before the
+model is asked (`AskPanel`, after safe to spend; `moreAsks.test.ts`):
+
+- **Bills due** (`billsAsk.ts`): "what bills are due?", "anything to pay
+  this week?", "did I pay Globe this month?", from `monthBills` and
+  `billStatuses`, with dates and amounts.
+- **Savings goal** (`goalAsk.ts`): "save 5000 by December", "how long to
+  save 10k?": a day, a week, a month, against what the last three months
+  kept (came in less went out, the Dashboard's "Kept so far").
+- **The week** (`weekAsk.ts`): "how was my week?", "review last week",
+  Monday to Sunday, against the same days of the week before.
+- **The last time** (`lastTimeAsk.ts`): "how much did I pay for gas last
+  time?", "when did I last buy Jollibee?", with the usual price (the middle
+  of the last ten) and the wallet it usually comes from.
+- And "I paid globe 999 using maya" books Globe at Home Wifi: one word that
+  fits two bills goes to the one still paid (`recurringIn`).
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
