@@ -9847,6 +9847,71 @@ button.fms-recent-row:disabled {
   background: var(--surface-hover);
 }
 
+/* A panel in the middle of a computer's screen (26 October 2026: "this isn't the phone"). */
+.fms-rowsheet--dialog {
+  inset: 0;
+  margin: auto;
+  width: min(760px, calc(100vw - var(--space-8)));
+  height: fit-content;
+  max-height: min(86dvh, 760px);
+  padding: var(--space-5);
+  gap: var(--space-4);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-lg);
+}
+
+.fms-reviewdesk {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.fms-reviewdesk-found {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--warn-bg);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-md);
+}
+
+.fms-reviewdesk-found p {
+  margin: 0;
+}
+
+.fms-reviewdesk-found .t-caption {
+  margin-top: 2px;
+  color: var(--ink-2);
+}
+
+.fms-reviewdesk-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: var(--space-3);
+}
+
+.fms-reviewdesk-choice {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+}
+
+.fms-reviewdesk-choice h3 {
+  margin: 0;
+  color: var(--ink);
+}
+
+.fms-reviewdesk-choice p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.fms-reviewdesk-choice .fms-btn {
+  justify-self: start;
+}
+
 .fms-rowsheet-body {
   display: grid;
   gap: var(--space-3);

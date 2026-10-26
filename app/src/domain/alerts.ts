@@ -1052,7 +1052,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
           const nums = [...new Set(group.flatMap((i) => i.recordNumbers))];
           return `${first.message.replace(/\.$/, "")}${nums.length > 0 ? ` (${nums.length === 1 ? `#${String(nums[0]).padStart(4, "0")}` : `${nums.length} rows, first #${String(Math.min(...nums)).padStart(4, "0")}`})` : ""}`;
         })
-        .join("; ")}. Open them in the Database and edit what is wrong.`,
+        .join("; ")}. Open Needs review: each row says what it means, and Keep as it is clears it without moving any money when your balances are already right.`,
       weight: 55,
     });
   }

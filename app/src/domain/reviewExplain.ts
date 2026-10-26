@@ -92,17 +92,19 @@ export function explainFlag(
   const keep =
     refused.length > 0
       ? `Keeping it as it is cannot be saved: the total of ${refused.map(no).join(", ")} is not its amount plus its fee, and the database refuses that. Edit it and save once.`
-      : `Nothing moves: no balance, no spending and no budget changes. A note says you checked it, and Needs review stops listing ${keepRows.length > 1 ? "them" : "it"}.${
-          others.length > 0 ? ` It is flagged together with ${others.map(no).join(", ")}, so ${others.length === 1 ? "that one is" : "those are"} kept too.` : ""
-        } Choose this when your wallets already show the right amounts.`;
+      : `Nothing moves: no balance, spending or budget changes. A note marks ${keepRows.length > 1 ? "them" : "it"} checked, and Needs review stops listing ${keepRows.length > 1 ? "them" : "it"}.${
+          others.length > 0 ? ` Flagged together with ${others.map(no).join(", ")}, so ${others.length === 1 ? "that one is" : "those are"} kept too.` : ""
+        } Best when your wallets already show the right amounts.`;
 
   // What fixing it would do, as the chat's fix card says it: each wallet and month it moves.
   const fixes = reviewFixes(transactions, context).fixes.filter(
     (f) => f.rows.some((r) => r.before.id === row.id) && !f.rows.every((r) => r.after.notes.includes(KEPT_NOTE)),
   );
   const ready = fixes[0];
+  // Without the sentence the warning above it already says.
+  const told = problems.map((p) => p.what);
   const fix = ready
-    ? `${ready.words.trim().replace(/[^.]$/, "$&.")}${ready.onlyIf ? ` Fix it only if ${ready.onlyIf}.` : ""}`
+    ? `${told.reduce((w, t) => (w.startsWith(t) ? w.slice(t.length).trim() : w), ready.words.trim()).replace(/[^.]$/, "$&.")}${ready.onlyIf ? ` Fix it only if ${ready.onlyIf}.` : ""}`
     : [...new Set(issues.map((i) => todoFor(i.code)))].join(" ");
 
   return { summary: flagSummary(issues), problems, fix, keepRows, kept: refused.length > 0 ? [] : keepRows.map(keptAsIs), keep };

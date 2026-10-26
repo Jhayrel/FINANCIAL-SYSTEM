@@ -30,6 +30,7 @@ export function Sheet({
   onClose,
   children,
   actions,
+  dialog = false,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
@@ -37,6 +38,11 @@ export function Sheet({
   children?: ReactNode;
   /** Along the bottom, the main one last so it sits under the right thumb. */
   actions?: ReactNode;
+  /**
+   * In the middle of a computer's screen, not along its bottom edge: a panel
+   * from below is a phone's (26 October 2026, "this isn't the phone").
+   */
+  dialog?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
@@ -80,8 +86,8 @@ export function Sheet({
   return createPortal(
     <>
       <div className="fms-scrim fms-scrim--sheet" aria-hidden onClick={() => close.current()} />
-      <div ref={panel} className="fms-rowsheet" role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined} tabIndex={-1}>
-        <div className="fms-sheethandle" aria-hidden />
+      <div ref={panel} className={dialog ? "fms-rowsheet fms-rowsheet--dialog" : "fms-rowsheet"} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined} tabIndex={-1}>
+        {!dialog && <div className="fms-sheethandle" aria-hidden />}
         <div className="fms-rowsheet-head">
           <div className="fms-rowsheet-titles">
             <h2 className="t-display-m" style={{ margin: 0 }}>

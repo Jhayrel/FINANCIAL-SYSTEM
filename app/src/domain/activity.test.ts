@@ -134,3 +134,13 @@ describe("byNewest", () => {
     expect([...events].sort(byNewest).map((e) => e.id)).toEqual(["b", "c", "a"]);
   });
 });
+
+describe("kept as it is from Needs review (26 October 2026)", () => {
+  it("is said as what it was, and its undo too", async () => {
+    const { KEPT_NOTE } = await import("./integrity");
+    const before = row({ recordNumber: 3831 });
+    const after = { ...before, notes: KEPT_NOTE };
+    expect(updated(before, after).summary).toBe("Checked #3831 in Needs review and kept it as it is: nothing moved.");
+    expect(updated(after, before).summary).toBe("Put #3831 back in Needs review: the kept note was taken off, nothing moved.");
+  });
+});

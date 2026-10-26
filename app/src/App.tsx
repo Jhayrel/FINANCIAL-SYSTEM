@@ -1241,7 +1241,7 @@ export default function App() {
     const undoable = rows.every((r) => previous.has(r.id));
     flash(
       said ?? `Edited #${String(first?.recordNumber ?? 0).padStart(4, "0")}${touched.length > 1 ? ` and ${touched.length - 1} more` : ""}${changed ? `: ${changed}` : ""}.`,
-      undoable ? { label: "Undo", run: () => handleUpdate(rows.map((r) => previous.get(r.id) ?? r), by) } : undefined,
+      undoable ? { label: "Undo", run: () => handleUpdate(rows.map((r) => previous.get(r.id) ?? r), by, said ? "Undone: back as it was." : undefined) } : undefined,
     );
     /*
      * An edit that makes a row cost more can take a kind past its limit, or

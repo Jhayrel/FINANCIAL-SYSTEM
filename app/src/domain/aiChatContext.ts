@@ -349,7 +349,7 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
     if (flagged.length === 0) {
       out.push("Nothing is flagged: every check passes. Never name a row as needing review.");
     } else {
-      out.push(`${flagged.length} ${flagged.length === 1 ? "row is" : "rows are"} flagged. These and only these: never name another record number as needing review. The app offers each a card that fixes it or keeps it as it is in one press ("fix the rows that need review"); keeping it moves no money, and the owner should keep any whose balances already match.`);
+      out.push(`${flagged.length} ${flagged.length === 1 ? "row is" : "rows are"} flagged. These and only these: never name another record number as needing review. The app offers each a card that fixes it or keeps it as it is in one press ("fix the rows that need review"), and the Database's Needs review has an i on each row that says what it means, with Keep as it is beside Edit; keeping it moves no money, and the owner should keep any whose balances already match.`);
       for (const f of flagged) {
         const t = f.row;
         out.push(`- #${String(t.recordNumber).padStart(4, "0")} ${t.date} ${t.type} ${t.item || t.description || ""} ${php(t.total)}: ${f.why.join(" ")} What to do: ${f.todo.join(" ")}`);

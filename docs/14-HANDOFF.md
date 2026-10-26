@@ -1591,6 +1591,13 @@ Read from the 76 chat turns since 20 October in the owner's backup.
   balance, spending or budget changes. Undo is on the notice. A row whose
   total is not its amount plus fee cannot be kept (the database refuses it);
   it says so and offers Edit.
+- On a computer the "i" opens a centred dialog (`Sheet dialog`), not the
+  phone's bottom sheet: what was noticed in a warning box, then "Keep it as
+  it is" and "Fix it" side by side, each with its button.
+- Connected: Activity says "Checked #3831 in Needs review and kept it as it
+  is: nothing moved" (and its Undo); the bell's Needs review opens the
+  filter and says what Keep does; the chat's context says the Database has
+  the i and Keep.
 
 ## 6. What the owner has to do
 

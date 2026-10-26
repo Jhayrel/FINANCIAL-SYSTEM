@@ -30,6 +30,7 @@
 
 import type { Centavos } from "./money";
 import type { Transaction } from "./types";
+import { KEPT_NOTE } from "./integrity";
 
 /** Who. `ai` means a row the assistant proposed and the owner approved. */
 export type Actor = "owner" | "ai";
@@ -194,10 +195,22 @@ export function updated(
   // The total is named only when it changed alone: beside the amount or fee it says nothing new.
   const all = changedFields(before, after);
   const changed = all.includes("amount") || all.includes("fee") ? all.filter((f) => f !== "total") : all;
+  /*
+   * Kept as it is from Needs review, or put back on it by Undo: said as what
+   * it was, not "Changed #3831: notes" (26 October 2026: every part of the
+   * system says the same thing about one action).
+   */
+  const onlyNotes = changed.length === 1 && changed[0] === "notes";
+  const kept = onlyNotes && after.notes.includes(KEPT_NOTE) && !before.notes.includes(KEPT_NOTE);
+  const unkept = onlyNotes && before.notes.includes(KEPT_NOTE) && !after.notes.includes(KEPT_NOTE);
   return build(
     "transaction.update",
     by,
-    changed.length > 0
+    kept
+      ? `Checked ${numbered(after)} in Needs review and kept it as it is: nothing moved.`
+      : unkept
+        ? `Put ${numbered(after)} back in Needs review: the kept note was taken off, nothing moved.`
+        : changed.length > 0
       ? `Changed ${numbered(after)}: ${changed.map((f) => FIELD_WORDS[f] ?? f).join(", ")}.`
       : `Saved ${numbered(after)} with no change.`,
     {

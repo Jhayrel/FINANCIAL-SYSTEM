@@ -880,33 +880,55 @@ export function Database({
         )}
       </Card>
 
-      {reviewing && (
+      {reviewing && explained && (
+        /*
+         * On a computer: in the middle of the screen, what was noticed at the
+         * top, then the two choices side by side, each with its own button
+         * (26 October 2026: "in pc dont make it like this ... this isn't the
+         * phone").
+         */
         <Sheet
+          dialog={!phone}
           title={`Why #${String(reviewing.recordNumber).padStart(4, "0")} needs review`}
-          subtitle={rowTitle(reviewing)}
+          subtitle={`${rowTitle(reviewing)} · ${formatShort(reviewing.date)} · ${walletPath(reviewing)} · ₱${formatAmount(reviewing.total)}`}
           onClose={() => setReviewing(null)}
-          actions={
-            <>
-              {onEdit && (
-                <Button
-                  onClick={() => {
-                    const t = reviewing;
-                    setReviewing(null);
-                    onEdit(t);
-                  }}
-                >
-                  Edit to fix it
-                </Button>
-              )}
-              {onKeep && explained && explained.kept.length > 0 && (
-                <Button variant="primary" onClick={() => keep(explained.kept)}>
-                  {explained.kept.length > 1 ? `Keep these ${explained.kept.length} as they are` : "Keep as it is"}
-                </Button>
-              )}
-            </>
-          }
         >
-          {reviewBody(reviewing)}
+          <div className="fms-reviewdesk">
+            <div className="fms-reviewdesk-found" role="note">
+              {explained.problems.map((p) => (
+                <div key={p.what}>
+                  <p className="t-body-strong">{p.what}</p>
+                  <p className="t-caption">{p.why}</p>
+                </div>
+              ))}
+            </div>
+            <div className="fms-reviewdesk-choices">
+              <section className="fms-reviewdesk-choice">
+                <h3 className="t-label">Keep it as it is</h3>
+                <p className="t-caption">{explained.keep}</p>
+                {onKeep && explained.kept.length > 0 && (
+                  <Button variant="primary" onClick={() => keep(explained.kept)}>
+                    {explained.kept.length > 1 ? `Keep these ${explained.kept.length}` : "Keep as it is"}
+                  </Button>
+                )}
+              </section>
+              <section className="fms-reviewdesk-choice">
+                <h3 className="t-label">Fix it</h3>
+                <p className="t-caption">{explained.fix}</p>
+                {onEdit && (
+                  <Button
+                    onClick={() => {
+                      const t = reviewing;
+                      setReviewing(null);
+                      onEdit(t);
+                    }}
+                  >
+                    Edit to fix it
+                  </Button>
+                )}
+              </section>
+            </div>
+          </div>
         </Sheet>
       )}
 
