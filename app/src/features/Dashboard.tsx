@@ -37,7 +37,7 @@
  * whether or not the line is still in use.
  */
 
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { Button, Card, CountChip, Money, ProgressBar, StatusPill } from "../components/primitives";
 import { AreaChart, BarChart, RankBars } from "../components/charts";
@@ -69,6 +69,9 @@ export function whenWords(days: number | undefined): string {
   if (days === 1) return "Due tomorrow";
   return `Due in ${days} days`;
 }
+
+/** How many of "Still to pay" show before Show all: the overdue and the soonest. */
+const DUE_SHOWN = 6;
 
 const shortDay = (iso: IsoDate): string => {
   const d = new Date(`${iso}T00:00:00`);
@@ -118,6 +121,8 @@ export function Dashboard({
 }) {
   const year = getYear(asOf);
   const month = getMonth(asOf);
+  // "Still to pay" shows the soonest few; the rest open in place (owner, 27 October 2026: "what if I have a lot of plan").
+  const [allDue, setAllDue] = useState(false);
 
   const brief = useMemo(
     () => monthBrief({ transactions, reference, budgets, debts, year, month, asOf }),
@@ -528,8 +533,9 @@ export function Dashboard({
               )}
             </>
           ) : (
+            <>
             <ul className="fms-duelist">
-              {upcoming.map((u) => (
+              {(allDue ? upcoming : upcoming.slice(0, DUE_SHOWN)).map((u) => (
                 <li key={u.key} className="fms-duerow">
                   <div className="fms-duerow-text">
                     <span className="t-body-strong fms-truncate">{u.name}</span>
@@ -547,6 +553,14 @@ export function Dashboard({
                 </li>
               ))}
             </ul>
+            {upcoming.length > DUE_SHOWN && (
+              <button type="button" className="t-caption fms-linkbtn fms-duemore" aria-expanded={allDue} onClick={() => setAllDue((v) => !v)}>
+                {allDue
+                  ? "Show the soonest only"
+                  : `Show all ${upcoming.length}: ${upcoming.length - DUE_SHOWN} more, ${formatMoney(upcoming.slice(DUE_SHOWN).reduce((s, u) => s + u.amount, 0))}`}
+              </button>
+            )}
+            </>
           )}
           {safe && safe.habits.length > 0 && (
             <p className="t-caption fms-habits">

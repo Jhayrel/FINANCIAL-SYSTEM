@@ -11885,6 +11885,22 @@ button.fms-recent-row:disabled {
   }
 }
 
+/* Show all, under a list cut to its first few (Dashboard's Still to pay, Budget's plans). */
+.fms-duemore,
+.fms-budgetplanned-more {
+  justify-self: start;
+  min-height: 32px;
+  margin-top: var(--space-2);
+}
+
+/* A thumb's width on a phone (D10). */
+@media (max-width: 639px) {
+  .fms-duemore,
+  .fms-budgetplanned-more {
+    min-height: 44px;
+  }
+}
+
 /* The month's plans on the Budget screen: under the tracks, hairlines only (D2). */
 .fms-budgetplanned {
   display: grid;

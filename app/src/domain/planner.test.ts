@@ -189,6 +189,18 @@ describe("no date, or only a month (owner, 27 October 2026: \"LIKE NO DATE LIKE 
     expect(readPlannerAsk("i paid the tuition plan", c)).toMatchObject({ kind: "pay" });
   });
 
+  // Owner, 27 October 2026: "what if I have a lot of plan". Many late or due soon are one finding each.
+  it("many plans late, or due in the same days, are one alert each kind, not one each", () => {
+    const many = Array.from({ length: 5 }, (_, i) => makePlan(input({ title: `Late ${i + 1}`, amount: 10_000, due: `2026-10-0${i + 1}` }), "2026-09-20", "owner"));
+    const soon = Array.from({ length: 4 }, (_, i) => makePlan(input({ title: `Soon ${i + 1}`, amount: 5_000, due: "2026-10-27" }), "2026-10-01", "owner"));
+    const found = planAlerts([...many, ...soon], [], [], asOf, 100_000);
+    expect(found.map((a) => a.id)).toEqual(["plan-overdue-5", "plan-due-4-2026-10-26"]);
+    expect(found[0]?.title).toBe("5 plans are overdue, ₱500.00");
+    expect(found[0]?.detail).toMatch(/^Late 1 ₱100\.00, Late 2 ₱100\.00, Late 3 ₱100\.00, and 2 more\./);
+    // Three or fewer: one each, as before.
+    expect(planAlerts(many.slice(0, 3), [], [], asOf, 100_000).map((a) => a.id)).toEqual(many.slice(0, 3).map((p) => `plan-overdue-${p.id}`));
+  });
+
   it("an entry typed on the Add form that pays a plan is found (planPaidBy)", () => {
     const haircut = makePlan(input({ title: "Haircut", amount: 15_000, due: "2026-10-28", item: "Self Care" }), "2026-10-20", "owner");
     const row = tx({ id: "new", item: "Self Care", description: "haircut at the barber", amount: 15_000, date: asOf });

@@ -93,7 +93,7 @@ import { daysInMonth, formatMedium, getMonth, getYear, MONTH_NAMES } from "../do
 import { PACE_FROM_DAY } from "../domain/alerts";
 import { budgetFromIncome, checkSplit, incomeBudget, type IncomeBudget } from "../domain/incomeBudget";
 import { monthBrief, spendable } from "../domain/monthPlan";
-import { NO_DATE, plannedForBudget, viewOf, whenOf, type PlannedMonth, type PlanView } from "../domain/planner";
+import { NO_DATE, plannedForBudget, viewOf, type PlannedMonth, type PlanView } from "../domain/planner";
 import { Icon } from "../components/Icon";
 import { formatMoney, type Centavos } from "../domain/money";
 import type {
@@ -132,6 +132,8 @@ const listWords = (xs: readonly string[]): string =>
   xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
 
 const monthLabel = (m: number): string => MONTH_NAMES[m - 1] ?? "";
+/** How many of the month's plans show before Show all: the overdue and the soonest. */
+const PLANS_SHOWN = 5;
 
 const pct = (ratio: number): string => `${Math.round(ratio * 100)}%`;
 
@@ -1770,6 +1772,15 @@ function PlannedInMonth({
   asOf: string;
   onOpenPlanner?: (() => void) | undefined;
 }) {
+  // The soonest few, the rest in place on a tap (owner, 27 October 2026: "what if I have a lot of plan").
+  const [all, setAll] = useState(false);
+  const shown = all ? planned.views : planned.views.slice(0, PLANS_SHOWN);
+  /** "Oct 27", "Any day in Oct": short, so a long name keeps its room on a phone. */
+  const shortWhen = (v: PlanView): string => {
+    const kind = v.plan.dueKind ?? "day";
+    const m = (MONTH_NAMES[Number(v.plan.due.slice(5, 7)) - 1] ?? "").slice(0, 3);
+    return kind === "month" ? `Any day in ${m}` : kind === "year" ? `Sometime in ${v.plan.due.slice(0, 4)}` : `${m} ${Number(v.plan.due.slice(8, 10))}`;
+  };
   // The month's spending plans by how sure they are; together they are `planned.spending`.
   const sumOf = (list: readonly PlanView[]): Centavos => list.reduce((s, v) => s + v.left, 0);
   const sure = sumOf(planned.spendingViews.filter((v) => v.plan.setAside && !v.plan.goalId));
@@ -1801,18 +1812,25 @@ function PlannedInMonth({
       </div>
       )}
       <ul className="fms-budgetplanned-rows">
-        {planned.views.map((v) => (
+        {shown.map((v) => (
           <li key={v.plan.id}>
-            <span className="t-body fms-truncate">{v.plan.title}</span>
+            <span className="t-body fms-truncate" title={v.plan.title}>
+              {v.plan.title}
+            </span>
             {/* Whether safe to spend holds its money back: the Budget counts it either way. */}
             <span className="t-caption fms-budgetplanned-when">
-              {v.plan.due < asOf ? `${whenOf(v.plan)}, overdue` : whenOf(v.plan)}
-              {v.plan.goalId ? ", from its goal" : !v.plan.setAside ? ", not in safe to spend" : ""}
+              {v.plan.due < asOf ? `${shortWhen(v)}, overdue` : shortWhen(v)}
+              {v.plan.goalId ? ", from its goal" : !v.plan.setAside ? ", not set aside" : ""}
             </span>
             <Money value={v.left} size="s" />
           </li>
         ))}
       </ul>
+      {planned.views.length > PLANS_SHOWN && (
+        <button type="button" className="t-caption fms-linkbtn fms-budgetplanned-more" aria-expanded={all} onClick={() => setAll((v) => !v)}>
+          {all ? "Show the soonest only" : `Show all ${planned.views.length} plans: ${planned.views.length - PLANS_SHOWN} more, ${formatMoney(planned.views.slice(PLANS_SHOWN).reduce((s, v) => s + v.left, 0))}`}
+        </button>
+      )}
       {/*
         The working, from what the spending budget has left: the plans taken
         off by how sure they are (owner, 27 October 2026: "show also the

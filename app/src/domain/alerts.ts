@@ -47,7 +47,7 @@ import { monthTotals } from "./totals";
 import { overdueGoals } from "./goalClose";
 import { patternFindings, type Finding } from "./patterns";
 import type { Account } from "./accounts";
-import { byWhen, coverage, likelyPayments, viewOf, whenOf, type Plan } from "./planner";
+import { byWhen, coverage, likelyPayments, viewOf, whenOf, type Plan, type PlanView } from "./planner";
 import type { Centavos } from "./money";
 import type { Budgets, IsoDate, SpendingType, Transaction } from "./types";
 
@@ -1140,13 +1140,50 @@ const fraction = (part: Centavos, whole: Centavos): number =>
  * payment added by hand that looks like a plan's, and a goal that will not
  * get there at the pace it needs. Each says what to do; none does it.
  */
+/** More plans late, or due within three days, than this are one finding, not one each. */
+const MANY_PLANS = 3;
+
 export function planAlerts(plans: readonly Plan[], transactions: readonly Transaction[], accounts: readonly Account[], asOf: IsoDate, freeBeforePlans: Centavos | null): Alert[] {
   const out: Alert[] = [];
   const views = plans.map((p) => viewOf(p, { transactions, accounts, asOf }));
   const short = freeBeforePlans === null ? new Map<string, Centavos>() : coverage(views, freeBeforePlans);
+  /*
+   * Many plans late, or due in the same few days, are one finding each kind,
+   * not one each: ten overdue plans filled the bell and pushed every other
+   * finding off the Dashboard's three (owner, 27 October 2026: "what if I
+   * have a lot of plan").
+   */
+  const late = views.filter((v) => v.state === "overdue");
+  const soon = views.filter((v) => (v.state === "today" || v.state === "soon" || v.state === "partly") && v.daysTo <= 3);
+  const names = (list: readonly PlanView[]): string =>
+    `${list.slice(0, 3).map((v) => `${v.plan.title.length > 40 ? `${v.plan.title.slice(0, 38).trim()}...` : v.plan.title} ${money(v.left)}`).join(", ")}${list.length > 3 ? `, and ${list.length - 3} more` : ""}`;
+  const gapOf = (list: readonly PlanView[]): Centavos => list.reduce((s, v) => s + (short.get(v.plan.id) ?? 0), 0);
+  if (late.length > MANY_PLANS) {
+    const gap = gapOf(late);
+    out.push({
+      id: `plan-overdue-${late.length}`,
+      level: "over",
+      area: "planner",
+      title: `${late.length} plans are overdue, ${money(late.reduce((s, v) => s + v.left, 0))}`,
+      detail: `${names(late)}. Pay each, move its day, or skip it in the Planner.${gap > 0 ? ` The wallets are ${money(gap)} short for them after the bills.` : ""}`,
+      weight: 92,
+    });
+  }
+  if (soon.length > MANY_PLANS) {
+    const gap = gapOf(soon);
+    out.push({
+      id: `plan-due-${soon.length}-${asOf}`,
+      level: gap > 0 ? "warn" : "info",
+      area: "planner",
+      title: `${soon.length} plans are due in the next 3 days, ${money(soon.reduce((s, v) => s + v.left, 0))}`,
+      detail: `${names(soon)}.${gap > 0 ? ` The wallets are ${money(gap)} short for them after the bills and the plans before them: pay part, move a date, or pay from savings.` : " Record each in the Planner when it is paid."}`,
+      weight: gap > 0 ? 80 : 55,
+    });
+  }
   for (const v of views) {
     const p = v.plan;
     if (v.state === "overdue") {
+      if (late.length > MANY_PLANS) continue;
       out.push({
         id: `plan-overdue-${p.id}`,
         level: "over",
@@ -1157,7 +1194,7 @@ export function planAlerts(plans: readonly Plan[], transactions: readonly Transa
       });
       continue;
     }
-    if ((v.state === "today" || v.state === "soon" || v.state === "partly") && v.daysTo <= 3) {
+    if ((v.state === "today" || v.state === "soon" || v.state === "partly") && v.daysTo <= 3 && soon.length <= MANY_PLANS) {
       const gap = short.get(p.id) ?? 0;
       out.push({
         id: `plan-due-${p.id}-${p.due}`,

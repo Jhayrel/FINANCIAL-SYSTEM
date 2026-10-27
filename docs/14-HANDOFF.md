@@ -2118,6 +2118,22 @@ style guide's Bin, Planner and sidebar lines say how each now works.
 - **Phone chat +**: two choices, Photos and screenshots, or Files (PDF, CSV,
   text). The camera button opens the camera straight away.
 
+### 2026-10-27, last: many plans, every screen holds its shape
+
+- Stress-tested with 40 plans (6 overdue, 15 this month, 10 later, 6 with no
+  date, names of 80 characters) on a computer and a phone, light and dark.
+  Nothing ran off the side; two lists grew without end.
+- **Dashboard, Still to pay**: the soonest 6, then "Show all 21: 15 more,
+  ₱6,150.00", which opens the rest in place.
+- **Budget, Planned in the month**: the soonest 5, then "Show all 21 plans".
+  The working under it stays in view. Dates are short ("Oct 27", "Any day in
+  Oct") so long names keep their room on a phone.
+- **Bell**: more than 3 plans overdue, or due within 3 days, are one finding
+  each kind ("6 plans are overdue, ₱3,000.00: ..., and 3 more"), not one per
+  plan; they had pushed every other finding off the Dashboard's three.
+- Insights and the Planner held up already: plans are dots on the calendar,
+  and the Planner was built for long lists.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
