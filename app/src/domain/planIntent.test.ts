@@ -116,10 +116,8 @@ describe("what is not this reader's", () => {
   it.each([
     "I paid 500 for food at the mall",
     "I bought a laptop yesterday 35000",
-    "I'm going to receive my allowance tomorrow",
     "I'm saving for a new phone",
     "I'm going to pay my Maya Credit on the 5th",
-    "I'm going to pay Globe at Home Wifi tomorrow",
     "I plan to set my budget to 12000",
     "food 150 cash",
     "what is planned?",
@@ -224,5 +222,56 @@ describe("a model number is part of the name, never the price", () => {
     const ps5 = read("im planning to get a ps5 in december 25k");
     if (ps5?.kind === "later") expect(ps5.plans[0]).toMatchObject({ title: "PS5", amount: 2_500_000, need: false });
     expect(ps5?.kind).toBe("later");
+  });
+});
+
+/*
+ * 27 October 2026, the owner: "make sure it knows if its plan, questions
+ * etc". Each of these went to the wrong reader before (an entry, the month's
+ * summary, or nothing).
+ */
+describe("plans said every way", () => {
+  const later = (text: string) => {
+    const r = read(text);
+    expect(r?.kind, text).toBe("later");
+    return r?.kind === "later" ? r : null;
+  };
+  it("reads plans with no 'I plan' in them", () => {
+    expect(later("on friday I'll treat my friends 1500")?.plans[0]).toMatchObject({ title: "Treat my friends", amount: 150_000, due: "2026-10-30" });
+    expect(later("I'm getting a haircut tomorrow")?.plans[0]).toMatchObject({ title: "Haircut", amount: null, due: "2026-10-27" });
+    expect(later("thinking of getting a new laptop in march, 45k")?.plans[0]).toMatchObject({ title: "New laptop", amount: 4_500_000, dueKind: "month" });
+    expect(later("plan: dinner 1500 saturday")?.plans[0]).toMatchObject({ title: "Dinner", amount: 150_000, due: "2026-10-31" });
+    expect(later("I want a ps5")?.plans[0]).toMatchObject({ title: "PS5", amount: null, dueKind: "none" });
+    expect(later("remind me to buy load tomorrow")?.plans[0]).toMatchObject({ title: "Load", due: "2026-10-27" });
+    expect(later("we're treating mama on her birthday nov 20, 3000")?.plans[0]).toMatchObject({ amount: 300_000, due: "2026-11-20" });
+  });
+  it("reads a note with no verb only when it looks ahead", () => {
+    expect(later("next week groceries 2000")?.plans[0]).toMatchObject({ title: "Groceries", amount: 200_000 });
+    expect(later("tuition next month 9000")?.plans[0]).toMatchObject({ title: "Tuition", amount: 900_000, dueKind: "month" });
+    // Saturday may be the one gone: the entry reader keeps it.
+    expect(read("groceries saturday 2000")).toBeNull();
+    expect(read("food 200")).toBeNull();
+  });
+  it("knows a question about buying from a plan said", () => {
+    expect(later("what do you think about buying a ps5?")).toMatchObject({ asked: true });
+    expect(later("is it a good idea to buy a ps5 next month?")).toMatchObject({ asked: true });
+    expect(later("should I buy a ps5 next month for 30000?")?.plans[0]).toMatchObject({ title: "PS5", amount: 3_000_000 });
+    expect(later("I might buy a jacket next month around 1500, good idea?")).toMatchObject({ asked: true });
+    // Today's: the afford question's, not a plan.
+    expect(read("should I buy a new phone?")).toBeNull();
+    // What is asked of it is not its name ("Laptop ok ba").
+    expect(later("balak kong bumili ng laptop sa december, ok lang ba?")?.plans[0]?.title).toBe("Laptop");
+  });
+  it("says a bill back as a bill, and money coming in as coming in", () => {
+    expect(read("I'm going to pay Globe at Home Wifi tomorrow")).toMatchObject({ kind: "bill", name: "Globe at Home Wifi", due: "2026-10-27" });
+    expect(read("I'm going to receive my allowance tomorrow")).toMatchObject({ kind: "income", due: "2026-10-27" });
+    expect(read("my friend will pay me 500 tomorrow")).toMatchObject({ kind: "income", amount: 50_000 });
+    expect(read("I'm getting paid tomorrow")).toBeNull();
+    // Asked, it is a question for the readers of questions.
+    expect(read("will I get my salary on the 30th?")).toBeNull();
+  });
+  it("keeps what is not a thing out", () => {
+    expect(read("I want a budget for food")).toBeNull();
+    expect(read("I need some help")).toBeNull();
   });
 });

@@ -39,12 +39,20 @@ import { borrowedMoney, lenderNames, ownIn } from "./borrowed";
 import { addDays, firstOfMonth, getMonth, getYear, lastOfMonth, MONTH_NAMES } from "./dates";
 import type { Debt } from "./debt";
 import { formatMoney, withoutYears, type Centavos } from "./money";
+import { withoutModelNumbers } from "./modelNumbers";
 import { monthBrief, safeAfter } from "./monthPlan";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
-/** Asking whether there is money for something, anywhere in the sentence. */
+/**
+ * Asking whether there is money for something, anywhere in the sentence.
+ * And the what-ifs that ask the same with a figure: "what if I spend 3000 on
+ * shoes this week", "if I buy shoes for 2500 today can I still eat this
+ * week?", "is 45k for a laptop too much for me?", "how about a 1500 dinner
+ * on saturday?", "kaya ko bang bumili ng 3000 na sapatos?" (27 October 2026
+ * sweep: each got the month's summary with the AI off).
+ */
 const AFFORD =
-  /\b(?:afford|affored|aford|afort|affort|kaya ko ba|kaya ba|can i (?:buy|spend|get|pay for|use)|could i (?:buy|spend|get)|do i have enough|have i got enough|enough (?:money|cash|balance|for|to)|what can i (?:buy|get|spend|afford)|how much (?:can|could|should) i (?:spend|spare|use)|can i spare|spare (?:for|tomorrow|tommorrow|today))\b|\bcan i\s*\??\s*$/i;
+  /\bwhat\s+(?:if|kung)\s+(?:i|we)\s+(?:buy|spend|get|pay(?:\s+for)?|order|book|purchase|treat)\b[^?.!]*\d|\bif\s+(?:i|we)\s+(?:buy|spend|get|pay(?:\s+for)?|order|book|purchase)\b[^?.!]*\b(?:can|will|would|could)\s+(?:i|we)\b|\bcan\s+(?:i|we)\s+still\s+(?:eat|afford|pay|buy|get|make\s+it|survive|last|cover)\b|\btoo\s+(?:much|expensive|pricey|mahal)\s+for\s+(?:me|us|my\s+(?:budget|wallet))\b|\b(?:how|what)\s+about\s+(?:a|an)\s+(?:₱|php\s*)?\d[\d,]*(?:\.\d+)?\s*k?\s+[a-z]|\bkaya\s+(?:ko|natin|ba)\s+(?:bang|ba|kaya)\b|\b(?:afford|affored|aford|afort|affort|kaya ko ba|kaya ba|can i (?:buy|spend|get|pay for|use)|could i (?:buy|spend|get)|do i have enough|have i got enough|enough (?:money|cash|balance|for|to)|what can i (?:buy|get|spend|afford)|how much (?:can|could|should) i (?:spend|spare|use)|can i spare|spare (?:for|tomorrow|tommorrow|today))\b|\bcan i\s*\??\s*$/i;
 
 /** Saying it is a question, or which figure to go by, after a question like that. */
 const GO_BY =
@@ -140,7 +148,8 @@ export function readAffordAsk(
   const when = /\b(?:tomorrow|tommorrow|tomorow|tmrw|bukas)\b/i.test(text) ? "tomorrow" : /\b(?:today|now|ngayon)\b/i.test(text) ? "today" : null;
   const yesNo = !/\bhow (?:much|many)\b|\bmagkano\b|\bilan\b/i.test(text);
   // A date's day is never money: "on oct 20", "the 20th" (12 October 2026 audit, A9).
-  const undated = withoutYears(text).replace(/\b(?:the\s+)?(?:[12]\d|3[01]|0?[1-9])(?:st|nd|rd|th)\b/gi, " ");
+  // "a ps5 for 30000" is PHP 30,000.00, never the 5 of PS5 (27 October 2026 sweep).
+  const undated = withoutModelNumbers(withoutYears(text)).replace(/\b(?:the\s+)?(?:[12]\d|3[01]|0?[1-9])(?:st|nd|rd|th)\b/gi, " ");
   return { items, amount: figureIn(undated), wallet, when, yesNo };
 }
 

@@ -3,7 +3,7 @@
  * 2026): "Before adding that what do you think?" and "Its not safe spend".
  */
 import { describe, expect, it } from "vitest";
-import { asksPlanOpinion, planOpinion, readPlanCardChange } from "./planCard";
+import { asksPlanOpinion, planOpinion, readPlanCardChange, wishOpinion } from "./planCard";
 import type { PlanInput } from "./planner";
 
 const reference = {
@@ -101,5 +101,46 @@ describe("an opinion on a plan already saved", () => {
     expect(words).toContain("- As it is, it is counted in safe to spend: ₱1,800.00 is held back now, until it is paid.");
     expect(words).not.toMatch(/next month|from the 1st/);
     expect(words).toMatch(/spend less on wants in October/);
+  });
+});
+
+/*
+ * 27 October 2026, the owner: "I am asking a question, I said the ai knows if
+ * I am asking or adding". A plan asked about with no price got "I need the
+ * amount first"; it is answered now, and the price is asked only to add it.
+ */
+describe("an opinion asked before the price is known", () => {
+  const phone: PlanInput = { title: "iPhone 18 Pro Max", amount: null, due: "2026-11-30", dueKind: "month", item: "", wallet: "", need: false, setAside: true, notes: "" };
+  const facts = (spare: number) => ({ asOf, month: { name: "November 2026", usual: 1_632_200, others: 900_000, income: 2_532_200 + spare }, freeNow: 0, savings: 354_535 });
+  it("answers with what the month can take, and asks the price only to add it", () => {
+    const words = wishOpinion(phone, facts(-599_574));
+    expect(words).toMatch(/^\*\*iPhone 18 Pro Max, sometime in November 2026\.\*\*/);
+    expect(words).toContain("already ₱5,995.74 short before this");
+    expect(words).toContain("A usual November has no room for it");
+    expect(words).toContain("It is a want");
+    expect(words).toContain("If you want it on the Planner, tell me the price");
+    expect(words).not.toMatch(/I need the amount first/);
+  });
+  it("names the room a month has, and never PHP 0.00 of it", () => {
+    expect(wishOpinion(phone, facts(1_500_000))).toContain("Up to about ₱15,000.00, a usual November can pay for it");
+    // PHP 4.26 spare is no room, not "up to about PHP 0.00".
+    const tiny = wishOpinion(phone, facts(426));
+    expect(tiny).toContain("has no room for it");
+    expect(tiny).not.toContain("₱0.00, a usual");
+  });
+  it("does not say they called it a need when they did not", () => {
+    expect(wishOpinion({ ...phone, need: true }, facts(-1))).toContain("It reads as a need");
+  });
+  it("knows the questions that ask for a view", () => {
+    for (const q of ["good idea?", "is it worth it", "should I buy it", "what do you think about it"]) expect(asksPlanOpinion(q), q).toBe(true);
+  });
+});
+
+describe("the price said as a guess", () => {
+  const phone: PlanInput = { title: "iPhone 18 Pro Max", amount: 10_000_000, due: "2026-11-30", dueKind: "month", item: "", wallet: "", need: false, setAside: true, notes: "" };
+  it("is the price, and the same price again is said back, never a second card", () => {
+    expect(readPlanCardChange("Probably 100k i think", phone, ctx)).toMatchObject({ changed: [], already: ["It is ₱100,000.00 on the card already."] });
+    expect(readPlanCardChange("its around 95k", phone, ctx)).toMatchObject({ changed: ["amount ₱95,000.00"] });
+    expect(readPlanCardChange("siguro 90k", phone, ctx)).toMatchObject({ changed: ["amount ₱90,000.00"] });
   });
 });

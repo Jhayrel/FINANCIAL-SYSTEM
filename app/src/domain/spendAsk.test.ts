@@ -59,8 +59,9 @@ describe("reading the question", () => {
   });
 
   it("leaves to the model what it cannot place exactly", () => {
-    // Not on the list: answered as nothing would be wrong.
-    expect(readSpendAsk("how much did I spend on the gym last month", items, asOf)).toBeNull();
+    // Not on the list: the entries whose words say it, never "nothing" (27 October 2026 sweep).
+    expect(readSpendAsk("how much did I spend on the gym last month", items, asOf)).toMatchObject({ item: null, word: "gym" });
+    expect(readSpendAsk("how much did I spend on it last month", items, asOf)).toBeNull();
     // About the future, or a decision.
     expect(readSpendAsk("how much would I save if I cut treats", items, asOf)).toBeNull();
     expect(readSpendAsk("how much can I spend on food this week", items, asOf)).toBeNull();
@@ -104,5 +105,23 @@ describe("one day by its weekday or 'days ago' (26 October 2026)", () => {
 
   it("reads this week as Monday to today", () => {
     expect(readSpendAsk("how much did I spend this week?", items, asOf)).toMatchObject({ from: "2026-09-28", to: "2026-09-28", name: "this week, today" });
+  });
+});
+
+// "how much did I spend on shoes?" got the month's summary with the AI off (27 October 2026 sweep).
+describe("a thing on no list", () => {
+  const rows = [...ledger, spend("2026-03-22", "Online Buy", 2194.5, "Buy shoes adidas"), spend("2026-09-10", "Clothes", 899, "School shoe"), spend("2026-09-12", "Food", 120, "Snacks")];
+  it("counts the entries whose words say it, and says where they are filed", () => {
+    const ask = readSpendAsk("how much did I spend on shoes this month?", items, asOf);
+    expect(ask).toMatchObject({ item: null, word: "shoes" });
+    expect(spendAnswer(ask!, rows, asOf)).toBe('You spent **PHP 899.00** on entries that say "shoes" in September 2026, over 1 entry. Filed under Clothes. The latest was PHP 899.00, #0007 on September 10, 2026 (School shoe).');
+  });
+  it("says the last year when the period has none", () => {
+    const ask = readSpendAsk("how much did I spend on shoes in july?", items, asOf);
+    expect(spendAnswer(ask!, rows, asOf)).toContain('No spending entry says "shoes" in July 2026. In the last year: **PHP 3,093.50** over 2 entries.');
+  });
+  it("says so when nothing ever did", () => {
+    const ask = readSpendAsk("how much did I spend on concerts?", items, asOf);
+    expect(spendAnswer(ask!, rows, asOf)).toMatch(/^No spending entry says "concerts" in September 2026, or in the last year\./);
   });
 });

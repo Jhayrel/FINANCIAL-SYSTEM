@@ -2158,6 +2158,44 @@ style guide's Bin, Planner and sidebar lines say how each now works.
   to the budget". Under ₱100 into the wallets is said without the button.
   The bell's "came in since you set the budget" follows the same rule.
 
+### 2026-10-27, last: plans AI first, asking told from adding
+
+- **AI first for plans** (`aiFirst` in `AskPanel.tsx`): with the AI on,
+  every question about a plan (an opinion, "should I buy", what is planned,
+  what a month holds, how much to save for one, a bill or income said ahead)
+  goes to whichever model is set, handed the app's own answer as its figures
+  and told to do no arithmetic, move no month and guess no price. The app's
+  words are the answer when no model is on, none answers, or the answer is
+  empty. Cards are always the app's, under the answer. Tested with stand-in
+  models that answer well, answer nothing, and write only a Plan line.
+- **Any model**: a Plan line becomes a card only when it names something the
+  owner spoke of, has a price, and does not repeat an open or queued card;
+  the month they said wins over the model's ("next month" was written
+  "January 2027"). A Plan line that makes no card is taken out before the
+  figures are checked, so no stray "not a figure this app worked out" note
+  is left. Card figures count as the app's own (₱100,045.74 was flagged).
+- **Asking, not adding**: "I plan next month to get iphone 18 pro max what
+  do you think?" is answered with what November can take, the savings, and a
+  view; the price is asked only as the way to add it. "Thats a question"
+  after a plan said gives the same. "Probably 100k i think" with the card
+  open says the card has it already: it was two replies and a second card.
+- **More ways of saying it**, each misread before: "I'm getting a haircut
+  tomorrow", "thinking of getting a laptop in march, 45k", "plan: dinner 1500
+  saturday", "I want a ps5", "remind me to buy load tomorrow", "next week
+  groceries 2000", "what do you think about buying a ps5?", "is it a good
+  idea to buy ...", "I might buy ... good idea?". A bill the owner has ("I
+  need to pay the electric bill on nov 5") is said back as a bill, never
+  booked as paid on a future day; money coming in ("I will get my salary on
+  the 30th") is booked when it arrives. "may plano ba ako" is not May. A
+  phone plan or data plan is an entry, not the Planner.
+- **Questions answered on the device too**: what-ifs and Taglish afford
+  questions, "is 45k too much for me", "how much did I spend on shoes" (the
+  entries that say it, `spendAsk.ts`), "am I spending too much on food"
+  (this month against the same days of the three before, `paceAsk.ts`), and
+  "save for a trip in april 15000" (by April). "I bought shoes 2500 and I
+  plan to buy a bag next month 1500" is an entry card and a plan card
+  (`planClause.ts`); the model reading entries is sent only the first part.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

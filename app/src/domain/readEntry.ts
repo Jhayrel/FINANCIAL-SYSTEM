@@ -26,6 +26,7 @@
  * borrowing as spending.
  */
 
+import { withoutPlanClause } from "./planClause";
 import { formatMedium } from "./dates";
 import { namesMoney, withoutTotals } from "./entryTotals";
 import { cashWallet } from "./withdrawal";
@@ -764,11 +765,13 @@ function kindByWord(text: string, reference: ReferenceLists): string {
 }
 
 export function readEntry(
-  text: string,
+  message: string,
   transactions: readonly Transaction[],
   reference: ReferenceLists,
   asOf: IsoDate,
 ): ReadEntry {
+  // "I bought shoes 2500 and I plan to buy a bag next month 1500": the entry is the part that happened (planClause.ts).
+  const text = withoutPlanClause(message);
   /**
    * A named credit line makes the sentence about debt, whatever verb it uses.
    *

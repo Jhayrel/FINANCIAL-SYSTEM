@@ -46,7 +46,8 @@ export function readGoalAsk(text: string, asOf: IsoDate): GoalAsk | null {
   const m = Number(asOf.slice(5, 7));
   let by: IsoDate | null = null;
   const inSpan = /\b(?:in|within|for the next|over)\s+(\d{1,2}|a|an|one|two|three|four|five|six)\s+(days?|weeks?|months?)\b/i.exec(t);
-  const named = /\b(?:by|until|before|on|this|for)\s+(?:the\s+end\s+of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.?(?:\s+(\d{1,2})(?:st|nd|rd|th)?)?(?:,?\s+(20\d{2}))?\b/i.exec(t);
+  // "save for a trip to cebu in april 15000": in April is by April (27 October 2026 sweep, it was read as no date).
+  const named = /\b(?:by|until|before|on|this|for|in|sa)\s+(?:the\s+end\s+of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.?(?:\s+(\d{1,2})(?:st|nd|rd|th)?)?(?:,?\s+(20\d{2}))?\b/i.exec(t);
   if (inSpan) {
     const words: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
     const n = /^\d+$/.test(inSpan[1] ?? "") ? Number(inSpan[1]) : (words[(inSpan[1] ?? "").toLowerCase()] ?? 1);

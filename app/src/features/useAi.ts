@@ -93,6 +93,8 @@ export interface UseAi {
       pinned?: string;
       /** The conversation's figures that count as sources: the owner's and the device's, never a model's. */
       trusted?: string;
+      /** Lines taken out of a model's answer before it is checked and shown: a Plan line that makes no card (`AskPanel`). */
+      tidy?: (text: string) => string;
     },
   ) => Promise<AiAnswer>;
   readonly clear: () => void;
@@ -233,6 +235,7 @@ export function useAi({
          * "known" (3 October 2026, PHP 4,500.00 twice). Defaults to all of it.
          */
         trusted?: string;
+        tidy?: (text: string) => string;
       } = {},
     ): Promise<AiAnswer> => {
       // Switched off means nothing is sent, not that nothing comes back.
@@ -285,7 +288,7 @@ export function useAi({
       const withWorked =
         chatText && options.worked ? `## Worked out by the app for this question\n${options.worked.trim()}\n\n${chatText}` : chatText;
 
-      const answered = await askAi({
+      let answered = await askAi({
         context,
         task,
         tone: ai.tone,
@@ -319,6 +322,13 @@ export function useAi({
        * the deciding to the owner. See `domain/aiFigures.ts`.
        */
       if (answered.source !== "model") return answered;
+      /*
+       * Taken out before the figures are checked, so a line that is not shown
+       * leaves no note behind: "Plan: iPhone, PHP 100,000.00" removed left
+       * only "PHP 100,000.00 is not a figure this app worked out" (27 October
+       * 2026, a model that wrote nothing else).
+       */
+      if (options.tidy) answered = { ...answered, text: options.tidy(answered.text) };
 
       /*
        * The conversation counts as a source: a figure the device worked out a

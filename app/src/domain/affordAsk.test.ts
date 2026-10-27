@@ -238,3 +238,14 @@ describe("a limit on the kind asked about", () => {
     expect(affordAnswer(readAffordAsk("can I spend 100 on food today", rows, reference, TODAY), input)).not.toContain("limit");
   });
 });
+
+// What-ifs, "too much for me" and Taglish, each the month's summary with the AI off (27 October 2026 sweep).
+describe("asked another way", () => {
+  it("knows them", () => {
+    for (const q of ["what if I spend 3000 on shoes this week", "if I buy shoes for 2500 today can I still eat this week?", "is 45k for a laptop too much for me?", "how about a 1500 dinner on saturday?", "kaya ko bang bumili ng 3000 na sapatos?", "can I still eat this week?"]) expect(isAffordQuestion(q), q).toBe(true);
+    for (const q of ["what if I spend less on food", "how about last month", "I bought shoes 2500"]) expect(isAffordQuestion(q), q).toBe(false);
+  });
+  it("never takes a model number for the price", () => {
+    expect(readAffordAsk("should I buy a ps5 next month for 30000?", rows, reference, TODAY).amount).toBe(3_000_000);
+  });
+});

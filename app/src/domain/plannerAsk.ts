@@ -171,7 +171,7 @@ export function planNamed(text: string, plans: readonly Plan[], prefer: readonly
  * made (planIntent.ts) and was answered "No plan by that name is on the
  * Planner" (27 October 2026).
  */
-const PLANNER = /\b(?:planner|plans|planned)\b|(?<!\b(?:i|we|they|you|to|also|still|really|will|i'?ll|we'?ll)\s)\bplan\b/i;
+const PLANNER = /\b(?:planner|plans|planned|plano)\b|(?<!\b(?:i|we|they|you|to|also|still|really|will|i'?ll|we'?ll)\s)\bplan\b/i;
 const QUESTIONISH = /\?\s*$|^\s*(?:what|how|can|could|should|would|will|is|am|do|does)\b/i;
 
 const esc = (v: string): string => v.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -268,10 +268,14 @@ export function readPlannerAsk(
    * 2026 sweep), with nothing about the plans.
    */
   {
-    const named = MONTH_NAMES.findIndex((m) => new RegExp(`\\b${m.slice(0, 3)}(?:${m.slice(3)})?\\b`, "i").test(t));
-    const aboutMonth = /\b(?:this|next|ngayong|sa\s+susunod\s+na)\s+(?:month|buwan)\b/i.test(t) || named >= 0;
+    // "may plano ba ako" is Filipino "is there", not May: May only after "in", "by", "this" and the like, as `dayIn` reads it (27 October 2026 sweep).
+    const named = MONTH_NAMES.findIndex((m) => (m === "May" ? /\b(?:in|by|on|for|until|till|this|next|sa)\s+may\b/i : new RegExp(`\\b${m.slice(0, 3)}(?:${m.slice(3)})?\\b`, "i")).test(t));
+    // "how much is left after my plans?" is this month's (27 October 2026 sweep).
+    const afterPlans = /\b(?:left|free|remain\w*|natira|matitira)\b[^.?!]{0,20}\bafter\s+(?:all\s+)?(?:my|the|these|those)?\s*plans\b/i.test(t);
+    const aboutMonth = /\b(?:this|next|ngayong|sa\s+susunod\s+na)\s+(?:month|buwan)\b/i.test(t) || named >= 0 || afterPlans;
     // "planned" or "plans", never "plan": "I plan next month to get an iphone, what do you think?" is a new plan, asked about (27 October 2026).
-    const asksHowMuch = /\b(?:how\s+much|magkano|total|what(?:'s|\s+is|\s+are)?)\b[^.?!]{0,30}\b(?:planned|plans)\b/i.test(t) || /\b(?:planned|plans)\b[^.?!]{0,12}\b(?:for|in|this|next)\b/i.test(t);
+    // "may plano ba ako next month?", "ano mga plano ko sa november?": the same, in Filipino.
+    const asksHowMuch = /\b(?:how\s+much|magkano|total|what(?:'s|\s+is|\s+are)?)\b[^.?!]{0,30}\b(?:planned|plans)\b/i.test(t) || /\b(?:planned|plans)\b[^.?!]{0,12}\b(?:for|in|this|next)\b/i.test(t) || /\b(?:may|meron|merong|ano(?:ng)?|ilan(?:g)?)\b[^.?!]{0,20}\bplano\b/i.test(t);
     const tellsAPlan = /\b(?:i|we)\s+(?:plan|am\s+planning|'m\s+planning|m\s+planning|want|will|'ll)\b|\b(?:to\s+)?(?:buy|get|purchase|order|book)\b/i.test(t);
     if (aboutMonth && asksHowMuch && !tellsAPlan && !/\b(?:add|move|skip|remove|delete|pay|paid|plan\s+(?:a|an|my|the)?\s*\w+\s+\d)\b/i.test(t) && !/\d{3,}/.test(t)) {
       const y = Number(asOf.slice(0, 4));
@@ -285,7 +289,7 @@ export function readPlannerAsk(
   }
 
   // "What's planned?", "show my planner", "what plans are due this week?"
-  if (/\b(?:what(?:'s| is| do i have)?|show|list|any|see|check)\b[^.?!]{0,30}\b(?:planned|planner|plans)\b/i.test(t) && !/\b(?:add|move|skip|remove|delete|pay|paid)\b/i.test(t)) {
+  if ((/\b(?:what(?:'s| is| do i have)?|show|list|any|see|check)\b[^.?!]{0,30}\b(?:planned|planner|plans)\b/i.test(t) || /\b(?:may|meron|merong|ano(?:ng)?|ilan(?:g)?)\b[^.?!]{0,20}\bplano\b/i.test(t)) && !/\b(?:add|move|skip|remove|delete|pay|paid)\b/i.test(t)) {
     return { kind: "list" };
   }
 
@@ -353,7 +357,16 @@ export function readPlannerAsk(
     if (plan && amount !== null && amount > 0 && amount !== plan.amount) return { kind: "amount", plan, amount };
   }
 
-  if (!PLANNER.test(t)) return null;
+  /*
+   * A phone plan, a data plan, an insurance plan: a bill, not the Planner.
+   * "paid my phone plan 999 gcash" was offered as paying the "New phone"
+   * plan (27 October 2026 sweep). Kept when a plan on the Planner is called
+   * that.
+   */
+  const notPlanner = /\b(?:phone|mobile|cell|postpaid|prepaid|data|internet|wifi|wi-fi|fiber|fibre|broadband|load|insurance|health|life|hmo|installment|instalment|payment|unli|globe|smart|dito|sun|tnt|gomo|meal|family|streaming|netflix|spotify)\s+plans?\b/gi;
+  // "pay the new phone plan": a plan called New phone is still the Planner's.
+  const kept = plans.some((p) => p.status === "open" && (new RegExp(notPlanner.source, "i").test(p.title) || new RegExp(`\\b${p.title.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+plans?\\b`, "i").test(t)));
+  if (!PLANNER.test(kept ? t : t.replace(notPlanner, " "))) return null;
   const open = plans.filter((p) => p.status === "open");
 
   if (/\b(?:how\s+much|magkano)\b[^.?!]*\b(?:save|set\s+aside|put\s+aside|keep|ipon|itabi)\b/i.test(t)) {
@@ -372,7 +385,8 @@ export function readPlannerAsk(
   }
 
   // A field other than the date, the amount or a payment ("the trip plan is a want", "don't count the trip plan").
-  if (!/\b(?:put\s+back|restore|bring\s+back|reopen|paid|move|extend|postpone)\b|\b(?:put|bring)\b[^.?!]{0,40}?\bback\b/i.test(t)) {
+  // "pay the new phone plan 5000 from cash" is a payment from Cash, not the plan's wallet changed (27 October 2026 sweep).
+  if (!/^\s*(?:please\s+|pls\s+)?(?:pay|settle)\b|\b(?:put\s+back|restore|bring\s+back|reopen|paid|move|extend|postpone)\b|\b(?:put|bring)\b[^.?!]{0,40}?\bback\b/i.test(t)) {
     const plan = planNamed(t, open, ["open"]);
     const edit = plan ? editIn(t, plan, reference, context.goals ?? []) : null;
     if (plan && edit) return { kind: "edit", plan, input: edit.input, changes: edit.changes };

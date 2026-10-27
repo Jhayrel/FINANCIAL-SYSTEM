@@ -511,3 +511,22 @@ describe("a plan for a day already gone (owner, 27 October 2026: \"what happen i
     expect(restored.state).toBe("paid");
   });
 });
+
+// 27 October 2026 sweep: Filipino "may", a phone plan, and what is left after the plans.
+describe("the Planner's questions, said other ways", () => {
+  const plans = [makePlan(input({ title: "New phone", amount: 2_500_000, due: "2027-03-31", dueKind: "month" }), asOf, "owner")];
+  const c = { plans, reference, transactions: ledger, asOf };
+  it("reads Filipino 'may' as 'there is', never May", () => {
+    expect(readPlannerAsk("may plano ba ako next month?", c)).toEqual({ kind: "month", year: 2026, month: 11 });
+    expect(readPlannerAsk("ano mga plano ko sa november?", c)).toEqual({ kind: "month", year: 2026, month: 11 });
+    expect(readPlannerAsk("what's planned in may?", c)).toEqual({ kind: "month", year: 2027, month: 5 });
+  });
+  it("answers what is left after the plans for this month", () => {
+    expect(readPlannerAsk("how much is left after my plans?", c)).toEqual({ kind: "month", year: 2026, month: 10 });
+  });
+  it("leaves a phone plan, a data plan, an insurance plan to the entry readers", () => {
+    expect(readPlannerAsk("paid my phone plan 999 gcash", c)).toBeNull();
+    expect(readPlannerAsk("my data plan is 299 a month", c)).toBeNull();
+    expect(readPlannerAsk("pay the new phone plan 5000 from cash", c)).toMatchObject({ kind: "pay" });
+  });
+});

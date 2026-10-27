@@ -137,11 +137,11 @@ import { readSmallTalk, smallTalkAnswer } from "../domain/smallTalk";
 import { fileAsBefore } from "../domain/fileAsBefore";
 import { asksAboutDeleted, deletedRows, deletedWindowIn, deletedWords, onlyAWindow } from "../domain/deletedAsk";
 import { inferFromHistory } from "../domain/infer";
-import { monthBills } from "../domain/budgetView";
+import { categoryLimits, monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, saysItWasAStatement, wantsThoseEntries, type Intent } from "../domain/intent";
 import { monthBrief, spendable } from "../domain/monthPlan";
-import { asksPlanOpinion, planOpinion, readPlanCardChange, type PlanOpinionFacts } from "../domain/planCard";
+import { asksPlanOpinion, planOpinion, readPlanCardChange, wishOpinion, type PlanOpinionFacts } from "../domain/planCard";
 import { pictureDay } from "../domain/pictureDay";
 import { quickAnswer, readQuickAsk } from "../domain/quickAsk";
 import { financeAlerts } from "../domain/alerts";
@@ -169,6 +169,7 @@ import { entryImpact, limitLine } from "../domain/entryImpact";
 import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
 import { kindFromHistory, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
 import { closedPlanWords, dayFor, plannedMonthWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
+import { splitPlanClause, withoutPlanClause } from "../domain/planClause";
 import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
@@ -201,7 +202,7 @@ import { asksToAddTheDifference, differenceNextStep, namedForTheDifference } fro
 import { withoutFalseDenial } from "../domain/aiText";
 import { asksAboutAFile, exportWords, readExportAsk, sheetRequestOf, statementBrief, statementWords, withCut, withSheet, type ExportAsk } from "../domain/exportAsk";
 import { readInvestigateAsk, type InvestigateAsk } from "../domain/investigateAsk";
-import { affordAnswer, followsUpDecision, goesByBalance, isAffordQuestion, readAffordAsk } from "../domain/affordAsk";
+import { affordAnswer, followsUpDecision, goesByBalance, isAffordQuestion, readAffordAsk, usualCost } from "../domain/affordAsk";
 import {
   duplicateHeadline,
   groupDuplicates,
@@ -288,6 +289,7 @@ import {
   editedAsk,
 } from "../domain/budgetAsk";
 import { readSpendAsk, spendAnswer } from "../domain/spendAsk";
+import { paceAnswer, readPaceAsk } from "../domain/paceAsk";
 import { earnAnswer, readEarnAsk } from "../domain/earnAsk";
 import { readLedgerSearch, searchLedger } from "../domain/ledgerSearch";
 import { adviceMonthIn, adviceWords, asksBudgetAdvice, asksShortBudget, asksForTheSplit, budgetAdvice, expectedIncomeIn, judgeWords, judgesSetBudget, keepWords, needWords, newestBudgetChange, savingsGoalIn, type BudgetAdvice } from "../domain/budgetAdvice";
@@ -2487,6 +2489,8 @@ export function AskPanel({
    * 20") makes its Planner card (planIntent.ts).
    */
   const pendingPlan = useRef<{ readonly input: PlanInput; readonly dueSaid: boolean; readonly at: number } | null>(null);
+  /** While an answer is the app's own working said by the model (`aiFirst`): its Plan and Entry lines are not offered or shown. */
+  const linesOff = useRef(false);
   /**
    * Planner cards to show under the answer being worked out, so "how much do
    * I need next month? add it as a plan" is answered and then carded, in that
@@ -2756,7 +2760,8 @@ export function AskPanel({
      * correction made against a Spending card cannot put a spending type on
      * a Revenue row.
      */
-    const said = (proposal.said ?? hint).trim().toLowerCase();
+    // A plan said after the entry is not the entry's words (planClause.ts).
+    const said = withoutPlanClause(proposal.said ?? hint).trim().toLowerCase();
     // Matched on the words that carry the meaning, not on the whole sentence:
     // the figure changes every time and an exact lookup never fired twice.
     const taught = said ? taughtFor(said, learnedItems) : undefined;
@@ -3445,7 +3450,8 @@ export function AskPanel({
       sent.length > 0 ? "Reading what you sent" : "Working out the entry",
       () =>
         extractProposals({
-          note,
+          // A plan said after the entry is the Planner's, never an entry the model reads (planClause.ts).
+          note: withoutPlanClause(note),
           attachments: sent,
           reference,
           asOf,
@@ -3661,6 +3667,12 @@ export function AskPanel({
        * rules, "How much was it?" (28 September 2026). One message, one reply.
        */
       if (sent.length === 0 && readEntry(note, transactions, reference, asOf).worthOffering) return false;
+      /*
+       * A sentence goes on to the rules and then the question path, which
+       * always answers: saying "I could not find an entry in that" first made
+       * two replies to "Probably 100k i think" (27 October 2026).
+       */
+      if (sent.length === 0) return false;
       /*
        * Say so either way.
        *
@@ -4524,6 +4536,16 @@ export function AskPanel({
           trusted: [
             question,
             ...turns.filter(isSaid).filter((t) => t.kind === "you" || t.from === "this device").map((t) => t.text),
+            /*
+             * The cards are the app's own working too: PHP 100,045.74 short,
+             * from a Planner card, was flagged as "not figures this app worked
+             * out" under the model's answer (27 October 2026).
+             */
+            ...turns.flatMap((t) => {
+              if (isSaid(t) || isChart(t)) return [];
+              const state = (t as { state?: string }).state;
+              return state ? [cardWords(t, state as StoredCard["state"])] : [];
+            }),
           ].join("\n"),
           /*
            * Only when the question points at it.
@@ -4535,6 +4557,16 @@ export function AskPanel({
            */
           screen: [aboutTheScreen(question) ? screenText(currentScreen()) : "", picked ? pickText(picked) : ""].filter(Boolean).join("\n\n"),
           ...(figures ? { worked: figures } : {}),
+          /*
+           * A Plan or Entry line that makes no card is not shown: under an
+           * `aiFirst` answer the card is the app's, and elsewhere a line with
+           * no price, or for a thing nobody said ("Plan: New phone, PHP 0.00"
+           * under a question about an iPhone, 27 October 2026), is noise.
+           */
+          tidy: (text: string) => {
+            const lines = linesOff.current ? /^\s*(?:[-*]\s*)?\**(?:plan|entry)\**\s*:.*$/gim : planLineIn(text) && !planFromAnswer(text, question) ? /^\s*(?:[-*]\s*)?\**plan\**\s*:.*$/gim : null;
+            return lines ? text.replace(lines, "").replace(/\n{3,}/g, "\n\n").trim() : text;
+          },
           // What it must not forget: what they told it, and this conversation in outline (domain/memory.ts).
           pinned: keepInMind(savedChat.current, turns.filter(isSaid).map((t) => ({ role: t.kind, text: t.text })).concat([{ role: "you" as const, text: question }]), asOf),
           signal: control.signal,
@@ -4572,6 +4604,17 @@ export function AskPanel({
     }
     const from = answer.source === "model" ? model : tookTooLong ? `No answer came within ${CHAT_DEADLINE_MS / 1000} seconds.` : (answer.reason ?? model);
     const answerText = answer.source === "model" ? withoutFalseDenial(answer.text) : tookTooLong ? `${NOT_ANSWERED} the AI took too long. Your question is kept; press Try again.` : answer.text;
+    /*
+     * An answer with nothing left to read, empty or only a Plan line, is no
+     * answer: the app's own working is said instead, as when no model
+     * answers. Any model, however small, then leaves a reply worth reading.
+     */
+    if (answer.source === "model" && !answerText.trim()) {
+      const own = worked?.fallback;
+      say({ kind: "assistant", text: own ?? `${NOT_ANSWERED} the AI sent an empty answer. Your question is kept; press Try again.`, from: own ? "this device, because the AI sent an empty answer" : model, ...(own ? {} : { retry: question }) });
+      log(aiEvent("answered", "add", { text: own ?? "Empty answer", model: "this device" }));
+      return;
+    }
     say({ kind: "assistant", text: answerText, from, ...(failed ? { retry: question } : {}) });
     log(aiEvent("answered", "add", { text: answerText, model }));
     /*
@@ -4587,9 +4630,10 @@ export function AskPanel({
      * Entry line and a PHP 1,000.00 card for money not yet spent (4 October
      * 2026). It is a decision; it becomes an entry when the money moves.
      */
+    if (linesOff.current) return;
     if (answer.source === "model" && !isPlan(question)) await offerFromAnswer(answerText);
     // A plan for today is today's money: a Plan line under it is not offered.
-    if (answer.source === "model" && readPlanIntent(question, { reference, transactions, asOf })?.kind !== "today") offerPlanFromAnswer(answerText);
+    if (answer.source === "model" && readPlanIntent(question, { reference, transactions, asOf })?.kind !== "today") offerPlanFromAnswer(answerText, question);
   };
 
   /**
@@ -4619,7 +4663,7 @@ export function AskPanel({
   };
 
   /** What an opinion on a plan is worked from: its month as "how much do I need" reads it, today's money, the savings. */
-  const planOpinionFacts = (plan: Plan): PlanOpinionFacts => {
+  const planOpinionFacts = (plan: Pick<Plan, "due" | "title"> & { readonly amount: Centavos | null }): PlanOpinionFacts => {
     const brief = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
     const savings = reference.savings.reduce((sum, a) => sum + Math.max(0, walletBalance(transactions, a)), 0);
     let month: PlanOpinionFacts["month"] = null;
@@ -4673,20 +4717,82 @@ export function AskPanel({
   };
 
   /**
+   * A plan question answered AI first: whichever model is on is handed the
+   * app's own answer as its figures and says it in its own words, and the
+   * app's words are the answer when no model is on or none answers. A card is
+   * the app's, under the answer; never one from a Plan line.
+   *
+   * The owner, 27 October 2026: "i want ai first always like it should always
+   * work to any ai". Handed only the question, a small model named the wrong
+   * month ("January 2027" for next month) and wrote "Plan: New phone, PHP
+   * 0.00"; another worked its own figures from a card's and had them flagged.
+   * Given the working, any model has nothing to work out, so a small one
+   * answers as a large one does.
+   */
+  const aiFirst = async (
+    question: string,
+    worked: string,
+    opts: { readonly go?: GoPlace; readonly where?: AiWhere; readonly cards?: readonly { readonly plan: Plan; readonly words: string }[]; readonly rules?: string } = {},
+  ): Promise<void> => {
+    const cards = opts.cards ?? [];
+    if (ai.disabled) {
+      say({ kind: "assistant", text: worked, from: "this device", ...(opts.go ? { go: opts.go } : {}) });
+      log(aiEvent("answered", opts.where ?? "budget", { text: worked, model: "this device" }));
+      for (const c of cards) offerPlan(c.plan, c.words);
+      return;
+    }
+    const rules =
+      opts.rules ??
+      `The app worked out the answer below from the ledger and the Planner, for this message. Today is ${formatMedium(asOf)}. Answer what they asked first, in your own words and briefly, using only the figures, months and days written below: do no arithmetic of your own, never move a month or a day, and never guess a price. When no price is known, say what the month can take, and that they can say the price if they want it added. Never write a Plan line or an Entry line: the app shows its own card under your answer when there is one, and nothing is saved until they press it.`;
+    queuedPlans.current = [...queuedPlans.current, ...cards];
+    linesOff.current = true;
+    setBusy(true);
+    try {
+      await askQuestion(question, false, { text: `${rules}\n\n${worked}`, fallback: worked });
+    } finally {
+      linesOff.current = false;
+      setBusy(false);
+    }
+    flushPlans();
+  };
+
+  /**
    * The "Plan:" line of a model's answer, as a Planner card: "Plan: Tuition,
    * PHP 9,000.00, by 2026-11-15". Before it, the model could only tell the
    * owner to type "plan tuition 9000 by nov 15" (27 October 2026).
    */
-  const offerPlanFromAnswer = (text: string): boolean => {
-    if (!sink.canPlan || queuedPlans.current.length > 0) return false;
+  /** The plan an answer's Plan line names, when it is one to offer; null otherwise. */
+  const planFromAnswer = (text: string, question = ""): PlanInput | null => {
+    if (!sink.canPlan || queuedPlans.current.length > 0) return null;
     // A plan card already waiting is the one to act on: the answer's Plan line is not offered again beside it (27 October 2026).
-    if (turns.slice(-12).some((t) => isSettling(t) && t.state === "open" && t.planner?.save?.action === "plan.create")) return false;
+    if (turns.slice(-12).some((t) => isSettling(t) && t.state === "open" && t.planner?.save?.action === "plan.create")) return null;
     const line = planLineIn(text);
-    if (!line) return false;
-    const input = readPlanLine(line, { reference, transactions, asOf });
-    if (!input || input.amount === null) return false;
+    if (!line) return null;
+    const read = readPlanLine(line, { reference, transactions, asOf });
+    if (!read || read.amount === null) return null;
+    /*
+     * Something they spoke of: "Plan: iPhone, PHP 100,000.00" under "can I
+     * afford a 9k tuition next month?" was a card for a phone nobody asked
+     * about (27 October 2026, a small model). The question or their last few
+     * messages must name it.
+     */
+    const spoken = [question, ...[...turns].reverse().filter((t): t is Said => t.kind === "you").slice(0, 6).map((t) => t.text)].join(" ");
+    if (!namesIt(spoken, read.title)) return null;
+    /*
+     * The month they said wins over the model's: "next month" was written
+     * "in January 2027" by a small model on 27 October 2026. The question's
+     * own day or month, when it says one, is the plan's.
+     */
+    const said = question ? (whenFor(question, asOf) ?? (aheadMonthIn(question, asOf) ? { due: lastOfMonth(aheadMonthIn(question, asOf)!.year, aheadMonthIn(question, asOf)!.month), kind: "month" as const } : null)) : null;
+    const input = said && said.due >= asOf && said.due.slice(0, 7) !== read.due.slice(0, 7) ? { ...read, due: said.due, dueKind: said.kind } : read;
     const plans = settings.plans ?? [];
-    if (plans.some((p) => p.status === "open" && p.amount === input.amount && namesIt(p.title, input.title))) return false;
+    if (plans.some((p) => p.status === "open" && p.amount === input.amount && namesIt(p.title, input.title))) return null;
+    return input;
+  };
+
+  const offerPlanFromAnswer = (text: string, question = ""): boolean => {
+    const input = planFromAnswer(text, question);
+    if (!input) return false;
     const plan = makePlan(input, asOf, "ai");
     offerPlan(plan, `A new plan from the answer above. No money moves until you pay.${plan.setAside ? " It is counted in safe to spend in its month, like a bill still to pay." : ""}`);
     return true;
@@ -4984,9 +5090,7 @@ export function AskPanel({
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", "budget", { text: note }));
-        const reply = planOpinion(input, planOpinionFacts(plan));
-        say({ kind: "assistant", text: reply, from: "this device", go: { screen: "planner", label: "the Planner" } });
-        log(aiEvent("answered", "budget", { text: reply, model: "this device" }));
+        await aiFirst(note, planOpinion(input, planOpinionFacts(plan)), { go: { screen: "planner", label: "the Planner" } });
         return;
       }
     }
@@ -5193,6 +5297,28 @@ export function AskPanel({
         if (!remark && asksSafeToSpend(before.text)) {
           await answerSafe(before.text);
           return;
+        }
+        /*
+         * A plan said, then "I am asking": an opinion on it, from the figures,
+         * never the summary the model's absence gives. The price is asked for
+         * only as the way to add it (owner, 27 October 2026).
+         */
+        const wished = !remark ? readPlanIntent(before.text, { reference, transactions, asOf, debtNames: debts.flatMap((d) => [d.name, d.counterparty]) }) : null;
+        if (wished?.kind === "later" && wished.plans.length === 1) {
+          const input = wished.plans[0]!;
+          if (input.amount === null) {
+            pendingPlan.current = { input, dueSaid: wished.dueSaid, at: Date.now() };
+            const text = wishOpinion(input, planOpinionFacts(input.due === NO_DATE ? { ...input, due: lastOfMonth(nextOf(asOf).year, nextOf(asOf).month) } : input), wished.hint);
+            await aiFirst(before.text, text, { go: { screen: "planner", label: "the Planner" } });
+            return;
+          }
+          if (sink.canPlan) {
+            const plan = makePlan(input, asOf, "ai");
+            await aiFirst(before.text, planOpinion(plan, planOpinionFacts(plan)), {
+              cards: [{ plan, words: `A new plan${(plan.dueKind ?? "day") === "day" ? "" : ` for ${whenOf(plan).replace(/^S/, "s")}`}, if you want it. ${countsSentence(plan, asOf)}` }],
+            });
+            return;
+          }
         }
         setBusy(true);
         try {
@@ -5493,6 +5619,13 @@ export function AskPanel({
         say({ kind: "assistant", text, from: "this device", ...(go ? { go } : {}) });
         log(aiEvent("answered", where, { text, model: "this device" }));
       };
+      // A question asked, not a change: AI first, with the app's words as its figures (`aiFirst`).
+      const answerAi = async (text: string, where: AiWhere, go?: GoPlace): Promise<void> => {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", where, { text: note }));
+        await aiFirst(note, text, { where, ...(go ? { go } : {}) });
+      };
 
       // "Undo", "undo that": the last thing done from this chat, as a card that puts it back.
       if (asksUndoLast(lead)) {
@@ -5745,7 +5878,7 @@ export function AskPanel({
         const planner: GoPlace = { screen: "planner", label: "the Planner" };
         const views = plans.map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf }));
         if (planAsk.kind === "list") {
-          answer(plansWords(views, plansSetAside(views).total), "budget", planner);
+          await answerAi(plansWords(views, plansSetAside(views).total), "budget", planner);
           return;
         }
         if (planAsk.kind === "payIf") {
@@ -5773,7 +5906,7 @@ export function AskPanel({
               ? `To pay it, say "I paid the ${p.title.toLowerCase()} plan${planAsk.wallet ? ` from ${from.toLowerCase()}` : ""}".`
               : `Before paying, move money into ${from}, pay part of it now, or move its day${p.due !== NO_DATE ? ` (now ${whenOf(p).replace(/^S/, "s")})` : ""}.`,
           ].filter(Boolean);
-          answer(lines.join(" "), "budget", planner);
+          await answerAi(lines.join(" "), "budget", planner);
           return;
         }
         if (planAsk.kind === "closed") {
@@ -5790,7 +5923,7 @@ export function AskPanel({
             { ...facts, freeNow: facts.freeNow === null ? null : facts.freeNow + (v.counts ? v.left : 0) },
             { paid: v.paid, left: v.left },
           );
-          answer(reply, "budget", planner);
+          await answerAi(reply, "budget", planner);
           return;
         }
         if (planAsk.kind === "month") {
@@ -5801,7 +5934,7 @@ export function AskPanel({
           const brief = running ? monthBrief({ transactions: reportRows, reference, budgets, debts, year: py, month: pm, asOf }) : null;
           const ib = brief ? incomeBudget({ transactions: reportRows, reference, plan: budgets[String(py)], year: py, month: pm, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: tracks.spending.spent }) : null;
           const name = `${MONTH_NAMES[pm - 1]} ${py}`;
-          answer(
+          await answerAi(
             plannedMonthWords(plannedForBudget(views, py, pm, reference, asOf), { name, asOf, spendingLeft: tracks.spending.budget > 0 ? tracks.spending.remaining : null, room: ib ? ib.room : null }),
             "budget",
             { screen: "budget", label: "Budget" },
@@ -5815,7 +5948,7 @@ export function AskPanel({
           const months = p.due === NO_DATE ? 0 : Math.max(1, (Number(p.due.slice(0, 4)) - Number(asOf.slice(0, 4))) * 12 + (Number(p.due.slice(5, 7)) - Number(asOf.slice(5, 7))));
           const days = p.due === NO_DATE ? 0 : Math.max(1, Math.round((Date.parse(`${p.due}T00:00:00Z`) - Date.parse(`${asOf}T00:00:00Z`)) / 86_400_000));
           const weeks = Math.max(1, Math.ceil(days / 7));
-          answer(
+          await answerAi(
             p.due === NO_DATE
               ? `"${p.title}" has no date yet, so there is nothing to divide it by. ${formatMoney(v.left)} is left to pay. Give it a month, like "move the ${p.title.toLowerCase()} plan to March", and I will work out a monthly amount.`
               : v.left <= 0
@@ -6148,6 +6281,23 @@ export function AskPanel({
         }
       } else {
         const intent = readPlanIntent(lead, planCtx);
+        /*
+         * An entry with a plan after it ("I bought shoes 2500 and I plan to buy
+         * a bag next month 1500"): the entry goes on as an entry, and the plan
+         * comes after it, as a card to press or a question for its amount.
+         */
+        const mixed = intent === null ? splitPlanClause(lead) : null;
+        const after = mixed && sink.canPlan ? readPlanIntent(mixed.plan, planCtx) : null;
+        if (after?.kind === "later") {
+          const fresh = after.plans.filter((p) => p.amount === null || !onPlanner(p));
+          const priced = fresh.filter((p) => p.amount !== null);
+          queuedPlans.current = priced.map((i) => makePlan(i, asOf, "ai")).map((plan) => ({ plan, words: planCardWords(plan, after.dueSaid) }));
+          const unpriced = fresh.find((p) => p.amount === null);
+          if (priced.length === 0 && unpriced) {
+            pendingPlan.current = { input: unpriced, dueSaid: after.dueSaid, at: Date.now() };
+            queuedPlans.current = [{ ask: askAmountWords(after.title, after.hint, unpriced.due, after.dueSaid) }];
+          }
+        }
         if (intent?.kind === "today") todayPlan = intent.thing || "it";
         else if (intent?.kind === "past" && sink.canPlan) {
           /*
@@ -6173,7 +6323,37 @@ export function AskPanel({
           offerPlan(plan, `${day} has passed. Paid already? Then it is an entry, not a plan: type it like "${thing} ${Math.round(plan.amount / 100)} cash ${short}". Still to pay? Add it here and it shows as overdue until it is paid, or say a new day.`);
           return;
         }
+        else if (intent?.kind === "income") {
+          // "I will get my salary on the 30th": booked when it arrives, never before (27 October 2026 sweep).
+          youAsked();
+          const pesos = intent.amount !== null ? Math.round(intent.amount / 100) : 5000;
+          const text = `Money coming in is saved when it arrives, not before, so nothing is booked now${intent.amount !== null ? ` for the ${formatMoney(intent.amount)}` : ""}${intent.due ? ` (expected ${formatMedium(intent.due)})` : ""}. Safe to spend counts it once it is in your wallets. When it comes in, say so, like "${intent.what ? `got my ${intent.what} ${pesos}` : `received ${pesos}`} gcash", and it is saved then. To see what a month looks like with it, ask "if I get ${pesos} next month, what budget fits?".`;
+          await aiFirst(note, text);
+          return;
+        }
+        else if (intent?.kind === "bill") {
+          /*
+           * One of their own bills, said ahead ("I need to pay the electric
+           * bill on nov 5, around 1200"): no plan and no entry. It was booked
+           * as paid on November 5 (27 October 2026 sweep).
+           */
+          youAsked();
+          const usual = usualCost(transactions, intent.name, asOf);
+          const differs = intent.amount !== null && usual !== null && Math.abs(intent.amount - usual) * 4 > usual;
+          const text = `${intent.name} is one of your ${reference.subscriptions.includes(intent.name) ? "subscriptions" : "bills"}, so safe to spend holds it back every month already: it needs no plan, and nothing is booked until you pay it.${usual !== null ? ` It usually comes to ${formatMoney(usual)}${differs && intent.amount !== null ? `, so ${formatMoney(intent.amount)} is ${intent.amount > usual ? "more" : "less"} than usual` : ""}.` : ""} When you pay it, say so (like "paid ${intent.name.toLowerCase()} ${intent.amount !== null ? Math.round(intent.amount / 100) : Math.round((usual ?? 50000) / 100)} gcash") and it is saved then.`;
+          await aiFirst(note, text);
+          return;
+        }
         else if (intent?.kind === "later" && sink.canPlan) {
+          // "I'm getting a haircut tomorrow" with a Haircut plan already open: said back, not asked for again.
+          const named = intent.plans.length === 1 && intent.plans[0]!.amount === null ? plans.find((p) => p.status === "open" && namesIt(p.title, intent.plans[0]!.title) && namesIt(intent.plans[0]!.title, p.title)) : undefined;
+          if (named && !intent.asked) {
+            youAsked();
+            const day = intent.dueSaid && intent.plans[0]!.dueKind === "day" ? intent.plans[0]!.due : null;
+            const moved = day !== null && day !== named.due ? ` You said ${formatMedium(day)}: say "move the ${named.title.toLowerCase()} plan to ${formatMedium(day).replace(/, \d{4}$/, "").toLowerCase()}" to change its day.` : "";
+            say({ kind: "assistant", text: `"${named.title}" is on the Planner already: ${formatMoney(named.amount)} ${byWhen(named)}.${moved}`, from: "this device", go: plannerPlace });
+            return;
+          }
           const fresh = intent.plans.filter((p) => p.amount === null || !onPlanner(p));
           if (fresh.length === 0) {
             if (!intent.asked) {
@@ -6182,6 +6362,21 @@ export function AskPanel({
               say({ kind: "assistant", text: p ? `"${p.title}" is on the Planner already: ${formatMoney(p.amount)} ${byWhen(p)}. Say "move the ${p.title.toLowerCase()} plan to" a day, or open the Planner to change it.` : "That is on the Planner already.", from: "this device", go: plannerPlace });
               return;
             }
+          } else if (!intent.amountSaid && intent.asked && !asksToPlan(lead)) {
+            /*
+             * A question about something with no price yet ("I plan next month
+             * to get iphone 18 pro max what do you think?"): answered as a
+             * question, with what the month can take. Adding it is theirs to
+             * ask for, by saying the price (owner, 27 October 2026: "I am
+             * asking a question, I said the ai knows if I am asking or
+             * adding").
+             */
+            const first = fresh[0]!;
+            pendingPlan.current = { input: first, dueSaid: intent.dueSaid, at: Date.now() };
+            youAsked();
+            const text = wishOpinion(first, planOpinionFacts(first.due === NO_DATE ? { ...first, due: lastOfMonth(nextOf(asOf).year, nextOf(asOf).month) } : first), intent.hint);
+            await aiFirst(note, text, { go: plannerPlace });
+            return;
           } else if (!intent.amountSaid) {
             const first = fresh[0]!;
             pendingPlan.current = { input: first, dueSaid: intent.dueSaid, at: Date.now() };
@@ -6197,6 +6392,13 @@ export function AskPanel({
             return;
           } else {
             const made = fresh.map((i) => makePlan(i, asOf, "ai"));
+            // "... for 80000, what do you think?": the opinion, then the card to add if they want it.
+            if (intent.asked && made.length === 1 && asksPlanOpinion(lead) && !isAffordQuestion(lead)) {
+              youAsked();
+              const plan = made[0]!;
+              await aiFirst(note, planOpinion(plan, planOpinionFacts(plan)), { cards: [{ plan, words: planCardWords(plan, intent.dueSaid) }] });
+              return;
+            }
             if (intent.asked) queuedPlans.current = made.map((plan) => ({ plan, words: planCardWords(plan, intent.dueSaid) }));
             else {
               youAsked();
@@ -6785,7 +6987,9 @@ export function AskPanel({
 
       // "How much do I owe?", "when is my Maya Credit due?", "how much does Father owe me?" (`debtAsk.ts`).
       const owes = !affordish && !budgetish && !spent && !earned && !wantsChart(note) ? readDebtAsk(ruled, debts) : null;
-      if (affordish || budgetish || spent || earned || owes) {
+      // "Am I spending too much on food?": this month against the same days of the three before (paceAsk.ts).
+      const pace = !affordish && !budgetish && !spent && !earned && !owes && !essay && !wantsChart(note) ? readPaceAsk(ruled, knownItems) : null;
+      if (affordish || budgetish || spent || earned || owes || pace) {
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", budgetish ? "budget" : "add", { text: note }));
@@ -7014,6 +7218,12 @@ export function AskPanel({
             `The income the message asks about, worked out by the app from the whole ledger, and nothing carried over from an earlier question: a source is counted only if this message names it. Answer with these figures, in your own words, and do no arithmetic of your own:\n${reply}`,
             reply,
           );
+          return;
+        }
+
+        if (pace) {
+          const reply = paceAnswer(pace, reportRows, asOf, pace.item ? (categoryLimits(budgets[asOf.slice(0, 4)], Number(asOf.slice(5, 7))).get(pace.item) ?? null) : null);
+          await answerWithModel(`Whether they spend too much, worked out by the app from the ledger: this month to today against the same days of the three months before, and the limit when one is set. Answer with these figures, in your own words, and do no arithmetic of your own:\n${reply}`, reply);
           return;
         }
 

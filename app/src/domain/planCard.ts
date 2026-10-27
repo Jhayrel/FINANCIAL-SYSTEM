@@ -21,7 +21,7 @@ import type { IsoDate, ReferenceLists } from "./types";
 export function asksPlanOpinion(text: string): boolean {
   const t = text.trim();
   if (!t || t.split(/\s+/).length > 20) return false;
-  return /\b(?:what\s+(?:do|would)\s+you\s+(?:think|say|suggest|recommend)|what'?s\s+your\s+(?:take|opinion|advice|thoughts?)|your\s+(?:opinion|take|advice|suggestion|thoughts?)|any\s+(?:advice|suggestions?|tips?)|thoughts\s*\?|is\s+(?:it|this|that)\s+(?:ok(?:ay)?|good|wise|fine|smart|realistic|doable|possible|a\s+good\s+idea|worth\s+it|too\s+much)|should\s+i\s+(?:add|do|plan|push|go|continue|proceed|save)\b|can\s+i\s+(?:afford|do)\s+(?:it|this|that)|kaya\s+(?:ko\s+)?ba|ok(?:ay)?\s+lang\s+ba|ano\s+(?:sa\s+tingin|masasabi)\s+mo|before\s+(?:adding|i\s+add|saving))/i.test(t);
+  return /\b(?:good\s+idea|worth\s+it|should\s+i\s+(?:buy|get|order|book|purchase)|what\s+(?:do|would)\s+you\s+(?:think|say|suggest|recommend)|what'?s\s+your\s+(?:take|opinion|advice|thoughts?)|your\s+(?:opinion|take|advice|suggestion|thoughts?)|any\s+(?:advice|suggestions?|tips?)|thoughts\s*\?|is\s+(?:it|this|that)\s+(?:ok(?:ay)?|good|wise|fine|smart|realistic|doable|possible|a\s+good\s+idea|worth\s+it|too\s+much)|should\s+i\s+(?:add|do|plan|push|go|continue|proceed|save)\b|can\s+i\s+(?:afford|do)\s+(?:it|this|that)|kaya\s+(?:ko\s+)?ba|ok(?:ay)?\s+lang\s+ba|ano\s+(?:sa\s+tingin|masasabi)\s+mo|before\s+(?:adding|i\s+add|saving))/i.test(t);
 }
 
 export interface PlanCardChange {
@@ -44,7 +44,8 @@ function amountIn(text: string): Centavos | null {
   const said =
     /\b(?:make|change|set|lower|raise|put|update|increase|decrease|reduce|bring|cut)\s+(?:it|the\s+amount|amount|the\s+budget)?\s*(?:down|up)?\s*(?:to|into|at|as)?\s*(?:₱|php\s*)?\d/i.test(text) ||
     /(?:₱|php\s*)?\d[\d,]*(?:\.\d+)?\s*k?\s+(?:instead|only|lang|na\s+lang)\b/i.test(text) ||
-    /^(?:just|only|actually|maybe|around|about)?\s*(?:₱|php\s*)?\d[\d,]*(?:\.\d+)?\s*k?\s*(?:pesos?)?\s*$/i.test(text) ||
+    // "Probably 100k i think", "its around 95k": the price said as a guess is still the price (27 October 2026; it was read as an entry with no wallet).
+    /^(?:(?:it'?s|its|it\s+is|it\s+will\s+be|it\s+costs?|that'?s|the\s+price\s+is|price\s+is|cost\s+is)\s+)?(?:just|only|actually|maybe|probably|likely|around|about|roughly|approximately|approx\.?|siguro|mga|like)?\s*(?:₱|php\s*)?\d[\d,]*(?:\.\d+)?\s*k?\s*(?:pesos?|php)?\s*(?:i\s+think|i\s+guess|i\s+believe|siguro|lang|po|or\s+so|more\s+or\s+less|na\s+lang|ata|yata)?\s*[.!]?\s*$/i.test(text) ||
     /\bamount\b[^.?!]{0,12}\d/i.test(text);
   if (!said) return null;
   // Days and years are not the amount: "make it 8k on dec 20".
@@ -96,6 +97,9 @@ export function readPlanCardChange(
   if (amount !== null && amount !== input.amount) {
     next = { ...next, amount };
     changed.push(`amount ${formatMoney(amount)}`);
+  } else if (amount !== null) {
+    // The same price again ("Probably 100k i think"): said back, never a second card (27 October 2026).
+    already.push(`It is ${formatMoney(amount)} on the card already.`);
   }
 
   // When: a day, a month, a year, or no date at all.
@@ -210,7 +214,8 @@ export function planOpinion(plan: PlanInput, f: PlanOpinionFacts, saved?: { read
     lines.push(`- It is next month, so it comes out of next month's money or your savings.`);
   }
   if (f.savings > 0) lines.push(`- Your savings hold ${formatMoney(f.savings)}${f.savings >= amount ? ", enough to cover it without touching the monthly money" : ""}.`);
-  lines.push(plan.need ? "- It is marked a need." : "- It is a want, so it is the first thing to move or cut if money gets short.");
+  // Unsaved, the need was read, not said: say so, so it can be put right.
+  lines.push(plan.need ? (saved ? "- It is marked a need." : '- It reads as a need; say "it\'s a want" if it is not.') : "- It is a want, so it is the first thing to move or cut if money gets short.");
   if (plan.due !== NO_DATE) {
     lines.push(
       plan.setAside
@@ -246,5 +251,50 @@ export function planOpinion(plan: PlanInput, f: PlanOpinionFacts, saved?: { read
     ? `To change it, say so ("move the ${plan.title.toLowerCase()} plan to ${(MONTH_NAMES[plan.due === NO_DATE ? 11 : Number((late ? f.asOf : plan.due).slice(5, 7)) % 12] ?? "December").toLowerCase()}", "make the ${plan.title.toLowerCase()} plan ${Math.max(100, Math.round((plan.amount ?? 0) / 100 / 1.25 / 100) * 100)}") or open it on the Planner.`
     : "Nothing is saved until you press Add to the planner.";
   lines.push(`My suggestion: ${suggestion.replace(/^./, (c) => c.toUpperCase())} ${close}`);
+  return lines.join("\n");
+}
+
+/**
+ * An opinion asked before the price is known: "I plan next month to get
+ * iphone 18 pro max what do you think?". It is a question, so it is answered:
+ * how much the month can take on top of what it already has, what is held,
+ * and what to do. The price is asked for only as the way to add it, if they
+ * want to (owner, 27 October 2026: "I am asking a question, I said the ai
+ * knows if I am asking or adding"; it was answered "To say whether November
+ * can cover it, I need the amount first").
+ *
+ * With no month to go by (no date), `f.month` may be a usual month read for
+ * next month, and is said as a usual month.
+ */
+export function wishOpinion(plan: PlanInput, f: PlanOpinionFacts, hint = ""): string {
+  const undated = plan.due === NO_DATE;
+  const when = undated ? "with no date yet" : whenOf({ due: plan.due, dueKind: plan.dueKind }).replace(/^S/, "s");
+  const thisMonth = !undated && plan.due.slice(0, 7) <= f.asOf.slice(0, 7);
+  const monthName = undated ? "a usual month" : (MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1] ?? "that month");
+  const lines: string[] = [`**${plan.title}, ${when}.** You did not say the price, so here is what ${thisMonth ? "this month" : monthName} can take.`];
+
+  let spare: Centavos | null = null;
+  if (f.month && !thisMonth) {
+    spare = f.month.income - f.month.usual - f.month.others;
+    lines.push(
+      `- ${undated ? `A usual month (going by ${f.month.name})` : f.month.name}: it costs ${formatMoney(f.month.usual)}${f.month.others > 0 ? ` and ${undated ? "the plans already in it" : "its other plans"} ${formatMoney(f.month.others)}` : ""}, against about ${formatMoney(f.month.income)} that usually comes in: ${spare >= 0 ? `about ${formatMoney(spare)} to spare` : `already ${formatMoney(-spare)} short before this`}.`,
+    );
+  }
+  const free = f.freeNow === null ? null : Math.max(0, f.freeNow);
+  if (thisMonth && free !== null) lines.push(`- Safe to spend until the month ends is ${formatMoney(free)}.`);
+  if (f.savings > 0) lines.push(`- Your savings hold ${formatMoney(f.savings)}.`);
+  if (hint) lines.push(`- ${hint}`);
+  lines.push(plan.need ? '- It reads as a need; say "it\'s a want" if it is not.' : "- It is a want, so it can wait for a month that has room.");
+
+  // Less than PHP 100.00 spare is no room: "up to about PHP 0.00" was said (27 October 2026 sweep).
+  const roomLeft = thisMonth ? free : spare;
+  const room = roomLeft !== null && roomLeft < 10_000 ? 0 : roomLeft;
+  const savingsToo = f.savings > 0 ? ` With your savings too, about ${formatMoney((room !== null && room > 0 ? hundred(room) : 0) + f.savings)}.` : "";
+  let view: string;
+  if (room === null) view = `without a price or a month I cannot say more than the money above. Saving up for it first, a part each month, is the safe way for anything large.`;
+  else if (room <= 0) view = `${thisMonth ? "this month" : monthName === "a usual month" ? "a usual month" : `a usual ${monthName}`} has no room for it.${savingsToo} ${plan.need ? "As a need, pay it from savings or cut wants that month." : "As a want, it is better to wait, or save up for it first and buy it once the money is there."}`;
+  else view = `up to about ${formatMoney(hundred(room))}, ${thisMonth ? "this month's money" : monthName === "a usual month" ? "a usual month" : `a usual ${monthName}`} can pay for it.${savingsToo} If it costs more than that, ${plan.need ? "the rest has to come from savings or from wants cut that month" : "save up for it first, a part each month, rather than paying it all at once"}.`;
+  lines.push(`My view: ${view.replace(/^./, (c) => c.toUpperCase())}`);
+  lines.push("If you want it on the Planner, tell me the price and I will check it against the month and give you a card to add. Nothing is added otherwise.");
   return lines.join("\n");
 }

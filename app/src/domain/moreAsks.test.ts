@@ -74,6 +74,8 @@ describe("bills due", () => {
 describe("a savings goal", () => {
   it("reads the figure and the date", () => {
     expect(readGoalAsk("I want to save 5000 by december", asOf)).toMatchObject({ target: 500000, by: "2026-12-31" });
+    // "In April" is by April: it was read as no date (27 October 2026 sweep).
+    expect(readGoalAsk("save for a trip to cebu in april 15000", asOf)).toMatchObject({ target: 1500000, by: "2027-04-30", purpose: "trip to cebu" });
     expect(readGoalAsk("how long to save 10k?", asOf)).toMatchObject({ target: 1000000, by: null });
     expect(readGoalAsk("save 3000 in 2 months for a new phone", asOf)).toMatchObject({ target: 300000, by: "2026-12-25", purpose: "a new phone".replace(/^a /, "") });
     expect(readGoalAsk("how much did I save in september?", asOf)).toBeNull();

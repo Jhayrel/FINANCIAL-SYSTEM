@@ -15,7 +15,7 @@
 
 import { windowOf } from "./charts";
 import { daysIn } from "./readEntry";
-import { dayInWords, formatMedium } from "./dates";
+import { addDays, dayInWords, formatMedium } from "./dates";
 import { dayFromWords } from "./dayWords";
 import { formatMoney, type Centavos } from "./money";
 import { itemHintIn } from "./filipino";
@@ -82,15 +82,24 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
   const item = byName ?? byHint ?? null;
   if (!ASKS.test(text) && !item) return null;
   const pointed = !byName && byHint && after?.[1] ? after[1].trim().toLowerCase() : "";
-  const word = pointed && /^[a-z][a-z'-]{2,20}$/.test(pointed) && pointed !== (byHint ?? "").toLowerCase() ? pointed : undefined;
-  const withWord = <T extends SpendAsk>(a: T): T => (word ? { ...a, word } : a);
+  let word = pointed && /^[a-z][a-z'-]{2,20}$/.test(pointed) && pointed !== (byHint ?? "").toLowerCase() ? pointed : undefined;
 
-  // Something was named that is not on the list: not a question to answer as nothing.
+  /*
+   * Something named that is not on the list: the entries whose words say it.
+   * "How much did I spend on shoes?" got the month's summary with the AI off
+   * (27 October 2026 sweep); shoes are filed under Online Buy or Clothes, and
+   * the description says shoes. More than two words is not a thing.
+   */
   if (!item && after?.[1]) {
     const named = after[1].trim().toLowerCase();
     const period = /^(?:the\s+)?(?:last|this|past|whole|entire|all|everything|today|yesterday|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|week|month|year|20\d{2})\b/;
-    if (!period.test(named)) return null;
+    if (!period.test(named)) {
+      const thing = named.replace(/^(?:a|an|the|my|mga)\s+/, "");
+      if (!/^[a-z][a-z'-]{2,20}(?:\s[a-z][a-z'-]{2,20})?$/.test(thing) || /^(?:it|that|this|them|things?|stuff|everything|anything|something|myself|me|you|average)$/.test(thing)) return null;
+      word = thing;
+    }
   }
+  const withWord = <T extends SpendAsk>(a: T): T => (word ? { ...a, word } : a);
 
   /*
    * A run of days, however it is said ("in span of oct 10 to 12", "between
@@ -137,6 +146,8 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
       return `${own} All ${ask.item} in the same days: ${formatMoney(whole).replace(/^₱/, "PHP ")}.`;
     }
   }
+  // Only a word, on no list: the entries that say it, and the year's when the period has none.
+  if (ask.word && !ask.item) return wordAnswer({ ...ask, word: ask.word }, transactions, asOf);
   const live = transactions.filter((t) => !(t as Transaction & { deletedAt?: string }).deletedAt);
   const to = ask.to > asOf ? asOf : ask.to;
   const matches = (t: Transaction): boolean => ask.item === null || t.item.trim().toLowerCase() === ask.item.trim().toLowerCase();
@@ -237,4 +248,42 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
 export function periodOnly(said: string): string | null {
   const m = /^\s*(?:(?:and|what about|how about|for|in|over|ok(?:ay)?|then|now|like|i mean|i meant|no|so|but|just|only),?\s+)*((?:all|every)\s+(?:years?|time)|all-time|ever|overall|(?:this|last|past)\s+(?:year|month|week)|20\d{2}|since\s+20\d{2}|from\s+20\d{2}|the\s+whole\s+(?:year|ledger|time)|since\s+the\s+(?:beginning|start))\s*[?.!]*\s*$/i.exec(said);
   return m?.[1] ? (/^20\d{2}$/.test(m[1]) ? `in ${m[1]}` : m[1].toLowerCase()) : null;
+}
+
+/** "shoes" says shoe and shoes, "glasses" says glass; "grab" says Grab. */
+const saysWord = (word: string): RegExp => {
+  const w = word.toLowerCase().trim();
+  const forms = [...new Set([w, w.replace(/s$/, ""), w.replace(/es$/, "")])].filter((f) => f === w || f.length >= 4);
+  const escaped = forms.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"));
+  return new RegExp(`\\b(?:${escaped.join("|")})(?:s|es)?\\b`, "i");
+};
+
+/**
+ * What was spent on entries that say a word no list has: "shoes". When the
+ * period asked has none, the last year is said beside it, since a thing bought
+ * now and then is seldom in one month.
+ */
+function wordAnswer(ask: SpendAsk & { readonly word: string }, transactions: readonly Transaction[], asOf: IsoDate): string {
+  const money = (c: Centavos): string => formatMoney(c).replace(/^₱/, "PHP ");
+  const says = saysWord(ask.word);
+  const spent = transactions.filter((t) => !(t as Transaction & { deletedAt?: string }).deletedAt && costOf(t) > 0 && t.date <= asOf && says.test(`${t.description} ${t.notes}`));
+  const to = ask.to > asOf ? asOf : ask.to;
+  const inside = spent.filter((t) => t.date >= ask.from && t.date <= to);
+  const sum = (rows: readonly Transaction[]): Centavos => rows.reduce((s, t) => s + costOf(t), 0);
+  const kinds = (rows: readonly Transaction[]): string => {
+    const names = [...new Set(rows.map((t) => t.item.trim()).filter(Boolean))];
+    return names.length === 0 ? "" : ` Filed under ${names.slice(0, 3).join(", ")}${names.length > 3 ? " and others" : ""}.`;
+  };
+  const latest = (rows: readonly Transaction[]): string => {
+    const last = [...rows].sort((a, b) => b.date.localeCompare(a.date) || b.recordNumber - a.recordNumber)[0];
+    return last ? ` The latest was ${money(costOf(last))}, #${String(last.recordNumber).padStart(4, "0")} on ${formatMedium(last.date)}${last.description.trim() ? ` (${last.description.trim().slice(0, 50)})` : ""}.` : "";
+  };
+  const period = /\b(?:to|from)\b/.test(ask.name) ? `from ${ask.name}` : `in ${ask.name}`;
+  if (inside.length > 0) {
+    return `You spent **${money(sum(inside))}** on entries that say "${ask.word}" ${period}, over ${inside.length} ${inside.length === 1 ? "entry" : "entries"}.${kinds(inside)}${latest(inside)}`;
+  }
+  const yearAgo = addDays(asOf, -365);
+  const year = spent.filter((t) => t.date >= yearAgo);
+  if (year.length === 0) return `No spending entry says "${ask.word}" ${period}, or in the last year. If it was filed under another word, ask by its kind, like "how much did I spend on online buy".`;
+  return `No spending entry says "${ask.word}" ${period}. In the last year: **${money(sum(year))}** over ${year.length} ${year.length === 1 ? "entry" : "entries"}.${kinds(year)}${latest(year)}`;
 }
