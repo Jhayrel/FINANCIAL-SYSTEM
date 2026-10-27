@@ -30,6 +30,12 @@ export interface SpendAsk {
   readonly name: string;
   /** "What did I buy last friday?": the entries, not only their sum. */
   readonly list?: boolean;
+  /**
+   * The word asked about when it only points at the kind: "grab" is Travel,
+   * but the question is the Grab rides, not a funeral trip filed as Travel
+   * (27 October 2026 sweep). The answer counts the entries that say it.
+   */
+  readonly word?: string;
 }
 
 /** Common slips, only in the words this reader looks for. */
@@ -65,7 +71,7 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
   if (NOT_THIS.test(text) || (!ASKS.test(text) && !summed)) return null;
 
   // The thing, after "on", "for" or "sa": a name on the owner's list, or a word that means one.
-  const after = /\b(?:on|for|sa|sa mga|in the way of)\s+(?:my\s+|the\s+|mga\s+)?([a-z][a-z &'-]{1,40}?)(?=\s+(?:in|during|last|this|from|since|over|for|between|today|yesterday|so far|ngayon)\b|[?.!,]|$)/i.exec(text);
+  const after = /\b(?:on|for|at|sa|sa mga|in the way of)\s+(?:my\s+|the\s+|mga\s+)?([a-z][a-z &'-]{1,40}?)(?=\s+(?:in|during|last|this|from|since|over|for|between|today|yesterday|so far|ngayon)\b|[?.!,]|$)/i.exec(text);
   const lower = text.toLowerCase();
   const byName = [...items]
     .filter((name) => name.trim().length > 1)
@@ -75,6 +81,9 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
   const byHint = hint ? items.find((name) => name.trim().toLowerCase() === hint) : undefined;
   const item = byName ?? byHint ?? null;
   if (!ASKS.test(text) && !item) return null;
+  const pointed = !byName && byHint && after?.[1] ? after[1].trim().toLowerCase() : "";
+  const word = pointed && /^[a-z][a-z'-]{2,20}$/.test(pointed) && pointed !== (byHint ?? "").toLowerCase() ? pointed : undefined;
+  const withWord = <T extends SpendAsk>(a: T): T => (word ? { ...a, word } : a);
 
   // Something was named that is not on the list: not a question to answer as nothing.
   if (!item && after?.[1]) {
@@ -92,20 +101,42 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
   // "this month vs last month": this month, and the answer says the month before beside it (19 October 2026).
   if (/\bthis month\b/i.test(text) && /\b(?:last|previous)\s+month\b/i.test(text)) {
     const w = windowOf("this month", asOf);
-    return { item, from: w.from, to: w.to, name: w.name };
+    return withWord({ item, from: w.from, to: w.to, name: w.name });
   }
   // One day by its weekday, "2 days ago" or "the 23rd": that day, not the days up to it (26 October 2026).
   const oneDay = dayFromWords(said, asOf);
   const list = /\bwhat (?:did|have) i (?:buy|bought|purchase|pay for)\b/i.test(text);
-  if (oneDay && !/\b(?:since|from|until|to|hanggang)\b/i.test(text)) return { item, from: oneDay, to: oneDay, name: dayInWords(oneDay), list: true };
+  if (oneDay && !/\b(?:since|from|until|to|hanggang)\b/i.test(text)) return withWord({ item, from: oneDay, to: oneDay, name: dayInWords(oneDay), list: true });
   const span = daysIn(text, asOf);
-  if (span) return { item, from: span.from, to: span.to, name: `${formatMedium(span.from)} to ${formatMedium(span.to)}`, ...(list ? { list } : {}) };
+  if (span) return withWord({ item, from: span.from, to: span.to, name: `${formatMedium(span.from)} to ${formatMedium(span.to)}`, ...(list ? { list } : {}) });
   const w = windowOf(text, asOf);
-  return { item, from: w.from, to: w.to, name: w.name, ...(list || w.from === w.to ? { list: true } : {}) };
+  return withWord({ item, from: w.from, to: w.to, name: w.name, ...(list || w.from === w.to ? { list: true } : {}) });
 }
 
 /** What was spent, in one or two sentences, with the figure bolded. */
 export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[], asOf: IsoDate): string {
+  /*
+   * A word that points at a kind: the entries that say it, and the whole
+   * kind beside them, when they are not all of it.
+   */
+  if (ask.word && ask.item) {
+    const word = ask.word;
+    const said = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
+    const to = ask.to > asOf ? asOf : ask.to;
+    const inKind = transactions.filter((t) => t.date >= ask.from && t.date <= to && t.item.trim().toLowerCase() === ask.item!.trim().toLowerCase() && costOf(t) > 0);
+    const named = inKind.filter((t) => said.test(`${t.description} ${t.notes}`));
+    if (named.length === 0 && inKind.length > 0) {
+      const whole = inKind.reduce((s, t) => s + costOf(t), 0);
+      return `No entry in that time says "${word}". ${ask.item}, where it is filed, came to ${formatMoney(whole).replace(/^₱/, "PHP ")} over ${inKind.length} ${inKind.length === 1 ? "entry" : "entries"}.`;
+    }
+    if (named.length > 0 && named.length < inKind.length) {
+      const label = word.replace(/^./, (c) => c.toUpperCase());
+      const { word: _said, ...plain } = ask;
+      const own = spendAnswer({ ...plain, item: label }, named.map((t) => ({ ...t, item: label })), asOf);
+      const whole = inKind.reduce((s, t) => s + costOf(t), 0);
+      return `${own} All ${ask.item} in the same days: ${formatMoney(whole).replace(/^₱/, "PHP ")}.`;
+    }
+  }
   const live = transactions.filter((t) => !(t as Transaction & { deletedAt?: string }).deletedAt);
   const to = ask.to > asOf ? asOf : ask.to;
   const matches = (t: Transaction): boolean => ask.item === null || t.item.trim().toLowerCase() === ask.item.trim().toLowerCase();

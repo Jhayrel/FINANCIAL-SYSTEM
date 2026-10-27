@@ -26,6 +26,18 @@ const salary = row({ date: "2026-11-05", type: "Revenue", category: "Revenue", i
 const of = (rows: Transaction[], safe: number, budget = 500000) =>
   incomeBudget({ transactions: rows, reference: reference as never, plan: novemberAt(budget), year: 2026, month: 11, safe, spent: 100000 })!;
 
+describe("plans counted in safe to spend (owner, 27 October 2026)", () => {
+  it("stay in the most the budget can be: counting a plan or not moves safe to spend only", () => {
+    const counted = incomeBudget({ transactions: before, reference: reference as never, plan: novemberAt(500000), year: 2026, month: 11, safe: 200000, spendable: 1000000, plans: 800000, spent: 100000 })!;
+    const notCounted = incomeBudget({ transactions: before, reference: reference as never, plan: novemberAt(500000), year: 2026, month: 11, safe: 1000000, spendable: 1000000, plans: 0, spent: 100000 })!;
+    expect(counted.most).toBe(1100000);
+    expect(notCounted.most).toBe(1100000);
+    expect(counted.safe).toBe(200000);
+    expect(counted.plans).toBe(800000);
+    expect(incomeBudgetWords(counted, "November").join(" ")).toMatch(/safe to spend ₱2,000\.00, after ₱8,000\.00 set aside for plans\. The most the spending budget can be with the money held now: ₱11,000\.00 \(spent, plus what the wallets can still pay this month, the ₱8,000\.00 set aside for plans included\)/);
+  });
+});
+
 describe("the budget moved by the money that came in (owner, 12 October 2026)", () => {
   it("counts only income since the budget was set, and the most the money can keep", () => {
     const ib = of([...before, salary], 1500000);

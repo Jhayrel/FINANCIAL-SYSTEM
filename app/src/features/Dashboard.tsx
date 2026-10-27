@@ -237,7 +237,8 @@ export function Dashboard({
         ).spendingViews.map((v) => ({
           key: `plan-${v.plan.id}`,
           name: v.plan.title,
-          what: v.paid > 0 ? `Planned, ${formatMoney(v.paid)} paid` : "Planned",
+          // A plan not counted in safe to spend is still to pay; said, so the figure above is not read as covering it.
+          what: `Planned${v.paid > 0 ? `, ${formatMoney(v.paid)} paid` : ""}${!v.plan.setAside && !v.plan.goalId ? ", not in safe to spend" : ""}`,
           amount: v.left,
           days: v.daysTo as number | undefined,
           on: v.plan.due as IsoDate | undefined,
@@ -255,7 +256,7 @@ export function Dashboard({
       lines: [
         `${name} ${year}, ${brief.daysLeft} days left.`,
         safe
-          ? `Safe to spend today ${formatMoney(safe.perDay)} (today's share ${formatMoney(safe.todayShare)}, ${formatMoney(safe.spentToday)} spent today). Safe until the month ends ${formatMoney(safe.safe)}: wallets ${formatMoney(safe.wallets)}, less bills and subscriptions still to pay ${formatMoney(safe.reservedBills)} and debt payments due ${formatMoney(safe.reservedDebt)}. From tomorrow ${formatMoney(safe.perDayAfter)} a day. ${carryWords(safe, yesterday, formatMoney).join(" ")}${next ? ` From 1 ${monthName(next.month)}: ${formatMoney(next.perDay)} a day over ${next.days} days, if nothing more is spent and nothing comes in.` : ""}`
+          ? `Safe to spend today ${formatMoney(safe.perDay)} (today's share ${formatMoney(safe.todayShare)}, ${formatMoney(safe.spentToday)} spent today). Safe until the month ends ${formatMoney(safe.safe)}: wallets ${formatMoney(safe.wallets)}, less bills and subscriptions still to pay ${formatMoney(safe.reservedBills)}, debt payments due ${formatMoney(safe.reservedDebt)}${safe.reservedPlans > 0 ? ` and plans set aside ${formatMoney(safe.reservedPlans)}` : ""}. From tomorrow ${formatMoney(safe.perDayAfter)} a day. ${carryWords(safe, yesterday, formatMoney).join(" ")}${next ? ` From 1 ${monthName(next.month)}: ${formatMoney(next.perDay)} a day over ${next.days} days, if nothing more is spent and nothing comes in.` : ""}`
           : "",
         noBudget
           ? `No budget set for ${name}. Spent ${formatMoney(t.combined.spent)}.`

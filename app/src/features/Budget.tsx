@@ -92,7 +92,7 @@ import type { MonthOutlook } from "../domain/outlook";
 import { daysInMonth, formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { PACE_FROM_DAY } from "../domain/alerts";
 import { budgetFromIncome, checkSplit, incomeBudget, type IncomeBudget } from "../domain/incomeBudget";
-import { monthBrief } from "../domain/monthPlan";
+import { monthBrief, spendable } from "../domain/monthPlan";
 import { plannedForBudget, viewOf, whenOf, type PlannedMonth } from "../domain/planner";
 import { Icon } from "../components/Icon";
 import { formatMoney, type Centavos } from "../domain/money";
@@ -283,7 +283,7 @@ export function Budget({
   const incomeView = useMemo(() => {
     if (year !== getYear(asOf) || month !== getMonth(asOf)) return null;
     const brief = monthBrief({ transactions, reference, budgets, debts, year, month, asOf });
-    return incomeBudget({ transactions, reference, plan: y.plan, year, month, safe: brief.safe ? brief.safe.safe : null, spent: a.spending.spent });
+    return incomeBudget({ transactions, reference, plan: y.plan, year, month, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: a.spending.spent });
   }, [transactions, reference, budgets, debts, year, month, asOf, y.plan, a.spending.spent]);
   const saveFromIncome = (value: { spending: Centavos; billsSubs: Centavos }, reason: string): boolean =>
     commit(saveTracks(y.plan, year, month, value, "month", asOf, now(), reason), `Saved. ${name}'s budget now has ${formatMoney(value.spending)} for spending and ${formatMoney(value.billsSubs)} for bills and subscriptions, and the reason is kept with it.`, setNote);
@@ -586,7 +586,7 @@ export function Budget({
           )}
 
           {planned && planned.total > 0 && (
-            <PlannedInMonth planned={planned} name={name} noPlan={noPlan} spendingLeft={a.spending.remaining} billsLeft={a.billsSubs.remaining} asOf={asOf} onOpenPlanner={onOpenPlanner} />
+            <PlannedInMonth planned={planned} name={name} noPlan={noPlan} spendingLeft={a.spending.remaining} billsLeft={a.billsSubs.remaining} room={incomeView ? incomeView.room : null} asOf={asOf} onOpenPlanner={onOpenPlanner} />
           )}
 
           {/*
@@ -1738,6 +1738,7 @@ function PlannedInMonth({
   noPlan,
   spendingLeft,
   billsLeft,
+  room,
   asOf,
   onOpenPlanner,
 }: {
@@ -1746,15 +1747,24 @@ function PlannedInMonth({
   noPlan: boolean;
   spendingLeft: Centavos;
   billsLeft: Centavos;
+  /** How far the money lets the spending budget rise (`incomeBudget`), for the month running; null otherwise. */
+  room: Centavos | null;
   asOf: string;
   onOpenPlanner?: (() => void) | undefined;
 }) {
-  const fit = (part: string, plannedPart: Centavos, left: Centavos): string =>
-    plannedPart <= 0
-      ? ""
-      : left >= plannedPart
-        ? `The ${part} budget has ${formatMoney(left)} left; with ${formatMoney(plannedPart)} planned, ${formatMoney(left - plannedPart)} is free for the rest.`
-        : `${formatMoney(plannedPart)} planned is ${formatMoney(plannedPart - Math.max(0, left))} more than the ${part} budget has left. Raise it on the right, or move a plan to another month.`;
+  const fit = (part: string, plannedPart: Centavos, left: Centavos): string => {
+    if (plannedPart <= 0) return "";
+    if (left >= plannedPart) return `The ${part} budget has ${formatMoney(left)} left; with ${formatMoney(plannedPart)} planned, ${formatMoney(left - plannedPart)} is free for the rest.`;
+    const short = plannedPart - Math.max(0, left);
+    /*
+     * "Raise it" only as far as the money goes: raised past it, the budget
+     * promises what the wallets cannot pay, and "Budget and your money"
+     * below said to lower it (27 October 2026).
+     */
+    if (part === "spending" && room !== null && room < short)
+      return `${formatMoney(plannedPart)} planned is ${formatMoney(short)} more than the spending budget has left, and your money ${room > 0 ? `lets it rise by only ${formatMoney(room)}` : "does not let it rise"}. Move a plan to a later month, or skip one.`;
+    return `${formatMoney(plannedPart)} planned is ${formatMoney(short)} more than the ${part} budget has left. Raise it on the right, or move a plan to another month.`;
+  };
   const words = noPlan
     ? `No budget for ${name} yet: "Usual + plans" on the right sets one with them in it.`
     : [fit("spending", planned.spending, spendingLeft), fit("bills", planned.billsSubs, billsLeft)].filter(Boolean).join(" ");
@@ -1769,7 +1779,11 @@ function PlannedInMonth({
         {planned.views.map((v) => (
           <li key={v.plan.id}>
             <span className="t-body fms-truncate">{v.plan.title}</span>
-            <span className="t-caption fms-budgetplanned-when">{v.plan.due < asOf ? `${whenOf(v.plan)}, overdue` : whenOf(v.plan)}</span>
+            {/* Whether safe to spend holds its money back: the Budget counts it either way. */}
+            <span className="t-caption fms-budgetplanned-when">
+              {v.plan.due < asOf ? `${whenOf(v.plan)}, overdue` : whenOf(v.plan)}
+              {v.plan.goalId ? ", from its goal" : !v.plan.setAside ? ", not in safe to spend" : ""}
+            </span>
             <Money value={v.left} size="s" />
           </li>
         ))}
@@ -2088,6 +2102,13 @@ function IncomeSplitCard({
           <dt>Safe to spend now</dt>
           <dd>{formatMoney(view.safe)}</dd>
         </div>
+        {/* Set aside in safe to spend, and still spending this budget pays: counted in the most it can be. */}
+        {view.plans > 0 && (
+          <div>
+            <dt>Set aside for plans</dt>
+            <dd>{formatMoney(view.plans)}</dd>
+          </div>
+        )}
         <div>
           <dt>Spent this month</dt>
           <dd>{formatMoney(view.spent)}</dd>
@@ -2104,14 +2125,14 @@ function IncomeSplitCard({
       {view.over > 0 ? (
         <>
           <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
-            Your budget is {formatMoney(view.over)} more than your money can cover. Spent so far plus safe to spend is {formatMoney(view.most)}.
+            Your budget is {formatMoney(view.over)} more than your money can cover. {view.plans > 0 ? `Spent so far, plus the ${formatMoney(Math.max(0, view.most - view.spent))} the wallets can still pay this month (plans set aside included), is` : "Spent so far plus safe to spend is"} {formatMoney(view.most)}.
           </p>
           <Button
             variant="primary"
             onClick={() =>
               void ask(
                 { spending: view.most, billsSubs: view.billsBudget },
-                `Lowered to match your money: ${formatMoney(view.most)} is what is spent plus what is safe to spend`,
+                `Lowered to match your money: ${formatMoney(view.most)} is what is spent plus ${view.plans > 0 ? "what the wallets can still pay this month, plans included" : "what is safe to spend"}`,
                 `Lower ${monthName}'s spending budget to ${formatMoney(view.most)}?`,
               )
             }

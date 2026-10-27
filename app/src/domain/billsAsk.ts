@@ -22,7 +22,8 @@ export interface BillsAsk {
 }
 
 const DUE =
-  /\b(?:what|which|any|anything|are there|is there|list|show)\b[^?.!]*\b(?:bills?|subscriptions?|subs|payments?)\b[^?.!]*\b(?:due|to pay|left|upcoming|coming|pending|unpaid|still|next)\b|\b(?:anything|something|what)\s+(?:else\s+)?(?:to pay|due)\b|\b(?:upcoming|unpaid|pending)\s+(?:bills?|subscriptions?|payments?)\b|\bbills?\s+(?:due|this (?:week|month))\b/i;
+  // "whats due this week", "what's due", "anything due", "my next bill" (27 October 2026 sweep).
+  /\bwhat(?:'?s|s|\s+is|\s+are)\s+(?:still\s+)?due\b|\bdue\s+(?:this|next)\s+week\b|\bnext\s+(?:bill|payment|due)\b|\b(?:what|which|any|anything|are there|is there|list|show)\b[^?.!]*\b(?:bills?|subscriptions?|subs|payments?)\b[^?.!]*\b(?:due|to pay|left|upcoming|coming|pending|unpaid|still|next)\b|\b(?:anything|something|what)\s+(?:else\s+)?(?:to pay|due)\b|\b(?:upcoming|unpaid|pending)\s+(?:bills?|subscriptions?|payments?)\b|\bbills?\s+(?:due|this (?:week|month))\b/i;
 const PAID = /\b(?:did|have)\s+i\s+(?:already\s+)?(?:pay|paid)\b|\bis\s+[a-z ]+\s+paid\b|\balready\s+paid\b/i;
 
 /** The question, or null. `names` is every bill and subscription on the owner's lists. */
@@ -49,9 +50,22 @@ export function readBillsAsk(text: string, names: readonly string[]): BillsAsk |
 /** 999 or 85.50, the way it would be typed. */
 const typed = (c: Centavos): string => `${Math.floor(c / 100)}${c % 100 ? `.${String(c % 100).padStart(2, "0")}` : ""}`;
 
+/** A plan still to pay, as the Planner has it, for "what's due". */
+export interface DuePlan {
+  readonly title: string;
+  readonly left: Centavos;
+  readonly due: IsoDate;
+}
+
 export function billsAnswer(
   ask: BillsAsk,
-  input: { readonly transactions: readonly Transaction[]; readonly reference: ReferenceLists; readonly asOf: IsoDate },
+  input: {
+    readonly transactions: readonly Transaction[];
+    readonly reference: ReferenceLists;
+    readonly asOf: IsoDate;
+    /** Open plans with a day, so "what's due" names them beside the bills. */
+    readonly plans?: readonly DuePlan[] | undefined;
+  },
   money: (c: Centavos) => string,
 ): string {
   const { transactions, reference, asOf } = input;
@@ -93,6 +107,22 @@ export function billsAnswer(
   }
   if (bills.neverPaid.length > 0) {
     out.push(`${bills.neverPaid.join(", ")} ${bills.neverPaid.length === 1 ? "has" : "have"} no payment in your entries yet, so nothing is set aside for ${bills.neverPaid.length === 1 ? "it" : "them"}.`);
+  }
+  // Plans with a day in the same window, late ones first: what is due is not only bills (27 October 2026 sweep).
+  const end = ask.week ? addDays(asOf, 7) : `${asOf.slice(0, 7)}-31`;
+  const plans = [...(input.plans ?? [])].filter((p) => p.left > 0 && p.due <= end).sort((a, b) => a.due.localeCompare(b.due));
+  if (plans.length > 0) {
+    out.push(
+      `Planned${ask.week ? " in the next seven days" : " this month"}: ${plans.map((p) => `${p.title} ${money(p.left)}, ${p.due < asOf ? `overdue since ${when(p.due)}` : `by ${when(p.due)}`}`).join("; ")}.`,
+    );
+  }
+  // All paid: the next ones expected, so "when is my next bill" has a date (27 October 2026 sweep).
+  if (due.length === 0) {
+    const next = billStatuses(transactions, reference, asOf)
+      .filter((s) => !s.stopped && s.nextDue !== undefined && s.nextDue > asOf && s.timesPaid > 0)
+      .sort((a, b) => (a.nextDue ?? "").localeCompare(b.nextDue ?? ""))
+      .slice(0, 3);
+    if (next.length > 0) out.push(`Next expected: ${next.map((s) => `${s.item} about ${when(s.nextDue)}, ${money(s.lastAmount)}`).join("; ")}.`);
   }
   return out.join("\n");
 }

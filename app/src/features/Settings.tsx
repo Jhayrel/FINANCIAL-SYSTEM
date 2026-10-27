@@ -389,6 +389,16 @@ function OwnerSection({
   const [draft, setDraft] = useState<OwnerDetails>(saved);
   const [tried, setTried] = useState(false);
   const [done, setDone] = useState("");
+  /*
+   * Saved details are shown, not left open to typing: Edit opens them
+   * (owner, 27 October 2026: "lock this when its allready added then add
+   * edit"). Nothing saved yet, the form is open. Null follows that; a tap
+   * on Edit or a save decides it.
+   */
+  const hasSaved = Boolean(saved.name || saved.callMe || saved.email || saved.phone || saved.address || saved.about);
+  const [editingChoice, setEditingChoice] = useState<boolean | null>(null);
+  const editing = editingChoice ?? !hasSaved;
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const clean = normaliseOwner(draft);
   const dirty = JSON.stringify(clean) !== JSON.stringify(saved);
   // A change saved on another device arrives here while nothing is being typed.
@@ -412,8 +422,22 @@ function OwnerSection({
     patch({ owner: clean });
     typing.current = false;
     setTried(false);
+    setEditingChoice(false);
     setDone("Saved. Statements, the activity PDF and the assistant use it from now on, on every device you sign in on.");
   };
+  const stopEditing = async (): Promise<void> => {
+    if (dirty && !(await confirm({ title: "Stop editing without saving?", body: "What you changed is not saved. Your details stay as they were.", confirmLabel: "Stop editing", cancelLabel: "Keep editing" }))) return;
+    typing.current = false;
+    setDraft(saved);
+    setTried(false);
+    setEditingChoice(false);
+  };
+  const fact = (label: string, value: string, long = false): React.ReactNode => (
+    <div className={long ? "fms-rowfacts-long" : undefined}>
+      <dt>{label}</dt>
+      <dd className={value ? undefined : "fms-ownerfacts-none"}>{value || "Not given"}</dd>
+    </div>
+  );
   const err = (k: keyof OwnerDetails): string | undefined => (tried || clean[k] !== saved[k] ? problems[k] : undefined);
 
   return (
@@ -424,64 +448,96 @@ function OwnerSection({
           Only this Google account opens your ledger: the database is locked to it. Its address is changed in your Google account, not here, and signing in with another Google account opens nothing. For an e-mail to be reached at, use Contact e-mail below.
         </p>
       )}
-      <div className="fms-ownerform">
-        <div className="fms-ownerform-pair">
-          <Field label="Your name" htmlFor="owner-name" help="Shown as Issued to on statements and the activity PDF." error={err("name")}>
-            <TextInput id="owner-name" value={draft.name} onChange={set("name")} maxLength={OWNER_LIMITS.name} autoComplete="name" placeholder="As it should read on a statement" />
-          </Field>
-          <Field label="What to call you" optional htmlFor="owner-call" help="What the assistant calls you.">
-            <TextInput id="owner-call" value={draft.callMe} onChange={set("callMe")} maxLength={OWNER_LIMITS.callMe} autoComplete="nickname" placeholder="A first name or a nickname" />
-          </Field>
-        </div>
-        <div className="fms-ownerform-pair">
-          <Field label="Contact e-mail" optional htmlFor="owner-email" error={err("email")}>
-            <TextInput id="owner-email" type="email" inputMode="email" autoComplete="email" value={draft.email} onChange={set("email")} maxLength={OWNER_LIMITS.email} placeholder="name@gmail.com" invalid={Boolean(err("email"))} />
-            {signedInAs && !draft.email && (
-              <button type="button" className="t-caption fms-linkbtn" onClick={() => set("email")(signedInAs)}>
-                Use {signedInAs}
-              </button>
+      {confirmDialog}
+      {!editing ? (
+        <div className="fms-ownerform">
+          <dl className="t-body fms-rowfacts fms-ownerfacts">
+            {fact("Your name", saved.name)}
+            {fact("What to call you", saved.callMe)}
+            {fact("Contact e-mail", saved.email)}
+            {fact("Phone", saved.phone)}
+            {fact("Address", saved.address)}
+            {fact("About you", saved.about, true)}
+            {fact("Contact details to the assistant", saved.shareContact ? "Shared" : "Not shared")}
+          </dl>
+          <div className="fms-ownerform-actions">
+            {done && (
+              <p className="t-caption" role="status" style={{ margin: 0, color: "var(--ink-2)" }}>
+                {done}
+              </p>
             )}
-          </Field>
-          <Field label="Phone" optional htmlFor="owner-phone" error={err("phone")}>
-            <TextInput id="owner-phone" type="tel" inputMode="tel" autoComplete="tel" value={draft.phone} onChange={set("phone")} maxLength={OWNER_LIMITS.phone} placeholder="0917 123 4567" invalid={Boolean(err("phone"))} />
-          </Field>
+            <Button
+              onClick={() => {
+                setDraft(saved);
+                setDone("");
+                setEditingChoice(true);
+              }}
+            >
+              Edit
+            </Button>
+          </div>
         </div>
-        <Field label="Address" optional htmlFor="owner-address">
-          <TextInput id="owner-address" value={draft.address} onChange={set("address")} maxLength={OWNER_LIMITS.address} autoComplete="street-address" placeholder="Street, barangay, city" />
-        </Field>
-        <Field label="About you" optional htmlFor="owner-about" help="A few words the assistant keeps in mind with every question: what you do, when money comes in, what you are saving for.">
-          <textarea
-            id="owner-about"
-            value={draft.about}
-            onChange={(e) => set("about")(e.target.value)}
-            maxLength={OWNER_LIMITS.about}
-            rows={3}
-            placeholder="A student, allowance every 15th and 30th, saving for a laptop"
-            className="t-body fms-input fms-ownerabout"
-          />
-        </Field>
-        <div className="fms-planform-switch">
-          <span className="fms-planform-switchtext">
-            <span className="t-body">Let the assistant see my e-mail, phone and address</span>
-            <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-              {draft.shareContact
-                ? "On: they go with each question to the AI provider you picked, so it can use them when you ask."
-                : "Off: the assistant gets your name and what you wrote about yourself, never how to reach you."}
+      ) : (
+        <div className="fms-ownerform">
+          <div className="fms-ownerform-pair">
+            <Field label="Your name" htmlFor="owner-name" help="Shown as Issued to on statements and the activity PDF." error={err("name")}>
+              <TextInput id="owner-name" value={draft.name} onChange={set("name")} maxLength={OWNER_LIMITS.name} autoComplete="name" placeholder="As it should read on a statement" />
+            </Field>
+            <Field label="What to call you" optional htmlFor="owner-call" help="What the assistant calls you.">
+              <TextInput id="owner-call" value={draft.callMe} onChange={set("callMe")} maxLength={OWNER_LIMITS.callMe} autoComplete="nickname" placeholder="A first name or a nickname" />
+            </Field>
+          </div>
+          <div className="fms-ownerform-pair">
+            <Field label="Contact e-mail" optional htmlFor="owner-email" error={err("email")}>
+              <TextInput id="owner-email" type="email" inputMode="email" autoComplete="email" value={draft.email} onChange={set("email")} maxLength={OWNER_LIMITS.email} placeholder="name@gmail.com" invalid={Boolean(err("email"))} />
+              {signedInAs && !draft.email && (
+                <button type="button" className="t-caption fms-linkbtn" onClick={() => set("email")(signedInAs)}>
+                  Use {signedInAs}
+                </button>
+              )}
+            </Field>
+            <Field label="Phone" optional htmlFor="owner-phone" error={err("phone")}>
+              <TextInput id="owner-phone" type="tel" inputMode="tel" autoComplete="tel" value={draft.phone} onChange={set("phone")} maxLength={OWNER_LIMITS.phone} placeholder="0917 123 4567" invalid={Boolean(err("phone"))} />
+            </Field>
+          </div>
+          <Field label="Address" optional htmlFor="owner-address">
+            <TextInput id="owner-address" value={draft.address} onChange={set("address")} maxLength={OWNER_LIMITS.address} autoComplete="street-address" placeholder="Street, barangay, city" />
+          </Field>
+          <Field label="About you" optional htmlFor="owner-about" help="A few words the assistant keeps in mind with every question: what you do, when money comes in, what you are saving for.">
+            <textarea
+              id="owner-about"
+              value={draft.about}
+              onChange={(e) => set("about")(e.target.value)}
+              maxLength={OWNER_LIMITS.about}
+              rows={3}
+              placeholder="A student, allowance every 15th and 30th, saving for a laptop"
+              className="t-body fms-input fms-ownerabout"
+            />
+          </Field>
+          <div className="fms-planform-switch">
+            <span className="fms-planform-switchtext">
+              <span className="t-body">Let the assistant see my e-mail, phone and address</span>
+              <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                {draft.shareContact
+                  ? "On: they go with each question to the AI provider you picked, so it can use them when you ask."
+                  : "Off: the assistant gets your name and what you wrote about yourself, never how to reach you."}
+              </span>
             </span>
-          </span>
-          <Switch checked={draft.shareContact} onChange={set("shareContact")} label="Let the assistant see my e-mail, phone and address" />
+            <Switch checked={draft.shareContact} onChange={set("shareContact")} label="Let the assistant see my e-mail, phone and address" />
+          </div>
+          <div className="fms-ownerform-actions">
+            {done && (
+              <p className="t-caption" role="status" style={{ margin: 0, color: "var(--ink-2)" }}>
+                {done}
+              </p>
+            )}
+            {hasSaved && <Button onClick={() => void stopEditing()}>Stop editing</Button>}
+            <Button variant="primary" disabled={!dirty} onClick={save}>
+              {hasSaved ? "Save changes" : "Save my details"}
+            </Button>
+          </div>
         </div>
-        <div className="fms-ownerform-actions">
-          {done && (
-            <p className="t-caption" role="status" style={{ margin: 0, color: "var(--ink-2)" }}>
-              {done}
-            </p>
-          )}
-          <Button variant="primary" disabled={!dirty} onClick={save}>
-            {dirty ? "Save my details" : "Saved"}
-          </Button>
-        </div>
-      </div>
+      )}
     </Group>
   );
 }

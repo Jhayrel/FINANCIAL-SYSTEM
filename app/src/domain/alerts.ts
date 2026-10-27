@@ -38,7 +38,7 @@ import { categoryLimits } from "./budgetView";
 import { limitKindOf, spendingTrackByKind } from "./kinds";
 import { borrowedMoney, lenderNames } from "./borrowed";
 import { isNeedRow } from "./spendNote";
-import { budgetBeyondMoney, type NextMonthStart } from "./monthPlan";
+import { budgetBeyondMoney, moneyForBudgetWords, type NextMonthStart } from "./monthPlan";
 import { unusualRows } from "./unusual";
 import { wholeRows } from "./covers";
 import { incomeSinceSet } from "./incomeBudget";
@@ -104,7 +104,19 @@ export interface AlertInput {
   /** The kinds of spending, with the owner's needs and wants marked. */
   readonly spendingTypes?: readonly Pick<SpendingType, "name" | "necessity">[] | undefined;
   /** This month's safe to spend and what is left of the spending budget (`monthBrief`), for the budget against the money. */
-  readonly safe?: { readonly safe: Centavos; readonly budgetLeft: Centavos | null; readonly wallets: Centavos; readonly todayShare?: Centavos | undefined } | null | undefined;
+  readonly safe?:
+    | {
+        readonly safe: Centavos;
+        readonly budgetLeft: Centavos | null;
+        readonly wallets: Centavos;
+        readonly todayShare?: Centavos | undefined;
+        /** What is still due, so the budget is measured against the money with the plans counted in safe to spend added back (`spendable`). */
+        readonly reservedBills?: Centavos;
+        readonly reservedDebt?: Centavos;
+        readonly reservedPlans?: Centavos;
+      }
+    | null
+    | undefined;
   /** What next month starts at, in this month's last week (`nextMonthStart`). */
   readonly next?: NextMonthStart | null | undefined;
   /** The Planner's plans, and what the wallets hold after the bills and debt payments, before any plan. */
@@ -253,7 +265,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
         level: "warn",
         area: "budget",
         title: `The spending budget is ${money(beyond)} more than your money can cover`,
-        detail: `${money(sf.budgetLeft)} is left of it, but only ${money(Math.max(0, sf.safe))} is safe to spend. Lower it on the Budget screen, under Budget and your money.`,
+        detail: `${money(sf.budgetLeft)} is left of it, but ${moneyForBudgetWords(sf, money)}. Lower it on the Budget screen, under Budget and your money.`,
         weight: 72,
       });
     }

@@ -13,6 +13,7 @@ import {
   groupOpen,
   kindFromHistory,
   likelyPayments,
+  editPlan,
   linkPayments,
   makePlan,
   movePlan,
@@ -34,7 +35,7 @@ import {
   type Plan,
   type PlanInput,
 } from "./planner";
-import { dayIn, readPlannerAsk } from "./plannerAsk";
+import { closedPlanWords, dayIn, plannedMonthWords, readPlannerAsk } from "./plannerAsk";
 import { planAlerts } from "./alerts";
 import type { ReferenceLists, Transaction } from "./types";
 
@@ -162,6 +163,46 @@ describe("no date, or only a month (owner, 27 October 2026: \"LIKE NO DATE LIKE 
     expect(readPlannerAsk("move the tuition plan to december", c)).toMatchObject({ kind: "move", to: "2026-12-31", toKind: "month" });
     expect(readPlannerAsk("move the tuition plan to no date yet", c)).toMatchObject({ kind: "move", to: NO_DATE, toKind: "none" });
     expect(readPlannerAsk("the tuition plan has no date yet", c)).toMatchObject({ kind: "edit", input: { due: NO_DATE, dueKind: "none" } });
+  });
+  // 27 October 2026 sweep: each of these became an entry or the month's summary.
+  it("from the chat: a new price, and a plan put back, however it is said", () => {
+    const skipped = { ...makePlan(input({ title: "Concert ticket", amount: 450_000, due: "2026-10-18" }), "2026-10-01", "owner"), status: "skipped" as const };
+    const c = { plans: [november, skipped], reference, transactions: ledger, asOf };
+    expect(readPlannerAsk("make the tuition plan 9500", c)).toMatchObject({ kind: "amount", amount: 950_000 });
+    expect(readPlannerAsk("the tuition is 9500 now", c)).toMatchObject({ kind: "amount", amount: 950_000 });
+    expect(readPlannerAsk("tuition now costs 9500", c)).toMatchObject({ kind: "amount", amount: 950_000 });
+    // Without "now" or "costs" it is an entry, as before.
+    expect(readPlannerAsk("tuition 9500", c)).toBeNull();
+    expect(readPlannerAsk("put the concert ticket plan back", c)).toMatchObject({ kind: "restore", plan: { title: "Concert ticket" } });
+    expect(readPlannerAsk("bring back the concert plan", c)).toMatchObject({ kind: "restore" });
+    // Skipped already: said, not "no plan by that name".
+    const said = readPlannerAsk("skip the concert plan", c);
+    expect(said).toMatchObject({ kind: "closed", plan: { title: "Concert ticket" } });
+    if (said?.kind === "closed") expect(closedPlanWords(said.plan)).toMatch(/^"Concert ticket" is skipped already.*say "put the concert ticket plan back"\.$/);
+    expect(readPlannerAsk("skip the gym plan", c)).toMatchObject({ kind: "none" });
+  });
+  it("from the chat: one month's plans, against its budget and the money (27 October 2026)", () => {
+    const c = { plans: [november], reference, transactions: ledger, asOf };
+    expect(readPlannerAsk("how much is planned this month?", c)).toEqual({ kind: "month", year: 2026, month: 10 });
+    expect(readPlannerAsk("what's planned for november?", c)).toEqual({ kind: "month", year: 2026, month: 11 });
+    expect(readPlannerAsk("how much is planned next month", c)).toEqual({ kind: "month", year: 2026, month: 11 });
+    expect(readPlannerAsk("what's planned for march?", c)).toEqual({ kind: "month", year: 2027, month: 3 });
+    expect(readPlannerAsk("what plans do i have?", c)).toEqual({ kind: "list" });
+    expect(readPlannerAsk("what do you think of my tuition plan?", c)).toMatchObject({ kind: "opinion", plan: { title: "Tuition" } });
+    expect(readPlannerAsk("can i afford the tuition plan?", c)).toMatchObject({ kind: "opinion" });
+    expect(readPlannerAsk("how much should i save for the tuition plan", c)).toMatchObject({ kind: "saveFor" });
+
+    const haircut = makePlan(input({ title: "Haircut", amount: 15_000, due: "2026-10-28", item: "Self Care", setAside: false }), asOf, "owner");
+    const fee = makePlan(input({ title: "Org fee", amount: 50_000, due: "2026-10-30", item: "School" }), asOf, "owner");
+    const month = plannedForBudget([haircut, fee].map((p) => viewOf(p, ctx)), 2026, 10, reference, asOf);
+    const words = plannedMonthWords(month, { name: "October 2026", asOf, spendingLeft: 40_000, room: 0 });
+    expect(words).toMatch(/^\*\*₱650\.00 is planned in October 2026 and not paid yet\*\*, 2 plans:/);
+    expect(words).toMatch(/- Haircut: ₱150\.00, October 28, 2026 \(not in safe to spend\)/);
+    expect(words).toMatch(/Safe to spend holds back ₱500\.00 of it; the rest is not set aside\./);
+    // The budget cannot hold them, and the money cannot raise it: no "raise it".
+    expect(words).toMatch(/They need ₱250\.00 more than the spending budget has left, and your money does not let it rise: move a plan to a later month, or skip one\./);
+    expect(plannedMonthWords(month, { name: "October 2026", asOf, spendingLeft: 40_000, room: 100_000 })).toMatch(/raise it on the Budget screen/);
+    expect(plannedMonthWords(month, { name: "October 2026", asOf, spendingLeft: null })).toMatch(/has no spending budget yet/);
   });
 });
 
@@ -339,7 +380,7 @@ describe("a plan for a day already gone (owner, 27 October 2026: \"what happen i
   it("is allowed, says it shows as overdue and how not to pay it twice", () => {
     const check = checkPlan(input, { plans: [], reference, asOf });
     expect(check.problems).toEqual([]);
-    expect(check.notes.join(" ")).toMatch(/has already passed\. Saved, it shows as overdue/);
+    expect(check.notes.join(" ")).toMatch(/has already passed\. When you add it, you are asked whether it is still to pay \(it shows as overdue\) or paid already/);
     const v = viewOf(makePlan(input, asOf, "owner"), { transactions: [], accounts: [], asOf });
     expect(v.state).toBe("overdue");
   });
@@ -359,6 +400,62 @@ describe("a plan for a day already gone (owner, 27 October 2026: \"what happen i
     const check = checkPlan({ ...input, title: "Haircut, barber" }, { plans: [plan], reference, asOf, editing: plan.id, closed: true });
     expect(check.problems).toEqual([]);
     expect(check.notes.join(" ")).not.toMatch(/already passed/);
+  });
+
+  /*
+   * The owner, 27 October 2026: "what if I edit a plan that allready in
+   * deadline or the deadline is passed". Each case says what happens to it.
+   */
+  it("editing an overdue plan, left on its day, says how late it is and how to move it", () => {
+    const plan = makePlan(input, "2026-10-01", "owner");
+    const check = checkPlan({ ...input, title: "Haircut, barber" }, { plans: [plan], reference, asOf, editing: plan.id, was: { due: plan.due } });
+    expect(check.problems).toEqual([]);
+    expect(check.notes.join(" ")).toMatch(/^It was due October 20, 2026, 6 days ago, and shows as overdue\. Change the day to move it/);
+  });
+
+  it("moved to another day gone, it stays overdue; to a later day, it no longer is", () => {
+    const plan = makePlan(input, "2026-10-01", "owner");
+    const ctx2 = { plans: [plan], reference, asOf, editing: plan.id, was: { due: plan.due } };
+    expect(checkPlan({ ...input, due: "2026-10-22" }, ctx2).notes.join(" ")).toMatch(/has passed too, so it would stay overdue\. Pick today or a later day/);
+    expect(checkPlan({ ...input, due: "2026-11-05" }, ctx2).notes.join(" ")).toMatch(/^Moved from October 20, 2026 to November 5, 2026; the move is kept in its history, and it is no longer overdue\./);
+    // Today is not gone.
+    expect(checkPlan({ ...input, due: asOf }, ctx2).notes.join(" ")).toMatch(/no longer overdue/);
+    const moved = editPlan(plan, { ...input, due: "2026-11-05" }, asOf);
+    expect(moved.moves).toEqual([{ from: "2026-10-20", to: "2026-11-05", on: asOf }]);
+    expect(viewOf(moved, { transactions: [], accounts: [], asOf }).state).not.toBe("overdue");
+  });
+
+  it("cannot cost less than is paid on it; at exactly that, it is paid in full", () => {
+    const part = tx({ id: "part", item: "Self Care", description: "Barber", amount: 10_000, date: "2026-10-21" });
+    const plan = linkPayments(makePlan(input, "2026-10-01", "owner"), ["part"], [part], asOf);
+    expect(plan.status).toBe("open");
+    const ctx2 = { plans: [plan], reference, asOf, editing: plan.id, paid: 10_000, was: { due: plan.due } };
+    expect(checkPlan({ ...input, amount: 8_000 }, ctx2).problems).toEqual(["₱100.00 is paid on it already. Make the amount ₱100.00 or more, or unlink a payment first."]);
+    expect(checkPlan({ ...input, amount: 10_000 }, ctx2).notes.join(" ")).toMatch(/at this amount it is paid in full and is marked paid/);
+    const settled = editPlan(plan, { ...input, amount: 10_000 }, asOf, [part]);
+    expect(settled.status).toBe("done");
+    expect(settled.closedOn).toBe("2026-10-21");
+    expect(viewOf(settled, { transactions: [part], accounts: [], asOf }).state).toBe("paid");
+    // More than is paid: still open, the rest left.
+    const more = editPlan(plan, { ...input, amount: 12_000 }, asOf, [part]);
+    expect(more.status).toBe("open");
+    expect(viewOf(more, { transactions: [part], accounts: [], asOf }).left).toBe(2_000);
+    // Without the entries, an edit never closes it.
+    expect(editPlan(plan, { ...input, amount: 10_000 }, asOf).status).toBe("open");
+  });
+
+  it("paid, then made to cost more, stays closed and says how to open it again", () => {
+    const plan = linkPayments(makePlan(input, asOf, "owner"), ["cut"], [paidBefore], asOf);
+    const check = checkPlan({ ...input, amount: 20_000 }, { plans: [plan], reference, asOf, editing: plan.id, closed: true, paid: 15_000, was: { due: plan.due } });
+    expect(check.problems).toEqual([]);
+    expect(check.notes.join(" ")).toMatch(/₱150\.00 is paid on it\. Saved at ₱200\.00, it stays closed; if ₱50\.00 more is still to pay, open it again from its sheet\./);
+    expect(editPlan(plan, { ...input, amount: 20_000 }, asOf, [paidBefore]).status).toBe("done");
+  });
+
+  it("a month already over is gone; this month is not", () => {
+    const month = { ...input, due: "2026-09-30", dueKind: "month" as const };
+    expect(checkPlan(month, { plans: [], reference, asOf }).notes.join(" ")).toMatch(/^Sometime in September 2026 has already passed/);
+    expect(checkPlan({ ...month, due: "2026-10-31" }, { plans: [], reference, asOf }).notes.join(" ")).not.toMatch(/passed/);
   });
 
   it("put back after its day is open again, overdue, with its payments as they were", () => {

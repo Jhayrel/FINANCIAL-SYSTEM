@@ -261,6 +261,10 @@ export function checkPlan(
     readonly editing?: string | undefined;
     /** Editing a plan already paid or skipped. */
     readonly closed?: boolean | undefined;
+    /** What is paid on the plan being edited: its amount may not go below it. */
+    readonly paid?: Centavos | undefined;
+    /** The day the plan being edited had, to tell a move from a plan left where it was. */
+    readonly was?: { readonly due: IsoDate; readonly dueKind?: DueKind | undefined } | undefined;
   },
 ): PlanCheck {
   const problems: string[] = [];
@@ -270,12 +274,35 @@ export function checkPlan(
   const kind = dueKindOf(input);
   const due = dueFor(kind, input.due);
   if (!ISO.test(due)) problems.push(kind === "month" ? "Pick the month it is to be paid in." : "Pick the day it is to be paid by.");
+  /*
+   * Less than is paid on it already: "PHP 250.00 paid of PHP 200.00, Part
+   * paid" (27 October 2026 scenario run). Paid in full at exactly what is
+   * paid is said, and the Planner marks it paid.
+   */
+  const paid = context.paid ?? 0;
+  if (paid > 0 && input.amount !== null && input.amount < paid) problems.push(`${formatMoney(paid)} is paid on it already. Make the amount ${formatMoney(paid)} or more, or unlink a payment first.`);
   if (problems.length > 0) return { problems, notes };
-  // A plan already paid or skipped is a record: its day passing is no news.
-  if (due < context.asOf && kind !== "none" && !context.closed)
-    notes.push(
-      `${whenOf({ due, dueKind: kind })} has already passed. Saved, it shows as overdue. If it is already paid, open it after saving: link the entry if it is in your records, or record the payment with the day you paid, so nothing is entered twice.`,
-    );
+  if (paid > 0 && input.amount === paid && !context.closed) notes.push(`${formatMoney(paid)} is paid on it already, so at this amount it is paid in full and is marked paid.`);
+  // Paid or skipped, then made to cost more: saving does not open it again by itself.
+  if (paid > 0 && input.amount !== null && input.amount > paid && context.closed)
+    notes.push(`${formatMoney(paid)} is paid on it. Saved at ${formatMoney(input.amount)}, it stays closed; if ${formatMoney(input.amount - paid)} more is still to pay, open it again from its sheet.`);
+  /*
+   * A day already gone (owner, 27 October 2026: "what if I create a plan but
+   * in the past? what if I edit a plan that allready in deadline"). A plan
+   * already paid or skipped is a record: its day passing is no news.
+   */
+  const when = whenOf({ due, dueKind: kind });
+  const wasDue = context.was ? dueFor(dueKindOf(context.was), context.was.due) : null;
+  if (due < context.asOf && kind !== "none" && !context.closed) {
+    if (!context.editing || wasDue === null)
+      notes.push(`${when} has already passed. When you add it, you are asked whether it is still to pay (it shows as overdue) or paid already (then link or record the payment, so nothing is entered twice).`);
+    else if (wasDue === due) {
+      const late = daysBetween(due, context.asOf);
+      notes.push(`It was due ${when}, ${late === 1 ? "a day" : `${late} days`} ago, and shows as overdue. Change the day to move it; the move is kept in its history. Paid already? Close this and use Record payment, or link the entry.`);
+    } else notes.push(`${when} has passed too, so it would stay overdue. Pick today or a later day to move it.`);
+  } else if (context.editing && wasDue !== null && wasDue !== NO_DATE && wasDue < context.asOf && !context.closed && kind !== "none") {
+    notes.push(`Moved from ${whenOf({ due: wasDue, dueKind: context.was?.dueKind })} to ${when}; the move is kept in its history, and it is no longer overdue.`);
+  }
   const same = context.plans.find(
     (p) => p.id !== context.editing && p.status === "open" && p.title.trim().toLowerCase() === input.title.trim().toLowerCase() && p.due.slice(0, 7) === due.slice(0, 7),
   );
@@ -311,11 +338,16 @@ export function makePlan(input: PlanInput, asOf: IsoDate, by: "owner" | "ai", id
   });
 }
 
-/** The plan with what was changed, its history kept. A new date is a move (P4.12). */
-export function editPlan(plan: Plan, input: PlanInput, asOf: IsoDate): Plan {
+/**
+ * The plan with what was changed, its history kept. A new date is a move
+ * (P4.12). With the entries given, an open plan whose amount is brought down
+ * to what is paid on it is paid in full, as linking its last payment makes it
+ * (P4.5); `checkPlan` stops an amount below that.
+ */
+export function editPlan(plan: Plan, input: PlanInput, asOf: IsoDate, transactions?: readonly Transaction[]): Plan {
   const kind = dueKindOf(input);
   const due = dueFor(kind, input.due);
-  return tidy({
+  const next = tidy({
     ...plan,
     title: input.title.trim(),
     amount: input.amount ?? plan.amount,
@@ -329,6 +361,9 @@ export function editPlan(plan: Plan, input: PlanInput, asOf: IsoDate): Plan {
     notes: input.notes.trim(),
     moves: movesAfter(plan, due, asOf),
   });
+  if (!transactions || next.status !== "open" || next.entryIds.length === 0) return next;
+  const paid = paidSoFar(next, transactions);
+  return paid.amount > 0 && paid.amount >= next.amount ? tidy({ ...next, status: "done", closedOn: paid.lastOn ?? asOf }) : next;
 }
 
 /**

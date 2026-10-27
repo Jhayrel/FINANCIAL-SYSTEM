@@ -2030,6 +2030,53 @@ style guide's Bin, Planner and sidebar lines say how each now works.
   pay by its due day. A locked PDF or a scan says to send a screenshot or a
   photo instead.
 
+### 2026-10-27, last: plan dates, plans and the budget in step, better chat answers
+
+- **Plans and their days** (owner: "what if I create a plan but in the
+  past? what if I edit a plan that is already past its deadline"):
+  - Adding a plan for a day gone asks first: still to pay (it shows as
+    overdue) or paid already (link or record the payment). Go back keeps
+    the form.
+  - Editing an overdue plan says how late it is. Moving it to another day
+    gone says it stays overdue; to today or later, it is no longer overdue
+    and the move is kept in its history.
+  - An amount below what is paid on a plan is refused; at exactly what is
+    paid, the plan is marked paid. A paid plan made to cost more stays
+    closed and says how to open it again.
+  - Move the date takes only today or later. Putting back a plan whose day
+    has passed opens Move for a new day; Cancel keeps it overdue.
+  - The chat follows the same rules ("move the haircut plan to oct 20" is
+    refused, "the org membership plan is 200 now" below what is paid is
+    refused, "put the concert plan back" says it comes back overdue).
+- **Count it in safe to spend, on or off** (owner: "make sure it syncs
+  with plans ... what if I click safe to spend or not"):
+  - The switch moves safe to spend only. The Budget counts a plan as
+    planned spending either way.
+  - **Fixed**: a plan counted in safe to spend lowered "the most your
+    budget can be". The Budget then said "Raise it" for the plans and
+    "Lower it" for the money in the same view. The budget is now measured
+    against the wallets less bills and debt payments, the plans set aside
+    included (`spendable` in `monthPlan.ts`): Dashboard, bell, Budget,
+    Insights and the chat say the same figure.
+  - When even the money cannot raise the budget enough for the plans, it
+    says to move a plan to a later month or skip one.
+  - Plans not counted are marked "not in safe to spend" on the Budget and
+    the Dashboard. The form's switch and the chat card say what changes.
+- **Chat**:
+  - "How much is planned this month / in November?" lists the month's
+    plans against its budget.
+  - "What do you think of my tuition plan?" and "can I afford the gifts
+    plan?" give an opinion on a saved plan. An overdue plan is read as
+    this month's.
+  - Also understood now: "make the tuition plan 9500", "the tuition is
+    9500 now", "put the concert plan back", and "skip" on a plan that is
+    skipped already.
+  - Earlier in the day: "what's due", "biggest expense", "am I over
+    budget", "how much is my savings", Taglish budget questions, "plna"
+    typos, plan titles kept whole ("Birthday gift for mama").
+- **Settings, Data, You**: saved details are shown locked, with Edit.
+  Stop editing asks first when something was changed.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

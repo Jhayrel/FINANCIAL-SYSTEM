@@ -31,6 +31,15 @@ describe("an opinion is asked about the card", () => {
     expect(words).toContain("It is a want");
     expect(words).toContain(`say "don't count it"`);
     expect(words).toContain("lower it to about ₱3,000.00, which a usual December can spare");
+    expect(words).toContain("pay part from your savings (₱3,545.35)");
+  });
+
+  it("never suggests lowering a need, or a monthly amount for next month", () => {
+    const tuition: PlanInput = { ...trip, title: "Tuition", amount: 900_000, due: "2026-11-15", dueKind: "day", item: "School", need: true };
+    const words = planOpinion(tuition, { asOf, month: { name: "November 2026", usual: 1_632_200, others: 0, income: 1_932_626 }, freeNow: 70_085, savings: 354_535 });
+    expect(words).not.toContain("lower it");
+    expect(words).not.toContain("a month from now");
+    expect(words).toContain("spend less on wants in November");
     expect(words).toContain("Nothing is saved until you press Add to the planner.");
   });
 
@@ -66,5 +75,31 @@ describe("a change is said to the card", () => {
 
   it("leaves other messages alone", () => {
     for (const s of ["how much did I spend on food this month?", "what do you think?", "thanks", "spent 150 on lunch from gcash yesterday at the mall with friends after class"]) expect(readPlanCardChange(s, trip, ctx), s).toBeNull();
+  });
+});
+
+/*
+ * A plan already on the Planner (27 October 2026 sweep): "what do you think
+ * of my tuition plan?" fell to the month's summary, and an overdue plan read
+ * as "next month".
+ */
+describe("an opinion on a plan already saved", () => {
+  const registration: PlanInput = { title: "Motorcycle registration", amount: 180_000, due: "2026-10-22", item: "", wallet: "Cash", need: true, setAside: true, notes: "" };
+
+  it("works from what is left, and says keep rather than add", () => {
+    const words = planOpinion({ ...trip, need: true }, { asOf, month: { name: "December 2026", usual: 1_632_200, others: 0, income: 1_932_626 }, freeNow: 70_085, savings: 354_535 }, { paid: 400_000, left: 600_000 });
+    expect(words).toContain("**Trip, ₱10,000.00, sometime in December 2026.** ₱4,000.00 is paid, ₱6,000.00 left. Here is how it looks.");
+    expect(words).toContain("With this it comes to ₱22,322.00");
+    expect(words).not.toContain("Add to the planner");
+    expect(words).toMatch(/My suggestion: A usual December cannot cover it alone\. Keep it, and/);
+    expect(words).toMatch(/"move the trip plan to january", "make the trip plan 8000"/);
+  });
+
+  it("an overdue one is this month's, held back now, never \"next month\"", () => {
+    const words = planOpinion(registration, { asOf, month: null, freeNow: 30_085, savings: 354_535 }, { paid: 0, left: 180_000 });
+    expect(words).toContain("- Its day has passed, so it is overdue. Safe to spend until the month ends is ₱300.85, ₱1,499.15 less than this.");
+    expect(words).toContain("- As it is, it is counted in safe to spend: ₱1,800.00 is held back now, until it is paid.");
+    expect(words).not.toMatch(/next month|from the 1st/);
+    expect(words).toMatch(/spend less on wants in October/);
   });
 });

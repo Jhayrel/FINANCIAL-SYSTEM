@@ -26,6 +26,7 @@
  * borrowing as spending.
  */
 
+import { formatMedium } from "./dates";
 import { namesMoney, withoutTotals } from "./entryTotals";
 import { cashWallet } from "./withdrawal";
 import { daysBackIn, itemHintIn } from "./filipino";
@@ -1025,7 +1026,7 @@ export function readEntry(
   const source = stated || headWallet || (flow === "Spending" ? destination || loose : destination ? "" : loose);
 
   const because: string[] = [];
-  if (said && date !== asOf) because.push(`Dated ${date}, from what you said.`);
+  if (said && date !== asOf) because.push(`Dated ${formatMedium(date)}, from what you said.`);
 
   /**
    * Said outright, rather than assumed from a bare "to".

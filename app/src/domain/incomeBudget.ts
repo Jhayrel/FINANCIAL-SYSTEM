@@ -56,7 +56,9 @@ export interface IncomeBudget {
   readonly spent: Centavos;
   /** Safe to spend for the rest of the month (wallets less what is due). */
   readonly safe: Centavos;
-  /** The most the spending budget can be with the money held now: spent + safe (rule 3). */
+  /** The Planner's plans counted in safe to spend: spending the budget pays too, so back in `most`. */
+  readonly plans: Centavos;
+  /** The most the spending budget can be with the money held now: spent + safe + the plans counted in safe (rule 3). */
   readonly most: Centavos;
   /** How far the budget already promises more than the money. 0 when it does not. */
   readonly over: Centavos;
@@ -72,6 +74,14 @@ export function incomeBudget(input: {
   readonly month: number;
   /** Safe to spend for the month, from `monthBrief`. Null for a month that is not running. */
   readonly safe: Centavos | null;
+  /**
+   * What the spending wallets can still pay this month, the plans counted in
+   * safe to spend included (`spendable`), and those plans. A plan is spending
+   * the budget pays, so counting it in safe to spend never lowers the most
+   * the budget can be (27 October 2026). Absent, it is safe to spend.
+   */
+  readonly spendable?: Centavos | null | undefined;
+  readonly plans?: Centavos | undefined;
   /** Spent on the spending track this month, from the month's assessment. */
   readonly spent: Centavos;
 }): IncomeBudget | null {
@@ -125,7 +135,8 @@ export function incomeBudget(input: {
 
   const budget = plan?.spending[month - 1] ?? 0;
   const billsBudget = plan?.billsSubs[month - 1] ?? 0;
-  const most = spent + Math.max(0, safe - pending);
+  const plans = input.spendable !== undefined && input.spendable !== null ? (input.plans ?? 0) : 0;
+  const most = spent + Math.max(0, (input.spendable ?? safe) - pending);
   return {
     year,
     month,
@@ -137,6 +148,7 @@ export function incomeBudget(input: {
     billsBudget,
     spent,
     safe,
+    plans,
     most,
     over: Math.max(0, budget - most),
     room: Math.max(0, most - budget),
@@ -183,7 +195,9 @@ export function checkSplit(ib: IncomeBudget, split: IncomeSplit): SplitCheck {
     errors.push(
       split.keepAside > 0
         ? `A spending budget of ${formatMoney(spending)} would count the ${formatMoney(split.keepAside)} kept for savings twice: with it set aside, your money keeps a spending budget of ${formatMoney(Math.max(0, ceiling))} at most.`
-        : `A spending budget of ${formatMoney(spending)} is more than your money can cover: ${formatMoney(ib.spent)} is spent and ${formatMoney(ib.safe)} is safe to spend, so ${formatMoney(Math.max(0, ceiling))} at most.`,
+        : ib.plans > 0
+          ? `A spending budget of ${formatMoney(spending)} is more than your money can cover: ${formatMoney(ib.spent)} is spent and the wallets can pay ${formatMoney(Math.max(0, ib.most - ib.spent))} more this month, the plans counted in safe to spend included, so ${formatMoney(Math.max(0, ceiling))} at most.`
+          : `A spending budget of ${formatMoney(spending)} is more than your money can cover: ${formatMoney(ib.spent)} is spent and ${formatMoney(ib.safe)} is safe to spend, so ${formatMoney(Math.max(0, ceiling))} at most.`,
     );
   }
   if (given === 0) errors.push("Put some of it into a part first.");
@@ -209,6 +223,11 @@ export function checkSplit(ib: IncomeBudget, split: IncomeSplit): SplitCheck {
   };
 }
 
+/** How `most` is made up, in words: plans counted in safe to spend are paid from the budget too. */
+export function mostWords(ib: Pick<IncomeBudget, "plans">): string {
+  return ib.plans > 0 ? `spent, plus what the wallets can still pay this month, the ${formatMoney(ib.plans)} set aside for plans included` : "spent plus safe to spend";
+}
+
 /** The figures in words, for the chat and the model. */
 export function incomeBudgetWords(ib: IncomeBudget, monthName: string): string[] {
   const out: string[] = [];
@@ -220,7 +239,7 @@ export function incomeBudgetWords(ib: IncomeBudget, monthName: string): string[]
   );
   if (ib.toSavings > 0) out.push(`Moved into savings since then: ${formatMoney(ib.toSavings)}.`);
   out.push(
-    `Spending budget ${formatMoney(ib.budget)}, ${formatMoney(ib.spent)} spent; safe to spend ${formatMoney(ib.safe)}. The most the spending budget can be with the money held now: ${formatMoney(ib.most)} (spent plus safe to spend).`,
+    `Spending budget ${formatMoney(ib.budget)}, ${formatMoney(ib.spent)} spent; safe to spend ${formatMoney(ib.safe)}${ib.plans > 0 ? `, after ${formatMoney(ib.plans)} set aside for plans` : ""}. The most the spending budget can be with the money held now: ${formatMoney(ib.most)} (${mostWords(ib)}).`,
   );
   if (ib.over > 0) out.push(`The spending budget is already ${formatMoney(ib.over)} more than your money can cover. Lower it to ${formatMoney(ib.most)} to make it workable.`);
   else if (ib.cameIn > 0) out.push(`It can rise by ${formatMoney(Math.min(ib.room, ib.cameIn))} at most from this income; any part kept for savings comes off that.`);

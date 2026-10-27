@@ -171,14 +171,25 @@ function monthsTo(asOf: IsoDate, due: IsoDate): number {
 /** Rounded down to the hundred, for a figure to aim at rather than to pay. */
 const hundred = (c: Centavos): Centavos => Math.floor(c / 10_000) * 10_000;
 
-/** An opinion on the plan on the card, from the figures: how its month looks with it, how to get ready, and a suggestion. */
-export function planOpinion(plan: PlanInput, f: PlanOpinionFacts): string {
-  const amount = plan.amount ?? 0;
+/**
+ * An opinion on a plan, from the figures: how its month looks with it, how
+ * to get ready, and a suggestion. The plan on a card, before it is added; or,
+ * with `saved`, one on the Planner already ("what do you think of my tuition
+ * plan?", 27 October 2026 sweep), worked from what is left of it.
+ */
+export function planOpinion(plan: PlanInput, f: PlanOpinionFacts, saved?: { readonly paid: Centavos; readonly left: Centavos }): string {
+  const amount = saved ? saved.left : (plan.amount ?? 0);
   const when = plan.due === NO_DATE ? "with no date yet" : whenOf({ due: plan.due, dueKind: plan.dueKind }).replace(/^S/, "s");
-  const lines: string[] = [`**${plan.title}, ${formatMoney(amount)}, ${when}.** Here is how it looks before you add it.`];
-  const monthName = plan.due === NO_DATE ? "" : (MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1] ?? "that month");
-  const thisMonth = plan.due !== NO_DATE && plan.due.slice(0, 7) === f.asOf.slice(0, 7);
-  const months = plan.due === NO_DATE ? 0 : monthsTo(f.asOf, plan.due);
+  const late = plan.due !== NO_DATE && plan.due < f.asOf;
+  const lines: string[] = [
+    saved
+      ? `**${plan.title}, ${formatMoney(plan.amount ?? 0)}, ${when}.**${saved.paid > 0 ? ` ${formatMoney(saved.paid)} is paid, ${formatMoney(saved.left)} left.` : ""} Here is how it looks.`
+      : `**${plan.title}, ${formatMoney(amount)}, ${when}.** Here is how it looks before you add it.`,
+  ];
+  const monthName = plan.due === NO_DATE ? "" : (MONTH_NAMES[Number((late ? f.asOf : plan.due).slice(5, 7)) - 1] ?? "that month");
+  // A day already gone is paid out of this month's money, if at all.
+  const thisMonth = plan.due !== NO_DATE && (plan.due.slice(0, 7) === f.asOf.slice(0, 7) || late);
+  const months = plan.due === NO_DATE || late ? 0 : monthsTo(f.asOf, plan.due);
   const perMonth = months >= 2 ? Math.ceil(amount / months) : amount;
 
   let gap: Centavos | null = null;
@@ -192,7 +203,7 @@ export function planOpinion(plan: PlanInput, f: PlanOpinionFacts): string {
     );
   }
   if (thisMonth && f.freeNow !== null) {
-    lines.push(`- It is due this month. Safe to spend until the month ends is ${formatMoney(Math.max(0, f.freeNow))}${f.freeNow < amount ? `, ${formatMoney(amount - Math.max(0, f.freeNow))} less than this` : ""}.`);
+    lines.push(`- ${late ? "Its day has passed, so it is overdue" : "It is due this month"}. Safe to spend until the month ends is ${formatMoney(Math.max(0, f.freeNow))}${f.freeNow < amount ? `, ${formatMoney(amount - Math.max(0, f.freeNow))} less than this` : ""}.`);
   } else if (months >= 2) {
     lines.push(`- To have it ready by ${monthName}, set aside about ${formatMoney(perMonth)} a month for the next ${months} months.`);
   } else if (months === 1) {
@@ -203,19 +214,37 @@ export function planOpinion(plan: PlanInput, f: PlanOpinionFacts): string {
   if (plan.due !== NO_DATE) {
     lines.push(
       plan.setAside
-        ? `- As it is, it is counted in ${monthName}'s safe to spend: from the 1st, ${formatMoney(amount)} is held back before your daily figure is worked out. If you will pay it from savings, say "don't count it".`
+        ? thisMonth
+          ? `- As it is, it is counted in safe to spend: ${formatMoney(amount)} is held back now, until it is paid. If you will pay it from savings, say "don't count it".`
+          : `- As it is, it is counted in ${monthName}'s safe to spend: from the 1st, ${formatMoney(amount)} is held back before your daily figure is worked out. If you will pay it from savings, say "don't count it".`
         : "- It is not counted in safe to spend, so your daily figure will not hold money back for it.",
     );
   }
 
+  /*
+   * What to do about it, by what it is. A need is paid whatever happens, so
+   * the room comes from the wants and the savings, never from lowering it
+   * ("lower tuition to PHP 3,000.00" was suggested, 27 October 2026 sweep).
+   * Setting aside "a month" is said only with two months or more to go.
+   */
+  const ways: string[] = [];
+  if (months >= 2) ways.push(`set aside ${formatMoney(perMonth)} a month from now`);
+  if (f.savings > 0) ways.push(f.savings >= amount ? "pay it from your savings" : `pay part from your savings (${formatMoney(f.savings)})`);
+  if (plan.need) ways.push(`spend less on wants in ${monthName}`);
+  else {
+    if (spare !== null && spare > 0) ways.push(`lower it to about ${formatMoney(hundred(spare))}, which a usual ${monthName} can spare`);
+    ways.push("move it to a later month");
+  }
+  const either = (list: readonly string[]): string => (list.length <= 1 ? (list[0] ?? "") : `${list.slice(0, -1).join(", ")} or ${list[list.length - 1]}`);
   let suggestion: string;
-  if (plan.due === NO_DATE) suggestion = "Add it with no date for now, and give it a month once you know, so it is counted there.";
-  else if (gap !== null && gap < 0 && spare !== null && spare > 0)
-    suggestion = `A usual ${monthName} cannot cover it alone. Add it, and either set aside ${formatMoney(perMonth)} a month from now, lower it to about ${formatMoney(hundred(spare))}, which a usual ${monthName} can spare, or move it to a later month.`;
-  else if (gap !== null && gap < 0)
-    suggestion = `A usual ${monthName} has nothing to spare, so add it only if you set aside ${formatMoney(perMonth)} a month from now or pay it from savings.`;
-  else if (gap !== null) suggestion = `It fits a usual ${monthName}. Add it when you are ready.`;
-  else suggestion = months >= 2 ? `Add it, and set aside about ${formatMoney(perMonth)} a month so it is ready.` : "Add it if the money above covers it.";
-  lines.push(`My suggestion: ${suggestion} Nothing is saved until you press Add to the planner.`);
+  const add = saved ? "keep it" : "add it";
+  if (plan.due === NO_DATE) suggestion = saved ? "Give it a month once you know, so it is counted there." : "Add it with no date for now, and give it a month once you know, so it is counted there.";
+  else if (gap !== null && gap < 0) suggestion = `a usual ${monthName} cannot cover it alone. ${add.replace(/^./, (c) => c.toUpperCase())}, and ${either(ways)}.`;
+  else if (gap !== null) suggestion = saved ? `it fits a usual ${monthName}. Keep it as it is.` : `it fits a usual ${monthName}. Add it when you are ready.`;
+  else suggestion = months >= 2 ? `${add}, and set aside about ${formatMoney(perMonth)} a month so it is ready.` : thisMonth && f.freeNow !== null && f.freeNow < amount ? `this month's money does not cover it. ${either(ways.length > 0 ? ways : ["move it to a later month"]).replace(/^./, (c) => c.toUpperCase())}.` : `${add} if the money above covers it.`;
+  const close = saved
+    ? `To change it, say so ("move the ${plan.title.toLowerCase()} plan to ${(MONTH_NAMES[plan.due === NO_DATE ? 11 : Number((late ? f.asOf : plan.due).slice(5, 7)) % 12] ?? "December").toLowerCase()}", "make the ${plan.title.toLowerCase()} plan ${Math.max(100, Math.round((plan.amount ?? 0) / 100 / 1.25 / 100) * 100)}") or open it on the Planner.`
+    : "Nothing is saved until you press Add to the planner.";
+  lines.push(`My suggestion: ${suggestion.replace(/^./, (c) => c.toUpperCase())} ${close}`);
   return lines.join("\n");
 }

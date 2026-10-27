@@ -848,6 +848,9 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       year,
       month,
       safe: toCentavos(input.snapshot.safe.safe),
+      // The plans counted in safe to spend are spending the budget pays: back in the most it can be (`spendable`).
+      spendable: Math.max(0, toCentavos(input.snapshot.safe.wallets) - toCentavos(input.snapshot.safe.billsDue) - toCentavos(input.snapshot.safe.debtDue)),
+      plans: toCentavos(input.snapshot.safe.plansDue ?? 0),
       spent: assessMonthFor(input.transactions, input.budgets, year, month).spending.spent,
     });
     if (ib && (ib.cameIn > 0 || ib.over > 0)) {

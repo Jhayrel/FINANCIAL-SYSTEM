@@ -32,6 +32,7 @@
  * compares the ledger with, so it is returned beside the rows, never as one.
  */
 
+import { formatMedium } from "./dates";
 import { namesPerson } from "./behalfFor";
 import { makeDebtId } from "./debt";
 import { parseAmount, type Centavos } from "./money";
@@ -1237,7 +1238,7 @@ export function checkReceipts(
       fixed = { ...fixed, draft: { ...fixed.draft, fromWallet: wallet }, adjustments: [...fixed.adjustments, `Paid from ${wallet}, as the receipt shows.`] };
     }
     if (r.date && !r.dateAmbiguous && fixed.draft.date === asOf && r.date !== asOf) {
-      fixed = { ...fixed, draft: { ...fixed.draft, date: r.date }, adjustments: [...fixed.adjustments, `Dated ${r.date}, as printed on the receipt.`] };
+      fixed = { ...fixed, draft: { ...fixed.draft, date: r.date }, adjustments: [...fixed.adjustments, `Dated ${formatMedium(r.date)}, as printed on the receipt.`] };
     }
 
     const gone = new Set(parts);
@@ -1342,7 +1343,7 @@ export function datesFromHeadings(
     return {
       ...p,
       draft: { ...p.draft, date },
-      adjustments: [...p.adjustments, `Dated ${date} by the heading above it in the picture; it was read as ${p.draft.date}.`],
+      adjustments: [...p.adjustments, `Dated ${formatMedium(date)} by the heading above it in the picture; it was read as ${formatMedium(p.draft.date)}.`],
     };
   });
 }

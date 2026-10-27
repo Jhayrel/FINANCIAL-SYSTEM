@@ -412,7 +412,12 @@ export function Planner(props: PlannerProps) {
           onLink={() => setLinking(current.plan)}
           onSkip={() => setClosing({ plan: current.plan, how: "skip" })}
           onRemove={() => setClosing({ plan: current.plan, how: "remove" })}
-          onReopen={() => props.onChange(reopenPlan(current.plan), "plan.restore", `Put "${current.plan.title}" back on the plan list.`)}
+          onReopen={() => {
+            const back = reopenPlan(current.plan);
+            props.onChange(back, "plan.restore", `Put "${current.plan.title}" back on the plan list.`);
+            // Its day gone, it would come back overdue: a new day is offered, Cancel keeps it as it was.
+            if (back.due !== NO_DATE && dueFor(dueKindOf(back), back.due) < asOf) setMoving(back);
+          }}
           onAgain={() => {
             const next = planAgain(current.plan, addDays(asOf, 30) > current.plan.due ? addDays(asOf, 30) : addDays(current.plan.due, 30), asOf, "owner");
             props.onChange(next, "plan.create", `Planned "${next.title}" again, ${formatMoney(next.amount)} ${byWhen(next)}.`);
@@ -441,12 +446,13 @@ export function Planner(props: PlannerProps) {
           onSave={(input) => {
             if (form.editing && plans.some((p) => p.id === form.editing?.id)) {
               const was = form.editing;
-              const next = editPlan(was, input, asOf);
+              const next = editPlan(was, input, asOf, transactions);
               const changed: string[] = [];
               if (was.amount !== next.amount) changed.push(`amount ${formatMoney(was.amount)} to ${formatMoney(next.amount)}`);
               if (was.due !== next.due || was.dueKind !== next.dueKind) changed.push(`when ${whenOf(was)} to ${whenOf(next)}`);
               if (was.title !== next.title) changed.push(`name to "${next.title}"`);
-              props.onChange(next, was.due !== next.due && changed.length === 1 ? "plan.move" : "plan.update", `Edited "${next.title}"${changed.length > 0 ? `: ${changed.join(", ")}` : ""}.`);
+              const settled = was.status === "open" && next.status === "done";
+              props.onChange(next, settled ? "plan.paid" : was.due !== next.due && changed.length === 1 ? "plan.move" : "plan.update", `Edited "${next.title}"${changed.length > 0 ? `: ${changed.join(", ")}` : ""}${settled ? ", paid in full" : ""}.`);
               setOpenId(next.id);
             } else {
               const next = makePlan(input, asOf, "owner");
@@ -480,6 +486,7 @@ export function Planner(props: PlannerProps) {
       {moving && (
         <MoveSheet
           plan={moving}
+          view={views.find((v) => v.plan.id === moving.id)}
           asOf={asOf}
           dialog={!phone}
           onClose={() => setMoving(null)}
@@ -990,7 +997,22 @@ export function PlanForm(props: {
   const kind = item || suggested || "";
   const recurring = isRecurringKind(kind, reference);
   const input: PlanInput = { title, amount, due, dueKind: when.kind, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !recurring, notes };
-  const check = checkPlan({ ...input, setAside }, { plans: props.plans, reference, asOf, editing: editing?.id, closed: Boolean(isEdit && editing && editing.status !== "open") });
+  // What is paid on it already: its amount may not go below that, and at exactly that it is paid in full.
+  const paidOn = useMemo(() => (editing && isEdit ? viewOf(editing, { transactions: props.transactions, accounts, asOf }).paid : 0), [editing, isEdit, props.transactions, accounts, asOf]);
+  const check = checkPlan(
+    { ...input, setAside },
+    {
+      plans: props.plans,
+      reference,
+      asOf,
+      editing: isEdit ? editing?.id : undefined,
+      closed: Boolean(isEdit && editing && editing.status !== "open"),
+      paid: paidOn,
+      was: isEdit && editing ? { due: editing.due, dueKind: editing.dueKind } : undefined,
+    },
+  );
+  const paidProblem = check.problems.find((p) => p.includes("is paid on it already"));
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const goalName = goals.find((g) => g.id === goalId)?.name ?? "";
   const counted = setAside && !goalId && !recurring;
 
@@ -1012,17 +1034,37 @@ export function PlanForm(props: {
       .spendingViews.filter((v) => v.plan.item.trim() === kind)
       .reduce((sum, v) => sum + v.left, 0);
     // An edited plan's payments are in what is spent already; only what is left of it is still to come.
-    const paid = editing && isEdit ? viewOf(editing, { transactions, accounts, asOf }).paid : 0;
-    return planLimitNote(line, planned, Math.max(0, amount - paid), month);
-  }, [kind, recurring, amount, when.kind, due, asOf, transactions, budgets, debts, plans, editing, isEdit, accounts, reference]);
+    return planLimitNote(line, planned, Math.max(0, amount - paidOn), month);
+  }, [kind, recurring, amount, when.kind, due, asOf, transactions, budgets, debts, plans, editing, accounts, reference, paidOn]);
 
   // The rest folds under More details, as on the Add form; open when something in it is set.
   const [moreOpen, setMoreOpen] = useState(Boolean(editing && (!editing.need || editing.goalId || !editing.setAside || editing.notes)));
   const moreSummary = [need ? "A need" : "A want", goalName ? `saved in ${goalName}` : "", counted ? (when.kind === "none" ? "counted once it has a date" : "counted in safe to spend") : "not counted", notes ? "a note" : ""].filter(Boolean).join(", ");
 
-  const save = (): void => {
+  const save = async (): Promise<void> => {
     setTried(true);
     if (check.problems.length > 0) return;
+    /*
+     * A new plan for a day already gone (owner, 27 October 2026: "what if I
+     * create a plan but in the past?"): asked, since it is either a payment
+     * still owed, overdue from the day it is added, or one already made,
+     * which is an entry, not a plan.
+     */
+    const day = dueFor(when.kind, due);
+    if (!isEdit && when.kind !== "none" && day < asOf) {
+      const ok = await confirm({
+        title: `${whenOf({ due: day, dueKind: when.kind })} has passed`,
+        body: (
+          <>
+            <p style={{ margin: 0 }}>Still to pay: add it, and it shows as overdue and is counted in safe to spend until it is paid.</p>
+            <p style={{ margin: "var(--space-2) 0 0" }}>Paid already: add it, then on its sheet link the entry, or record the payment with the day you paid, so nothing is entered twice. Or pick a later day.</p>
+          </>
+        ),
+        confirmLabel: "Add it",
+        cancelLabel: "Go back",
+      });
+      if (!ok) return;
+    }
     props.onSave(input);
   };
 
@@ -1035,7 +1077,7 @@ export function PlanForm(props: {
       actions={
         <>
           <Button onClick={props.onClose}>Cancel</Button>
-          <Button variant="primary" onClick={save}>
+          <Button variant="primary" onClick={() => void save()}>
             {isEdit ? "Save changes" : "Add to the planner"}
           </Button>
         </>
@@ -1045,7 +1087,7 @@ export function PlanForm(props: {
         <Field label="What is it for" htmlFor="plan-title" error={tried && !title.trim() ? "Say what it is for." : undefined}>
           <TextInput id="plan-title" value={title} onChange={setTitle} placeholder="Tuition, new phone, a trip" maxLength={80} />
         </Field>
-        <Field label="How much" htmlFor="plan-amount" error={tried && (amount === null || amount <= 0) ? "Put in how much it will cost." : undefined}>
+        <Field label="How much" htmlFor="plan-amount" error={tried && (amount === null || amount <= 0) ? "Put in how much it will cost." : paidProblem}>
           <AmountInput id="plan-amount" value={amount} onChange={setAmount} />
         </Field>
         <div className="fms-planform-when">
@@ -1137,7 +1179,9 @@ export function PlanForm(props: {
                       ? "Bills and subscriptions are set aside already every month."
                       : when.kind === "none"
                         ? "Once it has a month or a day, it is set aside like a bill still to pay."
-                        : "Set aside in its month like a bill still to pay, so safe to spend stays accurate."}
+                        : counted
+                          ? "On: set aside in its month like a bill still to pay, so safe to spend leaves its money alone until it is paid."
+                          : "Off: safe to spend does not hold its money back, so that money can go on other things. The Budget still counts it as planned spending in its month."}
                 </span>
               </span>
               <Switch checked={counted} onChange={setSetAside} label="Count it in safe to spend" />
@@ -1154,6 +1198,7 @@ export function PlanForm(props: {
           </Alert>
         ))}
       </div>
+      {confirmDialog}
     </Sheet>
   );
 }
@@ -1265,7 +1310,7 @@ function PaySheet(props: {
   );
 }
 
-function MoveSheet(props: { plan: Plan; asOf: IsoDate; dialog: boolean; onClose: () => void; onMove: (to: IsoDate, kind: DueKind) => void }) {
+function MoveSheet(props: { plan: Plan; view?: PlanView | undefined; asOf: IsoDate; dialog: boolean; onClose: () => void; onMove: (to: IsoDate, kind: DueKind) => void }) {
   const { plan, asOf } = props;
   const undated = plan.due === NO_DATE;
   const base = !undated && plan.due > asOf ? plan.due : asOf;
@@ -1281,18 +1326,24 @@ function MoveSheet(props: { plan: Plan; asOf: IsoDate; dialog: boolean; onClose:
       ];
   const valid = when.kind === "none" || /^\d{4}-\d{2}-\d{2}$/.test(to);
   const same = to === plan.due && when.kind === dueKindOf(plan);
+  /*
+   * A move is to a later day: one already gone leaves it overdue, which is no
+   * move at all. To say it was really due earlier, Edit it (27 October 2026).
+   */
+  const gone = valid && when.kind !== "none" && dueFor(when.kind, to) < asOf;
+  const late = !undated && dueFor(dueKindOf(plan), plan.due) < asOf;
   return (
     <Sheet
       title={`Move "${plan.title}"`}
-      subtitle={`Now ${byWhen(plan)}. Each date change is kept in its history.`}
+      subtitle={late ? `It was due ${whenOf(plan).replace(/^S/, "s")}, which has passed${props.view?.state === "overdue" || plan.status === "open" ? ", so it shows as overdue" : ""}. Pick today or a later day; Cancel keeps it as it is.` : `Now ${byWhen(plan)}. Each date change is kept in its history.`}
       onClose={props.onClose}
       dialog={props.dialog}
       actions={
         <>
           <Button onClick={props.onClose}>Cancel</Button>
           {/* A cleared date picker gives "": never saved as a day (27 October 2026 error pass). */}
-          <Button variant="primary" onClick={() => props.onMove(to, when.kind)} disabled={same || !valid}>
-            {!valid ? "Pick a day" : when.kind === "none" ? "Save with no date" : `Move to ${whenOf({ due: to, dueKind: when.kind })}`}
+          <Button variant="primary" onClick={() => props.onMove(to, when.kind)} disabled={same || !valid || gone}>
+            {!valid ? "Pick a day" : gone ? "Pick today or later" : when.kind === "none" ? "Save with no date" : `Move to ${whenOf({ due: to, dueKind: when.kind })}`}
           </Button>
         </>
       }
@@ -1301,7 +1352,7 @@ function MoveSheet(props: { plan: Plan; asOf: IsoDate; dialog: boolean; onClose:
         {quick.length > 0 && (
           <SegmentedControl options={quick.map(([label, d]) => ({ id: d, label }))} value={when.kind === "day" ? (quick.find(([, d]) => d === to)?.[1] ?? "") : ""} onChange={(d) => setWhen({ kind: "day", due: d })} />
         )}
-        <WhenPicker value={when} onChange={setWhen} asOf={asOf} id="move-to" />
+        <WhenPicker value={when} onChange={setWhen} asOf={asOf} id="move-to" error={gone ? `${whenOf({ due: dueFor(when.kind, to), dueKind: when.kind })} has passed. Pick today or a later day, or Edit the plan to change when it was due.` : undefined} />
         {movesWords(plan) && <p className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>{movesWords(plan)}.</p>}
       </div>
     </Sheet>

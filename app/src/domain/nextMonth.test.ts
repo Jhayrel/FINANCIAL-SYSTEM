@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { budgetBeyondMoney, monthBrief, nextMonthStart } from "./monthPlan";
+import { budgetBeyondMoney, moneyForBudgetWords, monthBrief, nextMonthStart, spendable } from "./monthPlan";
 import { asksNextMonth, nextMonthWords } from "./safeAsk";
 import type { ReferenceLists, Transaction } from "./types";
 
@@ -105,6 +105,28 @@ describe("the budget promising more than the money", () => {
     expect(budgetBeyondMoney({ safe: 70085, budgetLeft: 90000, wallets: 70085, todayShare: 11680 })).toBe(19915);
     expect(budgetBeyondMoney({ safe: 0, budgetLeft: 500, wallets: 0, todayShare: 0 })).toBe(500);
     expect(budgetBeyondMoney({ safe: 70085, budgetLeft: null, wallets: 70085, todayShare: 11680 })).toBe(0);
+  });
+
+  /*
+   * The owner, 27 October 2026: "what if I click in plan safe to spend or
+   * not safe to spend off". A plan counted in safe to spend is spending the
+   * budget pays: with PHP 10,000.00 in the wallets, a PHP 8,000.00 plan
+   * counted and PHP 10,000.00 of budget left, the budget fits the money.
+   * It read "PHP 8,000.00 more than your money can cover; lower it".
+   */
+  it("counts the plans set aside as money the budget can spend, so the switch never moves it", () => {
+    const counted = { safe: 200000, budgetLeft: 1000000, wallets: 1000000, todayShare: 0, reservedBills: 0, reservedDebt: 0, reservedPlans: 800000 };
+    const notCounted = { ...counted, safe: 1000000, reservedPlans: 0 };
+    expect(spendable(counted)).toBe(1000000);
+    expect(spendable(notCounted)).toBe(1000000);
+    expect(budgetBeyondMoney(counted)).toBe(0);
+    expect(budgetBeyondMoney(notCounted)).toBe(0);
+    // Plans past what the wallets hold: safe to spend is nothing, the wallets can still pay what is there.
+    const short = { safe: 0, budgetLeft: 71546, wallets: 260585, todayShare: 0, reservedBills: 0, reservedDebt: 190500, reservedPlans: 205000 };
+    expect(spendable(short)).toBe(70085);
+    expect(budgetBeyondMoney(short)).toBe(1461);
+    expect(moneyForBudgetWords(short, (c) => `P${(c / 100).toFixed(2)}`)).toBe("the wallets can pay only P700.85 more this month (safe to spend P0.00, plus P2050.00 set aside for plans)");
+    expect(moneyForBudgetWords(notCounted, (c) => `P${(c / 100).toFixed(2)}`)).toBe("only P10000.00 is safe to spend");
   });
 });
 

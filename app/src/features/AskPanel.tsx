@@ -138,9 +138,10 @@ import { inferFromHistory } from "../domain/infer";
 import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, saysItWasAStatement, wantsThoseEntries, type Intent } from "../domain/intent";
-import { monthBrief } from "../domain/monthPlan";
+import { monthBrief, spendable } from "../domain/monthPlan";
 import { asksPlanOpinion, planOpinion, readPlanCardChange, type PlanOpinionFacts } from "../domain/planCard";
 import { pictureDay } from "../domain/pictureDay";
+import { quickAnswer, readQuickAsk } from "../domain/quickAsk";
 import { financeAlerts } from "../domain/alerts";
 import { billStatuses } from "../domain/bills";
 import { spentFromLeft } from "../domain/leftOver";
@@ -164,8 +165,8 @@ import type { PlanAction } from "./useProposalSink";
 import { PlanForm } from "./Planner";
 import { entryImpact, limitLine } from "../domain/entryImpact";
 import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
-import { kindFromHistory, makePlan, movePlan, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
-import { dayFor, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
+import { kindFromHistory, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
+import { closedPlanWords, dayFor, plannedMonthWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
 import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
@@ -5262,6 +5263,40 @@ export function AskPanel({
      * an income it names: "what budget do you recommend for november if I
      * only expect 8000" got October's money-in figures (19 October 2026 audit).
      */
+    /*
+     * The month's figures asked plainly: the biggest expense, over or within
+     * the budget, what is left of it, the savings, what was kept. Said from
+     * the screens' own figures, model or no model (`quickAsk.ts`, 27 October
+     * 2026 sweep: these got the month's summary, and "magkano natitira sa
+     * budget ko?" next month's suggested budget).
+     */
+    const quick = files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) ? readQuickAsk(ruled, knownItems) : null;
+    if (quick) {
+      const y = Number(asOf.slice(0, 4));
+      const m = Number(asOf.slice(5, 7));
+      const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
+      const savingsNames = new Set(reference.savings);
+      const reply = quickAnswer(
+        quick,
+        {
+          brief,
+          name: `${MONTH_NAMES[m - 1] ?? ""} ${y}`,
+          transactions: reportRows,
+          debts,
+          asOf,
+          savings: reference.savings.map((a) => ({ name: a, holds: walletBalance(transactions, a) })),
+          movedToSavings: transactions.filter((r) => r.type === "Transfer" && savingsNames.has(r.toWallet) && r.date.startsWith(asOf.slice(0, 7)) && r.date <= asOf).reduce((s, r) => s + r.amount, 0),
+        },
+        formatMoney,
+      );
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "budget", { text: note }));
+      const place: GoPlace | null = quick.kind === "budget" ? { screen: "budget", label: "Budget" } : quick.kind === "biggest" ? { screen: "insights", label: "Insights" } : null;
+      say({ kind: "assistant", text: reply, from: "this device", ...(place ? { go: place } : {}) });
+      log(aiEvent("answered", "budget", { text: reply, model: "this device" }));
+      return;
+    }
     const askedMonth = adviceMonthIn(ruled, asOf);
     const aboutAnotherMonth = (askedMonth !== null && (askedMonth.year !== Number(asOf.slice(0, 4)) || askedMonth.month !== Number(asOf.slice(5, 7)))) || /\bnext\s+month\b/i.test(ruled);
     const plansFromIncome = expectedIncomeIn(ruled) !== null && asksBudgetAdvice(ruled);
@@ -5269,7 +5304,7 @@ export function AskPanel({
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
       const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
-      const ib = incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent });
+      const ib = incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent });
       if (ib) {
         setDraft("");
         say({ kind: "you", text: note });
@@ -5384,7 +5419,18 @@ export function AskPanel({
             })() : null) ??
             (meantNow && asksLastTime(prevYou) ? readLastTimeAsk(`${prevYou} ${meantNow}`, knownItems) : null));
       const reply = billsAsked
-        ? billsAnswer(billsAsked, { transactions: reportRows, reference, asOf }, formatMoney)
+        ? billsAnswer(
+            billsAsked,
+            {
+              transactions: reportRows,
+              reference,
+              asOf,
+              plans: (settings.plans ?? [])
+                .filter((p) => p.status === "open" && p.due !== NO_DATE && (p.dueKind ?? "day") === "day")
+                .map((p) => ({ title: p.title, left: viewOf(p, { transactions, accounts: settings.accounts, asOf }).left, due: p.due })),
+            },
+            formatMoney,
+          )
         : goalAsked
           ? goalAnswer(goalAsked, { transactions: reportRows, reference, budgets, debts, asOf }, formatMoney)
           : weekAsked
@@ -5672,6 +5718,68 @@ export function AskPanel({
           answer(plansWords(views, plansSetAside(views).total), "budget", planner);
           return;
         }
+        if (planAsk.kind === "closed") {
+          answer(closedPlanWords(planAsk.plan), "budget", planner);
+          return;
+        }
+        if (planAsk.kind === "opinion") {
+          const p = planAsk.plan;
+          const v = views.find((x) => x.plan.id === p.id) ?? viewOf(p, { transactions, accounts: settings.accounts, asOf });
+          const facts = planOpinionFacts(p);
+          // Safe to spend has this plan held back already when it counts: its own money is not "less than this".
+          const reply = planOpinion(
+            { title: p.title, amount: p.amount, due: p.due, dueKind: p.dueKind, item: p.item, wallet: p.wallet, goalId: p.goalId, need: p.need, setAside: p.setAside, notes: p.notes },
+            { ...facts, freeNow: facts.freeNow === null ? null : facts.freeNow + (v.counts ? v.left : 0) },
+            { paid: v.paid, left: v.left },
+          );
+          answer(reply, "budget", planner);
+          return;
+        }
+        if (planAsk.kind === "month") {
+          // The Budget screen's own figures for the month: its plans, its budget left, and for the month running how far the money lets it rise.
+          const { year: py, month: pm } = planAsk;
+          const running = py === Number(asOf.slice(0, 4)) && pm === Number(asOf.slice(5, 7));
+          const tracks = assessMonthFor(reportRows, budgets, py, pm);
+          const brief = running ? monthBrief({ transactions: reportRows, reference, budgets, debts, year: py, month: pm, asOf }) : null;
+          const ib = brief ? incomeBudget({ transactions: reportRows, reference, plan: budgets[String(py)], year: py, month: pm, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: tracks.spending.spent }) : null;
+          const name = `${MONTH_NAMES[pm - 1]} ${py}`;
+          answer(
+            plannedMonthWords(plannedForBudget(views, py, pm, reference, asOf), { name, asOf, spendingLeft: tracks.spending.budget > 0 ? tracks.spending.remaining : null, room: ib ? ib.room : null }),
+            "budget",
+            { screen: "budget", label: "Budget" },
+          );
+          return;
+        }
+        if (planAsk.kind === "saveFor") {
+          // The Planner's own figure for it: what is left, over the whole months to its day (`viewOf`, perMonth).
+          const p = planAsk.plan;
+          const v = views.find((x) => x.plan.id === p.id) ?? viewOf(p, { transactions, accounts: settings.accounts, asOf });
+          const months = p.due === NO_DATE ? 0 : Math.max(1, (Number(p.due.slice(0, 4)) - Number(asOf.slice(0, 4))) * 12 + (Number(p.due.slice(5, 7)) - Number(asOf.slice(5, 7))));
+          const days = p.due === NO_DATE ? 0 : Math.max(1, Math.round((Date.parse(`${p.due}T00:00:00Z`) - Date.parse(`${asOf}T00:00:00Z`)) / 86_400_000));
+          const weeks = Math.max(1, Math.ceil(days / 7));
+          answer(
+            p.due === NO_DATE
+              ? `"${p.title}" has no date yet, so there is nothing to divide it by. ${formatMoney(v.left)} is left to pay. Give it a month, like "move the ${p.title.toLowerCase()} plan to March", and I will work out a monthly amount.`
+              : v.left <= 0
+                ? `"${p.title}" is paid in full, so nothing more needs saving.`
+                : `**About ${formatMoney(Math.ceil(v.left / Math.max(1, months)))} a month** for ${months === 1 ? "the month" : `the next ${months} months`}, or ${formatMoney(Math.ceil(v.left / weeks))} a week for ${weeks} ${weeks === 1 ? "week" : "weeks"}, to have the ${formatMoney(v.left)} still to pay for "${p.title}" by ${formatMedium(p.due)}.${v.goal ? ` ${v.goal.name} holds ${formatMoney(v.goal.holds)} for it.` : ""}`,
+            "budget",
+            planner,
+          );
+          return;
+        }
+        if (planAsk.kind === "recurring") {
+          // A plan is one payment; one every month is a bill, expected and set aside each month on its own.
+          const isBill = [...reference.bills, ...reference.subscriptions].some((b) => b.toLowerCase() === planAsk.title.toLowerCase());
+          answer(
+            isBill
+              ? `${planAsk.title} is on your bills already, so it is expected every month and set aside in safe to spend without a plan. To plan one payment of it, say a day, like "plan ${planAsk.title.toLowerCase()} ${Math.round(planAsk.amount / 100)} on nov 5".`
+              : `A plan is one payment. ${planAsk.title}, ${formatMoney(planAsk.amount)} every month, is a bill: add "${planAsk.title}" to your bills in Settings, Categories, and it is expected every month and set aside in safe to spend after its first payment is entered. To plan just the next one, say a day, like "plan ${planAsk.title.toLowerCase()} ${Math.round(planAsk.amount / 100)} on nov 5".`,
+            "budget",
+            { screen: "settings", label: "Settings, Categories", tab: "categories" },
+          );
+          return;
+        }
         if (planAsk.kind === "none") {
           answer(`No plan by that name is on the Planner. ${plans.filter((p) => p.status === "open").length > 0 ? `Open ones: ${plans.filter((p) => p.status === "open").map((p) => p.title).join(", ")}.` : "Nothing is planned yet."}`, "budget", planner);
           return;
@@ -5701,9 +5809,19 @@ export function AskPanel({
         const p = planAsk.plan;
         if (planAsk.kind === "move") {
           const next = movePlan(p, planAsk.to, asOf, planAsk.toKind);
-          const lower = (w: string): string => w.replace(/^(Sometime|No)/, (m) => m.toLowerCase());
+          // "Sometime in March", "No date yet" mid-sentence; never "November".
+          const lower = (w: string): string => w.replace(/^(Sometime|No date)\b/, (m) => m.toLowerCase());
+          // A move is to a later day, as on the Planner's Move sheet: one already gone leaves it overdue.
+          if (next.due !== NO_DATE && next.due < asOf) {
+            answer(
+              `${whenOf(next)} has passed, so moving "${p.title}" there leaves it overdue. Say today or a later day, like "move the ${p.title.toLowerCase()} plan to ${formatMedium(addDays(asOf, 7)).replace(/, \d{4}$/, "").toLowerCase()}". If it was really due then, open it on the Planner and Edit its day.`,
+              "budget",
+              planner,
+            );
+            return;
+          }
           card(
-            `"${p.title}" from ${lower(whenOf(p))} to ${lower(whenOf(next))}.${next.due === NO_DATE ? " With no date it is counted nowhere until it has one." : next.due < asOf ? " That day has passed, so it shows as overdue until it is paid." : p.due === NO_DATE ? ` ${countsSentence(next)}` : " The move is kept on the plan."}`,
+            `"${p.title}" from ${lower(whenOf(p))} to ${lower(whenOf(next))}.${next.due === NO_DATE ? " With no date it is counted nowhere until it has one." : p.due === NO_DATE ? ` ${countsSentence(next)}` : p.status === "open" && p.due < asOf ? " It is no longer overdue; the move is kept on the plan." : " The move is kept on the plan."}`,
             next.due === NO_DATE ? "Save with no date" : "Move it",
             [{ label: "Pay by, now", value: whenOf(p) }, { label: "New", value: whenOf(next) }],
             {
@@ -5713,11 +5831,23 @@ export function AskPanel({
           return;
         }
         if (planAsk.kind === "amount") {
-          const next = editPlan(p, { title: p.title, amount: planAsk.amount, due: p.due, item: p.item, wallet: p.wallet, goalId: p.goalId, need: p.need, setAside: p.setAside, notes: p.notes }, asOf);
-          card(`"${p.title}" from ${money(p.amount)} to ${money(planAsk.amount)}.`, "Change it", [{ label: "Amount, now", value: money(p.amount) }, { label: "New", value: money(planAsk.amount) }], {
-            rows: [],
-            save: { plan: next, action: "plan.update", summary: `Edited "${p.title}": amount ${money(p.amount)} to ${money(planAsk.amount)}, from the chat.`, before: p },
-          });
+          // Never below what is paid on it; at exactly that it is paid in full (`checkPlan`, `editPlan`).
+          const paidOn = views.find((v) => v.plan.id === p.id)?.paid ?? 0;
+          if (paidOn > 0 && planAsk.amount < paidOn) {
+            answer(`${money(paidOn)} is paid on "${p.title}" already, so it cannot cost ${money(planAsk.amount)}. Say ${money(paidOn)} or more, or unlink a payment on the Planner first.`, "budget", planner);
+            return;
+          }
+          const next = editPlan(p, { title: p.title, amount: planAsk.amount, due: p.due, dueKind: p.dueKind, item: p.item, wallet: p.wallet, goalId: p.goalId, need: p.need, setAside: p.setAside, notes: p.notes }, asOf, transactions);
+          const settled = p.status === "open" && next.status === "done";
+          card(
+            `"${p.title}" from ${money(p.amount)} to ${money(planAsk.amount)}.${settled ? ` ${money(paidOn)} is paid on it, so at this amount it is paid in full and is marked paid.` : paidOn > 0 ? ` ${money(paidOn)} is paid on it; ${money(planAsk.amount - paidOn)} is left.` : ""}`,
+            "Change it",
+            [{ label: "Amount, now", value: money(p.amount) }, { label: "New", value: money(planAsk.amount) }],
+            {
+              rows: [],
+              save: { plan: next, action: settled ? "plan.paid" : "plan.update", summary: `Edited "${p.title}": amount ${money(p.amount)} to ${money(planAsk.amount)}${settled ? ", paid in full" : ""}, from the chat.`, before: p },
+            },
+          );
           return;
         }
         if (planAsk.kind === "skip") {
@@ -5735,12 +5865,28 @@ export function AskPanel({
           return;
         }
         if (planAsk.kind === "edit") {
-          const next = editPlan(p, planAsk.input, asOf);
+          const next = editPlan(p, planAsk.input, asOf, transactions);
           const said = planAsk.changes.map((c) => `${c.label.toLowerCase()} "${c.before}" to "${c.after}"`).join(", ");
           const WORD: Record<string, string> = { Name: "name", "Need or want": "need or want", "Safe to spend": "counting in safe to spend", Kind: "kind", "Pay from": "wallet", Goal: "goal", Notes: "note", "Pay by": "date" };
           const what = planAsk.changes.map((c) => WORD[c.label] ?? c.label.toLowerCase());
+          /*
+           * Counted in safe to spend or not, said by what it does: safe to
+           * spend moves, the Budget does not (owner, 27 October 2026: "what
+           * if I click in plan safe to spend or not safe to spend off").
+           */
+          const effect = ((): string => {
+            if (!planAsk.changes.some((c) => c.label === "Safe to spend") || planAsk.changes.some((c) => c.label === "Goal")) return "";
+            const before = viewOf(p, { transactions, accounts: settings.accounts, asOf });
+            const after = viewOf(next, { transactions, accounts: settings.accounts, asOf });
+            const month = next.due === NO_DATE ? "" : `${MONTH_NAMES[Number(next.due.slice(5, 7)) - 1]} ${next.due.slice(0, 4)}`;
+            const budget = month ? ` The Budget counts it as planned spending in ${month} either way.` : "";
+            if (before.counts && !after.counts) return ` Safe to spend rises by ${money(before.left)}: nothing is held back for it, so that money can go on other things.${budget}`;
+            if (!before.counts && after.counts) return ` Safe to spend drops by ${money(after.left)}, held back for it until it is paid.${budget}`;
+            if (next.setAside) return month ? ` Nothing changes today; from ${month}, safe to spend holds back ${money(after.left)} for it.${budget}` : " Once it has a month or a day, safe to spend holds its money back.";
+            return ` When its month comes, nothing is held back for it.${budget}`;
+          })();
           card(
-            `Edit "${p.title}": its ${what.length > 1 ? `${what.slice(0, -1).join(", ")} and ${what[what.length - 1]}` : what[0]}, as below. Nothing else about it changes.${planAsk.changes.some((c) => c.label === "Goal") ? " Its money is in the goal, so it is no longer counted in safe to spend." : ""}`,
+            `Edit "${p.title}": its ${what.length > 1 ? `${what.slice(0, -1).join(", ")} and ${what[what.length - 1]}` : what[0]}, as below. Nothing else about it changes.${planAsk.changes.some((c) => c.label === "Goal") ? " Its money is in the goal, so it is no longer counted in safe to spend." : ""}${effect}`,
             "Save the change",
             planAsk.changes.flatMap((c) => [{ label: `${c.label}, now`, value: c.before }, { label: "New", value: c.after }]),
             { rows: [], save: { plan: next, action: "plan.update", summary: `Edited "${p.title}": ${said}, from the chat.`, before: p } },
@@ -5748,7 +5894,8 @@ export function AskPanel({
           return;
         }
         if (planAsk.kind === "restore") {
-          card(`Put "${p.title}" back on the Planner as open, ${money(p.amount)} ${byWhen(p)}.`, "Put it back", [], {
+          const gone = p.due !== NO_DATE && p.due < asOf;
+          card(`Put "${p.title}" back on the Planner as open, ${money(p.amount)} ${byWhen(p)}.${gone ? ` That day has passed, so it comes back overdue: after putting it back, say "move the ${p.title.toLowerCase()} plan to" a later day.` : ""}`, "Put it back", [], {
             rows: [],
             save: { plan: reopenPlan(p), action: "plan.restore", summary: `Put "${p.title}" back on the plan list, from the chat.`, before: p },
           });
@@ -6932,7 +7079,7 @@ export function AskPanel({
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
       const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
-      const ib = incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent });
+      const ib = incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent });
       const answer = (words: string): void => {
         setDraft("");
         say({ kind: "you", text: note });
@@ -6989,7 +7136,7 @@ export function AskPanel({
       const spentNow = assessMonthFor(reportRows, budgets, target.year, target.month).spending.spent;
       if (running) {
         const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: target.year, month: target.month, asOf });
-        most = incomeBudget({ transactions: reportRows, reference, plan, year: target.year, month: target.month, safe: brief.safe ? brief.safe.safe : null, spent: spentNow })?.most ?? null;
+        most = incomeBudget({ transactions: reportRows, reference, plan, year: target.year, month: target.month, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: spentNow })?.most ?? null;
       }
       const worked = budgetFromIncome({ income, keep, bills, most });
       const name = `${MONTH_NAMES[target.month - 1] ?? ""} ${target.year}`;
@@ -10696,7 +10843,7 @@ export function AskPanel({
             if (!card || !isSettling(card) || card.state !== "open") return;
             const creating = editing.action === "plan.create";
             const base = editing.before ?? (settings.plans ?? []).find((p) => p.id === editing.plan.id) ?? editing.plan;
-            const next: Plan = creating ? { ...makePlan(input, asOf, "ai"), id: editing.plan.id, createdOn: editing.plan.createdOn } : editPlan(base, input, asOf);
+            const next: Plan = creating ? { ...makePlan(input, asOf, "ai"), id: editing.plan.id, createdOn: editing.plan.createdOn } : editPlan(base, input, asOf, transactions);
             sink.savePlan?.(next, creating ? "plan.create" : "plan.update", creating ? `Planned "${next.title}", ${formatMoney(next.amount)} ${byWhen(next)}, from the chat, filled in by hand.` : `Edited "${next.title}" from the chat, by hand.`);
             const done: Settling = { ...card, state: "applied", words: creating ? "Added to the planner, as you filled it in." : "Saved, as you filled it in.", planner: { rows: planRows(next) } };
             recordCard(done);

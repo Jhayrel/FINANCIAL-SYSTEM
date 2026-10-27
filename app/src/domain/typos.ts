@@ -161,6 +161,13 @@ export function withCommandWordsFixed(text: string): string {
    * is: "next moth" is next month (27 October 2026: "does my plan next moth
    * and my spanding and budget align properly?" was read as no month at all).
    */
-  const months = text.replace(/\b(next|this|last|nxt)\s+(?:moth|mont|mnth|monht|montj|mpnth)\b/gi, (_, w: string) => `${w.toLowerCase() === "nxt" ? "next" : w} month`);
+  const months = text
+    .replace(/\b(next|this|last|nxt)\s+(?:moth|mont|mnth|monht|montj|mpnth)\b/gi, (_, w: string) => `${w.toLowerCase() === "nxt" ? "next" : w} month`)
+    /*
+     * "plna trip to baguio 8k on dec" was read as PHP 8,000.00 of Travel spent
+     * today (27 October 2026 sweep). Too short for the rule below, so the
+     * slips of "plan" are fixed where a command starts.
+     */
+    .replace(/^(\s*)(?:plna|paln|plnn|plam|plab|lpan|pkan|plsn|pln)\b/i, "$1plan");
   return months.replace(/[A-Za-z]+/g, (word) => meant(word));
 }

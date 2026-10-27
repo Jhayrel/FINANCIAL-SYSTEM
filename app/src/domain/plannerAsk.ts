@@ -9,14 +9,24 @@
  * 3000 on a trip next month, what budget should I set?" stay the questions
  * they are (`plannedSpend.ts`). Each change is a card to press.
  */
-import { addDays, dayOfWeek, lastOfMonth, MONTH_NAMES } from "./dates";
+import { addDays, dayOfWeek, formatMedium, lastOfMonth, MONTH_NAMES } from "./dates";
 import { formatMoney, parseAmount, withoutYears, type Centavos } from "./money";
-import { byWhen, dueFor, kindFromHistory, NO_DATE, planKinds, whenOf, type DueKind, type Plan, type PlanInput, type PlanView } from "./planner";
+import { byWhen, dueFor, kindFromHistory, NO_DATE, planKinds, whenOf, type DueKind, type Plan, type PlanInput, type PlannedMonth, type PlanView } from "./planner";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export type PlannerAsk =
   | { readonly kind: "list" }
+  /** Skip, move or pay a plan already paid, skipped or removed: said, with how to open it again. */
+  | { readonly kind: "closed"; readonly plan: Plan }
+  /** "What do you think of my tuition plan?", "can I afford the gifts plan?": an opinion on a plan on the Planner. */
+  | { readonly kind: "opinion"; readonly plan: Plan }
+  /** "How much is planned this month?", "what's planned for November?": one month's plans against its budget. */
+  | { readonly kind: "month"; readonly year: number; readonly month: number }
   | { readonly kind: "add"; readonly input: PlanInput }
+  /** "plan rent 3500 every month": a payment every month is a bill, not a plan (27 October 2026 sweep). */
+  | { readonly kind: "recurring"; readonly title: string; readonly amount: Centavos }
+  /** "How much should I save a month for the gifts plan?": worked out from the plan (27 October 2026 sweep). */
+  | { readonly kind: "saveFor"; readonly plan: Plan }
   | { readonly kind: "move"; readonly plan: Plan; readonly to: IsoDate; readonly toKind: DueKind }
   | { readonly kind: "amount"; readonly plan: Plan; readonly amount: Centavos }
   | { readonly kind: "skip"; readonly plan: Plan }
@@ -245,6 +255,26 @@ export function readPlannerAsk(
   if (!t || t.split(/\s+/).length > 30) return null;
   const { plans, reference, transactions, asOf } = context;
 
+  /*
+   * One month's plans: "how much is planned this month?", "what's planned
+   * for November?". It was answered with the month's summary (27 October
+   * 2026 sweep), with nothing about the plans.
+   */
+  {
+    const named = MONTH_NAMES.findIndex((m) => new RegExp(`\\b${m.slice(0, 3)}(?:${m.slice(3)})?\\b`, "i").test(t));
+    const aboutMonth = /\b(?:this|next|ngayong|sa\s+susunod\s+na)\s+(?:month|buwan)\b/i.test(t) || named >= 0;
+    const asksHowMuch = /\b(?:how\s+much|magkano|total|what(?:'s|\s+is|\s+are)?)\b[^.?!]{0,30}\b(?:planned|plans?)\b/i.test(t) || /\b(?:planned|plans?)\b[^.?!]{0,12}\b(?:for|in|this|next)\b/i.test(t);
+    if (aboutMonth && asksHowMuch && !/\b(?:add|move|skip|remove|delete|pay|paid|plan\s+(?:a|an|my|the)?\s*\w+\s+\d)\b/i.test(t) && !/\d{3,}/.test(t)) {
+      const y = Number(asOf.slice(0, 4));
+      const m = Number(asOf.slice(5, 7));
+      if (named >= 0) {
+        const month = named + 1;
+        return { kind: "month", year: month < m ? y + 1 : y, month };
+      }
+      return /\bnext\b|susunod/i.test(t) ? { kind: "month", year: m === 12 ? y + 1 : y, month: m === 12 ? 1 : m + 1 } : { kind: "month", year: y, month: m };
+    }
+  }
+
   // "What's planned?", "show my planner", "what plans are due this week?"
   if (/\b(?:what(?:'s| is| do i have)?|show|list|any|see|check)\b[^.?!]{0,30}\b(?:planned|planner|plans)\b/i.test(t) && !/\b(?:add|move|skip|remove|delete|pay|paid)\b/i.test(t)) {
     return { kind: "list" };
@@ -253,12 +283,16 @@ export function readPlannerAsk(
   // Adding: "plan tuition 9000 on nov 15", "add a new phone 25k by march 2027 to my planner".
   const adds =
     /^\s*(?:please\s+|pls\s+)?(?:plan|schedule)\s+(?!to\b)/i.test(t) ||
+    // "add christmas party contribution 300 dec 18 as a plan": the whole thing, not just "Christmas".
+    /^\s*(?:please\s+|pls\s+)?(?:add|put|save)\s+(?!it\b|that\b|this\b|them\b).+\b(?:as\s+a\s+plan|to\s+(?:my|the)\s+plans)\b/i.test(t) ||
     /\b(?:to|in|into|on)\s+(?:my|the)\s+planner\b|\badd\s+(?:a\s+)?(?:new\s+)?plan\b|\bnew\s+plan\b|^\s*remind\s+me\s+to\s+pay\b/i.test(t);
   if (adds && !QUESTIONISH.test(t)) {
     const amount = sumIn(t);
-    // The day, month or year said; with none, no date (counted nowhere until it has one).
-    const when = whenFor(t, asOf);
+    // The day, month or year said; with none, no date (counted nowhere until it has one). "Today" is today.
+    const today = /\b(?:today|tonight|ngayon)\b/i.test(t) ? { due: asOf, kind: "day" as const } : null;
+    const when = today ?? whenFor(t, asOf);
     const due = when?.due ?? NO_DATE;
+    const monthly = /\b(?:every|each|per|a)\s+month\b|\bmonthly\b|\bkada\s+buwan\b|\bbuwan[- ]buwan\b/i.test(t);
     const wallet = [...reference.wallets, ...reference.savings].find((w) => new RegExp(`\\b(?:from|using|with|via)\\s+${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) ?? "";
     const title = t
       .replace(/^\s*(?:please\s+|pls\s+)?(?:plan|schedule|add|put|remind\s+me\s+to\s+pay)\s+/i, "")
@@ -269,11 +303,22 @@ export function readPlannerAsk(
       .replace(/\b(?:by|on|for|in|due|before)?\s*(?:next\s+(?:month|week|year)|this\s+(?:month|year)|end of (?:the |this )?month|tomorrow|(?:the\s+day\s+before\s+)?yesterday|kahapon|last\s+week|in\s+\w+\s+(?:days?|weeks?|months?)|in\s+20\d{2})\b/gi, " ")
       .replace(NO_DAY_G, " ")
       .replace(/\b(?:from|using|with|via)\s+\S+/gi, " ")
-      .replace(/\b(?:pesos?|php|worth|of|to pay|pay|for|by|on|due|the|my|a|an)\b/gi, " ")
+      .replace(/\b(?:as\s+a\s+plan|to\s+(?:my|the)\s+plans)\b/gi, " ")
+      .replace(/\b(?:today|tonight|ngayon|(?:every|each|per)\s+month|monthly|kada\s+buwan|buwan[- ]buwan)\b/gi, " ")
+      .replace(/\b(?:pesos?|php|worth|to pay|due)\b/gi, " ")
       .replace(/[,.:;!]+/g, " ")
       .replace(/\s+/g, " ")
+      .trim()
+      /*
+       * Small words only where they hang off an end: "birthday gift for
+       * mama" keeps its "for" (it read "Birthday gift mama"), "for the trip"
+       * loses it.
+       */
+      .replace(/^(?:(?:for|by|on|the|my|a|an|of|pay|in)\s+)+/i, "")
+      .replace(/(?:\s+(?:for|by|on|the|my|a|an|of|in|and|to))+$/i, "")
       .trim();
     if (amount === null || !title) return null;
+    if (monthly) return { kind: "recurring", title: title.replace(/^./, (c) => c.toUpperCase()), amount };
     const kinds = planKinds(reference).options;
     const name = title.replace(/^./, (c) => c.toUpperCase());
     const recurring = [...reference.bills, ...reference.subscriptions].some((b) => b.toLowerCase() === (kindFromHistory(name, transactions, kinds) ?? "").toLowerCase());
@@ -283,17 +328,47 @@ export function readPlannerAsk(
     };
   }
 
+  /*
+   * "The tuition is 9500 now": a price changed, said of an open plan by its
+   * name without the word "plan". It was read as a PHP 9,500.00 School entry
+   * (27 October 2026 sweep). Only with "now" or "costs", and only when what
+   * is named is that plan's whole name, so "tuition 9500" stays an entry.
+   */
+  const priced = /^\s*(?:the\s+|my\s+)?([a-z][a-z0-9 '-]{1,40}?)\s+(?:is\s+now|now\s+costs?|costs?\s+now|is|costs?|will\s+cost)\s+(?:now\s+)?(?:₱|php\s*|p\s*)?[\d,.]+\s*k?\s*(?:now|na)?\s*[.!]?\s*$/i.exec(t);
+  if (priced?.[1] && /\b(?:now|na|costs?)\b/i.test(t)) {
+    const subject = priced[1].toLowerCase().replace(/\s+plan$/, "").trim();
+    const plan = plans.find((p) => p.status === "open" && p.title.toLowerCase().trim() === subject);
+    const amount = sumIn(t);
+    if (plan && amount !== null && amount > 0 && amount !== plan.amount) return { kind: "amount", plan, amount };
+  }
+
   if (!PLANNER.test(t)) return null;
   const open = plans.filter((p) => p.status === "open");
 
+  if (/\b(?:how\s+much|magkano)\b[^.?!]*\b(?:save|set\s+aside|put\s+aside|keep|ipon|itabi)\b/i.test(t)) {
+    const plan = planNamed(t, open, ["open"]);
+    if (plan) return { kind: "saveFor", plan };
+  }
+
+  /*
+   * An opinion on a plan already on the Planner (27 October 2026 sweep:
+   * "what do you think of my tuition plan?" fell to the month's summary, and
+   * "can i afford the christmas gifts plan?" was answered with today's money).
+   */
+  if (/\b(?:what\s+(?:do|would)\s+you\s+(?:think|say|suggest|recommend)|what'?s\s+your\s+(?:take|opinion|advice|thoughts?)|your\s+(?:opinion|take|advice|thoughts?)|any\s+(?:advice|suggestions?|tips?)|can\s+i\s+(?:afford|make|manage|pay\s+for)|kaya\s+(?:ko\s+)?ba|ok(?:ay)?\s+lang\s+ba|ano\s+(?:sa\s+tingin|masasabi)\s+mo|is\s+(?:the|my)\b[^.?!]{1,40}\bplan\s+(?:ok(?:ay)?|good|realistic|doable|possible|too\s+much|affordable))\b/i.test(t)) {
+    const plan = planNamed(t, open, ["open"]);
+    if (plan) return { kind: "opinion", plan };
+  }
+
   // A field other than the date, the amount or a payment ("the trip plan is a want", "don't count the trip plan").
-  if (!/\b(?:put\s+back|restore|bring\s+back|reopen|paid|move|extend|postpone)\b/i.test(t)) {
+  if (!/\b(?:put\s+back|restore|bring\s+back|reopen|paid|move|extend|postpone)\b|\b(?:put|bring)\b[^.?!]{0,40}?\bback\b/i.test(t)) {
     const plan = planNamed(t, open, ["open"]);
     const edit = plan ? editIn(t, plan, reference, context.goals ?? []) : null;
     if (plan && edit) return { kind: "edit", plan, input: edit.input, changes: edit.changes };
   }
 
-  if (/\b(?:put\s+back|restore|bring\s+back|un-?skip|reopen)\b/i.test(t)) {
+  // "Put the concert plan back" as well as "put back the concert plan".
+  if (/\b(?:put\s+back|restore|bring\s+back|un-?skip|reopen)\b|\b(?:put|bring)\b[^.?!]{0,40}?\bback\b/i.test(t)) {
     const plan = planNamed(t, plans, ["removed", "skipped", "done"]);
     return plan ? { kind: "restore", plan } : { kind: "none", said: t };
   }
@@ -303,27 +378,96 @@ export function readPlannerAsk(
   }
   if (/\b(?:skip|cancel|won'?t|not\s+(?:going|buying|paying)|no\s+longer|call\s+off)\b/i.test(t)) {
     const plan = planNamed(t, open, ["open"]);
-    return plan ? { kind: "skip", plan } : { kind: "none", said: t };
+    return plan ? { kind: "skip", plan } : closedNamed(t, plans);
   }
   if (/\b(?:move|extend|push|postpone|resched\w*|delay|change\s+the\s+date|later\s+to)\b/i.test(t)) {
     const plan = planNamed(t, open, ["open"]);
     // "Move the trip plan to december" is a month; "... to no date yet" takes the date away.
     const when = NO_DAY.test(t) ? null : whenFor(t, asOf);
     if (plan && NO_DAY.test(t)) return { kind: "move", plan, to: NO_DATE, toKind: "none" };
-    return plan && when ? { kind: "move", plan, to: when.due, toKind: when.kind } : plan ? null : { kind: "none", said: t };
+    return plan && when ? { kind: "move", plan, to: when.due, toKind: when.kind } : plan ? null : closedNamed(t, plans);
   }
   if (/\b(?:paid|pay|settle|mark\b[^.?!]{0,30}\bpaid)\b/i.test(t)) {
     const plan = planNamed(t, open, ["open"]);
-    if (!plan) return { kind: "none", said: t };
+    if (!plan) return closedNamed(t, plans);
     const wallet = [...reference.wallets, ...reference.savings].find((w) => new RegExp(`\\b${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) ?? "";
     return { kind: "pay", plan, amount: sumIn(t), wallet };
   }
-  if (/\b(?:is\s+now|now|costs?|price|change|make\s+it|actually)\b/i.test(t)) {
+  if (/\b(?:is\s+now|now|costs?|price|change|make|set|update|raise|lower|increase|reduce|bump|actually)\b/i.test(t)) {
     const plan = planNamed(t, open, ["open"]);
     const amount = sumIn(t);
     return plan && amount !== null && amount !== plan.amount ? { kind: "amount", plan, amount } : null;
   }
   return null;
+}
+
+/*
+ * "Skip the concert plan" when it is skipped already: "No plan by that name"
+ * was wrong (27 October 2026 sweep). A closed plan by its whole name is said
+ * as it is.
+ */
+function closedNamed(t: string, plans: readonly Plan[]): PlannerAsk {
+  const plan = planNamed(t, plans.filter((p) => p.status !== "open"), ["skipped", "done", "removed"]);
+  const words = plan?.title.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3) ?? [];
+  const lower = ` ${t.toLowerCase().replace(/[^a-z0-9\s]/g, " ")} `;
+  return plan && words.some((w) => lower.includes(` ${w} `)) ? { kind: "closed", plan } : { kind: "none", said: t };
+}
+
+/** What a closed plan is, and how to open it again. */
+export function closedPlanWords(plan: Plan): string {
+  const state = plan.status === "done" ? "paid" : plan.status;
+  const on = plan.closedOn ? ` on ${formatMedium(plan.closedOn)}` : "";
+  return `"${plan.title}" is ${state} already${on}${plan.reason ? ` (${plan.reason})` : ""}, so there is nothing to ${plan.status === "done" ? "pay" : "skip or move"}. To open it again, say "put the ${plan.title.toLowerCase()} plan back"${plan.status === "done" ? ', or "plan it again" on its sheet for a new one' : ""}.`;
+}
+
+/**
+ * One month's plans still to pay (`plannedForBudget`, the figure the Budget
+ * screen shows), which of them safe to spend holds money back for, and what
+ * the month's budget has left for them.
+ */
+export function plannedMonthWords(
+  planned: PlannedMonth,
+  input: {
+    readonly name: string;
+    readonly asOf: IsoDate;
+    /** Left of the month's spending budget; null when none is set. */
+    readonly spendingLeft: Centavos | null;
+    /** How far the money lets the spending budget rise, for the month running; null otherwise. */
+    readonly room?: Centavos | null | undefined;
+  },
+): string {
+  const { name, asOf } = input;
+  if (planned.views.length === 0) return `Nothing is planned in ${name} that is still to pay. Say "plan tuition 9000 on nov 15" to add one, or open the Planner.`;
+  const lines = planned.views.slice(0, 12).map((v) => {
+    const notes = [
+      v.plan.due < asOf ? "overdue" : "",
+      v.paid > 0 ? `${formatMoney(v.paid)} paid` : "",
+      v.plan.goalId ? "from its goal" : !v.plan.setAside ? "not in safe to spend" : "",
+    ].filter(Boolean);
+    return `- ${v.plan.title}: ${formatMoney(v.left)}, ${whenOf(v.plan).replace(/^S/, "s")}${notes.length > 0 ? ` (${notes.join(", ")})` : ""}`;
+  });
+  const setAside = planned.views.filter((v) => v.plan.setAside && !v.plan.goalId && v.plan.due.slice(0, 7) <= asOf.slice(0, 7)).reduce((s, v) => s + v.left, 0);
+  const out = [
+    `**${formatMoney(planned.total)} is planned in ${name} and not paid yet**, ${planned.views.length === 1 ? "one plan" : `${planned.views.length} plans`}${planned.billsSubs > 0 ? `, ${formatMoney(planned.billsSubs)} of it under bills and subscriptions` : ""}:`,
+    ...lines,
+  ];
+  if (setAside > 0 && setAside < planned.total) out.push(`Safe to spend holds back ${formatMoney(setAside)} of it; the rest is not set aside.`);
+  else if (setAside > 0) out.push("Safe to spend holds back all of it until it is paid.");
+  if (planned.spending > 0) {
+    const left = input.spendingLeft;
+    if (left === null) out.push(`${name} has no spending budget yet: "Usual + plans" on the Budget screen sets one with these in it.`);
+    else if (left >= planned.spending) out.push(`The spending budget has ${formatMoney(left)} left; after these, ${formatMoney(left - planned.spending)} is free for the rest.`);
+    else {
+      const short = planned.spending - Math.max(0, left);
+      const room = input.room ?? null;
+      out.push(
+        room !== null && room < short
+          ? `They need ${formatMoney(short)} more than the spending budget has left, and your money ${room > 0 ? `lets it rise by only ${formatMoney(room)}` : "does not let it rise"}: move a plan to a later month, or skip one.`
+          : `They need ${formatMoney(short)} more than the spending budget has left: raise it on the Budget screen, or move a plan to another month.`,
+      );
+    }
+  }
+  return out.join("\n");
 }
 
 /** "What's planned?": the open plans, overdue first, each with its state. */

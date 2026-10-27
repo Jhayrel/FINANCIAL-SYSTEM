@@ -2712,6 +2712,16 @@
   flex: 1 1 16rem;
 }
 
+/* Saved details, shown until Edit: a detail not given reads quieter than one that is. */
+.fms-ownerfacts dt {
+  flex: 0 1 auto;
+}
+
+.fms-ownerfacts dd.fms-ownerfacts-none {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
 @container (max-width: 520px) {
   .fms-ownerform-pair {
     grid-template-columns: minmax(0, 1fr);

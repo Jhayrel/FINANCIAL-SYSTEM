@@ -173,7 +173,26 @@ const TOP_KINDS = 6;
 const HABITS = 3;
 
 /**
- * How much more the spending budget promises than is safe to spend, or 0.
+ * What the spending wallets can still pay this month: safe to spend with the
+ * plans counted in it added back, so the wallets less the bills and debt
+ * payments still due.
+ *
+ * A plan counted in safe to spend is still spending the budget has to carry,
+ * so a budget is measured against this, never against safe to spend alone.
+ * Against safe to spend, a PHP 8,000.00 plan counted read as "the budget is
+ * PHP 8,000.00 more than your money can cover; lower it", and the Budget
+ * screen said "Raise it" for the same plan two lines up (owner, 27 October
+ * 2026: "what if I click in plan safe to spend or not safe to spend off").
+ * Counting a plan or not moves safe to spend, never this.
+ */
+export function spendable(safe: { readonly safe: Centavos; readonly wallets?: Centavos; readonly reservedBills?: Centavos; readonly reservedDebt?: Centavos; readonly reservedPlans?: Centavos }): Centavos {
+  if (safe.wallets === undefined || safe.reservedBills === undefined || safe.reservedDebt === undefined || !safe.reservedPlans) return Math.max(0, safe.safe);
+  return Math.max(0, safe.wallets - safe.reservedBills - safe.reservedDebt);
+}
+
+/**
+ * How much more the spending budget promises than the money can pay, or 0
+ * (`spendable`: safe to spend, plus the plans counted in it).
  *
  * Said only when it is more than a day's share: "it promises ₱14.61 more
  * than your money" under a ₱116.80 day was a warning about nothing, and the
@@ -185,10 +204,20 @@ export function budgetBeyondMoney(safe: {
   readonly budgetLeft: Centavos | null;
   readonly wallets: Centavos;
   readonly todayShare?: Centavos | undefined;
+  readonly reservedBills?: Centavos;
+  readonly reservedDebt?: Centavos;
+  readonly reservedPlans?: Centavos;
 }): Centavos {
   if (safe.budgetLeft === null || safe.budgetLeft <= 0 || safe.wallets < 0) return 0;
-  const beyond = safe.budgetLeft - Math.max(0, safe.safe);
+  const beyond = safe.budgetLeft - spendable(safe);
   return beyond > (safe.todayShare ?? 0) ? beyond : 0;
+}
+
+/** "Only PHP 0.00 is safe to spend", with the plans counted in it said when there are any. */
+export function moneyForBudgetWords(safe: { readonly safe: Centavos; readonly wallets?: Centavos; readonly reservedBills?: Centavos; readonly reservedDebt?: Centavos; readonly reservedPlans?: Centavos }, money: (c: Centavos) => string): string {
+  return safe.reservedPlans && spendable(safe) !== Math.max(0, safe.safe)
+    ? `the wallets can pay only ${money(spendable(safe))} more this month (safe to spend ${money(Math.max(0, safe.safe))}, plus ${money(safe.reservedPlans)} set aside for plans)`
+    : `only ${money(Math.max(0, safe.safe))} is safe to spend`;
 }
 
 /** A bill still to pay this month: late, due soon, or due. */
@@ -615,7 +644,7 @@ function notesFor(
        * "make sure the system and ai all parts will know about this").
        */
       warn(
-        `The spending budget has ${money(safe.budgetLeft)} left, but only ${money(Math.max(0, safe.safe))} is safe to spend. The budget is ${money(safe.budgetLeft - Math.max(0, safe.safe))} more than your money can cover; lower it on the Budget screen.`,
+        `The spending budget has ${money(safe.budgetLeft)} left, but ${moneyForBudgetWords(safe, money)}. The budget is ${money(budgetBeyondMoney(safe))} more than your money can cover; lower it on the Budget screen.`,
       );
     }
     if (safe.budgetLeft !== null && safe.budgetLeft <= 0) {

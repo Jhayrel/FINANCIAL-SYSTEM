@@ -23,6 +23,7 @@
  * The model reads pictures and sentences. Filling in one blank is not that.
  */
 
+import { formatMedium } from "./dates";
 import { dayFromWords } from "./dayWords";
 import { walletBalance } from "./balances";
 import { debtWalletDirection, itemsFor, needs, type Draft, type Flow } from "./entry";
@@ -604,7 +605,7 @@ export function amend(
    * the model answered "I cannot change entries here".
    */
   const date = dateFrom(trimmed, draft.date, asOf);
-  if (date) return { draft: { ...draft, date }, what: `Dated ${date}.` };
+  if (date) return { draft: { ...draft, date }, what: `Dated ${formatMedium(date)}.` };
 
   // A wallet named on its own, or with a correcting phrase around it.
   const wallet = matchExact(trimmed, accounts) || walletInside(trimmed, accounts);
