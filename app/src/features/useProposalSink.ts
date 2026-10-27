@@ -15,6 +15,7 @@
  * an AI row is a typed row that someone else did the typing for.
  */
 
+import type { GoalForPlan } from "../domain/planGoal";
 import type { OwnerDetails } from "../domain/owner";
 import { useEffect, useMemo, useRef } from "react";
 
@@ -68,6 +69,8 @@ export interface SinkInput {
   readonly onSavePlan?: ((plan: Plan, action: PlanAction, summary: string) => void) | undefined;
   /** A plan paid: the entry saved and linked. Returns what stopped it, or null. */
   readonly onPayPlan?: ((plan: Plan, draft: Draft, settles: boolean) => string | null) | undefined;
+  /** A goal for a plan, made as `goalForPlan` worked it out, or the one already there (domain/planGoal.ts). */
+  readonly onMakeGoal?: ((goal: GoalForPlan) => { readonly id: string; readonly name: string }) | undefined;
   /** The owner's details saved from the chat (domain/owner.ts). */
   readonly onSaveOwner?: ((owner: OwnerDetails) => void) | undefined;
 }
@@ -155,6 +158,7 @@ export function useProposalSink(input: SinkInput): ProposalSink {
       canPlan: Boolean(input.onSavePlan),
       savePlan: (plan, action, summary) => handlers.current.onSavePlan?.(plan, action, summary),
       payPlan: (plan, draft, settles) => handlers.current.onPayPlan?.(plan, draft, settles) ?? "The Planner cannot be reached from here.",
+      makeGoal: input.onMakeGoal ? (goal) => handlers.current.onMakeGoal?.(goal) ?? null : undefined,
       canSaveOwner: Boolean(input.onSaveOwner),
       saveOwner: (owner) => handlers.current.onSaveOwner?.(owner),
       /**

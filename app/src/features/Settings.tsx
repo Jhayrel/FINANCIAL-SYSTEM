@@ -23,6 +23,7 @@ import { Icon } from "../components/Icon";
 import { LoadingRows } from "../components/LoadingScreen";
 import { AmountInput, Field, Select, Switch, TextInput } from "../components/forms";
 import { useConfirm, type ConfirmRequest } from "../components/Confirm";
+import { whenOf, type Plan } from "../domain/planner";
 import { FREE_READS, FREE_WRITES, resetsAt, usageLevel } from "../data/usage";
 import { useUsage } from "./useUsage";
 import {
@@ -271,6 +272,7 @@ export function Settings({
         {tab === "goals" && (
           <GoalsSection
             goals={goals}
+            plans={settings.plans ?? []}
             accounts={settings.accounts}
             transactions={transactions}
             onChange={(accounts) => patch({ accounts })}
@@ -1352,12 +1354,14 @@ function AccountRow({
 
 function GoalsSection({
   goals,
+  plans,
   accounts,
   transactions,
   onChange,
   onAddTransactions,
 }: {
   goals: readonly Account[];
+  plans: readonly Plan[];
   accounts: readonly Account[];
   transactions: readonly Transaction[];
   onChange: (accounts: Account[]) => void;
@@ -1432,6 +1436,7 @@ function GoalsSection({
               <GoalRow
                 key={g.id}
                 goal={g}
+                plans={plans.filter((p) => p.goalId === g.id && p.status !== "removed")}
                 accounts={accounts}
                 transactions={transactions}
                 onUpdate={(part) => update(g.id, part)}
@@ -1550,12 +1555,15 @@ const GOAL_STATUS_TONE = {
 
 function GoalRow({
   goal,
+  plans,
   accounts,
   transactions,
   onUpdate,
   onAddTransactions,
 }: {
   goal: Account;
+  /** The Planner's plans saving in it: which plan a goal is for, said on it (27 October 2026). */
+  plans: readonly Plan[];
   accounts: readonly Account[];
   transactions: readonly Transaction[];
   onUpdate: (part: Partial<Account>) => void;
@@ -1571,6 +1579,7 @@ function GoalRow({
     transactions.reduce((a, t) => Math.max(a, t.recordNumber), 0) + 1;
   const p = goalProgress(goal, transactions);
   const parent = accounts.find((a) => a.id === goal.parentId);
+  const neverUsed = p.saved === 0 && !transactions.some((t) => t.fromWallet === goal.name || t.toWallet === goal.name);
 
   /**
    * Closing a goal.
@@ -1652,9 +1661,18 @@ function GoalRow({
       <div className="t-caption" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-3)", color: "var(--ink-2)" }}>
         <span><Money value={p.saved} size="s" /> of <Money value={p.target} size="s" tone="var(--ink-3)" /></span>
         {p.remaining > 0 && <span><Money value={p.remaining} size="s" tone="var(--ink-3)" /> to go</span>}
-        {goal.deadline && <span>by {formatMedium(goal.deadline)}</span>}
+        {/* The year 9999 is "no date yet" from the Planner, never a deadline. */}
+        {goal.deadline && goal.deadline < "9000" ? <span>by {formatMedium(goal.deadline)}</span> : <span style={{ color: "var(--ink-3)" }}>no deadline yet</span>}
         {parent && <span style={{ color: "var(--ink-3)" }}>in {parent.name}</span>}
       </div>
+
+      {plans.length > 0 && (
+        <p className="t-caption" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-2)" }}>
+          {plans
+            .map((x) => (x.status === "open" ? `Saving for the plan "${x.title}" (${formatMoney(x.amount)}, ${whenOf(x).replace(/^S/, "s")}).` : `Its plan "${x.title}" is ${x.status === "done" ? "paid" : x.status}: Mark done closes the goal when you have finished with it.`))
+            .join(" ")}
+        </p>
+      )}
 
       {p.requiredPerMonth !== undefined && (
         <p className="t-caption" style={{ margin: "var(--space-2) 0 0", color: p.onTrack ? "var(--ok)" : "var(--warn)" }}>
@@ -1717,7 +1735,7 @@ function GoalRow({
         <span style={{ width: 150 }}>
           <input
             type="date"
-            value={goal.deadline ?? ""}
+            value={goal.deadline && goal.deadline < "9000" ? goal.deadline : ""}
             min={today()}
             onChange={(e) => {
               const next = e.target.value;
@@ -1754,6 +1772,28 @@ function GoalRow({
           />
         </span>
         <Button size="sm" onClick={() => void finish()}>Mark done</Button>
+        {/*
+         * A goal nothing was ever put in or taken from can simply go: "Make a
+         * goal for it" made two for one plan, and Mark done was the only way
+         * out (27 October 2026). It is archived, never deleted.
+         */}
+        {neverUsed && (
+          <Button
+            size="sm"
+            onClick={() =>
+              void (async () => {
+                const ok = await confirm({
+                  title: `Remove ${goal.name}?`,
+                  body: "Nothing was ever put in it or taken out, so no money moves. It goes to the archived accounts, and a plan saving in it goes back to being counted in safe to spend.",
+                  confirmLabel: "Remove it",
+                });
+                if (ok) onUpdate({ archived: true });
+              })()
+            }
+          >
+            Remove
+          </Button>
+        )}
       </div>
     </div>
   );

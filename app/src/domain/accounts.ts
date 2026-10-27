@@ -142,7 +142,13 @@ export function goalProgress(
   const remaining = Math.max(0, target - saved);
   const progress = target > 0 ? saved / target : 0;
 
-  const daysLeft = goal.deadline ? daysBetween(asOf, goal.deadline) : undefined;
+  /*
+   * No deadline when there is none, or when it is the year 9999: the
+   * Planner's "no date yet" reached two goals as December 31, 9999, and they
+   * read "PHP 0.31/month to make it" (27 October 2026).
+   */
+  const deadline = goal.deadline && goal.deadline < "9000" ? goal.deadline : undefined;
+  const daysLeft = deadline ? daysBetween(asOf, deadline) : undefined;
 
   let status: GoalStatus;
   if (goal.archived) status = "archived";
@@ -164,8 +170,8 @@ export function goalProgress(
    * alone: being 40% funded is fine at 30% elapsed and behind at 80%.
    */
   let onTrack = true;
-  if (status === "active" && goal.deadline && goal.openedDate && target > 0) {
-    const total = daysBetween(goal.openedDate, goal.deadline);
+  if (status === "active" && deadline && goal.openedDate && target > 0) {
+    const total = daysBetween(goal.openedDate, deadline);
     const gone = daysBetween(goal.openedDate, asOf);
     if (total > 0) onTrack = progress >= gone / total;
   }

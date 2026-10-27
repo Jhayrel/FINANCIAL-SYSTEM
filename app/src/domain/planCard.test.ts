@@ -3,7 +3,7 @@
  * 2026): "Before adding that what do you think?" and "Its not safe spend".
  */
 import { describe, expect, it } from "vitest";
-import { asksPlanOpinion, planOpinion, readPlanCardChange, wishOpinion } from "./planCard";
+import { addsTheCard, asksPlanOpinion, planOpinion, priceSaid, readPlanCardChange, wishOpinion } from "./planCard";
 import type { PlanInput } from "./planner";
 
 const reference = {
@@ -142,5 +142,25 @@ describe("the price said as a guess", () => {
     expect(readPlanCardChange("Probably 100k i think", phone, ctx)).toMatchObject({ changed: [], already: ["It is ₱100,000.00 on the card already."] });
     expect(readPlanCardChange("its around 95k", phone, ctx)).toMatchObject({ changed: ["amount ₱95,000.00"] });
     expect(readPlanCardChange("siguro 90k", phone, ctx)).toMatchObject({ changed: ["amount ₱90,000.00"] });
+  });
+});
+
+describe("a price guessed, and 'add it'", () => {
+  it("reads the price in a guess, question mark and all", () => {
+    for (const [t, v] of [["but i thinks thats around 100k?", 10_000_000], ["Probably 100k i think", 10_000_000], ["siguro mga 95k po", 9_500_000], ["100k?", 10_000_000]] as const) expect(priceSaid(t), t).toBe(v);
+    for (const t of ["how much is it?", "I bought shoes 2500", "can I afford 100k next month?"]) expect(priceSaid(t), t).toBeNull();
+  });
+  it("knows 'add it' from a question", () => {
+    for (const t of ["add it", "yes add it", "can you add it", "save it please", "ok go ahead", "add to the planner"]) expect(addsTheCard(t), t).toBe(true);
+    for (const t of ["should I add it?", "what is it", "add 500 to it"]) expect(addsTheCard(t), t).toBe(false);
+  });
+  it("works through the what-ifs and says how it read the message", () => {
+    const phone: PlanInput = { title: "iPhone 18 Pro Max", amount: 10_000_000, due: "2026-11-30", dueKind: "month", item: "", wallet: "", need: false, setAside: true, notes: "" };
+    const words = planOpinion(phone, { asOf, month: { name: "November 2026", usual: 1_632_200, others: 450_000, income: 2_532_200 }, freeNow: 0, savings: 354_535 }, undefined, { readAs: "How I read it: a question." });
+    expect(words.split("\n")[0]).toBe("How I read it: a question.");
+    expect(words).toContain("What-ifs:");
+    expect(words).toContain("Paid from savings: they cover ₱3,545.35, so ₱96,454.65 would still have to come from the month.");
+    expect(words).toContain("Saved up first: a usual month spares about ₱4,500.00, so about 23 months of that");
+    expect(words).toContain("The main risk: November is ₱95,500.00 short with it");
   });
 });

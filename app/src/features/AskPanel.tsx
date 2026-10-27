@@ -141,7 +141,7 @@ import { categoryLimits, monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, saysItWasAStatement, wantsThoseEntries, type Intent } from "../domain/intent";
 import { monthBrief, spendable } from "../domain/monthPlan";
-import { asksPlanOpinion, planOpinion, readPlanCardChange, wishOpinion, type PlanOpinionFacts } from "../domain/planCard";
+import { addsTheCard, asksPlanOpinion, planOpinion, priceSaid, readPlanCardChange, wishOpinion, type PlanOpinionFacts } from "../domain/planCard";
 import { pictureDay } from "../domain/pictureDay";
 import { quickAnswer, readQuickAsk } from "../domain/quickAsk";
 import { financeAlerts } from "../domain/alerts";
@@ -167,9 +167,10 @@ import type { PlanAction } from "./useProposalSink";
 import { PlanForm } from "./Planner";
 import { entryImpact, limitLine } from "../domain/entryImpact";
 import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
-import { kindFromHistory, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
-import { closedPlanWords, dayFor, plannedMonthWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
+import { kindFromHistory, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, linkPayments, unlinkPayment, planAgain, dueFor, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
+import { closedPlanWords, closedPlansWords, dayFor, NO_DAY, plannedMonthWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
 import { splitPlanClause, withoutPlanClause } from "../domain/planClause";
+import { asksForGoal, goalForPlan, type GoalForPlan } from "../domain/planGoal";
 import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
@@ -391,6 +392,8 @@ export interface ProposalSink {
   readonly canPlan?: boolean | undefined;
   readonly savePlan?: ((plan: Plan, action: PlanAction, summary: string) => void) | undefined;
   readonly payPlan?: ((plan: Plan, draft: Draft, settles: boolean) => string | null) | undefined;
+  /** A goal for a plan, made when its card is pressed (domain/planGoal.ts). */
+  readonly makeGoal?: ((goal: GoalForPlan) => { readonly id: string; readonly name: string } | null) | undefined;
   /** The owner's details (Settings, Data, You; domain/owner.ts). */
   readonly canSaveOwner?: boolean | undefined;
   readonly saveOwner?: ((owner: OwnerDetails) => void) | undefined;
@@ -422,6 +425,8 @@ interface Settling {
     readonly rows: readonly { readonly label: string; readonly value: string }[];
     readonly save?: { readonly plan: Plan; readonly action: PlanAction; readonly summary: string; readonly before?: Plan | undefined } | undefined;
     readonly pay?: { readonly plan: Plan; readonly draft: Draft; readonly settles: boolean } | undefined;
+    /** A goal to make for the plan when the card is pressed, never before (owner, 27 October 2026). */
+    readonly goal?: GoalForPlan | undefined;
   };
 }
 
@@ -2488,7 +2493,11 @@ export function AskPanel({
    * for, and the next short reply with a figure ("5000", "around 5k by dec
    * 20") makes its Planner card (planIntent.ts).
    */
-  const pendingPlan = useRef<{ readonly input: PlanInput; readonly dueSaid: boolean; readonly at: number } | null>(null);
+  const pendingPlan = useRef<{ readonly input: PlanInput; readonly dueSaid: boolean; readonly at: number; readonly asked?: boolean } | null>(null);
+  /** The saved plan the conversation is about, so "move it", "skip it", "I paid it" need no name (`plannerAsk.ts`, focus). */
+  const planFocus = useRef<{ readonly id: string; readonly at: number } | null>(null);
+  /** The thing last talked about as a plan, with its price once said, so "add it as a plan" after "Not now" still knows it. */
+  const lastWish = useRef<{ readonly input: PlanInput; readonly at: number } | null>(null);
   /** While an answer is the app's own working said by the model (`aiFirst`): its Plan and Entry lines are not offered or shown. */
   const linesOff = useRef(false);
   /**
@@ -4683,6 +4692,20 @@ export function AskPanel({
     return { asOf, month, freeNow: brief.safe?.free ?? null, savings };
   };
 
+  /**
+   * How the message was read, said first, so a misreading is caught at once:
+   * a question or a plan to add, the month and where it came from, the price
+   * and whether it was a guess, need or want. The owner had to say "I am
+   * asking a question" when it was read as adding (27 October 2026); the
+   * reasoning references call it stating the assumptions.
+   */
+  const readAsWords = (input: Pick<PlanInput, "title" | "amount" | "due" | "dueKind" | "need">, said: string, guessed = false): string => {
+    const when = input.due === NO_DATE ? "no date yet" : whenOf({ due: input.due, dueKind: input.dueKind }).replace(/^S/, "s");
+    const from = /\bnext\s+month\b/i.test(said) ? ' (from "next month")' : /\bnext\s+year\b/i.test(said) ? ' (from "next year")' : /\bnext\s+week\b/i.test(said) ? ' (from "next week")' : "";
+    const price = input.amount === null ? "no price yet" : `${formatMoney(input.amount)}${guessed ? ", your estimate" : ""}`;
+    return `How I read it: a question, not a plan to add yet. ${input.title}, ${when}${from}, ${price}, ${input.need ? "read as a need" : "a want"}.`;
+  };
+
   /** A new plan's card rows, the same on every route that offers one. */
   const planRows = (plan: Plan): { label: string; value: string }[] => [
     { label: "What", value: plan.title },
@@ -4695,6 +4718,7 @@ export function AskPanel({
 
   /** A Planner card for a new plan (docs/16-PLANNER.md, P4.23). Nothing is saved until it is pressed. */
   const offerPlan = (plan: Plan, words: string): void => {
+    lastWish.current = { input: plan, at: Date.now() };
     say({
       kind: "settle",
       debtId: "",
@@ -4743,7 +4767,7 @@ export function AskPanel({
     }
     const rules =
       opts.rules ??
-      `The app worked out the answer below from the ledger and the Planner, for this message. Today is ${formatMedium(asOf)}. Answer what they asked first, in your own words and briefly, using only the figures, months and days written below: do no arithmetic of your own, never move a month or a day, and never guess a price. When no price is known, say what the month can take, and that they can say the price if they want it added. Never write a Plan line or an Entry line: the app shows its own card under your answer when there is one, and nothing is saved until they press it.`;
+      `The app worked out the answer below from the ledger and the Planner, for this message. Today is ${formatMedium(asOf)}. Answer what they asked first, in your own words and briefly, using only the figures, months and days written below: do no arithmetic of your own, never move a month or a day, and never guess a price. When it opens with How I read it, start with that in a short clause of your own, so a misreading is caught at once. Use its What-ifs where they help the decision, and name the main risk. When no price is known, say what the month can take, and that they can say the price if they want it added. Never write a Plan line or an Entry line: the app shows its own card under your answer when there is one, and nothing is saved until they press it.`;
     queuedPlans.current = [...queuedPlans.current, ...cards];
     linesOff.current = true;
     setBusy(true);
@@ -5072,6 +5096,72 @@ export function AskPanel({
       const { index: at, turn: card, plan } = planOpen;
       const input: PlanInput = { title: plan.title, amount: plan.amount, due: plan.due, dueKind: plan.dueKind, item: plan.item, wallet: plan.wallet, goalId: plan.goalId, need: plan.need, setAside: plan.setAside, notes: plan.notes };
       const change = readPlanCardChange(lead, input, { reference, asOf });
+      /*
+       * The card is "it". "can you add it as plan maybe next year february?"
+       * (owner, 27 October 2026) was answered "What should go on the
+       * Planner, how much, and by when?" with the card right above it. Now:
+       * a day or month said in the same breath changes it, with or without
+       * "on" or "in", and "add it" adds it, as pressing the button would.
+       */
+      /*
+       * "Make a goal for it" with the card open: the card carries the goal,
+       * made when it is pressed, never before (owner, 27 October 2026: "it
+       * will not do goal until it is actually created").
+       */
+      if (asksForGoal(lead)) {
+        setDraft("");
+        log(aiEvent("asked", "budget", { text: note }));
+        const g = goalForPlan(input, { accounts: settings.accounts, plans: settings.plans ?? [], transactions, asOf });
+        if (g.problems.length > 0) {
+          say({ kind: "you", text: note });
+          say({ kind: "assistant", text: `${g.problems.join(" ")} The card above is unchanged.`, from: "this device" });
+          return;
+        }
+        const next: Plan = { ...makePlan({ ...input, setAside: false }, asOf, "ai"), id: plan.id, createdOn: plan.createdOn };
+        const changedCard: Settling = {
+          ...card,
+          words: `${g.notes.join(" ")} The goal is made and the plan saved in it when you press Add to the planner.`,
+          planner: { rows: [...planRows(next), { label: "Goal", value: `${g.name}${g.reuse ? "" : " (new)"}` }], save: { plan: next, action: "plan.create", summary: `Planned "${next.title}", ${formatMoney(next.amount)} ${byWhen(next)}, saved in the goal ${g.name}, from the chat.` }, goal: g },
+        };
+        recordCard(changedCard);
+        setTurns((prev) => [...prev.filter((_, i) => i !== at), { kind: "you", text: note }, changedCard]);
+        return;
+      }
+      const adds = asksToPlan(lead) || addsTheCard(lead);
+      const whatIf = !adds && /\?\s*$|^\s*(?:what\s+(?:if|about)|how\s+about|kung|paano\s+kung)\b/i.test(lead);
+      let nextInput: PlanInput = change?.input ?? input;
+      const changed = [...(change?.changed ?? [])];
+      const bare = (adds || whatIf) && !NO_DAY.test(lead) ? whenFor(lead, asOf) : null;
+      if (bare && bare.due >= asOf && dueFor(bare.kind, bare.due) !== nextInput.due) {
+        nextInput = { ...nextInput, due: dueFor(bare.kind, bare.due), dueKind: bare.kind };
+        changed.push(whenOf({ due: nextInput.due, dueKind: bare.kind }).replace(/^S/, "s"));
+      }
+      if (adds) {
+        setDraft("");
+        log(aiEvent("asked", "budget", { text: note }));
+        // A goal the card carries is made now, and the plan saved in it.
+        const made = card.planner?.goal ? (sink.makeGoal?.(card.planner.goal) ?? null) : null;
+        const saved: Plan = { ...makePlan(nextInput, asOf, "ai"), id: plan.id, createdOn: plan.createdOn, ...(made ? { goalId: made.id, wallet: made.name, setAside: false } : {}) };
+        const summary = `Planned "${saved.title}", ${formatMoney(saved.amount)} ${byWhen(saved)}${made ? `, saved in the goal ${made.name}` : ""}, from the chat.`;
+        sink.savePlan?.(saved, "plan.create", summary);
+        planFocus.current = { id: saved.id, at: Date.now() };
+        const done: Settling = { ...card, words: `Added to the Planner.${changed.length > 0 ? ` Changed first: ${changed.join(", ")}.` : ""} ${countsSentence(saved, asOf)}`, state: "applied", planner: { rows: planRows(saved), save: { plan: saved, action: "plan.create", summary } } };
+        recordCard(done);
+        setTurns((prev) => [...prev.filter((_, i) => i !== at), { kind: "you", text: note }, done]);
+        log(aiEvent("accepted", "budget", { entry: `Plan ${saved.title}, ${formatMoney(saved.amount)}`, text: summary }));
+        say({ kind: "assistant", text: `Added "${saved.title}", ${formatMoney(saved.amount)}, ${whenOf(saved).replace(/^S/, "s")}, to the Planner.${changed.length > 0 ? ` Changed first: ${changed.join(", ")}.` : ""} To change it, say so ("move it to march", "make it 90k"), or "remove it" to take it off.`, from: "this device", go: { screen: "planner", label: "the Planner" } });
+        return;
+      }
+      if (whatIf && changed.length > 0) {
+        // "What about december?": that month's view, and the card made to match it; nothing is saved.
+        setDraft("");
+        log(aiEvent("asked", "budget", { text: note }));
+        const next: Plan = { ...makePlan(nextInput, asOf, "ai"), id: plan.id, createdOn: plan.createdOn };
+        setTurns((prev) => prev.filter((_, i) => i !== at));
+        say({ kind: "you", text: note });
+        await aiFirst(note, planOpinion(next, planOpinionFacts(next)), { cards: [{ plan: next, words: `For this what-if: ${changed.join(", ")}. Nothing is saved until you add it. ${countsSentence(next, asOf)}` }] });
+        return;
+      }
       if (change) {
         setDraft("");
         log(aiEvent("asked", "budget", { text: note }));
@@ -5307,14 +5397,15 @@ export function AskPanel({
         if (wished?.kind === "later" && wished.plans.length === 1) {
           const input = wished.plans[0]!;
           if (input.amount === null) {
-            pendingPlan.current = { input, dueSaid: wished.dueSaid, at: Date.now() };
-            const text = wishOpinion(input, planOpinionFacts(input.due === NO_DATE ? { ...input, due: lastOfMonth(nextOf(asOf).year, nextOf(asOf).month) } : input), wished.hint);
+            pendingPlan.current = { input, dueSaid: wished.dueSaid, at: Date.now(), asked: true };
+            lastWish.current = { input, at: Date.now() };
+            const text = wishOpinion(input, planOpinionFacts(input.due === NO_DATE ? { ...input, due: lastOfMonth(nextOf(asOf).year, nextOf(asOf).month) } : input), wished.hint, { readAs: readAsWords(input, before.text) });
             await aiFirst(before.text, text, { go: { screen: "planner", label: "the Planner" } });
             return;
           }
           if (sink.canPlan) {
             const plan = makePlan(input, asOf, "ai");
-            await aiFirst(before.text, planOpinion(plan, planOpinionFacts(plan)), {
+            await aiFirst(before.text, planOpinion(plan, planOpinionFacts(plan), undefined, { readAs: readAsWords(plan, before.text) }), {
               cards: [{ plan, words: `A new plan${(plan.dueKind ?? "day") === "day" ? "" : ` for ${whenOf(plan).replace(/^S/, "s")}`}, if you want it. ${countsSentence(plan, asOf)}` }],
             });
             return;
@@ -5873,12 +5964,13 @@ export function AskPanel({
         const seen = likelyPayments(plan, transactions, plans)[0];
         return seen ? ` #${String(seen.recordNumber).padStart(4, "0")} on ${formatMedium(seen.date)}, ${seen.item} ${formatMoney(seen.total)}, looks like it is paid already: after adding, link it on the Planner instead of paying again.` : "";
       };
-      const planAsk = readPlannerAsk(lead, { plans, reference, transactions, asOf, goals: settings.accounts.filter((a) => a.kind === "goal" && !a.archived).map((a) => ({ id: a.id, name: a.name })) });
+      const focused = planFocus.current && Date.now() - planFocus.current.at < 30 * 60_000 ? (plans.find((p) => p.id === planFocus.current?.id) ?? null) : null;
+      const planAsk = readPlannerAsk(lead, { plans, reference, transactions, asOf, goals: settings.accounts.filter((a) => a.kind === "goal" && !a.archived).map((a) => ({ id: a.id, name: a.name })), focus: focused });
       if (planAsk) {
         const planner: GoPlace = { screen: "planner", label: "the Planner" };
         const views = plans.map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf }));
         if (planAsk.kind === "list") {
-          await answerAi(plansWords(views, plansSetAside(views).total), "budget", planner);
+          await answerAi(planAsk.which ? closedPlansWords(views, planAsk.which, asOf) : plansWords(views, plansSetAside(views).total), "budget", planner);
           return;
         }
         if (planAsk.kind === "payIf") {
@@ -5998,6 +6090,114 @@ export function AskPanel({
           return;
         }
         const p = planAsk.plan;
+        planFocus.current = { id: p.id, at: Date.now() };
+        const no = (n: number): string => `#${String(n).padStart(4, "0")}`;
+        if (planAsk.kind === "link") {
+          /*
+           * The Planner's "Link a payment I added", said: the entry named, or
+           * the one that looks like it. "I already paid the haircut plan"
+           * made a second entry for a payment already in the ledger.
+           */
+          const said = planAsk.records.map((n) => transactions.find((t) => t.recordNumber === n));
+          const missing = planAsk.records.filter((_, i) => !said[i]);
+          const rows = planAsk.records.length > 0 ? said.filter((t): t is Transaction => Boolean(t)) : likelyPayments(p, transactions, plans).slice(0, 1);
+          if (missing.length > 0 || rows.length === 0) {
+            answer(
+              missing.length > 0
+                ? `${missing.map(no).join(", ")} ${missing.length === 1 ? "is" : "are"} not in the ledger, so ${missing.length === 1 ? "it" : "they"} cannot be linked to "${p.title}". Check the number on Database.`
+                : `No entry in the ledger looks like the payment for "${p.title}" (${money(p.amount)}). If it is there, say its number, like "link #0123 to the ${p.title.toLowerCase()} plan". If it is not entered yet, say "I paid the ${p.title.toLowerCase()} plan ${Math.round(p.amount / 100)} from cash" and it is entered and linked in one go.`,
+              "budget",
+              planner,
+            );
+            return;
+          }
+          // An entry already counted for another plan is that plan's: never counted twice (#3933 was the Abra trip's, 27 October 2026).
+          const taken = rows.flatMap((r) => {
+            const other = plans.find((x) => x.id !== p.id && x.entryIds.includes(r.id));
+            return other ? [{ r, other }] : [];
+          });
+          if (taken.length > 0) {
+            answer(
+              taken.map(({ r, other }) => `${no(r.recordNumber)} is the payment for "${other.title}" already.`).join(" ") +
+                ` If it belongs to "${p.title}" instead, unlink it there first ("unlink ${no(taken[0]!.r.recordNumber)} from the ${taken[0]!.other.title.toLowerCase()} plan"), then link it here.`,
+              "budget",
+              planner,
+            );
+            return;
+          }
+          const fresh = rows.filter((r) => !p.entryIds.includes(r.id));
+          if (fresh.length === 0) {
+            answer(`${rows.map((r) => no(r.recordNumber)).join(", ")} ${rows.length === 1 ? "is" : "are"} linked to "${p.title}" already.`, "budget", planner);
+            return;
+          }
+          const next = linkPayments(p, fresh.map((r) => r.id), transactions, asOf);
+          const paid = viewOf(next, { transactions, accounts: settings.accounts, asOf });
+          card(
+            `Count ${fresh.map((r) => `${no(r.recordNumber)} (${formatMedium(r.date)}, ${r.item || "no kind"}, ${money(r.total)})`).join(", ")} as the payment for "${p.title}". No entry is added or changed.${fresh.reduce((s, r) => s + r.total, 0) > p.amount * 1.5 ? ` It is ${money(fresh.reduce((s, r) => s + r.total, 0) - p.amount)} more than the plan's ${money(p.amount)}: check it is the right entry.` : ""}${next.status === "done" ? " That covers it, so it is marked paid." : ` ${money(paid.left)} is left to pay; it stays open.`}${planAsk.records.length === 0 ? " It was picked as the entry that looks like it; if it is the wrong one, say its number instead." : ""}`,
+            "Link it",
+            [],
+            { rows: [], save: { plan: next, action: "plan.paid", summary: `Linked ${fresh.map((r) => no(r.recordNumber)).join(", ")} to "${p.title}" as its payment, from the chat.`, before: p } },
+          );
+          return;
+        }
+        if (planAsk.kind === "unlink") {
+          const linked = p.entryIds.map((id) => transactions.find((t) => t.id === id)).filter((t): t is Transaction => Boolean(t));
+          const rows = planAsk.records.length > 0 ? linked.filter((t) => planAsk.records.includes(t.recordNumber)) : linked.length === 1 ? linked : [];
+          if (rows.length === 0) {
+            answer(
+              linked.length === 0
+                ? `"${p.title}" has no payment linked, so there is nothing to unlink.`
+                : `Which one? "${p.title}" has ${linked.map((t) => `${no(t.recordNumber)} (${money(t.total)})`).join(", ")} linked. Say "unlink ${no(linked[0]!.recordNumber)} from the ${p.title.toLowerCase()} plan".`,
+              "budget",
+              planner,
+            );
+            return;
+          }
+          const next = rows.reduce((acc, r) => unlinkPayment(acc, r.id, transactions), p);
+          card(
+            `Stop counting ${rows.map((r) => no(r.recordNumber)).join(", ")} as the payment for "${p.title}". The entry stays in the ledger as it is.${p.status === "done" && next.status === "open" ? " It is no longer paid in full, so it opens again." : ""}`,
+            "Unlink it",
+            [],
+            { rows: [], save: { plan: next, action: "plan.update", summary: `Unlinked ${rows.map((r) => no(r.recordNumber)).join(", ")} from "${p.title}", from the chat.`, before: p } },
+          );
+          return;
+        }
+        if (planAsk.kind === "makeGoal") {
+          // The Planner's "Make a goal for it", said: worked out and checked now, made only when the card is pressed.
+          if (p.goalId) {
+            const g = settings.accounts.find((a) => a.id === p.goalId);
+            answer(`"${p.title}" is saving in ${g?.name ?? "a goal"} already.`, "budget", planner);
+            return;
+          }
+          const g = goalForPlan(p, { accounts: settings.accounts, plans, transactions, asOf });
+          if (g.problems.length > 0) {
+            answer(g.problems.join(" "), "budget", { screen: "settings", tab: "accounts", label: "Settings, Accounts" });
+            return;
+          }
+          card(
+            `${g.notes.join(" ")} Nothing is made until you press it.`,
+            g.reuse ? "Save it in the goal" : "Make the goal",
+            [
+              { label: "Goal", value: g.name },
+              { label: "Target", value: money(g.target) },
+              { label: "Deadline", value: g.deadline ? formatMedium(g.deadline) : "None until the plan has a date" },
+            ],
+            { rows: [], save: { plan: { ...p, setAside: false }, action: "plan.update", summary: `Saved "${p.title}" in the goal ${g.name}, from the chat.`, before: p }, goal: g },
+          );
+          return;
+        }
+        if (planAsk.kind === "again") {
+          // The Planner's "Plan it again": a copy, nothing paid, for the day said or no date yet.
+          const copy = planAgain(p, planAsk.due, asOf, "ai");
+          const plan: Plan = { ...copy, amount: planAsk.amount ?? p.amount, ...(planAsk.dueKind === "day" ? {} : { dueKind: planAsk.dueKind }) };
+          card(
+            `"${p.title}" again, as a new plan: ${money(plan.amount)}, ${whenOf(plan).replace(/^S/, "s")}${planAsk.amount === null ? `, the same amount as last time` : ""}. The ${p.status === "done" ? "paid" : p.status} one stays as it was. ${countsSentence(plan, asOf)}`,
+            "Add to the planner",
+            planRows(plan),
+            { rows: [], save: { plan, action: "plan.create", summary: `Planned "${plan.title}" again, ${money(plan.amount)} ${byWhen(plan)}, from the chat.` } },
+          );
+          return;
+        }
         if (planAsk.kind === "move") {
           const next = movePlan(p, planAsk.to, asOf, planAsk.toKind);
           // "Sometime in March", "No date yet" mid-sentence; never "November".
@@ -6195,12 +6395,20 @@ export function AskPanel({
       const waitingPlan = pendingPlan.current && Date.now() - pendingPlan.current.at < 20 * 60_000 ? pendingPlan.current : null;
       if (waitingPlan) {
         pendingPlan.current = null;
-        const amount = sumIn(lead);
-        if (amount !== null && lead.split(/\s+/).length <= 10 && !/\?/.test(lead) && !asksToPlan(lead) && sink.canPlan) {
+        // "but i thinks thats around 100k?" is the price with a guess in it, not a new question (27 October 2026).
+        const guessed = priceSaid(lead);
+        const amount = guessed ?? sumIn(lead);
+        if (amount !== null && amount > 0 && lead.split(/\s+/).length <= 12 && (guessed !== null || !/\?/.test(lead)) && !asksToPlan(lead) && !/\b(?:spent|paid|bought|received|got)\b/i.test(lead) && sink.canPlan) {
           const said = whenFor(lead, asOf);
           const plan = makePlan({ ...waitingPlan.input, amount, ...(said ? { due: said.due, dueKind: said.kind } : {}) }, asOf, "ai");
           youAsked();
-          offerPlan(plan, planCardWords(plan, said !== null || waitingPlan.dueSaid));
+          const words = planCardWords(plan, said !== null || waitingPlan.dueSaid);
+          // Asked for a view first ("what do you think?"): the view with the price, then the card to add if they want it.
+          if (waitingPlan.asked) {
+            await aiFirst(note, planOpinion(plan, planOpinionFacts(plan), undefined, { readAs: readAsWords(plan, `${lead} ${[...turns].reverse().find((t): t is Said => t.kind === "you")?.text ?? ""}`, guessed !== null) }), { cards: [{ plan, words }] });
+            return;
+          }
+          offerPlan(plan, words);
           return;
         }
       }
@@ -6218,6 +6426,36 @@ export function AskPanel({
       if (asksToPlan(lead)) {
         // This message first, then the last few things said, then the budget just worked out.
         let inputs = plansIn(lead);
+        /*
+         * The thing just talked about, its price once said (`lastWish`): "can
+         * you add it as plan maybe next year february?" after "Not now", or
+         * after a view. Added as asked, with the month said; it was answered
+         * "What should go on the Planner?" (owner, 27 October 2026).
+         */
+        const wished = inputs.length === 0 && sink.canPlan && lastWish.current && Date.now() - lastWish.current.at < 30 * 60_000 ? lastWish.current.input : null;
+        if (wished) {
+          const when = NO_DAY.test(lead) ? null : whenFor(lead, asOf);
+          const input: PlanInput = when && when.due >= asOf ? { ...wished, due: dueFor(when.kind, when.due), dueKind: when.kind } : wished;
+          youAsked();
+          if (input.amount === null) {
+            pendingPlan.current = { input, dueSaid: when !== null || (input.dueKind ?? "day") !== "none", at: Date.now() };
+            say({ kind: "assistant", text: askAmountWords(input.title, "", input.due, when !== null || (input.dueKind ?? "day") !== "none"), from: "this device", go: plannerPlace });
+            return;
+          }
+          if (onPlanner(input)) {
+            const p = plans.find((x) => x.status === "open" && x.amount === input.amount && namesIt(x.title, input.title));
+            say({ kind: "assistant", text: p ? `"${p.title}" is on the Planner already: ${formatMoney(p.amount)} ${byWhen(p)}. Say "move it to" a day to change it.` : "That is on the Planner already.", from: "this device", go: plannerPlace });
+            if (p) planFocus.current = { id: p.id, at: Date.now() };
+            return;
+          }
+          const saved = makePlan(input, asOf, "ai");
+          const summary = `Planned "${saved.title}", ${formatMoney(saved.amount)} ${byWhen(saved)}, from the chat.`;
+          sink.savePlan?.(saved, "plan.create", summary);
+          planFocus.current = { id: saved.id, at: Date.now() };
+          log(aiEvent("accepted", "budget", { entry: `Plan ${saved.title}, ${formatMoney(saved.amount)}`, text: summary }));
+          say({ kind: "assistant", text: `Added "${saved.title}", ${formatMoney(saved.amount)}, ${whenOf(saved).replace(/^S/, "s")}, to the Planner. ${countsSentence(saved, asOf)} To change it, say so ("move it to march", "make it 90k"), or "remove it" to take it off.`, from: "this device", go: plannerPlace });
+          return;
+        }
         if (inputs.length === 0) {
           for (const said of [...turns].reverse().filter((t): t is Said => t.kind === "you").slice(0, 6).map((t) => t.text)) {
             inputs = plansIn(said);
@@ -6372,9 +6610,10 @@ export function AskPanel({
              * adding").
              */
             const first = fresh[0]!;
-            pendingPlan.current = { input: first, dueSaid: intent.dueSaid, at: Date.now() };
+            pendingPlan.current = { input: first, dueSaid: intent.dueSaid, at: Date.now(), asked: true };
+            lastWish.current = { input: first, at: Date.now() };
             youAsked();
-            const text = wishOpinion(first, planOpinionFacts(first.due === NO_DATE ? { ...first, due: lastOfMonth(nextOf(asOf).year, nextOf(asOf).month) } : first), intent.hint);
+            const text = wishOpinion(first, planOpinionFacts(first.due === NO_DATE ? { ...first, due: lastOfMonth(nextOf(asOf).year, nextOf(asOf).month) } : first), intent.hint, { readAs: readAsWords(first, lead) });
             await aiFirst(note, text, { go: plannerPlace });
             return;
           } else if (!intent.amountSaid) {
@@ -6396,7 +6635,7 @@ export function AskPanel({
             if (intent.asked && made.length === 1 && asksPlanOpinion(lead) && !isAffordQuestion(lead)) {
               youAsked();
               const plan = made[0]!;
-              await aiFirst(note, planOpinion(plan, planOpinionFacts(plan)), { cards: [{ plan, words: planCardWords(plan, intent.dueSaid) }] });
+              await aiFirst(note, planOpinion(plan, planOpinionFacts(plan), undefined, { readAs: readAsWords(plan, lead) }), { cards: [{ plan, words: planCardWords(plan, intent.dueSaid) }] });
               return;
             }
             if (intent.asked) queuedPlans.current = made.map((plan) => ({ plan, words: planCardWords(plan, intent.dueSaid) }));
@@ -10730,7 +10969,16 @@ export function AskPanel({
                 }
                 if (turn.planner) {
                   const op = turn.planner;
-                  if (op.save) sink.savePlan?.(op.save.plan, op.save.action, op.save.summary);
+                  // The goal first, made only now that the card is pressed; the plan then saves in it.
+                  const made = op.goal && op.save ? (sink.makeGoal?.(op.goal) ?? null) : null;
+                  if (op.goal && op.save && !made) {
+                    say({ kind: "assistant", text: "The goal could not be made from here. Open the plan on the Planner and pick Make a goal for it.", from: "this device", go: { screen: "planner", label: "the Planner" } });
+                    return;
+                  }
+                  if (op.save) sink.savePlan?.(made ? { ...op.save.plan, goalId: made.id, wallet: made.name, setAside: false } : op.save.plan, op.save.action, op.save.summary);
+                  // What "move it", "skip it" and "I paid it" mean next.
+                  const pressed = op.save?.plan ?? op.pay?.plan;
+                  if (pressed) planFocus.current = { id: pressed.id, at: Date.now() };
                   if (op.pay) {
                     const stopped = sink.payPlan?.(op.pay.plan, op.pay.draft, op.pay.settles) ?? null;
                     if (stopped) {

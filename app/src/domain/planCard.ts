@@ -39,8 +39,30 @@ const WANT = /\b(?:it'?s|its|it\s+is|this\s+is|mark\s+it(?:\s+as)?|make\s+it)\s+
 const NEED = /\b(?:it'?s|its|it\s+is|this\s+is|mark\s+it(?:\s+as)?|make\s+it)\s+(?:a\s+)?need\b|\bnot\s+a\s+want\b/i;
 const MONTHS = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
 
+/**
+ * A price said on its own, however unsure: "but i thinks thats around
+ * 100k?", "Probably 100k i think", "siguro 90k", "100k?". The question mark
+ * there is a guess, not a question: it went to the model unworked and came
+ * back with figures the app had not worked out (owner, 27 October 2026).
+ */
+export function priceSaid(text: string): Centavos | null {
+  const rest = text
+    .toLowerCase()
+    .replace(/[?.!,]/g, " ")
+    .replace(/\b(?:but|and|so|ok(?:ay)?|hmm+|well|wait|no|yes|yeah|i\s+think(?:s)?|i\s+guess|i\s+believe|i\s+heard|i\s+saw|maybe|probably|likely|siguro|mga|around|about|roughly|approximately|approx|like|just|only|actually|it'?s|its|it\s+is|it\s+will\s+be|it\s+costs?|that'?s|thats|that\s+is|that\s+will\s+be|the\s+price\s+is|price\s+is|cost\s+is|costs?|is|will\s+be|lang|po|daw|raw|ata|yata|or\s+so|more\s+or\s+less|na\s+lang|na|pesos?|php|₱)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^₱?\s*\d[\d,]*(?:\.\d+)?\s*k?$/.test(rest) ? sumIn(rest) : null;
+}
+
+/** "add it", "yes add it", "save it", "go ahead": the card above, pressed by saying so. */
+export const addsTheCard = (text: string): boolean =>
+  /^\s*(?:(?:yes|yep|yeah|sure|ok(?:ay)?|sige|go|alright|oo)[\s,.!]*)?(?:(?:please|pls|can\s+you|could\s+you|kindly|pakisuyo)\s+)?(?:(?:add|save|put|keep|plan|ilagay|i-?add|isave)\s+(?:it|that|this|na)\b|go\s+ahead|do\s+it|confirm(?:ed)?|add\s+to\s+(?:the\s+|my\s+)?planner)/i.test(text) && text.trim().split(/\s+/).length <= 16;
+
 /** An amount said as a change: "make it 8k", "8000 instead", "just 8000", "lower it to 7500". */
 function amountIn(text: string): Centavos | null {
+  const guessed = priceSaid(text);
+  if (guessed !== null && guessed > 0) return guessed;
   const said =
     /\b(?:make|change|set|lower|raise|put|update|increase|decrease|reduce|bring|cut)\s+(?:it|the\s+amount|amount|the\s+budget)?\s*(?:down|up)?\s*(?:to|into|at|as)?\s*(?:₱|php\s*)?\d/i.test(text) ||
     /(?:₱|php\s*)?\d[\d,]*(?:\.\d+)?\s*k?\s+(?:instead|only|lang|na\s+lang)\b/i.test(text) ||
@@ -181,11 +203,12 @@ const hundred = (c: Centavos): Centavos => Math.floor(c / 10_000) * 10_000;
  * with `saved`, one on the Planner already ("what do you think of my tuition
  * plan?", 27 October 2026 sweep), worked from what is left of it.
  */
-export function planOpinion(plan: PlanInput, f: PlanOpinionFacts, saved?: { readonly paid: Centavos; readonly left: Centavos }): string {
+export function planOpinion(plan: PlanInput, f: PlanOpinionFacts, saved?: { readonly paid: Centavos; readonly left: Centavos }, opts: { readonly readAs?: string } = {}): string {
   const amount = saved ? saved.left : (plan.amount ?? 0);
   const when = plan.due === NO_DATE ? "with no date yet" : whenOf({ due: plan.due, dueKind: plan.dueKind }).replace(/^S/, "s");
   const late = plan.due !== NO_DATE && plan.due < f.asOf;
   const lines: string[] = [
+    ...(opts.readAs ? [opts.readAs] : []),
     saved
       ? `**${plan.title}, ${formatMoney(plan.amount ?? 0)}, ${when}.**${saved.paid > 0 ? ` ${formatMoney(saved.paid)} is paid, ${formatMoney(saved.left)} left.` : ""} Here is how it looks.`
       : `**${plan.title}, ${formatMoney(amount)}, ${when}.** Here is how it looks before you add it.`,
@@ -227,6 +250,24 @@ export function planOpinion(plan: PlanInput, f: PlanOpinionFacts, saved?: { read
   }
 
   /*
+   * What-ifs, worked through before the suggestion: paid from savings, saved
+   * up first, and the one thing most likely to go wrong (owner, 27 October
+   * 2026: "use what ifs etc overthink everything"; a pre-mortem, as the
+   * reasoning references put it: assume it went wrong, and say why).
+   */
+  const ifs: string[] = [];
+  if (f.savings > 0 && amount > 0) ifs.push(f.savings >= amount ? `Paid from savings: covered, and ${formatMoney(f.savings - amount)} stays saved.` : `Paid from savings: they cover ${formatMoney(f.savings)}, so ${formatMoney(amount - f.savings)} would still have to come from the month.`);
+  if (spare !== null && amount > 0) {
+    if (spare >= 10_000) {
+      const n = Math.ceil(amount / spare);
+      const at = Number(f.asOf.slice(0, 4)) * 12 + Number(f.asOf.slice(5, 7)) - 1 + n;
+      ifs.push(`Saved up first: a usual month spares about ${formatMoney(hundred(spare))}, so about ${n} ${n === 1 ? "month" : "months"} of that, ready around ${MONTH_NAMES[at % 12]} ${Math.floor(at / 12)}.`);
+    } else ifs.push(`Saved up first: a usual month spends ${formatMoney(Math.max(0, -spare))} more than comes in, so nothing builds up until that changes.`);
+  }
+  if (gap !== null) ifs.push(gap < 0 ? `The main risk: ${monthName} is ${formatMoney(-gap)} short with it, so anything unexpected that month would come out of savings or borrowing.` : `The main risk: it takes ${formatMoney(amount)} of what a usual ${monthName} spares, leaving ${formatMoney(gap)} for anything unexpected.`);
+  if (ifs.length > 0) lines.push(`What-ifs:\n${ifs.map((x) => `- ${x}`).join("\n")}`);
+
+  /*
    * What to do about it, by what it is. A need is paid whatever happens, so
    * the room comes from the wants and the savings, never from lowering it
    * ("lower tuition to PHP 3,000.00" was suggested, 27 October 2026 sweep).
@@ -266,12 +307,12 @@ export function planOpinion(plan: PlanInput, f: PlanOpinionFacts, saved?: { read
  * With no month to go by (no date), `f.month` may be a usual month read for
  * next month, and is said as a usual month.
  */
-export function wishOpinion(plan: PlanInput, f: PlanOpinionFacts, hint = ""): string {
+export function wishOpinion(plan: PlanInput, f: PlanOpinionFacts, hint = "", opts: { readonly readAs?: string } = {}): string {
   const undated = plan.due === NO_DATE;
   const when = undated ? "with no date yet" : whenOf({ due: plan.due, dueKind: plan.dueKind }).replace(/^S/, "s");
   const thisMonth = !undated && plan.due.slice(0, 7) <= f.asOf.slice(0, 7);
   const monthName = undated ? "a usual month" : (MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1] ?? "that month");
-  const lines: string[] = [`**${plan.title}, ${when}.** You did not say the price, so here is what ${thisMonth ? "this month" : monthName} can take.`];
+  const lines: string[] = [...(opts.readAs ? [opts.readAs] : []), `**${plan.title}, ${when}.** You did not say the price, so here is what ${thisMonth ? "this month" : monthName} can take.`];
 
   let spare: Centavos | null = null;
   if (f.month && !thisMonth) {

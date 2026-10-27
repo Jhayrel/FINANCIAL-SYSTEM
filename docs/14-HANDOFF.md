@@ -2196,6 +2196,49 @@ style guide's Bin, Planner and sidebar lines say how each now works.
   plan to buy a bag next month 1500" is an entry card and a plan card
   (`planClause.ts`); the model reading entries is sent only the first part.
 
+### 2026-10-27, last: the chat does every Planner action; goals made only on save
+
+- **"It" is understood.** The open plan card is "it": "can you add it as
+  plan maybe next year february?" changes the card to February 2027 and
+  adds it, as pressing the button would (it was answered "What should go on
+  the Planner?"). After a plan is added or talked about, "move it", "skip
+  it", "make it 90k", "I paid it", "what do you think of it" mean that plan
+  (`plannerAsk.ts`, `focus`). After "Not now", "add it as a plan" still
+  knows the thing and its price (`lastWish`).
+- **A price said as a guess is the price**: "but i thinks thats around
+  100k?" (`priceSaid`) answers the earlier question with the price in it,
+  AI first, and shows the card to add if wanted. It went to the model with
+  no figures and came back flagged.
+- **What-ifs**: "what about december?" with a card open gives December's
+  view and the card for December. Every plan view opens with "How I read
+  it" (a question or a plan, the month and where it came from, the price
+  and whether it was a guess, need or want) and has What-ifs: paid from
+  savings, saved up first, and the main risk.
+- **New chat actions, as on the Planner screen**: link a payment already
+  in the ledger ("link #3933 to the tuition plan", "I already paid the
+  haircut plan" links the entry that looks like it instead of entering it
+  twice; one already linked to another plan is refused), unlink one, plan a
+  paid one again, list overdue, paid, skipped or removed plans, and make a
+  goal for a plan.
+- **Goals for plans** (`planGoal.ts`): "Make a goal for it" was making a
+  goal the moment it was picked, so a cancelled form left one and a second
+  pick made "... fund"; a plan with no date gave December 31, 9999 and
+  "PHP 0.31/month". Now the goal is made only when the plan is saved (form
+  or chat card), inside a savings or reserve account picked on the form
+  and named as Settings names one, checked as Settings checks one, and one
+  already there by that name is used. No date or a day gone means no
+  deadline. Before saving, the form says what the goal will be, what it
+  takes a month, if its target differs from the plan's, and if another plan
+  saves in it. A goal made for a plan follows the plan's amount and day
+  when they change. Settings, Goals says which plan a goal saves for, shows
+  the year 9999 as "no deadline yet", and has Remove for a goal nothing was
+  ever put in; closing or removing a goal frees its plans, which count in
+  safe to spend again.
+- **The model reasons in steps** (functions/api/ai.ts, from the reasoning
+  references the owner sent): what the message is, each part in turn, what
+  is assumed and said, a pre-mortem for spending decisions, and a read-back
+  of every figure.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

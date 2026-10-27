@@ -65,6 +65,7 @@ import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domai
 import { checkDraft, debtWalletDirection, draftToTransactions, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { Planner } from "./features/Planner";
 import { linkPayments, NO_DATE, renamePlans, type Plan } from "./domain/planner";
+import { goalInStep, type GoalForPlan } from "./domain/planGoal";
 import { buildPlanSheet, planSheetCsv, planSheetFilename } from "./domain/planSheet";
 import { NO_OWNER, ownerChanges, ownerName as nameOfOwner } from "./domain/owner";
 import { spreadCovered } from "./domain/covers";
@@ -120,7 +121,7 @@ import {
   type ActivityEvent,
   type Provenance,
 } from "./domain/activity";
-import type { BudgetYear, Budgets, DeletedTransaction, IsoDate, ReferenceLists, Transaction } from "./domain/types";
+import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction } from "./domain/types";
 
 type Screen =
   | "dashboard"
@@ -2030,11 +2031,21 @@ export default function App() {
    * own section of settings, and the change on the activity trail.
    */
   const changePlan = (plan: Plan, action: Parameters<typeof planChanged>[0], summary: string, by: Provenance): void => {
+    /*
+     * A goal made for the plan follows it: its amount or day changed, the
+     * goal's target or deadline moves too, when they were the plan's
+     * (`goalInStep`). One set by hand in Settings is left alone.
+     */
+    const before = (settings.plans ?? []).find((p) => p.id === plan.id);
+    const goal = plan.goalId ? settings.accounts.find((a) => a.id === plan.goalId && !a.archived) : undefined;
+    const step = before && goal && before.goalId === plan.goalId ? goalInStep(goal, before, plan, asOf) : null;
     setSettings((s) => {
       const list = s.plans ?? [];
-      return { ...s, plans: list.some((p) => p.id === plan.id) ? list.map((p) => (p.id === plan.id ? plan : p)) : [...list, plan] };
+      const plans = list.some((p) => p.id === plan.id) ? list.map((p) => (p.id === plan.id ? plan : p)) : [...list, plan];
+      return { ...s, plans, ...(step && goal ? { accounts: s.accounts.map((a) => (a.id === goal.id ? { ...a, ...step } : a)) } : {}) };
     });
     record(planChanged(action, summary, by, { amount: plan.amount, targetId: plan.id }));
+    if (step && goal) record(settingsChanged(`Kept the goal "${goal.name}" in step with its plan:${step.target !== undefined ? ` target ${formatMoney(step.target)}` : ""}${"deadline" in step ? `${step.target !== undefined ? "," : ""} deadline ${step.deadline ? formatMedium(step.deadline) : "none until the plan has a date"}` : ""}`));
   };
 
   /**
@@ -2058,14 +2069,20 @@ export default function App() {
     return null;
   };
 
-  /** A goal for a plan, in Settings' accounts like any other (P4.17). Returns its id. */
-  const makeGoalFor = (name: string, target: Centavos, deadline: IsoDate): string => {
-    const taken = new Set(settings.accounts.map((a) => a.name.trim().toLowerCase()));
-    const unique = taken.has(name.trim().toLowerCase()) ? `${name.trim()} fund` : name.trim();
+  /**
+   * A goal for a plan, in Settings' accounts like any other (P4.17), as
+   * `goalForPlan` worked it out and checked it: inside a savings account,
+   * named as Settings names one, the one already there used rather than a
+   * second, and no deadline when the plan has no date. Made only when the
+   * plan is saved (owner, 27 October 2026: picking "Make a goal for it" made
+   * one each time, with December 31, 9999 as its deadline).
+   */
+  const makeGoalFor = (goal: GoalForPlan): { id: string; name: string } => {
+    if (goal.reuse) return { id: goal.reuse.id, name: goal.reuse.name };
     const id = `goal-${Date.now().toString(36)}`;
-    setSettings((s) => ({ ...s, accounts: [...s.accounts, { id, name: unique, kind: "goal", target, deadline, openedDate: asOf, archived: false }] }));
-    record(settingsChanged(`Made the goal "${unique}" for a plan: ${formatMoney(target)} by ${formatMedium(deadline)}`));
-    return id;
+    setSettings((s) => ({ ...s, accounts: [...s.accounts, { id, name: goal.name, kind: "goal", parentId: goal.parentId || undefined, target: goal.target, ...(goal.deadline ? { deadline: goal.deadline } : {}), openedDate: asOf, archived: false }] }));
+    record(settingsChanged(`Made the goal "${goal.name}" for a plan: ${formatMoney(goal.target)}${goal.deadline ? ` by ${formatMedium(goal.deadline)}` : ", no deadline until the plan has a date"}`));
+    return { id, name: goal.name };
   };
 
   /*
@@ -2077,7 +2094,7 @@ export default function App() {
    */
   /** The owner's name: the one in Settings, Data, You, else the Google account's (`domain/owner.ts`). */
   const theOwner = nameOfOwner(settings.owner, cloud.auth.status === "ready" ? cloud.auth.name : "");
-  const assist: Pick<SinkInput, "onExport" | "onRestoreMany" | "onUpdateDebt" | "onGo" | "onSavePlan" | "onPayPlan" | "onSaveOwner"> = {
+  const assist: Pick<SinkInput, "onExport" | "onRestoreMany" | "onUpdateDebt" | "onGo" | "onSavePlan" | "onPayPlan" | "onMakeGoal" | "onSaveOwner"> = {
     onExport: handleAskedExport,
     onRestoreMany: handleRestoreMany,
     onUpdateDebt: (next) => setSettings((s) => ({ ...s, credits: s.credits.map((c) => (c.id === next.id ? next : c)) })),
@@ -2085,6 +2102,7 @@ export default function App() {
     // The Planner from the chat: recorded as the assistant's, which it was (docs/16-PLANNER.md, P4.23).
     onSavePlan: (plan, action, summary) => changePlan(plan, action, summary, { actor: "ai", via: "ai_chat" }),
     onPayPlan: (plan, draft, settles) => payPlan(plan, draft, settles, { actor: "ai", via: "ai_chat" }),
+    onMakeGoal: (goal) => makeGoalFor(goal),
     // The owner's details from the chat: which parts changed goes on the trail, never what they now say.
     onSaveOwner: (owner) => {
       const touched = ownerChanges(settings.owner ?? NO_OWNER, owner);
@@ -2839,7 +2857,15 @@ export default function App() {
                   (s, [from, to]) => ({ ...s, credits: renameDebtAccount(s.credits, from, to), plans: renamePlans(s.plans ?? [], "wallet", from, to) }),
                   next,
                 );
-                setSettings(kinds.reduce<AppSettings>((s, [from, to]) => ({ ...s, plans: renamePlans(s.plans ?? [], "item", from, to) }), withAccounts));
+                /*
+                 * A goal closed or removed: the plans saving in it no longer
+                 * point at it, and are counted in safe to spend again, as a plan
+                 * with no goal is.
+                 */
+                const gone = new Set(next.accounts.filter((a) => a.kind === "goal" && a.archived && settings.accounts.some((b) => b.id === a.id && !b.archived)).map((a) => a.id));
+                const freed = (s: AppSettings): AppSettings =>
+                  gone.size === 0 ? s : { ...s, plans: (s.plans ?? []).map((p) => (p.goalId && gone.has(p.goalId) ? { ...p, goalId: undefined, wallet: s.accounts.find((a) => a.id === p.goalId)?.name === p.wallet ? "" : p.wallet, setAside: true } : p)) };
+                setSettings(freed(kinds.reduce<AppSettings>((s, [from, to]) => ({ ...s, plans: renamePlans(s.plans ?? [], "item", from, to) }), withAccounts)));
               }}
               onRenameAccount={(from, to) => handleRename("account", from, to)}
               onRenameItem={(from, to) => handleRename("item", from, to)}

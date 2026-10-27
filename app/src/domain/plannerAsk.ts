@@ -12,6 +12,7 @@
 import { addDays, dayOfWeek, formatMedium, lastOfMonth, MONTH_NAMES } from "./dates";
 import { formatMoney, parseAmount, withoutYears, type Centavos } from "./money";
 import { protectModels, withoutModelNumbers } from "./modelNumbers";
+import { asksForGoal } from "./planGoal";
 
 /** The first letter up, unless the word is written in its own case already: "iPhone" stays "iPhone". */
 export const capitalised = (s: string): string => s.replace(/^[a-z](?![A-Z])/, (c) => c.toUpperCase());
@@ -19,7 +20,16 @@ import { byWhen, dueFor, kindFromHistory, NO_DATE, planKinds, whenOf, type DueKi
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export type PlannerAsk =
-  | { readonly kind: "list" }
+  /** What is on the Planner: open by default, or the paid, skipped, removed or overdue ones. */
+  | { readonly kind: "list"; readonly which?: "done" | "skipped" | "removed" | "overdue" | undefined }
+  /** "Link #3933 to the tuition plan", "I already paid it": an entry already in the ledger counted as its payment. */
+  | { readonly kind: "link"; readonly plan: Plan; readonly records: readonly number[] }
+  /** "Unlink #3933 from the tuition plan": that entry no longer counted as its payment. */
+  | { readonly kind: "unlink"; readonly plan: Plan; readonly records: readonly number[] }
+  /** "Make a goal for the iphone plan": a goal made for it when the card is pressed (planGoal.ts). */
+  | { readonly kind: "makeGoal"; readonly plan: Plan }
+  /** "Plan the Abra trip again in december": a new open plan copied from a closed one. */
+  | { readonly kind: "again"; readonly plan: Plan; readonly due: IsoDate; readonly dueKind: DueKind; readonly amount: Centavos | null }
   /** "If I pay the tuition plan today, will I be short?": what paying it would do, nothing saved. */
   | { readonly kind: "payIf"; readonly plan: Plan; readonly wallet: string }
   /** Skip, move or pay a plan already paid, skipped or removed: said, with how to open it again. */
@@ -256,11 +266,27 @@ export function readPlannerAsk(
     readonly asOf: IsoDate;
     /** Goal accounts, for "save for the phone plan in Phone fund". */
     readonly goals?: readonly { readonly id: string; readonly name: string }[] | undefined;
+    /**
+     * The plan the conversation is about: the one just added, changed or
+     * asked about. "Move it to march", "skip it", "I paid it" mean it when
+     * no plan is named (owner, 27 October 2026: "all things the plan can do
+     * ai can do it too").
+     */
+    readonly focus?: Plan | null | undefined;
   },
 ): PlannerAsk | null {
   const t = text.trim();
   if (!t || t.split(/\s+/).length > 30) return null;
   const { plans, reference, transactions, asOf } = context;
+  const focus = context.focus ?? null;
+  // "it", "that", "this one" with something to do to it, and no plan named.
+  const pointsAt =
+    focus !== null &&
+    /\b(?:it|its|it'?s|that|this(?:\s+one)?)\b/i.test(t) &&
+    /\b(?:move|push|postpone|resched\w*|delay|extend|skip|cancel|remove|delete|drop|pay|paid|settle|put|bring|restore|reopen|rename|call|make|change|set|update|link|unlink|count\w*|want|need|note|save|afford|think|again|mark\w*|done|worth)\b/i.test(t) &&
+    planNamed(t, plans, ["open", "done", "skipped", "removed"]) === null;
+  const named = (list: readonly Plan[], prefer: readonly Plan["status"][]): Plan | null =>
+    planNamed(t, list, prefer) ?? (pointsAt && focus && list.some((p) => p.id === focus.id) && prefer.includes(focus.status) ? focus : null);
 
   /*
    * One month's plans: "how much is planned this month?", "what's planned
@@ -288,9 +314,24 @@ export function readPlannerAsk(
     }
   }
 
+  // The Planner's tabs, asked for: "which plans are done?", "show skipped plans", "overdue plans" (27 October 2026).
+  {
+    const which = /\b(?:overdue|late|past\s+due)\b/i.test(t) ? "overdue" : /\bskipped\b/i.test(t) ? "skipped" : /\bremoved|deleted\b/i.test(t) ? "removed" : /\b(?:done|paid|finished|completed)\b/i.test(t) ? "done" : null;
+    if (which && /\bplans\b|\bplan\s+list\b|\bplanner\b/i.test(t) && /\b(?:what|which|show|list|any|see|my|ilan|ano)\b/i.test(t) && !/\b(?:add|move|skip\s+the|remove\s+the|delete\s+the|link|unlink)\b/i.test(t)) return { kind: "list", which };
+  }
+
   // "What's planned?", "show my planner", "what plans are due this week?"
   if ((/\b(?:what(?:'s| is| do i have)?|show|list|any|see|check)\b[^.?!]{0,30}\b(?:planned|planner|plans)\b/i.test(t) || /\b(?:may|meron|merong|ano(?:ng)?|ilan(?:g)?)\b[^.?!]{0,20}\bplano\b/i.test(t)) && !/\b(?:add|move|skip|remove|delete|pay|paid)\b/i.test(t)) {
     return { kind: "list" };
+  }
+
+  // "Plan the Abra trip again in december 8000": the Planner's "Plan it again", for a paid or skipped one.
+  if (/\bagain\b|\brepeat\b|\bonce\s+more\b|\bulit\b/i.test(t) && /\b(?:plan|do|book|buy|have|go|add|schedule)\b/i.test(t)) {
+    const plan = named(plans.filter((p) => p.status !== "open"), ["done", "skipped", "removed"]);
+    if (plan) {
+      const when = NO_DAY.test(t) ? null : whenFor(t, asOf);
+      return { kind: "again", plan, due: when?.due ?? NO_DATE, dueKind: when?.kind ?? "none", amount: sumIn(t.replace(/#\s?\d+/g, " ")) };
+    }
   }
 
   // Adding: "plan tuition 9000 on nov 15", "add a new phone 25k by march 2027 to my planner".
@@ -366,11 +407,27 @@ export function readPlannerAsk(
   const notPlanner = /\b(?:phone|mobile|cell|postpaid|prepaid|data|internet|wifi|wi-fi|fiber|fibre|broadband|load|insurance|health|life|hmo|installment|instalment|payment|unli|globe|smart|dito|sun|tnt|gomo|meal|family|streaming|netflix|spotify)\s+plans?\b/gi;
   // "pay the new phone plan": a plan called New phone is still the Planner's.
   const kept = plans.some((p) => p.status === "open" && (new RegExp(notPlanner.source, "i").test(p.title) || new RegExp(`\\b${p.title.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+plans?\\b`, "i").test(t)));
-  if (!PLANNER.test(kept ? t : t.replace(notPlanner, " "))) return null;
+  if (!PLANNER.test(kept ? t : t.replace(notPlanner, " ")) && !pointsAt) return null;
   const open = plans.filter((p) => p.status === "open");
 
+  /*
+   * Payments already in the ledger, counted as the plan's or no longer: the
+   * Planner's "Link a payment I added" and Unlink, said ("link #3933 to the
+   * tuition plan", "#3950 was the payment for it", "unlink #3933").
+   */
+  const records = [...t.matchAll(/#\s?(\d{1,5})\b/g)].map((m) => Number(m[1]));
+  if (/\bunlink\b|\b(?:not|isn'?t|wasn'?t)\s+(?:a\s+|the\s+)?payment\s+for\b|\b(?:remove|take\s+off)\s+(?:the\s+)?(?:payment|link)\b/i.test(t)) {
+    const plan = named(plans, ["open", "done"]);
+    return plan ? { kind: "unlink", plan, records } : { kind: "none", said: t };
+  }
+  if (/\blink\b|\b(?:was|is)\s+(?:the\s+|its\s+)?payment\s+for\b|\bpaid\s+(?:it\s+|for\s+it\s+)?(?:with|by|using|in)\s+#|\balready\s+(?:paid|entered|recorded|added)\b/i.test(t) || (records.length > 0 && /\b(?:paid|payment)\b/i.test(t))) {
+    const plan = named(plans, ["open", "done"]);
+    if (plan) return { kind: "link", plan, records };
+  }
+
+
   if (/\b(?:how\s+much|magkano)\b[^.?!]*\b(?:save|set\s+aside|put\s+aside|keep|ipon|itabi)\b/i.test(t)) {
-    const plan = planNamed(t, open, ["open"]);
+    const plan = named(open, ["open"]);
     if (plan) return { kind: "saveFor", plan };
   }
 
@@ -380,33 +437,39 @@ export function readPlannerAsk(
    * "can i afford the christmas gifts plan?" was answered with today's money).
    */
   if (/\b(?:what\s+(?:do|would)\s+you\s+(?:think|say|suggest|recommend)|what'?s\s+your\s+(?:take|opinion|advice|thoughts?)|your\s+(?:opinion|take|advice|thoughts?)|any\s+(?:advice|suggestions?|tips?)|can\s+i\s+(?:afford|make|manage|pay\s+for)|kaya\s+(?:ko\s+)?ba|ok(?:ay)?\s+lang\s+ba|ano\s+(?:sa\s+tingin|masasabi)\s+mo|is\s+(?:the|my)\b[^.?!]{1,40}\bplan\s+(?:ok(?:ay)?|good|realistic|doable|possible|too\s+much|affordable))\b/i.test(t)) {
-    const plan = planNamed(t, open, ["open"]);
+    const plan = named(open, ["open"]);
     if (plan) return { kind: "opinion", plan };
+  }
+
+  // "Make a goal for it": before the edits, which read "save for the phone plan in Phone fund" as an existing goal.
+  if (asksForGoal(t)) {
+    const plan = named(open, ["open"]);
+    if (plan) return { kind: "makeGoal", plan };
   }
 
   // A field other than the date, the amount or a payment ("the trip plan is a want", "don't count the trip plan").
   // "pay the new phone plan 5000 from cash" is a payment from Cash, not the plan's wallet changed (27 October 2026 sweep).
   if (!/^\s*(?:please\s+|pls\s+)?(?:pay|settle)\b|\b(?:put\s+back|restore|bring\s+back|reopen|paid|move|extend|postpone)\b|\b(?:put|bring)\b[^.?!]{0,40}?\bback\b/i.test(t)) {
-    const plan = planNamed(t, open, ["open"]);
+    const plan = named(open, ["open"]);
     const edit = plan ? editIn(t, plan, reference, context.goals ?? []) : null;
     if (plan && edit) return { kind: "edit", plan, input: edit.input, changes: edit.changes };
   }
 
   // "Put the concert plan back" as well as "put back the concert plan".
   if (/\b(?:put\s+back|restore|bring\s+back|un-?skip|reopen)\b|\b(?:put|bring)\b[^.?!]{0,40}?\bback\b/i.test(t)) {
-    const plan = planNamed(t, plans, ["removed", "skipped", "done"]);
+    const plan = named(plans, ["removed", "skipped", "done"]);
     return plan ? { kind: "restore", plan } : { kind: "none", said: t };
   }
   if (/\b(?:remove|delete|take\s+off|drop)\b/i.test(t)) {
-    const plan = planNamed(t, plans, ["open", "skipped", "done"]);
+    const plan = named(plans, ["open", "skipped", "done"]);
     return plan ? { kind: "remove", plan } : { kind: "none", said: t };
   }
   if (/\b(?:skip|cancel|won'?t|not\s+(?:going|buying|paying)|no\s+longer|call\s+off)\b/i.test(t)) {
-    const plan = planNamed(t, open, ["open"]);
+    const plan = named(open, ["open"]);
     return plan ? { kind: "skip", plan } : closedNamed(t, plans);
   }
   if (/\b(?:move|extend|push|postpone|resched\w*|delay|change\s+the\s+date|later\s+to)\b/i.test(t)) {
-    const plan = planNamed(t, open, ["open"]);
+    const plan = named(open, ["open"]);
     // "Move the trip plan to december" is a month; "... to no date yet" takes the date away.
     const when = NO_DAY.test(t) ? null : whenFor(t, asOf);
     if (plan && NO_DAY.test(t)) return { kind: "move", plan, to: NO_DATE, toKind: "none" };
@@ -417,20 +480,20 @@ export function readPlannerAsk(
    * will i be short" was offered as a Pay card (27 October 2026 sweep).
    */
   if (/\bpay\b/i.test(t) && /^\s*(?:if|what\s+if|kung|suppose)\b|\b(?:will|would|can|could|should)\s+i\b|\bam\s+i\b|\b(?:enough|short|kulang|kaya)\b|\?\s*$/i.test(t) && !/\b(?:i|we)\s+(?:already\s+)?paid\b/i.test(t)) {
-    const plan = planNamed(t, open, ["open"]);
+    const plan = named(open, ["open"]);
     if (plan) {
       const wallet = [...reference.wallets, ...reference.savings].find((w) => new RegExp(`\\b${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) ?? "";
       return { kind: "payIf", plan, wallet };
     }
   }
   if (/\b(?:paid|pay|settle|mark\b[^.?!]{0,30}\bpaid)\b/i.test(t)) {
-    const plan = planNamed(t, open, ["open"]);
+    const plan = named(open, ["open"]);
     if (!plan) return closedNamed(t, plans);
     const wallet = [...reference.wallets, ...reference.savings].find((w) => new RegExp(`\\b${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) ?? "";
     return { kind: "pay", plan, amount: sumIn(t), wallet };
   }
   if (/\b(?:is\s+now|now|costs?|price|change|make|set|update|raise|lower|increase|reduce|bump|actually)\b/i.test(t)) {
-    const plan = planNamed(t, open, ["open"]);
+    const plan = named(open, ["open"]);
     const amount = sumIn(t);
     return plan && amount !== null && amount !== plan.amount ? { kind: "amount", plan, amount } : null;
   }
@@ -532,4 +595,19 @@ export function plansWords(views: readonly PlanView[], setAside: Centavos): stri
 export function dueWords(due: IsoDate, asOf: IsoDate): string {
   const month = MONTH_NAMES[Number(due.slice(5, 7)) - 1] ?? "";
   return `${month} ${Number(due.slice(8, 10))}, ${due.slice(0, 4)}${due < asOf ? " (already passed)" : ""}`;
+}
+
+/** The Planner's other tabs, said: the paid, skipped, removed or overdue plans (27 October 2026). */
+export function closedPlansWords(views: readonly PlanView[], which: "done" | "skipped" | "removed" | "overdue", asOf: IsoDate): string {
+  const pick = views.filter((v) => (which === "overdue" ? v.plan.status === "open" && v.plan.due !== NO_DATE && v.plan.due < asOf : which === "done" ? v.plan.status === "done" : v.plan.status === which));
+  const name = which === "done" ? "paid" : which;
+  if (pick.length === 0) return which === "overdue" ? "No plan is overdue: every open plan's day is today or later, or it has no date yet." : `No plan is ${name}.`;
+  const sorted = [...pick].sort((a, b) => (which === "overdue" ? a.plan.due.localeCompare(b.plan.due) : (b.plan.closedOn ?? "").localeCompare(a.plan.closedOn ?? "")));
+  const lines = sorted.slice(0, 12).map((v) =>
+    which === "overdue"
+      ? `- ${v.plan.title}: ${formatMoney(v.left)} left, due ${formatMedium(v.plan.due)}`
+      : `- ${v.plan.title}: ${formatMoney(v.plan.amount)}${v.plan.closedOn ? `, ${name} on ${formatMedium(v.plan.closedOn)}` : ""}${v.plan.reason ? ` (${v.plan.reason})` : ""}${which === "done" && v.paid > 0 ? `, ${formatMoney(v.paid)} paid` : ""}`,
+  );
+  const close = which === "overdue" ? 'To pay one, say "I paid the ... plan"; to give it a new day, "move the ... plan to" a day.' : which === "done" ? 'To do one again, say "plan the ... again" with a day.' : 'To open one again, say "put the ... plan back".';
+  return [`**${pick.length} ${pick.length === 1 ? "plan" : "plans"} ${which === "overdue" ? "overdue" : name}:**`, ...lines, pick.length > 12 ? `And ${pick.length - 12} more on the Planner.` : "", close].filter(Boolean).join("\n");
 }

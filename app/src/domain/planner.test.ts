@@ -530,3 +530,35 @@ describe("the Planner's questions, said other ways", () => {
     expect(readPlannerAsk("pay the new phone plan 5000 from cash", c)).toMatchObject({ kind: "pay" });
   });
 });
+
+// "All things the plan can do ai can do it too" (owner, 27 October 2026).
+describe("every Planner action from the chat", () => {
+  const open = makePlan(input({ title: "Haircut", amount: 15_000, due: "2026-10-28", item: "Self Care" }), asOf, "owner");
+  const done = { ...makePlan(input({ title: "Trip to Abra", amount: 900_000, due: "2026-10-10" }), asOf, "owner"), status: "done" as const, closedOn: "2026-10-09" };
+  const c = { plans: [open, done], reference, transactions: ledger, asOf };
+  it("links and unlinks payments already in the ledger", () => {
+    expect(readPlannerAsk("link #3950 to the haircut plan", c)).toMatchObject({ kind: "link", plan: { title: "Haircut" }, records: [3950] });
+    expect(readPlannerAsk("I already paid the haircut plan", c)).toMatchObject({ kind: "link", records: [] });
+    expect(readPlannerAsk("unlink #3950 from the haircut plan", c)).toMatchObject({ kind: "unlink", records: [3950] });
+  });
+  it("plans a paid one again", () => {
+    expect(readPlannerAsk("plan the trip to abra again in december 8000", c)).toMatchObject({ kind: "again", plan: { title: "Trip to Abra" }, due: "2026-12-31", dueKind: "month", amount: 800_000 });
+  });
+  it("lists the other tabs", () => {
+    expect(readPlannerAsk("which plans are overdue?", c)).toEqual({ kind: "list", which: "overdue" });
+    expect(readPlannerAsk("show my skipped plans", c)).toEqual({ kind: "list", which: "skipped" });
+    expect(readPlannerAsk("what plans are done", c)).toEqual({ kind: "list", which: "done" });
+  });
+  it("makes a goal for one", () => {
+    expect(readPlannerAsk("make a goal for the haircut plan", c)).toMatchObject({ kind: "makeGoal", plan: { title: "Haircut" } });
+  });
+  it("knows what 'it' is: the plan just talked about", () => {
+    const f = { ...c, focus: open };
+    expect(readPlannerAsk("move it to nov 5", f)).toMatchObject({ kind: "move", plan: { title: "Haircut" }, to: "2026-11-05" });
+    expect(readPlannerAsk("skip it", f)).toMatchObject({ kind: "skip", plan: { title: "Haircut" } });
+    expect(readPlannerAsk("make it 200", f)).toMatchObject({ kind: "amount", amount: 20_000 });
+    expect(readPlannerAsk("make a goal for it", f)).toMatchObject({ kind: "makeGoal" });
+    // With nothing in focus, "it" names no plan.
+    expect(readPlannerAsk("skip it", c)).toBeNull();
+  });
+});

@@ -28,6 +28,7 @@ import { AmountInput, Field, Switch, TextInput } from "../components/forms";
 import { Alert, Button, Card, EmptyState, Money, ProgressBar, SegmentedControl, StatusPill, Tabs } from "../components/primitives";
 import { Select } from "../components/Select";
 import { Sheet } from "../components/Sheet";
+import { goalForPlan, goalParents, type GoalForPlan } from "../domain/planGoal";
 import { useConfirm } from "../components/Confirm";
 import type { Account } from "../domain/accounts";
 import { walletBalance } from "../domain/balances";
@@ -90,8 +91,8 @@ export interface PlannerProps {
   readonly onChange: (plan: Plan, action: PlanAction, summary: string) => void;
   /** Save a payment as an entry and link it. Returns what stopped it, or null when saved. */
   readonly onPay: (plan: Plan, draft: Draft, settles: boolean) => string | null;
-  /** A goal for a plan, made in Settings' accounts. Returns its id. */
-  readonly onMakeGoal: (name: string, target: Centavos, deadline: IsoDate) => string;
+  /** A goal for a plan, made in Settings' accounts as worked out (`planGoal.ts`), or the one already there. Returns its id and name. */
+  readonly onMakeGoal: (goal: GoalForPlan) => { readonly id: string; readonly name: string };
   /** Open an entry in the Database. */
   readonly onShowEntry?: ((recordNumber: number) => void) | undefined;
   /** A plan another screen sent here: opened, or opened to record its payment (the Dashboard's and Insights' Pay). */
@@ -968,7 +969,7 @@ export function PlanForm(props: {
   onClose: () => void;
   onSave: (input: PlanInput) => void;
   /** Making a goal for it from the form; absent where that cannot be done (the chat). */
-  onMakeGoal?: ((name: string, target: Centavos, deadline: IsoDate) => string) | undefined;
+  onMakeGoal?: ((goal: GoalForPlan) => { readonly id: string; readonly name: string }) | undefined;
 }) {
   const { editing, reference, accounts, asOf } = props;
   const isEdit = Boolean(editing && props.plans.some((p) => p.id === editing.id));
@@ -981,6 +982,14 @@ export function PlanForm(props: {
   const [item, setItem] = useState(editing?.item ?? "");
   const [wallet, setWallet] = useState(editing?.wallet ?? "");
   const [goalId, setGoalId] = useState(editing?.goalId ?? "");
+  /*
+   * "Make a goal for it" is made when the plan is saved, never on the pick:
+   * picked and then cancelled, or picked twice, it made a goal each time
+   * ("Motorcylce setup and repair" and "... fund", owner 27 October 2026).
+   */
+  const [newGoal, setNewGoal] = useState(false);
+  const goalHomes = goalParents(accounts);
+  const [goalHome, setGoalHome] = useState(goalHomes[0]?.id ?? "");
   const [need, setNeed] = useState(editing?.need ?? true);
   const [setAside, setSetAside] = useState(editing ? editing.setAside : true);
   const [notes, setNotes] = useState(editing?.notes ?? "");
@@ -996,7 +1005,7 @@ export function PlanForm(props: {
   const suggested = !picked && !item ? kindFromHistory(title, props.transactions, kinds) : null;
   const kind = item || suggested || "";
   const recurring = isRecurringKind(kind, reference);
-  const input: PlanInput = { title, amount, due, dueKind: when.kind, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !recurring, notes };
+  const input: PlanInput = { title, amount, due, dueKind: when.kind, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !newGoal && !recurring, notes };
   // What is paid on it already: its amount may not go below that, and at exactly that it is paid in full.
   const paidOn = useMemo(() => (editing && isEdit ? viewOf(editing, { transactions: props.transactions, accounts, asOf }).paid : 0), [editing, isEdit, props.transactions, accounts, asOf]);
   const check = checkPlan(
@@ -1013,8 +1022,10 @@ export function PlanForm(props: {
   );
   const paidProblem = check.problems.find((p) => p.includes("is paid on it already"));
   const { confirm, dialog: confirmDialog } = useConfirm();
-  const goalName = goals.find((g) => g.id === goalId)?.name ?? "";
-  const counted = setAside && !goalId && !recurring;
+  // The goal it would get, or the one picked, checked and said before anything is made (`planGoal.ts`).
+  const goalPlan = newGoal || goalId ? goalForPlan({ id: editing?.id, title, amount, due, dueKind: when.kind }, { accounts, plans: props.plans, transactions: props.transactions, asOf, parentId: goalHome, goalId: newGoal ? undefined : goalId }) : null;
+  const goalName = newGoal ? (goalPlan?.name ?? title.trim()) : (goals.find((g) => g.id === goalId)?.name ?? "");
+  const counted = setAside && !goalId && !newGoal && !recurring;
 
   /*
    * The kind's limit in the plan's month, with what is spent and the other
@@ -1043,7 +1054,7 @@ export function PlanForm(props: {
 
   const save = async (): Promise<void> => {
     setTried(true);
-    if (check.problems.length > 0) return;
+    if (check.problems.length > 0 || (newGoal && (goalPlan?.problems.length ?? 0) > 0)) return;
     /*
      * A new plan for a day already gone (owner, 27 October 2026: "what if I
      * create a plan but in the past?"): asked, since it is either a payment
@@ -1064,6 +1075,13 @@ export function PlanForm(props: {
         cancelLabel: "Go back",
       });
       if (!ok) return;
+    }
+    // The goal, made now that the plan is saved: by its day, or with no deadline when the plan has no date (never the year 9999).
+    if (newGoal && props.onMakeGoal && goalPlan) {
+      if (goalPlan.problems.length > 0) return;
+      const made = props.onMakeGoal(goalPlan);
+      props.onSave({ ...input, goalId: made.id, wallet: made.name, setAside: false });
+      return;
     }
     props.onSave(input);
   };
@@ -1147,20 +1165,21 @@ export function PlanForm(props: {
                 onChange={(v) => setNeed(v === "need")}
               />
             </Field>
-            <Field label="Saving for it" help={goalId ? `${goalName} is where its money is kept. Paying it comes out of the goal.` : "Link a goal from Settings, or make one for it."}>
+            <Field
+              label="Saving for it"
+              help={goalPlan ? goalPlan.notes.join(" ") : "Link a goal from Settings, or make one for it when you save."}
+              error={newGoal && goalPlan && goalPlan.problems.length > 0 ? goalPlan.problems[0] : undefined}
+            >
               <Select
-                value={goalName || NO_GOAL}
+                value={newGoal ? NEW_GOAL : goalName || NO_GOAL}
                 onChange={(v) => {
                   if (v === NEW_GOAL && props.onMakeGoal) {
-                    if (!title.trim() || amount === null || amount <= 0) {
-                      setTried(true);
-                      return;
-                    }
-                    const id = props.onMakeGoal(title.trim(), amount, due);
-                    setGoalId(id);
-                    setWallet(title.trim());
+                    // Only marked here; made on save. What is missing is said under it, not silently refused.
+                    setNewGoal(true);
+                    setGoalId("");
                     return;
                   }
+                  setNewGoal(false);
                   const g = goals.find((x) => x.name === v);
                   setGoalId(g?.id ?? "");
                   if (g) setWallet(g.name);
@@ -1169,6 +1188,11 @@ export function PlanForm(props: {
                 ariaLabel="Saving for it in a goal"
               />
             </Field>
+            {newGoal && goalPlan && !goalPlan.reuse && goalHomes.length > 1 && (
+              <Field label="Kept inside" help="The savings account the goal's money sits in, as on Settings, Goals.">
+                <Select value={goalHomes.find((h) => h.id === goalHome)?.name ?? goalHomes[0]?.name ?? ""} onChange={(v) => setGoalHome(goalHomes.find((h) => h.name === v)?.id ?? goalHome)} options={goalHomes.map((h) => h.name)} ariaLabel="Account the goal sits in" />
+              </Field>
+            )}
             <div className="fms-planform-switch">
               <span className="fms-planform-switchtext">
                 <span className="t-body">Count it in safe to spend</span>

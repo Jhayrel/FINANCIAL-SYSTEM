@@ -435,7 +435,9 @@ export function readPlanLine(line: string, ctx: PlanContext): PlanInput | null {
   const kind: DueKind = when ? when.kind : "none";
   const due = when ? when.due : NO_DATE;
   const amount = sumIn(line.replace(/\b20\d{2}-\d{2}-\d{2}\b/g, " ").replace(/\b(?:in|by|of)\s+20\d{2}\b/gi, " "));
-  const title = (line.split(/,|\s+(?:php|₱)\s*\d|\s+\d/i)[0] ?? "").replace(/^\s*(?:a|an|the|my)\s+/i, "").trim();
+  // "iPhone 18 Pro Max, PHP 100,000.00": the model number is the name, never where the price starts ("iPhone", 27 October 2026).
+  const models = protectModels(line);
+  const title = models.restore((models.text.split(/,|\s+(?:php|₱)\s*\d|\s+\d/i)[0] ?? "").replace(/^\s*(?:a|an|the|my)\s+/i, "").trim());
   if (!title || amount === null || due < ctx.asOf) return null;
   const wallet = /\bfrom\s+([^,]+?)\s*(?:,|$)/i.exec(line)?.[1]?.trim() ?? "";
   const input = planInputFor(title, amount, due, ctx, line, kind);
