@@ -11,6 +11,10 @@
  */
 import { addDays, dayOfWeek, formatMedium, lastOfMonth, MONTH_NAMES } from "./dates";
 import { formatMoney, parseAmount, withoutYears, type Centavos } from "./money";
+import { protectModels, withoutModelNumbers } from "./modelNumbers";
+
+/** The first letter up, unless the word is written in its own case already: "iPhone" stays "iPhone". */
+export const capitalised = (s: string): string => s.replace(/^[a-z](?![A-Z])/, (c) => c.toUpperCase());
 import { byWhen, dueFor, kindFromHistory, NO_DATE, planKinds, whenOf, type DueKind, type Plan, type PlanInput, type PlannedMonth, type PlanView } from "./planner";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -139,7 +143,8 @@ const withoutDays = (t: string): string => t.replace(NO_DAY_G, " ");
 
 /** A sum said: "9000", "9k", "PHP 9,000". */
 export function sumIn(text: string): Centavos | null {
-  const m = /(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*(k)?\b(?!\s*(?:st|nd|rd|th|days?|weeks?|months?|%))/i.exec(withoutYears(text).replace(new RegExp(String.raw`\b${MONTH_RE}\.?\s+\d{1,2}(?:st|nd|rd|th)?\b`, "gi"), " "));
+  // "iphone 18 pro max" names a model, not PHP 18.00 (`modelNumbers.ts`).
+  const m = /(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*(k)?\b(?!\s*(?:st|nd|rd|th|days?|weeks?|months?|%))/i.exec(withoutModelNumbers(withoutYears(text)).replace(new RegExp(String.raw`\b${MONTH_RE}\.?\s+\d{1,2}(?:st|nd|rd|th)?\b`, "gi"), " "));
   if (!m?.[1]) return null;
   const base = parseAmount(m[1]);
   return base === null || base <= 0 ? null : m[2] ? base * 1000 : base;
@@ -265,8 +270,10 @@ export function readPlannerAsk(
   {
     const named = MONTH_NAMES.findIndex((m) => new RegExp(`\\b${m.slice(0, 3)}(?:${m.slice(3)})?\\b`, "i").test(t));
     const aboutMonth = /\b(?:this|next|ngayong|sa\s+susunod\s+na)\s+(?:month|buwan)\b/i.test(t) || named >= 0;
-    const asksHowMuch = /\b(?:how\s+much|magkano|total|what(?:'s|\s+is|\s+are)?)\b[^.?!]{0,30}\b(?:planned|plans?)\b/i.test(t) || /\b(?:planned|plans?)\b[^.?!]{0,12}\b(?:for|in|this|next)\b/i.test(t);
-    if (aboutMonth && asksHowMuch && !/\b(?:add|move|skip|remove|delete|pay|paid|plan\s+(?:a|an|my|the)?\s*\w+\s+\d)\b/i.test(t) && !/\d{3,}/.test(t)) {
+    // "planned" or "plans", never "plan": "I plan next month to get an iphone, what do you think?" is a new plan, asked about (27 October 2026).
+    const asksHowMuch = /\b(?:how\s+much|magkano|total|what(?:'s|\s+is|\s+are)?)\b[^.?!]{0,30}\b(?:planned|plans)\b/i.test(t) || /\b(?:planned|plans)\b[^.?!]{0,12}\b(?:for|in|this|next)\b/i.test(t);
+    const tellsAPlan = /\b(?:i|we)\s+(?:plan|am\s+planning|'m\s+planning|m\s+planning|want|will|'ll)\b|\b(?:to\s+)?(?:buy|get|purchase|order|book)\b/i.test(t);
+    if (aboutMonth && asksHowMuch && !tellsAPlan && !/\b(?:add|move|skip|remove|delete|pay|paid|plan\s+(?:a|an|my|the)?\s*\w+\s+\d)\b/i.test(t) && !/\d{3,}/.test(t)) {
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
       if (named >= 0) {
@@ -296,7 +303,9 @@ export function readPlannerAsk(
     const due = when?.due ?? NO_DATE;
     const monthly = /\b(?:every|each|per|a)\s+month\b|\bmonthly\b|\bkada\s+buwan\b|\bbuwan[- ]buwan\b/i.test(t);
     const wallet = [...reference.wallets, ...reference.savings].find((w) => new RegExp(`\\b(?:from|using|with|via)\\s+${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) ?? "";
-    const title = t
+    // "plan iphone 18 pro max 80000": the model number stays in the name (`modelNumbers.ts`).
+    const models = protectModels(t);
+    const title = models.restore(models.text
       .replace(/^\s*(?:please\s+|pls\s+)?(?:plan|schedule|add|put|remind\s+me\s+to\s+pay)\s+/i, "")
       .replace(/\b(?:to|in|into|on)\s+(?:my|the)\s+planner\b/gi, " ")
       .replace(/\b(?:a\s+)?(?:new\s+)?plan\s+(?:for\s+)?/gi, " ")
@@ -318,11 +327,11 @@ export function readPlannerAsk(
        */
       .replace(/^(?:(?:for|by|on|the|my|a|an|of|pay|in)\s+)+/i, "")
       .replace(/(?:\s+(?:for|by|on|the|my|a|an|of|in|and|to))+$/i, "")
-      .trim();
+      .trim()).replace(/\s+/g, " ").trim();
     if (amount === null || !title) return null;
-    if (monthly) return { kind: "recurring", title: title.replace(/^./, (c) => c.toUpperCase()), amount };
+    if (monthly) return { kind: "recurring", title: capitalised(title), amount };
     const kinds = planKinds(reference).options;
-    const name = title.replace(/^./, (c) => c.toUpperCase());
+    const name = capitalised(title);
     const recurring = [...reference.bills, ...reference.subscriptions].some((b) => b.toLowerCase() === (kindFromHistory(name, transactions, kinds) ?? "").toLowerCase());
     return {
       kind: "add",

@@ -176,6 +176,8 @@ describe("no date, or only a month (owner, 27 October 2026: \"LIKE NO DATE LIKE 
     expect(readPlannerAsk("tuition 9500", c)).toBeNull();
     expect(readPlannerAsk("put the concert ticket plan back", c)).toMatchObject({ kind: "restore", plan: { title: "Concert ticket" } });
     expect(readPlannerAsk("bring back the concert plan", c)).toMatchObject({ kind: "restore" });
+    // A model number is the name: "Galaxy S24 Ultra", PHP 65,000.00.
+    expect(readPlannerAsk("plan galaxy s24 ultra 65000 in march", c)).toMatchObject({ kind: "add", input: { title: "Galaxy S24 Ultra", amount: 6_500_000 } });
     // Skipped already: said, not "no plan by that name".
     const said = readPlannerAsk("skip the concert plan", c);
     expect(said).toMatchObject({ kind: "closed", plan: { title: "Concert ticket" } });
@@ -220,6 +222,8 @@ describe("no date, or only a month (owner, 27 October 2026: \"LIKE NO DATE LIKE 
     expect(readPlannerAsk("how much is planned next month", c)).toEqual({ kind: "month", year: 2026, month: 11 });
     expect(readPlannerAsk("what's planned for march?", c)).toEqual({ kind: "month", year: 2027, month: 3 });
     expect(readPlannerAsk("what plans do i have?", c)).toEqual({ kind: "list" });
+    // Telling a plan is not asking what is planned.
+    expect(readPlannerAsk("I plan next month to get iphone 18 pro max what do you think?", c)).toBeNull();
     expect(readPlannerAsk("what do you think of my tuition plan?", c)).toMatchObject({ kind: "opinion", plan: { title: "Tuition" } });
     expect(readPlannerAsk("can i afford the tuition plan?", c)).toMatchObject({ kind: "opinion" });
     expect(readPlannerAsk("how much should i save for the tuition plan", c)).toMatchObject({ kind: "saveFor" });

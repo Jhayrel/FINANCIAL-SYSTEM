@@ -302,7 +302,9 @@ export function financeAlerts(input: AlertInput): Alert[] {
    * against the money (`incomeBudget.ts`). Never changed without the owner.
    */
   {
-    const since = incomeSinceSet(transactions, budgets[String(year)], year, month);
+    // Into a spending wallet only: bank interest into savings is savings growing, not money for the budget (27 October 2026).
+    const spendingWallets = input.accounts.filter((a) => a.kind === "spending" && !a.archived).map((a) => a.name);
+    const since = incomeSinceSet(transactions, budgets[String(year)], year, month, spendingWallets);
     if (since.setOn && since.amount >= 10000) {
       out.push({
         id: `income-since-budget-${year}-${month}-${since.amount}`,

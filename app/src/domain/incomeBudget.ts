@@ -42,10 +42,22 @@ export interface IncomeBudget {
   readonly month: number;
   /** The local day the month's budget was last saved, or null when it never was. */
   readonly setOn: IsoDate | null;
-  /** Income dated on or after `setOn` in the month (the whole month when it was set before). */
+  /**
+   * Income dated on or after `setOn` in the month (the whole month when it
+   * was set before) that landed in a spending wallet: money that can be
+   * spent, so money a budget can grow by.
+   */
   readonly cameIn: Centavos;
   /** The largest of it, for the words. */
   readonly sources: readonly { readonly name: string; readonly amount: Centavos; readonly date: IsoDate }[];
+  /**
+   * Income that landed in savings or a goal instead: bank interest, mostly.
+   * Savings growing, not money to spend, so never offered to the budget
+   * (owner, 27 October 2026: "I received an interest in my bank and now it's
+   * saying to add to the budget").
+   */
+  readonly intoSavings: Centavos;
+  readonly savingsSources: readonly { readonly name: string; readonly amount: Centavos; readonly date: IsoDate }[];
   /** Moved from the spending wallets into savings since then, less what came back. */
   readonly toSavings: Centavos;
   /** The spending budget now. */
@@ -100,13 +112,20 @@ export function incomeBudget(input: {
   const income = rows.filter(
     (t) => t.date.startsWith(prefix) && t.date >= since && incomeOf(t) > 0 && (t.date > since || since !== setOn || (savedAt(t) ?? Infinity) > setAtMs),
   );
-  const cameIn = income.reduce((sum, t) => sum + incomeOf(t), 0);
-  const sources = [...income]
-    .sort((a, b) => incomeOf(b) - incomeOf(a))
-    .slice(0, 3)
-    .map((t) => ({ name: t.item.trim() || t.description.trim() || "Income", amount: incomeOf(t), date: t.date }));
-
   const wallets = new Set(reference.wallets);
+  // Where it landed decides what it is: a spending wallet is money to spend; savings or a goal is savings growing.
+  const usable = income.filter((t) => wallets.has(t.toWallet));
+  const saved = income.filter((t) => !wallets.has(t.toWallet));
+  const named = (rows: readonly Transaction[]) =>
+    [...rows]
+      .sort((a, b) => incomeOf(b) - incomeOf(a))
+      .slice(0, 3)
+      .map((t) => ({ name: t.item.trim() || t.description.trim() || "Income", amount: incomeOf(t), date: t.date }));
+  const cameIn = usable.reduce((sum, t) => sum + incomeOf(t), 0);
+  const sources = named(usable);
+  const intoSavings = saved.reduce((sum, t) => sum + incomeOf(t), 0);
+  const savingsSources = named(saved);
+
   const savings = new Set(reference.savings);
   let toSavings = 0;
   for (const t of rows) {
@@ -143,6 +162,8 @@ export function incomeBudget(input: {
     setOn,
     cameIn,
     sources,
+    intoSavings,
+    savingsSources,
     toSavings: Math.max(0, toSavings),
     budget,
     billsBudget,
@@ -228,6 +249,9 @@ export function mostWords(ib: Pick<IncomeBudget, "plans">): string {
   return ib.plans > 0 ? `spent, plus what the wallets can still pay this month, the ${formatMoney(ib.plans)} set aside for plans included` : "spent plus safe to spend";
 }
 
+/** Less than this coming in is too little to change a budget for: said, never offered with a button. */
+export const WORTH_ADDING: Centavos = 10_000;
+
 /** The figures in words, for the chat and the model. */
 export function incomeBudgetWords(ib: IncomeBudget, monthName: string): string[] {
   const out: string[] = [];
@@ -237,6 +261,8 @@ export function incomeBudgetWords(ib: IncomeBudget, monthName: string): string[]
       ? `Came in ${since}: ${formatMoney(ib.cameIn)}${ib.sources.length > 0 ? ` (${ib.sources.map((s) => `${s.name} ${formatMoney(s.amount)} on ${formatMedium(s.date)}`).join("; ")})` : ""}.`
       : `Nothing has come in ${since}.`,
   );
+  if (ib.intoSavings > 0)
+    out.push(`Went straight into savings ${since}, not money to spend and not for the budget: ${formatMoney(ib.intoSavings)} (${ib.savingsSources.map((s) => `${s.name} ${formatMoney(s.amount)}`).join("; ")}).`);
   if (ib.toSavings > 0) out.push(`Moved into savings since then: ${formatMoney(ib.toSavings)}.`);
   out.push(
     `Spending budget ${formatMoney(ib.budget)}, ${formatMoney(ib.spent)} spent; safe to spend ${formatMoney(ib.safe)}${ib.plans > 0 ? `, after ${formatMoney(ib.plans)} set aside for plans` : ""}. The most the spending budget can be with the money held now: ${formatMoney(ib.most)} (${mostWords(ib)}).`,
@@ -312,7 +338,14 @@ function savedAt(t: Transaction): number | null {
 }
 
 /** Income dated on or after the day the month's budget was last set: what the bell says came in since. */
-export function incomeSinceSet(transactions: readonly Transaction[], plan: BudgetYear | undefined, year: number, month: number): { readonly setOn: IsoDate | null; readonly amount: Centavos } {
+export function incomeSinceSet(
+  transactions: readonly Transaction[],
+  plan: BudgetYear | undefined,
+  year: number,
+  month: number,
+  /** The spending wallets: only what landed in one is money a budget can grow by (`incomeBudget`, cameIn). */
+  wallets?: readonly string[],
+): { readonly setOn: IsoDate | null; readonly amount: Centavos } {
   const prefix = `${year}-${String(month).padStart(2, "0")}`;
   const last = [...(plan?.revisions?.[String(month)] ?? [])].filter((r) => r.what === "tracks").sort((a, b) => a.at.localeCompare(b.at)).pop();
   const setOn = last ? localDay(last.at) : null;
@@ -321,6 +354,7 @@ export function incomeSinceSet(transactions: readonly Transaction[], plan: Budge
   const after = new Date(last!.at).getTime();
   const amount = wholeRows(transactions)
     .filter((t) => t.date.startsWith(prefix) && t.date >= setOn && incomeOf(t) > 0)
+    .filter((t) => !wallets || wallets.includes(t.toWallet))
     .filter((t) => t.date > setOn || (savedAt(t) ?? Infinity) > after)
     .reduce((sum, t) => sum + incomeOf(t), 0);
   return { setOn, amount };

@@ -12,6 +12,7 @@
  */
 import { notTheMonth } from "./budgetAsk";
 import { withoutYears, type Centavos } from "./money";
+import { withoutModelNumbers } from "./modelNumbers";
 import type { IsoDate } from "./types";
 
 export interface PlannedSpend {
@@ -48,7 +49,8 @@ const title = (word: string): string => word.trim().replace(/\s+/g, " ").replace
  */
 export function plannedSpendIn(said: string): PlannedSpend[] {
   // Only a year where it is one ("November 2026", "in 2027"): "spend 2000" is two thousand pesos.
-  const text = withoutYears(said);
+  // Nor a model number: "rtx 4060" is a graphics card, not PHP 4,060.00 (`modelNumbers.ts`).
+  const text = withoutModelNumbers(withoutYears(said));
   const found: PlannedSpend[] = [];
   for (const m of text.matchAll(NUM)) {
     const raw = m[1]?.replace(/,/g, "");

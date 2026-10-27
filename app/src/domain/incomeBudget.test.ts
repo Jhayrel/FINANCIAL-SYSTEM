@@ -26,6 +26,20 @@ const salary = row({ date: "2026-11-05", type: "Revenue", category: "Revenue", i
 const of = (rows: Transaction[], safe: number, budget = 500000) =>
   incomeBudget({ transactions: rows, reference: reference as never, plan: novemberAt(budget), year: 2026, month: 11, safe, spent: 100000 })!;
 
+// Owner, 27 October 2026: "I received an interest in my bank and now it's saying to add to the budget".
+describe("where the money landed", () => {
+  it("counts only money into a spending wallet; interest into savings is savings growing", () => {
+    const interest = row({ date: "2026-11-06", type: "Revenue", category: "Revenue", item: "Bank interest", fromWallet: "", toWallet: "Savings", amount: 150, total: 150 });
+    const ib = of([...before, salary, interest], 1500000);
+    expect(ib.cameIn).toBe(1000000);
+    expect(ib.intoSavings).toBe(150);
+    expect(ib.savingsSources[0]).toMatchObject({ name: "Bank interest", amount: 150 });
+    const onlyInterest = of([...before, interest], 1500000);
+    expect(onlyInterest.cameIn).toBe(0);
+    expect(incomeBudgetWords(onlyInterest, "November").join(" ")).toMatch(/Went straight into savings .*not money to spend and not for the budget: ₱1\.50 \(Bank interest ₱1\.50\)/);
+  });
+});
+
 describe("plans counted in safe to spend (owner, 27 October 2026)", () => {
   it("stay in the most the budget can be: counting a plan or not moves safe to spend only", () => {
     const counted = incomeBudget({ transactions: before, reference: reference as never, plan: novemberAt(500000), year: 2026, month: 11, safe: 200000, spendable: 1000000, plans: 800000, spent: 100000 })!;

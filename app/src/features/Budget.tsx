@@ -91,7 +91,7 @@ import { cashFlow } from "../domain/forecast";
 import type { MonthOutlook } from "../domain/outlook";
 import { daysInMonth, formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { PACE_FROM_DAY } from "../domain/alerts";
-import { budgetFromIncome, checkSplit, incomeBudget, type IncomeBudget } from "../domain/incomeBudget";
+import { budgetFromIncome, checkSplit, incomeBudget, WORTH_ADDING, type IncomeBudget } from "../domain/incomeBudget";
 import { monthBrief, spendable } from "../domain/monthPlan";
 import { NO_DATE, plannedForBudget, viewOf, type PlannedMonth, type PlanView } from "../domain/planner";
 import { Icon } from "../components/Icon";
@@ -2255,10 +2255,22 @@ function IncomeSplitCard({
           Your budget fits your money{view.room > 0 ? `, with room to raise it by ${formatMoney(view.room)}` : ""}.
         </p>
       )}
-      {view.cameIn > 0 && (
+      {/* Into savings or a goal: savings growing, never offered to the budget (owner, 27 October 2026). */}
+      {view.intoSavings > 0 && (
+        <p className="t-caption" style={{ color: "var(--ink-3)", margin: 0 }}>
+          {formatMoney(view.intoSavings)} went into savings {since} ({view.savingsSources.map((x) => `${x.name} ${formatMoney(x.amount)}`).join(", ")}): savings growing, not money to spend, so it stays out of the budget.
+        </p>
+      )}
+      {view.cameIn > 0 && view.cameIn < WORTH_ADDING && (
+        <p className="t-caption" style={{ color: "var(--ink-3)", margin: 0 }}>
+          {formatMoney(view.cameIn)} came into your wallets {since}
+          {view.sources.length > 0 ? ` (${view.sources.map((x) => `${x.name} ${formatMoney(x.amount)}`).join(", ")})` : ""}: too little to change the budget for. It is in safe to spend already.
+        </p>
+      )}
+      {view.cameIn >= WORTH_ADDING && (
         <>
           <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
-            {formatMoney(view.cameIn)} came in {since}
+            {formatMoney(view.cameIn)} came into your wallets {since}
             {view.sources.length > 0 ? ` (${view.sources.map((x) => `${x.name} ${formatMoney(x.amount)}`).join(", ")})` : ""}.
             {view.toSavings > 0 ? ` ${formatMoney(view.toSavings)} has gone into savings since then.` : ""}
           </p>

@@ -311,3 +311,11 @@ describe("what-ifs said on the card", () => {
     expect(q).not.toMatch(/\? Cash,/);
   });
 });
+
+describe("a model number in an entry is not its amount (27 October 2026)", () => {
+  it("reads the price, and leaves real amounts alone", () => {
+    expect(readEntry("bought iphone 18 case 500", [], reference, "2026-10-26").draft.amount).toBe(50_000);
+    expect(readEntry("lunch 50 in cash", [], reference, "2026-10-26").draft.amount).toBe(5_000);
+    expect(readEntry("bought 128gb flash drive 450", [], reference, "2026-10-26").draft.amount).toBe(45_000);
+  });
+});

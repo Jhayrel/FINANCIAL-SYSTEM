@@ -150,7 +150,7 @@ import { spentFromLeft } from "../domain/leftOver";
 import { readSettleAsk, settleLine } from "../domain/settleLine";
 import { wholeRows } from "../domain/covers";
 import { incomeOf } from "../domain/totals";
-import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, readBudgetMove, readIncomePlan, answerMoveIn, type BudgetMove } from "../domain/incomeBudget";
+import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, mostWords, readBudgetMove, readIncomePlan, answerMoveIn, type BudgetMove } from "../domain/incomeBudget";
 import { asksCarryOver, asksNextMonth, asksSafeToSpend, nextMonthWords, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer, everydayPrices } from "../domain/dayFit";
 import { eatOutAnswer, mealPrice, readEatOutAsk } from "../domain/eatOutAsk";
@@ -5276,17 +5276,6 @@ export function AskPanel({
      * 2026 sweep: these got the month's summary, and "magkano natitira sa
      * budget ko?" next month's suggested budget).
      */
-    // "hello", "thanks", a bare "100", "what's 150+80": no summary for any of them (`smallTalk.ts`).
-    const small = files.length === 0 && !as && pending === null ? readSmallTalk(note) : null;
-    if (small) {
-      const reply = smallTalkAnswer(small, (settings.owner?.callMe || settings.owner?.name || "").trim().split(/\s+/)[0] ?? "");
-      setDraft("");
-      say({ kind: "you", text: note });
-      log(aiEvent("asked", "dashboard", { text: note }));
-      say({ kind: "assistant", text: reply, from: "this device" });
-      log(aiEvent("answered", "dashboard", { text: reply, model: "this device" }));
-      return;
-    }
     const quick = files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) ? readQuickAsk(ruled, knownItems, [...reference.wallets, ...reference.savings]) : null;
     if (quick) {
       const y = Number(asOf.slice(0, 4));
@@ -7168,10 +7157,10 @@ export function AskPanel({
           return;
         }
         budgetAsk = { kind: "tracks", year: y, month: m, spending: ib.most, billsSubs: ib.billsBudget, scope: "month" };
-        budgetNote = `Lowered to what your money keeps: ${formatMoney(ib.spent)} spent plus ${formatMoney(ib.safe)} safe to spend is ${formatMoney(ib.most)}, ${formatMoney(ib.over)} under the ${formatMoney(ib.budget)} budget.`;
+        budgetNote = `Lowered to what your money keeps: ${mostWords(ib)} is ${formatMoney(ib.most)}, ${formatMoney(ib.over)} under the ${formatMoney(ib.budget)} budget.`;
       } else {
         if (ib.cameIn <= 0) {
-          answer(`Nothing has come in ${ib.setOn ? `since you set the budget on ${formatMedium(ib.setOn)}` : "this month"}, so there is no new money to add. ${ib.over > 0 ? `The budget is ${formatMoney(ib.over)} more than your money keeps; say "lower my budget to my money" to fit it.` : `It can rise by ${formatMoney(ib.room)} from the money you hold, if you want: say "raise my budget by" a figure.`}`);
+          answer(`Nothing has come into your wallets ${ib.setOn ? `since you set the budget on ${formatMedium(ib.setOn)}` : "this month"}, so there is no new money to add.${ib.intoSavings > 0 ? ` ${formatMoney(ib.intoSavings)} went into savings (${ib.savingsSources.map((s) => s.name).join(", ")}): savings growing, which stays out of the budget.` : ""} ${ib.over > 0 ? `The budget is ${formatMoney(ib.over)} more than your money keeps; say "lower my budget to my money" to fit it.` : `It can rise by ${formatMoney(ib.room)} from the money you hold, if you want: say "raise my budget by" a figure.`}`);
           return;
         }
         const keep = move.keep ? ("percent" in move.keep ? Math.floor((ib.cameIn * move.keep.percent) / 100) : move.keep.amount) : 0;
@@ -9556,6 +9545,15 @@ export function AskPanel({
     setBusy(true);
     try {
       if (job === "ask") {
+        // A greeting, a thanks or a sum asked: answered here, before the model or its summary (`smallTalk.ts`).
+        const small = files.length === 0 && !as ? readSmallTalk(note) : null;
+        if (small) {
+          say({ kind: "you", text: note });
+          const reply = smallTalkAnswer(small, (settings.owner?.callMe || settings.owner?.name || "").trim().split(/\s+/)[0] ?? "");
+          say({ kind: "assistant", text: reply, from: "this device" });
+          log(aiEvent("answered", "dashboard", { text: reply, model: "this device" }));
+          return;
+        }
         /*
          * Two periods set against each other, asked in words: both, the same
          * days of each, worked out here (`comparisonWorked`). The router names
@@ -9953,6 +9951,21 @@ export function AskPanel({
           false,
           offline.settled,
         );
+        return;
+      }
+
+      /*
+       * "hello", "thanks", a bare "100", "what's 150+80": no summary for any
+       * of them (`smallTalk.ts`). Last, so a figure that answers a card's
+       * question or a plan's "how much" reaches them first: placed early, an
+       * answer of "85000" to "How much will the iPhone 18 Pro Max be?" was
+       * met with "PHP 85,000.00 for what?" (27 October 2026).
+       */
+      const small = files.length === 0 && !as ? readSmallTalk(note) : null;
+      if (small) {
+        const reply = smallTalkAnswer(small, (settings.owner?.callMe || settings.owner?.name || "").trim().split(/\s+/)[0] ?? "");
+        say({ kind: "assistant", text: reply, from: "this device" });
+        log(aiEvent("answered", "dashboard", { text: reply, model: "this device" }));
         return;
       }
 

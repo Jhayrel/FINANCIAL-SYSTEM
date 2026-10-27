@@ -199,3 +199,30 @@ describe("a plan for a day already gone (owner, 27 October 2026)", () => {
     expect(whenFor("last week", asOf)).toEqual({ due: "2026-10-19", kind: "day" });
   });
 });
+
+/*
+ * The owner, 27 October 2026: "I plan to buy iphone 18 pro max next January
+ * let me know" became a PHP 18.00 plan titled "Iphone pro max let me know".
+ */
+describe("a model number is part of the name, never the price", () => {
+  it("keeps it in the title, asks the price, and reads let me know as asking", () => {
+    const got = read("I plan to buy iphone 18 pro max next January let me know");
+    expect(got).toMatchObject({ kind: "later", title: "iPhone 18 Pro Max", amountSaid: false, asked: true });
+    if (got?.kind === "later") expect(got.plans[0]).toMatchObject({ title: "iPhone 18 Pro Max", amount: null, due: "2027-01-31", dueKind: "month", need: false });
+  });
+
+  // 27 October 2026: this was answered with next month's plans, as if it asked "what's planned next month".
+  it("is a new plan asked about, however the month is placed", () => {
+    for (const said of ["I plan next month to get iphone 18 pro max what do you think?", "I plan to get iphone 18 pro max next month what do you think?"]) {
+      expect(read(said), said).toMatchObject({ kind: "later", title: "iPhone 18 Pro Max", amountSaid: false, asked: true });
+    }
+  });
+
+  it("reads the real price beside it", () => {
+    const priced = read("I plan to buy iphone 18 pro max next January for 90000");
+    if (priced?.kind === "later") expect(priced.plans[0]).toMatchObject({ title: "iPhone 18 Pro Max", amount: 9_000_000 });
+    const ps5 = read("im planning to get a ps5 in december 25k");
+    if (ps5?.kind === "later") expect(ps5.plans[0]).toMatchObject({ title: "PS5", amount: 2_500_000, need: false });
+    expect(ps5?.kind).toBe("later");
+  });
+});

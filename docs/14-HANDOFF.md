@@ -2134,6 +2134,30 @@ style guide's Bin, Planner and sidebar lines say how each now works.
 - Insights and the Planner held up already: plans are dots on the calendar,
   and the Planner was built for long lists.
 
+### 2026-10-27, last: model numbers, plans asked about, income by where it lands
+
+- **Model numbers are names, not prices** (`modelNumbers.ts`): "I plan to
+  buy iphone 18 pro max next January let me know" made a ₱18.00 plan titled
+  "Iphone pro max let me know". iPhone 18, Galaxy S24, PS5, RTX 4060, 128GB
+  and "18 pro max" now stay in the title, cased as written ("iPhone 18 Pro
+  Max"), and are never read as the amount by the plan readers or the entry
+  reader. Real prices next to them are kept ("vivo 2000", "50 in cash",
+  "500 max", "500 plus 50" are still money). With no price, the chat asks
+  for one. Phones, consoles and gadgets are wants unless said otherwise.
+- **"let me know", "what do you think"** are read as asking: the price is
+  asked first, then the card comes with how the month looks with it, to add
+  or not. "I plan next month to get ..." (words between "plan" and "to") is
+  read as a plan; it was answered with next month's plans.
+- **Small talk** (hello, thanks, a bare figure, a sum) is answered last,
+  after every card and question has had the message: placed first, "85000"
+  given as a plan's price was answered "₱85,000.00 for what?".
+- **Income by where it lands**: only money into a spending wallet is money
+  a budget can grow by. Interest or anything else into savings or a goal is
+  "savings growing, not money to spend", said apart on Budget and your
+  money, in the chat and to the AI, and never offered with "Add this money
+  to the budget". Under ₱100 into the wallets is said without the button.
+  The bell's "came in since you set the budget" follows the same rule.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

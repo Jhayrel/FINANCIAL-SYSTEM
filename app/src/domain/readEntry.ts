@@ -39,6 +39,7 @@ import { inferFromHistory, itemFromHistory } from "./infer";
 import { centavosInWords } from "./numberWords";
 import { readMoney } from "./proposal";
 import { formatMoney, withoutDays } from "./money";
+import { withoutModelNumbers } from "./modelNumbers";
 import { dayFromWords, withoutDayWords } from "./dayWords";
 import { carriesIdentifier, withoutIdentifiers } from "./identifiers";
 import { saysItHappened } from "./intent";
@@ -292,7 +293,8 @@ function flowOf(text: string): Flow | null {
 const SHOP_NUMBERS = /\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]?11|711|24[\s/-]?7)\b/gi;
 
 function amountIn(text: string): number | null {
-  let withoutDates = withoutDays(withoutDayWords(withoutIdentifiers(text).replace(SHOP_NUMBERS, " "))).replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
+  // "iphone 18 case 500" is PHP 500.00: a model number is a name, never the price (`modelNumbers.ts`, 27 October 2026).
+  let withoutDates = withoutDays(withoutDayWords(withoutModelNumbers(withoutIdentifiers(text).replace(SHOP_NUMBERS, " ")))).replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
 
   /**
    * A year beside a month is a date, not two thousand pesos.
@@ -1407,11 +1409,12 @@ function splitOnAnd(part: string): string[] {
 
 /** The distinct figures written as money in a text, read the way `amountIn` reads one. */
 function figuresIn(text: string): Set<string> {
-  const undated = text
+  // A model number is a name, not a figure written as money (`modelNumbers.ts`).
+  const undated = withoutModelNumbers(text)
     .replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?/gi, " ")
     .replace(/\b\d{1,4}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, " ")
     .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?/gi, " ");
-  return new Set([...undated.matchAll(/(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d{1,2}|\d{2,})/gi)].map((m) => String(readMoney(m[1] ?? ""))));
+  return new Set([...undated.matchAll(/(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d{2,})/gi)].map((m) => String(readMoney(m[1] ?? ""))));
 }
 
 export function splitEntries(text: string): string[] {

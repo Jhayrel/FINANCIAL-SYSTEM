@@ -33,7 +33,8 @@ import { addDays, MONTH_NAMES } from "./dates";
 import { formatMoney, withoutYears, type Centavos } from "./money";
 import { aheadMonthIn, plannedSpendIn } from "./plannedSpend";
 import { dueFor, isRecurringKind, kindFromHistory, NO_DATE, planKinds, type DueKind, type PlanInput } from "./planner";
-import { NO_DAY, sumIn, whenFor } from "./plannerAsk";
+import { capitalised, NO_DAY, sumIn, whenFor } from "./plannerAsk";
+import { protectModels } from "./modelNumbers";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export interface PlanContext {
@@ -69,11 +70,11 @@ export type PlanIntent =
 
 /** Said before it happens, about the owner's own spending. */
 const INTENT =
-  /\b(?:i'?m|im|i\s+am|we'?re|we\s+are)\s+(?:planning|thinking\s+(?:of|about)|going\s+to|gonna|about\s+to|preparing\s+(?:to|for))\b|\b(?:i|we)\s+(?:plan|intend|want|need|have|would\s+like|wanna)\s+(?:to|on)\b|\b(?:i|we)\s*(?:will|'ll|shall)\s+(?:buy|pay|spend|get|book|order|go|have|purchase|renew|treat)\b|^\s*(?:planning|thinking\s+of|going)\s+(?:to|a|an|my|on|for)\b|\b(?:my|our)\s+plans?\s+(?:today|tonight|tomorrow|for|this|is|are|next)\b|\bbalak\s+(?:ko|kong|namin|naming)\b|\bplano\s+(?:ko|kong|namin|naming)\b/i;
+  /\b(?:i'?m|im|i\s+am|we'?re|we\s+are)\s+(?:planning|thinking\s+(?:of|about)|going\s+to|gonna|about\s+to|preparing\s+(?:to|for))\b|\b(?:i|we)\s+(?:plan|intend|want|need|have|would\s+like|wanna)\s+(?:to|on)\b|\b(?:i|we)\s+(?:plan|intend)\s+(?:next|this|in|on|by|sa)\s+[^.?!]{1,25}?\bto\b|\b(?:i|we)\s*(?:will|'ll|shall)\s+(?:buy|pay|spend|get|book|order|go|have|purchase|renew|treat)\b|^\s*(?:planning|thinking\s+of|going)\s+(?:to|a|an|my|on|for)\b|\b(?:my|our)\s+plans?\s+(?:today|tonight|tomorrow|for|this|is|are|next)\b|\bbalak\s+(?:ko|kong|namin|naming)\b|\bplano\s+(?:ko|kong|namin|naming)\b/i;
 
 /** It costs money: a verb of paying, or a thing that costs. */
 const SPENDS =
-  /\b(?:buy|bili|bumili|pay|bayad|bayaran|magbayad|spend|gastos|purchase|order|book|renew|get\s+(?:a|an|my|new|some|the)|treat|trip|travel|vacation|outing|party|birthday|tuition|enrol\w*|mall|shopping|shop|groceries|grocery|market|palengke|eat|dinner|lunch|breakfast|merienda|food|haircut|repair\w*|registration|gift|regalo|concert|ticket|phone|laptop|shoes|clothes|uniform|books?|fees?)\b/i;
+  /\b(?:buy|bili|bumili|pay|bayad|bayaran|magbayad|spend|gastos|purchase|order|book|renew|get\s+(?:a|an|my|new|some|the)|treat|trip|travel|vacation|outing|party|birthday|tuition|enrol\w*|mall|shopping|shop|groceries|grocery|market|palengke|eat|dinner|lunch|breakfast|merienda|food|haircut|repair\w*|registration|gift|regalo|concert|ticket|phone|laptop|shoes|clothes|uniform|books?|fees?|iphone|ipad|airpods|macbook|tablet|ps5|playstation|xbox|nintendo|console|gadget|camera|watch|bike|motorcycle|car)\b/i;
 
 /** Already happened: an entry, read by the entry readers. */
 const MOVED = /\b(?:spent|paid|bought|purchased|got\s+paid|nagbayad|binili|bumili\s+na|nabili|ginastos|nagastos)\b/i;
@@ -92,9 +93,11 @@ const TODAY =
 const DAYS_PLACES = /\b(?:mall|sm|grocer\w*|market|palengke|supermarket|eat\s+out|kain|snacks?|fast\s*food|jollibee|mcdo|7-?eleven)\b/i;
 
 /** A question about it, answered before any card. */
-const ASKED = /\?|^\s*(?:what|how|can|could|should|would|will|is|am|do|does)\b|\b(?:how\s+much|can\s+i|could\s+i|should\s+i|is\s+it\s+enough|enough|what\s+budget|afford)\b/i;
+// "let me know", "tell me", "what do you think": asked for a view, as a question mark is (27 October 2026).
+const ASKED = /\?|^\s*(?:what|how|can|could|should|would|will|is|am|do|does)\b|\b(?:how\s+much|can\s+i|could\s+i|should\s+i|is\s+it\s+enough|enough|what\s+budget|afford|let\s+me\s+know|tell\s+me|what\s+do\s+you\s+think|advise|ano\s+sa\s+tingin\s+mo)\b/i;
 
-const WANTS = /\b(?:want|treat|gadget|trip|travel|vacation|outing|concert|party|shopping|game|shoes|clothes|bag)\b/i;
+// A new phone, a console, a gadget: a want unless said otherwise ("iphone 18 pro max" was marked a need, 27 October 2026).
+const WANTS = /\b(?:want|treat|gadget|trip|travel|vacation|outing|concert|party|shopping|game|games|gaming|shoes|clothes|bag|iphone|ipad|airpods|macbook|apple\s+watch|ps5|playstation|xbox|nintendo|console|upgrade)\b/i;
 
 
 export { dayFor, whenFor } from "./plannerAsk";
@@ -115,7 +118,10 @@ function thingIn(text: string): string {
    * this (owner, 27 October 2026).
    */
   thing =
-    thing.split(/\s+(?:like\s+)?(?:i|we)\s+(?:want|wanna|need|think|guess|plan|will|would|might|hope|really)\b|\s+like\s+(?:i|we|maybe|around|about|mga|siguro)\b|\s+so\s+(?:i|we|that)\b|\s+(?:which|that)\s+(?:i|we|will|would|costs?|is)\b/i)[0] ?? thing;
+    thing.split(/\s+(?:like\s+)?(?:i|we)\s+(?:want|wanna|need|think|guess|plan|will|would|might|hope|really)\b|\s+like\s+(?:i|we|maybe|around|about|mga|siguro)\b|\s+so\s+(?:i|we|that)\b|\s+(?:which|that)\s+(?:i|we|will|would|costs?|is)\b|\s+(?:let\s+me\s+know|tell\s+me|what\s+do\s+you\s+think|any\s+(?:advice|thoughts?)|please|pls)\b/i)[0] ?? thing;
+  // "iphone 18 pro max": the model number is the name, kept through the cleaning below and put back (`modelNumbers.ts`).
+  const models = protectModels(thing);
+  thing = models.text;
   const months = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
   thing = withoutYears(thing)
     .replace(/^\s*(?:to\s+)?(?:buy|get|pay(?:\s+for)?|go\s+(?:to|on)|have)\s+/i, "")
@@ -132,10 +138,11 @@ function thingIn(text: string): string {
     .replace(/^(?:a|an|the|my|our|some|ng|mga)\s+/i, "")
     .replace(/\s+(?:on|by|for|in|at|to|of|and|with|the|a|sa)$/i, "")
     .trim();
+  thing = models.restore(thing).replace(/\s+/g, " ").trim();
   return thing.length > 60 ? thing.slice(0, 60).replace(/\s+\S*$/, "") : thing;
 }
 
-const titleOf = (thing: string): string => thing.replace(/^./, (c) => c.toUpperCase());
+const titleOf = (thing: string): string => capitalised(thing);
 
 /** The kind the words name outright: "food" is Food. */
 function kindNamed(thing: string, ctx: PlanContext): string {
