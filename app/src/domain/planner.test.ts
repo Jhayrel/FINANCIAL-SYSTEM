@@ -15,6 +15,7 @@ import {
   likelyPayments,
   editPlan,
   linkPayments,
+  planPaidBy,
   makePlan,
   movePlan,
   byWhen,
@@ -181,6 +182,25 @@ describe("no date, or only a month (owner, 27 October 2026: \"LIKE NO DATE LIKE 
     if (said?.kind === "closed") expect(closedPlanWords(said.plan)).toMatch(/^"Concert ticket" is skipped already.*say "put the concert ticket plan back"\.$/);
     expect(readPlannerAsk("skip the gym plan", c)).toMatchObject({ kind: "none" });
   });
+  it("from the chat: a question about paying is answered, never a Pay card (27 October 2026)", () => {
+    const c = { plans: [november], reference, transactions: ledger, asOf };
+    expect(readPlannerAsk("if i pay the tuition plan today will i be short", c)).toMatchObject({ kind: "payIf", plan: { title: "Tuition" } });
+    expect(readPlannerAsk("can i pay the tuition plan from maya?", c)).toMatchObject({ kind: "payIf", wallet: "Maya" });
+    expect(readPlannerAsk("i paid the tuition plan", c)).toMatchObject({ kind: "pay" });
+  });
+
+  it("an entry typed on the Add form that pays a plan is found (planPaidBy)", () => {
+    const haircut = makePlan(input({ title: "Haircut", amount: 15_000, due: "2026-10-28", item: "Self Care" }), "2026-10-20", "owner");
+    const row = tx({ id: "new", item: "Self Care", description: "haircut at the barber", amount: 15_000, date: asOf });
+    expect(planPaidBy(row, [haircut], ledger)).toMatchObject({ plan: { title: "Haircut" }, left: 15_000, sure: true });
+    // Its kind only, close to what is left: offered, not switched on.
+    expect(planPaidBy({ ...row, description: "barber", total: 14_000, amount: 14_000 }, [haircut], ledger)).toMatchObject({ sure: false });
+    // Something else entirely is no plan's payment.
+    expect(planPaidBy({ ...row, item: "Food", description: "lunch" }, [haircut], ledger)).toBeNull();
+    // A plan already paid is not offered.
+    expect(planPaidBy(row, [{ ...haircut, status: "done" }], ledger)).toBeNull();
+  });
+
   it("from the chat: one month's plans, against its budget and the money (27 October 2026)", () => {
     const c = { plans: [november], reference, transactions: ledger, asOf };
     expect(readPlannerAsk("how much is planned this month?", c)).toEqual({ kind: "month", year: 2026, month: 10 });

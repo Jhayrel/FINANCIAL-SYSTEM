@@ -52,7 +52,7 @@ const TAB_WORDS: readonly (readonly [SettingsTab, RegExp])[] = [
 
 /** The screens and what they are called, longest names first so "debt screen" is not read as "debt". */
 const SCREENS: readonly (readonly [RegExp, Omit<GoPlace, "label"> & { readonly label: string }])[] = [
-  [/needs?[-\s]review|(?:the\s+)?review list|flagged(?:\s+(?:rows|entries|list))?|(?:the\s+)?checks?/i, { screen: "database", review: true, label: "Needs review" }],
+  [/needs?[-\s]review|needing\s+review|(?:entries|rows|items)\s+(?:that\s+)?(?:need(?:s|ing)?\s+|to\s+)review|(?:the\s+)?review list|flagged(?:\s+(?:rows|entries|list))?|(?:the\s+)?checks?/i, { screen: "database", review: true, label: "Needs review" }],
   [/dashboard|home(?:\s+screen)?|main(?:\s+screen)?|front page/i, { screen: "dashboard", label: "Dashboard" }],
   [/add(?:\s+(?:form|screen|page))?|(?:the\s+)?(?:entry|add)\s+form|new entry/i, { screen: "add", label: "Add" }],
   [/database|ledger|(?:all\s+)?(?:my\s+)?(?:entries|records|transactions)(?:\s+list)?/i, { screen: "database", label: "Database" }],
@@ -68,7 +68,7 @@ const SCREENS: readonly (readonly [RegExp, Omit<GoPlace, "label"> & { readonly l
 
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
-const VERB = String.raw`(?:open|go\s+(?:back\s+)?to|take\s+me\s+(?:back\s+)?to|bring\s+me\s+to|navigate\s+to|switch\s+to|jump\s+to|show\s+me\s+the|show\s+the|punta\s+(?:sa|tayo\s+sa)|buksan(?:\s+ang)?|pakita\s+ang)`;
+const VERB = String.raw`(?:open|go\s+(?:back\s+)?to|take\s+me\s+(?:back\s+)?to|bring\s+me\s+to|navigate\s+to|switch\s+to|jump\s+to|show\s+me\s+the|show\s+the|show(?:\s+me)?(?=\s+(?:my\s+|the\s+)?(?:entries|rows|items)\s+(?:that\s+)?(?:need|needing|to\s+review))|punta\s+(?:sa|tayo\s+sa)|buksan(?:\s+ang)?|pakita\s+ang)`;
 const POLITE = String.raw`(?:(?:please|pls|plz|can\s+you|could\s+you|kindly|ok(?:ay)?|sige)[\s,]+)*`;
 const TAIL = String.raw`(?:\s+(?:screen|page|tab|section|view))?(?:\s+(?:please|pls|plz|for me|now|po))*`;
 
@@ -91,7 +91,8 @@ export function readGoAsk(text: string, asOf: string): GoPlace | null {
   if (!m?.[1]) return null;
   let target = m[1].trim();
   const showVerb = /^\s*(?:\S+[\s,]+)*?show\b/i.test(t) || /\bpakita\b/i.test(t);
-  if (showVerb && !/\b(?:screen|page|tab|section|view)\b/i.test(t)) return null;
+  // "Show entries needing review" is the list itself, which only its screen shows (27 October 2026 sweep).
+  if (showVerb && !/\b(?:screen|page|tab|section|view)\b/i.test(t) && !/\bneed(?:s|ing)?\s+review\b/i.test(t)) return null;
 
   // "insights for september", "insights for september 2025"
   let month: string | undefined;
@@ -142,6 +143,22 @@ export function settingsPlaceFor(text: string): GoPlace {
  * Categories does. Read here so it is never taken for an entry with no
  * amount ("How much was it?", 26 October 2026).
  */
+/**
+ * "Rename food to meals", "rename gcash to gcash main": a kind's or an
+ * account's name, which Settings changes and asks about first, since it
+ * rewrites every entry that carries it. Read so it is never an entry: "rename
+ * food to meals" was answered "How much was it?" (27 October 2026 sweep).
+ */
+export function asksToRenameName(text: string, kinds: readonly string[], accounts: readonly string[]): { readonly from: string; readonly to: string; readonly what: "kind" | "account" } | null {
+  const m = /^\s*(?:please\s+|can\s+you\s+)?(?:rename|change\s+the\s+name\s+of)\s+(?:the\s+|my\s+)?(?:kind|category|item|account|wallet)?\s*["'\u201c]?(.+?)["'\u201d]?\s+(?:to|as|into)\s+["'\u201c]?(.+?)["'\u201d]?\s*[.!]?\s*$/i.exec(text);
+  if (!m?.[1] || !m[2]) return null;
+  const said = m[1].trim().toLowerCase();
+  const kind = kinds.find((k) => k.trim().toLowerCase() === said);
+  if (kind) return { from: kind, to: m[2].trim(), what: "kind" };
+  const account = accounts.find((a) => a.trim().toLowerCase() === said);
+  return account ? { from: account, to: m[2].trim(), what: "account" } : null;
+}
+
 export function asksToStopBill(text: string, names: readonly string[]): string | null {
   const t = text.trim();
   if (/\d/.test(t) || t.split(/\s+/).length > 12) return null;

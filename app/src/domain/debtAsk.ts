@@ -20,9 +20,13 @@ const ASKS =
   /\b(?:how much|magkano|ilan)\b[^?.!]*\b(?:owe|owes|owed|utang|debt|debts|due|hold(?:ing)?|held)\b|\bwho\s+(?:owes|still owes)\b|\bwhen\b[^?.!]*\b(?:due|pay|bayad)\b|\b(?:do|does|am)\s+(?:i|he|she|they|\w+)\s+(?:still\s+)?(?:owe|in debt)\b|\b(?:my|all my)\s+(?:debts?|utang|loans?)\b|\butang\s+ko\b|\bnext\s+(?:due|payment)\b/i;
 
 /** A debt question, never an entry: no figure, and asked rather than told. */
+// "What's my balance on Maya Credit?": a debt's balance, only when a debt is named (27 October 2026 sweep).
+const BALANCE_ON = /\b(?:balance|outstanding|natitira)\b[^?.!]{0,12}\b(?:on|of|for|sa|ng)\b|\b(?:how\s+much\s+is\s+left|what'?s\s+left)\s+(?:on|of|to\s+pay\s+on)\b/i;
+
 export function readDebtAsk(said: string, debts: readonly Debt[]): DebtAsk | null {
   const t = said.trim();
-  if (!ASKS.test(t) || /\d/.test(t)) return null;
+  const byBalance = !ASKS.test(t) && BALANCE_ON.test(t);
+  if ((!ASKS.test(t) && !byBalance) || /\d/.test(t)) return null;
   // "I owe Ana, she lent it to me" tells; a question asks.
   const asked = /\?\s*$/.test(t) || /^\s*(?:how|what|when|who|which|do|does|is|am|magkano|ilan|kailan|sino|may)\b/i.test(t);
   if (!asked) return null;
@@ -34,6 +38,7 @@ export function readDebtAsk(said: string, debts: readonly Debt[]): DebtAsk | nul
         .filter((w) => w.length >= 3)
         .some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)),
     );
+  if (byBalance && !named) return null;
   return { debt: named ?? null, said: t };
 }
 

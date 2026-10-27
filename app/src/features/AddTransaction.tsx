@@ -21,7 +21,8 @@ import {
   StatusPill,
   type Flow as FlowTone,
 } from "../components/primitives";
-import { AmountInput, Select, TextInput } from "../components/forms";
+import { AmountInput, Select, Switch, TextInput } from "../components/forms";
+import { byWhen, planPaidBy, type Plan } from "../domain/planner";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
 import { billClosingFor, choicesFor, debtDue, effectsFor, interestOnTop, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionOf, positionsOf, unpaidCharges, withFeesPaid } from "../domain/debt";
@@ -142,6 +143,7 @@ export function AddTransaction({
   incoming,
   lastSaved,
   onSaved,
+  onLinkPlan,
   onEditRow,
   onAddDebt,
   onOpenBudget,
@@ -156,6 +158,8 @@ export function AddTransaction({
   debts: readonly Debt[];
   balances: readonly WalletBalance[];
   onSave: (rows: Transaction[], by?: Provenance) => void;
+  /** A new entry counted as an open plan's payment, once saved (`planPaidBy`). */
+  onLinkPlan?: ((plan: Plan, rows: readonly Transaction[]) => void) | undefined;
   onUpdate: (rows: Transaction[], by?: Provenance) => void;
   /** A year's budget replaced, when the assistant sets one. */
   onBudget?: ((year: number, plan: BudgetYear, changes: readonly string[]) => void) | undefined;
@@ -902,6 +906,24 @@ export function AddTransaction({
    * that works out the figure, and entries already saved in those days.
    */
   const [takeOut, setTakeOut] = useState<string | null>(null);
+  /*
+   * A new spending entry that looks like an open plan's payment: offered as
+   * that payment, so the plan is not left open and set aside a second time
+   * (owner, 27 October 2026: "make sure the planner is connected also in add
+   * too"). On by itself only when the entry names the plan or is exactly
+   * what is left of it; otherwise it waits for a tap.
+   */
+  const planMatch = useMemo(() => {
+    if (!onLinkPlan || editing || draft.id || draft.flow !== "Spending" || !draft.amount || draft.amount <= 0 || !draft.date) return null;
+    try {
+      const [row] = draftToTransactions(draft, 0, "plan-check");
+      return row ? planPaidBy(row, reference.plans ?? [], transactions) : null;
+    } catch {
+      return null;
+    }
+  }, [onLinkPlan, editing, draft, reference.plans, transactions]);
+  const [linkChoice, setLinkChoice] = useState<{ readonly planId: string; readonly on: boolean } | null>(null);
+  const linkOn = planMatch ? (linkChoice?.planId === planMatch.plan.id ? linkChoice.on : planMatch.sure) : false;
   const covering = draft.flow === "Spending" && draft.coversTo !== undefined;
   const coverHere = draft.flow === "Spending" && !covering && (draft.amount ?? 0) > 0 && !draft.id ? (coversOn(draft.date, transactions, draft.id)[0] ?? null) : null;
   /*
@@ -1640,12 +1662,14 @@ export function AddTransaction({
     } else {
       const saved = draftToTransactions(final, nextRecordNumber, `t-${Date.now()}`, check.repaymentSplit);
       onSave(saved);
+      if (planMatch && linkOn) onLinkPlan?.(planMatch.plan, saved);
       // Paid from the money an entry over several days already counts: taken out of it, so it is counted once.
       const cover = takeOut && coverHere?.id === takeOut && sameWallet ? transactions.find((t) => t.id === takeOut) : undefined;
       const spent = saved.reduce((a, t) => a + t.total, 0);
       if (cover && cover.amount > spent) onUpdate([{ ...cover, amount: cover.amount - spent, total: cover.amount - spent + cover.fee }]);
     }
     setTakeOut(null);
+    setLinkChoice(null);
 
     // The card that supplied this row can now say it was saved, and as which number.
     onSaved({ draft: final, at: Date.now(), recordNumber: target ? target.recordNumber : nextRecordNumber, ...(fromCard.current ? { cardId: fromCard.current } : {}) });
@@ -2630,6 +2654,38 @@ export function AddTransaction({
                 </div>
               )}
             </div>
+
+            {planMatch && (
+              <div className="fms-planform-switch fms-addplanlink">
+                <span className="fms-planform-switchtext">
+                  <span className="t-body">Pays the &ldquo;{planMatch.plan.title}&rdquo; plan</span>
+                  <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                    {linkOn
+                      ? `${formatMoney(planMatch.left)} is left of it, ${byWhen(planMatch.plan)}. Saved, ${(draft.amount ?? 0) + draft.fee >= planMatch.left ? "the plan is marked paid" : `${formatMoney(planMatch.left - (draft.amount ?? 0) - draft.fee)} of it is still to pay`}${planMatch.plan.setAside && !planMatch.plan.goalId ? ", and safe to spend stops setting this money aside" : ""}.`
+                      : `Off: saved as an entry only. The plan stays open${planMatch.plan.setAside && !planMatch.plan.goalId ? " and its money stays set aside" : ""}.`}
+                  </span>
+                </span>
+                <Switch checked={linkOn} onChange={(on) => setLinkChoice({ planId: planMatch.plan.id, on })} label={`Count it as the "${planMatch.plan.title}" plan's payment`} />
+                {/* What the plan already knows, one tap away when the form has it blank. */}
+                {linkOn && ((!draft.item && planMatch.plan.item) || (!draft.fromWallet && planMatch.plan.wallet && reference.wallets.concat(reference.savings).includes(planMatch.plan.wallet))) && (
+                  <button
+                    type="button"
+                    className="t-micro fms-linkbtn"
+                    onClick={() =>
+                      setDraft((d) => ({
+                        ...d,
+                        ...(!d.item && planMatch.plan.item
+                          ? { item: planMatch.plan.item, category: reference.bills.includes(planMatch.plan.item) ? "Bills" : reference.subscriptions.includes(planMatch.plan.item) ? "Subscriptions" : "Spending" }
+                          : {}),
+                        ...(!d.fromWallet && planMatch.plan.wallet && reference.wallets.concat(reference.savings).includes(planMatch.plan.wallet) ? { fromWallet: planMatch.plan.wallet } : {}),
+                      }))
+                    }
+                  >
+                    Fill in from the plan: {[!draft.item ? planMatch.plan.item : "", !draft.fromWallet ? planMatch.plan.wallet && `from ${planMatch.plan.wallet}` : ""].filter(Boolean).join(", ")}
+                  </button>
+                )}
+              </div>
+            )}
 
             <div className="fms-actions">
               {tone && <FlowBadge flow={tone} label={draft.behalf ? ON_BEHALF : undefined} />}

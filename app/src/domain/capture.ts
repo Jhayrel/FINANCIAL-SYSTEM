@@ -112,14 +112,28 @@ export function nextQuestion(
   draft: Draft,
   reference: ReferenceLists,
   settled: readonly Blank[] = [],
+  /** What was typed, so a wallet that is not yours, or one named twice, is said (27 October 2026 sweep). */
+  said = "",
 ): { readonly blank: Blank; readonly question: string } | null {
   const accounts = [...reference.wallets, ...reference.savings];
   const blank = blanksIn(draft, accounts, settled)[0];
   if (!blank) return null;
 
   // Named, so the answer can be one word. A list of your own wallet names is
-  // both the question and its own answer key.
-  const list = accounts.join(", ");
+  // both the question and its own answer key. A transfer's other end is never its own source.
+  const list = (
+    blank === "toWallet" && draft.flow === "Transfer" && draft.fromWallet
+      ? accounts.filter((a) => a !== draft.fromWallet)
+      : blank === "fromWallet" && draft.flow === "Transfer" && draft.toWallet
+        ? accounts.filter((a) => a !== draft.toWallet)
+        : accounts
+  ).join(", ");
+  const isAccount = (w: string): boolean => accounts.some((a) => a.toLowerCase() === w.toLowerCase() || a.toLowerCase().split(/[^a-z0-9]+/)[0] === w.toLowerCase());
+  // "paid 200 from paypal": PayPal is not on the list, and the question said nothing about it.
+  const strange = /\b(?:from|using|via|thru|through)\s+(?:my\s+)?([a-z][a-z0-9]{2,})\b/i.exec(said)?.[1];
+  const notMine = strange && !isAccount(strange) && !/^(?:the|my|a|an|it|him|her|them|work|home|mama|papa|kuya|ate)$/i.test(strange) ? strange.replace(/^./, (c) => c.toUpperCase()) : "";
+  // "transfer 500 from cash to cash": one wallet at both ends moves nothing.
+  const twice = draft.flow === "Transfer" && draft.fromWallet && new RegExp(`\\bfrom\\s+${draft.fromWallet.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b[^.?!]*\\bto\\s+${draft.fromWallet.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(said);
 
   switch (blank) {
     case "amount":
@@ -127,9 +141,7 @@ export function nextQuestion(
     case "fromWallet":
       return {
         blank,
-        question: list
-          ? `Which one did it come out of? ${list}`
-          : "Which wallet did it come out of?",
+        question: `${notMine ? `${notMine} is not one of your accounts. ` : ""}${list ? `Which one did it come out of? ${list}` : "Which wallet did it come out of?"}${notMine ? `. To keep ${notMine} as its own account, add it in Settings, Accounts first.` : ""}`,
       };
     case "toWallet":
       /**
@@ -157,9 +169,7 @@ export function nextQuestion(
       }
       return {
         blank,
-        question: list
-          ? `And which one did it go into? ${list}. Say "someone else" if it left your accounts.`
-          : 'Which wallet did it go into? Say "someone else" if it left your accounts.',
+        question: `${twice ? `From ${draft.fromWallet} to ${draft.fromWallet} moves nothing. ` : ""}${list ? `${twice ? "Which" : "And which"} one did it go into? ${list}. Say "someone else" if it left your accounts.` : 'Which wallet did it go into? Say "someone else" if it left your accounts.'}`,
       };
     case "item":
       return { blank, question: "What was it for?" };

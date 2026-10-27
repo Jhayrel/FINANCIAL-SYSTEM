@@ -4073,6 +4073,7 @@
  * (`PlainBox.tsx`), so it is drawn as text, not as a field inside a field.
  */
 .fms-askfield {
+  position: relative;
   display: grid;
   gap: 2px;
   padding: var(--space-2) var(--space-2) var(--space-1) var(--space-3);
@@ -4105,6 +4106,25 @@
 .fms-askinput[aria-disabled="true"] {
   color: var(--ink-3);
   cursor: default;
+}
+
+/* +'s two choices on a phone, opening upward from the box (features/AskPanel.tsx, AttachMenu). */
+.fms-attachmenu {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 5;
+  display: grid;
+  min-width: 260px;
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-raised);
+}
+
+.fms-attachmenu > .fms-actionrow:last-child {
+  border-bottom: 0;
 }
 
 .fms-asktools {
@@ -11815,6 +11835,25 @@ button.fms-recent-row:disabled {
   min-height: 44px;
 }
 
+/* The Add form's "Pays the plan" row: hairlines above and below, the fill-in link on its own line (features/AddTransaction.tsx). */
+.fms-addplanlink {
+  flex-wrap: wrap;
+  margin: var(--space-2) 0;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-addplanlink > .fms-planform-switchtext {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.fms-addplanlink > .fms-linkbtn {
+  flex-basis: 100%;
+  text-align: left;
+}
+
 .fms-planform-switchtext {
   display: grid;
   gap: 2px;
@@ -11884,6 +11923,28 @@ button.fms-recent-row:disabled {
 
 .fms-budgetplanned-when {
   color: var(--ink-3);
+}
+
+/* The working under the month's plans: what is left, each kind of plan taken off, what remains. */
+.fms-budgetplancalc {
+  width: 100%;
+}
+
+.fms-budgetplancalc > div {
+  padding: 4px 0;
+}
+
+.fms-budgetplancalc dt {
+  flex: 0 1 auto;
+}
+
+.fms-budgetplancalc > .fms-budgetplancalc-total {
+  border-top: 1px solid var(--hairline-strong);
+  font-weight: 600;
+}
+
+.fms-budgetplancalc > .fms-budgetplancalc-total dt {
+  color: var(--ink-2);
 }
 
 @media (max-width: 639px) {

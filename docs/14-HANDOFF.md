@@ -2077,6 +2077,47 @@ style guide's Bin, Planner and sidebar lines say how each now works.
 - **Settings, Data, You**: saved details are shown locked, with Edit.
   Stop editing asks first when something was changed.
 
+### 2026-10-27, last: what-if sweep, plans connected to every screen, phone attach
+
+- **Sweep**: about 120 what-if messages to the chat with the model off
+  (entries, odd inputs, questions, debt, budget, bin, edits, goals, settings).
+  Every miss below was fixed and is covered by a test.
+- **Money faults fixed**:
+  - "move 500 to savings" was booked as money that left your accounts (all
+    of it spending). "Savings" is now the account whose name says savings,
+    when there is one; with two, it is asked.
+  - "raise my budget by 1000" warned that "a spending budget of ₱1,000.00
+    leaves nothing to spend". "set my budget to 20000" (a total) was not
+    checked at all. Both now check the spending budget the card makes.
+  - "if i pay the tuition plan today will i be short" made a Pay card. It is
+    now answered: what the wallet holds, how short, what to do.
+- **Entries say what was read differently**: a dropped minus sign, a third
+  decimal place (₱50.555 is ₱50.56), and a day that cannot be ("feb 30").
+  "tomorrow" is dated tomorrow, with a note to plan it if it is not paid
+  yet. "PayPal is not one of your accounts" and "From Cash to Cash moves
+  nothing" are said in the question. "last" and "tomorrow" no longer stay
+  in the description.
+- **Answered on the device now** (they got the month's summary): a wallet's
+  balance, "magkano pera ko", net worth, "show my budget", "why is my budget
+  over", money received this month, the subscriptions or bills list, the
+  biggest expense this week or today, a debt's balance by name, "restore
+  everything in the bin", "show entries needing review", "rename food to
+  meals" (Settings, which asks first), and hello, thanks, a bare figure and
+  a simple sum.
+- **Planner connected**:
+  - Add form: an entry that looks like an open plan's payment shows "Pays
+    the X plan", with a switch. It is on by itself only when the entry names
+    the plan or is exactly what is left. "Fill in from the plan" adds the
+    plan's kind and wallet. Saved, the plan is paid and Activity says so.
+  - Budget: the working under the month's plans. What the spending budget
+    has left, less plans set aside, less plans not set aside ("may not go
+    ahead"), less plans paid from a goal, and what is left after them. Also
+    what is left if only the set-aside ones go ahead. Plans with no date are
+    named as in no month yet.
+  - AI context: the same split, and a plan with no date is in no month.
+- **Phone chat +**: two choices, Photos and screenshots, or Files (PDF, CSV,
+  text). The camera button opens the camera straight away.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

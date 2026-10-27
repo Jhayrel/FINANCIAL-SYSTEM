@@ -28,3 +28,11 @@ describe("debt questions", () => {
     expect(debtAnswer({ debt: friend }, [card, friend], rows, "2026-01-20")).toBe("Pal owes you PHP 500.00.");
   });
 });
+
+// 27 October 2026 sweep: "what's my balance on maya credit" got the month's summary.
+describe("a debt's balance asked by name", () => {
+  it("is a debt question with the debt named, and nothing without one", () => {
+    expect(readDebtAsk("what's my balance on Card Credit?", [card, friend])?.debt?.id).toBe("card");
+    expect(readDebtAsk("what's my balance on gcash?", [card, friend])).toBeNull();
+  });
+});

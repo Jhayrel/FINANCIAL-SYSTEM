@@ -739,6 +739,30 @@ export function likelyPayments(plan: Plan, rows: readonly Transaction[], allPlan
   return scored.slice(0, 6).map((s) => s.t);
 }
 
+/**
+ * The open plan a new entry most likely pays, read with `likelyPayments`'s
+ * own rule from the other side: the Add form offers to count the entry as
+ * that plan's payment, so a plan typed in by hand is not left open and set
+ * aside a second time (owner, 27 October 2026: "make sure the planner is
+ * connected also in add too"). `sure` when the entry names the plan or is
+ * exactly what is left of it; the form starts with the link on only then.
+ */
+export function planPaidBy(row: Transaction, plans: readonly Plan[], transactions: readonly Transaction[]): { readonly plan: Plan; readonly left: Centavos; readonly sure: boolean } | null {
+  if (row.type !== "Spending" || row.total <= 0) return null;
+  const all = [...transactions.filter((t) => t.id !== row.id), row];
+  const found = plans
+    .filter((p) => p.status === "open" && likelyPayments(p, all, plans).some((t) => t.id === row.id))
+    .map((plan) => {
+      const left = Math.max(0, plan.amount - paidSoFar(plan, transactions).amount);
+      const words = plan.title.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+      const text = `${row.item} ${row.description}`.toLowerCase();
+      return { plan, left, sure: row.total === left || words.some((w) => text.includes(w)) };
+    })
+    .filter((m) => m.left > 0)
+    .sort((a, b) => Number(b.sure) - Number(a.sure) || a.plan.due.localeCompare(b.plan.due));
+  return found[0] ?? null;
+}
+
 /** "Moved twice, first planned for Nov 15". */
 export function movesWords(plan: Plan): string {
   if (plan.moves.length === 0) return "";

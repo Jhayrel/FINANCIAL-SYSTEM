@@ -38,7 +38,7 @@ import { makeDebtId } from "./debt";
 import { inferFromHistory, itemFromHistory } from "./infer";
 import { centavosInWords } from "./numberWords";
 import { readMoney } from "./proposal";
-import { withoutDays } from "./money";
+import { formatMoney, withoutDays } from "./money";
 import { dayFromWords, withoutDayWords } from "./dayWords";
 import { carriesIdentifier, withoutIdentifiers } from "./identifiers";
 import { saysItHappened } from "./intent";
@@ -334,7 +334,8 @@ function amountIn(text: string): number | null {
     return Number.isFinite(pesos) ? Math.round(pesos * 100) : null;
   }
 
-  const match = /(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d{1,2}|\d{2,})/i.exec(
+  // "50.555" is ₱50.56, rounded to the centavo, never ₱50.55 with a stray 5 (27 October 2026 sweep).
+  const match = /(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d{2,})/i.exec(
     withoutDates,
   );
   if (match?.[1]) return readMoney(match[1]);
@@ -542,6 +543,8 @@ function dateIn(text: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
   const worded = dayFromWords(text, asOf);
   if (worded) return { date: worded, said: true };
   if (/\btoday\b|\bjust now\b|\bearlier\b/i.test(text)) return { date: asOf, said: true };
+  // "bought load 100 tomorrow" was dated today with "tomorrow" in its words (27 October 2026 sweep); a day ahead is checked on the card.
+  if (/\btomorrow\b/i.test(text)) return { date: shift(asOf, 1), said: true };
 
   /**
    * The same words in Filipino, which is half of how the owner writes.
@@ -616,6 +619,17 @@ function walletIn(said: string, accounts: readonly string[]): string {
      */
     const short = shortNameOf(account, accounts);
     if (short && (flat.includes(` ${short} `) || flat.includes(` ${short}s `))) return account;
+  }
+
+  /*
+   * "Move 500 to savings", "from my savings": the one account whose name says
+   * savings. Unread, "to savings" left the destination blank and the transfer
+   * was booked as money that left your accounts, all of it spending (27
+   * October 2026 sweep). With two such accounts, nothing: which one is asked.
+   */
+  if (/\b(?:savings?|ipon)\b/.test(flat)) {
+    const saving = accounts.filter((a) => /\bsavings?\b/.test(bare(a)));
+    if (saving.length === 1) return saving[0]!;
   }
 
   return "";
@@ -1027,6 +1041,28 @@ export function readEntry(
 
   const because: string[] = [];
   if (said && date !== asOf) because.push(`Dated ${formatMedium(date)}, from what you said.`);
+  /*
+   * What was read differently from how it was written, said on the card
+   * (27 October 2026 sweep): "spent -50" became PHP 50.00, "50.555" a figure
+   * with a stray digit, "feb 30" today, all without a word.
+   */
+  if (amount !== null && /(?:^|[\s(:])[-\u2212]\s*(?:₱|php\s*)?\d/i.test(text) && !/\d\s*[-\u2212]\s*\d/.test(text)) {
+    because.push(`Read as ${formatMoney(amount)}: an amount is never below zero. Money back is a refund: say "refund ${formatMoney(amount, { symbol: false })} to cash".`);
+  }
+  if (amount !== null && /\d\.\d{3,}/.test(text)) because.push(`Read as ${formatMoney(amount)}: money is counted to the centavo, two places.`);
+  if (!said) {
+    // Only a day that cannot be: a month and a day past its last, or a month past twelve.
+    const named = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\b/i.exec(text);
+    const slashed = /\b(\d{1,2})\/(\d{1,2})\/((?:19|20)?\d{2})\b/.exec(text);
+    const year = Number(asOf.slice(0, 4));
+    const daysIn = (m: number): number => new Date(Date.UTC(year, m, 0)).getUTCDate();
+    const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    const namedMonth = named ? MONTHS.indexOf((named[1] ?? "").toLowerCase()) + 1 : 0;
+    const impossible =
+      (named && namedMonth > 0 && Number(named[2]) > daysIn(namedMonth)) ||
+      (slashed && (Number(slashed[1]) > 12 || Number(slashed[1]) < 1 || Number(slashed[2]) > daysIn(Math.min(12, Math.max(1, Number(slashed[1]))))));
+    if (impossible) because.push(`"${(named ?? slashed)?.[0] ?? ""}" is not a day on the calendar, so it is dated today. Check the date.`);
+  }
 
   /**
    * Said outright, rather than assumed from a bare "to".

@@ -36,6 +36,7 @@ import { splitEntries } from "./readEntry";
 import { itemsFor, needs, type Draft, type FieldName } from "./entry";
 import { numbersInWords } from "./numberWords";
 import { withoutDays } from "./money";
+import { formatMedium } from "./dates";
 import { withoutIdentifiers } from "./identifiers";
 import { matchExact, type Confidence } from "./proposal";
 import type { IsoDate, ReferenceLists } from "./types";
@@ -361,7 +362,7 @@ export function verifyReading(
   if (draft.date && draft.date > asOf) {
     findings.push({
       check: "date",
-      says: `This is dated ${draft.date}, which is after today. Check the date.`,
+      says: `This is dated ${formatMedium(draft.date)}, after today. Not paid yet? Plan it instead: say "plan" with what it is, the amount and the day.`,
     });
   }
 

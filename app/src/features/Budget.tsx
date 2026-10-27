@@ -93,7 +93,7 @@ import { daysInMonth, formatMedium, getMonth, getYear, MONTH_NAMES } from "../do
 import { PACE_FROM_DAY } from "../domain/alerts";
 import { budgetFromIncome, checkSplit, incomeBudget, type IncomeBudget } from "../domain/incomeBudget";
 import { monthBrief, spendable } from "../domain/monthPlan";
-import { plannedForBudget, viewOf, whenOf, type PlannedMonth } from "../domain/planner";
+import { NO_DATE, plannedForBudget, viewOf, whenOf, type PlannedMonth, type PlanView } from "../domain/planner";
 import { Icon } from "../components/Icon";
 import { formatMoney, type Centavos } from "../domain/money";
 import type {
@@ -266,6 +266,21 @@ export function Budget({
             asOf,
           ),
     [view.phase, reference, transactions, year, month, asOf],
+  );
+  /*
+   * Open plans with no date yet: in no month's figure until they have one,
+   * named under the plans so they are not forgotten (owner, 27 October 2026:
+   * "be accurate because some with no date").
+   */
+  const undated = useMemo(
+    () =>
+      view.phase === "past"
+        ? []
+        : (reference.plans ?? [])
+            .filter((p) => p.status === "open" && p.due === NO_DATE)
+            .map((p) => viewOf(p, { transactions, accounts: [], asOf }))
+            .filter((v) => v.left > 0),
+    [view.phase, reference.plans, transactions, asOf],
   );
   /** The month's plans still to pay, by kind, for the limits (`CategoryRow`). */
   const plannedByKind = useMemo(() => {
@@ -585,8 +600,8 @@ export function Budget({
             </p>
           )}
 
-          {planned && planned.total > 0 && (
-            <PlannedInMonth planned={planned} name={name} noPlan={noPlan} spendingLeft={a.spending.remaining} billsLeft={a.billsSubs.remaining} room={incomeView ? incomeView.room : null} asOf={asOf} onOpenPlanner={onOpenPlanner} />
+          {planned && (planned.total > 0 || undated.length > 0) && (
+            <PlannedInMonth planned={planned} undated={undated} name={name} noPlan={noPlan} spendingLeft={a.spending.remaining} billsLeft={a.billsSubs.remaining} room={incomeView ? incomeView.room : null} asOf={asOf} onOpenPlanner={onOpenPlanner} />
           )}
 
           {/*
@@ -1734,6 +1749,7 @@ function LimitEditor({
  */
 function PlannedInMonth({
   planned,
+  undated,
   name,
   noPlan,
   spendingLeft,
@@ -1743,6 +1759,8 @@ function PlannedInMonth({
   onOpenPlanner,
 }: {
   planned: PlannedMonth;
+  /** Open plans with no date yet, in no month's figure. */
+  undated: readonly PlanView[];
   name: string;
   noPlan: boolean;
   spendingLeft: Centavos;
@@ -1752,6 +1770,11 @@ function PlannedInMonth({
   asOf: string;
   onOpenPlanner?: (() => void) | undefined;
 }) {
+  // The month's spending plans by how sure they are; together they are `planned.spending`.
+  const sumOf = (list: readonly PlanView[]): Centavos => list.reduce((s, v) => s + v.left, 0);
+  const sure = sumOf(planned.spendingViews.filter((v) => v.plan.setAside && !v.plan.goalId));
+  const maybe = sumOf(planned.spendingViews.filter((v) => !v.plan.setAside && !v.plan.goalId));
+  const fromGoal = sumOf(planned.spendingViews.filter((v) => Boolean(v.plan.goalId)));
   const fit = (part: string, plannedPart: Centavos, left: Centavos): string => {
     if (plannedPart <= 0) return "";
     if (left >= plannedPart) return `The ${part} budget has ${formatMoney(left)} left; with ${formatMoney(plannedPart)} planned, ${formatMoney(left - plannedPart)} is free for the rest.`;
@@ -1771,10 +1794,12 @@ function PlannedInMonth({
   const over = !noPlan && (planned.spending > Math.max(0, spendingLeft) || planned.billsSubs > Math.max(0, billsLeft));
   return (
     <section className="fms-budgetplanned" aria-label={`Planned in ${name}`}>
+      {planned.total > 0 && (
       <div className="fms-budgetplanned-head">
         <span className="t-label">Planned in {name}, not paid yet</span>
         <Money value={planned.total} size="s" />
       </div>
+      )}
       <ul className="fms-budgetplanned-rows">
         {planned.views.map((v) => (
           <li key={v.plan.id}>
@@ -1788,6 +1813,64 @@ function PlannedInMonth({
           </li>
         ))}
       </ul>
+      {/*
+        The working, from what the spending budget has left: the plans taken
+        off by how sure they are (owner, 27 October 2026: "show also the
+        calculation of the one with the planner but be accurate because some
+        with no date, no exact goal or really just a plan without making sure
+        if we will continue with it"). Set aside is held back in safe to
+        spend; not set aside may not go ahead; a goal's is spending all the
+        same, paid from money saved for it.
+      */}
+      {!noPlan && planned.spending > 0 && (
+        <dl className="t-caption fms-rowfacts fms-budgetplancalc">
+          <div>
+            <dt>Left of the spending budget</dt>
+            <dd>
+              <Money value={spendingLeft} size="s" />
+            </dd>
+          </div>
+          {sure > 0 && (
+            <div>
+              <dt>Plans set aside in safe to spend</dt>
+              <dd>
+                <Money value={-sure} size="s" tone="var(--ink-2)" />
+              </dd>
+            </div>
+          )}
+          {maybe > 0 && (
+            <div>
+              <dt>Plans not set aside, may not go ahead</dt>
+              <dd>
+                <Money value={-maybe} size="s" tone="var(--ink-2)" />
+              </dd>
+            </div>
+          )}
+          {fromGoal > 0 && (
+            <div>
+              <dt>Plans paid from a goal</dt>
+              <dd>
+                <Money value={-fromGoal} size="s" tone="var(--ink-2)" />
+              </dd>
+            </div>
+          )}
+          <div className="fms-budgetplancalc-total">
+            <dt>Left after {[sure, maybe, fromGoal].filter((x) => x > 0).length > 1 ? "all of them" : "them"}</dt>
+            <dd>
+              <Money value={spendingLeft - planned.spending} size="s" />
+            </dd>
+          </div>
+          {maybe > 0 && (
+            <div>
+              <dt>Left if only the plans set aside go ahead</dt>
+              <dd>
+                <Money value={spendingLeft - sure - fromGoal} size="s" />
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+      {words && (
       <p className="t-caption fms-plannote">
         {over && (
           <span className="fms-plannote-icon" style={{ color: "var(--over)" }} aria-hidden>
@@ -1796,6 +1879,15 @@ function PlannedInMonth({
         )}
         <span>{words}</span>
       </p>
+      )}
+      {undated.length > 0 && (
+        <p className="t-caption fms-plannote" style={{ color: "var(--ink-3)" }}>
+          <span>
+            Not in any month yet, with no date: {undated.slice(0, 4).map((v) => `${v.plan.title} ${formatMoney(v.left)}`).join(", ")}
+            {undated.length > 4 ? `, and ${undated.length - 4} more` : ""}. Give {undated.length === 1 ? "it" : "each"} a month on the Planner and it counts there.
+          </span>
+        </p>
+      )}
       {onOpenPlanner && (
         <button type="button" className="t-caption fms-linkbtn" onClick={onOpenPlanner}>
           Open the Planner

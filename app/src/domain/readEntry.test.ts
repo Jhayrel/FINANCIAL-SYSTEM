@@ -273,3 +273,41 @@ describe("debt is never guessed at", () => {
     expect(read("bought load 100").readsAsDebt).toBe(false);
   });
 });
+
+/*
+ * The 27 October 2026 what-if sweep: what was read differently from how it
+ * was written is said on the card, and "savings" is the savings account.
+ */
+describe("what-ifs said on the card", () => {
+  const asOf = "2026-10-26";
+  it("reads savings as the savings account, both ways, never as money given away", () => {
+    expect(readEntry("move 500 to savings", [], reference, asOf).draft).toMatchObject({ flow: "Transfer", toWallet: "Maya Bank (Personal savings)" });
+    expect(readEntry("withdraw 500 from savings to cash", [], reference, asOf).draft).toMatchObject({ fromWallet: "Maya Bank (Personal savings)", toWallet: "Cash" });
+  });
+
+  it("says a dropped minus sign, a third decimal place and a day that cannot be", () => {
+    expect(readEntry("spent -50 on food", [], reference, asOf).because.join(" ")).toMatch(/Read as ₱50\.00: an amount is never below zero/);
+    const three = readEntry("spent 50.555 on food", [], reference, asOf);
+    expect(three.draft.amount).toBe(5_056);
+    expect(three.because.join(" ")).toMatch(/Read as ₱50\.56: money is counted to the centavo/);
+    const feb = readEntry("lunch 100 on feb 30", [], reference, asOf);
+    expect(feb.draft.date).toBe(asOf);
+    expect(feb.because.join(" ")).toMatch(/"feb 30" is not a day on the calendar/);
+    // A real day, and a range, say nothing of the kind.
+    expect(readEntry("lunch 100 on oct 20", [], reference, asOf).because.join(" ")).not.toMatch(/not a day/);
+    expect(readEntry("bus 20-30 pesos", [], reference, asOf).because.join(" ")).not.toMatch(/below zero/);
+  });
+
+  it("dates tomorrow as tomorrow", () => {
+    expect(readEntry("bought load 100 tomorrow", [], reference, asOf).draft.date).toBe("2026-10-27");
+  });
+
+  it("asks about a wallet that is not yours, and a transfer to itself, by saying so", () => {
+    const paypal = readEntry("paid 200 from paypal", [], reference, asOf);
+    expect(nextQuestion(paypal.draft, reference, [], "paid 200 from paypal")?.question).toMatch(/^Paypal is not one of your accounts\. Which one did it come out of\?/);
+    const same = readEntry("transfer 500 from cash to cash", [], reference, asOf);
+    const q = nextQuestion(same.draft, reference, [], "transfer 500 from cash to cash")?.question ?? "";
+    expect(q).toMatch(/^From Cash to Cash moves nothing\. Which one did it go into\? Gcash, Maya, Maya Bank/);
+    expect(q).not.toMatch(/\? Cash,/);
+  });
+});

@@ -16,6 +16,8 @@ import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export type PlannerAsk =
   | { readonly kind: "list" }
+  /** "If I pay the tuition plan today, will I be short?": what paying it would do, nothing saved. */
+  | { readonly kind: "payIf"; readonly plan: Plan; readonly wallet: string }
   /** Skip, move or pay a plan already paid, skipped or removed: said, with how to open it again. */
   | { readonly kind: "closed"; readonly plan: Plan }
   /** "What do you think of my tuition plan?", "can I afford the gifts plan?": an opinion on a plan on the Planner. */
@@ -386,6 +388,17 @@ export function readPlannerAsk(
     const when = NO_DAY.test(t) ? null : whenFor(t, asOf);
     if (plan && NO_DAY.test(t)) return { kind: "move", plan, to: NO_DATE, toKind: "none" };
     return plan && when ? { kind: "move", plan, to: when.due, toKind: when.kind } : plan ? null : closedNamed(t, plans);
+  }
+  /*
+   * A question about paying, not a payment: "if i pay the tuition plan today
+   * will i be short" was offered as a Pay card (27 October 2026 sweep).
+   */
+  if (/\bpay\b/i.test(t) && /^\s*(?:if|what\s+if|kung|suppose)\b|\b(?:will|would|can|could|should)\s+i\b|\bam\s+i\b|\b(?:enough|short|kulang|kaya)\b|\?\s*$/i.test(t) && !/\b(?:i|we)\s+(?:already\s+)?paid\b/i.test(t)) {
+    const plan = planNamed(t, open, ["open"]);
+    if (plan) {
+      const wallet = [...reference.wallets, ...reference.savings].find((w) => new RegExp(`\\b${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) ?? "";
+      return { kind: "payIf", plan, wallet };
+    }
   }
   if (/\b(?:paid|pay|settle|mark\b[^.?!]{0,30}\bpaid)\b/i.test(t)) {
     const plan = planNamed(t, open, ["open"]);

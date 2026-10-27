@@ -47,6 +47,8 @@ export function asksAboutDeleted(text: string): boolean {
   const t = text.trim();
   if (!t || ORDER_TO_DELETE.test(t)) return false;
   if (RESTORE_ONE.test(t) && !/\b(?:what|which|show|list|everything|all)\b/i.test(t)) return false;
+  // "Restore everything in the bin": the list, with its Restore all (27 October 2026 sweep: "nothing in the bin matches that").
+  if (RESTORE_ONE.test(t) && /\b(?:everything|all)\b/i.test(t)) return DELETED.test(t);
   return DELETED.test(t) && LOOKING.test(t);
 }
 

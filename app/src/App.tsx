@@ -2578,6 +2578,12 @@ export default function App() {
               uid={cloud.uid ?? null}
               sync={{ signedIn: Boolean(cloud.uid), online, pending }}
               onSave={handleSave}
+              onLinkPlan={(plan, rows) => {
+                // Typed on the Add form, counted as the plan's payment (`planPaidBy`).
+                const linked = linkPayments(plan, rows.map((r) => r.id), [...transactions, ...rows], asOf);
+                const paid = rows.reduce((sum, r) => sum + r.total, 0);
+                changePlan(linked, "plan.paid", `Paid "${plan.title}": ${formatMoney(paid)}, #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}, from the Add form${linked.status === "done" ? "" : ", more to pay"}.`, BY_OWNER);
+              }}
               onBin={handleDelete}
               onBinMany={handleDeleteMany}
               onRestoreRow={handleRestore}

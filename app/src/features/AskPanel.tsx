@@ -65,7 +65,7 @@
  * treats every call as its own.
  */
 
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { Button, Money } from "../components/primitives";
@@ -132,6 +132,8 @@ import {
 import { buildMeasureChart, chartHelps, chartReading, chartsWorked, inWords, localHint, measureOf, mergeHint, type ChartHint } from "../domain/chartAsk";
 import { rampFor } from "../components/charts";
 import { Icon } from "../components/Icon";
+import { AttachMenu } from "../components/AttachMenu";
+import { readSmallTalk, smallTalkAnswer } from "../domain/smallTalk";
 import { fileAsBefore } from "../domain/fileAsBefore";
 import { asksAboutDeleted, deletedRows, deletedWindowIn, deletedWords, onlyAWindow } from "../domain/deletedAsk";
 import { inferFromHistory } from "../domain/infer";
@@ -156,7 +158,7 @@ import { billsAnswer, readBillsAsk } from "../domain/billsAsk";
 import { goalAnswer, readGoalAsk } from "../domain/goalAsk";
 import { readWeekAsk, weekAnswer } from "../domain/weekAsk";
 import { asksLastTime, itemNamed, lastTimeAnswer, readLastTimeAsk } from "../domain/lastTimeAsk";
-import { asksToSignOut, asksToStopBill, readGoAsk, settingsPlaceFor, type GoPlace } from "../domain/goAsk";
+import { asksToRenameName, asksToSignOut, asksToStopBill, readGoAsk, settingsPlaceFor, type GoPlace } from "../domain/goAsk";
 import { creditRoomAnswer, debtDetailChange, readDebtDetailAsk } from "../domain/debtDetailAsk";
 import { numbersInWords, readReviewRowAsk, reviewRowAnswer } from "../domain/reviewAsk";
 import { activityAnswer, asksUndoLast, readActivityAsk } from "../domain/activityAsk";
@@ -184,7 +186,7 @@ import { reconcile } from "../domain/reconcile";
 import { readAgainst, statementAccount } from "../domain/statement";
 import { useMediaQuery } from "./useMediaQuery";
 import { ownNamesIn, senseStatementRows } from "../domain/statementSense";
-import { allWalletBalances, walletBalance } from "../domain/balances";
+import { allWalletBalances, totalSavingsBalance, totalWalletBalance, walletBalance } from "../domain/balances";
 import {
   draftForClue,
   investigate,
@@ -247,7 +249,7 @@ import { spreadCovered } from "../domain/covers";
 import { rowSavedFor } from "../domain/formSaved";
 import type { Draft } from "../domain/entry";
 import type { Proposal } from "../domain/proposal";
-import { choicesFor, effectsFor, interestOnTop, outstandingOf, owedChange, asAmountAndFees, owedParts, type Debt, type DebtEffect } from "../domain/debt";
+import { choicesFor, effectsFor, interestOnTop, netWorth, outstandingOf, owedChange, asAmountAndFees, owedParts, positionsOf, type Debt, type DebtEffect } from "../domain/debt";
 import { BEHALF_EFFECTS, BEHALF_SIDE_LABEL, ON_BEHALF, effectInline, effectLabel, effectMeaning, type BehalfSide } from "../domain/debtWords";
 import { debtCardIntro } from "../domain/debtSentence";
 import { splitsWhose } from "../domain/behalfFor";
@@ -1567,6 +1569,10 @@ export function AskPanel({
   const pickerRef = useRef<HTMLInputElement>(null);
   /** The phone's camera, opened straight to taking a picture (owner, 26 September 2026). */
   const cameraRef = useRef<HTMLInputElement>(null);
+  /** The phone's photos and screenshots, from + (owner, 27 October 2026). */
+  const photosRef = useRef<HTMLInputElement>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const closeAttach = useCallback(() => setAttachOpen(false), []);
 
   /**
    * Mark a card added once the form saves the row it supplied.
@@ -3007,7 +3013,7 @@ export function AskPanel({
     }
 
     // A training card asks nothing: it is there to be taught, not saved.
-    const asked = batch || pictureNow.current?.teach ? null : nextQuestion(ready.draft, reference, settled);
+    const asked = batch || pictureNow.current?.teach ? null : nextQuestion(ready.draft, reference, settled, ready.said ?? "");
 
     if (!asked) {
       const cardId = newCardId();
@@ -5270,7 +5276,18 @@ export function AskPanel({
      * 2026 sweep: these got the month's summary, and "magkano natitira sa
      * budget ko?" next month's suggested budget).
      */
-    const quick = files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) ? readQuickAsk(ruled, knownItems) : null;
+    // "hello", "thanks", a bare "100", "what's 150+80": no summary for any of them (`smallTalk.ts`).
+    const small = files.length === 0 && !as && pending === null ? readSmallTalk(note) : null;
+    if (small) {
+      const reply = smallTalkAnswer(small, (settings.owner?.callMe || settings.owner?.name || "").trim().split(/\s+/)[0] ?? "");
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "dashboard", { text: note }));
+      say({ kind: "assistant", text: reply, from: "this device" });
+      log(aiEvent("answered", "dashboard", { text: reply, model: "this device" }));
+      return;
+    }
+    const quick = files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) ? readQuickAsk(ruled, knownItems, [...reference.wallets, ...reference.savings]) : null;
     if (quick) {
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
@@ -5286,13 +5303,25 @@ export function AskPanel({
           asOf,
           savings: reference.savings.map((a) => ({ name: a, holds: walletBalance(transactions, a) })),
           movedToSavings: transactions.filter((r) => r.type === "Transfer" && savingsNames.has(r.toWallet) && r.date.startsWith(asOf.slice(0, 7)) && r.date <= asOf).reduce((s, r) => s + r.amount, 0),
+          // The top bar's own figures: each wallet, and net worth (`netWorth`).
+          wallets: reference.wallets.map((w) => ({ name: w, holds: walletBalance(transactions, w) })),
+          worth: netWorth(totalWalletBalance(transactions, reference.wallets), totalSavingsBalance(transactions, reference.savings), positionsOf(debts, transactions, asOf)),
         },
         formatMoney,
       );
       setDraft("");
       say({ kind: "you", text: note });
       log(aiEvent("asked", "budget", { text: note }));
-      const place: GoPlace | null = quick.kind === "budget" ? { screen: "budget", label: "Budget" } : quick.kind === "biggest" ? { screen: "insights", label: "Insights" } : null;
+      const place: GoPlace | null =
+        quick.kind === "budget"
+          ? { screen: "budget", label: "Budget" }
+          : quick.kind === "biggest" || quick.kind === "received"
+            ? { screen: "insights", label: "Insights" }
+            : quick.kind === "recurring"
+              ? { screen: "settings", label: "Settings, Categories", tab: "categories" }
+              : quick.kind === "balance" || quick.kind === "worth"
+                ? { screen: "dashboard", label: "Dashboard" }
+                : null;
       say({ kind: "assistant", text: reply, from: "this device", ...(place ? { go: place } : {}) });
       log(aiEvent("answered", "budget", { text: reply, model: "this device" }));
       return;
@@ -5625,6 +5654,18 @@ export function AskPanel({
         return;
       }
 
+      // "Rename food to meals": on Settings, which says what it rewrites and asks first.
+      const renaming = asksToRenameName(lead, planKinds(reference).options, [...reference.wallets, ...reference.savings]);
+      if (renaming) {
+        const rows = transactions.filter((t) => (renaming.what === "kind" ? t.item === renaming.from : t.fromWallet === renaming.from || t.toWallet === renaming.from)).length;
+        answer(
+          `Renaming ${renaming.from} to ${renaming.to} rewrites the ${rows === 1 ? "one entry" : `${rows} entries`} that ${renaming.what === "kind" ? "are filed under it" : "use it"}, in the ledger and the bin; amounts and dates stay, so no balance moves. It is done on Settings, under ${renaming.what === "kind" ? "Categories" : "Accounts"}: press Rename beside ${renaming.from}, and it asks before changing anything.`,
+          "settings",
+          { screen: "settings", tab: renaming.what === "kind" ? "categories" : "accounts", label: `Settings, ${renaming.what === "kind" ? "Categories" : "Accounts"}` },
+        );
+        return;
+      }
+
       // A credit line's limit, due day or billing day, as the Debt screen's Details form sets them.
       const detailAsk = readDebtDetailAsk(lead, debts);
       if (detailAsk) {
@@ -5716,6 +5757,34 @@ export function AskPanel({
         const views = plans.map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf }));
         if (planAsk.kind === "list") {
           answer(plansWords(views, plansSetAside(views).total), "budget", planner);
+          return;
+        }
+        if (planAsk.kind === "payIf") {
+          // What paying it now would do, from the same figures the Pay card checks; nothing is saved.
+          const p = planAsk.plan;
+          const v = views.find((x) => x.plan.id === p.id) ?? viewOf(p, { transactions, accounts: settings.accounts, asOf });
+          const item = p.item || kindFromHistory(p.title, transactions, planKinds(reference).options) || "";
+          const goalName = p.goalId ? settings.accounts.find((a) => a.id === p.goalId)?.name : undefined;
+          const from = planAsk.wallet || goalName || walletToPayFrom({ wallet: p.wallet, item }, v.left, transactions, reference.wallets);
+          const holds = walletBalance(transactions, from);
+          const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
+          const wallets = brief.safe?.wallets ?? null;
+          const safe = brief.safe ? Math.max(0, brief.safe.safe) : null;
+          const lines = [
+            holds >= v.left
+              ? `**Yes, ${from} can pay it.** "${p.title}" has ${formatMoney(v.left)} left to pay; ${from} holds ${formatMoney(holds)}, so ${formatMoney(holds - v.left)} would stay in it.`
+              : `**${from} would be ${formatMoney(v.left - holds)} short.** "${p.title}" has ${formatMoney(v.left)} left to pay and ${from} holds ${formatMoney(Math.max(0, holds))}.`,
+            wallets !== null && from !== goalName ? `All your spending wallets together hold ${formatMoney(wallets)}${wallets < v.left ? `, ${formatMoney(v.left - wallets)} less than it` : ""}.` : "",
+            v.counts
+              ? "It is set aside in safe to spend already, so paying it does not lower your daily figure."
+              : safe !== null && !goalName
+                ? `It is not set aside this month, so paying it now comes out of safe to spend (${formatMoney(safe)} until the month ends)${safe < v.left ? `, ${formatMoney(v.left - safe)} more than it` : ""}.`
+                : "",
+            holds >= v.left
+              ? `To pay it, say "I paid the ${p.title.toLowerCase()} plan${planAsk.wallet ? ` from ${from.toLowerCase()}` : ""}".`
+              : `Before paying, move money into ${from}, pay part of it now, or move its day${p.due !== NO_DATE ? ` (now ${whenOf(p).replace(/^S/, "s")})` : ""}.`,
+          ].filter(Boolean);
+          answer(lines.join(" "), "budget", planner);
           return;
         }
         if (planAsk.kind === "closed") {
@@ -7432,10 +7501,31 @@ export function AskPanel({
      * kept, whoever proposed it: said on the card (19 October 2026, a card
      * set October to exactly what was spent).
      */
-    if (budgetAsk && budgetAsk.kind === "tracks" && budgetAsk.spending !== undefined && budgetAsk.year === Number(asOf.slice(0, 4)) && budgetAsk.month === Number(asOf.slice(5, 7))) {
+    if (budgetAsk && budgetAsk.kind === "tracks" && budgetAsk.year === Number(asOf.slice(0, 4)) && budgetAsk.month === Number(asOf.slice(5, 7))) {
+      /*
+       * The spending budget the card makes, not the figure said: "raise my
+       * budget by 1000" was checked as a budget of PHP 1,000.00 ("leaves
+       * nothing to spend"), and "set my budget to 20000", a total, was not
+       * checked at all though its spending was under what was spent (27
+       * October 2026 sweep).
+       */
+      const set = budgets[String(budgetAsk.year)];
+      const nowSpending = set?.spending[budgetAsk.month - 1] ?? 0;
+      const nowBills = set?.billsSubs[budgetAsk.month - 1] ?? budgetAsk.billsHint ?? 0;
+      const bills = budgetAsk.billsSubs === undefined ? nowBills : budgetAsk.by ? nowBills + budgetAsk.billsSubs : budgetAsk.billsSubs;
+      const spending =
+        budgetAsk.spending !== undefined
+          ? budgetAsk.by
+            ? nowSpending + budgetAsk.spending
+            : budgetAsk.spending
+          : budgetAsk.total !== undefined
+            ? budgetAsk.by
+              ? nowSpending + budgetAsk.total
+              : budgetAsk.total - bills
+            : null;
       const spentSoFar = assessMonthFor(reportRows, budgets, budgetAsk.year, budgetAsk.month).spending.spent;
-      if (budgetAsk.spending <= spentSoFar) {
-        budgetNote = [budgetNote, `${formatMoney(spentSoFar)} is already spent this month, so a spending budget of ${formatMoney(budgetAsk.spending)} leaves nothing to spend. Change the figures before you apply.`].filter(Boolean).join(" ");
+      if (spending !== null && spending <= spentSoFar) {
+        budgetNote = [budgetNote, `${formatMoney(spentSoFar)} is already spent this month, so a spending budget of ${formatMoney(Math.max(0, spending))} leaves nothing to spend. Change the figures before you apply.`].filter(Boolean).join(" ");
       }
     }
     if (budgetAsk || saysBudget || yesAfterBudgetTalk || (files.length === 0 && !as && modelSawEntry && isBudgetCommand(ruled))) {
@@ -10986,19 +11076,19 @@ export function AskPanel({
         }}
       >
         {/*
-          + is for files. On a phone it takes documents only (owner, 27
-          October 2026: "the + is only for file"): an Android phone offers
-          its camera for any picker that also takes pictures, which made +
-          the camera button twice over. One document type, a PDF, opens the
-          phone's files instead. Pictures come by the camera button, which
-          offers the camera or the gallery. A computer has no camera button,
-          so its + takes pictures as well.
+          Files. On a computer + opens this one, pictures included. On a
+          phone + asks first, Photos and screenshots or Files (`AttachMenu`),
+          and this is Files: documents only, so the phone opens its files
+          straight away. A picker that also takes pictures makes Android
+          offer the camera beside them, the camera button twice over (owner,
+          27 October 2026: "the + is only for file"), and cut to PDFs only it
+          hid the screenshots ("before i can see screenshots and photos").
         */}
         <input
           ref={pickerRef}
           type="file"
           multiple
-          accept={wide ? "image/jpeg,image/png,image/webp,application/pdf,.pdf,.csv,.txt,.md,.json,.tsv" : "application/pdf"}
+          accept={wide ? "image/jpeg,image/png,image/webp,application/pdf,.pdf,.csv,.txt,.md,.json,.tsv" : "application/pdf,text/csv,text/plain"}
           hidden
           onChange={(e) => {
             void attach(e.target.files);
@@ -11016,11 +11106,23 @@ export function AskPanel({
           receipt, so the button is not drawn there (layout.css).
         */}
         {/*
-          No `capture`: the phone asks Camera or Photos, so a screenshot from
-          the gallery comes in here too, now that + is for documents.
+          `capture` again: the camera straight away, now that photos and
+          screenshots have their own place under +.
         */}
         <input
           ref={cameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={(e) => {
+            void attach(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        {/* Photos and screenshots, from + on a phone: pictures only, so the phone opens its photos. */}
+        <input
+          ref={photosRef}
           type="file"
           multiple
           accept="image/*"
@@ -11082,22 +11184,35 @@ export function AskPanel({
             }
             label={attached ? "A note about the attached files" : "Ask a question, or type an entry"}
           />
+          {!wide && (
+            <AttachMenu
+              open={attachOpen}
+              onClose={closeAttach}
+              choices={[
+                { label: "Photos and screenshots", icon: "image", run: () => photosRef.current?.click() },
+                { label: "Files: PDF, CSV or text", icon: "statements", run: () => pickerRef.current?.click() },
+              ]}
+            />
+          )}
           <div className="fms-asktools">
             <button
               type="button"
               className="fms-attach"
-              aria-label={wide ? "Attach a picture, a PDF or a file" : "Attach a PDF document"}
-              title={wide ? "Attach a picture, a PDF or a file" : "Attach a PDF document"}
+              aria-label={wide ? "Attach a picture, a PDF or a file" : "Attach photos, screenshots or files"}
+              title={wide ? "Attach a picture, a PDF or a file" : "Attach photos, screenshots or files"}
+              aria-haspopup={wide ? undefined : "menu"}
+              aria-expanded={wide ? undefined : attachOpen}
+              data-attach-toggle=""
               disabled={busy || files.length >= limits.maxCount}
-              onClick={() => pickerRef.current?.click()}
+              onClick={() => (wide ? pickerRef.current?.click() : setAttachOpen((o) => !o))}
             >
               +
             </button>
             <button
               type="button"
               className="fms-attach fms-askcamera"
-              aria-label="Take a photo or choose one"
-              title="Take a photo or choose one"
+              aria-label="Take a photo"
+              title="Take a photo"
               disabled={busy || files.length >= limits.maxCount}
               onClick={() => cameraRef.current?.click()}
             >

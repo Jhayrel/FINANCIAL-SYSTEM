@@ -118,3 +118,12 @@ describe("the model is told the bin", () => {
     expect(without).not.toMatch(/## The bin/);
   });
 });
+
+// 27 October 2026 sweep: "restore everything in the bin" was answered "nothing in the bin matches that".
+describe("restore everything", () => {
+  it("is the bin's list, which has Restore all", () => {
+    expect(asksAboutDeleted("restore everything in the bin")).toBe(true);
+    expect(asksAboutDeleted("restore all from the bin")).toBe(true);
+    expect(asksAboutDeleted("restore the gas entry")).toBe(false);
+  });
+});

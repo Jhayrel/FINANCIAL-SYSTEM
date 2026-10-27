@@ -43,6 +43,8 @@ const FILLER = new Set([
   // How money moved, not what it was: "fee" was learned as "the Maya wallet" and "moved into" as Maya (20 Sep 2026).
   "fee", "fees", "charge", "charged", "moved", "move", "into", "onto", "gave", "give", "given", "treated",
   "withdraw", "withdrew", "withdrawn", "deposit", "deposited", "credited", "borrowed", "lent",
+  // When, not what: "lunch last friday" kept "lunch last", "load tomorrow" its "tomorrow" (27 October 2026 sweep).
+  "tomorrow", "last", "night", "ago", "kahapon", "kagabi", "bukas", "noong", "nung",
 ]);
 
 const DATE_WORDS = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*$|^(mon|tue|wed|thu|fri|sat|sun)[a-z]*$/;
