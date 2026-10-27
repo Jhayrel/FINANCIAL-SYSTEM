@@ -139,6 +139,8 @@ import { monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, saysItWasAStatement, wantsThoseEntries, type Intent } from "../domain/intent";
 import { monthBrief } from "../domain/monthPlan";
+import { asksPlanOpinion, planOpinion, readPlanCardChange, type PlanOpinionFacts } from "../domain/planCard";
+import { pictureDay } from "../domain/pictureDay";
 import { financeAlerts } from "../domain/alerts";
 import { billStatuses } from "../domain/bills";
 import { spentFromLeft } from "../domain/leftOver";
@@ -159,15 +161,16 @@ import { numbersInWords, readReviewRowAsk, reviewRowAnswer } from "../domain/rev
 import { activityAnswer, asksUndoLast, readActivityAsk } from "../domain/activityAsk";
 import { activityStore } from "../data/activityStore";
 import type { PlanAction } from "./useProposalSink";
+import { PlanForm } from "./Planner";
 import { entryImpact, limitLine } from "../domain/entryImpact";
 import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
 import { kindFromHistory, makePlan, movePlan, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
-import { plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
+import { dayFor, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
 import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
 import { planWorked } from "../domain/planRate";
-import { notPaidIn, notPaidWords, paidDraftFor, saysItWasPaid, type NotPaid } from "../domain/notPaid";
+import { notPaidIn, notPaidWords, paidDraftFor, planToPay, saysItWasPaid, type NotPaid } from "../domain/notPaid";
 import { classifyPaper, PAPER_KINDS, PAPER_WORDS, UNPAID, type PaperKind } from "../domain/paperKind";
 import { maskNumbers, nearestTaught, paperEvent, papersFrom, printedIn, taughtFromCard, trainingFrom, wantsTraining, type TaughtPaper } from "../domain/paperMemory";
 import { addressesEveryCard, asksToReadAgain, asksToRename, saysAllOfIt, saysOneWasMissed, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
@@ -251,6 +254,7 @@ import { entryLineIn } from "../domain/intent";
 import { fillDebt, personDebt } from "../domain/debtFill";
 import { foldInterest } from "../domain/interestFold";
 import { afterFigureChange } from "../domain/cardEdit";
+import { currentNotes } from "../domain/cardNotes";
 import { accountIn, interestFromBalance } from "../domain/interestAsk";
 import { saysWhen } from "../domain/when";
 import { lessonKey, lessonsFrom } from "../domain/learning";
@@ -318,7 +322,7 @@ export interface ProposalSink {
     readonly feesPaid?: { readonly fees: number; readonly total: number } | undefined;
   };
   /** Put it in the form, for a correction before saving. */
-  readonly use: (draft: Draft) => void;
+  readonly use: (draft: Draft, cardId?: string) => void;
   /**
    * Save it, through the same path a typed entry takes.
    *
@@ -1172,7 +1176,7 @@ export function AskPanel({
    * even after you pressed Save there, so the two halves of one entry
    * disagreed about what had happened to it.
    */
-  lastSaved: { draft: Draft; at: number; recordNumber?: number } | null;
+  lastSaved: { draft: Draft; at: number; recordNumber?: number; cardId?: string | undefined } | null;
   /**
    * What the form beside this holds, right now.
    *
@@ -1211,6 +1215,8 @@ export function AskPanel({
   const wide = useMediaQuery("(min-width: 1024px)");
 
   const [turns, setTurns] = useState<Turn[]>([]);
+  /** A Planner card open in the plan form, by its Edit (owner, 27 October 2026: "add manually edit"). */
+  const [planEditing, setPlanEditing] = useState<{ readonly cardId: string; readonly plan: Plan; readonly action: PlanAction; readonly before?: Plan | undefined } | null>(null);
 
   /**
    * The last message that was answered as a question and had entries in it.
@@ -1596,6 +1602,8 @@ export function AskPanel({
      */
     const same = (t: Turn): t is Offered => {
       if (!isOffer(t) || t.state !== "used") return false;
+      // The form says which card it was filled from: that one, whatever was changed in the form.
+      if (lastSaved.cardId) return t.cardId === lastSaved.cardId;
       if (t.usedAt !== undefined && t.usedAt > lastSaved.at) return false;
       const shown = t.live ?? t.proposal.draft;
       const first = t.proposal.draft;
@@ -1617,6 +1625,22 @@ export function AskPanel({
   }, [lastSaved, turns]);
 
   /*
+   * A change card opened in the form and saved there: the card says so, as
+   * an entry card does, rather than still offering Apply for a row already
+   * edited (27 October 2026, "make sure everything is sync").
+   */
+  useEffect(() => {
+    const id = lastSaved?.cardId;
+    if (!id) return;
+    const card = turns.find((t): t is Changing => isChanging(t) && t.cardId === id && t.state === "open");
+    if (!card) return;
+    const done: Changing = { ...card, state: "applied", note: "Edited in the form and saved there." };
+    recordCard(done);
+    setTurns((prev) => prev.map((t) => (isChanging(t) && t.cardId === id ? done : t)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastSaved, turns]);
+
+  /*
    * The form emptied with no save behind it: the edit was called off, so the
    * card is open again (see the follow effect above). Never a card the form
    * saved, by the save the form reported or by a row the ledger already has:
@@ -1632,6 +1656,7 @@ export function AskPanel({
     if (inForm.length === 0) return;
     const savedByForm = (card: Offered): boolean => {
       if (!lastSaved || (card.usedAt !== undefined && card.usedAt > lastSaved.at)) return false;
+      if (lastSaved.cardId) return lastSaved.cardId === card.cardId;
       const s0 = lastSaved.draft;
       return [card.live ?? card.proposal.draft, card.proposal.draft].some((d) => d.date === s0.date && d.amount === s0.amount && d.flow === s0.flow);
     };
@@ -1898,6 +1923,8 @@ export function AskPanel({
   const heldDifference = useRef<{ readonly draft: Draft; readonly at: number } | null>(null);
   /** A bill, a fee assessment or a checkout just read, held for "paid it" (`domain/notPaid.ts`). */
   const heldPaper = useRef<{ readonly docs: readonly NotPaid[]; readonly at: number } | null>(null);
+  /** Plans to pay a bill just read, offered once what the bill is has been said. */
+  const paperPlans = useRef<{ readonly plan: Plan; readonly words: string }[]>([]);
   /** Cards already written down as added, so a second path never writes the same one again. */
   const addedCards = useRef(new Set<string>());
 
@@ -3370,10 +3397,13 @@ export function AskPanel({
   /** Read the attached files into proposals. Returns false when there were none. */
   /** Read what was sent; the picture being read is let go however it ends (`pictureNow`). */
   const readAttached = async (note: string, again?: readonly Attachment[]): Promise<boolean> => {
+    paperPlans.current = [];
     try {
       return await readSent(note, again);
     } finally {
       pictureNow.current = null;
+      // A bill's plan to pay it, under what the bill is (`planToPay`).
+      for (const p of paperPlans.current.splice(0)) offerPlan(p.plan, p.words);
     }
   };
 
@@ -3569,6 +3599,25 @@ export function AskPanel({
       const docs = notPaidIn(result.readings ?? [], training);
       const teaching = pictureNow.current?.teach === true;
       heldPaper.current = docs.length > 0 && !teaching && !saysItWasPaid(note) ? { docs, at: Date.now() } : null;
+      /*
+       * A bill or an invoice not paid yet, with the day it is due: offered as
+       * a plan to pay it by then, so it is set aside and the bell says when it
+       * comes (owner, 27 October 2026: "allow scanning of documents invoice
+       * etc"). Nothing is saved until the card is pressed; paid later, the
+       * payment is linked to it on the Planner.
+       */
+      if (heldPaper.current && sink.canPlan) {
+        for (const doc of docs) {
+          const pay = planToPay(doc, doc.due ? dayFor(doc.due, asOf) : null, asOf);
+          if (!pay) continue;
+          const plans = settings.plans ?? [];
+          if (plans.some((p) => p.status === "open" && p.amount === pay.amount && p.due === pay.due)) continue;
+          const input = planInputFor(pay.title, pay.amount, pay.due, { reference, transactions, asOf }, doc.from);
+          const plan = makePlan({ ...input, title: pay.title }, asOf, "ai");
+          // Offered after what the paper is has been said (`readAttached`).
+          paperPlans.current.push({ plan, words: `Not paid yet, so it is not an entry. Add it to the Planner to pay it by ${formatMedium(pay.due)}: no money moves until you pay, and when you do, the payment is linked to it. ${countsSentence(plan, asOf)}` });
+        }
+      }
       // Sent to train: a bill or a checkout gets its card too, to be taught as what it is.
       if (teaching) {
         for (const doc of docs) {
@@ -3775,7 +3824,7 @@ export function AskPanel({
 
     const onDevice = result.proposals.map((proposal, i) => {
       const reading = readings[i];
-      const base = reading
+      const read = reading
         ? {
             ...proposal,
             draft: reading.draft,
@@ -3784,6 +3833,9 @@ export function AskPanel({
               : proposal.adjustments,
           }
         : proposal;
+      // A screenshot's day against the day the phone saved it: "27 Oct" read as October 7 (`pictureDay.ts`).
+      const day = sent.length > 0 ? pictureDay(read.draft, read.sourceRef || fromOneFile?.name || "") ?? (fromOneFile ? pictureDay(read.draft, fromOneFile.name) : null) : null;
+      const base = day ? { ...read, draft: { ...read.draft, date: day.date }, adjustments: [...read.adjustments, day.note] } : read;
 
       if (!oneSentence) return base;
 
@@ -4533,6 +4585,53 @@ export function AskPanel({
     if (answer.source === "model" && readPlanIntent(question, { reference, transactions, asOf })?.kind !== "today") offerPlanFromAnswer(answerText);
   };
 
+  /**
+   * The Planner card waiting for a press, when it is the last card in the
+   * conversation: what a reply after it is about. A card further up, under
+   * an entry card or a chart since, is not.
+   */
+  const openPlanCard = (): { index: number; turn: Settling; plan: Plan } | null => {
+    for (let i = turns.length - 1; i >= 0 && i >= turns.length - 12; i--) {
+      const t = turns[i];
+      if (!t || t.kind === "you" || t.kind === "assistant") continue;
+      if (isSettling(t) && t.state === "open" && t.planner?.save && t.planner.save.action === "plan.create") return { index: i, turn: t, plan: t.planner.save.plan };
+      return null;
+    }
+    return null;
+  };
+
+  /** The plan card at `index`, changed, arriving again at the bottom under what was said, as an entry card does (`reviseCard`). */
+  const revisePlanCard = (index: number, turn: Settling, plan: Plan, words: string, said: string): void => {
+    const changed: Settling = {
+      ...turn,
+      words,
+      planner: { rows: planRows(plan), save: { plan, action: "plan.create", summary: `Planned "${plan.title}", ${formatMoney(plan.amount)} ${byWhen(plan)}, from the chat.` } },
+    };
+    recordCard(changed);
+    setTurns((prev) => [...prev.filter((_, i) => i !== index), { kind: "you", text: said }, changed]);
+  };
+
+  /** What an opinion on a plan is worked from: its month as "how much do I need" reads it, today's money, the savings. */
+  const planOpinionFacts = (plan: Plan): PlanOpinionFacts => {
+    const brief = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
+    const savings = reference.savings.reduce((sum, a) => sum + Math.max(0, walletBalance(transactions, a)), 0);
+    let month: PlanOpinionFacts["month"] = null;
+    const monthEnd = lastOfMonth(Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)));
+    if (plan.due !== NO_DATE && plan.due > monthEnd) {
+      const y = Number(plan.due.slice(0, 4));
+      const m = Number(plan.due.slice(5, 7));
+      if (y * 12 + m - (Number(asOf.slice(0, 4)) * 12 + Number(asOf.slice(5, 7))) <= 12) {
+        const others = plannedIn((settings.plans ?? []).map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf })), y, m).filter((o) => !(o.amount === plan.amount && namesIt(o.name, plan.title)));
+        const nextUp = nextOf(asOf);
+        const readFrom = y * 12 + m > nextUp.year * 12 + nextUp.month ? { readBefore: { year: nextUp.year, month: nextUp.month } } : {};
+        const a = budgetAdvice({ transactions: reportRows, year: y, month: m, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes, planned: others, ...readFrom });
+        const othersSum = others.reduce((sum, o) => sum + o.amount, 0);
+        if (a.typicalIncome > 0) month = { name: a.name, usual: a.total + a.debtDue - othersSum, others: othersSum, income: a.typicalIncome };
+      }
+    }
+    return { asOf, month, freeNow: brief.safe?.free ?? null, savings };
+  };
+
   /** A new plan's card rows, the same on every route that offers one. */
   const planRows = (plan: Plan): { label: string; value: string }[] => [
     { label: "What", value: plan.title },
@@ -4573,6 +4672,8 @@ export function AskPanel({
    */
   const offerPlanFromAnswer = (text: string): boolean => {
     if (!sink.canPlan || queuedPlans.current.length > 0) return false;
+    // A plan card already waiting is the one to act on: the answer's Plan line is not offered again beside it (27 October 2026).
+    if (turns.slice(-12).some((t) => isSettling(t) && t.state === "open" && t.planner?.save?.action === "plan.create")) return false;
     const line = planLineIn(text);
     if (!line) return false;
     const input = readPlanLine(line, { reference, transactions, asOf });
@@ -4844,6 +4945,43 @@ export function AskPanel({
         owner: { next },
       });
       return;
+    }
+
+    /*
+     * A Planner card still waiting, and something said back to it (owner, 27
+     * October 2026): "Before adding that what do you think?" is an opinion on
+     * that plan, and "Its not safe spend" changes it. Both went elsewhere, to
+     * where the month's money went and to today's safe to spend, and a
+     * second card for the same plan came with the first (`planCard.ts`).
+     */
+    const planOpen = files.length === 0 && !as && sink.canPlan ? openPlanCard() : null;
+    if (planOpen) {
+      const { index: at, turn: card, plan } = planOpen;
+      const input: PlanInput = { title: plan.title, amount: plan.amount, due: plan.due, dueKind: plan.dueKind, item: plan.item, wallet: plan.wallet, goalId: plan.goalId, need: plan.need, setAside: plan.setAside, notes: plan.notes };
+      const change = readPlanCardChange(lead, input, { reference, asOf });
+      if (change) {
+        setDraft("");
+        log(aiEvent("asked", "budget", { text: note }));
+        if (change.changed.length === 0) {
+          say({ kind: "you", text: note });
+          say({ kind: "assistant", text: `${change.already.join(" ")} The card above is unchanged; press Add to the planner when it looks right.`, from: "this device" });
+          return;
+        }
+        const next: Plan = { ...makePlan(change.input, asOf, "ai"), id: plan.id, createdOn: plan.createdOn };
+        const words = [`Changed: ${change.changed.join(", ")}.`, ...change.already, "No money moves until you pay.", countsSentence(next, asOf)].join(" ");
+        revisePlanCard(at, card, next, words, note);
+        log(aiEvent("edited", "budget", { entry: `Plan ${next.title}, ${formatMoney(next.amount)}`, text: words }));
+        return;
+      }
+      if (asksPlanOpinion(lead)) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "budget", { text: note }));
+        const reply = planOpinion(input, planOpinionFacts(plan));
+        say({ kind: "assistant", text: reply, from: "this device", go: { screen: "planner", label: "the Planner" } });
+        log(aiEvent("answered", "budget", { text: reply, model: "this device" }));
+        return;
+      }
     }
 
     /*
@@ -10043,7 +10181,7 @@ export function AskPanel({
                 say({ kind: "assistant", text: done, from: "this device" });
               }}
               onDiscard={() => decide(i, "discarded")}
-              onOpen={(row) => sink.use(transactionToDraft(row))}
+              onOpen={(row) => sink.use(transactionToDraft(row), turn.cardId)}
               onPutBack={() => {
                 const { back, moved } = putBackRows([turn]);
                 if (back.length === 0) {
@@ -10105,6 +10243,14 @@ export function AskPanel({
             <SettleCard
               key={i}
               turn={turn}
+              onEdit={
+                turn.cardId && sink.canPlan && turn.planner?.save && (turn.planner.save.action === "plan.create" || turn.planner.save.action === "plan.update")
+                  ? () => {
+                      const save = turn.planner?.save;
+                      if (save && turn.cardId) setPlanEditing({ cardId: turn.cardId, plan: save.plan, action: save.action, before: save.before });
+                    }
+                  : undefined
+              }
               canSettle={
                 turn.owner
                   ? Boolean(sink.canSaveOwner && turn.owner.next)
@@ -10304,7 +10450,7 @@ export function AskPanel({
               }}
               onUse={() => {
                 hold(i);
-                sink.use(turn.proposal.draft);
+                sink.use(turn.proposal.draft, turn.cardId);
                 settle(i, "used");
               }}
               onTeach={turn.paper?.teach ? (kind) => teachCard(i, turn, kind) : undefined}
@@ -10525,6 +10671,41 @@ export function AskPanel({
         written anywhere, which is the whole point of describing photos
         rather than storing them.
       */}
+      {/*
+        A Planner card's Edit: the Planner's own form, filled from the card.
+        Saving there adds the plan, as saving the Add form adds an entry sent
+        to it with Edit first, and the card says what was saved.
+      */}
+      {planEditing && (
+        <PlanForm
+          editing={planEditing.plan}
+          plans={settings.plans ?? []}
+          transactions={transactions}
+          budgets={budgets}
+          debts={debts}
+          reference={reference}
+          accounts={settings.accounts}
+          asOf={asOf}
+          dialog={wide}
+          onClose={() => setPlanEditing(null)}
+          onSave={(input) => {
+            const editing = planEditing;
+            setPlanEditing(null);
+            const at = turns.findIndex((t) => isSettling(t) && t.cardId === editing.cardId);
+            const card = turns[at];
+            if (!card || !isSettling(card) || card.state !== "open") return;
+            const creating = editing.action === "plan.create";
+            const base = editing.before ?? (settings.plans ?? []).find((p) => p.id === editing.plan.id) ?? editing.plan;
+            const next: Plan = creating ? { ...makePlan(input, asOf, "ai"), id: editing.plan.id, createdOn: editing.plan.createdOn } : editPlan(base, input, asOf);
+            sink.savePlan?.(next, creating ? "plan.create" : "plan.update", creating ? `Planned "${next.title}", ${formatMoney(next.amount)} ${byWhen(next)}, from the chat, filled in by hand.` : `Edited "${next.title}" from the chat, by hand.`);
+            const done: Settling = { ...card, state: "applied", words: creating ? "Added to the planner, as you filled it in." : "Saved, as you filled it in.", planner: { rows: planRows(next) } };
+            recordCard(done);
+            setTurns((prev) => prev.map((t) => (isSettling(t) && t.cardId === editing.cardId ? done : t)));
+            log(aiEvent("accepted", "budget", { entry: `Plan ${next.title}, ${formatMoney(next.amount)}`, text: "Edited on the card, then saved" }));
+          }}
+        />
+      )}
+
       {previewing?.dataUrl &&
         /*
          * On the page itself, not inside the chat. Drawn inside it, "fixed"
@@ -10657,11 +10838,20 @@ export function AskPanel({
           if ((e.target as HTMLElement).closest("button")) e.preventDefault();
         }}
       >
+        {/*
+          + is for files. On a phone it takes documents only (owner, 27
+          October 2026: "the + is only for file"): an Android phone offers
+          its camera for any picker that also takes pictures, which made +
+          the camera button twice over. One document type, a PDF, opens the
+          phone's files instead. Pictures come by the camera button, which
+          offers the camera or the gallery. A computer has no camera button,
+          so its + takes pictures as well.
+        */}
         <input
           ref={pickerRef}
           type="file"
           multiple
-          accept="image/jpeg,image/png,image/webp,.csv,.txt,.md,.json,.tsv"
+          accept={wide ? "image/jpeg,image/png,image/webp,application/pdf,.pdf,.csv,.txt,.md,.json,.tsv" : "application/pdf"}
           hidden
           onChange={(e) => {
             void attach(e.target.files);
@@ -10678,11 +10868,15 @@ export function AskPanel({
           from being read. A computer has no camera worth pointing at a
           receipt, so the button is not drawn there (layout.css).
         */}
+        {/*
+          No `capture`: the phone asks Camera or Photos, so a screenshot from
+          the gallery comes in here too, now that + is for documents.
+        */}
         <input
           ref={cameraRef}
           type="file"
+          multiple
           accept="image/*"
-          capture="environment"
           hidden
           onChange={(e) => {
             void attach(e.target.files);
@@ -10745,8 +10939,8 @@ export function AskPanel({
             <button
               type="button"
               className="fms-attach"
-              aria-label="Attach a photo or a file"
-              title="Attach a photo or a file"
+              aria-label={wide ? "Attach a picture, a PDF or a file" : "Attach a PDF document"}
+              title={wide ? "Attach a picture, a PDF or a file" : "Attach a PDF document"}
               disabled={busy || files.length >= limits.maxCount}
               onClick={() => pickerRef.current?.click()}
             >
@@ -10755,8 +10949,8 @@ export function AskPanel({
             <button
               type="button"
               className="fms-attach fms-askcamera"
-              aria-label="Take a photo"
-              title="Take a photo"
+              aria-label="Take a photo or choose one"
+              title="Take a photo or choose one"
               disabled={busy || files.length >= limits.maxCount}
               onClick={() => cameraRef.current?.click()}
             >
@@ -10973,6 +11167,8 @@ function ProposalCard({
    * disagree with each other.
    */
   const draft = offered.live ?? proposal.draft;
+  // Only the notes that still describe the card: an edited kind drops "Booked as" the old one (`cardNotes.ts`).
+  const shownNotes = currentNotes(proposal.adjustments, draft);
   /** The form has been changed since this was read, so there is an undo to offer. */
   const changedInForm =
     offered.live !== undefined &&
@@ -11444,9 +11640,9 @@ function ProposalCard({
         </div>
       )}
 
-      {proposal.adjustments.length > 0 && (
+      {shownNotes.length > 0 && (
         <div className="fms-proposalnotes">
-          {proposal.adjustments.map((a) => (
+          {shownNotes.map((a) => (
             <p key={a} className="t-micro fms-proposalnote">
               {a}
             </p>
@@ -11697,7 +11893,7 @@ function ChangeCard({
             </span>
             {state === "open" && plan.rows.length === 1 && (
               <button type="button" className="t-micro fms-linkish" onClick={() => onOpen(r.after)}>
-                Open in the form instead
+                Edit in the form instead
               </button>
             )}
           </li>
@@ -11755,7 +11951,20 @@ function ChangeCard({
  * appearing in the downloads folder because of a sentence is a surprise, and
  * this one holds the owner's whole financial history.
  */
-function SettleCard({ turn, canSettle, onSettle, onDiscard }: { turn: Settling; canSettle: boolean; onSettle: () => void; onDiscard: () => void }) {
+function SettleCard({
+  turn,
+  canSettle,
+  onSettle,
+  onDiscard,
+  onEdit,
+}: {
+  turn: Settling;
+  canSettle: boolean;
+  onSettle: () => void;
+  onDiscard: () => void;
+  /** A Planner card filled in by hand in the plan form. */
+  onEdit?: (() => void) | undefined;
+}) {
   const { detail, planner, owner } = turn;
   return (
     <div className="fms-proposal">
@@ -11802,6 +12011,11 @@ function SettleCard({ turn, canSettle, onSettle, onDiscard }: { turn: Settling; 
           {canSettle && (
             <Button size="sm" variant="primary" onClick={onSettle}>
               {turn.action}
+            </Button>
+          )}
+          {onEdit && (
+            <Button size="sm" onClick={onEdit}>
+              Edit
             </Button>
           )}
           <Button size="sm" onClick={onDiscard}>

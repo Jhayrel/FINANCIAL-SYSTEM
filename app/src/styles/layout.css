@@ -4402,6 +4402,8 @@
   .fms-plans > .fms-section > .fms-section-body > .fms-planlist {
     flex: 1 1 auto;
     min-height: 0;
+    /* Stacked from the top: a grid as tall as the card spread its few groups down it (owner, 27 October 2026). */
+    align-content: start;
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: thin;
@@ -5122,8 +5124,19 @@ button.fms-recent-row:disabled {
 
 .fms-budgethero-figure {
   display: grid;
+  align-content: start;
   gap: var(--space-1);
   min-width: 0;
+}
+
+.fms-budgethero-day {
+  color: var(--ink-2);
+}
+
+.fms-budgethero-day strong {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .fms-budgettracks {

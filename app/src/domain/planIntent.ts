@@ -108,6 +108,14 @@ function thingIn(text: string): string {
     /\b(?:planning|plan(?:ning)?\s+(?:on|for)|thinking\s+(?:of|about)|preparing\s+for|balak\s+(?:ko|kong)|plano\s+(?:ko|kong))\s+(.+)$/i.exec(clause) ??
     /\bmy\s+plans?\s+(?:today|tonight|tomorrow|is|are)\s+(?:is\s+|are\s+)?(?:to\s+)?(.+)$/i.exec(clause);
   let thing = after?.[1] ?? "";
+  /*
+   * What follows "like I want", "so I", "that costs" is how they feel about
+   * it or what it costs, not what it is: "a trip on dec no date yet like i
+   * want to spend 10k" is a trip, titled "Trip like i want to spend" until
+   * this (owner, 27 October 2026).
+   */
+  thing =
+    thing.split(/\s+(?:like\s+)?(?:i|we)\s+(?:want|wanna|need|think|guess|plan|will|would|might|hope|really)\b|\s+like\s+(?:i|we|maybe|around|about|mga|siguro)\b|\s+so\s+(?:i|we|that)\b|\s+(?:which|that)\s+(?:i|we|will|would|costs?|is)\b/i)[0] ?? thing;
   const months = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
   thing = withoutYears(thing)
     .replace(/^\s*(?:to\s+)?(?:buy|get|pay(?:\s+for)?|go\s+(?:to|on)|have)\s+/i, "")
@@ -135,9 +143,24 @@ function kindNamed(thing: string, ctx: PlanContext): string {
   return planKinds(ctx.reference).options.find((k) => words.includes(k.toLowerCase()) || thing.toLowerCase() === k.toLowerCase()) ?? "";
 }
 
-/** The kind it would be filed under: one the words name ("food"), else what its entries were. */
+/** Everyday words for a kind, used only when that kind is on the owner's list: a trip is Travel. */
+const KIND_WORDS: readonly (readonly [RegExp, string])[] = [
+  [/\b(?:trip|travel|vacation|outing|getaway|bakasyon|lakad|flight|hotel)\b/i, "travel"],
+  [/\b(?:tuition|enrol\w*|school|uniform|thesis|capstone)\b/i, "school"],
+  [/\b(?:groceries|grocery|dinner|lunch|breakfast|meal|food)\b/i, "food"],
+  [/\b(?:gifts?|regalo|present)\b/i, "gifts"],
+  [/\b(?:haircut|salon|spa|skincare)\b/i, "self care"],
+  [/\b(?:repairs?|fix|maintenance|change\s+oil|tune\s*up)\b/i, "repairs"],
+];
+
+/** The kind it would be filed under: one the words name ("food"), else what its entries were, else what the words usually mean. */
 function kindOf(thing: string, ctx: PlanContext): string {
-  return kindNamed(thing, ctx) || (kindFromHistory(thing, ctx.transactions, planKinds(ctx.reference).options) ?? "");
+  const options = planKinds(ctx.reference).options;
+  const usual = (): string => {
+    const hit = KIND_WORDS.find(([words]) => words.test(thing));
+    return hit ? (options.find((k) => k.toLowerCase() === hit[1]) ?? "") : "";
+  };
+  return kindNamed(thing, ctx) || (kindFromHistory(thing, ctx.transactions, options) ?? "") || usual();
 }
 
 /**

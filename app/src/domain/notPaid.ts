@@ -280,3 +280,17 @@ export function paidDraftFor(doc: NotPaid, said: string, reference: ReferenceLis
     status: "Paid",
   };
 }
+
+/**
+ * A plan to pay what a bill or an assessment asks for, by the day it is due:
+ * what it is called on the Planner and when. Null for a checkout or a
+ * quotation (nothing is owed until the order is placed), for a paper with no
+ * amount, and for a due day already gone or not read.
+ */
+export function planToPay(doc: NotPaid, dueDay: IsoDate | null, asOf: IsoDate): { readonly title: string; readonly amount: Centavos; readonly due: IsoDate } | null {
+  if ((doc.kind !== "bill" && doc.kind !== "assessment") || doc.amount === null || doc.amount <= 0 || !dueDay || dueDay < asOf) return null;
+  const from = doc.from.replace(/\s+/g, " ").trim().replace(/[,.]?\s*(?:inc|corp|co|ltd)\.?$/i, "").trim();
+  const name = from.length > 0 && from.length <= 40 ? from.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase()) : "";
+  const title = doc.kind === "assessment" ? (name ? `${name} fees` : "School fees") : name ? `${name} bill` : "Bill";
+  return { title, amount: doc.amount, due: dueDay };
+}

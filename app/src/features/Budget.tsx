@@ -562,11 +562,13 @@ export function Budget({
                 />
                 <span className="t-caption" style={{ color: "var(--ink-3)" }}>
                   {formatMoney(a.combined.spent)} spent of {formatMoney(a.combined.budget)}
-                  {/* The headline is the whole plan, bills included; the day's figure is the spending part's (6 October 2026 audit). */}
-                  {view.phase !== "past" && view.perDay > 0 && a.spending.remaining > 0
-                    ? ` · ${formatMoney(a.spending.remaining)} of it for spending, ${formatMoney(view.perDay)} a day`
-                    : ""}
                 </span>
+                {/* The headline is the whole plan, bills included; the day's figure is the spending part's (6 October 2026 audit). */}
+                {view.phase !== "past" && view.perDay > 0 && a.spending.remaining > 0 && (
+                  <span className="t-caption fms-budgethero-day">
+                    <strong>{formatMoney(view.perDay)}</strong> a day for spending until the month ends
+                  </span>
+                )}
               </div>
               <div className="fms-budgettracks">
                 {TRACKS.map((t) => (
@@ -576,9 +578,10 @@ export function Budget({
             </div>
           )}
 
+          {/* The change only; why it was made is in Changes to the budget below (owner, 27 October 2026: "fix ui more cleaner"). */}
           {lastChange && !noPlan && (
-            <p className="t-caption fms-budgetnote">
-              Last change, {changedAt(lastChange.at)}: {describeRevision(lastChange)}.
+            <p className="t-micro fms-budgetnote">
+              Last changed {changedAt(lastChange.at)}: {describeRevision({ ...lastChange, reason: undefined }).replace(/^Changed from /, "from ")}
             </p>
           )}
 
@@ -1802,9 +1805,10 @@ function TrackRow({ label, track, pace }: { label: string; track: BudgetTrack; p
         </span>
       </div>
       <ProgressBar value={track.spent} max={track.budget} {...(pace !== undefined ? { pace } : {})} />
+      {/* Over or unset is said with a pill; within is the card's own pill already, so the line only says what is left. */}
       <div className="t-caption fms-budgettrack-foot">
-        <StatusPill status={statusOf(track)}>{none ? "No budget" : over ? "Over" : "Within"}</StatusPill>
-        <span>
+        {(none || over) && <StatusPill status={statusOf(track)}>{none ? "No budget" : "Over"}</StatusPill>}
+        <span style={over ? { color: "var(--over)" } : undefined}>
           {none
             ? "Nothing budgeted for this track"
             : over

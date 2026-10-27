@@ -290,8 +290,8 @@ export default function App() {
    * last row the form saved. Held here because the assistant can be in three
    * places and the form is in one.
    */
-  const [incoming, setIncoming] = useState<{ draft: Draft; at: number } | null>(null);
-  const [lastSaved, setLastSaved] = useState<{ draft: Draft; at: number; recordNumber?: number } | null>(null);
+  const [incoming, setIncoming] = useState<{ draft: Draft; at: number; cardId?: string | undefined } | null>(null);
+  const [lastSaved, setLastSaved] = useState<{ draft: Draft; at: number; recordNumber?: number; cardId?: string | undefined } | null>(null);
   /*
    * What the Add form holds, for a chat that is not beside it: the phone's AI
    * screen, or the chat over another screen. Read again each time one of
@@ -2101,8 +2101,8 @@ export default function App() {
     onBin: handleDelete,
     onBinMany: handleDeleteMany,
     onRestore: handleRestore,
-    onUse: (draft) => {
-      setIncoming({ draft, at: Date.now() });
+    onUse: (draft, cardId) => {
+      setIncoming({ draft, at: Date.now(), ...(cardId ? { cardId } : {}) });
       setChatOpen(false);
       setScreen("add");
     },

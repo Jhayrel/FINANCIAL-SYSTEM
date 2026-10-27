@@ -694,6 +694,19 @@ export function amend(
     if (right && right !== draft.item && (!wrong || wrong === draft.item.trim().toLowerCase())) {
       return { draft: { ...draft, item: right }, what: `${right} instead.` };
     }
+    /*
+     * The kind with a word about the thing after it: "Thats online buy load"
+     * is Online Buy, and the load is what was bought. Read as nothing, it
+     * went on to make a second entry and asked "How much was it?" (owner, 27
+     * October 2026: "Its struggling in editing"). The words after the kind
+     * join the description when it does not say them already.
+     */
+    const leading = !right ? kindLeading(said[1].trim(), known) : null;
+    if (leading && leading.item !== draft.item && (!wrong || wrong === draft.item.trim().toLowerCase())) {
+      const extra = leading.rest && !draft.description.toLowerCase().includes(leading.rest.toLowerCase()) ? leading.rest : "";
+      const description = extra ? `${draft.description.trim()} ${extra}`.trim().slice(0, 500) : draft.description;
+      return { draft: { ...draft, item: leading.item, description }, what: `${leading.item} instead${extra ? `, "${extra}" added to the description` : ""}.` };
+    }
     if (draft.flow === "Spending" && !right) {
       const bill = matchExact(said[1].trim(), reference.bills);
       const sub = bill ? "" : matchExact(said[1].trim(), reference.subscriptions);
@@ -704,6 +717,25 @@ export function amend(
   }
 
   return null;
+}
+
+/**
+ * One of the owner's kinds at the start of a phrase, and the few words after
+ * it: "online buy load" is Online Buy and "load". The longest kind wins, so
+ * "Online Buy" beats an "Online" kind. Null when no kind starts it, or more
+ * than three words follow.
+ */
+export function kindLeading(phrase: string, known: readonly string[]): { readonly item: string; readonly rest: string } | null {
+  const said = phrase.toLowerCase().replace(/\s+/g, " ").trim();
+  const hit = [...known]
+    .filter((k) => {
+      const name = k.trim().toLowerCase();
+      return name.length >= 3 && (said === name || said.startsWith(`${name} `));
+    })
+    .sort((a, b) => b.length - a.length)[0];
+  if (!hit) return null;
+  const rest = phrase.trim().slice(hit.trim().length).trim().replace(/^(?:for|of|na|ng)\s+/i, "");
+  return rest.split(/\s+/).filter(Boolean).length <= 3 ? { item: hit, rest } : null;
 }
 
 /**

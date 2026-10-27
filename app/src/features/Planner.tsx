@@ -943,7 +943,12 @@ const NEW_GOAL = "Make a goal for it";
 const NO_KIND = "Not said";
 const NO_WALLET = "Not decided";
 
-function PlanForm(props: {
+/**
+ * The plan form: the Planner's own, and the chat's Edit on a Planner card
+ * (owner, 27 October 2026: "add manually edit ... make it sync like the
+ * add"), so a plan is filled in the same way wherever it is made.
+ */
+export function PlanForm(props: {
   editing: Plan | null;
   plans: readonly Plan[];
   transactions: readonly Transaction[];
@@ -955,7 +960,8 @@ function PlanForm(props: {
   dialog: boolean;
   onClose: () => void;
   onSave: (input: PlanInput) => void;
-  onMakeGoal: (name: string, target: Centavos, deadline: IsoDate) => string;
+  /** Making a goal for it from the form; absent where that cannot be done (the chat). */
+  onMakeGoal?: ((name: string, target: Centavos, deadline: IsoDate) => string) | undefined;
 }) {
   const { editing, reference, accounts, asOf } = props;
   const isEdit = Boolean(editing && props.plans.some((p) => p.id === editing.id));
@@ -1103,7 +1109,7 @@ function PlanForm(props: {
               <Select
                 value={goalName || NO_GOAL}
                 onChange={(v) => {
-                  if (v === NEW_GOAL) {
+                  if (v === NEW_GOAL && props.onMakeGoal) {
                     if (!title.trim() || amount === null || amount <= 0) {
                       setTried(true);
                       return;
@@ -1117,7 +1123,7 @@ function PlanForm(props: {
                   setGoalId(g?.id ?? "");
                   if (g) setWallet(g.name);
                 }}
-                options={[NO_GOAL, ...goals.map((g) => g.name), NEW_GOAL]}
+                options={[NO_GOAL, ...goals.map((g) => g.name), ...(props.onMakeGoal ? [NEW_GOAL] : [])]}
                 ariaLabel="Saving for it in a goal"
               />
             </Field>

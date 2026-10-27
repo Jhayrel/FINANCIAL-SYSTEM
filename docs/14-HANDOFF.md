@@ -1994,6 +1994,42 @@ style guide's Bin, Planner and sidebar lines say how each now works.
 - Two real faults found on the way: "1 kinds not marked yet" (plural), and
   "once the PHP 0.00 still to pay is set aside" in the offline summary.
 
+### 2026-10-27, last: chat cards edited by hand and by words, PDFs, cleaner screens
+
+- **Planner on a computer**: the list stacks from the top; a few groups no
+  longer spread down the card. **Budget month card**: one status pill (the
+  card's), the day's figure on its own line, the last change in one short
+  line; the reason is in Changes to the budget.
+- **Plans said in the chat** ("I plan for a trip on dec no date yet like i
+  want to spend 10k"): titled "Trip", kind Travel. A reply to the waiting
+  Planner card is about that card (`planCard.ts`): "what do you think?" is
+  an opinion from the figures (its month against usual income, how much a
+  month to have it ready, savings, need or want, and a suggestion);
+  "its not safe spend", "make it 8k on dec 20", "call it Baguio trip",
+  "it's a need", "pay it from gcash" change the card. A model's answer no
+  longer adds a second card for the same plan.
+- **Edit on chat cards**: a Planner card has Edit, the Planner's own form;
+  saving there adds the plan and the card says so. Edit first on an entry
+  card and "Edit in the form instead" on a change card are now matched to
+  their card by its id: a card whose amount was changed in the form on a
+  phone reopened with Add to ledger after the row was saved (found while
+  checking this). A card's notes follow what it says now ("Booked as" the
+  old kind drops).
+- **Words to an open card**: "Thats online buy load" makes the card Online
+  Buy and adds "load" to the description (`kindLeading`); it made a second
+  entry and asked "How much was it?".
+- **Screenshot dates**: a receipt read as October 7 from
+  `Screenshot_20261027_093437`, at the screenshot's own time, is dated the
+  27th, and no reading is dated after its screenshot (`pictureDay.ts`).
+- **Phone chat buttons**: + takes PDF documents (an Android picker that
+  also takes pictures always offers the camera); the camera button takes a
+  photo or chooses one from the gallery.
+- **PDFs**: an invoice, a bill or an e-statement as a PDF is read on the
+  device, no library (`pdfRead.ts`, `pdfText.ts`), and goes on as text. A
+  bill or invoice not paid yet makes no entry; it is offered as a plan to
+  pay by its due day. A locked PDF or a scan says to send a screenshot or a
+  photo instead.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

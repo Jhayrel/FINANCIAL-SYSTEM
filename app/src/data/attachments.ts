@@ -21,6 +21,7 @@
  */
 
 import { redact } from "../domain/aiRedact";
+import { pdfText } from "./pdfRead";
 
 export const LIMITS = {
   /** Matches what the free vision models accept in one request. */
@@ -88,6 +89,13 @@ export interface ReadResult {
 const isTextName = (name: string): boolean =>
   TEXT_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext));
 
+/** An invoice, a bill or an e-statement as a PDF: its text is read on this device (`pdfRead.ts`). */
+export const isPdf = (file: { readonly name: string; readonly type: string }): boolean =>
+  file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+
+/** The most of a PDF that is opened: e-statements run to a few hundred kilobytes, scans to many megabytes. */
+const PDF_READ_BYTES = 15 * 1024 * 1024;
+
 const isImageType = (type: string): boolean =>
   (IMAGE_TYPES as readonly string[]).includes(type);
 
@@ -127,14 +135,17 @@ export function checkFile(
     };
   }
 
-  const text = isTextName(file.name);
+  const text = isTextName(file.name) || isPdf(file);
   const image = isImageType(file.type);
 
   if (!text && !image) {
     return {
       ok: false,
-      reason: "Only JPEG, PNG and WebP pictures, and CSV or text files, can be read.",
+      reason: "Only JPEG, PNG and WebP pictures, PDF documents, and CSV or text files can be read.",
     };
+  }
+  if (isPdf(file) && file.size > PDF_READ_BYTES) {
+    return { ok: false, reason: "This PDF is too large to read here. Take a screenshot of the page that matters and send that." };
   }
 
   if (file.size === 0) {
@@ -312,8 +323,29 @@ export async function readFiles(
         continue;
       }
 
+      /*
+       * A PDF: its words, read here, sent as text like a pasted statement.
+       * One with none to give says why and what to send instead.
+       */
+      let fromPdf: string | null = null;
+      if (isPdf(file)) {
+        const read = await pdfText(await file.arrayBuffer());
+        if (!read.ok) {
+          rejected.push({
+            name: file.name,
+            reason:
+              read.reason === "locked"
+                ? "This PDF is locked with a password, so it cannot be read here. Open it, take a screenshot of the page, and send that."
+                : read.reason === "scanned"
+                  ? "This PDF is a scan, a picture of the page with no text in it. Take a photo or a screenshot of it and send that."
+                  : "This file could not be opened as a PDF. Take a screenshot of it and send that.",
+          });
+          continue;
+        }
+        fromPdf = `${read.text}\n`;
+      }
       // Only as much as is used is read, so a file of any size opens at once.
-      const content = redact(await file.slice(0, LIMITS.textReadBytes).text());
+      const content = redact(fromPdf ?? (await file.slice(0, LIMITS.textReadBytes).text()));
       const digest = digestOf(content);
 
       const twin = seen.get(digest);

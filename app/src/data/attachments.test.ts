@@ -22,9 +22,15 @@ describe("checkFile", () => {
   });
 
   it("refuses a format it cannot read, and says which it can", () => {
-    const result = checkFile(file({ name: "statement.pdf", type: "application/pdf" }), 0);
+    const result = checkFile(file({ name: "statement.docx", type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }), 0);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain("JPEG");
+  });
+
+  // An invoice or an e-statement as a PDF is read for its text (owner, 27 October 2026).
+  it("takes a PDF", () => {
+    expect(checkFile(file({ name: "statement.pdf", type: "application/pdf" }), 0).ok).toBe(true);
+    expect(checkFile(file({ name: "INVOICE.PDF", type: "" }), 0).ok).toBe(true);
   });
 
   /*

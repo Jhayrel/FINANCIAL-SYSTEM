@@ -47,7 +47,7 @@ export interface SinkInput {
   readonly onBinMany: (ids: readonly string[]) => void;
   readonly onRestore: (id: string) => void;
   /** Put a draft in the form, for a correction before saving. */
-  readonly onUse: (draft: Draft) => void;
+  readonly onUse: (draft: Draft, cardId?: string) => void;
   /** Replace saved rows: the app's own correction path, which keeps ids and numbers. */
   readonly onUpdate?: ((rows: Transaction[], by?: Provenance) => void) | undefined;
   /** Replace a year's budget, with a line per month it changed. */
@@ -135,7 +135,7 @@ export function useProposalSink(input: SinkInput): ProposalSink {
           ...(c.feesPaid ? { feesPaid: c.feesPaid } : {}),
         };
       },
-      use: (d) => handlers.current.onUse(d),
+      use: (d, cardId) => handlers.current.onUse(d, cardId),
       canUpdate: Boolean(input.onUpdate),
       update: (rows, by) => handlers.current.onUpdate?.([...rows], by ?? { actor: "ai", via: "ai_chat" }),
       canBudget: Boolean(input.onBudget),

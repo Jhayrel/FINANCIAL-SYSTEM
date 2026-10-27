@@ -185,9 +185,9 @@ export function AddTransaction({
    */
   showChat: boolean;
   /** A card the assistant sent to the form from elsewhere ("Edit first"). */
-  incoming: { draft: Draft; at: number } | null;
+  incoming: { draft: Draft; at: number; cardId?: string | undefined } | null;
   /** The last row this form saved, shared so a card anywhere can say so. */
-  lastSaved: { draft: Draft; at: number; recordNumber?: number } | null;
+  lastSaved: { draft: Draft; at: number; recordNumber?: number; cardId?: string | undefined } | null;
   onSaved: (saved: { draft: Draft; at: number; recordNumber?: number }) => void;
   /** Loads a saved row back into this form, from the latest entries beside it. */
   onEditRow?: ((row: Transaction) => void) | undefined;
@@ -433,7 +433,16 @@ export function AddTransaction({
    */
   const debtsRef = useRef(debts);
   debtsRef.current = debts;
-  const applyDraft = useCallback((d: Draft): void => {
+  /*
+   * The chat card the form was filled from, so its save is told to that card
+   * by its id and not by its figures. Matched on date and amount, a card
+   * whose amount was changed here was never marked added, opened again, and
+   * offered Add to ledger for a row already saved (owner, 27 October 2026:
+   * "in manually edit make it sync like the add").
+   */
+  const fromCard = useRef<string | null>(null);
+  const applyDraft = useCallback((d: Draft, cardId?: string): void => {
+    fromCard.current = cardId ?? null;
     setDraft(withBehalf(d, debtsRef.current));
     const carried: [string, string][] = [
       ["fromWallet", d.fromWallet],
@@ -489,9 +498,10 @@ export function AddTransaction({
      */
     if (!incoming || incoming.at === appliedAt) return;
     appliedAt = incoming.at;
-    applyDraft(incoming.draft);
+    applyDraft(incoming.draft, incoming.cardId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incoming?.at]);
+
 
   /** The name typed for someone not on the list yet. Null while picking from the list. */
   const [newPerson, setNewPerson] = useState<string | null>(null);
@@ -1638,7 +1648,8 @@ export function AddTransaction({
     setTakeOut(null);
 
     // The card that supplied this row can now say it was saved, and as which number.
-    onSaved({ draft: final, at: Date.now(), recordNumber: target ? target.recordNumber : nextRecordNumber });
+    onSaved({ draft: final, at: Date.now(), recordNumber: target ? target.recordNumber : nextRecordNumber, ...(fromCard.current ? { cardId: fromCard.current } : {}) });
+    fromCard.current = null;
     forgetDraft();
     setNewPerson(null);
     setPersonKind(null);
@@ -1648,6 +1659,7 @@ export function AddTransaction({
   };
 
   const cancelEdit = (): void => {
+    fromCard.current = null;
     onCancelEdit();
     setDraft({ ...emptyDraft(draft.date), flow: "Spending" });
     setSuggested(new Set());
@@ -1672,6 +1684,8 @@ export function AddTransaction({
       });
       if (!ok) return;
     }
+    // Cleared by hand: what is typed next is not the card's, so its save is not told to the card.
+    fromCard.current = null;
     setDraft({ ...emptyDraft(draft.date), flow: "Spending" });
     setSuggested(new Set());
     setSubmitted(false);

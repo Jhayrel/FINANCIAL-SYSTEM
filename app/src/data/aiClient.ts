@@ -718,8 +718,35 @@ function extractContext(options: ExtractOptions): string {
  */
 export async function extractProposals(options: ExtractOptions): Promise<ExtractResult> {
   const training = options.training ?? trainingFrom();
-  const read = await extractRead({ ...options, training });
-  return onDeviceWhenUnread(fileAsTaught(holdNotPaid(read, options.note, training), training), options);
+  const papers = withPdfPapers(options, training);
+  const read = await extractRead({ ...options, attachments: papers.attachments, training });
+  // A PDF's words count as what was read off it, so a bill in one is held like a photographed bill.
+  const withPdf = papers.texts.length > 0 ? { ...read, readings: [...(read.readings ?? []), ...papers.texts] } : read;
+  return onDeviceWhenUnread(fileAsTaught(holdNotPaid(withPdf, options.note, training), training), options);
+}
+
+/**
+ * A PDF's text, read on this device (`pdfRead.ts`), checked as a picture's
+ * reading is: a bill, an invoice not yet paid or a quotation says so to the
+ * model beside its words, and nothing is proposed from it until it is paid
+ * (`notPaid.ts`). The owner, 27 October 2026: "allow scanning of documents
+ * invoice etc make sure my ai and system can do it".
+ */
+export function withPdfPapers(
+  options: Pick<ExtractOptions, "attachments" | "note">,
+  training: PaperTraining,
+): { readonly attachments: readonly Attachment[]; readonly texts: readonly string[] } {
+  const texts: string[] = [];
+  const paidSaid = saysItWasPaid(options.note);
+  const attachments = options.attachments.map((a) => {
+    if (a.kind !== "text" || !a.text || !/\.pdf$/i.test(a.name)) return a;
+    texts.push(a.text);
+    const doc = readNotPaid([a.text], training);
+    const note = doc ? notPaidNote(doc, paidSaid) : "This is a PDF document; its text was read on the device.";
+    const text = `${a.text}\n${note}`;
+    return { ...a, text, bytes: text.length };
+  });
+  return { attachments, texts };
 }
 
 /**
