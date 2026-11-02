@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { checkSplit, incomeBudget, incomeBudgetWords } from "./incomeBudget";
+import { checkSplit, incomeBudget, incomeBudgetWords, incomeToCome, overWords } from "./incomeBudget";
 import type { BudgetYear, Transaction } from "./types";
 
 let n = 0;
@@ -172,5 +172,27 @@ describe("budget moves said in chat (owner, 13 October 2026)", () => {
     expect(readBudgetMove("add the money that came in to my budget, keep 2000 for savings")).toEqual({ kind: "addIncome", keep: { amount: 200000 }, toBills: false });
     expect(readBudgetMove("put my salary into the budget and save 20%")).toEqual({ kind: "addIncome", keep: { percent: 20 }, toBills: false });
     for (const q of ["set my budget to 5000", "how much is my budget?", "lower my food limit to 2000"]) expect([q, readBudgetMove(q)]).toEqual([q, null]);
+  });
+});
+
+// The owner's data, 1 November 2026: nothing had come in yet, and the chat said to lower the budget to PHP 0.00.
+describe("income still to come at the start of a month", () => {
+  const pay = (date: string, amount: number, wallet = "Cash") => row({ date, type: "Revenue", category: "Revenue", item: "Salary", fromWallet: "", toWallet: wallet, amount, total: amount });
+  const history = [pay("2026-08-05", 800000), pay("2026-09-05", 1000000), pay("2026-10-05", 900000), pay("2026-10-20", 5000, "Savings")];
+
+  it("is the middle of the last three months into the spending wallets, less what came so far", () => {
+    expect(incomeToCome(history, ["Cash", "Maya"], 2026, 11, "2026-11-01")).toEqual({ usual: 900000, soFar: 0, toCome: 900000 });
+    expect(incomeToCome([...history, pay("2026-11-05", 1000000)], ["Cash", "Maya"], 2026, 11, "2026-11-06")).toEqual({ usual: 900000, soFar: 1000000, toCome: 0 });
+  });
+
+  it("does not tell them to lower the budget when the usual income covers it, and still names the floor", () => {
+    const words = overWords(300000, 0, { usual: 900000, soFar: 0, toCome: 900000 });
+    expect(words).toContain("if the rest comes as usual, the budget holds, so there is no need to lower it yet");
+    expect(words).toContain("If it will not come, lower it to ₱0.00.");
+  });
+
+  it("says how short it still is when even the usual income would not cover it", () => {
+    expect(overWords(1200000, 100000, { usual: 900000, soFar: 0, toCome: 900000 })).toContain("it is ₱3,000.00 short: lower it to about ₱10,000.00, or to ₱1,000.00 going by the money held now");
+    expect(overWords(300000, 0, null)).toBe("The spending budget is already ₱3,000.00 more than your money can cover. Lower it to ₱0.00 to make it workable.");
   });
 });

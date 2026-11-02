@@ -23,6 +23,7 @@ const bill = (text: string): PaperExample => ({ text, kind: "bill" });
 const assessment = (text: string): PaperExample => ({ text, kind: "assessment" });
 const checkout = (text: string): PaperExample => ({ text, kind: "checkout" });
 const quote = (text: string): PaperExample => ({ text, kind: "quote" });
+const letter = (text: string): PaperExample => ({ text, kind: "letter" });
 
 export const PAPER_SEED: readonly PaperExample[] = [
   // ── Receipts: paid, at a counter, online or at an office ────────────────
@@ -566,4 +567,156 @@ Motorcycle tune up 650.00
 Parts estimate 1,200.00
 Estimated cost 1,850.00
 Final amount may change after inspection`),
+
+  // ── Letters and notices: they speak of money and record no payment (1 November 2026) ──
+  letter(`NORTHBRIDGE COLLEGE
+Office of the Dean
+October 5, 2026
+To Whom It May Concern:
+I, the undersigned parent/guardian of ______ (name of student), a ______ (course and year),
+understand that the program requires an educational tour on December 2 - 4, 2026.
+I was informed that the payment for the said activity amounting to Eight thousand pesos only (Php 8,000.00)
+shall cover transportation, accommodation and food. The full payment should be paid on or before November 20, 2026 at the Accounting Office.
+The following is the tentative itinerary of the trip:
+December 2, 2026 6:00am Assembly 7:00am Departure
+Signature over printed name of parent/guardian`),
+  letter(`PARENT'S CONSENT AND WAIVER
+I hereby give my consent for my son/daughter to join the field trip.
+I understand the school is not liable for accidents beyond its control.
+Contribution: Php 1,500.00 to be settled not later than March 3
+Name of parent ______ Signature ______ Date ______`),
+  letter(`MEMORANDUM
+TO: All students and parents
+FROM: Office of Student Affairs
+SUBJECT: Intramurals 2026 and class fund
+Please be informed that the intramurals will be held on September 15 to 17.
+Each class is requested to settle its contribution of PHP 200.00 per student before September 10.
+For your information and guidance.`),
+  letter(`ACKNOWLEDGEMENT
+This is to acknowledge that we have received your application documents
+for the scholarship program. Your requirements are complete and under review.
+You will be notified of the result through email within thirty days.
+Thank you. Very truly yours, Admissions Office`),
+  letter(`NOTICE TO ALL TENANTS
+Please be advised that starting January 2027 the monthly association dues
+will be adjusted to Php 350.00. Kindly coordinate with the admin office for concerns.
+Thank you for your cooperation. The Management`),
+  letter(`INVITATION
+Dear Parents,
+You are cordially invited to the Christmas program on December 18, 2026 at 2:00 PM.
+A potluck will follow. Families may bring one dish to share.
+Respectfully yours, The Principal`),
+  letter(`ANNOUNCEMENT
+Enrollment for the second semester is from January 5 to 16.
+Students with balances must settle them at the cashier before enrolling.
+Bring your clearance and your printed registration form.
+Office of the Registrar`),
+  letter(`Dear Mr. Santos,
+We are pleased to inform you that your request has been approved.
+The processing fee of Php 500.00 may be paid at the cashier on or before the 15th of the month.
+Please present this letter when you claim your certificate.
+Sincerely, Records Section`),
+  letter(`EXCUSE LETTER
+Dear Ma'am,
+Please excuse my child from class on October 8 as he was sick with fever.
+Attached is the medical certificate from our doctor.
+Respectfully yours, Parent`),
+  letter(`ACKNOWLEDGEMENT OF REQUIREMENTS
+This acknowledges that the following were submitted to this office:
+Form 137, good moral certificate, two copies of 1x1 picture.
+Pending: certificate of transfer. Please submit on or before June 30.
+Registrar`),
+  letter(`REQUEST LETTER
+To the Barangay Captain,
+I am writing to request a barangay clearance for my employment requirements.
+I will claim it personally and pay the clearance fee of Php 50.00 at your office.
+Thank you for your kind consideration. Respectfully, Applicant`),
+  letter(`NOTICE OF MEETING
+To all homeowners: there will be a general assembly on Sunday, November 9, at 3:00 PM at the clubhouse.
+Agenda: election of officers and the proposed increase of the monthly dues to Php 300.00.
+Your attendance is highly encouraged. The Board`),
+  letter(`Dear Parents and Guardians,
+Greetings of peace! The Grade 10 class will hold a fun run for the school library fund.
+The registration fee is Php 250.00 per participant, payable to the class adviser until October 30.
+Kindly sign the reply slip below if your child will join.
+Reply slip: ______ will / will not join. Signature of parent ______`),
+  letter(`ENDORSEMENT LETTER
+This is to endorse the bearer, a student of this institution, for on-the-job training at your company.
+The training covers 486 hours starting February 2027.
+Your favorable action on this request is highly appreciated. Very truly yours, OJT Coordinator`),
+  // ── ATM slips of any bank, and a quotation, so a slip or a quote never reads as a shop receipt ──
+  atm(`RURAL BANK ATM
+DATE 10/29/26 TIME 14:22
+TERMINAL 00410022 TRACE NO 004417
+CARD NO XXXX-XXXX-XXXX-1234
+WITHDRAWAL FROM SAVINGS
+AMOUNT PHP 2,000.00
+AVAILABLE BALANCE PHP 3,410.55
+THANK YOU FOR BANKING WITH US`),
+  atm(`CASH WITHDRAWAL
+BANK ATM TERMINAL ID 1042
+SEQ NO 0912 DATE 2026-10-29 10:05
+FROM SAVINGS ACCOUNT
+WITHDRAWN AMOUNT 1,000.00
+TRANSACTION FEE 18.00
+LEDGER BALANCE 2,402.11`),
+  quote(`QUOTATION
+Quotation No. Q-2026-118 Valid until November 30, 2026
+Prepared for: ______
+2 units desktop computer @ 25,000.00 50,000.00
+Installation 1,500.00
+Total quoted amount 51,500.00
+Prices are subject to change without prior notice. This is not an official receipt.`),
+
+  // ── Credit and wallet app screens with a bill line and a history under it: a history, not a bill ──
+  history(`Credit Loans Cards
+Available credit 7,000.00 1,000.00 used 8,000.00 limit
+Outstanding balance 1,075.52
+Pay now Pay partially or in full anytime
+Latest bill 0.00 Statement for Oct 2026 Due Oct 21, 2026
+Transactions See all
+Fee applied DST - 0.62
+Fee applied Service Fee - 74.90
+Transferred money to My Wallet - 1,000.00
+Paid amount due 27 Sep 2026 4,302.06`),
+  history(`Wallet Savings Credit Loans Cards
+Latest bill 2,150.00 Due Nov 6, 2026
+View statement Pay this bill
+Transactions See all
+Fee applied Interest - 32.10 2 hours ago
+Transferred money to My Wallet - 2,000.00 Oct 2
+Paid amount due 5,200.00 Sep 6`),
+  history(`Transaction History As of Nov 2, 2026
+Oct 28, 2026 4:19 PM Send Money -100.00
+Oct 26, 2026 9:27 AM Online Payment Link and Pay -50.00
+Oct 20, 2026 Card Payment -286.00
+Oct 18, 2026 Cashin from Bank +1,500.00`),
+  history(`Transactions All Interest Transfers Deposits
+November 1 Interest earned Net boosted interest 0.27 Interest earned Net base interest 0.23
+October 31 Interest earned Net boosted interest 0.27 Interest earned Net base interest 0.23`),
+
+  // ── An acknowledgement receipt is a receipt: money received, with an amount ──
+  receipt(`ACKNOWLEDGEMENT RECEIPT
+No. 0412
+Date: October 3, 2026
+Received from Juan Dela Cruz the sum of One thousand pesos (P1,000.00)
+as payment for the field trip contribution.
+Received by: ______ Cashier`),
+  // A letter that says the money was received or paid in full records a payment: it is a receipt, worded as a letter.
+  receipt(`Dear Ms. Reyes,
+This is to acknowledge receipt of your payment of Php 2,500.00 for the September 2026 rent of Room 3.
+Thank you.
+Sincerely,
+The Landlord`),
+  receipt(`CERTIFICATION
+This is to certify that the student has fully paid the amount of P 1,200.00 for the seminar fee on September 12, 2026.
+Issued upon request for whatever purpose it may serve.
+School Cashier`),
+  receipt(`CERTIFICATE OF PAYMENT
+This certifies that payment in the amount of PHP 850.00 was received for the membership fee of the organization.
+Received on October 1, 2026.
+Treasurer`),
+  receipt(`Thank you for your payment!
+We have received PHP 3,000.00 for your tuition installment on October 15, 2026.
+Official Receipt No. 55120 will be issued at the cashier.`),
 ];

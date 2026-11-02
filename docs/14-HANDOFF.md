@@ -2239,6 +2239,53 @@ style guide's Bin, Planner and sidebar lines say how each now works.
   is assumed and said, a pre-mortem for spending decisions, and a read-back
   of every figure.
 
+### 2026-11-01: letters, any receipt, interest counted once, find a difference
+
+From the owner's 1 November backup, a school's consent letter, receipts and
+eight wallet and savings screenshots.
+
+- **A letter is a letter** (`paperKind.ts` "letter", `notPaid.ts`): a
+  consent or waiver form, memorandum, notice, invitation, announcement or
+  acknowledgement of documents records no payment, even with an amount, a
+  fee and a deadline. It is read for what it asks (PHP 14,950.00 by February
+  28, 2026), who sent it (a photographed "Gollege" is still a college) and
+  the smaller fee it also names (the notary fee). A letter that says money
+  was received or paid in full ("acknowledge receipt of your payment",
+  "fully paid") is a receipt, never held back. Trained on 94 examples, 90%
+  right on each one held out.
+- **Paid already?** (`paidAlready`, `pastDueWords`): a letter, bill or
+  assessment whose day has passed is looked for in the ledger. The owner's
+  letter matched the PHP 15,000.00 school payment eleven days before its
+  day, so the chat says "It looks paid already: #xxxx" and adds nothing; a
+  move between their own pockets on its way is not the payment. A bill's
+  search starts 25 days back, so last month's bill is never taken for this
+  one. None found: the day passed is said, with what to do. "paid it from
+  cash on feb 20" now dates the card February 20 and keeps the amount (the
+  20 was read as PHP 20.00).
+- **Every kind of receipt** (functions/api/ai.ts): two receipts with
+  different numbers or times are two purchases; the same one photographed
+  twice is one; two ATM slips with different trace numbers are two
+  withdrawals; a bank not on their list leaves the account to ask.
+- **Interest counted once** (`interestFold.ts`): a daily interest list
+  beside the balance in the same pictures adds what the balance is short
+  of, not the list's sum, and says both (list PHP 2.50 after the last
+  recorded day, balance PHP 2.73 short: the card adds 2.73). A balance that
+  matches offers nothing. Two credits of one day are no longer added again
+  when the ledger has that day. The card says the daily and monthly rate.
+- **Find a difference sees more** (`checkPicture.ts`, `investigate.ts`):
+  rows found on another day, in another account or as another kind are
+  marked with what differs; a row nearly matching (same day and account, an
+  amount a little off) is named and not offered as a card; entries of the
+  listed account inside the list's days that it does not show are named.
+  Interest kept as lump sums takes the daily credits it covers, and a lump
+  that does not add up is said; credits not in the ledger are one finding.
+  All of it reports; nothing is changed.
+- **The 1st of the month** (`incomeBudget.ts`): with nothing come in yet,
+  the chat said to lower the budget to PHP 0.00. The documented rule (the
+  money held now) is kept, and the usual month's income still to come is
+  said beside it: no need to lower it yet if the rest comes as usual. The
+  bell's note is information, not a warning, in that case.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

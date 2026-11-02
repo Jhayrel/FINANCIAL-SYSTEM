@@ -150,7 +150,7 @@ import { spentFromLeft } from "../domain/leftOver";
 import { readSettleAsk, settleLine } from "../domain/settleLine";
 import { wholeRows } from "../domain/covers";
 import { incomeOf } from "../domain/totals";
-import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, mostWords, readBudgetMove, readIncomePlan, answerMoveIn, type BudgetMove } from "../domain/incomeBudget";
+import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, mostWords, overWords, readBudgetMove, readIncomePlan, answerMoveIn, type BudgetMove } from "../domain/incomeBudget";
 import { asksCarryOver, asksNextMonth, asksSafeToSpend, nextMonthWords, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer, everydayPrices } from "../domain/dayFit";
 import { eatOutAnswer, mealPrice, readEatOutAsk } from "../domain/eatOutAsk";
@@ -168,14 +168,14 @@ import { PlanForm } from "./Planner";
 import { entryImpact, limitLine } from "../domain/entryImpact";
 import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
 import { kindFromHistory, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, linkPayments, unlinkPayment, planAgain, dueFor, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
-import { closedPlanWords, closedPlansWords, dayFor, NO_DAY, plannedMonthWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
+import { closedPlanWords, closedPlansWords, NO_DAY, plannedMonthWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
 import { splitPlanClause, withoutPlanClause } from "../domain/planClause";
 import { asksForGoal, goalForPlan, type GoalForPlan } from "../domain/planGoal";
 import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
 import { planWorked } from "../domain/planRate";
-import { notPaidIn, notPaidWords, paidDraftFor, planToPay, saysItWasPaid, type NotPaid } from "../domain/notPaid";
+import { notPaidIn, notPaidWords, paidAlready, paidDraftFor, paperDueDay, pastDueWords, planToPay, saysItWasPaid, type NotPaid } from "../domain/notPaid";
 import { classifyPaper, PAPER_KINDS, PAPER_WORDS, UNPAID, type PaperKind } from "../domain/paperKind";
 import { maskNumbers, nearestTaught, paperEvent, papersFrom, printedIn, taughtFromCard, trainingFrom, wantsTraining, type TaughtPaper } from "../domain/paperMemory";
 import { addressesEveryCard, asksToReadAgain, asksToRename, saysAllOfIt, saysOneWasMissed, POINTS_ELSEWHERE, startsNewEntry, titleFrom, walletInside, WORDED_AS_CORRECTION } from "../domain/capture";
@@ -257,7 +257,7 @@ import { debtCardIntro } from "../domain/debtSentence";
 import { splitsWhose } from "../domain/behalfFor";
 import { entryLineIn } from "../domain/intent";
 import { fillDebt, personDebt } from "../domain/debtFill";
-import { foldInterest } from "../domain/interestFold";
+import { foldInterestWith } from "../domain/interestFold";
 import { afterFigureChange } from "../domain/cardEdit";
 import { currentNotes } from "../domain/cardNotes";
 import { accountIn, interestFromBalance } from "../domain/interestAsk";
@@ -1939,6 +1939,8 @@ export function AskPanel({
   const heldPaper = useRef<{ readonly docs: readonly NotPaid[]; readonly at: number } | null>(null);
   /** Plans to pay a bill just read, offered once what the bill is has been said. */
   const paperPlans = useRef<{ readonly plan: Plan; readonly words: string }[]>([]);
+  /** What a paper's payment check found, said after what the paper is (`pastDueWords`). */
+  const paperSays = useRef<string[]>([]);
   /** Cards already written down as added, so a second path never writes the same one again. */
   const addedCards = useRef(new Set<string>());
 
@@ -3419,10 +3421,13 @@ export function AskPanel({
   /** Read what was sent; the picture being read is let go however it ends (`pictureNow`). */
   const readAttached = async (note: string, again?: readonly Attachment[]): Promise<boolean> => {
     paperPlans.current = [];
+    paperSays.current = [];
     try {
       return await readSent(note, again);
     } finally {
       pictureNow.current = null;
+      // Whether a letter's or a bill's payment is in the ledger already (`paidAlready`).
+      for (const w of paperSays.current.splice(0)) say({ kind: "assistant", text: w, from: "this device" });
       // A bill's plan to pay it, under what the bill is (`planToPay`).
       for (const p of paperPlans.current.splice(0)) offerPlan(p.plan, p.words);
     }
@@ -3483,7 +3488,13 @@ export function AskPanel({
     if (sent.length > 0) pictureNow.current = { readings: read.readings ?? [], teach: wantsTraining(note) };
     // A screenful of daily interest is one entry, not sixty cards (domain/interestFold.ts).
     // The typed words' entries once, however many pictures came with them (`typedOnce.ts`).
-    const folded = foldInterest(typedOnce(read.proposals, sent.map((f) => f.name), note), transactions, reference);
+    // With the account's balance in the same pictures, the balance decides what is missing (`foldInterestWith`).
+    const foldedWith = foldInterestWith(typedOnce(read.proposals, sent.map((f) => f.name), note), transactions, reference, read.balances ?? []);
+    const folded = foldedWith.proposals;
+    for (const n of foldedWith.notes) {
+      say({ kind: "assistant", text: n, from: "this device" });
+      log(aiEvent("answered", "add", { text: n, model: "this device" }));
+    }
     /*
      * A typed message that names no day is today's, whatever the model dated
      * it (domain/when.ts). Pictures keep the dates printed on them.
@@ -3628,9 +3639,32 @@ export function AskPanel({
        * etc"). Nothing is saved until the card is pressed; paid later, the
        * payment is linked to it on the Planner.
        */
+      /*
+       * Paid already? A school's letter asking PHP 14,950.00 by February 28
+       * was sent in on November 1 (owner, 2026: "what if thats not a plan or
+       * like thats a acknowledgement ... be accurate"). Its day had passed and
+       * the ledger had paid it on February 17: said, with the entry, and no
+       * plan or card is offered for money already gone. A day passed with no
+       * payment found is said too, rather than a plan for a day gone.
+       */
+      const settled = new Set<NotPaid>();
+      if (!teaching) {
+        for (const doc of docs) {
+          if (doc.kind === "checkout" || doc.kind === "quote") continue;
+          const dueDay = doc.due ? paperDueDay(doc.due, asOf) : null;
+          if (!dueDay) continue;
+          const found = paidAlready(doc, dueDay, transactions.filter((t) => t.date <= asOf), paidDraftFor(doc, "", reference, asOf).item);
+          const words = pastDueWords(doc, dueDay, found, asOf);
+          if (words) {
+            paperSays.current.push(words);
+            settled.add(doc);
+          }
+        }
+      }
       if (heldPaper.current && sink.canPlan) {
         for (const doc of docs) {
-          const pay = planToPay(doc, doc.due ? dayFor(doc.due, asOf) : null, asOf);
+          if (settled.has(doc)) continue;
+          const pay = planToPay(doc, doc.due ? paperDueDay(doc.due, asOf) : null, asOf);
           if (!pay) continue;
           const plans = settings.plans ?? [];
           if (plans.some((p) => p.status === "open" && p.amount === pay.amount && p.due === pay.due)) continue;
@@ -4026,7 +4060,7 @@ export function AskPanel({
      * interest, as `findDifference` offers it; anything else waits to be asked.
      */
     const shownOnly =
-      sent.length > 0 && !fromBalance && cards.length === 0 && extras.length === 0
+      sent.length > 0 && !fromBalance && cards.length === 0 && extras.length === 0 && foldedWith.notes.length === 0
         ? balanceFromPicture(note, [], read.balances ?? [], [...reference.savings, ...reference.wallets], (a) => walletBalance(transactions, a))
         : null;
     if (shownOnly) {
@@ -5234,8 +5268,13 @@ export function AskPanel({
       say({ kind: "you", text: note });
       log(aiEvent("asked", "add", { text: note }));
       for (const doc of paper) {
+        const card = paidDraftFor(doc, note, reference, asOf);
+        // Already in the ledger: the card says so with the entry, so it is not added twice by mistake.
+        const dueDay = doc.due ? paperDueDay(doc.due, asOf) : null;
+        const found = dueDay ? paidAlready(doc, dueDay, transactions.filter((t) => t.date <= asOf), card.item) : null;
+        const twice = found ? [`${pastDueWords(doc, dueDay!, found, asOf).split(" Nothing is added")[0]} Add this only if it is a second payment.`] : [];
         await offer(
-          { draft: paidDraftFor(doc, note, reference, asOf), confidence: "medium", sourceRef: "the picture above", adjustments: ["From the picture above, now that you say it was paid."] },
+          { draft: card, confidence: "medium", sourceRef: "the picture above", adjustments: [...twice, "From the picture above, now that you say it was paid."] },
           note,
           true,
         );
@@ -5539,7 +5578,7 @@ export function AskPanel({
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
       const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
-      const ib = incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent });
+      const ib = incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent, asOf });
       if (ib) {
         setDraft("");
         say({ kind: "you", text: note });
@@ -6024,7 +6063,7 @@ export function AskPanel({
           const running = py === Number(asOf.slice(0, 4)) && pm === Number(asOf.slice(5, 7));
           const tracks = assessMonthFor(reportRows, budgets, py, pm);
           const brief = running ? monthBrief({ transactions: reportRows, reference, budgets, debts, year: py, month: pm, asOf }) : null;
-          const ib = brief ? incomeBudget({ transactions: reportRows, reference, plan: budgets[String(py)], year: py, month: pm, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: tracks.spending.spent }) : null;
+          const ib = brief ? incomeBudget({ transactions: reportRows, reference, plan: budgets[String(py)], year: py, month: pm, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: tracks.spending.spent, asOf }) : null;
           const name = `${MONTH_NAMES[pm - 1]} ${py}`;
           await answerAi(
             plannedMonthWords(plannedForBudget(views, py, pm, reference, asOf), { name, asOf, spendingLeft: tracks.spending.budget > 0 ? tracks.spending.remaining : null, room: ib ? ib.room : null }),
@@ -7586,7 +7625,7 @@ export function AskPanel({
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
       const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: y, month: m, asOf });
-      const ib = incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent });
+      const ib = incomeBudget({ transactions: reportRows, reference, plan: budgets[String(y)], year: y, month: m, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: assessMonthFor(reportRows, budgets, y, m).spending.spent, asOf });
       const answer = (words: string): void => {
         setDraft("");
         say({ kind: "you", text: note });
@@ -7601,6 +7640,17 @@ export function AskPanel({
       // "Add that" after an answer that said the budget is over the money: what it proposed was lowering it.
       const move: BudgetMove = byAnswer && ib.over > 0 ? { kind: "fit" } : budgetMove;
       if (move.kind === "fit") {
+        /*
+         * "Add that" after an answer, on a day the usual income has not come
+         * yet: the budget may well hold, so nothing is lowered unasked. On
+         * November 1 it offered to lower the budget to PHP 0.00 (owner's
+         * data). "Lower my budget to my money", said, still does it.
+         */
+        const come = ib.toCome;
+        if (byAnswer && come && ib.over > 0 && ib.over <= come.toCome) {
+          answer(`${overWords(ib.over, ib.most, come)} Say "lower my budget to my money" if you want it lowered now anyway.`);
+          return;
+        }
         if (ib.over <= 0) {
           answer(`Your spending budget of ${formatMoney(ib.budget)} already fits your money: ${formatMoney(ib.spent)} spent and ${formatMoney(ib.safe)} safe to spend keep up to ${formatMoney(ib.most)}${ib.room > 0 ? `, so it could even rise by ${formatMoney(ib.room)}` : ""}.`);
           return;
@@ -7609,14 +7659,14 @@ export function AskPanel({
         budgetNote = `Lowered to what your money keeps: ${mostWords(ib)} is ${formatMoney(ib.most)}, ${formatMoney(ib.over)} under the ${formatMoney(ib.budget)} budget.`;
       } else {
         if (ib.cameIn <= 0) {
-          answer(`Nothing has come into your wallets ${ib.setOn ? `since you set the budget on ${formatMedium(ib.setOn)}` : "this month"}, so there is no new money to add.${ib.intoSavings > 0 ? ` ${formatMoney(ib.intoSavings)} went into savings (${ib.savingsSources.map((s) => s.name).join(", ")}): savings growing, which stays out of the budget.` : ""} ${ib.over > 0 ? `The budget is ${formatMoney(ib.over)} more than your money keeps; say "lower my budget to my money" to fit it.` : `It can rise by ${formatMoney(ib.room)} from the money you hold, if you want: say "raise my budget by" a figure.`}`);
+          answer(`Nothing has come into your wallets ${ib.setOn ? `since you set the budget on ${formatMedium(ib.setOn)}` : "this month"}, so there is no new money to add.${ib.intoSavings > 0 ? ` ${formatMoney(ib.intoSavings)} went into savings (${ib.savingsSources.map((s) => s.name).join(", ")}): savings growing, which stays out of the budget.` : ""} ${ib.over > 0 ? overWords(ib.over, ib.most, ib.toCome ?? null) : `It can rise by ${formatMoney(ib.room)} from the money you hold, if you want: say "raise my budget by" a figure.`}`);
           return;
         }
         const keep = move.keep ? ("percent" in move.keep ? Math.floor((ib.cameIn * move.keep.percent) / 100) : move.keep.amount) : 0;
         const give = Math.max(0, Math.min(ib.cameIn - keep, ib.room - keep));
         // Nothing can go to spending: said plainly, never "Put some of it into a part first".
         if (give === 0 && keep === 0 && !move.toBills) {
-          answer(`None of the ${formatMoney(ib.cameIn)} that came in can go to spending: the spending budget of ${formatMoney(ib.budget)} ${ib.over > 0 ? `is already ${formatMoney(ib.over)} more than your money can cover. Say "lower my budget to my money" to fit it.` : "already uses all the money you hold."}`);
+          answer(`None of the ${formatMoney(ib.cameIn)} that came in can go to spending: the spending budget of ${formatMoney(ib.budget)} ${ib.over > 0 ? `is more than the money held now covers. ${overWords(ib.over, ib.most, ib.toCome ?? null)}` : "already uses all the money you hold."}`);
           return;
         }
         const check = checkSplit(ib, move.toBills ? { toSpending: 0, toBills: Math.max(0, ib.cameIn - keep), keepAside: keep } : { toSpending: give, toBills: 0, keepAside: keep });
@@ -7643,7 +7693,7 @@ export function AskPanel({
       const spentNow = assessMonthFor(reportRows, budgets, target.year, target.month).spending.spent;
       if (running) {
         const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: target.year, month: target.month, asOf });
-        most = incomeBudget({ transactions: reportRows, reference, plan, year: target.year, month: target.month, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: spentNow })?.most ?? null;
+        most = incomeBudget({ transactions: reportRows, reference, plan, year: target.year, month: target.month, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: spentNow, asOf })?.most ?? null;
       }
       const worked = budgetFromIncome({ income, keep, bills, most });
       const name = `${MONTH_NAMES[target.month - 1] ?? ""} ${target.year}`;

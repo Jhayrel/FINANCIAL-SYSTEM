@@ -300,7 +300,7 @@ export function Budget({
   const incomeView = useMemo(() => {
     if (year !== getYear(asOf) || month !== getMonth(asOf)) return null;
     const brief = monthBrief({ transactions, reference, budgets, debts, year, month, asOf });
-    return incomeBudget({ transactions, reference, plan: y.plan, year, month, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: a.spending.spent });
+    return incomeBudget({ transactions, reference, plan: y.plan, year, month, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: a.spending.spent, asOf });
   }, [transactions, reference, budgets, debts, year, month, asOf, y.plan, a.spending.spent]);
   const saveFromIncome = (value: { spending: Centavos; billsSubs: Centavos }, reason: string): boolean =>
     commit(saveTracks(y.plan, year, month, value, "month", asOf, now(), reason), `Saved. ${name}'s budget now has ${formatMoney(value.spending)} for spending and ${formatMoney(value.billsSubs)} for bills and subscriptions, and the reason is kept with it.`, setNote);

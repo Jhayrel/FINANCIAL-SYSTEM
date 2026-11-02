@@ -46,6 +46,7 @@ import { actionableIssues, checkIntegrity } from "./integrity";
 import { monthTotals } from "./totals";
 import { overdueGoals } from "./goalClose";
 import { patternFindings, type Finding } from "./patterns";
+import { incomeToCome } from "./incomeBudget";
 import type { Account } from "./accounts";
 import { byWhen, coverage, likelyPayments, viewOf, whenOf, type Plan, type PlanView } from "./planner";
 import type { Centavos } from "./money";
@@ -260,13 +261,23 @@ export function financeAlerts(input: AlertInput): Alert[] {
     const sf = input.safe;
     const beyond = sf ? budgetBeyondMoney(sf) : 0;
     if (sf && sf.budgetLeft !== null && beyond > 0) {
+      /*
+       * Early in a month the usual income may not have come yet: on November
+       * 1 this warned to lower the budget the owner had set from their usual
+       * month the week before. Said as what it counts on, not as a fault,
+       * while the usual month still covers it (`incomeToCome`).
+       */
+      const come = incomeToCome(input.transactions, accounts.filter((a) => a.kind === "spending" && !a.archived).map((a) => a.name), Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)), asOf);
+      const counts = come.toCome > 0 && beyond <= come.toCome;
       out.push({
         id: "budget-beyond-money",
-        level: "warn",
+        level: counts ? "info" : "warn",
         area: "budget",
-        title: `The spending budget is ${money(beyond)} more than your money can cover`,
-        detail: `${money(sf.budgetLeft)} is left of it, but ${moneyForBudgetWords(sf, money)}. Lower it on the Budget screen, under Budget and your money.`,
-        weight: 72,
+        title: counts ? `The spending budget counts on income still to come` : `The spending budget is ${money(beyond)} more than your money can cover`,
+        detail: counts
+          ? `${money(sf.budgetLeft)} is left of it, but ${moneyForBudgetWords(sf, money)}. Your usual month brings about ${money(come.usual)} into your wallets and ${money(come.soFar)} has come in so far: if the rest comes as usual, it holds. If it will not, lower it on the Budget screen.`
+          : `${money(sf.budgetLeft)} is left of it, but ${moneyForBudgetWords(sf, money)}.${come.toCome > 0 ? ` Even with about ${money(come.toCome)} more coming as usual, it is ${money(beyond - come.toCome)} short.` : ""} Lower it on the Budget screen, under Budget and your money.`,
+        weight: counts ? 40 : 72,
       });
     }
   }

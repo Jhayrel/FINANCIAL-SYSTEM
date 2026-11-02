@@ -399,3 +399,38 @@ describe("the finding, written out for the model", () => {
     expect(investigationForModel(over)).toContain("more than the difference");
   });
 });
+
+describe("a daily interest list against interest recorded in lumps (owner, 1 November 2026)", () => {
+  const SAVE = "Maya Bank (Personal savings)";
+  const interest = (date: string, amount: number, description: string) =>
+    row({ date, type: "Revenue", category: "Revenue", fromWallet: "", toWallet: SAVE, amount, total: amount, item: "Bank interest", description, status: "Received" });
+  // Lumps worked out from the balance: up to Oct 20, then Oct 21 to 24 (₱2.00), then Oct 25 to 27 (₱1.50). Figures invented.
+  const ledger2: Transaction[] = [
+    row({ date: "2026-10-01", type: "Transfer", fromWallet: "Maya", toWallet: SAVE, amount: 350_000, total: 350_000, item: "", category: "" }),
+    interest("2026-10-20", 150, "Interest earned, October 20"),
+    interest("2026-10-24", 200, "Interest earned, October 24"),
+    interest("2026-10-27", 150, "Interest earned, October 27"),
+  ];
+  const days = ["10-21", "10-22", "10-23", "10-24", "10-25", "10-26", "10-27", "10-28", "10-29", "10-30", "10-31", "11-01"];
+  const statement: StatementLine[] = days.flatMap((d) => [
+    { date: `2026-${d}`, amount: 27, description: "Net boosted interest" },
+    { date: `2026-${d}`, amount: 23, description: "Net base interest" },
+  ]);
+  const recorded = 350_000 + 150 + 200 + 150;
+
+  it("counts the credits a lump holds once, and names the rest as one missing sum", () => {
+    const result = investigate({ transactions: ledger2, account: SAVE, actual: recorded + 250, asOf: "2026-11-01", statement });
+    expect(result.found).toHaveLength(1);
+    expect(result.found[0]).toMatchObject({ kind: "missing", explains: -250 });
+    expect(clueWords(result.found[0]!)).toContain("10 interest credits, October 28, 2026 to November 1, 2026");
+    expect(result.unexplained).toBe(0);
+  });
+
+  it("says when a lump does not match the credits it covers", () => {
+    const off = ledger2.map((t) => (t.description === "Interest earned, October 24" ? { ...t, amount: 250, total: 250 } : t));
+    const result = investigate({ transactions: off, account: SAVE, actual: recorded + 50 + 250, asOf: "2026-11-01", statement });
+    const differs = result.found.find((c) => c.kind === "amount-differs");
+    expect(differs).toMatchObject({ explains: 50 });
+    expect(clueWords(differs!)).toContain("is recorded as ₱2.50 and the statement says ₱2.00");
+  });
+});

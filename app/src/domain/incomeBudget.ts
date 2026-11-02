@@ -76,6 +76,8 @@ export interface IncomeBudget {
   readonly over: Centavos;
   /** How much the spending budget could still rise. 0 when it cannot. */
   readonly room: Centavos;
+  /** Income the usual month still brings, when the month is running (`incomeToCome`). A what-if, never money held. */
+  readonly toCome?: { readonly usual: Centavos; readonly soFar: Centavos; readonly toCome: Centavos } | undefined;
 }
 
 export function incomeBudget(input: {
@@ -96,6 +98,8 @@ export function incomeBudget(input: {
   readonly plans?: Centavos | undefined;
   /** Spent on the spending track this month, from the month's assessment. */
   readonly spent: Centavos;
+  /** Today, for the income still to come; absent, none is worked out. */
+  readonly asOf?: IsoDate | undefined;
 }): IncomeBudget | null {
   const { reference, plan, year, month, safe, spent } = input;
   if (safe === null) return null;
@@ -173,6 +177,7 @@ export function incomeBudget(input: {
     most,
     over: Math.max(0, budget - most),
     room: Math.max(0, most - budget),
+    ...(input.asOf ? { toCome: incomeToCome(input.transactions, reference.wallets, year, month, input.asOf) } : {}),
   };
 }
 
@@ -267,7 +272,7 @@ export function incomeBudgetWords(ib: IncomeBudget, monthName: string): string[]
   out.push(
     `Spending budget ${formatMoney(ib.budget)}, ${formatMoney(ib.spent)} spent; safe to spend ${formatMoney(ib.safe)}${ib.plans > 0 ? `, after ${formatMoney(ib.plans)} set aside for plans` : ""}. The most the spending budget can be with the money held now: ${formatMoney(ib.most)} (${mostWords(ib)}).`,
   );
-  if (ib.over > 0) out.push(`The spending budget is already ${formatMoney(ib.over)} more than your money can cover. Lower it to ${formatMoney(ib.most)} to make it workable.`);
+  if (ib.over > 0) out.push(overWords(ib.over, ib.most, ib.toCome ?? null));
   else if (ib.cameIn > 0) out.push(`It can rise by ${formatMoney(Math.min(ib.room, ib.cameIn))} at most from this income; any part kept for savings comes off that.`);
   return out;
 }
@@ -464,3 +469,38 @@ export function answerMoveIn(text: string, monthIndex: number): "raise" | "fit" 
   return raise === fit ? null : raise ? "raise" : "fit";
 }
 
+
+/**
+ * Income still to come this month, going by the usual month: the middle of
+ * what the last three whole months brought into the spending wallets, less
+ * what has come in so far. On November 1 nothing had come yet, and the chat
+ * said the most the budget could be was PHP 0.00 and offered to lower it to
+ * that (owner's data, 1 November 2026). The money held now is still the
+ * rule; this says what may still arrive beside it, as a what-if, never as
+ * money in hand.
+ */
+export function incomeToCome(transactions: readonly Transaction[], wallets: readonly string[], year: number, month: number, asOf: IsoDate): { readonly usual: Centavos; readonly soFar: Centavos; readonly toCome: Centavos } {
+  const into = new Set(wallets);
+  const inMonth = (y: number, m: number, to?: IsoDate): Centavos => {
+    const prefix = `${y}-${String(m).padStart(2, "0")}`;
+    return wholeRows(transactions).filter((t) => t.date.startsWith(prefix) && (!to || t.date <= to) && into.has(t.toWallet)).reduce((sum, t) => sum + incomeOf(t), 0);
+  };
+  const months = [1, 2, 3].map((back) => {
+    const k = year * 12 + (month - 1) - back;
+    return inMonth(Math.floor(k / 12), (k % 12) + 1);
+  });
+  const sorted = [...months].sort((a, b) => a - b);
+  const usual = sorted[1] ?? 0;
+  const soFar = inMonth(year, month, asOf);
+  return { usual, soFar, toCome: Math.max(0, usual - soFar) };
+}
+
+/** The budget against the money, said with the income still to come beside it when there is some. */
+export function overWords(over: Centavos, most: Centavos, come: { readonly usual: Centavos; readonly soFar: Centavos; readonly toCome: Centavos } | null): string {
+  if (over <= 0) return "";
+  if (!come || come.toCome <= 0) return `The spending budget is already ${formatMoney(over)} more than your money can cover. Lower it to ${formatMoney(most)} to make it workable.`;
+  const usualWords = `Your usual month brings about ${formatMoney(come.usual)} into your wallets, and ${formatMoney(come.soFar)} of it has come in so far`;
+  return over <= come.toCome
+    ? `The spending budget is ${formatMoney(over)} more than the money you hold now can cover. ${usualWords}: if the rest comes as usual, the budget holds, so there is no need to lower it yet. If it will not come, lower it to ${formatMoney(most)}.`
+    : `The spending budget is ${formatMoney(over)} more than the money you hold now can cover. ${usualWords}, and even if the rest comes as usual it is ${formatMoney(over - come.toCome)} short: lower it to about ${formatMoney(most + come.toCome)}, or to ${formatMoney(most)} going by the money held now.`;
+}

@@ -520,6 +520,9 @@ export function daysIn(text: string, asOf: IsoDate): { from: IsoDate; to: IsoDat
 
 const daysBetweenIso = (a: IsoDate, b: IsoDate): number => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 
+/** The day a sentence says something happened, read as an entry reads it (past first); today when none is said. */
+export const dateSaid = (text: string, asOf: IsoDate): { readonly date: IsoDate; readonly said: boolean } => dateIn(text, asOf);
+
 function dateIn(text: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
   const iso = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(text);
   if (iso?.[1]) return { date: iso[1], said: true };

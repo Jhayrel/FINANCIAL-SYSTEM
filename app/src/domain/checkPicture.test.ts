@@ -73,3 +73,33 @@ describe("the answer, from the ledger", () => {
     expect(inLedgerOrNot(twice, ledger).missing).toEqual([1]);
   });
 });
+
+describe("find a difference: what is wrong, not only what is missing (owner, 1 November 2026)", () => {
+  it("finds the entry on another day, in another account, or for a slightly different amount, and offers no card for it", () => {
+    const ledger2 = [
+      row(3901, "2026-10-12", 25000, "Food"),
+      { ...row(3902, "2026-10-14", 9900, "Load"), fromWallet: "Gcash" },
+      row(3903, "2026-10-15", 30500, "Gas"),
+    ];
+    const drafts = [draft("2026-10-13", 25000, "Food"), draft("2026-10-14", 9900, "Load"), draft("2026-10-15", 30000, "Gas"), draft("2026-10-16", 12000, "School")];
+    const verdict = inLedgerOrNot(drafts, ledger2);
+    // Found, the same money a day off or in another account; or not found as it is, but nearly.
+    expect(verdict.already.map((a) => a.record)).toEqual([3901, 3902]);
+    expect(verdict.near.map((n) => n.record)).toEqual([3903]);
+    expect(verdict.missing).toEqual([3]);
+    expect(verdict.words).toContain("#3901, but the ledger has it on Oct 12, the picture on Oct 13");
+    expect(verdict.words).toContain("#3902, but the ledger has it in Gcash, the picture in Maya");
+    expect(verdict.words).toContain("likely #3903, but the ledger has ₱305.00, the picture ₱300.00 (₱5.00 more in the ledger)");
+    expect(verdict.words).toContain("nothing was changed");
+  });
+
+  it("names entries of that account inside the list's days that the list does not show", () => {
+    const ledger3 = [row(3911, "2026-10-10", 10000, "Food"), row(3912, "2026-10-11", 20000, "Food"), row(3913, "2026-10-12", 7700, "Snacks"), row(3914, "2026-10-13", 30000, "Food"), { ...row(3915, "2026-10-11", 5000, "Food"), fromWallet: "Cash" }];
+    const drafts = [draft("2026-10-10", 10000, "Food"), draft("2026-10-11", 20000, "Food"), draft("2026-10-13", 30000, "Food")];
+    const verdict = inLedgerOrNot(drafts, ledger3);
+    expect(verdict.already).toHaveLength(3);
+    // #3913 is Maya's, inside the days shown, and not in the list; #3915 is Cash's, so not this list's.
+    expect(verdict.notShown).toEqual([3913]);
+    expect(verdict.words).toContain("#3913: ₱77.00 Snacks, Oct 12");
+  });
+});

@@ -353,6 +353,8 @@ export interface InvestigateInput {
   readonly countAhead?: boolean | undefined;
 }
 
+const INTEREST_WORDS = /\binterest\b|\btubo\b/i;
+
 export function investigate(input: InvestigateInput): Investigation {
   const { transactions, account, actual, asOf } = input;
   const since = input.matchedOn && input.matchedOn < asOf ? input.matchedOn : undefined;
@@ -480,6 +482,35 @@ export function investigate(input: InvestigateInput): Investigation {
       }
     }
 
+    /*
+     * Pass 5: interest recorded in lumps. The owner's savings list shows two
+     * credits a day ("Net base interest ₱0.23", "Net boosted interest
+     * ₱0.27"), and the ledger often holds them as one entry worked out from
+     * the balance ("Interest earned, October 24", ₱2.00 for several days).
+     * Line by line, every credit was "missing" and every lump "not on the
+     * statement": the same money twice over (owner, 1 November 2026, "train it
+     * better in duplication like in maya bank interest"). A lump takes the
+     * credits from the day after the interest before it up to its own day.
+     * When the list starts inside those days the lump cannot be checked, so
+     * it is taken as matching; otherwise a different sum is said.
+     */
+    const isInterestRow = (t: Transaction): boolean => t.type === "Revenue" && movedOn(t, account) > 0 && INTEREST_WORDS.test(`${t.item} ${t.description}`);
+    const interestRows = onAccount.filter(isInterestRow).sort((a, b) => a.date.localeCompare(b.date) || a.recordNumber - b.recordNumber);
+    for (const lump of inWindow.filter((t) => unmatchedRows.has(t.id) && isInterestRow(t)).sort((a, b) => a.date.localeCompare(b.date))) {
+      const before = interestRows.filter((t) => t.date < lump.date).pop();
+      const open = lines.filter((l) => unmatchedLines.has(l.index) && l.line.amount > 0 && INTEREST_WORDS.test(l.line.description) && l.line.date <= lump.date && (!before || l.line.date > before.date));
+      if (open.length === 0) continue;
+      const sum = open.reduce((n, l) => n + l.line.amount, 0);
+      unmatchedRows.delete(lump.id);
+      for (const l of open) unmatchedLines.delete(l.index);
+      const whole = !before || before.date >= addDays(from, -1);
+      const value = movedOn(lump, account);
+      if (whole && sum !== value) {
+        const first = open.reduce((m, l) => (l.line.date < m ? l.line.date : m), open[0]!.line.date);
+        found.push({ kind: "amount-differs", row: lump, line: { date: lump.date, amount: sum, description: `${open.length} interest credits, ${formatMedium(first)} to ${formatMedium(lump.date)}` }, explains: value - sum });
+      }
+    }
+
     // What is left over on either side.
     const leftRows = inWindow.filter((t) => unmatchedRows.has(t.id) && inPeriod(t));
     const doubled = twins(inWindow, account, onAccount).filter((p) => unmatchedRows.has(p.row.id) && !unmatchedRows.has(p.twin.id));
@@ -487,6 +518,14 @@ export function investigate(input: InvestigateInput): Investigation {
     for (const p of doubled) found.push({ kind: "duplicate", row: p.row, twin: p.twin, explains: movedOn(p.row, account) });
     for (const row of leftRows) {
       if (!doubledIds.has(row.id)) found.push({ kind: "not-on-statement", row, explains: movedOn(row, account) });
+    }
+    // Interest credits not in the ledger are one finding, not one per credit.
+    const interestLeft = lines.filter((l) => unmatchedLines.has(l.index) && l.line.amount > 0 && INTEREST_WORDS.test(l.line.description));
+    if (interestLeft.length >= 2) {
+      const sum = interestLeft.reduce((n, l) => n + l.line.amount, 0);
+      const days = interestLeft.map((l) => l.line.date).sort();
+      for (const l of interestLeft) unmatchedLines.delete(l.index);
+      found.push({ kind: "missing", line: { date: days[days.length - 1]!, amount: sum, description: `${interestLeft.length} interest credits, ${formatMedium(days[0]!)} to ${formatMedium(days[days.length - 1]!)}` }, explains: -sum });
     }
     for (const { line, index } of lines) {
       if (unmatchedLines.has(index)) found.push({ kind: "missing", line, explains: -line.amount });

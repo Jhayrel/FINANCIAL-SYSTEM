@@ -27,12 +27,20 @@
  */
 
 /** The kinds a picture of money can be. */
-export type PaperKind = "receipt" | "slip" | "wallet" | "atm" | "history" | "bill" | "assessment" | "checkout" | "quote";
+/*
+ * "letter": a letter, notice, consent form, circular, memo or itinerary. It
+ * may name a fee and a day to pay it by, and it records no payment. The
+ * owner, 1 November 2026, of a school's consent letter for a field trip
+ * (PHP 14,950.00 by February 28): "what if thats not a plan or like thats a
+ * acknowledgement or something like be accurate". It read as "most likely a
+ * receipt" before this kind existed.
+ */
+export type PaperKind = "receipt" | "slip" | "wallet" | "atm" | "history" | "bill" | "assessment" | "checkout" | "quote" | "letter";
 
-export const PAPER_KINDS: readonly PaperKind[] = ["receipt", "slip", "wallet", "atm", "history", "bill", "assessment", "checkout", "quote"];
+export const PAPER_KINDS: readonly PaperKind[] = ["receipt", "slip", "wallet", "atm", "history", "bill", "assessment", "checkout", "quote", "letter"];
 
-/** Kinds that ask for money rather than record it paid. */
-export const UNPAID: ReadonlySet<PaperKind> = new Set<PaperKind>(["bill", "assessment", "checkout", "quote"]);
+/** Kinds that ask for money, or only speak of it, rather than record it paid. */
+export const UNPAID: ReadonlySet<PaperKind> = new Set<PaperKind>(["bill", "assessment", "checkout", "quote", "letter"]);
 
 /** The kind in the owner's words, for the card and the chat. */
 export const PAPER_WORDS: Record<PaperKind, string> = {
@@ -45,6 +53,7 @@ export const PAPER_WORDS: Record<PaperKind, string> = {
   assessment: "an assessment of fees",
   checkout: "a checkout screen",
   quote: "a quotation",
+  letter: "a letter or notice",
 };
 
 export interface PaperExample {
@@ -149,5 +158,5 @@ export function classifyPaper(text: string, model: PaperModel): PaperGuess {
 export function paperNote(guess: PaperGuess, model: PaperModel): string {
   const second = guess.ranked[1];
   const how = guess.p >= 0.9 ? "almost certainly" : guess.p >= 0.7 ? "most likely" : "possibly";
-  return `Going by ${model.examples} examples${model.taught > 0 ? `, ${model.taught} of them taught by the owner` : ""}, this paper is ${how} ${PAPER_WORDS[guess.kind]}${second && second.p >= 0.15 ? ` (or ${PAPER_WORDS[second.kind]})` : ""}.${UNPAID.has(guess.kind) ? " That kind asks for money and records no payment." : ""}`;
+  return `Going by ${model.examples} examples${model.taught > 0 ? `, ${model.taught} of them taught by the owner` : ""}, this paper is ${how} ${PAPER_WORDS[guess.kind]}${second && second.p >= 0.15 ? ` (or ${PAPER_WORDS[second.kind]})` : ""}.${guess.kind === "letter" ? " That kind records no payment: an amount in it is asked for or only mentioned, never paid by the paper." : UNPAID.has(guess.kind) ? " That kind asks for money and records no payment." : ""}`;
 }
