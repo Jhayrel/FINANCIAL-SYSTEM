@@ -2358,6 +2358,31 @@ eight wallet and savings screenshots.
   verification); the intent router has the owner's own borderline messages
   as worked examples (few-shot on ambiguous cases).
 
+### 2026-11-02, last: a plan said again, or asked about by name
+
+The last item open from the 1 November replay, with what replaying it on
+that day's data found (`plannedAgain.test.ts`; docs/16-PLANNER.md, "Already
+on the Planner, said again"):
+
+- "plan the blazer 1500 for december, what do you think?" was answered
+  about "Gift for the baby christening": "for" and "the" counted as two
+  hits of its name. Small words and verbs no longer name a plan
+  (`titleWords`, in `planNamed` and `namesIt`).
+- "Can I afford my tuition next month?" was answered from today's wallets,
+  with the tuition priced at PHP 5,000.00 from past entries; the plan says
+  PHP 9,000.00. A question naming an open plan is that plan's view, worked
+  for the month asked about (`planAskedAbout`). The same for "can I afford
+  the keychains 2500 in december?" (it was November's money).
+- A plan said again for another month or day ("I plan to pay my tuition
+  next month", "plan the blazer 1500 for december", "add keychains 2500 as a
+  plan for january") gets a Move card; before, only a day said got a hint,
+  and "plan the blazer 1500 for december" made a second blazer.
+- "How much do I need next month with my 9k tuition? Add it as a plan"
+  dropped the question; it is answered, then the plan and its Move card.
+
+All 37 of the 1 November conversations replayed before and after: only the
+planner answers changed, each to the intended one, no page errors.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

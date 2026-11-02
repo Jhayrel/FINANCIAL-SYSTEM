@@ -203,7 +203,20 @@ const hundred = (c: Centavos): Centavos => Math.floor(c / 10_000) * 10_000;
  * with `saved`, one on the Planner already ("what do you think of my tuition
  * plan?", 27 October 2026 sweep), worked from what is left of it.
  */
-export function planOpinion(plan: PlanInput, f: PlanOpinionFacts, saved?: { readonly paid: Centavos; readonly left: Centavos }, opts: { readonly readAs?: string } = {}): string {
+export function planOpinion(
+  plan: PlanInput,
+  f: PlanOpinionFacts,
+  saved?: { readonly paid: Centavos; readonly left: Centavos },
+  opts: {
+    readonly readAs?: string;
+    /**
+     * Worked for the time asked about, not the plan's own: "can I afford my
+     * tuition next month?" with Tuition on the Planner with no date. It is
+     * said as where it would be, with the Move card under it to make it so.
+     */
+    readonly moved?: boolean;
+  } = {},
+): string {
   const amount = saved ? saved.left : (plan.amount ?? 0);
   const when = plan.due === NO_DATE ? "with no date yet" : whenOf({ due: plan.due, dueKind: plan.dueKind }).replace(/^S/, "s");
   const late = plan.due !== NO_DATE && plan.due < f.asOf;
@@ -232,7 +245,8 @@ export function planOpinion(plan: PlanInput, f: PlanOpinionFacts, saved?: { read
   if (thisMonth && f.freeNow !== null) {
     lines.push(`- ${late ? "Its day has passed, so it is overdue" : "It is due this month"}. Safe to spend until the month ends is ${formatMoney(Math.max(0, f.freeNow))}${f.freeNow < amount ? `, ${formatMoney(amount - Math.max(0, f.freeNow))} less than this` : ""}.`);
   } else if (months >= 2) {
-    lines.push(`- To have it ready by ${monthName}, set aside about ${formatMoney(perMonth)} a month for the next ${months} months.`);
+    // "By December" a year and more away is December of that year, said so.
+    lines.push(`- To have it ready by ${monthName}${plan.due.slice(0, 4) !== f.asOf.slice(0, 4) ? ` ${plan.due.slice(0, 4)}` : ""}, set aside about ${formatMoney(perMonth)} a month for the next ${months} months.`);
   } else if (months === 1) {
     lines.push(`- It is next month, so it comes out of next month's money or your savings.`);
   }
@@ -243,8 +257,8 @@ export function planOpinion(plan: PlanInput, f: PlanOpinionFacts, saved?: { read
     lines.push(
       plan.setAside
         ? thisMonth
-          ? `- As it is, it is counted in safe to spend: ${formatMoney(amount)} is held back now, until it is paid. If you will pay it from savings, say "don't count it".`
-          : `- As it is, it is counted in ${monthName}'s safe to spend: from the 1st, ${formatMoney(amount)} is held back before your daily figure is worked out. If you will pay it from savings, say "don't count it".`
+          ? `- ${opts.moved ? "Moved there, it is" : "As it is, it is"} counted in safe to spend: ${formatMoney(amount)} is held back now, until it is paid. If you will pay it from savings, say "don't count it".`
+          : `- ${opts.moved ? "Moved there, it is" : "As it is, it is"} counted in ${monthName}'s safe to spend: from the 1st, ${formatMoney(amount)} is held back before your daily figure is worked out. If you will pay it from savings, say "don't count it".`
         : "- It is not counted in safe to spend, so your daily figure will not hold money back for it.",
     );
   }
@@ -288,7 +302,9 @@ export function planOpinion(plan: PlanInput, f: PlanOpinionFacts, saved?: { read
   else if (gap !== null && gap < 0) suggestion = `a usual ${monthName} cannot cover it alone. ${add.replace(/^./, (c) => c.toUpperCase())}, and ${either(ways)}.`;
   else if (gap !== null) suggestion = saved ? `it fits a usual ${monthName}. Keep it as it is.` : `it fits a usual ${monthName}. Add it when you are ready.`;
   else suggestion = months >= 2 ? `${add}, and set aside about ${formatMoney(perMonth)} a month so it is ready.` : thisMonth && f.freeNow !== null && f.freeNow < amount ? `this month's money does not cover it. ${either(ways.length > 0 ? ways : ["move it to a later month"]).replace(/^./, (c) => c.toUpperCase())}.` : `${add} if the money above covers it.`;
-  const close = saved
+  const close = opts.moved
+    ? "Press Move it below to move it there; until then it stays as it is on the Planner."
+    : saved
     ? `To change it, say so ("move the ${plan.title.toLowerCase()} plan to ${(MONTH_NAMES[plan.due === NO_DATE ? 11 : Number((late ? f.asOf : plan.due).slice(5, 7)) % 12] ?? "December").toLowerCase()}", "make the ${plan.title.toLowerCase()} plan ${Math.max(100, Math.round((plan.amount ?? 0) / 100 / 1.25 / 100) * 100)}") or open it on the Planner.`
     : "Nothing is saved until you press Add to the planner.";
   lines.push(`My suggestion: ${suggestion.replace(/^./, (c) => c.toUpperCase())} ${close}`);

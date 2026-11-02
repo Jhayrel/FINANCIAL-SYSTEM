@@ -33,7 +33,7 @@ import { addDays, MONTH_NAMES } from "./dates";
 import { formatMoney, withoutYears, type Centavos } from "./money";
 import { aheadMonthIn, plannedSpendIn } from "./plannedSpend";
 import { dueFor, isRecurringKind, kindFromHistory, NO_DATE, planKinds, type DueKind, type PlanInput } from "./planner";
-import { capitalised, NO_DAY, sumIn, whenFor } from "./plannerAsk";
+import { capitalised, NO_DAY, sumIn, titleWords, whenFor } from "./plannerAsk";
 import { protectModels } from "./modelNumbers";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -403,7 +403,8 @@ export function thingToPlan(text: string): string {
 
 /** Words naming which of several, when said ("add the tuition as a plan"): checked against each name. */
 export function namesIt(text: string, name: string): boolean {
-  const words = name.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+  // Its naming words: "Buy blazer" is not named by "buy shoes", nor "New phone" by "a new laptop" (`titleWords`).
+  const words = titleWords(name);
   const said = ` ${text.toLowerCase().replace(/[^a-z0-9\s]/g, " ")} `;
   return words.some((w) => said.includes(` ${w} `) || said.includes(` ${w}s `));
 }

@@ -160,12 +160,28 @@ export function sumIn(text: string): Centavos | null {
   return base === null || base <= 0 ? null : m[2] ? base * 1000 : base;
 }
 
+/*
+ * Words that name nothing on their own. "plan the blazer 1500 for december,
+ * what do you think?" was answered about "Gift for the baby christening":
+ * "for" and "the" made two hits against the blazer's one (2 November 2026,
+ * replaying the owner's Nov 1 chat). A verb like "buy" in "Buy blazer" is
+ * not the thing either, so "I plan to buy a bag" does not name it.
+ */
+const NAMES_NOTHING = new Set(["the", "for", "and", "with", "from", "into", "onto", "our", "your", "its", "this", "that", "these", "those", "but", "are", "was", "not", "all", "any", "too", "buy", "get", "pay", "new", "plan", "plans", "some", "her", "his", "their", "them"]);
+
+/** The words of a plan's title that name it; all of them when every one is a small word. */
+export const titleWords = (title: string): string[] => {
+  const words = title.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+  const naming = words.filter((w) => !NAMES_NOTHING.has(w));
+  return naming.length > 0 ? naming : words;
+};
+
 /** The plan a sentence names, by the words of its title; the state asked about first. */
 export function planNamed(text: string, plans: readonly Plan[], prefer: readonly Plan["status"][]): Plan | null {
   const lower = ` ${text.toLowerCase().replace(/[^a-z0-9\s]/g, " ")} `;
   const scored = plans
     .map((p) => {
-      const words = p.title.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+      const words = titleWords(p.title);
       const hits = words.filter((w) => lower.includes(` ${w} `) || lower.includes(` ${w}s `)).length;
       return { p, hits, all: words.length > 0 && hits === words.length };
     })
@@ -173,6 +189,73 @@ export function planNamed(text: string, plans: readonly Plan[], prefer: readonly
     .sort((a, b) => Number(b.all) - Number(a.all) || b.hits - a.hits || prefer.indexOf(a.p.status) - prefer.indexOf(b.p.status) || b.p.due.localeCompare(a.p.due));
   const preferred = scored.find((s) => prefer.includes(s.p.status));
   return (preferred ?? scored[0])?.p ?? null;
+}
+
+/**
+ * When a plan on the Planner already was said for another time: the day,
+ * month or year to offer moving it to, or null when it was said for its own
+ * time, for none, or for a time already gone.
+ *
+ * "I plan to pay my tuition next month" with Tuition on the Planner with no
+ * date was answered only "is on the Planner already" (owner's chat, 1
+ * November 2026), so it stayed counted nowhere. A month said matches a plan
+ * on a day in that month; a day said must be its day.
+ */
+export function moveSaid(
+  plan: Pick<Plan, "due" | "dueKind">,
+  said: { readonly due: IsoDate; readonly kind: DueKind } | null,
+  asOf: IsoDate,
+): { readonly due: IsoDate; readonly kind: DueKind } | null {
+  if (!said || said.kind === "none" || said.due === NO_DATE) return null;
+  const due = dueFor(said.kind, said.due);
+  // A month or year already over, or a day gone, is not somewhere to move a plan to.
+  if (due < asOf) return null;
+  if (plan.due === NO_DATE) return { due, kind: said.kind };
+  const same = said.kind === "day" ? plan.due === due : said.kind === "month" ? plan.due.slice(0, 7) === due.slice(0, 7) : plan.due.slice(0, 4) === due.slice(0, 4);
+  return same ? null : { due, kind: said.kind };
+}
+
+/** "December 10, 2026", "December 2026", "2027": a time said, in words. */
+const saidWhen = (to: { readonly due: IsoDate; readonly kind: DueKind }): string => whenOf({ due: to.due, dueKind: to.kind }).replace(/^Sometime in /, "");
+
+/**
+ * A plan said again that is on the Planner already: said back, never added
+ * twice. With another time said, what pressing Move does; the card under it
+ * is the Planner's own Move, so nothing changes until it is pressed.
+ */
+export function alreadyPlannedWords(plan: Plan, to: { readonly due: IsoDate; readonly kind: DueKind } | null): string {
+  const lead = `"${plan.title}" is on the Planner already: ${formatMoney(plan.amount)} ${byWhen(plan)}, so it is not added again.`;
+  if (!to) return `${lead} To change it, say "move the ${plan.title.toLowerCase()} plan to" a day, or open it on the Planner.`;
+  return `${lead} ${moveWords(plan, to)}`;
+}
+
+/** What moving a plan to the time said does, for the Move card under an answer. */
+export function moveWords(plan: Plan, to: { readonly due: IsoDate; readonly kind: DueKind }): string {
+  const counted = plan.setAside && !plan.goalId;
+  const month = MONTH_NAMES[Number(to.due.slice(5, 7)) - 1] ?? "";
+  const counts = !counted || to.kind === "year" ? "" : to.kind === "month" ? `, and it is counted in ${month}'s safe to spend` : `, and it is counted in safe to spend in ${month}`;
+  const now = plan.due === NO_DATE ? "With no date it is counted nowhere now. " : "";
+  return `You said ${saidWhen(to)}. ${now}Press Move it to have it ${byWhen({ due: to.due, dueKind: to.kind })}${counts}, or leave it as it is.`;
+}
+
+/**
+ * The open plan a question is about when it does not say "plan": "can I
+ * afford my tuition next month?", "can I afford the keychains 2500 in
+ * december?". They were answered from today's wallets, with the tuition
+ * priced from past entries (PHP 5,000.00) instead of the plan's PHP
+ * 9,000.00 (2 November 2026). Its whole name said, with no other price; or
+ * part of its name with its own price ("Baguio ... 2000" for "Baguio trip
+ * with friends", PHP 2,000.00).
+ */
+export function planAskedAbout(text: string, plans: readonly Plan[]): Plan | null {
+  const open = plans.filter((p) => p.status === "open");
+  const plan = planNamed(text, open, ["open"]);
+  if (!plan) return null;
+  const lower = ` ${text.toLowerCase().replace(/[^a-z0-9\s]/g, " ")} `;
+  const whole = titleWords(plan.title).every((w) => lower.includes(` ${w} `) || lower.includes(` ${w}s `));
+  const amount = sumIn(text);
+  if (amount !== null && amount === plan.amount) return plan;
+  return whole && amount === null ? plan : null;
 }
 
 /*
@@ -183,6 +266,9 @@ export function planNamed(text: string, plans: readonly Plan[], prefer: readonly
  */
 const PLANNER = /\b(?:planner|plans|planned|plano)\b|(?<!\b(?:i|we|they|you|to|also|still|really|will|i'?ll|we'?ll)\s)\bplan\b/i;
 const QUESTIONISH = /\?\s*$|^\s*(?:what|how|can|could|should|would|will|is|am|do|does)\b/i;
+/** Asking for a view of a plan, or whether it can be afforded. */
+const OPINION =
+  /\b(?:what\s+(?:do|would)\s+you\s+(?:think|say|suggest|recommend)|what'?s\s+your\s+(?:take|opinion|advice|thoughts?)|your\s+(?:opinion|take|advice|thoughts?)|any\s+(?:advice|suggestions?|tips?)|can\s+i\s+(?:afford|make|manage|pay\s+for)|kaya\s+(?:ko\s+)?ba|ok(?:ay)?\s+lang\s+ba|ano\s+(?:sa\s+tingin|masasabi)\s+mo|is\s+(?:the|my)\b[^.?!]{1,40}\bplan\s+(?:ok(?:ay)?|good|realistic|doable|possible|too\s+much|affordable))\b/i;
 
 const esc = (v: string): string => v.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -203,7 +289,7 @@ function editIn(
   const input: { -readonly [K in keyof PlanInput]: PlanInput[K] } = { title: plan.title, amount: plan.amount, due: plan.due, dueKind: plan.dueKind ?? "day", item: plan.item, wallet: plan.wallet, goalId: plan.goalId, need: plan.need, setAside: plan.setAside, notes: plan.notes };
   const changes: { label: string; before: string; after: string }[] = [];
   const counted = (b: boolean): string => (b ? "Counted in its month" : "Not counted");
-  const titleWords = new Set(plan.title.toLowerCase().split(/[^a-z0-9]+/));
+  const ownWords = new Set(plan.title.toLowerCase().split(/[^a-z0-9]+/));
 
   const renamed = /\b(?:rename|re-name|call)\b[^.?!]*?\b(?:to|as)\s+["']?(.+?)["']?\s*[.!]?\s*$/i.exec(t);
   if (renamed?.[1] && /\b(?:rename|re-name)\b|\bcall\s+(?:it|the\s+\w+(?:\s+\w+)?\s+plan)\b/i.test(t)) {
@@ -224,7 +310,7 @@ function editIn(
     input.setAside = on;
     changes.push({ label: "Safe to spend", before: counted(plan.setAside), after: counted(on) });
   }
-  const kind = planKinds(reference).options.find((k) => k.toLowerCase() !== plan.item.toLowerCase() && !titleWords.has(k.toLowerCase()) && new RegExp(`\\b${esc(k)}\\b`, "i").test(t));
+  const kind = planKinds(reference).options.find((k) => k.toLowerCase() !== plan.item.toLowerCase() && !ownWords.has(k.toLowerCase()) && new RegExp(`\\b${esc(k)}\\b`, "i").test(t));
   if (kind && /\b(?:kind|is|as|under|file\w*|categor\w*|put\s+it\s+(?:in|under)|type)\b/i.test(t)) {
     changes.push({ label: "Kind", before: plan.item || "Not said", after: kind });
     input.item = kind;
@@ -407,7 +493,12 @@ export function readPlannerAsk(
   const notPlanner = /\b(?:phone|mobile|cell|postpaid|prepaid|data|internet|wifi|wi-fi|fiber|fibre|broadband|load|insurance|health|life|hmo|installment|instalment|payment|unli|globe|smart|dito|sun|tnt|gomo|meal|family|streaming|netflix|spotify)\s+plans?\b/gi;
   // "pay the new phone plan": a plan called New phone is still the Planner's.
   const kept = plans.some((p) => p.status === "open" && (new RegExp(notPlanner.source, "i").test(p.title) || new RegExp(`\\b${p.title.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+plans?\\b`, "i").test(t)));
-  if (!PLANNER.test(kept ? t : t.replace(notPlanner, " ")) && !pointsAt) return null;
+  const plannerSaid = PLANNER.test(kept ? t : t.replace(notPlanner, " "));
+  if (!plannerSaid && !pointsAt && OPINION.test(t)) {
+    const plan = planAskedAbout(t, plans);
+    if (plan) return { kind: "opinion", plan };
+  }
+  if (!plannerSaid && !pointsAt) return null;
   const open = plans.filter((p) => p.status === "open");
 
   /*
@@ -436,7 +527,7 @@ export function readPlannerAsk(
    * "what do you think of my tuition plan?" fell to the month's summary, and
    * "can i afford the christmas gifts plan?" was answered with today's money).
    */
-  if (/\b(?:what\s+(?:do|would)\s+you\s+(?:think|say|suggest|recommend)|what'?s\s+your\s+(?:take|opinion|advice|thoughts?)|your\s+(?:opinion|take|advice|thoughts?)|any\s+(?:advice|suggestions?|tips?)|can\s+i\s+(?:afford|make|manage|pay\s+for)|kaya\s+(?:ko\s+)?ba|ok(?:ay)?\s+lang\s+ba|ano\s+(?:sa\s+tingin|masasabi)\s+mo|is\s+(?:the|my)\b[^.?!]{1,40}\bplan\s+(?:ok(?:ay)?|good|realistic|doable|possible|too\s+much|affordable))\b/i.test(t)) {
+  if (OPINION.test(t)) {
     const plan = named(open, ["open"]);
     if (plan) return { kind: "opinion", plan };
   }

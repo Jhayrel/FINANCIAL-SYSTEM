@@ -167,8 +167,8 @@ import type { PlanAction } from "./useProposalSink";
 import { PlanForm } from "./Planner";
 import { entryImpact, limitLine } from "../domain/entryImpact";
 import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
-import { kindFromHistory, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, linkPayments, unlinkPayment, planAgain, dueFor, whenOf, NO_DATE, type Plan, type PlanInput } from "../domain/planner";
-import { closedPlanWords, closedPlansWords, NO_DAY, plannedMonthWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
+import { kindFromHistory, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, linkPayments, unlinkPayment, planAgain, dueFor, whenOf, NO_DATE, type DueKind, type Plan, type PlanInput } from "../domain/planner";
+import { alreadyPlannedWords, closedPlanWords, closedPlansWords, moveSaid, moveWords, NO_DAY, plannedMonthWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
 import { splitPlanClause, withoutPlanClause } from "../domain/planClause";
 import { asksForGoal, goalForPlan, type GoalForPlan } from "../domain/planGoal";
 import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
@@ -266,7 +266,7 @@ import { lessonKey, lessonsFrom } from "../domain/learning";
 import { AmountInput, Field as FormField } from "../components/forms";
 import type { Provenance } from "../domain/activity";
 import { imageLimits, type AppSettings } from "../domain/settings";
-import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction } from "../domain/types";
+import type { BudgetYear, Budgets, DeletedTransaction, IsoDate, ReferenceLists, Transaction } from "../domain/types";
 import { changeWords, planEdit, readEditAsk, type EditPlan } from "../domain/chatChanges";
 import {
   asksRatherThanTells,
@@ -2507,7 +2507,12 @@ export function AskPanel({
    * I need next month? add it as a plan" is answered and then carded, in that
    * order (27 October 2026).
    */
-  const queuedPlans = useRef<({ readonly plan: Plan; readonly words: string } | { readonly ask: string })[]>([]);
+  /*
+   * A plan on the Planner already, said again with a question: said back
+   * after the answer, as a Move card when another time was said
+   * (`alreadyPlannedWords`, `moveSaid`).
+   */
+  const queuedPlans = useRef<({ readonly plan: Plan; readonly words: string } | { readonly ask: string } | { readonly move: Plan; readonly to: { readonly due: IsoDate; readonly kind: DueKind } | null; readonly words: string })[]>([]);
   /** The last "money until my salary" question, for its follow-ups ("what about gas", "that's confusing"). */
   const bridgeRef = useRef<{ readonly ask: BridgeAsk; readonly asked: string } | null>(null);
   /** When Needs review was last asked about here, for "fix it" and "what to do" after it. */
@@ -4764,12 +4769,46 @@ export function AskPanel({
     log(aiEvent("proposed", "budget", { entry: `Plan ${plan.title}, ${formatMoney(plan.amount)}`, text: words }));
   };
 
+  /**
+   * A plan on the Planner already, moved to the time said: a card to press,
+   * the Planner's own Move. Nothing changes until it is pressed.
+   */
+  const offerMove = (p: Plan, to: { readonly due: IsoDate; readonly kind: DueKind }, words: string): void => {
+    const next = movePlan(p, to.due, asOf, to.kind);
+    // "Sometime in March", "No date yet" mid-sentence; never "november".
+    const lower = (w: string): string => w.replace(/^(Sometime|No date)\b/, (m) => m.toLowerCase());
+    planFocus.current = { id: p.id, at: Date.now() };
+    say({
+      kind: "settle",
+      debtId: "",
+      words,
+      action: "Move it",
+      state: "open",
+      planner: {
+        rows: [
+          { label: "Pay by, now", value: whenOf(p) },
+          { label: "New", value: whenOf(next) },
+        ],
+        save: { plan: next, action: "plan.move", summary: `Moved "${p.title}" from ${lower(whenOf(p))} to ${lower(whenOf(next))}, from the chat.`, before: p },
+      },
+    });
+    log(aiEvent("proposed", "budget", { entry: `Move ${p.title} to ${whenOf(next)}`, text: words }));
+  };
+
+  /** A plan said again that is on the Planner already: said back, with a Move card when another time was said. */
+  const sayPlanned = (p: Plan, to: { readonly due: IsoDate; readonly kind: DueKind } | null, words = alreadyPlannedWords(p, to)): void => {
+    planFocus.current = { id: p.id, at: Date.now() };
+    if (to) offerMove(p, to, words);
+    else say({ kind: "assistant", text: words, from: "this device", go: { screen: "planner", label: "the Planner" } });
+  };
+
   /** The Planner cards waiting on an answer, shown now, in order. */
   const flushPlans = (): void => {
     const waiting = queuedPlans.current;
     queuedPlans.current = [];
     for (const q of waiting) {
       if ("ask" in q) say({ kind: "assistant", text: q.ask, from: "this device", go: { screen: "planner", label: "the Planner" } });
+      else if ("move" in q) sayPlanned(q.move, q.to, q.words);
       else offerPlan(q.plan, q.words);
     }
   };
@@ -6004,6 +6043,30 @@ export function AskPanel({
         return seen ? ` #${String(seen.recordNumber).padStart(4, "0")} on ${formatMedium(seen.date)}, ${seen.item} ${formatMoney(seen.total)}, looks like it is paid already: after adding, link it on the Planner instead of paying again.` : "";
       };
       const focused = planFocus.current && Date.now() - planFocus.current.at < 30 * 60_000 ? (plans.find((p) => p.id === planFocus.current?.id) ?? null) : null;
+      /*
+       * A view of a plan on the Planner already, for the time asked about.
+       * "Can I afford my tuition next month?" with Tuition there with no
+       * date was answered from today's wallets and a price from past
+       * entries (2 November 2026): it is worked for next month, at the
+       * plan's own amount, and a Move card follows for the time said.
+       */
+      const savedOpinion = async (p: Plan, said: { readonly due: IsoDate; readonly kind: DueKind } | null): Promise<void> => {
+        const v = viewOf(p, { transactions, accounts: settings.accounts, asOf });
+        const to = moveSaid(p, said, asOf);
+        const asked = to ? movePlan(p, to.due, asOf, to.kind) : p;
+        const facts = planOpinionFacts(asked);
+        const readAs = to ? `"${p.title}" is on the Planner ${byWhen(p)}. You asked about ${byWhen(asked).replace(/^by /, "")}, so this is worked for then.` : "";
+        // Safe to spend has this plan held back already when it counts: its own money is not "less than this".
+        const reply = planOpinion(
+          { title: p.title, amount: p.amount, due: asked.due, dueKind: asked.dueKind, item: p.item, wallet: p.wallet, goalId: p.goalId, need: p.need, setAside: p.setAside, notes: p.notes },
+          { ...facts, freeNow: facts.freeNow === null ? null : facts.freeNow + (v.counts ? v.left : 0) },
+          { paid: v.paid, left: v.left },
+          to ? { readAs, moved: true } : {},
+        );
+        planFocus.current = { id: p.id, at: Date.now() };
+        if (to) queuedPlans.current = [...queuedPlans.current, { move: p, to, words: moveWords(p, to) }];
+        await answerAi(reply, "budget", { screen: "planner", label: "the Planner" });
+      };
       const planAsk = readPlannerAsk(lead, { plans, reference, transactions, asOf, goals: settings.accounts.filter((a) => a.kind === "goal" && !a.archived).map((a) => ({ id: a.id, name: a.name })), focus: focused });
       if (planAsk) {
         const planner: GoPlace = { screen: "planner", label: "the Planner" };
@@ -6045,16 +6108,7 @@ export function AskPanel({
           return;
         }
         if (planAsk.kind === "opinion") {
-          const p = planAsk.plan;
-          const v = views.find((x) => x.plan.id === p.id) ?? viewOf(p, { transactions, accounts: settings.accounts, asOf });
-          const facts = planOpinionFacts(p);
-          // Safe to spend has this plan held back already when it counts: its own money is not "less than this".
-          const reply = planOpinion(
-            { title: p.title, amount: p.amount, due: p.due, dueKind: p.dueKind, item: p.item, wallet: p.wallet, goalId: p.goalId, need: p.need, setAside: p.setAside, notes: p.notes },
-            { ...facts, freeNow: facts.freeNow === null ? null : facts.freeNow + (v.counts ? v.left : 0) },
-            { paid: v.paid, left: v.left },
-          );
-          await answerAi(reply, "budget", planner);
+          await savedOpinion(planAsk.plan, whenFor(lead, asOf));
           return;
         }
         if (planAsk.kind === "month") {
@@ -6119,6 +6173,20 @@ export function AskPanel({
         };
         const money = formatMoney;
         if (planAsk.kind === "add") {
+          /*
+           * The same plan, by its name and amount, is there already: said
+           * back with a Move card for the time said, as every other route
+           * does. "plan the blazer 1500 for december" with "Buy blazer",
+           * PHP 1,500.00, on November 14 made a second blazer (2 November 2026).
+           */
+          const same = plans.find((x) => x.status === "open" && x.amount === planAsk.input.amount && namesIt(x.title, planAsk.input.title) && namesIt(planAsk.input.title, x.title));
+          if (same) {
+            setDraft("");
+            say({ kind: "you", text: note });
+            log(aiEvent("asked", "budget", { text: note }));
+            sayPlanned(same, moveSaid(same, { due: planAsk.input.due, kind: planAsk.input.dueKind ?? "day" }, asOf));
+            return;
+          }
           const plan = makePlan(planAsk.input, asOf, "ai");
           card(
             `A new plan${plan.due === NO_DATE ? " with no date yet" : ""}. No money moves until you pay. ${countsSentence(plan, asOf)}${pastLooksPaid(plan)}`,
@@ -6483,8 +6551,8 @@ export function AskPanel({
           }
           if (onPlanner(input)) {
             const p = plans.find((x) => x.status === "open" && x.amount === input.amount && namesIt(x.title, input.title));
-            say({ kind: "assistant", text: p ? `"${p.title}" is on the Planner already: ${formatMoney(p.amount)} ${byWhen(p)}. Say "move it to" a day to change it.` : "That is on the Planner already.", from: "this device", go: plannerPlace });
-            if (p) planFocus.current = { id: p.id, at: Date.now() };
+            if (p) sayPlanned(p, moveSaid(p, when, asOf));
+            else say({ kind: "assistant", text: "That is on the Planner already.", from: "this device", go: plannerPlace });
             return;
           }
           const saved = makePlan(input, asOf, "ai");
@@ -6540,17 +6608,28 @@ export function AskPanel({
           });
           return;
         }
-        if (fresh.length === 0) {
+        /*
+         * On the Planner already. With a question too ("how much do I need
+         * next month with my 9k tuition? add it as a plan"), the question is
+         * answered and the plan said after it; it was "is on the Planner
+         * already" and nothing else (owner's chat, 1 November 2026). With
+         * another time said, a Move card.
+         */
+        const already = fresh.length === 0 ? plans.find((x) => x.status === "open" && inputs.some((i) => i.amount === x.amount && namesIt(x.title, i.title))) : undefined;
+        const ahead = aheadMonthIn(lead, asOf);
+        const saidWhen = whenFor(lead, asOf) ?? (ahead ? { due: lastOfMonth(ahead.year, ahead.month), kind: "month" as const } : null);
+        if (fresh.length === 0 && !(questionToo && already)) {
           youAsked();
-          const p = plans.find((x) => x.status === "open" && inputs.some((i) => i.amount === x.amount && namesIt(x.title, i.title)));
-          say({ kind: "assistant", text: p ? `"${p.title}" is on the Planner already: ${formatMoney(p.amount)} ${byWhen(p)}.` : "That is on the Planner already.", from: "this device", go: plannerPlace });
+          if (already) sayPlanned(already, moveSaid(already, saidWhen, asOf));
+          else say({ kind: "assistant", text: "That is on the Planner already.", from: "this device", go: plannerPlace });
           return;
         }
         const made = fresh.map((i) => makePlan(i, asOf, "ai"));
-        const dueSaid = whenFor(lead, asOf) !== null || aheadMonthIn(lead, asOf) !== null;
+        const dueSaid = saidWhen !== null;
         if (questionToo) {
           // Answered first, by whichever route the question takes; the cards come after it.
-          queuedPlans.current = made.map((plan) => ({ plan, words: planCardWords(plan, dueSaid) }));
+          const said = already ? moveSaid(already, saidWhen, asOf) : null;
+          queuedPlans.current = [...(already ? [{ move: already, to: said, words: alreadyPlannedWords(already, said) }] : []), ...made.map((plan) => ({ plan, words: planCardWords(plan, dueSaid) }))];
         } else {
           youAsked();
           for (const plan of made) offerPlan(plan, planCardWords(plan, dueSaid));
@@ -6624,20 +6703,31 @@ export function AskPanel({
         else if (intent?.kind === "later" && sink.canPlan) {
           // "I'm getting a haircut tomorrow" with a Haircut plan already open: said back, not asked for again.
           const named = intent.plans.length === 1 && intent.plans[0]!.amount === null ? plans.find((p) => p.status === "open" && namesIt(p.title, intent.plans[0]!.title) && namesIt(intent.plans[0]!.title, p.title)) : undefined;
-          if (named && !intent.asked) {
-            youAsked();
-            const day = intent.dueSaid && intent.plans[0]!.dueKind === "day" ? intent.plans[0]!.due : null;
-            const moved = day !== null && day !== named.due ? ` You said ${formatMedium(day)}: say "move the ${named.title.toLowerCase()} plan to ${formatMedium(day).replace(/, \d{4}$/, "").toLowerCase()}" to change its day.` : "";
-            say({ kind: "assistant", text: `"${named.title}" is on the Planner already: ${formatMoney(named.amount)} ${byWhen(named)}.${moved}`, from: "this device", go: plannerPlace });
-            return;
-          }
-          const fresh = intent.plans.filter((p) => p.amount === null || !onPlanner(p));
+          const fresh = named ? [] : intent.plans.filter((p) => p.amount === null || !onPlanner(p));
+          const onIt = named ?? (fresh.length === 0 ? plans.find((x) => x.status === "open" && intent.plans.some((i) => i.amount === x.amount && namesIt(x.title, i.title))) : undefined);
+          // The time they said, when they said one: another than the plan's is offered as a Move card (`moveSaid`).
+          const first = intent.plans[0];
+          const saidFor = intent.dueSaid && first ? { due: first.due, kind: first.dueKind ?? ("day" as const) } : null;
           if (fresh.length === 0) {
             if (!intent.asked) {
               youAsked();
-              const p = plans.find((x) => x.status === "open" && intent.plans.some((i) => i.amount === x.amount && namesIt(x.title, i.title)));
-              say({ kind: "assistant", text: p ? `"${p.title}" is on the Planner already: ${formatMoney(p.amount)} ${byWhen(p)}. Say "move the ${p.title.toLowerCase()} plan to" a day, or open the Planner to change it.` : "That is on the Planner already.", from: "this device", go: plannerPlace });
+              if (onIt) sayPlanned(onIt, moveSaid(onIt, saidFor, asOf));
+              else say({ kind: "assistant", text: "That is on the Planner already.", from: "this device", go: plannerPlace });
               return;
+            }
+            /*
+             * Asked about ("I plan to buy the blazer in december, can I afford
+             * it?"): the view of the plan on the Planner, for the time said.
+             * Another question ("how much do I need next month?") takes its
+             * own route below, and the plan is said after the answer.
+             */
+            if (onIt && (asksPlanOpinion(lead) || isAffordQuestion(lead))) {
+              await savedOpinion(onIt, saidFor);
+              return;
+            }
+            if (onIt) {
+              const to = moveSaid(onIt, saidFor, asOf);
+              queuedPlans.current = [...queuedPlans.current, { move: onIt, to, words: alreadyPlannedWords(onIt, to) }];
             }
           } else if (!intent.amountSaid && intent.asked && !asksToPlan(lead)) {
             /*

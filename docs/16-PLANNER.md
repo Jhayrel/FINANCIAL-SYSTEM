@@ -188,6 +188,30 @@ Said with a question ("can I afford it?", "what budget should I set?"), the
 question is answered first and the card follows it. Already on the Planner,
 it says so instead of offering it twice.
 
+**Already on the Planner, said again** (2 November 2026, the owner's 1
+November chat replayed). The same plan is the same name and amount, by the
+words that name it: "for", "the", "buy" and "new" name nothing, so "plan
+the blazer 1500 for december" is the blazer, not "Gift for the baby
+christening" (`titleWords`, used by `planNamed` and `namesIt`).
+
+- **Another time said**: a Move card under the words, the Planner's own
+  Move, nothing changed until it is pressed (`moveSaid`,
+  `alreadyPlannedWords`). A month said matches a plan on a day in it; a day
+  said must be its day; a time already gone is never offered. "I plan to
+  pay my tuition next month" with Tuition there with no date offers
+  sometime in December, where it is then counted.
+- **With a question**: the question is answered, then the plan is said
+  with its Move card. "How much do I need next month with my 9k tuition?
+  Add it as a plan" was "is on the Planner already" and nothing else.
+- **Asked about by name, without the word plan**: "can I afford my tuition
+  next month?", "can I afford the keychains 2500 in december?". Its whole
+  name with no other price, or part of its name with its own price
+  (`planAskedAbout`). The answer is the plan's view at its own amount for
+  the time asked about; it was today's wallets with a price from past
+  entries (PHP 5,000.00 for a PHP 9,000.00 plan). Worked for another time
+  than its own, the view says so ("Moved there, it is counted ...") and the
+  Move card follows.
+
 **"Add it as a plan"**, "put it on my planner", "plan it": what this message
 said is coming, else the last few messages, else the budget just worked out.
 "Add the tuition as a plan" picks the one named, and with nothing said
