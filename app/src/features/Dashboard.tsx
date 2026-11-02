@@ -233,23 +233,39 @@ export function Dashboard({
      * under a bill is that bill, above, so it is not listed twice.
      */
     ...(onOpenPlan
-      ? plannedForBudget(
-          (reference.plans ?? []).map((p) => viewOf(p, { transactions, accounts: [], asOf })),
-          year,
-          month,
-          reference,
-          asOf,
-        ).spendingViews.map((v) => ({
-          key: `plan-${v.plan.id}`,
-          name: v.plan.title,
-          // A plan not counted in safe to spend is still to pay; said, so the figure above is not read as covering it.
-          what: `Planned${v.paid > 0 ? `, ${formatMoney(v.paid)} paid` : ""}${!v.plan.setAside && !v.plan.goalId ? ", not in safe to spend" : ""}`,
-          amount: v.left,
-          days: v.daysTo as number | undefined,
-          on: v.plan.due as IsoDate | undefined,
-          action: "Pay",
-          record: () => onOpenPlan(v.plan.id, true),
-        }))
+      ? (() => {
+          const planned = plannedForBudget(
+            (reference.plans ?? []).map((p) => viewOf(p, { transactions, accounts: [], asOf })),
+            year,
+            month,
+            reference,
+            asOf,
+          );
+          return [
+            ...planned.spendingViews.map((v) => ({
+              key: `plan-${v.plan.id}`,
+              name: v.plan.title,
+              // A plan not counted in safe to spend is still to pay; said, so the figure above is not read as covering it.
+              what: `Planned${v.paid > 0 ? `, ${formatMoney(v.paid)} paid` : ""}${!v.plan.setAside && !v.plan.goalId ? ", not in safe to spend" : ""}`,
+              amount: v.left,
+              days: v.daysTo as number | undefined,
+              on: v.plan.due as IsoDate | undefined,
+              action: "Pay",
+              record: () => onOpenPlan(v.plan.id, true),
+            })),
+            // Money to move into savings or a goal this month (P11): a transfer to make, not a payment.
+            ...planned.savingViews.map((v) => ({
+              key: `plan-${v.plan.id}`,
+              name: v.plan.title,
+              what: `To save into ${v.plan.into}${v.paid > 0 ? `, ${formatMoney(v.paid)} moved` : ""}${!v.plan.setAside ? ", not held back" : ""}`,
+              amount: v.left,
+              days: v.daysTo as number | undefined,
+              on: v.plan.due as IsoDate | undefined,
+              action: "Move it",
+              record: () => onOpenPlan(v.plan.id, true),
+            })),
+          ];
+        })()
       : []),
   ].sort((a, b) => (a.days ?? 99) - (b.days ?? 99));
 

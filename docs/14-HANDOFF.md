@@ -2417,6 +2417,27 @@ all. Make sure too the system works if the year changes".
   pressed through on a test goal: the transfer, the plan let go, the
   sidebar, Planner, Activity and Database all agree.
 
+### 2026-11-02, late: plans to save or move money; the Planner on Insights and Budget
+
+Owner: "what if I plan to save like ... deposit 3000 to maya bank next week
+... or goal", "what if I edited a plan to buy to plan to save", "I cannot see
+the planner in insight and budgeting", "interact with all the buttons".
+The rules are docs/16-PLANNER.md P11; `planSave.test.ts` holds each.
+
+- A plan has `into` when it is to save or move money. The Planner's form
+  has "To spend / To save or move" with Into and From; Record the move saves
+  a transfer; the badge says Part moved and Done. Dashboard rows say "To
+  save into" with Move it; the bell, Statements and the AI's context say it.
+- Insights: "Planner: <month>" moved from below the month in brief to under
+  the calendar, with Open the Planner; Budget: "From the Planner" with its
+  button in the month card. Both show even with nothing planned.
+- Found while testing: a PHP 1.50 "Bank interest" offered as the payment of
+  "Deposit to Maya Bank" (fixed: the account's words are not the plan's);
+  "I want to save 3000 next week" answered as a six-month target (fixed);
+  and a crash on the phone Planner from the new badge calling itself, fixed
+  before pushing.
+- No database rule change: plans already save with any fields.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

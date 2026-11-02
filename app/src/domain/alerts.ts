@@ -48,7 +48,7 @@ import { overdueGoals } from "./goalClose";
 import { patternFindings, type Finding } from "./patterns";
 import { incomeToCome } from "./incomeBudget";
 import type { Account } from "./accounts";
-import { byWhen, coverage, likelyPayments, viewOf, whenOf, type Plan, type PlanView } from "./planner";
+import { byWhen, coverage, isSave, likelyPayments, viewOf, whenOf, type Plan, type PlanView } from "./planner";
 import type { Centavos } from "./money";
 import type { Budgets, IsoDate, SpendingType, Transaction } from "./types";
 
@@ -1202,7 +1202,9 @@ export function planAlerts(plans: readonly Plan[], transactions: readonly Transa
         level: "over",
         area: "planner",
         title: `${p.title} was due ${whenOf(p).replace(/^Sometime in /, "in ")}`,
-        detail: `${money(v.left)} not paid yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} late. Pay it, move the date, or skip it in the Planner.${short.get(p.id) ? ` The wallets are ${money(short.get(p.id) ?? 0)} short for it after the bills.` : ""}`,
+        detail: isSave(p)
+          ? `${money(v.left)} not moved into ${p.into} yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} late. Move it, move the date, or skip it in the Planner.`
+          : `${money(v.left)} not paid yet, ${-v.daysTo} ${v.daysTo === -1 ? "day" : "days"} late. Pay it, move the date, or skip it in the Planner.${short.get(p.id) ? ` The wallets are ${money(short.get(p.id) ?? 0)} short for it after the bills.` : ""}`,
         weight: 92,
       });
       continue;
@@ -1214,20 +1216,24 @@ export function planAlerts(plans: readonly Plan[], transactions: readonly Transa
         level: gap > 0 ? "warn" : "info",
         area: "planner",
         title: `${p.title} is due ${v.daysTo === 0 ? "today" : v.daysTo === 1 ? "tomorrow" : `in ${v.daysTo} days`}`,
-        detail: `${money(v.left)} ${byWhen(p)}. ${gap > 0 ? `The wallets are ${money(gap)} short for it after the bills and the plans before it: pay part, move the date, or pay it from savings.` : p.setAside && !p.goalId ? "Set aside already: the money is there." : "Record it in the Planner when it is paid."}`,
+        detail: isSave(p)
+          ? `${money(v.left)} to move into ${p.into} ${byWhen(p)}. ${gap > 0 ? `The wallets are ${money(gap)} short for it after the bills and the plans before it: move part, or move the date.` : v.counts ? "Held back already: the money is there to move." : "Record the move in the Planner when it is done."}`
+          : `${money(v.left)} ${byWhen(p)}. ${gap > 0 ? `The wallets are ${money(gap)} short for it after the bills and the plans before it: pay part, move the date, or pay it from savings.` : p.setAside && !p.goalId ? "Set aside already: the money is there." : "Record it in the Planner when it is paid."}`,
         weight: gap > 0 ? 80 : 55,
       });
     }
     // A payment added by hand that looks like this one: same kind or words, the same amount.
     if (v.state !== "paid" && v.state !== "skipped" && v.state !== "removed") {
-      const match = likelyPayments(p, transactions, plans).find((t) => t.total === v.left && t.date >= p.createdOn);
+      const match = likelyPayments(p, transactions, plans).find((t) => (isSave(p) ? t.amount : t.total) === v.left && t.date >= p.createdOn);
       if (match) {
         out.push({
           id: `plan-link-${p.id}-${match.id}`,
           level: "info",
           area: "planner",
-          title: `Is #${String(match.recordNumber).padStart(4, "0")} the ${p.title} payment?`,
-          detail: `${match.item}, ${money(match.total)} on ${formatMedium(match.date)}: the same kind and amount as the plan. Link it in the Planner so the plan shows as paid and nothing is entered twice.`,
+          title: isSave(p) ? `Is #${String(match.recordNumber).padStart(4, "0")} the money for ${p.title}?` : `Is #${String(match.recordNumber).padStart(4, "0")} the ${p.title} payment?`,
+          detail: isSave(p)
+            ? `${money(match.amount)} into ${match.toWallet} on ${formatMedium(match.date)}: the amount the plan moves. Link it in the Planner so the plan shows as done and nothing is entered twice.`
+            : `${match.item}, ${money(match.total)} on ${formatMedium(match.date)}: the same kind and amount as the plan. Link it in the Planner so the plan shows as paid and nothing is entered twice.`,
           weight: 60,
         });
       }

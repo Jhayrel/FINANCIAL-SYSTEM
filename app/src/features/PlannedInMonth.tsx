@@ -80,6 +80,26 @@ export function PlannedInMonth({
   const over = !noPlan && (planned.spending > Math.max(0, spendingLeft) || planned.billsSubs > Math.max(0, billsLeft));
   return (
     <section className={where === "budget" ? "fms-budgetplanned" : "fms-budgetplanned is-own"} aria-label={`Planned in ${name}`}>
+      {/*
+        Named as the Planner, with its button at the top: "Planned in
+        November" inside the month card was not read as the Planner (owner,
+        2 November 2026: "I cannot see the planner in insight and budgeting").
+      */}
+      {where === "budget" && (
+        <div className="fms-budgetplanned-title">
+          <span className="t-body-strong">From the Planner</span>
+          {onOpenPlanner && (
+            <button type="button" className="t-caption fms-linkbtn" onClick={onOpenPlanner}>
+              Open the Planner
+            </button>
+          )}
+        </div>
+      )}
+      {planned.total === 0 && planned.saving === 0 && (
+        <p className="t-caption fms-plannote" style={{ color: "var(--ink-3)" }}>
+          <span>Nothing planned in {name} is still to pay.</span>
+        </p>
+      )}
       {planned.total > 0 && (
       <div className="fms-budgetplanned-head">
         <span className="t-label">Planned in {name}, not paid yet</span>
@@ -173,6 +193,34 @@ export function PlannedInMonth({
         <span>{words}</span>
       </p>
       )}
+      {/*
+        Money to move into savings, a goal or another wallet (P11): beside the
+        budget, never in it. Whether safe to spend holds it back is said.
+      */}
+      {planned.savingViews.length > 0 && (
+        <>
+          <div className="fms-budgetplanned-head">
+            <span className="t-label">To save or move in {name}</span>
+            <Money value={planned.saving} size="s" />
+          </div>
+          <ul className="fms-budgetplanned-rows">
+            {planned.savingViews.map((v) => (
+              <li key={v.plan.id}>
+                <span className="t-body fms-truncate" title={v.plan.title}>
+                  {v.plan.title}
+                </span>
+                <span className="t-caption fms-budgetplanned-when">
+                  {`into ${v.plan.into}, ${v.plan.due < asOf ? `${shortWhen(v)}, overdue` : shortWhen(v)}${v.counts ? ", held back" : ""}`}
+                </span>
+                <Money value={v.left} size="s" />
+              </li>
+            ))}
+          </ul>
+          <p className="t-caption fms-plannote" style={{ color: "var(--ink-3)" }}>
+            <span>Saving is not spending: no budget counts it.{planned.savingViews.some((v) => v.counts) ? " Safe to spend holds the money back until it is moved." : ""}</span>
+          </p>
+        </>
+      )}
       {undated.length > 0 && (
         <p className="t-caption fms-plannote" style={{ color: "var(--ink-3)" }}>
           <span>
@@ -181,7 +229,7 @@ export function PlannedInMonth({
           </span>
         </p>
       )}
-      {onOpenPlanner && (
+      {onOpenPlanner && where !== "budget" && (
         <button type="button" className="t-caption fms-linkbtn" onClick={onOpenPlanner}>
           Open the Planner
         </button>

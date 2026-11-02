@@ -49,9 +49,10 @@ export function buildPlanSheet(
     const paidBy = plan.entryIds.map((id) => byNumber.get(id)).filter((n): n is number => n !== undefined).map((n) => `#${String(n).padStart(4, "0")}`);
     const detail = [
       plan.dueKind && plan.dueKind !== "day" ? whenOf(plan) : "",
-      plan.item,
-      plan.need ? "" : "a want",
-      paidBy.length > 0 ? `paid by ${paidBy.join(", ")}` : "",
+      // A plan to save says where the money goes, and is done by a move, not paid (P11).
+      plan.into ? `to save into ${plan.into}` : plan.item,
+      plan.need || plan.into ? "" : "a want",
+      paidBy.length > 0 ? `${plan.into ? "moved by" : "paid by"} ${paidBy.join(", ")}` : "",
       plan.status === "skipped" && plan.reason ? `skipped: ${plan.reason}` : "",
     ]
       .filter(Boolean)
@@ -63,7 +64,7 @@ export function buildPlanSheet(
       description: plan.title,
       kind: STATE[v.state],
       fromWallet: plan.wallet,
-      toWallet: "",
+      toWallet: plan.into ?? "",
       // Planned first, then paid, as the columns read left to right.
       moneyIn: plan.amount,
       moneyOut: v.paid,

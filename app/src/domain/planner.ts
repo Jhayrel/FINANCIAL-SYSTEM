@@ -69,14 +69,26 @@ export function byWhen(plan: { readonly due: IsoDate; readonly dueKind?: DueKind
 }
 
 /** Where a plan counts, for a card's row: "Counted in November 2026", "Not counted until it has a date". */
-export function countedWords(plan: Pick<Plan, "due" | "dueKind" | "setAside" | "goalId">): string {
+export function countedWords(plan: Pick<Plan, "due" | "dueKind" | "setAside" | "goalId"> & { readonly into?: string | undefined }): string {
+  if (isSave(plan)) {
+    if (!plan.setAside) return "Not held back";
+    if (plan.due === NO_DATE) return "Held back once it has a date";
+    return dueKindOf(plan) === "day" ? "Held back in its month" : `Held back in ${MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1] ?? ""} ${plan.due.slice(0, 4)}`;
+  }
   if (!plan.setAside || plan.goalId) return "Not counted";
   if (plan.due === NO_DATE) return "Not counted until it has a date";
   return dueKindOf(plan) === "day" ? "Counted in its month" : `Counted in ${MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1] ?? ""} ${plan.due.slice(0, 4)}`;
 }
 
 /** The sentence a card says about where a new plan counts. With `asOf`, a day already gone is said first. */
-export function countsSentence(plan: Pick<Plan, "due" | "dueKind" | "setAside" | "goalId" | "title">, asOf?: IsoDate): string {
+export function countsSentence(plan: Pick<Plan, "due" | "dueKind" | "setAside" | "goalId" | "title"> & { readonly into?: string | undefined }, asOf?: IsoDate): string {
+  if (isSave(plan)) {
+    if (asOf && plan.due !== NO_DATE && plan.due < asOf) return `${whenOf(plan)} has already passed: kept as a plan, it shows as overdue until the money is moved. Moved already? Link the transfer on the Planner, so it is not entered twice.`;
+    if (plan.due === NO_DATE) return `With no date it is held back nowhere until it has one: say "move the ${plan.title.toLowerCase()} plan to December", or a day, when you know.`;
+    return plan.setAside
+      ? `Safe to spend holds the money back in ${dueKindOf(plan) === "day" ? "its month" : `${MONTH_NAMES[Number(plan.due.slice(5, 7)) - 1] ?? ""}`}, so it is there to move. It is saving, not spending: no budget counts it.`
+      : "Nothing is held back from safe to spend for it, and no budget counts it: it is saving, not spending.";
+  }
   if (asOf && plan.due !== NO_DATE && plan.due < asOf)
     return `${whenOf(plan)} has already passed: kept as a plan, it shows as overdue until it is paid. Already paid? Say "I paid the ${plan.title.toLowerCase()} plan", or link the entry on the Planner, so nothing is entered twice.`;
   if (plan.due === NO_DATE) return `With no date it is counted nowhere, not in safe to spend and not in a month's budget, until it has one: say "move the ${plan.title.toLowerCase()} plan to December", or a day, when you know.`;
@@ -109,9 +121,17 @@ export interface Plan {
   readonly wallet: string;
   /** Saved for in this goal account (`Account.id`), when it is. */
   readonly goalId?: string | undefined;
+  /**
+   * A plan to save or move money, not to spend it: the account or goal the
+   * money goes into, by name, as entries name wallets ("next week I want to
+   * deposit 3000 to Maya Bank", owner, 2 November 2026). `wallet` is where it
+   * comes from. Paid by a transfer into it, never by spending; it is not in
+   * any budget's spending (P11, docs/16-PLANNER.md). Absent for a plan to spend.
+   */
+  readonly into?: string | undefined;
   /** A need (true) or a want (false): which gives way first when money is short. */
   readonly need: boolean;
-  /** Set aside from safe to spend in its month (P5). */
+  /** Set aside from safe to spend in its month (P5). For a plan to save: held back until it is moved. */
   readonly setAside: boolean;
   readonly notes: string;
   readonly status: PlanStatus;
@@ -137,9 +157,29 @@ export interface PlanInput {
   readonly item: string;
   readonly wallet: string;
   readonly goalId?: string | undefined;
+  /** Where the money goes, for a plan to save or move it (`Plan.into`). */
+  readonly into?: string | undefined;
+  /** The form's "Save or move money" picked, before an account is: checked as a plan to save. */
+  readonly saving?: boolean | undefined;
   readonly need: boolean;
   readonly setAside: boolean;
   readonly notes: string;
+}
+
+/** A plan to save or move money into an account or goal, not to spend it (P11). */
+export const isSave = (p: { readonly into?: string | undefined }): boolean => Boolean(p.into?.trim());
+
+/**
+ * Whether saving it takes money out of the spending wallets, so safe to spend
+ * should hold it back until it is moved: into savings or a goal, from a
+ * spending wallet or from none said. Moving it between spending wallets, or
+ * out of savings into one, takes nothing out of them.
+ */
+export function savesOutOfSpending(plan: { readonly into?: string | undefined; readonly wallet: string }, spendingWallets: readonly string[]): boolean {
+  if (!isSave(plan)) return false;
+  const lower = (w: string): string => w.trim().toLowerCase();
+  const spending = new Set(spendingWallets.map(lower));
+  return !spending.has(lower(plan.into ?? "")) && (!plan.wallet.trim() || spending.has(lower(plan.wallet)));
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -224,6 +264,19 @@ export function planWallets(reference: Pick<ReferenceLists, "wallets" | "savings
   );
 }
 
+/** Where a plan to save can put its money: savings, the open goals, and the spending wallets (P11). */
+export function planInto(reference: Pick<ReferenceLists, "wallets" | "savings">, accounts: readonly Pick<Account, "name" | "kind" | "archived">[], keep = ""): Choices {
+  return grouped(
+    [
+      ["Savings", reference.savings],
+      ["Goals", accounts.filter((a) => a.kind === "goal" && !a.archived).map((a) => a.name)],
+      ["Spending wallets", reference.wallets],
+    ],
+    keep,
+    "This plan's",
+  );
+}
+
 /**
  * Plans after a rename in Settings: a wallet's name on the plans paid from
  * it, a kind's on the plans filed under it. Entries, debts and limits were
@@ -232,9 +285,14 @@ export function planWallets(reference: Pick<ReferenceLists, "wallets" | "savings
  * when nothing names it.
  */
 export function renamePlans(plans: readonly Plan[], field: "wallet" | "item", from: string, to: string): readonly Plan[] {
-  const same = (v: string): boolean => v.trim().toLowerCase() === from.trim().toLowerCase();
-  if (!plans.some((p) => same(p[field]))) return plans;
-  return plans.map((p) => (same(p[field]) ? { ...p, [field]: to } : p));
+  const same = (v: string | undefined): boolean => (v ?? "").trim().toLowerCase() === from.trim().toLowerCase();
+  // An account renamed is renamed where a plan saves into it too.
+  const intoToo = field === "wallet";
+  if (!plans.some((p) => same(p[field]) || (intoToo && isSave(p) && same(p.into)))) return plans;
+  return plans.map((p) => {
+    const next = same(p[field]) ? { ...p, [field]: to } : p;
+    return intoToo && isSave(next) && same(next.into) ? { ...next, into: to } : next;
+  });
 }
 
 /** A bill or subscription is set aside already every month (P4.16). */
@@ -255,8 +313,18 @@ export function checkPlan(
   input: PlanInput,
   context: {
     readonly plans: readonly Plan[];
-    readonly reference: Pick<ReferenceLists, "bills" | "subscriptions">;
+    readonly reference: Pick<ReferenceLists, "bills" | "subscriptions"> & { readonly wallets?: readonly string[] | undefined };
     readonly asOf: IsoDate;
+    /**
+     * The entries linked to the plan being edited, as payments: a plan to
+     * spend is paid by spending, one to save by money moved into its account,
+     * so a change from one to the other cannot keep the wrong kind.
+     */
+    readonly linked?: readonly Transaction[] | undefined;
+    /** Whether the plan being edited was a plan to save: the linked payments are checked only when that changes. */
+    readonly wasSaving?: boolean | undefined;
+    /** Accounts closed: a plan cannot save into one. */
+    readonly closedAccounts?: readonly string[] | undefined;
     /** The plan being edited, so it is not its own duplicate. */
     readonly editing?: string | undefined;
     /** Editing a plan already paid or skipped. */
@@ -269,8 +337,32 @@ export function checkPlan(
 ): PlanCheck {
   const problems: string[] = [];
   const notes: string[] = [];
+  const saving = Boolean(input.saving) || isSave(input);
   if (!input.title.trim()) problems.push("Say what it is for.");
-  if (input.amount === null || !Number.isInteger(input.amount) || input.amount <= 0) problems.push("Put in how much it will cost.");
+  if (input.amount === null || !Number.isInteger(input.amount) || input.amount <= 0) problems.push(saving ? "Put in how much to move." : "Put in how much it will cost.");
+  /*
+   * A plan to save or move money (P11): it needs somewhere to go, not the
+   * account it comes from, and not one closed in Settings. Payments already
+   * linked must be of its own kind: spending does not pay a deposit, nor a
+   * transfer into savings a purchase.
+   */
+  if (saving) {
+    const into = (input.into ?? "").trim();
+    if (!into) problems.push("Pick the account or goal the money goes into.");
+    else if (into.toLowerCase() === input.wallet.trim().toLowerCase()) problems.push(`It goes into ${into} and comes from ${into}: pick another account for one of them.`);
+    else if ((context.closedAccounts ?? []).some((a) => a.trim().toLowerCase() === into.toLowerCase())) problems.push(`${into} is closed in Settings. Open it again there, or pick another account.`);
+  }
+  const no = (n: number): string => `#${String(n).padStart(4, "0")}`;
+  const switched = context.wasSaving !== undefined && context.wasSaving !== saving;
+  const wrongKind = switched ? (context.linked ?? []).filter((t) => (saving ? t.type === "Spending" || !t.toWallet.trim() : t.type !== "Spending")) : [];
+  if (wrongKind.length > 0) {
+    const list = wrongKind.map((t) => no(t.recordNumber)).join(", ");
+    problems.push(
+      saving
+        ? `${list} ${wrongKind.length === 1 ? "is" : "are"} linked as its payment, and ${wrongKind.length === 1 ? "it is" : "they are"} spending. A plan to save is paid by moving money into its account: unlink ${wrongKind.length === 1 ? "it" : "them"} on the plan's sheet first, or keep it as a plan to spend.`
+        : `${list} ${wrongKind.length === 1 ? "is" : "are"} linked as its payment, and ${wrongKind.length === 1 ? "it is" : "they are"} money moved between your accounts, not spending. Unlink ${wrongKind.length === 1 ? "it" : "them"} on the plan's sheet first, or keep it as a plan to save.`,
+    );
+  }
   const kind = dueKindOf(input);
   const due = dueFor(kind, input.due);
   if (!ISO.test(due)) problems.push(kind === "month" ? "Pick the month it is to be paid in." : "Pick the day it is to be paid by.");
@@ -307,6 +399,17 @@ export function checkPlan(
     (p) => p.id !== context.editing && p.status === "open" && p.title.trim().toLowerCase() === input.title.trim().toLowerCase() && p.due.slice(0, 7) === due.slice(0, 7),
   );
   if (same) notes.push(`"${same.title}" is already planned${same.due === NO_DATE ? ", with no date yet" : ` for ${MONTH_NAMES[Number(same.due.slice(5, 7)) - 1]}`}, ${formatMoney(same.amount)}. Saving this makes a second one.`);
+  if (saving) {
+    const wallets = context.reference.wallets ?? [];
+    const into = (input.into ?? "").trim();
+    const intoSpending = wallets.some((w) => w.toLowerCase() === into.toLowerCase());
+    const fromSpending = !input.wallet.trim() || wallets.some((w) => w.toLowerCase() === input.wallet.trim().toLowerCase());
+    if (into && intoSpending && fromSpending) notes.push(`${into} is a spending wallet too, so moving money into it changes nothing in safe to spend: nothing is held back.`);
+    else if (into && intoSpending) notes.push(`It adds to your spending money once it is moved into ${into}; safe to spend counts it then, not before.`);
+    else if (into && input.setAside && kind !== "none") notes.push(`Safe to spend holds the money back in its month, so it is there to move into ${into}. It is saving, not spending: no budget counts it.`);
+    if (kind === "none" && input.setAside) notes.push("With no date it is held back nowhere yet. Give it a month or a day when you know.");
+    return { problems, notes };
+  }
   if (kind === "none" && input.setAside && !input.goalId) notes.push("With no date it is counted nowhere yet: not in safe to spend, not in a month's budget. Give it a month or a day when you know, and it counts there.");
   if (input.setAside && isRecurringKind(input.item, context.reference)) {
     notes.push(`${input.item} is a bill or subscription, already set aside every month. Counting this plan in safe to spend too would set the money aside twice.`);
@@ -323,12 +426,14 @@ export function makePlan(input: PlanInput, asOf: IsoDate, by: "owner" | "ai", id
     amount: input.amount ?? 0,
     due: dueFor(dueKindOf(input), input.due),
     ...(dueKindOf(input) !== "day" ? { dueKind: dueKindOf(input) } : {}),
-    item: input.item.trim(),
+    // A plan to save has no kind of spending and is paid from no goal (P11).
+    item: isSave(input) ? "" : input.item.trim(),
     wallet: input.wallet.trim(),
-    ...(input.goalId ? { goalId: input.goalId } : {}),
-    need: input.need,
+    ...(input.goalId && !isSave(input) ? { goalId: input.goalId } : {}),
+    ...(isSave(input) ? { into: (input.into ?? "").trim() } : {}),
+    need: isSave(input) ? true : input.need,
     // A plan saved in a goal never counts: its money is apart already (P4.17).
-    setAside: input.setAside && !input.goalId,
+    setAside: input.setAside && (isSave(input) || !input.goalId),
     notes: input.notes.trim(),
     status: "open",
     entryIds: [],
@@ -353,11 +458,13 @@ export function editPlan(plan: Plan, input: PlanInput, asOf: IsoDate, transactio
     amount: input.amount ?? plan.amount,
     due,
     dueKind: kind === "day" ? undefined : kind,
-    item: input.item.trim(),
+    item: isSave(input) ? "" : input.item.trim(),
     wallet: input.wallet.trim(),
-    goalId: input.goalId || undefined,
-    need: input.need,
-    setAside: input.setAside && !input.goalId,
+    goalId: (!isSave(input) && input.goalId) || undefined,
+    // Changed from a plan to spend to one to save, or back (P11): `checkPlan` stops it while payments of the other kind are linked.
+    into: isSave(input) ? (input.into ?? "").trim() : undefined,
+    need: isSave(input) ? true : input.need,
+    setAside: input.setAside && (isSave(input) || !input.goalId),
     notes: input.notes.trim(),
     moves: movesAfter(plan, due, asOf),
   });
@@ -433,7 +540,8 @@ export function paidSoFar(plan: Plan, transactions: readonly Transaction[]): { r
       gone.push(id);
       continue;
     }
-    amount += t.total;
+    // A plan to save is paid by what was moved into its account; a fee on the transfer is spending, not saving.
+    amount += isSave(plan) ? t.amount : t.total;
     if (lastOn === null || t.date > lastOn) lastOn = t.date;
   }
   return { amount, lastOn, gone };
@@ -556,7 +664,8 @@ export function viewOf(
     goal,
     // Only when it spreads over two months or more: "₱9,000.00 a month" for one 35 days off said nothing (27 October 2026).
     perMonth: open && !plan.goalId && plan.due !== NO_DATE && daysTo > 31 && monthsTo(asOf, plan.due) >= 2 ? Math.ceil(left / monthsTo(asOf, plan.due)) : 0,
-    counts: open && plan.setAside && !plan.goalId && plan.due <= monthEnd && left > 0,
+    // A plan to save is held back only when it takes money out of the spending wallets (P11).
+    counts: open && plan.setAside && !plan.goalId && plan.due <= monthEnd && left > 0 && (!isSave(plan) || accounts.length === 0 || savesOutOfSpending(plan, accounts.filter((a) => a.kind === "spending" && !a.archived).map((a) => a.name))),
   };
 }
 
@@ -624,7 +733,7 @@ export function plansSetAside(views: readonly PlanView[]): { readonly total: Cen
 export function plannedIn(views: readonly PlanView[], year: number, month: number): { readonly name: string; readonly amount: Centavos }[] {
   const key = `${year}-${String(month).padStart(2, "0")}`;
   return views
-    .filter((v) => v.plan.due.slice(0, 7) === key && v.left > 0 && v.state !== "paid" && v.state !== "skipped" && v.state !== "removed" && !v.plan.goalId)
+    .filter((v) => v.plan.due.slice(0, 7) === key && v.left > 0 && v.state !== "paid" && v.state !== "skipped" && v.state !== "removed" && !v.plan.goalId && !isSave(v.plan))
     .map((v) => ({ name: v.plan.title, amount: v.left }));
 }
 
@@ -635,10 +744,13 @@ export interface PlannedMonth {
   /** Bills and subscriptions: plans filed under one. */
   readonly billsSubs: Centavos;
   readonly total: Centavos;
-  /** Soonest first. */
+  /** Soonest first: the plans to spend. */
   readonly views: readonly PlanView[];
   /** The ones counted in spending, soonest first. */
   readonly spendingViews: readonly PlanView[];
+  /** Plans to save or move money in the month (P11): apart from the budget, said beside it. */
+  readonly saving: Centavos;
+  readonly savingViews: readonly PlanView[];
 }
 
 /**
@@ -668,22 +780,29 @@ export function plannedForBudget(
     .sort((a, b) => a.plan.due.localeCompare(b.plan.due));
   let spending = 0;
   let billsSubs = 0;
+  let saving = 0;
   const spendingViews: PlanView[] = [];
+  const savingViews: PlanView[] = [];
   for (const v of open) {
-    if (isRecurringKind(v.plan.item, reference)) billsSubs += v.left;
+    // Saving is not spending: it is said beside the budget, never counted in it (P11).
+    if (isSave(v.plan)) {
+      saving += v.left;
+      savingViews.push(v);
+    } else if (isRecurringKind(v.plan.item, reference)) billsSubs += v.left;
     else {
       spending += v.left;
       spendingViews.push(v);
     }
   }
-  return { spending, billsSubs, total: spending + billsSubs, views: open, spendingViews };
+  return { spending, billsSubs, total: spending + billsSubs, views: open.filter((v) => !isSave(v.plan)), spendingViews, saving, savingViews };
 }
 
 /** What is planned on each day from a day on: the Insights calendar's marks. Open plans only, what is left of each. */
 export function plannedByDay(views: readonly PlanView[], from: IsoDate): Map<IsoDate, Centavos> {
   const out = new Map<IsoDate, Centavos>();
   for (const v of views) {
-    if (v.state === "paid" || v.state === "skipped" || v.state === "removed" || v.left <= 0 || v.plan.due < from) continue;
+    // The calendar marks spending to come; money moved into savings is not spending (P11).
+    if (v.state === "paid" || v.state === "skipped" || v.state === "removed" || v.left <= 0 || v.plan.due < from || isSave(v.plan)) continue;
     // Only a day is a day on the calendar: "sometime in November" is not November 30.
     if (dueKindOf(v.plan) !== "day") continue;
     out.set(v.plan.due, (out.get(v.plan.due) ?? 0) + v.left);
@@ -727,6 +846,36 @@ export function likelyPayments(plan: Plan, rows: readonly Transaction[], allPlan
   const from = addDays(plan.createdOn < plan.due ? plan.createdOn : plan.due, -7);
   const to = plan.due === NO_DATE ? NO_DATE : addDays(plan.due, 60);
   const left = Math.max(0, plan.amount - paidSoFar(plan, transactions).amount) || plan.amount;
+  /*
+   * A plan to save is paid by money moved into its account: a transfer, or
+   * income put straight into it, from where it was to come from when that
+   * was said. Close to what is left, or naming the plan (P11).
+   */
+  if (isSave(plan)) {
+    const into = (plan.into ?? "").trim().toLowerCase();
+    const from_ = plan.wallet.trim().toLowerCase();
+    /*
+     * Its own words only: not the account's name, which every row into it
+     * carries, nor deposit or save. "Deposit to Maya Bank" took a PHP 1.50
+     * "Bank interest" as its likely payment (2 November 2026, on the owner's
+     * data). Income paid straight in counts only at about the amount.
+     */
+    const plain = new Set([...into.split(/[^a-z0-9]+/), "deposit", "save", "saving", "savings", "move", "into", "transfer", "money", "put"]);
+    const own = words.filter((w) => !plain.has(w));
+    return transactions
+      .filter((t) => (t.type === "Transfer" || t.type === "Revenue") && t.toWallet.trim().toLowerCase() === into && !linked.has(t.id) && t.date >= from && t.date <= to && t.amount > 0)
+      .map((t) => {
+        const saysIt = own.some((w) => `${t.item} ${t.description}`.toLowerCase().includes(w));
+        const close = t.amount === left ? 3 : Math.abs(t.amount - left) <= left * 0.2 ? 2 : t.amount < left && t.amount * 4 >= left ? 1 : 0;
+        const sameFrom = Boolean(from_) && t.fromWallet.trim().toLowerCase() === from_ ? 1 : 0;
+        const fits = t.type === "Revenue" ? close >= 2 : close >= 1 || saysIt;
+        return { t, score: close + sameFrom + (saysIt ? 2 : 0), fits };
+      })
+      .filter((s) => s.fits)
+      .sort((a, b) => b.score - a.score || Math.abs(daysBetween(plan.due, a.t.date)) - Math.abs(daysBetween(plan.due, b.t.date)))
+      .slice(0, 6)
+      .map((s) => s.t);
+  }
   const scored = transactions
     .filter((t) => t.type === "Spending" && !linked.has(t.id) && t.date >= from && t.date <= to)
     .map((t) => {
@@ -756,15 +905,17 @@ export function likelyPayments(plan: Plan, rows: readonly Transaction[], allPlan
  * exactly what is left of it; the form starts with the link on only then.
  */
 export function planPaidBy(row: Transaction, plans: readonly Plan[], transactions: readonly Transaction[]): { readonly plan: Plan; readonly left: Centavos; readonly sure: boolean } | null {
-  if (row.type !== "Spending" || row.total <= 0) return null;
+  // Spending pays a plan to spend; money moved into an account pays a plan to save into it (P11).
+  const moved = (row.type === "Transfer" || row.type === "Revenue") && row.toWallet.trim() !== "";
+  if ((row.type !== "Spending" && !moved) || row.total <= 0) return null;
   const all = [...transactions.filter((t) => t.id !== row.id), row];
   const found = plans
-    .filter((p) => p.status === "open" && likelyPayments(p, all, plans).some((t) => t.id === row.id))
+    .filter((p) => p.status === "open" && isSave(p) === moved && likelyPayments(p, all, plans).some((t) => t.id === row.id))
     .map((plan) => {
       const left = Math.max(0, plan.amount - paidSoFar(plan, transactions).amount);
       const words = plan.title.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
       const text = `${row.item} ${row.description}`.toLowerCase();
-      return { plan, left, sure: row.total === left || words.some((w) => text.includes(w)) };
+      return { plan, left, sure: (moved ? row.amount : row.total) === left || words.some((w) => text.includes(w)) };
     })
     .filter((m) => m.left > 0)
     .sort((a, b) => Number(b.sure) - Number(a.sure) || a.plan.due.localeCompare(b.plan.due));
@@ -780,6 +931,7 @@ export function movesWords(plan: Plan): string {
 
 /** One line for the activity trail and the chat. */
 export function planLine(plan: Plan): string {
+  if (isSave(plan)) return `${plan.title}, ${formatMoney(plan.amount)} to save into ${plan.into}, ${byWhen(plan)}${plan.wallet ? `, from ${plan.wallet}` : ""}`;
   return `${plan.title}, ${formatMoney(plan.amount)}, ${byWhen(plan)}${plan.item ? `, ${plan.item}` : ""}${plan.wallet ? `, from ${plan.wallet}` : ""}`;
 }
 

@@ -600,7 +600,8 @@ export function Budget({
             </p>
           )}
 
-          {planned && (planned.total > 0 || undated.length > 0) && (
+          {/* Always there, so the Planner is found from the Budget even in a month with nothing planned yet. */}
+          {planned && (
             <PlannedInMonth planned={planned} undated={undated} name={name} noPlan={noPlan} spendingLeft={a.spending.remaining} billsLeft={a.billsSubs.remaining} room={incomeView ? incomeView.room : null} asOf={asOf} onOpenPlanner={onOpenPlanner} />
           )}
 

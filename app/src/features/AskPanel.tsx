@@ -167,11 +167,11 @@ import type { PlanAction } from "./useProposalSink";
 import { PlanForm } from "./Planner";
 import { entryImpact, limitLine } from "../domain/entryImpact";
 import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
-import { kindFromHistory, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, linkPayments, unlinkPayment, planAgain, dueFor, whenOf, NO_DATE, type DueKind, type Plan, type PlanInput } from "../domain/planner";
+import { checkPlan, isSave, kindFromHistory, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, linkPayments, unlinkPayment, planAgain, dueFor, whenOf, NO_DATE, type DueKind, type Plan, type PlanInput } from "../domain/planner";
 import { alreadyPlannedWords, closedPlanWords, closedPlansWords, moveSaid, moveWords, NO_DAY, plannedMonthWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
 import { splitPlanClause, withoutPlanClause } from "../domain/planClause";
 import { asksForGoal, goalForPlan, type GoalForPlan } from "../domain/planGoal";
-import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, thingToPlan } from "../domain/planIntent";
+import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, readSaveIntent, thingToPlan } from "../domain/planIntent";
 import { asksAboutLimit, limitAnswer, limitLines } from "../domain/limitAsk";
 import { borrowedMoney, lenderNames, ownIn } from "../domain/borrowed";
 import { planWorked } from "../domain/planRate";
@@ -4746,14 +4746,25 @@ export function AskPanel({
   };
 
   /** A new plan's card rows, the same on every route that offers one. */
-  const planRows = (plan: Plan): { label: string; value: string }[] => [
-    { label: "What", value: plan.title },
-    { label: "Amount", value: formatMoney(plan.amount) },
-    { label: "Pay by", value: whenOf(plan) },
-    ...(plan.item ? [{ label: "Kind", value: plan.item }] : []),
-    ...(plan.wallet ? [{ label: "From", value: plan.wallet }] : []),
-    { label: "Safe to spend", value: countedWords(plan) },
-  ];
+  const planRows = (plan: Plan): { label: string; value: string }[] =>
+    // A plan to save says where the money goes, and is not spending (P11).
+    isSave(plan)
+      ? [
+          { label: "What", value: plan.title },
+          { label: "Amount", value: formatMoney(plan.amount) },
+          { label: "Into", value: plan.into ?? "" },
+          ...(plan.wallet ? [{ label: "From", value: plan.wallet }] : []),
+          { label: "Move by", value: whenOf(plan) },
+          { label: "Safe to spend", value: countedWords(plan) },
+        ]
+      : [
+          { label: "What", value: plan.title },
+          { label: "Amount", value: formatMoney(plan.amount) },
+          { label: "Pay by", value: whenOf(plan) },
+          ...(plan.item ? [{ label: "Kind", value: plan.item }] : []),
+          ...(plan.wallet ? [{ label: "From", value: plan.wallet }] : []),
+          { label: "Safe to spend", value: countedWords(plan) },
+        ];
 
   /** A Planner card for a new plan (docs/16-PLANNER.md, P4.23). Nothing is saved until it is pressed. */
   const offerPlan = (plan: Plan, words: string): void => {
@@ -4865,7 +4876,7 @@ export function AskPanel({
     if (turns.slice(-12).some((t) => isSettling(t) && t.state === "open" && t.planner?.save?.action === "plan.create")) return null;
     const line = planLineIn(text);
     if (!line) return null;
-    const read = readPlanLine(line, { reference, transactions, asOf });
+    const read = readPlanLine(line, { reference, transactions, asOf, accounts: settings.accounts });
     if (!read || read.amount === null) return null;
     /*
      * Something they spoke of: "Plan: iPhone, PHP 100,000.00" under "can I
@@ -6173,23 +6184,29 @@ export function AskPanel({
         };
         const money = formatMoney;
         if (planAsk.kind === "add") {
+          // "Plan deposit 3000 to maya bank next week": a plan to save, read as one (P11), not a purchase called "Deposit".
+          const asSave = readSaveIntent(lead, { reference, transactions, asOf, accounts: settings.accounts });
+          const saveInput = asSave?.kind === "later" ? asSave.plans[0] : undefined;
+          const addInput: PlanInput = saveInput?.into ? { ...saveInput, amount: saveInput.amount ?? planAsk.input.amount, ...(saveInput.dueKind === "none" && planAsk.input.dueKind !== "none" ? { due: planAsk.input.due, dueKind: planAsk.input.dueKind } : {}) } : planAsk.input;
           /*
            * The same plan, by its name and amount, is there already: said
            * back with a Move card for the time said, as every other route
            * does. "plan the blazer 1500 for december" with "Buy blazer",
            * PHP 1,500.00, on November 14 made a second blazer (2 November 2026).
            */
-          const same = plans.find((x) => x.status === "open" && x.amount === planAsk.input.amount && namesIt(x.title, planAsk.input.title) && namesIt(planAsk.input.title, x.title));
+          const same = plans.find((x) => x.status === "open" && x.amount === addInput.amount && namesIt(x.title, addInput.title) && namesIt(addInput.title, x.title));
           if (same) {
             setDraft("");
             say({ kind: "you", text: note });
             log(aiEvent("asked", "budget", { text: note }));
-            sayPlanned(same, moveSaid(same, { due: planAsk.input.due, kind: planAsk.input.dueKind ?? "day" }, asOf));
+            sayPlanned(same, moveSaid(same, { due: addInput.due, kind: addInput.dueKind ?? "day" }, asOf));
             return;
           }
-          const plan = makePlan(planAsk.input, asOf, "ai");
+          const plan = makePlan(addInput, asOf, "ai");
           card(
-            `A new plan${plan.due === NO_DATE ? " with no date yet" : ""}. No money moves until you pay. ${countsSentence(plan, asOf)}${pastLooksPaid(plan)}`,
+            isSave(plan)
+              ? `A plan to move ${money(plan.amount)} into ${plan.into}${plan.due === NO_DATE ? ", with no date yet" : ""}. No money moves until you do it; then it is saved as a transfer. ${countsSentence(plan, asOf)}`
+              : `A new plan${plan.due === NO_DATE ? " with no date yet" : ""}. No money moves until you pay. ${countsSentence(plan, asOf)}${pastLooksPaid(plan)}`,
             "Add to the planner",
             planRows(plan),
             { rows: [], save: { plan, action: "plan.create", summary: `Planned "${plan.title}", ${money(plan.amount)} ${byWhen(plan)}, from the chat.` } },
@@ -6363,9 +6380,21 @@ export function AskPanel({
           return;
         }
         if (planAsk.kind === "edit") {
+          /*
+           * Spending to saving or back (P11): stopped while payments of the
+           * other kind are linked, as the Planner's own form stops it.
+           */
+          if (isSave(planAsk.input) !== isSave(p)) {
+            const switchCheck = checkPlan(planAsk.input, { plans, reference, asOf, editing: p.id, linked: transactions.filter((t) => p.entryIds.includes(t.id)), wasSaving: isSave(p), closedAccounts: settings.accounts.filter((a) => a.archived).map((a) => a.name) });
+            const stop = switchCheck.problems.find((x) => x.includes("linked as its payment") || x.includes("is closed in Settings"));
+            if (stop) {
+              answer(stop, "budget", planner);
+              return;
+            }
+          }
           const next = editPlan(p, planAsk.input, asOf, transactions);
           const said = planAsk.changes.map((c) => `${c.label.toLowerCase()} "${c.before}" to "${c.after}"`).join(", ");
-          const WORD: Record<string, string> = { Name: "name", "Need or want": "need or want", "Safe to spend": "counting in safe to spend", Kind: "kind", "Pay from": "wallet", Goal: "goal", Notes: "note", "Pay by": "date" };
+          const WORD: Record<string, string> = { Name: "name", "Need or want": "need or want", "Safe to spend": "counting in safe to spend", Kind: "kind", "Pay from": "wallet", Goal: "goal", Notes: "note", "Pay by": "date", "Plan to": "kind of plan" };
           const what = planAsk.changes.map((c) => WORD[c.label] ?? c.label.toLowerCase());
           /*
            * Counted in safe to spend or not, said by what it does: safe to
@@ -6384,7 +6413,13 @@ export function AskPanel({
             return ` When its month comes, nothing is held back for it.${budget}`;
           })();
           card(
-            `Edit "${p.title}": its ${what.length > 1 ? `${what.slice(0, -1).join(", ")} and ${what[what.length - 1]}` : what[0]}, as below. Nothing else about it changes.${planAsk.changes.some((c) => c.label === "Goal") ? " Its money is in the goal, so it is no longer counted in safe to spend." : ""}${effect}`,
+            `Edit "${p.title}": its ${what.length > 1 ? `${what.slice(0, -1).join(", ")} and ${what[what.length - 1]}` : what[0]}, as below. Nothing else about it changes.${planAsk.changes.some((c) => c.label === "Goal") ? " Its money is in the goal, so it is no longer counted in safe to spend." : ""}${effect}${
+              planAsk.changes.some((c) => c.label === "Plan to")
+                ? isSave(next)
+                  ? ` As a plan to save it leaves the budget's planned spending and is done by moving the money into ${next.into}; ${next.setAside ? "safe to spend holds it back until then" : "nothing is held back for it"}.`
+                  : " As a plan to spend it counts in its month's planned spending and is paid by spending, not by a transfer."
+                : ""
+            }`,
             "Save the change",
             planAsk.changes.flatMap((c) => [{ label: `${c.label}, now`, value: c.before }, { label: "New", value: c.after }]),
             { rows: [], save: { plan: next, action: "plan.update", summary: `Edited "${p.title}": ${said}, from the chat.`, before: p } },
@@ -6403,6 +6438,39 @@ export function AskPanel({
         const view = views.find((v) => v.plan.id === p.id);
         const left = view?.left ?? p.amount;
         const amount = planAsk.amount ?? left;
+        /*
+         * A plan to save is done by moving the money: a transfer into its
+         * account, never spending (P11). "I did the deposit plan", "move the
+         * money for the maya bank plan".
+         */
+        if (isSave(p)) {
+          const fromSave = planAsk.wallet && planAsk.wallet !== p.into ? planAsk.wallet : p.wallet || walletToPayFrom({ wallet: "", item: "" }, amount, transactions, reference.wallets);
+          const moveDraft: Draft = {
+            ...emptyDraft(asOf),
+            flow: "Transfer",
+            date: asOf,
+            fromWallet: fromSave,
+            toWallet: p.into ?? "",
+            description: p.title,
+            amount,
+            status: "Transferred",
+            notes: `Moved from the Planner: ${p.title}.`,
+          };
+          const okMove = sink.check(moveDraft);
+          card(
+            `Move ${money(amount)} from ${fromSave || "a wallet to pick"} into ${p.into}, today, for "${p.title}". Saved as a transfer, checked as the Add form checks one, and linked to the plan. It is saving, not spending.${amount < left ? ` ${money(left - amount)} is left to move after it; the plan stays open.` : ""}${okMove.warnings.length > 0 ? ` ${okMove.warnings.join(" ")}` : ""}`,
+            okMove.ok ? "Move it" : "Fix it in the Planner",
+            [
+              { label: "Amount", value: money(amount) },
+              { label: "From", value: fromSave || "not picked" },
+              { label: "Into", value: p.into ?? "" },
+              { label: "On", value: formatMedium(asOf) },
+            ],
+            okMove.ok ? { rows: [], pay: { plan: p, draft: moveDraft, settles: amount >= left } } : { rows: [] },
+          );
+          if (!okMove.ok) say({ kind: "assistant", text: `${okMove.problems.join(" ")} Open the Planner to move it with a wallet picked.`, from: "this device", go: planner });
+          return;
+        }
         const item = p.item || kindFromHistory(p.title, transactions, planKinds(reference).options) || "";
         const goalName = p.goalId ? settings.accounts.find((a) => a.id === p.goalId)?.name : undefined;
         const from = planAsk.wallet || goalName || walletToPayFrom({ wallet: p.wallet, item }, amount, transactions, reference.wallets);
@@ -6444,7 +6512,7 @@ export function AskPanel({
        * as a plan", which made a Budget change card the same day, puts on the
        * Planner what was just said.
        */
-      const planCtx = { reference, transactions, asOf, debtNames: debts.flatMap((d) => [d.name, d.counterparty]) };
+      const planCtx = { reference, transactions, asOf, debtNames: debts.flatMap((d) => [d.name, d.counterparty]), accounts: settings.accounts };
       const onPlanner = (input: PlanInput): boolean => plans.some((p) => p.status === "open" && p.amount === input.amount && namesIt(p.title, input.title));
       const nowBrief = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
       const monthEnd = lastOfMonth(Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)));
@@ -6485,6 +6553,18 @@ export function AskPanel({
        */
       const planCardWords = (plan: Plan, _dueSaid?: boolean): string => {
         const kind = plan.dueKind ?? "day";
+        /*
+         * A plan to save (P11): where the money goes and what safe to spend
+         * does about it. Never "what the month needs with it": saving is not
+         * the month's spending.
+         */
+        if (isSave(plan)) {
+          const when = plan.due === NO_DATE ? "with no date yet" : kind === "day" ? `by ${formatMedium(plan.due)}` : whenOf(plan).replace(/^S/, "s");
+          const goal = settings.accounts.find((a) => a.kind === "goal" && a.name === plan.into);
+          const holds = goal ? walletBalance(transactions, goal.name) : null;
+          const toGoal = goal && holds !== null ? ` ${goal.name} holds ${formatMoney(holds)}; with this it holds ${formatMoney(holds + plan.amount)}${goal.target ? ` of its ${formatMoney(goal.target)} target${holds + plan.amount >= goal.target ? ", reached" : ""}` : ""}.` : "";
+          return `A plan to move ${formatMoney(plan.amount)} into ${plan.into}, ${when}. No money moves until you do it; then say so, or press Record the move on the Planner, and it is saved as a transfer.${plan.notes ? ` ${plan.notes}` : ""} ${countsSentence(plan, asOf)}${plan.setAside && plan.due <= monthEnd ? fitWords(plan) : ""}${toGoal}`;
+        }
         const lead =
           plan.due === NO_DATE
             ? `A new plan with no date yet, kept on the Planner. ${countsSentence(plan)}`
@@ -6677,6 +6757,16 @@ export function AskPanel({
             return;
           }
           offerPlan(plan, `${day} has passed. Paid already? Then it is an entry, not a plan: type it like "${thing} ${Math.round(plan.amount / 100)} cash ${short}". Still to pay? Add it here and it shows as overdue until it is paid, or say a new day.`);
+          return;
+        }
+        else if (intent?.kind === "saveWhere") {
+          // Money to save with nowhere said, and more than one place it could go (P11): asked, never guessed.
+          youAsked();
+          const places = [...reference.savings, ...settings.accounts.filter((a) => a.kind === "goal" && !a.archived).map((a) => a.name)];
+          const pesos = intent.amount !== null ? Math.round(intent.amount / 100) : 3000;
+          const text = `Into which account or goal?${places.length > 0 ? ` Yours: ${places.join(", ")}.` : ""} Say it with the place, like "${intent.verb === "deposit" ? "deposit" : "save"} ${pesos} to ${(places[0] ?? "Maya Bank").replace(/\s*\(.*\)\s*$/, "").toLowerCase()} next week", and it comes back as a Planner card to press.`;
+          say({ kind: "assistant", text, from: "this device", go: plannerPlace });
+          log(aiEvent("answered", "budget", { text, model: "this device" }));
           return;
         }
         else if (intent?.kind === "income") {

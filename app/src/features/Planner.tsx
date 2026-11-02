@@ -61,6 +61,9 @@ import {
   planKinds,
   plannedForBudget,
   planWallets,
+  planInto,
+  isSave,
+  savesOutOfSpending,
   removePlan,
   reopenPlan,
   skipPlan,
@@ -111,6 +114,13 @@ const PILL: Record<PlanView["state"], { word: string; status: "ok" | "warn" | "o
   paid: { word: "Paid", status: "ok" },
   skipped: { word: "Skipped", status: "none" },
   removed: { word: "Removed", status: "none" },
+};
+
+/** The badge, in a plan to save's own words: money is moved, not paid (P11). */
+const pillOf = (v: PlanView): (typeof PILL)[PlanView["state"]] => {
+  const pill = PILL[v.state];
+  if (!pill || !isSave(v.plan)) return pill;
+  return v.state === "partly" ? { ...pill, word: "Part moved" } : v.state === "paid" ? { ...pill, word: "Done" } : pill;
 };
 
 const no = (n: number): string => `#${String(n).padStart(4, "0")}`;
@@ -540,8 +550,9 @@ export function Planner(props: PlannerProps) {
 function PlanRow({ view: v, asOf, short, onOpen }: { view: PlanView; asOf: IsoDate; short: Centavos; onOpen: () => void }) {
   const p = v.plan;
   const open = isOpen(v);
-  const meta = [whenWords(v, asOf), p.item, p.wallet].filter(Boolean).join(" · ");
-  const pill = PILL[v.state];
+  // A plan to save says where the money goes (P11).
+  const meta = (isSave(p) ? [whenWords(v, asOf), `Into ${p.into}`, p.wallet ? `from ${p.wallet}` : ""] : [whenWords(v, asOf), p.item, p.wallet]).filter(Boolean).join(" · ");
+  const pill = pillOf(v);
   const note =
     short > 0
       ? { status: "over" as const, words: `${formatMoney(short)} more than safe to spend` }
@@ -676,7 +687,7 @@ function PlanSheet(props: {
   // A one-tap link marks a plan paid: asked first (owner, 27 October 2026: "Add validation to button").
   const { confirm, dialog: confirmDialog } = useConfirm();
   const open = isOpen(v);
-  const pill = PILL[v.state];
+  const pill = pillOf(v);
   const paidRows = p.entryIds.map((id) => transactions.find((t) => t.id === id)).filter((t): t is Transaction => t !== undefined);
   // A payment added by hand that looks like this one (P4.9): asked, never linked by itself.
   const maybe = open ? likelyPayments(p, transactions, props.plans).slice(0, 2) : [];
@@ -691,7 +702,7 @@ function PlanSheet(props: {
   const primary =
     open ? (
       <Button variant="primary" onClick={props.onPay}>
-        {v.paid > 0 ? "Pay the rest" : "Record payment"}
+        {isSave(p) ? (v.paid > 0 ? "Move the rest" : "Record the move") : v.paid > 0 ? "Pay the rest" : "Record payment"}
       </Button>
     ) : v.state === "removed" ? (
       <Button variant="primary" onClick={props.onReopen}>
@@ -763,7 +774,9 @@ function PlanSheet(props: {
         {/* Not while an entry looks like its payment already: the money may have gone, not be short. */}
         {props.short > 0 && !(v.state === "overdue" && maybe.length > 0) && (
           <Alert status="over" title={`${formatMoney(props.short)} short for it`}>
-            After the bills and debt payments still due and the plans before it, safe to spend does not cover all of it. Pay part now, move the date, or pay it from savings.
+            {isSave(p)
+              ? "After the bills and debt payments still due and the plans before it, safe to spend does not cover all of it. Move part now, or move the date."
+              : "After the bills and debt payments still due and the plans before it, safe to spend does not cover all of it. Pay part now, move the date, or pay it from savings."}
           </Alert>
         )}
         {v.goneNote && <Alert status="warn" title="A payment is gone">{v.goneNote}</Alert>}
@@ -777,11 +790,23 @@ function PlanSheet(props: {
         )}
 
         <dl className="fms-rowfacts">
-          <Fact label="Pay by">{whenOf(p)}</Fact>
-          {p.item && <Fact label="Kind">{p.item}</Fact>}
-          {p.wallet && <Fact label="Pay from">{p.wallet}</Fact>}
-          <Fact label="Need or want">{p.need ? "A need" : "A want"}</Fact>
-          <Fact label="Safe to spend">{!open ? (v.state === "paid" ? "Nothing set aside: it is paid" : "Not counted") : p.goalId ? "Not counted, saved in a goal" : p.setAside && v.counts ? "Set aside now" : countedWords(p).replace(/^Counted in its month$/, "Set aside in its month").replace(/^Counted in /, "Set aside in ")}</Fact>
+          {isSave(p) ? (
+            <>
+              <Fact label="Move by">{whenOf(p)}</Fact>
+              <Fact label="Into">{p.into}</Fact>
+              {p.wallet && <Fact label="From">{p.wallet}</Fact>}
+              <Fact label="Safe to spend">{!open ? (v.state === "paid" ? "Nothing held back: it is moved" : "Not held back") : v.counts ? "Held back now" : countedWords(p)}</Fact>
+              <Fact label="Budget">Not counted: it is saving, not spending</Fact>
+            </>
+          ) : (
+            <>
+              <Fact label="Pay by">{whenOf(p)}</Fact>
+              {p.item && <Fact label="Kind">{p.item}</Fact>}
+              {p.wallet && <Fact label="Pay from">{p.wallet}</Fact>}
+              <Fact label="Need or want">{p.need ? "A need" : "A want"}</Fact>
+              <Fact label="Safe to spend">{!open ? (v.state === "paid" ? "Nothing set aside: it is paid" : "Not counted") : p.goalId ? "Not counted, saved in a goal" : p.setAside && v.counts ? "Set aside now" : countedWords(p).replace(/^Counted in its month$/, "Set aside in its month").replace(/^Counted in /, "Set aside in ")}</Fact>
+            </>
+          )}
           {v.goal && (
             <Fact label="Goal">
               {v.goal.missing
@@ -806,9 +831,9 @@ function PlanSheet(props: {
               {paidRows.map((t) => (
                 <li key={t.id}>
                   <button type="button" className="fms-linkbutton t-caption" onClick={() => props.onShowEntry?.(t.recordNumber)}>
-                    {no(t.recordNumber)} · {formatMedium(t.date)} · {t.fromWallet || "no wallet"}
+                    {no(t.recordNumber)} · {formatMedium(t.date)} · {isSave(p) ? `${t.fromWallet || "income"} to ${t.toWallet}` : t.fromWallet || "no wallet"}
                   </button>
-                  <Money value={t.total} size="s" />
+                  <Money value={isSave(p) ? t.amount : t.total} size="s" />
                   {open && (
                     <Button size="sm" onClick={() => props.onUnlink(t.id)}>
                       Unlink
@@ -822,20 +847,23 @@ function PlanSheet(props: {
 
         {maybe.length > 0 && (
           <div className="fms-plansheet-part">
-            <h4 className="t-label">Already paid it?</h4>
+            <h4 className="t-label">{isSave(p) ? "Moved it already?" : "Already paid it?"}</h4>
             <ul className="fms-planpays">
               {maybe.map((t) => (
                 <li key={t.id}>
                   <span className="t-caption">
                     {no(t.recordNumber)} · {formatMedium(t.date)} · {t.description && t.description !== t.item ? t.description.slice(0, 48) : t.item}
                   </span>
-                  <Money value={t.total} size="s" />
+                  <Money value={isSave(p) ? t.amount : t.total} size="s" />
                   <Button
                     size="sm"
                     onClick={() =>
                       void confirm({
                         title: `Link ${no(t.recordNumber)} as its payment?`,
-                        body: `${no(t.recordNumber)}, ${formatMoney(t.total)} on ${formatMedium(t.date)}, counts as paying "${p.title}"${t.total >= v.left ? ", and the plan is marked paid" : `, ${formatMoney(v.left - t.total)} still to pay`}. No money moves: the entry is already in your records. Unlink puts it back.`,
+                        body: (() => {
+                          const got = isSave(p) ? t.amount : t.total;
+                          return `${no(t.recordNumber)}, ${formatMoney(got)} on ${formatMedium(t.date)}, counts as ${isSave(p) ? "moving the money for" : "paying"} "${p.title}"${got >= v.left ? `, and the plan is marked ${isSave(p) ? "done" : "paid"}` : `, ${formatMoney(v.left - got)} still to ${isSave(p) ? "move" : "pay"}`}. No money moves: the entry is already in your records. Unlink puts it back.`;
+                        })(),
                         confirmLabel: "Link it",
                         tone: "normal",
                       }).then((ok) => {
@@ -908,7 +936,7 @@ function monthsFrom(asOf: IsoDate, keep: IsoDate): IsoDate[] {
  * NO DATE LIKE NO IDEA WHEN". A day, a month ("sometime in November", counted
  * in November), or no date at all (counted nowhere until it has one).
  */
-function WhenPicker({ value, onChange, asOf, id, error }: { value: When; onChange: (w: When) => void; asOf: IsoDate; id: string; error?: string | undefined }) {
+function WhenPicker({ value, onChange, asOf, id, error, dayLabel = "Pay by" }: { value: When; onChange: (w: When) => void; asOf: IsoDate; id: string; error?: string | undefined; dayLabel?: string }) {
   const kind = value.kind === "year" ? "month" : value.kind;
   const fallback = value.due !== NO_DATE ? value.due : nextMonthEnd(asOf);
   return (
@@ -919,7 +947,7 @@ function WhenPicker({ value, onChange, asOf, id, error }: { value: When; onChang
         onChange={(k) => onChange({ kind: k, due: k === "none" ? NO_DATE : dueFor(k, fallback) })}
       />
       {kind === "day" && (
-        <Field label="Pay by" htmlFor={id} error={error}>
+        <Field label={dayLabel} htmlFor={id} error={error}>
           <input id={id} type="date" value={value.due === NO_DATE ? "" : value.due} onChange={(e) => onChange({ kind: "day", due: e.target.value })} className="t-body fms-control" />
         </Field>
       )}
@@ -950,6 +978,7 @@ const NO_GOAL = "Not saved in a goal";
 const NEW_GOAL = "Make a goal for it";
 const NO_KIND = "Not said";
 const NO_WALLET = "Not decided";
+const NO_INTO = "Pick one";
 
 /**
  * The plan form: the Planner's own, and the chat's Edit on a Planner card
@@ -970,8 +999,17 @@ export function PlanForm(props: {
   onSave: (input: PlanInput) => void;
   /** Making a goal for it from the form; absent where that cannot be done (the chat). */
   onMakeGoal?: ((goal: GoalForPlan) => { readonly id: string; readonly name: string }) | undefined;
+  /** A new plan opened as one to save or move money (P11). */
+  saving?: boolean | undefined;
 }) {
   const { editing, reference, accounts, asOf } = props;
+  /*
+   * To spend, or to save or move money into an account or goal (P11; owner,
+   * 2 November 2026: "what if I plan to save like deposit to bank or wallet
+   * or goal ... what if I edited a plan to buy to plan to save").
+   */
+  const [saving, setSaving] = useState(editing ? isSave(editing) : Boolean(props.saving));
+  const [into, setInto] = useState(editing?.into ?? "");
   const isEdit = Boolean(editing && props.plans.some((p) => p.id === editing.id));
   const goals = accounts.filter((a) => a.kind === "goal" && !a.archived);
   const [title, setTitle] = useState(editing?.title ?? "");
@@ -1004,16 +1042,26 @@ export function PlanForm(props: {
   const [picked, setPicked] = useState(Boolean(editing?.item));
   const suggested = !picked && !item ? kindFromHistory(title, props.transactions, kinds) : null;
   const kind = item || suggested || "";
-  const recurring = isRecurringKind(kind, reference);
-  const input: PlanInput = { title, amount, due, dueKind: when.kind, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !newGoal && !recurring, notes };
+  const recurring = !saving && isRecurringKind(kind, reference);
+  // Held back only when the money leaves the spending wallets: into savings or a goal, from a spending wallet or none said.
+  const outOfSpending = savesOutOfSpending({ into, wallet }, reference.wallets);
+  const intoChoices = planInto(reference, accounts, editing?.into ?? "");
+  const input: PlanInput = saving
+    ? { title, amount, due, dueKind: when.kind, item: "", wallet, into, saving: true, need: true, setAside: setAside && outOfSpending, notes }
+    : { title, amount, due, dueKind: when.kind, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !newGoal && !recurring, notes };
+  // The payments linked to the plan being edited: of the other kind, they stop a change between spending and saving.
+  const linkedRows = useMemo(() => (editing && isEdit ? props.transactions.filter((t) => editing.entryIds.includes(t.id)) : []), [editing, isEdit, props.transactions]);
   // What is paid on it already: its amount may not go below that, and at exactly that it is paid in full.
   const paidOn = useMemo(() => (editing && isEdit ? viewOf(editing, { transactions: props.transactions, accounts, asOf }).paid : 0), [editing, isEdit, props.transactions, accounts, asOf]);
   const check = checkPlan(
-    { ...input, setAside },
+    { ...input, setAside: saving ? input.setAside : setAside },
     {
       plans: props.plans,
       reference,
       asOf,
+      linked: linkedRows,
+      wasSaving: isEdit && editing ? isSave(editing) : undefined,
+      closedAccounts: accounts.filter((a) => a.archived).map((a) => a.name),
       editing: isEdit ? editing?.id : undefined,
       closed: Boolean(isEdit && editing && editing.status !== "open"),
       paid: paidOn,
@@ -1025,7 +1073,9 @@ export function PlanForm(props: {
   // The goal it would get, or the one picked, checked and said before anything is made (`planGoal.ts`).
   const goalPlan = newGoal || goalId ? goalForPlan({ id: editing?.id, title, amount, due, dueKind: when.kind }, { accounts, plans: props.plans, transactions: props.transactions, asOf, parentId: goalHome, goalId: newGoal ? undefined : goalId }) : null;
   const goalName = newGoal ? (goalPlan?.name ?? title.trim()) : (goals.find((g) => g.id === goalId)?.name ?? "");
-  const counted = setAside && !goalId && !newGoal && !recurring;
+  const counted = saving ? setAside && outOfSpending : setAside && !goalId && !newGoal && !recurring;
+  const intoProblem = check.problems.find((x) => x.startsWith("Pick the account") || x.includes(" and comes from ") || x.includes("is closed in Settings"));
+  const kindProblem = check.problems.find((x) => x.includes("linked as its payment"));
 
   /*
    * The kind's limit in the plan's month, with what is spent and the other
@@ -1034,7 +1084,7 @@ export function PlanForm(props: {
    */
   const { transactions, budgets, debts, plans } = props;
   const limitNote = useMemo(() => {
-    if (!kind || recurring || amount === null || amount <= 0 || when.kind === "none" || when.kind === "year" || !/^\d{4}-\d{2}/.test(due)) return null;
+    if (saving || !kind || recurring || amount === null || amount <= 0 || when.kind === "none" || when.kind === "year" || !/^\d{4}-\d{2}/.test(due)) return null;
     const at = due.slice(0, 7) < asOf.slice(0, 7) ? asOf : due;
     const year = Number(at.slice(0, 4));
     const month = Number(at.slice(5, 7));
@@ -1046,15 +1096,17 @@ export function PlanForm(props: {
       .reduce((sum, v) => sum + v.left, 0);
     // An edited plan's payments are in what is spent already; only what is left of it is still to come.
     return planLimitNote(line, planned, Math.max(0, amount - paidOn), month);
-  }, [kind, recurring, amount, when.kind, due, asOf, transactions, budgets, debts, plans, editing, accounts, reference, paidOn]);
+  }, [saving, kind, recurring, amount, when.kind, due, asOf, transactions, budgets, debts, plans, editing, accounts, reference, paidOn]);
 
   // The rest folds under More details, as on the Add form; open when something in it is set.
   const [moreOpen, setMoreOpen] = useState(Boolean(editing && (!editing.need || editing.goalId || !editing.setAside || editing.notes)));
-  const moreSummary = [need ? "A need" : "A want", goalName ? `saved in ${goalName}` : "", counted ? (when.kind === "none" ? "counted once it has a date" : "counted in safe to spend") : "not counted", notes ? "a note" : ""].filter(Boolean).join(", ");
+  const moreSummary = saving
+    ? [counted ? (when.kind === "none" ? "held back once it has a date" : "held back from safe to spend") : "not held back", notes ? "a note" : ""].filter(Boolean).join(", ")
+    : [need ? "A need" : "A want", goalName ? `saved in ${goalName}` : "", counted ? (when.kind === "none" ? "counted once it has a date" : "counted in safe to spend") : "not counted", notes ? "a note" : ""].filter(Boolean).join(", ");
 
   const save = async (): Promise<void> => {
     setTried(true);
-    if (check.problems.length > 0 || (newGoal && (goalPlan?.problems.length ?? 0) > 0)) return;
+    if (check.problems.length > 0 || (!saving && newGoal && (goalPlan?.problems.length ?? 0) > 0)) return;
     /*
      * A new plan for a day already gone (owner, 27 October 2026: "what if I
      * create a plan but in the past?"): asked, since it is either a payment
@@ -1067,8 +1119,8 @@ export function PlanForm(props: {
         title: `${whenOf({ due: day, dueKind: when.kind })} has passed`,
         body: (
           <>
-            <p style={{ margin: 0 }}>Still to pay: add it, and it shows as overdue and is counted in safe to spend until it is paid.</p>
-            <p style={{ margin: "var(--space-2) 0 0" }}>Paid already: add it, then on its sheet link the entry, or record the payment with the day you paid, so nothing is entered twice. Or pick a later day.</p>
+            <p style={{ margin: 0 }}>{saving ? "Still to move: add it, and it shows as overdue until the money is moved." : "Still to pay: add it, and it shows as overdue and is counted in safe to spend until it is paid."}</p>
+            <p style={{ margin: "var(--space-2) 0 0" }}>{saving ? "Moved already: add it, then on its sheet link the transfer, so nothing is entered twice. Or pick a later day." : "Paid already: add it, then on its sheet link the entry, or record the payment with the day you paid, so nothing is entered twice. Or pick a later day."}</p>
           </>
         ),
         confirmLabel: "Add it",
@@ -1077,7 +1129,7 @@ export function PlanForm(props: {
       if (!ok) return;
     }
     // The goal, made now that the plan is saved: by its day, or with no deadline when the plan has no date (never the year 9999).
-    if (newGoal && props.onMakeGoal && goalPlan) {
+    if (!saving && newGoal && props.onMakeGoal && goalPlan) {
       if (goalPlan.problems.length > 0) return;
       const made = props.onMakeGoal(goalPlan);
       props.onSave({ ...input, goalId: made.id, wallet: made.name, setAside: false });
@@ -1089,7 +1141,7 @@ export function PlanForm(props: {
   return (
     <Sheet
       title={isEdit && editing ? `Edit "${editing.title}"` : "Plan something"}
-      subtitle={isEdit && editing && editing.status !== "open" ? `It stays ${editing.status === "done" ? "paid" : "skipped"}; its payments are not changed.` : "No money moves until you pay."}
+      subtitle={isEdit && editing && editing.status !== "open" ? `It stays ${editing.status === "done" ? "paid" : "skipped"}; its payments are not changed.` : saving ? "No money moves until you move it." : "No money moves until you pay."}
       onClose={props.onClose}
       dialog={props.dialog}
       actions={
@@ -1102,10 +1154,20 @@ export function PlanForm(props: {
       }
     >
       <div className="fms-planform">
-        <Field label="What is it for" htmlFor="plan-title" error={tried && !title.trim() ? "Say what it is for." : undefined}>
-          <TextInput id="plan-title" value={title} onChange={setTitle} placeholder="Tuition, new phone, a trip" maxLength={80} />
+        <Field label="This plan is" help={saving ? "Money you will put into savings, a goal or another wallet. It is moved, not spent." : undefined}>
+          <SegmentedControl
+            options={[
+              { id: "spend", label: "To spend" },
+              { id: "save", label: "To save or move" },
+            ]}
+            value={saving ? "save" : "spend"}
+            onChange={(v) => setSaving(v === "save")}
+          />
         </Field>
-        <Field label="How much" htmlFor="plan-amount" error={tried && (amount === null || amount <= 0) ? "Put in how much it will cost." : paidProblem}>
+        <Field label="What is it for" htmlFor="plan-title" error={tried && !title.trim() ? "Say what it is for." : undefined}>
+          <TextInput id="plan-title" value={title} onChange={setTitle} placeholder={saving ? "Deposit to savings, money for a trip" : "Tuition, new phone, a trip"} maxLength={80} />
+        </Field>
+        <Field label={saving ? "How much to move" : "How much"} htmlFor="plan-amount" error={tried && (amount === null || amount <= 0) ? (saving ? "Put in how much to move." : "Put in how much it will cost.") : paidProblem}>
           <AmountInput id="plan-amount" value={amount} onChange={setAmount} />
         </Field>
         <div className="fms-planform-when">
@@ -1115,9 +1177,26 @@ export function PlanForm(props: {
             onChange={setWhen}
             asOf={asOf}
             id="plan-due"
+            dayLabel={saving ? "Move by" : "Pay by"}
             error={tried && when.kind !== "none" && !/^\d{4}-\d{2}-\d{2}$/.test(due) ? (when.kind === "month" ? "Pick the month." : "Pick the day it is to be paid by.") : undefined}
           />
         </div>
+        {saving ? (
+          <div className="fms-planform-pair">
+            <Field label="Into" error={tried || into ? intoProblem : undefined}>
+              <Select value={into || NO_INTO} onChange={(v) => setInto(v === NO_INTO ? "" : v)} options={[NO_INTO, ...intoChoices.options]} groups={intoChoices.groups} ariaLabel="Into" />
+            </Field>
+            <Field label="From">
+              <Select
+                value={wallet || NO_WALLET}
+                onChange={(v) => setWallet(v === NO_WALLET ? "" : v)}
+                options={[NO_WALLET, ...walletChoices.options, ...(wallet && !walletChoices.options.includes(wallet) ? [wallet] : [])]}
+                groups={walletChoices.groups}
+                ariaLabel="From"
+              />
+            </Field>
+          </div>
+        ) : (
         <div className="fms-planform-pair">
           <Field label="Kind">
             <Select
@@ -1142,7 +1221,8 @@ export function PlanForm(props: {
             />
           </Field>
         </div>
-        {suggested && (
+        )}
+        {!saving && suggested && (
           <p className="t-caption fms-planform-hint">
             {suggested}, as your entries about it are. Counted under it when it is paid.
           </p>
@@ -1153,7 +1233,33 @@ export function PlanForm(props: {
           <span className="t-caption fms-more-sum fms-truncate">{moreSummary}</span>
         </button>
 
-        {moreOpen && (
+        {moreOpen && saving && (
+          <>
+            <div className="fms-planform-switch">
+              <span className="fms-planform-switchtext">
+                <span className="t-body">Hold it back from safe to spend</span>
+                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                  {!into
+                    ? "Pick where it goes first."
+                    : !outOfSpending
+                      ? reference.wallets.some((w) => w.toLowerCase() === into.toLowerCase())
+                        ? `${into} is a spending wallet too, so nothing leaves your spending money and nothing is held back.`
+                        : `It comes from ${wallet}, not a spending wallet, so nothing is held back.`
+                      : when.kind === "none"
+                        ? "Once it has a month or a day, safe to spend holds the money back then."
+                        : counted
+                          ? "On: safe to spend holds the money back in its month, so it is there to move."
+                          : "Off: safe to spend does not hold it back; move it when the money is there."}
+                </span>
+              </span>
+              {into && outOfSpending && <Switch checked={counted} onChange={setSetAside} label="Hold it back from safe to spend" />}
+            </div>
+            <Field label="Notes" optional>
+              <TextInput value={notes} onChange={setNotes} maxLength={300} placeholder="Why, what it is for, anything to remember" />
+            </Field>
+          </>
+        )}
+        {moreOpen && !saving && (
           <>
             <Field label="Need or want" help="When money is short, put wants off first.">
               <SegmentedControl
@@ -1234,6 +1340,18 @@ export function PlanForm(props: {
             </Alert>
           );
         })()}
+        {/*
+          Changed between spending and saving (P11): what that does, and
+          what stops it while payments of the other kind are linked.
+        */}
+        {isEdit && editing && isSave(editing) !== saving && editing.status === "open" && (
+          <Alert status={kindProblem ? "over" : "info"} {...(kindProblem ? { title: "Cannot change it yet" } : {})}>
+            {kindProblem ??
+              (saving
+                ? `It was a plan to spend. As a plan to save it leaves the budget's planned spending, is paid by moving money into ${into || "the account you pick"}, and ${into && outOfSpending && setAside ? "safe to spend still holds the money back" : "safe to spend holds nothing back for it"}.`
+                : `It was a plan to save into ${editing.into}. As a plan to spend it counts in its month's planned spending, is paid by spending, not by moving money, and ${setAside ? "safe to spend holds it back" : "safe to spend does not hold it back"}.`)}
+          </Alert>
+        )}
         {limitNote && <Alert status={limitNote.over ? "warn" : "info"}>{limitNote.text}</Alert>}
         {check.notes.filter((n) => !n.startsWith("With no date")).map((n) => (
           <Alert key={n} status="info">
@@ -1269,32 +1387,50 @@ function PaySheet(props: {
   const [stopped, setStopped] = useState<string | null>(null);
 
   const category = reference.bills.some((b) => b === item) ? "Bills" : reference.subscriptions.some((b) => b === item) ? "Subscriptions" : "Spending";
-  const draft: Draft = {
-    ...emptyDraft(date),
-    flow: "Spending",
-    date,
-    fromWallet: from,
-    category,
-    item,
-    description: plan.title,
-    amount,
-    status: "Paid",
-    notes: `Paid from the Planner: ${plan.title}.`,
-  };
+  /*
+   * A plan to save is done by moving the money, saved as a transfer into its
+   * account: the same row the Add form makes, linked to the plan (P11). It is
+   * not spending, so it has no kind.
+   */
+  const saving = isSave(plan);
+  const draft: Draft = saving
+    ? {
+        ...emptyDraft(date),
+        flow: "Transfer",
+        date,
+        fromWallet: from,
+        toWallet: plan.into ?? "",
+        description: plan.title,
+        amount,
+        status: "Transferred",
+        notes: `Moved from the Planner: ${plan.title}.`,
+      }
+    : {
+        ...emptyDraft(date),
+        flow: "Spending",
+        date,
+        fromWallet: from,
+        category,
+        item,
+        description: plan.title,
+        amount,
+        status: "Paid",
+        notes: `Paid from the Planner: ${plan.title}.`,
+      };
   const holds = from ? walletBalance(transactions, from) : null;
   const less = amount !== null && amount < view.left;
   const pay = (settles: boolean): void => setStopped(props.onPay(draft, settles));
 
   return (
     <Sheet
-      title={`Pay "${plan.title}"`}
-      subtitle="Saved as an entry, with the same checks as the Add form, and linked to the plan."
+      title={saving ? `Move money for "${plan.title}"` : `Pay "${plan.title}"`}
+      subtitle={saving ? `Saved as a transfer into ${plan.into}, with the same checks as the Add form, and linked to the plan.` : "Saved as an entry, with the same checks as the Add form, and linked to the plan."}
       onClose={props.onClose}
       dialog={props.dialog}
       actions={
         less ? (
           <>
-            <Button onClick={() => pay(false)}>Save, more to pay later</Button>
+            <Button onClick={() => pay(false)}>{saving ? "Save, more to move later" : "Save, more to pay later"}</Button>
             <Button variant="primary" onClick={() => pay(true)}>
               Save, that settles it
             </Button>
@@ -1303,7 +1439,7 @@ function PaySheet(props: {
           <>
             <Button onClick={props.onClose}>Cancel</Button>
             <Button variant="primary" onClick={() => pay(true)}>
-              Save payment
+              {saving ? "Save the move" : "Save payment"}
             </Button>
           </>
         )
@@ -1311,15 +1447,15 @@ function PaySheet(props: {
     >
       <div className="fms-planform">
         <div className="fms-planform-pair">
-          <Field label="Amount paid" htmlFor="pay-amount">
+          <Field label={saving ? "Amount moved" : "Amount paid"} htmlFor="pay-amount">
             <AmountInput id="pay-amount" value={amount} onChange={setAmount} />
           </Field>
-          <Field label="Paid on" htmlFor="pay-date">
+          <Field label={saving ? "Moved on" : "Paid on"} htmlFor="pay-date">
             <input id="pay-date" type="date" value={date} max={asOf} onChange={(e) => setDate(e.target.value)} className="t-body fms-control" />
           </Field>
         </div>
         <div className="fms-planform-pair">
-          <Field label="Paid from" help={holds !== null ? `${from} holds ${formatMoney(holds)}.` : undefined}>
+          <Field label={saving ? "From" : "Paid from"} help={holds !== null ? `${from} holds ${formatMoney(holds)}.` : undefined}>
             <Select
               value={from || NO_WALLET}
               onChange={(v) => setFrom(v === NO_WALLET ? "" : v)}
@@ -1328,19 +1464,29 @@ function PaySheet(props: {
               ariaLabel="Paid from"
             />
           </Field>
-          <Field label="Kind">
-            <Select value={item || NO_KIND} onChange={(v) => setItem(v === NO_KIND ? "" : v)} options={[NO_KIND, ...kinds]} groups={kindChoices.groups} ariaLabel="Kind of spending" searchable />
-          </Field>
+          {saving ? (
+            <Field label="Into">
+              <p className="t-body" style={{ margin: 0, padding: "var(--space-2) 0" }}>
+                {plan.into}
+              </p>
+            </Field>
+          ) : (
+            <Field label="Kind">
+              <Select value={item || NO_KIND} onChange={(v) => setItem(v === NO_KIND ? "" : v)} options={[NO_KIND, ...kinds]} groups={kindChoices.groups} ariaLabel="Kind of spending" searchable />
+            </Field>
+          )}
         </div>
         {less && (
           <Alert status="info">
-            {`${formatMoney(view.left - (amount ?? 0))} less than is left of it. "More to pay later" keeps it open as part paid; "that settles it" marks it paid for less.`}
+            {saving
+              ? `${formatMoney(view.left - (amount ?? 0))} less than is left of it. "More to move later" keeps it open; "that settles it" marks it done for less.`
+              : `${formatMoney(view.left - (amount ?? 0))} less than is left of it. "More to pay later" keeps it open as part paid; "that settles it" marks it paid for less.`}
           </Alert>
         )}
         {amount !== null && amount > view.left && view.left > 0 && <Alert status="info">{`${formatMoney(amount - view.left)} more than was planned. It is marked paid, and says so.`}</Alert>}
         {holds !== null && amount !== null && holds < amount && (
           <Alert status="warn" title={`${from} holds ${formatMoney(holds)}`}>
-            Paying {formatMoney(amount)} from it takes it below zero. Pay from another wallet, pay part now, or move the date.
+            {saving ? "Moving" : "Paying"} {formatMoney(amount)} from it takes it below zero. {saving ? "Move it from another wallet, move part now, or move the date." : "Pay from another wallet, pay part now, or move the date."}
           </Alert>
         )}
         {stopped && (

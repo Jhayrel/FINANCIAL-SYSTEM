@@ -1296,6 +1296,37 @@ export function Insights({
 
   const monthCards = (
     <>
+      {/*
+        The Planner first, under the calendar, with its own button: below the
+        month in brief it was a screen's height down and not seen (owner, 2
+        November 2026: "I cannot see the planner in insight and budgeting").
+      */}
+      {plannedHere && (
+        <Card
+          title={`Planner: ${name}`}
+          subtitle="Not paid or moved yet, against what the budget has left"
+          action={
+            onOpenPlanner ? (
+              <Button size="sm" onClick={onOpenPlanner}>
+                Open the Planner
+              </Button>
+            ) : undefined
+          }
+        >
+          <PlannedInMonth
+            planned={plannedHere}
+            undated={undatedHere}
+            name={name}
+            noPlan={t.combined.budget === 0}
+            spendingLeft={t.spending.remaining}
+            billsLeft={t.billsSubs.remaining}
+            room={null}
+            asOf={asOf}
+            where="elsewhere"
+          />
+        </Card>
+      )}
+
       {/* ── The month in brief ─────────────────────────────────────────── */}
       <Card
         title={`${name} ${year} in brief`}
@@ -1354,23 +1385,6 @@ export function Insights({
           </div>
         </div>
       </Card>
-
-      {plannedHere && (plannedHere.total > 0 || undatedHere.length > 0) && (
-        <Card title={`Plans in ${name}`} subtitle="From the Planner: not paid yet, against what the budget has left">
-          <PlannedInMonth
-            planned={plannedHere}
-            undated={undatedHere}
-            name={name}
-            noPlan={t.combined.budget === 0}
-            spendingLeft={t.spending.remaining}
-            billsLeft={t.billsSubs.remaining}
-            room={null}
-            asOf={asOf}
-            onOpenPlanner={onOpenPlanner}
-            where="elsewhere"
-          />
-        </Card>
-      )}
 
       <div className="fms-charts">
         {burn && (

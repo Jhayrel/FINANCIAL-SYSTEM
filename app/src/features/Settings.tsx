@@ -263,6 +263,7 @@ export function Settings({
         {tab === "accounts" && (
           <AccountsSection
             accounts={settings.accounts}
+            plans={settings.plans ?? []}
             transactions={transactions}
             onChange={(accounts) => patch({ accounts })}
             onRename={onRenameAccount}
@@ -859,12 +860,15 @@ function DatabaseUse() {
 
 function AccountsSection({
   accounts,
+  plans = [],
   transactions,
   onChange,
   onRename,
   onAddTransactions,
 }: {
   accounts: readonly Account[];
+  /** The Planner's plans: closing an account names the open ones that use it. */
+  plans?: readonly Plan[];
   transactions: readonly Transaction[];
   onChange: (accounts: Account[]) => void;
   onRename: (from: string, to: string) => void;
@@ -946,6 +950,7 @@ function AccountsSection({
                         key={`${a.id}-${accounts.indexOf(a)}`}
                         account={a}
                         accounts={accounts}
+                        plans={plans}
                         transactions={transactions}
                         confirm={confirm}
                         onUpdate={(part) => onChange(accounts.map((x) => (x === a ? { ...x, ...part } : x)))}
@@ -1056,6 +1061,7 @@ function AccountsSection({
 function AccountRow({
   account,
   accounts,
+  plans = [],
   transactions,
   confirm,
   onUpdate,
@@ -1065,6 +1071,7 @@ function AccountRow({
 }: {
   account: Account;
   accounts: readonly Account[];
+  plans?: readonly Plan[];
   transactions: readonly Transaction[];
   confirm: (req: ConfirmRequest) => Promise<boolean>;
   onUpdate: (part: Partial<Account>) => void;
@@ -1203,9 +1210,12 @@ function AccountRow({
       return;
     }
 
+    // Open plans that move money into it, or pay or move from it (P11): said, since they would point at an account closed.
+    const same = (w: string | undefined): boolean => (w ?? "").trim().toLowerCase() === account.name.trim().toLowerCase();
+    const using = plans.filter((p) => p.status === "open" && (same(p.into) || same(p.wallet)));
     const ok = await confirm({
       title: `Deactivate ${account.name}?`,
-      body: "It disappears from every wallet picker, so you cannot file new transactions against it. History and net worth are untouched, and you can reactivate it whenever you like.",
+      body: `It disappears from every wallet picker, so you cannot file new transactions against it. History and net worth are untouched, and you can reactivate it whenever you like.${using.length > 0 ? ` ${using.map((p) => `"${p.title}"`).join(" and ")} on the Planner ${using.length === 1 ? "uses" : "use"} it: edit ${using.length === 1 ? "it" : "them"} to pick another account, or the move cannot be recorded.` : ""}`,
       confirmLabel: "Deactivate",
       tone: "danger",
     });
@@ -1691,6 +1701,17 @@ function GoalRow({
             .join(" ")}
         </p>
       )}
+      {/* Money planned to go into it (P11): what it will hold once those are moved. */}
+      {(() => {
+        const into = allPlans.filter((x) => x.status === "open" && (x.into ?? "").trim().toLowerCase() === goal.name.trim().toLowerCase());
+        if (into.length === 0) return null;
+        const coming = into.reduce((sum, x) => sum + x.amount, 0);
+        return (
+          <p className="t-caption" style={{ margin: "var(--space-2) 0 0", color: "var(--ink-2)" }}>
+            {`Planned to go in: ${into.map((x) => `${formatMoney(x.amount)} ${whenOf(x).replace(/^S/, "s").replace(/^No date yet$/, "with no date yet")} ("${x.title}")`).join(", ")}. With ${into.length === 1 ? "it" : "them"}, ${goal.name} holds ${formatMoney(p.saved + coming)}${p.target > 0 ? ` of ${formatMoney(p.target)}${p.saved + coming >= p.target ? ", its target reached" : ""}` : ""}.`}
+          </p>
+        );
+      })()}
 
       {p.requiredPerMonth !== undefined && (
         <p className="t-caption" style={{ margin: "var(--space-2) 0 0", color: p.onTrack ? "var(--ok)" : "var(--warn)" }}>

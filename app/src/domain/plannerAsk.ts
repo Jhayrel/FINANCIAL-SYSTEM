@@ -16,7 +16,7 @@ import { asksForGoal } from "./planGoal";
 
 /** The first letter up, unless the word is written in its own case already: "iPhone" stays "iPhone". */
 export const capitalised = (s: string): string => s.replace(/^[a-z](?![A-Z])/, (c) => c.toUpperCase());
-import { byWhen, dueFor, kindFromHistory, NO_DATE, planKinds, whenOf, type DueKind, type Plan, type PlanInput, type PlannedMonth, type PlanView } from "./planner";
+import { byWhen, dueFor, isSave, kindFromHistory, NO_DATE, planKinds, savesOutOfSpending, whenOf, type DueKind, type Plan, type PlanInput, type PlannedMonth, type PlanView } from "./planner";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export type PlannerAsk =
@@ -286,8 +286,39 @@ function editIn(
   reference: ReferenceLists,
   goals: readonly { readonly id: string; readonly name: string }[],
 ): { readonly input: PlanInput; readonly changes: { label: string; before: string; after: string }[] } | null {
-  const input: { -readonly [K in keyof PlanInput]: PlanInput[K] } = { title: plan.title, amount: plan.amount, due: plan.due, dueKind: plan.dueKind ?? "day", item: plan.item, wallet: plan.wallet, goalId: plan.goalId, need: plan.need, setAside: plan.setAside, notes: plan.notes };
+  const input: { -readonly [K in keyof PlanInput]: PlanInput[K] } = { title: plan.title, amount: plan.amount, due: plan.due, dueKind: plan.dueKind ?? "day", item: plan.item, wallet: plan.wallet, goalId: plan.goalId, into: plan.into, need: plan.need, setAside: plan.setAside, notes: plan.notes };
   const changes: { label: string; before: string; after: string }[] = [];
+
+  /*
+   * To spend, or to save or move money (P11; owner, 2 November 2026: "what
+   * if I edited a plan to buy to plan to save or deposit"). "Make it a
+   * deposit to maya bank", "change it to saving into Phone fund", "it's
+   * spending, not a saving". Said alone: the rest of the plan is kept.
+   */
+  const places = [...reference.savings, ...goals.map((g) => g.name), ...reference.wallets];
+  // "Make it a deposit", "make the tuition plan a deposit to maya bank", "change it to saving into Phone fund".
+  const toSave = /\b(?:make|change|turn|switch|set)\b[^.?!]{0,40}?\b(?:a|an|into|to|as)\s+(?:a\s+)?(?:saving|savings|deposit|plan\s+to\s+save|transfer)\b|\b(?:it'?s|is)\s+(?:a\s+)?(?:saving|deposit)\s+(?:to|into|in)\b|\b(?:deposit|save|transfer)\s+it\s+(?:to|into|in)\b/i.test(t);
+  const toSpend = isSave(plan) && /\b(?:make\s+it|change\s+it\s+(?:in)?to|it'?s|as)\s+(?:a\s+)?(?:spending|purchase|buy|payment|plan\s+to\s+(?:spend|buy|pay))\b|\bnot\s+(?:a\s+)?(?:saving|deposit)\b/i.test(t);
+  if (toSave) {
+    const lower = ` ${t.toLowerCase().replace(/[^a-z0-9()]+/g, " ")} `;
+    const into = places
+      .map((n) => ({ n, keys: [n.toLowerCase().replace(/[^a-z0-9()]+/g, " ").trim(), n.replace(/\s*\(.*\)\s*$/, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()] }))
+      .flatMap(({ n, keys }) => keys.filter((k) => k.length >= 3 && lower.includes(` ${k} `)).map((k) => ({ n, k })))
+      .sort((a, b) => b.k.length - a.k.length)[0]?.n;
+    if (into && into !== plan.into) {
+      changes.push({ label: "Plan to", before: isSave(plan) ? `Save into ${plan.into}` : "Spend", after: `Save into ${into}` });
+      input.into = into;
+      input.item = "";
+      input.goalId = undefined;
+      input.setAside = savesOutOfSpending({ into, wallet: plan.wallet }, reference.wallets);
+      return { input, changes };
+    }
+  }
+  if (toSpend) {
+    changes.push({ label: "Plan to", before: `Save into ${plan.into}`, after: "Spend" });
+    input.into = undefined;
+    return { input, changes };
+  }
   const counted = (b: boolean): string => (b ? "Counted in its month" : "Not counted");
   const ownWords = new Set(plan.title.toLowerCase().split(/[^a-z0-9]+/));
 
@@ -577,6 +608,14 @@ export function readPlannerAsk(
       return { kind: "payIf", plan, wallet };
     }
   }
+  // A plan to save is done by moving the money: "I deposited the money for the maya bank plan", "moved it" (P11).
+  if (/\b(?:deposited|moved|transferred|saved|put|did|done)\b/i.test(t) && !/\b(?:move|moved)\s+(?:it|the\s+\w+(?:\s+\w+)?\s+plan)\s+to\b/i.test(t)) {
+    const plan = named(open.filter((p) => isSave(p)), ["open"]);
+    if (plan) {
+      const wallet = [...reference.wallets, ...reference.savings].find((w) => w !== plan.into && new RegExp(`\\bfrom\\s+(?:my\\s+)?${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) ?? "";
+      return { kind: "pay", plan, amount: sumIn(t), wallet };
+    }
+  }
   if (/\b(?:paid|pay|settle|mark\b[^.?!]{0,30}\bpaid)\b/i.test(t)) {
     const plan = named(open, ["open"]);
     if (!plan) return closedNamed(t, plans);
@@ -627,7 +666,11 @@ export function plannedMonthWords(
   },
 ): string {
   const { name, asOf } = input;
-  if (planned.views.length === 0) return `Nothing is planned in ${name} that is still to pay. Say "plan tuition 9000 on nov 15" to add one, or open the Planner.`;
+  // Plans to save or move money: said apart, never in the budget's figure (P11).
+  const saves = planned.savingViews.map((v) => `- ${v.plan.title}: ${formatMoney(v.left)} into ${v.plan.into}, ${whenOf(v.plan).replace(/^S/, "s")}${v.plan.due < asOf ? " (overdue)" : ""}`);
+  const savesWords = saves.length > 0 ? [`**${formatMoney(planned.saving)} to save or move** in ${name}, apart from spending:`, ...saves] : [];
+  if (planned.views.length === 0)
+    return savesWords.length > 0 ? [`Nothing to spend is planned in ${name}.`, ...savesWords].join("\n") : `Nothing is planned in ${name} that is still to pay. Say "plan tuition 9000 on nov 15" to add one, or open the Planner.`;
   const lines = planned.views.slice(0, 12).map((v) => {
     const notes = [
       v.plan.due < asOf ? "overdue" : "",
@@ -657,7 +700,7 @@ export function plannedMonthWords(
       );
     }
   }
-  return out.join("\n");
+  return [...out, ...savesWords].join("\n");
 }
 
 /** "What's planned?": the open plans, overdue first, each with its state. */
@@ -671,7 +714,8 @@ export function plansWords(views: readonly PlanView[], setAside: Centavos): stri
       v.counts ? "set aside" : "",
       v.goal && !v.goal.missing ? `${v.goal.name} holds ${formatMoney(v.goal.holds)}` : "",
     ].filter(Boolean).join(", ");
-    return `- ${v.plan.title}: ${formatMoney(v.left)} ${byWhen(v.plan)}.${more ? ` ${more.charAt(0).toUpperCase()}${more.slice(1)}.` : ""}`;
+    // A plan to save says where the money goes (P11).
+    return `- ${v.plan.title}: ${formatMoney(v.left)}${v.plan.into ? ` to save into ${v.plan.into},` : ""} ${byWhen(v.plan)}.${more ? ` ${more.charAt(0).toUpperCase()}${more.slice(1)}.` : ""}`;
   });
   return [
     `**${open.length} ${open.length === 1 ? "plan" : "plans"} open, ${formatMoney(total)} still to pay.**${setAside > 0 ? ` ${formatMoney(setAside)} of it is set aside from this month's safe to spend.` : ""}`,

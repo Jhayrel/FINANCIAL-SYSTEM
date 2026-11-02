@@ -332,3 +332,38 @@ edit it anymore ... creating, editing, restoring it from delete".
   "Yesterday" and "last week" are read as days, and "plan tuition 9000 by oct
   20" or "move the tuition plan to oct 1" says the day has passed.
 
+
+## P11. Plans to save or move money (owner, 2 November 2026)
+
+"What if I plan to save like to add an amount or deposit to bank or wallet or
+goal like on next week I want to deposit 3000 to maya bank", and "what if I
+edited a plan to buy to plan to save or deposit". A plan can be to spend or to
+save or move money. A plan to save has `into`, the account or goal the money
+goes into, by name, as entries name wallets; `wallet` is where it comes from.
+
+| Case | What happens |
+|---|---|
+| Into savings or a goal, from a spending wallet or none said | Held back from safe to spend in its month, so the money is there to move (`savesOutOfSpending`) |
+| Into a spending wallet, or out of savings | Nothing is held back: the spending money does not go down |
+| Any budget | Never counted: saving is not spending. Budget, Insights and the chat list it apart, "To save or move in November" (`plannedForBudget().saving`) |
+| What a month ahead needs, the Insights calendar's marks | Left out: both are spending |
+| Done | By a transfer into its account, from the Planner's Record the move, the chat ("I deposited the money for the deposit plan"), or a transfer on the Add form offered as its move. What was moved counts; a transfer fee is not saving |
+| Likely payments | Transfers into its account, by amount or its own words (not the account's name, which every row into it carries); income straight into it only at about the amount |
+| Changed to spending, or to saving | Allowed while nothing is linked; a payment of the other kind linked stops it, with which and how to unlink. Its kind of spending and its goal are taken off when it becomes a plan to save |
+| Closed account | Cannot be picked; closing an account or a goal names the open plans that use it |
+| Renamed account | Renamed where a plan saves into it |
+| A goal | Shows the deposits planned into it, and what it holds with them |
+
+From the chat: "next week I want to deposit 3000 to maya bank", "I will save
+2000 into my phone fund in december", "transfer 1000 from gcash to maya
+tomorrow", "magiipon ako 1000 sa maya bank bukas". With no account named it
+goes into the one savings account there is, said on the card, or asks where.
+A person is not an account ("send 500 to mama tomorrow" is not saving), and
+money already moved ("I deposited 3000") is an entry. "Save 5000 by December"
+and "how long to save 10k" stay targets, worked out by the day or the month.
+The model writes such a plan as a Plan line ending ", into <account>".
+
+The Planner's place on Insights and Budget: Insights has "Planner: <month>"
+under the calendar with Open the Planner; the Budget's month card has "From
+the Planner" with its button, both shown even with nothing planned (owner:
+"I cannot see the planner in insight and budgeting").

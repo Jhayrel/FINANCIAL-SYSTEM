@@ -914,7 +914,8 @@ export function AddTransaction({
    * what is left of it; otherwise it waits for a tap.
    */
   const planMatch = useMemo(() => {
-    if (!onLinkPlan || editing || draft.id || draft.flow !== "Spending" || !draft.amount || draft.amount <= 0 || !draft.date) return null;
+    // Spending pays a plan to spend; a transfer into one of their accounts does a plan to save into it (P11).
+    if (!onLinkPlan || editing || draft.id || (draft.flow !== "Spending" && draft.flow !== "Transfer" && draft.flow !== "Revenue") || !draft.amount || draft.amount <= 0 || !draft.date) return null;
     try {
       const [row] = draftToTransactions(draft, 0, "plan-check");
       return row ? planPaidBy(row, reference.plans ?? [], transactions) : null;
@@ -2658,10 +2659,12 @@ export function AddTransaction({
             {planMatch && (
               <div className="fms-planform-switch fms-addplanlink">
                 <span className="fms-planform-switchtext">
-                  <span className="t-body">Pays the &ldquo;{planMatch.plan.title}&rdquo; plan</span>
+                  <span className="t-body">{planMatch.plan.into ? "Does" : "Pays"} the &ldquo;{planMatch.plan.title}&rdquo; plan</span>
                   <span className="t-caption" style={{ color: "var(--ink-3)" }}>
                     {linkOn
-                      ? `${formatMoney(planMatch.left)} is left of it, ${byWhen(planMatch.plan)}. Saved, ${(draft.amount ?? 0) + draft.fee >= planMatch.left ? "the plan is marked paid" : `${formatMoney(planMatch.left - (draft.amount ?? 0) - draft.fee)} of it is still to pay`}${planMatch.plan.setAside && !planMatch.plan.goalId ? ", and safe to spend stops setting this money aside" : ""}.`
+                      ? planMatch.plan.into
+                        ? `${formatMoney(planMatch.left)} is left to move into ${planMatch.plan.into}, ${byWhen(planMatch.plan)}. Saved, ${(draft.amount ?? 0) >= planMatch.left ? "the plan is marked done" : `${formatMoney(planMatch.left - (draft.amount ?? 0))} of it is still to move`}${planMatch.plan.setAside ? ", and safe to spend stops holding this money back" : ""}.`
+                        : `${formatMoney(planMatch.left)} is left of it, ${byWhen(planMatch.plan)}. Saved, ${(draft.amount ?? 0) + draft.fee >= planMatch.left ? "the plan is marked paid" : `${formatMoney(planMatch.left - (draft.amount ?? 0) - draft.fee)} of it is still to pay`}${planMatch.plan.setAside && !planMatch.plan.goalId ? ", and safe to spend stops setting this money aside" : ""}.`
                       : `Off: saved as an entry only. The plan stays open${planMatch.plan.setAside && !planMatch.plan.goalId ? " and its money stays set aside" : ""}.`}
                   </span>
                 </span>

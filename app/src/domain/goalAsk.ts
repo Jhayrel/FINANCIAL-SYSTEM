@@ -36,6 +36,14 @@ export function readGoalAsk(text: string, asOf: IsoDate): GoalAsk | null {
   if (!SAVE.test(t)) return null;
   // Asking about what was saved already, or a budget, is another question.
   if (/\b(?:how much (?:did|have) i (?:save|saved)|budget|limit|interest)\b/i.test(t)) return null;
+  /*
+   * Money to put away on a day soon, not a total to build up: "I want to
+   * save 3000 next week", "deposit 3000 to maya bank tomorrow". A plan to
+   * save on the Planner (P11); it was answered "about 6 months to save
+   * PHP 3,000.00" (2 November 2026). "By", "until", "within" or "how long"
+   * keep it a target.
+   */
+  if (/\b(?:next\s+(?:week|weekend)|tomorrow|bukas|tonight|this\s+(?:week|weekend|friday|saturday|sunday)|on\s+(?:mon|tues|wednes|thurs|fri|satur|sun)day|deposit)\b/i.test(t) && !/\b(?:by|until|before|within|how\s+long|how\s+much|how\s+many)\b/i.test(t)) return null;
   const figure = /(?:₱|php\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(k)?\b(?!\s*(?:days?|weeks?|months?|years?|%))/i.exec(withoutYears(t));
   if (!figure?.[1]) return null;
   const base = parseAmount(figure[1]);

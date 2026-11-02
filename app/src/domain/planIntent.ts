@@ -32,7 +32,7 @@
 import { addDays, MONTH_NAMES } from "./dates";
 import { formatMoney, withoutYears, type Centavos } from "./money";
 import { aheadMonthIn, plannedSpendIn } from "./plannedSpend";
-import { dueFor, isRecurringKind, kindFromHistory, NO_DATE, planKinds, type DueKind, type PlanInput } from "./planner";
+import { dueFor, isRecurringKind, kindFromHistory, NO_DATE, planKinds, savesOutOfSpending, type DueKind, type PlanInput } from "./planner";
 import { capitalised, NO_DAY, sumIn, titleWords, whenFor } from "./plannerAsk";
 import { protectModels } from "./modelNumbers";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
@@ -43,6 +43,8 @@ export interface PlanContext {
   readonly asOf: IsoDate;
   /** Debt and On behalf line names: paying one is the debt readers'. */
   readonly debtNames?: readonly string[] | undefined;
+  /** Settings' accounts: the goals a plan to save can go into, and which account is savings (P11). */
+  readonly accounts?: readonly { readonly name: string; readonly kind: string; readonly archived?: boolean | undefined }[] | undefined;
 }
 
 export type PlanIntent =
@@ -67,6 +69,12 @@ export type PlanIntent =
    * it got the month's summary (27 October 2026 sweep).
    */
   | { readonly kind: "income"; readonly amount: Centavos | null; readonly due: IsoDate | null; readonly what: string }
+  /**
+   * Money to save or move, with nowhere said for it: "I want to save 3000
+   * next week" with no savings account to put it in, or several (P11). The
+   * chat asks where.
+   */
+  | { readonly kind: "saveWhere"; readonly amount: Centavos | null; readonly verb: string }
   /** For a later day: a Planner card, or a question for the amount when none was said. */
   | {
       readonly kind: "later";
@@ -299,9 +307,76 @@ export function planInputFor(title: string, amount: Centavos | null, due: IsoDat
 
 export { nextMonthEnd } from "./planner";
 
+/*
+ * Money to save or move later (P11; owner, 2 November 2026: "what if I plan
+ * to save like to add an amount or deposit to bank or wallet or goal like on
+ * next week I want to deposit 3000 to maya bank"). A verb of putting money
+ * somewhere, one of the owner's own accounts or goals as where it goes, and a
+ * time ahead or a plan said. Money already moved ("deposited", "saved",
+ * "transferred") is an entry, and a person is not an account: "send 500 to
+ * mama tomorrow" is not saving.
+ */
+// "magiipon", "iipunin": the Filipino future says the first syllable twice.
+const SAVE_VERB = /\b(deposit|save|saving|put|transfer|move|send|top[\s-]?up|add|ipon|mag-?i?ipon|iipunin|itabi|itatabi|ilagay|ilalagay|ihulog|ihuhulog|hulog|set\s+aside|put\s+aside)\b/i;
+const SAVE_DONE = /\b(?:deposited|saved|transferred|moved|sent|topped\s+up|added|naghulog|nag-?ipon|nilagay|inilagay|tinabi|itinabi)\b/i;
+const SAVE_AHEAD = /\b(?:will|i'?ll|shall|going\s+to|gonna|plan(?:ning)?|want\s+to|wanna|need\s+to|have\s+to|balak|plano|next|tomorrow|bukas|later|mamaya|this\s+(?:week|weekend|month|friday|saturday|sunday)|on\s+(?:mon|tues|wednes|thurs|fri|satur|sun)day|by\s+\w+|sa\s+susunod)\b/i;
+
+/** The account or goal a message names, longest name first: "maya bank" is Maya Bank (Personal savings), not the Maya wallet. */
+function accountNamed(text: string, names: readonly string[], not: readonly string[] = []): string | null {
+  const lower = ` ${text.toLowerCase().replace(/[^a-z0-9()]+/g, " ")} `;
+  const keys = names.flatMap((n) => {
+    const full = n.toLowerCase().replace(/[^a-z0-9()]+/g, " ").trim();
+    const short = n.replace(/\s*\(.*\)\s*$/, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    return [...new Set([full, short])].filter((k) => k.length >= 3).map((k) => ({ n, k }));
+  });
+  const hit = keys.filter(({ n, k }) => lower.includes(` ${k} `) && !not.includes(n)).sort((a, b) => b.k.length - a.k.length)[0];
+  return hit?.n ?? null;
+}
+
+export function readSaveIntent(text: string, ctx: PlanContext): PlanIntent | null {
+  const t = text.trim();
+  const verb = SAVE_VERB.exec(t)?.[1]?.toLowerCase();
+  if (!verb || ASKED.test(t)) return null;
+  if (SAVE_DONE.test(t) && !/\b(?:will|i'?ll|going\s+to|gonna|plan|want\s+to)\b/i.test(t)) return null;
+  // "bukas" is tomorrow, as "tomorrow" is.
+  const when = NO_DAY.test(t) ? null : (whenFor(t, ctx.asOf) ?? (/\bbukas\b/i.test(t) ? { due: addDays(ctx.asOf, 1), kind: "day" as const } : null));
+  const ahead = aheadMonthIn(t, ctx.asOf);
+  if (!SAVE_AHEAD.test(t) && !(when && when.due > ctx.asOf) && !ahead) return null;
+  if (when && when.due < ctx.asOf) return null;
+  const accounts = ctx.accounts ?? [];
+  const goals = accounts.filter((a) => a.kind === "goal" && !a.archived).map((a) => a.name);
+  const own = [...ctx.reference.savings, ...goals, ...ctx.reference.wallets];
+  const fromSaid = /\bfrom\s+(?:my\s+)?([a-z][a-z0-9 ()-]{1,40}?)(?=\s+(?:to|into|in|sa|on|by|next|tomorrow|this)\b|[,.!?]|$)/i.exec(t)?.[1] ?? "";
+  const from = fromSaid ? accountNamed(fromSaid, own) : null;
+  let into = accountNamed(t.replace(/\bfrom\s+(?:my\s+)?[a-z][a-z0-9 ()-]{1,40}?(?=\s+(?:to|into|in|sa|on|by|next|tomorrow|this)\b|[,.!?]|$)/i, " "), own, from ? [from] : []);
+  const amount = sumIn(t);
+  // "Save 3000 next week", nowhere said: the one savings account there is, else asked.
+  let guessed = false;
+  if (!into) {
+    if (!/\b(?:deposit|save|saving|ipon|mag-?i?ipon|iipunin|itabi|itatabi|set\s+aside|put\s+aside)\b/i.test(t)) return null;
+    // "Save on food" is spending less, not putting money away.
+    if (/\bsav(?:e|ing)\s+(?:on|for)\b/i.test(t) && !/\b(?:account|bank|goal|savings)\b/i.test(t)) return null;
+    const savings = accounts.filter((a) => a.kind === "savings" && !a.archived).map((a) => a.name);
+    if (savings.length === 1) {
+      into = savings[0]!;
+      guessed = true;
+    } else return { kind: "saveWhere", amount, verb };
+  }
+  const due = when?.due ?? (ahead ? dueFor("month", `${ahead.year}-${String(ahead.month).padStart(2, "0")}-01`) : NO_DATE);
+  const dueKind: DueKind = when ? when.kind : ahead ? "month" : "none";
+  const short = into.replace(/\s*\(.*\)\s*$/, "");
+  const title = /deposit|hulog/.test(verb) ? `Deposit to ${short}` : /transfer|move|send|top|add|ilagay|ilalagay/.test(verb) ? `Move to ${short}` : `Save into ${short}`;
+  const wallet = from ?? "";
+  const plan: PlanInput = { title, amount, due, dueKind, item: "", wallet, into, need: true, setAside: savesOutOfSpending({ into, wallet }, ctx.reference.wallets), notes: guessed ? `Into ${into}, the savings account; change it if it goes elsewhere.` : "" };
+  return { kind: "later", plans: [plan], title, amountSaid: amount !== null, dueSaid: dueKind !== "none", hint: "", asked: false };
+}
+
 export function readPlanIntent(text: string, ctx: PlanContext): PlanIntent | null {
   const t = text.trim();
   if (!t || t.split(/\s+/).length > 45) return null;
+  // Money to save or move into one of their own accounts or goals (P11), before anything reads it as spending.
+  const saved = readSaveIntent(t, ctx);
+  if (saved) return saved;
   const lower = t.toLowerCase();
   const owed = (ctx.debtNames ?? []).some((d) => d.trim() && lower.includes(d.trim().toLowerCase()));
   if (INCOME_AHEAD.test(t) && !ASKED.test(t) && !MOVED.test(t) && !owed) {
@@ -444,7 +519,22 @@ export function planLineIn(text: string): string {
 }
 
 /** A "Plan:" line read into the Planner's form: what, how much, by when. Null when it says too little. */
-export function readPlanLine(line: string, ctx: PlanContext): PlanInput | null {
+export function readPlanLine(raw: string, ctx: PlanContext): PlanInput | null {
+  /*
+   * ", into Maya Bank (Personal savings)" at the end: a plan to save into one
+   * of their own accounts or goals (P11). Kept only when the account is
+   * theirs; the rest of the line is read as before.
+   */
+  const intoSaid = /,\s*into\s+([^,]+?)\s*\.?\s*$/i.exec(raw)?.[1]?.trim() ?? "";
+  const own = [...ctx.reference.savings, ...(ctx.accounts ?? []).filter((a) => a.kind === "goal" && !a.archived).map((a) => a.name), ...ctx.reference.wallets];
+  const into = intoSaid ? (own.find((a) => a.toLowerCase() === intoSaid.toLowerCase()) ?? accountNamed(intoSaid, own)) : null;
+  const line = intoSaid ? raw.replace(/,\s*into\s+[^,]+?\s*\.?\s*$/i, "") : raw;
+  const read = readSpendLine(line, ctx);
+  if (!read || !into) return read;
+  return { ...read, into, item: "", goalId: undefined, need: true, setAside: savesOutOfSpending({ into, wallet: read.wallet }, ctx.reference.wallets) };
+}
+
+function readSpendLine(line: string, ctx: PlanContext): PlanInput | null {
   // "by 2026-11-15", "in November 2026", "in 2027", "no date yet".
   const iso = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(line)?.[1];
   const when = iso ? { due: iso, kind: "day" as const } : NO_DAY.test(line) ? null : whenFor(line, ctx.asOf);

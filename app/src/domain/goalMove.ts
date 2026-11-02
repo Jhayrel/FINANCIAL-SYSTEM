@@ -128,7 +128,10 @@ export function goalParentNote(goal: Account, toParent: Account | undefined, tra
 /** What closing does to the plans saving in a goal, for the confirmation. */
 export function closePlansNote(goal: Account, plans: readonly Plan[]): string {
   const saving = plans.filter((p) => p.status === "open" && p.goalId === goal.id);
-  if (saving.length === 0) return "";
+  // Plans to put money into it (P11): closed, it can take none, so they are named too.
+  const into = plans.filter((p) => p.status === "open" && (p.into ?? "").trim().toLowerCase() === goal.name.trim().toLowerCase());
   const titles = saving.map((p) => `"${p.title}"`).join(" and ");
-  return ` ${titles} ${saving.length === 1 ? "saves" : "save"} in it: after closing, ${saving.length === 1 ? "it is" : "they are"} counted in safe to spend again. To keep ${saving.length === 1 ? "it" : "them"} on a goal, use Move its money first and take ${saving.length === 1 ? "the plan" : "the plans"} with it.`;
+  const intoWords = into.length > 0 ? ` ${into.map((p) => `"${p.title}"`).join(" and ")} ${into.length === 1 ? "puts" : "put"} money into it: after closing, edit ${into.length === 1 ? "it" : "them"} on the Planner to pick another account.` : "";
+  if (saving.length === 0) return intoWords;
+  return ` ${titles} ${saving.length === 1 ? "saves" : "save"} in it: after closing, ${saving.length === 1 ? "it is" : "they are"} counted in safe to spend again. To keep ${saving.length === 1 ? "it" : "them"} on a goal, use Move its money first and take ${saving.length === 1 ? "the plan" : "the plans"} with it.${intoWords}`;
 }

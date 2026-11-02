@@ -64,7 +64,7 @@ import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { checkDraft, debtWalletDirection, draftToTransactions, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { Planner } from "./features/Planner";
-import { linkPayments, NO_DATE, renamePlans, type Plan } from "./domain/planner";
+import { isSave, linkPayments, NO_DATE, renamePlans, type Plan } from "./domain/planner";
 import { goalInStep, type GoalForPlan } from "./domain/planGoal";
 import { buildPlanSheet, planSheetCsv, planSheetFilename } from "./domain/planSheet";
 import { NO_OWNER, ownerChanges, ownerName as nameOfOwner } from "./domain/owner";
@@ -2060,11 +2060,15 @@ export default function App() {
     const rows = draftToTransactions(withFeesPaid(draft, transactions), sink.nextRecordNumber, `t-${Date.now()}-plan`, c.repaymentSplit);
     handleSave(rows, by);
     const linked = linkPayments(plan, rows.map((r) => r.id), [...transactions, ...rows], asOf, settles);
-    const paid = rows.reduce((sum, r) => sum + r.total, 0);
+    // A plan to save is done by what was moved; a transfer fee is not saving (P11).
+    const saving = isSave(plan);
+    const paid = rows.reduce((sum, r) => sum + (saving ? r.amount : r.total), 0);
     changePlan(
       linked,
       "plan.paid",
-      `Paid "${plan.title}": ${formatMoney(paid)} on ${formatMedium(draft.date)}, #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}${linked.status === "done" ? "" : ", more to pay"}.`,
+      saving
+        ? `Moved ${formatMoney(paid)} into ${plan.into} for "${plan.title}" on ${formatMedium(draft.date)}, #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}${linked.status === "done" ? "" : ", more to move"}.`
+        : `Paid "${plan.title}": ${formatMoney(paid)} on ${formatMedium(draft.date)}, #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}${linked.status === "done" ? "" : ", more to pay"}.`,
       by,
     );
     return null;
