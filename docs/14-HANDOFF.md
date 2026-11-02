@@ -2409,6 +2409,17 @@ planner answers changed, each to the intended one, no page errors.
    provider.
    Done on 2 October, night: the owner set up 4 and 5 and redeployed.
    Settings, AI, under Model, says which providers are set up.
+7. **#3818's PHP 18.00 fee, still open (found 2 November, back-reading the
+   chat).** On 20 October the owner was asked to Edit #3818 (18 September,
+   Transfer, Maya to Cash, PHP 1,000.00) and set its Fee to PHP 0.00: an
+   earlier fix had added the fee to its total, which left Maya PHP 18.00
+   below the owner's own balance. The 1 November backup still has the fee,
+   and nothing else in it makes up the PHP 18.00. The app shows Maya at PHP
+   100.55 on that backup; PHP 118.55 without the fee. Only the Maya app can
+   say which is right, so nothing is changed from here (integrity is
+   reported, never corrected): if Maya's own balance is PHP 18.00 above the
+   app's, Edit #3818 and set Fee to PHP 0.00 ("When saved: Maya goes up PHP
+   18.00"); if they match, leave it.
 
 ---
 
