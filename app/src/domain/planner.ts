@@ -577,7 +577,13 @@ export function groupOpen(views: readonly PlanView[], asOf: IsoDate): PlanGroup[
   const yearOut = addDays(asOf, 365).slice(0, 7);
   for (const v of open) {
     const month = v.plan.due.slice(0, 7);
-    const key = v.plan.due === NO_DATE ? "4-nodate" : v.state === "overdue" ? "0-overdue" : month === thisMonth ? `1-${month}` : month <= yearOut ? `2-${month}` : "3-later";
+    /*
+     * "Sometime in 2027" is kept on December 31 of that year, and was listed
+     * under "December 2027" once the year began (2 November 2026, testing the
+     * app on 1 January 2027). It is its own group, after that year's months.
+     */
+    const wholeYear = dueKindOf(v.plan) === "year";
+    const key = v.plan.due === NO_DATE ? "4-nodate" : v.state === "overdue" ? "0-overdue" : wholeYear ? (month <= yearOut ? `2-${month.slice(0, 4)}-year` : "3-later") : month === thisMonth ? `1-${month}` : month <= yearOut ? `2-${month}` : "3-later";
     const title =
       key === "4-nodate"
         ? "No date yet"
@@ -587,7 +593,9 @@ export function groupOpen(views: readonly PlanView[], asOf: IsoDate): PlanGroup[
             ? "This month"
             : key === "3-later"
               ? "Later"
-              : `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+              : key.endsWith("-year")
+                ? `Sometime in ${month.slice(0, 4)}`
+                : `${MONTH_NAMES[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
     const g = groups.get(key) ?? { title, views: [] };
     g.views.push(v);
     groups.set(key, g);

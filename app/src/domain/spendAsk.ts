@@ -92,7 +92,13 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
   let text = said.trim();
   for (const [slip, word] of SLIPS) text = text.replace(slip, word);
   // "Total summary of school spending": a sum too, once an item on the list is named (13 October 2026).
-  const summed = /\b(?:total|summary|sum|overall)\b[^?.!]*\b(?:spending|spent|expenses?|gastos)\b/i.test(text);
+  /*
+   * "Summary of 2026", "summary of october", "recap last month": a period and
+   * nothing else is that period's spending. They fell to the month's summary
+   * with the AI off (2 November 2026).
+   */
+  const periodSummary = /^\s*(?:(?:give|show)\s+(?:me\s+)?)?(?:a\s+|the\s+|my\s+)?(?:summary|summari[sz]e|overview|recap)\s+(?:of\s+|for\s+)?(?:my\s+|the\s+)?(?:(?:last|this|past)\s+(?:month|year)|20\d{2}|(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+20\d{2})?)\s*[?.!]?\s*$/i.test(text);
+  const summed = periodSummary || /\b(?:total|summary|sum|overall)\b[^?.!]*\b(?:spending|spent|expenses?|gastos)\b/i.test(text);
   if (NOT_THIS.test(text) || (!ASKS.test(text) && !summed)) return null;
 
   // The thing, after "on", "for" or "sa": a name on the owner's list, or a word that means one.
@@ -105,7 +111,7 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
   const hint = itemHintIn(text);
   const byHint = hint ? items.find((name) => name.trim().toLowerCase() === hint) : undefined;
   const item = byName ?? byHint ?? null;
-  if (!ASKS.test(text) && !item) return null;
+  if (!ASKS.test(text) && !item && !periodSummary) return null;
   const pointed = !byName && byHint && after?.[1] ? after[1].trim().toLowerCase() : "";
   let word = pointed && /^[a-z][a-z'-]{2,20}$/.test(pointed) && pointed !== (byHint ?? "").toLowerCase() ? pointed : undefined;
 
@@ -228,7 +234,9 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
         : ask.from === to
           ? `Nothing${what} ${when}: no spending entry${ask.item ? ` for ${ask.item}` : ""} that day.`
           : `Nothing${what} ${when}: no spending entry${ask.item ? ` for ${ask.item}` : ""} between ${ask.from > "1000" ? formatMedium(ask.from) : "the start"} and ${formatMedium(to)}.`;
-    if (!monthAsked) return none;
+    // Before the ledger began, said so: "December 2025" asked when the entries start in January 2026.
+    const firstDay = live.reduce<IsoDate | null>((d, t) => (d === null || t.date < d ? t.date : d), null);
+    if (!monthAsked) return firstDay && ask.to < firstDay ? `${none} Your entries start on ${formatMedium(firstDay)}.` : none;
     const y = Number(ask.from.slice(0, 4));
     const m = Number(ask.from.slice(5, 7));
     const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;

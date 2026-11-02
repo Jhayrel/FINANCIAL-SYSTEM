@@ -210,6 +210,25 @@ export function spanIn(text: string, asOf: IsoDate): Span | null {
     let to = bounds(b, yearB, asOf).to;
     // Neither end names a year: "from august to may" is May to August, as it always was.
     const anyYear = a.year !== null || b.year !== null;
+    /*
+     * Across New Year, with no year said: "from december to january" asked in
+     * January is December just gone to this January. It was read as January
+     * to December of the new year (2 November 2026, testing 15 January 2027).
+     * A range wholly after this month is last year's: what was spent then.
+     */
+    const nowMonth = Number(asOf.slice(5, 7));
+    const dated = (p: typeof a): boolean => p.year === null && p.kind !== "today" && p.kind !== "year" && p.month !== null;
+    if (!anyYear && dated(a) && dated(b) && a.month !== null && b.month !== null) {
+      if (a.month > b.month && a.month > nowMonth && b.month <= nowMonth) {
+        yearA = thisYear - 1;
+        yearB = thisYear;
+      } else if (Math.min(a.month, b.month) > nowMonth) {
+        yearA = thisYear - 1;
+        yearB = thisYear - 1;
+      }
+      from = bounds(a, yearA, asOf).from;
+      to = bounds(b, yearB, asOf).to;
+    }
     if (to < from && anyYear) {
       if (a.year === null && a.kind !== "today") {
         yearA -= 1;

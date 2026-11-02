@@ -105,7 +105,13 @@ const SHOULD_BUY = /\bshould\s+(?:i|we)\s+(?:buy|get|order|book|purchase)\b/i;
  */
 const AHEAD = String.raw`(?:next\s+(?:week|weekend|month|(?:mon|tues|wednes|thurs|fri|satur|sun)day)|tomorrow|bukas|sa\s+susunod\s+na\s+(?:linggo|buwan))`;
 const SUM = String.raw`(?:₱|php\s*)?\d[\d,]*(?:\.\d{1,2})?\s*k?`;
-const TERSE = new RegExp(String.raw`^\s*(?:${AHEAD}\s+[a-z][a-z' ]{1,40}?\s+${SUM}|[a-z][a-z' ]{1,40}?\s+${AHEAD}\s+${SUM}|[a-z][a-z' ]{1,40}?\s+${SUM}\s+${AHEAD})\s*$`, "i");
+/*
+ * The wallet it will come from, said as an entry says it: "lunch 150 cash
+ * tomorrow" was read as later money and then as nothing, and fell to the
+ * month's summary (2 November 2026, testing 31 December).
+ */
+const FROM = String.raw`(?:\s+(?:(?:from|in|using|via|with)\s+)?(?:cash|gcash|g-cash|maya|paymaya|bank|card|savings))?`;
+const TERSE = new RegExp(String.raw`^\s*(?:${AHEAD}\s+[a-z][a-z' ]{1,40}?\s+${SUM}${FROM}|[a-z][a-z' ]{1,40}?\s+${AHEAD}\s+${SUM}${FROM}|[a-z][a-z' ]{1,40}?\s+${SUM}${FROM}\s+${AHEAD})\s*$`, "i");
 
 /** Money coming in, said ahead. */
 const INCOME_AHEAD =
@@ -156,7 +162,8 @@ function thingIn(text: string): string {
   // "I'll treat my friends" is a treat; "I want a ps5" is a PS5 (27 October 2026 sweep).
   const treat = /\btreat(?:ing)?\s+(?!(?:myself|me)\s+to\b)(.+)$/i.exec(clause);
   const wanted = /\b(?:i|we)\s+(?:want|need|would\s+like|wanna)\s+((?:a|an|some|new)\s+.+)$/i.exec(clause);
-  let thing = after?.[1] ?? (treat ? `treat ${treat[1]}` : (wanted?.[1] ?? (TERSE.test(clause) ? clause : "")));
+  // The short form's wallet is where it comes from, not part of its name ("lunch 150 cash tomorrow" is Lunch).
+  let thing = after?.[1] ?? (treat ? `treat ${treat[1]}` : (wanted?.[1] ?? (TERSE.test(clause) ? clause.replace(/(\d[\d,]*(?:\.\d{1,2})?\s*k?)\s+(?:(?:from|in|using|via|with)\s+)?(?:cash|gcash|g-cash|maya|paymaya|bank|card|savings)\b/i, "$1") : "")));
   /*
    * What follows "like I want", "so I", "that costs" is how they feel about
    * it or what it costs, not what it is: "a trip on dec no date yet like i
@@ -271,7 +278,12 @@ export function costHint(thing: string, kind: string, ctx: PlanContext): string 
 /** The plan for one thing, filled in as the Planner's form would be. */
 export function planInputFor(title: string, amount: Centavos | null, due: IsoDate, ctx: PlanContext, said = "", dueKind: DueKind = "day"): PlanInput {
   const kind = kindOf(title, ctx);
-  const wallet = [...ctx.reference.wallets, ...ctx.reference.savings].find((w) => new RegExp(`\\b(?:from|using|with|via)\\s+(?:my\\s+)?${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(said)) ?? "";
+  const esc = (w: string): string => w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // "from gcash", or the short form's own "lunch 150 cash tomorrow": a wallet right after the amount.
+  const wallet =
+    [...ctx.reference.wallets, ...ctx.reference.savings].find((w) => new RegExp(`\\b(?:from|using|with|via)\\s+(?:my\\s+)?${esc(w)}\\b`, "i").test(said)) ??
+    (TERSE.test(said) ? ctx.reference.wallets.find((w) => new RegExp(`\\d\\s*k?\\s+(?:(?:from|in|using|via|with)\\s+)?${esc(w)}\\b`, "i").test(said)) : undefined) ??
+    "";
   return {
     title: titleOf(title),
     amount,

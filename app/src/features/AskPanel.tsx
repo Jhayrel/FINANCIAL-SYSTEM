@@ -8168,12 +8168,20 @@ export function AskPanel({
       // A total keeps the bills the usual month plans when the month has none set yet.
       if (budgetAsk.kind === "tracks" && budgetAsk.total !== undefined && budgetAsk.billsSubs === undefined && budgetAsk.billsHint === undefined) {
         const f = forecastFor(budgetAsk.year, budgetAsk.month);
+        /*
+         * The latest month before with bills set, back across New Year: in
+         * January it looked in the new year only, found none, and "set my
+         * budget for this month to 12000" put all of it in spending and none
+         * in bills (2 November 2026, testing 15 January 2027). With none set
+         * in a year, the month's own bills, as the Budget screen lists them.
+         */
         const latest = (() => {
-          for (let m = budgetAsk.month - 1; m >= 1; m -= 1) {
-            const b = budgets[String(budgetAsk.year)]?.billsSubs?.[m - 1] ?? 0;
+          for (let back = 1; back <= 12; back += 1) {
+            const i = budgetAsk.year * 12 + (budgetAsk.month - 1) - back;
+            const b = budgets[String(Math.floor(i / 12))]?.billsSubs?.[i % 12] ?? 0;
             if (b > 0) return b;
           }
-          return 0;
+          return monthBills(transactions, reference, budgetAsk.year, budgetAsk.month, asOf).total;
         })();
         budgetAsk = { ...budgetAsk, billsHint: f?.billsSubs ?? latest };
       }

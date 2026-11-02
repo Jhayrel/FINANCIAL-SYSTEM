@@ -138,6 +138,16 @@ backup whole, including the limits for kinds of spending added on 2026-09-15.
 A January plan looks back to the December before it, and "usual" figures
 reach across the year boundary the same way.
 
+**A month named without a year** in a question about money (spent, received,
+compared, charted, exported or deleted) is the latest one that has begun: on
+15 January 2027 "december" is December 2026, and "from december to january"
+runs from December 2026 to January 2027. A range wholly after this month is
+last year's. A plan or a budget said for a month is the next one, as before.
+The bills part of a budget said as one total looks back across New Year for
+the last month that had one, then to the month's own bills. Tested in
+`yearChange.test.ts`, found by running the app on 31 December, 1 January and
+15 January (2 November 2026).
+
 ---
 
 ## Y4. A month's budget closes.

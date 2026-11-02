@@ -2383,6 +2383,40 @@ on the Planner, said again"):
 All 37 of the 1 November conversations replayed before and after: only the
 planner answers changed, each to the intended one, no page errors.
 
+### 2026-11-02, night: the year changing, buttons again, the // notes replayed
+
+Owner: "have you tried all buttons and features ... Read also the // and fix
+all. Make sure too the system works if the year changes".
+
+- **The year changing.** The 1 November data with invented November,
+  December and January rows (a trip from 30 December to 2 January, December
+  bills, a plan due in January, a goal; scratchpad only), run on 31 December,
+  1 January and 15 January with the browser's clock set to each. Every
+  screen opened with no error; safe to spend, bills, Debt, Budget, Insights,
+  Statements and the Planner read the new year correctly; "last month",
+  "last year", "yesterday" and a range across New Year were right. Fixed:
+  - "how much did I spend in december?" on 1 January was December 2027
+    ("Nothing in December 2027 yet"); a month named with no year is now the
+    latest one begun, and "from december to january" runs across New Year
+    (`windowOf`, `periodIn.spanIn`; docs/08 Y3).
+  - "set my budget for this month to 12000" in January put it all in
+    spending and PHP 0.00 in bills: the bills part looked only at months of
+    the new year. It looks back across New Year, then to the month's bills.
+  - A plan for "sometime in 2027" was listed under "December 2027"; it is
+    its own group, "Sometime in 2027" (`groupOpen`).
+  - The Debt card said "goes on the bill of January 6" beside "Next
+    payment February 6"; it now says the bill's due day too.
+- **Asked with the AI off, answered on the device now**: "what is my budget
+  this month?", "how much interest did I earn this year?" (and income over
+  any named period, by a source's word), "summary of 2026" or "of october",
+  and "lunch 150 cash tomorrow" (a Planner card for tomorrow, from Cash).
+- **Every button again** on today's code, on 1 January with every dialog
+  confirmed, PC and phone, and on the 1 November data: see the report.
+- **The // notes**: eight in the 1 November backup; each conversation was
+  replayed on today's code and answers right. The goal Move its money was
+  pressed through on a test goal: the transfer, the plan let go, the
+  sidebar, Planner, Activity and Database all agree.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

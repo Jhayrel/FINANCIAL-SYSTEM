@@ -44,7 +44,8 @@ const WORTH = /\bnet\s*worth\b|\bhow\s+(?:rich|much\s+am\s+i\s+worth)\b|\bnetwor
 const MONEY_NOW = /\b(?:how\s+much|magkano|what'?s|what\s+is|show)\b[^?.!]{0,25}\b(?:money|pera|cash\s+on\s+hand|balance|balances)\b|\bmagkano\s+(?:ang\s+)?(?:pera|laman)\b|\bhow\s+much\s+(?:do\s+i\s+have|money\s+do\s+i\s+have)\b/i;
 const RECEIVED = /\b(?:how\s+much|magkano|what|total)\b[^?.!]{0,25}\b(?:did\s+i\s+)?(?:receive|received|get|got|came\s+in|come\s+in|earn|earned|income|natanggap|kinita)\b[^?.!]{0,25}\b(?:this|last|ngayong|nakaraang)\s+(?:month|buwan)\b/i;
 const RECURRING = /\b(?:list|show|what\s+are|what'?s|which\s+are|ano\s+ang)\b[^?.!]{0,15}\b(?:my\s+)?(bills\s+and\s+subscriptions|subscriptions?|subs|bills)\b(?![^?.!]*\b(?:due|to\s+pay|left|unpaid|budget)\b)/i;
-const BUDGET_STATUS = /^\s*(?:show|see|check|view)\s+(?:me\s+)?(?:my\s+|the\s+)?budget\s*\??\s*$|\bwhy\s+(?:is|am)\s+(?:my\s+budget|i)\s+(?:over|under|short)\b|\bbudget\s+status\b/i;
+// "What is my budget this month?" was answered with the month's summary with the AI off (2 November 2026).
+const BUDGET_STATUS = /^\s*(?:show|see|check|view)\s+(?:me\s+)?(?:my\s+|the\s+)?budget\s*\??\s*$|\bwhy\s+(?:is|am)\s+(?:my\s+budget|i)\s+(?:over|under|short)\b|\bbudget\s+status\b|^\s*(?:what(?:'s|\s+is)|how\s+much\s+is)\s+(?:my\s+|the\s+)budget(?:\s+(?:this\s+month|for\s+this\s+month|now|right\s+now|today))?\s*\??\s*$/i;
 
 /** The question, or null. A kind of spending named ("food budget left") is a limit's question, not this. */
 export function readQuickAsk(text: string, kinds: readonly string[] = [], wallets: readonly string[] = []): QuickAsk | null {

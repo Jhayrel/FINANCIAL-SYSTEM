@@ -654,17 +654,35 @@ export function windowOf(
     index: i,
   })).filter((m) => m.at >= 0);
 
+  /*
+   * A month named with no year is the latest one that has begun: in January,
+   * "december" is the December just gone. It was December of the new year,
+   * which has not happened, and answered "Nothing in December 2027 yet"
+   * (2 November 2026, testing the app on 1 January 2027). Every question
+   * read here is about money already spent.
+   */
+  const said = /\b(20\d{2})\b/.exec(question)?.[1];
+  const thisMonthNo = Number(asOf.slice(5, 7));
+  const yearOf = (monthNo: number): string => said ?? (monthNo > thisMonthNo ? String(Number(year) - 1) : year);
+
   if (
     spanned.length > 1 &&
     (/\b(to|through|until|till|and|thru|until)\b/i.test(question) || COMPARING.test(question))
   ) {
-    const y = /\b(20\d{2})\b/.exec(question)?.[1] ?? year;
-    const months = [...spanned].sort((a, b) => a.index - b.index);
+    const bySaid = [...spanned].sort((a, b) => a.at - b.at);
+    const saidFirst = bySaid[0];
+    const saidLast = bySaid[bySaid.length - 1];
+    // "From december to january", asked in January: across New Year, December first.
+    const wraps = !said && saidFirst && saidLast && saidFirst.index > saidLast.index && saidFirst.index + 1 > thisMonthNo && saidLast.index + 1 <= thisMonthNo;
+    const months = wraps ? [saidFirst, saidLast] : [...spanned].sort((a, b) => a.index - b.index);
     const first = months[0];
     const last = months[months.length - 1];
     if (first && last) {
-      const from = `${y}-${String(first.index + 1).padStart(2, "0")}`;
-      const to = `${y}-${String(last.index + 1).padStart(2, "0")}`;
+      // A range all after this month is last year's; one reaching into this month is this year's.
+      const yFirst = wraps ? String(Number(year) - 1) : yearOf(first.index + 1);
+      const yLast = wraps ? year : yFirst;
+      const from = `${yFirst}-${String(first.index + 1).padStart(2, "0")}`;
+      const to = `${yLast}-${String(last.index + 1).padStart(2, "0")}`;
       return {
         from: `${from}-01`,
         to: lastDay(to),
@@ -675,7 +693,7 @@ export function windowOf(
 
   const named = MONTHS.findIndex((m) => new RegExp(`\\b${m}\\b`, "i").test(question));
   if (named >= 0) {
-    const y = /\b(20\d{2})\b/.exec(question)?.[1] ?? year;
+    const y = yearOf(named + 1);
     const mm = String(named + 1).padStart(2, "0");
     return { from: `${y}-${mm}-01`, to: lastDay(`${y}-${mm}`), name: monthName(`${y}-${mm}`) };
   }
@@ -1087,7 +1105,9 @@ export function comparedPeriods(question: string, asOf: IsoDate): ComparedPeriod
     // "may" is a month only where a month goes: "in may", "and may", "may 2026", never "what I may spend".
     const two = [...new Set(named)].filter((w) => w !== "may" || /\b(?:in|of|and|vs|versus|to|from|with|than)\s+may\b/.test(q));
     if (two.length !== 2) return null;
-    const [a, b] = two.map((w) => windowOf(w, asOf)) as [ReturnType<typeof windowOf>, ReturnType<typeof windowOf>];
+    // "dec" and "jan" as their months: `windowOf` reads whole names.
+    const whole = (w: string): string => w.replace(/^[a-z]+/, (m) => MONTHS.find((x) => x.toLowerCase().startsWith(m.slice(0, 3))) ?? m);
+    const [a, b] = two.map((w) => windowOf(whole(w), asOf)) as [ReturnType<typeof windowOf>, ReturnType<typeof windowOf>];
     if (a.from === b.from) return null;
     return a.from > b.from ? { now: a, before: b } : { now: b, before: a };
   }

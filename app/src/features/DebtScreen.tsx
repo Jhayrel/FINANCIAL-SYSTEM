@@ -572,7 +572,7 @@ function DebtCard({
         text:
           due.bill.billed > 0 && due.bill.last
             ? `The bill of ${formatMedium(due.bill.last)} is ${formatMoney(due.bill.billed)}${due.nextDue ? `, due ${formatMedium(due.nextDue)}` : ""}. Anything borrowed after it goes on the bill of ${formatMedium(due.bill.next)}.`
-            : `Nothing was left owed on the last bill${due.bill.last ? ` (${formatMedium(due.bill.last)})` : ""}. What you owe now goes on the bill of ${formatMedium(due.bill.next)}.`,
+            : `Nothing was left owed on the last bill${due.bill.last ? ` (${formatMedium(due.bill.last)})` : ""}. What you owe now goes on the bill of ${formatMedium(due.bill.next)}${due.nextDue && due.nextDue !== due.bill.next ? `, due ${formatMedium(due.nextDue)}` : ""}.`,
       });
     }
     if (!settled && !due.nextDue && form !== "informal") {
