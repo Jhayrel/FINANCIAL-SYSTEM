@@ -45,9 +45,10 @@ import { Sheet } from "../components/Sheet";
 import type { Plan } from "../domain/planner";
 import { useMediaQuery } from "./useMediaQuery";
 import { binCounts, restoreImpact } from "../domain/binView";
+import { restoreCheck } from "../domain/restoreCheck";
 import { formatMoney } from "../domain/money";
 import { matchesSearch, parseSearch } from "../domain/search";
-import type { DeletedTransaction, TransactionType } from "../domain/types";
+import type { DeletedTransaction, Transaction, TransactionType } from "../domain/types";
 import type { Flow as FlowTone } from "../components/primitives";
 
 const TONE: Record<TransactionType, FlowTone> = {
@@ -77,6 +78,7 @@ export function Bin({
   onRestoreMany,
   onPurge,
   plans = [],
+  transactions,
 }: {
   deleted: readonly DeletedTransaction[];
   onRestore: (id: string) => void;
@@ -86,9 +88,13 @@ export function Bin({
   onPurge?: ((id: string) => void) | undefined;
   /** The Planner's plans, so a binned payment says which plan it paid. */
   plans?: readonly Plan[] | undefined;
+  /** The ledger as it is, to say what restoring a row would do (`restoreCheck`). */
+  transactions?: readonly Transaction[] | undefined;
 }) {
   const phone = useMediaQuery("(max-width: 639px)");
   const [opened, setOpened] = useState<string | null>(null);
+  /** What restoring a row would do: an entry like it already there, an account taken below zero. */
+  const checksFor = (t: Transaction): string[] => (transactions ? restoreCheck(t, transactions) : []);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
@@ -296,7 +302,8 @@ export function Bin({
                       <Money value={t.total} />
                     </span>
                     <span className="fms-binrow-actions">
-                      <Button size="sm" onClick={() => onRestore(t.id)}>
+                      {/* A row with something to say first opens its details, where it is said; the rest come back in one tap. */}
+                      <Button size="sm" onClick={() => (checksFor(t).length > 0 ? setOpened(t.id) : onRestore(t.id))}>
                         Restore
                       </Button>
                       {onPurge && (
@@ -358,11 +365,16 @@ export function Bin({
                   setOpened(null);
                 }}
               >
-                Restore
+                {checksFor(open).length > 0 ? "Restore anyway" : "Restore"}
               </Button>
             </>
           }
         >
+          {checksFor(open).length > 0 && (
+            <Alert status="warn" title="Check before restoring">
+              {checksFor(open).join(" ")}
+            </Alert>
+          )}
           <dl className="fms-rowfacts">
             <div>
               <dt>Amount</dt>

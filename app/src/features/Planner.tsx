@@ -1215,6 +1215,25 @@ export function PlanForm(props: {
             </Field>
           </>
         )}
+        {/*
+          A saved plan's goal changed, to another or to none: what happens to
+          the money already in the old one (owner, 27 October 2026: "what if
+          the plan i made is connected to a goal then I edit the goal change
+          it to none goal"). The money never moves by itself.
+        */}
+        {(() => {
+          const was = editing?.goalId ? accounts.find((a) => a.id === editing.goalId) : undefined;
+          if (!was || was.id === goalId || (newGoal && !was)) return null;
+          const holds = walletBalance(props.transactions, was.name);
+          const now = newGoal ? goalName || "a new goal" : goals.find((g) => g.id === goalId)?.name;
+          const kept = holds > 0 ? `${was.name} keeps its ${formatMoney(holds)}: it does not move by itself. To use it for this plan, move the goal's money in Settings, Goals, taking the plan with it, or pay the plan from ${was.name}.` : `${was.name} holds nothing, so no money is left behind.`;
+          return (
+            <Alert status="info">
+              {now ? `It will save in ${now} from now, not ${was.name}. ` : `It will no longer save in ${was.name}, so it is ${counted ? "counted in safe to spend again" : "not counted in safe to spend, as the switch is off"}. `}
+              {kept}
+            </Alert>
+          );
+        })()}
         {limitNote && <Alert status={limitNote.over ? "warn" : "info"}>{limitNote.text}</Alert>}
         {check.notes.filter((n) => !n.startsWith("With no date")).map((n) => (
           <Alert key={n} status="info">

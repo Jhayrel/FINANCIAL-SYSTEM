@@ -152,7 +152,14 @@ export function AmountInput({
   const [focused, setFocused] = useState(false);
   /** A minus sign where none belongs: kept in the box and said under it, never saved and never silently dropped. */
   const [refused, setRefused] = useState(false);
+  /**
+   * A third decimal: pesos have two. "12.345" was saved as PHP 12.35 without
+   * a word, found by pressing every button with odd figures (2 November
+   * 2026). Kept in the box and said, like a minus sign, never rounded.
+   */
+  const [tooFine, setTooFine] = useState(false);
   const wrongSign = (parsed: Centavos | null): boolean => parsed !== null && parsed < 0 && !allowNegative;
+  const threeDecimals = (typed: string): boolean => /\.\d{3,}\s*$/.test(typed.replace(/,/g, "").trim());
 
   /**
    * While you are not typing in it, the field shows what is actually saved.
@@ -165,8 +172,11 @@ export function AmountInput({
    */
   const committed = value === null ? "" : formatAmount(value);
   // A value set from outside (a suggestion tapped, a form cleared) replaces a refused figure.
-  if (!focused && refused && value !== null) setRefused(false);
-  if (!focused && (!refused || value !== null) && text !== committed) setText(committed);
+  if (!focused && (refused || tooFine) && value !== null) {
+    setRefused(false);
+    setTooFine(false);
+  }
+  if (!focused && (!(refused || tooFine) || value !== null) && text !== committed) setText(committed);
 
   return (
     <div className="fms-amount">
@@ -181,7 +191,7 @@ export function AmountInput({
           autoComplete="off"
           enterKeyHint="done"
           disabled={disabled}
-          aria-invalid={invalid || refused || undefined}
+          aria-invalid={invalid || refused || tooFine || undefined}
           aria-label={ariaLabel}
           placeholder={placeholder}
           /**
@@ -206,15 +216,19 @@ export function AmountInput({
           onChange={(e) => {
             setText(e.target.value);
             const parsed = parseAmount(e.target.value);
-            const wrong = wrongSign(parsed);
-            setRefused(wrong);
+            const fine = threeDecimals(e.target.value);
+            const wrong = wrongSign(parsed) || fine;
+            setRefused(wrongSign(parsed));
+            setTooFine(fine);
             if (focused) onChange(wrong ? null : parsed);
           }}
           onBlur={() => {
             setFocused(false);
             const parsed = parseAmount(text);
-            const wrong = wrongSign(parsed);
-            setRefused(wrong);
+            const fine = threeDecimals(text);
+            const wrong = wrongSign(parsed) || fine;
+            setRefused(wrongSign(parsed));
+            setTooFine(fine);
             onChange(wrong ? null : parsed);
             // Show what was typed for now. If the caller declines it, the
             // re-sync above puts the committed value back on the next render.
@@ -227,6 +241,11 @@ export function AmountInput({
       {refused && (
         <span className="t-micro fms-amount-refused" role="alert">
           This takes an amount above zero. Leave out the minus sign.
+        </span>
+      )}
+      {tooFine && !refused && (
+        <span className="t-micro fms-amount-refused" role="alert">
+          Pesos have two decimals: {text.trim()} has more. Type it as it is on the receipt, like 12.35.
         </span>
       )}
     </div>

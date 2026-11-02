@@ -1076,7 +1076,21 @@ export function comparedPeriods(question: string, asOf: IsoDate): ComparedPeriod
       : /\b(?:last|previous|prior)\s+month\b/.test(q)
         ? "month"
         : null;
-  if (!unit) return null;
+  if (!unit) {
+    /*
+     * Two months named: "compare food in october and september and show me"
+     * fell to the month's summary with the model away (owner's chat, 21
+     * October 2026: "the ai and system should know if to see a chart or text
+     * or combine"). The later is "now", whichever was said first.
+     */
+    const named = [...q.matchAll(new RegExp(String.raw`\b(${MONTHS.map((m) => m.toLowerCase()).join("|")}|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\b(?:\s+(20\d{2}))?`, "g"))].map((x) => `${x[1]}${x[2] ? ` ${x[2]}` : ""}`);
+    // "may" is a month only where a month goes: "in may", "and may", "may 2026", never "what I may spend".
+    const two = [...new Set(named)].filter((w) => w !== "may" || /\b(?:in|of|and|vs|versus|to|from|with|than)\s+may\b/.test(q));
+    if (two.length !== 2) return null;
+    const [a, b] = two.map((w) => windowOf(w, asOf)) as [ReturnType<typeof windowOf>, ReturnType<typeof windowOf>];
+    if (a.from === b.from) return null;
+    return a.from > b.from ? { now: a, before: b } : { now: b, before: a };
+  }
 
   const iso = (d: Date): IsoDate => d.toISOString().slice(0, 10);
   const at = (d: IsoDate): Date => new Date(`${d}T00:00:00Z`);
@@ -1631,9 +1645,14 @@ export function chartInWords(chart: Chart): string {
 const WANTS_A_FILE =
   /\b(pdf|download|print|printable|export|excel|spreadsheet|csv|file|copy of|send me|statement|statements)\b/i;
 
+/*
+ * A summary is words on screen, never a file: "Summary my spending last
+ * month" was told it could not have a file and then given November (owner,
+ * 21 October 2026, "//it show wrong chart"). Only a report of the whole
+ * position, or a file named outright, points at Statements.
+ */
 export const wantsStatement = (question: string): boolean =>
-  WANTS_A_FILE.test(question) ||
-  (WANTS_REPORT.test(question) && /\b(month|monthly|this month|financial status|position)\b/i.test(question));
+  WANTS_A_FILE.test(question) || (/\breport\b/i.test(question) && /\b(financial status|position|monthly report)\b/i.test(question));
 
 /**
  * The same question with the file part taken out.

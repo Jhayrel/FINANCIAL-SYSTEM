@@ -121,6 +121,7 @@ import {
   type ActivityEvent,
   type Provenance,
 } from "./domain/activity";
+import { settingsChanges, settingsChangesSummary } from "./domain/settingsChanges";
 import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction } from "./domain/types";
 
 type Screen =
@@ -2819,6 +2820,7 @@ export default function App() {
               onRestoreMany={handleRestoreMany}
               onPurge={handlePurge}
               plans={settings.plans ?? []}
+              transactions={transactions}
             />
           )}
           {screen === "activity" && (
@@ -2854,6 +2856,15 @@ export default function App() {
                 pendingAccountRenames.current = [];
                 const kinds = pendingItemRenames.current;
                 pendingItemRenames.current = [];
+                /*
+                 * Everything else that changed, said in Activity: accounts,
+                 * goals, categories, debts, the AI, the alerts (owner, 27
+                 * October 2026: "//fix the activity it doesnt recognized
+                 * edits happening in settings"). Plans and the owner's details
+                 * have their own events.
+                 */
+                const changes = settingsChanges(settings, next, kinds);
+                if (changes.length > 0) record({ ...settingsChanged(settingsChangesSummary(changes)), after: changes.map((c) => `${c.area}: ${c.line}`).join("\n") });
                 const withAccounts = renames.reduce<AppSettings>(
                   (s, [from, to]) => ({ ...s, credits: renameDebtAccount(s.credits, from, to), plans: renamePlans(s.plans ?? [], "wallet", from, to) }),
                   next,

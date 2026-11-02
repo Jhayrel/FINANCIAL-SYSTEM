@@ -1058,6 +1058,14 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
      */
     "A letter or notice records no payment, even when it names an amount, a fee and a deadline: a consent or waiver form, a permission slip, a memorandum, an invitation, an announcement, a reminder, a notice to tenants or students, and an acknowledgement that documents were received. Propose nothing from one unless what they said says it was paid, and then one proposal of the amount it asks for; a smaller fee it also names (a notary fee paid apart) is not added unless they say it was paid too. A letter is not a plan either unless they ask for one. An acknowledgement receipt is different: it says money was received from them (received from, the sum of, as payment for), so it is a receipt of money they paid. Who signed or sent it and the student or person named are never amounts or wallets.",
     "Every paper is read for what it is, not only the kinds named here: a pharmacy, grocery, cinema, restaurant, utility, school, government or courier receipt, an official receipt or a sales invoice, printed, handwritten or on a screen. Find the total that was paid (TOTAL, AMOUNT DUE paid, CASH tendered less CHANGE), the day and time printed, and how it was paid. Two receipts with different receipt, OR, invoice, trace or reference numbers, or different times, are two purchases even when the amounts match; the same receipt photographed twice (the same number) is one. Two ATM slips with different trace or sequence numbers are two withdrawals. A slip from a bank or card that is not on their list of accounts: leave fromWallet empty and say in reasoning which bank it names, so they are asked. When the context lists entries already in their ledger with the same reference, trace or receipt number, or the same day, amount and wallet, do not propose that row again.",
+    /*
+     * Every value re-derived from the text it came from (fieldproof,
+     * belegradar: the receipt readers that check each extracted value
+     * against its source): an amount is copied from the paper or the
+     * message, never worked out, unless it is the sum of several tickets of
+     * one purchase. The app checks this too (`checkAgainstReadings`).
+     */
+    "Every amount you propose is copied from the paper or from what they said, digit for digit, and amountText is it exactly as printed. Never work one out, round one or estimate one; the only sum allowed is several tickets or slips of one purchase, and then say the count in description. A figure you cannot read clearly is proposed with confidence low and the doubt in reasoning, never guessed.",
     "Work it out before you fill anything in. In reasoning, say in one sentence what was bought or received, which of their lists that belongs to, and which wallet it moved through. Then fill the fields to match what you just said.",
     "The item and the category go together. You are given their items grouped under the category each one belongs to: an item from the Bills group means the category is Bills, from the Subscriptions group means Subscriptions, from the Spending group means Spending. Never file a bill under Spending because it looked like an expense. The note in brackets after a spending type is their own description of what counts as it, so read it.",
     "Use ordinary knowledge about what things are. A fast food chain is a meal, a petrol station is fuel, a streaming service is a subscription, a telco is a bill. Match that to their list.",
@@ -1194,6 +1202,17 @@ const TASK_INSTRUCTIONS: Record<string, string> = {
     "did I spend more this week than the one before, draw it: chart, compare this week|last week.",
     "chart how my food went from last month to now: chart, compare this month|last month.",
     "nagbayad ako ng tricycle 500 kanina cash: entry.",
+    /*
+     * The owner's own borderline messages, 1 November 2026: examples of the
+     * cases between two intents are what moves a router most (few-shot on
+     * ambiguous cases, MARCO, arXiv 2410.21784).
+     */
+    "Summary my spending last month: question, period last month. A summary is words on screen, never export.",
+    "I am planning to eat outside tomorrow, should I just eat at home or outside: question. A plan asked about is a question, never entry.",
+    "I have loan in maya credit: question, target maya credit. Said with no figure, it asks what is owed, never entry.",
+    "fix my balance: investigate. They want an account put right; which one and what it holds come next.",
+    "Compare food in october and september and show me: chart, compare october|september.",
+    "I paid using maya food 940 + 10 transaction fee: entry. The 10 is the fee of the 940, never a second entry.",
     "I will be spending 1000 cash: question. Money not yet spent is a plan, never an entry. So are i'm going to buy shoes 2000 gcash and gagastos ako 300 bukas.",
     // 5 and 6 October 2026: drawn as an empty chart, and told Settings are the owner's.
     "Make me a breakdown of how much i can spend today: question, never chart. What is safe, free or left to spend is a figure to be told, however it is worded.",
@@ -1508,6 +1527,17 @@ const ADVICE_RULES = [
   "Any word about size, high, low, unusual, a lot, on track, must carry the comparison that makes it mean something: this month against their own recent months, or this item against what it usually costs. The months are in the data. Never use the bare adjective.",
   "Separate what the figures say from what you think about it. A total is a fact. Whether it was wise is a judgment, and a judgment is said with its condition attached, never as a verdict: their ledger contains emergency repairs that any purely numeric reading would call overspending.",
   "Do not add, subtract or divide figures to reach a new one. Every total, balance, difference and daily rate is already worked out in the data. If the figure you want is not there, say which figure you do not have.",
+  /*
+   * Three steps from the research the owner asked for, 2 November 2026:
+   * reading the question twice before answering (re-reading), asking rather
+   * than guessing when a message has two readings that lead to different
+   * answers (clarifying questions cut misrouting in production chat), and a
+   * check of each figure against the data before the answer is sent
+   * (chain of verification, checks each claim with its own question).
+   */
+  "Read the message twice before answering: once for what is asked, then for every word that changes it (a date, an account, not, only, also, already, a name). Answer every part it asks, in the order asked.",
+  "When the message can be read two ways that lead to different figures or a different entry, and the conversation does not settle it, ask one short question that names both readings, and answer neither. When one reading is plainly meant, answer that one and say in a few words how you read it.",
+  "Before you send the answer, check each figure in it against the data you were given: the same digits, the same period, the same account, and that it answers what was asked. Leave out any you cannot find there.",
   /*
    * ── Never say you did it ───────────────────────────────────────────────
    *

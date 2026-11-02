@@ -40,6 +40,7 @@ import {
 import { walletBalance } from "../domain/balances";
 import type { Alert as Finding } from "../domain/alerts";
 import { describeClose, planGoalClose } from "../domain/goalClose";
+import { closePlansNote, goalParentNote, moveTargets, planGoalMove, type PlansChoice } from "../domain/goalMove";
 import { planStartClean, validateBackup, type Backup, type RestoreMode, type Validation } from "../domain/backup";
 import { formatBytes, measureStorage } from "../domain/storage";
 import { cleanSettings } from "../domain/settingsCleanup";
@@ -276,6 +277,7 @@ export function Settings({
             accounts={settings.accounts}
             transactions={transactions}
             onChange={(accounts) => patch({ accounts })}
+            onPlans={(plans) => patch({ plans })}
             onAddTransactions={onAddTransactions}
           />
         )}
@@ -1358,6 +1360,7 @@ function GoalsSection({
   accounts,
   transactions,
   onChange,
+  onPlans,
   onAddTransactions,
 }: {
   goals: readonly Account[];
@@ -1365,6 +1368,8 @@ function GoalsSection({
   accounts: readonly Account[];
   transactions: readonly Transaction[];
   onChange: (accounts: Account[]) => void;
+  /** The Planner's plans changed: a goal's money moved and its plans with it (`goalMove.ts`). */
+  onPlans: (plans: Plan[]) => void;
   onAddTransactions: (rows: Transaction[]) => void;
 }) {
   const parents = accounts.filter(
@@ -1437,9 +1442,11 @@ function GoalsSection({
                 key={g.id}
                 goal={g}
                 plans={plans.filter((p) => p.goalId === g.id && p.status !== "removed")}
+                allPlans={plans}
                 accounts={accounts}
                 transactions={transactions}
                 onUpdate={(part) => update(g.id, part)}
+                onPlans={onPlans}
                 onAddTransactions={onAddTransactions}
               />
             ))}
@@ -1556,19 +1563,30 @@ const GOAL_STATUS_TONE = {
 function GoalRow({
   goal,
   plans,
+  allPlans,
   accounts,
   transactions,
   onUpdate,
+  onPlans,
   onAddTransactions,
 }: {
   goal: Account;
   /** The Planner's plans saving in it: which plan a goal is for, said on it (27 October 2026). */
   plans: readonly Plan[];
+  /** Every plan, for moving the ones saving here with the money. */
+  allPlans: readonly Plan[];
   accounts: readonly Account[];
   transactions: readonly Transaction[];
   onUpdate: (part: Partial<Account>) => void;
+  onPlans: (plans: Plan[]) => void;
   onAddTransactions: (rows: Transaction[]) => void;
 }) {
+  // Moving its money somewhere else, and its plans with it or not (`goalMove.ts`).
+  const [moving, setMoving] = useState(false);
+  const targets = moveTargets(goal, accounts);
+  const [moveTo, setMoveTo] = useState<string>("");
+  const [moveAmount, setMoveAmount] = useState<Centavos | null>(null);
+  const [plansChoice, setPlansChoice] = useState<PlansChoice>("keep");
   const [blocked, setBlocked] = useState<string | null>(null);
   const [reconciling, setReconciling] = useState(false);
   const [actualBalance, setActualBalance] = useState<Centavos | null>(null);
@@ -1636,7 +1654,7 @@ function GoalRow({
 
     const ok = await confirm({
       title: `Close ${goal.name}?`,
-      body: describeClose(plan, formatMoney),
+      body: `${describeClose(plan, formatMoney)}${closePlansNote(goal, allPlans)}`,
       confirmLabel: "Close it",
     });
     if (!ok) return;
@@ -1772,6 +1790,11 @@ function GoalRow({
           />
         </span>
         <Button size="sm" onClick={() => void finish()}>Mark done</Button>
+        {p.saved > 0 && targets.length > 0 && (
+          <Button size="sm" aria-expanded={moving} onClick={() => setMoving((v) => !v)}>
+            {moving ? "Stop moving" : "Move its money"}
+          </Button>
+        )}
         {/*
          * A goal nothing was ever put in or taken from can simply go: "Make a
          * goal for it" made two for one plan, and Mark done was the only way
@@ -1795,6 +1818,102 @@ function GoalRow({
           </Button>
         )}
       </div>
+
+      {/* Which account it sits inside: where it is said to be kept, never a move of money by itself. */}
+      {(() => {
+        const parents = accounts.filter((a) => (a.kind === "savings" || a.kind === "reserve") && !a.archived);
+        if (parents.length < 2) return null;
+        return (
+          <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", flexWrap: "wrap", marginTop: "var(--space-2)" }}>
+            <span className="t-caption" style={{ color: "var(--ink-2)" }}>Inside</span>
+            <span style={{ minWidth: 180 }}>
+              <Select
+                value={parent?.name ?? ""}
+                options={parents.map((a) => a.name)}
+                onChange={(name) => {
+                  const to = parents.find((a) => a.name === name);
+                  if (!to || to.id === goal.parentId) return;
+                  void (async () => {
+                    const ok = await confirm({ title: `Move ${goal.name} inside ${to.name}?`, body: goalParentNote(goal, to, transactions), confirmLabel: "Move it" });
+                    if (ok) onUpdate({ parentId: to.id });
+                  })();
+                }}
+              />
+            </span>
+          </div>
+        );
+      })()}
+
+      {moving && (() => {
+        const target = targets.find((a) => a.id === moveTo) ?? null;
+        const preview = target
+          ? planGoalMove(goal, target.id, moveAmount, { accounts, transactions, plans: allPlans, choice: plansChoice, today: today(), nextRecordNumber: nextRecord })
+          : null;
+        const saving = plans.filter((x) => x.status === "open");
+        return (
+          <div className="fms-goalmove" style={{ marginTop: "var(--space-3)", display: "grid", gap: "var(--space-2)" }}>
+            <Field label="Move to">
+              <Select
+                value={target?.name ?? ""}
+                options={["", ...targets.map((a) => a.name)]}
+                onChange={(name) => setMoveTo(targets.find((a) => a.name === name)?.id ?? "")}
+              />
+            </Field>
+            <Field label="How much" help={`All of it is ${formatMoney(p.saved)}; leave it blank for all.`}>
+              <AmountInput value={moveAmount} onChange={setMoveAmount} />
+            </Field>
+            {saving.length > 0 && (
+              <fieldset className="fms-radiogroup" style={{ border: 0, padding: 0, margin: 0 }}>
+                <legend className="t-caption" style={{ color: "var(--ink-2)" }}>
+                  {saving.map((x) => `"${x.title}"`).join(" and ")} {saving.length === 1 ? "saves" : "save"} in this goal. After the move:
+                </legend>
+                {([
+                  ["keep", "Keep saving in this goal"],
+                  ["follow", "Move with the money (to a goal)"],
+                  ["free", "Stop saving in a goal: counted in safe to spend"],
+                ] as const).map(([v, label]) => (
+                  <label key={v} className="t-caption" style={{ display: "flex", gap: "var(--space-2)", alignItems: "center", minHeight: 44 }}>
+                    <input type="radio" name={`plans-${goal.id}`} checked={plansChoice === v} onChange={() => setPlansChoice(v)} />
+                    {label}
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            {preview?.blocked && <Alert status="warn">{preview.blocked}</Alert>}
+            {preview && !preview.blocked && (
+              <ul className="t-caption" style={{ margin: 0, paddingLeft: "var(--space-4)", color: "var(--ink-2)" }}>
+                {preview.notes.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            )}
+            <div style={{ display: "flex", gap: "var(--space-2)" }}>
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={!preview || Boolean(preview.blocked)}
+                onClick={() =>
+                  void (async () => {
+                    if (!preview || preview.blocked || !target) return;
+                    const ok = await confirm({ title: `Move ${formatMoney(preview.rows[0]?.amount ?? 0)} to ${target.name}?`, body: preview.notes.join(" "), confirmLabel: "Move it" });
+                    if (!ok) return;
+                    onAddTransactions([...preview.rows]);
+                    if (preview.plans.length > 0) onPlans([...preview.plans]);
+                    setMoving(false);
+                    setMoveAmount(null);
+                    setMoveTo("");
+                  })()
+                }
+              >
+                Move it
+              </Button>
+              <Button size="sm" onClick={() => setMoving(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

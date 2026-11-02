@@ -215,9 +215,27 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
           : `in ${ask.name}`;
 
   if (rows.length === 0) {
-    return ask.from === to
-      ? `Nothing${what} ${when}: no spending entry${ask.item ? ` for ${ask.item}` : ""} that day.`
-      : `Nothing${what} ${when}: no spending entry${ask.item ? ` for ${ask.item}` : ""} between ${ask.from > "1000" ? formatMedium(ask.from) : "the start"} and ${formatMedium(to)}.`;
+    /*
+     * The 1st of a month asked as a month: "nothing yet", not "that day", and
+     * the month before beside it when it is a comparison of the two (owner's
+     * chat: "compare my spending on food this month and last month" on
+     * November 1 said only "no spending entry that day").
+     */
+    const monthAsked = /^\d{4}-\d{2}-01$/.test(ask.from) && ask.to.slice(0, 7) === ask.from.slice(0, 7) && ask.to > to;
+    const none =
+      monthAsked
+        ? `Nothing${what} ${when} yet: no spending entry${ask.item ? ` for ${ask.item}` : ""} so far.`
+        : ask.from === to
+          ? `Nothing${what} ${when}: no spending entry${ask.item ? ` for ${ask.item}` : ""} that day.`
+          : `Nothing${what} ${when}: no spending entry${ask.item ? ` for ${ask.item}` : ""} between ${ask.from > "1000" ? formatMedium(ask.from) : "the start"} and ${formatMedium(to)}.`;
+    if (!monthAsked) return none;
+    const y = Number(ask.from.slice(0, 4));
+    const m = Number(ask.from.slice(5, 7));
+    const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+    const before = live.filter((t) => t.date.startsWith(prev) && matches(t) && costOf(t) > 0);
+    const beforeSum = before.reduce((sum, t) => sum + costOf(t), 0);
+    const prevName = new Date(`${prev}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    return beforeSum > 0 ? `${none} ${prevName} had **${money(beforeSum)}**${what}, over ${before.length} ${before.length === 1 ? "entry" : "entries"}.` : none;
   }
   /*
    * One entry, however many days it covers: the days of a date range are

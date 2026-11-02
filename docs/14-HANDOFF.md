@@ -2313,6 +2313,51 @@ eight wallet and savings screenshots.
   it; the Lower button stays, as a second choice, while that income covers
   the budget.
 
+### 2026-11-02, later: every button pressed, the // notes, research applied
+
+- **Every button pressed** (scratchpad robot, on the 1 November data, PC
+  and phone): each screen and each Settings tab, every visible button,
+  once with dialogs left and once with every dialog confirmed, then the
+  wallets and net worth compared across the sidebar, Dashboard and
+  Insights. About 470 presses on a PC and 300 on a phone: no crash, no page
+  error, figures in step even after rows were restored from the Bin.
+  Found and fixed: a third decimal ("12.345") was saved as PHP 12.35
+  without a word (now refused, like a minus sign, `AmountInput`); Restore
+  in the Bin counted a payment twice and took Maya below zero without a
+  word (now said first, "Restore anyway", `restoreCheck.ts`).
+- **The owner's // notes**: "it show wrong chart" and "should know if to
+  see a chart or text or combine" (21 Oct): "Summary my spending last
+  month" was taken for a file request and then given November; it is the
+  last month in words now, and "In pie" draws it. Two months named
+  ("october and september ... show me") compare with a chart and words; a
+  this-and-last-month comparison on the 1st says last month's figure.
+  "fix the activity it doesnt recognized edits happening in settings"
+  (27 Oct): every Settings change is in Activity with before and after
+  (`settingsChanges.ts`; `settingsDiff.ts` is the per-section save, left
+  as it was). The goal what-ifs (27 Oct): Settings, Goals has Move its
+  money (to any account or goal, all or part, one transfer row; the plans
+  saving in it keep their goal, move with the money, or go back to safe to
+  spend, `goalMove.ts`), an Inside picker that says the money does not
+  move by itself, and closing says which plans it frees. The Planner says
+  what happens to the old goal's money when a plan's goal is changed or
+  removed.
+- **The database read through**: no duplicate ids, no total that is not
+  amount plus fee, no wallet outside the accounts, no debt row without its
+  line, nothing dated ahead, no archived account holding money, nothing
+  actionable from the integrity check. Three record numbers on two rows
+  each (#3821, #3822, #3969) are a borrowing and its fees, one movement in
+  two parts, by design.
+- **Research applied** (owner: "search online ... how to make your system
+  ai and api ai reasoning better"): every card amount is held to the
+  paper (printed there, a sum of what is printed, or typed by the owner),
+  else marked and low confidence, never changed (`checkAgainstReadings`,
+  after fieldproof and belegradar); the extract prompt copies amounts digit
+  for digit; the chat prompt reads the message twice, asks one question
+  naming both readings when a message has two, and checks each figure
+  before sending (re-reading, clarifying questions, chain of
+  verification); the intent router has the owner's own borderline messages
+  as worked examples (few-shot on ambiguous cases).
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

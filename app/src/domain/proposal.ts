@@ -35,7 +35,7 @@
 import { formatMedium } from "./dates";
 import { namesPerson } from "./behalfFor";
 import { makeDebtId } from "./debt";
-import { parseAmount, type Centavos } from "./money";
+import { figuresIn, parseAmount, type Centavos } from "./money";
 import type { Draft, Flow } from "./entry";
 import { emptyDraft, itemsFor } from "./entry";
 import { accountFor, type InterestCredit } from "./interestCredit";
@@ -805,7 +805,7 @@ export function readProposals(
    */
   const checked = checkWalletReceipts(checkCardSlips(checkWithdrawal(checkInterest(
     checkReceipts(
-      datesFromHeadings(checkAgainstReadings(proposals, context.readings ?? []), context.readings ?? [], context.readingDays ?? [], asOf),
+      datesFromHeadings(checkAgainstReadings(proposals, context.readings ?? [], context.note ?? ""), context.readings ?? [], context.readingDays ?? [], asOf),
       context.receipts ?? [],
       reference.wallets,
       asOf,
@@ -1248,6 +1248,41 @@ export function checkReceipts(
   return out;
 }
 
+/** A sum of two to four of the figures shown, as tickets or a day's credits added up are. */
+function sumOfShown(amount: number, shown: ReadonlySet<number>): boolean {
+  const list = [...shown].filter((v) => v > 0 && v < amount).slice(0, 30);
+  const n = list.length;
+  for (let a = 0; a < n; a += 1)
+    for (let b = a; b < n; b += 1) {
+      const ab = list[a]! + list[b]!;
+      if (ab === amount) return true;
+      for (let c = b; c < n; c += 1) {
+        const abc = ab + list[c]!;
+        if (abc === amount) return true;
+        if (n <= 20) for (let d = c; d < n; d += 1) if (abc + list[d]! === amount) return true;
+      }
+    }
+  return false;
+}
+
+/**
+ * An amount printed nowhere on the paper, and not a sum of what is: said on
+ * the card and dropped to low confidence, never changed. Only when the
+ * device's reading found enough figures to judge by (three or more); a
+ * reading that caught little proves nothing. The research behind it: the
+ * receipt readers that check every value against the text it came from
+ * (fieldproof, belegradar) catch what a larger model still invents
+ * (owner, 2 November 2026: "make the reasoning and recognition better").
+ */
+function notOnPaper(p: Proposal, amount: number, shown: ReadonlySet<number>): Proposal {
+  if (shown.size < 3 || sumOfShown(amount, shown)) return p;
+  return {
+    ...p,
+    confidence: "low",
+    adjustments: [...p.adjustments, `${pesos(amount)} is not printed on the picture as read here, and is not a sum of what is: check it against the paper before adding.`],
+  };
+}
+
 /** Every amount printed with its two decimals in the readings, in centavos. */
 function amountsIn(readings: readonly string[]): Set<number> {
   const found = new Set<number>();
@@ -1270,16 +1305,19 @@ function amountsIn(readings: readonly string[]): Set<number> {
  * that does, is that one. Only when there is exactly one such figure, and the
  * card says so and drops to low confidence, so the owner looks.
  */
-export function checkAgainstReadings(proposals: readonly Proposal[], readings: readonly string[]): Proposal[] {
+export function checkAgainstReadings(proposals: readonly Proposal[], readings: readonly string[], note = ""): Proposal[] {
   if (readings.length === 0) return [...proposals];
   const shown = amountsIn(readings);
   if (shown.size === 0) return [...proposals];
+  // Figures the owner typed with the pictures are theirs, not the paper's: never flagged for being off it.
+  const typed = new Set(figuresIn(note));
   return proposals.map((p) => {
     const amount = p.draft.amount;
-    if (amount === null || shown.has(amount)) return p;
+    const fee = p.draft.fee ?? 0;
+    if (amount === null || shown.has(amount) || typed.has(amount) || (fee > 0 && (shown.has(amount + fee) || shown.has(amount - fee)))) return p;
     const digits = String(amount % 100 === 0 ? amount / 100 : amount);
     const matches = [...shown].filter((v) => v !== amount && String(v) === digits);
-    if (matches.length !== 1) return p;
+    if (matches.length !== 1) return notOnPaper(p, amount, shown);
     const right = matches[0]!;
     return {
       ...p,
