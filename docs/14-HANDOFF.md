@@ -2286,6 +2286,33 @@ eight wallet and savings screenshots.
   said beside it: no need to lower it yet if the rest comes as usual. The
   bell's note is information, not a warning, in that case.
 
+### 2026-11-02: the chat replayed, plans in Insights, the 1st of the month everywhere
+
+- **The 1 November chat, replayed with the AI off** and fixed: "tommorrow"
+  and other slips of a day (`typos.ts`, `withDayWordsFixed`, also used by
+  the entry reader); "+ 10 transaction fee" kept as the fee; a plan question
+  titled by the thing ("Eat outside"); on the 1st, "highest spending" and
+  "a breakdown of my spending" show last month and say why; "spend badly
+  since started the entries" is every entry, wants only, beside all
+  spending; "I have loan in maya credit" shows what is owed and when;
+  "fix my balance" asks which account and what it holds; "foodo" is Food;
+  "this month and last month" is named forward.
+- **Plans in Insights** (owner, 2 November: "Add the planner too in insight
+  and Budgeting like make sure it fit and accurate also make sure it
+  sync"): a "Plans in <month>" card under the month in brief, the same
+  component and the same `plannedForBudget` figure as the Budget screen
+  (`PlannedInMonth.tsx`), so the two cannot disagree: the plans, set aside
+  or not, what the spending budget has left after them, and the plans with
+  no date. Checked on the 1 November data on a phone and a PC: both screens
+  say PHP 4,500.00 planned and PHP 11,978.00 left after them, matching the
+  Planner and the Dashboard's short of PHP 2,481.45.
+- **The 1st of the month on every screen**: the Budget card, the month in
+  brief on Insights and the Dashboard said to lower the budget to PHP 0.00
+  before the month's income had come. Each now says the money held now
+  (the rule, unchanged) and the usual month's income still to come beside
+  it; the Lower button stays, as a second choice, while that income covers
+  the budget.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

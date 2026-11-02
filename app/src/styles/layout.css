@@ -11902,6 +11902,12 @@ button.fms-recent-row:disabled {
 }
 
 /* The month's plans on the Budget screen: under the tracks, hairlines only (D2). */
+/* In a card of its own (Insights): the card's title is the heading, so no rule or gap above. */
+.fms-budgetplanned.is-own {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
 .fms-budgetplanned {
   display: grid;
   gap: var(--space-2);

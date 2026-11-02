@@ -2709,6 +2709,7 @@ export default function App() {
               asOf={asOf}
               settings={settings}
               onOpenBudget={() => go("budget")}
+              onOpenPlanner={() => go("planner")}
               onOpenPlan={(id, pay) => {
                 go("planner");
                 setPlanFocus({ id, pay, at: Date.now() });

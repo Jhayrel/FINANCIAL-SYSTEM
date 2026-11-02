@@ -64,6 +64,7 @@ import { debtDue, positionsOf, type Debt, type DebtKind, type DueBasis } from ".
 import { addDays, daysBetween, daysInMonth, firstOfMonth, getDay, lastOfMonth, monthName } from "./dates";
 import { formatMoney as money, type Centavos } from "./money";
 import { costByKind } from "./kinds";
+import { incomeToCome } from "./incomeBudget";
 import { monthTotals, totalsFor } from "./totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -557,7 +558,8 @@ export function monthBrief(input: {
     safe,
     ...(() => {
       const warnings: string[] = [];
-      return { notes: notesFor(phase, month, tracks, cameIn, wentOut, safe, warnings), warnings };
+      const come = phase === "current" ? incomeToCome(transactions, reference.wallets, year, month, asOf) : null;
+      return { notes: notesFor(phase, month, tracks, cameIn, wentOut, safe, warnings, come), warnings };
     })(),
   };
 }
@@ -571,6 +573,8 @@ function notesFor(
   safe: SafeToSpend | null,
   /** Filled with the notes that need doing something about, as they are written. */
   warnings: string[] = [],
+  /** The usual month's income still to come, this month only (`incomeToCome`). */
+  come: { readonly usual: Centavos; readonly soFar: Centavos; readonly toCome: Centavos } | null = null,
 ): string[] {
   const out: string[] = [];
   const warn = (line: string): void => {
@@ -643,9 +647,22 @@ function notesFor(
        * chat's safe answer and to the model alike (owner, 13 October 2026:
        * "make sure the system and ai all parts will know about this").
        */
-      warn(
-        `The spending budget has ${money(safe.budgetLeft)} left, but ${moneyForBudgetWords(safe, money)}. The budget is ${money(budgetBeyondMoney(safe))} more than your money can cover; lower it on the Budget screen.`,
-      );
+      /*
+       * Unless the usual month's income still to come covers it: on the 1st,
+       * with nothing in yet, every screen said to lower the budget to PHP
+       * 0.00 (owner's data, 1 November 2026). The rule (the money held now)
+       * is kept and said; the income still to come is said beside it.
+       */
+      const beyond = budgetBeyondMoney(safe);
+      if (come && come.toCome > 0 && beyond <= come.toCome) {
+        out.push(
+          `The spending budget has ${money(safe.budgetLeft)} left, but ${moneyForBudgetWords(safe, money)}: ${money(beyond)} more than the money held now. Your usual month brings about ${money(come.usual)} into your wallets and ${money(come.soFar)} has come in so far, so if the rest comes as usual the budget holds. Until it does, spend only what is safe.`,
+        );
+      } else {
+        warn(
+          `The spending budget has ${money(safe.budgetLeft)} left, but ${moneyForBudgetWords(safe, money)}. The budget is ${money(beyond)} more than your money can cover${come && come.toCome > 0 ? `, ${money(beyond - come.toCome)} more even if about ${money(come.toCome)} comes in as usual` : ""}; lower it on the Budget screen.`,
+        );
+      }
     }
     if (safe.budgetLeft !== null && safe.budgetLeft <= 0) {
       warn("The spending budget is used up. Anything more this month goes over the budget, even if the money is there.");

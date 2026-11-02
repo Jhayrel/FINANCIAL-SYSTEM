@@ -91,7 +91,8 @@ import {
 } from "../domain/insightWindow";
 import { kindOf } from "../domain/kinds";
 import { formatMoney, type Centavos } from "../domain/money";
-import { plannedByDay, viewOf } from "../domain/planner";
+import { NO_DATE, plannedByDay, plannedForBudget, viewOf } from "../domain/planner";
+import { PlannedInMonth } from "./PlannedInMonth";
 import { isOpenBill, monthBrief } from "../domain/monthPlan";
 import { costOf, incomeOf } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "../domain/types";
@@ -180,6 +181,7 @@ export function Insights({
   onAdd,
   onBin,
   onOpenPlan,
+  onOpenPlanner,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -201,6 +203,8 @@ export function Insights({
   onBin?: ((id: string) => void) | undefined;
   /** A plan on the Planner, opened, or opened to record its payment. */
   onOpenPlan?: ((planId: string, pay: boolean) => void) | undefined;
+  /** The Planner, where the month's plans are kept. */
+  onOpenPlanner?: (() => void) | undefined;
 }) {
   const nowYear = getYear(asOf);
   const nowMonth = getMonth(asOf);
@@ -403,6 +407,35 @@ export function Insights({
   }, [period.kind, transactions, frame, asOf, brief.tracks.combined.budget]);
 
   const t = brief.tracks;
+  /*
+   * The Planner's open plans for this month, as the Budget screen shows them
+   * (`plannedForBudget`, one figure for both screens), and the open ones with
+   * no date yet. A month that is over has none: what was paid is in its
+   * spending (owner, 2 November 2026: "Add the planner too in insight").
+   */
+  const plannedHere = useMemo(
+    () =>
+      brief.phase === "past"
+        ? null
+        : plannedForBudget(
+            (reference.plans ?? []).map((p) => viewOf(p, { transactions, accounts: [], asOf })),
+            year,
+            month,
+            reference,
+            asOf,
+          ),
+    [brief.phase, reference, transactions, year, month, asOf],
+  );
+  const undatedHere = useMemo(
+    () =>
+      brief.phase === "past"
+        ? []
+        : (reference.plans ?? [])
+            .filter((p) => p.status === "open" && p.due === NO_DATE)
+            .map((p) => viewOf(p, { transactions, accounts: [], asOf }))
+            .filter((v) => v.left > 0),
+    [brief.phase, reference.plans, transactions, asOf],
+  );
   const safe = brief.safe;
   const nowSafe = now.safe;
   const maxDay = Math.max(1, ...days.spent.values());
@@ -1321,6 +1354,23 @@ export function Insights({
           </div>
         </div>
       </Card>
+
+      {plannedHere && (plannedHere.total > 0 || undatedHere.length > 0) && (
+        <Card title={`Plans in ${name}`} subtitle="From the Planner: not paid yet, against what the budget has left">
+          <PlannedInMonth
+            planned={plannedHere}
+            undated={undatedHere}
+            name={name}
+            noPlan={t.combined.budget === 0}
+            spendingLeft={t.spending.remaining}
+            billsLeft={t.billsSubs.remaining}
+            room={null}
+            asOf={asOf}
+            onOpenPlanner={onOpenPlanner}
+            where="elsewhere"
+          />
+        </Card>
+      )}
 
       <div className="fms-charts">
         {burn && (

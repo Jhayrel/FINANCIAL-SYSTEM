@@ -91,10 +91,9 @@ import { cashFlow } from "../domain/forecast";
 import type { MonthOutlook } from "../domain/outlook";
 import { daysInMonth, formatMedium, getMonth, getYear, MONTH_NAMES } from "../domain/dates";
 import { PACE_FROM_DAY } from "../domain/alerts";
-import { budgetFromIncome, checkSplit, incomeBudget, WORTH_ADDING, type IncomeBudget } from "../domain/incomeBudget";
+import { budgetFromIncome, checkSplit, incomeBudget, overWords, WORTH_ADDING, type IncomeBudget } from "../domain/incomeBudget";
 import { monthBrief, spendable } from "../domain/monthPlan";
-import { NO_DATE, plannedForBudget, viewOf, type PlannedMonth, type PlanView } from "../domain/planner";
-import { Icon } from "../components/Icon";
+import { NO_DATE, plannedForBudget, viewOf, type PlannedMonth } from "../domain/planner";
 import { formatMoney, type Centavos } from "../domain/money";
 import type {
   BudgetRevision,
@@ -106,6 +105,7 @@ import type {
 } from "../domain/types";
 import { pickableYears } from "../domain/year";
 import { Outlook } from "./Outlook";
+import { PlannedInMonth } from "./PlannedInMonth";
 import { useReportScreen } from "./screenReport";
 
 const TRACKS = [
@@ -132,8 +132,6 @@ const listWords = (xs: readonly string[]): string =>
   xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
 
 const monthLabel = (m: number): string => MONTH_NAMES[m - 1] ?? "";
-/** How many of the month's plans show before Show all: the overdue and the soonest. */
-const PLANS_SHOWN = 5;
 
 const pct = (ratio: number): string => `${Math.round(ratio * 100)}%`;
 
@@ -1743,177 +1741,6 @@ function LimitEditor({
 // ── Parts ──────────────────────────────────────────────────────────────────
 
 /** One track: what went out, the budget, a bar with today's pace on it, and the verdict. */
-/**
- * What the Planner has for the month, against what its budget has left: the
- * plans, and how much of the budget they take (27 October 2026, "Add also
- * the planned in budget"). Nothing here is spent yet, so the bars above do
- * not move; this says what is coming out of what they show as left.
- */
-function PlannedInMonth({
-  planned,
-  undated,
-  name,
-  noPlan,
-  spendingLeft,
-  billsLeft,
-  room,
-  asOf,
-  onOpenPlanner,
-}: {
-  planned: PlannedMonth;
-  /** Open plans with no date yet, in no month's figure. */
-  undated: readonly PlanView[];
-  name: string;
-  noPlan: boolean;
-  spendingLeft: Centavos;
-  billsLeft: Centavos;
-  /** How far the money lets the spending budget rise (`incomeBudget`), for the month running; null otherwise. */
-  room: Centavos | null;
-  asOf: string;
-  onOpenPlanner?: (() => void) | undefined;
-}) {
-  // The soonest few, the rest in place on a tap (owner, 27 October 2026: "what if I have a lot of plan").
-  const [all, setAll] = useState(false);
-  const shown = all ? planned.views : planned.views.slice(0, PLANS_SHOWN);
-  /** "Oct 27", "Any day in Oct": short, so a long name keeps its room on a phone. */
-  const shortWhen = (v: PlanView): string => {
-    const kind = v.plan.dueKind ?? "day";
-    const m = (MONTH_NAMES[Number(v.plan.due.slice(5, 7)) - 1] ?? "").slice(0, 3);
-    return kind === "month" ? `Any day in ${m}` : kind === "year" ? `Sometime in ${v.plan.due.slice(0, 4)}` : `${m} ${Number(v.plan.due.slice(8, 10))}`;
-  };
-  // The month's spending plans by how sure they are; together they are `planned.spending`.
-  const sumOf = (list: readonly PlanView[]): Centavos => list.reduce((s, v) => s + v.left, 0);
-  const sure = sumOf(planned.spendingViews.filter((v) => v.plan.setAside && !v.plan.goalId));
-  const maybe = sumOf(planned.spendingViews.filter((v) => !v.plan.setAside && !v.plan.goalId));
-  const fromGoal = sumOf(planned.spendingViews.filter((v) => Boolean(v.plan.goalId)));
-  const fit = (part: string, plannedPart: Centavos, left: Centavos): string => {
-    if (plannedPart <= 0) return "";
-    if (left >= plannedPart) return `The ${part} budget has ${formatMoney(left)} left; with ${formatMoney(plannedPart)} planned, ${formatMoney(left - plannedPart)} is free for the rest.`;
-    const short = plannedPart - Math.max(0, left);
-    /*
-     * "Raise it" only as far as the money goes: raised past it, the budget
-     * promises what the wallets cannot pay, and "Budget and your money"
-     * below said to lower it (27 October 2026).
-     */
-    if (part === "spending" && room !== null && room < short)
-      return `${formatMoney(plannedPart)} planned is ${formatMoney(short)} more than the spending budget has left, and your money ${room > 0 ? `lets it rise by only ${formatMoney(room)}` : "does not let it rise"}. Move a plan to a later month, or skip one.`;
-    return `${formatMoney(plannedPart)} planned is ${formatMoney(short)} more than the ${part} budget has left. Raise it on the right, or move a plan to another month.`;
-  };
-  const words = noPlan
-    ? `No budget for ${name} yet: "Usual + plans" on the right sets one with them in it.`
-    : [fit("spending", planned.spending, spendingLeft), fit("bills", planned.billsSubs, billsLeft)].filter(Boolean).join(" ");
-  const over = !noPlan && (planned.spending > Math.max(0, spendingLeft) || planned.billsSubs > Math.max(0, billsLeft));
-  return (
-    <section className="fms-budgetplanned" aria-label={`Planned in ${name}`}>
-      {planned.total > 0 && (
-      <div className="fms-budgetplanned-head">
-        <span className="t-label">Planned in {name}, not paid yet</span>
-        <Money value={planned.total} size="s" />
-      </div>
-      )}
-      <ul className="fms-budgetplanned-rows">
-        {shown.map((v) => (
-          <li key={v.plan.id}>
-            <span className="t-body fms-truncate" title={v.plan.title}>
-              {v.plan.title}
-            </span>
-            {/* Whether safe to spend holds its money back: the Budget counts it either way. */}
-            <span className="t-caption fms-budgetplanned-when">
-              {v.plan.due < asOf ? `${shortWhen(v)}, overdue` : shortWhen(v)}
-              {v.plan.goalId ? ", from its goal" : !v.plan.setAside ? ", not set aside" : ""}
-            </span>
-            <Money value={v.left} size="s" />
-          </li>
-        ))}
-      </ul>
-      {planned.views.length > PLANS_SHOWN && (
-        <button type="button" className="t-caption fms-linkbtn fms-budgetplanned-more" aria-expanded={all} onClick={() => setAll((v) => !v)}>
-          {all ? "Show the soonest only" : `Show all ${planned.views.length} plans: ${planned.views.length - PLANS_SHOWN} more, ${formatMoney(planned.views.slice(PLANS_SHOWN).reduce((s, v) => s + v.left, 0))}`}
-        </button>
-      )}
-      {/*
-        The working, from what the spending budget has left: the plans taken
-        off by how sure they are (owner, 27 October 2026: "show also the
-        calculation of the one with the planner but be accurate because some
-        with no date, no exact goal or really just a plan without making sure
-        if we will continue with it"). Set aside is held back in safe to
-        spend; not set aside may not go ahead; a goal's is spending all the
-        same, paid from money saved for it.
-      */}
-      {!noPlan && planned.spending > 0 && (
-        <dl className="t-caption fms-rowfacts fms-budgetplancalc">
-          <div>
-            <dt>Left of the spending budget</dt>
-            <dd>
-              <Money value={spendingLeft} size="s" />
-            </dd>
-          </div>
-          {sure > 0 && (
-            <div>
-              <dt>Plans set aside in safe to spend</dt>
-              <dd>
-                <Money value={-sure} size="s" tone="var(--ink-2)" />
-              </dd>
-            </div>
-          )}
-          {maybe > 0 && (
-            <div>
-              <dt>Plans not set aside, may not go ahead</dt>
-              <dd>
-                <Money value={-maybe} size="s" tone="var(--ink-2)" />
-              </dd>
-            </div>
-          )}
-          {fromGoal > 0 && (
-            <div>
-              <dt>Plans paid from a goal</dt>
-              <dd>
-                <Money value={-fromGoal} size="s" tone="var(--ink-2)" />
-              </dd>
-            </div>
-          )}
-          <div className="fms-budgetplancalc-total">
-            <dt>Left after {[sure, maybe, fromGoal].filter((x) => x > 0).length > 1 ? "all of them" : "them"}</dt>
-            <dd>
-              <Money value={spendingLeft - planned.spending} size="s" />
-            </dd>
-          </div>
-          {maybe > 0 && (
-            <div>
-              <dt>Left if only the plans set aside go ahead</dt>
-              <dd>
-                <Money value={spendingLeft - sure - fromGoal} size="s" />
-              </dd>
-            </div>
-          )}
-        </dl>
-      )}
-      {words && (
-      <p className="t-caption fms-plannote">
-        {over && (
-          <span className="fms-plannote-icon" style={{ color: "var(--over)" }} aria-hidden>
-            <Icon name="statusOver" size={16} />
-          </span>
-        )}
-        <span>{words}</span>
-      </p>
-      )}
-      {undated.length > 0 && (
-        <p className="t-caption fms-plannote" style={{ color: "var(--ink-3)" }}>
-          <span>
-            Not in any month yet, with no date: {undated.slice(0, 4).map((v) => `${v.plan.title} ${formatMoney(v.left)}`).join(", ")}
-            {undated.length > 4 ? `, and ${undated.length - 4} more` : ""}. Give {undated.length === 1 ? "it" : "each"} a month on the Planner and it counts there.
-          </span>
-        </p>
-      )}
-      {onOpenPlanner && (
-        <button type="button" className="t-caption fms-linkbtn" onClick={onOpenPlanner}>
-          Open the Planner
-        </button>
-      )}
-    </section>
-  );
-}
 
 function TrackRow({ label, track, pace }: { label: string; track: BudgetTrack; pace?: number | undefined }) {
   const none = track.status === "NO BUDGET SET";
@@ -2235,10 +2062,21 @@ function IncomeSplitCard({
       {view.over > 0 ? (
         <>
           <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
-            Your budget is {formatMoney(view.over)} more than your money can cover. {view.plans > 0 ? `Spent so far, plus the ${formatMoney(Math.max(0, view.most - view.spent))} the wallets can still pay this month (plans set aside included), is` : "Spent so far plus safe to spend is"} {formatMoney(view.most)}.
+            Your budget is {formatMoney(view.over)} more than the money you hold now can cover. {view.plans > 0 ? `Spent so far, plus the ${formatMoney(Math.max(0, view.most - view.spent))} the wallets can still pay this month (plans set aside included), is` : "Spent so far plus safe to spend is"} {formatMoney(view.most)}.
           </p>
+          {/*
+            The 1st of the month, before the income has come: "Lower it to
+            PHP 0.00" (owner's data, 1 November 2026). The usual month's
+            income still to come is said beside it, and lowering stays a
+            choice, not the first one offered.
+          */}
+          {view.toCome && view.toCome.toCome > 0 && (
+            <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
+              {overWords(view.over, view.most, view.toCome).replace(/^The spending budget is .*? can cover\. /, "")}
+            </p>
+          )}
           <Button
-            variant="primary"
+            variant={view.toCome && view.toCome.toCome >= view.over ? "secondary" : "primary"}
             onClick={() =>
               void ask(
                 { spending: view.most, billsSubs: view.billsBudget },
