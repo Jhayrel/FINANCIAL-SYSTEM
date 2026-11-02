@@ -56,7 +56,7 @@ export function matchedOnIn(text: string, asOf: IsoDate): IsoDate | null {
 
 /** Words that say the figures do not agree, or ask to check them. */
 const MISMATCH =
-  /\b(extra money|more money than|have extra|has extra|got extra|more than (?:the |my )?(?:system|app|ledger|tracker)|less than (?:the |my )?(?:system|app|ledger|tracker)|where('?s| is| are| did| does| do)? (the )?(rest|remaining|difference|missing|balance|it go|they go|my money)|where did (my|the|it)|where('?s| is) my|missing|nawawala|nasaan|doesn'?t match|don'?t match|not match(ing)?|hindi (match|tugma)|mismatch|discrepanc\w*|reconcile|reconciliation|investigate|investigation|find (the|my) (difference|missing)|balance is (off|wrong|different)|does(?:n'?t| not) balance|not balanced|off by|wrong balance|unaccounted|lost money|check my balance|different (from|than) (the )?(app|bank|system))\b/i;
+  /\b(extra money|more money than|have extra|has extra|got extra|more than (?:the |my )?(?:system|app|ledger|tracker)|less than (?:the |my )?(?:system|app|ledger|tracker)|where('?s| is| are| did| does| do)? (the )?(rest|remaining|difference|missing|balance|it go|they go|my money)|where did (my|the|it)|where('?s| is) my|missing|nawawala|nasaan|doesn'?t match|don'?t match|not match(ing)?|hindi (match|tugma)|mismatch|discrepanc\w*|reconcile|reconciliation|investigate|investigation|find (the|my) (difference|missing)|balance is (off|wrong|different)|does(?:n'?t| not) balance|not balanced|off by|wrong balance|unaccounted|lost money|check my balance|different (from|than) (the )?(app|bank|system)|(fix|correct|adjust|update|ayusin|itama)\s+(my |the |ang )?([a-z]+ ){0,2}?(balance|balances)|balance (fix|correction)|my balance is (now )?(wrong|off|incorrect))\b/i;
 
 /**
  * A balance said for an account: "my balance is", "the balance now", "check
@@ -181,7 +181,8 @@ export function readInvestigateAsk(
 
   if (!mismatch && !counted && !contrasted && !claimed) return null;
   // "where did I spend the most" names no account and no figure: not this.
-  if (!account && figures.length === 0 && !/\b(reconcile|investigate|mismatch|discrepanc\w*|doesn'?t match|hindi match)\b/i.test(text)) {
+  // "fix my balance" (owner's chat, 1 November 2026) asks for it too: which account, and what it holds, come next.
+  if (!account && figures.length === 0 && !/\b(reconcile|investigate|mismatch|discrepanc\w*|doesn'?t match|hindi match|(?:fix|correct|adjust|ayusin|itama)\s+(?:my |the |ang )?(?:[a-z]+ ){0,2}?balances?|balance is (?:now )?(?:wrong|off|incorrect))\b/i.test(text)) {
     return null;
   }
 

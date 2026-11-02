@@ -23,13 +23,21 @@ const ASKS =
 // "What's my balance on Maya Credit?": a debt's balance, only when a debt is named (27 October 2026 sweep).
 const BALANCE_ON = /\b(?:balance|outstanding|natitira)\b[^?.!]{0,12}\b(?:on|of|for|sa|ng)\b|\b(?:how\s+much\s+is\s+left|what'?s\s+left)\s+(?:on|of|to\s+pay\s+on)\b/i;
 
+const HAS_LOAN = /\b(?:i\s+have|i've\s+got|i\s+got|i\s+still\s+have|may)\s+(?:a\s+|an\s+|some\s+|pa\s*(?:ng|akong)?\s+|akong\s+)?(?:loans?|debts?|utang|balance|credit)\s+(?:(?:ako|ko|pa)\s+)?(?:in|on|with|from|at|to|sa)\b/i;
+
 export function readDebtAsk(said: string, debts: readonly Debt[]): DebtAsk | null {
   const t = said.trim();
   const byBalance = !ASKS.test(t) && BALANCE_ON.test(t);
-  if ((!ASKS.test(t) && !byBalance) || /\d/.test(t)) return null;
+  if ((!ASKS.test(t) && !byBalance && !HAS_LOAN.test(t)) || /\d/.test(t)) return null;
   // "I owe Ana, she lent it to me" tells; a question asks.
   const asked = /\?\s*$/.test(t) || /^\s*(?:how|what|when|who|which|do|does|is|am|magkano|ilan|kailan|sino|may)\b/i.test(t);
-  if (!asked) return null;
+  /*
+   * "I have loan in maya credit", with no figure: told, but nothing to add,
+   * and what it holds is what they want to see (owner's chat, 1 November
+   * 2026: it got the month's summary). Only with a line named.
+   */
+  const hasOne = HAS_LOAN.test(t);
+  if (!asked && !hasOne) return null;
   const named = [...debts]
     .filter((d) => !d.archived || /\barchived\b/i.test(t))
     .sort((a, b) => b.name.length - a.name.length)
@@ -38,7 +46,7 @@ export function readDebtAsk(said: string, debts: readonly Debt[]): DebtAsk | nul
         .filter((w) => w.length >= 3)
         .some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)),
     );
-  if (byBalance && !named) return null;
+  if ((byBalance || (hasOne && !asked)) && !named) return null;
   return { debt: named ?? null, said: t };
 }
 

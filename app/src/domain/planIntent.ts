@@ -164,13 +164,16 @@ function thingIn(text: string): string {
    * this (owner, 27 October 2026).
    */
   thing =
-    thing.split(/\s+(?:like\s+)?(?:i|we)\s+(?:want|wanna|need|think|guess|plan|will|would|might|hope|really)\b|\s+like\s+(?:i|we|maybe|around|about|mga|siguro)\b|\s+so\s+(?:i|we|that)\b|\s+(?:which|that)\s+(?:i|we|will|would|costs?|is)\b|\s+(?:let\s+me\s+know|tell\s+me|what\s+do\s+you\s+think|any\s+(?:advice|thoughts?)|please|pls)\b/i)[0] ?? thing;
+    // "eat outside tomorrow I know I can afford it but should I ..." is eating out (owner, 1 November 2026).
+    thing.split(/\s+(?:like\s+)?(?:i|we)\s+(?:want|wanna|need|think|guess|plan|will|would|might|hope|really|know|can|could|already|am|have)\b|\s+but\s+(?:i|we|should|is|it|maybe)\b|\s+like\s+(?:i|we|maybe|around|about|mga|siguro)\b|\s+so\s+(?:i|we|that)\b|\s+(?:which|that)\s+(?:i|we|will|would|costs?|is)\b|\s+(?:let\s+me\s+know|tell\s+me|what\s+do\s+you\s+think|any\s+(?:advice|thoughts?)|please|pls)\b/i)[0] ?? thing;
   // "iphone 18 pro max": the model number is the name, kept through the cleaning below and put back (`modelNumbers.ts`).
   const models = protectModels(thing);
   thing = models.text;
   const months = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
   thing = withoutYears(thing)
     .replace(/^\s*(?:to\s+)?(?:buy(?:ing)?|get(?:ting)?|pay(?:ing)?(?:\s+for)?|go\s+(?:to|on)|hav(?:e|ing))\s+/i, "")
+    // "planning to eat outside": eating outside, not "To eat outside".
+    .replace(/^\s*to\s+(?=[a-z])/i, "")
     .replace(new RegExp(String.raw`\b(?:on|by|for|in|until|before|this|next|sa)?\s*${months}\.?(?:\s+\d{1,2}(?:st|nd|rd|th)?)?(?:,?\s+20\d{2})?\b`, "gi"), " ")
     .replace(/\b(?:on|by|for|in|due|before|sa)?\s*(?:next\s+(?:month|week|year)|this\s+(?:month|week|weekend|year)|end\s+of\s+(?:the\s+|this\s+)?month|tomorrow|bukas|today|tonight|now|ngayon|mamaya|later|this\s+(?:morning|afternoon|evening|noon)|in\s+\w+\s+(?:days?|weeks?|months?)|(?:on\s+)?the\s+\d{1,2}(?:st|nd|rd|th)|(?:this\s+|next\s+|on\s+)?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)|in\s+20\d{2}|christmas|pasko)\b/gi, " ")
     .replace(/(?:₱|php\s*)?\d[\d,]*(?:\.\d{1,2})?\s*k?\b/gi, " ")

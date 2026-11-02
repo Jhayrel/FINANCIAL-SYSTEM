@@ -7506,7 +7506,7 @@ export function AskPanel({
         }
 
         if (spent) {
-          const reply = spendAnswer(spent, reportRows, asOf);
+          const reply = spendAnswer(spent, reportRows, asOf, reference.spendingTypes);
           // "how much did I spend each month this year": the months drawn as well as summed.
           await answerWithModel(`The sum the message asks about, worked out by the app from the ledger. Answer with it, in your own words:\n${reply}`, reply, besideFor(ruled));
           return;

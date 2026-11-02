@@ -125,3 +125,26 @@ describe("a thing on no list", () => {
     expect(spendAnswer(ask!, rows, asOf)).toMatch(/^No spending entry says "concerts" in September 2026, or in the last year\./);
   });
 });
+
+describe("the owner's chat, 1 November 2026", () => {
+  const types = [{ name: "Food", necessity: "essential" as const }, { name: "Treats", necessity: "discretionary" as const }];
+  const t = (id: string, date: string, item: string, amount: number): Transaction =>
+    ({ id, recordNumber: Number(id.slice(1)), date, type: "Spending", fromWallet: "Cash", toWallet: "", category: "Spending", item, description: item, amount, fee: 0, total: amount, notes: "", status: "Paid" }) as Transaction;
+  const rows = [t("x1", "2025-03-01", "Food", 10000), t("x2", "2025-06-01", "Treats", 5000), t("x3", "2026-10-30", "Treats", 2500)];
+
+  it("reads since I started as every entry, and badly as the wants", () => {
+    const ask = readSpendAsk("How much I spend badly since started the entries?", ["Food", "Treats"], "2026-11-01");
+    expect(ask).toMatchObject({ item: null, from: "0001-01-01", to: "2026-11-01", wants: true });
+    const said = spendAnswer(ask!, rows, "2026-11-01", types);
+    expect(said).toContain("You spent **PHP 75.00** since your first entry on wants, over 2 entries.");
+    expect(said).toContain("out of PHP 175.00 of all spending in the same time");
+  });
+});
+
+describe("a kind misspelled by one key (owner's chat, 1 November 2026)", () => {
+  it("reads foodo as Food, and leaves a word near two kinds alone", () => {
+    expect(readSpendAsk("Can you compare my spending on foodo this month and last month?", ["Food", "Treats"], "2026-11-01")?.item).toBe("Food");
+    expect(readSpendAsk("how much did i spend on shoes this month", ["Food", "Treats", "Shoe", "Shop"], "2026-11-01")?.item ?? null).toBe("Shoe");
+    expect(readSpendAsk("how much did i spend on grab this month", ["Food", "Gas"], "2026-11-01")?.word).toBe("grab");
+  });
+});

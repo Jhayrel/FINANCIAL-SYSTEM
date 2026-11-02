@@ -27,6 +27,7 @@
  */
 
 import { withoutPlanClause } from "./planClause";
+import { withDayWordsFixed } from "./typos";
 import { formatMedium } from "./dates";
 import { namesMoney, withoutTotals } from "./entryTotals";
 import { cashWallet } from "./withdrawal";
@@ -523,7 +524,9 @@ const daysBetweenIso = (a: IsoDate, b: IsoDate): number => Math.round((Date.pars
 /** The day a sentence says something happened, read as an entry reads it (past first); today when none is said. */
 export const dateSaid = (text: string, asOf: IsoDate): { readonly date: IsoDate; readonly said: boolean } => dateIn(text, asOf);
 
-function dateIn(text: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
+function dateIn(said: string, asOf: IsoDate): { date: IsoDate; said: boolean } {
+  // "tommorrow", "yestarday": the day meant (`typos.ts`).
+  const text = withDayWordsFixed(said);
   const iso = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(text);
   if (iso?.[1]) return { date: iso[1], said: true };
 
@@ -1300,10 +1303,10 @@ const LENDER_FEE = /\b(?:service|dst|stamp|documentary|interest|penalty|late|pro
 
 function feeIn(text: string): { fee: number; rest: string } {
   const patterns = [
-    // "15 fee", "15 pesos fee", "15 charge"
-    /(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)\s*(?:pesos?\s*)?(?:fee|charge|convenience fee|service fee)\b/i,
-    // "fee 15", "fee of 15", "charge: 15"
-    /\b(?:fee|charge|convenience fee|service fee)\s*(?:of|is|:)?\s*(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)/i,
+    // "15 fee", "15 pesos fee", "15 charge", "+ 10 transaction fee" (owner's chat, 1 November 2026: the fee was lost)
+    /(?:\+\s*)?(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)\s*(?:pesos?\s*)?(?:(?:transaction|transfer|sending|send|bank|atm|withdrawal|cash[\s-]?out|cash[\s-]?in|convenience|service|processing)\s+)?(?:fee|charge)\b/i,
+    // "fee 15", "fee of 15", "charge: 15", "transaction fee 10"
+    /\b(?:(?:transaction|transfer|sending|send|bank|atm|withdrawal|cash[\s-]?out|cash[\s-]?in|convenience|service|processing)\s+)?(?:fee|charge)\s*(?:of|is|:)?\s*(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)/i,
   ];
 
   for (const pattern of patterns) {

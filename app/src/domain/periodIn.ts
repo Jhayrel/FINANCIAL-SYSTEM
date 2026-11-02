@@ -219,7 +219,11 @@ export function spanIn(text: string, asOf: IsoDate): Span | null {
         to = bounds(b, yearB, asOf).to;
       }
     }
-    if (to < from) [from, to] = [bounds(b, yearB, asOf).from, bounds(a, yearA, asOf).to];
+    // Said later first ("this month and last month"): the range runs forward, and so does its name (owner's chat, 1 November 2026).
+    if (to < from) {
+      [from, to] = [bounds(b, yearB, asOf).from, bounds(a, yearA, asOf).to];
+      return { from, to, name: `${nameOf(b, yearB, asOf)} to ${nameOf(a, yearA, asOf)}` };
+    }
     return { from, to, name: `${nameOf(a, yearA, asOf)} to ${nameOf(b, yearB, asOf)}` };
   }
 

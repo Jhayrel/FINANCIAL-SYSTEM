@@ -20,7 +20,7 @@ import { costOf, incomeOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 
 export type QuickAsk =
-  | { readonly kind: "biggest"; readonly month: "this" | "last"; readonly span?: "week" | "today" | undefined }
+  | { readonly kind: "biggest"; readonly month: "this" | "last"; readonly span?: "week" | "today" | undefined; readonly all?: boolean | undefined }
   | { readonly kind: "budget" }
   | { readonly kind: "savings" }
   | { readonly kind: "saved" }
@@ -34,6 +34,7 @@ export type QuickAsk =
 
 const BIGGEST =
   /\b(?:biggest|largest|highest|top|most)\b[^?.!]{0,30}\b(?:expenses?|spending|spend|costs?|gastos|categor(?:y|ies)|kinds?)\b|\bwhere\s+(?:did|does|do)\s+(?:most\s+of\s+)?my\s+money\s+go\b|\bsaan\s+(?:napunta|nauubos)\b|\bwhat\s+(?:did|do)\s+i\s+spend\s+(?:the\s+)?most\s+on\b|\bpinaka\s*malaki\b[^?.!]{0,20}\bgastos\b/i;
+const BREAKDOWN = /\b(?:breakdown|break\s*down|split)\b[^?.!]{0,30}\b(?:spending|spend|spent|expenses?|gastos)\b|\b(?:spending|expenses?)\s+(?:breakdown|by\s+(?:kind|category|item))\b/i;
 const BUDGET =
   /\b(?:am\s+i|are\s+we|did\s+i\s+go|have\s+i\s+gone|is\s+my\s+spending)\s+(?:over|above|past|within|under)\s+(?:my\s+|the\s+)?budget\b|\bover\s+(?:my\s+|the\s+)?budget\s*\?|\blagpas\b[^?.!]{0,20}\bbudget\b|\b(?:how\s+much|magkano|what'?s|what\s+is)\b[^?.!]{0,30}\b(?:left|natitira|matitira|remaining|natira)\b[^?.!]{0,20}\bbudget\b|\bbudget\b[^?.!]{0,20}\b(?:left|natitira|remaining|natira)\b|\bhow\s+(?:is|'?s)\s+my\s+budget\b/i;
 const SAVINGS = /\b(?:how\s+much|magkano|what'?s|what\s+is|show)\b[^?.!]{0,15}\b(?:is\s+|are\s+)?(?:my|aking)\s+(?:savings?|ipon)\b|\bmy\s+savings?\s+(?:balance|total)\b|\bmagkano\s+(?:na\s+)?(?:ang\s+)?(?:ipon|naipon)\b/i;
@@ -71,9 +72,11 @@ export function readQuickAsk(text: string, kinds: readonly string[] = [], wallet
   });
   if (SAVED.test(t) && !/\b(?:per|a|each)\s+month\s+for\b|\bto\s+(?:have|reach|buy)\b/i.test(t)) return { kind: "saved" };
   if (SAVINGS.test(t)) return { kind: "savings" };
-  if (BIGGEST.test(t)) {
+  // "i need a breakdown of my spending this month": every kind, biggest first (owner's chat, 1 November 2026).
+  const breakdown = BREAKDOWN.test(t) && !/\b(?:chart|graph|pie|bars?|trend)\b/i.test(t);
+  if (BIGGEST.test(t) || breakdown) {
     const span = /\bthis\s+week\b|\bngayong\s+linggo\b/i.test(t) ? "week" : /\btoday\b|\bngayon\b/i.test(t) ? "today" : undefined;
-    return { kind: "biggest", month: /\blast\s+month\b|\bnakaraang\s+buwan\b/i.test(t) ? "last" : "this", ...(span ? { span } : {}) };
+    return { kind: "biggest", month: /\blast\s+month\b|\bnakaraang\s+buwan\b/i.test(t) ? "last" : "this", ...(span ? { span } : {}), ...(breakdown ? { all: true } : {}) };
   }
   if (BUDGET.test(t) && !namesKind && !/\b(?:next\s+month|set|make|change|propose|recommend|suggest)\b/i.test(t)) return { kind: "budget" };
   return null;
@@ -167,8 +170,17 @@ export function quickAnswer(ask: QuickAsk, f: QuickFacts, money: (c: Centavos) =
     const weekStart = addDays(f.asOf, -((new Date(`${f.asOf}T00:00:00Z`).getUTCDay() + 6) % 7));
     const from = ask.span === "week" ? weekStart : ask.span === "today" ? f.asOf : null;
     const rows = f.transactions.filter((r) => (from ? r.date >= from : r.date.startsWith(key)) && r.date <= f.asOf);
-    const kinds = costByKind(rows, f.debts).slice(0, 5);
+    const kinds = costByKind(rows, f.debts).slice(0, ask.all ? 20 : 5);
     const spanName = ask.span === "week" ? `this week (since ${formatMedium(weekStart)})` : ask.span === "today" ? "today" : null;
+    /*
+     * The 1st of the month, nothing spent yet: "Show my highest spending in
+     * chart" on November 1 was told only that (owner's chat, 1 November
+     * 2026). Said, then last month's, which is what there is to show.
+     */
+    if (kinds.length === 0 && ask.month === "this" && !ask.span) {
+      const last = quickAnswer({ ...ask, month: "last" }, f, money);
+      return /^Nothing was spent/.test(last) ? `Nothing was spent in ${name} yet, or last month.` : `Nothing was spent in ${name} yet, so here is last month.\n${last}`;
+    }
     if (kinds.length === 0) return `Nothing was spent ${spanName ?? `in ${ask.month === "last" ? "last month" : name}`} yet.`;
     const total = rows.reduce((s, r) => s + Math.max(0, costOf(r)), 0);
     // One entry over several days is one entry: its days' shares together (`covers.ts`).

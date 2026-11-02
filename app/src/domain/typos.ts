@@ -169,5 +169,17 @@ export function withCommandWordsFixed(text: string): string {
      * slips of "plan" are fixed where a command starts.
      */
     .replace(/^(\s*)(?:plna|paln|plnn|plam|plab|lpan|pkan|plsn|pln)\b/i, "$1plan");
-  return months.replace(/[A-Za-z]+/g, (word) => meant(word));
+  return withDayWordsFixed(months).replace(/[A-Za-z]+/g, (word) => meant(word));
+}
+
+/**
+ * Days, misspelled two ways at once or shortened: "I am planning to eat
+ * outside tommorrow" was read as a plan with no date (owner's chat, 1
+ * November 2026), and "tommorow" is two keystrokes from the word. Used by
+ * the rules and by the entry reader, so a card is dated the day meant.
+ */
+export function withDayWordsFixed(text: string): string {
+  return text
+    .replace(/\b(?:tom+or+ow+|tom+or+o|tomor+w|tmrw|tmrow|tmr|tom+ro+w)\b/gi, "tomorrow")
+    .replace(/\b(?:yest[ae]r?day|yesturday|yesterdy|yesterdya|ystrdy|yday)\b/gi, "yesterday");
 }

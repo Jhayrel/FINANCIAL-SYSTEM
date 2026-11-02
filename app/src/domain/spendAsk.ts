@@ -20,7 +20,8 @@ import { dayFromWords } from "./dayWords";
 import { formatMoney, type Centavos } from "./money";
 import { itemHintIn } from "./filipino";
 import { costOf } from "./totals";
-import type { IsoDate, Transaction } from "./types";
+import { isNeedRow } from "./spendNote";
+import type { IsoDate, SpendingType, Transaction } from "./types";
 
 export interface SpendAsk {
   /** The item, as the ledger names it, or null for everything. */
@@ -36,6 +37,30 @@ export interface SpendAsk {
    * (27 October 2026 sweep). The answer counts the entries that say it.
    */
   readonly word?: string;
+  /** "How much did I spend badly?": wants only, the kinds not marked or known as needs (`isNeedRow`). */
+  readonly wants?: boolean;
+}
+
+/** Every entry up to today: "since I started the entries", "all time", "ever" (owner, 1 November 2026). */
+const ALL_TIME = /\bsince\s+(?:i\s+)?(?:first\s+)?(?:start(?:ed)?|began|begun)\b|\bsince\s+(?:the\s+)?(?:start|beginning|first\s+entry)\b|\ball[\s-]?time\b|\bsince\s+day\s+one\b|\bfrom\s+the\s+(?:start|beginning)\b|\bever\b|\bsimula\s+(?:noon|umpisa|nagsimula)\b/i;
+/** Spending they regret or call wasteful: the wants. */
+const WANTS_ASKED = /\b(?:badly|wastefully|wasted|unnecessar(?:y|ily)|on\s+wants|on\s+things\s+i\s+(?:do\s*n'?t|did\s*n'?t)\s+need|luho|sayang|walang\s+kwenta)\b/i;
+
+/** One keystroke apart: a letter added, dropped, changed or two swapped. */
+function slipOf(typed: string, name: string): boolean {
+  if (typed === name || Math.abs(typed.length - name.length) > 1 || typed.length < 4) return false;
+  const rows = typed.length + 1;
+  const cols = name.length + 1;
+  const d: number[][] = Array.from({ length: rows }, (_, i) => Array.from({ length: cols }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < cols; j += 1) {
+      const cost = typed[i - 1] === name[j - 1] ? 0 : 1;
+      let v = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + cost);
+      if (i > 1 && j > 1 && typed[i - 1] === name[j - 2] && typed[i - 2] === name[j - 1]) v = Math.min(v, d[i - 2]![j - 2]! + 1);
+      d[i]![j] = v;
+    }
+  }
+  return d[rows - 1]![cols - 1] === 1;
 }
 
 /** Common slips, only in the words this reader looks for. */
@@ -96,10 +121,18 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
     if (!period.test(named)) {
       const thing = named.replace(/^(?:a|an|the|my|mga)\s+/, "");
       if (!/^[a-z][a-z'-]{2,20}(?:\s[a-z][a-z'-]{2,20})?$/.test(thing) || /^(?:it|that|this|them|things?|stuff|everything|anything|something|myself|me|you|average)$/.test(thing)) return null;
+      // "foodo" is Food, one key off (owner's chat, 1 November 2026); only when one kind is that close.
+      const near = items.filter((name) => name.trim().length >= 4 && slipOf(thing, name.trim().toLowerCase()));
+      if (near.length === 1) return readSpendAsk(said.replace(new RegExp(`\\b${thing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i"), near[0]!), items, asOf);
       word = thing;
     }
   }
-  const withWord = <T extends SpendAsk>(a: T): T => (word ? { ...a, word } : a);
+  const wants = WANTS_ASKED.test(text);
+  const withWord = <T extends SpendAsk>(a: T): T => {
+    const out = word ? { ...a, word } : a;
+    return wants && !item ? { ...out, wants: true } : out;
+  };
+  if (ALL_TIME.test(text)) return withWord({ item, from: "0001-01-01", to: asOf, name: "since your first entry" });
 
   /*
    * A run of days, however it is said ("in span of oct 10 to 12", "between
@@ -123,7 +156,16 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
 }
 
 /** What was spent, in one or two sentences, with the figure bolded. */
-export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[], asOf: IsoDate): string {
+export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[], asOf: IsoDate, spendingTypes: readonly Pick<SpendingType, "name" | "necessity">[] = []): string {
+  // Wants only: the same answer over the rows that are not needs, said as such.
+  if (ask.wants) {
+    const { wants: _w, ...plain } = ask;
+    const wanted = transactions.filter((t) => costOf(t) > 0 && !isNeedRow(t, null, spendingTypes));
+    const all = spendAnswer(plain, transactions, asOf, spendingTypes);
+    const own = spendAnswer({ ...plain, item: null }, wanted, asOf, spendingTypes).replace(/\bspent \*\*/, "spent **").replace(/,? over (\d+ (?:entry|entries))/, " on wants, over $1");
+    const whole = /\*\*(PHP [\d,.]+)\*\*/.exec(all)?.[1];
+    return `${own}${whole ? ` That is out of ${whole} of all spending in the same time.` : ""} Wants are the kinds not marked as needs in Settings, Categories; bills, subscriptions and fees count as needs.`;
+  }
   /*
    * A word that points at a kind: the entries that say it, and the whole
    * kind beside them, when they are not all of it.
@@ -162,7 +204,7 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
    */
   const weekday = /^(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),/.test(ask.name);
   const week = /^(this|last) week, (.+)$/.exec(ask.name);
-  const when = /^(?:yesterday|today)$|^the (?:last|past)\b/i.test(ask.name)
+  const when = /^(?:yesterday|today)$|^the (?:last|past)\b|^since\b/i.test(ask.name)
     ? ask.name
     : weekday
       ? `on ${ask.name}`

@@ -275,3 +275,10 @@ describe("plans said every way", () => {
     expect(read("I need some help")).toBeNull();
   });
 });
+
+describe("the owner's chat, 1 November 2026", () => {
+  it("titles a meal out by the meal, not by how they feel about it", () => {
+    const got = read("I am planning to eat outside tomorrow I know I can afford it but should I just eat at home or outside?");
+    expect(got?.kind === "later" ? got.plans.map((p) => p.title) : got).toEqual(["Eat outside"]);
+  });
+});

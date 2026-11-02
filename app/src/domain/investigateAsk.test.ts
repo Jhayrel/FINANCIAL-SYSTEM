@@ -53,3 +53,13 @@ describe("the day it last matched", () => {
     expect(matchedOnIn("where did my 20k go", "2026-09-17")).toBeNull();
   });
 });
+
+// Owner's chat, 1 November 2026: "fix my balance" got the month's summary.
+describe("asking to fix a balance", () => {
+  it("is a request to find the difference, the account and figure asked next", () => {
+    const none = (): number => 0;
+    expect(readInvestigateAsk("fix my balance", ["Cash", "Gcash", "Maya"], none)).toEqual({ account: "", actual: null, gap: null });
+    expect(readInvestigateAsk("I think after I fix the data in the review my balance is now wrong what to do?", ["Cash", "Gcash", "Maya"], none)).toEqual({ account: "", actual: null, gap: null });
+    expect(readInvestigateAsk("fix my gcash balance", ["Cash", "Gcash", "Maya"], none)?.account).toBe("Gcash");
+  });
+});

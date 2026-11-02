@@ -319,3 +319,16 @@ describe("a model number in an entry is not its amount (27 October 2026)", () =>
     expect(readEntry("bought 128gb flash drive 450", [], reference, "2026-10-26").draft.amount).toBe(45_000);
   });
 });
+
+describe("the owner's chat, 1 November 2026", () => {
+  it("keeps a fee named with what it was for: food 940 + 10 transaction fee", () => {
+    const { draft } = readEntry("I paid using maya food 940 + 10 transaction fee", ledger, reference, "2026-11-01");
+    expect(draft).toMatchObject({ amount: 94000, fee: 1000, fromWallet: "Maya", item: "Food" });
+    expect(readEntry("sent 500 to gcash transaction fee 15", ledger, reference, "2026-11-01").draft).toMatchObject({ amount: 50000, fee: 1500 });
+  });
+
+  it("dates a misspelled day as the day meant", () => {
+    expect(readEntry("bought load 50 tommorrow", ledger, reference, "2026-11-01").draft.date).toBe("2026-11-02");
+    expect(readEntry("food 120 yestarday cash", ledger, reference, "2026-11-01").draft.date).toBe("2026-10-31");
+  });
+});

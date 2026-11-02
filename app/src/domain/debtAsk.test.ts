@@ -36,3 +36,13 @@ describe("a debt's balance asked by name", () => {
     expect(readDebtAsk("what's my balance on gcash?", [card, friend])).toBeNull();
   });
 });
+
+// Owner's chat, 1 November 2026: "I have loan in maya credit" got the month's summary.
+describe("a loan said, with no figure", () => {
+  it("shows the line named, and is nothing without one or with a figure", () => {
+    expect(readDebtAsk("I have loan in Card Credit", [card, friend])?.debt?.id).toBe("card");
+    expect(readDebtAsk("may utang ako sa Card Credit", [card, friend])?.debt?.id).toBe("card");
+    expect(readDebtAsk("I have a loan in BPI", [card, friend])).toBeNull();
+    expect(readDebtAsk("I have loan in Card Credit 500", [card, friend])).toBeNull();
+  });
+});

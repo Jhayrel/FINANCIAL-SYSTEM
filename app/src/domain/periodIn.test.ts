@@ -118,3 +118,9 @@ describe("a statement sheet for days", () => {
     expect(sheet.lines.map((l) => (l as { date?: string }).date).filter(Boolean)).toEqual(["2026-09-01", "2026-09-19"]);
   });
 });
+
+describe("a range said later first (owner's chat, 1 November 2026)", () => {
+  it("runs forward, and is named that way", () => {
+    expect(spanIn("food this month and last month", "2026-11-01")).toEqual({ from: "2026-10-01", to: "2026-11-30", name: "October 2026 to November 2026" });
+  });
+});
