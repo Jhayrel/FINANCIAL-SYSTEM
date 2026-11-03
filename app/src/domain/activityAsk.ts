@@ -68,6 +68,17 @@ const ACTIONS: Readonly<Record<NonNullable<ActivityAsk["action"]>, readonly Acti
   settings: ["settings.update"],
 };
 
+/** Plan events, in the tally of what changed: they were left out of it (3 November 2026). */
+const PLAN_WORD: Readonly<Record<"plan.create" | "plan.update" | "plan.move" | "plan.paid" | "plan.skip" | "plan.remove" | "plan.restore", readonly [string, string]>> = {
+  "plan.create": ["plan added", "plans added"],
+  "plan.update": ["plan edited", "plans edited"],
+  "plan.move": ["plan moved", "plans moved"],
+  "plan.paid": ["plan payment", "plan payments"],
+  "plan.skip": ["plan skipped", "plans skipped"],
+  "plan.remove": ["plan removed", "plans removed"],
+  "plan.restore": ["plan put back", "plans put back"],
+};
+
 const VERB: Readonly<Record<NonNullable<ActivityAsk["action"]>, string>> = {
   add: "added",
   edit: "edited",
@@ -103,9 +114,10 @@ export function activityAnswer(ask: ActivityAsk, events: readonly ActivityEvent[
   }
   const counts = new Map<string, number>();
   for (const e of wanted) counts.set(e.action, (counts.get(e.action) ?? 0) + 1);
-  const part = (a: Action, word: string): string | null => {
+  // "1 plan added", "2 plans added": a word given as one and many reads right at either count.
+  const part = (a: Action, word: string | readonly [string, string]): string | null => {
     const n = counts.get(a) ?? 0;
-    return n > 0 ? `${n} ${word}` : null;
+    return n > 0 ? `${n} ${typeof word === "string" ? word : n === 1 ? word[0] : word[1]}` : null;
   };
   const tally = [
     part("transaction.create", "added"),
@@ -114,7 +126,12 @@ export function activityAnswer(ask: ActivityAsk, events: readonly ActivityEvent[
     part("transaction.restore", "restored"),
     part("budget.update", "budget changes"),
     part("settings.update", "settings changes"),
-    part("backup.restore", "backups restored"),
+    part("backup.restore", ["backup restored", "backups restored"]),
+    ...(["plan.create", "plan.update", "plan.move", "plan.paid", "plan.skip", "plan.remove", "plan.restore"] as const).map((a) => part(a, PLAN_WORD[a])),
+    part("data.backup", ["backup taken", "backups taken"]),
+    part("data.export", ["export", "exports"]),
+    part("data.upload", ["upload", "uploads"]),
+    part("transaction.purge", "deleted for good"),
   ].filter(Boolean);
   const shown = wanted.slice(0, 12).map((e) => {
     const d = dayOf(e.at);

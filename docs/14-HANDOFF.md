@@ -2486,6 +2486,50 @@ and make it ai first", with two phone screenshots. Each case below is in
 - Left as it is, for the owner (section 6, item 8): money someone gives you
   to hold on an On behalf line is counted in net worth.
 
+### 2026-11-03, later: plans to pay a debt; Planner, Database and Activity in step
+
+Owner: "Fix the reasoning and everything every part etc sync all", "every
+part of the system even setting will be recorded in activity log", "the
+statements update it with the planner", "Reveiw the dataabse backup", "what
+if I missed or ignore or edit", "What happens if I added it and edit it in
+database", "Pay? Make sure the logic aligns", "what about if I want to pay a
+loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
+`planToLedger.test.ts`, `activityEverywhere.test.ts`.
+
+- **Plans to pay a debt** (P12): a third kind on the Planner form, in the
+  chat, on every screen; paid by a repayment on its line; never in a
+  budget's spending; not held back twice when the line's payment is.
+- **A plan to save turned into one to spend**: changing a waiting card by
+  words ("... this month") or a plan's amount from the chat dropped where
+  the money goes, so "Save into Maya Bank" showed Pay. Fixed (`inputOf`);
+  the owner's own plan made that way is flagged under the bell (section 6,
+  item 9).
+- **A plain entry for a planned thing** left the plan open and held back
+  twice. The chat now offers "Count it as paid" or "Count it as moved", as
+  the Add form did. "Bought blazer" takes Online Buy from the Buy blazer plan.
+- **The Database and the Planner**: a linked entry edited down reopens a
+  plan done by it; moved to another account it stops counting; each said.
+- **Chat reasoning**: "change #3964 to extra cash" made a PHP 3,964.00
+  December budget (the record number read as money); now that entry's
+  destination. "How is the ... plan?" answers where the plan stands.
+- **Activity**: Settings changes made on the Debt screen, the Add form, the
+  chat, and lines reopened by a new entry are recorded; so are backups,
+  exports, uploads and deletes for good. A save that changed many settings
+  is cut to fit instead of refused by the database. The chat's "what
+  changed" counts the Planner too.
+- **Backups** now hold every Activity, chat and AI record; they held the
+  newest 300 to 400 (the 1 November backup's trail started 26 September).
+  The backup itself is clean: no orphaned links, totals all equal amount
+  plus fee; #3821, #3822 and #3969 share numbers as borrowings with fees.
+- **Statements, Plans**: a plan to save reads Moved and Part moved, the CSV
+  has From and Into, and a moved date, a late plan or a changed payment is
+  in its line.
+- Missed plans checked on 16 November and 2 December: the Planner,
+  Dashboard, Budget and Insights show the same overdue plans and totals.
+- Tested: the process robot (18 steps, plus a save plan, a plain transfer,
+  a debt plan and its repayment, the blazer), every figure to the centavo;
+  the 37 conversations replayed, 0 of 109 answers moved.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
@@ -2532,6 +2576,11 @@ and make it ai first", with two phone screenshots. Each case below is in
    nothing shows now. If money held for someone should not count as yours,
    say so: the line would then count as money you hold for them, and the
    PHP 1.00 case would change with it.
+9. **"Save into Maya Bank" was saved as spending (3 November).** Made from
+   the chat before the fix, it shows Pay and counts PHP 1,500.00 as planned
+   spending. The bell says so. To put it right, say "make the save into maya
+   bank plan a saving into maya bank", or on the Planner: Edit, To save or
+   move, Into Maya Bank (Personal savings).
 
 ---
 

@@ -95,7 +95,7 @@ export function PlannedInMonth({
           )}
         </div>
       )}
-      {planned.total === 0 && planned.saving === 0 && (
+      {planned.total === 0 && planned.saving === 0 && planned.debt === 0 && (
         <p className="t-caption fms-plannote" style={{ color: "var(--ink-3)" }}>
           <span>Nothing planned in {name} is still to pay.</span>
         </p>
@@ -218,6 +218,32 @@ export function PlannedInMonth({
           </ul>
           <p className="t-caption fms-plannote" style={{ color: "var(--ink-3)" }}>
             <span>Saving is not spending: no budget counts it.{planned.savingViews.some((v) => v.counts) ? " Safe to spend holds the money back until it is moved." : ""}</span>
+          </p>
+        </>
+      )}
+      {/*
+        Payments planned on a loan or credit line (P12): beside the budget,
+        never in it, as a repayment is not spending.
+      */}
+      {planned.debtViews.length > 0 && (
+        <>
+          <div className="fms-budgetplanned-head">
+            <span className="t-label">To pay on debts in {name}</span>
+            <Money value={planned.debt} size="s" />
+          </div>
+          <ul className="fms-budgetplanned-rows">
+            {planned.debtViews.map((v) => (
+              <li key={v.plan.id}>
+                <span className="t-body fms-truncate" title={v.plan.title}>
+                  {v.plan.title}
+                </span>
+                <span className="t-caption fms-budgetplanned-when">{`${v.plan.due < asOf ? `${shortWhen(v)}, overdue` : shortWhen(v)}${v.counts ? ", held back" : ""}`}</span>
+                <Money value={v.left} size="s" />
+              </li>
+            ))}
+          </ul>
+          <p className="t-caption fms-plannote" style={{ color: "var(--ink-3)" }}>
+            <span>A repayment is not spending: no budget counts it.</span>
           </p>
         </>
       )}

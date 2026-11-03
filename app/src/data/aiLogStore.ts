@@ -13,6 +13,8 @@
 
 import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc, where } from "firebase/firestore";
 
+import { readAllNewestFirst } from "./readAll";
+
 import { firestore } from "./firebase";
 import { countReads, noteError } from "./usage";
 import { byNewest, type AiEvent } from "../domain/aiLog";
@@ -77,6 +79,8 @@ const explain = (e: unknown): string => {
 export interface AiLogStore {
   record(event: AiEvent): Promise<void>;
   recent(): Promise<AiEvent[]>;
+  /** Every event there is, newest first, for a backup (`readAll.ts`). */
+  everything(): Promise<AiEvent[]>;
   /**
    * The same, read from the server once a session. Each chat panel read
    * the last 400 events every time it opened, for the corrections it learns
@@ -115,6 +119,9 @@ export function aiLogStore(uid: string | null): AiLogStore {
         return [...memory].sort(byNewest);
       },
       async recentOnce() {
+        return [...memory].sort(byNewest);
+      },
+      async everything() {
         return [...memory].sort(byNewest);
       },
       async papers() {
@@ -167,6 +174,18 @@ export function aiLogStore(uid: string | null): AiLogStore {
         );
         if (!snapshot.metadata.fromCache) countReads(snapshot.size);
         return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as AiEvent).sort(byNewest);
+      } catch (e) {
+        noteError(e, "reads");
+        throw e;
+      }
+    },
+
+    async everything() {
+      if (!db) return [];
+      try {
+        const all = await readAllNewestFirst(db, path(uid));
+        countReads(all.length);
+        return all.map((d) => ({ id: d.id, ...d.data }) as AiEvent).sort(byNewest);
       } catch (e) {
         noteError(e, "reads");
         throw e;

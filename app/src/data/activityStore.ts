@@ -28,7 +28,8 @@
 import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, setDoc } from "firebase/firestore";
 
 import { firestore } from "./firebase";
-import { byNewest, type ActivityEvent } from "../domain/activity";
+import { byNewest, withinLimits, type ActivityEvent } from "../domain/activity";
+import { readAllNewestFirst } from "./readAll";
 
 /** Enough to scroll through without paging, small enough to read in one go. */
 const PAGE = 300;
@@ -47,6 +48,8 @@ const memory: ActivityEvent[] = [];
 export interface ActivityStore {
   record(event: ActivityEvent): Promise<void>;
   recent(): Promise<ActivityEvent[]>;
+  /** Every event there is, newest first, for a backup (`readAll.ts`). */
+  everything(): Promise<ActivityEvent[]>;
   /**
    * The newest events, kept up to date as they happen on any device. The
    * screen read them once when it opened, so an entry added on the phone
@@ -67,6 +70,9 @@ export function activityStore(uid: string | null): ActivityStore {
       async recent() {
         return [...memory].sort(byNewest);
       },
+      async everything() {
+        return [...memory].sort(byNewest);
+      },
       subscribe() {
         return null;
       },
@@ -82,9 +88,14 @@ export function activityStore(uid: string | null): ActivityStore {
       // Undefined is rejected by Firestore, and the optional fields on an
       // event are genuinely absent rather than empty.
       const document = Object.fromEntries(
-        Object.entries(fields).filter(([, v]) => v !== undefined),
+        Object.entries(withinLimits(fields)).filter(([, v]) => v !== undefined),
       );
       await setDoc(doc(collection(db, path(uid)), id), document);
+    },
+
+    async everything() {
+      if (!db) return [];
+      return (await readAllNewestFirst(db, path(uid))).map((d) => ({ id: d.id, ...d.data }) as ActivityEvent).sort(byNewest);
     },
 
     subscribe(onChange, onError) {

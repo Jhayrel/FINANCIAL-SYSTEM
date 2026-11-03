@@ -12,6 +12,8 @@
 
 import { collection, doc, getDocs, getDocsFromCache, limit, onSnapshot, orderBy, query, setDoc, where } from "firebase/firestore";
 
+import { readAllNewestFirst } from "./readAll";
+
 import { firestore } from "./firebase";
 import { countReads, noteError } from "./usage";
 import { byOldest, type ChatMessage } from "../domain/chat";
@@ -59,6 +61,8 @@ const SESSION_FROM = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 export interface ChatStore {
   record(message: ChatMessage): Promise<void>;
   recent(): Promise<ChatMessage[]>;
+  /** Every message there is, oldest first, for a backup (`readAll.ts`). */
+  everything(): Promise<ChatMessage[]>;
   /**
    * What this device already holds, without asking the server. Empty when
    * nothing is cached. Shown first, so the thread is there the moment the
@@ -88,6 +92,9 @@ export function chatStore(uid: string | null): ChatStore {
       async cached() {
         return [...memory].sort(byOldest);
       },
+      async everything() {
+        return [...memory].sort(byOldest);
+      },
       watch() {
         return () => {};
       },
@@ -107,6 +114,13 @@ export function chatStore(uid: string | null): ChatStore {
         Object.entries(fields).filter(([, v]) => v !== undefined),
       );
       await setDoc(doc(collection(db, path(uid)), id), document);
+    },
+
+    async everything() {
+      if (!db) return [];
+      const all = await readAllNewestFirst(db, path(uid));
+      countReads(all.length);
+      return all.map((d) => ({ id: d.id, ...d.data }) as ChatMessage).sort(byOldest);
     },
 
     async recent() {

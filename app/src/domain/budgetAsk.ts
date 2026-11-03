@@ -72,7 +72,8 @@ const TOTAL = /\b(?:all\s+total|in\s+total|total(?:ling|ing)?|overall|all[- ]in|
 export function readBudgetTotal(said: string): Centavos | null {
   const text = respell(said).toLowerCase();
   if (text.split(/\s+/).length > 24 || asksRatherThanTells(said)) return null;
-  if (/\b(paid|spent|bought|received|bayad|nagastos|from (?:cash|maya|gcash)|#\s*\d)/i.test(text)) return null;
+  // A record named is an entry to change, never a budget: "change #3964 to extra cash" made a PHP 3,964.00 budget (3 November 2026; the respelling drops the "#").
+  if (/#\s*\d/.test(said) || /\b(paid|spent|bought|received|bayad|nagastos|from (?:cash|maya|gcash)|#\s*\d)/i.test(text)) return null;
   if (!/\b(make|set|change|put|gawin|card|equal\w*|total\w*|overall|budget|it|that)\b/.test(text)) return null;
   const m = new RegExp(NUM, "i").exec(text.replace(/\b20\d{2}\b/g, " "));
   if (!m?.[1]) return null;

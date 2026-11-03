@@ -22,7 +22,7 @@ import { inPeriod, matchesSearch, PERIODS, type Period } from "../domain/activit
 import { SearchInput } from "../components/forms";
 
 type Who = Actor | "all";
-type Kind = "all" | "added" | "changed" | "binned" | "budget" | "planner" | "settings";
+type Kind = "all" | "added" | "changed" | "binned" | "budget" | "planner" | "settings" | "data";
 
 /** Enough to scan in one go. Three hundred rows at once was a wall. */
 const PAGE = 50;
@@ -53,6 +53,8 @@ const KIND: readonly {
   // The Planner: plans added, moved, paid, skipped or removed (docs/16-PLANNER.md).
   { id: "planner", label: "Planner", phrase: "Nothing planned or changed in the Planner", match: (a) => a.startsWith("plan.") },
   { id: "settings", label: "Settings", phrase: "No settings changed", match: (a) => a.startsWith("settings.") },
+  // Copies taken or sent, restores, and rows deleted for good (3 November 2026).
+  { id: "data", label: "Data", phrase: "No backup, export, upload or restore", match: (a) => a.startsWith("data.") || a === "backup.restore" || a === "transaction.purge" },
 ];
 
 /** The calendar day an event happened on, on this device, as YYYY-MM-DD. */
@@ -105,6 +107,7 @@ function iconFor(action: string): IconName {
   if (action === "transaction.update") return "edit";
   if (action === "transaction.bin") return "bin";
   if (action === "transaction.restore") return "ledger";
+  if (action === "transaction.purge") return "bin";
   if (action.startsWith("ai.")) return "ai";
   if (action.startsWith("plan.")) return "planner";
   return "settings";

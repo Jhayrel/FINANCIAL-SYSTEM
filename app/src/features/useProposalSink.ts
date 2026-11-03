@@ -118,6 +118,25 @@ export function useProposalSink(input: SinkInput): ProposalSink {
     taken.current = 0;
   }, [nextRecordNumber]);
 
+  /** Save a card's draft; the rows saved, or null when it does not pass the Add form's checks. */
+  const addRows = (d: Draft, by?: Provenance): readonly Transaction[] | null => {
+    const c = checkDraft(d, transactions, reference, debts);
+    // Belt and braces: the button is already disabled when this fails.
+    if (!c.ok) return null;
+    proposed += 1;
+    const number = nextRecordNumber + taken.current;
+    taken.current += 1;
+    const rows = draftToTransactions(withFeesPaid(d, transactions), number, `t-${Date.now()}-${proposed}`, c.repaymentSplit);
+    handlers.current.onSave(
+      rows,
+      // Recorded as the assistant's, because it was: the owner approved
+      // it, but they did not type it, and six months from now that is the
+      // difference worth being able to look up.
+      by ?? { actor: "ai", via: "ai_chat" },
+    );
+    return rows;
+  };
+
   return useMemo<ProposalSink>(
     () => ({
       nextRecordNumber,
@@ -185,22 +204,8 @@ export function useProposalSink(input: SinkInput): ProposalSink {
        * advance within a batch, and the number is returned so the card can
        * show what it actually got rather than what is next.
        */
-      add: (d, by) => {
-        const c = checkDraft(d, transactions, reference, debts);
-        // Belt and braces: the button is already disabled when this fails.
-        if (!c.ok) return null;
-        proposed += 1;
-        const number = nextRecordNumber + taken.current;
-        taken.current += 1;
-        handlers.current.onSave(
-          draftToTransactions(withFeesPaid(d, transactions), number, `t-${Date.now()}-${proposed}`, c.repaymentSplit),
-          // Recorded as the assistant's, because it was: the owner approved
-          // it, but they did not type it, and six months from now that is the
-          // difference worth being able to look up.
-          by ?? { actor: "ai", via: "ai_chat" },
-        );
-        return number;
-      },
+      add: (d, by) => addRows(d, by)?.[0]?.recordNumber ?? null,
+      addRows: (d, by) => addRows(d, by),
     }),
     [transactions, reference, debts, nextRecordNumber],
   );

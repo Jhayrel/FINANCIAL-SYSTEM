@@ -29,9 +29,10 @@
  * Nothing here saves anything. Today's answer is the afford answer with the
  * day's figures; a later one is a Planner card to press.
  */
-import { addDays, lastOfMonth, MONTH_NAMES } from "./dates";
+import { addDays, formatMedium, lastOfMonth, MONTH_NAMES } from "./dates";
 import { formatMoney, withoutYears, type Centavos } from "./money";
 import { aheadMonthIn, plannedSpendIn } from "./plannedSpend";
+import type { PlanDebtLine } from "./planDebt";
 import { dueFor, isRecurringKind, kindFromHistory, NO_DATE, planKinds, savesOutOfSpending, type DueKind, type PlanInput } from "./planner";
 import { capitalised, NO_DAY, sumIn, titleWords, whenFor } from "./plannerAsk";
 import { protectModels } from "./modelNumbers";
@@ -45,6 +46,8 @@ export interface PlanContext {
   readonly debtNames?: readonly string[] | undefined;
   /** Settings' accounts: the goals a plan to save can go into, and which account is savings (P11). */
   readonly accounts?: readonly { readonly name: string; readonly kind: string; readonly archived?: boolean | undefined }[] | undefined;
+  /** The loans and credit lines a plan can pay (`planDebt.ts`, P12). */
+  readonly debtLines?: readonly PlanDebtLine[] | undefined;
 }
 
 export type PlanIntent =
@@ -382,6 +385,9 @@ export function readPlanIntent(text: string, ctx: PlanContext): PlanIntent | nul
   // Money to save or move into one of their own accounts or goals (P11), before anything reads it as spending.
   const saved = readSaveIntent(t, ctx);
   if (saved) return saved;
+  // A payment planned on a loan or credit line (P12), before the debt guard below sends it to the debt readers.
+  const repay = readDebtPlanIntent(t, ctx);
+  if (repay) return repay;
   const lower = t.toLowerCase();
   const owed = (ctx.debtNames ?? []).some((d) => d.trim() && lower.includes(d.trim().toLowerCase()));
   if (INCOME_AHEAD.test(t) && !ASKED.test(t) && !MOVED.test(t) && !owed) {
@@ -561,4 +567,49 @@ function readSpendLine(line: string, ctx: PlanContext): PlanInput | null {
   const wallet = /\bfrom\s+([^,]+?)\s*(?:,|$)/i.exec(line)?.[1]?.trim() ?? "";
   const input = planInputFor(title, amount, due, ctx, line, kind);
   return { ...input, wallet: [...ctx.reference.wallets, ...ctx.reference.savings].find((w) => w.toLowerCase() === wallet.toLowerCase()) ?? input.wallet };
+}
+
+/**
+ * A payment planned on a loan or credit line (P12; owner, 3 November 2026:
+ * "what about if I want to pay a loan"): "I plan to pay my Maya Credit 1075
+ * on Dec 5", "I'll pay off my loan next month", "balak kong bayaran ang
+ * maya credit sa december". It needs a later day or month: "paid maya
+ * credit 1000" is a payment made, and "pay maya credit 1000" today is an
+ * entry, both the debt readers'.
+ */
+export function readDebtPlanIntent(text: string, ctx: PlanContext): PlanIntent | null {
+  const lines = (ctx.debtLines ?? []).filter((d) => !d.archived);
+  if (lines.length === 0) return null;
+  const t = text.trim();
+  if (/\b(?:paid|nagbayad|binayaran)\b/i.test(t)) return null;
+  const plans = /\b(?:plan(?:ning)?\s+(?:to\s+|on\s+)?(?:pay|settle)|(?:i|we)\s*(?:will|'ll|am\s+going\s+to|'m\s+going\s+to|need\s+to|have\s+to|want\s+to|intend\s+to)\s+(?:pay|settle)|(?:pay|settle)(?:\s+off)?\b[^.?!]{0,50}\b(?:next|on|by|this|in|sa)\b|balak\s+(?:ko\s+|kong\s+)?(?:na\s+)?(?:bayaran|magbayad))/i.test(t);
+  if (!plans) return null;
+  const lower = ` ${t.toLowerCase().replace(/[^a-z0-9 ]+/g, " ")} `;
+  const line = [...lines].sort((a, b) => b.name.length - a.name.length).find((d) => lower.includes(` ${d.name.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").trim()} `)) ?? (lines.length === 1 && /\b(?:loan|utang|credit|debt)\b/i.test(t) ? lines[0] : undefined);
+  if (!line) return null;
+  const when = whenFor(t, ctx.asOf);
+  const ahead = aheadMonthIn(t, ctx.asOf);
+  if (!when && !ahead) return null;
+  if (when && when.due < ctx.asOf) return null;
+  const dueKind: DueKind = when ? when.kind : "month";
+  const due = when ? when.due : dueFor("month", `${ahead!.year}-${String(ahead!.month).padStart(2, "0")}-01`);
+  // "pay off" with no figure is all that is owed; else the figure said, else asked for.
+  const said = sumIn(withoutYears(t).replace(new RegExp(`\\b${line.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i"), " "));
+  const amount = said ?? (/\bpay\s+(?:it\s+)?off\b|\bin\s+full\b|\blahat\b/i.test(t) && line.owed > 0 ? line.owed : null);
+  const wallet = [...ctx.reference.wallets, ...ctx.reference.savings].find((w) => new RegExp(`\\bfrom\\s+(?:my\\s+)?${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) ?? "";
+  const plan: PlanInput = {
+    title: `Pay ${line.name}`,
+    amount,
+    due,
+    dueKind,
+    item: "",
+    wallet,
+    debtId: line.id,
+    need: true,
+    // Its own payment is held back already when the line has a due day (`planDebt.ts`).
+    setAside: !line.scheduled,
+    notes: "",
+  };
+  const hint = `Owed on ${line.name} now: ${formatMoney(line.owed)}${line.scheduled ? `; its next payment, ${formatMoney(line.scheduled.amount)}, is due ${formatMedium(line.scheduled.on)}` : ""}.`;
+  return { kind: "later", plans: [plan], title: plan.title, amountSaid: amount !== null, dueSaid: true, hint, asked: ASKED.test(t) };
 }

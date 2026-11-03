@@ -367,3 +367,67 @@ The Planner's place on Insights and Budget: Insights has "Planner: <month>"
 under the calendar with Open the Planner; the Budget's month card has "From
 the Planner" with its button, both shown even with nothing planned (owner:
 "I cannot see the planner in insight and budgeting").
+
+## P12. Plans to pay a debt, and the plan kept in step with its entries (owner, 3 November 2026)
+
+"What about if I want to pay a loan etc ... fix all logic and process all
+sync properly"; "What happens if I added it and edit it in database";
+"Pay? Make sure the logic aligns to all and more accurate wording".
+
+A plan is one of three kinds, picked on the form ("This plan is"):
+
+| Kind | Paid by | Budget | Safe to spend |
+|---|---|---|---|
+| To spend | Spending | Planned spending in its month | Held back when counted |
+| To save or move (P11) | A transfer, or income, into its account | Not counted: saving | Held back when it leaves the spending wallets |
+| To pay a debt | A repayment on its line (`debtId`) | Not counted: a repayment is not spending | Not counted when the line's own payment is held back already; else when counted |
+
+A plan to pay a debt:
+
+1. **Picks the line** (loans and credit lines; On behalf lines have their
+   own flow). Picking it fills the name ("Pay Maya Credit") and the amount
+   (the next payment due, else all that is owed) where nothing was typed.
+2. **Is not held back twice.** Safe to spend already holds back a line's
+   next payment when it falls due in the month (`debtDue`). For such a line
+   the plan is a reminder of the day and amount meant, and "Count it in
+   safe to spend" stays off; for a line with no due day or rhythm it is the
+   owner's choice, on by default.
+3. **Is paid by a repayment** on its line, saved as the Debt screen saves
+   one (borrowed and fees broken out, `asAmountAndFees`). The whole payment
+   counts, the interest row saved beside it included. Interest paid from a
+   wallet is not spending (CLAUDE.md), and nothing here changes that.
+4. **Is said apart** wherever a month's plans are listed: Budget, Insights,
+   the Dashboard ("Planned debt payment", Pay), the chat ("to pay on
+   debts"), Statements ("a debt payment, not spending") and the AI's
+   context ("to pay Maya Credit").
+5. **From the chat:** "I plan to pay my maya credit 1075 on dec 5", "I'll
+   pay off my loan next month" (all that is owed). A payment made ("paid
+   maya credit 1000") or one today stays the debt readers'.
+
+Kept in step with its entries, every kind:
+
+6. **An entry added by hand that looks like a plan's payment** is offered
+   as it, with a button, from the Add form and now the chat too ("Count it
+   as paid", "Count it as moved"); never linked by itself (P4.9). Only the
+   rows that pay it are linked (`paysPlan`): a repayment's fee rows are not.
+7. **An entry named after an open plan takes the plan's kind**: "bought
+   blazer 1500 gcash" is Online Buy when "Buy blazer" is planned as Online
+   Buy.
+8. **A linked entry edited in the Database** (P4.8, extended):
+   - its amount down: a plan done because its payments covered it opens
+     again with what is left, and says why; one closed for less on purpose
+     ("That settles it", stored as `settled`) stays done;
+   - its amount up: still done, the difference said;
+   - moved to another account, or no longer a repayment on the plan's line:
+     it no longer counts, and the plan says which entry and why;
+   - binned: open again, as before.
+9. **Where a plan stands**, asked in the chat ("how is the save into maya
+   bank plan?"): its amount, what is paid or moved and by which entries,
+   what is left, where it counts, and anything that changed under it.
+10. **Wording follows the kind**: a plan to save is moved, never paid
+    ("Moved PHP 1,000.00 of PHP 1,500.00", "1 plan moved"); a plan to pay a
+    debt is paid on its line.
+11. **A plan named as a saving but saved as spending** ("Save into Maya
+    Bank" with no account) is said under the bell with how to put it right;
+    never changed by itself. The chat rebuilt plans without their account
+    in three places before 3 November 2026; `inputOf` copies every field.

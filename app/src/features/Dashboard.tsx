@@ -253,6 +253,17 @@ export function Dashboard({
               action: "Pay",
               record: () => onOpenPlan(v.plan.id, true),
             })),
+            // A payment planned on a loan or credit line (P12): a repayment to record, not spending.
+            ...planned.debtViews.map((v) => ({
+              key: `plan-${v.plan.id}`,
+              name: v.plan.title,
+              what: `Planned debt payment${v.paid > 0 ? `, ${formatMoney(v.paid)} paid` : ""}`,
+              amount: v.left,
+              days: v.daysTo as number | undefined,
+              on: v.plan.due as IsoDate | undefined,
+              action: "Pay",
+              record: () => onOpenPlan(v.plan.id, true),
+            })),
             // Money to move into savings or a goal this month (P11): a transfer to make, not a payment.
             ...planned.savingViews.map((v) => ({
               key: `plan-${v.plan.id}`,

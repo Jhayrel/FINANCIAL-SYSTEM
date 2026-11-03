@@ -160,9 +160,15 @@ export function settingsChanges(before: AppSettings, after: AppSettings, renamed
   ];
 }
 
-/** One Activity summary for a save: the areas, and the first few changes in full. */
-export function settingsChangesSummary(changes: readonly SettingsChange[]): string {
+/**
+ * One Activity summary for a save: where it was made, the areas, and the
+ * first few changes in full. A debt's limit set on the Debt screen, a debt
+ * line added from the Add form or the chat, a line opened again by a new
+ * entry: each is a change to Settings made somewhere else, and each was
+ * missing from Activity (3 November 2026).
+ */
+export function settingsChangesSummary(changes: readonly SettingsChange[], where = "in Settings"): string {
   const areas = [...new Set(changes.map((c) => c.area))];
   const shown = changes.slice(0, 3).map((c) => c.line);
-  return `Changed in Settings, ${areas.join(", ")}: ${shown.join("; ")}${changes.length > 3 ? `; and ${changes.length - 3} more` : ""}`;
+  return `Changed ${where}, ${areas.join(", ")}: ${shown.join("; ")}${changes.length > 3 ? `; and ${changes.length - 3} more` : ""}`;
 }

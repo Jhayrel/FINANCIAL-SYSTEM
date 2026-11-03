@@ -36,6 +36,8 @@ export type PlannerAsk =
   | { readonly kind: "closed"; readonly plan: Plan }
   /** "What do you think of my tuition plan?", "can I afford the gifts plan?": an opinion on a plan on the Planner. */
   | { readonly kind: "opinion"; readonly plan: Plan }
+  /** "How is the save into maya bank plan?", "status of the tuition plan": where it stands, from its live entries. */
+  | { readonly kind: "status"; readonly plan: Plan }
   /** "How much is planned this month?", "what's planned for November?": one month's plans against its budget. */
   | { readonly kind: "month"; readonly year: number; readonly month: number }
   | { readonly kind: "add"; readonly input: PlanInput }
@@ -269,6 +271,35 @@ const QUESTIONISH = /\?\s*$|^\s*(?:what|how|can|could|should|would|will|is|am|do
 /** Asking for a view of a plan, or whether it can be afforded. */
 const OPINION =
   /\b(?:what\s+(?:do|would)\s+you\s+(?:think|say|suggest|recommend)|what'?s\s+your\s+(?:take|opinion|advice|thoughts?)|your\s+(?:opinion|take|advice|thoughts?)|any\s+(?:advice|suggestions?|tips?)|can\s+i\s+(?:afford|make|manage|pay\s+for)|kaya\s+(?:ko\s+)?ba|ok(?:ay)?\s+lang\s+ba|ano\s+(?:sa\s+tingin|masasabi)\s+mo|is\s+(?:the|my)\b[^.?!]{1,40}\bplan\s+(?:ok(?:ay)?|good|realistic|doable|possible|too\s+much|affordable))\b/i;
+
+/** "How is the ... plan", "how's my ... plan", "status of", "where is ... at", "kumusta". */
+const STATUS = /^\s*(?:so\s+)?(?:how\s+(?:is|'?s|are)|how'?s|what'?s\s+the\s+status\s+of|status\s+(?:of|on)|update\s+on|where\s+(?:is|'?s|are)|kumusta(?:\s+na)?|ano\s+na)\b/i;
+
+/** Where a plan stands, from its live entries: what it is, what is paid or moved, what is left, and what counts. */
+export function planStatusWords(v: PlanView, linked: readonly Transaction[], asOf: IsoDate, debtName = ""): string {
+  const p = v.plan;
+  const saving = isSave(p);
+  const no = (t: Transaction): string => `#${String(t.recordNumber).padStart(4, "0")}`;
+  // Only the entries that still count: one edited into another account is said in `goneNote`.
+  const into = (p.into ?? "").trim().toLowerCase();
+  const counting = saving ? linked.filter((t) => (t.type === "Transfer" || t.type === "Revenue") && t.toWallet.trim().toLowerCase() === into) : p.debtId ? linked.filter((t) => t.type === "Debt" && t.debtId === p.debtId && t.debtEffect === "repay") : linked;
+  const lines = [
+    `**${p.title}**: ${formatMoney(p.amount)} ${saving ? `to move into ${p.into}` : p.debtId ? `to pay on ${debtName || "a debt"}` : "to spend"}, ${p.due === NO_DATE ? "with no date yet" : byWhen(p)}.${v.state === "later" ? "" : ` ${v.words}.`}`,
+    counting.length > 0
+      ? `${saving ? "Moved" : "Paid"} so far: ${formatMoney(v.paid)}, by ${counting.map((t) => `${no(t)} on ${formatMedium(t.date)}`).join(", ")}.`
+      : v.state === "paid"
+        ? "Marked done with no entry linked."
+        : `Nothing ${saving ? "moved" : "paid"} yet.`,
+    v.state === "paid" || v.state === "skipped" || v.state === "removed"
+      ? ""
+      : `${formatMoney(v.left)} left to ${saving ? "move" : "pay"}. ${v.counts ? "Safe to spend holds it back this month." : p.due === NO_DATE ? "With no date it is held back nowhere." : p.setAside ? `It counts in ${MONTH_NAMES[Number(p.due.slice(5, 7)) - 1] ?? "its month"}'s safe to spend.` : "It is not held back in safe to spend."}`,
+    v.goneNote,
+    p.moves.length > 0 ? `Moved ${p.moves.length === 1 ? "once" : `${p.moves.length} times`}, first planned for ${formatMedium(p.moves[0]!.from)}.` : "",
+    v.state === "overdue" ? `It was due ${formatMedium(p.due)}: ${saving ? "move it" : "pay it"}, move the date, or skip it.` : "",
+  ];
+  void asOf;
+  return lines.filter(Boolean).join("\n");
+}
 
 const esc = (v: string): string => v.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -533,6 +564,14 @@ export function readPlannerAsk(
     if (plan) return { kind: "opinion", plan };
   }
   if (!plannerSaid && !pointsAt) return null;
+  /*
+   * Where a plan stands: "how is the save into maya bank plan?" was answered
+   * with the month's summary (3 November 2026).
+   */
+  if (STATUS.test(t) && !OPINION.test(t)) {
+    const plan = named(plans, ["open", "done", "skipped", "removed"]);
+    if (plan) return { kind: "status", plan };
+  }
   const open = plans.filter((p) => p.status === "open");
 
   /*
@@ -682,6 +721,9 @@ export function plannedMonthWords(
   // Plans to save or move money: said apart, never in the budget's figure (P11).
   const saves = planned.savingViews.map((v) => `- ${v.plan.title}: ${formatMoney(v.left)} into ${v.plan.into}, ${whenOf(v.plan).replace(/^S/, "s")}${v.plan.due < asOf ? " (overdue)" : ""}`);
   const savesWords = saves.length > 0 ? [`**${formatMoney(planned.saving)} to save or move** in ${name}, apart from spending:`, ...saves] : [];
+  // Payments planned on a loan or credit line (P12): apart from spending too.
+  const repays = planned.debtViews.map((v) => `- ${v.plan.title}: ${formatMoney(v.left)}, ${whenOf(v.plan).replace(/^S/, "s")}${v.plan.due < asOf ? " (overdue)" : ""}`);
+  if (repays.length > 0) savesWords.push(`**${formatMoney(planned.debt)} to pay on debts** in ${name}, apart from spending:`, ...repays);
   if (planned.views.length === 0)
     return savesWords.length > 0 ? [`Nothing to spend is planned in ${name}.`, ...savesWords].join("\n") : `Nothing is planned in ${name} that is still to pay. Say "plan tuition 9000 on nov 15" to add one, or open the Planner.`;
   const lines = planned.views.slice(0, 12).map((v) => {

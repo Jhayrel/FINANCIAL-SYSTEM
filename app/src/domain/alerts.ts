@@ -1195,6 +1195,27 @@ export function planAlerts(plans: readonly Plan[], transactions: readonly Transa
   }
   for (const v of views) {
     const p = v.plan;
+    /*
+     * Named as money moved into an account, but saved as spending: "Save
+     * into Maya Bank" came back a plan to spend after a change by words, so
+     * it showed Pay and counted in the month's spending (owner's phone, 3
+     * November 2026). Said, never changed by itself: one Edit on the
+     * Planner makes it a plan to save.
+     */
+    if (v.state !== "paid" && v.state !== "skipped" && v.state !== "removed" && !isSave(p) && !p.item.trim()) {
+      const named = /^(?:save|saving|deposit|move|transfer)\s+(?:it\s+)?(?:into|to|in)\s+(.+?)\s*$/i.exec(p.title.trim())?.[1]?.toLowerCase() ?? "";
+      const account = named ? accounts.find((a) => !a.archived && (a.name.toLowerCase() === named || a.name.replace(/\s*\(.*\)\s*$/, "").toLowerCase() === named)) : undefined;
+      if (account) {
+        out.push({
+          id: `plan-kind-${p.id}`,
+          level: "warn",
+          area: "planner",
+          title: `${p.title} is set as spending`,
+          detail: `Its name says the money goes into ${account.name}, but it is saved as a plan to spend, so it shows Pay and counts as ${money(v.left)} of the month's planned spending. On the Planner, Edit it and pick To save or move, into ${account.name}; or say "make the ${p.title.toLowerCase()} plan a saving into ${account.name.replace(/\s*\(.*\)\s*$/, "").toLowerCase()}".`,
+          weight: 70,
+        });
+      }
+    }
     if (v.state === "overdue") {
       if (late.length > MANY_PLANS) continue;
       out.push({

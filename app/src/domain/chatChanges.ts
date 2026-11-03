@@ -25,8 +25,12 @@ import type { IsoDate, ReferenceLists, Transaction, TransactionCategory } from "
 
 export interface EntryChange {
   readonly amount?: Centavos | undefined;
-  /** A wallet swapped: `from` limits it to the side that held that wallet. */
-  readonly wallet?: { readonly from?: string | undefined; readonly to: string } | undefined;
+  /**
+   * A wallet swapped: `from` limits it to the side that held that wallet.
+   * `where`: said as where the money went ("change #3964 to extra cash"),
+   * which for a transfer is its destination.
+   */
+  readonly wallet?: { readonly from?: string | undefined; readonly to: string; readonly where?: true | undefined } | undefined;
   readonly date?: IsoDate | undefined;
   readonly item?: string | undefined;
   /** "change the description to Buy food": the words, as typed. */
@@ -168,6 +172,21 @@ export function readEditAsk(text: string, reference: ReferenceLists, asOf: IsoDa
     }
   }
 
+  /*
+   * A record named and an account after "to": "change #3964 to extra cash".
+   * It went to the budget reader and came back a PHP 3,964.00 budget (3
+   * November 2026). For a transfer it is where the money went; for anything
+   * else, the account it moved through.
+   */
+  if (!change.wallet && /#\s*\d{1,5}\b/.test(text)) {
+    const onto = new RegExp(String.raw`\b(?:to|into|sa)\s+(?:my\s+|the\s+)?(.+?)(?=$|[,.]|\s+(?:instead|and|on|for|this|last)\b)`, "i").exec(rest);
+    const to = onto?.[1] ? nameIn(onto[1], accounts) : "";
+    if (onto && to && nameIn(onto[1] ?? "", items) === "") {
+      change.wallet = { to, where: true };
+      rest = rest.replace(onto[0], " ");
+    }
+  }
+
   // A date: "the date ... to aug 27", "to yesterday".
   const dateTo = /\b(?:date\b.*?\bto|\bto)\s+((?:20\d{2}-\d{2}-\d{2})|(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2})|yesterday|today)\b/i.exec(rest);
   if (dateTo?.[1] && /\bdate\b/i.test(text)) {
@@ -216,7 +235,9 @@ export function readEditAsk(text: string, reference: ReferenceLists, asOf: IsoDa
 }
 
 /** Which side of a row a wallet sits on, for the flow it is. */
-function walletSide(row: Transaction, from: string | undefined): "fromWallet" | "toWallet" | null {
+function walletSide(row: Transaction, from: string | undefined, where = false): "fromWallet" | "toWallet" | null {
+  // "Change #3964 to extra cash": a transfer's "to" is where it went.
+  if (!from && where && row.type === "Transfer") return "toWallet";
   if (from) {
     if (row.fromWallet === from) return "fromWallet";
     if (row.toWallet === from) return "toWallet";
@@ -246,7 +267,7 @@ export function changeRow(
     after = { ...after, amount: change.amount, total: change.amount + after.fee };
   }
   if (change.wallet) {
-    const side = walletSide(row, change.wallet.from);
+    const side = walletSide(row, change.wallet.from, change.wallet.where === true);
     if (!side) return { reason: `It does not move money through ${change.wallet.from ?? "a wallet"}.` };
     after = { ...after, [side]: change.wallet.to };
   }

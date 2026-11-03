@@ -348,11 +348,38 @@ export function inferFromHistory(
       (flow === "Revenue" ? reference.revenueCategories : [...reference.spendingTypes.map((s) => s.name), ...reference.bills, ...reference.subscriptions]).map((n) => n.trim().toLowerCase()),
     );
     const sameFlow = transactions.filter((t) => t.type === flow && (current.size === 0 || current.has(t.item.trim().toLowerCase())));
-    const match = itemFromHistory(hint, sameFlow, [
+    /*
+     * An open plan the sentence names, with its kind picked: "bought blazer
+     * 1500 gcash" with "Buy blazer" planned as Online Buy asked "What was it
+     * for?" (3 November 2026). The plan is the owner's own word on it.
+     */
+    const PLAIN = new Set(["buy", "pay", "plan", "save", "into", "move", "deposit", "for", "the", "new", "and", "with", "from", "trip"]);
+    const said = ` ${hint.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
+    const planned =
+      flow === "Spending"
+        ? (reference.plans ?? []).find(
+            (p) =>
+              p.status === "open" &&
+              !p.into &&
+              !p.debtId &&
+              p.item.trim() !== "" &&
+              current.has(p.item.trim().toLowerCase()) &&
+              p.title
+                .toLowerCase()
+                .split(/[^a-z0-9]+/)
+                .filter((w) => w.length >= 4 && !PLAIN.has(w))
+                .some((w) => said.includes(` ${w} `) || said.includes(` ${w}s `)),
+          )
+        : undefined;
+    const match = planned ? null : itemFromHistory(hint, sameFlow, [
       ...reference.wallets,
       ...reference.savings,
     ]);
-    if (match) {
+    if (planned) {
+      next = { ...next, item: planned.item };
+      unsure.push("item");
+      because.push(`Booked as ${planned.item}, the kind of your "${planned.title}" plan.`);
+    } else if (match) {
       next = { ...next, item: match.item };
       unsure.push("item");
       because.push(

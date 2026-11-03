@@ -39,8 +39,9 @@ describe("the Plans statement (owner, 27 October 2026: \"in statement add plans 
 
   it("is a spreadsheet with a total line", () => {
     const csv = planSheetCsv(sheet).split("\r\n");
-    expect(csv[0]).toBe("Due,Plan,State,Pay from,Planned,Paid,Still to pay,Details");
-    expect(csv).toContain("No date yet,Laptop,Open,Maya,35000.00,0.00,35000.00,No date yet · School");
-    expect(csv.at(-2)).toBe(",Total,,,57837.00,9337.00,44000.00,");
+    // From and Into (3 November 2026): a plan to save says where its money goes.
+    expect(csv[0]).toBe("Due,Plan,State,From,Into,Planned,Paid,Still to pay,Details");
+    expect(csv).toContain("No date yet,Laptop,Open,Maya,,35000.00,0.00,35000.00,No date yet · School");
+    expect(csv.at(-2)).toBe(",Total,,,,57837.00,9337.00,44000.00,");
   });
 });

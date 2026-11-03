@@ -196,6 +196,8 @@ export interface AiContext {
     readonly from: string;
     /** A plan to save or move money: the account or goal it goes into (P11). */
     readonly into?: string | undefined;
+    /** A plan to pay a debt: the line it pays (P12). */
+    readonly pays?: string | undefined;
     readonly counted: boolean;
     /** Chosen to be set aside in safe to spend; false is a plan that may not go ahead. */
     readonly setAside?: boolean | undefined;
@@ -474,6 +476,7 @@ export function buildContext(input: ContextInput): AiContext {
         kind: v.plan.item,
         from: v.plan.wallet,
         ...(v.plan.into ? { into: v.plan.into } : {}),
+        ...(v.plan.debtId ? { pays: credits.find((d) => d.id === v.plan.debtId)?.name ?? "a debt" } : {}),
         counted: v.counts,
         setAside: v.plan.setAside,
         goal: v.goal && !v.goal.missing ? `${v.goal.name} holds ${formatMoney(v.goal.holds)}` : "",
@@ -818,10 +821,11 @@ export function contextToText(c: AiContext): string {
     // The Budget's own split (owner, 27 October 2026): every open plan is planned spending in its month, set aside or not; one with no date is in no month.
     lines.push("The Budget counts every open plan to spend as planned spending in its month, set aside or not. Not set aside means it may not go ahead and nothing is held back for it. A plan with no date is in no month's figure until it has one.");
     lines.push("A plan marked \"to save into\" an account or goal is money to move, not spend: no budget counts it, it is done by a transfer, and safe to spend holds it back only when it leaves the spending wallets.");
+    lines.push("A plan marked \"to pay\" a debt is a repayment on that loan or credit line, not spending: no budget counts it, it is done by recording the repayment, and a line with a due day has its payment held back in safe to spend already.");
     for (const p of c.plans ?? []) {
       const undated = p.due === "9999-12-31";
       lines.push(
-        `- ${p.title}: ${php(p.amount)}${p.into ? ` to save into ${p.into},` : ""} ${p.when ?? `by ${p.due}`}${p.kind ? `, ${p.kind}` : ""}${p.from ? `, from ${p.from}` : ""}. ${p.words}${p.left > 0 && p.left !== p.amount ? `, ${php(p.left)} left` : ""}${p.counted ? ", set aside in safe to spend" : p.setAside === false && !p.goal ? ", not set aside: may not go ahead" : ""}${undated ? ", in no month yet" : ""}${p.goal ? `. ${p.goal}` : ""}.`,
+        `- ${p.title}: ${php(p.amount)}${p.into ? ` to save into ${p.into},` : ""}${p.pays ? ` to pay ${p.pays},` : ""} ${p.when ?? `by ${p.due}`}${p.kind ? `, ${p.kind}` : ""}${p.from ? `, from ${p.from}` : ""}. ${p.words}${p.left > 0 && p.left !== p.amount ? `, ${php(p.left)} left` : ""}${p.counted ? ", set aside in safe to spend" : p.setAside === false && !p.goal ? ", not set aside: may not go ahead" : ""}${undated ? ", in no month yet" : ""}${p.goal ? `. ${p.goal}` : ""}.`,
       );
     }
   }

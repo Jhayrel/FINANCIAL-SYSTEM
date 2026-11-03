@@ -36,45 +36,9 @@ import { addDays, formatMedium, lastOfMonth, MONTH_NAMES } from "../domain/dates
 import { emptyDraft, type Draft } from "../domain/entry";
 import { formatMoney, type Centavos } from "../domain/money";
 import { monthBrief } from "../domain/monthPlan";
-import {
-  checkPlan,
-  closedViews,
-  coverage,
-  editPlan,
-  groupOpen,
-  isRecurringKind,
-  kindFromHistory,
-  likelyPayments,
-  linkPayments,
-  makePlan,
-  movePlan,
-  movesWords,
-  byWhen,
-  countedWords,
-  dueFor,
-  dueKindOf,
-  NO_DATE,
-  nextMonthEnd,
-  whenOf,
-  type DueKind,
-  planAgain,
-  planKinds,
-  plannedForBudget,
-  planWallets,
-  planInto,
-  isSave,
-  savesOutOfSpending,
-  removePlan,
-  reopenPlan,
-  skipPlan,
-  unlinkPayment,
-  viewOf,
-  walletToPayFrom,
-  type Plan,
-  type PlanGroup,
-  type PlanInput,
-  type PlanView,
-} from "../domain/planner";
+import { checkPlan, closedViews, coverage, editPlan, groupOpen, isRecurringKind, kindFromHistory, likelyPayments, linkPayments, makePlan, movePlan, movesWords, byWhen, countedWords, dueFor, dueKindOf, NO_DATE, nextMonthEnd, whenOf, type DueKind, planAgain, planKinds, plannedForBudget, planWallets, planInto, isSave, savesOutOfSpending, removePlan, reopenPlan, skipPlan, unlinkPayment, viewOf, walletToPayFrom, type Plan, type PlanGroup, type PlanInput, type PlanView, paysDebt } from "../domain/planner";
+import { planDebtLines } from "../domain/planDebt";
+import { asAmountAndFees } from "../domain/debt";
 import type { Debt } from "../domain/debt";
 import { limitLines, planLimitNote } from "../domain/limitAsk";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "../domain/types";
@@ -411,6 +375,7 @@ export function Planner(props: PlannerProps) {
       {current && !form && !paying && !moving && !linking && !closing && (
         <PlanSheet
           view={current}
+          debts={props.debts}
           asOf={asOf}
           short={short.get(current.plan.id) ?? 0}
           dialog={!phone}
@@ -483,6 +448,7 @@ export function Planner(props: PlannerProps) {
           reference={reference}
           accounts={accounts}
           transactions={transactions}
+          debts={props.debts}
           asOf={asOf}
           dialog={!phone}
           onClose={() => setPaying(null)}
@@ -551,7 +517,7 @@ function PlanRow({ view: v, asOf, short, onOpen }: { view: PlanView; asOf: IsoDa
   const p = v.plan;
   const open = isOpen(v);
   // A plan to save says where the money goes (P11).
-  const meta = (isSave(p) ? [whenWords(v, asOf), `Into ${p.into}`, p.wallet ? `from ${p.wallet}` : ""] : [whenWords(v, asOf), p.item, p.wallet]).filter(Boolean).join(" · ");
+  const meta = (isSave(p) ? [whenWords(v, asOf), `Into ${p.into}`, p.wallet ? `from ${p.wallet}` : ""] : paysDebt(p) ? [whenWords(v, asOf), "Debt payment", p.wallet ? `from ${p.wallet}` : ""] : [whenWords(v, asOf), p.item, p.wallet]).filter(Boolean).join(" · ");
   const pill = pillOf(v);
   const note =
     short > 0
@@ -668,6 +634,8 @@ function PlanSheet(props: {
   short: Centavos;
   dialog: boolean;
   transactions: readonly Transaction[];
+  /** The debt lines, for a plan to pay one (P12). */
+  debts?: readonly Debt[] | undefined;
   plans: readonly Plan[];
   onClose: () => void;
   onEdit: () => void;
@@ -779,7 +747,7 @@ function PlanSheet(props: {
               : "After the bills and debt payments still due and the plans before it, safe to spend does not cover all of it. Pay part now, move the date, or pay it from savings."}
           </Alert>
         )}
-        {v.goneNote && <Alert status="warn" title="A payment is gone">{v.goneNote}</Alert>}
+        {v.goneNote && <Alert status="warn" title={v.goneNote.includes("edited") ? "A payment changed" : "A payment is gone"}>{v.goneNote}</Alert>}
         {/* Past its day and open: what to do, the already-paid case first, so nothing is entered twice. */}
         {v.state === "overdue" && (
           <Alert status="warn" title={`${formatMedium(p.due)} has passed`}>
@@ -790,7 +758,15 @@ function PlanSheet(props: {
         )}
 
         <dl className="fms-rowfacts">
-          {isSave(p) ? (
+          {paysDebt(p) ? (
+            <>
+              <Fact label="Pay by">{whenOf(p)}</Fact>
+              <Fact label="Paid to">{props.debts?.find((d) => d.id === p.debtId)?.name ?? "A debt no longer in Settings"}</Fact>
+              {p.wallet && <Fact label="Pay from">{p.wallet}</Fact>}
+              <Fact label="Safe to spend">{!open ? "Nothing held back: it is paid" : v.counts ? "Held back now" : countedWords(p)}</Fact>
+              <Fact label="Budget">Not counted: a repayment is not spending</Fact>
+            </>
+          ) : isSave(p) ? (
             <>
               <Fact label="Move by">{whenOf(p)}</Fact>
               <Fact label="Into">{p.into}</Fact>
@@ -1008,8 +984,17 @@ export function PlanForm(props: {
    * 2 November 2026: "what if I plan to save like deposit to bank or wallet
    * or goal ... what if I edited a plan to buy to plan to save").
    */
-  const [saving, setSaving] = useState(editing ? isSave(editing) : Boolean(props.saving));
+  /*
+   * And to pay a debt (P12; owner, 3 November 2026: "what about if I want to
+   * pay a loan"): a repayment on a loan or credit line, not spending.
+   */
+  const [planType, setPlanType] = useState<"spend" | "save" | "debt">(editing ? (paysDebt(editing) ? "debt" : isSave(editing) ? "save" : "spend") : props.saving ? "save" : "spend");
+  const saving = planType === "save";
+  const paying = planType === "debt";
   const [into, setInto] = useState(editing?.into ?? "");
+  const [debtId, setDebtId] = useState(editing?.debtId ?? "");
+  const debtLines = useMemo(() => planDebtLines(props.debts, props.transactions, asOf), [props.debts, props.transactions, asOf]);
+  const line = debtLines.find((d) => d.id === debtId);
   const isEdit = Boolean(editing && props.plans.some((p) => p.id === editing.id));
   const goals = accounts.filter((a) => a.kind === "goal" && !a.archived);
   const [title, setTitle] = useState(editing?.title ?? "");
@@ -1042,21 +1027,26 @@ export function PlanForm(props: {
   const [picked, setPicked] = useState(Boolean(editing?.item));
   const suggested = !picked && !item ? kindFromHistory(title, props.transactions, kinds) : null;
   const kind = item || suggested || "";
-  const recurring = !saving && isRecurringKind(kind, reference);
+  const recurring = planType === "spend" && isRecurringKind(kind, reference);
   // Held back only when the money leaves the spending wallets: into savings or a goal, from a spending wallet or none said.
   const outOfSpending = savesOutOfSpending({ into, wallet }, reference.wallets);
   const intoChoices = planInto(reference, accounts, editing?.into ?? "");
   const input: PlanInput = saving
     ? { title, amount, due, dueKind: when.kind, item: "", wallet, into, saving: true, need: true, setAside: setAside && outOfSpending, notes }
-    : { title, amount, due, dueKind: when.kind, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !newGoal && !recurring, notes };
+    : paying
+      ? // A line whose payment safe to spend holds back already is never held back twice.
+        { title, amount, due, dueKind: when.kind, item: "", wallet, debtId: debtId || undefined, paying: true, need: true, setAside: setAside && !line?.scheduled, notes }
+      : { title, amount, due, dueKind: when.kind, item: kind, wallet, goalId: goalId || undefined, need, setAside: setAside && !goalId && !newGoal && !recurring, notes };
   // The payments linked to the plan being edited: of the other kind, they stop a change between spending and saving.
   const linkedRows = useMemo(() => (editing && isEdit ? props.transactions.filter((t) => editing.entryIds.includes(t.id)) : []), [editing, isEdit, props.transactions]);
   // What is paid on it already: its amount may not go below that, and at exactly that it is paid in full.
   const paidOn = useMemo(() => (editing && isEdit ? viewOf(editing, { transactions: props.transactions, accounts, asOf }).paid : 0), [editing, isEdit, props.transactions, accounts, asOf]);
   const check = checkPlan(
-    { ...input, setAside: saving ? input.setAside : setAside },
+    { ...input, setAside: saving || paying ? input.setAside : setAside },
     {
       plans: props.plans,
+      debtLines,
+      wasPaying: isEdit && editing ? paysDebt(editing) : undefined,
       reference,
       asOf,
       linked: linkedRows,
@@ -1073,7 +1063,8 @@ export function PlanForm(props: {
   // The goal it would get, or the one picked, checked and said before anything is made (`planGoal.ts`).
   const goalPlan = newGoal || goalId ? goalForPlan({ id: editing?.id, title, amount, due, dueKind: when.kind }, { accounts, plans: props.plans, transactions: props.transactions, asOf, parentId: goalHome, goalId: newGoal ? undefined : goalId }) : null;
   const goalName = newGoal ? (goalPlan?.name ?? title.trim()) : (goals.find((g) => g.id === goalId)?.name ?? "");
-  const counted = saving ? setAside && outOfSpending : setAside && !goalId && !newGoal && !recurring;
+  const counted = saving ? setAside && outOfSpending : paying ? setAside && !line?.scheduled : setAside && !goalId && !newGoal && !recurring;
+  const debtProblem = check.problems.find((x) => x.startsWith("Pick the loan") || x.includes("debt line is no longer") || x.includes("not a repayment") || x.includes("are not repayments") || x.includes("repayments on a debt") || x.includes("is a repayment on a debt"));
   const intoProblem = check.problems.find((x) => x.startsWith("Pick the account") || x.includes(" and comes from ") || x.includes("is closed in Settings"));
   const kindProblem = check.problems.find((x) => x.includes("linked as its payment"));
 
@@ -1084,7 +1075,7 @@ export function PlanForm(props: {
    */
   const { transactions, budgets, debts, plans } = props;
   const limitNote = useMemo(() => {
-    if (saving || !kind || recurring || amount === null || amount <= 0 || when.kind === "none" || when.kind === "year" || !/^\d{4}-\d{2}/.test(due)) return null;
+    if (saving || paying || !kind || recurring || amount === null || amount <= 0 || when.kind === "none" || when.kind === "year" || !/^\d{4}-\d{2}/.test(due)) return null;
     const at = due.slice(0, 7) < asOf.slice(0, 7) ? asOf : due;
     const year = Number(at.slice(0, 4));
     const month = Number(at.slice(5, 7));
@@ -1096,17 +1087,19 @@ export function PlanForm(props: {
       .reduce((sum, v) => sum + v.left, 0);
     // An edited plan's payments are in what is spent already; only what is left of it is still to come.
     return planLimitNote(line, planned, Math.max(0, amount - paidOn), month);
-  }, [saving, kind, recurring, amount, when.kind, due, asOf, transactions, budgets, debts, plans, editing, accounts, reference, paidOn]);
+  }, [saving, paying, kind, recurring, amount, when.kind, due, asOf, transactions, budgets, debts, plans, editing, accounts, reference, paidOn]);
 
   // The rest folds under More details, as on the Add form; open when something in it is set.
   const [moreOpen, setMoreOpen] = useState(Boolean(editing && (!editing.need || editing.goalId || !editing.setAside || editing.notes)));
   const moreSummary = saving
     ? [counted ? (when.kind === "none" ? "held back once it has a date" : "held back from safe to spend") : "not held back", notes ? "a note" : ""].filter(Boolean).join(", ")
-    : [need ? "A need" : "A want", goalName ? `saved in ${goalName}` : "", counted ? (when.kind === "none" ? "counted once it has a date" : "counted in safe to spend") : "not counted", notes ? "a note" : ""].filter(Boolean).join(", ");
+    : paying
+      ? [line?.scheduled ? "its payment is held back already" : counted ? "counted in safe to spend" : "not counted", notes ? "a note" : ""].filter(Boolean).join(", ")
+      : [need ? "A need" : "A want", goalName ? `saved in ${goalName}` : "", counted ? (when.kind === "none" ? "counted once it has a date" : "counted in safe to spend") : "not counted", notes ? "a note" : ""].filter(Boolean).join(", ");
 
   const save = async (): Promise<void> => {
     setTried(true);
-    if (check.problems.length > 0 || (!saving && newGoal && (goalPlan?.problems.length ?? 0) > 0)) return;
+    if (check.problems.length > 0 || (planType === "spend" && newGoal && (goalPlan?.problems.length ?? 0) > 0)) return;
     /*
      * A new plan for a day already gone (owner, 27 October 2026: "what if I
      * create a plan but in the past?"): asked, since it is either a payment
@@ -1129,7 +1122,7 @@ export function PlanForm(props: {
       if (!ok) return;
     }
     // The goal, made now that the plan is saved: by its day, or with no deadline when the plan has no date (never the year 9999).
-    if (!saving && newGoal && props.onMakeGoal && goalPlan) {
+    if (planType === "spend" && newGoal && props.onMakeGoal && goalPlan) {
       if (goalPlan.problems.length > 0) return;
       const made = props.onMakeGoal(goalPlan);
       props.onSave({ ...input, goalId: made.id, wallet: made.name, setAside: false });
@@ -1141,7 +1134,7 @@ export function PlanForm(props: {
   return (
     <Sheet
       title={isEdit && editing ? `Edit "${editing.title}"` : "Plan something"}
-      subtitle={isEdit && editing && editing.status !== "open" ? `It stays ${editing.status === "done" ? "paid" : "skipped"}; its payments are not changed.` : saving ? "No money moves until you move it." : "No money moves until you pay."}
+      subtitle={isEdit && editing && editing.status !== "open" ? `It stays ${editing.status === "done" ? "paid" : "skipped"}; its payments are not changed.` : saving ? "No money moves until you move it." : paying ? "No money moves until you record the repayment." : "No money moves until you pay."}
       onClose={props.onClose}
       dialog={props.dialog}
       actions={
@@ -1154,20 +1147,26 @@ export function PlanForm(props: {
       }
     >
       <div className="fms-planform">
-        <Field label="This plan is" help={saving ? "Money you will put into savings, a goal or another wallet. It is moved, not spent." : undefined}>
+        <Field label="This plan is" help={saving ? "Money you will put into savings, a goal or another wallet. It is moved, not spent." : paying ? "A payment on a loan or credit line. It lowers what you owe; it is not spending." : undefined}>
           <SegmentedControl
             options={[
               { id: "spend", label: "To spend" },
               { id: "save", label: "To save or move" },
+              { id: "debt", label: "To pay a debt" },
             ]}
-            value={saving ? "save" : "spend"}
-            onChange={(v) => setSaving(v === "save")}
+            value={planType}
+            onChange={(v) => setPlanType(v === "save" ? "save" : v === "debt" ? "debt" : "spend")}
           />
         </Field>
         <Field label="What is it for" htmlFor="plan-title" error={tried && !title.trim() ? "Say what it is for." : undefined}>
-          <TextInput id="plan-title" value={title} onChange={setTitle} placeholder={saving ? "Deposit to savings, money for a trip" : "Tuition, new phone, a trip"} maxLength={80} />
+          <TextInput id="plan-title" value={title} onChange={setTitle} placeholder={saving ? "Deposit to savings, money for a trip" : paying ? "Pay Maya Credit, loan payment" : "Tuition, new phone, a trip"} maxLength={80} />
         </Field>
-        <Field label={saving ? "How much to move" : "How much"} htmlFor="plan-amount" error={tried && (amount === null || amount <= 0) ? (saving ? "Put in how much to move." : "Put in how much it will cost.") : paidProblem}>
+        <Field
+          label={saving ? "How much to move" : paying ? "How much to pay" : "How much"}
+          htmlFor="plan-amount"
+          help={paying && line ? `Owed on ${line.name} now: ${formatMoney(line.owed)}${line.scheduled ? `; its next payment, ${formatMoney(line.scheduled.amount)}, is due ${formatMedium(line.scheduled.on)}` : ""}.` : undefined}
+          error={tried && (amount === null || amount <= 0) ? (saving ? "Put in how much to move." : paying ? "Put in how much you will pay." : "Put in how much it will cost.") : paidProblem}
+        >
           <AmountInput id="plan-amount" value={amount} onChange={setAmount} />
         </Field>
         <div className="fms-planform-when">
@@ -1181,7 +1180,33 @@ export function PlanForm(props: {
             error={tried && when.kind !== "none" && !/^\d{4}-\d{2}-\d{2}$/.test(due) ? (when.kind === "month" ? "Pick the month." : "Pick the day it is to be paid by.") : undefined}
           />
         </div>
-        {saving ? (
+        {paying ? (
+          <div className="fms-planform-pair">
+            <Field label="Which debt" error={tried || debtId ? debtProblem : undefined}>
+              <Select
+                value={line?.name ?? NO_INTO}
+                onChange={(v) => {
+                  const picked = debtLines.find((d) => d.name === v);
+                  setDebtId(picked?.id ?? "");
+                  // Filled from the line, only where nothing was typed: its name, and what its next payment is, or all that is owed.
+                  if (picked && !title.trim()) setTitle(`Pay ${picked.name}`);
+                  if (picked && (amount === null || amount <= 0)) setAmount(picked.scheduled?.amount ?? (picked.owed > 0 ? picked.owed : null));
+                }}
+                options={[NO_INTO, ...debtLines.filter((d) => !d.archived || d.id === debtId).map((d) => d.name)]}
+                ariaLabel="Which debt"
+              />
+            </Field>
+            <Field label="Pay from">
+              <Select
+                value={wallet || NO_WALLET}
+                onChange={(v) => setWallet(v === NO_WALLET ? "" : v)}
+                options={[NO_WALLET, ...walletChoices.options, ...(wallet && !walletChoices.options.includes(wallet) ? [wallet] : [])]}
+                groups={walletChoices.groups}
+                ariaLabel="Pay from"
+              />
+            </Field>
+          </div>
+        ) : saving ? (
           <div className="fms-planform-pair">
             <Field label="Into" error={tried || into ? intoProblem : undefined}>
               <Select value={into || NO_INTO} onChange={(v) => setInto(v === NO_INTO ? "" : v)} options={[NO_INTO, ...intoChoices.options]} groups={intoChoices.groups} ariaLabel="Into" />
@@ -1222,7 +1247,7 @@ export function PlanForm(props: {
           </Field>
         </div>
         )}
-        {!saving && suggested && (
+        {planType === "spend" && suggested && (
           <p className="t-caption fms-planform-hint">
             {suggested}, as your entries about it are. Counted under it when it is paid.
           </p>
@@ -1259,7 +1284,31 @@ export function PlanForm(props: {
             </Field>
           </>
         )}
-        {moreOpen && !saving && (
+        {moreOpen && paying && (
+          <>
+            <div className="fms-planform-switch">
+              <span className="fms-planform-switchtext">
+                <span className="t-body">Count it in safe to spend</span>
+                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                  {!line
+                    ? "Pick the debt first."
+                    : line.scheduled
+                      ? `${line.name}'s payment of ${formatMoney(line.scheduled.amount)}, due ${formatMedium(line.scheduled.on)}, is held back already as a debt payment due, so this plan is not counted again.`
+                      : when.kind === "none"
+                        ? "Once it has a month or a day, safe to spend holds it back then."
+                        : counted
+                          ? `On: ${line.name} has no due day, so safe to spend holds this payment back in its month.`
+                          : "Off: safe to spend does not hold it back; pay it when the money is there."}
+                </span>
+              </span>
+              {line && !line.scheduled && <Switch checked={counted} onChange={setSetAside} label="Count it in safe to spend" />}
+            </div>
+            <Field label="Notes" optional>
+              <TextInput value={notes} onChange={setNotes} maxLength={300} placeholder="What it is for, anything to remember" />
+            </Field>
+          </>
+        )}
+        {moreOpen && planType === "spend" && (
           <>
             <Field label="Need or want" help="When money is short, put wants off first.">
               <SegmentedControl
@@ -1344,7 +1393,7 @@ export function PlanForm(props: {
           Changed between spending and saving (P11): what that does, and
           what stops it while payments of the other kind are linked.
         */}
-        {isEdit && editing && isSave(editing) !== saving && editing.status === "open" && (
+        {isEdit && editing && !paying && !paysDebt(editing) && isSave(editing) !== saving && editing.status === "open" && (
           <Alert status={kindProblem ? "over" : "info"} {...(kindProblem ? { title: "Cannot change it yet" } : {})}>
             {kindProblem ??
               (saving
@@ -1352,8 +1401,17 @@ export function PlanForm(props: {
                 : `It was a plan to save into ${editing.into}. As a plan to spend it counts in its month's planned spending, is paid by spending, not by moving money, and ${setAside ? "safe to spend holds it back" : "safe to spend does not hold it back"}.`)}
           </Alert>
         )}
+        {isEdit && editing && paying !== paysDebt(editing) && editing.status === "open" && (
+          <Alert status={debtProblem && debtId ? "over" : "info"} {...(debtProblem && debtId ? { title: "Cannot change it yet" } : {})}>
+            {debtProblem && debtId
+              ? debtProblem
+              : paying
+                ? "As a plan to pay a debt it leaves the budget's planned spending, and is paid by recording a repayment on the line you pick."
+                : "It was a plan to pay a debt. As this kind it is paid by spending or by moving money, not by a repayment."}
+          </Alert>
+        )}
         {limitNote && <Alert status={limitNote.over ? "warn" : "info"}>{limitNote.text}</Alert>}
-        {check.notes.filter((n) => !n.startsWith("With no date")).map((n) => (
+        {check.notes.filter((n) => !n.startsWith("With no date") && !(paying && n.includes("is held back in safe to spend already"))).map((n) => (
           <Alert key={n} status="info">
             {n}
           </Alert>
@@ -1370,12 +1428,15 @@ function PaySheet(props: {
   reference: ReferenceLists;
   accounts: readonly Account[];
   transactions: readonly Transaction[];
+  debts?: readonly Debt[] | undefined;
   asOf: IsoDate;
   dialog: boolean;
   onClose: () => void;
   onPay: (draft: Draft, settles: boolean) => string | null;
 }) {
   const { plan, view, reference, asOf, transactions } = props;
+  // A plan to pay a debt (P12): a repayment on its line, from the line's own wallet unless the plan says one.
+  const debt = paysDebt(plan) ? props.debts?.find((d) => d.id === plan.debtId) : undefined;
   const [date, setDate] = useState<IsoDate>(asOf);
   const [amount, setAmount] = useState<Centavos | null>(view.left > 0 ? view.left : plan.amount);
   const goal = plan.goalId ? props.accounts.find((a) => a.id === plan.goalId)?.name : undefined;
@@ -1383,7 +1444,7 @@ function PaySheet(props: {
   const kinds = kindChoices.options;
   const [item, setItem] = useState(plan.item || (kindFromHistory(plan.title, transactions, kinds) ?? ""));
   // The goal it is saved in, else the plan's wallet, else the one this kind usually comes from or that holds enough.
-  const [from, setFrom] = useState(goal ?? walletToPayFrom({ wallet: plan.wallet, item: plan.item || item }, view.left || plan.amount, transactions, reference.wallets));
+  const [from, setFrom] = useState(goal ?? (debt && !plan.wallet && debt.wallet ? debt.wallet : walletToPayFrom({ wallet: plan.wallet, item: plan.item || item }, view.left || plan.amount, transactions, reference.wallets)));
   const [stopped, setStopped] = useState<string | null>(null);
 
   const category = reference.bills.some((b) => b === item) ? "Bills" : reference.subscriptions.some((b) => b === item) ? "Subscriptions" : "Spending";
@@ -1393,7 +1454,25 @@ function PaySheet(props: {
    * not spending, so it has no kind.
    */
   const saving = isSave(plan);
-  const draft: Draft = saving
+  const repaying = paysDebt(plan);
+  const draft: Draft = repaying
+    ? // The Debt screen's own repayment: what the line owes broken into borrowed and its fees (`asAmountAndFees`).
+      asAmountAndFees(
+        {
+          ...emptyDraft(date),
+          flow: "Debt",
+          date,
+          debtId: plan.debtId,
+          debtEffect: "repay",
+          fromWallet: from,
+          toWallet: "",
+          description: plan.title,
+          amount,
+          notes: `Paid from the Planner: ${plan.title}.`,
+        },
+        transactions,
+      )
+    : saving
     ? {
         ...emptyDraft(date),
         flow: "Transfer",
@@ -1424,7 +1503,13 @@ function PaySheet(props: {
   return (
     <Sheet
       title={saving ? `Move money for "${plan.title}"` : `Pay "${plan.title}"`}
-      subtitle={saving ? `Saved as a transfer into ${plan.into}, with the same checks as the Add form, and linked to the plan.` : "Saved as an entry, with the same checks as the Add form, and linked to the plan."}
+      subtitle={
+        saving
+          ? `Saved as a transfer into ${plan.into}, with the same checks as the Add form, and linked to the plan.`
+          : repaying
+            ? `Saved as a repayment on ${debt?.name ?? "the debt"}, as the Debt screen saves one, and linked to the plan. It lowers what you owe; it is not spending.`
+            : "Saved as an entry, with the same checks as the Add form, and linked to the plan."
+      }
       onClose={props.onClose}
       dialog={props.dialog}
       actions={
@@ -1464,10 +1549,10 @@ function PaySheet(props: {
               ariaLabel="Paid from"
             />
           </Field>
-          {saving ? (
-            <Field label="Into">
+          {saving || repaying ? (
+            <Field label={saving ? "Into" : "Paid to"}>
               <p className="t-body" style={{ margin: 0, padding: "var(--space-2) 0" }}>
-                {plan.into}
+                {saving ? plan.into : (debt?.name ?? "A debt no longer in Settings")}
               </p>
             </Field>
           ) : (

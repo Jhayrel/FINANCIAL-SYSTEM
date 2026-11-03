@@ -64,7 +64,7 @@ import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { checkDraft, debtWalletDirection, draftToTransactions, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { Planner } from "./features/Planner";
-import { isSave, linkPayments, NO_DATE, renamePlans, type Plan } from "./domain/planner";
+import { isSave, linkPayments, NO_DATE, paidSoFar, paysDebt, paysPlan, renamePlans, type Plan } from "./domain/planner";
 import { goalInStep, type GoalForPlan } from "./domain/planGoal";
 import { buildPlanSheet, planSheetCsv, planSheetFilename } from "./domain/planSheet";
 import { NO_OWNER, ownerChanges, ownerName as nameOfOwner } from "./domain/owner";
@@ -118,6 +118,8 @@ import {
   planChanged,
   updated as updatedEvent,
   BY_OWNER,
+  dataTaken,
+  purged,
   type ActivityEvent,
   type Provenance,
 } from "./domain/activity";
@@ -834,6 +836,16 @@ export default function App() {
   };
 
   /**
+   * A change to Settings made anywhere but the Settings screen, said in
+   * Activity the way that screen's own saves are (`settingsChanges`).
+   */
+  const changeSettingsFrom = (where: string, update: (s: AppSettings) => AppSettings, by: Provenance = BY_OWNER): void => {
+    const changes = settingsChanges(settings, update(settings));
+    if (changes.length > 0) record({ ...settingsChanged(settingsChangesSummary(changes, where), by), after: changes.map((c) => `${c.area}: ${c.line}`).join("\n") });
+    setSettings(update);
+  };
+
+  /**
    * Reference lists are derived from settings, so every screen keeps working
    * against the shape it already knows while Settings edits the richer model.
    *
@@ -1132,7 +1144,7 @@ export default function App() {
     const stamped: Transaction[] = rows.map((r) => ({ ...r, entrySource: by.actor === "ai" ? "ai" : "manual" }));
     // A new entry for someone archived reopens them, from the form or the chat alike.
     const reopened = new Set(stamped.flatMap((r) => (r.debtId && settings.credits.some((d) => d.id === r.debtId && d.archived) ? [r.debtId] : [])));
-    if (reopened.size > 0) setSettings((s) => ({ ...s, credits: s.credits.map((d) => (reopened.has(d.id) ? { ...d, archived: false } : d)) }));
+    if (reopened.size > 0) changeSettingsFrom("by a new entry", (s) => ({ ...s, credits: s.credits.map((d) => (reopened.has(d.id) ? { ...d, archived: false } : d)) }), by);
 
     setTransactions((prev) => insertChronologically(prev, stamped, { renumber: renumbers }));
     push((l) => l.saveMany(stamped));
@@ -1601,7 +1613,9 @@ export default function App() {
   const handlePurge = cloud.uid
     ? undefined
     : (id: string): void => {
+        const row = deleted.find((t) => t.id === id);
         setDeleted((prev) => prev.filter((t) => t.id !== id));
+        if (row) record(purged(row));
         flash("Removed from this browser.");
       };
 
@@ -1667,10 +1681,12 @@ export default function App() {
    */
   const handleBackup = async (): Promise<void> => {
     const uid = cloud.uid ?? null;
+    // Every record of what happened, not the newest few hundred (`data/readAll.ts`); the newest if the full read fails.
+    const whole = async <T,>(all: () => Promise<T[]>, recent: () => Promise<T[]>): Promise<T[]> => all().catch(() => recent().catch(() => []));
     const [activity, chat, ai] = await Promise.all([
-      activityStore(uid).recent().catch(() => []),
-      chatStore(uid).recent().catch(() => []),
-      aiLogStore(uid).recent().catch(() => []),
+      whole(() => activityStore(uid).everything(), () => activityStore(uid).recent()),
+      whole(() => chatStore(uid).everything(), () => chatStore(uid).recent()),
+      whole(() => aiLogStore(uid).everything(), () => aiLogStore(uid).recent()),
     ]);
 
     const backup = createBackup(
@@ -1682,11 +1698,9 @@ export default function App() {
       JSON.stringify(backup, null, 2),
       "application/json",
     );
-    flash(
-      `Backed up ${transactions.length.toLocaleString()} transactions, every setting, and ${(
-        activity.length + chat.length + ai.length
-      ).toLocaleString()} records of what happened.`,
-    );
+    const said = `Backed up ${transactions.length.toLocaleString()} transactions, every setting, and ${(activity.length + chat.length + ai.length).toLocaleString()} records of what happened.`;
+    flash(said);
+    record(dataTaken("data.backup", `${said.replace(/\.$/, "")}, as a file on this device.`));
   };
 
   const handleRestoreBackup = (backup: Backup, mode: RestoreMode | "clean"): void => {
@@ -1805,6 +1819,7 @@ export default function App() {
       }
       setSyncError(null);
       flash(`Uploaded ${transactions.length.toLocaleString()} transactions and every setting.`);
+      record(dataTaken("data.upload", `Uploaded ${transactions.length.toLocaleString()} transactions, every setting and every budget to the cloud.`));
     } catch (e) {
       setSyncError({ what: "upload", message: (e as Error).message });
     } finally {
@@ -1905,6 +1920,7 @@ export default function App() {
       "text/csv;charset=utf-8",
     );
     flash("Exported the whole system as CSV.");
+    record(dataTaken("data.export", `Exported the whole system as CSV: ${transactions.length.toLocaleString()} transactions, every setting and every budget.`));
   };
 
   /**
@@ -2059,16 +2075,22 @@ export default function App() {
     if (!c.ok) return c.errors.map((e) => e.message).join(" ");
     const rows = draftToTransactions(withFeesPaid(draft, transactions), sink.nextRecordNumber, `t-${Date.now()}-plan`, c.repaymentSplit);
     handleSave(rows, by);
-    const linked = linkPayments(plan, rows.map((r) => r.id), [...transactions, ...rows], asOf, settles);
-    // A plan to save is done by what was moved; a transfer fee is not saving (P11).
-    const saving = isSave(plan);
-    const paid = rows.reduce((sum, r) => sum + (saving ? r.amount : r.total), 0);
+    // Only the rows that pay it: a repayment's fees are rows of their own, and not the plan's (`paysPlan`).
+    const paying = rows.filter((r) => paysPlan(plan, r));
+    const all = [...transactions, ...rows];
+    const linked = linkPayments(plan, paying.map((r) => r.id), all, asOf, settles);
+    // What it counts as paid: what was moved for a plan to save, the repayment for a debt, the entry for spending (P11, P12).
+    const paid = Math.max(0, paidSoFar(linked, all).amount - paidSoFar(plan, transactions).amount);
+    const no = `#${String(paying[0]?.recordNumber ?? rows[0]?.recordNumber ?? 0).padStart(4, "0")}`;
+    const debtName = paysDebt(plan) ? (settings.credits.find((d) => d.id === plan.debtId)?.name ?? "the debt") : "";
     changePlan(
       linked,
       "plan.paid",
-      saving
-        ? `Moved ${formatMoney(paid)} into ${plan.into} for "${plan.title}" on ${formatMedium(draft.date)}, #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}${linked.status === "done" ? "" : ", more to move"}.`
-        : `Paid "${plan.title}": ${formatMoney(paid)} on ${formatMedium(draft.date)}, #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}${linked.status === "done" ? "" : ", more to pay"}.`,
+      isSave(plan)
+        ? `Moved ${formatMoney(paid)} into ${plan.into} for "${plan.title}" on ${formatMedium(draft.date)}, ${no}${linked.status === "done" ? "" : ", more to move"}.`
+        : paysDebt(plan)
+          ? `Paid ${formatMoney(paid)} on ${debtName} for "${plan.title}" on ${formatMedium(draft.date)}, ${no}${linked.status === "done" ? "" : ", more to pay"}.`
+          : `Paid "${plan.title}": ${formatMoney(paid)} on ${formatMedium(draft.date)}, ${no}${linked.status === "done" ? "" : ", more to pay"}.`,
       by,
     );
     return null;
@@ -2102,7 +2124,7 @@ export default function App() {
   const assist: Pick<SinkInput, "onExport" | "onRestoreMany" | "onUpdateDebt" | "onGo" | "onSavePlan" | "onPayPlan" | "onMakeGoal" | "onSaveOwner"> = {
     onExport: handleAskedExport,
     onRestoreMany: handleRestoreMany,
-    onUpdateDebt: (next) => setSettings((s) => ({ ...s, credits: s.credits.map((c) => (c.id === next.id ? next : c)) })),
+    onUpdateDebt: (next) => changeSettingsFrom("from the chat", (s) => ({ ...s, credits: s.credits.map((c) => (c.id === next.id ? next : c)) }), { actor: "ai", via: "ai_chat" }),
     onGo: (place) => goRef.current(place.screen as Screen, place),
     // The Planner from the chat: recorded as the assistant's, which it was (docs/16-PLANNER.md, P4.23).
     onSavePlan: (plan, action, summary) => changePlan(plan, action, summary, { actor: "ai", via: "ai_chat" }),
@@ -2131,7 +2153,7 @@ export default function App() {
     },
     onUpdate: handleUpdate,
     onBudget: handleBudgetYear,
-    onAddDebt: (debt) => setSettings((s) => ({ ...s, credits: withDebt(s.credits, debt) })),
+    onAddDebt: (debt) => changeSettingsFrom("from the chat", (s) => ({ ...s, credits: withDebt(s.credits, debt) }), { actor: "ai", via: "ai_chat" }),
     onSettle: (debtId) => {
       const debt = settings.credits.find((d) => d.id === debtId);
       if (debt) settleDebt(debt);
@@ -2603,9 +2625,21 @@ export default function App() {
               onSave={handleSave}
               onLinkPlan={(plan, rows) => {
                 // Typed on the Add form, counted as the plan's payment (`planPaidBy`).
-                const linked = linkPayments(plan, rows.map((r) => r.id), [...transactions, ...rows], asOf);
-                const paid = rows.reduce((sum, r) => sum + r.total, 0);
-                changePlan(linked, "plan.paid", `Paid "${plan.title}": ${formatMoney(paid)}, #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}, from the Add form${linked.status === "done" ? "" : ", more to pay"}.`, BY_OWNER);
+                const paying = rows.filter((r) => paysPlan(plan, r));
+                const all = [...transactions, ...rows];
+                const linked = linkPayments(plan, paying.map((r) => r.id), all, asOf);
+                // A plan to save is done by what was moved, never its fee (P11), and said as moved.
+                const saving = isSave(plan);
+                const paid = Math.max(0, paidSoFar(linked, all).amount - paidSoFar(plan, transactions).amount);
+                const no = `#${String(paying[0]?.recordNumber ?? rows[0]?.recordNumber ?? 0).padStart(4, "0")}`;
+                changePlan(
+                  linked,
+                  "plan.paid",
+                  saving
+                    ? `Moved ${formatMoney(paid)} into ${plan.into} for "${plan.title}", ${no}, from the Add form${linked.status === "done" ? "" : ", more to move"}.`
+                    : `Paid "${plan.title}": ${formatMoney(paid)}, ${no}, from the Add form${linked.status === "done" ? "" : ", more to pay"}.`,
+                  BY_OWNER,
+                );
               }}
               onBin={handleDelete}
               onBinMany={handleDeleteMany}
@@ -2614,7 +2648,7 @@ export default function App() {
               reserved={renumbers ? undefined : deleted}
               onUpdate={handleUpdate}
               onBudget={handleBudgetYear}
-              onAddDebt={(debt) => setSettings((s) => ({ ...s, credits: withDebt(s.credits, debt) }))}
+              onAddDebt={(debt) => changeSettingsFrom("on the Add form", (s) => ({ ...s, credits: withDebt(s.credits, debt) }))}
               settlementFor={settlementFor}
               onSettle={settleAsked}
               assist={assist}
@@ -2690,9 +2724,7 @@ export default function App() {
               asOf={asOf}
               onRecord={(debt, effect, amount) => recordDebt(debt, effect, amount, "debt")}
               onEditRow={startEditing}
-              onUpdateDebt={(next) =>
-                setSettings((s) => ({ ...s, credits: s.credits.map((c) => (c.id === next.id ? next : c)) }))
-              }
+              onUpdateDebt={(next) => changeSettingsFrom("on the Debt screen", (s) => ({ ...s, credits: s.credits.map((c) => (c.id === next.id ? next : c)) }))}
               onManage={() => go("settings")}
               onShowRows={(query) => {
                 go("database");

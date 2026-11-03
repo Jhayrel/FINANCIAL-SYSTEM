@@ -55,7 +55,13 @@ export type Action =
   | "plan.paid"
   | "plan.skip"
   | "plan.remove"
-  | "plan.restore";
+  | "plan.restore"
+  /** Deleted for good from the bin (offline only: the cloud keeps the bin). */
+  | "transaction.purge"
+  /** The whole system taken out of the app, or sent up to the cloud: who took a copy, and when (3 November 2026). */
+  | "data.backup"
+  | "data.export"
+  | "data.upload";
 
 export interface ActivityEvent {
   readonly id: string;
@@ -249,6 +255,26 @@ export function restored(row: Transaction, by: Provenance = BY_OWNER): ActivityE
   });
 }
 
+/** A row deleted for good from the bin. */
+export function purged(row: Transaction, by: Provenance = BY_OWNER): ActivityEvent {
+  return build("transaction.purge", by, `Deleted ${numbered(row)}, ${nameOf(row)}, for good from the bin.`, {
+    targetId: row.id,
+    recordNumber: row.recordNumber,
+    amount: row.total,
+    before: describeRow(row),
+  });
+}
+
+/**
+ * A copy of the system taken or sent: a backup file, a CSV export, an
+ * upload to the cloud. Nothing in the app changes, but the owner asked that
+ * every part be on the trail (3 November 2026), and a copy of their money
+ * leaving the app is the kind of thing a trail is for.
+ */
+export function dataTaken(action: "data.backup" | "data.export" | "data.upload", summary: string, by: Provenance = BY_OWNER): ActivityEvent {
+  return build(action, by, summary);
+}
+
 export function settingsChanged(what: string, by: Provenance = BY_OWNER): ActivityEvent {
   return build("settings.update", by, what);
 }
@@ -282,3 +308,21 @@ export function proposalDiscarded(what: string, model?: string): ActivityEvent {
 /** Newest first, which is the only order this is ever read in. */
 export const byNewest = (a: ActivityEvent, b: ActivityEvent): number =>
   a.at < b.at ? 1 : a.at > b.at ? -1 : b.id.localeCompare(a.id);
+
+/**
+ * The database's own limits on an event (firestore.rules, `validActivity`),
+ * kept before writing. A save in Settings that changed many things wrote
+ * every change into `after`, and past 600 characters the database refused
+ * the whole event: that save left no trace in Activity (3 November 2026).
+ */
+export function withinLimits<T extends Partial<Omit<ActivityEvent, "id">>>(event: T): T {
+  const cut = (s: string | undefined, n: number): string | undefined => (s === undefined || s.length <= n ? s : `${s.slice(0, n - 3)}...`);
+  return {
+    ...event,
+    ...(event.summary !== undefined ? { summary: cut(event.summary, 300) } : {}),
+    ...(event.before !== undefined ? { before: cut(event.before, 600) } : {}),
+    ...(event.after !== undefined ? { after: cut(event.after, 600) } : {}),
+    ...(event.model !== undefined ? { model: cut(event.model, 120) } : {}),
+    ...(event.targetId !== undefined ? { targetId: event.targetId.slice(0, 80) } : {}),
+  };
+}
