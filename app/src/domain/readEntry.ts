@@ -628,6 +628,14 @@ function walletIn(said: string, accounts: readonly string[]): string {
      */
     const short = shortNameOf(account, accounts);
     if (short && (flat.includes(` ${short} `) || flat.includes(` ${short}s `))) return account;
+
+    /*
+     * Run together: "deposited 1500 to my mayabank" (owner, 3 November 2026)
+     * left the destination blank. A name of two words or more, typed as one.
+     */
+    const squeezed = (v: string): string => (v.includes(" ") ? v.replace(/ /g, "") : "");
+    const joined = [squeezed(flattened), squeezed(short)].filter((v) => v.length >= 6);
+    if (joined.some((v) => flat.includes(` ${v} `) || flat.includes(` ${v}s `))) return account;
   }
 
   /*

@@ -2561,6 +2561,22 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
 - Tested on the owner's 3 November data: the sheet, Pay, Link, Skip, Remove,
   Put back, Edit, Move the date and the warning button, PC and phone, each
   on a fresh copy: all pass, no new entry, set aside down by ₱1,500.00.
+- **The chat that day, replayed** (pushed after b4f5418):
+  - receipts plus "deposited 1500 to my mayabank" made the deposit twice:
+    the model's card from the words had no wallet, and `typedOnce` matched
+    only identical cards, and only with two pictures; now a blank field
+    matches and the fuller card stays, with any picture;
+  - "mayabank" as one word was no account; "None of your accounts shows
+    ₱1,500.00 arriving" was said with #3974 right there (`destination.ts`
+    now finds the recorded transfer and says it);
+  - "my maya bank 3549.81 let me know how much it gain" went to the model,
+    which answered the year's interest: "gain" now reads as interest from a
+    balance;
+  - "this november" to an open plan card gave the month's summary;
+  - "plan to pay maya credit 1000 on dec 6" said "paid already";
+  - a model "Plan:" line named as a saving made a plan to spend;
+  - skipping a card already in the ledger now offers it to a plan.
+  The earlier set of conversations replayed after these changes; see below.
 
 ## 6. What the owner has to do
 

@@ -21,7 +21,8 @@ export interface InterestFromBalance {
   readonly gap: Centavos;
 }
 
-const EARNS = /\b(?:interest|interests|tubo|earn(?:ed|ing|s)?|kita)\b/i;
+// "how much it gain" (owner, 3 November 2026) went to the model, which summed the year's interest instead.
+const EARNS = /\b(?:interest|interests|tubo|earn(?:ed|ing|s)?|kita|gain(?:ed|s)?|grew|grow(?:n|th)?|increased?|nadagdag|lumaki)\b/i;
 
 /** The account a sentence names, the longest name first, a name's words before any part in brackets counting too ("maya bank"). */
 export function accountIn(text: string, accounts: readonly string[]): string {

@@ -163,4 +163,11 @@ describe("a price guessed, and 'add it'", () => {
     expect(words).toContain("Saved up first: a usual month spares about ₱4,500.00, so about 23 months of that");
     expect(words).toContain("The main risk: November is ₱95,500.00 short with it");
   });
+
+  it("a date said on its own moves the card: 'this november', 'next month' (3 November 2026 replay)", () => {
+    const c = readPlanCardChange("this november", { ...trip, due: "9999-12-31", dueKind: "none" }, ctx);
+    expect(c?.input.dueKind).toBe("month");
+    expect(c?.input.due.slice(0, 7)).toBe(`${ctx.asOf.slice(0, 4)}-11`);
+    expect(readPlanCardChange("ok thanks", trip, ctx)).toBeNull();
+  });
 });

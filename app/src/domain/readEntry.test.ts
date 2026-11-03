@@ -285,6 +285,11 @@ describe("what-ifs said on the card", () => {
     expect(readEntry("withdraw 500 from savings to cash", [], reference, asOf).draft).toMatchObject({ fromWallet: "Maya Bank (Personal savings)", toWallet: "Cash" });
   });
 
+  it("reads a name typed as one word: 'mayabank' is the savings account (3 November 2026)", () => {
+    expect(readEntry("deposited 1500 to my mayabank", [], reference, asOf).draft).toMatchObject({ flow: "Transfer", toWallet: "Maya Bank (Personal savings)", amount: 150000 });
+    expect(readEntry("i spent 50 on food from gcash", [], reference, asOf).draft.fromWallet).toBe("Gcash");
+  });
+
   it("says a dropped minus sign, a third decimal place and a day that cannot be", () => {
     expect(readEntry("spent -50 on food", [], reference, asOf).because.join(" ")).toMatch(/Read as ₱50\.00: an amount is never below zero/);
     const three = readEntry("spent 50.555 on food", [], reference, asOf);

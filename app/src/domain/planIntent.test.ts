@@ -165,6 +165,10 @@ describe("a Plan line from the model", () => {
     expect(readPlanLine(line, ctx)).toMatchObject({ title: "Tuition", amount: 900_000, due: "2026-11-15", item: "School" });
     expect(readPlanLine("Trip, by 2026-12-20", ctx)).toBeNull();
     expect(readPlanLine("Tuition, PHP 9,000.00, in November 2026", ctx)).toMatchObject({ due: "2026-11-30", dueKind: "month" });
+    // Named as a saving with no ", into": still a plan to save, never one to spend (3 November 2026).
+    const saving = readPlanLine("Save into Maya Bank, PHP 1,500.00, in November 2026", ctx);
+    expect(saving?.into).toBe("Maya Bank");
+    expect(saving?.item).toBe("");
     expect(readPlanLine("New phone, PHP 25,000.00, in 2027", ctx)).toMatchObject({ amount: 2_500_000, due: "2027-12-31", dueKind: "year" });
     expect(readPlanLine("Trip, PHP 5,000.00, no date yet", ctx)).toMatchObject({ amount: 500_000, due: NO_DATE, dueKind: "none" });
     expect(readPlanLine("Tuition, PHP 9,000.00, by 2026-01-15", ctx)).toBeNull();

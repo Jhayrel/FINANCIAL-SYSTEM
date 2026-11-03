@@ -131,7 +131,8 @@ export function readPlanCardChange(
       changed.push("no date yet");
     }
   } else {
-    const when = /\b(?:on|by|in|for|to|until|before|move|date|sa)\b|\b20\d{2}\b/i.test(t) ? whenFor(t, ctx.asOf) : null;
+    // A date said on its own is the card's date too: "this november" went to the month's summary (3 November 2026 replay).
+    const when = /\b(?:on|by|in|for|to|until|before|move|date|sa)\b|\b20\d{2}\b/i.test(t) || t.split(" ").length <= 3 ? whenFor(t, ctx.asOf) : null;
     if (when && when.due >= ctx.asOf) {
       const kind: DueKind = when.kind;
       const due = dueFor(kind, when.due);

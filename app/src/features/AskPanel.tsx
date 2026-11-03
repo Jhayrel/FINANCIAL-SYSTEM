@@ -11670,6 +11670,15 @@ export function AskPanel({
                   }),
                 );
                 settle(i, "discarded");
+                /*
+                 * Skipped because it is in the ledger already: that entry may
+                 * be what an open plan was waiting for. Told "I deposited 1500
+                 * to my maya bank already" with "Save into Maya Bank" just
+                 * planned, the chat started a second entry and never offered
+                 * #3974 to the plan (3 November 2026). Offered, never linked.
+                 */
+                const twin = alreadyInLedger.get(i)?.[0]?.row;
+                if (twin) offerPlanLink([twin]);
               }}
             />
           ) : (

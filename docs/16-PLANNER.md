@@ -473,3 +473,11 @@ entry, ₱1,500.00 of "Random necessities" (#3976). Rules from that day:
    it the same way. It was "paid already" to the chat.
 7. **A kind guessed for a plan with none** is said under the field: "Picked
    from your past entries like it ... Check it."
+8. **No way in makes a saving into a plan to spend.** The model's "Plan:"
+   line named as a saving ("Plan: Save into Maya Bank, PHP 1,500.00") is a
+   plan to save into that account even without ", into"; a date said alone
+   to an open card ("this november") changes the card and keeps its account.
+9. **"plan to pay maya credit 1000 on dec 6"** with November's plan by that
+   name done is a new plan, not "paid already".
+10. **Skipping a card because it is already in the ledger** offers that entry
+   to an open plan it fits ("Count it as moved"), never linked by itself.

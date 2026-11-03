@@ -124,13 +124,13 @@ describe("holding the card to the screen", () => {
 
   it("keeps a payment on a credit line a debt payment, not Spending, on a Paid to merchant screen", () => {
     // Owner, 3 November 2026: a Maya Credit payment's screen came out "Spending" with the line still on it.
-    const paid = "Maya\nPaid to merchant\nNOVA BANK\nAmount ₱1,075.52\nRef No. 5555 666 777888\nNov 3, 2026 3:34 PM";
+    const paid = "Maya\nPaid to merchant\nNOVA BANK\nAmount ₱980.00\nRef No. 5555 666 777888\nNov 3, 2026 3:34 PM";
     const screen = readWalletReceipt([paid])!;
     expect(screen.kind).toBe("pay");
-    const [card] = checkWalletReceipts([proposal({ flow: "Debt", item: "Maya Credit", amount: 107552, fromWallet: "Maya", date: "2026-11-03", debtId: "maya-credit", debtEffect: "repay", status: "Paid" })], [screen], reference, ASOF);
-    expect(card?.draft).toMatchObject({ flow: "Debt", debtId: "maya-credit", debtEffect: "repay", item: "Maya Credit", amount: 107552, status: "Paid" });
+    const [card] = checkWalletReceipts([proposal({ flow: "Debt", item: "Maya Credit", amount: 98000, fromWallet: "Maya", date: "2026-11-03", debtId: "maya-credit", debtEffect: "repay", status: "Paid" })], [screen], reference, ASOF);
+    expect(card?.draft).toMatchObject({ flow: "Debt", debtId: "maya-credit", debtEffect: "repay", item: "Maya Credit", amount: 98000, status: "Paid" });
     // Spending read off the same kind of screen stays spending.
-    const [shop] = checkWalletReceipts([proposal({ flow: "Spending", category: "Spending", item: "Food", amount: 107552, fromWallet: "Maya", date: "2026-11-03" })], [screen], reference, ASOF);
+    const [shop] = checkWalletReceipts([proposal({ flow: "Spending", category: "Spending", item: "Food", amount: 98000, fromWallet: "Maya", date: "2026-11-03" })], [screen], reference, ASOF);
     expect(shop?.draft.flow).toBe("Spending");
   });
 

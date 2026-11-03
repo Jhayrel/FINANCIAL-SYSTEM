@@ -31,4 +31,24 @@ describe("typedOnce", () => {
     expect(typedOnce(one, pictures, note)).toHaveLength(2);
     expect(typedOnce(one, ["bank.jpg"], note)).toHaveLength(2);
   });
+
+  it("one picture and the words: the deposit the message describes is the picture's, once, with its wallet (3 November 2026)", () => {
+    const words = "I paid my debt and also deposited 1500 to my bank";
+    const read = [
+      card("a.jpg line 2", "Transfer", "", 150000, "Wallet A", "Bank"),
+      card("b.jpg", "Debt", "", 98000, "Wallet A"),
+      card("b.jpg, user message", "Transfer", "", 150000, "", "Bank"),
+    ];
+    const kept = typedOnce(read, ["a.jpg", "b.jpg", "c.jpg"], words);
+    expect(kept.map((p) => [p.draft.flow, p.draft.amount, p.draft.fromWallet])).toEqual([
+      ["Transfer", 150000, "Wallet A"],
+      ["Debt", 98000, "Wallet A"],
+    ]);
+    // The fuller card stays when the words' card came first.
+    const first = typedOnce([read[2]!, read[0]!], ["a.jpg"], words);
+    expect(first).toHaveLength(1);
+    expect(first[0]!.draft.fromWallet).toBe("Wallet A");
+    // Into another account: two movements.
+    expect(typedOnce([read[0]!, card("b.jpg, user message", "Transfer", "", 150000, "", "Other")], ["a.jpg", "b.jpg"], words)).toHaveLength(2);
+  });
 });

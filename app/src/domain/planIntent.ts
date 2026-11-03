@@ -546,7 +546,13 @@ export function readPlanLine(raw: string, ctx: PlanContext): PlanInput | null {
    */
   const intoSaid = /,\s*into\s+([^,]+?)\s*\.?\s*$/i.exec(raw)?.[1]?.trim() ?? "";
   const own = [...ctx.reference.savings, ...(ctx.accounts ?? []).filter((a) => a.kind === "goal" && !a.archived).map((a) => a.name), ...ctx.reference.wallets];
-  const into = intoSaid ? (own.find((a) => a.toLowerCase() === intoSaid.toLowerCase()) ?? accountNamed(intoSaid, own)) : null;
+  /*
+   * Or said in its name: "Plan: Save into Maya Bank, PHP 1,500.00, in
+   * November 2026" with no ", into" made a plan to spend called a saving, the
+   * fault that booked ₱1,500.00 of spending on 3 November 2026.
+   */
+  const titleInto = intoSaid ? "" : (/^\s*(?:save|saving|savings|deposit|move|transfer|put|ipon)\b[^,]*?\b(?:into|to|in|sa)\s+(?:my\s+|the\s+)?([^,]+?)\s*(?:,|$)/i.exec(raw)?.[1]?.trim() ?? "");
+  const into = intoSaid ? (own.find((a) => a.toLowerCase() === intoSaid.toLowerCase()) ?? accountNamed(intoSaid, own)) : titleInto ? (own.find((a) => a.toLowerCase() === titleInto.toLowerCase()) ?? accountNamed(titleInto, own)) : null;
   const line = intoSaid ? raw.replace(/,\s*into\s+[^,]+?\s*\.?\s*$/i, "") : raw;
   const read = readSpendLine(line, ctx);
   if (!read || !into) return read;

@@ -155,4 +155,13 @@ describe("a repayment with its interest saved beside it", () => {
     expect(linked.status).toBe("done");
     expect(paidSoFar(linked, all).amount).toBe(107_552);
   });
+
+  it("'plan to pay maya credit 1000 on dec 6' with November's plan done: a new plan, not 'paid already' (3 November 2026 replay)", async () => {
+    const { readPlannerAsk } = await import("./plannerAsk");
+    const done = { ...linkPayments(makePlan({ ...input, due: asOf }, asOf, "owner", "nov"), ["pay1"], [...ledger, repay({ amount: 100_000 })], asOf) };
+    expect(done.status).toBe("done");
+    expect(readPlannerAsk("plan to pay maya credit 1000 on dec 6", { plans: [done], reference, transactions: [...ledger, repay()], asOf })).toBeNull();
+    // Paying it, said of the done plan, is still said as paid already.
+    expect(readPlannerAsk("pay the pay maya credit plan", { plans: [done], reference, transactions: [...ledger, repay()], asOf })?.kind).toBe("closed");
+  });
 });

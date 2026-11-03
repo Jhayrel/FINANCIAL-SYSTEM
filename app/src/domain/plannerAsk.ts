@@ -692,6 +692,13 @@ export function readPlannerAsk(
   }
   if (/\b(?:paid|pay|settle|mark\b[^.?!]{0,30}\bpaid)\b/i.test(t)) {
     const plan = named(open, ["open"]);
+    /*
+     * "plan to pay maya credit 1000 on dec 6" is a new plan, the next one:
+     * it was answered "Pay Maya Credit is paid already" because November's
+     * plan by that name was done (3 November 2026 replay). Left to the
+     * readers that add a plan.
+     */
+    if (!plan && /\b(?:plan(?:ning)?\s+to|will|i'?ll|going\s+to|gonna|need\s+to|have\s+to)\s+pay\b/i.test(t) && !/\b(?:i|we)\s+(?:already\s+)?paid\b/i.test(t)) return null;
     if (!plan) return closedNamed(t, plans);
     const wallet = [...reference.wallets, ...reference.savings].find((w) => new RegExp(`\\b${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) ?? "";
     return { kind: "pay", plan, amount: sumIn(t), wallet };
