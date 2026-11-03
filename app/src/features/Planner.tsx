@@ -1001,6 +1001,8 @@ export function PlanForm(props: {
   const [amount, setAmount] = useState<Centavos | null>(editing ? editing.amount : null);
   // A new plan starts as "sometime next month"; the day, or no date at all, is a tap away.
   const [when, setWhen] = useState<When>(editing ? { kind: dueKindOf(editing), due: editing.due } : { kind: "month", due: nextMonthEnd(asOf) });
+  // Picked by hand: a debt picked later does not move it to the line's due day.
+  const [whenTouched, setWhenTouched] = useState(Boolean(editing));
   const due = when.due;
   const [item, setItem] = useState(editing?.item ?? "");
   const [wallet, setWallet] = useState(editing?.wallet ?? "");
@@ -1094,7 +1096,7 @@ export function PlanForm(props: {
   const moreSummary = saving
     ? [counted ? (when.kind === "none" ? "held back once it has a date" : "held back from safe to spend") : "not held back", notes ? "a note" : ""].filter(Boolean).join(", ")
     : paying
-      ? [line?.scheduled ? "its payment is held back already" : counted ? "counted in safe to spend" : "not counted", notes ? "a note" : ""].filter(Boolean).join(", ")
+      ? [!line ? "pick the debt first" : line.scheduled ? "its payment is held back already" : counted ? "counted in safe to spend" : "not counted", notes ? "a note" : ""].filter(Boolean).join(", ")
       : [need ? "A need" : "A want", goalName ? `saved in ${goalName}` : "", counted ? (when.kind === "none" ? "counted once it has a date" : "counted in safe to spend") : "not counted", notes ? "a note" : ""].filter(Boolean).join(", ");
 
   const save = async (): Promise<void> => {
@@ -1158,29 +1160,8 @@ export function PlanForm(props: {
             onChange={(v) => setPlanType(v === "save" ? "save" : v === "debt" ? "debt" : "spend")}
           />
         </Field>
-        <Field label="What is it for" htmlFor="plan-title" error={tried && !title.trim() ? "Say what it is for." : undefined}>
-          <TextInput id="plan-title" value={title} onChange={setTitle} placeholder={saving ? "Deposit to savings, money for a trip" : paying ? "Pay Maya Credit, loan payment" : "Tuition, new phone, a trip"} maxLength={80} />
-        </Field>
-        <Field
-          label={saving ? "How much to move" : paying ? "How much to pay" : "How much"}
-          htmlFor="plan-amount"
-          help={paying && line ? `Owed on ${line.name} now: ${formatMoney(line.owed)}${line.scheduled ? `; its next payment, ${formatMoney(line.scheduled.amount)}, is due ${formatMedium(line.scheduled.on)}` : ""}.` : undefined}
-          error={tried && (amount === null || amount <= 0) ? (saving ? "Put in how much to move." : paying ? "Put in how much you will pay." : "Put in how much it will cost.") : paidProblem}
-        >
-          <AmountInput id="plan-amount" value={amount} onChange={setAmount} />
-        </Field>
-        <div className="fms-planform-when">
-          <span className="t-label fms-planform-whenlabel">When</span>
-          <WhenPicker
-            value={when}
-            onChange={setWhen}
-            asOf={asOf}
-            id="plan-due"
-            dayLabel={saving ? "Move by" : "Pay by"}
-            error={tried && when.kind !== "none" && !/^\d{4}-\d{2}-\d{2}$/.test(due) ? (when.kind === "month" ? "Pick the month." : "Pick the day it is to be paid by.") : undefined}
-          />
-        </div>
-        {paying ? (
+        {/* The debt first: picking it fills the name, the amount, the day and the account (3 November 2026). */}
+        {paying && debtLines.some((d) => !d.archived) && (
           <div className="fms-planform-pair">
             <Field label="Which debt" error={tried || debtId ? debtProblem : undefined}>
               <Select
@@ -1191,6 +1172,11 @@ export function PlanForm(props: {
                   // Filled from the line, only where nothing was typed: its name, and what its next payment is, or all that is owed.
                   if (picked && !title.trim()) setTitle(`Pay ${picked.name}`);
                   if (picked && (amount === null || amount <= 0)) setAmount(picked.scheduled?.amount ?? (picked.owed > 0 ? picked.owed : null));
+                  // Its due day, unless a time was picked: "sometime in December" when Maya Credit is due December 6 (3 November 2026).
+                  if (picked?.scheduled && !whenTouched) setWhen({ kind: "day", due: picked.scheduled.on });
+                  // The account it is paid from, unless one was picked.
+                  const account = picked ? props.debts.find((d) => d.id === picked.id)?.wallet : undefined;
+                  if (account && !wallet && reference.wallets.concat(reference.savings).includes(account)) setWallet(account);
                 }}
                 options={[NO_INTO, ...debtLines.filter((d) => !d.archived || d.id === debtId).map((d) => d.name)]}
                 ariaLabel="Which debt"
@@ -1206,7 +1192,36 @@ export function PlanForm(props: {
               />
             </Field>
           </div>
-        ) : saving ? (
+        )}
+        {paying && !debtLines.some((d) => !d.archived) && (
+          <Alert status="info">No loan or credit line is in Settings yet. Add one in Settings, Credit and loans, then plan its payment here.</Alert>
+        )}
+        <Field label="What is it for" htmlFor="plan-title" error={tried && !title.trim() ? "Say what it is for." : undefined}>
+          <TextInput id="plan-title" value={title} onChange={setTitle} placeholder={saving ? "Deposit to savings, money for a trip" : paying ? "Pay Maya Credit, loan payment" : "Tuition, new phone, a trip"} maxLength={80} />
+        </Field>
+        <Field
+          label={saving ? "How much to move" : paying ? "How much to pay" : "How much"}
+          htmlFor="plan-amount"
+          help={paying && line ? `Owed on ${line.name} now: ${formatMoney(line.owed)}${line.scheduled ? `; its next payment, ${formatMoney(line.scheduled.amount)}, is due ${formatMedium(line.scheduled.on)}` : ""}.` : undefined}
+          error={tried && (amount === null || amount <= 0) ? (saving ? "Put in how much to move." : paying ? "Put in how much you will pay." : "Put in how much it will cost.") : paidProblem}
+        >
+          <AmountInput id="plan-amount" value={amount} onChange={setAmount} />
+        </Field>
+        <div className="fms-planform-when">
+          <span className="t-label fms-planform-whenlabel">When</span>
+          <WhenPicker
+            value={when}
+            onChange={(w) => {
+              setWhenTouched(true);
+              setWhen(w);
+            }}
+            asOf={asOf}
+            id="plan-due"
+            dayLabel={saving ? "Move by" : "Pay by"}
+            error={tried && when.kind !== "none" && !/^\d{4}-\d{2}-\d{2}$/.test(due) ? (when.kind === "month" ? "Pick the month." : "Pick the day it is to be paid by.") : undefined}
+          />
+        </div>
+        {paying ? null : saving ? (
           <div className="fms-planform-pair">
             <Field label="Into" error={tried || into ? intoProblem : undefined}>
               <Select value={into || NO_INTO} onChange={(v) => setInto(v === NO_INTO ? "" : v)} options={[NO_INTO, ...intoChoices.options]} groups={intoChoices.groups} ariaLabel="Into" />

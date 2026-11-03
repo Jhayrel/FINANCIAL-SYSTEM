@@ -384,9 +384,12 @@ A plan is one of three kinds, picked on the form ("This plan is"):
 
 A plan to pay a debt:
 
-1. **Picks the line** (loans and credit lines; On behalf lines have their
-   own flow). Picking it fills the name ("Pay Maya Credit") and the amount
-   (the next payment due, else all that is owed) where nothing was typed.
+1. **Picks the line first** (loans and credit lines; On behalf lines have
+   their own flow): it is the form's first field. Picking it fills, where
+   nothing was set by hand, the name ("Pay Maya Credit"), the amount (the
+   next payment due, else all that is owed), the day (the line's due day)
+   and Pay from (the line's account). With no line in Settings the form says
+   so and where to add one; before a pick, More details says to pick it.
 2. **Is not held back twice.** Safe to spend already holds back a line's
    next payment when it falls due in the month (`debtDue`). For such a line
    the plan is a reminder of the day and amount meant, and "Count it in
