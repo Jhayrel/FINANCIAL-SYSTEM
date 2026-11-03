@@ -124,6 +124,12 @@ const SEE =
 const BUDGET_SEE = /\b(?:vs\.?|versus|against|compared?|compare|actual|chart|graph|plot|draw|show|track|tracking|pace|each month|every month|per month|by month|monthly|over time|trend|so far)\b/i;
 /** A budget being set, raised or recommended is a budget card, not a chart. */
 const BUDGET_DOING = /\b(?:set|change|raise|lower|recommend|suggest|propose|make|add|apply|increase|decrease|cut|realistic)\b/i;
+/**
+ * Why it was asked, not what to draw: "a break down of expenses based on
+ * categories so I can do Budgeting last month", then "chart", drew the month
+ * against the budget instead of the categories (owner, 4 November 2026).
+ */
+export const BUDGET_PURPOSE = /\b(?:so\s+(?:that\s+)?i\s+(?:can|could)|for|to\s+help\s+(?:me\s+)?(?:with)?|to)\s+(?:do\s+|make\s+|plan\s+|set\s+|with\s+)?(?:my\s+|a\s+|the\s+)?budget(?:ing|s)?\b/gi;
 
 /** Where the money is now, per account: a level, split. */
 /** "how much is in each of my accounts", "how much do I have in my wallets". */
@@ -159,7 +165,7 @@ export function localHint(question: string, credits: readonly string[] = []): Ch
   const lower = q.toLowerCase();
   const namesCredit = credits.some((c) => c.trim() !== "" && lower.includes(c.trim().toLowerCase()));
 
-  if (/\bbudget/i.test(q) && BUDGET_SEE.test(q) && !BUDGET_DOING.test(q)) {
+  if (/\bbudget/i.test(q.replace(BUDGET_PURPOSE, " ")) && BUDGET_SEE.test(q) && !BUDGET_DOING.test(q)) {
     return { money: "budget" };
   }
   if (!TELLS_BALANCE.test(q) && (BALANCE_NOUN.test(q) || /\b(?:savings|ipon)\b|\bwhere is (?:all )?my money\b(?!\s+go)/i.test(q) || new RegExp(IN_ACCOUNTS, "i").test(q))) {

@@ -2616,6 +2616,16 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
   - a pie of months kept January to June and folded the recent months: it
     keeps the largest, and its words no longer call "Other months" a month
     or name a lowest month it cannot see.
+- **Charts after a breakdown, 4 November (owner's screenshots)**:
+  - "Trend" drew "Spending on Down by month, the whole ledger": the subject
+    picker took "down" from "break down". A breakdown question has no one
+    subject; its words are left out;
+  - "chart" after the pie drew the month against the budget: "so I can do
+    Budgeting" is why it was asked, not a budget chart (`BUDGET_PURPOSE`);
+  - a long line listed all 31 running totals under the chart: about eight,
+    evenly through it, with the first and the last; any day by pointing.
+  Now: Trend draws the year by month, Pie and chart draw October by kind,
+  with the AI on and off. The 121 earlier questions: unchanged.
 - **Every button, on the owner's 3 November data**, each pressed on a fresh
   copy: computer 400 (and 399 again with each dialog's confirm pressed, 89
   confirmed), phone 342 with confirm (89 confirmed) and again without. No

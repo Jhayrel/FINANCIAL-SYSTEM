@@ -1,7 +1,7 @@
 /** Charts said as a wish, kinds as categories, and a folded pie read honestly (3 November 2026). Invented rows. */
 import { describe, expect, it } from "vitest";
 
-import { chartReading } from "./chartAsk";
+import { chartReading, localHint, measureOf } from "./chartAsk";
 import { buildChart, drawReply, type Chart } from "./charts";
 import type { Transaction } from "./types";
 
@@ -34,4 +34,12 @@ describe("charts after a breakdown", () => {
     expect(words).toBe("The 2 largest months have slices of their own. May 2026 is the largest, PHP 4,000.00, 40% of the PHP 10,000.00 total. The other months together are PHP 3,000.00.");
     expect(words).not.toMatch(/lowest|Other months is/);
   });
+
+  it("'so I can do Budgeting' is why it was asked, not a budget chart; 'against the budget' still is (4 November 2026)", () => {
+    expect(measureOf(localHint("Can you give me a break down of expenses based on categories so I can do Budgeting last month chart"))).toBeNull();
+    expect(measureOf(localHint("breakdown by category for budgeting, as a chart"))).toBeNull();
+    expect(measureOf(localHint("chart my spending against the budget last month"))).toBe("budget");
+    expect(measureOf(localHint("show my budget vs actual each month"))).toBe("budget");
+  });
 });
+

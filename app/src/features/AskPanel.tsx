@@ -129,7 +129,7 @@ import {
   type Chart,
   type ComparedPeriods,
 } from "../domain/charts";
-import { buildMeasureChart, chartHelps, chartReading, chartsWorked, inWords, localHint, measureOf, mergeHint, type ChartHint } from "../domain/chartAsk";
+import { BUDGET_PURPOSE, buildMeasureChart, chartHelps, chartReading, chartsWorked, inWords, localHint, measureOf, mergeHint, type ChartHint } from "../domain/chartAsk";
 import { rampFor } from "../components/charts";
 import { Icon } from "../components/Icon";
 import { AttachMenu } from "../components/AttachMenu";
@@ -667,7 +667,8 @@ const CHAT_DEADLINE_MS = 60_000;
 
 /** Words a question is never about, however often the entries use them. */
 const SUBJECT_STOP = new Set(
-  "the and for with from that this what how much many can could would should will did does have has had was were are you your my mine our today yesterday tomorrow tonight morning usual usually last time times month months week weeks year years day days spend spent spending pay paid buy bought afford cost costs money budget going based consistent see trend chart show again more less also just only really like want need get got make made take took give gave keep left still about over under into onto then than when where which who why not yes okay please pls lang naman yung ang mga sa ng na po".split(" "),
+  // "break down": "Down" was taken as the subject of a trend after a breakdown (3 November 2026, and 31 October before it).
+  "the and for with from that this what how much many can could would should will did does have has had was were are you your my mine our today yesterday tomorrow tonight morning usual usually last time times month months week weeks year years day days spend spent spending pay paid buy bought afford cost costs money budget going based consistent see trend chart show again more less also just only really like want need get got make made take took give gave keep left still about over under into onto then than when where which who why not yes okay please pls lang naman yung ang mga sa ng na po break down breakdown categories category kinds kind items item expenses expense budgeting total totals pie bars graph income revenue earned saved savings so me do".split(" "),
 );
 
 const isOffer = (t: Turn): t is Offered => t.kind === "proposal";
@@ -2380,6 +2381,8 @@ export function AskPanel({
   const subjectSaid = (): string | null => {
     const asked = turns.filter((t): t is Said => t.kind === "you").slice(-3).reverse();
     for (const t of asked) {
+      // A breakdown of everything has no one subject: its words are not one to draw.
+      if (/\bbreak\s*down\b|\bbreakdown\b|\bcategor(?:y|ies)\b|\bby\s+(?:kind|item|type)\b/i.test(t.text) && !itemNamed(t.text, knownItems)) continue;
       const item = itemNamed(t.text, knownItems);
       if (item) return item;
       // Or a word the spending entries use, "gym" for Self Care (Gym): the rarest one said.
@@ -5138,7 +5141,11 @@ export function AskPanel({
             .filter((t): t is Said => t.kind === "you")
             .slice(0, 4)
             .map((t) => t.text)
-            .find((q) => q !== note && !(drawReply(q) ?? drawsBack(q)) && /\b(?:break\s*down|breakdown|categor\w*|by\s+(?:kind|item|type|wallet)|spen[dt]\w*|expenses?|income|revenue|earn\w*|where\s+(?:did\s+)?my\s+money)\b/i.test(q)) ?? null)
+            .find((q) => q !== note && !(drawReply(q) ?? drawsBack(q)) && /\b(?:break\s*down|breakdown|categor\w*|by\s+(?:kind|item|type|wallet)|spen[dt]\w*|expenses?|income|revenue|earn\w*|where\s+(?:did\s+)?my\s+money)\b/i.test(q))
+            // What it was for is not what to draw ("so I can do Budgeting").
+            ?.replace(BUDGET_PURPOSE, " ")
+            .replace(/\s+/g, " ")
+            .trim() ?? null)
         : null;
     // A breakdown asked for is the subject before any one word guessed from it.
     // Not for a trend, which is about time: "trend" after "a breakdown of my spending this month" drew nothing, where it drew the year by month.
@@ -14279,13 +14286,23 @@ function LineView({
    * figure. Spending against the budget lists the days that had some.
    */
   const level = chart.measure === "balance" || chart.measure === "owed";
-  const listed = (i: number): boolean => {
+  const worth = (i: number): boolean => {
     const r = chart.rows[i];
     if (!r) return false;
     if (level) return i === 0 || i === chart.rows.length - 1 || r.value !== chart.rows[i - 1]?.value;
     if (chart.measure === "budget") return r.count > 0 || i === chart.rows.length - 1;
     return r.value !== 0;
   };
+  /*
+   * A long line lists about eight of its points, evenly through it, with the
+   * first and the last: a month against the budget listed all thirty-one
+   * running totals under the chart (owner, 4 November 2026: "fix the
+   * charting"). Any point is still read by pointing at it or tapping it.
+   */
+  const worthy = chart.rows.map((_, i) => i).filter(worth);
+  const every = worthy.length > 12 ? Math.ceil(worthy.length / 8) : 1;
+  const shown = new Set(worthy.filter((_, k) => k % every === 0 || k === worthy.length - 1));
+  const listed = (i: number): boolean => shown.has(i);
 
   /** Half a step either side, so the whole width of the chart is pointable. */
   const grab = single ? width / 2 : step / 2;
