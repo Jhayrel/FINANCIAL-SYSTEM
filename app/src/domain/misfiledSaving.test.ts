@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Account } from "./accounts";
 import { planAlerts } from "./alerts";
-import { asSaving, asSavingWords, isSave, makePlan, misfiledSaving, plannedForBudget, planPaidBy, statusNow, viewOf, type Plan } from "./planner";
+import { asSaving, asSavingWords, isSave, makePlan, misfiledSaving, plannedForBudget, planPaidBy, plansAsNow, statusNow, viewOf, type Plan } from "./planner";
 import { readPlannerAsk } from "./plannerAsk";
 import type { ReferenceLists, Transaction } from "./types";
 
@@ -153,3 +153,13 @@ describe("the Add form and the chat offer it when the transfer is added", () => 
     expect(whole && whole.kind === "edit" ? whole.input.into : null).toBe(SAVINGS);
   });
 });
+
+describe("plansAsNow: the plans as the Planner shows them", () => {
+  it("a done plan whose payment was binned is open; one done for nothing on purpose stays done", () => {
+    const [lost, settled] = plansAsNow([misfiled(), misfiled({ id: "p2", entryIds: [] })], live);
+    expect(lost?.status).toBe("open");
+    expect(lost?.closedOn).toBeUndefined();
+    expect(settled?.status).toBe("done");
+  });
+});
+

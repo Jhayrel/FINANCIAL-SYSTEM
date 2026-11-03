@@ -362,7 +362,14 @@ function dimensionOf(question: string, twoMonthsAreBars = true): ChartBy {
   ) {
     return "wallet";
   }
-  if (/\b(category|categories|bills|subscriptions)\b/i.test(question)) return "category";
+  /*
+   * "Categories" are the owner's kinds, Food and Travel, as Settings,
+   * Categories lists them and the breakdown answers: a pie of "expenses based
+   * on categories" drew three slices, Spending, Bills and Subscriptions,
+   * beside a breakdown of fifteen kinds (3 November 2026). The three groups
+   * only when asked for by name.
+   */
+  if (/\b(?:main|top[- ]level|big)\s+categor(?:y|ies)\b|\bspending,?\s+bills\b|\bbills\s+(?:and|vs\.?|or)\s+subscriptions\b|\b(?:bills|subscriptions)\b/i.test(question)) return "category";
   return "item";
 }
 
@@ -787,7 +794,8 @@ export function presentationFor(question: string): Presentation {
 export function drawReply(said: string): "pie" | "bars" | "trend" | "chart" | null {
   const t = said.trim().toLowerCase().replace(/[.!]+$/, "");
   if (t.split(/\s+/).length > 7) return null;
-  const m = /^(?:(?:yes|yeah|yep|sure|ok(?:ay)?|sige|oo|go|please|pls)[\s,]+)*(?:(?:draw|show|make|give)(?: me)?(?: it| that)?(?: (?:as|in))?(?: a| an)?\s+)?(?:(?:as|in)\s+(?:a\s+)?)?(pie|pie chart|bars?|bar chart|trend|line|line chart|chart|graph)(?:\s+(?:please|pls|chart|it|po))*$/.exec(t);
+  // "I want pie", "can I see a pie", "gusto ko pie": said as a wish, not a command (owner, 3 November 2026).
+  const m = /^(?:(?:yes|yeah|yep|sure|ok(?:ay)?|sige|oo|go|please|pls)[\s,]+)*(?:(?:i\s+(?:want|need|wanna|would\s+like|like)|can\s+i\s+(?:have|see|get)|let\s+me\s+see|gusto\s+ko(?:\s+ng)?)(?:\s+(?:it|that|this))?\s+)?(?:(?:draw|show|make|give)(?: me)?(?: it| that)?(?: (?:as|in))?(?: a| an)?\s+)?(?:(?:as|in)\s+)?(?:a\s+|an\s+)?(pie|pie chart|bars?|bar chart|trend|line|line chart|chart|graph)(?:\s+(?:please|pls|chart|it|po|na))*$/.exec(t);
   if (m?.[1]) return /^pie/.test(m[1]) ? "pie" : /^bar/.test(m[1]) ? "bars" : /^(?:trend|line)/.test(m[1]) ? "trend" : "chart";
   return /^(?:yes|yeah|yep|sure|ok(?:ay)?|sige|oo)[\s,]*(?:please|pls)?[\s,]*(?:draw it|show it|draw|show me)$/.test(t) ? "chart" : null;
 }
@@ -1522,9 +1530,17 @@ export function buildChart(
     overTime(by) ? all : all.slice(0, most);
   let folded = 0;
   if (kind === "pie" && all.length > PIE_SLICES) {
-    const rest = all.slice(PIE_SLICES - 1);
+    /*
+     * Over time, the largest periods keep their slices, in date order, and the
+     * smallest share one. Taken in date order, January to June had slices
+     * and the months since, the ones asked about most, were "Other months"
+     * (owner's chat, 3 November 2026).
+     */
+    const biggest = overTime(by) ? new Set([...all].sort((a, b) => b[1].value - a[1].value).slice(0, PIE_SLICES - 1).map(([k]) => k)) : null;
+    const head = biggest ? all.filter(([k]) => biggest.has(k)) : all.slice(0, PIE_SLICES - 1);
+    const rest = biggest ? all.filter(([k]) => !biggest.has(k)) : all.slice(PIE_SLICES - 1);
     kept = [
-      ...all.slice(0, PIE_SLICES - 1),
+      ...head,
       [
         `Other (${rest.length})`,
         { value: rest.reduce((s, [, g]) => s + g.value, 0), count: rest.reduce((s, [, g]) => s + g.count, 0) },

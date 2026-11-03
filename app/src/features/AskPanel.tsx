@@ -167,7 +167,7 @@ import type { PlanAction } from "./useProposalSink";
 import { PlanForm } from "./Planner";
 import { entryImpact, limitLine } from "../domain/entryImpact";
 import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
-import { asSaving, asSavingWords, misfiledSaving, paysPlan, checkPlan, inputOf, isSave, kindFromHistory, paysDebt, planPaidBy, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, linkPayments, unlinkPayment, planAgain, dueFor, whenOf, NO_DATE, type DueKind, type Plan, type PlanInput } from "../domain/planner";
+import { asSaving, asSavingWords, misfiledSaving, paysPlan, plansAsNow, checkPlan, inputOf, isSave, kindFromHistory, paysDebt, planPaidBy, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, linkPayments, unlinkPayment, planAgain, dueFor, whenOf, NO_DATE, type DueKind, type Plan, type PlanInput } from "../domain/planner";
 import { alreadyPlannedWords, closedPlanWords, closedPlansWords, moveSaid, moveWords, NO_DAY, plannedMonthWords, planNamed, planStatusWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
 import { splitPlanClause, withoutPlanClause } from "../domain/planClause";
 import { asksForGoal, goalForPlan, type GoalForPlan } from "../domain/planGoal";
@@ -242,6 +242,7 @@ import { notArrivedWords, placeSentMoney } from "../domain/destination";
 import { carryWords, dayFigures, nextMonthStart, safeOverDays, yesterdayOf } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
 import { typedOnce } from "../domain/typedOnce";
+import { readSavedAsk, savedAnswer } from "../domain/savedAsk";
 import { debtAnswer, readDebtAsk } from "../domain/debtAsk";
 import { bridgeAnswer, readBridgeAsk, type BridgeAsk } from "../domain/bridgeAsk";
 import { periodOnly } from "../domain/spendAsk";
@@ -3723,7 +3724,7 @@ export function AskPanel({
           if (settled.has(doc)) continue;
           const pay = planToPay(doc, doc.due ? paperDueDay(doc.due, asOf) : null, asOf);
           if (!pay) continue;
-          const plans = settings.plans ?? [];
+          const plans = plansAsNow(settings.plans ?? [], transactions);
           if (plans.some((p) => p.status === "open" && p.amount === pay.amount && p.due === pay.due)) continue;
           const input = planInputFor(pay.title, pay.amount, pay.due, { reference, transactions, asOf }, doc.from);
           const plan = makePlan({ ...input, title: pay.title }, asOf, "ai");
@@ -4955,7 +4956,7 @@ export function AskPanel({
      */
     const said = question ? (whenFor(question, asOf) ?? (aheadMonthIn(question, asOf) ? { due: lastOfMonth(aheadMonthIn(question, asOf)!.year, aheadMonthIn(question, asOf)!.month), kind: "month" as const } : null)) : null;
     const input = said && said.due >= asOf && said.due.slice(0, 7) !== read.due.slice(0, 7) ? { ...read, due: said.due, dueKind: said.kind } : read;
-    const plans = settings.plans ?? [];
+    const plans = plansAsNow(settings.plans ?? [], transactions);
     if (plans.some((p) => p.status === "open" && p.amount === input.amount && namesIt(p.title, input.title))) return null;
     return input;
   };
@@ -5124,7 +5125,28 @@ export function AskPanel({
     // Else the item the last questions named, when this names none ("let see it in trend" after the gym).
     const bareDraw = !offeredDraw.current && !lastAnswered && files.length === 0 && (drawReply(lead) ?? drawsBack(lead)) !== null && itemNamed(lead, knownItems) === null;
     const subjectNow = bareDraw ? subjectSaid() : null;
-    const drawTopic = offeredDraw.current ?? lastAnswered ?? (subjectNow ? `${subjectNow} spending` : null);
+    /*
+     * Else the last question a chart can draw, whoever answered it: "Can you
+     * give me a break down of expenses based on categories ... last month",
+     * answered by the model, then "I want pie", drew the year by month (owner,
+     * 3 November 2026). Only the model answered, so nothing was kept to draw.
+     */
+    const askedToDraw =
+      bareDraw
+        ? ([...turns]
+            .reverse()
+            .filter((t): t is Said => t.kind === "you")
+            .slice(0, 4)
+            .map((t) => t.text)
+            .find((q) => q !== note && !(drawReply(q) ?? drawsBack(q)) && /\b(?:break\s*down|breakdown|categor\w*|by\s+(?:kind|item|type|wallet)|spen[dt]\w*|expenses?|income|revenue|earn\w*|where\s+(?:did\s+)?my\s+money)\b/i.test(q)) ?? null)
+        : null;
+    // A breakdown asked for is the subject before any one word guessed from it.
+    // Not for a trend, which is about time: "trend" after "a breakdown of my spending this month" drew nothing, where it drew the year by month.
+    const shapeSaid = drawReply(lead) ?? drawsBack(lead);
+    const fromQuestion = shapeSaid !== "trend" ? askedToDraw : null;
+    const breakdownAsked = fromQuestion && /\b(?:break\s*down|breakdown|categor\w*|by\s+(?:kind|item|type|wallet)|where\s+(?:did\s+)?my\s+money)\b/i.test(fromQuestion) ? fromQuestion : null;
+    const drawTopic = offeredDraw.current ?? lastAnswered ?? breakdownAsked ?? (subjectNow ? `${subjectNow} spending` : fromQuestion);
+    const guessedTopic = drawTopic !== null && drawTopic === fromQuestion;
     const drawAs = drawTopic && !as && files.length === 0 ? (drawReply(lead) ?? drawsBack(lead)) : null;
     // An offer is for the next message only.
     if (!drawAs) offeredDraw.current = null;
@@ -5135,6 +5157,8 @@ export function AskPanel({
       // Two periods asked about are drawn side by side, not as one (21 October 2026).
       const pair = drawAs === "pie" ? null : comparedPeriods(drawTopic, asOf);
       const charts = chartsFor(question, mergeHint(localHint(question, reference.credits ?? []), null, question, reference.credits ?? []), pair);
+      // A subject taken from an earlier question that draws nothing is let go: the request is drawn as said, as before.
+      if (!(charts.length === 0 && guessedTopic)) {
       emptyBox();
       say({ kind: "you", text: note });
       log(aiEvent("asked", "insights", { text: note }));
@@ -5144,6 +5168,7 @@ export function AskPanel({
       }
       for (const chart of charts) drawChart(chart);
       return;
+      }
     }
 
     /*
@@ -5913,7 +5938,7 @@ export function AskPanel({
      * 2026 process test). New plans were read either way; acting on one was
      * not.
      */
-    const aboutAPlan = pending !== null && /\bplans?\b/i.test(lead) && planNamed(lead, (settings.plans ?? []).filter((p) => p.status === "open"), ["open"]) !== null;
+    const aboutAPlan = pending !== null && /\bplans?\b/i.test(lead) && planNamed(lead, plansAsNow(settings.plans ?? [], transactions).filter((p) => p.status === "open"), ["open"]) !== null;
     if (files.length === 0 && !as && (pending === null || aboutAPlan) && !/^\s*\/\//.test(note) && !isEssay(note)) {
       const answer = (text: string, where: AiWhere, go?: GoPlace): void => {
         setDraft("");
@@ -6169,7 +6194,8 @@ export function AskPanel({
        * The Planner from the chat (docs/16-PLANNER.md, P4.23): list, add, move,
        * change, pay, skip, remove and put back, each change a card to press.
        */
-      const plans = settings.plans ?? [];
+      // As the Planner shows them (`plansAsNow`): one open again after its payment was binned is open here too.
+      const plans = plansAsNow(settings.plans ?? [], transactions);
       /** A plan for a day gone, and an entry that looks like its payment already: said, so it is not paid twice. */
       const pastLooksPaid = (plan: Plan): string => {
         if (plan.due === NO_DATE || plan.due >= asOf) return "";
@@ -7688,6 +7714,16 @@ export function AskPanel({
       const owes = !affordish && !budgetish && !spent && !earned && !wantsChart(note) ? readDebtAsk(ruled, debts) : null;
       // "Am I spending too much on food?": this month against the same days of the three before (paceAsk.ts).
       const pace = !affordish && !budgetish && !spent && !earned && !owes && !essay && !wantsChart(note) ? readPaceAsk(ruled, knownItems) : null;
+      // "What did I save this month?": moved into savings, from the ledger (`savedAsk.ts`).
+      const savedQ = !affordish && !budgetish && !spent && !earned && !owes && !pace && !essay && !wantsChart(note) ? readSavedAsk(ruled, asOf) : null;
+      if (savedQ) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const reply = savedAnswer(savedQ, reportRows, reference.wallets, reference.savings);
+        await answerWithModel(`What they saved, worked out by the app from the ledger: money moved from their wallets into savings, less what came back out, and what landed in savings on its own. Answer with these figures, in your own words, and do no arithmetic of your own:\n${reply}`, reply);
+        return;
+      }
       if (affordish || budgetish || spent || earned || owes || pace) {
         setDraft("");
         say({ kind: "you", text: note });

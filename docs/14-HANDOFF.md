@@ -2598,6 +2598,24 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
   amount is now set aside, and said.
 - **Delete record** named #3975 "This entry, no description" and #3974
   "This entry, Deposit to My Savings": it names rows as the list does.
+- **The four left over, and the charts (owner: "Fix those", "fix all the
+  reasoning etc and also the charting")**:
+  - "I deposited 1500 to my maya bank already" left "already" as the
+    description: words that say how, not what, are left out (`learning.ts`);
+  - "and 50 fees for the transfer" was a second entry, and "fees" was not
+    read as a fee at all: both fixed (`readEntry.ts`);
+  - "what did i save this month" got the month's summary with the AI off:
+    it is answered from the ledger, by account, less what came back out,
+    interest apart (`savedAsk.ts`);
+  - name matching read a plan's stored "done": `plansAsNow` everywhere the
+    chat finds or offers a plan;
+  - "I want pie" after a breakdown the model answered drew the year by
+    month: "I want pie" is read as a request to draw, the last question a
+    chart can draw is its subject, and "categories" are the kinds (Travel,
+    Food), the three groups only by name;
+  - a pie of months kept January to June and folded the recent months: it
+    keeps the largest, and its words no longer call "Other months" a month
+    or name a lowest month it cannot see.
 - **Every button, on the owner's 3 November data**, each pressed on a fresh
   copy: computer 400 (and 399 again with each dialog's confirm pressed, 89
   confirmed), phone 342 with confirm (89 confirmed) and again without. No

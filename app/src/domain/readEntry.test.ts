@@ -289,6 +289,10 @@ describe("what-ifs said on the card", () => {
     expect(splitEntries("I borrowed 1000 from maya credit to my maya, with 75.52 fees")).toHaveLength(1);
     expect(splitEntries("I paid 1000 to maya credit, with 75.52 interest")).toHaveLength(1);
     expect(splitEntries("I paid 500 for food and 300 for gas")).toHaveLength(2);
+    expect(splitEntries("I paid 200 for load, and 50 fees for the transfer")).toHaveLength(1);
+    expect(splitEntries("sent 500 to gcash with 15 fee for sending")).toHaveLength(1);
+    // And the fee is read, "fees" as well as "fee".
+    expect(readEntry("I paid 200 for load from gcash, and 50 fees for the transfer", [], reference, asOf).draft).toMatchObject({ amount: 20000, fee: 5000 });
   });
 
   it("reads a name typed as one word: 'mayabank' is the savings account (3 November 2026)", () => {

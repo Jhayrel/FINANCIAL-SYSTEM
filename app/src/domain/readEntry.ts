@@ -1312,9 +1312,9 @@ const LENDER_FEE = /\b(?:service|dst|stamp|documentary|interest|penalty|late|pro
 function feeIn(text: string): { fee: number; rest: string } {
   const patterns = [
     // "15 fee", "15 pesos fee", "15 charge", "+ 10 transaction fee" (owner's chat, 1 November 2026: the fee was lost)
-    /(?:\+\s*)?(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)\s*(?:pesos?\s*)?(?:(?:transaction|transfer|sending|send|bank|atm|withdrawal|cash[\s-]?out|cash[\s-]?in|convenience|service|processing)\s+)?(?:fee|charge)\b/i,
+    /(?:\+\s*)?(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)\s*(?:pesos?\s*)?(?:(?:transaction|transfer|sending|send|bank|atm|withdrawal|cash[\s-]?out|cash[\s-]?in|convenience|service|processing)\s+)?(?:fees?|charges?)\b/i,
     // "fee 15", "fee of 15", "charge: 15", "transaction fee 10"
-    /\b(?:(?:transaction|transfer|sending|send|bank|atm|withdrawal|cash[\s-]?out|cash[\s-]?in|convenience|service|processing)\s+)?(?:fee|charge)\s*(?:of|is|:)?\s*(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)/i,
+    /\b(?:(?:transaction|transfer|sending|send|bank|atm|withdrawal|cash[\s-]?out|cash[\s-]?in|convenience|service|processing)\s+)?(?:fees?|charges?)\s*(?:of|is|are|:)?\s*(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d{1,2})?)/i,
   ];
 
   for (const pattern of patterns) {
@@ -1389,7 +1389,8 @@ function verbPhrase(part: string): string {
 
 /** A clause that is only a fee: "16 fee", "fee of 15", "with 10 charge". */
 // "with 75.52 fees" was cut off as its own borrowing, ₱75.52 with ₱75.52 of fees on it (3 November 2026): plurals and interest too.
-const FEE_ONLY = /^\s*(?:(?:with|a|the|plus|and)\s+)?(?:(?:₱|php\s*)?\d[\d,.]*\s*(?:pesos?\s*)?(?:(?:service\s+)?fees?|charges?|interest|tax)|(?:(?:service\s+)?fees?|charges?|interest|tax)\s*(?:of|is|are|:)?\s*(?:₱|php\s*)?\d[\d,.]*)\s*[.!?]?\s*$/i;
+// And what it was charged for after it: "and 50 fees for the transfer" was a second entry (3 November 2026).
+const FEE_ONLY = /^\s*(?:(?:with|a|the|plus|and)\s+)?(?:(?:₱|php\s*)?\d[\d,.]*\s*(?:pesos?\s*)?(?:(?:service\s+)?fees?|charges?|interest|tax)|(?:(?:service\s+)?fees?|charges?|interest|tax)\s*(?:of|is|are|:)?\s*(?:₱|php\s*)?\d[\d,.]*)(?:\s+(?:for|on|sa)\s+(?:the\s+|it\b|that\b|this\b|my\s+)?\s*(?:transfer|sending|send|withdrawal|withdrawing|cash[\s-]?(?:out|in)|payment|it|that|this)?)?\s*[.!?]?\s*$/i;
 
 /**
  * "and" between two things, each with its own figure, is two entries.
@@ -1471,7 +1472,13 @@ export function splitEntries(text: string): string[] {
       .flatMap((sentence) => sentence.split(JOINS))
       .map((part) => part.trim().replace(/^(?:and|also|plus)\s+/i, ""))
       .flatMap(splitOnAnd)
-      .filter((part) => part.length > 2),
+      .filter((part) => part.length > 2)
+      // A fee cut off on its own, by ", and" or a full stop, goes back on the entry it was charged on.
+      .reduce<string[]>((kept, part) => {
+        if (kept.length > 0 && FEE_ONLY.test(part)) kept[kept.length - 1] = `${kept[kept.length - 1]!.replace(/[,\s]+$/, "")}, ${part}`;
+        else kept.push(part);
+        return kept;
+      }, []),
   );
 
   /**

@@ -45,6 +45,8 @@ const FILLER = new Set([
   "withdraw", "withdrew", "withdrawn", "deposit", "deposited", "credited", "borrowed", "lent",
   // When, not what: "lunch last friday" kept "lunch last", "load tomorrow" its "tomorrow" (27 October 2026 sweep).
   "tomorrow", "last", "night", "ago", "kahapon", "kagabi", "bukas", "noong", "nung",
+  // How it was said, not what: "I deposited 1500 to my maya bank already" left "already" as the card's description (3 November 2026).
+  "already", "also", "too", "again", "na", "lang", "din", "rin", "pa", "naman", "yet", "only", "done", "did",
 ]);
 
 const DATE_WORDS = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*$|^(mon|tue|wed|thu|fri|sat|sun)[a-z]*$/;

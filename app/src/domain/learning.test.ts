@@ -21,6 +21,9 @@ describe("what a saved correction teaches", () => {
   it("keys a lesson on the words that name the thing, not the figure, the day or the wallet", () => {
     expect(lessonKey("jollibee 285 today using gcash", REFERENCE)).toBe("jollibee");
     expect(lessonKey("I paid 500 yesterday from maya", REFERENCE)).toBe("");
+    // How it was said is not what it was (3 November 2026).
+    expect(lessonKey("I deposited 1500 to my maya already", REFERENCE)).toBe("");
+    expect(lessonKey("paid 100 for food na", REFERENCE)).toBe("food");
   });
 
   it("learns an item changed on the card, and uses it on the next sentence with those words", () => {

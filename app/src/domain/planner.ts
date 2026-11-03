@@ -720,6 +720,15 @@ export function statusNow(plan: Plan, transactions: readonly Transaction[]): Pla
   return paid === 0 || (!plan.settled && paid < plan.amount) ? "open" : "done";
 }
 
+/**
+ * The plans as the Planner shows them: one marked done whose payment was
+ * binned is open (`statusNow`). For anything that finds a plan by name or
+ * offers one, so a plan the Planner shows open is never "paid already".
+ */
+export function plansAsNow(plans: readonly Plan[], transactions: readonly Transaction[]): Plan[] {
+  return plans.map((p) => (p.status === "done" && statusNow(p, transactions) === "open" ? tidy({ ...p, status: "open", closedOn: undefined, settled: undefined }) : p));
+}
+
 export function viewOf(
   plan: Plan,
   context: { readonly transactions: readonly Transaction[]; readonly accounts: readonly Account[]; readonly asOf: IsoDate },

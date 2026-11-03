@@ -774,6 +774,18 @@ export function chartReading(chart: Chart): string {
 
   if (overTime(chart.by)) {
     const unit = UNIT[chart.by];
+    /*
+     * A pie's "Other months" slice is many months, not one: it is no high,
+     * no low and no last month. "Other months is PHP 37,458.87 above that"
+     * was said of five months together (owner's chat, 3 November 2026).
+     */
+    const dated = rows.filter((r) => !/^Other\b/i.test(r.label));
+    if (dated.length > 0 && dated.length < rows.length) {
+      // Only what the slices can stand behind: the smaller periods are inside "Other", so no lowest and no average is said.
+      const folded = rows.filter((r) => /^Other\b/i.test(r.label)).reduce((sum, r) => sum + r.value, 0);
+      const top = dated.reduce((a, b) => (b.value > a.value ? b : a));
+      return `The ${dated.length} largest ${unit}s have slices of their own. ${when(top.label).replace(/^in /, "")} is the largest, ${m(top.value)}, ${percent(top.value, chart.total)}% of the ${m(chart.total)} total. The other ${unit}s together are ${m(folded)}.`;
+    }
     if (!rows.some((r) => r.value > 0)) return "";
     if (rows.length === 1) return `${lastName}: ${m(last.value)}.`;
     // Two periods are a comparison: the second against the first, said once.

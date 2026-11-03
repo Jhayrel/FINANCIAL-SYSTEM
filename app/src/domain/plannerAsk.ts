@@ -16,7 +16,7 @@ import { asksForGoal } from "./planGoal";
 
 /** The first letter up, unless the word is written in its own case already: "iPhone" stays "iPhone". */
 export const capitalised = (s: string): string => s.replace(/^[a-z](?![A-Z])/, (c) => c.toUpperCase());
-import { byWhen, dueFor, inputOf, isSave, kindFromHistory, NO_DATE, planKinds, savesOutOfSpending, statusNow, whenOf, type DueKind, type Plan, type PlanInput, type PlannedMonth, type PlanView } from "./planner";
+import { byWhen, dueFor, inputOf, isSave, kindFromHistory, NO_DATE, planKinds, savesOutOfSpending, plansAsNow, whenOf, type DueKind, type Plan, type PlanInput, type PlannedMonth, type PlanView } from "./planner";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export type PlannerAsk =
@@ -449,9 +449,8 @@ export function readPlannerAsk(
    * open again (`statusNow`). Read as stored, "Save into Maya Bank" was paid
    * already to the chat while the Planner showed it open (3 November 2026).
    */
-  const asNow = (p: Plan): Plan => (p.status === "done" && statusNow(p, transactions) === "open" ? { ...p, status: "open", closedOn: undefined, settled: undefined } : p);
-  const plans = context.plans.map(asNow);
-  const focus = context.focus ? asNow(context.focus) : null;
+  const plans = plansAsNow(context.plans, transactions);
+  const focus = context.focus ? (plansAsNow([context.focus], transactions)[0] ?? null) : null;
   // "it", "that", "this one" with something to do to it, and no plan named.
   const pointsAt =
     focus !== null &&
@@ -818,7 +817,9 @@ export function dueWords(due: IsoDate, asOf: IsoDate): string {
 
 /** The Planner's other tabs, said: the paid, skipped, removed or overdue plans (27 October 2026). */
 export function closedPlansWords(views: readonly PlanView[], which: "done" | "skipped" | "removed" | "overdue", asOf: IsoDate): string {
-  const pick = views.filter((v) => (which === "overdue" ? v.plan.status === "open" && v.plan.due !== NO_DATE && v.plan.due < asOf : which === "done" ? v.plan.status === "done" : v.plan.status === which));
+  // As the Planner shows them: a plan open again after its payment was binned is open, not paid. The views are worked out for `asOf` already.
+  void asOf;
+  const pick = views.filter((v) => (which === "overdue" ? v.state === "overdue" : which === "done" ? v.state === "paid" : v.plan.status === which));
   const name = which === "done" ? "paid" : which;
   if (pick.length === 0) return which === "overdue" ? "No plan is overdue: every open plan's day is today or later, or it has no date yet." : `No plan is ${name}.`;
   const sorted = [...pick].sort((a, b) => (which === "overdue" ? a.plan.due.localeCompare(b.plan.due) : (b.plan.closedOn ?? "").localeCompare(a.plan.closedOn ?? "")));
