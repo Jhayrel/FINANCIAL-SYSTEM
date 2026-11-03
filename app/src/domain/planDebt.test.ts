@@ -164,4 +164,16 @@ describe("a repayment with its interest saved beside it", () => {
     // Paying it, said of the done plan, is still said as paid already.
     expect(readPlannerAsk("pay the pay maya credit plan", { plans: [done], reference, transactions: [...ledger, repay()], asOf })?.kind).toBe("closed");
   });
+
+  it("a line paid off with a payment day: the day in the month shown, said as nothing due yet (3 November 2026)", async () => {
+    const { dueDayIn } = await import("./planDebt");
+    expect(dueDayIn("2026-12-31", 6)).toBe("2026-12-06");
+    expect(dueDayIn("2027-02-28", 31)).toBe("2027-02-28");
+    const lines = planDebtLines([line({ dueDay: 6 } as unknown as Partial<Debt>)], [], asOf);
+    expect(lines[0]).toMatchObject({ owed: 0, scheduled: null, dueDay: 6 });
+    const notes = checkPlan({ ...input, setAside: true, due: "2026-12-06" }, { plans: [], reference, asOf, debtLines: lines }).notes.join(" ");
+    expect(notes).toMatch(/Nothing is due on Maya Credit yet/);
+    expect(notes).not.toMatch(/has no due day/);
+  });
 });
+

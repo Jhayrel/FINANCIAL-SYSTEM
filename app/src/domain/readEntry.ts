@@ -1388,7 +1388,8 @@ function verbPhrase(part: string): string {
 
 
 /** A clause that is only a fee: "16 fee", "fee of 15", "with 10 charge". */
-const FEE_ONLY = /^\s*(?:(?:with|a|the|plus)\s+)?(?:(?:₱|php\s*)?\d[\d,.]*\s*(?:pesos?\s*)?(?:fee|charge|service fee)|(?:fee|charge)\s*(?:of|is|:)?\s*(?:₱|php\s*)?\d[\d,.]*)\s*[.!?]?\s*$/i;
+// "with 75.52 fees" was cut off as its own borrowing, ₱75.52 with ₱75.52 of fees on it (3 November 2026): plurals and interest too.
+const FEE_ONLY = /^\s*(?:(?:with|a|the|plus|and)\s+)?(?:(?:₱|php\s*)?\d[\d,.]*\s*(?:pesos?\s*)?(?:(?:service\s+)?fees?|charges?|interest|tax)|(?:(?:service\s+)?fees?|charges?|interest|tax)\s*(?:of|is|are|:)?\s*(?:₱|php\s*)?\d[\d,.]*)\s*[.!?]?\s*$/i;
 
 /**
  * "and" between two things, each with its own figure, is two entries.

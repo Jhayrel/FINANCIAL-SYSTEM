@@ -2106,12 +2106,26 @@ function IncomeSplitCard({
           {view.sources.length > 0 ? ` (${view.sources.map((x) => `${x.name} ${formatMoney(x.amount)}`).join(", ")})` : ""}: too little to change the budget for. It is in safe to spend already.
         </p>
       )}
-      {view.cameIn >= WORTH_ADDING && (
+      {/*
+        The budget above the money already: the income is counted in it, and
+        nothing can be added. "Add this money to the budget" was offered under
+        "Your budget is ₱10,003.97 more than the money you hold now can cover",
+        and read as if the savings could be added (owner, 3 November 2026: "I
+        want the bank to be savings, do not touch only if needed").
+      */}
+      {view.cameIn >= WORTH_ADDING && view.room <= 0 && (
+        <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
+          {formatMoney(view.cameIn)} came into your wallets {since}
+          {view.sources.length > 0 ? ` (${view.sources.map((x) => `${x.name} ${formatMoney(x.amount)}`).join(", ")})` : ""}. It is counted already: your budget is above what the wallets can still pay this month, so there is nothing to add.
+          {view.toSavings > 0 ? ` ${formatMoney(view.toSavings)} of your money went into savings since then; savings are never counted in the budget.` : ""}
+        </p>
+      )}
+      {view.cameIn >= WORTH_ADDING && view.room > 0 && (
         <>
           <p className="t-caption" style={{ color: "var(--ink-2)", margin: 0 }}>
             {formatMoney(view.cameIn)} came into your wallets {since}
             {view.sources.length > 0 ? ` (${view.sources.map((x) => `${x.name} ${formatMoney(x.amount)}`).join(", ")})` : ""}.
-            {view.toSavings > 0 ? ` ${formatMoney(view.toSavings)} has gone into savings since then.` : ""}
+            {view.toSavings > 0 ? ` ${formatMoney(view.toSavings)} has gone into savings since then.` : ""} Savings are never counted: at most {formatMoney(Math.min(view.room, view.cameIn))} can go to the spending budget, what the wallets can still pay.
           </p>
           {!splitting ? (
             <Button onClick={() => setSplitting(true)}>Add this money to the budget</Button>

@@ -37,7 +37,8 @@ import { emptyDraft, type Draft } from "../domain/entry";
 import { formatMoney, type Centavos } from "../domain/money";
 import { monthBrief } from "../domain/monthPlan";
 import { asSaving, asSavingWords, misfiledSaving, paidSoFar, paysPlan, checkPlan, closedViews, coverage, editPlan, groupOpen, isRecurringKind, kindFromHistory, likelyPayments, linkPayments, makePlan, movePlan, movesWords, byWhen, countedWords, dueFor, dueKindOf, NO_DATE, nextMonthEnd, whenOf, type DueKind, planAgain, planKinds, plannedForBudget, planWallets, planInto, isSave, savesOutOfSpending, removePlan, reopenPlan, skipPlan, unlinkPayment, viewOf, walletToPayFrom, type Plan, type PlanGroup, type PlanInput, type PlanView, paysDebt } from "../domain/planner";
-import { planDebtLines } from "../domain/planDebt";
+import { dueDayIn, planDebtLines } from "../domain/planDebt";
+import { ordinalDay } from "../domain/debtWords";
 import { asAmountAndFees } from "../domain/debt";
 import type { Debt } from "../domain/debt";
 import { limitLines, planLimitNote } from "../domain/limitAsk";
@@ -1249,6 +1250,8 @@ export function PlanForm(props: {
                   if (picked && (amount === null || amount <= 0)) setAmount(picked.scheduled?.amount ?? (picked.owed > 0 ? picked.owed : null));
                   // Its due day, unless a time was picked: "sometime in December" when Maya Credit is due December 6 (3 November 2026).
                   if (picked?.scheduled && !whenTouched) setWhen({ kind: "day", due: picked.scheduled.on });
+                  // Nothing due yet, but a payment day set: that day in the month shown ("December 6", not "sometime in December").
+                  else if (picked?.dueDay && !whenTouched && when.kind === "month") setWhen({ kind: "day", due: dueDayIn(when.due, picked.dueDay) });
                   // The account it is paid from, unless one was picked.
                   const account = picked ? props.debts.find((d) => d.id === picked.id)?.wallet : undefined;
                   if (account && !wallet && reference.wallets.concat(reference.savings).includes(account)) setWallet(account);
@@ -1277,7 +1280,7 @@ export function PlanForm(props: {
         <Field
           label={saving ? "How much to move" : paying ? "How much to pay" : "How much"}
           htmlFor="plan-amount"
-          help={paying && line ? `Owed on ${line.name} now: ${formatMoney(line.owed)}${line.scheduled ? `; its next payment, ${formatMoney(line.scheduled.amount)}, is due ${formatMedium(line.scheduled.on)}` : ""}.` : undefined}
+          help={paying && line ? `Owed on ${line.name} now: ${formatMoney(line.owed)}${line.scheduled ? `; its next payment, ${formatMoney(line.scheduled.amount)}, is due ${formatMedium(line.scheduled.on)}` : line.owed <= 0 && line.dueDay ? `; payments fall due on the ${ordinalDay(line.dueDay)}` : ""}.` : undefined}
           error={tried && (amount === null || amount <= 0) ? (saving ? "Put in how much to move." : paying ? "Put in how much you will pay." : "Put in how much it will cost.") : paidProblem}
         >
           <AmountInput id="plan-amount" value={amount} onChange={setAmount} />
@@ -1387,7 +1390,9 @@ export function PlanForm(props: {
                       : when.kind === "none"
                         ? "Once it has a month or a day, safe to spend holds it back then."
                         : counted
-                          ? `On: ${line.name} has no due day, so safe to spend holds this payment back in its month.`
+                          ? line.dueDay
+                            ? `On: nothing is due on ${line.name} yet, so safe to spend holds this payment back in its month.`
+                            : `On: ${line.name} has no due day, so safe to spend holds this payment back in its month.`
                           : "Off: safe to spend does not hold it back; pay it when the money is there."}
                 </span>
               </span>

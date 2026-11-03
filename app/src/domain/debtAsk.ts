@@ -28,7 +28,14 @@ const HAS_LOAN = /\b(?:i\s+have|i've\s+got|i\s+got|i\s+still\s+have|may)\s+(?:a\
 export function readDebtAsk(said: string, debts: readonly Debt[]): DebtAsk | null {
   const t = said.trim();
   const byBalance = !ASKS.test(t) && BALANCE_ON.test(t);
-  if ((!ASKS.test(t) && !byBalance && !HAS_LOAN.test(t)) || /\d/.test(t)) return null;
+  /*
+   * "pay off my maya credit", with no figure and no later day: what is owed
+   * on it, so the payment can be said or nothing is due. It got the month's
+   * summary when Maya Credit was paid off (3 November 2026 replay). A later
+   * day ("next month") is a plan, read elsewhere.
+   */
+  const payOff = /^\s*(?:please\s+|pls\s+)?(?:pay\s+off|settle)\s+(?:my\s+|the\s+)?/i.test(t) && !/\b(?:next|tomorrow|later|on|by|in|before|until|plan|will)\b/i.test(t);
+  if ((!ASKS.test(t) && !byBalance && !HAS_LOAN.test(t) && !payOff) || /\d/.test(t)) return null;
   // "I owe Ana, she lent it to me" tells; a question asks.
   const asked = /\?\s*$/.test(t) || /^\s*(?:how|what|when|who|which|do|does|is|am|magkano|ilan|kailan|sino|may)\b/i.test(t);
   /*
@@ -37,7 +44,7 @@ export function readDebtAsk(said: string, debts: readonly Debt[]): DebtAsk | nul
    * 2026: it got the month's summary). Only with a line named.
    */
   const hasOne = HAS_LOAN.test(t);
-  if (!asked && !hasOne) return null;
+  if (!asked && !hasOne && !payOff) return null;
   const named = [...debts]
     .filter((d) => !d.archived || /\barchived\b/i.test(t))
     .sort((a, b) => b.name.length - a.name.length)
@@ -46,7 +53,7 @@ export function readDebtAsk(said: string, debts: readonly Debt[]): DebtAsk | nul
         .filter((w) => w.length >= 3)
         .some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)),
     );
-  if ((byBalance || (hasOne && !asked)) && !named) return null;
+  if ((byBalance || (hasOne && !asked) || payOff) && !named) return null;
   return { debt: named ?? null, said: t };
 }
 

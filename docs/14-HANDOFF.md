@@ -2576,7 +2576,22 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
   - "plan to pay maya credit 1000 on dec 6" said "paid already";
   - a model "Plan:" line named as a saving made a plan to spend;
   - skipping a card already in the ledger now offers it to a plan.
-  The earlier set of conversations replayed after these changes; see below.
+  The earlier set of conversations replayed after these changes: 0 of 121
+  answers moved.
+- **Debt, on the owner's newest data (Maya Credit paid off)**:
+  - the plan form said "Maya Credit has no due day" (it is the 6th) and
+    left the plan on "sometime in December": it now takes the 6th of the
+    month shown and says "Nothing is due on Maya Credit yet";
+  - "I borrowed 1000 from maya credit, with 75.52 fees" made a second
+    borrowing of ₱75.52 with ₱75.52 of fees: "fees", "charges",
+    "interest" and "tax" now stay with the entry they were charged on;
+  - "pay off my maya credit" got the month's summary: it says what is owed.
+- **Budget, "Add this money to the budget"** was offered under "Your budget
+  is ₱10,003.97 more than the money you hold now can cover", and read as if
+  the savings could be added (owner: "I want the bank to be savings, do not
+  touch only if needed"). Savings were never counted; now the card says
+  the money is counted already when there is no room, and how much at most
+  can go to spending when there is.
 
 ## 6. What the owner has to do
 

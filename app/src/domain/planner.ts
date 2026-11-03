@@ -402,7 +402,7 @@ export function checkPlan(
      * The debt lines a plan can pay (P12): what is owed on each now, and the
      * payment safe to spend already holds back for it, when it has one.
      */
-    readonly debtLines?: readonly { readonly id: string; readonly name: string; readonly archived?: boolean | undefined; readonly owed: Centavos; readonly scheduled: { readonly amount: Centavos; readonly on: IsoDate } | null }[] | undefined;
+    readonly debtLines?: readonly { readonly id: string; readonly name: string; readonly archived?: boolean | undefined; readonly owed: Centavos; readonly scheduled: { readonly amount: Centavos; readonly on: IsoDate } | null; readonly dueDay?: number | null | undefined }[] | undefined;
     /** Whether the plan being edited paid a debt: its linked payments are checked when that changes. */
     readonly wasPaying?: boolean | undefined;
   },
@@ -500,7 +500,8 @@ export function checkPlan(
           ? `${line.name}'s payment of ${formatMoney(line.scheduled.amount)}, due ${formatMedium(line.scheduled.on)}, is held back in safe to spend already. Counting this plan too would hold it back twice.`
           : `${line.name}'s payment of ${formatMoney(line.scheduled.amount)}, due ${formatMedium(line.scheduled.on)}, is held back in safe to spend already, so this plan is not counted there. It keeps the date and the amount you mean to pay.`,
       );
-    else if (input.setAside && kind !== "none") notes.push(`${line.name} has no due day, so safe to spend holds this payment back in its month.`);
+    // With a payment day but nothing owed, nothing is due yet: "has no due day" was said of Maya Credit, due on the 6th (3 November 2026).
+    else if (input.setAside && kind !== "none") notes.push(line.dueDay ? `Nothing is due on ${line.name} yet, so safe to spend holds this payment back in its month.` : `${line.name} has no due day, so safe to spend holds this payment back in its month.`);
     notes.push("A repayment is not spending: no budget counts it.");
     return { problems, notes };
   }

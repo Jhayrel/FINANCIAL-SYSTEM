@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { readEntry } from "./readEntry";
+import { splitEntries, readEntry } from "./readEntry";
 import { nextQuestion } from "./capture";
 import { checkDraft } from "./entry";
 import type { ReferenceLists, Transaction } from "./types";
@@ -283,6 +283,12 @@ describe("what-ifs said on the card", () => {
   it("reads savings as the savings account, both ways, never as money given away", () => {
     expect(readEntry("move 500 to savings", [], reference, asOf).draft).toMatchObject({ flow: "Transfer", toWallet: "Maya Bank (Personal savings)" });
     expect(readEntry("withdraw 500 from savings to cash", [], reference, asOf).draft).toMatchObject({ fromWallet: "Maya Bank (Personal savings)", toWallet: "Cash" });
+  });
+
+  it("keeps 'with 75.52 fees' on the borrowing it was charged on, never a second entry (3 November 2026)", () => {
+    expect(splitEntries("I borrowed 1000 from maya credit to my maya, with 75.52 fees")).toHaveLength(1);
+    expect(splitEntries("I paid 1000 to maya credit, with 75.52 interest")).toHaveLength(1);
+    expect(splitEntries("I paid 500 for food and 300 for gas")).toHaveLength(2);
   });
 
   it("reads a name typed as one word: 'mayabank' is the savings account (3 November 2026)", () => {

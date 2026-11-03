@@ -45,4 +45,12 @@ describe("a loan said, with no figure", () => {
     expect(readDebtAsk("I have a loan in BPI", [card, friend])).toBeNull();
     expect(readDebtAsk("I have loan in Card Credit 500", [card, friend])).toBeNull();
   });
+
+  it("'pay off my maya credit' asks what is owed on it; with a later day it is a plan, not this (3 November 2026)", () => {
+    const debts = [{ id: "mc", name: "Maya Credit", counterparty: "Maya", archived: false }] as unknown as Parameters<typeof readDebtAsk>[1];
+    expect(readDebtAsk("pay off my maya credit", debts)?.debt?.name).toBe("Maya Credit");
+    expect(readDebtAsk("pay off my maya credit next month", debts)).toBeNull();
+    expect(readDebtAsk("pay off my car", debts)).toBeNull();
+  });
 });
+
