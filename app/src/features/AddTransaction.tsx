@@ -915,14 +915,19 @@ export function AddTransaction({
    */
   const planMatch = useMemo(() => {
     // Spending pays a plan to spend; a transfer into one of their accounts does a plan to save into it (P11).
-    if (!onLinkPlan || editing || draft.id || (draft.flow !== "Spending" && draft.flow !== "Transfer" && draft.flow !== "Revenue") || !draft.amount || draft.amount <= 0 || !draft.date) return null;
+    // And a repayment on a loan, a plan to pay that debt (P12).
+    const repaying = draft.flow === "Debt" && draft.debtEffect === "repay";
+    if (!onLinkPlan || editing || draft.id || (draft.flow !== "Spending" && draft.flow !== "Transfer" && draft.flow !== "Revenue" && !repaying) || !draft.amount || draft.amount <= 0 || !draft.date) return null;
     try {
-      const [row] = draftToTransactions(draft, 0, "plan-check");
-      return row ? planPaidBy(row, reference.plans ?? [], transactions) : null;
+      // Split as it will be saved: a repayment's interest is a row of its own beside it.
+      const rows = draftToTransactions(withFeesPaid(draft, transactions), 0, "plan-check", check.repaymentSplit);
+      // The repayment itself, not its interest row; with the interest beside it, as it will be saved.
+      const row = rows.find((r) => r.type !== "Debt" || r.debtEffect === "repay");
+      return row ? planPaidBy(row, reference.plans ?? [], [...transactions, ...rows.filter((r) => r !== row)]) : null;
     } catch {
       return null;
     }
-  }, [onLinkPlan, editing, draft, reference.plans, transactions]);
+  }, [onLinkPlan, editing, draft, reference.plans, transactions, check.repaymentSplit]);
   const [linkChoice, setLinkChoice] = useState<{ readonly planId: string; readonly on: boolean } | null>(null);
   const linkOn = planMatch ? (linkChoice?.planId === planMatch.plan.id ? linkChoice.on : planMatch.sure) : false;
   const covering = draft.flow === "Spending" && draft.coversTo !== undefined;
@@ -2664,7 +2669,11 @@ export function AddTransaction({
                     {linkOn
                       ? planMatch.plan.into
                         ? `${formatMoney(planMatch.left)} is left to move into ${planMatch.plan.into}, ${byWhen(planMatch.plan)}. Saved, ${(draft.amount ?? 0) >= planMatch.left ? "the plan is marked done" : `${formatMoney(planMatch.left - (draft.amount ?? 0))} of it is still to move`}${planMatch.plan.setAside ? ", and safe to spend stops holding this money back" : ""}.`
-                        : `${formatMoney(planMatch.left)} is left of it, ${byWhen(planMatch.plan)}. Saved, ${(draft.amount ?? 0) + draft.fee >= planMatch.left ? "the plan is marked paid" : `${formatMoney(planMatch.left - (draft.amount ?? 0) - draft.fee)} of it is still to pay`}${planMatch.plan.setAside && !planMatch.plan.goalId ? ", and safe to spend stops setting this money aside" : ""}.`
+                        : (() => {
+                            // A repayment counts with its interest, never a fee; spending with its fee (P12).
+                            const counts = draft.flow === "Debt" ? (draft.amount ?? 0) + (draft.interest ?? 0) : (draft.amount ?? 0) + draft.fee;
+                            return `${formatMoney(planMatch.left)} is left of it, ${byWhen(planMatch.plan)}. Saved, ${counts >= planMatch.left ? "the plan is marked paid" : `${formatMoney(planMatch.left - counts)} of it is still to pay`}${planMatch.plan.setAside && !planMatch.plan.goalId ? ", and safe to spend stops setting this money aside" : ""}.`;
+                          })()
                       : `Off: saved as an entry only. The plan stays open${planMatch.plan.setAside && !planMatch.plan.goalId ? " and its money stays set aside" : ""}.`}
                   </span>
                 </span>

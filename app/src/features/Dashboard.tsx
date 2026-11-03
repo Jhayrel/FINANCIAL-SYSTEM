@@ -205,11 +205,22 @@ export function Dashboard({
   const previous = monthName(month === 1 ? 12 : month - 1);
 
   /** Everything still to pay or collect this month, soonest first. */
+  /*
+   * A payment planned on a line whose own payment is listed here already is
+   * that payment: one row, said as planned, never two for the same money
+   * (P12, 3 November 2026).
+   */
+  const duePlanned = new Set(
+    onOpenPlan
+      ? plannedForBudget((reference.plans ?? []).map((p) => viewOf(p, { transactions, accounts: [], asOf })), year, month, reference, asOf).debtViews.map((v) => v.plan.debtId ?? "")
+      : [],
+  );
+  const dueLines = new Set(brief.debts.map((d) => d.debtId));
   const upcoming = [
     ...brief.debts.map((d) => ({
       key: `debt-${d.debtId}`,
       name: d.name,
-      what: d.kind === "payable" ? "Debt payment" : "Owed to you",
+      what: d.kind === "payable" ? `Debt payment${duePlanned.has(d.debtId) ? ", planned" : ""}` : "Owed to you",
       amount: d.amount,
       days: d.daysToDue as number | undefined,
       on: d.dueOn as IsoDate | undefined,
@@ -254,7 +265,7 @@ export function Dashboard({
               record: () => onOpenPlan(v.plan.id, true),
             })),
             // A payment planned on a loan or credit line (P12): a repayment to record, not spending.
-            ...planned.debtViews.map((v) => ({
+            ...planned.debtViews.filter((v) => !dueLines.has(v.plan.debtId ?? "")).map((v) => ({
               key: `plan-${v.plan.id}`,
               name: v.plan.title,
               what: `Planned debt payment${v.paid > 0 ? `, ${formatMoney(v.paid)} paid` : ""}`,

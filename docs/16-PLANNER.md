@@ -400,20 +400,25 @@ A plan to pay a debt:
    the Dashboard ("Planned debt payment", Pay), the chat ("to pay on
    debts"), Statements ("a debt payment, not spending") and the AI's
    context ("to pay Maya Credit").
-5. **From the chat:** "I plan to pay my maya credit 1075 on dec 5", "I'll
+5. **One row for one payment.** On the Dashboard a plan for a line whose
+   own payment is listed this month is that payment: the line's row says
+   "Debt payment, planned", and no second row is shown. Record payment there
+   opens the Add form, which offers "Pays the ... plan", on by itself when it
+   covers what is left, the fees already owed inside it counted as saved.
+6. **From the chat:** "I plan to pay my maya credit 1075 on dec 5", "I'll
    pay off my loan next month" (all that is owed). A payment made ("paid
    maya credit 1000") or one today stays the debt readers'.
 
 Kept in step with its entries, every kind:
 
-6. **An entry added by hand that looks like a plan's payment** is offered
+7. **An entry added by hand that looks like a plan's payment** is offered
    as it, with a button, from the Add form and now the chat too ("Count it
    as paid", "Count it as moved"); never linked by itself (P4.9). Only the
    rows that pay it are linked (`paysPlan`): a repayment's fee rows are not.
-7. **An entry named after an open plan takes the plan's kind**: "bought
+8. **An entry named after an open plan takes the plan's kind**: "bought
    blazer 1500 gcash" is Online Buy when "Buy blazer" is planned as Online
    Buy.
-8. **A linked entry edited in the Database** (P4.8, extended):
+9. **A linked entry edited in the Database** (P4.8, extended):
    - its amount down: a plan done because its payments covered it opens
      again with what is left, and says why; one closed for less on purpose
      ("That settles it", stored as `settled`) stays done;
@@ -421,13 +426,13 @@ Kept in step with its entries, every kind:
    - moved to another account, or no longer a repayment on the plan's line:
      it no longer counts, and the plan says which entry and why;
    - binned: open again, as before.
-9. **Where a plan stands**, asked in the chat ("how is the save into maya
+10. **Where a plan stands**, asked in the chat ("how is the save into maya
    bank plan?"): its amount, what is paid or moved and by which entries,
    what is left, where it counts, and anything that changed under it.
-10. **Wording follows the kind**: a plan to save is moved, never paid
+11. **Wording follows the kind**: a plan to save is moved, never paid
     ("Moved PHP 1,000.00 of PHP 1,500.00", "1 plan moved"); a plan to pay a
     debt is paid on its line.
-11. **A plan named as a saving but saved as spending** ("Save into Maya
+12. **A plan named as a saving but saved as spending** ("Save into Maya
     Bank" with no account) is said under the bell with how to put it right;
     never changed by itself. The chat rebuilt plans without their account
     in three places before 3 November 2026; `inputOf` copies every field.
