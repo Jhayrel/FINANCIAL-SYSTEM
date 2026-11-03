@@ -10665,6 +10665,28 @@ export function AskPanel({
            */
           // A payment of what the line owes, filled in as what was borrowed plus its interest and fees.
           const card = debtCard(asAmountAndFees(local.draft, transactions), note);
+          /*
+           * The same money, said again as a debt movement: the open card or
+           * the question about it is set aside, never left beside this one
+           * to be added twice. "spent 1075.52 from maya", then "The 1075.52
+           * is the pay of my credit", left "What was it for?" open beside the
+           * Maya Credit card (3 November 2026, from the owner's chat).
+           */
+          const same = card.turn.draft.amount;
+          const setAside: string[] = [];
+          if (same && pending && pending.draft.amount === same && pending.draft.flow !== "Debt") {
+            setPending(null);
+            setAside.push("the question about it");
+          }
+          if (same) {
+            turns.forEach((t, i) => {
+              if (isOffer(t) && t.state === "open" && t.proposal.draft.amount === same && t.proposal.draft.flow !== "Debt") {
+                settle(i, "discarded");
+                setAside.push(`the ${t.proposal.draft.flow.toLowerCase()} card`);
+              }
+            });
+          }
+          const asideWords = setAside.length > 0 ? ` The ${formatMoney(same ?? 0)} you said before is this one, so ${setAside.join(" and ")} is set aside: nothing is added twice.` : "";
           const intro = debtCardIntro(
             card.turn.draft,
             local.interestUnstated ?? false,
@@ -10676,9 +10698,9 @@ export function AskPanel({
           say({
             kind: "assistant",
             text:
-              card.notes.length > 0
+              (card.notes.length > 0
                 ? intro.replace(/Check the card, then add it\.$/, `${card.notes.join(" ")} Check the card, then add it.`)
-                : intro,
+                : intro) + asideWords,
             from: "this device",
             ephemeral: true,
           });

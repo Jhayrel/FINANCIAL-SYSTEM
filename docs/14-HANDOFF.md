@@ -2592,6 +2592,17 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
   touch only if needed"). Savings were never counted; now the card says
   the money is counted already when there is no room, and how much at most
   can go to spending when there is.
+- **The same money said twice in the chat**: "spent 1075.52 from maya",
+  then "The 1075.52 is the pay of my credit", left "What was it for?" open
+  beside the Maya Credit card. The earlier question or card for that
+  amount is now set aside, and said.
+- **Delete record** named #3975 "This entry, no description" and #3974
+  "This entry, Deposit to My Savings": it names rows as the list does.
+- **Every button, on the owner's 3 November data**, each pressed on a fresh
+  copy: computer 400 (and 399 again with each dialog's confirm pressed, 89
+  confirmed), phone 342 with confirm (89 confirmed) and again without. No
+  crash, no page error, no failure; every move went to its screen. The
+  process robots (steps13 to 15, every figure to the centavo) all pass.
 
 ## 6. What the owner has to do
 

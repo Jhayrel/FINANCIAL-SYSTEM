@@ -219,7 +219,8 @@ export function Database({
     const part = partOf(t, transactions);
     const ok = await confirm({
       title: `Delete record #${String(t.recordNumber).padStart(4, "0")}?`,
-      body: `${t.item || "This entry"}, ${t.description || "no description"}, ₱${formatAmount(t.total)} on ${shortDays(t)}.${
+      // Named as the list names it: "Maya Credit, paid", "To Maya Bank (Personal savings)", never "This entry, no description" (3 November 2026 sweep).
+      body: `${[rowTitle(t, debts), t.description.trim() && t.description.trim() !== rowTitle(t, debts) ? t.description.trim() : ""].filter(Boolean).join(", ")}, ₱${formatAmount(t.total)} on ${shortDays(t)}.${
         part
           ? ` Its ₱${formatAmount(part.total)} of ${t.debtEffect === "draw" ? "fees" : "interest"}, #${String(part.recordNumber).padStart(4, "0")}, was part of the same ${
               t.debtEffect === "draw" ? "borrowing" : "payment"
