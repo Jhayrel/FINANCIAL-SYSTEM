@@ -935,7 +935,9 @@ const ASKING_WORDS = new Set(
     // Words about the asking, never a topic: "at the same time", "all of my transaction", "a proper explanation" (4 October 2026).
     "same transaction kind kinds type types visual visuals summary summarize summarized summarise summarised proper explanation " +
     "explain high highest low lowest latest wanted give charts graphs trend pie bars look good better worse okay please thanks " +
-    "thank kindly maybe again also both other others another thing things stuff overall everything anything something"
+    "thank kindly maybe again also both other others another thing things stuff overall everything anything something " +
+    // How sure the answer should be, and what it is for: "so I can do Budgeting. Make sure its accurate" (3 November 2026).
+    "based accurate accurately correct correctly sure exact exactly precise budgeting detailed details"
   ).split(" "),
 );
 
@@ -944,7 +946,13 @@ const ASKING_WORDS = new Set(
  * rare enough to pick a few rows out: "abra" in a few rows, not "food" in
  * hundreds. Names of items and wallets are left to their own filters.
  */
-function aboutOf(question: string, transactions: readonly Transaction[], taken: readonly string[]): string {
+function aboutOf(text: string, transactions: readonly Transaction[], taken: readonly string[]): string {
+  /*
+   * "Break down" is one word for how to show it: "a break down of expenses"
+   * picked out the two rows that say "down" and answered PHP 3,526.00 of
+   * the whole ledger (owner's phone, 3 November 2026). "Down payment" stays.
+   */
+  const question = text.replace(/\b(?:break|broken)\s+(?:it\s+|them\s+)?down\b/gi, "breakdown");
   const months = MONTHS.map((m) => m.toLowerCase());
   const skip = new Set([...ASKING_WORDS, ...months, ...months.map((m) => m.slice(0, 3)), ...taken.map((t) => t.toLowerCase())]);
   const said = transactions.map((t) => ` ${`${t.description} ${t.notes}`.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `);

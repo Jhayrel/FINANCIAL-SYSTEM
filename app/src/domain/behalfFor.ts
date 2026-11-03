@@ -159,6 +159,37 @@ export function behalfFor(
     }
   }
 
+  /*
+   * Paid for them, said outright: "I paid 599 for my father's globe bill",
+   * "paid father's load 100". The thing was theirs, whatever the owner's own
+   * entries say about the word: it asked "What was it for?" because the
+   * latest "globe" row was the owner's own Globe at Home bill (3 November
+   * 2026, the owner's 13 October case replayed).
+   */
+  /*
+   * Theirs, not a present: "father's globe", "for my father globe bill". A
+   * gift for them ("a gift for my father", "birthday cake for papa") is the
+   * owner's own spending and never comes back.
+   */
+  if (named && direction === "out" && !/\b(?:gift|gifts|regalo|present|treat|libre|birthday|bday|pasalubong|christmas|pamasko|allowance|baon)\b/i.test(text)) {
+    const calls = callsFor(named.name);
+    const forThem = [
+      ...text
+        .toLowerCase()
+        .matchAll(/\b([a-z]+)'s\b|\b(?:for|para\s+(?:kay|kina|sa))\s+(?:my\s+|our\s+|si\s+|kay\s+)?([a-z]+)\s+(?:globe|smart|dito|tm|tnt|postpaid|prepaid|load|bill|bills|plan|wifi|internet|meralco|electric\w*|kuryente|water|tubig|rent|upa)\b/g),
+    ].some((m) => calls.has(m[1] ?? m[2] ?? ""));
+    if (forThem) return { person: named, effect: effectFor(named.side, direction), because: `Paid for ${named.name}, as you said.` };
+  }
+  /*
+   * Money they give you for their own thing: "father gave me 1000 for his
+   * bill". It is theirs, on their line, never income; it was booked as
+   * PHP 1,000.00 of Random income (3 November 2026 process test). "Papa gave
+   * me 1000 for my birthday" is the owner's, and stays income.
+   */
+  if (named && direction === "in" && /\bfor\s+(?:his|her|their)\s+[a-z]+|\bpara\s+(?:sa\s+)?[a-z]+\s+(?:niya|nila)\b/i.test(text)) {
+    return { person: named, effect: effectFor(named.side, direction), because: `Money from ${named.name} for their own bill is theirs, not income.` };
+  }
+
   const skip = new Set([...PLAIN, ...ignore.flatMap(wordsOf), ...people.flatMap((p) => [...callsFor(p.name)])]);
   const words = [...new Set(wordsOf(text))].filter((w) => w.length >= 4 && !/^\d/.test(w) && !skip.has(w));
   if (words.length === 0) return null;

@@ -1999,7 +1999,7 @@ export function AddTransaction({
                     error={errorFor("debtEffect")}
                     hint={
                       draft.debtEffect
-                        ? effectMeaning(draft.debtEffect, debtShape)
+                        ? effectMeaning(draft.debtEffect, debtShape, draft.debtId ? outstandingOf(editing ? transactions.filter((t) => t.id !== editing.id) : transactions, draft.debtId) : undefined)
                         : "Pick one. The wallet it moves through appears below."
                     }
                   >
@@ -2079,7 +2079,7 @@ export function AddTransaction({
                     error={errorFor("debtEffect")}
                     hint={
                       draft.debtEffect
-                        ? effectMeaning(draft.debtEffect, debtShape)
+                        ? effectMeaning(draft.debtEffect, debtShape, draft.debtId ? outstandingOf(editing ? transactions.filter((t) => t.id !== editing.id) : transactions, draft.debtId) : undefined)
                         : "Pick one, and the wallet it moves money through appears."
                     }
                   >

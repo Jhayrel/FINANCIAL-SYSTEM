@@ -29,7 +29,7 @@
  * Nothing here saves anything. Today's answer is the afford answer with the
  * day's figures; a later one is a Planner card to press.
  */
-import { addDays, MONTH_NAMES } from "./dates";
+import { addDays, lastOfMonth, MONTH_NAMES } from "./dates";
 import { formatMoney, withoutYears, type Centavos } from "./money";
 import { aheadMonthIn, plannedSpendIn } from "./plannedSpend";
 import { dueFor, isRecurringKind, kindFromHistory, NO_DATE, planKinds, savesOutOfSpending, type DueKind, type PlanInput } from "./planner";
@@ -105,6 +105,8 @@ const WOULD_BUY =
 
 /** "Should I buy a ps5 next month?": a plan asked about only with a later day said; today's is the afford question's. */
 const SHOULD_BUY = /\bshould\s+(?:i|we)\s+(?:buy|get|order|book|purchase)\b/i;
+/** "Can I afford a jacket ...", "kaya ko bang bilhin": a thing asked about. Read as a plan only with a later month said. */
+const AFFORD_LATER = /\b(?:can|could|will)\s+(?:i|we)\s+(?:still\s+)?afford\s+(?!it\b|that\b|this\b|them\b)\S/i;
 
 /**
  * A note with no verb, for later: "next week groceries 2000", "tuition next
@@ -164,7 +166,7 @@ function thingIn(text: string): string {
   const clause = pieces.find((p) => p.trim().split(/\s+/).length >= 2) ?? pieces[0] ?? text;
   const after =
     /^\s*plan\s*[:\-]\s*(.+)$/i.exec(clause) ??
-    /\b(?:to\s+)?(?:buy(?:ing)?|bili|bumili|get(?:ting)?|purchas(?:e|ing)|order(?:ing)?|pay(?:ing)?(?:\s+for)?|bayaran|magbayad\s+(?:ng|sa)?|book(?:ing)?|renew(?:ing)?|hav(?:e|ing)|treat\s+(?:myself|me)\s+to|go\s+(?:to|on)|spend\s+(?:(?:₱|php\s*)?[\d,.]+\s*k?\s+)?(?:on|for|sa))\s+(.+)$/i.exec(clause) ??
+    /\b(?:to\s+)?(?:buy(?:ing)?|afford(?!\s+(?:it|that|this|them)\b)|bili|bumili|get(?:ting)?|purchas(?:e|ing)|order(?:ing)?|pay(?:ing)?(?:\s+for)?|bayaran|magbayad\s+(?:ng|sa)?|book(?:ing)?|renew(?:ing)?|hav(?:e|ing)|treat\s+(?:myself|me)\s+to|go\s+(?:to|on)|spend\s+(?:(?:₱|php\s*)?[\d,.]+\s*k?\s+)?(?:on|for|sa))\s+(.+)$/i.exec(clause) ??
     /\b(?:planning|plan(?:ning)?\s+(?:on|for)|thinking\s+(?:of|about)|preparing\s+for|balak\s+(?:ko|kong)|plano\s+(?:ko|kong))\s+(.+)$/i.exec(clause) ??
     /\bmy\s+plans?\s+(?:today|tonight|tomorrow|is|are)\s+(?:is\s+|are\s+)?(?:to\s+)?(.+)$/i.exec(clause);
   // "I'll treat my friends" is a treat; "I want a ps5" is a PS5 (27 October 2026 sweep).
@@ -367,7 +369,10 @@ export function readSaveIntent(text: string, ctx: PlanContext): PlanIntent | nul
   const short = into.replace(/\s*\(.*\)\s*$/, "");
   const title = /deposit|hulog/.test(verb) ? `Deposit to ${short}` : /transfer|move|send|top|add|ilagay|ilalagay/.test(verb) ? `Move to ${short}` : `Save into ${short}`;
   const wallet = from ?? "";
-  const plan: PlanInput = { title, amount, due, dueKind, item: "", wallet, into, need: true, setAside: savesOutOfSpending({ into, wallet }, ctx.reference.wallets), notes: guessed ? `Into ${into}, the savings account; change it if it goes elsewhere.` : "" };
+  // "From my salary": out of money still to come, so no wallet now; said on the card.
+  const fromIncome = /\b(?:from|out\s+of|when)\s+(?:my\s+)?(salary|sahod|sweldo|allowance|income|pay(?:check)?)\b/i.exec(t)?.[1]?.toLowerCase();
+  const notes = [guessed ? `Into ${into}, the savings account; change it if it goes elsewhere.` : "", fromIncome ? `From your ${fromIncome} when it comes in.` : ""].filter(Boolean).join(" ");
+  const plan: PlanInput = { title, amount, due, dueKind, item: "", wallet, into, need: true, setAside: savesOutOfSpending({ into, wallet }, ctx.reference.wallets), notes };
   return { kind: "later", plans: [plan], title, amountSaid: amount !== null, dueSaid: dueKind !== "none", hint: "", asked: false };
 }
 
@@ -385,7 +390,15 @@ export function readPlanIntent(text: string, ctx: PlanContext): PlanIntent | nul
     return { kind: "income", amount: sumIn(t), due: when?.due ?? null, what };
   }
   const should = SHOULD_BUY.test(t) && !INTENT.test(t) && !WOULD_BUY.test(t);
-  if (!(((INTENT.test(t) || WOULD_BUY.test(t) || should) && SPENDS.test(t)) || TERSE.test(t))) return null;
+  /*
+   * "Can I afford a 2000 jacket next month?": a thing for a later month,
+   * asked about, is that month's question. It was answered from today's
+   * wallets and November's budget, "No ... PHP 0.00 free" (3 November 2026).
+   * Today's or no time said stays today's money (`affordAsk.ts`).
+   */
+  const monthEnd = lastOfMonth(Number(ctx.asOf.slice(0, 4)), Number(ctx.asOf.slice(5, 7)));
+  const affordLater = AFFORD_LATER.test(t) && !/\b(?:bills?|subscriptions?|budget)\b/i.test(t) && ((whenFor(t, ctx.asOf)?.due ?? "") > monthEnd || aheadMonthIn(t, ctx.asOf) !== null);
+  if (!(((INTENT.test(t) || WOULD_BUY.test(t) || should) && SPENDS.test(t)) || TERSE.test(t) || affordLater)) return null;
   if (MOVED.test(t) || NOT_SPENDING.test(t) || SETS_BUDGET.test(t)) return null;
   if (owed) return null;
   // "Should I buy a ps5?" with no later day is about today's money; with one, it is a plan asked about.

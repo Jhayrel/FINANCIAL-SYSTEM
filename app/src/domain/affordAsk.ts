@@ -36,7 +36,7 @@ import { categoryLimits } from "./budgetView";
 import { spendingTrackByKind } from "./kinds";
 import { walletBalance } from "./balances";
 import { borrowedMoney, lenderNames, ownIn } from "./borrowed";
-import { addDays, firstOfMonth, getMonth, getYear, lastOfMonth, MONTH_NAMES } from "./dates";
+import { addDays, firstOfMonth, formatMedium, getMonth, getYear, lastOfMonth, MONTH_NAMES } from "./dates";
 import type { Debt } from "./debt";
 import { formatMoney, withoutYears, type Centavos } from "./money";
 import { withoutModelNumbers } from "./modelNumbers";
@@ -155,7 +155,8 @@ export function readAffordAsk(
 
 /** Words of a question that are never the thing bought. */
 const NOT_A_THING = new Set(
-  "can could should would will the and for but with from into look usual usually expense expenses cost costs much how what when where today tomorrow tommorrow now this that these those you your mine afford buy get pay paid spend spent money cash balance budget go going went want need still also just like please pls".split(" "),
+  // "Bill" and "subscription" name what kind it is, never the thing: "my wifi bill" found "Bill usually costs you PHP 199.00" (3 November 2026).
+  "can could should would will the and for but with from into look usual usually expense expenses cost costs much how what when where today tomorrow tommorrow now this that these those you your mine afford buy get pay paid spend spent money cash balance budget go going went want need still also just like please pls bill bills subscription subscriptions next month week year".split(" "),
 );
 
 /** What one of these usually costs: the middle of the last ninety days' purchases, or by description over a year. */
@@ -394,3 +395,36 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
   }
   return lines.join("\n\n");
 }
+
+/**
+ * The bills and subscriptions a question names, by a word of their own:
+ * "my wifi bill" is Globe at Home Wifi, "spotify" is Spotify.
+ */
+export function recurringNamed(text: string, reference: Pick<ReferenceLists, "bills" | "subscriptions">): readonly string[] {
+  const said = ` ${words(text)} `;
+  const PLAIN = new Set(["home", "bill", "bills", "plan", "prepaid", "postpaid", "the", "and", "for", "monthly", "subscription"]);
+  return [...reference.bills, ...reference.subscriptions].filter((name) => {
+    const own = words(name).split(/\s+/).filter((w) => w.length >= 4 && !PLAIN.has(w));
+    return own.some((w) => said.includes(` ${w} `));
+  });
+}
+
+/**
+ * A bill or subscription asked about for a later month: it is counted in
+ * every month already, so the answer is what it costs and that it is
+ * there, never today's wallets ("can I afford my wifi bill next month?" was
+ * answered from November's money, 3 November 2026).
+ */
+export function recurringLaterAnswer(names: readonly string[], monthName: string, transactions: readonly Transaction[], money: (c: Centavos) => string): string {
+  const lines = names.map((name) => {
+    const last = [...transactions].filter((t) => (t.type === "Spending" || t.type === "Debt") && t.item === name && !t.debtId).sort((a, b) => b.date.localeCompare(a.date))[0];
+    return last ? `${name}: ${money(last.total)} last time, on ${formatMedium(last.date)}.` : `${name}: not paid yet in your entries, so its amount is not known.`;
+  });
+  const one = names.length === 1;
+  return [
+    `${one ? `${names[0]} is` : `${names.join(" and ")} are`} among your bills and subscriptions, so ${one ? "it is" : "they are"} counted in every month already, ${monthName} included: the budget sets bills and subscriptions apart, and safe to spend holds ${one ? "it" : "them"} back until paid.`,
+    ...lines,
+    `Whether ${monthName} can carry it is whether its usual money covers its usual costs: ask "how much do I need ${monthName === "next month" ? "next month" : `in ${monthName}`}?" for the month in full.`,
+  ].join("\n");
+}
+

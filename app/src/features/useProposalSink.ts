@@ -157,7 +157,13 @@ export function useProposalSink(input: SinkInput): ProposalSink {
       go: (place) => handlers.current.onGo?.(place),
       canPlan: Boolean(input.onSavePlan),
       savePlan: (plan, action, summary) => handlers.current.onSavePlan?.(plan, action, summary),
-      payPlan: (plan, draft, settles) => handlers.current.onPayPlan?.(plan, draft, settles) ?? "The Planner cannot be reached from here.",
+      /*
+       * The handler answers null when it paid. `?? "cannot be reached"` read
+       * that null as no handler: every plan paid from the chat said "Not paid:
+       * The Planner cannot be reached from here." and left its card open to be
+       * pressed again, paying twice (3 November 2026 process test).
+       */
+      payPlan: (plan, draft, settles) => (handlers.current.onPayPlan ? handlers.current.onPayPlan(plan, draft, settles) : "The Planner cannot be reached from here."),
       makeGoal: input.onMakeGoal ? (goal) => handlers.current.onMakeGoal?.(goal) ?? null : undefined,
       canSaveOwner: Boolean(input.onSaveOwner),
       saveOwner: (owner) => handlers.current.onSaveOwner?.(owner),

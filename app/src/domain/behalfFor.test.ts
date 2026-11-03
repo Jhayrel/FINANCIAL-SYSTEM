@@ -146,3 +146,37 @@ describe("what stays the owner's own", () => {
     expect(readEntry("paid globe postpaid 450 gcash", ledger, { ...reference, onBehalf: [] }, TODAY).draft.flow).not.toBe("Debt");
   });
 });
+
+/*
+ * The 3 November 2026 process test: the owner's own Globe at Home bill made
+ * "paid 599 for my father's globe" ask what it was for, and "father gave me
+ * 1000 for his bill" was booked as PHP 1,000.00 of income.
+ */
+describe("said outright whose it is", () => {
+  const withOwn = [...ledger, row({ date: "2026-10-20", category: "Bills", item: "Globe at Home Wifi", description: "Globe at home", amount: 99900, total: 99900 })];
+  const readOwn = (said: string) => {
+    const r = readEntry(said, withOwn, reference, TODAY);
+    return r.readsAsDebt ? fillDebt(r.draft, said, [father], withOwn, [...reference.wallets, ...reference.savings], TODAY).draft : r.draft;
+  };
+
+  it("their bill, paid: an advance to them, whatever the owner's own rows say", () => {
+    expect(behalfFor("paid 599 for my father's globe", withOwn, people, TODAY, 59900)).toMatchObject({ person: { id: "father" }, effect: "lend" });
+    expect(behalfFor("paid for my father globe bill 599", withOwn, people, TODAY, 59900)).toMatchObject({ person: { id: "father" }, effect: "lend" });
+    expect(readOwn("paid 599 for my father's globe gcash")).toMatchObject({ flow: "Debt", debtId: "father", debtEffect: "lend", amount: 59900 });
+  });
+
+  it("a present for them stays the owner's spending", () => {
+    expect(behalfFor("bought a birthday gift for my father 599", withOwn, people, TODAY, 59900)).toBeNull();
+    expect(behalfFor("bought a gift for papa's birthday 599", withOwn, people, TODAY, 59900)).toBeNull();
+  });
+
+  it("their money for their own bill is theirs, not income", () => {
+    expect(behalfFor("father gave me 1000 for his bill", withOwn, people, TODAY, 100000)).toMatchObject({ person: { id: "father" }, effect: "collect" });
+    expect(readOwn("father gave me 1000 for his bill cash")).toMatchObject({ flow: "Debt", debtId: "father", debtEffect: "collect", toWallet: "Cash" });
+  });
+
+  it("money for the owner stays income", () => {
+    expect(behalfFor("papa gave me 500 for my birthday", withOwn, people, TODAY, 50000)).toBeNull();
+    expect(readOwn("papa gave me 500 for my birthday gcash").flow).not.toBe("Debt");
+  });
+});

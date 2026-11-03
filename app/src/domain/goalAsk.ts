@@ -44,6 +44,13 @@ export function readGoalAsk(text: string, asOf: IsoDate): GoalAsk | null {
    * keep it a target.
    */
   if (/\b(?:next\s+(?:week|weekend)|tomorrow|bukas|tonight|this\s+(?:week|weekend|friday|saturday|sunday)|on\s+(?:mon|tues|wednes|thurs|fri|satur|sun)day|deposit)\b/i.test(t) && !/\b(?:by|until|before|within|how\s+long|how\s+much|how\s+many)\b/i.test(t)) return null;
+  /*
+   * A plan to put money aside, said as one: "I am planning to save 1500 from
+   * my salary", "I'll save 2000 when my allowance comes". It was answered
+   * "about 3 months to save PHP 1,500.00" (owner's phone, 3 November 2026).
+   * A target keeps its own words: by, until, how long, a goal of.
+   */
+  if (/\b(?:i'?m|i\s+am|im)\s+(?:planning|going)\s+to\s+save\b|\b(?:i|we)\s+(?:plan|will|intend)\s+(?:to\s+)?save\b|\b(?:i|we)'ll\s+save\b|\bsave\b[^.?!]{0,30}\bwhen\s+(?:my\s+)?(?:salary|sahod|sweldo|allowance|income|pay(?:check)?)\b|\bsave\b[^.?!]{0,30}\b(?:from|out\s+of)\s+(?:my\s+)?(?:salary|sahod|sweldo|allowance|income|pay(?:check)?)\b/i.test(t) && !/\b(?:by|until|before|within|how\s+long|how\s+many|goal\s+of|target)\b/i.test(t)) return null;
   const figure = /(?:₱|php\s*)?(\d[\d,]*(?:\.\d{1,2})?)\s*(k)?\b(?!\s*(?:days?|weeks?|months?|years?|%))/i.exec(withoutYears(t));
   if (!figure?.[1]) return null;
   const base = parseAmount(figure[1]);

@@ -88,12 +88,25 @@ export function effectLabel(effect: DebtEffect, debt?: Shape): string {
   }
 }
 
-/** What a choice does, in a sentence, shown under the row of choices. */
-export function effectMeaning(effect: DebtEffect, debt?: Shape): string {
+/**
+ * What a choice does, in a sentence, shown under the row of choices.
+ *
+ * `owedBefore` is what the line stood at before this entry, when known. Money
+ * from someone who owed nothing is theirs, held ahead of their bill: "father
+ * gave me 1000 for his bill" was told "They paid you back ... it was your
+ * money all along" with nothing owed (3 November 2026 process test).
+ */
+export function effectMeaning(effect: DebtEffect, debt?: Shape, owedBefore?: number): string {
   if (passing(debt)) {
     if (debt?.kind === "receivable") {
+      if (effect === "lend" && owedBefore !== undefined && owedBefore < 0) {
+        return "Paid for them out of the money they left with you. It is not spending: it was theirs.";
+      }
       if (effect === "lend") {
         return "Paid or sent on their behalf, such as a friend's meal they will pay back. It is not spending while they owe it. A transfer fee you pay yourself is spending, so add it on its own.";
+      }
+      if (effect === "collect" && owedBefore !== undefined && owedBefore <= 0) {
+        return "They owe you nothing on this line, so this is their money, held for something of theirs such as their bill. It is not income: pay it from this and the line comes back to zero.";
       }
       if (effect === "collect") return "They paid you back. It is not income: it was your money all along.";
       if (effect === "writeoff") {

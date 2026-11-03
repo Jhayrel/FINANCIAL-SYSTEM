@@ -143,7 +143,7 @@ import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvic
 import { monthBrief, spendable } from "../domain/monthPlan";
 import { addsTheCard, asksPlanOpinion, planOpinion, priceSaid, readPlanCardChange, wishOpinion, type PlanOpinionFacts } from "../domain/planCard";
 import { pictureDay } from "../domain/pictureDay";
-import { quickAnswer, readQuickAsk } from "../domain/quickAsk";
+import { asksToUseAi, quickAnswer, readQuickAsk } from "../domain/quickAsk";
 import { financeAlerts } from "../domain/alerts";
 import { billStatuses } from "../domain/bills";
 import { spentFromLeft } from "../domain/leftOver";
@@ -168,7 +168,7 @@ import { PlanForm } from "./Planner";
 import { entryImpact, limitLine } from "../domain/entryImpact";
 import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
 import { checkPlan, isSave, kindFromHistory, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, linkPayments, unlinkPayment, planAgain, dueFor, whenOf, NO_DATE, type DueKind, type Plan, type PlanInput } from "../domain/planner";
-import { alreadyPlannedWords, closedPlanWords, closedPlansWords, moveSaid, moveWords, NO_DAY, plannedMonthWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
+import { alreadyPlannedWords, closedPlanWords, closedPlansWords, moveSaid, moveWords, NO_DAY, plannedMonthWords, planNamed, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
 import { splitPlanClause, withoutPlanClause } from "../domain/planClause";
 import { asksForGoal, goalForPlan, type GoalForPlan } from "../domain/planGoal";
 import { askAmountWords, asksToPlan, costHint, whenFor, namesIt, planInputFor, planLineIn, readPlanIntent, readPlanLine, readSaveIntent, thingToPlan } from "../domain/planIntent";
@@ -203,7 +203,7 @@ import { asksToAddTheDifference, differenceNextStep, namedForTheDifference } fro
 import { withoutFalseDenial } from "../domain/aiText";
 import { asksAboutAFile, exportWords, readExportAsk, sheetRequestOf, statementBrief, statementWords, withCut, withSheet, type ExportAsk } from "../domain/exportAsk";
 import { readInvestigateAsk, type InvestigateAsk } from "../domain/investigateAsk";
-import { affordAnswer, followsUpDecision, goesByBalance, isAffordQuestion, readAffordAsk, usualCost } from "../domain/affordAsk";
+import { affordAnswer, followsUpDecision, goesByBalance, isAffordQuestion, readAffordAsk, recurringLaterAnswer, recurringNamed, usualCost } from "../domain/affordAsk";
 import {
   duplicateHeadline,
   groupDuplicates,
@@ -5012,6 +5012,52 @@ export function AskPanel({
     const emptyBox = (): void => {
       if (typed === undefined) setDraftState("");
     };
+    /*
+     * "Use ai", straight after an answer written on this device: the AI
+     * answers that same question, from the figures the device worked out. It
+     * got "Sure, I'm here to help." and nothing else (owner's phone, 3
+     * November 2026).
+     */
+    if (!as && files.length === 0 && asksToUseAi(lead)) {
+      const said = turns.filter((t): t is Said => (t as Said).kind === "you" || (t as Said).kind === "assistant");
+      const lines: string[] = [];
+      let question = "";
+      for (let k = said.length - 1; k >= 0; k -= 1) {
+        const t = said[k]!;
+        if (t.kind === "you") {
+          question = t.text;
+          break;
+        }
+        if (!t.from?.startsWith("this device")) {
+          lines.length = 0;
+          break;
+        }
+        if (!/^Want to see it drawn\?/.test(t.text)) lines.unshift(t.text);
+      }
+      if (question && lines.length > 0) {
+        emptyBox();
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "budget", { text: note }));
+        if (ai.disabled) {
+          say({ kind: "assistant", text: "The AI is off, so the answer above is this device's. Turn it on in Settings, AI, then say \"use ai\" again.", from: "this device", go: { screen: "settings", tab: "ai", label: "Settings, AI" } });
+          return;
+        }
+        await aiFirst(question, lines.join("\n\n"), {
+          rules: `The app worked out the answer below on this device, for the question "${question}"; they asked for the AI to answer it. Today is ${formatMedium(asOf)}. Answer that question in your own words, using only the figures, months and days written below: do no arithmetic of your own and never move a month or a day. Lead with what matters most for what they said they want it for. Never write a Plan line or an Entry line.`,
+        });
+        return;
+      }
+      // Nothing of this device's to hand over: say where the AI stands rather than send "use ai" as a question.
+      const lastModel = said.length > 0 && said[said.length - 1]!.kind === "assistant" ? said[said.length - 1]!.from : undefined;
+      emptyBox();
+      say({ kind: "you", text: note });
+      say(
+        ai.disabled
+          ? { kind: "assistant", text: "The AI is off, so this device answers. Turn it on in Settings, AI.", from: "this device", go: { screen: "settings", tab: "ai", label: "Settings, AI" } }
+          : { kind: "assistant", text: lastModel && !lastModel.startsWith("this device") ? `The AI is on: the answer above is from ${lastModel}. Ask your question and it answers.` : "The AI is on. Ask your question and it answers.", from: "this device" },
+      );
+      return;
+    }
     const lastAnswered = drawnNext.current && Date.now() - drawnNext.current.at < 15 * 60_000 && drawnNext.current.at > lastDrawnAt.current ? drawnNext.current.question : null;
     // Else the item the last questions named, when this names none ("let see it in trend" after the gym).
     const bareDraw = !offeredDraw.current && !lastAnswered && files.length === 0 && (drawReply(lead) ?? drawsBack(lead)) !== null && itemNamed(lead, knownItems) === null;
@@ -5617,8 +5663,8 @@ export function AskPanel({
               : quick.kind === "balance" || quick.kind === "worth"
                 ? { screen: "dashboard", label: "Dashboard" }
                 : null;
-      say({ kind: "assistant", text: reply, from: "this device", ...(place ? { go: place } : {}) });
-      log(aiEvent("answered", "budget", { text: reply, model: "this device" }));
+      // AI first, as every question is: the model says the app's figures; these words are the fallback (3 November 2026).
+      await aiFirst(note, reply, { ...(place ? { go: place } : {}), rules: `The app worked out the answer below from the ledger and the screens' own figures, for this message. Today is ${formatMedium(asOf)}. Answer what they asked first, in your own words and briefly, using only the figures written below: do no arithmetic of your own. Never write a Plan line or an Entry line.` });
       return;
     }
     const askedMonth = adviceMonthIn(ruled, asOf);
@@ -5766,8 +5812,14 @@ export function AskPanel({
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", billsAsked || goalAsked ? "budget" : "insights", { text: note }));
-        say({ kind: "assistant", text: reply, from: "this device" });
-        log(aiEvent("answered", billsAsked || goalAsked ? "budget" : "insights", { text: reply, model: "this device" }));
+        /*
+         * AI first (owner, 3 November 2026: "Fix the reasoning and make it ai
+         * first"): with a model on, it says the app's working in its own
+         * words; this device's words are the answer only with none on, or
+         * when none answers. "I am planning to save 1500 from my salary" was
+         * "Answered on this device" beside a Gemini answer just before it.
+         */
+        await aiFirst(note, reply, { where: billsAsked || goalAsked ? "budget" : "insights", rules: `The app worked out the answer below from the ledger, for this message. Today is ${formatMedium(asOf)}. Answer what they asked first, in your own words and briefly, using only the figures, months and days written below: do no arithmetic of your own and never move a month or a day. Never write a Plan line or an Entry line.` });
         // "Chart it" next draws the same subject.
         if (weekAsked) drawnNext.current = { question: weekAsked.last ? "spending last week" : "spending this week", at: Date.now() };
         if (lastAsked) drawnNext.current = { question: `${lastAsked.item ?? lastAsked.word ?? ""} spending`, at: Date.now() };
@@ -5791,7 +5843,16 @@ export function AskPanel({
      * or a Planner card (planIntent.ts, 27 October 2026).
      */
     let todayPlan: string | null = null;
-    if (files.length === 0 && !as && pending === null && !/^\s*\/\//.test(note) && !isEssay(note)) {
+    /*
+     * A plan on the Planner, named, with an entry's question still open: the
+     * plan is what this is about. "I deposited the money for the deposit to
+     * maya bank plan from maya", said while "What was it for?" waited on an
+     * earlier entry, was made a new plan and asked its amount (3 November
+     * 2026 process test). New plans were read either way; acting on one was
+     * not.
+     */
+    const aboutAPlan = pending !== null && /\bplans?\b/i.test(lead) && planNamed(lead, (settings.plans ?? []).filter((p) => p.status === "open"), ["open"]) !== null;
+    if (files.length === 0 && !as && (pending === null || aboutAPlan) && !/^\s*\/\//.test(note) && !isEssay(note)) {
       const answer = (text: string, where: AiWhere, go?: GoPlace): void => {
         setDraft("");
         say({ kind: "you", text: note });
@@ -6712,7 +6773,9 @@ export function AskPanel({
           queuedPlans.current = [...(already ? [{ move: already, to: said, words: alreadyPlannedWords(already, said) }] : []), ...made.map((plan) => ({ plan, words: planCardWords(plan, dueSaid) }))];
         } else {
           youAsked();
-          for (const plan of made) offerPlan(plan, planCardWords(plan, dueSaid));
+          // AI first (3 November 2026): with a model on, it says the app's working and the card follows; with none, the card alone.
+          if (ai.disabled) for (const plan of made) offerPlan(plan, planCardWords(plan, dueSaid));
+          else await aiFirst(note, made.map((plan) => planCardWords(plan, dueSaid)).join("\n\n"), { go: plannerPlace, cards: made.map((plan) => ({ plan, words: planCardWords(plan, dueSaid) })) });
           return;
         }
       } else {
@@ -6851,7 +6914,9 @@ export function AskPanel({
           } else {
             const made = fresh.map((i) => makePlan(i, asOf, "ai"));
             // "... for 80000, what do you think?": the opinion, then the card to add if they want it.
-            if (intent.asked && made.length === 1 && asksPlanOpinion(lead) && !isAffordQuestion(lead)) {
+            // "Can I afford a 2000 jacket next month?": the same, for that month; today's wallets are not its money (3 November 2026).
+            const later = made.length === 1 && made[0]!.due !== NO_DATE && made[0]!.due > monthEnd;
+            if (intent.asked && made.length === 1 && ((asksPlanOpinion(lead) && !isAffordQuestion(lead)) || (later && isAffordQuestion(lead)))) {
               youAsked();
               const plan = made[0]!;
               await aiFirst(note, planOpinion(plan, planOpinionFacts(plan), undefined, { readAs: readAsWords(plan, lead) }), { cards: [{ plan, words: planCardWords(plan, intent.dueSaid) }] });
@@ -6860,7 +6925,9 @@ export function AskPanel({
             if (intent.asked) queuedPlans.current = made.map((plan) => ({ plan, words: planCardWords(plan, intent.dueSaid) }));
             else {
               youAsked();
-              for (const plan of made) offerPlan(plan, planCardWords(plan, intent.dueSaid));
+              // AI first (3 November 2026): with a model on, it says the app's working and the card follows; with none, the card alone.
+              if (ai.disabled) for (const plan of made) offerPlan(plan, planCardWords(plan, intent.dueSaid));
+              else await aiFirst(note, made.map((plan) => planCardWords(plan, intent.dueSaid)).join("\n\n"), { go: plannerPlace, cards: made.map((plan) => ({ plan, words: planCardWords(plan, intent.dueSaid) })) });
               return;
             }
           }
@@ -7455,6 +7522,22 @@ export function AskPanel({
         if (spent || earned || owes) drawnNext.current = { question: ruled, at: Date.now() };
 
         if (affordish) {
+          /*
+           * A bill or subscription asked about for a later month: counted in
+           * every month already, said so with what it last cost. "Can I
+           * afford my wifi bill next month?" was answered from November's
+           * wallets (3 November 2026).
+           */
+          const thisEnd = lastOfMonth(Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)));
+          const ahead = aheadMonthIn(lead, asOf);
+          const laterDue = whenFor(lead, asOf)?.due ?? "";
+          const laterMonth = /\bnext\s+month\b/i.test(lead) ? "next month" : ahead ? `${MONTH_NAMES[ahead.month - 1]} ${ahead.year}` : laterDue > thisEnd ? `${MONTH_NAMES[Number(laterDue.slice(5, 7)) - 1]} ${laterDue.slice(0, 4)}` : null;
+          const recurring = laterMonth && todayPlan === null && !again ? recurringNamed(lead, reference) : [];
+          if (laterMonth && recurring.length > 0) {
+            const reply = recurringLaterAnswer(recurring, laterMonth, reportRows, formatMoney);
+            await answerWithModel(`A bill or subscription they asked about for ${laterMonth}, as the app reads it: it is counted in every month already. Say so, with what it last cost, in your own words; do no arithmetic of your own and never answer from today's wallets.`, reply);
+            return;
+          }
           const read = readAffordAsk(again ? `${again} ${lead}` : lead, transactions, reference, asOf);
           // A plan for today is a breakdown, not a yes or no: "Food usually costs you", the day's figures after it.
           const asked = todayPlan !== null ? { ...read, yesNo: false, when: read.when ?? ("today" as const) } : read;
@@ -10414,6 +10497,7 @@ export function AskPanel({
             debts,
             local.passThrough,
             card.turn.draft.debtId ? owedParts(transactions, card.turn.draft.debtId, asOf) : undefined,
+            card.turn.draft.debtId ? outstandingOf(transactions, card.turn.draft.debtId) : undefined,
           );
           say({
             kind: "assistant",
@@ -14249,7 +14333,7 @@ function DebtCard({
           })}
           {draft.debtEffect && (
             <p className="t-micro fms-proposalnote">
-              {effectMeaning(draft.debtEffect, { kind: behalf === "owed" ? "receivable" : "payable", form: "pass-through" })}
+              {effectMeaning(draft.debtEffect, { kind: behalf === "owed" ? "receivable" : "payable", form: "pass-through" }, draft.debtId ? outstandingOf(transactions, draft.debtId) : undefined)}
             </p>
           )}
         </div>

@@ -378,13 +378,15 @@ export function debtCardIntro(
   passThrough?: "held" | "fronted" | null,
   /** What the line is owed, in its parts (`owedParts`), so a payment is broken down rather than asked about. */
   owed?: OwedParts,
+  /** Where the line stands before this entry, signed: an On behalf line below zero holds their money (`effectMeaning`). */
+  standing?: Centavos,
 ): string {
   const line = debts.find((d) => d.id === draft.debtId)?.name;
   if (draft.behalf) {
     const shape = { kind: draft.behalf === "owed" ? ("receivable" as const) : ("payable" as const), form: "pass-through" as const };
     const parts = [
       draft.debtEffect
-        ? `That reads as On behalf: **${effectLabel(draft.debtEffect, shape)}**${line ? ` with **${line}**` : ""}. ${effectMeaning(draft.debtEffect, shape)}`
+        ? `That reads as On behalf: **${effectLabel(draft.debtEffect, shape)}**${line ? ` with **${line}**` : ""}. ${effectMeaning(draft.debtEffect, shape, standing)}`
         : `That reads as On behalf${line ? ` with **${line}**` : ""}. Pick what happened on the card.`,
     ];
     if (!line) parts.push("Pick who it is on the card, or keep the new name it read.");

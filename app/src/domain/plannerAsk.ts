@@ -296,8 +296,8 @@ function editIn(
    * spending, not a saving". Said alone: the rest of the plan is kept.
    */
   const places = [...reference.savings, ...goals.map((g) => g.name), ...reference.wallets];
-  // "Make it a deposit", "make the tuition plan a deposit to maya bank", "change it to saving into Phone fund".
-  const toSave = /\b(?:make|change|turn|switch|set)\b[^.?!]{0,40}?\b(?:a|an|into|to|as)\s+(?:a\s+)?(?:saving|savings|deposit|plan\s+to\s+save|transfer)\b|\b(?:it'?s|is)\s+(?:a\s+)?(?:saving|deposit)\s+(?:to|into|in)\b|\b(?:deposit|save|transfer)\s+it\s+(?:to|into|in)\b/i.test(t);
+  // "Make it a deposit", "make the tuition plan a deposit to maya bank", "change it to saving into Phone fund"; for one already saving, "it should go to extra cash".
+  const toSave = /\b(?:make|change|turn|switch|set)\b[^.?!]{0,40}?\b(?:a|an|into|to|as)\s+(?:a\s+)?(?:saving|savings|deposit|plan\s+to\s+save|transfer)\b|\b(?:it'?s|is)\s+(?:a\s+)?(?:saving|deposit)\s+(?:to|into|in)\b|\b(?:deposit|save|transfer)\s+it\s+(?:to|into|in)\b/i.test(t) || (isSave(plan) && /\b(?:should\s+go|goes|go|put\s+it|send\s+it)\s+(?:to|into|in)\b|\binto\s+[^.?!]{2,40}\binstead\b/i.test(t));
   const toSpend = isSave(plan) && /\b(?:make\s+it|change\s+it\s+(?:in)?to|it'?s|as)\s+(?:a\s+)?(?:spending|purchase|buy|payment|plan\s+to\s+(?:spend|buy|pay))\b|\bnot\s+(?:a\s+)?(?:saving|deposit)\b/i.test(t);
   if (toSave) {
     const lower = ` ${t.toLowerCase().replace(/[^a-z0-9()]+/g, " ")} `;
@@ -374,6 +374,9 @@ function editIn(
   return changes.length > 0 ? { input, changes } : null;
 }
 
+/** Money already moved for a plan to save: "I deposited", "transferred 3000", "I already moved it". */
+const DID_SAVE = /\b(?:deposited|transferred|saved)\b|\b(?:i|we|already)\s+(?:already\s+)?(?:moved|sent|put)\b/i;
+
 export function readPlannerAsk(
   text: string,
   context: {
@@ -400,7 +403,7 @@ export function readPlannerAsk(
   const pointsAt =
     focus !== null &&
     /\b(?:it|its|it'?s|that|this(?:\s+one)?)\b/i.test(t) &&
-    /\b(?:move|push|postpone|resched\w*|delay|extend|skip|cancel|remove|delete|drop|pay|paid|settle|put|bring|restore|reopen|rename|call|make|change|set|update|link|unlink|count\w*|want|need|note|save|afford|think|again|mark\w*|done|worth)\b/i.test(t) &&
+    /\b(?:move|moved|push|postpone|resched\w*|delay|extend|skip|cancel|remove|delete|drop|pay|paid|settle|put|bring|restore|reopen|rename|call|make|change|set|update|link|unlink|count\w*|want|need|note|save|saved|deposited|transferred|afford|think|again|mark\w*|done|worth)\b/i.test(t) &&
     planNamed(t, plans, ["open", "done", "skipped", "removed"]) === null;
   const named = (list: readonly Plan[], prefer: readonly Plan["status"][]): Plan | null =>
     planNamed(t, list, prefer) ?? (pointsAt && focus && list.some((p) => p.id === focus.id) && prefer.includes(focus.status) ? focus : null);
@@ -571,7 +574,8 @@ export function readPlannerAsk(
 
   // A field other than the date, the amount or a payment ("the trip plan is a want", "don't count the trip plan").
   // "pay the new phone plan 5000 from cash" is a payment from Cash, not the plan's wallet changed (27 October 2026 sweep).
-  if (!/^\s*(?:please\s+|pls\s+)?(?:pay|settle)\b|\b(?:put\s+back|restore|bring\s+back|reopen|paid|move|extend|postpone)\b|\b(?:put|bring)\b[^.?!]{0,40}?\bback\b/i.test(t)) {
+  // "I deposited the money for the deposit to maya bank plan from maya" is the deposit made, not the plan's wallet changed (3 November 2026 process test).
+  if (!/^\s*(?:please\s+|pls\s+)?(?:pay|settle)\b|\b(?:put\s+back|restore|bring\s+back|reopen|paid|move|extend|postpone)\b|\b(?:put|bring)\b[^.?!]{0,40}?\bback\b/i.test(t) && !DID_SAVE.test(t)) {
     const plan = named(open, ["open"]);
     const edit = plan ? editIn(t, plan, reference, context.goals ?? []) : null;
     if (plan && edit) return { kind: "edit", plan, input: edit.input, changes: edit.changes };
@@ -610,7 +614,16 @@ export function readPlannerAsk(
   }
   // A plan to save is done by moving the money: "I deposited the money for the maya bank plan", "moved it" (P11).
   if (/\b(?:deposited|moved|transferred|saved|put|did|done)\b/i.test(t) && !/\b(?:move|moved)\s+(?:it|the\s+\w+(?:\s+\w+)?\s+plan)\s+to\b/i.test(t)) {
-    const plan = named(open.filter((p) => isSave(p)), ["open"]);
+    const saving = open.filter((p) => isSave(p));
+    /*
+     * Or by where it went, when one plan to save goes there: "deposited 3000
+     * to maya bank from maya for the plan" (3 November 2026 process test).
+     */
+    const into = saving.filter((p) => {
+      const short = (p.into ?? "").replace(/\s*\(.*\)\s*$/, "").trim().toLowerCase();
+      return short !== "" && new RegExp(`\\b(?:to|into|in|sa)\\s+(?:my\\s+|the\\s+)?${short.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t);
+    });
+    const plan = named(saving, ["open"]) ?? (into.length === 1 ? into[0]! : null);
     if (plan) {
       const wallet = [...reference.wallets, ...reference.savings].find((w) => w !== plan.into && new RegExp(`\\bfrom\\s+(?:my\\s+)?${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) ?? "";
       return { kind: "pay", plan, amount: sumIn(t), wallet };
@@ -741,8 +754,13 @@ export function closedPlansWords(views: readonly PlanView[], which: "done" | "sk
   const lines = sorted.slice(0, 12).map((v) =>
     which === "overdue"
       ? `- ${v.plan.title}: ${formatMoney(v.left)} left, due ${formatMedium(v.plan.due)}`
-      : `- ${v.plan.title}: ${formatMoney(v.plan.amount)}${v.plan.closedOn ? `, ${name} on ${formatMedium(v.plan.closedOn)}` : ""}${v.plan.reason ? ` (${v.plan.reason})` : ""}${which === "done" && v.paid > 0 ? `, ${formatMoney(v.paid)} paid` : ""}`,
+      : `- ${v.plan.title}: ${formatMoney(v.plan.amount)}${v.plan.closedOn ? `, ${doneWord(v.plan)} on ${formatMedium(v.plan.closedOn)}` : ""}${v.plan.reason ? ` (${v.plan.reason})` : ""}${which === "done" && v.paid > 0 ? `, ${formatMoney(v.paid)} ${doneWord(v.plan)}` : ""}`,
   );
+  // A plan to save is done by moving the money: "Deposit to Maya Bank, paid on" read as spending.
+  function doneWord(plan: Plan): string {
+    return which === "done" && isSave(plan) ? "moved" : name;
+  }
   const close = which === "overdue" ? 'To pay one, say "I paid the ... plan"; to give it a new day, "move the ... plan to" a day.' : which === "done" ? 'To do one again, say "plan the ... again" with a day.' : 'To open one again, say "put the ... plan back".';
-  return [`**${pick.length} ${pick.length === 1 ? "plan" : "plans"} ${which === "overdue" ? "overdue" : name}:**`, ...lines, pick.length > 12 ? `And ${pick.length - 12} more on the Planner.` : "", close].filter(Boolean).join("\n");
+  const heading = which === "overdue" ? "overdue" : which === "done" && pick.some((v) => isSave(v.plan)) ? (pick.every((v) => isSave(v.plan)) ? "moved" : "done") : name;
+  return [`**${pick.length} ${pick.length === 1 ? "plan" : "plans"} ${heading}:**`, ...lines, pick.length > 12 ? `And ${pick.length - 12} more on the Planner.` : "", close].filter(Boolean).join("\n");
 }

@@ -2438,6 +2438,54 @@ The rules are docs/16-PLANNER.md P11; `planSave.test.ts` holds each.
   before pushing.
 - No database rule change: plans already save with any fields.
 
+### 2026-11-03: every process to the centavo, AI first, and the chat's reasoning
+
+Owner: "fix the logic and use every button in the system and make sure the
+process is good also fix the reasoning of ai and system", "Fix the reasoning
+and make it ai first", with two phone screenshots. Each case below is in
+`askedNov3.test.ts` or `behalfFor.test.ts`.
+
+- **Paying a plan from the chat said "Not paid".** Pay it and Move it saved
+  the entry, then said "Not paid: The Planner cannot be reached from here"
+  and left the card open, so a second press would pay twice. The sink read
+  the handler's null (paid, no problem) as no handler. In since 26 October;
+  the owner's backups have no plan paid from the chat, so nothing was paid
+  twice. Fixed in `useProposalSink.ts`.
+- **"Break down of expenses ... Make sure its accurate"** gave PHP 3,526.00
+  "under Down" for the whole ledger: the extra words took it past the quick
+  reader's 18 words, and the chart reader took "down" from "break down" as
+  a topic. Both fixed; it is the month's table by kind, AI on or off.
+- **"Use ai"** after an answer from this device was sent as a question and
+  got "Sure, I'm here to help." It now hands that answer and its question to
+  the AI; with the AI off it says how to turn it on.
+- **"I am planning to save 1500 from my salary"** was a three-month target.
+  It is a plan to save, noted "From your salary when it comes in."
+- **"Can I afford a 2000 jacket next month?"** was answered from November's
+  wallets ("No ... PHP 0.00 free"). A later month is that month's question:
+  its usual costs, plans and income, savings, and a card to add. A bill
+  asked about for a later month ("my wifi bill next month") is said to be
+  counted every month already, with what it last cost; "bill" is no longer
+  read as a thing bought.
+- **On behalf.** "Paid 599 for my father's globe" asked what it was for
+  (the owner's own Globe at Home row); "father gave me 1000 for his bill"
+  was PHP 1,000.00 of income. Both are on Father's line now. A gift for
+  them stays the owner's spending. The card no longer says "They paid you
+  back" when they owed nothing: it says it is their money, held.
+- **"I deposited the money for the deposit to maya bank plan from maya"**
+  was read as changing the plan's wallet, and, with an entry's question
+  still open, as a new plan. It is the Move it card now, from Maya.
+- AI first: bills due, a goal, the week, last time, quick answers and plan
+  cards go to the model with the app's figures; the device's words are the
+  answer when no model is on or none answers. Checked with a mocked model,
+  including one that sends nothing.
+- Tested: the process robot, 18 steps from a lunch to a deposit, each
+  checked to the centavo on the sidebar and Dashboard; the 37 owner
+  conversations replayed (0 of 109 answers moved); every button on every
+  screen on PC and phone with dialogs confirmed (no crash, no page error,
+  every screen's figures in step).
+- Left as it is, for the owner (section 6, item 8): money someone gives you
+  to hold on an On behalf line is counted in net worth.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
@@ -2475,6 +2523,15 @@ The rules are docs/16-PLANNER.md P11; `planSave.test.ts` holds each.
    reported, never corrected): if Maya's own balance is PHP 18.00 above the
    app's, Edit #3818 and set Fee to PHP 0.00 ("When saved: Maya goes up PHP
    18.00"); if they match, leave it.
+8. **Money held for someone, in net worth (found 3 November, not changed).**
+   When Father, who owes nothing, gives you PHP 1,000.00 for his bill, his
+   line goes below zero and net worth rises PHP 1,000.00 until you pay the
+   bill, because each On behalf line counts from zero up (the rule pinned
+   in `owedOnce.test.ts`: "owed by nobody, never -PHP 1.00", your 19 October
+   decision on Father's PHP 1.00). Today every On behalf line is at zero, so
+   nothing shows now. If money held for someone should not count as yours,
+   say so: the line would then count as money you hold for them, and the
+   PHP 1.00 case would change with it.
 
 ---
 

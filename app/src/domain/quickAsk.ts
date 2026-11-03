@@ -47,10 +47,23 @@ const RECURRING = /\b(?:list|show|what\s+are|what'?s|which\s+are|ano\s+ang)\b[^?
 // "What is my budget this month?" was answered with the month's summary with the AI off (2 November 2026).
 const BUDGET_STATUS = /^\s*(?:show|see|check|view)\s+(?:me\s+)?(?:my\s+|the\s+)?budget\s*\??\s*$|\bwhy\s+(?:is|am)\s+(?:my\s+budget|i)\s+(?:over|under|short)\b|\bbudget\s+status\b|^\s*(?:what(?:'s|\s+is)|how\s+much\s+is)\s+(?:my\s+|the\s+)budget(?:\s+(?:this\s+month|for\s+this\s+month|now|right\s+now|today))?\s*\??\s*$/i;
 
+/** The words that only ask for care or say what the answer is for. */
+const withoutAsides = (t: string): string =>
+  t
+    .replace(/\b(?:and\s+)?(?:please\s+)?make\s+sure\s+(?:that\s+)?(?:it'?s|its|it\s+is|you'?re|you\s+are|the\s+\w+\s+(?:is|are))\s+(?:accurate|correct|right|exact|complete|detailed)\b/gi, " ")
+    .replace(/\b(?:be\s+)?(?:accurate(?:ly)?|precise(?:ly)?)\s*(?:please|pls)?\b/gi, " ")
+    .replace(/\bso\s+(?:that\s+)?(?:i|we)\s+can\s+(?:do\s+)?(?:my\s+|our\s+|a\s+)?(?:budget(?:ing)?|plan(?:ning)?)\b/gi, " ")
+    .replace(/\b(?:please|pls|thanks?|thank\s+you|po)\b/gi, " ");
+
 /** The question, or null. A kind of spending named ("food budget left") is a limit's question, not this. */
 export function readQuickAsk(text: string, kinds: readonly string[] = [], wallets: readonly string[] = []): QuickAsk | null {
   const t = text.trim();
-  if (!t || t.split(/\s+/).length > 18) return null;
+  /*
+   * Counted without what only asks for care: "so I can do Budgeting. Make
+   * sure its accurate" took a breakdown past 18 words, and the chart reader
+   * answered it instead (owner's phone, 3 November 2026).
+   */
+  if (!t || withoutAsides(t).split(/\s+/).filter(Boolean).length > 18) return null;
   // Asked about, not entered: no figure in it ("how much is in my gcash", never "gcash 500").
   const noFigure = !/\d/.test(t.replace(/\b20\d{2}\b/g, ""));
   if (noFigure && WORTH.test(t)) return { kind: "worth" };
@@ -233,4 +246,13 @@ export function quickAnswer(ask: QuickAsk, f: QuickFacts, money: (c: Centavos) =
     kept >= 0 ? `**You kept ${money(kept)} in ${name} so far:** ${money(brief.cameIn)} came in and ${money(brief.wentOut)} went out.` : `**Nothing was kept in ${name} so far: ${money(-kept)} more went out than came in** (${money(brief.cameIn)} in, ${money(brief.wentOut)} out).`,
     f.movedToSavings > 0 ? `${money(f.movedToSavings)} was moved into savings this month.` : "Nothing was moved into savings this month.",
   ].join(" ");
+}
+
+/**
+ * "Use ai", "ask the AI instead", "answer that with gemini": the answer just
+ * written on this device, from the model. It was sent as a question of its
+ * own and got "Sure, I'm here to help." (owner's phone, 3 November 2026).
+ */
+export function asksToUseAi(text: string): boolean {
+  return /^\s*(?:(?:pls|please|ok(?:ay)?|then|so|just|now|can\s+you)\s+)*(?:use|ask|try|answer\s+(?:it\s+|that\s+|this\s+)?(?:with|using)|with|via)\s+(?:the\s+|an?\s+)?(?:ai|a\.i\.?|model|gemini|gpt)(?:\s+(?:please|pls|instead|po|for\s+(?:that|this|it)|on\s+(?:that|this|it)|to\s+answer(?:\s+(?:that|this|it))?))*\s*[.!?]*\s*$/i.test(text);
 }
