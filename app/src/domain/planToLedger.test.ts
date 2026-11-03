@@ -72,7 +72,7 @@ describe("one saved as spending by mistake is said, never changed by itself", ()
   it("the bell names it and how to put it right", () => {
     const found = planAlerts([wrong], [], accounts, asOf, null).find((a) => a.id === "plan-kind-w1");
     expect(found?.title).toBe("Save into Maya Bank is set as spending");
-    expect(found?.detail).toMatch(/Edit it and pick To save or move, into Maya Bank \(Personal savings\)/);
+    expect(found?.detail).toMatch(/goes into Maya Bank \(Personal savings\).*press "Make it a saving"\. Nothing changes until you do\./);
   });
 
   it("one sentence in the chat makes it a plan to save", () => {

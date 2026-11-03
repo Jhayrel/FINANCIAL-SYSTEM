@@ -44,7 +44,7 @@ import { Field, SearchInput, TextInput } from "../components/forms";
 import { Sheet } from "../components/Sheet";
 import type { Plan } from "../domain/planner";
 import { useMediaQuery } from "./useMediaQuery";
-import { binCounts, restoreImpact } from "../domain/binView";
+import { binCounts, binOrder, restoreImpact } from "../domain/binView";
 import { restoreCheck } from "../domain/restoreCheck";
 import { formatMoney } from "../domain/money";
 import { matchesSearch, parseSearch } from "../domain/search";
@@ -106,7 +106,8 @@ export function Bin({
 
   const matching = useMemo(() => {
     const terms = parseSearch(query);
-    return deleted.filter((t) => (type === "all" || t.type === type) && matchesSearch(t, terms));
+    // The last one binned on top (`binOrder`).
+    return binOrder(deleted.filter((t) => (type === "all" || t.type === type) && matchesSearch(t, terms)));
   }, [deleted, query, type]);
 
   const shown = matching.slice(0, limit);

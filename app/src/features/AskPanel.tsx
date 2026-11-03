@@ -167,7 +167,7 @@ import type { PlanAction } from "./useProposalSink";
 import { PlanForm } from "./Planner";
 import { entryImpact, limitLine } from "../domain/entryImpact";
 import { NO_OWNER, normaliseOwner, OWNER_FIELD_LABEL, ownerAnswer, readOwnerAsk, type OwnerDetails } from "../domain/owner";
-import { checkPlan, inputOf, isSave, kindFromHistory, paysDebt, planPaidBy, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, linkPayments, unlinkPayment, planAgain, dueFor, whenOf, NO_DATE, type DueKind, type Plan, type PlanInput } from "../domain/planner";
+import { asSaving, asSavingWords, misfiledSaving, paysPlan, checkPlan, inputOf, isSave, kindFromHistory, paysDebt, planPaidBy, makePlan, movePlan, plannedForBudget, plansSetAside, removePlan, reopenPlan, skipPlan, viewOf, walletToPayFrom, editPlan, plannedIn, planKinds, byWhen, countedWords, countsSentence, likelyPayments, linkPayments, unlinkPayment, planAgain, dueFor, whenOf, NO_DATE, type DueKind, type Plan, type PlanInput } from "../domain/planner";
 import { alreadyPlannedWords, closedPlanWords, closedPlansWords, moveSaid, moveWords, NO_DAY, plannedMonthWords, planNamed, planStatusWords, plansWords, readPlannerAsk, sumIn } from "../domain/plannerAsk";
 import { splitPlanClause, withoutPlanClause } from "../domain/planClause";
 import { asksForGoal, goalForPlan, type GoalForPlan } from "../domain/planGoal";
@@ -1109,7 +1109,8 @@ function cardWords(turn: Turn, state: StoredCard["state"]): string {
     const d = turn.proposal.draft;
     return `${CARD_WORD[state]}: ${d.date} ${d.flow} ${d.item} ${formatMoney(d.amount ?? 0)}`;
   }
-  if (isDebt(turn)) return `${CARD_WORD[state]}: ${turn.draft.date} Debt ${formatMoney(turn.draft.amount ?? 0)}`;
+  // What leaves the wallet: a payment split into borrowed and interest on the card is one sum ("Added: Debt ₱1,000.00" for ₱1,075.52 paid, 3 November 2026).
+  if (isDebt(turn)) return `${CARD_WORD[state]}: ${turn.draft.date} Debt ${formatMoney((turn.draft.amount ?? 0) + (turn.draft.debtEffect === "repay" ? (turn.draft.interest ?? 0) : 0))}`;
   if (isFound(turn)) {
     const n = turn.candidates.length || turn.restored?.length || 0;
     const verb = turn.action === "edit" ? "to edit" : turn.action === "restore" ? "to restore" : "to move to the bin";
@@ -2207,19 +2208,22 @@ export function AskPanel({
     const row = rows.find((r) => r.type === "Debt" && r.debtEffect === "repay") ?? rows.find((r) => r.type === "Spending" || r.type === "Transfer" || r.type === "Revenue");
     if (!row) return;
     const plans = settings.plans ?? [];
-    const match = planPaidBy(row, plans, transactions);
+    const match = planPaidBy(row, plans, transactions, [...reference.wallets, ...reference.savings]);
     if (!match) return;
-    const { plan, left } = match;
+    const { left, makesSaving } = match;
     const all = [...transactions, ...rows];
+    // Saved as spending, named as a saving into where this went: counting it makes it one (`misfiledSaving`).
+    const plan = makesSaving ? asSaving(match.plan, makesSaving, reference.wallets, all, asOf) : match.plan;
     const next = linkPayments(plan, [row.id], all, asOf);
     const saving = isSave(plan);
     // A repayment with its interest saved beside it is one payment (P12).
     const counted = saving ? row.amount : paysDebt(plan) ? row.amount + (rows.find((r) => r.debtEffect === "interest" && r.id !== row.id)?.amount ?? 0) : row.total;
     const no = `#${String(row.recordNumber).padStart(4, "0")}`;
     const rest = Math.max(0, left - counted);
+    // "₱1,075.52, with ₱1,075.52 left to pay" read as if nothing would be paid (3 November 2026): what is left is the plan's.
     const words = saving
-      ? `${no} looks like the money for "${plan.title}": ${formatMoney(counted)} into ${plan.into}, with ${formatMoney(left)} left to move. Count it, and the plan ${next.status === "done" ? "is done" : `has ${formatMoney(rest)} left to move`} and stops being held back from safe to spend${next.status === "done" ? "" : " for this part"}. No entry is added or changed.`
-      : `${no} looks like the payment for "${plan.title}": ${formatMoney(counted)}, with ${formatMoney(left)} left to pay. Count it, and the plan ${next.status === "done" ? "is paid" : `has ${formatMoney(rest)} left to pay`}${plan.setAside ? " and stops being held back from safe to spend" : ""}. No entry is added or changed.`;
+      ? `${no}, ${formatMoney(counted)} into ${plan.into}, looks like the money for "${plan.title}", which has ${formatMoney(left)} left to move.${makesSaving ? ` The plan was saved as spending; counting this makes it a plan to save into ${plan.into}, as its words say.` : ""} Count it, and the plan ${next.status === "done" ? "is done" : `has ${formatMoney(rest)} left to move`} and stops being held back from safe to spend${next.status === "done" ? "" : " for this part"}. No entry is added or changed.`
+      : `${no}, ${formatMoney(counted)}, looks like the payment for "${plan.title}", which has ${formatMoney(left)} left to pay. Count it, and the plan ${next.status === "done" ? "is paid" : `has ${formatMoney(rest)} left to pay`}${plan.setAside ? " and stops being held back from safe to spend" : ""}. No entry is added or changed.`;
     say({
       kind: "settle",
       debtId: "",
@@ -2232,7 +2236,7 @@ export function AskPanel({
           { label: "Entry", value: `${no}, ${formatMoney(counted)}` },
           { label: saving ? "Left to move" : "Left to pay", value: next.status === "done" ? "Nothing" : formatMoney(rest) },
         ],
-        save: { plan: next, action: "plan.paid", summary: `Linked ${no} to "${plan.title}" as its ${saving ? "money moved" : "payment"}, from the chat.`, before: plan },
+        save: { plan: next, action: "plan.paid", summary: makesSaving ? `Made "${plan.title}" a plan to save into ${plan.into}, and linked ${no} to it as its money moved, from the chat.` : `Linked ${no} to "${plan.title}" as its ${saving ? "money moved" : "payment"}, from the chat.`, before: match.plan },
       },
     });
     log(aiEvent("proposed", "budget", { entry: words }));
@@ -6361,6 +6365,34 @@ export function AskPanel({
             );
             return;
           }
+          /*
+           * An entry of the other kind: money moved does not pay a plan to
+           * spend, nor spending a saving. A plan saved as spending whose words
+           * name the account it went into is offered as made a saving, with it
+           * counted (owner, 3 November 2026); anything else is said.
+           */
+          const spends = !isSave(p) && !paysDebt(p);
+          const wrongKind = rows.filter((r) => !paysPlan(p, r) || (spends && (r.type === "Transfer" || r.type === "Revenue")));
+          if (wrongKind.length > 0) {
+            const r = wrongKind[0]!;
+            const misfiled = misfiledSaving(p, [...reference.wallets, ...reference.savings], transactions, plans);
+            const into = misfiled && (r.type === "Transfer" || r.type === "Revenue") && (misfiled.into === r.toWallet || (misfiled.into === null && misfiled.options.includes(r.toWallet))) ? r.toWallet : null;
+            if (into && wrongKind.length === rows.length && rows.length === 1) {
+              const next = asSaving(p, into, reference.wallets, transactions, asOf, r.id);
+              const words = asSavingWords(p, next, transactions, r);
+              card(`${words} It was saved as a plan to spend, and money moved into ${into} cannot pay one; as its words say, it becomes a plan to save. No entry is added or changed.`, "Make it a saving and count it", [], {
+                rows: [],
+                save: { plan: next, action: "plan.paid", summary: `${words} From the chat.`, before: p },
+              });
+              return;
+            }
+            answer(
+              `${no(r.recordNumber)} is ${r.type === "Spending" ? "spending" : r.type === "Debt" ? "a debt movement" : `money moved into ${r.toWallet || "an account"}`}, and "${p.title}" is a plan to ${isSave(p) ? `save into ${p.into}` : paysDebt(p) ? "pay a debt" : "spend"}, so it cannot count as its ${isSave(p) ? "money moved" : "payment"}. ${isSave(p) || paysDebt(p) ? "" : `If the plan is really a saving, say "make the ${p.title.toLowerCase()} plan a saving into" and the account. `}Or link an entry of its own kind.`,
+              "budget",
+              planner,
+            );
+            return;
+          }
           // An entry already counted for another plan is that plan's: never counted twice (#3933 was the Abra trip's, 27 October 2026).
           const taken = rows.flatMap((r) => {
             const other = plans.find((x) => x.id !== p.id && x.entryIds.includes(r.id));
@@ -6506,6 +6538,11 @@ export function AskPanel({
           return;
         }
         if (planAsk.kind === "edit") {
+          // A change that cannot be made as said: the question instead ("Which one: Maya Bank (Drone), ...?").
+          if (planAsk.ask) {
+            answer(planAsk.ask, "budget", planner);
+            return;
+          }
           /*
            * Spending to saving or back (P11): stopped while payments of the
            * other kind are linked, as the Planner's own form stops it.
@@ -6518,7 +6555,11 @@ export function AskPanel({
               return;
             }
           }
-          const next = editPlan(p, planAsk.input, asOf, transactions);
+          // Spending made a saving: what is linked from the bin let go, as the Planner's button does (`asSaving`).
+          const switching = isSave(planAsk.input) && !isSave(p);
+          const next = switching ? asSaving(p, planAsk.input.into ?? "", reference.wallets, transactions, asOf) : editPlan(p, planAsk.input, asOf, transactions);
+          // Money already moved for it: said, so it is counted next, never twice (owner, 3 November 2026).
+          const fits = switching ? likelyPayments(next, transactions, plans)[0] : undefined;
           const said = planAsk.changes.map((c) => `${c.label.toLowerCase()} "${c.before}" to "${c.after}"`).join(", ");
           const WORD: Record<string, string> = { Name: "name", "Need or want": "need or want", "Safe to spend": "counting in safe to spend", Kind: "kind", "Pay from": "wallet", Goal: "goal", Notes: "note", "Pay by": "date", "Plan to": "kind of plan" };
           const what = planAsk.changes.map((c) => WORD[c.label] ?? c.label.toLowerCase());
@@ -6542,7 +6583,9 @@ export function AskPanel({
             `Edit "${p.title}": its ${what.length > 1 ? `${what.slice(0, -1).join(", ")} and ${what[what.length - 1]}` : what[0]}, as below. Nothing else about it changes.${planAsk.changes.some((c) => c.label === "Goal") ? " Its money is in the goal, so it is no longer counted in safe to spend." : ""}${effect}${
               planAsk.changes.some((c) => c.label === "Plan to")
                 ? isSave(next)
-                  ? ` As a plan to save it leaves the budget's planned spending and is done by moving the money into ${next.into}; ${next.setAside ? "safe to spend holds it back until then" : "nothing is held back for it"}.`
+                  ? ` As a plan to save it leaves the budget's planned spending and is done by moving the money into ${next.into}; ${next.setAside ? "safe to spend holds it back until then" : "nothing is held back for it"}.${
+                      fits ? ` ${`#${String(fits.recordNumber).padStart(4, "0")}`}, ${money(fits.amount)} into ${next.into} on ${formatMedium(fits.date)}, looks like its money: once this is saved, say "link #${String(fits.recordNumber).padStart(4, "0")} to it" and it is counted.` : ""
+                    }${p.entryIds.length > next.entryIds.length ? " The payment linked to it from the bin is let go: spending does not pay a saving." : ""}`
                   : " As a plan to spend it counts in its month's planned spending and is paid by spending, not by a transfer."
                 : ""
             }`,
@@ -6573,6 +6616,36 @@ export function AskPanel({
          * A plan to pay a debt is paid by a repayment on its line (P12), the
          * Debt screen's own row: what is owed broken into borrowed and fees.
          */
+        /*
+         * Named as a saving, saved as spending (`misfiledSaving`): moved, never
+         * booked as spending; and an entry already added for it is counted,
+         * never added a second time. The owner told the chat about the
+         * transfer, then confirmed the plan, and it booked ₱1,500.00 of
+         * "Random necessities" beside it (3 November 2026).
+         */
+        const misfit = !isSave(p) && !paysDebt(p) ? misfiledSaving(p, [...reference.wallets, ...reference.savings], transactions, plans) : null;
+        if (misfit && !misfit.into) {
+          answer(`"${p.title}" says the money goes into ${misfit.options.join(" or ")}, but it is saved as a plan to spend, so paying it would book spending for money moved. Which account? Say "make the ${p.title.toLowerCase()} plan a saving into" and the whole name, then move it.`, "budget", planner);
+          return;
+        }
+        const asP = misfit?.into ? asSaving(p, misfit.into, reference.wallets, transactions, asOf) : p;
+        const countsAs = (t: Transaction): Centavos => (isSave(asP) ? t.amount : paysDebt(asP) ? t.amount + (transactions.find((r) => r.debtEffect === "interest" && r.partOf === t.id)?.amount ?? 0) : t.total);
+        const seen = likelyPayments(asP, transactions, plans).find((t) => countsAs(t) === amount);
+        if (seen) {
+          const next = misfit?.into ? asSaving(p, misfit.into, reference.wallets, transactions, asOf, seen.id) : linkPayments(p, [seen.id], transactions, asOf);
+          const did = isSave(asP) ? "move" : "payment";
+          card(
+            `${no(seen.recordNumber)}, ${money(countsAs(seen))} on ${formatMedium(seen.date)}${seen.description ? `, "${seen.description.slice(0, 48)}"` : ""}, is already in your entries and looks like this ${did}. Count it, and no second entry is added.${misfit ? ` "${p.title}" was saved as a plan to spend; its words say ${misfit.into}, so it becomes a plan to save.` : ""} If you ${isSave(asP) ? "moved the money" : "paid"} twice, add the second one on the Add form.`,
+            `Count ${no(seen.recordNumber)}`,
+            [
+              { label: "Plan", value: p.title },
+              { label: "Entry", value: `${no(seen.recordNumber)}, ${money(countsAs(seen))}` },
+              { label: isSave(asP) ? "Left to move" : "Left to pay", value: next.status === "done" ? "Nothing" : money(Math.max(0, left - countsAs(seen))) },
+            ],
+            { rows: [], save: { plan: next, action: "plan.paid", summary: misfit ? `${asSavingWords(p, next, transactions, seen)} From the chat.` : `Counted ${no(seen.recordNumber)} as the ${did} for "${p.title}", from the chat: no new entry added.`, before: p } },
+          );
+          return;
+        }
         if (paysDebt(p)) {
           const debt = debts.find((d) => d.id === p.debtId);
           if (!debt) {
@@ -6599,30 +6672,30 @@ export function AskPanel({
           if (!okRepay.ok) say({ kind: "assistant", text: `${okRepay.problems.join(" ")} Open the Planner to pay it with a wallet picked.`, from: "this device", go: planner });
           return;
         }
-        if (isSave(p)) {
-          const fromSave = planAsk.wallet && planAsk.wallet !== p.into ? planAsk.wallet : p.wallet || walletToPayFrom({ wallet: "", item: "" }, amount, transactions, reference.wallets);
+        if (isSave(asP)) {
+          const fromSave = planAsk.wallet && planAsk.wallet !== asP.into ? planAsk.wallet : asP.wallet || walletToPayFrom({ wallet: "", item: "" }, amount, transactions, reference.wallets);
           const moveDraft: Draft = {
             ...emptyDraft(asOf),
             flow: "Transfer",
             date: asOf,
             fromWallet: fromSave,
-            toWallet: p.into ?? "",
-            description: p.title,
+            toWallet: asP.into ?? "",
+            description: asP.title,
             amount,
             status: "Transferred",
-            notes: `Moved from the Planner: ${p.title}.`,
+            notes: `Moved from the Planner: ${asP.title}.`,
           };
           const okMove = sink.check(moveDraft);
           card(
-            `Move ${money(amount)} from ${fromSave || "a wallet to pick"} into ${p.into}, today, for "${p.title}". Saved as a transfer, checked as the Add form checks one, and linked to the plan. It is saving, not spending.${amount < left ? ` ${money(left - amount)} is left to move after it; the plan stays open.` : ""}${okMove.warnings.length > 0 ? ` ${okMove.warnings.join(" ")}` : ""}`,
+            `Move ${money(amount)} from ${fromSave || "a wallet to pick"} into ${asP.into}, today, for "${asP.title}". Saved as a transfer, checked as the Add form checks one, and linked to the plan. It is saving, not spending.${misfit ? ` The plan was saved as a plan to spend; its words say ${asP.into}, so it becomes a plan to save.` : ""}${amount < left ? ` ${money(left - amount)} is left to move after it; the plan stays open.` : ""}${okMove.warnings.length > 0 ? ` ${okMove.warnings.join(" ")}` : ""}`,
             okMove.ok ? "Move it" : "Fix it in the Planner",
             [
               { label: "Amount", value: money(amount) },
               { label: "From", value: fromSave || "not picked" },
-              { label: "Into", value: p.into ?? "" },
+              { label: "Into", value: asP.into ?? "" },
               { label: "On", value: formatMedium(asOf) },
             ],
-            okMove.ok ? { rows: [], pay: { plan: p, draft: moveDraft, settles: amount >= left } } : { rows: [] },
+            okMove.ok ? { rows: [], pay: { plan: asP, draft: moveDraft, settles: amount >= left } } : { rows: [] },
           );
           if (!okMove.ok) say({ kind: "assistant", text: `${okMove.problems.join(" ")} Open the Planner to move it with a wallet picked.`, from: "this device", go: planner });
           return;

@@ -16,7 +16,7 @@ import { asksForGoal } from "./planGoal";
 
 /** The first letter up, unless the word is written in its own case already: "iPhone" stays "iPhone". */
 export const capitalised = (s: string): string => s.replace(/^[a-z](?![A-Z])/, (c) => c.toUpperCase());
-import { byWhen, dueFor, isSave, kindFromHistory, NO_DATE, planKinds, savesOutOfSpending, whenOf, type DueKind, type Plan, type PlanInput, type PlannedMonth, type PlanView } from "./planner";
+import { byWhen, dueFor, inputOf, isSave, kindFromHistory, NO_DATE, planKinds, savesOutOfSpending, statusNow, whenOf, type DueKind, type Plan, type PlanInput, type PlannedMonth, type PlanView } from "./planner";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
 export type PlannerAsk =
@@ -52,7 +52,8 @@ export type PlannerAsk =
   | { readonly kind: "restore"; readonly plan: Plan }
   | { readonly kind: "pay"; readonly plan: Plan; readonly amount: Centavos | null; readonly wallet: string }
   /** Anything else about it: its name, kind, wallet, need or want, safe to spend, goal or note. */
-  | { readonly kind: "edit"; readonly plan: Plan; readonly input: PlanInput; readonly changes: readonly { readonly label: string; readonly before: string; readonly after: string }[] }
+  /** `ask`: the change cannot be made as said ("a saving into maya bank", with three Maya Bank accounts); the question to put instead. */
+  | { readonly kind: "edit"; readonly plan: Plan; readonly input: PlanInput; readonly changes: readonly { readonly label: string; readonly before: string; readonly after: string }[]; readonly ask?: string | undefined }
   /** It names a plan that is not there. */
   | { readonly kind: "none"; readonly said: string };
 
@@ -316,8 +317,9 @@ function editIn(
   plan: Plan,
   reference: ReferenceLists,
   goals: readonly { readonly id: string; readonly name: string }[],
-): { readonly input: PlanInput; readonly changes: { label: string; before: string; after: string }[] } | null {
-  const input: { -readonly [K in keyof PlanInput]: PlanInput[K] } = { title: plan.title, amount: plan.amount, due: plan.due, dueKind: plan.dueKind ?? "day", item: plan.item, wallet: plan.wallet, goalId: plan.goalId, into: plan.into, need: plan.need, setAside: plan.setAside, notes: plan.notes };
+): { readonly input: PlanInput; readonly changes: { label: string; before: string; after: string }[]; readonly ask?: string } | null {
+  // Every field, a plan to pay a debt's line included: built by hand, it lost `debtId` (as the card's change lost `into`, 3 November 2026).
+  const input: { -readonly [K in keyof PlanInput]: PlanInput[K] } = { ...inputOf(plan), dueKind: plan.dueKind ?? "day" };
   const changes: { label: string; before: string; after: string }[] = [];
 
   /*
@@ -332,10 +334,23 @@ function editIn(
   const toSpend = isSave(plan) && /\b(?:make\s+it|change\s+it\s+(?:in)?to|it'?s|as)\s+(?:a\s+)?(?:spending|purchase|buy|payment|plan\s+to\s+(?:spend|buy|pay))\b|\bnot\s+(?:a\s+)?(?:saving|deposit)\b/i.test(t);
   if (toSave) {
     const lower = ` ${t.toLowerCase().replace(/[^a-z0-9()]+/g, " ")} `;
-    const into = places
+    const found = places
       .map((n) => ({ n, keys: [n.toLowerCase().replace(/[^a-z0-9()]+/g, " ").trim(), n.replace(/\s*\(.*\)\s*$/, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()] }))
       .flatMap(({ n, keys }) => keys.filter((k) => k.length >= 3 && lower.includes(` ${k} `)).map((k) => ({ n, k })))
-      .sort((a, b) => b.k.length - a.k.length)[0]?.n;
+      .sort((a, b) => b.k.length - a.k.length);
+    /*
+     * "Maya Bank" is three accounts: the first of them, Maya Bank (Drone),
+     * was taken for the owner's Personal savings (3 November 2026). Several
+     * by the same words: the one the plan's notes name, else none, and the
+     * owner picks it on the form.
+     */
+    const tied = [...new Set(found.filter((f) => f.k.length === (found[0]?.k.length ?? 0)).map((f) => f.n))];
+    const noted = tied.filter((n) => plan.notes.toLowerCase().includes(n.toLowerCase()));
+    const into = tied.length === 1 ? tied[0] : noted.length === 1 ? noted[0] : undefined;
+    if (!into && tied.length > 1) {
+      changes.push({ label: "Plan to", before: isSave(plan) ? `Save into ${plan.into}` : "Spend", after: `Save into ${tied.join(" or ")}: say which` });
+      return { input: inputOf(plan), changes, ask: `Which one: ${tied.join(", ")}? Say the whole name, for example "make the ${plan.title.toLowerCase()} plan a saving into ${tied[0]!.toLowerCase()}".` };
+    }
     if (into && into !== plan.into) {
       changes.push({ label: "Plan to", before: isSave(plan) ? `Save into ${plan.into}` : "Spend", after: `Save into ${into}` });
       input.into = into;
@@ -428,8 +443,15 @@ export function readPlannerAsk(
 ): PlannerAsk | null {
   const t = text.trim();
   if (!t || t.split(/\s+/).length > 30) return null;
-  const { plans, reference, transactions, asOf } = context;
-  const focus = context.focus ?? null;
+  const { reference, transactions, asOf } = context;
+  /*
+   * As the Planner shows them: a plan marked done whose payment was binned is
+   * open again (`statusNow`). Read as stored, "Save into Maya Bank" was paid
+   * already to the chat while the Planner showed it open (3 November 2026).
+   */
+  const asNow = (p: Plan): Plan => (p.status === "done" && statusNow(p, transactions) === "open" ? { ...p, status: "open", closedOn: undefined, settled: undefined } : p);
+  const plans = context.plans.map(asNow);
+  const focus = context.focus ? asNow(context.focus) : null;
   // "it", "that", "this one" with something to do to it, and no plan named.
   const pointsAt =
     focus !== null &&
@@ -617,7 +639,7 @@ export function readPlannerAsk(
   if (!/^\s*(?:please\s+|pls\s+)?(?:pay|settle)\b|\b(?:put\s+back|restore|bring\s+back|reopen|paid|move|extend|postpone)\b|\b(?:put|bring)\b[^.?!]{0,40}?\bback\b/i.test(t) && !DID_SAVE.test(t)) {
     const plan = named(open, ["open"]);
     const edit = plan ? editIn(t, plan, reference, context.goals ?? []) : null;
-    if (plan && edit) return { kind: "edit", plan, input: edit.input, changes: edit.changes };
+    if (plan && edit) return { kind: "edit", plan, input: edit.input, changes: edit.changes, ...(edit.ask ? { ask: edit.ask } : {}) };
   }
 
   // "Put the concert plan back" as well as "put back the concert plan".

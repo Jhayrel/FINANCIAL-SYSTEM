@@ -704,6 +704,21 @@ function monthsTo(asOf: IsoDate, due: IsoDate): number {
   return Math.max(1, m);
 }
 
+/**
+ * Where a plan stands now, from what is linked to it (P4.8). Done, but every
+ * payment it was marked done with is gone (binned), or one of them edited
+ * down below it: open again. Done for nothing, or for less, on purpose
+ * ("That settles it") stays done. One definition for the Planner and for
+ * whatever offers a payment to a plan: the Add form and the chat looked at
+ * the stored "done" and passed over a plan the Planner showed open again
+ * (owner, 3 November 2026).
+ */
+export function statusNow(plan: Plan, transactions: readonly Transaction[]): PlanStatus {
+  if (plan.status !== "done" || plan.entryIds.length === 0) return plan.status;
+  const paid = paidSoFar(plan, transactions).amount;
+  return paid === 0 || (!plan.settled && paid < plan.amount) ? "open" : "done";
+}
+
 export function viewOf(
   plan: Plan,
   context: { readonly transactions: readonly Transaction[]; readonly accounts: readonly Account[]; readonly asOf: IsoDate },
@@ -711,19 +726,9 @@ export function viewOf(
   const { transactions, accounts, asOf } = context;
   const paid = paidSoFar(plan, transactions);
   const daysTo = daysBetween(asOf, plan.due);
-  /*
-   * Done, but every payment it was marked done with is gone: open again, and
-   * said (P4.8). A done plan with no payments at all was settled for nothing
-   * on purpose, and stays done.
-   */
-  const lostPayments = plan.status === "done" && plan.entryIds.length > 0 && paid.amount === 0;
-  /*
-   * Done because its payments covered it, and one of them was then edited
-   * down in the Database (P4.8): open again with what is left, as binning
-   * one does. Done for less on purpose ("That settles it") stays done.
-   */
-  const editedShort = plan.status === "done" && !plan.settled && plan.entryIds.length > 0 && paid.amount > 0 && paid.amount < plan.amount;
-  const status: PlanStatus = lostPayments || editedShort ? "open" : plan.status;
+  const status: PlanStatus = statusNow(plan, transactions);
+  // Done, and open again because what paid it was binned (P4.8), or edited down below it.
+  const editedShort = plan.status === "done" && status === "open" && paid.amount > 0;
   const left = status === "done" ? 0 : Math.max(0, plan.amount - paid.amount);
   const goneNote =
     paid.gone.length > 0
@@ -1071,7 +1076,13 @@ export function likelyPayments(plan: Plan, rows: readonly Transaction[], allPlan
  * connected also in add too"). `sure` when the entry names the plan or is
  * exactly what is left of it; the form starts with the link on only then.
  */
-export function planPaidBy(row: Transaction, plans: readonly Plan[], transactions: readonly Transaction[]): { readonly plan: Plan; readonly left: Centavos; readonly sure: boolean } | null {
+export function planPaidBy(
+  row: Transaction,
+  plans: readonly Plan[],
+  transactions: readonly Transaction[],
+  /** The open accounts' names: with them, a plan to save that was saved as spending is found too (`misfiledSaving`). */
+  accounts: readonly string[] = [],
+): { readonly plan: Plan; readonly left: Centavos; readonly sure: boolean; readonly makesSaving?: string } | null {
   // Spending pays a plan to spend; money moved into an account pays a plan to save into it (P11); a repayment, a plan to pay that debt (P12).
   const moved = (row.type === "Transfer" || row.type === "Revenue") && row.toWallet.trim() !== "";
   const repaid = row.type === "Debt" && row.debtEffect === "repay" && Boolean(row.debtId);
@@ -1079,17 +1090,109 @@ export function planPaidBy(row: Transaction, plans: readonly Plan[], transaction
   const all = [...transactions.filter((t) => t.id !== row.id), row];
   const kindOf = (p: Plan): "debt" | "save" | "spend" => (paysDebt(p) ? "debt" : isSave(p) ? "save" : "spend");
   const rowKind = repaid ? "debt" : moved ? "save" : "spend";
-  const found = plans
-    .filter((p) => p.status === "open" && kindOf(p) === rowKind && likelyPayments(p, all, plans).some((t) => t.id === row.id))
-    .map((plan) => {
-      const left = Math.max(0, plan.amount - paidSoFar(plan, transactions).amount);
+  // Open, or shown open again because what paid it was binned (`statusNow`).
+  const open = plans.filter((p) => statusNow(p, transactions) === "open");
+  /*
+   * Money moved into an account, and a plan saved as spending whose own
+   * words say it goes there: offered as that plan's, made a plan to save
+   * when it is counted (owner, 3 November 2026: "i allready transfer to my
+   * bank then it didnt recognize it").
+   */
+  const misfiled = moved && accounts.length > 0
+    ? open.flatMap((p) => {
+        const m = misfiledSaving(p, accounts, all, plans);
+        const into = m && (m.into === row.toWallet || (m.into === null && m.options.includes(row.toWallet))) ? row.toWallet : null;
+        return into ? [{ as: { ...p, into, item: "" }, plan: p, into }] : [];
+      })
+    : [];
+  const found = [
+    ...open.filter((p) => kindOf(p) === rowKind).map((p) => ({ as: p, plan: p, into: undefined as string | undefined })),
+    ...misfiled,
+  ]
+    .filter(({ as }) => likelyPayments(as, all, plans).some((t) => t.id === row.id))
+    .map(({ as, plan, into }) => {
+      const left = Math.max(0, as.amount - paidSoFar(as, transactions).amount);
       const words = plan.title.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
       const text = `${row.item} ${row.description}`.toLowerCase();
-      return { plan, left, sure: (moved ? row.amount : repaid ? row.amount + interestWith(row, all) : row.total) === left || words.some((w) => text.includes(w)) };
+      const exact = (moved ? row.amount : repaid ? row.amount + interestWith(row, all) : row.total) === left;
+      // A change of kind is on by itself only for exactly what is left: its words name the account every deposit goes to.
+      return { plan, left, sure: into ? exact : exact || words.some((w) => text.includes(w)), ...(into ? { makesSaving: into } : {}) };
     })
     .filter((m) => m.left > 0)
-    .sort((a, b) => Number(b.sure) - Number(a.sure) || a.plan.due.localeCompare(b.plan.due));
+    .sort((a, b) => Number(b.sure) - Number(a.sure) || Number(!b.makesSaving) - Number(!a.makesSaving) || a.plan.due.localeCompare(b.plan.due));
   return found[0] ?? null;
+}
+
+/** "Save into Maya Bank", "Deposit 1500 to my Maya Bank", "Transfer to Gcash": the place named. */
+const SAVE_TITLE = /^(?:save|saving|savings|deposit|move|transfer|put|ipon)\b(?:\s+(?:money|it|some|(?:php|₱)?\s?[\d,.]+\s*k?))?\s+(?:into|to|in|sa)\s+(?:my\s+|the\s+)?(.+?)\s*[.!]?$/i;
+
+/** An account's name without what is in brackets: "Maya Bank (Personal savings)" is "maya bank". */
+const baseName = (name: string): string => name.replace(/\s*\(.*\)\s*$/, "").trim().toLowerCase();
+
+/**
+ * A plan saved as spending whose own words say the money goes into one of
+ * the accounts: "Save into Maya Bank", its notes "Into Maya Bank (Personal
+ * savings)". A change to its chat card by words dropped where the money
+ * goes, so the owner's plan showed Pay, booked ₱1,500.00 of "Random
+ * necessities", and never saw the transfer made for it (3 November 2026).
+ *
+ * Read, never changed by itself (report, never correct): `asSaving` makes
+ * the change when the owner presses for it. `into` is the account, or null
+ * when the words fit several and nothing tells them apart ("Maya Bank" with
+ * three Maya Bank accounts and no notes); `options` is every account they
+ * fit; `fits` is the transfer or deposit into `into` that looks like it.
+ */
+export function misfiledSaving(
+  plan: Plan,
+  accounts: readonly string[],
+  transactions: readonly Transaction[],
+  allPlans: readonly Plan[],
+): { readonly into: string | null; readonly options: readonly string[]; readonly fits: Transaction | null } | null {
+  if (isSave(plan) || paysDebt(plan) || plan.goalId || plan.item.trim() || statusNow(plan, transactions) !== "open") return null;
+  // Spending counted for it already: a plan to spend, whatever it is called.
+  if (paidSoFar(plan, transactions).amount > 0) return null;
+  const named = SAVE_TITLE.exec(plan.title.trim())?.[1]?.trim().toLowerCase();
+  if (!named) return null;
+  const options = accounts.filter((n) => n.trim().toLowerCase() === named || baseName(n) === named);
+  if (options.length === 0) return null;
+  const notes = plan.notes.toLowerCase();
+  const exact = options.filter((n) => n.trim().toLowerCase() === named);
+  const inNotes = options.filter((n) => notes.includes(n.trim().toLowerCase()));
+  const fitsInto = (into: string): Transaction | null => likelyPayments({ ...plan, into, item: "" }, transactions, allPlans)[0] ?? null;
+  let into: string | null = exact.length === 1 ? exact[0]! : inNotes.length === 1 ? inNotes[0]! : options.length === 1 ? options[0]! : null;
+  if (into === null) {
+    // Several accounts by that name, and money moved into one of them that fits: that one.
+    const moved = options.filter((n) => fitsInto(n) !== null);
+    if (moved.length === 1) into = moved[0]!;
+  }
+  return { into, options, fits: into === null ? null : fitsInto(into) };
+}
+
+/**
+ * `misfiledSaving`'s change, made when the owner asks for it: a plan to save
+ * into `into`. What is linked to it and in the bin is let go (spending never
+ * pays a plan to save, and restored it would count twice), so a plan shown
+ * open again because of it is open; `link`, when given, is then counted as
+ * the money moved, as Link a payment does.
+ */
+export function asSaving(plan: Plan, into: string, spendingWallets: readonly string[], transactions: readonly Transaction[], asOf: IsoDate, link?: string): Plan {
+  const gone = new Set(paidSoFar(plan, transactions).gone);
+  const reopened = statusNow(plan, transactions) === "open" && plan.status === "done";
+  const base: Plan = tidy({ ...plan, entryIds: plan.entryIds.filter((id) => !gone.has(id)), ...(reopened ? { status: "open" as const, closedOn: undefined, settled: undefined } : {}) });
+  const next = editPlan(base, inputOf(base, { into, item: "", goalId: undefined, setAside: base.setAside && savesOutOfSpending({ into, wallet: base.wallet }, spendingWallets) }), asOf, transactions);
+  return link ? linkPayments(next, [link], transactions, asOf) : next;
+}
+
+/** What `asSaving` did, for Activity, the bell and the chat: "Made "X" a plan to save into Y, and counted #3974 as the money moved. #3976, in the bin, is no longer linked." */
+export function asSavingWords(before: Plan, after: Plan, transactions: readonly Transaction[], link?: Transaction | null): string {
+  const no = (n: number): string => `#${String(n).padStart(4, "0")}`;
+  const gone = paidSoFar(before, transactions).gone.length;
+  return [
+    `Made "${after.title}" a plan to save into ${after.into}${link ? `, and counted ${no(link.recordNumber)} (${formatMoney(link.amount)}) as the money moved${after.status === "done" ? "" : `, ${formatMoney(Math.max(0, after.amount - paidSoFar(after, transactions).amount))} still to move`}` : ""}.`,
+    gone > 0 ? `${gone === 1 ? "The payment" : `${gone} payments`} linked to it from the bin ${gone === 1 ? "is" : "are"} no longer linked.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /** "Moved twice, first planned for Nov 15". */

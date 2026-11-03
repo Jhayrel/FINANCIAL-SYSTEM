@@ -439,3 +439,37 @@ Kept in step with its entries, every kind:
     Bank" with no account) is said under the bell with how to put it right;
     never changed by itself. The chat rebuilt plans without their account
     in three places before 3 November 2026; `inputOf` copies every field.
+
+## P13. Paying a plan never books the wrong entry, or a second one (owner, 3 November 2026)
+
+"Save into Maya Bank" was saved as spending: a change to its chat card
+rebuilt it without its account. The owner then told the chat about the
+transfer (#3974), opened the plan to confirm it, and Pay booked a second
+entry, ₱1,500.00 of "Random necessities" (#3976). Rules from that day:
+
+1. **One check for "set as spending, named as a saving"** (`misfiledSaving`):
+   a plan to spend with no kind whose title says save, deposit, move or
+   transfer into an account. The account comes from its whole name in the
+   title or notes, else from the money moved into one of the accounts that
+   share the name ("Maya Bank" is three accounts), else it is asked. The
+   bell, the plan's sheet, Pay, Link, the Add form and the chat all use it.
+2. **Said, never changed by itself.** The sheet says it, with one button:
+   "Make it a saving and count #3974" (asked first). It becomes a plan to
+   save, the payment linked from the bin is let go, the transfer is counted.
+3. **Pay counts what is already there.** The Pay sheet, and the chat's pay,
+   look for an entry of the plan's own kind that fits it first. Exactly
+   what is left: "Count #3974" is the main button and "Add a new move
+   anyway" the other; close but not exact: offered beside the form.
+4. **Pay records only the plan's own kind** (`payPlan`, under every way in):
+   spending for a plan to spend, money moved into its account for a saving,
+   a repayment on its line for a debt. A plan named as a saving is recorded
+   as a transfer into that account, never spending; when the account cannot
+   be told, nothing is recorded until it is picked.
+5. **Link a payment I added** lists and finds only entries of the plan's own
+   kind (it listed spending only, so a saving could not find its transfer),
+   with what each counts for it.
+6. **A plan shown open again because its payment was binned is open
+   everywhere** (`statusNow`): the Add form, the chat and the Planner read
+   it the same way. It was "paid already" to the chat.
+7. **A kind guessed for a plan with none** is said under the field: "Picked
+   from your past entries like it ... Check it."

@@ -22,7 +22,7 @@ import {
   type Flow as FlowTone,
 } from "../components/primitives";
 import { AmountInput, Select, Switch, TextInput } from "../components/forms";
-import { byWhen, planPaidBy, type Plan } from "../domain/planner";
+import { byWhen, isSave, paidSoFar, paysDebt, planPaidBy, type Plan } from "../domain/planner";
 import { suggest } from "../domain/autofill";
 import type { Debt, DebtEffect } from "../domain/debt";
 import { billClosingFor, choicesFor, debtDue, effectsFor, interestOnTop, makeDebtId, movementsOf, outstandingOf, owedChange, parentOf, partOf, positionOf, positionsOf, unpaidCharges, withFeesPaid } from "../domain/debt";
@@ -159,7 +159,8 @@ export function AddTransaction({
   balances: readonly WalletBalance[];
   onSave: (rows: Transaction[], by?: Provenance) => void;
   /** A new entry counted as an open plan's payment, once saved (`planPaidBy`). */
-  onLinkPlan?: ((plan: Plan, rows: readonly Transaction[]) => void) | undefined;
+  /** `makesSaving`: the plan was saved as spending, and its words name the account the money went into (`misfiledSaving`). */
+  onLinkPlan?: ((plan: Plan, rows: readonly Transaction[], makesSaving?: string) => void) | undefined;
   onUpdate: (rows: Transaction[], by?: Provenance) => void;
   /** A year's budget replaced, when the assistant sets one. */
   onBudget?: ((year: number, plan: BudgetYear, changes: readonly string[]) => void) | undefined;
@@ -923,11 +924,25 @@ export function AddTransaction({
       const rows = draftToTransactions(withFeesPaid(draft, transactions), 0, "plan-check", check.repaymentSplit);
       // The repayment itself, not its interest row; with the interest beside it, as it will be saved.
       const row = rows.find((r) => r.type !== "Debt" || r.debtEffect === "repay");
-      return row ? planPaidBy(row, reference.plans ?? [], [...transactions, ...rows.filter((r) => r !== row)]) : null;
+      return row ? planPaidBy(row, reference.plans ?? [], [...transactions, ...rows.filter((r) => r !== row)], [...reference.wallets, ...reference.savings]) : null;
     } catch {
       return null;
     }
   }, [onLinkPlan, editing, draft, reference.plans, transactions, check.repaymentSplit]);
+  /*
+   * Editing an entry that is a plan's payment: said, so it is plain that this
+   * is the entry itself, edited like any other, and that the plan follows it
+   * (owner, 3 November 2026: "if I record payment then in database i edited
+   * it, would it go to plan or in add? Make sure it work like a normal entry").
+   */
+  const paysAPlan = useMemo(() => {
+    const id = editing?.id;
+    if (!id) return null;
+    const base = id.split("@")[0] ?? id;
+    const plan = (reference.plans ?? []).find((p) => p.entryIds.includes(base));
+    if (!plan) return null;
+    return { plan, paid: paidSoFar(plan, transactions).amount };
+  }, [editing, reference.plans, transactions]);
   const [linkChoice, setLinkChoice] = useState<{ readonly planId: string; readonly on: boolean } | null>(null);
   const linkOn = planMatch ? (linkChoice?.planId === planMatch.plan.id ? linkChoice.on : planMatch.sure) : false;
   const covering = draft.flow === "Spending" && draft.coversTo !== undefined;
@@ -1668,7 +1683,7 @@ export function AddTransaction({
     } else {
       const saved = draftToTransactions(final, nextRecordNumber, `t-${Date.now()}`, check.repaymentSplit);
       onSave(saved);
-      if (planMatch && linkOn) onLinkPlan?.(planMatch.plan, saved);
+      if (planMatch && linkOn) onLinkPlan?.(planMatch.plan, saved, planMatch.makesSaving);
       // Paid from the money an entry over several days already counts: taken out of it, so it is counted once.
       const cover = takeOut && coverHere?.id === takeOut && sameWallet ? transactions.find((t) => t.id === takeOut) : undefined;
       const spent = saved.reduce((a, t) => a + t.total, 0);
@@ -2661,14 +2676,26 @@ export function AddTransaction({
               )}
             </div>
 
+            {paysAPlan && (
+              <Alert status="info" title={`The ${isSave(paysAPlan.plan) ? "money moved" : "payment"} for the "${paysAPlan.plan.title}" plan`}>
+                {`${isSave(paysAPlan.plan) ? "Moved" : "Paid"} on it so far: ${formatMoney(paysAPlan.paid)} of ${formatMoney(paysAPlan.plan.amount)}. This is the entry itself: edit it as any other, and the plan follows. ${
+                  isSave(paysAPlan.plan)
+                    ? `A new amount changes what is moved; sent into another account than ${paysAPlan.plan.into}, it no longer counts for the plan.`
+                    : paysDebt(paysAPlan.plan)
+                      ? "A new amount changes what is paid; made anything but a repayment on its loan, it no longer counts for the plan."
+                      : "A new amount changes what is paid on it."
+                } Moved to the bin, the plan opens again. To stop counting it without changing it, unlink it on the plan's sheet.`}
+              </Alert>
+            )}
+
             {planMatch && (
               <div className="fms-planform-switch fms-addplanlink">
                 <span className="fms-planform-switchtext">
-                  <span className="t-body">{planMatch.plan.into ? "Does" : "Pays"} the &ldquo;{planMatch.plan.title}&rdquo; plan</span>
+                  <span className="t-body">{planMatch.plan.into || planMatch.makesSaving ? "Does" : "Pays"} the &ldquo;{planMatch.plan.title}&rdquo; plan</span>
                   <span className="t-caption" style={{ color: "var(--ink-3)" }}>
                     {linkOn
-                      ? planMatch.plan.into
-                        ? `${formatMoney(planMatch.left)} is left to move into ${planMatch.plan.into}, ${byWhen(planMatch.plan)}. Saved, ${(draft.amount ?? 0) >= planMatch.left ? "the plan is marked done" : `${formatMoney(planMatch.left - (draft.amount ?? 0))} of it is still to move`}${planMatch.plan.setAside ? ", and safe to spend stops holding this money back" : ""}.`
+                      ? planMatch.plan.into || planMatch.makesSaving
+                        ? `${planMatch.makesSaving ? `It was saved as a plan to spend; its words say ${planMatch.makesSaving}, so counting this makes it a plan to save into it. ` : ""}${formatMoney(planMatch.left)} is left to move into ${planMatch.plan.into || planMatch.makesSaving}, ${byWhen(planMatch.plan)}. Saved, ${(draft.amount ?? 0) >= planMatch.left ? "the plan is marked done" : `${formatMoney(planMatch.left - (draft.amount ?? 0))} of it is still to move`}${planMatch.plan.setAside ? ", and safe to spend stops holding this money back" : ""}.`
                         : (() => {
                             // A repayment counts with its interest, never a fee; spending with its fee (P12).
                             const counts = draft.flow === "Debt" ? (draft.amount ?? 0) + (draft.interest ?? 0) : (draft.amount ?? 0) + draft.fee;

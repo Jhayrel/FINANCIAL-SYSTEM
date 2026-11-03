@@ -36,7 +36,7 @@ import { explainFlag, firstSentence, flagSummary } from "../domain/reviewExplain
 import type { ReferenceLists, Transaction, TransactionType } from "../domain/types";
 import { accountGroups, type Account } from "../domain/accounts";
 import type { Debt } from "../domain/debt";
-import { ON_BEHALF } from "../domain/debtWords";
+import { ON_BEHALF, effectInline } from "../domain/debtWords";
 
 type FilterId = "all" | TransactionType | "behalf" | "flagged";
 
@@ -818,7 +818,7 @@ export function Database({
                         */}
                         <div className="fms-dbrow-text">
                           <div className="fms-dbrow-title">
-                            <span className="t-body-strong fms-truncate">{rowTitle(t)}</span>
+                            <span className="t-body-strong fms-truncate">{rowTitle(t, debts)}</span>
                             {badge(t)}
                           </div>
                           {t.item.trim() && t.description.trim() && (
@@ -893,7 +893,7 @@ export function Database({
         <Sheet
           dialog={!phone}
           title={`Why #${String(reviewing.recordNumber).padStart(4, "0")} needs review`}
-          subtitle={`${rowTitle(reviewing)} · ${formatShort(reviewing.date)} · ${walletPath(reviewing)} · ₱${formatAmount(reviewing.total)}`}
+          subtitle={`${rowTitle(reviewing, debts)} · ${formatShort(reviewing.date)} · ${walletPath(reviewing)} · ₱${formatAmount(reviewing.total)}`}
           onClose={() => setReviewing(null)}
           actions={
             <>
@@ -934,7 +934,7 @@ export function Database({
 
       {opened && (
         <Sheet
-          title={rowTitle(opened)}
+          title={rowTitle(opened, debts)}
           subtitle={`#${String(opened.recordNumber).padStart(4, "0")} · ${shortDays(opened)}`}
           onClose={() => setOpened(null)}
           actions={
@@ -1074,11 +1074,19 @@ export function Database({
   );
 }
 
-/** What a row is, in its title: its item, else its description, else what kind of row it is. */
-function rowTitle(t: Transaction): string {
+/**
+ * What a row is, in its title: its item, else its description, else what
+ * kind of row it is. A debt row names its line, as the Debt screen does: the
+ * chat and the Debt screen save one with no item, its line kept by id, and
+ * #3975, a payment on Maya Credit, read "Debt, no item" (owner, 3 November
+ * 2026).
+ */
+function rowTitle(t: Transaction, debts: readonly Debt[] = []): string {
+  const line = t.type === "Debt" ? debts.find((d) => d.id === t.debtId) : undefined;
   return (
     t.item.trim() ||
     t.description.trim() ||
+    (line ? [line.name, t.debtEffect ? effectInline(t.debtEffect, line) : ""].filter(Boolean).join(", ") : "") ||
     (t.type === "Transfer" ? (t.toWallet ? `To ${t.toWallet}` : "Sent to someone") : `${t.type}, no item`)
   );
 }

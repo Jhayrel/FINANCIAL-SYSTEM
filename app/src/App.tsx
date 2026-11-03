@@ -64,7 +64,7 @@ import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { checkDraft, debtWalletDirection, draftToTransactions, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { Planner } from "./features/Planner";
-import { isSave, linkPayments, NO_DATE, paidSoFar, paysDebt, paysPlan, renamePlans, type Plan } from "./domain/planner";
+import { asSaving, isSave, linkPayments, misfiledSaving, NO_DATE, paidSoFar, paysDebt, paysPlan, renamePlans, type Plan } from "./domain/planner";
 import { goalInStep, type GoalForPlan } from "./domain/planGoal";
 import { buildPlanSheet, planSheetCsv, planSheetFilename } from "./domain/planSheet";
 import { NO_OWNER, ownerChanges, ownerName as nameOfOwner } from "./domain/owner";
@@ -2071,6 +2071,28 @@ export default function App() {
    * stopped it, or null when saved (P1, P4.2 to P4.6).
    */
   const payPlan = (plan: Plan, draft: Draft, settles: boolean, by: Provenance): string | null => {
+    /*
+     * Only an entry of the plan's own kind: spending for a plan to spend, money
+     * moved into its account for a saving, a repayment on its line for a debt.
+     * Anything else is booked and never counted, or booked as the wrong kind:
+     * "Save into Maya Bank", saved as spending, booked ₱1,500.00 of "Random
+     * necessities" for money moved into the bank (owner, 3 November 2026:
+     * "make sure this will never happen again").
+     */
+    const ownKind = isSave(plan)
+      ? (draft.flow === "Transfer" || draft.flow === "Revenue") && draft.toWallet === plan.into
+      : paysDebt(plan)
+        ? draft.flow === "Debt" && draft.debtEffect === "repay" && draft.debtId === plan.debtId
+        : draft.flow === "Spending";
+    if (!ownKind) return `This entry would not count for "${plan.title}": a plan to ${isSave(plan) ? `save is done by money moved into ${plan.into}` : paysDebt(plan) ? "pay a debt is done by a repayment on its line" : "spend is paid by spending"}. Nothing was saved.`;
+    const misfit = isSave(plan) || paysDebt(plan) ? null : misfiledSaving(plan, settings.accounts.filter((a) => !a.archived).map((a) => a.name), transactions, settings.plans ?? []);
+    if (misfit) {
+      const no = misfit.fits ? `#${String(misfit.fits.recordNumber).padStart(4, "0")}` : "";
+      return `"${plan.title}" says the money goes into ${misfit.into ?? misfit.options.join(" or ")}, but it is saved as a plan to spend, so paying it would book spending for money moved. Nothing was saved. ${misfit.fits ? `${no} is that money already: on the plan's sheet, press "Make it a saving and count ${no}".` : `On the plan's sheet, make it a saving first, then record the move.`}`;
+    }
+    // Made a plan to save just now, from its Pay sheet: said in Activity with the payment.
+    const was = (settings.plans ?? []).find((p) => p.id === plan.id);
+    const madeSaving = isSave(plan) && was !== undefined && !isSave(was) ? `Made "${plan.title}" a plan to save into ${plan.into}. ` : "";
     const c = checkDraft(draft, transactions, reference, settings.credits);
     if (!c.ok) return c.errors.map((e) => e.message).join(" ");
     const rows = draftToTransactions(withFeesPaid(draft, transactions), sink.nextRecordNumber, `t-${Date.now()}-plan`, c.repaymentSplit);
@@ -2087,7 +2109,7 @@ export default function App() {
       linked,
       "plan.paid",
       isSave(plan)
-        ? `Moved ${formatMoney(paid)} into ${plan.into} for "${plan.title}" on ${formatMedium(draft.date)}, ${no}${linked.status === "done" ? "" : ", more to move"}.`
+        ? `${madeSaving}Moved ${formatMoney(paid)} into ${plan.into} for "${plan.title}" on ${formatMedium(draft.date)}, ${no}${linked.status === "done" ? "" : ", more to move"}.`
         : paysDebt(plan)
           ? `Paid ${formatMoney(paid)} on ${debtName} for "${plan.title}" on ${formatMedium(draft.date)}, ${no}${linked.status === "done" ? "" : ", more to pay"}.`
           : `Paid "${plan.title}": ${formatMoney(paid)} on ${formatMedium(draft.date)}, ${no}${linked.status === "done" ? "" : ", more to pay"}.`,
@@ -2623,10 +2645,12 @@ export default function App() {
               uid={cloud.uid ?? null}
               sync={{ signedIn: Boolean(cloud.uid), online, pending }}
               onSave={handleSave}
-              onLinkPlan={(plan, rows) => {
+              onLinkPlan={(found, rows, makesSaving) => {
                 // Typed on the Add form, counted as the plan's payment (`planPaidBy`).
-                const paying = rows.filter((r) => paysPlan(plan, r));
                 const all = [...transactions, ...rows];
+                // Saved as spending, named as a saving into where this went: made one first, as the form said (`misfiledSaving`).
+                const plan = makesSaving ? asSaving(found, makesSaving, reference.wallets, all, asOf) : found;
+                const paying = rows.filter((r) => paysPlan(plan, r));
                 const linked = linkPayments(plan, paying.map((r) => r.id), all, asOf);
                 // A plan to save is done by what was moved, never its fee (P11), and said as moved.
                 const saving = isSave(plan);
@@ -2636,7 +2660,7 @@ export default function App() {
                   linked,
                   "plan.paid",
                   saving
-                    ? `Moved ${formatMoney(paid)} into ${plan.into} for "${plan.title}", ${no}, from the Add form${linked.status === "done" ? "" : ", more to move"}.`
+                    ? `${makesSaving ? `Made "${plan.title}" a plan to save into ${plan.into}. ` : ""}Moved ${formatMoney(paid)} into ${plan.into} for "${plan.title}", ${no}, from the Add form${linked.status === "done" ? "" : ", more to move"}.`
                     : `Paid "${plan.title}": ${formatMoney(paid)}, ${no}, from the Add form${linked.status === "done" ? "" : ", more to pay"}.`,
                   BY_OWNER,
                 );

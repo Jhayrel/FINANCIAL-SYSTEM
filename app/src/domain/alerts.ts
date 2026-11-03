@@ -48,7 +48,7 @@ import { overdueGoals } from "./goalClose";
 import { patternFindings, type Finding } from "./patterns";
 import { incomeToCome } from "./incomeBudget";
 import type { Account } from "./accounts";
-import { byWhen, coverage, isSave, likelyPayments, viewOf, whenOf, type Plan, type PlanView } from "./planner";
+import { byWhen, coverage, isSave, likelyPayments, misfiledSaving, viewOf, whenOf, type Plan, type PlanView } from "./planner";
 import type { Centavos } from "./money";
 import type { Budgets, IsoDate, SpendingType, Transaction } from "./types";
 
@@ -1202,19 +1202,28 @@ export function planAlerts(plans: readonly Plan[], transactions: readonly Transa
      * November 2026). Said, never changed by itself: one Edit on the
      * Planner makes it a plan to save.
      */
-    if (v.state !== "paid" && v.state !== "skipped" && v.state !== "removed" && !isSave(p) && !p.item.trim()) {
-      const named = /^(?:save|saving|deposit|move|transfer)\s+(?:it\s+)?(?:into|to|in)\s+(.+?)\s*$/i.exec(p.title.trim())?.[1]?.toLowerCase() ?? "";
-      const account = named ? accounts.find((a) => !a.archived && (a.name.toLowerCase() === named || a.name.replace(/\s*\(.*\)\s*$/, "").toLowerCase() === named)) : undefined;
-      if (account) {
-        out.push({
-          id: `plan-kind-${p.id}`,
-          level: "warn",
-          area: "planner",
-          title: `${p.title} is set as spending`,
-          detail: `Its name says the money goes into ${account.name}, but it is saved as a plan to spend, so it shows Pay and counts as ${money(v.left)} of the month's planned spending. On the Planner, Edit it and pick To save or move, into ${account.name}; or say "make the ${p.title.toLowerCase()} plan a saving into ${account.name.replace(/\s*\(.*\)\s*$/, "").toLowerCase()}".`,
-          weight: 70,
-        });
-      }
+    /*
+     * "Maya Bank" was matched to the first account of that name, Maya Bank
+     * (Drone), when the plan's notes said Personal savings (3 November 2026):
+     * `misfiledSaving` reads the whole name from its words, or from the
+     * money moved for it, and says when it cannot tell.
+     */
+    const misfiled = v.state !== "paid" && v.state !== "skipped" && v.state !== "removed" ? misfiledSaving(p, accounts.filter((a) => !a.archived).map((a) => a.name), transactions, plans) : null;
+    if (misfiled) {
+      const no = (n: number): string => `#${String(n).padStart(4, "0")}`;
+      const where = misfiled.into ?? misfiled.options.join(" or ");
+      out.push({
+        id: `plan-kind-${p.id}`,
+        level: "warn",
+        area: "planner",
+        title: misfiled.fits ? `${no(misfiled.fits.recordNumber)} looks like the money for ${p.title}, but the plan is set as spending` : `${p.title} is set as spending`,
+        detail: `Its words say the money goes into ${where}, but it is saved as a plan to spend, so it shows Pay${misfiled.fits ? ` and does not see ${no(misfiled.fits.recordNumber)}, ${money(misfiled.fits.amount)} moved into ${misfiled.into} on ${formatMedium(misfiled.fits.date)}` : ` and counts as ${money(v.left)} of the month's planned spending`}. ${
+          misfiled.into
+            ? `Open it on the Planner and press "Make it a saving${misfiled.fits ? ` and count ${no(misfiled.fits.recordNumber)}` : ""}". Nothing changes until you do.`
+            : `Open it on the Planner, press Edit, and pick To save or move and the account it goes into.`
+        }`,
+        weight: misfiled.fits ? 78 : 70,
+      });
     }
     if (v.state === "overdue") {
       if (late.length > MANY_PLANS) continue;

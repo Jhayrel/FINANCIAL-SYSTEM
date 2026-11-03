@@ -36,7 +36,7 @@ import { addDays, formatMedium, lastOfMonth, MONTH_NAMES } from "../domain/dates
 import { emptyDraft, type Draft } from "../domain/entry";
 import { formatMoney, type Centavos } from "../domain/money";
 import { monthBrief } from "../domain/monthPlan";
-import { checkPlan, closedViews, coverage, editPlan, groupOpen, isRecurringKind, kindFromHistory, likelyPayments, linkPayments, makePlan, movePlan, movesWords, byWhen, countedWords, dueFor, dueKindOf, NO_DATE, nextMonthEnd, whenOf, type DueKind, planAgain, planKinds, plannedForBudget, planWallets, planInto, isSave, savesOutOfSpending, removePlan, reopenPlan, skipPlan, unlinkPayment, viewOf, walletToPayFrom, type Plan, type PlanGroup, type PlanInput, type PlanView, paysDebt } from "../domain/planner";
+import { asSaving, asSavingWords, misfiledSaving, paidSoFar, paysPlan, checkPlan, closedViews, coverage, editPlan, groupOpen, isRecurringKind, kindFromHistory, likelyPayments, linkPayments, makePlan, movePlan, movesWords, byWhen, countedWords, dueFor, dueKindOf, NO_DATE, nextMonthEnd, whenOf, type DueKind, planAgain, planKinds, plannedForBudget, planWallets, planInto, isSave, savesOutOfSpending, removePlan, reopenPlan, skipPlan, unlinkPayment, viewOf, walletToPayFrom, type Plan, type PlanGroup, type PlanInput, type PlanView, paysDebt } from "../domain/planner";
 import { planDebtLines } from "../domain/planDebt";
 import { asAmountAndFees } from "../domain/debt";
 import type { Debt } from "../domain/debt";
@@ -402,6 +402,11 @@ export function Planner(props: PlannerProps) {
           }}
           onUnlink={(id) => props.onChange(unlinkPayment(current.plan, id, transactions), "plan.update", `Unlinked a payment from "${current.plan.title}".`)}
           onLinkOne={(id) => props.onChange(linkPayments(current.plan, [id], transactions, asOf), "plan.paid", `Linked a payment to "${current.plan.title}".`)}
+          accounts={accounts.filter((a) => !a.archived).map((a) => a.name)}
+          onMakeSaving={(into, link) => {
+            const next = asSaving(current.plan, into, reference.wallets, transactions, asOf, link?.id);
+            props.onChange(next, link ? "plan.paid" : "plan.update", asSavingWords(current.plan, next, transactions, link));
+          }}
           onShowEntry={props.onShowEntry}
         />
       )}
@@ -451,11 +456,26 @@ export function Planner(props: PlannerProps) {
           debts={props.debts}
           asOf={asOf}
           dialog={!phone}
+          plans={plans}
           onClose={() => setPaying(null)}
-          onPay={(draft, settles) => {
-            const stopped = props.onPay(paying, draft, settles);
+          onPay={(draft, settles, makesSaving) => {
+            const stopped = props.onPay(makesSaving ? asSaving(paying, makesSaving, reference.wallets, transactions, asOf) : paying, draft, settles);
             if (!stopped) setPaying(null);
             return stopped;
+          }}
+          onCount={(entry, makesSaving) => {
+            if (makesSaving) {
+              const next = asSaving(paying, makesSaving, reference.wallets, transactions, asOf, entry.id);
+              props.onChange(next, "plan.paid", asSavingWords(paying, next, transactions, entry));
+            } else {
+              const next = linkPayments(paying, [entry.id], transactions, asOf);
+              props.onChange(next, "plan.paid", `Counted ${no(entry.recordNumber)} as the ${isSave(paying) ? "money moved" : "payment"} for "${paying.title}", from its Pay sheet: no new entry added.`);
+            }
+            setPaying(null);
+          }}
+          onEdit={() => {
+            setForm({ editing: paying });
+            setPaying(null);
           }}
         />
       )}
@@ -480,10 +500,17 @@ export function Planner(props: PlannerProps) {
           plan={linking}
           plans={plans}
           transactions={transactions}
+          accounts={accounts.filter((a) => !a.archived).map((a) => a.name)}
           dialog={!phone}
           onClose={() => setLinking(null)}
-          onLink={(ids, settles) => {
-            props.onChange(linkPayments(linking, ids, transactions, asOf, settles), "plan.paid", `Linked ${ids.map((id) => no(transactions.find((t) => t.id === id)?.recordNumber ?? 0)).join(", ")} to "${linking.title}" as its payment.`);
+          onLink={(ids, settles, makesSaving) => {
+            const base = makesSaving ? asSaving(linking, makesSaving, reference.wallets, transactions, asOf) : linking;
+            const nos = ids.map((id) => no(transactions.find((t) => t.id === id)?.recordNumber ?? 0)).join(", ");
+            props.onChange(
+              linkPayments(base, ids, transactions, asOf, settles),
+              "plan.paid",
+              `${makesSaving ? `Made "${linking.title}" a plan to save into ${makesSaving}. ` : ""}Linked ${nos} to "${linking.title}" as its ${isSave(base) ? "money moved" : "payment"}.`,
+            );
             setLinking(null);
           }}
         />
@@ -648,6 +675,10 @@ function PlanSheet(props: {
   onAgain: () => void;
   onUnlink: (id: string) => void;
   onLinkOne: (id: string) => void;
+  /** The open accounts' names, for a plan named as a saving but saved as spending (`misfiledSaving`). */
+  accounts: readonly string[];
+  /** Make it a plan to save into `into`, and count `link` as the money moved. */
+  onMakeSaving: (into: string, link: Transaction | null) => void;
   onShowEntry?: ((recordNumber: number) => void) | undefined;
 }) {
   const { view: v, transactions } = props;
@@ -659,6 +690,8 @@ function PlanSheet(props: {
   const paidRows = p.entryIds.map((id) => transactions.find((t) => t.id === id)).filter((t): t is Transaction => t !== undefined);
   // A payment added by hand that looks like this one (P4.9): asked, never linked by itself.
   const maybe = open ? likelyPayments(p, transactions, props.plans).slice(0, 2) : [];
+  // Named as a saving into an account, saved as spending: said, and one press makes it a saving.
+  const misfiled = open ? misfiledSaving(p, props.accounts, transactions, props.plans) : null;
 
   /*
    * One button at the foot, the thing most often done next, and every other
@@ -670,7 +703,7 @@ function PlanSheet(props: {
   const primary =
     open ? (
       <Button variant="primary" onClick={props.onPay}>
-        {isSave(p) ? (v.paid > 0 ? "Move the rest" : "Record the move") : v.paid > 0 ? "Pay the rest" : "Record payment"}
+        {isSave(p) || misfiled?.into ? (v.paid > 0 ? "Move the rest" : "Record the move") : v.paid > 0 ? "Pay the rest" : "Record payment"}
       </Button>
     ) : v.state === "removed" ? (
       <Button variant="primary" onClick={props.onReopen}>
@@ -733,11 +766,11 @@ function PlanSheet(props: {
         <div className="fms-plansheet-figure">
           <Money value={open ? v.left : v.paid || p.amount} size="l" />
           <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-            {open ? (v.paid > 0 ? `left of ${formatMoney(p.amount)}` : "planned") : v.state === "paid" ? "paid" : "was planned"}
+            {open ? (v.paid > 0 ? `left of ${formatMoney(p.amount)}` : "planned") : v.state === "paid" ? (isSave(p) ? "moved" : "paid") : "was planned"}
           </span>
           {pill && <StatusPill status={pill.status}>{pill.word}</StatusPill>}
         </div>
-        {v.paid > 0 && open && <ProgressBar value={v.paid} max={p.amount} label="paid so far" />}
+        {v.paid > 0 && open && <ProgressBar value={v.paid} max={p.amount} label={isSave(p) ? "moved so far" : "paid so far"} />}
 
         {/* Not while an entry looks like its payment already: the money may have gone, not be short. */}
         {props.short > 0 && !(v.state === "overdue" && maybe.length > 0) && (
@@ -747,7 +780,49 @@ function PlanSheet(props: {
               : "After the bills and debt payments still due and the plans before it, safe to spend does not cover all of it. Pay part now, move the date, or pay it from savings."}
           </Alert>
         )}
-        {v.goneNote && <Alert status="warn" title={v.goneNote.includes("edited") ? "A payment changed" : "A payment is gone"}>{v.goneNote}</Alert>}
+        {v.goneNote && !misfiled && <Alert status="warn" title={v.goneNote.includes("edited") ? "A payment changed" : "A payment is gone"}>{v.goneNote}</Alert>}
+        {/*
+          Its words say a saving, its kind says spending (owner, 3 November
+          2026: "i allready transfer to my bank then it didnt recognize it").
+          Said, with the change one press away; nothing changes by itself.
+        */}
+        {misfiled && (
+          <Alert
+            status="warn"
+            title={misfiled.fits ? `${no(misfiled.fits.recordNumber)} is not counted: this plan is set as spending` : "This plan is set as spending"}
+            action={
+              misfiled.into ? (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const into = misfiled.into!;
+                    const fits = misfiled.fits;
+                    void confirm({
+                      title: fits ? `Make it a saving and count ${no(fits.recordNumber)}?` : `Make it a saving into ${into}?`,
+                      body: `"${p.title}" becomes a plan to save into ${into}: it shows Record the move, and is not counted as spending in Budget or Insights.${
+                        fits ? ` ${no(fits.recordNumber)}, ${formatMoney(fits.amount)} moved on ${formatMedium(fits.date)}, counts as the money moved${fits.amount >= p.amount ? ", and the plan is done" : `, ${formatMoney(p.amount - fits.amount)} still to move`}.` : ""
+                      }${v.goneNote ? " The payment linked to it from the bin is let go: spending does not pay a saving." : ""} No entry is added or changed. Edit changes it back.`,
+                      confirmLabel: fits ? "Make it a saving and count it" : "Make it a saving",
+                      tone: "normal",
+                    }).then((ok) => {
+                      if (ok) props.onMakeSaving(into, fits);
+                    });
+                  }}
+                >
+                  {misfiled.fits ? `Make it a saving and count ${no(misfiled.fits.recordNumber)}` : "Make it a saving"}
+                </Button>
+              ) : (
+                <Button size="sm" onClick={props.onEdit}>
+                  Edit
+                </Button>
+              )
+            }
+          >
+            {`Its words say the money goes into ${misfiled.into ?? misfiled.options.join(" or ")}, but it is saved as a plan to spend${
+              misfiled.fits ? `, so ${no(misfiled.fits.recordNumber)}, ${formatMoney(misfiled.fits.amount)} moved into ${misfiled.into} on ${formatMedium(misfiled.fits.date)}, is not seen as its money` : ", so it shows Pay and is counted as planned spending"
+            }.${v.goneNote ? ` ${v.goneNote}` : ""}${misfiled.into ? "" : " Edit it, pick To save or move, and the account."}`}
+          </Alert>
+        )}
         {/* Past its day and open: what to do, the already-paid case first, so nothing is entered twice. */}
         {v.state === "overdue" && (
           <Alert status="warn" title={`${formatMedium(p.due)} has passed`}>
@@ -1446,10 +1521,25 @@ function PaySheet(props: {
   debts?: readonly Debt[] | undefined;
   asOf: IsoDate;
   dialog: boolean;
+  /** Every plan, so an entry counted for another is not offered here. */
+  plans: readonly Plan[];
   onClose: () => void;
-  onPay: (draft: Draft, settles: boolean) => string | null;
+  /** `makesSaving`: saved as spending, its words name this account; it is made a plan to save first (`misfiledSaving`). */
+  onPay: (draft: Draft, settles: boolean, makesSaving?: string) => string | null;
+  /** Count an entry already in the ledger instead of adding one (owner, 3 November 2026: "I go to plan to confirm it but the plan recorded new entry"). */
+  onCount: (entry: Transaction, makesSaving?: string) => void;
+  onEdit: () => void;
 }) {
-  const { plan, view, reference, asOf, transactions } = props;
+  const { plan: stored, view, reference, asOf, transactions } = props;
+  /*
+   * Named as a saving into an account, saved as spending: paid, it booked
+   * ₱1,500.00 of "Random necessities" for money moved into the bank, and the
+   * transfer already made for it was never seen (3 November 2026). The sheet
+   * moves the money instead, and the plan is made a saving when it is saved.
+   */
+  const misfit = misfiledSaving(stored, props.accounts.filter((a) => !a.archived).map((a) => a.name), transactions, props.plans);
+  const makesSaving = misfit?.into ?? undefined;
+  const plan: Plan = makesSaving ? { ...stored, into: makesSaving, item: "" } : stored;
   // A plan to pay a debt (P12): a repayment on its line, from the line's own wallet unless the plan says one.
   const debt = paysDebt(plan) ? props.debts?.find((d) => d.id === plan.debtId) : undefined;
   const [date, setDate] = useState<IsoDate>(asOf);
@@ -1457,7 +1547,8 @@ function PaySheet(props: {
   const goal = plan.goalId ? props.accounts.find((a) => a.id === plan.goalId)?.name : undefined;
   const kindChoices = planKinds(reference, plan.item);
   const kinds = kindChoices.options;
-  const [item, setItem] = useState(plan.item || (kindFromHistory(plan.title, transactions, kinds) ?? ""));
+  const guessed = plan.item ? "" : (kindFromHistory(plan.title, transactions, kinds) ?? "");
+  const [item, setItem] = useState(plan.item || guessed);
   // The goal it is saved in, else the plan's wallet, else the one this kind usually comes from or that holds enough.
   const [from, setFrom] = useState(goal ?? (debt && !plan.wallet && debt.wallet ? debt.wallet : walletToPayFrom({ wallet: plan.wallet, item: plan.item || item }, view.left || plan.amount, transactions, reference.wallets)));
   const [stopped, setStopped] = useState<string | null>(null);
@@ -1513,7 +1604,17 @@ function PaySheet(props: {
       };
   const holds = from ? walletBalance(transactions, from) : null;
   const less = amount !== null && amount < view.left;
-  const pay = (settles: boolean): void => setStopped(props.onPay(draft, settles));
+  const pay = (settles: boolean): void => setStopped(props.onPay(draft, settles, makesSaving));
+  /*
+   * Already in the entries: the money moved or paid, added from the chat or
+   * the Add form. Offered first, so confirming the plan counts that entry
+   * rather than adding a second one.
+   */
+  const counted = (t: Transaction): Centavos => (saving ? t.amount : t.total);
+  const already = misfit && !makesSaving ? null : (likelyPayments(plan, transactions, props.plans)[0] ?? null);
+  const exact = already !== null && counted(already) === view.left;
+  // Its words fit more than one account and nothing tells them apart: nothing is booked until it says which.
+  const unsure = misfit !== null && !makesSaving;
 
   return (
     <Sheet
@@ -1528,7 +1629,21 @@ function PaySheet(props: {
       onClose={props.onClose}
       dialog={props.dialog}
       actions={
-        less ? (
+        unsure ? (
+          <>
+            <Button onClick={props.onClose}>Cancel</Button>
+            <Button variant="primary" onClick={props.onEdit}>
+              Edit the plan
+            </Button>
+          </>
+        ) : exact && already ? (
+          <>
+            <Button onClick={() => pay(true)}>{saving ? "Add a new move anyway" : "Add a new payment anyway"}</Button>
+            <Button variant="primary" onClick={() => props.onCount(already, makesSaving)}>
+              Count {no(already.recordNumber)}
+            </Button>
+          </>
+        ) : less ? (
           <>
             <Button onClick={() => pay(false)}>{saving ? "Save, more to move later" : "Save, more to pay later"}</Button>
             <Button variant="primary" onClick={() => pay(true)}>
@@ -1546,6 +1661,21 @@ function PaySheet(props: {
       }
     >
       <div className="fms-planform">
+        {unsure && misfit && (
+          <Alert status="warn" title="Which account does it go into?">
+            {`"${stored.title}" says the money goes into ${misfit.options.join(" or ")}, but it is saved as a plan to spend. Paying it would book spending for money you moved. Edit it, pick To save or move, and the account; then record the move, or count the transfer you already added.`}
+          </Alert>
+        )}
+        {makesSaving && (
+          <Alert status="info" title={`Saved as a transfer into ${makesSaving}`}>
+            {`"${stored.title}" was saved as a plan to spend, but its words say the money goes into ${makesSaving}. It is recorded as money moved, not spending, and the plan is made a plan to save.${view.goneNote ? " The payment linked to it from the bin is let go." : ""}`}
+          </Alert>
+        )}
+        {already && !unsure && (
+          <Alert status={exact ? "warn" : "info"} title={exact ? `${no(already.recordNumber)} is already in your entries` : `Is ${no(already.recordNumber)} this ${saving ? "move" : "payment"}?`} action={exact ? undefined : <Button size="sm" onClick={() => props.onCount(already, makesSaving)}>Count it</Button>}>
+            {`${no(already.recordNumber)}, ${formatMoney(counted(already))} on ${formatMedium(already.date)}${already.description ? `, "${already.description.slice(0, 48)}"` : ""}${saving ? `, ${already.fromWallet || "income"} to ${already.toWallet}` : already.fromWallet ? `, from ${already.fromWallet}` : ""}, looks like it. ${exact ? `Count it, and no second entry is added. Add a new one only if you ${saving ? "moved the money" : "paid"} twice.` : "Count it instead of adding a new entry, or save below if this is another one."}`}
+          </Alert>
+        )}
         <div className="fms-planform-pair">
           <Field label={saving ? "Amount moved" : "Amount paid"} htmlFor="pay-amount">
             <AmountInput id="pay-amount" value={amount} onChange={setAmount} />
@@ -1571,7 +1701,7 @@ function PaySheet(props: {
               </p>
             </Field>
           ) : (
-            <Field label="Kind">
+            <Field label="Kind" help={!plan.item && item && item === guessed ? "Picked from your past entries like it, as the plan has no kind. Check it." : undefined}>
               <Select value={item || NO_KIND} onChange={(v) => setItem(v === NO_KIND ? "" : v)} options={[NO_KIND, ...kinds]} groups={kindChoices.groups} ariaLabel="Kind of spending" searchable />
             </Field>
           )}
@@ -1648,45 +1778,86 @@ function MoveSheet(props: { plan: Plan; view?: PlanView | undefined; asOf: IsoDa
   );
 }
 
-function LinkSheet(props: { plan: Plan; plans: readonly Plan[]; transactions: readonly Transaction[]; dialog: boolean; onClose: () => void; onLink: (ids: string[], settles: boolean) => void }) {
-  const { plan, transactions } = props;
+/**
+ * "Link a payment I added": an entry already in the ledger counted as the
+ * plan's. Only entries of its own kind are listed and found: spending for a
+ * plan to spend, money moved into its account for a saving, a repayment on
+ * its line for a debt. It listed spending only, so a plan to save could not
+ * find the transfer made for it (owner, 3 November 2026: "make sure this
+ * buttons works"). A plan saved as spending whose words name the account
+ * (`misfiledSaving`) lists the money moved there, and is made a saving when
+ * it is linked.
+ */
+function LinkSheet(props: {
+  plan: Plan;
+  plans: readonly Plan[];
+  transactions: readonly Transaction[];
+  /** The open accounts' names (`misfiledSaving`). */
+  accounts: readonly string[];
+  dialog: boolean;
+  onClose: () => void;
+  onLink: (ids: string[], settles: boolean, makesSaving?: string) => void;
+}) {
+  const { transactions } = props;
+  const misfit = misfiledSaving(props.plan, props.accounts, transactions, props.plans);
+  const makesSaving = misfit?.into ?? undefined;
+  const plan: Plan = makesSaving ? { ...props.plan, into: makesSaving, item: "" } : props.plan;
+  const saving = isSave(plan);
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const linked = new Set(props.plans.flatMap((p) => p.entryIds));
+  const ofKind = (t: Transaction): boolean => (saving ? (t.type === "Transfer" || t.type === "Revenue") && paysPlan(plan, t) : paysDebt(plan) ? paysPlan(plan, t) : t.type === "Spending");
+  // What one entry counts for it: what was moved, the whole repayment with its interest row, or the entry with its fee.
+  const countOf = (t: Transaction): Centavos => paidSoFar({ ...plan, entryIds: [t.id] }, transactions).amount;
+  const left = Math.max(0, plan.amount - paidSoFar(plan, transactions).amount) || plan.amount;
   const likely = likelyPayments(plan, transactions, props.plans);
   const found = query.trim()
     ? transactions
-        .filter((t) => t.type === "Spending" && !linked.has(t.id))
+        .filter((t) => ofKind(t) && !linked.has(t.id))
         .filter((t) => {
           const q = query.trim().toLowerCase().replace(/^#/, "");
-          return String(t.recordNumber) === q.replace(/^0+/, "") || `${t.item} ${t.description}`.toLowerCase().includes(q);
+          return String(t.recordNumber) === q.replace(/^0+/, "") || `${t.item} ${t.description} ${t.fromWallet} ${t.toWallet}`.toLowerCase().includes(q);
         })
         .slice(-8)
         .reverse()
     : likely;
   const toggle = (id: string): void => setPicked((was) => (was.includes(id) ? was.filter((x) => x !== id) : [...was, id]));
-  const sum = picked.reduce((s, id) => s + (transactions.find((t) => t.id === id)?.total ?? 0), 0);
+  const sum = picked.reduce((s, id) => {
+    const t = transactions.find((x) => x.id === id);
+    return s + (t ? countOf(t) : 0);
+  }, 0);
+  const what = (t: Transaction): string => (saving ? `${t.fromWallet || "Income"} to ${t.toWallet}` : t.type === "Debt" ? `Repayment from ${t.fromWallet || "no wallet"}` : t.item || "No kind");
   return (
     <Sheet
-      title={`Link a payment to "${plan.title}"`}
-      subtitle="For a payment already in your entries, so it is not entered twice."
+      title={`Link ${saving ? "money moved" : "a payment"} to "${plan.title}"`}
+      subtitle={`For ${saving ? `a transfer into ${plan.into}` : paysDebt(plan) ? "a repayment" : "a payment"} already in your entries, so it is not entered twice.`}
       onClose={props.onClose}
       dialog={props.dialog}
       actions={
         <>
           <Button onClick={props.onClose}>Cancel</Button>
-          {sum > 0 && sum < plan.amount && (
-            <Button onClick={() => props.onLink(picked, true)}>Link, that settles it</Button>
+          {sum > 0 && sum < left && (
+            <Button onClick={() => props.onLink(picked, true, makesSaving)}>Link, that settles it</Button>
           )}
-          <Button variant="primary" disabled={picked.length === 0} onClick={() => props.onLink(picked, false)}>
+          <Button variant="primary" disabled={picked.length === 0} onClick={() => props.onLink(picked, false, makesSaving)}>
             Link {picked.length > 0 ? formatMoney(sum) : ""}
           </Button>
         </>
       }
     >
       <div className="fms-planform">
+        {makesSaving && (
+          <Alert status="info" title={`Linked, it becomes a plan to save into ${makesSaving}`}>
+            {`"${props.plan.title}" was saved as a plan to spend, but its words say the money goes into ${makesSaving}, so money moved there is listed. Linking one makes it a plan to save.${paidSoFar(props.plan, transactions).gone.length > 0 ? " The payment linked to it from the bin is let go." : ""}`}
+          </Alert>
+        )}
+        {misfit && !makesSaving && (
+          <Alert status="warn" title="Which account does it go into?">
+            {`Its words say ${misfit.options.join(" or ")}, but it is saved as a plan to spend, so only spending is listed. Edit it first, pick To save or move and the account, then link the transfer.`}
+          </Alert>
+        )}
         <Field label="Find it" help={query.trim() ? undefined : likely.length > 0 ? "The likely ones, by kind, words and amount." : "Nothing looks like it yet. Search by its record number or words."}>
-          <TextInput value={query} onChange={setQuery} placeholder="Entry number or words, like tuition" />
+          <TextInput value={query} onChange={setQuery} placeholder={saving ? "Entry number or words, like deposit" : "Entry number or words, like tuition"} />
         </Field>
         <ul className="fms-planpick">
           {found.map((t) => (
@@ -1694,10 +1865,10 @@ function LinkSheet(props: { plan: Plan; plans: readonly Plan[]; transactions: re
               <label className="fms-planpick-row">
                 <input type="checkbox" checked={picked.includes(t.id)} onChange={() => toggle(t.id)} />
                 <span className="t-caption">
-                  {no(t.recordNumber)} · {formatMedium(t.date)} · {t.item}
+                  {no(t.recordNumber)} · {formatMedium(t.date)} · {what(t)}
                   {t.description && t.description !== t.item ? ` (${t.description.slice(0, 40)})` : ""}
                 </span>
-                <Money value={t.total} size="s" />
+                <Money value={countOf(t)} size="s" />
               </label>
             </li>
           ))}

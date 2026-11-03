@@ -13,6 +13,17 @@ import { walletBalance } from "./balances";
 import type { Centavos } from "./money";
 import type { Transaction, TransactionType } from "./types";
 
+/**
+ * The bin's order: the last one binned on top, as a phone's recently deleted
+ * list reads. Kept in the order the database gave, the oldest came first and
+ * the entry just binned sat at the bottom (owner, 3 November 2026: "make the
+ * recent above"). Same moment, the higher record first; one with no time
+ * binned (older backups) after those that have one.
+ */
+export function binOrder<T extends { readonly recordNumber: number; readonly deletedAt?: string | undefined }>(rows: readonly T[]): T[] {
+  return [...rows].sort((a, b) => (b.deletedAt ?? "").localeCompare(a.deletedAt ?? "") || b.recordNumber - a.recordNumber);
+}
+
 export interface TypeCount {
   readonly count: number;
   readonly total: Centavos;

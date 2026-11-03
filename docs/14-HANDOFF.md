@@ -2530,6 +2530,38 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
   a debt plan and its repayment, the blazer), every figure to the centavo;
   the 37 conversations replayed, 0 of 109 answers moved.
 
+### 2026-11-03, evening: the ₱1,500 plan, put right and kept from happening again
+
+- **The fault, from the owner's backup**: "Save into Maya Bank" lost its
+  account when its chat card was changed (the old code built the plan by
+  hand without `into`; `inputOf` fixed that this morning). As a plan to
+  spend it was held back from safe to spend, counted as planned spending,
+  never saw transfer #3974, and Pay booked #3976 as "Random necessities".
+- **Fixed** (docs/16-PLANNER.md P13): one check for a plan named as a
+  saving but saved as spending, used by the bell, the sheet, Pay, Link, the
+  Add form and the chat; one button to make it a saving and count the
+  transfer; Pay counts an entry already there before adding one; Pay
+  records only the plan's own kind; Link lists the plan's own kind; a plan
+  open again after its payment was binned is open everywhere.
+- **The bell named the wrong account**: "Maya Bank" matched Maya Bank
+  (Drone) first. The chat's "make it a saving into maya bank" did the same;
+  it now takes the account the notes name, or asks which.
+- **The chat's edit of a plan to pay a debt lost its line** (`editIn` built
+  it by hand); it uses `inputOf` now.
+- **A Maya "Paid to merchant" screen for the Maya Credit payment** came out
+  as Spending with the line still on it (`checkWalletReceipts`): a debt
+  reading stays a debt.
+- **"Added: Debt ₱1,000.00"** for ₱1,075.52 paid: the card says the whole
+  payment. **"Debt, no item"** in the Database: a debt row names its line
+  ("Maya Credit, paid").
+- **Bin**: the last one binned on top.
+- **The owner deleted #3976, the plan and some Activity in Firestore by
+  hand.** The Activity line for linking #3975 to "Pay Maya Credit" went
+  with them; the plan itself is still done and linked.
+- Tested on the owner's 3 November data: the sheet, Pay, Link, Skip, Remove,
+  Put back, Edit, Move the date and the warning button, PC and phone, each
+  on a fresh copy: all pass, no new entry, set aside down by ₱1,500.00.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
@@ -2576,11 +2608,10 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
    nothing shows now. If money held for someone should not count as yours,
    say so: the line would then count as money you hold for them, and the
    PHP 1.00 case would change with it.
-9. **"Save into Maya Bank" was saved as spending (3 November).** Made from
-   the chat before the fix, it shows Pay and counts PHP 1,500.00 as planned
-   spending. The bell says so. To put it right, say "make the save into maya
-   bank plan a saving into maya bank", or on the Planner: Edit, To save or
-   move, Into Maya Bank (Personal savings).
+9. **"Save into Maya Bank" (3 November): done by the owner.** They deleted
+   the plan and #3976 in Firestore. #3974 stays as a plain transfer. To keep
+   a plan for it, make one To save or move, into Maya Bank (Personal
+   savings), and link #3974 from its sheet.
 
 ---
 

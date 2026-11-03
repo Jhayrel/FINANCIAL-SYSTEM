@@ -1069,7 +1069,18 @@ export function checkWalletReceipts(
     const named = was?.flow === "Spending" && was.item.trim() !== "";
     const own = was && accounts.has(was.toWallet) && was.toWallet !== wallet ? was.toWallet : "";
     let shape: Pick<Draft, "flow" | "category" | "item" | "toWallet" | "fromWallet" | "status"> & { sentOut?: boolean };
-    switch (r.kind) {
+    /*
+     * Read as a payment on a loan or credit line: it stays one, whatever the
+     * screen looks like. A Maya "Paid to merchant Maya Bank" screen for the
+     * Maya Credit payment was made Spending here, with the line still on it,
+     * and showed as "Spending ₱1,075.52" (owner, 3 November 2026: "fix the
+     * issue of false identification of entry").
+     */
+    const owing = was?.flow === "Debt" && r.kind !== "received";
+    switch (owing ? "debt" : r.kind) {
+      case "debt":
+        shape = { flow: "Debt", category: was!.category, item: was!.item, fromWallet: wallet || was!.fromWallet, toWallet: was!.toWallet, status: was!.status || "Paid" };
+        break;
       case "send":
       case "bank":
         if (was?.flow === "Debt" || named) {
