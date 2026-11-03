@@ -2658,7 +2658,8 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
    say which is right, so nothing is changed from here (integrity is
    reported, never corrected): if Maya's own balance is PHP 18.00 above the
    app's, Edit #3818 and set Fee to PHP 0.00 ("When saved: Maya goes up PHP
-   18.00"); if they match, leave it.
+   18.00"); if they match, leave it. Asked again on 3 November: no
+   preference, so it stays. Still in the 3 November backup (fee PHP 18.00).
 8. **Money held for someone, in net worth (found 3 November, not changed).**
    When Father, who owes nothing, gives you PHP 1,000.00 for his bill, his
    line goes below zero and net worth rises PHP 1,000.00 until you pay the
@@ -2667,7 +2668,8 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
    decision on Father's PHP 1.00). Today every On behalf line is at zero, so
    nothing shows now. If money held for someone should not count as yours,
    say so: the line would then count as money you hold for them, and the
-   PHP 1.00 case would change with it.
+   PHP 1.00 case would change with it. Asked again on 3 November: no
+   preference, so the 19 October rule stays.
 9. **"Save into Maya Bank" (3 November): done by the owner.** They deleted
    the plan and #3976 in Firestore. #3974 stays as a plain transfer. To keep
    a plan for it, make one To save or move, into Maya Bank (Personal
