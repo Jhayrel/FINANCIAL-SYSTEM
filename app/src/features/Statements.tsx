@@ -205,7 +205,16 @@ export function Statements({
     return accountGroups([...named], accounts, reference);
   }, [reference, accounts, transactions, year, toYear]);
   const [wallet, setWallet] = useState(reference.wallets[0] ?? "");
-  const [debtId, setDebtId] = useState(debts[0]?.id ?? "");
+  /*
+   * The debt with the newest movement first: the first on the list opened a
+   * PNB loan with nothing in it, all zeros, beside a Maya Credit in use
+   * (4 November 2026).
+   */
+  const [debtId, setDebtId] = useState(() => {
+    const latest = new Map<string, string>();
+    for (const t of transactions) if (t.debtId && (latest.get(t.debtId) ?? "") < t.date) latest.set(t.debtId, t.date);
+    return [...debts].sort((a, b) => (latest.get(b.id) ?? "").localeCompare(latest.get(a.id) ?? ""))[0]?.id ?? "";
+  });
 
   const [issued, setIssued] = useState(() => {
     const last = readIssued();

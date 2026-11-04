@@ -20,6 +20,7 @@
  * the only safe destination for it is the machine it was asked for on.
  */
 
+import { windowOf } from "./charts";
 import { formatMedium, getMonth, getYear, monthName } from "./dates";
 import { describeRange } from "./dayRange";
 import { formatMoney } from "./money";
@@ -37,7 +38,9 @@ export type ExportKind =
   /** Everything, as a spreadsheet. */
   | "csv"
   /** One period, as a statement. */
-  | "statement";
+  | "statement"
+  /** The record of what happened (Activity), as the PDF that screen makes. */
+  | "activity";
 
 export interface ExportAsk {
   readonly kind: ExportKind;
@@ -118,6 +121,15 @@ const STATEMENTS: Readonly<Record<string, StatementType>> = {
   plans: "plans",
   planner: "plans",
   planned: "plans",
+  // Said in Tagalog, and the everyday words (4 November 2026: "gawa ka ng pdf ng gastos ko last month" was not a file).
+  gastos: "expense",
+  gastusin: "expense",
+  kita: "revenue",
+  kinita: "revenue",
+  sahod: "revenue",
+  earnings: "revenue",
+  ipon: "savings",
+  bayarin: "bills",
 };
 
 const MONTHS = [
@@ -155,7 +167,7 @@ const FILE_WORDS = /\b(export|exports|exported|download|backup|back\s?up|csv|spr
  * Saving money is not saving a file.
  */
 const FILE_OBJECT =
-  /\b(save|copy|print|file|document)\b[^.?!]{0,30}\b(data|ledger|entries|transactions|records|history|file|files|csv|pdf|spreadsheet|excel|sheet|statement|backup|everything|all of it|chat|conversation)\b|\b(save|copy|print)\s+(?:it|this|that|them)\s+as\b/i;
+  /\b(save|copy|print|file|document)\b[^.?!]{0,30}\b(data|ledger|entries|transactions|records|history|file|files|csv|pdf|spreadsheet|excel|sheet|statement|backup|everything|all of it|chat|conversation)\b|\b(save|copy|print)\s+(?:it|this|that|them)\s+as\b|\bprint\b[^.?!]{0,30}\b(?:bills?|subscriptions?|expenses?|spending|income|revenue|savings|transfers?|plans|debts?|loans?|gastos)\b/i;
 
 /**
  * A question about a statement or file already made, not a request for one.
@@ -208,7 +220,8 @@ const namedIn = (text: string, name: string, all: readonly string[]): boolean =>
   const bare = name.replace(/\s*\([^)]*\)\s*$/, "").trim();
   if (bare !== name && says(text, bare) && all.filter((n) => n.replace(/\s*\([^)]*\)\s*$/, "").trim().toLowerCase() === bare.toLowerCase()).length === 1) return true;
   const first = bare.split(/\s+/)[0] ?? "";
-  if (first.length < 4 || first === bare) return false;
+  // A word every sentence about money uses never names a kind on its own: "my transactions as pdf" was cut to Transaction Fee (4 November 2026).
+  if (first.length < 4 || first === bare || /^(?:transactions?|money|payments?|online|other|random|bank|interest)$/i.test(first)) return false;
   const sharing = all.filter((n) => (n.split(/\s+/)[0] ?? "").toLowerCase() === first.toLowerCase());
   return sharing.length === 1 && says(text, first);
 };
@@ -273,6 +286,15 @@ export function withCut(ask: ExportAsk, transactions: readonly Transaction[], re
   // "Cash withdrawals in September": the transfers, cut to that shape, before the Cash wallet is read into it.
   const shape = cutIn("transfers");
   if (shape === "withdrawals" || shape === "out" || shape === "between") return { ...ask, type: "transfers", only: shape };
+  /*
+   * "Statement for maya": the Maya wallet, named in full, before a debt that
+   * only shares its first word ("Maya Credit"). It was made as everything
+   * borrowed (4 November 2026). Naming the debt still makes the debt's.
+   */
+  const accountsNamed = [...reference.wallets, ...reference.savings];
+  const walletSaid = [...accountsNamed].sort((a, b) => b.length - a.length).find((w) => namedIn(text, w, accountsNamed));
+  const debtSaid = debts.some((d) => says(text, d.name)) || /\b(?:credit|loan|utang|debt|owe|borrow\w*|lent)\b/i.test(text);
+  if (walletSaid && !debtSaid) return { ...ask, type: "wallet", wallet: walletSaid };
   // "Spotify statement": the statement that holds what was named.
   for (const sheet of ["bills", "expense", "revenue", "borrowed", "lent", "onbehalf"] as const) {
     const only = cutIn(sheet);
@@ -376,8 +398,16 @@ export function readExportAsk(said: string, asOf: IsoDate): ExportAsk | null {
   if (!FILE_WORDS.test(text) && !FILE_OBJECT.test(text)) return null;
 
   // "Save 500 on food" is an entry, not an export: a figure with a verb of
-  // spending beside it is never a request for a file.
-  if (/\b(paid|spent|bought|bayad|gastos|received|natanggap)\b/i.test(text)) return null;
+  // spending beside it is never a request for a file. Without a figure, "a
+  // pdf of my gastos" is a file (4 November 2026).
+  const figure = /\d/.test(text.replace(/\b20\d{2}\b/g, "").replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b/gi, ""));
+  if (figure && /\b(paid|spent|bought|bayad|gastos|received|natanggap)\b/i.test(text)) return null;
+
+  // "The activity log as pdf": the record of what happened, as the Activity screen saves it.
+  if (/\b(?:activity|activities|audit\s*trail|trail|history of (?:changes|edits)|what happened|log)\b/i.test(text) && !/\b(?:statement|expenses?|spending|income|revenue|bills?)\b/i.test(text)) {
+    const days = relativeIn(text, asOf) ?? (monthIn(text) !== null ? monthDays(monthIn(text)!, yearIn(text) ?? getYear(asOf)) : null);
+    return { kind: "activity", year: yearIn(text) ?? getYear(asOf), ...(days ? { fromDate: days.from, toDate: days.to } : {}), format: "pdf", said: text };
+  }
 
   const year = yearIn(text) ?? getYear(asOf);
   const month = monthIn(text);
@@ -410,6 +440,32 @@ export function readExportAsk(said: string, asOf: IsoDate): ExportAsk | null {
     };
   }
 
+  /*
+   * "Last month", "this month", "this year", "this week": the period said in
+   * words. "Export my expenses last month as pdf" was the whole system as a
+   * spreadsheet, and "a pdf of my spending this month" was the year
+   * (4 November 2026).
+   */
+  const relative = month === null ? relativeIn(text, asOf) : null;
+  if (relative) {
+    const lastOf = (iso: string): string => new Date(Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)), 0)).toISOString().slice(0, 10);
+    const wholeMonths = relative.from.endsWith("-01") && (relative.to === lastOf(relative.to) || relative.to >= asOf);
+    return {
+      kind: "statement",
+      type: type ?? "account",
+      year: Number(relative.from.slice(0, 4)),
+      fromMonth: Number(relative.from.slice(5, 7)),
+      toMonth: Number(relative.to.slice(5, 7)),
+      toYear: Number(relative.to.slice(0, 4)),
+      ...(wholeMonths ? {} : { fromDate: relative.from, toDate: relative.to > asOf ? asOf : relative.to }),
+      format: AS_SPREADSHEET.test(text) ? "csv" : "pdf",
+      said: text,
+    };
+  }
+
+  // The plans with no period said: every month something is planned in (`planSheetForAsk`).
+  if (type === "plans" && month === null) return { kind: "statement", type, year, format: AS_SPREADSHEET.test(text) ? "csv" : "pdf", said: text };
+
   // A named month or a named sheet makes it a statement for that period.
   if (month !== null || type !== null) {
     const from = month ?? 1;
@@ -425,11 +481,61 @@ export function readExportAsk(said: string, asOf: IsoDate): ExportAsk | null {
     };
   }
 
+  /*
+   * A PDF said, and nothing else: the account statement, this year so far,
+   * or every entry when it says all. "Send me my transactions as pdf" was
+   * the whole system as a spreadsheet (4 November 2026).
+   */
+  if (/\bpdf\b/i.test(text) && !AS_SPREADSHEET.test(text)) {
+    return EVERYTHING.test(text)
+      ? { kind: "statement", type: "account", year: 2000, fromMonth: 1, toMonth: getMonth(asOf), toYear: getYear(asOf), format: "pdf", said: text }
+      : { kind: "statement", type: "account", year, fromMonth: 1, toMonth: 12, format: "pdf", said: text };
+  }
+
   if (CSV.test(text) || EVERYTHING.test(text)) return { kind: "csv", year, said: text };
 
   // "Export my data", with nothing else said: the spreadsheet, because it is
   // the one a person can open and read.
   return { kind: "csv", year, said: text };
+}
+
+/** "Last month", "this month", "this year", "last year", "this week", "last week", "today", "yesterday": the days, or null. */
+function relativeIn(text: string, asOf: IsoDate): { readonly from: IsoDate; readonly to: IsoDate } | null {
+  if (!/\b(?:this|last|past|previous|nakaraang|ngayong)\s+(?:week|month|year|linggo|buwan|taon)\b|\b(?:today|yesterday|ytd|so far this year)\b/i.test(text)) return null;
+  const w = windowOf(
+    text
+      .replace(/\bnakaraang\s+buwan\b/gi, "last month")
+      .replace(/\bngayong\s+buwan\b/gi, "this month")
+      .replace(/\bnakaraang\s+taon\b/gi, "last year")
+      .replace(/\bngayong\s+taon\b/gi, "this year"),
+    asOf,
+  );
+  return w.from < "1000" ? null : { from: w.from, to: w.to };
+}
+
+/** A named month's first and last day. */
+function monthDays(month: number, year: number): { readonly from: IsoDate; readonly to: IsoDate } {
+  const mm = String(month).padStart(2, "0");
+  return { from: `${year}-${mm}-01`, to: new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10) };
+}
+
+/** "pdf", "make it a pdf", "export that", "save it as csv", "pa-pdf": a file of something already said, naming nothing itself. */
+const BARE_FILE =
+  /^\s*(?:(?:ok(?:ay)?|yes|yeah|sure|pls|please|can\s+you|could\s+you|now|then|and)[\s,]+)*(?:(?:make|turn|export|save|download|print|send|give\s+me|put|get)(?:\s+me)?(?:\s+(?:it|that|this|them|those))?(?:\s+(?:as|in|to|into))?(?:\s+(?:a|an))?\s*)?(?:(?:as|in|into)\s+(?:a\s+|an\s+)?)?(?:pdf|file|csv|spreadsheet|statement|pa-?pdf)?(?:\s+(?:it|that|this|them|those|please|pls|po|na|file|version|copy|too))*\s*[.!?]*\s*$/i;
+
+/**
+ * A file of the answer just given. "Can you give me a break down of expenses
+ * ... last month", then "pdf", was offered the whole system as a spreadsheet;
+ * so was "show me revenue last month", then "export that" (4 November 2026).
+ * The question before is the subject and the period; this message only says
+ * it should be a file, and which kind.
+ */
+export function fileOfAnswer(said: string, previous: string | undefined, asOf: IsoDate): ExportAsk | null {
+  const text = said.trim();
+  if (!previous || text.split(/\s+/).length > 7 || !BARE_FILE.test(text) || !/\b(?:pdf|pa-?pdf|export|download|print|save|csv|spreadsheet|file|statement)\b/i.test(text)) return null;
+  const format = AS_SPREADSHEET.test(text) ? "csv" : "pdf";
+  const ask = readExportAsk(`${previous.replace(/[?.!]+\s*$/, "")} as ${format}`, asOf);
+  return ask?.kind === "statement" ? { ...ask, format, said: `${previous} (${text})` } : null;
 }
 
 function yearIn(text: string): number | null {
@@ -441,7 +547,8 @@ function typeIn(text: string): StatementType | null {
   const lower = text.toLowerCase();
   for (const [word, type] of Object.entries(STATEMENTS)) {
     // "statement" on its own means the account sheet; a named kind wins.
-    if (word !== "statement" && new RegExp(`\\b${word}\\b`, "i").test(lower)) return type;
+    // "expenses", "transfers", "savings": the plural is the same sheet (4 November 2026).
+    if (word !== "statement" && new RegExp(`\\b${word}(?:e?s)?\\b`, "i").test(lower)) return type;
   }
   return /\bstatement\b/i.test(lower) ? "account" : null;
 }
@@ -453,6 +560,9 @@ export function exportWords(ask: ExportAsk, asOf: IsoDate): string {
   }
   if (ask.kind === "csv") {
     return "The whole system as a spreadsheet: every entry, the bin, the budgets and the lists, each on its own sheet.";
+  }
+  if (ask.kind === "activity") {
+    return `The record of what happened${ask.fromDate && ask.toDate ? `, ${describeRange({ start: ask.fromDate, end: ask.toDate })}` : ", every change kept"}, as a PDF: each change with when, who and the amount, the same file the Activity screen saves.`;
   }
 
   const SHEET: Partial<Record<StatementType, string>> = {

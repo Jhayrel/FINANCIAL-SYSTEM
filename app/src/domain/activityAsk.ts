@@ -30,6 +30,8 @@ export function readActivityAsk(text: string, asOf: IsoDate): ActivityAsk | null
   if (/\b(?:spend|spent|buy|bought|pay|paid|earn|earned|receive|received|borrow\w*|owe|how much|expenses?|cost)\b/i.test(t)) return null;
   // A screen, a chart or a budget asked about is someone else's question.
   if (/\b(?:chart|graph|pie|trend|draw)\b/i.test(t)) return null;
+  // A file of it is the export's: "export the activity log as pdf" was read out in the chat (4 November 2026).
+  if (/\b(?:pdf|export|download|print|csv|file)\b/i.test(t)) return null;
   const monday = addDays(asOf, -((dayOfWeek(asOf) + 6) % 7));
   const span: Pick<ActivityAsk, "from" | "to" | "span"> = /\byesterday\b/i.test(t)
     ? { from: addDays(asOf, -1), to: addDays(asOf, -1), span: "yesterday" }

@@ -35,6 +35,7 @@ import { readShownNotes, rememberNote } from "./data/shownNotes";
 import { spendNoteFor } from "./domain/spendNote";
 import { phraseNote } from "./data/aiClient";
 import { Notifications } from "./components/Notifications";
+import { dropWaitingFile, onWaitingFile, saveFile, saveWaitingFile, type WaitingFile } from "./data/download";
 import { holdUpdates, useUpdateAvailable } from "./data/updateCheck";
 import { useBackToClose, useScreenHistory } from "./data/backButton";
 import { Icon, type IconName } from "./components/Icon";
@@ -64,18 +65,19 @@ import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
 import { checkDraft, debtWalletDirection, draftToTransactions, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { Planner } from "./features/Planner";
-import { asSaving, isSave, linkPayments, misfiledSaving, NO_DATE, paidSoFar, paysDebt, paysPlan, renamePlans, type Plan } from "./domain/planner";
+import { asSaving, isSave, linkPayments, misfiledSaving, paidSoFar, paysDebt, paysPlan, renamePlans, type Plan } from "./domain/planner";
 import { goalInStep, type GoalForPlan } from "./domain/planGoal";
-import { buildPlanSheet, planSheetCsv, planSheetFilename } from "./domain/planSheet";
+import { planSheetCsv, planSheetFilename, planSheetForAsk } from "./domain/planSheet";
 import { NO_OWNER, ownerChanges, ownerName as nameOfOwner } from "./domain/owner";
 import { spreadCovered } from "./domain/covers";
-import { formatMedium, getMonth, getYear, lastOfMonth, today } from "./domain/dates";
+import { eventDay, trailFilename, trailSummary } from "./domain/activityExport";
+import { formatMedium, getMonth, getYear, today } from "./domain/dates";
 import { monthBrief, nextMonthStart } from "./domain/monthPlan";
 import { settleLine, type Settlement } from "./domain/settleLine";
 import { systemToCsv } from "./domain/csv";
 import { sheetRequestOf, type ExportAsk } from "./domain/exportAsk";
-import { buildStatementBetween, rangeOf, statementFilename, statementToCsv } from "./domain/statements";
-import { buildSheet, periodLabel } from "./domain/statementSheet";
+import { buildStatementBetween, statementFilename, statementToCsv } from "./domain/statements";
+import { buildSheet } from "./domain/statementSheet";
 import { browserSettingsStore, type SettingsStore } from "./data/settingsStore";
 import {
   checksum,
@@ -1639,15 +1641,11 @@ export default function App() {
   };
 
   /** Download a blob without leaving the page. */
-  const download = (name: string, body: BlobPart, mime: string): void => {
-    const url = URL.createObjectURL(new Blob([body], { type: mime }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
-    // Revoked a moment later: a phone can still be reading it when click() returns.
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  };
+  /** Saved now, or kept for one more tap when making it outlasted the tap (`data/download.ts`). */
+  const download = (name: string, body: BlobPart, mime: string): "saved" | "waiting" => saveFile(name, body, mime);
+  // A file finished after the tap that asked for it: said, with one button to save it.
+  const [waitingFile, setWaitingFile] = useState<WaitingFile | null>(null);
+  useEffect(() => onWaitingFile(setWaitingFile), []);
 
   /**
    * The complete system state.
@@ -1867,16 +1865,33 @@ export default function App() {
       handleExport();
       return;
     }
+    // The record of what happened, every change kept (or the days asked), as the Activity screen's PDF.
+    if (ask.kind === "activity") {
+      const store = activityStore(cloud.uid ?? null);
+      void store
+        .everything()
+        .catch(() => store.recent())
+        .then(async (all) => {
+          const events = all
+            .filter((e) => !ask.fromDate || !ask.toDate || (eventDay(e.at) >= ask.fromDate && eventDay(e.at) <= ask.toDate))
+            .sort((a, b) => b.at.localeCompare(a.at));
+          if (events.length === 0) {
+            flash("Nothing is in the record of what happened for that period, so there is no PDF to make.");
+            return;
+          }
+          const { activityPdf } = await import("./pdf/activityPdf");
+          const showing = ask.fromDate && ask.toDate ? `everything from ${formatMedium(ask.fromDate)} to ${formatMedium(ask.toDate)}` : "everything kept";
+          const bytes = await activityPdf({ events, showing, issuedTo: theOwner, issuedAt: new Date() });
+          if (download(trailFilename(trailSummary(events)), bytes as BlobPart, "application/pdf") === "waiting") return;
+          flash(`Saved the record of what happened as a PDF: ${events.length.toLocaleString()} ${events.length === 1 ? "change" : "changes"}.`);
+        })
+        .catch((e: unknown) => flash(`The PDF could not be made (${(e as Error).message}). Activity on the menu can save the same record.`));
+      return;
+    }
 
     // The plans: the period asked, or with none said, every month something is planned in (`planSheet.ts`).
     if (ask.type === "plans") {
-      const all = settings.plans ?? [];
-      const dated = all.filter((p) => p.status !== "removed" && p.due !== NO_DATE).map((p) => p.due).sort();
-      const said = ask.fromDate && ask.toDate ? { from: ask.fromDate, to: ask.toDate } : ask.fromMonth !== undefined ? rangeOf({ year: ask.year, month: ask.fromMonth }, { year: ask.toYear ?? ask.year, month: ask.toMonth ?? ask.fromMonth }) : null;
-      const first = [dated[0] ?? asOf, asOf].sort()[0] ?? asOf;
-      const range = said ?? { from: `${first.slice(0, 7)}-01`, to: lastOfMonth(Number((dated.at(-1) ?? asOf).slice(0, 4)), Number((dated.at(-1) ?? asOf).slice(5, 7))) };
-      const label = periodLabel(Number(range.from.slice(0, 4)), Number(range.from.slice(5, 7)), Number(range.to.slice(5, 7)), Number(range.to.slice(0, 4)));
-      const sheet = buildPlanSheet(all, { transactions, accounts: settings.accounts, asOf }, range, label);
+      const sheet = planSheetForAsk(settings.plans ?? [], { transactions, accounts: settings.accounts, asOf }, ask);
       if (ask.format === "csv") {
         download(planSheetFilename(sheet, "csv"), planSheetCsv(sheet), "text/csv;charset=utf-8");
         flash(`Saved ${sheet.lines.length.toLocaleString()} ${sheet.lines.length === 1 ? "plan" : "plans"} as a spreadsheet.`);
@@ -1886,7 +1901,7 @@ export default function App() {
       void import("./pdf/statementPdf")
         .then(({ statementPdf }) => statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() }))
         .then((bytes) => {
-          download(planSheetFilename(sheet, "pdf"), bytes as BlobPart, "application/pdf");
+          if (download(planSheetFilename(sheet, "pdf"), bytes as BlobPart, "application/pdf") === "waiting") return;
           flash(sheet.lines.length === 0 ? "Nothing is planned in that period, so the statement says so." : `Saved the plans as a PDF: ${sheet.lines.length.toLocaleString()} ${sheet.lines.length === 1 ? "plan" : "plans"}.`);
         })
         .catch((e: unknown) => flash(`The PDF could not be made (${(e as Error).message}). Statements on the menu can save the same plans as CSV.`));
@@ -1918,7 +1933,7 @@ export default function App() {
     void import("./pdf/statementPdf")
       .then(({ statementPdf }) => statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() }))
       .then((bytes) => {
-        download(statementFilename(statement, "pdf"), bytes as BlobPart, "application/pdf");
+        if (download(statementFilename(statement, "pdf"), bytes as BlobPart, "application/pdf") === "waiting") return;
         flash(
           count === 0
             ? "That period has no entries, so the statement says so and nothing follows."
@@ -3149,6 +3164,22 @@ export default function App() {
         )}
         {usageDialog}
         {settleDialog}
+        {waitingFile && (
+          <Notice
+            status="info"
+            title="Your file is ready"
+            onDismiss={dropWaitingFile}
+            action={
+              <Button size="sm" variant="primary" onClick={saveWaitingFile}>
+                Save the file
+              </Button>
+            }
+          >
+            <span className="t-caption">
+              {waitingFile.name}. It took a moment to make, so the browser needs one more tap to save it.
+            </span>
+          </Notice>
+        )}
         {toasts.map((t) => (
           <Notice
             key={t.id}

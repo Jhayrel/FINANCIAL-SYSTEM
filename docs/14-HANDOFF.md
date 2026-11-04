@@ -2616,6 +2616,34 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
   - a pie of months kept January to June and folded the recent months: it
     keeps the largest, and its words no longer call "Other months" a month
     or name a lowest month it cannot see.
+- **"I never also tried the pdf feature improved it" (4 November)**: every
+  statement type and the Activity record made from the owner's newest data,
+  every page rendered and the figures checked against the screen (all 13
+  statements, a 27 page year, the whole ledger since May 2022). The PDFs
+  themselves were right; getting to them was not. Fixed:
+  - Asked in the chat: "export my expenses last month as pdf" was the whole
+    system as a spreadsheet, "a pdf of my spending this month" was the year,
+    "statement for maya" was everything borrowed, "print my bills this year"
+    and "gawa ka ng pdf ng gastos ko last month" were not files, "send me my
+    transactions as pdf" was cut to Transaction Fee. Periods in words,
+    plurals, Tagalog, "print", and a wallet named before a debt that shares
+    its first word are read now (`exportAsk.ts`).
+  - "pdf", "make it a pdf" or "export that" after an answer is the PDF of
+    that answer (`fileOfAnswer`); it was the spreadsheet of everything.
+  - "pdf of my plans" was measured against the ledger and said "0 entries";
+    the chat and the file now read the Planner the same way
+    (`planSheetForAsk`).
+  - "export the activity log as pdf" makes the Activity PDF from the chat.
+  - "I cannot make a file here ... print it to PDF from your browser" is gone:
+    the statement is offered instead.
+  - A file finished after the tap that asked for it was blocked silently by
+    the browser (the backup fault, for every file): `data/download.ts` keeps
+    it and "Your file is ready" with "Save the file" appears, one tap.
+  - The Debt statement opened on a loan with nothing in it; it opens on the
+    debt with the newest movement.
+  - A statement or Activity PDF this app made, attached in the chat, is said
+    for what it is and never read into entries (`ownFile.ts`); with the AI
+    off, a PDF is said to need it, not "not working, try again".
 - **"Find more problems ... the charting is always sometimes wrong" (4
   November, with the newest backup)**: the owner's own sequence and a sweep
   of 30 questions, each then "pie", "bars", "trend" or "chart", with the AI

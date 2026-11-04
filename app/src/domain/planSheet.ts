@@ -18,7 +18,7 @@ import type { Account } from "./accounts";
 import { formatMoney, type Centavos } from "./money";
 import { formatMedium } from "./dates";
 import { isSave, NO_DATE, viewOf, whenOf, type Plan, type PlanState } from "./planner";
-import type { SheetLine, StatementSheet } from "./statementSheet";
+import { periodLabel, type SheetLine, type StatementSheet } from "./statementSheet";
 import type { IsoDate, Transaction } from "./types";
 
 /** A plan to save is moved, not paid (P11). */
@@ -127,6 +127,34 @@ export function planSheetCsv(sheet: StatementSheet): string {
     ["", "Total", "", "", "", pesos(sheet.totalIn), pesos(sheet.totalOut), pesos(sheet.closing), ""],
   ];
   return `${rows.map((r) => r.map(cell).join(",")).join("\r\n")}\r\n`;
+}
+
+/**
+ * The plans statement a request asks for: the days said, else every month
+ * something is planned in, from this month or the first plan, whichever is
+ * earlier. One reading for the chat's words and the file it saves: the chat
+ * read a request for the plans against the ledger, and said "0 entries" of
+ * seven plans (4 November 2026).
+ */
+export function planSheetForAsk(
+  plans: readonly Plan[],
+  context: { readonly transactions: readonly Transaction[]; readonly accounts: readonly Account[]; readonly asOf: IsoDate },
+  ask: { readonly year: number; readonly fromMonth?: number | undefined; readonly toMonth?: number | undefined; readonly toYear?: number | undefined; readonly fromDate?: IsoDate | undefined; readonly toDate?: IsoDate | undefined },
+): StatementSheet {
+  const { asOf } = context;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  const monthEnd = (y: number, m: number): IsoDate => new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  const dated = plans.filter((p) => p.status !== "removed" && p.due !== NO_DATE).map((p) => p.due).sort();
+  const said =
+    ask.fromDate && ask.toDate
+      ? { from: ask.fromDate, to: ask.toDate }
+      : ask.fromMonth !== undefined
+        ? { from: `${ask.year}-${pad(ask.fromMonth)}-01`, to: monthEnd(ask.toYear ?? ask.year, ask.toMonth ?? ask.fromMonth) }
+        : null;
+  const first = [dated[0] ?? asOf, asOf].sort()[0] ?? asOf;
+  const last = [dated.at(-1) ?? asOf, asOf].sort().at(-1) ?? asOf;
+  const range = said ?? { from: `${first.slice(0, 7)}-01`, to: monthEnd(Number(last.slice(0, 4)), Number(last.slice(5, 7))) };
+  return buildPlanSheet(plans, context, range, periodLabel(Number(range.from.slice(0, 4)), Number(range.from.slice(5, 7)), Number(range.to.slice(5, 7)), Number(range.to.slice(0, 4))));
 }
 
 export function planSheetFilename(sheet: StatementSheet, extension: "csv" | "pdf"): string {

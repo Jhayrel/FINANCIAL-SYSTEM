@@ -204,7 +204,9 @@ import {
 import { buildSheet } from "../domain/statementSheet";
 import { asksToAddTheDifference, differenceNextStep, namedForTheDifference } from "../domain/differenceFollowUp";
 import { withoutFalseDenial } from "../domain/aiText";
-import { asksAboutAFile, exportWords, readExportAsk, sheetRequestOf, statementBrief, statementWords, withCut, withSheet, type ExportAsk } from "../domain/exportAsk";
+import { ownFile, ownFileWords } from "../domain/ownFile";
+import { planSheetForAsk } from "../domain/planSheet";
+import { asksAboutAFile, exportWords, fileOfAnswer, readExportAsk, sheetRequestOf, statementBrief, statementWords, withCut, withSheet, type ExportAsk } from "../domain/exportAsk";
 import { readInvestigateAsk, type InvestigateAsk } from "../domain/investigateAsk";
 import { affordAnswer, followsUpDecision, goesByBalance, isAffordQuestion, readAffordAsk, recurringLaterAnswer, recurringNamed, usualCost } from "../domain/affordAsk";
 import {
@@ -3534,8 +3536,27 @@ export function AskPanel({
 
   const readSent = async (note: string, again?: readonly Attachment[]): Promise<boolean> => {
     batchDrafts.current = [];
-    const sent = again ? [...again] : files;
+    const attached = again ? [...again] : files;
     if (!again) setFiles([]);
+    /*
+     * A statement or Activity record this app made, sent back: said for what
+     * it is, on this device, and never read into entries, which are in the
+     * ledger already (`ownFile.ts`).
+     */
+    const ownMade = attached.flatMap((f) => {
+      const made = f.kind === "text" && f.text ? ownFile(f.text) : null;
+      return made ? [{ name: f.name, made }] : [];
+    });
+    const sent = attached.filter((f) => !ownMade.some((o) => o.name === f.name));
+    if (ownMade.length > 0) {
+      say({ kind: "you", text: note, shown: attached });
+      for (const o of ownMade) {
+        const words = ownFileWords(o.name, o.made);
+        say({ kind: "assistant", text: words, from: "this device" });
+        log(aiEvent("answered", "add", { text: words, model: "this device" }));
+      }
+      if (sent.length === 0) return true;
+    }
     // Kept for "read it again" and "look at the receipt", which name no file (see READ_AGAIN).
     const pictures = sent.filter((a) => a.kind === "image" && a.dataUrl);
     if (pictures.length > 0) lastPictures.current = pictures;
@@ -3546,7 +3567,7 @@ export function AskPanel({
     for (const f of sent) if (f.digest) sentBefore.current.set(f.digest, clock);
     // Only once: if this falls through to the question path, that path must
     // not echo the same message a second time.
-    if (sent.length > 0 || note) {
+    if ((sent.length > 0 || note) && ownMade.length === 0) {
       say({
         kind: "you",
         // The pictures speak for themselves; a list of filenames beside them
@@ -3786,7 +3807,9 @@ export function AskPanel({
       // that could not be sent is better answered by the question path, which
       // has its own offline reply, so this stays quiet and lets it try.
       if (sent.length > 0) {
-        say({ kind: "assistant", text: downSentence(result.reason), from: result.reason ?? "this device" });
+        // Off in Settings is not broken: "The AI model is not working. Please try again." was said of a PDF with the AI off (4 November 2026).
+        const offWords = `The AI is off in Settings, so ${sent.length === 1 ? "this file was" : "these files were"} not read into entries. Turn it on in Settings, AI, or type the entries in a message.`;
+        say(ai.disabled && sent.every((f) => f.kind === "text") ? { kind: "assistant", text: offWords, from: "this device", go: { screen: "settings", tab: "ai", label: "Settings, AI" } } : { kind: "assistant", text: downSentence(result.reason), from: result.reason ?? "this device" });
       }
       return false;
     }
@@ -8855,18 +8878,32 @@ export function AskPanel({
       return;
     }
 
-    const readAsked = as || aboutAFile ? null : readExportAsk(ruled, asOf) ?? (routed?.intent === "export" ? readExportAsk(`export ${ruled}`, asOf) : null);
+    // The question before this one, for "pdf" or "export that" said after its answer (`fileOfAnswer`).
+    const fileSubject = [...turns]
+      .reverse()
+      .slice(0, 10)
+      .filter((t): t is Said => t.kind === "you")
+      .map((t) => t.text)
+      .find((text) => text.trim() !== "" && !readExportAsk(text, asOf));
+    const readAsked = as || aboutAFile ? null : fileOfAnswer(ruled, fileSubject, asOf) ?? readExportAsk(ruled, asOf) ?? (routed?.intent === "export" ? readExportAsk(`export ${ruled}`, asOf) : null);
     // "Subscriptions only", "Spotify", "cash withdrawals": the part of the statement named (`withCut`).
-    const exportAsked = readAsked ? withCut(readAsked, transactions, reference, debts) : null;
     /*
-     * A statement is fitted to what is recorded and said to the day, with what
-     * is in it: "Can you be specific? Like look it say January" (the owner, 4
-     * October 2026, of a statement that began four months before the first
-     * entry).
+     * A file offered: which one, the exact days, what is in it, and the
+     * button that saves it. A statement is fitted to what is recorded and
+     * said to the day, with what is in it: "Can you be specific? Like look it
+     * say January" (the owner, 4 October 2026, of a statement that began four
+     * months before the first entry).
      */
-    const offeredSheet = exportAsked?.kind === "statement" ? buildSheet(transactions, sheetRequestOf(exportAsked, asOf), reference, debts) : null;
-    const askedToExport = exportAsked && offeredSheet ? withSheet(exportAsked, offeredSheet) : exportAsked;
-    if (askedToExport) {
+    const offerFile = (read: ExportAsk): void => {
+      const exportAsked = withCut(read, transactions, reference, debts);
+      // The plans are laid out from the Planner, never the ledger: "pdf of my plans" was said to hold 0 entries (4 November 2026).
+      const offeredSheet =
+        exportAsked.kind === "statement"
+          ? exportAsked.type === "plans"
+            ? planSheetForAsk(settings.plans ?? [], { transactions, accounts: settings.accounts, asOf }, exportAsked)
+            : buildSheet(transactions, sheetRequestOf(exportAsked, asOf), reference, debts)
+          : null;
+      const askedToExport = offeredSheet ? withSheet(exportAsked, offeredSheet) : exportAsked;
       const words = offeredSheet ? statementWords(offeredSheet, askedToExport.format) : exportWords(askedToExport, asOf);
       // Said and cleared like every other message: it stayed in the box, unsent-looking (28 September 2026).
       setDraft("");
@@ -8874,6 +8911,9 @@ export function AskPanel({
       say({ kind: "assistant", text: words, from: "this device" });
       say({ kind: "export", ask: askedToExport, state: "open" });
       log(aiEvent("answered", "statements", { text: words, model: "this device" }));
+    };
+    if (readAsked) {
+      offerFile(readAsked);
       return;
     }
 
@@ -9690,15 +9730,18 @@ export function AskPanel({
      * still arrive rather than being replaced by a signpost.
      */
     if (files.length === 0 && !as && wantsStatement(note)) {
-      say({ kind: "you", text: note });
-      say({
-        kind: "assistant",
-        text: "I cannot make a file here. The Statements screen is the printable month, so open that and print it to PDF from your browser. Here is what it would say:",
-        from: "this device",
-        ephemeral: true,
-      });
-      log(aiEvent("answered", "statements", { text: `Pointed at Statements for: ${note}` }));
-      setDraft("");
+      /*
+       * The app makes the file itself now: the statement for the period said,
+       * this month when none is, offered with its button. "I cannot make a
+       * file here ... print it to PDF from your browser" was no longer true
+       * (4 November 2026).
+       */
+      const statement = readExportAsk(`statement ${withoutTheFilePart(note)} as pdf`, asOf);
+      offerFile(
+        statement?.kind === "statement"
+          ? statement
+          : { kind: "statement", type: "account", year: Number(asOf.slice(0, 4)), fromMonth: Number(asOf.slice(5, 7)), toMonth: Number(asOf.slice(5, 7)), format: "pdf", said: note },
+      );
       setBusy(true);
       try {
         // The file half has just been answered. What goes to the model is
@@ -13402,7 +13445,7 @@ function SettleCard({
 function ExportCard({ turn, onSave, onDiscard }: { turn: Exporting; onSave: () => void; onDiscard: () => void }) {
   const { ask, state } = turn;
   const what =
-    ask.kind === "backup" ? "Backup file" : ask.kind === "csv" ? "Spreadsheet of everything" : "Statement";
+    ask.kind === "backup" ? "Backup file" : ask.kind === "csv" ? "Spreadsheet of everything" : ask.kind === "activity" ? "Activity, as a PDF" : "Statement";
 
   return (
     <div className="fms-proposal">
