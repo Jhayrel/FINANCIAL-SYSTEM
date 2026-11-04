@@ -84,6 +84,8 @@ import {
   restore,
   type Backup,
   type BackupData,
+  type BackupFile,
+  type BackupOutcome,
   type RestoreMode,
 } from "./domain/backup";
 import { BROWSER_QUOTA, FIRESTORE_QUOTA } from "./domain/storage";
@@ -1679,28 +1681,43 @@ export default function App() {
    * are written by three separate stores and anything cached here would be
    * one message out of date the moment it was cached.
    */
-  const handleBackup = async (): Promise<void> => {
-    const uid = cloud.uid ?? null;
-    // Every record of what happened, not the newest few hundred (`data/readAll.ts`); the newest if the full read fails.
-    const whole = async <T,>(all: () => Promise<T[]>, recent: () => Promise<T[]>): Promise<T[]> => all().catch(() => recent().catch(() => []));
-    const [activity, chat, ai] = await Promise.all([
-      whole(() => activityStore(uid).everything(), () => activityStore(uid).recent()),
-      whole(() => chatStore(uid).everything(), () => chatStore(uid).recent()),
-      whole(() => aiLogStore(uid).everything(), () => aiLogStore(uid).recent()),
-    ]);
+  /** The backup file saved to this device, said, and kept in Activity. */
+  const saveBackupFile = (file: BackupFile): void => {
+    download(file.name, file.body, "application/json");
+    flash(file.said);
+    record(dataTaken("data.backup", `${file.said.replace(/\.$/, "")}, as a file on this device.`));
+  };
 
-    const backup = createBackup(
-      { ...systemState(), logs: { activity, chat, ai } },
-      new Date().toISOString(),
-    );
-    download(
-      `fms-backup-${new Date().toISOString().slice(0, 10)}.json`,
-      JSON.stringify(backup, null, 2),
-      "application/json",
-    );
-    const said = `Backed up ${transactions.length.toLocaleString()} transactions, every setting, and ${(activity.length + chat.length + ai.length).toLocaleString()} records of what happened.`;
-    flash(said);
-    record(dataTaken("data.backup", `${said.replace(/\.$/, "")}, as a file on this device.`));
+  const handleBackup = async (): Promise<BackupOutcome> => {
+    try {
+      const uid = cloud.uid ?? null;
+      // Every record of what happened, not the newest few hundred (`data/readAll.ts`); the newest if the full read fails.
+      const whole = async <T,>(all: () => Promise<T[]>, recent: () => Promise<T[]>): Promise<T[]> => all().catch(() => recent().catch(() => []));
+      const [activity, chat, ai] = await Promise.all([
+        whole(() => activityStore(uid).everything(), () => activityStore(uid).recent()),
+        whole(() => chatStore(uid).everything(), () => chatStore(uid).recent()),
+        whole(() => aiLogStore(uid).everything(), () => aiLogStore(uid).recent()),
+      ]);
+      const backup = createBackup({ ...systemState(), logs: { activity, chat, ai } }, new Date().toISOString());
+      const file: BackupFile = {
+        name: `fms-backup-${new Date().toISOString().slice(0, 10)}.json`,
+        body: JSON.stringify(backup, null, 2),
+        said: `Backed up ${transactions.length.toLocaleString()} transactions, every setting, and ${(activity.length + chat.length + ai.length).toLocaleString()} records of what happened.`,
+      };
+      /*
+       * Still inside the tap: saved now. Past it (reading every record took a
+       * while), a browser blocks a download the site starts by itself, so it
+       * waits for one more tap (`BackupOutcome`).
+       */
+      const stillTapped = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive === true;
+      if (stillTapped) {
+        saveBackupFile(file);
+        return { kind: "saved" };
+      }
+      return { kind: "ready", file };
+    } catch (error) {
+      return { kind: "failed", message: `The backup could not be made: ${error instanceof Error ? error.message : String(error)}. Nothing was changed. Check the connection and try again.` };
+    }
   };
 
   const handleRestoreBackup = (backup: Backup, mode: RestoreMode | "clean"): void => {
@@ -2899,6 +2916,7 @@ export default function App() {
               storeName={store.name}
               quota={cloud.uid ? FIRESTORE_QUOTA : BROWSER_QUOTA}
               onBackup={handleBackup}
+              onSaveBackup={saveBackupFile}
               onRestore={handleRestoreBackup}
               onAddTransactions={handleSave}
               signedInUid={cloud.auth.status === "ready" ? cloud.auth.uid : undefined}

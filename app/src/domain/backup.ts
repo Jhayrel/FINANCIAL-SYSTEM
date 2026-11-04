@@ -192,6 +192,26 @@ export function createBackup(input: BackupInput, now: string): Backup {
   };
 }
 
+/** A backup worked out and ready to save as a file. */
+export interface BackupFile {
+  readonly name: string;
+  readonly body: string;
+  /** What it holds, said once it is saved. */
+  readonly said: string;
+}
+
+/**
+ * What pressing Download backup came to. Reading every record first can take
+ * longer than a browser counts a tap as a tap; a download started after that
+ * was blocked as one the site started by itself, without a word (owner, 4
+ * November 2026: "For some reason I cannot download backup"). Then it is
+ * "ready", and a second tap saves it.
+ */
+export type BackupOutcome =
+  | { readonly kind: "saved" }
+  | { readonly kind: "ready"; readonly file: BackupFile }
+  | { readonly kind: "failed"; readonly message: string };
+
 // ── Validation ─────────────────────────────────────────────────────────────
 
 export interface Problem {

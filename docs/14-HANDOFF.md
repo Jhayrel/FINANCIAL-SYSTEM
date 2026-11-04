@@ -2616,6 +2616,14 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
   - a pie of months kept January to June and folded the recent months: it
     keeps the largest, and its words no longer call "Other months" a month
     or name a lowest month it cannot see.
+- **"For some reason I cannot download backup" (4 November)**: the backup
+  reads every record of what happened first (8,500 and more), and only then
+  started the download. Past a few seconds a browser no longer counts it as
+  the owner's tap, blocks it as a download the site started by itself, and
+  says nothing; the code caught no error and showed no progress either. Now:
+  "Preparing the backup..." while it reads; saved at once when the tap still
+  counts; else "The backup is ready" with "Save the backup file", one tap;
+  a failure is said, with what to do. Tested both ways, PC and phone.
 - **Charts after a breakdown, 4 November (owner's screenshots)**:
   - "Trend" drew "Spending on Down by month, the whole ledger": the subject
     picker took "down" from "break down". A breakdown question has no one

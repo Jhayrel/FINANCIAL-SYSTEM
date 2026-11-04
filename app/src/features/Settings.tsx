@@ -41,7 +41,7 @@ import { walletBalance } from "../domain/balances";
 import type { Alert as Finding } from "../domain/alerts";
 import { describeClose, planGoalClose } from "../domain/goalClose";
 import { closePlansNote, goalParentNote, moveTargets, planGoalMove, type PlansChoice } from "../domain/goalMove";
-import { planStartClean, validateBackup, type Backup, type RestoreMode, type Validation } from "../domain/backup";
+import { planStartClean, validateBackup, type Backup, type BackupFile, type BackupOutcome, type RestoreMode, type Validation } from "../domain/backup";
 import { formatBytes, measureStorage } from "../domain/storage";
 import { cleanSettings } from "../domain/settingsCleanup";
 import { canSetOpening, ledgerStart, openingRows } from "../domain/opening";
@@ -137,6 +137,7 @@ export function Settings({
   onMoveKind,
   onExport,
   onBackup,
+  onSaveBackup,
   onRestore,
   onAddTransactions,
   signedInUid,
@@ -166,7 +167,8 @@ export function Settings({
   /** A bill or subscription moved to the other list: its rows follow (App's `handleMoveKind`). */
   onMoveKind?: ((name: string, to: BillCategory) => void) | undefined;
   onExport: () => void;
-  onBackup: () => void;
+  onBackup: () => Promise<BackupOutcome>;
+  onSaveBackup: (file: BackupFile) => void;
   onRestore: (backup: Backup, mode: RestoreMode | "clean") => void;
   /** Closing a goal writes real rows, so Settings needs a way to add them. */
   onAddTransactions: (rows: Transaction[]) => void;
@@ -341,6 +343,7 @@ export function Settings({
             quota={quota}
             onExport={onExport}
             onBackup={onBackup}
+            onSaveBackup={onSaveBackup}
             onRestore={onRestore}
             onChangeSettings={onChange}
             signedInUid={signedInUid}
@@ -3716,6 +3719,7 @@ function DataSection({
   quota,
   onExport,
   onBackup,
+  onSaveBackup,
   onRestore,
   onChangeSettings,
   signedInUid,
@@ -3730,7 +3734,8 @@ function DataSection({
   storeName: string;
   quota: number;
   onExport: () => void;
-  onBackup: () => void;
+  onBackup: () => Promise<BackupOutcome>;
+  onSaveBackup: (file: BackupFile) => void;
   onRestore: (backup: Backup, mode: RestoreMode | "clean") => void;
   onChangeSettings: (next: AppSettings) => void;
   signedInUid?: string | undefined;
@@ -3739,6 +3744,9 @@ function DataSection({
   onUpload?: (() => void) | undefined;
 }) {
   const { confirm, dialog } = useConfirm();
+  // Download backup: preparing, ready for one more tap, or failed, said (`BackupOutcome`).
+  const [backingUp, setBackingUp] = useState(false);
+  const [backupState, setBackupState] = useState<Exclude<BackupOutcome, { kind: "saved" }> | null>(null);
   const [picked, setPicked] = useState<Validation | null>(null);
   const [reading, setReading] = useState(false);
   const file = useRef<HTMLInputElement>(null);
@@ -4107,9 +4115,56 @@ function DataSection({
           category. It restores this app exactly as it stands.
         </p>
         <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap" }}>
-          <Button variant="primary" onClick={onBackup}>Download backup</Button>
+          <Button
+            variant="primary"
+            disabled={backingUp}
+            onClick={() => {
+              setBackupState(null);
+              setBackingUp(true);
+              void onBackup().then((outcome) => {
+                setBackingUp(false);
+                setBackupState(outcome.kind === "saved" ? null : outcome);
+              });
+            }}
+          >
+            {backingUp ? "Preparing the backup..." : "Download backup"}
+          </Button>
           <Button onClick={onExport}>Export CSV</Button>
         </div>
+        {backingUp && (
+          <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-2)" }} role="status">
+            Reading every entry and every record of what happened. This can take a few seconds.
+          </p>
+        )}
+        {backupState?.kind === "ready" && (
+          <div style={{ marginTop: "var(--space-3)" }}>
+            <Alert
+              status="info"
+              title="The backup is ready"
+              action={
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => {
+                    onSaveBackup(backupState.file);
+                    setBackupState(null);
+                  }}
+                >
+                  Save the backup file
+                </Button>
+              }
+            >
+              It took a moment to read everything, so the browser needs one more tap to save it.
+            </Alert>
+          </div>
+        )}
+        {backupState?.kind === "failed" && (
+          <div style={{ marginTop: "var(--space-3)" }}>
+            <Alert status="over" title="No backup was saved">
+              {backupState.message}
+            </Alert>
+          </div>
+        )}
         <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-3)" }}>
           The CSV is for reading elsewhere and cannot be restored from. Money in it is a plain
           decimal so a spreadsheet reads it as a number.
