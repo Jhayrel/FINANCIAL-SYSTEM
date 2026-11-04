@@ -10,7 +10,7 @@
  * Insights screen shows (`incomeQuality`): borrowing, opening balances and
  * money moved between your own accounts are left out, and said so.
  */
-import { namesWindow, windowOf } from "./charts";
+import { namesWindow, percentOf, windowOf } from "./charts";
 import { incomeQuality, type Debt } from "./debt";
 import { formatMedium } from "./dates";
 import { formatMoney, type Centavos } from "./money";
@@ -100,7 +100,7 @@ export function earnAnswer(ask: EarnAsk, transactions: readonly Transaction[], d
       : `You received **${money(q.trueIncome)}**${what} ${ask.name ? `in ${ask.name}${to === asOf && (ask.to ?? asOf) > asOf ? `, up to ${formatMedium(asOf)}` : ""}` : `from ${formatMedium(from)} to ${formatMedium(to)}`}, over ${counted.length} ${counted.length === 1 ? "entry" : "entries"}.`,
   ];
   if (!ask.only && ranked.length > 1) {
-    out.push(`By source: ${ranked.slice(0, 6).map(([k, v]) => `${k} ${money(v)} (${q.trueIncome > 0 ? Math.round((v * 100) / q.trueIncome) : 0}%)`).join(", ")}${ranked.length > 6 ? `, and ${ranked.length - 6} more` : ""}.`);
+    out.push(`By source: ${ranked.slice(0, 6).map(([k, v]) => `${k} ${money(v)} (${percentOf(v, q.trueIncome)})`).join(", ")}${ranked.length > 6 ? `, and ${ranked.length - 6} more` : ""}.`);
   }
   const outside = q.cashIn - q.trueIncome;
   if (outside > 0) out.push(`Left out as not earned: ${money(outside)} of borrowing, opening balances and money moved between your own accounts.`);

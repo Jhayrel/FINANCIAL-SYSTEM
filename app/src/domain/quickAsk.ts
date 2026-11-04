@@ -11,6 +11,7 @@
  * figures (`monthPlan.ts`, `kinds.ts`), so the chat cannot disagree with
  * the screens, model or no model.
  */
+import { namesWindow, percentOf, windowOf } from "./charts";
 import { costByKind } from "./kinds";
 import type { Debt, NetWorth } from "./debt";
 import { addDays, formatMedium } from "./dates";
@@ -20,7 +21,19 @@ import { costOf, incomeOf } from "./totals";
 import type { IsoDate, Transaction } from "./types";
 
 export type QuickAsk =
-  | { readonly kind: "biggest"; readonly month: "this" | "last"; readonly span?: "week" | "today" | undefined; readonly all?: boolean | undefined }
+  | {
+      readonly kind: "biggest";
+      readonly month: "this" | "last";
+      readonly span?: "week" | "today" | undefined;
+      readonly all?: boolean | undefined;
+      /**
+       * Any other period, as said: read with the charts' windows. "What did I
+       * spend the most on in September" and "top spending this year" were
+       * answered with November, and the AI was handed November's figures to
+       * answer them with (4 November 2026 sweep).
+       */
+      readonly period?: string | undefined;
+    }
   | { readonly kind: "budget" }
   | { readonly kind: "savings" }
   | { readonly kind: "saved" }
@@ -89,8 +102,13 @@ export function readQuickAsk(text: string, kinds: readonly string[] = [], wallet
   // "i need a breakdown of my spending this month": every kind, biggest first (owner's chat, 1 November 2026).
   const breakdown = BREAKDOWN.test(t) && !/\b(?:chart|graph|pie|bars?|trend)\b/i.test(t);
   if (BIGGEST.test(t) || breakdown) {
+    // By wallet is the chart table's answer, which groups by wallet: this one lists kinds.
+    if (/\b(?:by|per|each|every)\s+(?:wallets?|accounts?)\b/i.test(t)) return null;
     const span = /\bthis\s+week\b|\bngayong\s+linggo\b/i.test(t) ? "week" : /\btoday\b|\bngayon\b/i.test(t) ? "today" : undefined;
-    return { kind: "biggest", month: /\blast\s+month\b|\bnakaraang\s+buwan\b/i.test(t) ? "last" : "this", ...(span ? { span } : {}), ...(breakdown ? { all: true } : {}) };
+    const month = /\blast\s+month\b|\bnakaraang\s+buwan\b/i.test(t) ? "last" : "this";
+    const plain = span !== undefined || month === "last" || /\bthis\s+month\b|\bngayong\s+buwan\b/i.test(t);
+    const period = !plain && namesWindow(withoutAsides(t)) ? withoutAsides(t) : undefined;
+    return { kind: "biggest", month, ...(span ? { span } : {}), ...(breakdown ? { all: true } : {}), ...(period ? { period } : {}) };
   }
   if (BUDGET.test(t) && !namesKind && !/\b(?:next\s+month|set|make|change|propose|recommend|suggest)\b/i.test(t)) return { kind: "budget" };
   return null;
@@ -183,15 +201,16 @@ export function quickAnswer(ask: QuickAsk, f: QuickFacts, money: (c: Centavos) =
     // This week runs from Monday; today is today (27 October 2026 sweep: "this week" got the month).
     const weekStart = addDays(f.asOf, -((new Date(`${f.asOf}T00:00:00Z`).getUTCDay() + 6) % 7));
     const from = ask.span === "week" ? weekStart : ask.span === "today" ? f.asOf : null;
-    const rows = f.transactions.filter((r) => (from ? r.date >= from : r.date.startsWith(key)) && r.date <= f.asOf);
+    const win = ask.period ? windowOf(ask.period, f.asOf) : null;
+    const rows = f.transactions.filter((r) => (win ? r.date >= win.from && r.date <= win.to : from ? r.date >= from : r.date.startsWith(key)) && r.date <= f.asOf);
     const kinds = costByKind(rows, f.debts).slice(0, ask.all ? 20 : 5);
-    const spanName = ask.span === "week" ? `this week (since ${formatMedium(weekStart)})` : ask.span === "today" ? "today" : null;
+    const spanName = win ? (win.from < "1000" ? "since your first entry" : `in ${win.name}${win.to >= f.asOf && win.from <= f.asOf ? " so far" : ""}`) : ask.span === "week" ? `this week (since ${formatMedium(weekStart)})` : ask.span === "today" ? "today" : null;
     /*
      * The 1st of the month, nothing spent yet: "Show my highest spending in
      * chart" on November 1 was told only that (owner's chat, 1 November
      * 2026). Said, then last month's, which is what there is to show.
      */
-    if (kinds.length === 0 && ask.month === "this" && !ask.span) {
+    if (kinds.length === 0 && ask.month === "this" && !ask.span && !win) {
       const last = quickAnswer({ ...ask, month: "last" }, f, money);
       return /^Nothing was spent/.test(last) ? `Nothing was spent in ${name} yet, or last month.` : `Nothing was spent in ${name} yet, so here is last month.\n${last}`;
     }
@@ -212,7 +231,7 @@ export function quickAnswer(ask: QuickAsk, f: QuickFacts, money: (c: Centavos) =
     const when = spanName ?? (ask.month === "last" ? "last month" : `${name} so far`);
     return [
       `**${kinds[0]!.name} is the biggest, ${money(kinds[0]!.amount)}** of ${money(total)} spent ${when}.`,
-      ...kinds.map((k) => `- ${k.name}: ${money(k.amount)}${total > 0 ? ` (${Math.round((k.amount * 100) / total)}%)` : ""}`),
+      ...kinds.map((k) => `- ${k.name}: ${money(k.amount)}${total > 0 ? ` (${percentOf(k.amount, total)})` : ""}`),
       top ? `The largest single entry was #${String(top.recordNumber).padStart(4, "0")}, ${top.item || top.type} ${money(topCost)}${said ? ` (${said.slice(0, 50)})` : ""}.` : "",
     ]
       .filter(Boolean)

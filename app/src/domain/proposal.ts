@@ -961,7 +961,8 @@ export function checkWithdrawal(
         status: base?.draft.status ?? start.status,
       },
       confidence: w.confidence === "high" ? (base?.confidence === "low" ? "medium" : base?.confidence ?? "high") : "medium",
-      adjustments: [...(base?.adjustments ?? []), ...notes],
+      // The slip settles the amount: "Using PHP 5,816.00" under a card of PHP 5,800.00 read as a contradiction (3 November 2026).
+      adjustments: [...(base?.adjustments ?? []).filter((a) => !(w.cash !== w.printed && /^It typed .+ off the page\./.test(a))), ...notes],
     };
     const at = base ? out.indexOf(base) : out.length;
     out = out.filter((p) => !related.includes(p));

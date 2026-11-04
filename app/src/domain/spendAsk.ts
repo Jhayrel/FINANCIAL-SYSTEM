@@ -13,7 +13,7 @@
  * of the conversation, rather than being answered as nothing.
  */
 
-import { windowOf } from "./charts";
+import { groupOf, windowOf } from "./charts";
 import { daysIn } from "./readEntry";
 import { addDays, dayInWords, formatMedium } from "./dates";
 import { dayFromWords } from "./dayWords";
@@ -39,6 +39,23 @@ export interface SpendAsk {
   readonly word?: string;
   /** "How much did I spend badly?": wants only, the kinds not marked or known as needs (`isNeedRow`). */
   readonly wants?: boolean;
+  /**
+   * "How much did I spend in maya this month?": what left that wallet. It was
+   * answered with every wallet's spending, PHP 726.00 where Maya's was
+   * PHP 101.00 (4 November 2026 sweep).
+   */
+  readonly wallet?: string;
+  /** "How much did I pay in bills last month?": the rows filed under Bills, or under Subscriptions (`groupOf` in charts.ts). */
+  readonly group?: "Bills" | "Subscriptions";
+}
+
+/** The spending wallet the question names after "in", "from", "using" or "sa", or before "spending". */
+function walletIn(text: string, wallets: readonly string[]): string | undefined {
+  const esc = (w: string): string => w.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [...wallets]
+    .filter((w) => w.trim().length > 1)
+    .sort((a, b) => b.length - a.length)
+    .find((w) => new RegExp(`\\b(?:in|from|using|with|via|thru|through|sa|on|my)\\s+(?:my\\s+)?${esc(w)}\\b(?!\\s+(?:bank|credit|loan))|\\b${esc(w)}\\s+(?:spending|expenses?|gastos)\\b`, "i").test(text));
 }
 
 /** Every entry up to today: "since I started the entries", "all time", "ever" (owner, 1 November 2026). */
@@ -78,7 +95,7 @@ const SLIPS: readonly (readonly [RegExp, string])[] = [
 ];
 
 const ASKS =
-  /\bwhat (?:did|have) i (?:spend|spent|buy|bought|purchase|pay for)\b|\b(?:how much|magkano|what did i spend|what have i spent|total (?:spending|spent|expenses?))\b[^?.!]*\b(?:spent|spend|spending|nagastos|ginastos|gastos|nagastusan|gastusin|used|paid)\b|\b(?:magkano|how much)\b[^?.!]*\b(?:nagastos|ginastos|gastos)\b|\bmy (?:total )?spending (?:on|for)\b|^\s*(?:what(?:'s| is| was)\s+)?(?:my\s+)?total (?:spending|spent|expenses?)\b/i;
+  /\bwhat (?:did|have) i (?:spend|spent|buy|bought|purchase|pay for)\b|\b(?:how much|magkano|what did i spend|what have i spent|total (?:spending|spent|expenses?))\b[^?.!]*\b(?:spent|spend|spending|nagastos|ginastos|gastos|nagastusan|gastusin|used|paid|pay)\b|\b(?:magkano|how much)\b[^?.!]*\b(?:nagastos|ginastos|gastos)\b|\bmy (?:total )?spending (?:on|for)\b|^\s*(?:what(?:'s| is| was)\s+)?(?:my\s+)?total (?:spending|spent|expenses?)\b/i;
 
 /** Asking what it could cost, or whether to, rather than what it did. */
 // "how much money i can spend tommorow?" is a can question, never a past sum (backup of 7 October 2026).
@@ -88,7 +105,14 @@ const NOT_THIS = /\b(afford|should|would|will|could|budget|save|saving|left|rema
  * The spending question in a sentence, or null when it is not one this can
  * answer exactly. `items` is every item name the ledger uses.
  */
-export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDate): SpendAsk | null {
+export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDate, wallets: readonly string[] = []): SpendAsk | null {
+  const read = readSpendAskOf(said, items, asOf);
+  const wallet = read ? walletIn(said, wallets) : undefined;
+  const group = read && read.item === null && !read.word ? groupOf(said) : "";
+  return read ? { ...read, ...(wallet ? { wallet } : {}), ...(group ? { group } : {}) } : read;
+}
+
+function readSpendAskOf(said: string, items: readonly string[], asOf: IsoDate): SpendAsk | null {
   let text = said.trim();
   for (const [slip, word] of SLIPS) text = text.replace(slip, word);
   // "Total summary of school spending": a sum too, once an item on the list is named (13 October 2026).
@@ -129,7 +153,7 @@ export function readSpendAsk(said: string, items: readonly string[], asOf: IsoDa
       if (!/^[a-z][a-z'-]{2,20}(?:\s[a-z][a-z'-]{2,20})?$/.test(thing) || /^(?:it|that|this|them|things?|stuff|everything|anything|something|myself|me|you|average)$/.test(thing)) return null;
       // "foodo" is Food, one key off (owner's chat, 1 November 2026); only when one kind is that close.
       const near = items.filter((name) => name.trim().length >= 4 && slipOf(thing, name.trim().toLowerCase()));
-      if (near.length === 1) return readSpendAsk(said.replace(new RegExp(`\\b${thing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i"), near[0]!), items, asOf);
+      if (near.length === 1) return readSpendAskOf(said.replace(new RegExp(`\\b${thing.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i"), near[0]!), items, asOf);
       word = thing;
     }
   }
@@ -198,11 +222,12 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
   if (ask.word && !ask.item) return wordAnswer({ ...ask, word: ask.word }, transactions, asOf);
   const live = transactions.filter((t) => !(t as Transaction & { deletedAt?: string }).deletedAt);
   const to = ask.to > asOf ? asOf : ask.to;
-  const matches = (t: Transaction): boolean => ask.item === null || t.item.trim().toLowerCase() === ask.item.trim().toLowerCase();
+  const matches = (t: Transaction): boolean =>
+    (ask.item === null || t.item.trim().toLowerCase() === ask.item.trim().toLowerCase()) && (!ask.wallet || t.fromWallet === ask.wallet) && (!ask.group || t.category === ask.group);
   const rows = live.filter((t) => t.date >= ask.from && t.date <= to && matches(t) && costOf(t) > 0);
   const total: Centavos = rows.reduce((sum, t) => sum + costOf(t), 0);
   const money = (c: Centavos): string => formatMoney(c).replace(/^₱/, "PHP ");
-  const what = ask.item ? ` on ${ask.item}` : "";
+  const what = `${ask.item ? ` on ${ask.item}` : ask.group ? ` on ${ask.group.toLowerCase()}` : ""}${ask.wallet ? ` from ${ask.wallet}` : ""}`;
   /*
    * "on Friday, October 23", "this week (Oct 19 to Oct 25)": "Nothing in
    * Friday, October 23 ... between October 23, 2026 and October 23, 2026"

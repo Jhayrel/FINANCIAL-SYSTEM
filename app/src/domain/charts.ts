@@ -95,11 +95,31 @@ export interface Chart {
   /** The last row is a period still running: "October 2026" read on 3 October. */
   readonly running?: boolean | undefined;
   /**
+   * The question it was drawn from, so "bars" after a pie draws the same
+   * thing as bars (`redrawAsked`). Without it, "pie" of the year's food
+   * then "bars" drew this month's food day by day (4 November 2026 sweep).
+   */
+  readonly asked?: string | undefined;
+  /**
    * Entries dated after today, counted in a level's last point so it is the
    * balance, or the amount owed, that every other screen shows. The Add
    * form takes a date ahead with a warning, and the sidebar counts it.
    */
   readonly ahead?: number | undefined;
+}
+
+/**
+ * A part of a whole as a percentage, honestly rounded: never "0%" for money
+ * that is there, never "100%" beside other parts. "Random: PHP 31.00, 0%"
+ * and "Framelink Media ... 100%" sat in one November breakdown of three
+ * sources (owner's chat, 3 November 2026).
+ */
+export function percentOf(part: number, whole: number): string {
+  if (whole <= 0 || part <= 0) return "0%";
+  const exact = (part * 100) / whole;
+  if (exact < 0.5) return "under 1%";
+  if (exact >= 99.5 && part < whole) return "over 99%";
+  return `${Math.round(exact)}%`;
 }
 
 /** Which way the money in a chart went, including charts stored before it was recorded. */
@@ -201,6 +221,10 @@ const revenueOf = incomeOf;
  * "receipts" is no longer a word for income. Here a receipt is the slip from
  * a purchase, the thing photographed for the chat, so "chart my receipts"
  * reading as income was backwards.
+ *
+ * "earn" and "receive" were missing as plain words: "how much did i earn
+ * last month", answered as income, then "pie", drew last month's spending
+ * (4 November 2026 sweep).
  */
 /** Money in or money out, as the words say it (`chartAsk.ts`). */
 export const directionIn = (question: string): "spending" | "revenue" => directionOf(question);
@@ -222,7 +246,7 @@ function directionOf(question: string): "spending" | "revenue" {
    * that asked.
    */
   if (
-    /\b(income|revenue|earned|earnings|earning|salary|allowance|received|receiving|money in|inflow|coming in|came in|cash in|positive|gain|gains|deposit|deposits|deposited|natanggap|kinita|pumasok)\b/i.test(
+    /\b(income|revenue|earn|earns|earned|earnings|earning|salary|allowance|receive|receives|received|receiving|money in|inflow|coming in|came in|come in|cash in|positive|gain|gains|deposit|deposits|deposited|natanggap|kinita|pumasok)\b/i.test(
       question,
     )
   ) {
@@ -369,7 +393,7 @@ function dimensionOf(question: string, twoMonthsAreBars = true): ChartBy {
    * beside a breakdown of fifteen kinds (3 November 2026). The three groups
    * only when asked for by name.
    */
-  if (/\b(?:main|top[- ]level|big)\s+categor(?:y|ies)\b|\bspending,?\s+bills\b|\bbills\s+(?:and|vs\.?|or)\s+subscriptions\b|\b(?:bills|subscriptions)\b/i.test(question)) return "category";
+  if (/\b(?:main|top[- ]level|big)\s+categor(?:y|ies)\b|\bspending,?\s+bills\b|\bbills\s+(?:and|vs\.?|or)\s+subscriptions\b/i.test(question) || (/\bbills\b/i.test(question) && /\bsubscriptions\b/i.test(question))) return "category";
   return "item";
 }
 
@@ -922,6 +946,21 @@ interface Focus {
    * say Abra.
    */
   readonly about: string;
+  /**
+   * Bills or Subscriptions, one of them named: its rows, by item. "my
+   * subscriptions this year", then "pie", drew Spending, Bills and
+   * Subscriptions as three slices, and "how much did i pay in bills last
+   * month", then "pie", drew nothing (4 November 2026 sweep).
+   */
+  readonly group: "" | "Bills" | "Subscriptions";
+}
+
+/** Bills, or Subscriptions, named alone: not both, and not beside the main categories. */
+export function groupOf(question: string): "" | "Bills" | "Subscriptions" {
+  if (/\b(?:main|top[- ]level|big)\s+categor(?:y|ies)\b|\bspending,?\s+bills\b|\b(?:by|per)\s+categor(?:y|ies)\b/i.test(question)) return "";
+  const bills = /\bbills?\b/i.test(question);
+  const subs = /\bsubscriptions?\b|\bsubs\b/i.test(question);
+  return bills === subs ? "" : bills ? "Bills" : "Subscriptions";
 }
 
 const capital = (w: string): string => w.charAt(0).toUpperCase() + w.slice(1);
@@ -945,7 +984,9 @@ const ASKING_WORDS = new Set(
     "explain high highest low lowest latest wanted give charts graphs trend pie bars look good better worse okay please thanks " +
     "thank kindly maybe again also both other others another thing things stuff overall everything anything something " +
     // How sure the answer should be, and what it is for: "so I can do Budgeting. Make sure its accurate" (3 November 2026).
-    "based accurate accurately correct correctly sure exact exactly precise budgeting detailed details"
+    "based accurate accurately correct correctly sure exact exactly precise budgeting detailed details " +
+    // How it was paid, never what: "how much did i pay in bills last month", then "pie", drew the rows that say "pay" (4 November 2026 sweep).
+    "pay pays paying"
   ).split(" "),
 );
 
@@ -1039,8 +1080,10 @@ function named(question: string, names: readonly string[]): string {
 function focusOf(question: string, transactions: readonly Transaction[]): Focus {
   const item = named(question, transactions.map((t) => t.item));
   const wallet = named(question, transactions.flatMap((t) => [t.fromWallet, t.toWallet]));
+  const group = item ? "" : groupOf(question);
   return {
-    about: aboutOf(question, transactions, [item, wallet].filter(Boolean)),
+    about: aboutOf(question, transactions, [item, wallet, ...(group ? ["bill", "bills", "subscription", "subscriptions", "subs"] : [])].filter(Boolean)),
+    group,
     item,
     /**
      * Naming one account is a filter, not a grouping.
@@ -1224,9 +1267,10 @@ function buildComparison(
     (t) =>
       (!focus.item || t.item.trim().toLowerCase() === focus.item.trim().toLowerCase()) &&
       (!focus.wallet || sideOf(t) === focus.wallet.trim().toLowerCase()) &&
+      (!focus.group || direction === "revenue" || t.category === focus.group) &&
       mentions(t, focus.about),
   );
-  const narrowed = [focus.item, focus.wallet, focus.about ? capital(focus.about) : ""].filter(Boolean).join(", ");
+  const narrowed = [focus.item, direction !== "revenue" ? focus.group : "", focus.wallet, focus.about ? capital(focus.about) : ""].filter(Boolean).join(", ");
   const key = (t: Transaction): string =>
     by === "wallet"
       ? (direction === "revenue" ? t.toWallet : t.fromWallet).trim() || "(none)"
@@ -1420,6 +1464,7 @@ export function buildChart(
       t.date >= period.from &&
       t.date <= period.to &&
       (!focus.item || t.item.trim().toLowerCase() === focus.item.toLowerCase()) &&
+      (!focus.group || direction === "revenue" || t.category === focus.group) &&
       matchesWallet(t) &&
       mentions(t, focus.about),
   );
@@ -1512,11 +1557,21 @@ export function buildChart(
    * 100% (19 October 2026). Days become weeks, and one slice becomes the
    * months or years it came in.
    */
-  const oneSlice = !overTime(by) && total > 0 && (all[0]?.[1].value ?? 0) >= total * 0.98;
+  /*
+   * Only one slice with money in it. "Show me revenue", then "pie", drew
+   * 2026's income by month: Framelink Media was 99.7% of November, which
+   * counted as one slice, and the months it was turned into were the
+   * year's, not November's (owner, 3 November 2026: "wrong chart it shows
+   * the revenue per month fix it"). Three sources are three slices, however
+   * thin; the legend gives each its share.
+   */
+  const oneSlice = !overTime(by) && total > 0 && all.filter(([, g]) => g.value > 0).length === 1;
   if (kind === "pie" && (by === "day" || oneSlice) && !/\b(?:by|per)\s+(?:weeks?|months?|years?)\b/i.test(question)) {
-    // The same period: "by week" alone reads as the last twelve weeks.
-    const same = by === "day" && !namesWindow(question) ? ` in ${period.name}` : "";
-    return buildChart(`${question} by ${by === "day" ? "week" : span > 400 ? "year" : "month"}${same}`, transactions, asOf, only, said, most);
+    const into = by === "day" || span <= 45 ? "week" : span > 400 ? "year" : "month";
+    // The same period, always: "by month" alone reads as this year, "by week" alone as the last twelve weeks.
+    const again = `${question} by ${into}${namesWindow(question) ? "" : ` in ${period.name}`}`;
+    const same = windowOf(again, asOf);
+    if (same.from === period.from && same.to === period.to) return buildChart(again, transactions, asOf, only, said, most);
   }
   /*
    * A pie is the whole, so what does not get a slice of its own goes into
@@ -1576,7 +1631,7 @@ export function buildChart(
      * month's spending and is wrong by everything it left out. The same goes
      * for one wallet.
      */
-    title: `${focus.item || word}${focus.about ? ` on ${capital(focus.about)}` : ""}${focus.wallet ? ` from ${focus.wallet}` : ""} by ${by}, ${
+    title: `${focus.item || (direction !== "revenue" && focus.group) || word}${focus.about ? ` on ${capital(focus.about)}` : ""}${focus.wallet ? ` from ${focus.wallet}` : ""} by ${by}, ${
       period.name
     }`,
     by,
@@ -1786,7 +1841,7 @@ export function wantsBothDirections(question: string): boolean {
 export function chartAsText(chart: Chart): string {
   if (chart.measure) return chartInWords(chart);
   const lines = chart.rows.map((r) => {
-    const share = chart.total > 0 ? `, ${Math.round((r.value * 100) / chart.total)}%` : "";
+    const share = chart.total > 0 ? `, ${percentOf(r.value, chart.total)}` : "";
     const count = r.count > 0 ? `, ${r.count} ${r.count === 1 ? "entry" : "entries"}` : "";
     const was = r.previous !== undefined ? `, was ${chartLabel(r.previous)}` : "";
     return `- ${r.label}: ${chartLabel(r.value)}${share}${count}${was}`;
@@ -1797,7 +1852,7 @@ export function chartAsText(chart: Chart): string {
   return [
     `${chart.title}: ${chartLabel(chart.total)} in all.`,
     ...lines,
-    chart.othersCount > 0 ? `- ${chart.othersCount} smaller ones: ${chartLabel(rest)}${chart.total > 0 ? `, ${Math.round((rest * 100) / chart.total)}%` : ""}` : "",
+    chart.othersCount > 0 ? `- ${chart.othersCount} smaller ones: ${chartLabel(rest)}${chart.total > 0 ? `, ${percentOf(rest, chart.total)}` : ""}` : "",
   ]
     .filter(Boolean)
     .join("\n");

@@ -42,6 +42,7 @@ import {
   wantsBothDirections,
   windowOf,
   presentationFor,
+  percentOf,
 } from "./charts";
 import { budgetForMonth } from "./budget";
 import { owedChange, type Debt } from "./debt";
@@ -683,7 +684,8 @@ export function buildMeasureChart(
 
 // ── What a chart says ───────────────────────────────────────────────────────
 
-const percent = (part: number, whole: number): number => (whole > 0 ? Math.round((part * 100) / whole) : 0);
+// Honestly rounded: "under 1%", "over 99%" (`percentOf`).
+const percent = (part: number, whole: number): string => percentOf(part, whole);
 
 const UNIT: Readonly<Record<ChartBy, string>> = {
   item: "item",
@@ -753,7 +755,7 @@ export function chartReading(chart: Chart): string {
     if (chart.by === "wallet") {
       const top = rows[0] as ChartRow;
       const below = rows.filter((r) => r.value < 0);
-      return `${top.label} holds the most, ${m(top.value)}${chart.total > 0 && rows.length > 1 ? `, ${percent(top.value, chart.total)}% of the ${m(chart.total)} across these accounts` : ""}.${below.length > 0 ? ` ${below.map((r) => r.label).join(" and ")} ${below.length === 1 ? "is" : "are"} below zero.` : ""}${ahead}`;
+      return `${top.label} holds the most, ${m(top.value)}${chart.total > 0 && rows.length > 1 ? `, ${percent(top.value, chart.total)} of the ${m(chart.total)} across these accounts` : ""}.${below.length > 0 ? ` ${below.map((r) => r.label).join(" and ")} ${below.length === 1 ? "is" : "are"} below zero.` : ""}${ahead}`;
     }
     const firstRow = rows[0] as ChartRow;
     const moved = last.value - firstRow.value;
@@ -790,7 +792,7 @@ export function chartReading(chart: Chart): string {
       // Only what the slices can stand behind: the smaller periods are inside "Other", so no lowest and no average is said.
       const folded = rows.filter((r) => /^Other\b/i.test(r.label)).reduce((sum, r) => sum + r.value, 0);
       const top = dated.reduce((a, b) => (b.value > a.value ? b : a));
-      return `The ${dated.length} largest ${unit}s have slices of their own. ${when(top.label).replace(/^in /, "")} is the largest, ${m(top.value)}, ${percent(top.value, chart.total)}% of the ${m(chart.total)} total. The other ${unit}s together are ${m(folded)}.`;
+      return `The ${dated.length} largest ${unit}s have slices of their own. ${when(top.label).replace(/^in /, "")} is the largest, ${m(top.value)}, ${percent(top.value, chart.total)} of the ${m(chart.total)} total. The other ${unit}s together are ${m(folded)}.`;
     }
     if (!rows.some((r) => r.value > 0)) return "";
     if (rows.length === 1) return `${lastName}: ${m(last.value)}.`;
@@ -834,8 +836,8 @@ export function chartReading(chart: Chart): string {
   if (rows.length === 1) return `All of it is ${top.label}: ${m(top.value)} over ${top.count} ${top.count === 1 ? "entry" : "entries"}.`;
   const share = percent(top.value, chart.total);
   const threeShare = percent(rows.slice(0, 3).reduce((s, r) => s + r.value, 0), chart.total);
-  const three = rows.length > 3 ? ` The top three make up ${threeShare}%.` : "";
-  return `${top.label} is the largest, ${m(top.value)}, ${share}% of the ${m(chart.total)} total.${three}`;
+  const three = rows.length > 3 ? ` The top three make up ${threeShare}.` : "";
+  return `${top.label} is the largest, ${m(top.value)}, ${share} of the ${m(chart.total)} total.${three}`;
 }
 
 /**

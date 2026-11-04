@@ -111,6 +111,9 @@ import {
   chartInWords,
   chartLabel,
   isChartFollowUp,
+  groupingOf,
+  windowOf,
+  percentOf,
   asksChartColour,
   namesWindow,
   pointsAtScreen,
@@ -2392,6 +2395,41 @@ export function AskPanel({
     }
     return null;
   };
+  /**
+   * The chart said last, when nothing has been asked since but the shape of
+   * a picture: what "bars" or "pie" said next is about.
+   */
+  const recentChart = (): Chart | undefined => {
+    for (let i = turns.length - 1; i >= 0 && i >= turns.length - 4; i -= 1) {
+      const t = turns[i]!;
+      if (isChart(t)) return t.chart;
+      if (t.kind === "you" && (drawReply(t.text) ?? drawsBack(t.text)) === null) return undefined;
+    }
+    return undefined;
+  };
+  /** The question a chart was drawn from, without the shape it was drawn in, and keeping its grouping over time. */
+  const redrawAsked = (chart: Chart): string | null => {
+    if (!chart.asked) return null;
+    const base = chart.asked
+      .replace(/\b(?:as\s+(?:a|an)\s+)?(?:pie(?:\s+chart)?|donut|doughnut|bar\s+(?:chart|graph)|bars?|line(?:\s+chart)?|trend|chart|graph|plot)\b/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!base) return null;
+    const over: Partial<Record<Chart["by"], string>> = { day: "daily", week: "weekly", month: "by month", year: "by year" };
+    const asked = overTime(chart.by) && groupingOf(base) !== chart.by ? `${base} ${over[chart.by] ?? ""}`.trim() : base;
+    /*
+     * And its period, which the words may only have implied: "pie" after a
+     * trend of the gym across the whole ledger drew 2026 alone, "by month"
+     * reading as this year (4 November 2026 sweep). The title ends with it.
+     */
+    const marker = ` by ${chart.by}, `;
+    const at = chart.title.indexOf(marker);
+    const period = at >= 0 && !chart.measure && !chart.against ? chart.title.slice(at + marker.length) : "";
+    if (!period) return asked;
+    const want = windowOf(`in ${period}`, asOf);
+    const got = windowOf(asked, asOf);
+    return got.from === want.from && got.to === want.to ? asked : `${asked} in ${period}`;
+  };
   /** When each item was last used, so the reader is told which ones are years old (aiClient.ts). */
   const lastUsed = useMemo(() => itemsLastUsed(transactions), [transactions]);
 
@@ -4511,13 +4549,14 @@ export function AskPanel({
   const chartsFor = (asked: string, hint: ChartHint | null, pair: ComparedPeriods | null): Chart[] => {
     if (measureOf(hint)) {
       const drawn = buildMeasureChart(asked, hint, { transactions, budgets, reference, debts, asOf });
-      return drawn ? [drawn] : [];
+      return drawn ? [{ ...drawn, asked }] : [];
     }
     const said = inWords(asked, hint);
     const both = wantsBothDirections(said);
     const income = buildChart(said, reportRows, asOf, both ? "revenue" : undefined, pair);
     const spending = both ? buildChart(said, reportRows, asOf, "spending", pair) : null;
-    return [spending, income].filter((c): c is Chart => c !== null);
+    // Each keeps the question it was drawn from, for "bars" or "pie" said next (`redrawAsked`).
+    return [spending, income].filter((c): c is Chart => c !== null).map((c) => ({ ...c, asked: said }));
   };
 
   /** A chart said in the conversation, and kept in the record with its figures. */
@@ -5141,7 +5180,7 @@ export function AskPanel({
             .filter((t): t is Said => t.kind === "you")
             .slice(0, 4)
             .map((t) => t.text)
-            .find((q) => q !== note && !(drawReply(q) ?? drawsBack(q)) && /\b(?:break\s*down|breakdown|categor\w*|by\s+(?:kind|item|type|wallet)|spen[dt]\w*|expenses?|income|revenue|earn\w*|where\s+(?:did\s+)?my\s+money)\b/i.test(q))
+            .find((q) => q !== note && !(drawReply(q) ?? drawsBack(q)) && (/\b(?:break\s*down|breakdown|categor\w*|by\s+(?:kind|item|type|wallet)|spen[dt]\w*|expenses?|income|revenue|earn\w*|receiv\w*|where\s+(?:did\s+)?my\s+money)\b/i.test(q) || measureOf(localHint(q, reference.credits ?? [])) !== null))
             // What it was for is not what to draw ("so I can do Budgeting").
             ?.replace(BUDGET_PURPOSE, " ")
             .replace(/\s+/g, " ")
@@ -5150,10 +5189,24 @@ export function AskPanel({
     // A breakdown asked for is the subject before any one word guessed from it.
     // Not for a trend, which is about time: "trend" after "a breakdown of my spending this month" drew nothing, where it drew the year by month.
     const shapeSaid = drawReply(lead) ?? drawsBack(lead);
+    /*
+     * The chart just drawn, in the shape said now: "pie" of the year's food,
+     * then "bars", drew this month's food day by day, and "chart" after a
+     * comparison drew one month (4 November 2026 sweep). A trend of a chart
+     * across items is a question about time, read as before.
+     */
+    const lastChart = bareDraw ? recentChart() : undefined;
+    const redrawn = lastChart && shapeSaid && (shapeSaid !== "trend" || overTime(lastChart.by)) ? redrawAsked(lastChart) : null;
     const fromQuestion = shapeSaid !== "trend" ? askedToDraw : null;
     const breakdownAsked = fromQuestion && /\b(?:break\s*down|breakdown|categor\w*|by\s+(?:kind|item|type|wallet)|where\s+(?:did\s+)?my\s+money)\b/i.test(fromQuestion) ? fromQuestion : null;
-    const drawTopic = offeredDraw.current ?? lastAnswered ?? breakdownAsked ?? (subjectNow ? `${subjectNow} spending` : fromQuestion);
-    const guessedTopic = drawTopic !== null && drawTopic === fromQuestion;
+    /*
+     * A balance, a budget or a debt asked about, drawn as that: "show me my
+     * balance" then "chart" said there was nothing to draw, and "show me my
+     * budget" then "chart" drew the month's spending by item.
+     */
+    const measureAsked = askedToDraw && measureOf(localHint(askedToDraw, reference.credits ?? [])) ? askedToDraw : null;
+    const drawTopic = offeredDraw.current ?? lastAnswered ?? redrawn ?? measureAsked ?? breakdownAsked ?? (subjectNow ? `${subjectNow} spending` : fromQuestion);
+    const guessedTopic = drawTopic !== null && (drawTopic === fromQuestion || drawTopic === measureAsked);
     const drawAs = drawTopic && !as && files.length === 0 ? (drawReply(lead) ?? drawsBack(lead)) : null;
     // An offer is for the next message only.
     if (!drawAs) offeredDraw.current = null;
@@ -5161,8 +5214,8 @@ export function AskPanel({
       const question = `${drawTopic} ${drawAs === "pie" ? "as a pie" : drawAs === "trend" ? "trend" : drawAs === "bars" ? "bar chart" : "chart"}`;
       offeredDraw.current = null;
       drawnNext.current = null;
-      // Two periods asked about are drawn side by side, not as one (21 October 2026).
-      const pair = drawAs === "pie" ? null : comparedPeriods(drawTopic, asOf);
+      // Two periods asked about are drawn side by side, not as one (21 October 2026); a comparison redrawn keeps its two.
+      const pair = drawAs === "pie" ? null : drawTopic === redrawn ? (lastChart?.against?.periods ?? comparedPeriods(drawTopic, asOf)) : comparedPeriods(drawTopic, asOf);
       const charts = chartsFor(question, mergeHint(localHint(question, reference.credits ?? []), null, question, reference.credits ?? []), pair);
       // A subject taken from an earlier question that draws nothing is let go: the request is drawn as said, as before.
       if (!(charts.length === 0 && guessedTopic)) {
@@ -7526,7 +7579,7 @@ export function AskPanel({
       const charts = pair
         ? justShown
           ? []
-          : [buildChart(question, reportRows, asOf, undefined, pair)].filter((c): c is Chart => c !== null)
+          : [buildChart(question, reportRows, asOf, undefined, pair)].filter((c): c is Chart => c !== null).map((c) => ({ ...c, asked: question }))
         : (() => {
             const hint = mergeHint(localHint(question, credits), routed?.draw ?? null, question, credits);
             if (chartHelps(question, hint, justShown)) return chartsFor(question, hint, null);
@@ -7713,7 +7766,7 @@ export function AskPanel({
        */
       const needs = !affordish && !essay && ((!keepsBudget && (asksWhatItNeeds(ruled) || planQuestion)) || plansAlign);
       const budgetish = !affordish && (asksBudgetAdvice(ruled) || splitAgain || newIncome || checksFit || needs || keepsBudget);
-      const spent = !affordish && !budgetish && !essay && !wantsChart(note) ? readSpendAsk(ruled, knownItems, asOf) : null;
+      const spent = !affordish && !budgetish && !essay && !wantsChart(note) ? readSpendAsk(ruled, knownItems, asOf, reference.wallets) : null;
       // "how much have I earned since the beginning", "all income since 2022, not only Framelink" (earnAsk.ts).
       const earned = !affordish && !budgetish && !spent && !wantsChart(note) ? readEarnAsk(ruled, reference.revenueCategories, asOf) : null;
 
@@ -9743,10 +9796,22 @@ export function AskPanel({
      * picture offered after it when the format was not said (13 October 2026).
      */
     const presentation = presentationFor(note);
+    /*
+     * Or said as a bare subject and a period: "gym spending", "spending by
+     * wallet last month", "spending in cash last month", "my subscriptions
+     * this year". With the AI off each got "I need the AI model ... here is
+     * a summary of the month instead" (4 November 2026 sweep). Never an
+     * entry: no amount, and no word that books one.
+     */
+    const bareSubject =
+      note.trim().split(/\s+/).length <= 8 &&
+      !/\d/.test(note.replace(/\b20\d{2}\b/g, "").replace(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b/gi, "")) &&
+      !/^\s*(?:i\s+|i've\s+|ive\s+)?(?:bought|paid|pay|spent|got|received|sent|send|transfer\w*|add|record|log|plan|budget|set)\b/i.test(note) &&
+      !/\?\s*$/.test(note);
     const writtenHint =
       files.length === 0 && !as && !aboutADebt && (presentation === "text" || (!followUp && !narrows)) && presentation !== "chart" &&
-      /\b(?:spend|spent|spending|expenses?|gastos|income|incoming|earn\w*|revenue|money (?:went|go))\b/i.test(note) &&
-      /\b(?:summary|summari[sz]e|overview|breakdown|break down|detailed|details|list|show|where|what did i|vs\.?|versus|compared?)\b/i.test(note)
+      /\b(?:spend|spent|spending|expenses?|gastos|income|incoming|earn\w*|revenue|money (?:went|go)|subscriptions?|bills)\b/i.test(note) &&
+      (bareSubject || /\b(?:summary|summari[sz]e|overview|breakdown|break down|detailed|details|list|show|where|what did i|vs\.?|versus|compared?)\b/i.test(note))
         ? (localHint(ruled, credits) ?? { by: "item" })
         : null;
     if (writtenHint && !measureOf(writtenHint)) {
@@ -13829,7 +13894,7 @@ function ChartRead({ chart, at }: { chart: Chart; at: number | null }) {
     );
   }
 
-  const share = chart.total > 0 ? Math.round((row.value / chart.total) * 100) : 0;
+  const share = percentOf(row.value, chart.total);
 
   if (chart.measure === "budget") {
     const budget = row.previous ?? 0;
@@ -13858,7 +13923,7 @@ function ChartRead({ chart, at }: { chart: Chart; at: number | null }) {
         <span className="fms-proposalmoney fms-chartread-money">{chartLabel(row.value)}</span>
         <span className="fms-chartread-of">
           {chart.measure === "owed" ? "owed" : "held"} {levelWhen(chart, row.label)}
-          {chart.by === "wallet" && chart.total > 0 && row.value > 0 ? `, ${share}% of what these accounts hold` : ""}
+          {chart.by === "wallet" && chart.total > 0 && row.value > 0 ? `, ${share} of what these accounts hold` : ""}
         </span>
       </p>
     );
@@ -13885,7 +13950,7 @@ function ChartRead({ chart, at }: { chart: Chart; at: number | null }) {
       <span className="fms-chartread-label">{row.label}</span>
       <span className="fms-proposalmoney fms-chartread-money">{chartLabel(row.value)}</span>
       <span className="fms-chartread-of">
-        {share}% of the total, {row.count} {row.count === 1 ? "entry" : "entries"}
+        {share} of the total, {row.count} {row.count === 1 ? "entry" : "entries"}
       </span>
     </p>
   );
@@ -13923,7 +13988,7 @@ function ChartView({ chart }: { chart: Chart }) {
         part: row.label,
         lines: [
           `${row.label}: ${formatMoney(row.value)}${row.count > 0 ? `, ${row.count} ${row.count === 1 ? "entry" : "entries"}` : ""}`,
-          ...(whole > 0 && chart.kind === "pie" ? [`${Math.round((row.value / whole) * 100)}% of the ${formatMoney(whole)} the chart shows`] : []),
+          ...(whole > 0 && chart.kind === "pie" ? [`${percentOf(row.value, whole)} of the ${formatMoney(whole)} the chart shows`] : []),
         ],
       });
     }
@@ -14132,7 +14197,7 @@ function PieView({
       // money (`rampFor`). Fading one hue over a dark background turned the
       // small slices the colour of a transfer.
       colour: rampFor(flowOf(chart), i, chart.rows.length),
-      percent: Math.round(fraction * 100),
+      percent: percentOf(r.value, chart.total),
     };
     offset += fraction * circumference;
     return slice;
@@ -14185,7 +14250,7 @@ function PieView({
               <span className="fms-pieswatch" style={{ background: s.colour }} aria-hidden />
               <span className="fms-pielabel">{s.label}</span>
               <span className="fms-piefigure fms-proposalmoney">
-                {s.percent}% · {chartLabel(s.value)}
+                {s.percent} · {chartLabel(s.value)}
               </span>
             </button>
           </li>

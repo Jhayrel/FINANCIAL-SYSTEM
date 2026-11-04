@@ -2616,6 +2616,39 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
   - a pie of months kept January to June and folded the recent months: it
     keeps the largest, and its words no longer call "Other months" a month
     or name a lowest month it cannot see.
+- **"Find more problems ... the charting is always sometimes wrong" (4
+  November, with the newest backup)**: the owner's own sequence and a sweep
+  of 30 questions, each then "pie", "bars", "trend" or "chart", with the AI
+  off and on (`chartSweep.test.ts`). Fixed:
+  - "Show me revenue", then "pie", drew 2026's income by month ("wrong chart
+    it shows the revenue per month"): Framelink Media was 99.7% of November,
+    which counted as one slice, and the months it became were the year's. A
+    pie now turns into weeks or months only when exactly one slice has money,
+    and always over the same period.
+  - Shares say "under 1%" and "over 99%", never "0%" beside money or "100%"
+    beside other parts (`percentOf`): breakdowns, charts, legends, readings.
+  - "bars" after a pie, or "chart" after a comparison, redraws that chart
+    (`Chart.asked`, `redrawAsked`): the year's food became this month's by
+    day, the comparison one month.
+  - "earn" and "receive" read as income: "how much did i earn last month",
+    then "pie", drew spending.
+  - "what did i spend the most on in september" and "top spending this year"
+    were answered, and handed to the AI, as November (`quickAsk` period).
+  - "how much did i spend in maya this month" counts Maya only; "how much did
+    i pay in bills last month" counts the bills.
+  - "show me my balance" then "chart" drew nothing; "show me my budget" then
+    "chart" drew spending by item. Each draws its own now.
+  - Bills or Subscriptions named alone is a filter by item ("my subscriptions
+    this year" drew Spending, Bills and Subscriptions as three slices).
+  - With the AI off, "gym spending", "spending by wallet last month" and the
+    like are answered from the ledger, not with the month's summary.
+  - The Landbank ATM slip (#3977): the first pass over the picture had "AN
+    ATM FEE OF" and "16.00" lines apart, so PHP 5,816.00 was booked with no
+    fee; the owner edited it to PHP 5,800.00 plus PHP 16.00. The reading
+    that finds the fee now wins, a fee a line or two below is read when it
+    makes the cash whole hundreds, and "O3NOV2026" is 3 November.
+  - Changed on purpose, for the owner to know: a pie of several sources where
+    one is 98% or more is now drawn by source (it used to become months).
 - **"For some reason I cannot download backup" (4 November)**: the backup
   reads every record of what happened first (8,500 and more), and only then
   started the download. Past a few seconds a browser no longer counts it as

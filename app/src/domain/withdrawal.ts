@@ -75,11 +75,12 @@ const peso = (c: Centavos): string => `PHP ${(Math.floor(c / 100)).toLocaleStrin
 
 export function dateIn(text: string): IsoDate | undefined {
   const pad = (n: number): string => String(n).padStart(2, "0");
-  // "29SEP2026", "29 SEP 2026", "29-Sep-2026"
-  const dayFirst = /\b(\d{1,2})[\s-]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?[\s,-]?(20\d{2})\b/i.exec(text);
-  if (dayFirst) {
+  // "29SEP2026", "29 SEP 2026", "29-Sep-2026", and "O3NOV2026", a zero read as the letter O (Landbank slip, 3 November 2026).
+  const dayFirst = /(?<![a-z\d])([\dO]{1,2})[\s-]?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?[\s,-]?(20\d{2})\b/i.exec(text);
+  const day = Number((dayFirst?.[1] ?? "").replace(/O/gi, "0"));
+  if (dayFirst && day >= 1 && day <= 31) {
     const m = MONTHS.indexOf((dayFirst[2] ?? "").toLowerCase()) + 1;
-    return `${dayFirst[3]}-${pad(m)}-${pad(Number(dayFirst[1]))}`;
+    return `${dayFirst[3]}-${pad(m)}-${pad(day)}`;
   }
   // "SEP 29, 2026"
   const monthFirst = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s?(\d{1,2}),?\s?(20\d{2})\b/i.exec(text);
@@ -123,14 +124,37 @@ export const BANKS: readonly [RegExp, string][] = [
  * rows is a list, and the list rules read it.
  */
 export function readWithdrawal(readings: readonly string[]): Withdrawal | null {
-  for (const text of readings) {
-    if (!text.trim()) continue;
-    if (!/\bwithdraw(?:al|n|ing)?\b|\bw\/d\b/i.test(text)) continue;
-    if (!/\b(?:atm|trace|stan|terminal|term id|card|application|location|seq(?:uence)?|ref(?:erence)?\s*(?:no|number)|approval)\b/i.test(text)) continue;
+  const found = readings.map(readOne).filter((w): w is Withdrawal => w !== null);
+  const first = found[0];
+  if (!first) return null;
+  /*
+   * The same slip read more than once, as two passes over one picture are:
+   * the reading that found the fee wins. The Landbank slip's first pass had
+   * "AN ATM FEE OF" and "16.00" lines apart, so PHP 5,816.00 was booked as
+   * the cash with no fee, where the machine gave PHP 5,800.00 and charged
+   * PHP 16.00 (owner's chat, 3 November 2026).
+   */
+  const best = found.find((w) => w.fee > 0 && (w.printed === first.printed || w.cash === first.cash)) ?? first;
+  const other = (pick: (w: Withdrawal) => unknown): Withdrawal | undefined => found.find((w) => pick(w) !== undefined && pick(w) !== "");
+  return {
+    ...best,
+    ...(best.date === undefined && other((w) => w.date)?.date ? { date: other((w) => w.date)!.date } : {}),
+    ...(best.time === undefined && other((w) => w.time)?.time ? { time: other((w) => w.time)!.time } : {}),
+    ...(best.balanceAfter === undefined && other((w) => w.balanceAfter)?.balanceAfter !== undefined ? { balanceAfter: other((w) => w.balanceAfter)!.balanceAfter } : {}),
+    place: best.place || other((w) => w.place)?.place || "",
+  };
+}
+
+function readOne(text: string): Withdrawal | null {
+  // One reading of the picture.
+  {
+    if (!text.trim()) return null;
+    if (!/\bwithdraw(?:al|n|ing)?\b|\bw\/d\b/i.test(text)) return null;
+    if (!/\b(?:atm|trace|stan|terminal|term id|card|application|location|seq(?:uence)?|ref(?:erence)?\s*(?:no|number)|approval)\b/i.test(text)) return null;
     // A deposit, a cash in or a transfer slip says so.
-    if (/\b(?:deposit|cash[\s-]?in|fund transfer|bills? payment)\b/i.test(text) && !/cash withdrawal/i.test(text)) continue;
+    if (/\b(?:deposit|cash[\s-]?in|fund transfer|bills? payment)\b/i.test(text) && !/cash withdrawal/i.test(text)) return null;
     const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
-    if (lines.flatMap(figures).length > 8) continue;
+    if (lines.flatMap(figures).length > 8) return null;
 
     // ── The printed amount ───────────────────────────────────────────────
     const onWithdrawal = lines.find((l) => /withdraw/i.test(l) && figures(l).length > 0);
@@ -138,13 +162,21 @@ export function readWithdrawal(readings: readonly string[]): Withdrawal | null {
     const printed =
       (onWithdrawal ? figures(onWithdrawal)[0] : undefined) ??
       (amountAt >= 0 ? (figures(lines[amountAt] ?? "")[0] ?? figures(lines[amountAt + 1] ?? "")[0]) : undefined);
-    if (printed === undefined || printed <= 0) continue;
+    if (printed === undefined || printed <= 0) return null;
 
     // ── The fee ───────────────────────────────────────────────────────────
     const feeMatch =
       /\bfee\b[^\d\n]{0,20}?(?:₱|php|p)?\s?(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})/i.exec(text) ??
       /(?:₱|php|p)?\s?(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})\s*(?:atm\s*|service\s*|convenience\s*)?fee\b/i.exec(text);
-    const fee = feeMatch ? Number((feeMatch[1] ?? "0").replace(/,/g, "")) * 100 + Number(feeMatch[2] ?? "0") : 0;
+    const sameLine = feeMatch ? Number((feeMatch[1] ?? "0").replace(/,/g, "")) * 100 + Number(feeMatch[2] ?? "0") : 0;
+    /*
+     * "AN ATM FEE OF" on one line and "16.00" a line or two below, as a
+     * picture taken at an angle reads. Taken only when it makes the cash
+     * whole hundreds, so a balance printed under it is never a fee.
+     */
+    const apart = /\batm\s*fee\s*(?:of\b)?[^\d]{0,40}?(\d{1,3}(?:,\d{3})*|\d+)\.(\d{2})/is.exec(text);
+    const apartFee = apart ? Number((apart[1] ?? "0").replace(/,/g, "")) * 100 + Number(apart[2] ?? "0") : 0;
+    const fee = sameLine > 0 ? sameLine : apartFee > 0 && apartFee < printed && (printed - apartFee) % 10_000 === 0 ? apartFee : 0;
 
     // ── Which figure the machine gave ─────────────────────────────────────
     const evidence: string[] = [];
@@ -198,7 +230,6 @@ export function readWithdrawal(readings: readonly string[]): Withdrawal | null {
       evidence,
     };
   }
-  return null;
 }
 
 /** The owner's cash wallet: the one called Cash, or the first whose name says cash. */
