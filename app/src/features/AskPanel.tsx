@@ -152,7 +152,7 @@ import { billStatuses } from "../domain/bills";
 import { spentFromLeft } from "../domain/leftOver";
 import { readSettleAsk, settleLine } from "../domain/settleLine";
 import { wholeRows } from "../domain/covers";
-import { incomeOf } from "../domain/totals";
+import { costOf, incomeOf } from "../domain/totals";
 import { asksIncomeBudget, budgetFromIncome, checkSplit, incomeBudget, incomeBudgetWords, mostWords, overWords, readBudgetMove, readIncomePlan, answerMoveIn, type BudgetMove } from "../domain/incomeBudget";
 import { asksCarryOver, asksNextMonth, asksSafeToSpend, nextMonthWords, rateIn, safeWords } from "../domain/safeAsk";
 import { challengedAnswer, challengesAnswer, everydayPrices } from "../domain/dayFit";
@@ -246,7 +246,7 @@ import { notEditable, transactionToDraft } from "../domain/entry";
 import { notArrivedWords, placeSentMoney } from "../domain/destination";
 import { carryWords, dayFigures, nextMonthStart, safeOverDays, yesterdayOf } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
-import { allocationWords, asksAllocations, monthAsked, SAFE_RULE } from "../domain/allocationAsk";
+import { allocationWords, asksAllocations, kindAsked, kindLeftWords, monthAsked, SAFE_RULE } from "../domain/allocationAsk";
 import { monthAllocations, monthOfDay } from "../domain/monthAllocation";
 import { typedOnce } from "../domain/typedOnce";
 import { readSavedAsk, savedAnswer } from "../domain/savedAsk";
@@ -5951,11 +5951,34 @@ export function AskPanel({
         }
         return;
       }
+      // A kind with no allocation: what it has spent and any limit, said here rather than left to a model that may not answer.
+      const kind = kindAsked(note, reference.spendingTypes.map((t) => t.name), month);
+      if (kind) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const y = Number(ym.slice(0, 4));
+        const m = Number(ym.slice(5, 7));
+        const spent = reportRows
+          .filter((t) => t.date.slice(0, 7) === ym && t.item.trim().toLowerCase() === kind.toLowerCase())
+          .reduce((sum, t) => sum + Math.max(0, costOf(t)), 0);
+        const limit = budgets[String(y)]?.categories?.[kind]?.[m - 1] ?? null;
+        const words = kindLeftWords(kind, month, spent, limit, ym === monthOfDay(asOf) && brief.safe ? { safe: brief.safe.safe, perDay: brief.safe.perDay } : null);
+        setBusy(true);
+        try {
+          await askQuestion(note, false, { text: `Worked out by the app from the entries. Answer with these figures. ${SAFE_RULE}\n${words}`, fallback: words });
+        } finally {
+          setBusy(false);
+        }
+        return;
+      }
     }
 
     // "Don't count the trip plan in safe to spend" is a change to a plan, not the safe-to-spend question.
     const editsAPlanCount = /\bplan\b/i.test(note) && /\b(?:count|counted|counting|set\s+aside)\b/i.test(note);
-    if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && (asksSafeToSpend(note) || asksShortBudget(ruled, asOf)) && !plainlyDone(note) && !editsAPlanCount) {
+    // "What happens next month": the From 1 figures, which this answer leads with (`asksNextMonth`).
+    const nextMonthAsked = asksNextMonth(note, asOf) && /\b(?:what\s+happens?|happen|how\s+much|can\s+i\s+spend|safe|left|carr(?:y|ies)|natira|reset)\b/i.test(note);
+    if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && (asksSafeToSpend(note) || asksShortBudget(ruled, asOf) || nextMonthAsked) && !plainlyDone(note) && !editsAPlanCount) {
       setDraft("");
       say({ kind: "you", text: note });
       log(aiEvent("asked", "add", { text: note }));

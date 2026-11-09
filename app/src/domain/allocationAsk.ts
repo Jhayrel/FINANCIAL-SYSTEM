@@ -86,3 +86,37 @@ export function allocationWords(text: string, month: MonthAllocations, safe: { r
   return parts.join("\n\n");
 }
 
+/**
+ * "How much is left for gas" when gas has no allocation: the kind it names,
+ * from the owner's own kinds, or null. It went to the model and, with none,
+ * said only "The AI model is not working" (heavy test, 9 November 2026).
+ */
+export function kindAsked(text: string, kinds: readonly string[], month: MonthAllocations): string | null {
+  if (!LEFT_FOR.test(text)) return null;
+  const t = text.toLowerCase();
+  const kind = [...kinds]
+    .sort((a, b) => b.length - a.length)
+    .find((k) => k.trim().length >= 2 && new RegExp(`(?<![a-z0-9])${k.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9])`).test(t));
+  if (!kind) return null;
+  // One with an allocation is `allocationWords`'s.
+  return month.lines.some((s) => s.line.kind.trim().toLowerCase() === kind.trim().toLowerCase()) ? null : kind;
+}
+
+/** What is left for a kind with no allocation: what it has spent, its limit if it has one, and how to set money aside for it. */
+export function kindLeftWords(
+  kind: string,
+  month: MonthAllocations,
+  spent: number,
+  limit: number | null,
+  safe: { readonly safe: number; readonly perDay: number } | null,
+): string {
+  const name = monthWords(month.month);
+  const parts = [`${kind} has no allocation for ${name}, so nothing is set aside for it: ${formatMoney(spent)} spent on it so far.`];
+  if (limit !== null && limit > 0) {
+    parts.push(spent > limit ? `It is ${formatMoney(spent - limit)} over its ${formatMoney(limit)} limit.` : `It has a ${formatMoney(limit)} limit: ${formatMoney(limit - spent)} left of it.`);
+  }
+  if (safe && month.phase === "running") parts.push(`What you can still spend on it comes out of safe to spend: ${formatMoney(Math.max(0, safe.safe))} until ${name.split(" ")[0]} ends, ${formatMoney(Math.max(0, safe.perDay))} today.`);
+  parts.push(`To set money aside for ${kind}, add an allocation on Budget, under Allocations.`);
+  return parts.join(" ");
+}
+

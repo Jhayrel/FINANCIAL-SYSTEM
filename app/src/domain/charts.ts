@@ -938,6 +938,8 @@ export const wantsReport = (question: string): boolean =>
  */
 interface Focus {
   readonly item: string;
+  /** Two or more kinds named together ("food and gas"): drawn side by side, those kinds only. Empty otherwise. */
+  readonly items: readonly string[];
   readonly wallet: string;
   /**
    * A word from the owner's own descriptions the question is about: a place,
@@ -1077,12 +1079,38 @@ function named(question: string, names: readonly string[]): string {
   return "";
 }
 
+/**
+ * Every name the question says, longest first, each part of the question
+ * used once: "food and gas" is Food and Gas, and "self care" is never also
+ * "care". `named` keeps the first only, so "pie chart of food and gas this
+ * month" drew Food alone, and on the owner's data said there was nothing to
+ * draw (heavy test, 9 November 2026).
+ */
+function namedAll(question: string, names: readonly string[]): string[] {
+  let asked = question.toLowerCase();
+  const byLength = [...new Set(names.map((n) => n.trim()).filter(Boolean))].sort((a, b) => b.length - a.length);
+  const found: string[] = [];
+  for (const name of byLength) {
+    const escaped = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const at = new RegExp(`(?<![a-z0-9])${escaped}s?(?![a-z0-9])`);
+    if (at.test(asked)) {
+      found.push(name);
+      asked = asked.replace(at, " ");
+    }
+  }
+  return found;
+}
+
 function focusOf(question: string, transactions: readonly Transaction[]): Focus {
-  const item = named(question, transactions.map((t) => t.item));
+  const allItems = namedAll(question, transactions.map((t) => t.item));
+  const items = allItems.length >= 2 ? allItems : [];
+  const item = items.length > 0 ? "" : named(question, transactions.map((t) => t.item));
   const wallet = named(question, transactions.flatMap((t) => [t.fromWallet, t.toWallet]));
-  const group = item ? "" : groupOf(question);
+  const group = item || items.length > 0 ? "" : groupOf(question);
   return {
-    about: aboutOf(question, transactions, [item, wallet, ...(group ? ["bill", "bills", "subscription", "subscriptions", "subs"] : [])].filter(Boolean)),
+    items,
+    // Kinds named together are kinds, not a topic in the descriptions: "food and gas" read Gas as "on Gas" too, and drew Gas alone.
+    about: aboutOf(question, transactions, [item, ...items, wallet, ...(group ? ["bill", "bills", "subscription", "subscriptions", "subs"] : [])].filter(Boolean)),
     group,
     item,
     /**
@@ -1432,8 +1460,11 @@ export function buildChart(
   const sideBySide = only !== undefined && said0 === "item" && span > 45 && !/\b(?:by|per)\s+items?\b|\bitems?\b|\bwhat\b/i.test(question);
   const asked0: ChartBy = (said0 === "year" && oneYear) || sideBySide ? "month" : said0;
   const asked = asked0 === "month" && span <= 45 && !comparesMonths(question) ? "day" : asked0;
+  const overTimeSaid = /\b(?:by|per)\s+(?:days?|weeks?|months?|years?)\b|\btrends?\b|\bover\s+time\b|\bdaily\b|\bweekly\b|\bmonthly\b/i.test(question);
   const by: ChartBy =
-    focus.item && asked === "item"
+    focus.items.length > 0 && !overTimeSaid
+      ? "item"
+      : focus.item && asked === "item"
       ? span <= 45
         ? "day"
         : "month"
@@ -1464,6 +1495,7 @@ export function buildChart(
       t.date >= period.from &&
       t.date <= period.to &&
       (!focus.item || t.item.trim().toLowerCase() === focus.item.toLowerCase()) &&
+      (focus.items.length === 0 || focus.items.some((i) => i.toLowerCase() === t.item.trim().toLowerCase())) &&
       (!focus.group || direction === "revenue" || t.category === focus.group) &&
       matchesWallet(t) &&
       mentions(t, focus.about),
@@ -1631,7 +1663,7 @@ export function buildChart(
      * month's spending and is wrong by everything it left out. The same goes
      * for one wallet.
      */
-    title: `${focus.item || (direction !== "revenue" && focus.group) || word}${focus.about ? ` on ${capital(focus.about)}` : ""}${focus.wallet ? ` from ${focus.wallet}` : ""} by ${by}, ${
+    title: `${focus.items.length > 0 ? focus.items.join(" and ") : focus.item || (direction !== "revenue" && focus.group) || word}${focus.about ? ` on ${capital(focus.about)}` : ""}${focus.wallet ? ` from ${focus.wallet}` : ""} by ${by}, ${
       period.name
     }`,
     by,

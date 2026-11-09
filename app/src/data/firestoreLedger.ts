@@ -430,35 +430,52 @@ export function firestoreLedger(uid: string): LedgerStore {
     },
 
     async saveMany(transactions) {
-      // Firestore caps a batch at 500 writes. A rename touching 440 rows fits
-      // in one; the chunking is here so it still works when it does not.
+      // Firestore caps a batch at 500 writes, so a change to more rows goes in
+      // chunks of 450.
+      //
+      // Every chunk is handed to Firestore before any is waited on. They were
+      // committed one after another, each waiting for the server, and a rename
+      // of Gcash (859 rows, two chunks) was half done between them: the
+      // database sent back 450 rows under the new name and 409 under the old,
+      // the old name was no longer an account, and Gcash read −₱441.08 instead
+      // of ₱575.00. Renamed back in that gap, or the app closed in it, the
+      // second chunk was never written and the split stayed (heavy test on the
+      // owner's data, 9 November 2026). Handed over together, every write is
+      // in the device's queue at once: the screen sees all of them, and the
+      // queue sends them even if the app is closed and opened again.
       const refused: Transaction[] = [];
       let reason = "";
-      for (let i = 0; i < transactions.length; i += 450) {
-        const chunk = transactions.slice(i, i + 450);
+      const chunks: Transaction[][] = [];
+      for (let i = 0; i < transactions.length; i += 450) chunks.push(transactions.slice(i, i + 450));
+      const commits = chunks.map((chunk) => {
         const batch = writeBatch(db);
         for (const t of chunk) {
           batch.set(doc(txCollection(db, uid), t.id), stamped(forWrite(t)), { merge: true });
         }
-        try {
-          await batch.commit();
+        return batch.commit();
+      });
+      const results = await Promise.allSettled(commits);
+      for (let k = 0; k < chunks.length; k += 1) {
+        const chunk = chunks[k]!;
+        const result = results[k]!;
+        if (result.status === "fulfilled") {
           countWrites(chunk.length);
-        } catch (e) {
-          noteError(e, "writes");
-          reason = reasonOf(e);
-          // One at a time, so a row the rules refuse loses only itself.
-          if (chunk.length === 1) {
-            refused.push(...chunk);
-            continue;
-          }
-          for (const t of chunk) {
-            try {
-              await setDoc(doc(txCollection(db, uid), t.id), stamped(forWrite(t)), { merge: true });
-              countWrites(1);
-            } catch (one) {
-              reason = reasonOf(one);
-              refused.push(t);
-            }
+          continue;
+        }
+        noteError(result.reason, "writes");
+        reason = reasonOf(result.reason);
+        // One at a time, so a row the rules refuse loses only itself.
+        if (chunk.length === 1) {
+          refused.push(...chunk);
+          continue;
+        }
+        for (const t of chunk) {
+          try {
+            await setDoc(doc(txCollection(db, uid), t.id), stamped(forWrite(t)), { merge: true });
+            countWrites(1);
+          } catch (one) {
+            reason = reasonOf(one);
+            refused.push(t);
           }
         }
       }

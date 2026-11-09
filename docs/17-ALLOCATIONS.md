@@ -183,7 +183,7 @@ A "time" pace (₱50.00 a time, 8 times) is counted by entries: 3 of 8 used.
 | Budget | The Allocations card for the month on screen: each line with spent, left, over and this week, with Edit and Remove as quiet links on the line's last row, as "Set a limit" is on the card below; Add beside the title once there is one (an empty month has the one "Add an allocation" button instead, centred on a computer and one wide button on a phone, with Copy from last month beside it); Removed, with Put back; the total against the spending budget; need to withdraw |
 | Add form | Under the item: "Gas allocation: ₱900.00 of ₱1,200.00 left (this week ₱300.00 of ₱300.00 left), ₱600.00 after this", and before saving, when it goes past: "This takes Gas ₱100.00 over its ₱1,200.00 allocation: ₱900.00 of this is covered by what is left of it, and ₱100.00 comes out of safe to spend" |
 | Bell | Over an allocation; past this week's share; the start-of-month copy offer |
-| Chat (no AI) | "how much is left for gas", "my allocations", "allocation status" |
+| Chat (no AI) | "how much is left for gas", "my allocations", "allocation status"; for a kind with no allocation, what it has spent, its limit if it has one, and how to set money aside for it (also in Tagalog: "magkano natira sa gas") |
 | AI | The month's allocations are in what the model is sent, with the rule that safe to spend is after them |
 | Activity | Every allocation added, changed, removed, put back or copied, who did it and how, under Budget |
 | Statements, Database, charts | Unchanged: they show money that moved, and an allocation moves none. The Expense sheet cut to a kind (Show) is the history of that envelope. |

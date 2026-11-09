@@ -91,3 +91,25 @@ describe("the month asked about", () => {
     expect(w).not.toContain(SAFE_RULE);
   });
 });
+
+describe("a kind with no allocation (heavy test, 9 November 2026)", () => {
+  it("is found by name, and only when it has no allocation", async () => {
+    const { kindAsked } = await import("./allocationAsk");
+    const kinds = ["Gas", "Food", "Self Care"];
+    expect(kindAsked("how much is left for food", kinds, month)).toBe("Food");
+    expect(kindAsked("magkano natira sa food", kinds, month)).toBe("Food");
+    // Gas has one: that is the allocation's answer.
+    expect(kindAsked("how much is left for gas", kinds, month)).toBeNull();
+    expect(kindAsked("what did I buy", kinds, month)).toBeNull();
+  });
+
+  it("says what was spent, the limit, and how to set money aside", async () => {
+    const { kindLeftWords } = await import("./allocationAsk");
+    const w = kindLeftWords("Food", month, 223_600, 300_000, { safe: 179_203, perDay: 8_145 });
+    expect(w).toBe(
+      "Food has no allocation for November 2026, so nothing is set aside for it: ₱2,236.00 spent on it so far. It has a ₱3,000.00 limit: ₱764.00 left of it. What you can still spend on it comes out of safe to spend: ₱1,792.03 until November ends, ₱81.45 today. To set money aside for Food, add an allocation on Budget, under Allocations.",
+    );
+    expect(kindLeftWords("Food", month, 400_000, 300_000, null)).toContain("It is ₱1,000.00 over its ₱3,000.00 limit.");
+    expect(kindLeftWords("Food", month, 1_000, null, null).includes(String.fromCharCode(0x2014))).toBe(false);
+  });
+});

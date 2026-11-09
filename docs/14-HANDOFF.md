@@ -2810,6 +2810,48 @@ copies; the live database was never touched.
   spend worked out apart from the app matches the Dashboard.
 - The emulator writes `firestore-debug.log` at the root; it is ignored now.
 
+### 2026-11-09, last: the heaviest run, every part, on the emulator copy
+
+The owner asked for every button, every text field, every scenario, the AI,
+the bell and Settings, connected. All of it ran against a restored copy of
+the 9 November backup in the Firestore and Auth emulators (the
+`firebase.ts` hook reverted after). What it found, all fixed:
+
+- **A rename could split an account (money).** `saveMany` committed its
+  chunks of 450 one after another, each waiting for the server. Renaming
+  Gcash (859 rows) was half done between them: 450 rows under the new name,
+  409 under the old, which was no longer an account. Renamed back in that
+  gap, the split stayed and Gcash read −₱441.08 instead of ₱575.00; an app
+  closed in it would have left the same. Every chunk is now handed to
+  Firestore at once, so the whole change is in the device's queue together.
+  Rerun: renamed and straight back counts 857 rows both ways, balance and
+  net worth exact. A rename closed within a second can still be lost whole
+  (settings and rows are separate saves): nothing splits, the old name
+  stays. Open item below.
+- **Activity said "Debt" for a borrowing and its repayment alike**, and
+  "Transaction Fee, PHP 210.00" for a ₱200.00 move. Now "Maya Credit,
+  borrowed", "Maya Credit, paid", "Ana, paid for them", and "Gcash to
+  Maya, PHP 200.00 and a PHP 10.00 fee" (`activityWords.test.ts`).
+- **12.345 as an amount** said "Amount must be more than ₱0.00" beside the
+  field's own "Pesos have two decimals". The form now says the field's
+  reason (`AmountInput` `onProblem`).
+- **"pie chart of food and gas this month"** drew Food alone, and on the
+  owner's data nothing; "gas" was also read as a word in the descriptions.
+  Two or more kinds named are drawn side by side (`chartKinds.test.ts`).
+- **"how much is left for gas"** with no allocation, and "magkano natira sa
+  gas", and **"what happens next month"** went to the model and, with none,
+  said only that it was not working. The device answers them now.
+
+What passed without a change: the 19-step money process (every figure to
+the centavo, including edit, bin, restore, transfers with fees, savings,
+borrowing and repaying, a plan set aside and paid, files, a chat entry);
+31 text-field checks (letters, negatives, three decimals, ₱100 billion,
+emoji, code-like text shown and never run, 4,000-character pastes); Settings
+(accounts added, renamed, deactivated; a kind added and renamed with its
+allocation following; the low-balance level; theme; AI off and on; the
+budget); 40 chat questions with no crash or empty answer; the bell and each
+of its links.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
@@ -2922,6 +2964,11 @@ copies; the live database was never touched.
 14. **The Add form's "This puts X at" check** compares with today's balance,
     not the balance on a back-dated entry's own day; a day closing below zero
     is now reported after saving instead.
+15. **A rename closed within a second of pressing it** can be lost whole:
+    the account list and the rows are saved separately. Nothing splits in
+    the test (the old name and every row stay), but one save could land
+    without the other. A single write for both, or a check on opening that
+    finds rows under a name no account has, would close it.
 ---
 
 ## 8. How the owner likes to be answered

@@ -1157,7 +1157,7 @@ export default function App() {
 
     setTransactions((prev) => insertChronologically(prev, stamped, { renumber: renumbers }));
     push((l) => l.saveMany(stamped));
-    record(...stamped.map((r) => createdEvent(r, by)));
+    record(...stamped.map((r) => createdEvent(r, by, settings.credits)));
 
     /**
      * The number the row ended up with, not the one it was handed.
@@ -1252,7 +1252,7 @@ export default function App() {
     record(
       ...rows.map((r) => {
         const was = previous.get(r.id);
-        return was ? updatedEvent(was, r, by) : createdEvent(r, by);
+        return was ? updatedEvent(was, r, by) : createdEvent(r, by, settings.credits);
       }),
     );
 
@@ -1424,7 +1424,7 @@ export default function App() {
     setTransactions((prev) => prev.filter((t) => t.id !== id));
     setDeleted((prev) => [{ ...row, deletedAt: at }, ...prev]);
     push((l) => l.bin(id, at));
-    record(binnedEvent(row));
+    record(binnedEvent(row, BY_OWNER, settings.credits));
     // Undo, for the tap that was meant for the row beside it.
     flash(`Moved record #${String(row.recordNumber).padStart(4, "0")} to the bin.`, {
       label: "Undo",
@@ -1462,7 +1462,7 @@ export default function App() {
     push(async (l) => {
       for (const t of rows) await l.bin(t.id, at);
     });
-    record(...rows.map((t) => binnedEvent(t)));
+    record(...rows.map((t) => binnedEvent(t, BY_OWNER, settings.credits)));
     /*
      * Undo here too. A payment and its interest went through this path with
      * no Undo on the notice, unlike every other row, and so did a selection
@@ -1490,7 +1490,7 @@ export default function App() {
     const { deletedAt: _ignored, ...restored } = row;
     setTransactions((prev) => insertChronologically(prev, [restored], { renumber: renumbers }));
     push((l) => l.restore(id));
-    record(restoredEvent(restored));
+    record(restoredEvent(restored, BY_OWNER, settings.credits));
     flash(`Restored record #${String(row.recordNumber).padStart(4, "0")}.`);
   };
 
@@ -1512,7 +1512,7 @@ export default function App() {
     push(async (l) => {
       for (const t of rows) await l.restore(t.id);
     });
-    record(...restored.map((t) => restoredEvent(t)));
+    record(...restored.map((t) => restoredEvent(t, BY_OWNER, settings.credits)));
     flash(
       rows.length === 1
         ? `Restored record #${String(rows[0]?.recordNumber ?? 0).padStart(4, "0")}.`

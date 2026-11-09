@@ -12,7 +12,7 @@
  * stop the page zooming in. `.fms-input` in layout.css carries all of it.
  */
 
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 
 import { formatAmount, parseAmount, type Centavos } from "../domain/money";
 import { Icon } from "./Icon";
@@ -130,9 +130,16 @@ export function AmountInput({
   placeholder = "0.00",
   ariaLabel,
   allowNegative = false,
+  onProblem,
 }: {
   value: Centavos | null;
   onChange: (v: Centavos | null) => void;
+  /**
+   * Why what is typed is not an amount, said once, or null: the form says the
+   * same thing instead of "Amount must be more than ₱0.00", which was wrong
+   * for 12.345 (heavy test, 9 November 2026).
+   */
+  onProblem?: ((message: string | null) => void) | undefined;
   invalid?: boolean | undefined;
   disabled?: boolean | undefined;
   id?: string | undefined;
@@ -177,6 +184,11 @@ export function AmountInput({
     setTooFine(false);
   }
   if (!focused && (!(refused || tooFine) || value !== null) && text !== committed) setText(committed);
+
+  const problem = refused ? "This takes an amount above zero. Leave out the minus sign." : tooFine ? `Pesos have two decimals: ${text.trim()} has more. Type it as it is on the receipt, like 12.35.` : null;
+  useEffect(() => {
+    onProblem?.(problem);
+  }, [problem, onProblem]);
 
   return (
     <div className="fms-amount">
@@ -238,14 +250,9 @@ export function AmountInput({
           className="t-num fms-input fms-input--amount"
         />
       </div>
-      {refused && (
+      {problem && (
         <span className="t-micro fms-amount-refused" role="alert">
-          This takes an amount above zero. Leave out the minus sign.
-        </span>
-      )}
-      {tooFine && !refused && (
-        <span className="t-micro fms-amount-refused" role="alert">
-          Pesos have two decimals: {text.trim()} has more. Type it as it is on the receipt, like 12.35.
+          {problem}
         </span>
       )}
     </div>

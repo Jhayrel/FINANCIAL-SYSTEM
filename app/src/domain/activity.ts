@@ -30,6 +30,8 @@
 
 import type { Centavos } from "./money";
 import type { Transaction } from "./types";
+import type { Debt } from "./debt";
+import { effectInline } from "./debtWords";
 import { KEPT_NOTE } from "./integrity";
 
 /** Who. `ai` means a row the assistant proposed and the owner approved. */
@@ -115,7 +117,31 @@ function eventId(at: string): string {
 const money = (centavos: Centavos): string =>
   `PHP ${(centavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const nameOf = (t: Transaction): string => t.item.trim() || t.description.trim() || t.type;
+/** The debt lines, for naming a debt movement by its line: only what the name needs. */
+export type DebtNames = readonly Pick<Debt, "id" | "name" | "kind" | "form">[];
+
+/**
+ * What an entry is, in a word or two, for a line in the trail.
+ *
+ * A debt movement is its line and what happened ("Maya Credit, borrowed"),
+ * and a transfer is where the money went ("Gcash to Maya"). They were "Debt"
+ * for a borrowing and its repayment alike, and "Transaction Fee" for a
+ * ₱200.00 move, which is the kind the row kept from the workbook (heavy
+ * test on the owner's data, 9 November 2026).
+ */
+function nameOf(t: Transaction, debts?: DebtNames): string {
+  if (t.type === "Debt") {
+    const line = debts?.find((d) => d.id === t.debtId);
+    const name = line?.name.trim() || t.item.trim() || t.description.trim();
+    const what = t.debtEffect ? effectInline(t.debtEffect, line) : "debt";
+    return name ? `${name}, ${what}` : what;
+  }
+  if (t.type === "Transfer") return `${t.fromWallet.trim() || "money"} to ${t.toWallet.trim() || "someone else"}`;
+  return t.item.trim() || t.description.trim() || t.type;
+}
+
+/** The money in a line: a transfer's amount and its fee apart, since the fee is not part of what moved. */
+const moneyOf = (t: Transaction): string => (t.type === "Transfer" && t.fee > 0 ? `${money(t.amount)} and a ${money(t.fee)} fee` : money(t.total));
 
 const numbered = (t: Transaction): string => `#${String(t.recordNumber).padStart(4, "0")}`;
 
@@ -198,11 +224,11 @@ function build(
   };
 }
 
-export function created(row: Transaction, by: Provenance = BY_OWNER): ActivityEvent {
+export function created(row: Transaction, by: Provenance = BY_OWNER, debts?: DebtNames): ActivityEvent {
   return build(
     "transaction.create",
     by,
-    `Added ${numbered(row)}, ${nameOf(row)}, ${money(row.total)}${by.actor === "ai" ? ", read by the assistant" : ""}.`,
+    `Added ${numbered(row)}, ${nameOf(row, debts)}, ${moneyOf(row)}${by.actor === "ai" ? ", read by the assistant" : ""}.`,
     { targetId: row.id, recordNumber: row.recordNumber, amount: row.total, after: describeRow(row) },
   );
 }
@@ -243,8 +269,8 @@ export function updated(
   );
 }
 
-export function binned(row: Transaction, by: Provenance = BY_OWNER): ActivityEvent {
-  return build("transaction.bin", by, `Moved ${numbered(row)}, ${nameOf(row)}, to the bin.`, {
+export function binned(row: Transaction, by: Provenance = BY_OWNER, debts?: DebtNames): ActivityEvent {
+  return build("transaction.bin", by, `Moved ${numbered(row)}, ${nameOf(row, debts)}, to the bin.`, {
     targetId: row.id,
     recordNumber: row.recordNumber,
     amount: row.total,
@@ -252,8 +278,8 @@ export function binned(row: Transaction, by: Provenance = BY_OWNER): ActivityEve
   });
 }
 
-export function restored(row: Transaction, by: Provenance = BY_OWNER): ActivityEvent {
-  return build("transaction.restore", by, `Restored ${numbered(row)}, ${nameOf(row)}.`, {
+export function restored(row: Transaction, by: Provenance = BY_OWNER, debts?: DebtNames): ActivityEvent {
+  return build("transaction.restore", by, `Restored ${numbered(row)}, ${nameOf(row, debts)}.`, {
     targetId: row.id,
     recordNumber: row.recordNumber,
     amount: row.total,
@@ -262,8 +288,8 @@ export function restored(row: Transaction, by: Provenance = BY_OWNER): ActivityE
 }
 
 /** A row deleted for good from the bin. */
-export function purged(row: Transaction, by: Provenance = BY_OWNER): ActivityEvent {
-  return build("transaction.purge", by, `Deleted ${numbered(row)}, ${nameOf(row)}, for good from the bin.`, {
+export function purged(row: Transaction, by: Provenance = BY_OWNER, debts?: DebtNames): ActivityEvent {
+  return build("transaction.purge", by, `Deleted ${numbered(row)}, ${nameOf(row, debts)}, for good from the bin.`, {
     targetId: row.id,
     recordNumber: row.recordNumber,
     amount: row.total,

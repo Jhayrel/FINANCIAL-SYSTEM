@@ -855,8 +855,11 @@ export function AddTransaction({
   const items = itemsFor(draft.flow, draft.category, reference);
   const categories = categoriesFor(draft.flow);
 
+  /** What the amount box says is wrong with what is typed: said for the amount instead of "must be more than ₱0.00". */
+  const [amountProblem, setAmountProblem] = useState<string | null>(null);
   const errorFor = (field: string): string | undefined =>
     submitted ? check.errors.find((e) => e.field === field)?.message : undefined;
+  const errorWords = (e: { readonly field: string; readonly message: string }): string => (e.field === "amount" && amountProblem ? amountProblem : e.message);
 
   /** A debt payment, which is the one movement that can carry interest inside it. */
   /*
@@ -2146,7 +2149,7 @@ export function AddTransaction({
                 label={paying ? "Amount paid" : "Amount"}
                 required
                 half={draft.flow === "Transfer" || sendsMoney}
-                error={errorFor("amount")}
+                error={amountProblem ? undefined : errorFor("amount")}
               >
                 <div className="fms-amounthero">
                   <AmountInput
@@ -2154,6 +2157,7 @@ export function AddTransaction({
                     onChange={(v) => set("amount", v)}
                     invalid={Boolean(errorFor("amount"))}
                     ariaLabel="Amount"
+                    onProblem={setAmountProblem}
                   />
                 </div>
                 {/*
@@ -2681,7 +2685,7 @@ export function AddTransaction({
             <div className="fms-checks">
               {submitted && check.errors.length > 0 && (
                 <Alert status="over" title={`${check.errors.length} thing${check.errors.length === 1 ? "" : "s"} to fix`}>
-                  {check.errors.map((e) => e.message).join(" ")}
+                  {check.errors.map(errorWords).join(" ")}
                 </Alert>
               )}
               {checks.length > 0 && (
