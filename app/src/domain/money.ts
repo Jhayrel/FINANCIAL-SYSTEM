@@ -13,6 +13,14 @@
 /** An amount in integer centavos. 1 peso = 100 centavos. */
 export type Centavos = number;
 
+/**
+ * The most any one money field takes: ₱1,000,000,000.00. Past it, a figure is
+ * a slip of the thumb (extra zeros), not money: "99999999999" was taken as
+ * ₱99,999,999,999.00 and would have swamped every balance, chart and budget
+ * (stress test, 9 November 2026). Allocations already refused it.
+ */
+export const MAX_MONEY: Centavos = 100_000_000_000;
+
 /** Largest amount we can represent without losing integer precision. */
 const MAX_SAFE_CENTAVOS = Number.MAX_SAFE_INTEGER;
 

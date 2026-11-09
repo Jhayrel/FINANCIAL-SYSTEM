@@ -270,7 +270,8 @@ export interface LedgerStore {
   bin(id: string, at: string): Promise<void>;
   restore(id: string): Promise<void>;
   /** One atomic write for a whole-ledger rewrite (a rename, a migration). */
-  saveMany(transactions: readonly Transaction[]): Promise<void>;
+  /** `onProgress` hears each chunk as the database takes it: the rows written so far, of all. */
+  saveMany(transactions: readonly Transaction[], onProgress?: (done: number, total: number) => void): Promise<void>;
   /**
    * Start clean from a file (`planStartClean`): write its rows as live, its
    * bin as binned, and mark every other document `discardedAt`. Nothing is
@@ -429,7 +430,7 @@ export function firestoreLedger(uid: string): LedgerStore {
       }
     },
 
-    async saveMany(transactions) {
+    async saveMany(transactions, onProgress) {
       // Firestore caps a batch at 500 writes, so a change to more rows goes in
       // chunks of 450.
       //
@@ -447,12 +448,17 @@ export function firestoreLedger(uid: string): LedgerStore {
       let reason = "";
       const chunks: Transaction[][] = [];
       for (let i = 0; i < transactions.length; i += 450) chunks.push(transactions.slice(i, i + 450));
+      let written = 0;
+      onProgress?.(0, transactions.length);
       const commits = chunks.map((chunk) => {
         const batch = writeBatch(db);
         for (const t of chunk) {
           batch.set(doc(txCollection(db, uid), t.id), stamped(forWrite(t)), { merge: true });
         }
-        return batch.commit();
+        return batch.commit().then(() => {
+          written += chunk.length;
+          onProgress?.(written, transactions.length);
+        });
       });
       const results = await Promise.allSettled(commits);
       for (let k = 0; k < chunks.length; k += 1) {
@@ -514,21 +520,40 @@ export function firestoreLedger(uid: string): LedgerStore {
         }
       };
 
-      // Smaller than the 500 a batch allows, so a refused batch retried a row
-      // at a time costs seconds, not minutes.
-      for (let i = 0; i < writes.length; i += 200) {
-        const chunk = writes.slice(i, i + 200);
+      /*
+       * Every batch handed over at once, in order (the test rows still first).
+       * Each was sent only after the one before it was acknowledged, so a
+       * replace of 4,000 rows took twenty round trips, and a tab closed or
+       * reloaded part way never sent the rest: rows the file had live stayed
+       * in the Bin and rows it had binned stayed live, while the app had
+       * already said it was done (final test, 9 November 2026). Handed over
+       * together, Firestore shows the whole result on this device at once
+       * and keeps every write in its offline queue, which outlives the tab.
+       * Smaller than the 500 a batch allows, so a refused batch retried a row
+       * at a time costs seconds, not minutes.
+       */
+      const chunks: Write[][] = [];
+      for (let i = 0; i < writes.length; i += 200) chunks.push(writes.slice(i, i + 200));
+      const commits = chunks.map((chunk) => {
         const batch = writeBatch(db);
         for (const w of chunk) batch.set(doc(txCollection(db, uid), w.id), stamped(w.data), { merge: true });
-        try {
-          await batch.commit();
+        return batch.commit().then(() => {
+          done += chunk.length;
+          onProgress?.(done, writes.length);
+        });
+      });
+      const results = await Promise.allSettled(commits);
+      for (let k = 0; k < chunks.length; k += 1) {
+        const chunk = chunks[k]!;
+        const result = results[k]!;
+        if (result.status === "fulfilled") {
           countWrites(chunk.length);
-        } catch (e) {
-          noteError(e, "writes");
-          reason = reasonOf(e);
-          // One at a time, so a document the rules refuse holds up only itself.
-          for (const w of chunk) await one(w);
+          continue;
         }
+        noteError(result.reason, "writes");
+        reason = reasonOf(result.reason);
+        // One at a time, so a document the rules refuse holds up only itself.
+        for (const w of chunk) await one(w);
         done += chunk.length;
         onProgress?.(done, writes.length);
       }

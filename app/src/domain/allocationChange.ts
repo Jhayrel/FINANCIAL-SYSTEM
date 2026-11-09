@@ -387,7 +387,8 @@ export function readAllocationChange(text: string, ctx: ChangeContext): Allocati
   // Not "allocation": only a live line of this month named by its own name, with a verb that changes it.
   const namedNow = linesSaid(t, live(now)).filter((l) => l.name.trim());
   if (!saysIt && !(namedNow.length > 0 && (REMOVE.test(t) || DONE.test(t) || EXTEND.test(t)) && /\b(?:the|my)\s/i.test(t))) return null;
-  if (QUESTION.test(t) && !ASKING_FOR.test(t)) return null;
+  // A question or a what-if is never a change, however politely asked ("please ... what if": stress test, 9 November 2026).
+  if (QUESTION.test(t)) return null;
   if (/\?\s*$/.test(t) && !ASKING_FOR.test(t)) return null;
 
   const apply = (change: AllocationChange): ReturnType<typeof applyAllocationChange> => applyAllocationChange(ctx.lines, change, { ...ctx, newId: () => "preview" } as ApplyContext);

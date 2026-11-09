@@ -177,7 +177,6 @@ export function Bin({
 
   return (
     <div className="fms-bin">
-      <div className="fms-binmain">
       <Card page
         title="Recycle bin"
         subtitle="Deleted transactions stay here until you restore them"
@@ -361,55 +360,6 @@ export function Bin({
         )}
       </Card>
 
-      <Card
-        title="Removed elsewhere"
-        subtitle="Plans and allocations removed are kept where they were made, and listed here to put back"
-      >
-        {refused && (
-          <p className="t-caption fms-note-over" role="alert" style={{ marginTop: 0 }}>
-            {refused}
-          </p>
-        )}
-        {removedPlans.length === 0 && removedAllocations.length === 0 ? (
-          <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
-            No plan or allocation is removed. A plan removed on the Planner, or an allocation removed on Budget, shows here and there, with Put back.
-          </p>
-        ) : (
-          <ul className="fms-alloc-removedlist">
-            {removedPlans.map((p) => (
-              <li key={p.id} className="fms-alloc-removedrow">
-                <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-                  Plan: {p.title}, {formatMoney(p.amount)}
-                  {p.closedOn ? `, removed ${formatMedium(p.closedOn)}` : ""}
-                  {p.reason ? ` (${p.reason})` : ""}
-                </span>
-                {onRestorePlan && (
-                  <button type="button" className="t-caption fms-linkbtn" onClick={() => onRestorePlan(p)} aria-label={`Put the plan ${p.title} back`}>
-                    Put back
-                  </button>
-                )}
-              </li>
-            ))}
-            {removedAllocations.map((l) => (
-              <li key={l.id} className="fms-alloc-removedrow">
-                <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-                  Allocation: {lineName(l)}, {formatMoney(l.amount)}, {l.repeat ? spanWords({ ...l, stoppedFrom: undefined }) : monthWords(l.month)}
-                  {l.removedOn ? `, removed ${formatMedium(l.removedOn)}` : l.stoppedFrom ? `, stopped from ${monthWords(l.stoppedFrom)}` : ""}
-                </span>
-                {onRestoreAllocation && (
-                  <button type="button" className="t-caption fms-linkbtn" onClick={() => setRefused(onRestoreAllocation(l.id) ?? "")} aria-label={`Put back the ${lineName(l)} allocation`}>
-                    Put back
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-3)" }}>
-          Accounts, goals and debts are archived, never removed, with their history: reopen them in Settings. A category taken off a list while entries still use it is under On no list in Settings, to put back. A budget changed by mistake has Undo the last change on Budget.
-        </p>
-      </Card>
-      </div>
 
       {open && !confirming && (
         <Sheet
@@ -531,8 +481,17 @@ export function Bin({
         </Sheet>
       )}
 
-      {deleted.length > 0 && (
-        <aside className="fms-binrail" aria-label="About the bin">
+      {/*
+        The side panel, always: what was removed elsewhere is here even with
+        an empty bin. It scrolls on its own beside the rows on a computer
+        (the list is the screen's one other scrolling region), and sits under
+        them on a phone. A wrapper round the list's card stopped its rows
+        scrolling on a computer (owner, 9 November 2026: "even in recycle bin
+        its not working").
+      */}
+      <aside className="fms-binrail" aria-label="About the bin">
+        {deleted.length > 0 && (
+          <>
           <Card title="In the bin" subtitle="None of these count toward a balance or a total until restored">
             <ul className="fms-binsum">
               {TYPES.filter((k) => counts[k].count > 0).map((k) => (
@@ -590,8 +549,57 @@ export function Bin({
               </p>
             )}
           </Card>
-        </aside>
-      )}
+          </>
+        )}
+          <Card
+            title="Removed elsewhere"
+            subtitle="Plans and allocations removed are kept where they were made, and listed here to put back"
+          >
+            {refused && (
+              <p className="t-caption fms-note-over" role="alert" style={{ marginTop: 0 }}>
+                {refused}
+              </p>
+            )}
+            {removedPlans.length === 0 && removedAllocations.length === 0 ? (
+              <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+                No plan or allocation is removed. A plan removed on the Planner, or an allocation removed on Budget, shows here and there, with Put back.
+              </p>
+            ) : (
+              <ul className="fms-alloc-removedlist">
+                {removedPlans.map((p) => (
+                  <li key={p.id} className="fms-alloc-removedrow">
+                    <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                      Plan: {p.title}, {formatMoney(p.amount)}
+                      {p.closedOn ? `, removed ${formatMedium(p.closedOn)}` : ""}
+                      {p.reason ? ` (${p.reason})` : ""}
+                    </span>
+                    {onRestorePlan && (
+                      <button type="button" className="t-caption fms-linkbtn" onClick={() => onRestorePlan(p)} aria-label={`Put the plan ${p.title} back`}>
+                        Put back
+                      </button>
+                    )}
+                  </li>
+                ))}
+                {removedAllocations.map((l) => (
+                  <li key={l.id} className="fms-alloc-removedrow">
+                    <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                      Allocation: {lineName(l)}, {formatMoney(l.amount)}, {l.repeat ? spanWords({ ...l, stoppedFrom: undefined }) : monthWords(l.month)}
+                      {l.removedOn ? `, removed ${formatMedium(l.removedOn)}` : l.stoppedFrom ? `, stopped from ${monthWords(l.stoppedFrom)}` : ""}
+                    </span>
+                    {onRestoreAllocation && (
+                      <button type="button" className="t-caption fms-linkbtn" onClick={() => setRefused(onRestoreAllocation(l.id) ?? "")} aria-label={`Put back the ${lineName(l)} allocation`}>
+                        Put back
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-3)" }}>
+              Accounts, goals and debts are archived, never removed, with their history: reopen them in Settings. A category taken off a list while entries still use it is under On no list in Settings, to put back. A budget changed by mistake has Undo the last change on Budget.
+            </p>
+          </Card>
+      </aside>
     </div>
   );
 }

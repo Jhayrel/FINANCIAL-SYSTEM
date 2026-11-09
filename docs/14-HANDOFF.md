@@ -2956,6 +2956,57 @@ with every screen. Done:
   Insights' calendar; the one apparent gap was a debt let go, which counts as
   money given away by rule. Pinned on invented data in `chartScreens.test.ts`.
 
+### 2026-11-09, final test before the project is declared done
+
+The owner asked for the hardest test yet: every button, every field, every
+part, scrolling, sync, what-ifs, stress. On the emulator copy of their 9
+November backup (never the live database) and on invented data. Found and
+fixed:
+
+- **Statements and the Bin could not be scrolled on a computer** (owner's
+  screenshots). Both are one screen tall there and only their rows scroll;
+  the budget part added to Statements, and a wrapper added round the Bin's
+  list, took that height, so the rows went to nothing. Statements now has
+  an Entries / Budget switch, each in the same scrolling space; the Bin's
+  Removed elsewhere is in its side panel, which scrolls on its own (and
+  under the rows from 1024 to 1279px). Lesson: on a fixed-height screen,
+  never add a block beside the one scrolling region.
+- **Extra zeros were saved**: "99999999999" became ₱99,999,999,999.00. Every
+  money field and every entry save now refuse more than ₱1,000,000,000.00,
+  said under the field (`MAX_MONEY`), as allocations already did.
+- **Replace everything could leave part of a backup unwritten.** It wrote
+  4,000 rows in twenty batches, each sent only after the one before was
+  acknowledged, said "Replaced everything" at once, and a tab closed or
+  reloaded in that time never sent the rest: on the emulator copy, 16 rows
+  the file has live stayed in the Bin and 8 it has binned stayed live, so the
+  screen read 3,982 records for a 3,990-row file. Now every batch is handed
+  over at once (shown on this device at once, kept in the offline queue),
+  with Start clean's progress notice and the browser's "leave this page?",
+  and done is said when it is written. Checked row by row against the file,
+  including a tab closed three seconds in.
+- **A rename, a move between lists, a merge or a bulk fix said nothing while
+  it wrote**, and the screen showed the account half renamed (Gcash Main
+  −₱441.08) for those seconds; closed then, part of it could be lost. Any
+  write of more than 150 rows now shows "Saving: X of Y rows written" and
+  the browser asks before the tab closes (`push(fn, rows)`).
+- **Statements on a short laptop window** (1093 by 615, a 1366 by 768 screen
+  at 125% scaling): its controls left the rows 0px to scroll in. Under 820px
+  tall, Statements scrolls as a page, as on a phone.
+- **Stress found three allocation faults**: a what-if said with "please"
+  made a card; Done was taken for a month a line does not cover or that has
+  not started; a split line could save an empty done list that read back
+  different. All fixed, and pinned by `allocationStress.test.ts` (8,000
+  random changes, 3,000 random sentences).
+
+Checked and passing: a cut-off detector on every screen at seven sizes
+(77/77), real wheel and touch scrolling to the last item of every screen
+(36/36), the money-process robot to the centavo (19/19), the text-field
+robot, every button on a computer and a phone in both Cancel and confirm
+modes, the new allocation features with a second device watching for sync,
+and `ledgerStress.test.ts`: random ledgers of every kind of row, where the
+charts, the calendar, Budget's tracks, the statement budget, the expense
+sheet and the account statement's closing balance all agree to the centavo.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

@@ -10,8 +10,10 @@ import {
   checkAllocation,
   checkRestore,
   copyLines,
+  covers,
   editAllocation,
   fromFor,
+  lineName,
   linesIn,
   makeAllocation,
   monthAllocations,
@@ -80,7 +82,9 @@ export function applyAllocationChange(all: readonly AllocationLine[], change: Al
     // A repeating line changed in a later month changes from that month on (A12).
     const from = change.month && change.month > was.month && was.repeat ? change.month : null;
     if (from) {
-      const kept: AllocationLine = { ...was, until: monthBefore(from), ...(was.done ? { done: was.done.filter((d) => d.month < from) } : {}) };
+      // Never an empty list: what is saved reads back the same (stress test, 9 November 2026).
+      const before = was.done?.filter((d) => d.month < from) ?? [];
+      const kept: AllocationLine = { ...without(was, "done"), until: monthBefore(from), ...(before.length > 0 ? { done: before } : {}) };
       const why = checkAllocation(change.input, from, [...all.filter((l) => l.id !== was.id), kept], reference);
       if (why) return { ok: false, why };
       const made = makeAllocation(change.input, from, asOf, ctx.newId(), undefined);
@@ -95,6 +99,9 @@ export function applyAllocationChange(all: readonly AllocationLine[], change: Al
   }
 
   if (change.kind === "done" || change.kind === "undone") {
+    // Only a month it holds in, and one that has started: a month ahead holds nothing yet, so there is nothing to free.
+    if (!covers(was, change.month)) return { ok: false, why: `${lineName(was)} is not an allocation for ${monthWords(change.month)}.` };
+    if (change.month > asOf.slice(0, 7)) return { ok: false, why: `${monthWords(change.month)} has not started, so ${lineName(was)} holds nothing yet to free.` };
     const status = monthAllocations([was], spreadCovered(ctx.transactions), change.month, asOf).lines[0];
     const others = (was.done ?? []).filter((d) => d.month !== change.month);
     if (change.kind === "done") {

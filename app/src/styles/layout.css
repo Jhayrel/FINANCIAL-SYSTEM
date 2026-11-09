@@ -772,14 +772,6 @@
   min-width: 0;
 }
 
-/* The bin's own list and what was removed elsewhere, one column beside the rail. */
-.fms-binmain {
-  display: grid;
-  align-content: start;
-  gap: var(--space-4);
-  min-width: 0;
-}
-
 /*
  * The width a wide screen has spare goes to a side panel, not to longer rows:
  * the counts by type and what restoring would do to each wallet.
@@ -799,6 +791,23 @@
   display: grid;
   gap: var(--space-4);
   min-width: 0;
+}
+
+/*
+ * One screen tall from 1024px, but one column until 1280px: the side panel
+ * goes under the rows there, so both share the height and each scrolls in
+ * its own part, never cut off at the foot.
+ */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .fms-bin {
+    grid-template-rows: minmax(0, 1fr) minmax(0, auto);
+  }
+
+  .fms-binrail {
+    max-height: 34vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 
 /* With nothing in it there is no side panel, so the card takes the panel's column too. */
@@ -3121,6 +3130,38 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--space-1);
+}
+
+/* ══ Statements on a short window: the page scrolls ═══════════════════════
+   One screen tall, the statement's own controls (the kind, the months, issued
+   to and by, the summary and its notes) take most of a short window, and on a
+   laptop at 125 or 150% scaling (1093 by 615) the rows were left 0px to
+   scroll in (final test, 9 November 2026). Under 820px tall the statement
+   scrolls as a page, as it does on a phone: everything reachable, the rows
+   at their full height. Placed before the Database block, and beaten by it
+   only where these selectors are weaker, which they are not. */
+
+@media (min-width: 1024px) and (max-height: 819px) {
+  .fms-main--fixed-lg:has(.fms-stmttools) {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .fms-main--fixed-lg:has(.fms-stmttools) .fms-db,
+  .fms-main--fixed-lg:has(.fms-stmttools) .fms-db > section,
+  .fms-main--fixed-lg:has(.fms-stmttools) .fms-db > section > div:last-child,
+  .fms-main--fixed-lg:has(.fms-stmttools) .fms-db .fms-tablewrap,
+  .fms-main--fixed-lg:has(.fms-stmttools) .fms-db .fms-tablewrap > div {
+    height: auto;
+    flex: none;
+    overflow: visible;
+  }
+
+  .fms-main--fixed-lg:has(.fms-stmttools) .fms-db .scroll-slim,
+  .fms-main--fixed-lg:has(.fms-stmttools) .fms-db .fms-stmtbudget-view {
+    flex: none;
+    overflow: visible;
+  }
 }
 
 /* ══ Database: only the rows move ═══════════════════════════════════════════
@@ -7143,11 +7184,27 @@ button.fms-recent-row:disabled {
 
 /* The statement's own notes, under its rows, as the PDF prints them under its totals. */
 /* The budget under a statement: a month at a time, a hairline between, square like the ledger (D2). */
-.fms-stmtbudget {
+/*
+ * The budget, in the space the rows use, chosen with Entries / Budget: on a
+ * computer it is the one scrolling region of a statement one screen tall; on a
+ * phone the page scrolls as a page.
+ */
+.fms-stmtbudget-view {
   display: grid;
+  align-content: start;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4) var(--space-4);
-  border-top: 1px solid var(--hairline);
+}
+
+@media (min-width: 1024px) {
+  .fms-db .fms-stmtbudget-view {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--hairline-strong) transparent;
+  }
 }
 
 .fms-stmtbudget-month {

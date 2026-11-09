@@ -15,7 +15,7 @@
  */
 import { spreadCovered } from "./covers";
 import { addDays, dayOfWeek, daysInMonth, firstOfMonth, formatMedium, lastOfMonth, monthName, WEEKDAY_NAMES } from "./dates";
-import { formatMoney, type Centavos } from "./money";
+import { formatMoney, MAX_MONEY, type Centavos } from "./money";
 import { costOf } from "./totals";
 import type { IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -107,7 +107,7 @@ export type AllocationChange =
   | { readonly kind: "copy"; readonly from: string; readonly to: string };
 
 export const MAX_LINES_A_MONTH = 30;
-const MAX_AMOUNT: Centavos = 100_000_000_000;
+const MAX_AMOUNT: Centavos = MAX_MONEY;
 
 /** "2026-11" from a day. */
 export const monthOfDay = (d: IsoDate): string => d.slice(0, 7);

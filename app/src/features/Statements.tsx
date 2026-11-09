@@ -18,7 +18,7 @@
 import { saveFile } from "../data/download";
 import { useEffect, useMemo, useState } from "react";
 
-import { Button, Card, EmptyState, Money, StatusPill } from "../components/primitives";
+import { Button, Card, EmptyState, Money, SegmentedControl, StatusPill } from "../components/primitives";
 import { Select } from "../components/Select";
 import { TextInput } from "../components/forms";
 import { DataTable, type Column } from "../components/DataTable";
@@ -232,6 +232,14 @@ export function Statements({
   }, [issued]);
 
   const [making, setMaking] = useState(false);
+  /*
+   * Entries or Budget, in the same space. The budget was put under the rows
+   * on 9 November 2026 and, on a computer, where the statement is one screen
+   * tall and its rows scroll in what is left, it took that space: the rows
+   * went to nothing and the budget could not be scrolled (owner's
+   * screenshot). A switch gives each the whole scrolling area in turn.
+   */
+  const [view, setView] = useState<"entries" | "budget">("entries");
   const [failed, setFailed] = useState("");
 
   const whole = useMemo(
@@ -276,6 +284,8 @@ export function Statements({
     [shown, transactions, type, year, from, to, toYear, wallet, debtId, reference, debts, asOf, budgets],
   );
   const sheet = filtered ?? whole;
+  const hasBudgetView = Boolean(sheet.budget && sheet.budget.months.length > 0);
+  const showBudget = view === "budget" && hasBudgetView;
   const statementNow = () =>
     buildStatementBetween(transactions, type, sheet.from, sheet.to, reference, debtId || undefined, { wallet, debts, only: shown || undefined });
 
@@ -536,9 +546,63 @@ export function Statements({
             </span>
             <StatusPill status="info">{sheet.lines.length} rows</StatusPill>
           </span>
+          {hasBudgetView && (
+            <SegmentedControl
+              label="Show the entries or the budget"
+              options={[
+                { id: "entries", label: "Entries" },
+                { id: "budget", label: "Budget" },
+              ]}
+              value={view}
+              onChange={setView}
+            />
+          )}
         </div>
 
-        {sheet.lines.length === 0 ? (
+        {showBudget && sheet.budget ? (
+          <div className="fms-stmtbudget-view" role="region" aria-label="Budget for the period">
+            {[...sheet.budget.months.map((m) => ({ key: m.month, label: `${m.label}${m.partial ? ", to date" : ""}`, parts: m.parts })), ...(sheet.budget.months.length > 1 ? [{ key: "all", label: "Whole period", parts: sheet.budget.totals }] : [])].map((m) => (
+                  <div key={m.key} className="fms-stmtbudget-month">
+                    <p className="t-body-strong" style={{ margin: 0 }}>
+                      {m.label}
+                    </p>
+                    <dl className="fms-stmtbudget-rows">
+                      {m.parts.map((part) => (
+                        <div key={part.label} className="fms-stmtbudget-row">
+                          <dt className="t-caption" style={{ color: "var(--ink-2)" }}>
+                            {part.label}
+                          </dt>
+                          <dd className="t-caption">
+                            <Money value={part.spent} size="s" />
+                            {part.budget > 0 ? (
+                              <>
+                                {" of "}
+                                <Money value={part.budget} size="s" />
+                                <span className={part.left !== null && part.left < 0 ? "fms-note-over" : undefined} style={part.left !== null && part.left < 0 ? undefined : { color: "var(--ink-3)" }}>
+                                  {part.left !== null && part.left < 0 ? `, ${formatMoney(-part.left)} over` : `, ${formatMoney(part.left ?? 0)} left`}
+                                </span>
+                              </>
+                            ) : (
+                              <span style={{ color: "var(--ink-3)" }}> spent, no budget set</span>
+                            )}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                ))}
+                {sheet.budget.notes.map((n) => (
+                  <p key={n} className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+                    {n}
+                  </p>
+                ))}
+            {sheet.budget.notes.map((n) => (
+              <p key={n} className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+                {n}
+              </p>
+            ))}
+          </div>
+        ) : sheet.lines.length === 0 ? (
           <EmptyState
             message={
               noDebtsOfKind
@@ -604,49 +668,7 @@ export function Statements({
                 ))}
               </div>
             )}
-            {/* The budget for the months it covers, as the PDF and the spreadsheet have it (`statementBudget.ts`). */}
-            {sheet.budget && sheet.budget.months.length > 0 && (
-              <section className="fms-stmtbudget" aria-label="Budget for the period">
-                <h3 className="t-label" style={{ margin: 0, color: "var(--ink-2)" }}>
-                  Budget
-                </h3>
-                {[...sheet.budget.months.map((m) => ({ key: m.month, label: `${m.label}${m.partial ? ", to date" : ""}`, parts: m.parts })), ...(sheet.budget.months.length > 1 ? [{ key: "all", label: "Whole period", parts: sheet.budget.totals }] : [])].map((m) => (
-                  <div key={m.key} className="fms-stmtbudget-month">
-                    <p className="t-body-strong" style={{ margin: 0 }}>
-                      {m.label}
-                    </p>
-                    <dl className="fms-stmtbudget-rows">
-                      {m.parts.map((part) => (
-                        <div key={part.label} className="fms-stmtbudget-row">
-                          <dt className="t-caption" style={{ color: "var(--ink-2)" }}>
-                            {part.label}
-                          </dt>
-                          <dd className="t-caption">
-                            <Money value={part.spent} size="s" />
-                            {part.budget > 0 ? (
-                              <>
-                                {" of "}
-                                <Money value={part.budget} size="s" />
-                                <span className={part.left !== null && part.left < 0 ? "fms-note-over" : undefined} style={part.left !== null && part.left < 0 ? undefined : { color: "var(--ink-3)" }}>
-                                  {part.left !== null && part.left < 0 ? `, ${formatMoney(-part.left)} over` : `, ${formatMoney(part.left ?? 0)} left`}
-                                </span>
-                              </>
-                            ) : (
-                              <span style={{ color: "var(--ink-3)" }}> spent, no budget set</span>
-                            )}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                ))}
-                {sheet.budget.notes.map((n) => (
-                  <p key={n} className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
-                    {n}
-                  </p>
-                ))}
-              </section>
-            )}
+
           </>
         )}
       </Card>

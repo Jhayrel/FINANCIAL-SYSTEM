@@ -722,11 +722,22 @@ export default function App() {
     if (cloud.uid) writeUnsaved(cloud.uid, next);
   };
 
-  const push = (fn: (l: ReturnType<typeof firestoreLedger>) => Promise<void>): void => {
+  /**
+   * A write to the database. Given `rows` above 150 (a rename, a move between
+   * lists, a merge, a bulk fix), it says how far it has got and the browser
+   * asks before the tab closes, as a restore does: a rename of Gcash closed
+   * in its first seconds could leave the account split (final test, 9
+   * November 2026). `fn` is handed the progress to report.
+   */
+  const push = (fn: (l: ReturnType<typeof firestoreLedger>, progress?: (done: number, total: number) => void) => Promise<void>, rows = 0): void => {
     if (!cloud.uid) return;
     const uid = cloud.uid;
+    const big = rows > 150;
+    if (big) setCleaning({ done: 0, total: rows });
     track(
-      fn(firestoreLedger(uid)).catch((e: unknown) => {
+      fn(firestoreLedger(uid), big ? (done, total) => setCleaning({ done, total }) : undefined).finally(() => {
+        if (big) setCleaning(null);
+      }).catch((e: unknown) => {
         if (e instanceof RowsNotSaved) {
           setUnsaved((prev) => {
             const next = mergeUnsaved(prev, e.rows);
@@ -1293,7 +1304,7 @@ export default function App() {
        */
       return added.length ? insertChronologically(replaced, added, { renumber: renumbers }) : replaced;
     });
-    push((l) => l.saveMany(rows));
+    push((l, progress) => l.saveMany(rows, progress), rows.length);
     setEditing(null);
     // Says what changed, and takes it back in one tap when every row was already there.
     const first = rows[0];
@@ -1347,7 +1358,7 @@ export default function App() {
 
     const byId = new Map(wrong.map((r) => [r.id, r]));
     setTransactions((prev) => prev.map((t) => byId.get(t.id) ?? t));
-    push((l) => l.saveMany(wrong));
+    push((l, progress) => l.saveMany(wrong, progress), wrong.length);
     flash(
       wrong.length === 1
         ? `Moved a starting balance to ${wrong[0]?.date}, where the ledger begins.`
@@ -1591,7 +1602,7 @@ export default function App() {
 
     setTransactions(live);
     setDeleted(binned);
-    push((l) => l.saveMany(changed));
+    push((l, progress) => l.saveMany(changed, progress), changed.length);
   };
 
   /**
@@ -1612,7 +1623,7 @@ export default function App() {
     if (changed.length === 0) return;
     setTransactions(live);
     setDeleted(binned);
-    push((l) => l.saveMany(changed));
+    push((l, progress) => l.saveMany(changed, progress), changed.length);
   };
 
   /**
@@ -1757,16 +1768,34 @@ export default function App() {
     if (mode === "replace") {
       const keep = new Set([...result.transactions, ...result.deleted].map((t) => t.id));
       const discard = [...before.transactions, ...before.deleted].map((t) => t.id).filter((id) => !keep.has(id));
-      push((l) => l.startClean(result.transactions, result.deleted, discard, new Date().toISOString()).then(() => undefined));
-    } else {
-      push((l) => l.saveMany(result.transactions));
+      /*
+       * With the progress notice and the browser's "leave this page?" that
+       * Start clean has, and "done" said only once it is written. A replace
+       * said done at once and was still writing; closed in that time, part of
+       * it never reached the database, so rows the file has live stayed in the
+       * Bin (final test, 9 November 2026).
+       */
+      if (!cloud.uid) {
+        flash(`Replaced everything. ${result.added.toLocaleString()} transactions restored.`);
+        return;
+      }
+      setCleaning({ done: 0, total: discard.length + result.transactions.length + result.deleted.length });
+      push(async (l) => {
+        try {
+          const r = await l.startClean(result.transactions, result.deleted, discard, new Date().toISOString(), (d, t) => setCleaning({ done: d, total: t }));
+          flash(
+            r.notDiscarded > 0
+              ? `Replaced everything: ${result.added.toLocaleString()} transactions restored. ${r.notDiscarded.toLocaleString()} old ${r.notDiscarded === 1 ? "row was" : "rows were"} refused by the database and still show: replace again with the same file.`
+              : `Replaced everything: ${result.added.toLocaleString()} transactions restored and saved.`,
+          );
+        } finally {
+          setCleaning(null);
+        }
+      });
+      return;
     }
-
-    flash(
-      mode === "replace"
-        ? `Replaced everything. ${result.added.toLocaleString()} transactions restored.`
-        : `Merged. ${result.added.toLocaleString()} added, ${result.kept.toLocaleString()} kept.`,
-    );
+    push((l, progress) => l.saveMany(result.transactions, progress), result.transactions.length);
+    flash(`Merged. ${result.added.toLocaleString()} added, ${result.kept.toLocaleString()} kept.`);
   };
 
   /**
@@ -3209,10 +3238,11 @@ export default function App() {
         {cleaning && (
           <Notice
             status="info"
-            title={`Loading your data: ${cleaning.done.toLocaleString()} of ${cleaning.total.toLocaleString()} written`}
+            title={`Saving: ${cleaning.done.toLocaleString()} of ${cleaning.total.toLocaleString()} rows written`}
           >
-            Keep this page open until it says done. If it closes first, run Start clean again with the
-            same file: it carries on where it stopped.
+            Keep this page open until this note goes; the browser asks first if you try to close it. If it
+            closes anyway, do the same again (the rename, or the restore with the same file): it carries on
+            where it stopped.
           </Notice>
         )}
         {updateReady && !updateClosed && (

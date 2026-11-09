@@ -17,7 +17,7 @@ import { limitOn, takesLimit, usedOn } from "./creditLimit";
 import { stopOf } from "./bills";
 import { daysBetween, formatMedium, getMonth, getYear, monthName, today } from "./dates";
 import { coversOn, insideCoverWords, MOST_DAYS_COVERED, savedInsideWords, savedWithin } from "./covers";
-import { formatMoney as money, type Centavos } from "./money";
+import { formatMoney as money, MAX_MONEY, type Centavos } from "./money";
 import { kindKey, unusualAgainst, type Unusual } from "./unusual";
 import type {
   IsoDate,
@@ -427,6 +427,9 @@ export function checkDraft(
   if (draft.amount === null || draft.amount < 0 || (draft.amount === 0 && !feeOnly)) {
     errors.push({ field: "amount", message: "Amount must be more than ₱0.00." });
   }
+  // Extra zeros, from any path (the form, the chat, a receipt): refused, never saved (`MAX_MONEY`).
+  if ((draft.amount ?? 0) > MAX_MONEY) errors.push({ field: "amount", message: `${money(draft.amount ?? 0)} is more than ${money(MAX_MONEY)}, too large to be right. Check for extra zeros.` });
+  if (draft.fee > MAX_MONEY) errors.push({ field: "fee", message: `A fee of ${money(draft.fee)} is too large to be right. Check for extra zeros.` });
 
   /**
    * A negative fee, which nothing checked.

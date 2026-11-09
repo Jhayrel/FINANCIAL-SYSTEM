@@ -14,7 +14,7 @@
 
 import { useEffect, useId, useState, type ReactNode } from "react";
 
-import { formatAmount, parseAmount, type Centavos } from "../domain/money";
+import { formatAmount, formatMoney, MAX_MONEY, parseAmount, type Centavos } from "../domain/money";
 import { Icon } from "./Icon";
 
 // ── Field wrapper ──────────────────────────────────────────────────────────
@@ -165,7 +165,10 @@ export function AmountInput({
    * 2026). Kept in the box and said, like a minus sign, never rounded.
    */
   const [tooFine, setTooFine] = useState(false);
+  /** Past ₱1,000,000,000.00 either way: extra zeros, kept in the box and said, never saved (`MAX_MONEY`). */
+  const [tooBig, setTooBig] = useState(false);
   const wrongSign = (parsed: Centavos | null): boolean => parsed !== null && parsed < 0 && !allowNegative;
+  const overMax = (parsed: Centavos | null): boolean => parsed !== null && Math.abs(parsed) > MAX_MONEY;
   const threeDecimals = (typed: string): boolean => /\.\d{3,}\s*$/.test(typed.replace(/,/g, "").trim());
 
   /**
@@ -179,13 +182,20 @@ export function AmountInput({
    */
   const committed = value === null ? "" : formatAmount(value);
   // A value set from outside (a suggestion tapped, a form cleared) replaces a refused figure.
-  if (!focused && (refused || tooFine) && value !== null) {
+  if (!focused && (refused || tooFine || tooBig) && value !== null) {
     setRefused(false);
     setTooFine(false);
+    setTooBig(false);
   }
-  if (!focused && (!(refused || tooFine) || value !== null) && text !== committed) setText(committed);
+  if (!focused && (!(refused || tooFine || tooBig) || value !== null) && text !== committed) setText(committed);
 
-  const problem = refused ? "This takes an amount above zero. Leave out the minus sign." : tooFine ? `Pesos have two decimals: ${text.trim()} has more. Type it as it is on the receipt, like 12.35.` : null;
+  const problem = refused
+    ? "This takes an amount above zero. Leave out the minus sign."
+    : tooFine
+      ? `Pesos have two decimals: ${text.trim()} has more. Type it as it is on the receipt, like 12.35.`
+      : tooBig
+        ? `That is more than ${formatMoney(MAX_MONEY)}, too large to be right. Check for extra zeros.`
+        : null;
   useEffect(() => {
     onProblem?.(problem);
   }, [problem, onProblem]);
@@ -203,7 +213,7 @@ export function AmountInput({
           autoComplete="off"
           enterKeyHint="done"
           disabled={disabled}
-          aria-invalid={invalid || refused || tooFine || undefined}
+          aria-invalid={invalid || refused || tooFine || tooBig || undefined}
           aria-label={ariaLabel}
           placeholder={placeholder}
           /**
@@ -229,18 +239,20 @@ export function AmountInput({
             setText(e.target.value);
             const parsed = parseAmount(e.target.value);
             const fine = threeDecimals(e.target.value);
-            const wrong = wrongSign(parsed) || fine;
+            const wrong = wrongSign(parsed) || fine || overMax(parsed);
             setRefused(wrongSign(parsed));
             setTooFine(fine);
+            setTooBig(overMax(parsed));
             if (focused) onChange(wrong ? null : parsed);
           }}
           onBlur={() => {
             setFocused(false);
             const parsed = parseAmount(text);
             const fine = threeDecimals(text);
-            const wrong = wrongSign(parsed) || fine;
+            const wrong = wrongSign(parsed) || fine || overMax(parsed);
             setRefused(wrongSign(parsed));
             setTooFine(fine);
+            setTooBig(overMax(parsed));
             onChange(wrong ? null : parsed);
             // Show what was typed for now. If the caller declines it, the
             // re-sync above puts the committed value back on the next render.
