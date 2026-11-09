@@ -56,6 +56,12 @@ export type Action =
   | "plan.skip"
   | "plan.remove"
   | "plan.restore"
+  /** Allocations (docs/17-ALLOCATIONS.md): a line added, changed, removed or put back, or a month copied from the one before. */
+  | "allocation.create"
+  | "allocation.update"
+  | "allocation.remove"
+  | "allocation.restore"
+  | "allocation.copy"
   /** Deleted for good from the bin (offline only: the cloud keeps the bin). */
   | "transaction.purge"
   /** The whole system taken out of the app, or sent up to the cloud: who took a copy, and when (3 November 2026). */
@@ -286,6 +292,16 @@ export function settingsChanged(what: string, by: Provenance = BY_OWNER): Activi
 /** A plan in the Planner changed. The amount, when there is one, is the plan's or the payment's. */
 export function planChanged(
   action: "plan.create" | "plan.update" | "plan.move" | "plan.paid" | "plan.skip" | "plan.remove" | "plan.restore",
+  summary: string,
+  by: Provenance = BY_OWNER,
+  extra: { readonly amount?: Centavos; readonly targetId?: string; readonly before?: string; readonly after?: string } = {},
+): ActivityEvent {
+  return build(action, by, summary, extra);
+}
+
+/** An allocation changed. The amount is the line's, or the copied month's total. */
+export function allocationChanged(
+  action: "allocation.create" | "allocation.update" | "allocation.remove" | "allocation.restore" | "allocation.copy",
   summary: string,
   by: Provenance = BY_OWNER,
   extra: { readonly amount?: Centavos; readonly targetId?: string; readonly before?: string; readonly after?: string } = {},

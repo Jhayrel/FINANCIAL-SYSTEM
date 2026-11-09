@@ -64,6 +64,7 @@ import { debtDue, positionsOf, type Debt, type DebtKind, type DueBasis } from ".
 import { addDays, daysBetween, daysInMonth, firstOfMonth, getDay, lastOfMonth, monthName } from "./dates";
 import { formatMoney as money, type Centavos } from "./money";
 import { costByKind } from "./kinds";
+import { allocatedIn, monthAllocations, type MonthAllocations } from "./monthAllocation";
 import { incomeToCome } from "./incomeBudget";
 import { monthTotals, totalsFor } from "./totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
@@ -110,6 +111,13 @@ export interface SafeToSpend {
   readonly reservedPlans: Centavos;
   /** Those plans, due order, each with what is left of it. */
   readonly plansDue: readonly { readonly id: string; readonly title: string; readonly left: Centavos; readonly due: IsoDate }[];
+  /**
+   * What the month's allocations still hold (docs/17-ALLOCATIONS.md, A5): a
+   * plan of the same kind held inside one, never twice. Absent with none.
+   */
+  readonly reservedAllocations?: Centavos;
+  /** The month's allocations, each with what it holds; absent with none. */
+  readonly allocations?: MonthAllocations;
   /** Wallets less everything still due. Negative when they cannot cover it. */
   readonly free: Centavos;
   /** What is left of the spending budget, or null with none set. Negative when over. */
@@ -186,8 +194,9 @@ const HABITS = 3;
  * 2026: "what if I click in plan safe to spend or not safe to spend off").
  * Counting a plan or not moves safe to spend, never this.
  */
-export function spendable(safe: { readonly safe: Centavos; readonly wallets?: Centavos; readonly reservedBills?: Centavos; readonly reservedDebt?: Centavos; readonly reservedPlans?: Centavos }): Centavos {
-  if (safe.wallets === undefined || safe.reservedBills === undefined || safe.reservedDebt === undefined || !safe.reservedPlans) return Math.max(0, safe.safe);
+export function spendable(safe: { readonly safe: Centavos; readonly wallets?: Centavos; readonly reservedBills?: Centavos; readonly reservedDebt?: Centavos; readonly reservedPlans?: Centavos; readonly reservedAllocations?: Centavos | undefined }): Centavos {
+  // Allocations are spending the budget carries too, added back like the plans (A5).
+  if (safe.wallets === undefined || safe.reservedBills === undefined || safe.reservedDebt === undefined || (!safe.reservedPlans && !safe.reservedAllocations)) return Math.max(0, safe.safe);
   return Math.max(0, safe.wallets - safe.reservedBills - safe.reservedDebt);
 }
 
@@ -208,6 +217,7 @@ export function budgetBeyondMoney(safe: {
   readonly reservedBills?: Centavos;
   readonly reservedDebt?: Centavos;
   readonly reservedPlans?: Centavos;
+  readonly reservedAllocations?: Centavos | undefined;
 }): Centavos {
   if (safe.budgetLeft === null || safe.budgetLeft <= 0 || safe.wallets < 0) return 0;
   const beyond = safe.budgetLeft - spendable(safe);
@@ -215,9 +225,13 @@ export function budgetBeyondMoney(safe: {
 }
 
 /** "Only PHP 0.00 is safe to spend", with the plans counted in it said when there are any. */
-export function moneyForBudgetWords(safe: { readonly safe: Centavos; readonly wallets?: Centavos; readonly reservedBills?: Centavos; readonly reservedDebt?: Centavos; readonly reservedPlans?: Centavos }, money: (c: Centavos) => string): string {
-  return safe.reservedPlans && spendable(safe) !== Math.max(0, safe.safe)
-    ? `the wallets can pay only ${money(spendable(safe))} more this month (safe to spend ${money(Math.max(0, safe.safe))}, plus ${money(safe.reservedPlans)} set aside for plans)`
+export function moneyForBudgetWords(safe: { readonly safe: Centavos; readonly wallets?: Centavos; readonly reservedBills?: Centavos; readonly reservedDebt?: Centavos; readonly reservedPlans?: Centavos; readonly reservedAllocations?: Centavos | undefined }, money: (c: Centavos) => string): string {
+  const aside = [
+    ...(safe.reservedPlans ? [`${money(safe.reservedPlans)} set aside for plans`] : []),
+    ...(safe.reservedAllocations ? [`${money(safe.reservedAllocations)} in allocations`] : []),
+  ].join(" and ");
+  return aside && spendable(safe) !== Math.max(0, safe.safe)
+    ? `the wallets can pay only ${money(spendable(safe))} more this month (safe to spend ${money(Math.max(0, safe.safe))}, plus ${aside})`
     : `only ${money(Math.max(0, safe.safe))} is safe to spend`;
 }
 
@@ -491,13 +505,32 @@ export function monthBrief(input: {
     const reservedDebt = due.filter((d) => d.kind === "payable").reduce((s, d) => s + d.amount, 0);
     // Plans the owner chose to count, as bills still to pay are (docs/16-PLANNER.md, P5).
     const planned = plansSetAside((reference.plans ?? []).map((p) => viewOf(p, { transactions, accounts: [], asOf })));
-    const reservedPlans = planned.total;
-    const plansDue = planned.views.map((v) => ({ id: v.plan.id, title: v.plan.title, left: v.left, due: v.plan.due }));
-    const free = wallets - reservedBills - reservedDebt - reservedPlans;
+    /*
+     * Allocations: what is left of each, held like a bill (docs/17-ALLOCATIONS.md,
+     * A5). A plan of the same kind is held inside its allocation, once.
+     */
+    const spendingWallets = new Set(reference.wallets);
+    const allocations =
+      (reference.allocations ?? []).length > 0
+        ? monthAllocations(reference.allocations, transactions, `${year}-${String(month).padStart(2, "0")}`, asOf, planned.views.map((v) => ({ id: v.plan.id, title: v.plan.title, item: v.plan.item, notes: v.plan.notes, left: v.left, counts: v.counts })), spendingWallets)
+        : null;
+    const plansOut = allocations ? planned.views.filter((v) => !allocations.plansInside.has(v.plan.id)) : planned.views;
+    const reservedPlans = plansOut.reduce((s, v) => s + v.left, 0);
+    const reservedAllocations = allocations?.held ?? 0;
+    const plansDue = plansOut.map((v) => ({ id: v.plan.id, title: v.plan.title, left: v.left, due: v.plan.due }));
+    const free = wallets - reservedBills - reservedDebt - reservedPlans - reservedAllocations;
     const budgetLeft = tracks.spending.budget > 0 ? tracks.spending.remaining : null;
+    /*
+     * The budget's day figure is after the allocations too: they are part of
+     * the spending budget, already spoken for. Gas bought out of the gas
+     * allocation leaves the budget and the allocation alike, so the day
+     * figure does not move (owner, 8 November 2026: "would it affect my daily
+     * budget?"). Going past an allocation lowers it, as it should.
+     */
+    const budgetFree = budgetLeft === null ? null : budgetLeft - reservedAllocations;
     const amount = Math.max(0, free);
-    const limitedBy = budgetLeft !== null && budgetLeft < amount ? "budget" : "wallets";
-    const budgetPerDay = budgetLeft === null ? null : daysLeft > 0 ? Math.floor(Math.max(0, budgetLeft) / daysLeft) : 0;
+    const limitedBy = budgetFree !== null && budgetFree < amount ? "budget" : "wallets";
+    const budgetPerDay = budgetFree === null ? null : daysLeft > 0 ? Math.floor(Math.max(0, budgetFree) / daysLeft) : 0;
 
     /*
      * What today already took out of the spending wallets, bills and
@@ -506,10 +539,10 @@ export function monthBrief(input: {
      * two of the owner's own accounts counts only its fee; money sent away
      * counts whole (`totalsFor`).
      */
-    const spendingWallets = new Set(reference.wallets);
     // What left the wallets today: a date range left them whole on its first day, never a share a day (`wholeRows`).
     const today = totalsFor(wholeRows(transactions).filter((t) => t.date === asOf && spendingWallets.has(t.fromWallet)));
-    const spentToday = today.spending + today.fees;
+    // What an allocation covered today was set aside already, as a bill paid today is: it does not use today's share (A5).
+    const spentToday = Math.max(0, today.spending + today.fees - (allocations?.coveredToday ?? 0));
     const day = dayFigures(amount, spentToday, daysLeft);
 
     const habits = learnPatterns(transactions, asOf)
@@ -529,6 +562,7 @@ export function monthBrief(input: {
       reservedDebt,
       reservedPlans,
       plansDue,
+      ...(allocations && allocations.lines.length > 0 ? { reservedAllocations, allocations } : {}),
       free,
       budgetLeft,
       budgetPerDay,
@@ -607,7 +641,7 @@ function notesFor(
      * still due this month is ₱1,499.15 more than your wallets hold"
      * (27 October 2026).
      */
-    const reserved = safe.reservedBills + safe.reservedDebt + safe.reservedPlans;
+    const reserved = safe.reservedBills + safe.reservedDebt + safe.reservedPlans + (safe.reservedAllocations ?? 0);
     // Worded as before when no plan is set aside, so every figure without plans reads exactly as it did.
     const owed =
       safe.reservedDebt > 0
@@ -617,7 +651,9 @@ function notesFor(
         : safe.reservedBills > 0 || safe.reservedPlans === 0
           ? "bills and subscriptions"
           : "";
-    const what = safe.reservedPlans > 0 ? (owed ? `${owed.replace(" and debt payments", ", debt payments")} and plans set aside` : "plans set aside") : owed;
+    const plansWords = safe.reservedPlans > 0 ? (owed ? `${owed.replace(" and debt payments", ", debt payments")} and plans set aside` : "plans set aside") : owed;
+    // Allocations named last, after everything else still due (A8).
+    const what = (safe.reservedAllocations ?? 0) > 0 ? (plansWords ? `${plansWords.replace(/ and (plans set aside|bills and subscriptions|debt payments)$/, ", $1")} and allocations` : "allocations") : plansWords;
 
     if (safe.wallets < 0) {
       // Said as what it is. "The ₱0.00 of bills still due is more than your wallets hold" was true and meant nothing.
@@ -712,6 +748,8 @@ export interface NextMonthStart {
   readonly reservedDebt: Centavos;
   /** The month's plans counted in safe to spend (docs/16-PLANNER.md, P5). */
   readonly reservedPlans: Centavos;
+  /** The month's allocations, whole: nothing is spent of them yet (docs/17-ALLOCATIONS.md, A5). */
+  readonly reservedAllocations: Centavos;
   /** Never below zero. */
   readonly safe: Centavos;
   /** A day, over every day of the month. */
@@ -737,10 +775,16 @@ export function nextMonthStart(
   const reservedBills = brief.bills.bills.filter(isOpenBill).reduce((s, b) => s + b.amount, 0);
   const reservedDebt = brief.debts.filter((d) => d.kind === "payable" && d.dueOn >= first).reduce((s, d) => s + d.amount, 0);
   // Next month's plans that count, what is left of each (docs/16-PLANNER.md, P5).
-  const reservedPlans = (input.reference.plans ?? [])
+  const nextPlans = (input.reference.plans ?? [])
     .map((p) => viewOf(p, { transactions: input.transactions, accounts: [], asOf: input.asOf }))
-    .filter((v) => v.plan.setAside && !v.plan.goalId && v.plan.due.slice(0, 7) === first.slice(0, 7) && v.left > 0 && v.state !== "paid" && v.state !== "skipped" && v.state !== "removed")
-    .reduce((s, v) => s + v.left, 0);
-  const safe = Math.max(0, now.free - reservedBills - reservedDebt - reservedPlans);
-  return { year, month, first, days, carried: now.free, reservedBills, reservedDebt, reservedPlans, safe, perDay: Math.floor(safe / days) };
+    .filter((v) => v.plan.setAside && !v.plan.goalId && v.plan.due.slice(0, 7) === first.slice(0, 7) && v.left > 0 && v.state !== "paid" && v.state !== "skipped" && v.state !== "removed");
+  // Next month's allocations, as they will hold on its 1st; a plan of the same kind inside one, once (A5).
+  const nextAllocations =
+    allocatedIn(input.reference.allocations, first.slice(0, 7)) > 0
+      ? monthAllocations(input.reference.allocations, input.transactions, first.slice(0, 7), first, nextPlans.map((v) => ({ id: v.plan.id, title: v.plan.title, item: v.plan.item, notes: v.plan.notes, left: v.left, counts: true })))
+      : null;
+  const reservedPlans = nextPlans.filter((v) => !nextAllocations?.plansInside.has(v.plan.id)).reduce((s, v) => s + v.left, 0);
+  const reservedAllocations = nextAllocations?.held ?? 0;
+  const safe = Math.max(0, now.free - reservedBills - reservedDebt - reservedPlans - reservedAllocations);
+  return { year, month, first, days, carried: now.free, reservedBills, reservedDebt, reservedPlans, reservedAllocations, safe, perDay: Math.floor(safe / days) };
 }

@@ -49,7 +49,7 @@ const KIND: readonly {
     match: (a) => a === "transaction.bin" || a === "transaction.restore",
   },
   // Budgets and limits: set, changed, corrected once closed, or undone.
-  { id: "budget", label: "Budget", phrase: "No budget changed", match: (a) => a === "budget.update" },
+  { id: "budget", label: "Budget", phrase: "No budget or allocation changed", match: (a) => a === "budget.update" || a.startsWith("allocation.") },
   // The Planner: plans added, moved, paid, skipped or removed (docs/16-PLANNER.md).
   { id: "planner", label: "Planner", phrase: "Nothing planned or changed in the Planner", match: (a) => a.startsWith("plan.") },
   { id: "settings", label: "Settings", phrase: "No settings changed", match: (a) => a.startsWith("settings.") },
@@ -242,7 +242,7 @@ export function Activity({
       binned: count((e) => e.action === "transaction.bin"),
       restored: count((e) => e.action === "transaction.restore"),
       settings: count((e) => e.action.startsWith("settings.")),
-      budget: count((e) => e.action === "budget.update"),
+      budget: count((e) => e.action === "budget.update" || e.action.startsWith("allocation.")),
       assistant: count((e) => e.actor === "ai"),
       days: new Set(list.map((e) => dayOf(e.at))).size,
       since: list[list.length - 1]?.at,

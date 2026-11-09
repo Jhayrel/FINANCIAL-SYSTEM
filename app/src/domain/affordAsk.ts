@@ -202,12 +202,12 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
     .map((w) => ({ name: w, balance: walletBalance(transactions, w) }))
     .filter((w) => w.balance !== 0);
   const inWallets = safe?.wallets ?? held.reduce((s, w) => s + w.balance, 0);
-  const due = safe ? safe.reservedBills + safe.reservedDebt + safe.reservedPlans : 0;
+  const due = safe ? safe.reservedBills + safe.reservedDebt + safe.reservedPlans + (safe.reservedAllocations ?? 0) : 0;
   const free = inWallets - due;
   // What is still due, named as it is: "PHP 2,200.00 of bills and debt payments" was three plans (27 October 2026 sweep).
   const dueKinds = (s: typeof safe): string => {
     if (!s) return "is";
-    const parts = [s.reservedBills > 0 ? "bills" : "", s.reservedDebt > 0 ? "debt payments" : "", s.reservedPlans > 0 ? "plans set aside" : ""].filter(Boolean);
+    const parts = [s.reservedBills > 0 ? "bills" : "", s.reservedDebt > 0 ? "debt payments" : "", s.reservedPlans > 0 ? "plans set aside" : "", (s.reservedAllocations ?? 0) > 0 ? "allocations" : ""].filter(Boolean);
     return parts.length === 0 ? "is" : `of ${parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0]} ${parts.length === 1 && parts[0] === "plans set aside" ? "are" : "is"}`;
   };
 

@@ -707,6 +707,8 @@ function mergeSettings(current: AppSettings, incoming: AppSettings): AppSettings
     stopped: byName([...(current.stopped ?? [])], [...(incoming.stopped ?? [])]),
     // Plans by id: the file's plans this device does not have are added, its own kept as they are.
     plans: [...(current.plans ?? []), ...(incoming.plans ?? []).filter((p) => !(current.plans ?? []).some((c) => c.id === p.id))],
+    // Allocations the same way, by id (docs/17-ALLOCATIONS.md, A3).
+    allocations: [...(current.allocations ?? []), ...(incoming.allocations ?? []).filter((a) => !(current.allocations ?? []).some((c) => c.id === a.id))],
     // The owner's details here win; a part left empty here is taken from the file.
     owner: mergeOwner(current.owner, incoming.owner),
   };

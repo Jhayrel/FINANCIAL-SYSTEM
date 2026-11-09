@@ -66,7 +66,7 @@ const ACTIONS: Readonly<Record<NonNullable<ActivityAsk["action"]>, readonly Acti
   edit: ["transaction.update"],
   bin: ["transaction.bin"],
   restore: ["transaction.restore"],
-  budget: ["budget.update"],
+  budget: ["budget.update", "allocation.create", "allocation.update", "allocation.remove", "allocation.restore", "allocation.copy"],
   settings: ["settings.update"],
 };
 
@@ -127,6 +127,11 @@ export function activityAnswer(ask: ActivityAsk, events: readonly ActivityEvent[
     part("transaction.bin", "binned"),
     part("transaction.restore", "restored"),
     part("budget.update", "budget changes"),
+    part("allocation.create", ["allocation added", "allocations added"]),
+    part("allocation.update", ["allocation changed", "allocations changed"]),
+    part("allocation.remove", ["allocation removed", "allocations removed"]),
+    part("allocation.restore", ["allocation put back", "allocations put back"]),
+    part("allocation.copy", ["month of allocations copied", "months of allocations copied"]),
     part("settings.update", "settings changes"),
     part("backup.restore", ["backup restored", "backups restored"]),
     ...(["plan.create", "plan.update", "plan.move", "plan.paid", "plan.skip", "plan.remove", "plan.restore"] as const).map((a) => part(a, PLAN_WORD[a])),

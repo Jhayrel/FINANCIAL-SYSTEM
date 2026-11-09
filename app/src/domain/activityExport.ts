@@ -36,6 +36,7 @@ export function kindOf(action: string): string {
   if (action === "transaction.bin") return "Moved to the bin";
   if (action === "transaction.restore") return "Restored";
   if (action === "budget.update") return "Budget";
+  if (action.startsWith("allocation.")) return "Allocation";
   if (action.startsWith("settings.")) return "Settings";
   if (action === "backup.restore") return "Backup restored";
   if (action.startsWith("plan.")) return "Planner";
@@ -146,7 +147,7 @@ export function trailSummary(events: readonly ActivityEvent[]): TrailSummary {
     added: count((e) => e.action === "transaction.create"),
     edited: count((e) => e.action === "transaction.update"),
     binnedOrRestored: count((e) => e.action === "transaction.bin" || e.action === "transaction.restore"),
-    budgetOrSettings: count((e) => e.action === "budget.update" || e.action.startsWith("settings.")),
+    budgetOrSettings: count((e) => e.action === "budget.update" || e.action.startsWith("allocation.") || e.action.startsWith("settings.")),
     byAssistant: count((e) => e.actor === "ai"),
     from: days[0] ?? "",
     to: days[days.length - 1] ?? "",

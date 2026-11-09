@@ -115,6 +115,7 @@ export interface AlertInput {
         readonly reservedBills?: Centavos;
         readonly reservedDebt?: Centavos;
         readonly reservedPlans?: Centavos;
+        readonly reservedAllocations?: Centavos | undefined;
       }
     | null
     | undefined;
@@ -290,7 +291,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
    */
   {
     const n = input.next;
-    const due = n ? n.reservedBills + n.reservedDebt + n.reservedPlans : 0;
+    const due = n ? n.reservedBills + n.reservedDebt + n.reservedPlans + (n.reservedAllocations ?? 0) : 0;
     if (n && due > 0 && n.safe === 0) {
       const short = due - Math.max(0, n.carried);
       const name = monthName(n.month);

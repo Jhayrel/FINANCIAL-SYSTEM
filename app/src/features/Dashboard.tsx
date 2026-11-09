@@ -299,7 +299,7 @@ export function Dashboard({
       lines: [
         `${name} ${year}, ${brief.daysLeft} days left.`,
         safe
-          ? `Safe to spend today ${formatMoney(safe.perDay)} (today's share ${formatMoney(safe.todayShare)}, ${formatMoney(safe.spentToday)} spent today). Safe until the month ends ${formatMoney(safe.safe)}: wallets ${formatMoney(safe.wallets)}, less bills and subscriptions still to pay ${formatMoney(safe.reservedBills)}, debt payments due ${formatMoney(safe.reservedDebt)}${safe.reservedPlans > 0 ? ` and plans set aside ${formatMoney(safe.reservedPlans)}` : ""}. From tomorrow ${formatMoney(safe.perDayAfter)} a day. ${carryWords(safe, yesterday, formatMoney).join(" ")}${next ? ` From 1 ${monthName(next.month)}: ${formatMoney(next.perDay)} a day over ${next.days} days, if nothing more is spent and nothing comes in.` : ""}`
+          ? `Safe to spend today ${formatMoney(safe.perDay)} (today's share ${formatMoney(safe.todayShare)}, ${formatMoney(safe.spentToday)} spent today). Safe until the month ends ${formatMoney(safe.safe)}: wallets ${formatMoney(safe.wallets)}, less bills and subscriptions still to pay ${formatMoney(safe.reservedBills)}, debt payments due ${formatMoney(safe.reservedDebt)}${safe.reservedPlans > 0 ? `, plans set aside ${formatMoney(safe.reservedPlans)}` : ""}${(safe.reservedAllocations ?? 0) > 0 ? `, allocations set aside ${formatMoney(safe.reservedAllocations ?? 0)}` : ""}. From tomorrow ${formatMoney(safe.perDayAfter)} a day. ${carryWords(safe, yesterday, formatMoney).join(" ")}${next ? ` From 1 ${monthName(next.month)}: ${formatMoney(next.perDay)} a day over ${next.days} days, if nothing more is spent and nothing comes in.` : ""}`
           : "",
         noBudget
           ? `No budget set for ${name}. Spent ${formatMoney(t.combined.spent)}.`
@@ -368,6 +368,8 @@ export function Dashboard({
                 {safe && safe.reservedDebt > 0 && <Line label="Debt payments due" value={-safe.reservedDebt} />}
                 {/* The Planner's plans counted this month (docs/16-PLANNER.md, P5). */}
                 {safe && safe.reservedPlans > 0 && <Line label="Set aside for plans" value={-safe.reservedPlans} />}
+                {/* Allocations: what is left of each this month (docs/17-ALLOCATIONS.md, A5). */}
+                {safe && (safe.reservedAllocations ?? 0) > 0 && <Line label="Set aside in allocations" value={-(safe.reservedAllocations ?? 0)} />}
                 <Line label={`Safe to spend until ${name} ends`} value={safe?.safe ?? 0} strong total />
                 {safe && safe.daysLeft > 1 && (
                   <Line label={`Per day from tomorrow (${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"})`} value={safe.perDayAfter} quiet />

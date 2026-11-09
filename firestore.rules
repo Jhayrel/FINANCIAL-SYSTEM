@@ -208,6 +208,10 @@ service cloud.firestore {
           && (!('plans' in d) || (d.plans is list && d.plans.size() <= 500))
           // The owner's own details (src/domain/owner.ts): a small map, when present.
           && (!('owner' in d) || (d.owner is map && d.owner.size() <= 10))
+          // Allocations (docs/17-ALLOCATIONS.md): money set aside for a kind of
+          // spending each month, one line a kind a month. A list, bounded, when
+          // present; older documents have none, which is allowed.
+          && (!('allocations' in d) || (d.allocations is list && d.allocations.size() <= 1000))
           // There is no API key field in the app, and none may be introduced
           // by writing one straight into the console. Rule AI4.
           && noSecretKeys(d.keys())

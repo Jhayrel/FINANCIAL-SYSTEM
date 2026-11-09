@@ -14,6 +14,7 @@
 
 import { NO_OWNER, normaliseOwner, type OwnerDetails } from "./owner";
 import type { Plan } from "./planner";
+import { normaliseAllocations, type AllocationLine } from "./monthAllocation";
 import type { Account } from "./accounts";
 import type { Debt } from "./debt";
 import type { Centavos } from "./money";
@@ -188,6 +189,12 @@ export interface AppSettings {
    */
   readonly plans?: readonly Plan[];
   /**
+   * Allocations: money set aside each month for a kind of spending
+   * (`domain/monthAllocation.ts`, docs/17-ALLOCATIONS.md). Its own section,
+   * so it syncs like the plans.
+   */
+  readonly allocations?: readonly AllocationLine[];
+  /**
    * Who the ledger belongs to: name, what to call them, contact details and a
    * few words about them (`domain/owner.ts`). Its own section, so it syncs.
    */
@@ -211,6 +218,7 @@ export function defaultSettings(): AppSettings {
     theme: "system",
     lowBalanceThreshold: 50000,
     plans: [],
+    allocations: [],
     owner: NO_OWNER,
     version: SETTINGS_VERSION,
   };
@@ -275,6 +283,8 @@ export function normaliseSettings(raw: unknown): AppSettings {
       typeof input.lowBalanceThreshold === "number" && Number.isInteger(input.lowBalanceThreshold)
         ? input.lowBalanceThreshold
         : base.lowBalanceThreshold,
+    // An allocation missing what makes it one is left out rather than shown broken (A3).
+    allocations: normaliseAllocations(input.allocations),
     // A plan missing what makes it one is left out rather than shown broken.
     plans: Array.isArray(input.plans)
       ? input.plans

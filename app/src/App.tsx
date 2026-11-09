@@ -107,6 +107,7 @@ import { accountGroups, KIND_LABEL, migrateAccounts, renameAccount, renameItem, 
 import { defaultSettings, isBlankSettings, type AppSettings } from "./domain/settings";
 import { Activity } from "./features/Activity";
 import { activityStore } from "./data/activityStore";
+import { allocatableKinds, checkAllocation, checkRestore, copyLines, editAllocation, lineName, lineSummary, linesIn, makeAllocation, monthWords, renameAllocations, type AllocationChange } from "./domain/monthAllocation";
 import { chatStore } from "./data/chatStore";
 import { FREE_READS, resetsAt, usageLevel } from "./data/usage";
 import { useUsage } from "./features/useUsage";
@@ -120,6 +121,7 @@ import {
   restored as restoredEvent,
   settingsChanged,
   planChanged,
+  allocationChanged,
   updated as updatedEvent,
   BY_OWNER,
   dataTaken,
@@ -909,6 +911,8 @@ export default function App() {
         .map((c) => ({ id: c.id, name: c.name, side: c.kind === "receivable" ? ("owed" as const) : ("held" as const) })),
       // The Planner, so every figure that sets money aside reads the same plans (docs/16-PLANNER.md, P5).
       plans: settings.plans ?? [],
+      // And the allocations, for the same reason (docs/17-ALLOCATIONS.md, A5).
+      allocations: settings.allocations ?? [],
     };
   }, [settings, transactions]);
 
@@ -2079,6 +2083,74 @@ export default function App() {
    * The Planner (docs/16-PLANNER.md): a plan saved, new or changed, into its
    * own section of settings, and the change on the activity trail.
    */
+  /**
+   * An allocation added, changed, removed, put back, or a month copied from
+   * the one before (docs/17-ALLOCATIONS.md). Checked here as well as in the
+   * form, so the Budget screen and the chat are held to one rule. Returns why
+   * it could not be saved, or null when it was.
+   */
+  const handleAllocation = (change: AllocationChange, by: Provenance = BY_OWNER): string | null => {
+    const all = settings.allocations ?? [];
+    const short = (text: string, most: number): string => (text.length > most ? `${text.slice(0, most - 3).trimEnd()}...` : text);
+    const newId = (): string => `alloc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    if (change.kind === "add") {
+      const why = checkAllocation(change.input, change.month, all, reference);
+      if (why) return why;
+      const line = makeAllocation(change.input, change.month, asOf, newId());
+      setSettings((s) => ({ ...s, allocations: [...(s.allocations ?? []), line] }));
+      record(allocationChanged("allocation.create", short(`Allocated ${lineSummary(line)}.`, 300), by, { amount: line.amount, targetId: line.id, after: short(lineSummary(line), 600) }));
+      flash(short(`Allocated ${lineSummary(line)}.`, 200));
+      return null;
+    }
+    if (change.kind === "edit") {
+      const was = all.find((l) => l.id === change.id);
+      if (!was) return "That allocation is not there any more: it was removed, perhaps on another device.";
+      const why = checkAllocation(change.input, was.month, all.filter((l) => l.id !== was.id), reference);
+      if (why) return why;
+      const line = { ...editAllocation(was, change.input), ...(was.removedOn ? { removedOn: was.removedOn } : {}) };
+      setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? line : l)) }));
+      record(allocationChanged("allocation.update", short(`Changed the ${lineName(was)} allocation for ${monthWords(was.month)}: ${formatMoney(was.amount)} to ${formatMoney(line.amount)}.`, 300), by, { amount: line.amount, targetId: line.id, before: short(lineSummary(was), 600), after: short(lineSummary(line), 600) }));
+      flash(short(`Changed: ${lineSummary(line)}.`, 200));
+      return null;
+    }
+    if (change.kind === "remove" || change.kind === "restore") {
+      const was = all.find((l) => l.id === change.id);
+      if (!was) return "That allocation is not there any more.";
+      if (change.kind === "restore") {
+        const why = checkRestore(was, all);
+        if (why) return why;
+        setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? (({ removedOn: _gone, ...rest }) => rest)(l) : l)) }));
+        record(allocationChanged("allocation.restore", short(`Put back the ${lineName(was)} allocation for ${monthWords(was.month)} (${formatMoney(was.amount)}).`, 300), by, { amount: was.amount, targetId: was.id, after: short(lineSummary(was), 600) }));
+        flash(`Put back the ${lineName(was)} allocation. It is set aside again.`);
+        return null;
+      }
+      // Kept, not deleted: shown under Removed on Budget and put back from there, as a skipped plan is (A7).
+      setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? { ...l, removedOn: asOf } : l)) }));
+      record(allocationChanged("allocation.remove", short(`Removed the ${lineName(was)} allocation for ${monthWords(was.month)} (${formatMoney(was.amount)}).`, 300), by, { amount: was.amount, targetId: was.id, before: short(lineSummary(was), 600) }));
+      flash(`Removed the ${lineName(was)} allocation. Safe to spend no longer holds it; it is kept under Removed on Budget.`, {
+        label: "Undo",
+        run: () => {
+          setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? (({ removedOn: _gone, ...rest }) => rest)(l) : l)) }));
+          record(allocationChanged("allocation.restore", short(`Put back the ${lineName(was)} allocation for ${monthWords(was.month)}.`, 300), by, { amount: was.amount, targetId: was.id, after: short(lineSummary(was), 600) }));
+        },
+      });
+      return null;
+    }
+    // Copied: amounts and pace, never what was left; kinds that are bills now, or gone, are left behind.
+    const kinds = new Set(allocatableKinds(reference).map((k) => k.toLowerCase()));
+    const lines = copyLines(all, change.from, change.to, asOf, newId).filter((l) => kinds.has(l.kind.trim().toLowerCase()));
+    if (lines.length === 0) {
+      return linesIn(all, change.from).length === 0
+        ? `${monthWords(change.from)} has no allocations to copy.`
+        : `Every allocation in ${monthWords(change.from)} is in ${monthWords(change.to)} already.`;
+    }
+    const total = lines.reduce((t, l) => t + l.amount, 0);
+    setSettings((s) => ({ ...s, allocations: [...(s.allocations ?? []), ...lines] }));
+    record(allocationChanged("allocation.copy", short(`Copied ${lines.length} ${lines.length === 1 ? "allocation" : "allocations"} from ${monthWords(change.from)} to ${monthWords(change.to)}, ${formatMoney(total)} in all.`, 300), by, { amount: total, after: short(lines.map(lineSummary).join("\n"), 600) }));
+    flash(`Copied ${lines.length} ${lines.length === 1 ? "allocation" : "allocations"} from ${monthWords(change.from)}, ${formatMoney(total)} in all. Change what this month needs on Budget.`);
+    return null;
+  };
+
   const changePlan = (plan: Plan, action: Parameters<typeof planChanged>[0], summary: string, by: Provenance): void => {
     /*
      * A goal made for the plan follows it: its amount or day changed, the
@@ -2959,7 +3031,7 @@ export default function App() {
                 const changes = settingsChanges(settings, next, kinds);
                 if (changes.length > 0) record({ ...settingsChanged(settingsChangesSummary(changes)), after: changes.map((c) => `${c.area}: ${c.line}`).join("\n") });
                 const withAccounts = renames.reduce<AppSettings>(
-                  (s, [from, to]) => ({ ...s, credits: renameDebtAccount(s.credits, from, to), plans: renamePlans(s.plans ?? [], "wallet", from, to) }),
+                  (s, [from, to]) => ({ ...s, credits: renameDebtAccount(s.credits, from, to), plans: renamePlans(s.plans ?? [], "wallet", from, to), allocations: renameAllocations(s.allocations, "wallet", from, to) }),
                   next,
                 );
                 /*
@@ -2970,7 +3042,8 @@ export default function App() {
                 const gone = new Set(next.accounts.filter((a) => a.kind === "goal" && a.archived && settings.accounts.some((b) => b.id === a.id && !b.archived)).map((a) => a.id));
                 const freed = (s: AppSettings): AppSettings =>
                   gone.size === 0 ? s : { ...s, plans: (s.plans ?? []).map((p) => (p.goalId && gone.has(p.goalId) ? { ...p, goalId: undefined, wallet: s.accounts.find((a) => a.id === p.goalId)?.name === p.wallet ? "" : p.wallet, setAside: true } : p)) };
-                setSettings(freed(kinds.reduce<AppSettings>((s, [from, to]) => ({ ...s, plans: renamePlans(s.plans ?? [], "item", from, to) }), withAccounts)));
+                // A kind renamed: its plans and its allocations follow (docs/17-ALLOCATIONS.md, A7).
+                setSettings(freed(kinds.reduce<AppSettings>((s, [from, to]) => ({ ...s, plans: renamePlans(s.plans ?? [], "item", from, to), allocations: renameAllocations(s.allocations, "kind", from, to) }), withAccounts)));
               }}
               onRenameAccount={(from, to) => handleRename("account", from, to)}
               onRenameItem={(from, to) => handleRename("item", from, to)}

@@ -88,8 +88,8 @@ export function asksNextMonth(text: string, asOf: IsoDate): boolean {
 /** The next month's start, in words: nothing resets, what carries over, less its bills, over its days (`nextMonthStart`). */
 export function nextMonthWords(next: NextMonthStart): string {
   const name = MONTH_NAMES[next.month - 1] ?? "next month";
-  const due = next.reservedBills + next.reservedDebt + next.reservedPlans;
-  const parts = ["bills", "subscriptions", ...(next.reservedDebt > 0 ? ["debt payments"] : []), ...(next.reservedPlans > 0 ? ["planned spending"] : [])];
+  const due = next.reservedBills + next.reservedDebt + next.reservedPlans + (next.reservedAllocations ?? 0);
+  const parts = ["bills", "subscriptions", ...(next.reservedDebt > 0 ? ["debt payments"] : []), ...(next.reservedPlans > 0 ? ["planned spending"] : []), ...((next.reservedAllocations ?? 0) > 0 ? ["allocations"] : [])];
   const what = `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1] ?? ""}`;
   const carried = Math.max(0, next.carried);
   return next.safe > 0
@@ -153,6 +153,8 @@ export function safeWords(
     `- Bills and subscriptions still to pay: ${safe.reservedBills > 0 ? `\u2212${money(safe.reservedBills)}${named.length > 0 ? ` (${named.join(", ")})` : ""}` : "none"}`,
     ...(safe.reservedDebt > 0 ? [`- Debt payments due: \u2212${money(safe.reservedDebt)}`] : []),
     ...(safe.reservedPlans > 0 ? [`- Planned, set aside: \u2212${money(safe.reservedPlans)} (${safe.plansDue.map((p) => `${p.title} ${money(p.left)}`).join(", ")})`] : []),
+    // Allocations: what is left of each, held like a bill (docs/17-ALLOCATIONS.md, A5).
+    ...((safe.reservedAllocations ?? 0) > 0 && safe.allocations ? [`- Allocations, set aside: \u2212${money(safe.reservedAllocations ?? 0)} (${safe.allocations.lines.filter((l) => l.held > 0).map((l) => `${l.name} ${money(l.held)}`).join(", ")})`] : []),
     `- Safe until ${name} ends: **${money(safe.safe)}**`,
     /*
      * How today's figure comes from it: the model twice called it the wallets

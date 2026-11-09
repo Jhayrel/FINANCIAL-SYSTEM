@@ -7,6 +7,7 @@
  */
 
 import type { Plan } from "./planner";
+import type { AllocationLine } from "./monthAllocation";
 import type { Centavos } from "./money";
 
 /** Re-exported so consumers have a single domain import surface. */
@@ -235,6 +236,8 @@ export interface ReferenceLists {
    * every fixture before 26 October 2026 have none.
    */
   readonly plans?: readonly Plan[];
+  /** Allocations (`domain/monthAllocation.ts`): safe to spend, the bell, the chat and the AI read the same list. Optional, like the plans. */
+  readonly allocations?: readonly AllocationLine[];
   /**
    * The people money is paid or held for (On behalf), with their side.
    *
