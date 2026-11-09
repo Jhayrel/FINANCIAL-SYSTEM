@@ -62,7 +62,7 @@ import { renameLimitKind, type MonthBill } from "./domain/budgetView";
 import { moveRows, type BillCategory } from "./domain/kindRename";
 import { formatMoney, type Centavos } from "./domain/money";
 import { costOf } from "./domain/totals";
-import { totalSavingsBalance, totalWalletBalance, walletBalances } from "./domain/balances";
+import { totalSavingsBalance, totalWalletBalance, walletBalance, walletBalances } from "./domain/balances";
 import { checkDraft, debtWalletDirection, draftToTransactions, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { Planner } from "./features/Planner";
 import { asSaving, isSave, linkPayments, misfiledSaving, paidSoFar, paysDebt, paysPlan, renamePlans, type Plan } from "./domain/planner";
@@ -1069,9 +1069,10 @@ export default function App() {
       next: safe && safe.daysLeft <= 7 ? nextMonthStart({ transactions: reportRows, reference, budgets, debts: settings.credits, asOf }, safe) : null,
       plans: settings.plans ?? [],
       freeBeforePlans: safe ? safe.free + safe.reservedPlans : null,
+      allocations: settings.allocations ?? [],
     });
   },
-    [reportRows, settings.accounts, settings.credits, settings.lowBalanceThreshold, settings.plans, budgets, reference, asOf],
+    [reportRows, settings.accounts, settings.credits, settings.lowBalanceThreshold, settings.plans, settings.allocations, budgets, reference, asOf],
   );
   const alerts = useMemo(() => (usageAlert ? [usageAlert, ...financeFindings] : financeFindings), [usageAlert, financeFindings]);
 
@@ -2919,6 +2920,8 @@ export default function App() {
               }
               reference={reference}
               asOf={asOf}
+              onAllocation={(change) => handleAllocation(change)}
+              balanceOf={(wallet) => walletBalance(transactions, wallet)}
               onReplaceYear={handleBudgetYear}
               onRecordBill={(bill) => {
                 // Filled in and shown, never saved: the Add form is where it is checked.

@@ -42,6 +42,8 @@
  * it exactly.
  */
 
+import { AllocationsCard } from "./Allocations";
+import { monthAllocations, type AllocationChange } from "../domain/monthAllocation";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
@@ -176,6 +178,8 @@ export function Budget({
   onOpenPlanner,
   stopped = NO_STOPPED,
   ai,
+  onAllocation,
+  balanceOf,
 }: {
   transactions: readonly Transaction[];
   budgets: Budgets;
@@ -194,6 +198,10 @@ export function Budget({
   onShowRows?: ((query: string) => void) | undefined;
   /** The Planner, where the month's plans are kept. */
   onOpenPlanner?: (() => void) | undefined;
+  /** An allocation added, changed, removed, put back or copied (docs/17-ALLOCATIONS.md): why it was refused, or null. */
+  onAllocation?: ((change: AllocationChange) => string | null) | undefined;
+  /** What a wallet holds, for what to withdraw into it. */
+  balanceOf?: ((wallet: string) => Centavos) | undefined;
 }) {
   const asOfYear = getYear(asOf);
   const asOfMonth = getMonth(asOf);
@@ -300,6 +308,19 @@ export function Budget({
     const brief = monthBrief({ transactions, reference, budgets, debts, year, month, asOf });
     return incomeBudget({ transactions, reference, plan: y.plan, year, month, safe: brief.safe ? brief.safe.safe : null, spendable: brief.safe ? spendable(brief.safe) : null, plans: brief.safe?.reservedPlans, spent: a.spending.spent, asOf });
   }, [transactions, reference, budgets, debts, year, month, asOf, y.plan, a.spending.spent]);
+  /*
+   * The month's allocations: for the month that is running, the same figures
+   * safe to spend holds (plans inside counted once); any other month, against
+   * the ledger as it stands (docs/17-ALLOCATIONS.md).
+   */
+  const allocations = useMemo(() => {
+    const ym = `${year}-${String(month).padStart(2, "0")}`;
+    if (year === getYear(asOf) && month === getMonth(asOf) && (reference.allocations ?? []).length > 0) {
+      const held = monthBrief({ transactions, reference, budgets, debts, year, month, asOf }).safe?.allocations;
+      if (held) return held;
+    }
+    return monthAllocations(reference.allocations, transactions, ym, asOf);
+  }, [transactions, reference, budgets, debts, year, month, asOf]);
   const saveFromIncome = (value: { spending: Centavos; billsSubs: Centavos }, reason: string): boolean =>
     commit(saveTracks(y.plan, year, month, value, "month", asOf, now(), reason), `Saved. ${name}'s budget now has ${formatMoney(value.spending)} for spending and ${formatMoney(value.billsSubs)} for bills and subscriptions, and the reason is kept with it.`, setNote);
   const name = monthLabel(month);
@@ -693,6 +714,18 @@ export function Budget({
 
       {/* ── The detail ───────────────────────────────────────────────────── */}
         <div className="fms-budgetgrid">
+          {onAllocation ? (
+            <AllocationsCard
+              month={allocations}
+              lines={reference.allocations ?? []}
+              reference={reference}
+              spendingBudget={a.spending.budget}
+              balanceOf={balanceOf ?? (() => 0)}
+              onChange={onAllocation}
+            />
+          ) : (
+            <span hidden />
+          )}
           <Card
             title="Where it went"
             subtitle={

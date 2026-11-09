@@ -28,6 +28,7 @@
  * 3 days left" is a fact they can act on.
  */
 
+import { allocationAlerts, monthAllocations, monthOfDay, type AllocationLine } from "./monthAllocation";
 import { allWalletBalances, walletBalance, walletDelta } from "./balances";
 import { assessMonthFor } from "./budget";
 import { overdue, STOPPED_AFTER_DAYS, upcoming, type BillStatus } from "./bills";
@@ -124,6 +125,8 @@ export interface AlertInput {
   /** The Planner's plans, and what the wallets hold after the bills and debt payments, before any plan. */
   readonly plans?: readonly Plan[] | undefined;
   readonly freeBeforePlans?: Centavos | null | undefined;
+  /** The allocations (docs/17-ALLOCATIONS.md): over one, past a week's share, the first-week copy offer. */
+  readonly allocations?: readonly AllocationLine[] | undefined;
 }
 
 /** Pace of spending so far this month, per day. */
@@ -1118,6 +1121,13 @@ export function financeAlerts(input: AlertInput): Alert[] {
   }
 
   out.push(...planAlerts(input.plans ?? [], transactions, accounts, asOf, input.freeBeforePlans ?? null));
+  // Allocations, said in the bell once each (docs/17-ALLOCATIONS.md, A7).
+  if ((input.allocations ?? []).length > 0) {
+    const month = monthAllocations(input.allocations, transactions, monthOfDay(asOf), asOf);
+    for (const a of allocationAlerts(month, input.allocations, asOf)) {
+      out.push({ id: a.id, level: a.level === "warning" ? "warn" : "info", area: "budget", title: a.title, detail: a.detail, weight: a.level === "warning" ? 62 : 28 });
+    }
+  }
   return out.sort((a, b) => b.weight - a.weight);
 }
 

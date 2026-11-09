@@ -5475,18 +5475,21 @@ button.fms-recent-row:disabled {
     grid-template-areas:
       "picker picker"
       "top rail"
+      "alloc rail"
       "cats rail"
       "bills bills"
       "rest rest";
     /* A planner taller than the month and its detail stretches the detail, not the month. */
-    grid-template-rows: auto auto 1fr auto auto;
+    grid-template-rows: auto auto auto 1fr auto auto;
   }
 
   .fms-budgetpicker { grid-area: picker; }
   .fms-budgettop { grid-area: top; }
   .fms-budgetgrid { display: contents; }
-  .fms-budgetgrid > :nth-child(1) { grid-area: cats; }
-  .fms-budgetgrid > :nth-child(2) { grid-area: bills; }
+  /* Allocations first: what is set aside, above where it went (docs/17-ALLOCATIONS.md). */
+  .fms-budgetgrid > :nth-child(1) { grid-area: alloc; }
+  .fms-budgetgrid > :nth-child(2) { grid-area: cats; }
+  .fms-budgetgrid > :nth-child(3) { grid-area: bills; }
   .fms-budgetrest { grid-area: rest; }
   .fms-budgetrail { grid-area: rail; }
 }
@@ -12005,4 +12008,106 @@ button.fms-recent-row:disabled {
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
+}
+
+/* ── Allocations (docs/17-ALLOCATIONS.md) ─────────────────────────────────
+ * Rows divided by hairlines, square, as the budget's own lists (rule D2). */
+.fms-alloc {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fms-alloc-sum {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.fms-alloc-need {
+  margin: 0;
+  color: var(--ink);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--ink-3);
+  background: var(--info-bg);
+}
+
+.fms-alloc-list,
+.fms-alloc-removedlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.fms-alloc-row {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--hairline);
+  min-width: 0;
+}
+
+.fms-alloc-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.fms-alloc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fms-alloc-name {
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fms-alloc-figure {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  flex: none;
+}
+
+.fms-alloc-meta {
+  overflow-wrap: anywhere;
+}
+
+.fms-alloc-acts,
+.fms-alloc-emptyacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.fms-alloc-removed {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-alloc-removedrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  min-width: 0;
+}
+
+.fms-alloc-form {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fms-alloc-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--space-3);
 }
