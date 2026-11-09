@@ -2914,6 +2914,48 @@ old payment carried its "already in the ledger" warning, and was discarded.
 
 Every figure on the new backup (2,907 across 153 days) is unchanged.
 
+### 2026-11-09, end: allocations on set days and for how long, changed from the chat; the Bin, statements, opening
+
+The owner asked, in turn: an allocation on Tuesdays and Thursdays only; what
+deleting does and where it goes; what happens when a month ends unspent or
+the money goes elsewhere; one valid this month, next month or until done;
+overspending; the chat and AI able to do all of it, careful with keywords;
+a modern loading screen; budgets in the statements; and charts that agree
+with every screen. Done:
+
+- **Allocations** (docs/17 A6, A7, A12): a set-days pace (₱50.00 each
+  Tuesday and Thursday, the month's amount from its own days, counting from
+  the day it is made); How long (this month only, every month, until a
+  month; a repeating line changed or removed in a later month is split or
+  stopped there, so a month that ended keeps its figures); Done (frees what
+  is left from that day, Hold it again undoes it); the bell says what last
+  month left unused in the first week, a set day gone past its share, and a
+  repeating line in its last month. One function works out every change
+  (`allocationApply.ts`) for Budget and the chat alike.
+- **The chat changes allocations** (`allocationChange.ts`): add, change,
+  extend, done, hold again, stop, remove, put back, copy, each as a card to
+  press. Read only when "allocation" is said or a live line is named by its
+  own name with a changing verb; never from a question or a what-if; unclear
+  amounts, kinds or days are asked back. The model is told the same. Checked
+  in the browser end to end (12 of 12) and by 38 tests, near misses included.
+- **Deleting** (the owner's question): entries go to the Bin as before; plans
+  to the Planner's Removed tab; allocations to Removed on Budget; and the Bin
+  now lists removed plans and allocations too, under Removed elsewhere, with
+  Put back. Accounts, goals and debts are archived and reopened in Settings;
+  a category still used by entries is under On no list in Settings.
+- **Opening screen**: in `index.html`, so it shows from the first frame in
+  the owner's theme, and the same screen while sign-in is checked (style
+  guide 3.10). The Sheet's title now stays at the top when a form scrolls.
+- **Statements** (`statementBudget.ts`): the account statement, the expense
+  sheet and bills and subscriptions carry each month's two budget tracks,
+  limits and allocations, on screen, in the PDF and the spreadsheet; the two
+  tracks add up to the expense sheet's total. Checked on the owner's data
+  against their own Budget screen, to the centavo.
+- **Charts against the screens**: 69 checks on the owner's data plus every
+  day of November agreed with the month totals, Budget's tracks and
+  Insights' calendar; the one apparent gap was a debt let go, which counts as
+  money given away by rule. Pinned on invented data in `chartScreens.test.ts`.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

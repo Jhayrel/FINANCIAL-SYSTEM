@@ -586,6 +586,8 @@ whole.
 
 Replaced the static `--surface-sunk` blocks on 28 September 2026 at the owner's instruction, after the plain "Loading your figures" card.
 
+**Opening** (owner, 9 November 2026: "fix the loading screen too make it modern"): before anything is known, the mark, the name, a slim bar and one line ("Opening your ledger"), centred on `--paper`. It is in `index.html` itself, so it shows from the first frame (a built page links the stylesheet before any script), in the owner's theme (a small script sets `theme-dark` before the first paint), and the sign-in gate shows the same screen while it checks, so the hand-over does not jump. The bar fills once and then breathes on opacity, the motion of 2.5; under reduced motion it holds still. A sign-in button that has to appear waits at the foot of the screen, never in its centre.
+
 **Error**: inline alert in place of the content, stating cause and offering `Try again`.
 
 ### 3.11 Modals & sheets

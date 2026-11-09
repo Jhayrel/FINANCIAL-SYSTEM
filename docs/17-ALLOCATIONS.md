@@ -27,7 +27,8 @@ It is the envelope in the owner's notes: "800 - gas for 4 weeks 200 per week".
 | Kind | The kind of spending whose entries count against it | Self Care |
 | Words (optional) | Only entries of that kind whose description or notes say one of them | gym |
 | Amount | For the whole month | ₱400.00 |
-| Each and times (optional) | How the amount is made up, and the pace it is checked against | ₱50.00 a time, 8 times; ₱300.00 a week, 4 weeks |
+| Each and times (optional) | How the amount is made up, and the pace it is checked against | ₱50.00 a time, 8 times; ₱300.00 a week, 4 weeks; ₱50.00 each Tuesday and Thursday |
+| How long | This month only (the default), every month, or every month until a month (A12) | Every month from November 2026 |
 | Wallet (optional) | Where it is paid from, for "need to withdraw" | Cash |
 | Month | The month it is for | November 2026 |
 
@@ -130,7 +131,7 @@ A plan of the same kind in the same month is held once, not twice: whichever
 is larger, what is left of the allocation or what is left of those plans. Its
 payment, being an entry of that kind, counts against the allocation too.
 
-## A6. The pace (a week, a time)
+## A6. The pace (a week, a time, set days)
 
 An allocation made of ₱300.00 a week for 4 weeks is checked week by week:
 week 1 is the 1st to the 7th, week 2 the 8th to the 14th, week 3 the 15th to
@@ -141,17 +142,30 @@ pace to keep, not four separate envelopes.
 
 A "time" pace (₱50.00 a time, 8 times) is counted by entries: 3 of 8 used.
 
+A "set days" pace (owner, 9 November 2026: "custom but weeks tuesday and
+thursday only") is an amount each day on chosen days of the week. Its month's
+amount is that amount times how many of those days the month has, worked out
+for every month on its own (November 2026 has 8 Tuesdays and Thursdays,
+December 10). Made after its month began, it counts from the day it was made:
+the days before were never in it, and neither is what was spent on them,
+which stays ordinary spending. Today's share is shown when today is one of its
+days, else the next day; going past today's share is said in the bell.
+
 ## A7. What if
 
 | What if | What happens |
 |---|---|
 | I spend more than the allocation | It shows "Over by ₱X". It holds nothing more, so the extra came out of the money that was free: safe to spend and the day figures are lower by it. The bell says so, and the Add form says it before saving. Nothing is blocked. |
 | I go past this week's share | "₱X past this week's ₱300.00" on the line and in the bell. The month's amount is unchanged; later weeks have less. |
-| I spend less | What is left stays held until the month ends. When it ends the hold stops: the leftover is free money in the new month and Budget says "₱X not used in November". Nothing carries by itself; the owner decides (more for next month, or a transfer to savings). |
+| I spend less | What is left stays held until the month ends. When it ends the hold stops: the leftover is free money in the new month and Budget says "₱X not used in November". In the first week of the new month the bell says how much last month's allocations left unused and that it is now in safe to spend. Nothing carries by itself; the owner decides (more for this month, or a transfer to savings). |
+| I spend the money on something else | The allocation still holds what is left of it, because nothing of its kind was spent; the other spending came out of safe to spend. If the money is gone for good, Done frees what is left (below), or lower the allocation. |
+| I am done with it before the month ends | Done (on the line, or "the gym allocation is done" in the chat): it stops holding what is left from that day, so safe to spend rises by it; what was spent stays counted against it; its kind spent after that day is ordinary spending. Hold it again undoes it. A repeating one holds again next month as usual. |
+| I want it every month, or until a month | How long: This month only, Every month, or Until a month (A12). Each month counts on its own: one month over or under never changes the next. |
+| I change or remove a repeating one in a later month | The change applies from that month on, and the months before keep what they had: the line is split. Removed in a later month, it is stopped from that month, kept under Removed there and in the Bin, and put back from either. |
 | I add an allocation in the middle of the month | Everything already spent of that kind this month counts. It holds the amount less that. |
 | I make the amount smaller than what is spent | Allowed, and said: it is over at once. |
 | I change the kind or the words | What counts is worked out again at once. |
-| I remove an allocation | It stops holding at once; safe to spend rises by what it held. It is kept under Removed on Budget, with Put back, as a skipped plan is in the Planner; Undo on the notice puts it back too. Entries are not touched. |
+| I remove an allocation | It stops holding at once; safe to spend rises by what it held. It is kept under Removed on Budget and in the Bin, with Put back, as a skipped plan is in the Planner; Undo on the notice puts it back too. Entries are not touched. |
 | I put one back | It holds again what is left of it. Refused only when the month has a live allocation of the same kind and words: change that one instead. |
 | I have no allocations | Everything is exactly as before: the same safe to spend, budget, statements and figures to the centavo. |
 | I edit, bin or restore an entry | The allocation follows at once (A4). |
@@ -185,7 +199,9 @@ A "time" pace (₱50.00 a time, 8 times) is counted by entries: 3 of 8 used.
 | Bell | Over an allocation; past this week's share; the start-of-month copy offer |
 | Chat (no AI) | "how much is left for gas", "my allocations", "allocation status"; for a kind with no allocation, what it has spent, its limit if it has one, and how to set money aside for it (also in Tagalog: "magkano natira sa gas") |
 | AI | The month's allocations are in what the model is sent, with the rule that safe to spend is after them |
-| Activity | Every allocation added, changed, removed, put back or copied, who did it and how, under Budget |
+| Activity | Every allocation added, changed, removed, put back, marked done or copied, who did it and how (Budget or the chat), under Budget |
+| Bin | Under Removed elsewhere: every removed or stopped allocation, and every removed plan, with Put back |
+| Statements | The account statement, the expense sheet and bills and subscriptions carry the budget for their months: both tracks, the limits and the allocations, with budget, spent and left, on screen, in the PDF and in the spreadsheet |
 | Statements, Database, charts | Unchanged: they show money that moved, and an allocation moves none. The Expense sheet cut to a kind (Show) is the history of that envelope. |
 | Settings | Nothing new. Allocations are made on Budget. Renaming a kind or a wallet carries them. |
 | Backup and restore | Included (A3) |
@@ -196,7 +212,7 @@ The model is told, in what it is sent with every question: the month's
 allocations, each with its amount, what is spent, what is left, this week and
 over; and that safe to spend is already after them, so it never subtracts
 them again. Asked "can I afford gas", it answers from the gas allocation
-first. It does not create or change allocations: the owner does, on Budget.
+first. Changes are made from the chat as cards, below, or on Budget.
 
 What it is sent says so in figures, not only in rules (9 November 2026,
 found reading what the model receives for the owner's data): the safe to
@@ -209,6 +225,19 @@ price of an allocated kind is set against what is left of the allocation,
 not today's figure. The device's own answers (`affordAsk.ts`,
 `whatIfAsk.ts`) work the same way.
 
+Since 9 November 2026 the chat changes allocations too (owner: "ai should
+able to do it"), always as a card the owner presses, worked out by the same
+function Budget uses (`allocationApply.ts`): add ("allocate 300 a week for
+gas", "allocate 50 every Tuesday and Thursday for gym"), change ("change the
+gas allocation to 1500", "raise gas by 200"), extend ("make the gym allocation
+every month", "extend gas until March", "for 2 more months"), mark done, hold
+again, stop from a month, remove, put back and copy. It reads a change only
+when the message says "allocation" (or names a live allocation by its own
+name with a verb that changes it), and never from a question or a what-if,
+which are answered instead (`allocationChange.ts`, with tests for the near
+misses). Anything unclear (which kind, how much, which days, an amount that
+does not split evenly) is asked back, never guessed.
+
 Nothing is learned from allocations; the kinds and words the owner picks are
 the same lists entries use, so what the app learned about kinds already
 applies.
@@ -218,6 +247,18 @@ applies.
 Entries, their numbers, wallets, balances, net worth, the budget's two tracks,
 limits, the Planner, statements and every parity figure in `CLAUDE.md`. An
 allocation only decides how much of what is already held is spoken for.
+
+## A12. How long
+
+Each line is for its own month by default. Every month makes it hold in each
+month from its own on; Until a month stops it after that month by itself. A
+repeating line is one line, not copies: each month works out its own amount
+(set days differ month to month), its own spending and its own left, and one
+month over or under never changes the next. Changed in a later month, it is
+split there, so a month that ended is never rewritten. Stopped in a later
+month, the months before keep it. A month with its own line for the same kind
+and words refuses a repeating one into it, so nothing is ever held twice. In
+its last week the bell says a line that repeats until this month ends with it.
 
 ## A11. Need to withdraw
 
