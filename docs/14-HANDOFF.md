@@ -2701,6 +2701,55 @@ loan". Rules: docs/16-PLANNER.md P12. Tests: `planDebt.test.ts`,
   crash, no page error, no failure; every move went to its screen. The
   process robots (steps13 to 15, every figure to the centavo) all pass.
 
+### 2026-11-09: allocations, and a backup the app called corrupt
+
+The owner's January to April and November notes, as a feature: money set
+aside for a kind of spending this month (gas ₱1,200.00 at ₱300.00 a week).
+`docs/17-ALLOCATIONS.md` is the binding description; read it before
+touching `domain/monthAllocation.ts` (`allocation.ts` is the older daily
+split, spec 5.7, and a different thing: it was overwritten once by a new file
+of the same name and restored).
+
+- **What it does.** Each allocation holds what is left of it out of safe to
+  spend, for the month that is running. Spending inside one changes no daily
+  figure; only what goes past it comes out. Removed ones stay under Removed
+  on Budget with Put back, as a skipped plan does in the Planner.
+- **Where it shows.** Budget (the card: Add, Edit, Remove, Copy from last
+  month, Put back, need to withdraw), Dashboard ("Set aside in
+  allocations"), the Add form (what is left, and the over warning before
+  saving), the bell, Activity (under Budget), the chat without the model
+  (`allocationAsk.ts`: "how much is left for gas", "my allocations"), the
+  model's figures (`aiContext.ts`) and its prompt rule (`functions/api/ai.ts`:
+  safe to spend is already after them).
+- **Rules file.** `docs/firestore-rules-allocations.txt` is the whole rules
+  file with a size check on the list. The app works without publishing it:
+  the settings rule already lets new fields through.
+- **Backup checksum, a real bug.** The reader hashed a rebuilt copy of the
+  data (settings with defaults filled in, no logs) while the writer hashed
+  the data as written, so every backup carrying a conversation or an
+  activity trail was called "edited or partly corrupted". It now checks the
+  file's `data` as written. `backupChecksum.test.ts` reproduces it without
+  the workbook.
+- **Charts.** An empty month's axis drew the gridlines 0, 0, 1, 1, 1 (a
+  centavo split in four), React's duplicate key warning on Insights. Ticks
+  are now unique.
+- **Chat cards.** The details go one to a row below 640px of chat (was
+  440px): the chat beside a page is wider than 440px and still too narrow
+  for two pairs, so dates and account names broke over two lines.
+- **Tested on the owner's 9 November backup** (scratchpad only): safe to
+  spend for 153 days across five months is identical to `main` to the
+  centavo with no allocations; with the November notes as allocations,
+  safe to spend falls by exactly what they hold; a gas entry inside its
+  allocation changes no figure, and one past it lowers safe to spend by
+  the part past it. In the browser: the backup restored, every screen on
+  computer (light) and phone (dark) with no error, the allocations added
+  and removed and put back through the card, a gas entry through the Add
+  form, the chat's answers, and a backup downloaded that restores with the
+  new entry and its three allocations.
+- **Not run here:** the 42 test files that need the workbook fixture
+  (`MY THINGS` is not in a cloud clone), and the model itself (no AI server
+  locally; the device's own answers were checked).
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

@@ -70,7 +70,7 @@ describe("the answer", () => {
   });
 
   it("never an em dash", () => {
-    expect(allocationWords("my allocations", month, { safe: 1, perDay: 1 })).not.toMatch(/—/);
+    expect(allocationWords("my allocations", month, { safe: 1, perDay: 1 }).includes(String.fromCharCode(0x2014))).toBe(false);
   });
 });
 

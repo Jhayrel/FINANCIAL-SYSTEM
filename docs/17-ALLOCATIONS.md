@@ -165,8 +165,8 @@ A "time" pace (₱50.00 a time, 8 times) is counted by entries: 3 of 8 used.
 | Part | What it shows |
 |---|---|
 | Dashboard, safe to spend | "Set aside in allocations −₱X" beside bills and plans, in the figure and in its words |
-| Budget | The Allocations card for the month on screen: each line with spent, left, over, this week, and Add, Edit, Remove, Copy from last month; Removed, with Put back; the total against the spending budget; need to withdraw |
-| Add form | Under the kind: "Gas allocation: ₱900.00 of ₱1,200.00 left (this week ₱300.00 of ₱300.00 left)", and "this takes it ₱X over" before saving |
+| Budget | The Allocations card for the month on screen: each line with spent, left, over and this week, with Edit and Remove on the line's last row; Add beside the title once there is one (an empty month has the one centred "Add an allocation" button instead, and Copy from last month beside it); Removed, with Put back; the total against the spending budget; need to withdraw |
+| Add form | Under the item: "Gas allocation: ₱900.00 of ₱1,200.00 left (this week ₱300.00 of ₱300.00 left), ₱600.00 after this", and before saving, when it goes past: "This takes Gas ₱100.00 over its ₱1,200.00 allocation: ₱900.00 of this is covered by what is left of it, and ₱100.00 comes out of safe to spend" |
 | Bell | Over an allocation; past this week's share; the start-of-month copy offer |
 | Chat (no AI) | "how much is left for gas", "my allocations", "allocation status" |
 | AI | The month's allocations are in what the model is sent, with the rule that safe to spend is after them |
