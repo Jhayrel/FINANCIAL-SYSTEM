@@ -2986,9 +2986,13 @@ fixed:
   including a tab closed three seconds in.
 - **A rename, a move between lists, a merge or a bulk fix said nothing while
   it wrote**, and the screen showed the account half renamed (Gcash Main
-  −₱441.08) for those seconds; closed then, part of it could be lost. Any
-  write of more than 150 rows now shows "Saving: X of Y rows written" and
-  the browser asks before the tab closes (`push(fn, rows)`).
+  −₱441.08) for about two seconds: Firestore shows a write of several
+  batches one batch at a time. The database was always right in the end;
+  the screen was not, and a tab closed then could lose part of it. Any
+  write of more than 150 rows now shows "Saving: X of Y rows written", the
+  browser asks before the tab closes, and the screen keeps the finished
+  result until a snapshot holds every row as written (`landing` in App.tsx,
+  60 seconds at most). Probed second by second: ₱285.00 throughout.
 - **Statements on a short laptop window** (1093 by 615, a 1366 by 768 screen
   at 125% scaling): its controls left the rows 0px to scroll in. Under 820px
   tall, Statements scrolls as a page, as on a phone.
@@ -2998,14 +3002,22 @@ fixed:
   different. All fixed, and pinned by `allocationStress.test.ts` (8,000
   random changes, 3,000 random sentences).
 
-Checked and passing: a cut-off detector on every screen at seven sizes
-(77/77), real wheel and touch scrolling to the last item of every screen
-(36/36), the money-process robot to the centavo (19/19), the text-field
-robot, every button on a computer and a phone in both Cancel and confirm
-modes, the new allocation features with a second device watching for sync,
-and `ledgerStress.test.ts`: random ledgers of every kind of row, where the
-charts, the calendar, Budget's tracks, the statement budget, the expense
+Checked and passing, the last round on a fresh restore of the backup after
+every fix: a cut-off detector on every screen at seven sizes and real wheel
+and touch scrolling to the last item at five, short laptop windows included
+(137/137); the money-process robot to the centavo (19/19); every button on a
+computer and a phone, Cancel and confirm (1,468 presses over the day, 105
+dialogs carried out, no page error, crash screen, NaN or undefined); the
+text fields (31/31); Settings (theme, AI, budget to Dashboard and Activity,
+accounts added, renamed, deactivated); the new allocation features with a
+second device watching for sync (20/20); what-ifs; merge (3/3); the race
+test (6/7: a rename killed without the leave question is lost whole, item
+15); and `ledgerStress.test.ts`: random ledgers of every kind of row, where
+the charts, the calendar, Budget's tracks, the statement budget, the expense
 sheet and the account statement's closing balance all agree to the centavo.
+Robots flagged a few things that were the robots (an old Cash figure, a
+theme read from an attribute the app does not use, a list read before it
+opened); each was checked by hand before being called that.
 
 ## 6. What the owner has to do
 
@@ -3120,10 +3132,13 @@ sheet and the account statement's closing balance all agree to the centavo.
     not the balance on a back-dated entry's own day; a day closing below zero
     is now reported after saving instead.
 15. **A rename closed within a second of pressing it** can be lost whole:
-    the account list and the rows are saved separately. Nothing splits in
-    the test (the old name and every row stay), but one save could land
-    without the other. A single write for both, or a check on opening that
-    finds rows under a name no account has, would close it.
+    the account list and the rows are saved separately. Since 9 November the
+    browser asks "leave this page?" while the rows are written, the screen
+    never shows the rename half done, and the race test still finds it lost
+    whole, never split, when the tab is killed without that question. Should
+    one save ever land without the other, the bell already says so: "₱X sits
+    under 'Gcash Main', which is not one of your accounts", with the rows to
+    open. A single write for both would close it entirely.
 ---
 
 ## 8. How the owner likes to be answered

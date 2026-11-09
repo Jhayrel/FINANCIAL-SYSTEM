@@ -233,6 +233,9 @@ function changedWords(was: Transaction, now: Transaction): string {
  */
 const FIXTURE_AS_OF = "2026-08-29";
 
+/** What a row says, for telling when a write has landed whole (`landing`). */
+const rowSig = (t: Transaction): string => [t.date, t.type, t.fromWallet, t.toWallet, t.category, t.item, t.description, t.amount, t.fee, t.debtId ?? "", t.debtEffect ?? ""].join("|");
+
 export default function App() {
   const cloud = useCloud();
   const [screen, setScreen] = useState<Screen>("dashboard");
@@ -600,6 +603,25 @@ export default function App() {
             .catch((e: Error) => setSyncError({ what: "upload", message: e.message }));
           return;
         }
+        const wait = landing.current;
+        if (wait) {
+          if (Date.now() > wait.until) landing.current = null;
+          else {
+            const live = new Map(snap.transactions.map((t) => [t.id, t]));
+            const bin = new Map(snap.deleted.map((t) => [t.id, t]));
+            let whole = true;
+            for (const [id, sig] of wait.sig) {
+              const t = live.get(id) ?? bin.get(id);
+              if (!t || rowSig(t) !== sig || (wait.binned !== undefined && wait.binned.has(id) !== bin.has(id))) {
+                whole = false;
+                break;
+              }
+            }
+            // Part way: the finished result stays on screen.
+            if (!whole) return;
+            landing.current = null;
+          }
+        }
         setTransactions([...snap.transactions]);
         setDeleted([...snap.deleted]);
         setLedgerSource("live");
@@ -698,6 +720,14 @@ export default function App() {
    * browser asks before the page is left while it is.
    */
   const [cleaning, setCleaning] = useState<{ done: number; total: number } | null>(null);
+  /**
+   * A bulk write landing: the rows it leaves, by what they say. Firestore
+   * shows a write of several batches one batch at a time, so a rename of
+   * Gcash (857 rows) read −₱441.08 for two seconds between them, half the
+   * rows under each name (final test, 9 November 2026). Until a snapshot
+   * holds every one of them as written, the finished result stays on screen.
+   */
+  const landing = useRef<{ readonly sig: ReadonlyMap<string, string>; readonly binned?: ReadonlySet<string>; readonly until: number } | null>(null);
   const writingClean = cleaning !== null;
   // Never reload into a new version halfway through writing a file into the database.
   useEffect(() => {
@@ -729,14 +759,26 @@ export default function App() {
    * in its first seconds could leave the account split (final test, 9
    * November 2026). `fn` is handed the progress to report.
    */
-  const push = (fn: (l: ReturnType<typeof firestoreLedger>, progress?: (done: number, total: number) => void) => Promise<void>, rows = 0): void => {
+  const push = (
+    fn: (l: ReturnType<typeof firestoreLedger>, progress?: (done: number, total: number) => void) => Promise<void>,
+    rows = 0,
+    /** The rows this write leaves, as it leaves them: the screen keeps them until the database shows all of them (`landing`). */
+    expect?: { readonly rows: readonly Transaction[]; readonly binned?: readonly Transaction[] },
+  ): void => {
     if (!cloud.uid) return;
     const uid = cloud.uid;
     const big = rows > 150;
     if (big) setCleaning({ done: 0, total: rows });
+    if (expect && expect.rows.length + (expect.binned?.length ?? 0) > 150) {
+      const sig = new Map<string, string>();
+      for (const t of [...expect.rows, ...(expect.binned ?? [])]) sig.set(t.id, rowSig(t));
+      landing.current = { sig, ...(expect.binned ? { binned: new Set(expect.binned.map((t) => t.id)) } : {}), until: Date.now() + 60_000 };
+    }
     track(
       fn(firestoreLedger(uid), big ? (done, total) => setCleaning({ done, total }) : undefined).finally(() => {
         if (big) setCleaning(null);
+        // Taken by the server: the next snapshot is the truth, whatever it holds.
+        if (landing.current) landing.current = { ...landing.current, until: Math.min(landing.current.until, Date.now() + 3_000) };
       }).catch((e: unknown) => {
         if (e instanceof RowsNotSaved) {
           setUnsaved((prev) => {
@@ -1304,7 +1346,7 @@ export default function App() {
        */
       return added.length ? insertChronologically(replaced, added, { renumber: renumbers }) : replaced;
     });
-    push((l, progress) => l.saveMany(rows, progress), rows.length);
+    push((l, progress) => l.saveMany(rows, progress), rows.length, { rows });
     setEditing(null);
     // Says what changed, and takes it back in one tap when every row was already there.
     const first = rows[0];
@@ -1358,7 +1400,7 @@ export default function App() {
 
     const byId = new Map(wrong.map((r) => [r.id, r]));
     setTransactions((prev) => prev.map((t) => byId.get(t.id) ?? t));
-    push((l, progress) => l.saveMany(wrong, progress), wrong.length);
+    push((l, progress) => l.saveMany(wrong, progress), wrong.length, { rows: wrong });
     flash(
       wrong.length === 1
         ? `Moved a starting balance to ${wrong[0]?.date}, where the ledger begins.`
@@ -1602,7 +1644,7 @@ export default function App() {
 
     setTransactions(live);
     setDeleted(binned);
-    push((l, progress) => l.saveMany(changed, progress), changed.length);
+    push((l, progress) => l.saveMany(changed, progress), changed.length, { rows: changed });
   };
 
   /**
@@ -1623,7 +1665,7 @@ export default function App() {
     if (changed.length === 0) return;
     setTransactions(live);
     setDeleted(binned);
-    push((l, progress) => l.saveMany(changed, progress), changed.length);
+    push((l, progress) => l.saveMany(changed, progress), changed.length, { rows: changed });
   };
 
   /**
@@ -1791,10 +1833,10 @@ export default function App() {
         } finally {
           setCleaning(null);
         }
-      });
+      }, 0, { rows: result.transactions, binned: result.deleted });
       return;
     }
-    push((l, progress) => l.saveMany(result.transactions, progress), result.transactions.length);
+    push((l, progress) => l.saveMany(result.transactions, progress), result.transactions.length, { rows: result.transactions });
     flash(`Merged. ${result.added.toLocaleString()} added, ${result.kept.toLocaleString()} kept.`);
   };
 
