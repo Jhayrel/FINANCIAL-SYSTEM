@@ -562,3 +562,25 @@ describe("every Planner action from the chat", () => {
     expect(readPlannerAsk("skip it", c)).toBeNull();
   });
 });
+
+describe("a plan is named by its own words, not the small ones (4 November 2026)", () => {
+  // "Gift for the baby christening" took "7-Eleven treat for friend" as its payment, by "for".
+  const gift = makePlan(input({ title: "Gift for the baby christening", amount: 100_000, due: "2026-11-07", item: "Random necessities", wallet: "", setAside: false }), "2026-10-26", "owner");
+  const treat = tx({ id: "treat", date: "2026-11-04", item: "Treat", description: "7-Eleven treat for friend", amount: 42_600 });
+
+  it("a treat for a friend is not the gift", () => {
+    expect(likelyPayments(gift, [...ledger, treat], [gift]).map((t) => t.id)).not.toContain("treat");
+    expect(planPaidBy(treat, [gift], ledger)).toBeNull();
+  });
+
+  it("a gift for the baby still is, and is sure by its words", () => {
+    const paid = tx({ id: "gift", date: "2026-11-05", item: "Random necessities", description: "Christening gift", amount: 80_000 });
+    expect(planPaidBy(paid, [gift], ledger)).toMatchObject({ sure: true });
+  });
+
+  it("words match whole or as the start of a word, never inside one", () => {
+    const gas = makePlan(input({ title: "Gas for the trip", amount: 50_000, due: "2026-11-07", item: "Gas", wallet: "" }), "2026-10-26", "owner");
+    expect(likelyPayments(gas, [...ledger, tx({ id: "g", date: "2026-11-06", item: "Fun", description: "gasoline", amount: 40_000 })], [gas]).map((t) => t.id)).toContain("g");
+    expect(likelyPayments(gas, [...ledger, tx({ id: "v", date: "2026-11-06", item: "Fun", description: "Vegas show", amount: 40_000 })], [gas]).map((t) => t.id)).not.toContain("v");
+  });
+});

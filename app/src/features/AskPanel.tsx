@@ -249,7 +249,7 @@ import { daysAskedAbout } from "../domain/safeAsk";
 import { allocationWords, asksAllocations, kindAsked, kindLeftWords, monthAsked, SAFE_RULE } from "../domain/allocationAsk";
 import { billPayWords, incomeIfWords, noSpendWords, readBillPayIf, readIncomeIf, readNoSpendDays, readSkipIf, skipWords } from "../domain/whatIfAsk";
 import { monthAllocations, monthOfDay } from "../domain/monthAllocation";
-import { typedOnce } from "../domain/typedOnce";
+import { sameMoney, typedOnce } from "../domain/typedOnce";
 import { readSavedAsk, savedAnswer } from "../domain/savedAsk";
 import { debtAnswer, readDebtAsk } from "../domain/debtAsk";
 import { bridgeAnswer, readBridgeAsk, type BridgeAsk } from "../domain/bridgeAsk";
@@ -2345,6 +2345,8 @@ export function AskPanel({
     renaming.current = null;
     lastPictures.current = [];
     lastWasPicture.current = false;
+    lastPictureWords.current = "";
+    wordsOfferedAlone.current = null;
   };
 
   /** The credit lines an answer can name ("borrowed on Maya Credit"): not the people money is held for. */
@@ -2718,6 +2720,19 @@ export function AskPanel({
   const lastPictures = useRef<readonly Attachment[]>([]);
   /** The last message was those pictures, so a bare "again" means them. */
   const lastWasPicture = useRef(false);
+  /**
+   * The words sent with those pictures, read with them again on "try again".
+   *
+   * 5 November 2026: "I spent 280 on food too" went with two receipts, the
+   * model could not be reached, and nothing was read at all, the sentence
+   * included. "Try again" then read the receipts with the words "Try again",
+   * and the ₱280.00 was never offered. It is not in the ledger.
+   */
+  const lastPictureWords = useRef("");
+  /** The model could not be reached for the pictures just sent, so their words are read here (`offerWordsAlone`). */
+  const picturesUnread = useRef(false);
+  /** What was offered from those words while the pictures were unread: not offered again when the pictures are. */
+  const wordsOfferedAlone = useRef<{ readonly note: string; readonly drafts: readonly Draft[] } | null>(null);
   /**
    * "Change the title" was asked with no words after it: the next message is
    * the title, for the entry waiting on a question or for this card.
@@ -3521,13 +3536,47 @@ export function AskPanel({
     });
   };
 
+  /**
+   * The words sent with pictures the model could not read, read on this
+   * device: "I spent 280 on food too" is an entry of its own whatever the
+   * receipts beside it hold (5 November 2026, where it was lost). Said as
+   * the words only; "try again" reads the pictures with them, and what these
+   * cards hold is not offered twice.
+   */
+  const offerWordsAlone = async (note: string): Promise<void> => {
+    picturesUnread.current = false;
+    const parts = splitEntries(note);
+    const reads = (parts.length > 1 ? parts : [note]).map((line) => ({ line, read: readEntry(line, transactions, reference, asOf) }));
+    const usable = reads.filter((r) => r.read.worthOffering && !r.read.readsAsDebt && (r.read.draft.amount ?? 0) > 0);
+    if (usable.length === 0) return;
+    const drafts: Draft[] = [];
+    for (const { line, read } of usable) {
+      await offer(
+        {
+          draft: read.draft,
+          confidence: "low",
+          sourceRef: "your words, read on this device without the model",
+          said: line,
+          typed: true,
+          adjustments: [...read.because, 'Your words only: the pictures were not read. Say "try again" to read them; what this card holds is not offered twice.'],
+        },
+        line,
+        false,
+        usable.length > 1,
+        read.settled,
+      );
+      drafts.push(read.draft);
+    }
+    wordsOfferedAlone.current = { note, drafts };
+  };
+
   /** Read the attached files into proposals. Returns false when there were none. */
   /** Read what was sent; the picture being read is let go however it ends (`pictureNow`). */
-  const readAttached = async (note: string, again?: readonly Attachment[]): Promise<boolean> => {
+  const readAttached = async (note: string, again?: readonly Attachment[], words?: string): Promise<boolean> => {
     paperPlans.current = [];
     paperSays.current = [];
     try {
-      return await readSent(note, again);
+      return await readSent(note, again, words);
     } finally {
       pictureNow.current = null;
       // Whether a letter's or a bill's payment is in the ledger already (`paidAlready`).
@@ -3537,8 +3586,15 @@ export function AskPanel({
     }
   };
 
-  const readSent = async (note: string, again?: readonly Attachment[]): Promise<boolean> => {
+  /**
+   * `typedNow` is what was typed and is shown; `words`, when given, is what
+   * the pictures are read with instead: on "try again", the words first sent
+   * with them.
+   */
+  const readSent = async (typedNow: string, again?: readonly Attachment[], words?: string): Promise<boolean> => {
+    const note = words ?? typedNow;
     batchDrafts.current = [];
+    picturesUnread.current = false;
     const attached = again ? [...again] : files;
     if (!again) setFiles([]);
     /*
@@ -3552,7 +3608,7 @@ export function AskPanel({
     });
     const sent = attached.filter((f) => !ownMade.some((o) => o.name === f.name));
     if (ownMade.length > 0) {
-      say({ kind: "you", text: note, shown: attached });
+      say({ kind: "you", text: typedNow, shown: attached });
       for (const o of ownMade) {
         const words = ownFileWords(o.name, o.made);
         say({ kind: "assistant", text: words, from: "this device" });
@@ -3562,7 +3618,10 @@ export function AskPanel({
     }
     // Kept for "read it again" and "look at the receipt", which name no file (see READ_AGAIN).
     const pictures = sent.filter((a) => a.kind === "image" && a.dataUrl);
-    if (pictures.length > 0) lastPictures.current = pictures;
+    if (pictures.length > 0) {
+      lastPictures.current = pictures;
+      lastPictureWords.current = note;
+    }
     lastWasPicture.current = pictures.length > 0;
 
     // Remembered on the way out, so the next message can recognise them.
@@ -3575,7 +3634,7 @@ export function AskPanel({
         kind: "you",
         // The pictures speak for themselves; a list of filenames beside them
         // is the same information twice, in the less useful form.
-        text: note,
+        text: typedNow,
         ...(sent.length > 0 ? { shown: sent } : {}),
       });
     }
@@ -3612,7 +3671,19 @@ export function AskPanel({
     // A screenful of daily interest is one entry, not sixty cards (domain/interestFold.ts).
     // The typed words' entries once, however many pictures came with them (`typedOnce.ts`).
     // With the account's balance in the same pictures, the balance decides what is missing (`foldInterestWith`).
-    const foldedWith = foldInterestWith(typedOnce(read.proposals, sent.map((f) => f.name), note), transactions, reference, read.balances ?? []);
+    /*
+     * Read again with the words first sent with them: what the device
+     * already offered from those words, while the pictures could not be
+     * read, is not offered a second time.
+     */
+    const offeredAlone = wordsOfferedAlone.current && wordsOfferedAlone.current.note === note && sent.length > 0 ? wordsOfferedAlone.current.drafts : [];
+    const unseen = offeredAlone.length > 0 ? read.proposals.filter((p) => !offeredAlone.some((d) => sameMoney(d, p.draft))) : read.proposals;
+    if (unseen.length < read.proposals.length) {
+      wordsOfferedAlone.current = null;
+      const words = `${offeredAlone.map((d) => formatMoney(d.amount ?? 0)).join(" and ")} from your words is the card offered already, so it is not offered again.`;
+      say({ kind: "assistant", text: words, from: "this device", ephemeral: true });
+    }
+    const foldedWith = foldInterestWith(typedOnce(unseen, sent.map((f) => f.name), note), transactions, reference, read.balances ?? []);
     const folded = foldedWith.proposals;
     for (const n of foldedWith.notes) {
       say({ kind: "assistant", text: n, from: "this device" });
@@ -3742,10 +3813,10 @@ export function AskPanel({
        * all, and the descriptions are the only thing lost.
        */
       void chatStore(uid)
-        .record(said("you", note, undefined, described))
+        .record(said("you", typedNow, undefined, described))
         .catch(() => {
           void chatStore(uid)
-            .record(said("you", note || `${described.length} attached, not kept.`))
+            .record(said("you", typedNow || `${described.length} attached, not kept.`))
             .catch(() => {});
         });
     }
@@ -3812,7 +3883,11 @@ export function AskPanel({
       if (sent.length > 0) {
         // Off in Settings is not broken: "The AI model is not working. Please try again." was said of a PDF with the AI off (4 November 2026).
         const offWords = `The AI is off in Settings, so ${sent.length === 1 ? "this file was" : "these files were"} not read into entries. Turn it on in Settings, AI, or type the entries in a message.`;
-        say(ai.disabled && sent.every((f) => f.kind === "text") ? { kind: "assistant", text: offWords, from: "this device", go: { screen: "settings", tab: "ai", label: "Settings, AI" } } : { kind: "assistant", text: downSentence(result.reason), from: result.reason ?? "this device" });
+        // A picture held this session can be read again from here, with the words sent with it.
+        const again = !ai.disabled && pictures.length > 0;
+        say(ai.disabled && sent.every((f) => f.kind === "text") ? { kind: "assistant", text: offWords, from: "this device", go: { screen: "settings", tab: "ai", label: "Settings, AI" } } : { kind: "assistant", text: downSentence(result.reason), from: result.reason ?? "this device", ...(again ? { retry: "try again" } : {}) });
+        // The words typed with them can still be read here (`offerWordsAlone`).
+        picturesUnread.current = note.trim() !== "";
       }
       return false;
     }
@@ -7595,7 +7670,8 @@ export function AskPanel({
       try {
         await during(
           again.length < lastPictures.current.length ? `Reading ${again.map((p) => p.name).join(" and ")} again` : "Reading the picture again",
-          () => readAttached(note, again),
+          // A bare "try again" says nothing about the pictures: they are read with the words first sent with them.
+          () => readAttached(note, again, bareAgain && lastPictureWords.current.trim() ? lastPictureWords.current : undefined),
           "Still reading it",
         );
       } finally {
@@ -11018,7 +11094,11 @@ export function AskPanel({
        * tries the other job.
        */
       const found = await readAttached(note);
-      if (found || files.length > 0 || !note) return;
+      if (found || !note) return;
+      if (files.length > 0) {
+        if (picturesUnread.current) await offerWordsAlone(note);
+        return;
+      }
 
       /**
        * The model could not be reached. Try the rules rather than give up.

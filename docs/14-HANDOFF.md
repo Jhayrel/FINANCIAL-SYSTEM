@@ -2880,6 +2880,40 @@ back (income in, a bill paid, gas inside and past its allocation, the gym,
 food, an allocation removed): each matched what the chat said beforehand,
 to the centavo.
 
+### 2026-11-09, closing: errors found in the owner's own chat record
+
+The owner's backup of 9 November was read for what went wrong in real use
+since 28 October: every `//` note, every model failure, and every card
+discarded soon after it was offered. Each was replayed on this device's own
+reader, or on the emulator copy, before it was fixed. Fixed:
+
+- **A typed entry was lost when the model failed** (5 November: "I spent
+  280 on food too" with two receipts). With pictures attached and the model
+  unreachable, nothing was read, the sentence included. The words are now
+  read on this device (`offerWordsAlone`), the failure carries a Try again,
+  and "try again" reads the pictures with the words first sent with them,
+  never with the words "try again"; what the device already offered from
+  those words is not offered twice (`sameMoney` in `typedOnce.ts`). That
+  ₱280.00 is not in the ledger: the owner should check it.
+- **A card saved from the form with another amount came back** (5 to 6
+  November: "I spent 200 in food empanada", saved as #3992 for ₱100.00).
+  The ledger match needed the amount to agree, so after a reload the card
+  reopened as a new ₱200.00 entry, twice. `rowSavedFor` now also takes the
+  one row saved within half an hour with the card's day, kind and words.
+  Shown failing on the old rule and passing on the new, in the browser.
+- **A plan took an entry by the word "for"** (4 November: "Gift for the
+  baby christening" offered "7-Eleven treat for friend" as its payment, and
+  the Add form would have switched that link on). Plan titles now match by
+  their own words, whole or as the start of a word, never the small ones.
+
+Already fixed before this pass, and checked again: the 3 November duplicate
+₱1,500.00 transfer card (`typedOnce`), the Maya Credit payment read as
+spending (`statementSense`), "Added: Debt ₱1,000.00" for ₱1,075.52, and the
+income-by-month chart. Not a fault: the 30 October Maya Credit screenshot's
+old payment carried its "already in the ledger" warning, and was discarded.
+
+Every figure on the new backup (2,907 across 153 days) is unchanged.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

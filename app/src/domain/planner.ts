@@ -1000,14 +1000,34 @@ export function coverage(views: readonly PlanView[], free: Centavos): Map<string
  * filed as School was offered as the PHP 9,000.00 tuition (owner's screen,
  * 27 October 2026).
  */
+/**
+ * The small words every title and description has, which name nothing.
+ * "Gift for the baby christening" took "7-Eleven treat for friend", ₱426.00,
+ * as its payment by the word "for" (4 November 2026, discarded by the
+ * owner), and the Add form would have started with that link switched on.
+ */
+const SMALL_WORDS = new Set(["for", "the", "and", "with", "from", "into", "onto", "this", "that", "these", "those", "next", "each", "every", "some", "our", "your", "mine", "pay", "paid", "buy", "bought", "plan", "get", "got", "new", "para", "ang", "mga", "yung"]);
+
+/** The words a plan's title names it by, without the small ones. */
+function namingWords(title: string, min = 3): string[] {
+  return title
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= min && !SMALL_WORDS.has(w) && !/^\d+$/.test(w));
+}
+
+/** Whether a text says one of those words as a word of its own, or the start of one: "gas" in "gasoline", never "the" in "brother". */
+export function saysWord(text: string, words: readonly string[]): boolean {
+  if (words.length === 0) return false;
+  const tokens = text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return words.some((w) => tokens.some((t) => t.startsWith(w) || (t.length >= 4 && w.startsWith(t) && w.length - t.length <= 2)));
+}
+
 export function likelyPayments(plan: Plan, rows: readonly Transaction[], allPlans: readonly Plan[]): Transaction[] {
   // The entries the ledger holds, not a day's share of one (see `paidSoFar`).
   const transactions = wholeRows(rows);
   const linked = new Set(allPlans.flatMap((p) => p.entryIds));
-  const words = plan.title
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((w) => w.length >= 3);
+  const words = namingWords(plan.title);
   const from = addDays(plan.createdOn < plan.due ? plan.createdOn : plan.due, -7);
   const to = plan.due === NO_DATE ? NO_DATE : addDays(plan.due, 60);
   const left = Math.max(0, plan.amount - paidSoFar(plan, transactions).amount) || plan.amount;
@@ -1047,7 +1067,7 @@ export function likelyPayments(plan: Plan, rows: readonly Transaction[], allPlan
     return transactions
       .filter((t) => (t.type === "Transfer" || t.type === "Revenue") && t.toWallet.trim().toLowerCase() === into && !linked.has(t.id) && t.date >= from && t.date <= to && t.amount > 0)
       .map((t) => {
-        const saysIt = own.some((w) => `${t.item} ${t.description}`.toLowerCase().includes(w));
+        const saysIt = saysWord(`${t.item} ${t.description}`, own);
         const close = t.amount === left ? 3 : Math.abs(t.amount - left) <= left * 0.2 ? 2 : t.amount < left && t.amount * 4 >= left ? 1 : 0;
         const sameFrom = Boolean(from_) && t.fromWallet.trim().toLowerCase() === from_ ? 1 : 0;
         const fits = t.type === "Revenue" ? close >= 2 : close >= 1 || saysIt;
@@ -1063,7 +1083,7 @@ export function likelyPayments(plan: Plan, rows: readonly Transaction[], allPlan
     .map((t) => {
       const text = `${t.item} ${t.description}`.toLowerCase();
       const sameKind = Boolean(plan.item) && t.item.trim().toLowerCase() === plan.item.trim().toLowerCase();
-      const saysIt = words.some((w) => text.includes(w));
+      const saysIt = saysWord(text, words);
       const close = t.total === left ? 3 : Math.abs(t.total - left) <= left * 0.2 ? 2 : t.total < left && t.total * 4 >= left ? 1 : 0;
       /*
        * Only the kind in common: it must also come after the plan was made,
@@ -1122,11 +1142,11 @@ export function planPaidBy(
     .filter(({ as }) => likelyPayments(as, all, plans).some((t) => t.id === row.id))
     .map(({ as, plan, into }) => {
       const left = Math.max(0, as.amount - paidSoFar(as, transactions).amount);
-      const words = plan.title.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+      const words = namingWords(plan.title);
       const text = `${row.item} ${row.description}`.toLowerCase();
       const exact = (moved ? row.amount : repaid ? row.amount + interestWith(row, all) : row.total) === left;
       // A change of kind is on by itself only for exactly what is left: its words name the account every deposit goes to.
-      return { plan, left, sure: into ? exact : exact || words.some((w) => text.includes(w)), ...(into ? { makesSaving: into } : {}) };
+      return { plan, left, sure: into ? exact : exact || saysWord(text, words), ...(into ? { makesSaving: into } : {}) };
     })
     .filter((m) => m.left > 0)
     .sort((a, b) => Number(b.sure) - Number(a.sure) || Number(!b.makesSaving) - Number(!a.makesSaving) || a.plan.due.localeCompare(b.plan.due));
@@ -1224,10 +1244,7 @@ export function planLine(plan: Plan): string {
  * School. Null when the entries say nothing about it.
  */
 export function kindFromHistory(title: string, transactions: readonly Transaction[], kinds: readonly string[]): string | null {
-  const words = title
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((w) => w.length >= 4);
+  const words = namingWords(title, 4);
   const exact = kinds.find((k) => k.trim().toLowerCase() === title.trim().toLowerCase());
   if (exact) return exact;
   if (words.length === 0) return null;
@@ -1235,7 +1252,7 @@ export function kindFromHistory(title: string, transactions: readonly Transactio
   for (const t of transactions) {
     if (t.type !== "Spending" || !t.item.trim()) continue;
     const text = `${t.item} ${t.description}`.toLowerCase();
-    if (words.some((w) => text.includes(w))) count.set(t.item, (count.get(t.item) ?? 0) + 1);
+    if (saysWord(text, words)) count.set(t.item, (count.get(t.item) ?? 0) + 1);
   }
   const best = [...count].sort((a, b) => b[1] - a[1])[0];
   return best && best[1] >= 1 && kinds.includes(best[0]) ? best[0] : null;

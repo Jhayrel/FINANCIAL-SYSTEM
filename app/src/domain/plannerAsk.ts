@@ -717,7 +717,7 @@ export function readPlannerAsk(
  */
 function closedNamed(t: string, plans: readonly Plan[]): PlannerAsk {
   const plan = planNamed(t, plans.filter((p) => p.status !== "open"), ["skipped", "done", "removed"]);
-  const words = plan?.title.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3) ?? [];
+  const words = plan ? titleWords(plan.title) : [];
   const lower = ` ${t.toLowerCase().replace(/[^a-z0-9\s]/g, " ")} `;
   return plan && words.some((w) => lower.includes(` ${w} `)) ? { kind: "closed", plan } : { kind: "none", said: t };
 }

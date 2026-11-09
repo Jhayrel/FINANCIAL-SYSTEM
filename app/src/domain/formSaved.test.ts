@@ -65,3 +65,33 @@ describe("a card in the form, and the ledger", () => {
     expect(rowSavedFor("an-old-card", [read], [row({})], new Set())).toBeNull();
   });
 });
+
+describe("a card whose amount was changed in the form (5 November 2026)", () => {
+  const empanada: Draft = { ...emptyDraft("2026-11-05"), flow: "Spending", category: "Spending", item: "Food", description: "empanada", fromWallet: "Cash", amount: 20_000 };
+  const saved = (over: Partial<Transaction>): Transaction => row({ date: "2026-11-05", item: "Food", description: "empanada", fromWallet: "Cash", amount: 10_000, total: 10_000, recordNumber: 3992, id: `t-${CARD_AT + 20_000}`, ...over });
+
+  it("is the row saved after it with its day, kind and words", () => {
+    expect(rowSavedFor(card, [empanada], [saved({})], new Set())?.recordNumber).toBe(3992);
+  });
+
+  it("by its item when it had no words of its own", () => {
+    const bare = { ...empanada, description: "" };
+    expect(rowSavedFor(card, [bare], [saved({ description: "" })], new Set())?.recordNumber).toBe(3992);
+    // The form gave it words the card never had: not enough to say it is the card's.
+    expect(rowSavedFor(card, [bare], [saved({ description: "siomai" })], new Set())).toBeNull();
+  });
+
+  it("never by other words, another day or kind, or long after", () => {
+    expect(rowSavedFor(card, [empanada], [saved({ description: "siomai" })], new Set())).toBeNull();
+    expect(rowSavedFor(card, [empanada], [saved({ date: "2026-11-04" })], new Set())).toBeNull();
+    expect(rowSavedFor(card, [empanada], [saved({ type: "Revenue" })], new Set())).toBeNull();
+    expect(rowSavedFor(card, [empanada], [saved({ id: `t-${CARD_AT + 31 * 60_000}` })], new Set())).toBeNull();
+  });
+
+  it("the amount still decides first, and two by the words is a guess not made", () => {
+    const exact = saved({ amount: 20_000, total: 20_000, recordNumber: 3993, id: `t-${CARD_AT + 40_000}` });
+    expect(rowSavedFor(card, [empanada], [saved({}), exact], new Set())?.recordNumber).toBe(3993);
+    const two = [saved({}), saved({ recordNumber: 3994, id: `t-${CARD_AT + 50_000}` })];
+    expect(rowSavedFor(card, [empanada], two, new Set())).toBeNull();
+  });
+});

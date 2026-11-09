@@ -30,6 +30,15 @@ interface Read {
  * (3 November 2026).
  */
 const same = (a: string, b: string): boolean => !a.trim() || !b.trim() || a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * The same money as a card already offered from the typed words, read again
+ * beside the pictures on "try again": the same flow and amount, with every
+ * wallet and kind the same or blank on one. Not the day: read beside a
+ * receipt, the words may take the receipt's.
+ */
+export const sameMoney = (a: Read["draft"], b: Read["draft"]): boolean =>
+  a.flow === b.flow && a.amount !== null && a.amount === b.amount && same(a.item, b.item) && same(a.fromWallet, b.fromWallet) && same(a.toWallet, b.toWallet);
 const filled = (d: Read["draft"]): number => [d.item, d.fromWallet, d.toWallet].filter((v) => v.trim() !== "").length;
 
 export function typedOnce<P extends Read>(proposals: readonly P[], pictures: readonly string[], note: string): P[] {
