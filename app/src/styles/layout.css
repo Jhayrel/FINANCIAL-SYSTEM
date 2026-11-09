@@ -3613,6 +3613,14 @@
   flex: 0 0 auto;
 }
 
+/*
+ * Room inside the scroll on every side, so a card's 1px frame is never laid on
+ * the scroller's own edge: it was flush on the left, 4px from the scrollbar on
+ * the right, and its top and bottom were cut as it scrolled past, a green box
+ * against the green halo with nothing between (owner, 9 November 2026: "the
+ * green box is edging"). The gutter is kept, so the right side does not jump
+ * when the thread grows a scrollbar.
+ */
 .fms-thread {
   flex: 1;
   min-height: 0;
@@ -3621,7 +3629,9 @@
   display: grid;
   gap: var(--space-2);
   align-content: start;
-  padding-right: var(--space-1);
+  padding: var(--space-2) var(--space-1) var(--space-3);
+  scroll-padding-block: var(--space-2) var(--space-3);
+  scrollbar-gutter: stable;
 }
 
 .fms-askempty {
@@ -12096,7 +12106,8 @@ button.fms-recent-row:disabled {
 .fms-alloc-acts {
   display: flex;
   flex: none;
-  gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-4);
   margin-left: auto;
 }
 
@@ -12113,9 +12124,33 @@ button.fms-recent-row:disabled {
   padding: var(--space-6) var(--space-3);
 }
 
-.fms-alloc-removedrow .fms-btn {
+.fms-alloc-removedrow .fms-linkbtn {
   flex: none;
   white-space: nowrap;
+}
+
+/*
+ * A phone is not a small computer (owner, 9 November 2026: "make sure the
+ * phone is not shrink down version of PC"). Here the card reads like the
+ * other cards on the phone: its words left-aligned under the title with no
+ * extra air, and its action one wide button, as "Add this money to the
+ * budget" is above it. The computer keeps the centred empty state.
+ */
+@media (max-width: 639px) {
+  .fms-alloc .fms-empty {
+    padding: 0;
+    text-align: left;
+  }
+
+  .fms-alloc-emptyacts {
+    display: grid;
+    justify-content: stretch;
+  }
+
+  .fms-alloc-emptyacts .fms-btn,
+  .fms-alloc > .fms-btn {
+    width: 100%;
+  }
 }
 
 .fms-alloc-removed {

@@ -778,6 +778,8 @@ export interface RankRow {
   hint?: string | undefined;
   /** A second line, for the kind's limit: "₱120.00 left of its ₱2,000.00 limit". */
   limit?: { readonly text: string; readonly over: boolean } | undefined;
+  /** And its allocation, apart from the limit: "₱600.00 left of its ₱1,200.00 allocation" (docs/17, A8). */
+  allocation?: { readonly text: string; readonly over: boolean } | undefined;
 }
 
 const rowValue = (r: RankRow): Centavos => r.value ?? r.amount ?? 0;
@@ -877,6 +879,7 @@ export function RankBars({
             </div>
             {r.hint && <span className="t-micro fms-rankhint">{r.hint}</span>}
             {r.limit && <span className={r.limit.over ? "t-micro fms-rankhint is-over" : "t-micro fms-rankhint"}>{r.limit.text}</span>}
+            {r.allocation && <span className={r.allocation.over ? "t-micro fms-rankhint is-over" : "t-micro fms-rankhint"}>{r.allocation.text}</span>}
           </>
         );
         return onPick ? (

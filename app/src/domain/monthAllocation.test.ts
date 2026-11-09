@@ -205,7 +205,7 @@ describe("safe to spend and the daily figures (A5)", () => {
     const b = brief(ref([big]));
     expect(b.safe!.safe).toBe(0);
     expect(b.safe!.free).toBeLessThan(0);
-    expect(b.warnings.join(" ")).toMatch(/allocations still due this month is ₱[\d,.]+ more than your wallets hold/);
+    expect(b.warnings.join(" ")).toMatch(/allocations (?:still due or set aside|set aside) this month is ₱[\d,.]+ more than your wallets hold/);
   });
 
   it("next month's start counts next month's allocations, whole", () => {

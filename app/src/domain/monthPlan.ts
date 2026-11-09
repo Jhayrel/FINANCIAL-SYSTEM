@@ -648,22 +648,25 @@ function notesFor(
         ? safe.reservedBills > 0
           ? "bills, subscriptions and debt payments"
           : "debt payments"
-        : safe.reservedBills > 0 || safe.reservedPlans === 0
+        : safe.reservedBills > 0 || (safe.reservedPlans === 0 && !safe.reservedAllocations)
           ? "bills and subscriptions"
           : "";
     const plansWords = safe.reservedPlans > 0 ? (owed ? `${owed.replace(" and debt payments", ", debt payments")} and plans set aside` : "plans set aside") : owed;
     // Allocations named last, after everything else still due (A8).
     const what = (safe.reservedAllocations ?? 0) > 0 ? (plansWords ? `${plansWords.replace(/ and (plans set aside|bills and subscriptions|debt payments)$/, ", $1")} and allocations` : "allocations") : plansWords;
+    // Allocations are not paid: with them the money is "still to pay or set aside" (owner's backup, 9 November 2026).
+    const still = (safe.reservedAllocations ?? 0) > 0 ? (plansWords ? "still to pay or set aside" : "set aside") : "still to pay";
+    const stillDue = (safe.reservedAllocations ?? 0) > 0 ? (plansWords ? "still due or set aside" : "set aside") : "still due";
 
     if (safe.wallets < 0) {
       // Said as what it is. "The ₱0.00 of bills still due is more than your wallets hold" was true and meant nothing.
       warn(`Your wallets are ${money(-safe.wallets)} below zero, so nothing is safe to spend until that is put right.`);
     } else if (safe.free < 0) {
-      warn(`The ${money(reserved)} of ${what} still due this month is ${money(-safe.free)} more than your wallets hold.`);
+      warn(`The ${money(reserved)} of ${what} ${stillDue} this month is ${money(-safe.free)} more than your wallets hold.`);
     } else {
       out.push(
         reserved > 0
-          ? `Your wallets hold ${money(safe.wallets)}. Less the ${money(reserved)} of ${what} still to pay, ${money(safe.safe)} is safe to spend until ${name} ends.`
+          ? `Your wallets hold ${money(safe.wallets)}. Less the ${money(reserved)} of ${what} ${still}, ${money(safe.safe)} is safe to spend until ${name} ends.`
           : `Your wallets hold ${money(safe.wallets)} and nothing is still due, so all of it is safe to spend until ${name} ends.`,
       );
       if (safe.overToday > 0) {

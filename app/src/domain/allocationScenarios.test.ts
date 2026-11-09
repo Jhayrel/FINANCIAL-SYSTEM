@@ -331,6 +331,22 @@ describe("month and year edges", () => {
   });
 });
 
+describe("how safe to spend is worded with allocations", () => {
+  it("only an allocation held: it is set aside, never bills, never still to pay", () => {
+    const gas = line({ kind: "Gas", amount: 120_000 });
+    const b = monthBrief({ transactions: ledger, reference: ref([gas]), budgets: {}, debts: [], year: 2026, month: 11, asOf });
+    const words = [...b.warnings, ...b.notes].join(" ");
+    expect(words).toMatch(/Less the ₱900\.00 of allocations set aside, ₱[\d,.]+ is safe to spend until November ends\./);
+    expect(words).not.toMatch(/bills and subscriptions and allocations/);
+  });
+
+  it("with none, worded exactly as before", () => {
+    const b = monthBrief({ transactions: ledger, reference: ref([]), budgets: {}, debts: [], year: 2026, month: 11, asOf });
+    const words = [...b.warnings, ...b.notes].join(" ");
+    expect(words).not.toMatch(/set aside|allocation/);
+  });
+});
+
 describe("need to withdraw", () => {
   it("a wallet below zero needs the whole of what it holds for", () => {
     const gas = line({ kind: "Gas", amount: 120_000, wallet: "Cash" });

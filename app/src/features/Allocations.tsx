@@ -178,9 +178,9 @@ export function AllocationsCard({
                     {lineName(l)}, {formatMoney(l.amount)}
                     {l.removedOn ? `, removed ${formatMedium(l.removedOn)}` : ""}
                   </span>
-                  <Button size="sm" onClick={() => run({ kind: "restore", id: l.id })}>
+                  <button type="button" className="t-caption fms-linkbtn" onClick={() => run({ kind: "restore", id: l.id })} aria-label={`Put back the ${lineName(l)} allocation`}>
                     Put back
-                  </Button>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -227,9 +227,9 @@ function AllocationRow({ status: s, phase, onEdit, onRemove }: { status: Allocat
             The same as {s.twinOf} above, {formatMoney(s.line.amount)}. Only the first counts; remove one.
           </span>
           <span className="fms-alloc-acts">
-            <Button size="sm" variant="ghost" tone="danger" onClick={onRemove} ariaLabel={`Remove this second ${s.name} allocation`}>
+            <button type="button" className="t-caption fms-linkbtn fms-linkbtn--danger" onClick={onRemove} aria-label={`Remove this second ${s.name} allocation`}>
               Remove
-            </Button>
+            </button>
           </span>
         </div>
       </li>
@@ -284,13 +284,14 @@ function AllocationRow({ status: s, phase, onEdit, onRemove }: { status: Allocat
           {formatMoney(s.spent)} spent of {formatMoney(s.line.amount)}
           {s.timesUsed !== null && s.line.times ? `, ${s.timesUsed} of ${s.line.times} times` : ""}
         </span>
+        {/* Quiet links, as "Set a limit" is on the card below it: one family on Budget, on the phone and the computer. */}
         <span className="fms-alloc-acts">
-          <Button size="sm" variant="ghost" onClick={onEdit} ariaLabel={`Edit the ${s.name} allocation`}>
+          <button type="button" className="t-caption fms-linkbtn" onClick={onEdit} aria-label={`Edit the ${s.name} allocation`}>
             Edit
-          </Button>
-          <Button size="sm" variant="ghost" tone="danger" onClick={onRemove} ariaLabel={`Remove the ${s.name} allocation`}>
+          </button>
+          <button type="button" className="t-caption fms-linkbtn fms-linkbtn--danger" onClick={onRemove} aria-label={`Remove the ${s.name} allocation`}>
             Remove
-          </Button>
+          </button>
         </span>
       </div>
     </li>

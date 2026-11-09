@@ -579,6 +579,25 @@ export function entryAllocationNote(
   return addFormNote(month, main.item, { description: main.description, notes: main.notes }, cost);
 }
 
+/**
+ * A kind's allocation in a word, for the lists of where money went (Dashboard,
+ * Insights): "₱600.00 left of its ₱1,200.00 allocation", "₱200.00 over its
+ * ₱1,200.00 allocation", or, for a month that ended, "₱300.00 of its ₱1,200.00
+ * allocation not used". Every live line of the kind together; none, nothing.
+ */
+export function kindAllocationWords(month: MonthAllocations | null | undefined, kind: string): { readonly text: string; readonly over: boolean } | undefined {
+  if (!month) return undefined;
+  const mine = month.lines.filter((s) => !s.twinOf && s.line.kind.trim().toLowerCase() === kind.trim().toLowerCase());
+  if (mine.length === 0) return undefined;
+  const amount = mine.reduce((t, s) => t + s.line.amount, 0);
+  const over = mine.reduce((t, s) => t + s.over, 0);
+  const left = mine.reduce((t, s) => t + Math.max(0, s.left), 0);
+  const its = mine.length === 1 ? `its ${php(amount)} allocation` : `its ${mine.length} allocations, ${php(amount)}`;
+  if (over > 0) return { text: `${php(over)} over ${its}`, over: true };
+  if (month.phase === "past") return { text: left > 0 ? `${php(left)} of ${its} not used` : `All of ${its} used`, over: false };
+  return { text: `${php(left)} left of ${its}`, over: false };
+}
+
 /** A line said for Activity: "Gas, ₱1,200.00 for November 2026 (₱300.00 a week, 4 weeks), paid from Cash". */
 export function lineSummary(l: AllocationLine): string {
   const pace = paceWords(l);

@@ -63,7 +63,7 @@ The owner's notes, sorted:
 | Tuition 11,000; School field trip 15,000; Christening 3,000 | Plans, with Set aside on |
 | Maya Bank 1,000; Extra money 350 | Plans to save (P11) |
 | Maya Credit 1,075 | Held already as a debt payment due |
-| Withdrawal fee 20 | An allocation on Transaction Fee, if wanted |
+| Withdrawal fee 20 | Not allocated: a fee is worked out from its transfer and is not a kind of spending, so it comes out of safe to spend when it happens |
 | Need to withdraw 5,800 | Worked out: A11 |
 | Free 1,325 | Safe to spend |
 
@@ -89,6 +89,13 @@ of them. Each counts by what it cost (`costOf`), the same figure the Budget,
 Insights and the statements use, so a transfer counts only its fee and an
 entry over several days counts each day's share in its own month, as the
 budget does.
+
+**One entry, one allocation.** When a kind has more than one line (Self Care
+for everything, and Gym for entries that say "gym"), an entry counts against
+the first made whose words it says, else the line for the whole kind; never
+two. Counted against both, a gym entry took its cost out of both and
+spending ₱100.00 raised safe to spend by ₱100.00 (scenario analysis, 9
+November 2026). A plan inside an allocation follows the same rule.
 
 Binned entries do not count. An edit, a bin, a restore or a change of kind
 moves the money between allocations at once, because nothing is stored: what
@@ -155,6 +162,10 @@ A "time" pace (₱50.00 a time, 8 times) is counted by entries: 3 of 8 used.
 | I copy last month | Each live line comes with its amount and pace, not with what was left. Lines already there for the kind are kept; removed ones are not copied. |
 | A new month starts | Nothing happens by itself. In the first week, if last month had allocations and this one has none, the bell offers to copy them. |
 | The same kind twice in a month | Refused: change the one there is. |
+| The same allocation made on two phones offline, or brought in by a merge | The first made counts; the second holds nothing and counts nothing, and Budget and the bell say "Gas is allocated twice": remove one. It is never removed by itself. |
+| I pay gas from savings, not from a spending wallet | The allocation needs that much less, and the spending wallets did not move, so safe to spend rises by it, as it does when a bill is paid from savings. Today's figure is unchanged. |
+| I record gas dated later this month | The wallet and the allocation both take it now, so safe to spend is unchanged; today is untouched. |
+| I spend inside an allocation today | Nothing moves; the Dashboard says "₱300.00 spent today came out of Gas allocation, not today's share", so the spending is seen. |
 | A kind with a limit and an allocation | Both are shown; they do not change each other. The allocation holds money, the limit measures. |
 | The allocations add up to more than the spending budget | Budget says so. Nothing is refused. |
 | I am offline | Saved on the device and sent when the connection is back, like every setting. |
@@ -164,14 +175,18 @@ A "time" pace (₱50.00 a time, 8 times) is counted by entries: 3 of 8 used.
 
 | Part | What it shows |
 |---|---|
-| Dashboard, safe to spend | "Set aside in allocations −₱X" beside bills and plans, in the figure and in its words |
-| Budget | The Allocations card for the month on screen: each line with spent, left, over and this week, with Edit and Remove on the line's last row; Add beside the title once there is one (an empty month has the one centred "Add an allocation" button instead, and Copy from last month beside it); Removed, with Put back; the total against the spending budget; need to withdraw |
+| Dashboard, safe to spend | "Set aside in allocations −₱X" beside bills and plans, in the figure and in its words; what came out of allocations today, under today's figure |
+| Dashboard, Still to pay this month | "Set aside in allocations": each line with what it still holds, this week's share left, or how far over |
+| Dashboard and Insights, Where it went | Under each kind with an allocation: "₱600.00 left of its ₱1,200.00 allocation", "₱200.00 over", or for a month that ended "₱300.00 not used" |
+| Insights, Safe to spend | Each allocation's hold, and each plan's, as lines, so the lines add up to the figure |
+| Insights, How it ended | For a month that ended: allocated, and each line not used or over |
+| Budget | The Allocations card for the month on screen: each line with spent, left, over and this week, with Edit and Remove as quiet links on the line's last row, as "Set a limit" is on the card below; Add beside the title once there is one (an empty month has the one "Add an allocation" button instead, centred on a computer and one wide button on a phone, with Copy from last month beside it); Removed, with Put back; the total against the spending budget; need to withdraw |
 | Add form | Under the item: "Gas allocation: ₱900.00 of ₱1,200.00 left (this week ₱300.00 of ₱300.00 left), ₱600.00 after this", and before saving, when it goes past: "This takes Gas ₱100.00 over its ₱1,200.00 allocation: ₱900.00 of this is covered by what is left of it, and ₱100.00 comes out of safe to spend" |
 | Bell | Over an allocation; past this week's share; the start-of-month copy offer |
 | Chat (no AI) | "how much is left for gas", "my allocations", "allocation status" |
 | AI | The month's allocations are in what the model is sent, with the rule that safe to spend is after them |
 | Activity | Every allocation added, changed, removed, put back or copied, who did it and how, under Budget |
-| Statements, Database, Insights, charts | Unchanged: they show entries, and an allocation is not money moving. The Expense sheet cut to a kind (Show) is the history of that envelope. |
+| Statements, Database, charts | Unchanged: they show money that moved, and an allocation moves none. The Expense sheet cut to a kind (Show) is the history of that envelope. |
 | Settings | Nothing new. Allocations are made on Budget. Renaming a kind or a wallet carries them. |
 | Backup and restore | Included (A3) |
 

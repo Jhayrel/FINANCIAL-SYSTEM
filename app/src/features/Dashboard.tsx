@@ -53,6 +53,7 @@ import { getMonth, getYear, MONTH_NAMES_SHORT, monthName } from "../domain/dates
 import { limitLines, limitWords } from "../domain/limitAsk";
 import { formatMoney, type Centavos } from "../domain/money";
 import { carryOver, carryWords, isOpenBill, monthBrief, nextMonthStart, yesterdayOf } from "../domain/monthPlan";
+import { kindAllocationWords } from "../domain/monthAllocation";
 import { plannedForBudget, viewOf } from "../domain/planner";
 import { monthlyTotalsForYear, spendingRanking, totalSpending } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction, WalletBalance } from "../domain/types";
@@ -615,6 +616,34 @@ export function Dashboard({
             )}
             </>
           )}
+          {/*
+            What the allocations still hold: set aside like the bills above,
+            spent by the entries of their kind (docs/17, A8).
+          */}
+          {safe?.allocations && safe.allocations.lines.length > 0 && (
+            <div className="fms-paidlist">
+              <div className="t-label" style={{ color: "var(--ink-2)" }}>
+                Set aside in allocations
+              </div>
+              <div className="fms-month-lines" style={{ marginTop: 0 }}>
+                {safe.allocations.lines
+                  .filter((l) => !l.twinOf)
+                  .map((l) => (
+                    <Line
+                      key={l.line.id}
+                      label={
+                        l.over > 0
+                          ? `${l.name}, ${formatMoney(l.over)} over`
+                          : l.week && l.week.left >= 0
+                            ? `${l.name}, ${formatMoney(l.week.left)} left this week`
+                            : `${l.name}, of ${formatMoney(l.line.amount)}`
+                      }
+                      value={l.held}
+                    />
+                  ))}
+              </div>
+            </div>
+          )}
           {safe && safe.habits.length > 0 && (
             <p className="t-caption fms-habits">
               Usually before the month ends:{" "}
@@ -693,6 +722,8 @@ export function Dashboard({
                         ? `No change from ${previous}`
                         : `${formatMoney(Math.abs(diff))} ${diff > 0 ? "more" : "less"} than ${previous}`,
                   limit: limit ? limitWords(limit) : undefined,
+                  // Its allocation, apart from its limit: one holds money, the other measures (docs/17, A2).
+                  allocation: kindAllocationWords(safe?.allocations, k.name),
                 };
               })}
               {...(onOpenInsights

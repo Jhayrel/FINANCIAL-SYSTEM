@@ -2750,6 +2750,38 @@ of the same name and restored).
   (`MY THINGS` is not in a cloud clone), and the model itself (no AI server
   locally; the device's own answers were checked).
 
+### 2026-11-09, later: what-if scenarios, the phone, and allocations everywhere
+
+- **Scenario suite** (`allocationScenarios.test.ts`): about forty named
+  what-ifs and 300 seeded random months. Two failed and are fixed: an entry
+  counted against two lines of one kind (Self Care and Gym), which made
+  spending raise safe to spend; and the same allocation made on two devices,
+  which held the money twice. Now one entry counts against one line
+  (`lineFor`), and a repeated line holds nothing and is reported
+  (`twinOf`), never removed by itself.
+- **Add form note** moved into `entryAllocationNote`: an edited entry is
+  counted as its new amount against the rest, and an entry over several days
+  counts this month's days only.
+- **Seen when spent.** Gas inside its allocation leaves today's figure where
+  it was; the Dashboard and the chat now say what came out of allocations
+  today, so the purchase does not look missed.
+- **Everywhere.** Dashboard: Still to pay lists what each allocation holds;
+  Where it went (Dashboard and Insights) says each kind against its
+  allocation. Insights: Safe to spend lists plans and allocations so its
+  lines add up (plans were missing before allocations existed); How it ended
+  says what was not used or over. Statements stay as they are: an allocation
+  moves no money.
+- **Words.** With only an allocation held, the safe to spend sentence said
+  "bills and subscriptions and allocations still to pay"; it now says
+  "allocations set aside". Unchanged when there are none.
+- **Phone.** The Allocations card follows the phone's own pattern: left-
+  aligned words and one wide button when empty, quiet links (Edit, Remove,
+  Put back) like "Set a limit" when not. The computer keeps the centred
+  empty state the owner asked for.
+- **Chat cards.** The thread has room on every side, so a card's green
+  frame no longer sits on the panel's edge or is cut at its bottom (owner:
+  "the green box is edging").
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

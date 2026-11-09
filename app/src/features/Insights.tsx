@@ -94,6 +94,7 @@ import { formatMoney, type Centavos } from "../domain/money";
 import { NO_DATE, plannedByDay, plannedForBudget, viewOf } from "../domain/planner";
 import { PlannedInMonth } from "./PlannedInMonth";
 import { isOpenBill, monthBrief } from "../domain/monthPlan";
+import { kindAllocationWords, monthAllocations } from "../domain/monthAllocation";
 import { costOf, incomeOf } from "../domain/totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "../domain/types";
 import { pickableYears } from "../domain/year";
@@ -325,6 +326,23 @@ export function Insights({
   const now = useMemo(
     () => (isThisMonth ? brief : monthBrief({ transactions, reference, budgets, debts, year: nowYear, month: nowMonth, asOf })),
     [isThisMonth, brief, transactions, reference, budgets, debts, nowYear, nowMonth, asOf],
+  );
+
+  /*
+   * The month's allocations (docs/17, A8): the running month's are the
+   * Dashboard's own; another month's are worked out the same way, so a month
+   * that ended says what was used, not used and over.
+   */
+  const ymOnScreen = `${year}-${String(month).padStart(2, "0")}`;
+  const allocations = useMemo(
+    () => brief.safe?.allocations ?? monthAllocations(reference.allocations, transactions, ymOnScreen, asOf),
+    [brief, reference.allocations, transactions, ymOnScreen, asOf],
+  );
+  // A pick of exactly one whole month (or the month so far) has its allocations beside each kind.
+  const pickMonth = sel.start.slice(0, 7) === sel.end.slice(0, 7) && sel.start.endsWith("-01") ? sel.start.slice(0, 7) : null;
+  const pickAllocations = useMemo(
+    () => (pickMonth === null ? null : pickMonth === ymOnScreen ? allocations : monthAllocations(reference.allocations, transactions, pickMonth, asOf)),
+    [pickMonth, ymOnScreen, allocations, reference.allocations, transactions, asOf],
   );
 
   const monthStart = firstOfMonth(year, month);
@@ -1087,6 +1105,7 @@ export function Insights({
                     : k.amount === k.before
                       ? `No change from ${before}`
                       : `${formatMoney(Math.abs(k.amount - k.before))} ${k.amount > k.before ? "more" : "less"} than ${before}`,
+                allocation: kindAllocationWords(pickAllocations, k.name),
               }))}
               total={kindsTotal}
               onPick={(n) => pickFocus(n, "out")}
@@ -1426,7 +1445,7 @@ export function Insights({
         )}
 
         {safe ? (
-          <Card title="Safe to spend" subtitle="The money in the wallets, less the bills, subscriptions and debt payments still to pay">
+          <Card title="Safe to spend" subtitle="The money in the wallets, less the bills, subscriptions and debt payments still to pay, and what is set aside">
             <div className="fms-safe-hero">
               <Money value={safe.perDay} size="xl" tone={safe.perDay === 0 ? "var(--over)" : undefined} />
               <span className="t-caption" style={{ color: safe.overToday > 0 ? "var(--over)" : "var(--ink-3)" }}>
@@ -1451,6 +1470,17 @@ export function Insights({
                 .filter((d) => d.kind === "payable")
                 .map((d) => (
                   <Row key={`debt-${d.debtId}`} label={`${d.name}, ${whenWords(d.daysToDue).toLowerCase()}`} value={-d.amount} quiet />
+                ))}
+              {/* Plans and allocations set aside: without them the lines did not add up to the figure under them. */}
+              {safe.plansDue
+                .filter((p) => p.left > 0)
+                .map((p) => (
+                  <Row key={`plan-${p.id}`} label={`${p.title}, planned`} value={-p.left} quiet />
+                ))}
+              {(safe.allocations?.lines ?? [])
+                .filter((l) => l.held > 0)
+                .map((l) => (
+                  <Row key={`alloc-${l.line.id}`} label={`${l.name}, allocated`} value={-l.held} quiet />
                 ))}
               <Row label="Safe to spend until the month ends" value={safe.safe} strong />
               {safe.daysLeft > 1 && <Row label="Per day from tomorrow" value={safe.perDayAfter} quiet />}
@@ -1492,6 +1522,23 @@ export function Insights({
               )}
               <Row label={brief.kept < 0 ? "More out than in" : "Kept"} value={brief.kept} signed strong />
             </div>
+            {/* How the month's allocations went: used, not used, over (docs/17, A7). */}
+            {allocations.lines.some((l) => !l.twinOf) && (
+              <div className="fms-month-lines" style={{ marginTop: "var(--space-4)" }}>
+                <Row label={brief.phase === "past" ? "Allocated" : "Allocated for the month"} value={allocations.allocated} />
+                {allocations.lines
+                  .filter((l) => !l.twinOf)
+                  .map((l) => (
+                    <Row
+                      key={l.line.id}
+                      label={l.over > 0 ? `${l.name}, over by` : brief.phase === "past" ? `${l.name}, not used` : `${l.name}, of ${formatMoney(l.line.amount)}`}
+                      value={l.over > 0 ? l.over : Math.max(0, l.left)}
+                      quiet
+                      tone={l.over > 0 ? "var(--over)" : undefined}
+                    />
+                  ))}
+              </div>
+            )}
           </Card>
         )}
       </div>
