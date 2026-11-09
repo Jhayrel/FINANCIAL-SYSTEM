@@ -20,7 +20,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { askAi, type AiAnswer, type AiTask } from "../data/aiClient";
 import { buildContext, contextToText } from "../domain/aiContext";
 import { buildChatContext } from "../domain/aiChatContext";
-import { saidAsFigures, untracedNote } from "../domain/aiFigures";
+import { figuresIn, saidAsFigures, untracedFigures, untracedNote } from "../domain/aiFigures";
+import { resolveCalcs } from "../domain/aiCalc";
 import { fitNote } from "../domain/dayFit";
 import { formatMoney, toCentavos } from "../domain/money";
 import { cacheKey, readCache, writeCache } from "../domain/aiCache";
@@ -336,7 +337,60 @@ export function useAi({
        * when the model repeats it.
        */
       const said = options.trusted ?? [options.earlier ?? "", ...(options.history ?? []).map((h) => h.text)].join("\n");
-      const note = untracedNote(answered.text, [withWorked ?? contextToText(context), said, saidAsFigures(said), options.pinned ?? ""].join("\n"), formatMoney, [options.worked ?? "", options.pinned ?? "", saidAsFigures(options.question ?? "")].join("\n"));
+      const given = [withWorked ?? contextToText(context), said, saidAsFigures(said), options.pinned ?? ""].join("\n");
+      const workedHere = [options.worked ?? "", options.pinned ?? "", saidAsFigures(options.question ?? "")].join("\n");
+      /*
+       * The calculations the model asked for, worked out here, exactly
+       * (`aiCalc.ts`): PAL and Program of Thoughts, the model writing the sum
+       * and an interpreter doing it. A result built only on the app's own
+       * figures is the app's figure too.
+       */
+      const known = new Set([...figuresIn(given), ...figuresIn(workedHere)].map(Math.abs));
+      const settle = (text: string): { text: string; worked: string; loose: readonly number[] } => {
+        const calc = resolveCalcs(text, known);
+        const worked = [workedHere, ...calc.trusted.map((c) => formatMoney(c))].join("\n");
+        return { text: calc.text, worked, loose: untracedFigures(calc.text, given, worked) };
+      };
+      let settled = settle(answered.text);
+      /*
+       * One second look, when figures the app did not work out remain
+       * (Chain-of-Verification, Dhuliawala et al., 2023: draft, check, then
+       * revise). The model is told which figures, and asked again to use
+       * only the app's or to write the sum for the app to work out. The
+       * answer with fewer untraced figures is kept, and whatever is left is
+       * still said underneath. Once only: never a loop, never a second wait
+       * for an answer that was already right.
+       */
+      if (task === "chat" && settled.loose.length > 0 && options.question && !options.signal?.aborted) {
+        try {
+          const list = settled.loose.map((c) => formatMoney(c)).join(", ");
+          const again = await askAi({
+            context,
+            task,
+            tone: ai.tone,
+            provider: ai.provider,
+            model: ai.model,
+            ...(withWorked ? { contextText: withWorked } : {}),
+            question: `${options.question}\n\n(Before you answer: a first answer to this used ${list}, which the app did not work out. Use only figures from the data, and write any sum the app did not work out as {{calc: ...}} so the app works it out.)`,
+            ...(options.history ? { history: options.history } : {}),
+            ...(options.earlier ? { earlier: options.earlier } : {}),
+            ...(options.signal ? { signal: options.signal } : {}),
+            ...(options.pinned ? { pinned: options.pinned } : {}),
+          });
+          if (again.source === "model") {
+            const tidied = options.tidy ? options.tidy(again.text) : again.text;
+            const second = settle(tidied);
+            if (second.loose.length < settled.loose.length) {
+              answered = { ...again, text: tidied };
+              settled = second;
+            }
+          }
+        } catch {
+          // The first answer stands, with its note.
+        }
+      }
+      answered = { ...answered, text: settled.text };
+      const note = untracedNote(answered.text, given, formatMoney, settled.worked);
       /*
        * Every figure can be real and the answer still wrong: "a PHP 95.00
        * meal is within that daily limit" of PHP 80.64 (7 October 2026). A

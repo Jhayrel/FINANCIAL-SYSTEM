@@ -3128,6 +3128,42 @@ this week", "how can I save more", "what should I cut", "am I saving
 enough". Each is answered from the full context the model is given; the
 container cannot reach a model, so none was seen answered here.
 
+### 2026-11-10, later: research applied to the AI (a calculator, a second look, examples)
+
+The owner: "use a ai training repository in github or etc find more sources
+to improve the system ai", "ai first ... they are both so smart they can be
+better". The models are free ones from several providers, called through
+their APIs, so none can be retrained here; what can change is what they are
+told, the tools they are given, and how their answers are checked. Three
+findings from the research on numerical questions over financial data, and
+what was built from each:
+
+- **PAL and Program of Thoughts** (Gao et al., ICML 2023,
+  github.com/reasoning-machines/pal; Chen et al., 2022,
+  github.com/wenhuchen/Program-of-Thoughts, tested on FinQA, ConvFinQA and
+  TAT-QA; FinQA, github.com/czyssrs/FinQA, writes each answer as a program
+  over figures from the report): the model writes the calculation and an
+  interpreter works it out. The chat's model now writes `{{calc: ...}}` for
+  pesos and `{{count: ...}}` for how many whole ones fit, and the device works
+  it out exactly in whole centavos (`aiCalc.ts`, exact fractions, half away
+  from zero). A result built only on figures from the data is the app's own
+  figure and is never flagged; one built on a figure nobody gave is shown and
+  still flagged. A correct answer was flagged on 9 November because the model
+  had nowhere to put a sum but its own words.
+- **Chain-of-Verification** (Dhuliawala et al., 2023, arXiv 2309.11495): draft,
+  check, revise. When an answer still holds figures the app cannot trace,
+  the model is asked once more, told which figures, to use only the data or
+  the calculator; the answer with fewer untraced figures is kept and any
+  left are still named underneath (`useAi.ts`). Once only, and only then.
+- **Few-shot examples** (dair-ai/Prompt-Engineering-Guide,
+  promptingguide.ai): three short worked answers, invented figures, in the
+  chat's instruction: an afford question, a why question, and a how-many.
+
+The model cannot be reached from the container, so how each provider takes
+to the calculator is for the next coderview dump to show: look for answers
+with `{{` left in them (a calculation the device could not read is shown as
+its expression) and for second tries in the AI log.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
