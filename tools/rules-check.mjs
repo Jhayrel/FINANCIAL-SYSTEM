@@ -118,6 +118,18 @@ console.log("Settings and budgets");
 await check("settings", () => assertSucceeds(setDoc(at(owner, "meta/settings"), settings)));
 await check("one section of settings", () => assertSucceeds(setDoc(at(owner, "meta/settings"), { theme: "dark" }, { mergeFields: ["theme"] })));
 await check("settings with a key in them are refused", () => assertFails(setDoc(at(owner, "meta/settings"), { ...settings, ai: { ...settings.ai, apiKey: "x" } })));
+// Allocations (docs/17-ALLOCATIONS.md): a list inside the settings document, saved as its own section.
+const allocation = (i) => ({ id: `a-${i}`, month: "2026-11", name: "", kind: "Gas", words: "", amount: 120000, each: 30000, times: 4, per: "week", wallet: "Cash", createdOn: "2026-11-01" });
+await check("settings with allocations", () => assertSucceeds(setDoc(at(owner, "meta/settings"), { ...settings, allocations: [allocation(1), { ...allocation(2), kind: "Parking", removedOn: "2026-11-09" }] })));
+await check("the allocations section alone", () => assertSucceeds(setDoc(at(owner, "meta/settings"), { allocations: [allocation(3)] }, { mergeFields: ["allocations"] })));
+await check("no allocations at all", () => assertSucceeds(setDoc(at(owner, "meta/settings"), { allocations: [] }, { mergeFields: ["allocations"] })));
+await check("1,000 allocations", () => assertSucceeds(setDoc(at(owner, "meta/settings"), { allocations: Array.from({ length: 1000 }, (_, i) => ({ id: `b${i}`, month: "2026-11", kind: "Gas", amount: 100 })) }, { mergeFields: ["allocations"] })));
+await check("1,001 allocations are refused", () => assertFails(setDoc(at(owner, "meta/settings"), { allocations: Array.from({ length: 1001 }, (_, i) => ({ id: `b${i}`, month: "2026-11", kind: "Gas", amount: 100 })) }, { mergeFields: ["allocations"] })));
+await check("allocations that are not a list are refused", () => assertFails(setDoc(at(owner, "meta/settings"), { allocations: { gas: 120000 } }, { mergeFields: ["allocations"] })));
+await check("an allocation activity event", () =>
+  assertSucceeds(setDoc(at(owner, "activity/alloc1"), { at: "2026-11-09T01:00:00Z", actor: "owner", via: "manual", action: "allocation.create", summary: "Allocated Gas, ₱1,200.00 for November 2026 (₱300.00 a week, 4 weeks), paid from Cash" })));
+await check("an allocation put back", () =>
+  assertSucceeds(setDoc(at(owner, "activity/alloc2"), { at: "2026-11-09T01:00:01Z", actor: "owner", via: "manual", action: "allocation.restore", summary: "Put back the Parking allocation for November 2026 (₱400.00).", before: "Parking, ₱400.00 for November 2026, removed November 9, 2026", after: "Parking, ₱400.00 for November 2026" })));
 await check("a budget year", () => assertSucceeds(setDoc(at(owner, "budgets/2026"), { spending: Array(12).fill(0), billsSubs: Array(12).fill(0) })));
 await check("a budget with eleven months is refused", () => assertFails(setDoc(at(owner, "budgets/2026"), { spending: Array(11).fill(0), billsSubs: Array(12).fill(0) })));
 

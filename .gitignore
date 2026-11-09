@@ -60,3 +60,8 @@ desktop.ini
 
 # Scratch tests written during a session (they read private data from outside the repo). Never committed.
 app/src/zz-*
+
+# The Firestore emulator writes these at the root when tools/rules-check.mjs runs.
+firestore-debug.log
+firebase-debug.log
+ui-debug.log

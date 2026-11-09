@@ -2782,6 +2782,34 @@ of the same name and restored).
   frame no longer sits on the panel's edge or is cut at its bottom (owner:
   "the green box is edging").
 
+### 2026-11-09, night: heavy testing against the published rules
+
+The owner published the rules with the allocations check, then asked for
+heavy testing "making sure everything is connected". All of it ran against
+copies; the live database was never touched.
+
+- **The rules, in Google's engine** (`tools/rules-check.mjs`, now with nine
+  allocation cases): 41 of 41. Allocations save, as a whole document and as
+  their own section; 1,000 lines are taken, 1,001 and a list that is not a
+  list are refused; allocation Activity events are accepted.
+- **The app against the Firestore and Auth emulators**, two devices signed in
+  as the owner (the handoff's emulator steps, the `firebase.ts` hook
+  reverted after): the 9 November backup restored through the rules (3,990
+  rows); the phone saw it; allocations added on the computer appeared on the
+  phone; one removed on the phone showed under Removed, with Put back, on the
+  computer; a gas entry made offline on the phone reached the computer when
+  it came back, both then showing the same safe to spend, with "came out of
+  Gas allocation" under today; Activity held every step from both; no
+  permission refused. A merge of an older backup brought a second Gas in: it
+  was shown as "twice", held nothing, and the bell said so.
+- **Every button**, on the emulator copy: computer 237 and phone 230 presses
+  with whatever opened cancelled; computer 228 (35 confirmed) and phone 214
+  (54 confirmed) with it confirmed. No crash screen, no page error, no NaN or
+  undefined on screen. The backup taken after it validates, its checksum
+  holds, every row is whole centavos with total = amount + fee, and safe to
+  spend worked out apart from the app matches the Dashboard.
+- The emulator writes `firestore-debug.log` at the root; it is ignored now.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
