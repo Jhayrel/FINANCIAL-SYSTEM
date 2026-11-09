@@ -106,9 +106,28 @@ function nameIn(text: string, names: readonly string[]): string {
 /** "#3948 should be 0.27": a record named and what it should be, with no verb (19 October 2026). */
 const SHOULD_BE = /#\s*\d{1,5}\b[^.?!]{0,40}\b(?:should|must)\s+(?:be|have\s+been)\b/i;
 
+/**
+ * "The travel on nov 8 was gcash not cash": a saved row put right with no
+ * verb, by saying what it was and what it is not. It became a new entry
+ * that asked "How much was it?" (9 November 2026 sweep). Both must be the
+ * owner's own accounts.
+ */
+const WAS_NOT =
+  /\b(?:was|were|is|should\s+(?:be|have\s+been))\s+(?:paid\s+|sent\s+|taken\s+)?(?:with\s+|from\s+|on\s+|using\s+|in\s+|sa\s+|thru\s+|through\s+)?(?:my\s+|the\s+)?([a-z][a-z ()]{1,28}?)\s*,?\s+(?:not|hindi|instead\s+of|rather\s+than)\s+(?:with\s+|from\s+|on\s+|in\s+|sa\s+)?(?:my\s+|the\s+)?([a-z][a-z ()]{1,28}?)(?=$|[,.!?]|\s)/i;
+
 export function readEditAsk(text: string, reference: ReferenceLists, asOf: IsoDate): EditAsk | null {
-  if (!VERB.test(text) && !SHOULD_BE.test(text)) return null;
   const accounts = [...reference.wallets, ...reference.savings];
+  const wasNot = WAS_NOT.exec(text);
+  // "not maya credit" is a credit line, not the wallet Maya.
+  const notPair = wasNot !== null && !/^\s*(?:credit|loan|card|later|paylater)\b/i.test(text.slice(wasNot.index + wasNot[0].length)) && nameIn(wasNot[1] ?? "", accounts) !== "" && nameIn(wasNot[2] ?? "", accounts) !== "" && nameIn(wasNot[1] ?? "", accounts) !== nameIn(wasNot[2] ?? "", accounts);
+  /*
+   * "Travel nov 8 should be gcash": one account, said as what a saved row
+   * should be, with the row named by a day or a record number.
+   */
+  const shouldBe = /\bshould\s+(?:be|have\s+been)\s+(?:paid\s+)?(?:with\s+|from\s+|on\s+|using\s+|in\s+|sa\s+)?(?:my\s+|the\s+)?([a-z][a-z ()]{1,28}?)(?=$|[,.!?]|\s+(?:not|instead|account|wallet)\b)/i.exec(text);
+  const shouldTo = shouldBe && (dayWord(text, asOf) || /#\s*\d{1,5}\b/.test(text)) ? nameIn(shouldBe[1] ?? "", accounts) : "";
+  const putRight = notPair || shouldTo !== "";
+  if (!VERB.test(text) && !SHOULD_BE.test(text) && !putRight) return null;
   const items = [...reference.spendingTypes.map((t) => t.name), ...reference.bills, ...reference.subscriptions, ...reference.revenueCategories];
 
   let rest = ` ${text} `;
@@ -147,6 +166,13 @@ export function readEditAsk(text: string, reference: ReferenceLists, asOf: IsoDa
    * `planEdit` narrows by the wallet a row is on today, so all this had to
    * do was read it.
    */
+  if (!change.wallet && notPair && wasNot) {
+    change.wallet = { from: nameIn(wasNot[2] ?? "", accounts), to: nameIn(wasNot[1] ?? "", accounts) };
+    rest = rest.replace(wasNot[0], " ");
+  } else if (!change.wallet && shouldTo && shouldBe) {
+    change.wallet = { to: shouldTo };
+    rest = rest.replace(shouldBe[0], " ");
+  }
   if (!change.wallet) {
     const nowOn = /\b(?:not|instead of|rather than|and not|hindi)\s+(?:with\s+|from\s+|using\s+|sa\s+)?([a-z][a-z ()]{1,28}?)(?=$|[,.]|\s+(?:the|way|it|and|but|account|wallet)\b)/i.exec(rest);
     const movedTo = /\b(?:paid|pay|charged|billed|used|spent|was|should be)\s+(?:with|from|using|sa|on)\s+(?:my\s+|the\s+|our\s+)?([a-z][a-z ()]{1,28}?)(?=$|[,.]|\s+(?:account|wallet|and|but|not|instead|rather)\b)/i.exec(rest);
@@ -228,8 +254,8 @@ export function readEditAsk(text: string, reference: ReferenceLists, asOf: IsoDa
     .replace(/\s+/g, " ")
     .trim();
 
-  // "move 500 from gcash to maya" names new money, not a saved entry.
-  if (change.wallet && !EXISTING.test(text) && /\d/.test(target) && !/#/.test(target)) return null;
+  // "move 500 from gcash to maya" names new money, not a saved entry. "Was gcash, not cash" is always a saved one.
+  if (change.wallet && !putRight && !EXISTING.test(text) && /\d/.test(target) && !/#/.test(target)) return null;
 
   return { target, all: /\b(all|every|each)\b/i.test(text), change };
 }

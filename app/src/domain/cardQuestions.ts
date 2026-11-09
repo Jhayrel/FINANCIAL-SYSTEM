@@ -79,7 +79,13 @@ export function looksLikeAnswer(note: string, blank: Blank): boolean {
   if (asksSafeToSpend(text)) return false;
   // "Change the title", "edit the date": an instruction about the card, not the answer to its question.
   if (NAMES_A_FIELD.test(text) || asksToRename(text)) return false;
-  if (/^(?:what|how|why|when|where|who|which|can|could|should|would|will|is|are|do|does|did|show|chart|graph|delete|remove|bin|restore|export|download|undo|add all|save all)\b/i.test(text)) return false;
+  if (/^(?:what|how|why|when|where|who|which|can|could|should|would|will|is|are|do|does|did|show|chart|graph|delete|remove|bin|restore|export|download|undo|add all|save all|put back|bring back|recover|retrieve|ibalik|move|switch|ilipat)\b/i.test(text)) return false;
+  /*
+   * A record named is about that record, never the amount asked for: "put
+   * back #4000", while a card waited for its amount, became a ₱4,000.00
+   * entry that took Gcash below zero (9 November 2026 sweep).
+   */
+  if (/#\s*\d{1,5}\b/.test(text)) return false;
   if (blank !== "amount" && /\d[\d,]*(?:\.\d+)?/.test(text.replace(/\b20\d{2}\b/g, ""))) return false;
   return text.split(/\s+/).length <= 12;
 }

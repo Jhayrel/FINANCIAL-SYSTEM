@@ -327,6 +327,12 @@ export interface AllocationStatus {
   readonly week: AllocationWeek | null;
   /** For a "time" pace: how many times used of how many. For a "day" pace: how many days had spending. */
   readonly timesUsed: number | null;
+  /**
+   * Each use counted against it this month, oldest first: an entry over
+   * several days is one use, at its whole cost. What "the 5 November session
+   * cost more than its share" is read from (`allocationAsk.ts`, `timesWords`).
+   */
+  readonly uses?: readonly { readonly date: IsoDate; readonly cost: Centavos }[];
   /** For a "day" pace in the running month. */
   readonly days: AllocationDays | null;
   /** The day it was marked done this month: it holds nothing more, and what it had left is free (A7). */
@@ -453,6 +459,13 @@ export function monthAllocations(
       week = { index, from: days.from, to: days.to, share: line.each, spent: weekSpent, left: line.each - weekSpent };
     }
     const entries = new Set(counted.map((t) => t.coveredBy ?? t.id)).size;
+    const useOf = new Map<string, { date: IsoDate; cost: Centavos }>();
+    for (const t of counted) {
+      const key = t.coveredBy ?? t.id;
+      const was = useOf.get(key);
+      useOf.set(key, { date: was && was.date < t.date ? was.date : t.date, cost: (was?.cost ?? 0) + costOf(t) });
+    }
+    const uses = [...useOf.values()].sort((a, b) => a.date.localeCompare(b.date));
     return {
       line: view,
       name: lineName(line),
@@ -465,6 +478,7 @@ export function monthAllocations(
       coveredToday,
       week,
       timesUsed: line.per === "time" && line.times ? entries : line.per === "day" ? new Set(counted.map((t) => t.date)).size : null,
+      uses,
       days,
       done: closed,
       plansInside: inside.map((p) => ({ id: p.id, title: p.title, left: p.left })),

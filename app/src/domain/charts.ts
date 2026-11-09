@@ -91,7 +91,27 @@ export interface Chart {
    * budget, in `previous`; a balance or what is owed is a level, read at the
    * end of each period, so `total` is the latest level rather than a sum.
    */
-  readonly measure?: "budget" | "balance" | "owed" | undefined;
+  readonly measure?: "budget" | "balance" | "owed" | "forecast" | "allocation" | "safe" | undefined;
+  /**
+   * A forecast's own figures beside its rows (`buildForecastChart`): what a
+   * usual month brings in, the debt payments due, and what is left after
+   * both, so the chart says the same as the words it was asked after.
+   */
+  readonly plan?:
+    | {
+        readonly income: number;
+        readonly debtDue: number;
+        readonly left: number;
+        /** The budget already set for the month, 0 when none. */
+        readonly budget: number;
+        /** The months the usual month was read from, said ("June to November 2026"). */
+        readonly readFrom: string;
+        /** The month or months planned, said ("December 2026", "December 2026 to February 2027"). */
+        readonly name: string;
+        /** The month planned is the one running: its usual month, not what it has spent. */
+        readonly running?: boolean | undefined;
+      }
+    | undefined;
   /** The last row is a period still running: "October 2026" read on 3 October. */
   readonly running?: boolean | undefined;
   /**
@@ -1733,6 +1753,24 @@ export function chartInWords(chart: Chart): string {
     }
     const said = chart.rows.slice(-12).map((r) => `${r.label} ${chartLabel(r.value)} of ${r.previous ? `${chartLabel(r.previous)} budgeted` : "no budget"}`);
     return `${said.join(", ")}. Spent ${chartLabel(chart.total)} against ${chartLabel(budget)} budgeted.`;
+  }
+  // What the wallets hold, by what it is still for.
+  if (chart.measure === "safe") {
+    return `${chart.rows.map((r) => `${r.label} ${chartLabel(r.value)}`).join(", ")}. The spending wallets hold ${chartLabel(chart.total)}.`;
+  }
+  // Each allocation: what it spent of what it holds for the month.
+  if (chart.measure === "allocation") {
+    const said = chart.rows.map((r) => `${r.label} ${chartLabel(r.value)} spent of ${chartLabel(r.previous ?? 0)}${r.value > (r.previous ?? 0) ? `, ${chartLabel(r.value - (r.previous ?? 0))} over` : `, ${chartLabel((r.previous ?? 0) - r.value)} left`}`);
+    return `${said.join("; ")}. Spent ${chartLabel(chart.total)} of ${chartLabel(chart.against?.total ?? 0)} allocated.`;
+  }
+  // The months ahead as planned: each part, then what a usual month brings in and leaves.
+  if (chart.measure === "forecast") {
+    const p = chart.plan;
+    const parts = chart.rows.map((r) => (chart.by === "item" ? `${r.label} ${chartLabel(r.value)}` : `${r.label} ${chartLabel(r.value)} against ${chartLabel(r.previous ?? 0)} usual income`));
+    const tail = p
+      ? ` Forecast ${chartLabel(chart.total)}; usual income ${chartLabel(p.income)}${p.debtDue > 0 ? `; debt payments due ${chartLabel(p.debtDue)}` : ""}; ${p.left >= 0 ? `left about ${chartLabel(p.left)}` : `short ${chartLabel(-p.left)}`}. From your usual month over ${p.readFrom}, one-offs left out.`
+      : ` Forecast ${chartLabel(chart.total)}.`;
+    return `${parts.join(", ")}.${tail}`;
   }
   // A level, not a flow: what each account holds, or what was held or owed at each period's end.
   if (chart.measure === "balance" || chart.measure === "owed") {

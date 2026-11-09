@@ -132,7 +132,8 @@ import {
   type Chart,
   type ComparedPeriods,
 } from "../domain/charts";
-import { BUDGET_PURPOSE, buildMeasureChart, chartHelps, chartReading, chartsWorked, inWords, localHint, measureOf, mergeHint, type ChartHint } from "../domain/chartAsk";
+import { asksForecast, BUDGET_PURPOSE, buildAllocationChart, buildMeasureChart, forecastEmptyWords, chartHelps, chartReading, chartsWorked, inWords, localHint, measureOf, mergeHint, type ChartHint } from "../domain/chartAsk";
+import { questionMeant } from "../domain/drawBack";
 import { rampFor } from "../components/charts";
 import { Icon } from "../components/Icon";
 import { AttachMenu } from "../components/AttachMenu";
@@ -194,6 +195,8 @@ import { ownNamesIn, senseStatementRows } from "../domain/statementSense";
 import { allWalletBalances, totalSavingsBalance, totalWalletBalance, walletBalance } from "../domain/balances";
 import {
   draftForClue,
+  feeFixes,
+  fixForClue,
   investigate,
   investigationWords,
   linesFromDrafts,
@@ -246,11 +249,11 @@ import { notEditable, transactionToDraft } from "../domain/entry";
 import { notArrivedWords, placeSentMoney } from "../domain/destination";
 import { carryWords, dayFigures, nextMonthStart, safeOverDays, yesterdayOf } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
-import { allocationWords, asksAllocations, kindAsked, kindLeftWords, monthAsked, SAFE_RULE } from "../domain/allocationAsk";
+import { allocationWords, asksAllocations, asksTimesLeft, kindAsked, kindLeftWords, linesNamed, monthAsked, SAFE_RULE } from "../domain/allocationAsk";
 import { readAllocationChange } from "../domain/allocationChange";
 import type { AllocationChange } from "../domain/monthAllocation";
 import { billPayWords, incomeIfWords, noSpendWords, readBillPayIf, readIncomeIf, readNoSpendDays, readSkipIf, skipWords } from "../domain/whatIfAsk";
-import { monthAllocations, monthOfDay } from "../domain/monthAllocation";
+import { monthAllocations, monthOfDay, monthWords } from "../domain/monthAllocation";
 import { sameMoney, typedOnce } from "../domain/typedOnce";
 import { readSavedAsk, savedAnswer } from "../domain/savedAsk";
 import { debtAnswer, readDebtAsk } from "../domain/debtAsk";
@@ -1965,6 +1968,8 @@ export function AskPanel({
   const lastRead = useRef<{ readonly account: string; readonly drafts: readonly Draft[]; readonly at: number; readonly balance?: Centavos } | null>(null);
   /** A told balance's guess at the difference, made a card only when the next message asks (`differenceFollowUp.ts`). */
   const heldDifference = useRef<{ readonly draft: Draft; readonly at: number } | null>(null);
+  /** "Which account is it?" asked, with the figure told: the next message naming an account answers it. */
+  const whichAccount = useRef<{ readonly actual: Centavos | null; readonly at: number; readonly said: string } | null>(null);
   /** A bill, a fee assessment or a checkout just read, held for "paid it" (`domain/notPaid.ts`). */
   const heldPaper = useRef<{ readonly docs: readonly NotPaid[]; readonly at: number } | null>(null);
   /** Plans to pay a bill just read, offered once what the bill is has been said. */
@@ -2405,18 +2410,23 @@ export function AskPanel({
    * holds across a reload and however long ago it was asked.
    */
   const subjectSaid = (): string | null => {
-    const asked = turns.filter((t): t is Said => t.kind === "you").slice(-3).reverse();
-    for (const t of asked) {
-      // A breakdown of everything has no one subject: its words are not one to draw.
-      if (/\bbreak\s*down\b|\bbreakdown\b|\bcategor(?:y|ies)\b|\bby\s+(?:kind|item|type)\b/i.test(t.text) && !itemNamed(t.text, knownItems)) continue;
-      const item = itemNamed(t.text, knownItems);
-      if (item) return item;
-      // Or a word the spending entries use, "gym" for Self Care (Gym): the rarest one said.
-      const said = t.text.toLowerCase().replace(/[^a-z\s-]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !SUBJECT_STOP.has(w) && (ledgerWords.get(w) ?? 0) >= 2);
-      const word = said.sort((a, b) => (ledgerWords.get(a) ?? 0) - (ledgerWords.get(b) ?? 0))[0];
-      if (word) return word;
-    }
-    return null;
+    /*
+     * Only the question just asked, past a shape said alone or a thanks
+     * (`drawBack.ts`). Three questions back, "can you show that in chart?"
+     * after a forecast drew the gym from the question before it (owner,
+     * 9 November 2026).
+     */
+    const text = questionMeant(turns.filter((t): t is Said => t.kind === "you").map((t) => t.text).reverse(), "");
+    if (!text) return null;
+    // A breakdown of everything has no one subject: its words are not one to draw.
+    if (/\bbreak\s*down\b|\bbreakdown\b|\bcategor(?:y|ies)\b|\bby\s+(?:kind|item|type)\b/i.test(text) && !itemNamed(text, knownItems)) return null;
+    // A forecast is of every item: a word in it is not the subject.
+    if (asksForecast(text)) return null;
+    const item = itemNamed(text, knownItems);
+    if (item) return item;
+    // Or a word the spending entries use, "gym" for Self Care (Gym): the rarest one said.
+    const said = text.toLowerCase().replace(/[^a-z\s-]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !SUBJECT_STOP.has(w) && (ledgerWords.get(w) ?? 0) >= 2);
+    return said.sort((a, b) => (ledgerWords.get(a) ?? 0) - (ledgerWords.get(b) ?? 0))[0] ?? null;
   };
   /**
    * The chart said last, when nothing has been asked since but the shape of
@@ -4465,7 +4475,7 @@ export function AskPanel({
    * entry to add, or rows to open or bin. Nothing is changed until a button
    * is pressed.
    */
-  const findDifference = async (note: string, ask: InvestigateAsk): Promise<void> => {
+  const findDifference = async (note: string, ask: InvestigateAsk, saidBefore = ""): Promise<void> => {
     const sent = files;
     setFiles([]);
     setDraft("");
@@ -4533,7 +4543,18 @@ export function AskPanel({
     }
 
     if (!account) {
-      const reply = "Which account is it, and what does it really hold right now? For example: my Maya balance is 30,000. A screenshot of the balance works too, with its transaction history if you have it.";
+      /*
+       * Which one, with what each holds by the ledger, so the owner can see
+       * at a glance which it is ("my wallet is ... only" named none).
+       */
+      const holding = [...reference.wallets, ...reference.savings].map((a) => ({ a, holds: walletBalance(transactions, a) })).filter((x) => x.holds !== 0);
+      const told = actual;
+      const nearest = told !== null && holding.length > 0 ? holding.reduce((b, x) => (Math.abs(x.holds - told) < Math.abs(b.holds - told) ? x : b)) : null;
+      const reply = [
+        `Which account is it${actual !== null ? `, the one that holds ${formatMoney(actual)}` : ", and what does it really hold right now"}? By the ledger: ${holding.map((x) => `${x.a} ${formatMoney(x.holds)}`).join(", ") || "every account holds nothing yet"}.`,
+        nearest && actual !== null ? `Say its name, like "${nearest.a}".` : `For example: my ${holding[0]?.a ?? "Maya"} balance is 30,000. A screenshot of the balance works too, with its transaction history if you have it.`,
+      ].join(" ");
+      whichAccount.current = { actual, at: Date.now(), said: note };
       say({ kind: "assistant", text: reply, from: "this device" });
       log(aiEvent("answered", "add", { text: reply, model: "this device" }));
       return;
@@ -4577,9 +4598,21 @@ export function AskPanel({
       .filter(shown)
       .map((clue) => draftForClue(clue, account, readOn, interestItem))
       .filter((draft): draft is Draft => draft !== null);
-    const guessClue = adds.length === 0 && !ledgerCouldSay ? clues.find((c) => (c.kind === "unrecorded" || c.kind === "cash") && !shown(c)) : undefined;
+    /*
+     * The guess at the rest is held even when the ledger offers rows that
+     * could be the answer: if none of them is, "add it" still records the
+     * difference (owner, 9 November 2026: "sometimes its bad at helping fix
+     * it"). It was dropped, and "add it" then had nothing to add.
+     */
+    const guessClue = adds.length === 0 ? [...result.possible].find((c) => (c.kind === "unrecorded" || c.kind === "cash") && !shown(c)) : undefined;
     const guess = guessClue ? draftForClue(guessClue, account, readOn, interestItem) : null;
-    heldDifference.current = guess ? { draft: guess, at: Date.now() } : null;
+    /*
+     * Asked for in the same breath: "fix it ... just make it unknown
+     * spending" (owner, 27 September 2026). The card is made now rather
+     * than held for an "add it" that was already said.
+     */
+    const wantsItAdded = /\b(?:make|add|record|put|book|save)\s+(?:it|the difference|the rest|that)\s+(?:as\s+|into\s+|an?\s+)*(?:unknown|spending|unknown spending|expense)\b|\bjust\s+(?:add|record)\s+it\b/i.test(`${saidBefore} ${note}`);
+    heldDifference.current = guess && !wantsItAdded ? { draft: guess, at: Date.now() } : null;
 
     const reply = [
       bold(words.headline),
@@ -4587,7 +4620,8 @@ export function AskPanel({
         ? [`Checked ${statement.length} ${statement.length === 1 ? "movement" : "movements"} from ${fromPicture ? "the picture you sent before" : "what you sent"} against the ledger.`]
         : []),
       ...words.lines.map((line) => (line.endsWith(":") ? line : `- ${line}`)),
-      ...(guess ? [differenceNextStep(guess, account)] : []),
+      ...(guess && !wantsItAdded ? [ledgerCouldSay ? `If none of those is it: ${differenceNextStep(guess, account)}` : differenceNextStep(guess, account)] : []),
+      ...(guess && wantsItAdded ? [`As you asked, the ${formatMoney(guess.amount ?? 0)} is on the card below as ${guess.flow === "Revenue" ? "money that came in" : "spending not written down"}. Check it, then add it.`] : []),
     ].join("\n");
     say({ kind: "assistant", text: reply, from: "this device" });
     log(aiEvent("answered", "add", { text: `Investigated ${account}: gap ${formatMoney(result.gap)}, found ${formatMoney(result.explained)}.`, model: "this device" }));
@@ -4598,7 +4632,8 @@ export function AskPanel({
      * "5000" said the card had misread the amount. The wallet is known, so no
      * batch wallet picker either.
      */
-    for (const draft of adds) {
+    const toAdd = guess && wantsItAdded ? [...adds, guess.flow === "Spending" && /\bunknown\b/i.test(`${saidBefore} ${note}`) ? { ...guess, item: reference.spendingTypes.find((t) => /^unknown$/i.test(t.name))?.name ?? guess.item } : guess] : adds;
+    for (const draft of toAdd) {
       await offer(
         {
           draft,
@@ -4643,7 +4678,27 @@ export function AskPanel({
                     : [],
       )
       .filter((c) => !seen.has(c.row.id) && Boolean(seen.add(c.row.id)));
-    if (toCheck.length > 0) say({ kind: "found", action: "edit", candidates: toCheck, done: [] });
+    /*
+     * And each one with a single edit, worked out to the centavo, as a card
+     * to press: the statement's figure, the fee out of a withdrawal, an
+     * estimate lowered, a row moved here. Nothing changes until it is
+     * pressed, and every one can be put back (owner, 9 November 2026). A row
+     * with one is not listed again to open and check by hand.
+     */
+    const fixes = [...result.found, ...result.possible].flatMap((c) => {
+      const one = fixForClue(c, account);
+      return one ? [{ rows: [{ before: one.before, after: one.after }], note: one.why }] : feeFixes(c, account).length > 0 ? [{ rows: feeFixes(c, account), note: "The cash in Amount and the machine's fee in Fee: the account moves the same, and Cash gets only the cash." }] : [];
+    });
+    const withFix = new Set(fixes.flatMap((f) => f.rows.map((r) => r.before.id)));
+    const byHand = toCheck.filter((c) => !withFix.has(c.row.id));
+    if (byHand.length > 0) say({ kind: "found", action: "edit", candidates: byHand, done: [] });
+    const fixed = new Set<string>();
+    for (const f of fixes) {
+      const fresh = f.rows.filter((r) => !fixed.has(r.before.id));
+      if (fresh.length === 0) continue;
+      for (const r of fresh) fixed.add(r.before.id);
+      say({ kind: "change", plan: { rows: fresh, refused: [] }, state: "open", title: `Edit ${numbersInWords(fresh.map((r) => r.before))}`, note: f.note });
+    }
   };
 
   /** Ask a question about the figures. */
@@ -4665,7 +4720,20 @@ export function AskPanel({
    */
   const chartsFor = (asked: string, hint: ChartHint | null, pair: ComparedPeriods | null): Chart[] => {
     if (measureOf(hint)) {
-      const drawn = buildMeasureChart(asked, hint, { transactions, budgets, reference, debts, asOf });
+      const ym = monthAsked(asked, asOf);
+      const allocationMonth = measureOf(hint) === "allocation" ? monthAllocations(reference.allocations, reportRows, ym, asOf) : null;
+      const drawn = buildMeasureChart(asked, hint, {
+        transactions,
+        budgets,
+        reference,
+        debts,
+        asOf,
+        stopped: settings.stopped ?? [],
+        ...(allocationMonth ? { allocations: { month: allocationMonth, named: linesNamed(asked, allocationMonth.lines.map((l) => l.line)).map((l) => l.id) } } : {}),
+        ...(measureOf(hint) === "safe"
+          ? { safe: monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe }
+          : {}),
+      });
       return drawn ? [{ ...drawn, asked }] : [];
     }
     const said = inWords(asked, hint);
@@ -4674,6 +4742,15 @@ export function AskPanel({
     const spending = both ? buildChart(said, reportRows, asOf, "spending", pair) : null;
     // Each keeps the question it was drawn from, for "bars" or "pie" said next (`redrawAsked`).
     return [spending, income].filter((c): c is Chart => c !== null).map((c) => ({ ...c, asked: said }));
+  };
+
+  /** Why nothing was drawn, said for what was asked: a forecast, an allocation and safe to spend each have their own reason. */
+  const emptyChartWords = (asked: string): string => {
+    const measure = measureOf(localHint(asked, reference.credits ?? []));
+    if (measure === "forecast") return forecastEmptyWords(asked, asOf);
+    if (measure === "allocation") return `There are no allocations for ${monthWords(monthAsked(asked, asOf))} to draw. Add one on Budget, under Allocations, or say "allocate 300 a week for gas".`;
+    if (measure === "safe") return "The spending wallets hold nothing now, so there is no safe to spend to draw.";
+    return "There is nothing in that period to draw.";
   };
 
   /** A chart said in the conversation, and kept in the record with its figures. */
@@ -5062,10 +5139,18 @@ export function AskPanel({
   const aiFirst = async (
     question: string,
     worked: string,
-    opts: { readonly go?: GoPlace; readonly where?: AiWhere; readonly cards?: readonly { readonly plan: Plan; readonly words: string }[]; readonly rules?: string } = {},
+    opts: {
+      readonly go?: GoPlace;
+      readonly where?: AiWhere;
+      readonly cards?: readonly { readonly plan: Plan; readonly words: string }[];
+      readonly rules?: string;
+      /** Charts drawn above the answer, when a picture shows it better (owner, 9 November 2026). */
+      readonly charts?: readonly Chart[];
+    } = {},
   ): Promise<void> => {
     const cards = opts.cards ?? [];
     if (ai.disabled) {
+      for (const chart of opts.charts ?? []) drawChart(chart);
       say({ kind: "assistant", text: worked, from: "this device", ...(opts.go ? { go: opts.go } : {}) });
       log(aiEvent("answered", opts.where ?? "budget", { text: worked, model: "this device" }));
       for (const c of cards) offerPlan(c.plan, c.words);
@@ -5078,7 +5163,7 @@ export function AskPanel({
     linesOff.current = true;
     setBusy(true);
     try {
-      await askQuestion(question, false, { text: `${rules}\n\n${worked}`, fallback: worked });
+      await askQuestion(question, false, { text: `${rules}\n\n${worked}`, fallback: worked }, opts.charts ?? []);
     } finally {
       linesOff.current = false;
       setBusy(false);
@@ -5290,18 +5375,17 @@ export function AskPanel({
      * answered by the model, then "I want pie", drew the year by month (owner,
      * 3 November 2026). Only the model answered, so nothing was kept to draw.
      */
+    /*
+     * Only the question just asked (`drawBack.ts`): when it has nothing to
+     * draw, nothing older is drawn in its place. A forecast asked, then
+     * "show that in chart", drew the gym from the question before it
+     * (owner, 9 November 2026).
+     */
+    const meant = bareDraw ? questionMeant([...turns].reverse().filter((t): t is Said => t.kind === "you").map((t) => t.text), note) : null;
     const askedToDraw =
-      bareDraw
-        ? ([...turns]
-            .reverse()
-            .filter((t): t is Said => t.kind === "you")
-            .slice(0, 4)
-            .map((t) => t.text)
-            .find((q) => q !== note && !(drawReply(q) ?? drawsBack(q)) && (/\b(?:break\s*down|breakdown|categor\w*|by\s+(?:kind|item|type|wallet)|spen[dt]\w*|expenses?|income|revenue|earn\w*|receiv\w*|where\s+(?:did\s+)?my\s+money)\b/i.test(q) || measureOf(localHint(q, reference.credits ?? [])) !== null))
-            // What it was for is not what to draw ("so I can do Budgeting").
-            ?.replace(BUDGET_PURPOSE, " ")
-            .replace(/\s+/g, " ")
-            .trim() ?? null)
+      meant && (/\b(?:break\s*down|breakdown|categor\w*|by\s+(?:kind|item|type|wallet)|spen[dt]\w*|expenses?|income|revenue|earn\w*|receiv\w*|where\s+(?:did\s+)?my\s+money)\b/i.test(meant) || measureOf(localHint(meant, reference.credits ?? [])) !== null)
+        ? // What it was for is not what to draw ("so I can do Budgeting").
+          meant.replace(BUDGET_PURPOSE, " ").replace(/\s+/g, " ").trim() || null
         : null;
     // A breakdown asked for is the subject before any one word guessed from it.
     // Not for a trend, which is about time: "trend" after "a breakdown of my spending this month" drew nothing, where it drew the year by month.
@@ -5322,8 +5406,40 @@ export function AskPanel({
      * budget" then "chart" drew the month's spending by item.
      */
     const measureAsked = askedToDraw && measureOf(localHint(askedToDraw, reference.credits ?? [])) ? askedToDraw : null;
-    const drawTopic = offeredDraw.current ?? lastAnswered ?? redrawn ?? measureAsked ?? breakdownAsked ?? (subjectNow ? `${subjectNow} spending` : fromQuestion);
-    const guessedTopic = drawTopic !== null && (drawTopic === fromQuestion || drawTopic === measureAsked);
+    /*
+     * The answer just given, when it was one the device works out: safe to
+     * spend is drawn as where the wallets' money stands, an allocation as its
+     * spending against what it holds. "How many gym sessions are left", then
+     * "show that in chart", drew the gym's spending over the whole ledger
+     * (owner, 9 November 2026).
+     */
+    const safeAsked = meant && !measureAsked && !redrawn && (asksSafeToSpend(meant) || asksShortBudget(meant, asOf)) ? "safe to spend chart" : null;
+    const allocationAsked =
+      meant && !measureAsked && !redrawn && !safeAsked && (reference.allocations ?? []).length > 0
+        ? (() => {
+            const mo = monthAllocations(reference.allocations, reportRows, monthAsked(meant, asOf), asOf);
+            const named = linesNamed(meant, mo.lines.map((l) => l.line));
+            return asksAllocations(meant, mo) || (named.length > 0 && asksTimesLeft(meant)) ? `${named.map((l) => l.name).join(" ")} allocation chart ${monthAsked(meant, asOf) === monthOfDay(asOf) ? "" : meant}`.trim() : null;
+          })()
+        : null;
+    const drawTopic = offeredDraw.current ?? lastAnswered ?? redrawn ?? measureAsked ?? safeAsked ?? allocationAsked ?? breakdownAsked ?? (subjectNow ? `${subjectNow} spending` : fromQuestion);
+    const guessedTopic = drawTopic !== null && (drawTopic === fromQuestion || drawTopic === measureAsked || drawTopic === safeAsked || drawTopic === allocationAsked);
+    /*
+     * "Show that in a chart" after an answer with nothing of its own to draw:
+     * said so, with what can be drawn, rather than a chart of something else.
+     */
+    if (bareDraw && drawTopic === null && meant && !as && !turns.slice(-4).some(isChart)) {
+      emptyBox();
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "insights", { text: note }));
+      const short = meant.length > 70 ? `${meant.slice(0, 67).trim()}...` : meant;
+      say({
+        kind: "assistant",
+        text: `"${short}" was answered in words: it has no figures of its own to draw. I can draw your spending or income by item, day, week or month, a forecast of the months ahead, spending against the budget, safe to spend, balances, what is owed, or your allocations. Say which, like "chart my food this month".`,
+        from: "this device",
+      });
+      return;
+    }
     const drawAs = drawTopic && !as && files.length === 0 ? (drawReply(lead) ?? drawsBack(lead)) : null;
     // An offer is for the next message only.
     if (!drawAs) offeredDraw.current = null;
@@ -5340,7 +5456,7 @@ export function AskPanel({
       say({ kind: "you", text: note });
       log(aiEvent("asked", "insights", { text: note }));
       if (charts.length === 0) {
-        say({ kind: "assistant", text: "There is nothing in that period to draw.", from: "this device" });
+        say({ kind: "assistant", text: emptyChartWords(question), from: "this device" });
         return;
       }
       for (const chart of charts) drawChart(chart);
@@ -5763,6 +5879,8 @@ export function AskPanel({
             text: `Safe to spend, worked out by the app exactly as the Dashboard shows it: the spending wallets less the bills, subscriptions and debt payments still to pay this month; today's share less what today already spent; then a day from tomorrow; the spending budget said apart, as the plan. Answer with these figures, today's first. If the message proposes its own figure a day, say whether it fits, using the line that checks it. Never answer with the budget's pace in place of these. When they ask what happens to money not spent, or say they did not spend, answer with the carry-over lines and their figures as they are: unspent money is never lost and never "unchanged", it is spread over the days left, and the owner may use it today instead. When they ask about next month, answer with the From 1 lines first: nothing resets on the 1st.\n${words}`,
             fallback: words,
           },
+          // "Safe to spend as a pie": the picture with the words (9 November 2026 sweep).
+          wantsChart(question) && !noPicture(question) ? chartsFor(`safe to spend chart ${/\b(?:pie|donut|doughnut)\b/i.test(question) ? "pie" : ""}`.trim(), { money: "safe" }, null) : [],
         );
       } finally {
         setBusy(false);
@@ -5892,7 +6010,13 @@ export function AskPanel({
      * 2026 sweep: these got the month's summary, and "magkano natitira sa
      * budget ko?" next month's suggested budget).
      */
-    const quick = files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) ? readQuickAsk(ruled, knownItems, [...reference.wallets, ...reference.savings]) : null;
+    /*
+     * Not a picture asked for by name: "chart my maya balance" was answered
+     * as one figure (9 November 2026 sweep). The chart route draws it.
+     */
+    const quickChartAsked = wantsChart(ruled) && !noPicture(ruled);
+    const quickRead = files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) ? readQuickAsk(ruled, knownItems, [...reference.wallets, ...reference.savings]) : null;
+    const quick = quickRead && quickChartAsked && (quickRead.kind === "balance" || quickRead.kind === "worth" || quickRead.kind === "savings") ? null : quickRead;
     if (quick) {
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
@@ -5927,8 +6051,32 @@ export function AskPanel({
               : quick.kind === "balance" || quick.kind === "worth"
                 ? { screen: "dashboard", label: "Dashboard" }
                 : null;
+      /*
+       * The picture of it, drawn beside the words without being asked when it
+       * shows the answer better (owner, 9 November 2026): where the money
+       * went as shares, what came in by source, the budget against spending,
+       * what each account holds. One wallet's balance is one figure, said
+       * alone.
+       */
+      const quickChart = ((): Chart[] => {
+        if (noPicture(note) || presentationFor(note) === "text") return [];
+        const month = quick.kind === "received" ? (quick.month === "last" ? "last month" : "this month") : "";
+        const asked =
+          quick.kind === "biggest"
+            ? ruled
+            : quick.kind === "received"
+              ? `income by item ${month}`
+              : quick.kind === "budget"
+                ? "budget against spending this month chart"
+                : quick.kind === "balance" && quick.wallet === null
+                  ? "balance of each account"
+                  : null;
+        if (!asked) return [];
+        const hint = quick.kind === "biggest" ? (mergeHint(localHint(asked, reference.credits ?? []), null, asked, reference.credits ?? []) ?? { by: "item" as const }) : localHint(asked, reference.credits ?? []) ?? (quick.kind === "received" ? { by: "item" as const, money: "income" as const } : null);
+        return chartsFor(asked, hint, null).filter((c) => c.rows.length > 1 || c.measure !== undefined);
+      })();
       // AI first, as every question is: the model says the app's figures; these words are the fallback (3 November 2026).
-      await aiFirst(note, reply, { ...(place ? { go: place } : {}), rules: `The app worked out the answer below from the ledger and the screens' own figures, for this message. Today is ${formatMedium(asOf)}. Answer what they asked first, in your own words and briefly, using only the figures written below: do no arithmetic of your own. Never write a Plan line or an Entry line.` });
+      await aiFirst(note, reply, { ...(place ? { go: place } : {}), charts: quickChart, rules: `The app worked out the answer below from the ledger and the screens' own figures, for this message. Today is ${formatMedium(asOf)}. Answer what they asked first, in your own words and briefly, using only the figures written below: do no arithmetic of your own. Never write a Plan line or an Entry line.` });
       return;
     }
     const askedMonth = adviceMonthIn(ruled, asOf);
@@ -6097,13 +6245,21 @@ export function AskPanel({
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", "add", { text: note }));
-        const words = allocationWords(note, month, brief.safe ? { safe: brief.safe.safe, perDay: brief.safe.perDay } : null);
+        const words = allocationWords(note, month, brief.safe ? { safe: brief.safe.safe, perDay: brief.safe.perDay } : null, asOf);
+        /*
+         * Drawn beside the words when a picture helps (owner, 9 November
+         * 2026): asked for by name, every allocation at once, or how many
+         * times a line has left. "Gas left" is one figure, said alone.
+         */
+        const namedLines = linesNamed(note, month.lines.map((l) => l.line));
+        const drawIt = !noPicture(note) && (wantsChart(note) || namedLines.length === 0 || asksTimesLeft(note));
+        const pictured = drawIt ? buildAllocationChart(month, namedLines.map((l) => l.id)) : null;
         setBusy(true);
         try {
           await askQuestion(note, false, {
-            text: `Allocations, worked out by the app exactly as Budget shows them. Answer with these figures. ${SAFE_RULE} Safe to spend is already after the allocations: never subtract them again. To add, change, extend, mark done, stop, remove or put back an allocation, the owner says it here ("allocate 300 a week for gas", "make the gym allocation every month", "the gym allocation is done") and presses the card the app shows, or uses Budget, under Allocations. Never say a change was made: only the card makes it.\n${words}`,
+            text: `Allocations, worked out by the app exactly as Budget shows them. Answer with these figures. Say each figure once, as what it is: how many the money left pays for, how many the allocation counts, and how many the schedule needs are three different things, never the same finding twice. Name any use that cost more than its share. ${SAFE_RULE} Safe to spend is already after the allocations: never subtract them again. To add, change, extend, mark done, stop, remove or put back an allocation, the owner says it here ("allocate 300 a week for gas", "make the gym allocation every month", "the gym allocation is done") and presses the card the app shows, or uses Budget, under Allocations. Never say a change was made: only the card makes it.\n${words}`,
             fallback: words,
-          });
+          }, pictured ? [{ ...pictured, asked: `${namedLines.map((l) => l.name).join(" ")} allocation chart`.trim() }] : []);
         } finally {
           setBusy(false);
         }
@@ -7817,10 +7973,12 @@ export function AskPanel({
           : [buildChart(question, reportRows, asOf, undefined, pair)].filter((c): c is Chart => c !== null).map((c) => ({ ...c, asked: question }))
         : (() => {
             const hint = mergeHint(localHint(question, credits), routed?.draw ?? null, question, credits);
-            if (chartHelps(question, hint, justShown)) return chartsFor(question, hint, null);
-            // Not asked for by name: written, and the picture offered rather than pushed.
-            // A question about cooking with "my budget 500" in it is not one to draw (21 October 2026).
-            if (hint && !justShown && presentationFor(question) === "either" && aboutMoney(question)) offerAfter.current = question;
+            /*
+             * Drawn beside the words when a picture helps, without waiting to
+             * be asked (owner, 9 November 2026). A question about cooking with
+             * "my budget 500" in it is not one to draw (21 October 2026).
+             */
+            if (chartHelps(question, hint, justShown) && (presentationFor(question) === "chart" || aboutMoney(question) || measureOf(hint) !== null)) return chartsFor(question, hint, null);
             return [];
           })();
       return charts.filter((c) => !recent.includes(c.title));
@@ -9359,6 +9517,17 @@ export function AskPanel({
       await findDifference(note, { account: interest.account, actual: interest.told, gap: null });
       return;
     }
+    /*
+     * The answer to "Which account is it?": its name, alone or in a few
+     * words ("cash", "the maya one"), with the figure told before.
+     */
+    const which = whichAccount.current && Date.now() - whichAccount.current.at < 30 * 60_000 && !as && files.length === 0 && note.trim().split(/\s+/).length <= 5 ? whichAccount.current : null;
+    whichAccount.current = null;
+    const whichNamed = which ? [...findable].sort((a, b) => b.length - a.length).find((a) => new RegExp(`(?<![a-z0-9])${a.toLowerCase().replace(/\s*\([^)]*\)/g, "").trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9])`, "i").test(note)) : undefined;
+    if (which && whichNamed) {
+      await findDifference(note, { account: whichNamed, actual: which.actual, gap: null }, which.said);
+      return;
+    }
     const askedToFind = as
       ? null
       : readInvestigateAsk(lead, findable, (account) => walletBalance(transactions, account), asOf, talkedAbout ?? lastRead.current?.account) ??
@@ -10086,8 +10255,14 @@ export function AskPanel({
         const words = out
           ? [chartAsText(table), chartAsText(out), `Came in ${php(table.total)}, went out ${php(out.total)}: ${table.total >= out.total ? `${php(table.total - out.total)} kept` : `${php(out.total - table.total)} more went out than came in`}.`].join("\n\n")
           : chartAsText(table);
-        // Offered after the words, unless a picture was said not to be wanted ("Summary my spending", then "In pie", 21 October 2026).
-        if (!noPicture(note)) offerAfter.current = ruled;
+        /*
+         * Drawn with the words when the format was left open (owner, 9
+         * November 2026: "they know the right time to show charts"); not when
+         * words were asked for ("Summary my spending", then "In pie", 21
+         * October 2026), when it is still offered.
+         */
+        const drawNow = presentation === "either" && !noPicture(note) && !asksForProse(note);
+        if (!noPicture(note) && !drawNow) offerAfter.current = ruled;
         // A pie or a chart said next draws this table, offered or not ("In pie" drew the kinds instead, 21 October 2026).
         drawnNext.current = { question: asked, at: Date.now() };
         /*
@@ -10104,6 +10279,7 @@ export function AskPanel({
         await answerWithModel(
           `The figures the message asks about, worked out by the app from the ledger, every row. Answer in words with them: lead with what matters most, then the rows they asked for, with each one's share. Do no arithmetic of your own.${rests ? ` ${rests}` : ""}\n${words}`,
           words,
+          drawNow ? chartsFor(ruled, writtenHint, null) : [],
         );
         return;
       }
@@ -10189,7 +10365,16 @@ export function AskPanel({
        */
       const namesGrouping = /\b(?:by|per)\s+(?:items?|months?|days?|weeks?|wallets?|accounts?|categor(?:y|ies)|years?)\b|\b(?:monthly|daily|weekly|yearly)\b/i.test(ruled);
       const regrouped = namesGrouping ? shownTitle.replace(/\s+by\s+(?:item|wallet|category|month|day|week|year)\b/i, "") : shownTitle;
-      const title = !shown ? "" : namesDirection ? regrouped.replace(/^(?:spending|income)\s+/i, "") : regrouped;
+      /*
+       * A message that names its own direction and no item is about all of
+       * it: "compare october and november spending", after a trend of food,
+       * drew food again, and "income vs spending this year" drew food beside
+       * no income (9 November 2026 sweep). The item goes; the window and the
+       * grouping stay.
+       */
+      const ownSubject = namesDirection && !itemNamed(ruled, knownItems) && !/^(?:spending|income)\b/i.test(regrouped);
+      const unItemed = ownSubject ? regrouped.replace(/^[^,]*?(?=\s+by\s+)/i, "Spending") : regrouped;
+      const title = !shown ? "" : namesDirection ? unItemed.replace(/^(?:spending|income)\s+/i, "") : unItemed;
       /*
        * A snapshot hands on nothing. "Balance by account, today" carried its
        * "today" into "I want graphs", "Chart" and "Spending", each answered
@@ -10203,7 +10388,14 @@ export function AskPanel({
        * read raw it drew spending by item (backup of 7 October 2026). The
        * text is only read, never shown.
        */
-      const carriedTitle = !shown || snapshot
+      /*
+       * A level, a budget, a forecast or an allocation hands nothing to a
+       * request for money in or out: "income vs spending this year" after a
+       * Maya balance by day drew income by day across the year (9 November
+       * 2026 sweep).
+       */
+      const measureToFlow = shown?.measure !== undefined && namesDirection;
+      const carriedTitle = !shown || snapshot || measureToFlow
         ? ruled
         : !namesPeriod
           ? `${ruled} ${title}`
@@ -10317,9 +10509,15 @@ export function AskPanel({
                   ? "No entry moves that account in that period. Try a wider window, or name the account the way Settings does."
                   : measure === "owed"
                     ? "Nothing has been borrowed on that line yet, so there is nothing owed to draw."
-                    : chartTopic(asked, transactions)
+                    : measure === "forecast" || measure === "allocation" || measure === "safe"
+                      ? emptyChartWords(asked)
+                      : chartTopic(asked, transactions)
                       ? `Nothing in your entries mentions ${chartTopic(asked, transactions).replace(/^./, (c) => c.toUpperCase())}. Say it the way the entry's description does, or name the item instead.`
-                      : "There is nothing in that period to draw. Try a wider window, a month with entries in it, or the year.",
+                      : (() => {
+                          // Which days were looked at, so "this week" on a Monday is not a mystery (9 November 2026 sweep).
+                          const w = windowOf(asked, asOf);
+                          return `Nothing was ${/\b(?:income|revenue|earn|received)/i.test(asked) ? "received" : "spent"} in the days asked about (${w.name}), so there is nothing to draw. Try a wider window, like "last 7 days", a month, or the year.`;
+                        })(),
           from: "this device",
         });
         log(aiEvent("answered", "add", { text: `No chart drawn: nothing in that period. Asked: ${note}` }));
@@ -14128,7 +14326,8 @@ const toneOf = (chart: Chart): string => `var(--flow-${flowOf(chart)})`;
  * is a liability, so it takes the amber debt has everywhere else.
  */
 function flowOf(chart: Chart): "revenue" | "spending" | "transfer" | "debt" {
-  if (chart.measure === "balance") return "transfer";
+  // What the wallets hold, by what it is for: money held, neither gain nor loss.
+  if (chart.measure === "balance" || chart.measure === "safe") return "transfer";
   if (chart.measure === "owed") return "debt";
   return chartDirection(chart) === "revenue" ? "revenue" : "spending";
 }
@@ -14186,6 +14385,43 @@ function ChartRead({ chart, at }: { chart: Chart; at: number | null }) {
             : budget > 0
               ? `of ${chartLabel(budget)}, ${gap >= 0 ? `${chartLabel(gap)} left` : `${chartLabel(-gap)} over`}`
               : "with no budget set"}
+        </span>
+      </p>
+    );
+  }
+
+  if (chart.measure === "safe") {
+    return (
+      <p className="t-micro fms-chartread">
+        <span className="fms-chartread-label">{row.label}</span>
+        <span className="fms-proposalmoney fms-chartread-money">{chartLabel(row.value)}</span>
+        <span className="fms-chartread-of">{`${share} of what the spending wallets hold`}</span>
+      </p>
+    );
+  }
+
+  if (chart.measure === "allocation") {
+    const holds = row.previous ?? 0;
+    return (
+      <p className="t-micro fms-chartread">
+        <span className="fms-chartread-label">{row.label}</span>
+        <span className="fms-proposalmoney fms-chartread-money">{chartLabel(row.value)}</span>
+        <span className="fms-chartread-of">
+          {`spent of ${chartLabel(holds)}, ${row.value > holds ? `${chartLabel(row.value - holds)} over` : `${chartLabel(holds - row.value)} left`}${row.count > 0 ? `, ${row.count} ${row.count === 1 ? "entry" : "entries"}` : ""}`}
+        </span>
+      </p>
+    );
+  }
+
+  if (chart.measure === "forecast") {
+    return (
+      <p className="t-micro fms-chartread">
+        <span className="fms-chartread-label">{row.label}</span>
+        <span className="fms-proposalmoney fms-chartread-money">{chartLabel(row.value)}</span>
+        <span className="fms-chartread-of">
+          {chart.by === "item"
+            ? `in a usual month, ${share} of the forecast`
+            : `forecast, against ${chartLabel(row.previous ?? 0)} a usual month brings in: ${(row.previous ?? 0) >= row.value ? `${chartLabel((row.previous ?? 0) - row.value)} to spare` : `${chartLabel(row.value - (row.previous ?? 0))} short`}`}
         </span>
       </p>
     );
@@ -14315,7 +14551,15 @@ function ChartView({ chart }: { chart: Chart }) {
             const months = overTime(chart.by);
             // Against a budget, full colour is a month over it; otherwise a period above the average.
             const strength =
-              chart.measure === "budget" ? ((r.previous ?? 0) > 0 && r.value > (r.previous ?? 0) ? 1 : 0.55) : months ? monthStrength(r.value, average) : 1;
+              chart.measure === "budget" || chart.measure === "forecast" || chart.measure === "allocation"
+                ? (r.previous ?? 0) > 0 && r.value > (r.previous ?? 0)
+                  ? 1
+                  : chart.measure === "forecast" && chart.by === "item"
+                    ? 1
+                    : 0.55
+                : months
+                  ? monthStrength(r.value, average)
+                  : 1;
             // Two periods side by side: one ink for now, so rank does not read as a third thing.
             const colour = months || chart.against
               ? toneOf(chart)
@@ -14353,7 +14597,15 @@ function ChartView({ chart }: { chart: Chart }) {
                 {chartLabel(r.value)}
                 {chart.against && (
                   <span className="fms-chartbefore">
-                    {chart.measure === "budget" ? (r.previous ? ` of ${chartLabel(r.previous)}` : " no budget") : ` was ${chartLabel(r.previous ?? 0)}`}
+                    {chart.measure === "budget"
+                      ? r.previous
+                        ? ` of ${chartLabel(r.previous)}`
+                        : " no budget"
+                      : chart.measure === "forecast"
+                        ? ` of ${chartLabel(r.previous ?? 0)} in`
+                        : chart.measure === "allocation"
+                          ? ` of ${chartLabel(r.previous ?? 0)}`
+                          : ` was ${chartLabel(r.previous ?? 0)}`}
                   </span>
                 )}
               </span>
@@ -14372,11 +14624,21 @@ function ChartView({ chart }: { chart: Chart }) {
             ? "Balances worked out on this device, from your entries, the same way every screen does."
             : chart.measure === "owed"
               ? "What is owed: borrowed and charges added, less what was paid and written off. Interest paid is not owed. Worked out on this device."
-              : chart.othersCount > 0
+              : chart.measure === "safe"
+                ? "The Dashboard's safe to spend: what the spending wallets hold, less what is still due this month. Worked out on this device."
+                : chart.measure === "allocation"
+                ? "Allocations as Budget shows them: what each has spent of what it holds this month. Worked out on this device."
+                : chart.measure === "forecast"
+                ? `The Budget screen's forecast: each item at its usual month over ${chart.plan?.readFrom ?? "the months read"}, one-offs left out, bills at their latest amount. Worked out on this device.`
+                : chart.othersCount > 0
                 ? `The ${chart.rows.length} largest, with ${chart.othersCount} smaller left off. Totals worked out on this device.`
                 : "Totals worked out on this device, from your entries."}
         {chart.kind === "bars" && chart.measure === "budget"
           ? " Full colour marks the months over their budget."
+          : chart.measure === "forecast"
+          ? chart.by === "item" ? "" : " Full colour marks a month forecast to cost more than a usual month brings in."
+          : chart.measure === "allocation"
+          ? " Full colour marks an allocation spent past what it holds."
           : chart.kind === "bars" && overTime(chart.by)
           ? ` Full colour marks the ${chart.by === "day" ? "days" : chart.by === "week" ? "weeks" : chart.by === "year" ? "years" : "months"} above the average of ${chartLabel(Math.round(chart.total / Math.max(chart.rows.length, 1)))}.`
           : ""}
@@ -14584,7 +14846,8 @@ function LineView({
    * a collapse. The budget's steady pace, when there is one, is on the same
    * scale, so where the two lines cross is where the month went over.
    */
-  const pace = chart.measure === "budget" ? chart.rows.map((r) => r.previous ?? 0) : [];
+  // Against a forecast, the usual income is the guide: where the line passes it, the month is short.
+  const pace = chart.measure === "budget" || chart.measure === "forecast" ? chart.rows.map((r) => r.previous ?? 0) : [];
   const highest = Math.max(...chart.rows.map((r) => r.value), ...pace, 1);
   const lowest = Math.min(0, ...chart.rows.map((r) => r.value));
   const yOf = (value: number): number => bottom - ((value - lowest) / (highest - lowest)) * (bottom - top);
@@ -14631,6 +14894,7 @@ function LineView({
     if (!r) return false;
     if (level) return i === 0 || i === chart.rows.length - 1 || r.value !== chart.rows[i - 1]?.value;
     if (chart.measure === "budget") return r.count > 0 || i === chart.rows.length - 1;
+    if (chart.measure === "forecast") return true;
     return r.value !== 0;
   };
   /*

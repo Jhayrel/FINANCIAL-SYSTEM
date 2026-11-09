@@ -3019,6 +3019,72 @@ Robots flagged a few things that were the robots (an old Cash figure, a
 theme read from an attribute the app does not use, a list read before it
 opened); each was checked by hand before being called that.
 
+### 2026-11-09, after the final test: charts, reasoning, and finding a difference
+
+The owner sent their 9 November backup, then a screenshot: a question about
+gym sessions answered "6 sessions left, but ... 6 sessions remaining", a
+prediction of next month answered in words, and "can you show that in
+chart?" drawn as the gym's spending over the whole ledger. Then: "the
+reasoning is bad, fix all charting", "overthink more scenario", "find the
+difference sometimes its bad at helping fix it", and "they know the right
+time to show charts ... they dont wait".
+
+**A rule changed at the owner's instruction.** From 13 October 2026 a chart
+nobody named was offered after the words and drawn only on a yes. Now a
+chart is drawn beside the words whenever the question has a shape a picture
+shows: a split, a ranking, a change over time, a comparison with the
+owner's own figures, a forecast, the budget, allocations, safe to spend.
+One figure, a yes or no, words asked for ("text only", "in words"), and a
+question about a chart already on screen are still words alone
+(`chartHelps`, `chartAsk.ts`).
+
+Found and fixed:
+
+- **"That" meant a question two back.** "Show that in chart" looked over the
+  last three questions for a subject and took the first it found. Now it is
+  the question just asked, past only a shape said alone or a thanks
+  (`drawBack.ts`); if that has nothing to draw, it says so and lists what
+  can be drawn, never an older subject.
+- **New charts**, each with the figures the screens use: a **forecast** of
+  the months ahead (the Budget screen's usual month, by item for one month,
+  month by month beside usual income for several; "forecast for October"
+  in November says October has ended), **allocations** (each one's spending
+  beside what it holds), and **safe to spend** (what the wallets hold, by
+  what is still due, to the centavo). The model can ask for each.
+- **"How many sessions are left"** is worked out on the device for a
+  per-time or set-days allocation: what the money left pays for, what the
+  allocation counts, and what the schedule said ("twice a week") needs to
+  the month's end, each said once, with any session that cost more than its
+  share named, and what the rest pays for at that dearer price
+  (`timesWords`). The question had also been read as the budget's edit
+  history ("budget" and "before" in one sentence); that reader now needs a
+  word of changing.
+- **Charts the chat answered in words**: where the money went, what came in,
+  the budget, allocations, "chart my maya balance", "safe to spend as a
+  pie". **Charts carrying the wrong subject**: "compare october and november
+  spending" after a food trend drew food; "income vs spending this year"
+  after a balance chart drew it by day.
+- **Find the difference** now ends with something to press: the statement's
+  figure on a row saved at another, a machine's fee taken out of a
+  withdrawal, an estimate lowered, a row moved onto the account, each a card
+  worked out to the centavo (`fixForClue`, `feeFixes`), and "add it" still
+  works when the ledger offered rows that might be it. It reads "my cash is
+  300 only why its different", "gcash 120 lang laman", "cash on hand 500
+  but app says 800"; with two figures and no account it finds the account
+  the ledger holds one of them for, else asks which, listing what each
+  holds; "make it unknown spending" in the same sentence makes the card.
+  "Fix it make it balance" about an account is no longer a budget card.
+- **Entries put right in plain words**: "the travel on nov 8 was gcash not
+  cash" and "travel nov 8 should be gcash" are edits (they started a new
+  entry). While a card waited for its amount, "put back #4000" was taken as
+  ₱4,000.00; a record number or a command is never that answer now.
+  "Move the gas allocation to maya" changes where it is paid from.
+
+Checked: the owner's screenshot conversation replayed on the emulator copy
+of the backup; a sweep of chat edits, moves, deletes, restores and undo with
+the buttons pressed and balances read before and after; every chart type;
+`chartsAhead.test.ts` and `differenceFixes.test.ts` on invented figures.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

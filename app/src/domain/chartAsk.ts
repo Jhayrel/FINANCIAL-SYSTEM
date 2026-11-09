@@ -45,6 +45,10 @@ import {
   percentOf,
 } from "./charts";
 import { budgetForMonth } from "./budget";
+import { monthsRead } from "./budgetAdvice";
+import { monthsSaid, outlookFor, type MonthOutlook } from "./outlook";
+import type { AllocationStatus, MonthAllocations } from "./monthAllocation";
+import type { SafeToSpend } from "./monthPlan";
 import { owedChange, type Debt } from "./debt";
 import { costOf, monthTotals } from "./totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
@@ -53,7 +57,7 @@ import { walletDelta } from "./balances";
 // ── What the message wants drawn ────────────────────────────────────────────
 
 /** The money a chart is of. The last three are levels or a budget, drawn by this file. */
-export type ChartMoney = "spending" | "income" | "both" | "budget" | "balance" | "owed";
+export type ChartMoney = "spending" | "income" | "both" | "budget" | "balance" | "owed" | "forecast" | "allocation" | "safe";
 
 /** What to draw, as the model or the words say it. Every part may be missing. */
 export interface ChartHint {
@@ -85,6 +89,9 @@ const MONIES: Readonly<Record<string, ChartMoney>> = {
   budget: "budget",
   balance: "balance", balances: "balance",
   owed: "owed", debt: "owed", owe: "owed",
+  forecast: "forecast", prediction: "forecast", projection: "forecast",
+  allocation: "allocation", allocations: "allocation",
+  safe: "safe",
 };
 
 /**
@@ -155,6 +162,34 @@ const TELLS_BALANCE = /\bbalances?\s+(?:is|was|says|shows|reads)\s+(?:php|₱|p)
 const DEBT_WORDS = /\b(?:debts?|owe|owed|owing|utang|loans?|borrow(?:ed|ing)?|credit)\b/i;
 
 /**
+ * The months ahead as the app plans them: "a prediction next month", "my
+ * forecast for December", "what will I spend next month". The owner, 9
+ * November 2026, asked for a prediction of next month, was answered in
+ * words, then said "can you show that in chart?" and was drawn the gym's
+ * spending from two questions before: nothing here knew a forecast was a
+ * thing to draw.
+ */
+export const FORECAST_WORDS =
+  /\b(?:forecast(?:ed|s|ing)?|predict(?:ion|ions|ed|s|ing)?|projections?|projected|(?:will|would|might) i (?:likely |probably )?(?:spend|need)|expected (?:spending|expenses?|costs?)|usual month)\b/i;
+/** "use the forecast": a budget being set from it, which is a budget card, not a chart. */
+const FORECAST_DOING = /\b(?:use|apply|take|go with|set (?:it |my budget |the budget )?to)\s+(?:the\s+|my\s+|that\s+|this\s+)?(?:forecast|projection|prediction)\b/i;
+/** About a month to come, or the months ahead, rather than one gone. */
+const AHEAD = /\b(?:next|coming|upcoming|ahead|future|rest of (?:the|this) year|following)\b|\b(?:will|would|might|going to|gonna)\b/i;
+
+/** Safe to spend by name, or what is free to spend. */
+const SAFE_WORDS = /\bsafe[\s-]+to[\s-]+spend\b|\b(?:free|okay|ok) to spend\b|\bhow much (?:can|could) i (?:still )?spend\b|\bpwede (?:ko )?(?:pang )?gastusin\b/i;
+
+/** Said about allocations by name: "allocation", "allocated", "envelope". */
+const ALLOCATION_WORDS = /\b(?:allocat\w*|alocat\w*|envelopes?|naka-?allocate)\b/i;
+
+/** Whether the words ask about the months ahead as the app plans them. */
+export function asksForecast(question: string): boolean {
+  if (!FORECAST_WORDS.test(question) || FORECAST_DOING.test(question)) return false;
+  // "usual month" alone is a habit asked about; with a month to come it is a forecast.
+  return /\b(?:forecast|predict|projection|projected)/i.test(question) || AHEAD.test(question) || /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/i.test(question);
+}
+
+/**
  * What the words alone say should be drawn, from plain signals only.
  *
  * Narrow on purpose: this is what overrules a model, so it fires on
@@ -166,6 +201,9 @@ export function localHint(question: string, credits: readonly string[] = []): Ch
   const lower = q.toLowerCase();
   const namesCredit = credits.some((c) => c.trim() !== "" && lower.includes(c.trim().toLowerCase()));
 
+  if (asksForecast(q)) return { money: "forecast" };
+  if (SAFE_WORDS.test(q) && SEE.test(q)) return { money: "safe" };
+  if (ALLOCATION_WORDS.test(q) && (SEE.test(q) || /\b(?:status|left|how (?:are|is)|progress|used)\b/i.test(q))) return { money: "allocation" };
   if (/\bbudget/i.test(q.replace(BUDGET_PURPOSE, " ")) && BUDGET_SEE.test(q) && !BUDGET_DOING.test(q)) {
     return { money: "budget" };
   }
@@ -198,6 +236,9 @@ function moneyAllowed(money: ChartMoney, question: string, credits: readonly str
       (BALANCE_NOUN.test(question) || /\b(?:savings|ipon|where is (?:all )?my money|in (?:my|each|every) (?:wallets?|accounts?))\b/i.test(question) || new RegExp(IN_ACCOUNTS, "i").test(question))
     );
   }
+  if (money === "forecast") return asksForecast(question);
+  if (money === "allocation") return ALLOCATION_WORDS.test(question);
+  if (money === "safe") return SAFE_WORDS.test(question);
   if (money === "owed") {
     const lower = question.toLowerCase();
     return DEBT_WORDS.test(question) || credits.some((c) => c.trim() !== "" && lower.includes(c.trim().toLowerCase()));
@@ -218,9 +259,9 @@ export function mergeHint(local: ChartHint | null, model: ChartHint | null, ques
 }
 
 /** The money this chart is of, when it is a level or a budget rather than a flow. */
-export function measureOf(hint: ChartHint | null): "budget" | "balance" | "owed" | null {
+export function measureOf(hint: ChartHint | null): "budget" | "balance" | "owed" | "forecast" | "allocation" | "safe" | null {
   const money = hint?.money;
-  return money === "budget" || money === "balance" || money === "owed" ? money : null;
+  return money === "budget" || money === "balance" || money === "owed" || money === "forecast" || money === "allocation" || money === "safe" ? money : null;
 }
 
 const SAYS_SHAPE = /\b(?:pie|donut|doughnut|circle|bars?|bar chart|bar graph|columns?|line|line chart|curve|trend|over time)\b/i;
@@ -282,13 +323,31 @@ export function chartHelps(question: string, hint: ChartHint | null, chartJustSh
   if (question.trim().split(/\n+/).length >= 3 || question.trim().split(/\s+/).length > 60) return false;
   if (chartJustShown && /\b(?:it|that|this|those|these|the chart|the graph|the trend)\b/i.test(question)) return false;
   if (ONE_FIGURE.test(question) && !SPREAD.test(question)) return false;
+  const presentation = presentationFor(question);
+  if (presentation === "text") return false;
+  if (presentation === "chart" || OVER_TIME.test(question)) return true;
   /*
-   * Drawn beside the words only when asked for by name, or when the question
-   * is about change over time, which a picture shows and a sentence does
-   * not. Anything else is offered, not drawn (13 October 2026).
+   * "Compare to Elon Musk" is not two of the owner's own figures side by
+   * side: a comparison is drawn only against a period, a budget, a plan or
+   * income (13 October 2026).
    */
-  return presentationFor(question) === "chart" || OVER_TIME.test(question);
+  if (COMPARES.test(question) && !COMPARES_OWN.test(question)) return false;
+  /*
+   * Drawn beside the words whenever the question has a shape a picture
+   * shows: a split, a ranking, a forecast, a budget, a balance or a debt
+   * over time. The owner, 9 November 2026: "they know the right time to
+   * show charts ... they dont wait". This replaces the rule of 13 October
+   * 2026, when a chart nobody named was offered after the words and drawn
+   * only on a yes. One figure, a yes or no, and a question about a chart
+   * already on screen are still answered in words alone (above).
+   */
+  return true;
 }
+
+const COMPARES = /\b(?:compare[sd]?|comparing|comparison|vs\.?|versus|against)\b/i;
+/** Compared with something of the owner's own: a period, the budget, a plan, income or spending. */
+const COMPARES_OWN =
+  /\b(?:compare[sd]?|comparing|comparison|vs\.?|versus|against)\s+(?:to\s+|with\s+)?(?:my\s+|the\s+|its\s+|what\s+i\s+)?(?:last|this|previous|next|same|budget|budgets|limits?|plan|plans|forecast|income|spending|spent|earn\w*|usual|average|actual|january|february|march|april|may|june|july|august|september|october|november|december|20\d{2})\b/i;
 
 /** A question about how something moved across periods. */
 const OVER_TIME = /\b(?:going up|went up|rising|rose|increas\w*|decreas\w*|dropp\w*|falling|fell|month by month|each month|every month|per month|week by week|over the (?:months|weeks|year)|compared? (?:to|with) (?:last|this|the previous|previous|the same) (?:month|week|year|period)|(?:vs\.?|versus) (?:last|this|the previous|previous) (?:month|week|year)|than last (?:month|week|year))\b/i;
@@ -661,6 +720,254 @@ export function buildOwedChart(
   };
 }
 
+// ── The months ahead ────────────────────────────────────────────────────────
+
+const MONTH_WORDS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"] as const;
+const COUNT_WORDS: Readonly<Record<string, number>> = {
+  two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, few: 3, "couple of": 2, couple: 2,
+};
+
+/**
+ * The months a forecast is asked for, as month numbers counted from year 0
+ * (`year * 12 + month - 1`), oldest first. "past" when every month named has
+ * already ended: a forecast is of a month still to come.
+ *
+ * Next month when none is said. A month named without a year is its next
+ * one from today ("december" in November is this December, "march" is next
+ * year's). "the next 3 months", "the coming months", "the rest of the year",
+ * "next year" and "december to february" are each a run of months.
+ */
+export function forecastMonths(question: string, asOf: IsoDate): number[] | "past" {
+  const q = question.toLowerCase();
+  const y = Number(asOf.slice(0, 4));
+  const now = y * 12 + Number(asOf.slice(5, 7)) - 1;
+  const run = (from: number, count: number): number[] => Array.from({ length: Math.max(1, Math.min(12, count)) }, (_, i) => from + i);
+
+  const counted = /\b(?:next|coming|upcoming|following)\s+(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|few|couple(?: of)?)\s+months?\b/.exec(q);
+  if (counted?.[1]) return run(now + 1, /^\d+$/.test(counted[1]) ? Number(counted[1]) : (COUNT_WORDS[counted[1]] ?? 3));
+  if (/\b(?:the\s+)?(?:coming|upcoming)\s+months\b|\bmonths\s+(?:ahead|to come)\b|\bnext\s+quarter\b/.test(q)) return run(now + 1, 3);
+  if (/\brest of (?:the|this) year\b/.test(q)) return run(now + 1, 11 - (now % 12) || 1);
+  if (/\bnext year\b/.test(q)) return run((y + 1) * 12, 12);
+
+  // Month names, each at its next coming, with a year when one is said beside it.
+  const named: number[] = [];
+  const re = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?(?:\s+(20\d{2}))?\b/g;
+  for (let m = re.exec(q); m; m = re.exec(q)) {
+    const word = m[0];
+    // "may" is a month only beside a year or a word for one ("in may", "for may"), not "may I".
+    if (m[1] === "may" && !m[2] && !/\b(?:in|for|of|on|by|until|till|to|from|this|next|last)\s+may\b/.test(q)) continue;
+    // Only whole month words: "mart" or "decent" are not months.
+    if (!/^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?(?:\s+20\d{2})?$/.test(word)) continue;
+    const month = MONTH_WORDS.indexOf(m[1] as (typeof MONTH_WORDS)[number]);
+    /*
+     * Without a year, a month this year that ended in the last six is that
+     * month ("october" said in November is the October just gone, which has
+     * no forecast); one further back is next year's ("march" in November).
+     */
+    const thisYear = y * 12 + month;
+    const index = m[2] ? Number(m[2]) * 12 + month : thisYear >= now || now - thisYear <= 6 ? thisYear : (y + 1) * 12 + month;
+    named.push(index);
+  }
+  let months: number[];
+  if (named.length >= 2 && /\b(?:to|through|thru|until|till)\b|\s-\s/.test(q)) {
+    const from = named[0] as number;
+    let to = named[named.length - 1] as number;
+    while (to < from) to += 12;
+    months = run(from, to - from + 1);
+  } else if (named.length > 0) {
+    months = [...new Set(named)].sort((a, b) => a - b);
+  } else {
+    months = [now + 1];
+  }
+  const ahead = months.filter((i) => i >= now);
+  return ahead.length === 0 ? "past" : ahead;
+}
+
+const nameOfIndex = (index: number): string => `${MONTHS[index % 12]} ${Math.floor(index / 12)}`;
+
+/**
+ * The months ahead, drawn as the Budget screen plans them (`outlook.ts`):
+ * each item at its usual month, bills at their latest amount, what a usual
+ * month brings in, and the debt payments due. The same figures the chat is
+ * given in words, so the chart and the answer it was asked after agree.
+ *
+ * One month is drawn by item; several are drawn month by month beside the
+ * income a usual month brings in. Null when there is no history to plan
+ * from, or every month asked about has already ended.
+ */
+export function buildForecastChart(
+  question: string,
+  transactions: readonly Transaction[],
+  budgets: Budgets,
+  asOf: IsoDate,
+  options: { readonly stopped?: readonly { readonly name: string; readonly since: IsoDate }[]; readonly debts?: readonly Debt[] } = {},
+): Chart | null {
+  const months = forecastMonths(question, asOf);
+  if (months === "past") return null;
+  const now = Number(asOf.slice(0, 4)) * 12 + Number(asOf.slice(5, 7)) - 1;
+  const next = { year: Math.floor((now + 1) / 12), month: ((now + 1) % 12) + 1 };
+  const plans: MonthOutlook[] = months.map((index) =>
+    outlookFor(transactions, budgets, Math.floor(index / 12), (index % 12) + 1, asOf, {
+      ...options,
+      // Every month ahead read from the same months, as the Budget screen does; the month running from the ones before it.
+      ...(index > now ? { readBefore: next } : {}),
+    }),
+  );
+  const first = plans[0];
+  if (!first || first.read.length === 0 || first.total <= 0) return null;
+  const readFrom = monthsRead(first.read);
+  const shape: ChartKind = /\b(?:pie|donut|doughnut|circle)\b/i.test(question) ? "pie" : "bars";
+
+  if (plans.length === 1) {
+    const a = first.advice;
+    const parts = new Map<string, number>();
+    const put = (label: string, value: number): void => {
+      if (value > 0) parts.set(label, (parts.get(label) ?? 0) + value);
+    };
+    for (const l of a.items) put(l.name, l.amount);
+    for (const l of a.planned ?? []) put(l.name, l.amount);
+    put("Transfer fees", a.fees);
+    put("Debt interest", a.interest);
+    for (const l of [...a.bills, ...a.subscriptions]) put(l.name, l.amount);
+    // Whatever the parts leave of the month's figure, so the rows always add up to it.
+    const counted = [...parts.values()].reduce((sum, v) => sum + v, 0);
+    if (first.total - counted > 0) put("Other", first.total - counted);
+    const sorted = [...parts.entries()].sort((x, y) => y[1] - x[1]);
+    // The nine largest, and the rest together, so the rows still add up to the month.
+    const keep = sorted.length > 10 ? sorted.slice(0, 9) : sorted;
+    const rest = sorted.slice(keep.length);
+    const listed = rest.length > 0 ? [...keep, [`The other ${rest.length} items`, rest.reduce((sum, [, v]) => sum + v, 0)] as [string, number]] : keep;
+    const top = Math.max(...listed.map(([, v]) => v), 1);
+    const rows: ChartRow[] = listed.map(([label, value]) => ({ label, value, share: value / top, count: 0 }));
+    return {
+      title: `${first.name} forecast by item`,
+      by: "item",
+      kind: shape,
+      rows,
+      total: listed.reduce((sum, [, v]) => sum + v, 0),
+      othersCount: 0,
+      direction: "spending",
+      measure: "forecast",
+      plan: {
+        income: first.income,
+        debtDue: first.debtDue,
+        left: first.left,
+        budget: first.budget.total,
+        readFrom,
+        name: first.name,
+        ...(months[0] === now ? { running: true } : {}),
+      },
+    };
+  }
+
+  const top = Math.max(...plans.map((o) => Math.max(o.total, o.income)), 1);
+  const rows: ChartRow[] = plans.map((o) => ({ label: o.name, value: o.total, share: o.total / top, count: 0, previous: o.income, previousShare: o.income / top }));
+  const sum = (f: (o: MonthOutlook) => number): number => plans.reduce((s, o) => s + f(o), 0);
+  const name = monthsSaid(plans);
+  return {
+    title: `${name} forecast by month`,
+    by: "month",
+    kind: shape === "pie" ? "pie" : /\b(?:line|trend|curve)\b/i.test(question) ? "line" : "bars",
+    rows,
+    total: sum((o) => o.total),
+    othersCount: 0,
+    direction: "spending",
+    measure: "forecast",
+    against: { name: "Usual income", total: sum((o) => o.income), now: "Usual month" },
+    plan: { income: sum((o) => o.income), debtDue: sum((o) => o.debtDue), left: sum((o) => o.left), budget: sum((o) => o.budget.total), readFrom, name: name || nameOfIndex(months[0] as number) },
+  };
+}
+
+/**
+ * The month's allocations, each one's spending beside what it holds: the
+ * figures the Budget screen's Allocations card shows (`monthAllocations`).
+ * Only the lines a question names, when it names some ("chart the gym
+ * allocation"); every line otherwise. A line marked done holds only what it
+ * spent up to that day. Null when the month has none.
+ */
+export function buildAllocationChart(month: MonthAllocations, named: readonly string[] = []): Chart | null {
+  const own = month.lines.filter((l) => !l.twinOf);
+  const picked = named.length > 0 ? own.filter((l) => named.includes(l.line.id)) : own;
+  const lines = picked.length > 0 ? picked : own;
+  if (lines.length === 0) return null;
+  const holds = (l: AllocationStatus): number => (l.done ? l.spent : l.line.amount);
+  const top = Math.max(...lines.map((l) => Math.max(l.spent, holds(l))), 1);
+  const rows: ChartRow[] = lines.map((l) => ({
+    label: l.name,
+    value: l.spent,
+    share: l.spent / top,
+    count: l.entries,
+    previous: holds(l),
+    previousShare: holds(l) / top,
+  }));
+  const allocated = lines.reduce((sum, l) => sum + holds(l), 0);
+  const [y, m] = [Number(month.month.slice(0, 4)), Number(month.month.slice(5, 7))];
+  return {
+    title: `${lines.length === 1 ? `${lines[0]?.name ?? ""} allocation` : "Allocations"}, ${MONTHS[m - 1] ?? ""} ${y}`,
+    by: "item",
+    kind: "bars",
+    rows,
+    total: rows.reduce((sum, r) => sum + r.value, 0),
+    othersCount: 0,
+    direction: "spending",
+    measure: "allocation",
+    against: { name: "Allocated", total: allocated, now: "Spent" },
+    ...(month.phase === "running" ? { running: true } : {}),
+  };
+}
+
+/**
+ * Where the spending wallets' money stands: what is still due out of it
+ * (bills, debt payments, plans, allocations) and what is safe to spend, the
+ * Dashboard's own figures (`monthBrief`), so "how much can I spend", then
+ * "show that in a chart", draws the answer rather than a month of spending.
+ * The parts add up to what the wallets hold. When they hold less than is
+ * due, the shortfall is said and safe to spend is nothing.
+ */
+export function buildSafeChart(
+  safe: Pick<SafeToSpend, "wallets" | "reservedBills" | "reservedDebt" | "reservedPlans" | "reservedAllocations" | "free" | "safe" | "daysLeft" | "perDay">,
+  ym: string,
+  pie = false,
+): Chart | null {
+  if (safe.wallets <= 0) return null;
+  const parts: [string, number][] = [
+    ["Bills still to pay", safe.reservedBills],
+    ["Debt payments due", safe.reservedDebt],
+    ["Plans", safe.reservedPlans],
+    ["Allocations", safe.reservedAllocations ?? 0],
+  ];
+  const due = parts.reduce((sum, [, v]) => sum + v, 0);
+  // When the wallets cannot cover what is due, each part is cut down in order, so the parts still add up to the wallets.
+  let room = safe.wallets;
+  const kept = parts.map(([label, v]) => {
+    const take = Math.max(0, Math.min(v, room));
+    room -= take;
+    return [label, take] as [string, number];
+  });
+  const rows0: [string, number][] = [...kept.filter(([, v]) => v > 0), ["Safe to spend", Math.max(0, safe.free)]];
+  const top = Math.max(...rows0.map(([, v]) => v), 1);
+  return {
+    title: `Safe to spend, ${MONTHS[Number(ym.slice(5, 7)) - 1] ?? ""} ${ym.slice(0, 4)}`,
+    by: "item",
+    kind: pie ? "pie" : "bars",
+    rows: rows0.map(([label, value]) => ({ label, value, share: value / top, count: 0 })),
+    total: safe.wallets,
+    othersCount: 0,
+    measure: "safe",
+    plan: { income: 0, debtDue: safe.reservedDebt, left: safe.free, budget: due, readFrom: "", name: `${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"} left, ${chartLabel(safe.perDay)} today` },
+  };
+}
+
+/**
+ * Why a forecast drew nothing, in a sentence: every month asked about has
+ * ended, or there is no history to plan from.
+ */
+export function forecastEmptyWords(question: string, asOf: IsoDate): string {
+  const months = forecastMonths(question, asOf);
+  if (months === "past") return "That month has ended, so it has no forecast. Ask what it spent, or ask for a month still to come, like \"forecast for next month\".";
+  return "There are no months of spending yet to plan from. The forecast needs at least one month that has ended.";
+}
+
 /** Whichever level or budget the hint names, built; null when it names none or there is nothing to draw. */
 export function buildMeasureChart(
   question: string,
@@ -671,9 +978,18 @@ export function buildMeasureChart(
     readonly reference: Pick<ReferenceLists, "wallets" | "savings">;
     readonly debts: readonly Debt[];
     readonly asOf: IsoDate;
+    /** Bills and subscriptions marked stopped, which a forecast leaves out as the Budget screen does. */
+    readonly stopped?: readonly { readonly name: string; readonly since: IsoDate }[];
+    /** The month's allocations, as Budget shows them, and the lines the question names. */
+    readonly allocations?: { readonly month: MonthAllocations; readonly named: readonly string[] };
+    /** The Dashboard's safe to spend this month, for a chart of it. */
+    readonly safe?: SafeToSpend | null;
   },
 ): Chart | null {
   const measure = measureOf(hint);
+  if (measure === "safe") return data.safe ? buildSafeChart(data.safe, data.asOf.slice(0, 7), /\b(?:pie|donut|doughnut|circle)\b/i.test(question)) : null;
+  if (measure === "allocation") return data.allocations ? buildAllocationChart(data.allocations.month, data.allocations.named) : null;
+  if (measure === "forecast") return buildForecastChart(question, data.transactions, data.budgets, data.asOf, { stopped: data.stopped ?? [], debts: data.debts });
   if (measure === "budget") return buildBudgetChart(question, data.transactions, data.budgets, data.asOf);
   if (measure === "balance") {
     return buildBalanceChart(question, data.transactions, data.reference, data.asOf, hint?.by === "wallet" || PER_ACCOUNT.test(question));
@@ -746,6 +1062,41 @@ export function chartReading(chart: Chart): string {
         ? `Within the budget in every month that has one (${withBudget.length}).`
         : `Over the budget in ${over.length} of ${withBudget.length} ${withBudget.length === 1 ? "month" : "months"} with one${worst ? `; ${worst.label} by the most, ${m(worst.value - (worst.previous ?? 0))} over` : ""}.`;
     return `${head}${now}${ahead}`;
+  }
+
+  if (chart.measure === "safe" && chart.plan) {
+    const p = chart.plan;
+    const safeRow = rows.find((r) => r.label === "Safe to spend");
+    const short = p.left < 0 ? ` The wallets are ${m(-p.left)} short of what is still due, so nothing is safe to spend.` : "";
+    return `The spending wallets hold ${m(chart.total)}. ${m(p.budget)} of it is still due this month${short ? "" : `, which leaves ${m(safeRow?.value ?? 0)} safe to spend`} (${p.name}).${short}`;
+  }
+
+  if (chart.measure === "allocation") {
+    const over = rows.filter((r) => r.value > (r.previous ?? 0));
+    const allocated = chart.against?.total ?? 0;
+    const left = rows.reduce((sum, r) => sum + Math.max(0, (r.previous ?? 0) - r.value), 0);
+    const head = `${m(chart.total)} spent of ${m(allocated)} allocated${chart.running ? ", with the month still running" : ""}.`;
+    const overs = over.length > 0 ? ` ${over.map((r) => `${r.label} is ${m(r.value - (r.previous ?? 0))} over`).join("; ")}.` : "";
+    const most = [...rows].filter((r) => r.value <= (r.previous ?? 0)).sort((a, b) => (b.previous ?? 0) - b.value - ((a.previous ?? 0) - a.value))[0];
+    return `${head}${overs}${left > 0 ? ` ${m(left)} is left${most && rows.length > 1 ? `, most of it in ${most.label}, ${m((most.previous ?? 0) - most.value)}` : ""}.` : ""}`;
+  }
+
+  if (chart.measure === "forecast" && chart.plan) {
+    const p = chart.plan;
+    const top = [...rows].sort((a, b) => b.value - a.value)[0] as ChartRow;
+    const after = p.left >= 0 ? `which leaves about ${m(p.left)}` : `which is ${m(-p.left)} short`;
+    const debt = p.debtDue > 0 ? ` after ${m(p.debtDue)} of debt payments due` : "";
+    const budget =
+      p.budget > 0
+        ? ` The budget set is ${m(p.budget)}${p.budget < chart.total ? `, ${m(chart.total - p.budget)} under the forecast` : ", which covers it"}.`
+        : ` No budget is set for ${rows.length > 1 && chart.by !== "item" ? "them" : "it"} yet.`;
+    if (chart.by === "item") {
+      const running = p.running ? ` ${p.name} is already running: this is its usual month, not what it has spent.` : "";
+      return `${p.name} should cost about ${m(chart.total)}, going by your usual month; ${top.label} is the largest, ${m(top.value)}. A usual month brings in ${m(p.income)}, ${after}${debt}.${budget}${running}`;
+    }
+    const high = rows.reduce((a, b) => (b.value > a.value ? b : a), top);
+    const same = rows.every((r) => r.value === rows[0]?.value);
+    return `About ${m(chart.total)} across ${rows.length} months, going by your usual month${same ? `, ${m(high.value)} each` : `; ${high.label} the most, ${m(high.value)}`}. A usual month brings in ${m(Math.round(p.income / rows.length))}, ${m(p.income)} in all, ${after}${debt}.${budget}`;
   }
 
   // A level is read at the end of a month, and on a day.

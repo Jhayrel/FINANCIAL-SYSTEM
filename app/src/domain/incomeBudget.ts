@@ -436,6 +436,14 @@ export function readBudgetMove(text: string, cardJustShown = false): BudgetMove 
   if (/\?\s*$/.test(t) && !/\b(?:can you|could you|please|pls)\b/i.test(t)) return null;
   const budget = /\b(?:budget|it)\b/i.test(t);
   if (!budget) return null;
+  /*
+   * An account's balance said against the app's, with no word of the
+   * budget, is a difference to find, not a budget to lower: "my current
+   * balance in wallet is [a figure] but here in the system its [another] fix
+   * it make it balance" was a budget card (the owner's words of 27 September
+   * 2026, replayed 9 November).
+   */
+  if (!/\bbudget/i.test(t) && /\b(?:current|real|actual|true)\s+balance\b|\bbalance\s+(?:in|of|sa|ng)\b|\b(?:in|on)\s+the\s+(?:system|app)\b|\bhere\s+(?:it\s+)?(?:says|shows)\b|\b(?:wallet|cash|maya|gcash|account|bank)\s+(?:is|has|holds)\s+(?:only\s+)?(?:₱|php\s*)?\d/i.test(t)) return null;
   const fit =
     /\b(?:lower|reduce|cut|bring\s+down|fit|match|adjust|set|fix)\b[^.]*\b(?:to\s+)?(?:what\s+)?(?:my\s+|the\s+)?(?:money|wallets?|balance|can\s+keep|keeps|afford|safe(?:\s+to\s+spend)?|realistic|what\s+i\s+have)\b/i.test(t) ||
     /\bfit\s+(?:my\s+|the\s+)?budget\b|\bmake\s+(?:my\s+|the\s+)?budget\s+fit\b/i.test(t) ||

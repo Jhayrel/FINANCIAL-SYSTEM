@@ -201,6 +201,12 @@ function walletIn(text: string, accounts: readonly string[]): string | null {
   for (const a of sorted) {
     const name = a.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (new RegExp(`\\b(?:from|paid\\s+from|using|via|out\\s+of|in)\\s+(?:my\\s+)?${name}(?![a-z0-9])`).test(t)) return a;
+    /*
+     * "Move the gas allocation to maya", "switch it to gcash", "pay it from
+     * cash instead": where it is paid from, said with a verb of moving. It
+     * was asked again what should change (9 November 2026 sweep).
+     */
+    if (new RegExp(`\\b(?:move|moved|switch|switched|change|changed|transfer|ilipat)\\b[^.]{0,50}\\b(?:to|into|onto|sa)\\s+(?:my\\s+|the\\s+)?${name}(?![a-z0-9])`).test(t)) return a;
   }
   return null;
 }

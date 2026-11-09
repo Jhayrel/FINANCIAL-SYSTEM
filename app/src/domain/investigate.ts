@@ -952,6 +952,60 @@ export function choicesForClue(
   ];
 }
 
+/**
+ * The edit a finding points at, as the row before and after, for a card the
+ * owner presses: the statement's own figure on a row saved at another one,
+ * a machine's fee taken out of a withdrawal's amount, an estimate lowered by
+ * what was never spent, or a row moved onto this account. Null for a finding
+ * with no single edit (a copy is binned, not edited) or when the edit cannot
+ * be worked out to the centavo.
+ *
+ * The owner, 9 November 2026: "find the difference sometimes its bad at
+ * helping fix it". Each of these was "Check it" beside the row, and the
+ * figure had to be worked out and typed by hand.
+ */
+export function fixForClue(clue: Clue, account: string): { readonly before: Transaction; readonly after: Transaction; readonly why: string } | null {
+  const edited = (t: Transaction, change: Partial<Transaction>): Transaction => {
+    const next = { ...t, ...change };
+    return { ...next, total: next.amount + next.fee };
+  };
+  if (clue.kind === "amount-differs") {
+    const t = clue.row;
+    if (t.type === "Spending" && t.fromWallet === account && clue.line.amount < 0) {
+      const amount = -clue.line.amount - t.fee;
+      return amount > 0 ? { before: t, after: edited(t, { amount }), why: `The history shows ${formatMoney(-clue.line.amount)} out on ${formatMedium(clue.line.date)}.` } : null;
+    }
+    if (t.type === "Revenue" && t.toWallet === account && clue.line.amount > 0 && t.fee === 0) {
+      return { before: t, after: edited(t, { amount: clue.line.amount }), why: `The history shows ${formatMoney(clue.line.amount)} in on ${formatMedium(clue.line.date)}.` };
+    }
+    return null;
+  }
+  if (clue.kind === "estimate") {
+    const t = clue.row;
+    const amount = t.amount - Math.abs(clue.explains);
+    return t.type === "Spending" && amount > 0 ? { before: t, after: edited(t, { amount }), why: `An estimate: ${formatMoney(Math.abs(clue.explains))} of it was never spent.` } : null;
+  }
+  if (clue.kind === "wrong-account") {
+    const t = clue.row;
+    const change: Partial<Transaction> = t.fromWallet === clue.other ? { fromWallet: account } : t.toWallet === clue.other ? { toWallet: account } : {};
+    if (Object.keys(change).length === 0) return null;
+    // Moving it here must not make it a transfer from an account into itself.
+    const after = edited(t, change);
+    if (after.fromWallet && after.fromWallet === after.toWallet) return null;
+    return { before: t, after, why: `Filed on ${clue.other}: if it was ${account}, this moves it.` };
+  }
+  return null;
+}
+
+/** The withdrawals a fee-inside finding names, each with the cash in Amount and the machine's fee in Fee. */
+export function feeFixes(clue: Clue, account: string): { readonly before: Transaction; readonly after: Transaction }[] {
+  if (clue.kind !== "fee-inside") return [];
+  return clue.rows.flatMap((t) => {
+    const split = feeInside(t, account);
+    return split && split.fee > 0 ? [{ before: t, after: { ...t, amount: split.cash, fee: split.fee, total: split.cash + split.fee } }] : [];
+  });
+}
+
 /** The entry a finding would add, for the Add form or a card to check before it is saved. */
 export function draftForClue(clue: Clue, account: string, asOf: IsoDate, interestItem = ""): Draft | null {
   if (clue.kind === "unrecorded") {

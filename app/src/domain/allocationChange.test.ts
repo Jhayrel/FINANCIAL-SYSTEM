@@ -233,3 +233,15 @@ describe("the pieces", () => {
     expect(said.join(" ").includes(String.fromCharCode(0x2014))).toBe(false);
   });
 });
+
+describe("where an allocation is paid from, moved (9 November 2026 sweep)", () => {
+  it("\"move the gas allocation to maya\" changes its wallet and nothing else", () => {
+    const moved = after("move the gas allocation to maya").find((l) => l.id === "a-gas")!;
+    expect(moved.wallet).toBe("Maya");
+    expect(moved.amount).toBe(gas.amount);
+    expect(moved.each).toBe(gas.each);
+  });
+  it("\"switch the gas allocation to gcash\" too", () => {
+    expect(after("switch the gas allocation to gcash").find((l) => l.id === "a-gas")!.wallet).toBe("Gcash");
+  });
+});

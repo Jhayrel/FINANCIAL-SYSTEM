@@ -56,7 +56,7 @@ export function matchedOnIn(text: string, asOf: IsoDate): IsoDate | null {
 
 /** Words that say the figures do not agree, or ask to check them. */
 const MISMATCH =
-  /\b(extra money|more money than|have extra|has extra|got extra|more than (?:the |my )?(?:system|app|ledger|tracker)|less than (?:the |my )?(?:system|app|ledger|tracker)|where('?s| is| are| did| does| do)? (the )?(rest|remaining|difference|missing|balance|it go|they go|my money)|where did (my|the|it)|where('?s| is) my|missing|nawawala|nasaan|doesn'?t match|don'?t match|not match(ing)?|hindi (match|tugma)|mismatch|discrepanc\w*|reconcile|reconciliation|investigate|investigation|find (the|my) (difference|missing)|balance is (off|wrong|different)|does(?:n'?t| not) balance|not balanced|off by|wrong balance|unaccounted|lost money|check my balance|different (from|than) (the )?(app|bank|system)|(fix|correct|adjust|update|ayusin|itama)\s+(my |the |ang )?([a-z]+ ){0,2}?(balance|balances)|balance (fix|correction)|my balance is (now )?(wrong|off|incorrect))\b/i;
+  /\b(extra money|more money than|have extra|has extra|got extra|more than (?:the |my )?(?:system|app|ledger|tracker)|less than (?:the |my )?(?:system|app|ledger|tracker)|where('?s| is| are| did| does| do)? (the )?(rest|remaining|difference|missing|balance|it go|they go|my money)|where did (my|the|it)|where('?s| is) my|missing|nawawala|nasaan|doesn'?t match|don'?t match|not match(ing)?|hindi (match|tugma)|mismatch|discrepanc\w*|reconcile|reconciliation|investigate|investigation|find (the|my) (difference|missing)|balance is (off|wrong|different)|does(?:n'?t| not) balance|not balanced|off by|wrong balance|unaccounted|lost money|check my balance|different (from|than) (the )?(app|bank|system)|(fix|correct|adjust|update|ayusin|itama)\s+(my |the |ang )?([a-z]+ ){0,2}?(balance|balances)|balance (fix|correction)|my balance is (now )?(wrong|off|incorrect)|why (?:is |are )?(?:it'?s |its |it |my |the )?(?:\w+ )?(?:different|not the same|off)|not the same (?:as|with) (?:the )?(?:app|system|ledger|here)|bakit (?:iba|hindi|kulang|sobra)|di tugma|kulang (?:ng|ang)|sobra (?:ng|ang))\b/i;
 
 /**
  * A balance said for an account: "my balance is", "the balance now", "check
@@ -65,7 +65,7 @@ const MISMATCH =
  * owner wants a balance told to be looked into however it is worded).
  */
 const BALANCE_SAID =
-  /\b(?:my|the)\b[^.]{0,40}\bbalance\b[^.]{0,40}?\b(?:is|now|are|=|should be)\b|\bbalance\b[^.]{0,30}\b(?:look|check|compare|see)\b|\b(?:look|check|compare)\b[^.]{0,40}\bbalance\b|\bbalance\s+(?:of\s+|in\s+|sa\s+|ng\s+)?[a-z][a-z ()]{1,30}?\s*(?:is\s+|=\s*|:\s*)?(?:₱|php\s*)?\d|\b(?:is|are|has|have|holds?)\s+(?:only\s+|just\s+)?(?:₱|php\s*)?\d[\d,.]*k?\s*(?:now|na lang|left|remaining|today)\b|\b(?:left|remaining)\s*(?:is\s+)?(?:₱|php\s*)?\d/i;
+  /\b(?:my|the)\b[^.]{0,40}\bbalance\b[^.]{0,40}?\b(?:is|now|are|=|should be)\b|\bbalance\b[^.]{0,30}\b(?:look|check|compare|see)\b|\b(?:look|check|compare)\b[^.]{0,40}\bbalance\b|\bbalance\s+(?:of\s+|in\s+|sa\s+|ng\s+)?[a-z][a-z ()]{1,30}?\s*(?:is\s+|=\s*|:\s*)?(?:₱|php\s*)?\d|\b(?:is|are|has|have|holds?)\s+(?:only\s+|just\s+)?(?:₱|php\s*)?\d[\d,.]*k?\s*(?:now|na lang|left|remaining|today)\b|\b(?:left|remaining)\s*(?:is\s+)?(?:₱|php\s*)?\d|\b(?:is|are|has|have|holds?)\s+(?:₱|php\s*)?\d[\d,.]*k?\s+(?:only|lang|na lang)\b|(?:₱|php\s*)?\d[\d,.]*k?\s+(?:lang|na lang)\s+(?:ang\s+)?(?:laman|natira|natitira|ang)\b|\bnasa\s+(?:₱|php\s*)?\d[\d,.]*k?\s+(?:lang|na lang)\b|\b(?:on|in)\s+hand\b[^.]{0,20}\d|\d[\d,.]*k?\s+(?:on|in)\s+hand\b/i;
 
 /** Words saying a figure is what the account really holds. */
 const REAL = /\b(balance|really|actual|actually|only have|i have|counted|count|in my (bank|account|wallet)|bank says|app says|sa app|on the app|in the app|left|remaining|holds|has)\b/i;
@@ -133,8 +133,12 @@ export function sharedWord(
   if (figure === null) return named;
   const off = (a: string): number => Math.abs(recorded(a) - figure);
   const nearest = rivals.reduce((best, a) => (off(a) < off(best) ? a : best), rivals[0] as string);
-  // Only a clear winner: within a tenth of the named account's distance.
-  return off(nearest) * 10 < off(named) ? nearest : named;
+  /*
+   * Only a clear winner: within a tenth of the named account's distance, and
+   * near the figure itself. "My cash is 300" took "Extra Cash", holding
+   * ₱0.00, over Cash: nearer, but nothing like the figure (9 November 2026).
+   */
+  return off(nearest) * 10 < off(named) && off(nearest) * 10 <= figure ? nearest : named;
 }
 
 /**
@@ -167,9 +171,36 @@ export function readInvestigateAsk(
       : "";
   const figures = figuresSaid;
   const mismatch = MISMATCH.test(text);
+  /*
+   * Two figures and no account named ("my current balance in wallet is 1500
+   * but here in the system its 4500"): the account is the one the ledger
+   * holds one of them for, to the peso. The other is what it really holds.
+   */
+  if (!account && figures.length >= 2 && (mismatch || HERE.test(text))) {
+    const owner = accounts.find((a) => figures.some((f) => Math.abs(recorded(a) - f.value) <= 100));
+    if (owner) {
+      const ledgerFigure = figures.find((f) => Math.abs(recorded(owner) - f.value) <= 100)!;
+      const other = figures.find((f) => f !== ledgerFigure && f.value !== ledgerFigure.value);
+      if (other) return { account: owner, actual: other.value, gap: null, ...(matchedOn ? { matchedOn } : {}) };
+    }
+    /*
+     * No account holds either figure: the one not said to be the app's is
+     * what the account holds, and which account it is gets asked next. It
+     * was read as a spending entry for the first figure (9 November 2026).
+     */
+    const appSays = figures.find((f) => HERE.test(text.slice(Math.max(0, f.index - 30), f.index)));
+    const told = figures.find((f) => f !== appSays && (!appSays || f.value !== appSays.value));
+    if (appSays && told) return { account: "", actual: told.value, gap: null, ...(matchedOn ? { matchedOn } : {}) };
+  }
   const counted = /\b(counted|count|bilang|binilang)\b/i.test(text) && account !== "";
-  // "maya app says 30,000 but here it says 50,000": two figures set against each other.
-  const contrasted = account !== "" && figures.length >= 2 && HERE.test(text) && /\b(app|bank|says|shows|balance|only|but)\b/i.test(text);
+  /*
+   * "maya app says 30,000 but here it says 50,000": two figures set against
+   * each other. Cash has no app of its own, so for cash "the app says" is
+   * this one ("cash on hand 500 but app says 800").
+   */
+  const cashLike = /(^|[^a-z])cash([^a-z]|$)/i.test(account);
+  const hereSaid = HERE.test(text) || (cashLike && /\b(?:the\s+)?app\s+(?:says|shows|has)\b/i.test(text));
+  const contrasted = account !== "" && figures.length >= 2 && hereSaid && /\b(app|bank|says|shows|balance|only|but|hand)\b/i.test(text);
 
   /*
    * "My new balance in maya bank is 1533.83 can you look because there's
@@ -179,6 +210,9 @@ export function readInvestigateAsk(
    */
   const claimed = account !== "" && figures.length === 1 && BALANCE_SAID.test(text);
 
+  // "my wallet is 1500 only": a balance told for an account not named; which one is asked next.
+  const unnamed = account === "" && figures.length === 1 && /\b(?:my|the|ang)\s+(?:wallet|e-?wallet|account|bank|pera)\b/i.test(text) && BALANCE_SAID.test(text);
+  if (unnamed) return { account: "", actual: figures[0]!.value, gap: null, ...(matchedOn ? { matchedOn } : {}) };
   if (!mismatch && !counted && !contrasted && !claimed) return null;
   // "where did I spend the most" names no account and no figure: not this.
   // "fix my balance" (owner's chat, 1 November 2026) asks for it too: which account, and what it holds, come next.
@@ -193,7 +227,8 @@ export function readInvestigateAsk(
     // The figure that is the ledger's own, to the peso, is not the one the account holds.
     const ledgerFigure = figures.find((f) => Math.abs(f.value - ledger) <= 100);
     // Failing that, the one said to be this app's: "here it says 50,000", read before the figure only.
-    const hereFigure = ledgerFigure ?? figures.find((f) => HERE.test(text.slice(Math.max(0, f.index - 30), f.index)));
+    const saysHere = (before: string): boolean => HERE.test(before) || (cashLike && /\bapp\s+(?:says|shows|has)\s*(?:₱|php\s*)?$/i.test(before.trimEnd()));
+    const hereFigure = ledgerFigure ?? figures.find((f) => saysHere(text.slice(Math.max(0, f.index - 30), f.index)));
     /*
      * Of the rest, the one nearest the ledger's. A balance is near what the
      * ledger says; a difference is small. "₱6.25 interest was added

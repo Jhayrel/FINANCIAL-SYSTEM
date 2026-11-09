@@ -99,10 +99,17 @@ export function budgetChangeWords(budgets: Budgets, asOf: IsoDate): string[] {
 
 /** "how many times did I change my budget", "when did I change the food limit", "budget history". */
 export function asksBudgetHistory(text: string): boolean {
-  return (
-    /\b(?:budget|budgets|limit|limits)\b/i.test(text) &&
-    /\b(?:how many times|how often|when did i|did i (?:ever )?change|have i (?:ever )?changed|what did i change|history|changes|changed|change log|revisions?|before|previous|old|used to be|ilang beses|binago)\b/i.test(text) &&
-    !/^\s*(?:change|set|update|make|raise|lower|increase|decrease|reduce|add|remove)\b/i.test(text)
-  );
+  /*
+   * "Before", "how many" and "how often" are history only about the budget
+   * itself: "how many session I have left before the month end also base on
+   * the budget also?" was answered with eleven budget edits (owner, 9
+   * November 2026).
+   */
+  const changeVerb = /\b(?:change[sd]?|changing|set|edit(?:ed)?|update[sd]?|lower(?:ed)?|raise[sd]?|adjust(?:ed)?|binago|pinalitan)\b/i;
+  const history =
+    /\b(?:did i (?:ever )?change|have i (?:ever )?changed|what did i change|history|changes|change log|revisions?)\b/i.test(text) ||
+    (/\b(?:how many times|how often|when did i|ilang beses)\b/i.test(text) && changeVerb.test(text)) ||
+    /\b(?:budget|limit)s?\s+(?:was\s+|were\s+)?(?:before|used to be|changed)\b|\b(?:previous|old|former|earlier)\s+(?:budget|limit)s?\b|\bwhat was my (?:budget|limit)\b/i.test(text);
+  return /\b(?:budget|budgets|limit|limits)\b/i.test(text) && history && !/^\s*(?:change|set|update|make|raise|lower|increase|decrease|reduce|add|remove)\b/i.test(text);
 }
 

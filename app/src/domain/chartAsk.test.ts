@@ -148,8 +148,11 @@ describe("what the words say to draw", () => {
   });
 
   it("puts a chart beside a question only when it shows more than one figure", () => {
-    // Not asked for by name and not about change over time: offered after the words, not drawn (13 October 2026).
-    expect(chartHelps("where did my money go this month?", { by: "item", shape: "pie" }, false)).toBe(false);
+    // A split shows better drawn: drawn beside the words without being asked (owner, 9 November 2026; it was only offered from 13 October).
+    expect(chartHelps("where did my money go this month?", { by: "item", shape: "pie" }, false)).toBe(true);
+    // Asked for in words: words alone.
+    expect(chartHelps("where did my money go this month? text only", { by: "item", shape: "pie" }, false)).toBe(false);
+    expect(chartHelps("next month forecast", { money: "forecast" }, false)).toBe(true);
     expect(chartHelps("pie of where my money went this month", { by: "item", shape: "pie" }, false)).toBe(true);
     expect(chartHelps("how much did I spend today?", { by: "item" }, false)).toBe(false);
     expect(chartHelps("how much did I spend each month?", { by: "month" }, false)).toBe(true);
