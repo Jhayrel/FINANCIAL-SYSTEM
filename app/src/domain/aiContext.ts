@@ -46,6 +46,7 @@ import { costOf, incomeOf, spendingRanking, monthTotals } from "./totals";
 import { formatMoney, toCentavos, toPesos } from "./money";
 import { carryWords, ifNothingMoreToday, isOpenBill, monthBrief, nextMonthStart, weekAhead, yesterdayOf } from "./monthPlan";
 import { borrowedMoney, lenderNames } from "./borrowed";
+import { paceWords, spanWords } from "./monthAllocation";
 import type { Account } from "./accounts";
 import type { BudgetRevision, Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -250,6 +251,14 @@ export interface AiContext {
       readonly left: number;
       readonly over: number;
       readonly week?: { readonly index: number; readonly share: number; readonly spent: number; readonly left: number } | undefined;
+      /** How it is made up: "PHP 50.00 each Tuesday and Thursday, 6 days". */
+      readonly pace?: string | undefined;
+      /** A set-days line: today's share when today is one of its days, else the next day. */
+      readonly day?: { readonly today?: { readonly share: number; readonly spent: number; readonly left: number }; readonly next?: string; readonly toCome: number } | undefined;
+      /** "every month from November 2026", for a line that repeats. */
+      readonly repeats?: string | undefined;
+      /** The day it was marked done this month: it holds nothing, what it had left is free. */
+      readonly done?: string | undefined;
     }[];
     readonly safe: number;
     readonly today: number;
@@ -554,9 +563,16 @@ export function buildContext(input: ContextInput): AiContext {
           words: a.line.words,
           amount: pesos(a.line.amount),
           spent: pesos(a.spent),
-          left: pesos(Math.max(0, a.left)),
+          // Done: it holds nothing, so nothing is left in it.
+          left: a.done ? 0 : pesos(Math.max(0, a.left)),
           over: pesos(a.over),
           week: a.week ? { index: a.week.index, share: pesos(a.week.share), spent: pesos(a.week.spent), left: pesos(a.week.left) } : undefined,
+          ...(paceWords(a.line) ? { pace: paceWords(a.line).replace(/₱/g, "PHP ") } : {}),
+          ...(a.days
+            ? { day: { ...(a.days.today ? { today: { share: pesos(a.days.today.share), spent: pesos(a.days.today.spent), left: pesos(a.days.today.left) } } : {}), ...(a.days.next ? { next: a.days.next } : {}), toCome: a.days.toCome } }
+            : {}),
+          ...(a.line.repeat ? { repeats: spanWords(a.line) } : {}),
+          ...(a.done ? { done: a.done } : {}),
         })),
         safe: pesos(safe.safe),
         today: pesos(safe.perDay),
@@ -733,7 +749,11 @@ export function contextToText(c: AiContext): string {
         `Allocations for ${c.month.name}, money set aside for one kind of spending each. What is left of each is already out of safe to spend above; spending inside one changes neither safe to spend nor today's figure, and only what goes past it comes out of them:`,
         ...allocated.map(
           (a) =>
-            `- ${a.name}${a.name !== a.kind ? ` (${a.kind}${a.words ? `, entries that say ${a.words}` : ""})` : ""}: ${php(a.amount)} for the month, ${php(a.spent)} spent, ${a.over > 0 ? `${php(a.over)} over, holding nothing` : `${php(a.left)} left`}${a.week ? `; this week (week ${a.week.index}) ${php(a.week.spent)} of ${php(a.week.share)}${a.week.left < 0 ? `, ${php(-a.week.left)} past it` : `, ${php(a.week.left)} left`}` : ""}.`,
+            `- ${a.name}${a.name !== a.kind ? ` (${a.kind}${a.words ? `, entries that say ${a.words}` : ""})` : ""}: ${php(a.amount)} for the month${a.pace ? ` (${a.pace})` : ""}${a.repeats ? `, ${a.repeats}` : ""}, ${php(a.spent)} spent, ${
+              a.done ? `done on ${a.done}: it holds nothing more and what it had left is free money, in safe to spend` : a.over > 0 ? `${php(a.over)} over, holding nothing` : `${php(a.left)} left`
+            }${a.week ? `; this week (week ${a.week.index}) ${php(a.week.spent)} of ${php(a.week.share)}${a.week.left < 0 ? `, ${php(-a.week.left)} past it` : `, ${php(a.week.left)} left`}` : ""}${
+              a.day ? (a.day.today ? `; today is one of its days: ${php(a.day.today.spent)} of ${php(a.day.today.share)}${a.day.today.left < 0 ? `, ${php(-a.day.today.left)} past it` : ""}` : a.day.next ? `; its next day is ${a.day.next}, ${a.day.toCome} to come` : "; none of its days is left this month") : ""
+            }.`,
         ),
       );
     }

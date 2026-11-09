@@ -65,7 +65,7 @@ import { costOf } from "./domain/totals";
 import { totalSavingsBalance, totalWalletBalance, walletBalance, walletBalances } from "./domain/balances";
 import { checkDraft, debtWalletDirection, draftToTransactions, emptyDraft, insertChronologically, notEditable } from "./domain/entry";
 import { Planner } from "./features/Planner";
-import { asSaving, isSave, linkPayments, misfiledSaving, paidSoFar, paysDebt, paysPlan, renamePlans, type Plan } from "./domain/planner";
+import { asSaving, isSave, linkPayments, misfiledSaving, paidSoFar, paysDebt, paysPlan, renamePlans, reopenPlan, type Plan } from "./domain/planner";
 import { goalInStep, type GoalForPlan } from "./domain/planGoal";
 import { planSheetCsv, planSheetFilename, planSheetForAsk } from "./domain/planSheet";
 import { NO_OWNER, ownerChanges, ownerName as nameOfOwner } from "./domain/owner";
@@ -107,7 +107,7 @@ import { accountGroups, KIND_LABEL, migrateAccounts, renameAccount, renameItem, 
 import { defaultSettings, isBlankSettings, type AppSettings } from "./domain/settings";
 import { Activity } from "./features/Activity";
 import { activityStore } from "./data/activityStore";
-import { allocatableKinds, checkAllocation, checkRestore, copyLines, editAllocation, lineName, lineSummary, linesIn, makeAllocation, monthWords, renameAllocations, type AllocationChange } from "./domain/monthAllocation";
+import { allocatableKinds, checkAllocation, checkRestore, copyLines, editAllocation, fromFor, lineName, lineSummary, linesIn, makeAllocation, monthAllocations, monthBefore, monthWords, paceWords, renameAllocations, type AllocationChange, type AllocationLine } from "./domain/monthAllocation";
 import { chatStore } from "./data/chatStore";
 import { FREE_READS, resetsAt, usageLevel } from "./data/usage";
 import { useUsage } from "./features/useUsage";
@@ -2095,7 +2095,7 @@ export default function App() {
     const short = (text: string, most: number): string => (text.length > most ? `${text.slice(0, most - 3).trimEnd()}...` : text);
     const newId = (): string => `alloc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
     if (change.kind === "add") {
-      const why = checkAllocation(change.input, change.month, all, reference);
+      const why = checkAllocation(change.input, change.month, all, reference, fromFor(change.input, change.month, asOf));
       if (why) return why;
       const line = makeAllocation(change.input, change.month, asOf, newId());
       setSettings((s) => ({ ...s, allocations: [...(s.allocations ?? []), line] }));
@@ -2106,7 +2106,25 @@ export default function App() {
     if (change.kind === "edit") {
       const was = all.find((l) => l.id === change.id);
       if (!was) return "That allocation is not there any more: it was removed, perhaps on another device.";
-      const why = checkAllocation(change.input, was.month, all.filter((l) => l.id !== was.id), reference);
+      /*
+       * A repeating line changed in a later month changes from that month
+       * on: the months before keep what they had, so a month that ended
+       * never has its figures rewritten (A12).
+       */
+      const from = change.month && change.month > was.month && was.repeat ? change.month : null;
+      if (from) {
+        const kept: AllocationLine = { ...was, until: monthBefore(from), ...(was.done ? { done: was.done.filter((d) => d.month < from) } : {}) };
+        const why = checkAllocation(change.input, from, [...all.filter((l) => l.id !== was.id), kept], reference);
+        if (why) return why;
+        const made = makeAllocation(change.input, from, asOf, newId(), undefined);
+        const moved = was.done?.filter((d) => d.month >= from) ?? [];
+        const line: AllocationLine = moved.length > 0 ? { ...made, done: moved } : made;
+        setSettings((s) => ({ ...s, allocations: [...(s.allocations ?? []).map((l) => (l.id === was.id ? kept : l)), line] }));
+        record(allocationChanged("allocation.update", short(`Changed the ${lineName(was)} allocation from ${monthWords(from)} on: ${lineSummary(line)}. ${monthWords(monthBefore(from))} and before keep ${formatMoney(was.amount)}${paceWords(was) ? ` (${paceWords(was)})` : ""}.`, 300), by, { amount: line.amount, targetId: line.id, before: short(lineSummary(was), 600), after: short(lineSummary(line), 600) }));
+        flash(short(`Changed from ${monthWords(from)} on: ${lineSummary(line)}. The months before keep what they had.`, 200));
+        return null;
+      }
+      const why = checkAllocation(change.input, was.month, all.filter((l) => l.id !== was.id), reference, change.input.per === "day" ? was.from : undefined);
       if (why) return why;
       const line = { ...editAllocation(was, change.input), ...(was.removedOn ? { removedOn: was.removedOn } : {}) };
       setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? line : l)) }));
@@ -2114,21 +2132,71 @@ export default function App() {
       flash(short(`Changed: ${lineSummary(line)}.`, 200));
       return null;
     }
+    if (change.kind === "done" || change.kind === "undone") {
+      const was = all.find((l) => l.id === change.id);
+      if (!was) return "That allocation is not there any more.";
+      const status = monthAllocations([was], spreadCovered(transactions), change.month, asOf).lines[0];
+      const freed = Math.max(0, status?.left ?? 0);
+      const without = (was.done ?? []).filter((d) => d.month !== change.month);
+      const doneLine: AllocationLine = { ...was, done: [...without, { month: change.month, on: asOf }] };
+      const openLine: AllocationLine = without.length > 0 ? { ...was, done: without } : (({ done: _d, ...rest }) => rest)(was);
+      const put = (line: AllocationLine): void => setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? line : l)) }));
+      if (change.kind === "done") {
+        // Done for this month: what it had left is free from today, and later entries of its kind are ordinary spending (A7).
+        put(doneLine);
+        record(allocationChanged("allocation.update", short(`Marked the ${lineName(was)} allocation done for ${monthWords(change.month)}: ${formatMoney(freed)} it had left is free.`, 300), by, { amount: freed, targetId: was.id, after: short(lineSummary(was), 600) }));
+        flash(`${lineName(was)} is done for ${monthWords(change.month)}: ${formatMoney(freed)} is free, in safe to spend.`, {
+          label: "Undo",
+          run: () => {
+            put(openLine);
+            record(allocationChanged("allocation.update", short(`Held the ${lineName(was)} allocation again for ${monthWords(change.month)}.`, 300), by, { targetId: was.id }));
+          },
+        });
+        return null;
+      }
+      put(openLine);
+      record(allocationChanged("allocation.update", short(`Held the ${lineName(was)} allocation again for ${monthWords(change.month)}.`, 300), by, { targetId: was.id, after: short(lineSummary(was), 600) }));
+      flash(`${lineName(was)} holds again what is left of it for ${monthWords(change.month)}.`);
+      return null;
+    }
     if (change.kind === "remove" || change.kind === "restore") {
       const was = all.find((l) => l.id === change.id);
       if (!was) return "That allocation is not there any more.";
+      const unstop = (l: AllocationLine): AllocationLine => (({ stoppedFrom: _s, ...rest }) => rest)(l);
+      const unremove = (l: AllocationLine): AllocationLine => (({ removedOn: _gone, ...rest }) => rest)(l);
       if (change.kind === "restore") {
         const why = checkRestore(was, all);
         if (why) return why;
-        setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? (({ removedOn: _gone, ...rest }) => rest)(l) : l)) }));
-        record(allocationChanged("allocation.restore", short(`Put back the ${lineName(was)} allocation for ${monthWords(was.month)} (${formatMoney(was.amount)}).`, 300), by, { amount: was.amount, targetId: was.id, after: short(lineSummary(was), 600) }));
+        // A repeating line stopped from a month goes on again from it; a line removed whole comes back whole.
+        const stopped = Boolean(was.stoppedFrom && !was.removedOn);
+        setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? (stopped ? unstop(l) : unremove(l)) : l)) }));
+        record(allocationChanged("allocation.restore", short(`Put back the ${lineName(was)} allocation ${stopped ? `from ${monthWords(was.stoppedFrom!)} on` : `for ${monthWords(was.month)}`} (${formatMoney(was.amount)}).`, 300), by, { amount: was.amount, targetId: was.id, after: short(lineSummary(was), 600) }));
         flash(`Put back the ${lineName(was)} allocation. It is set aside again.`);
+        return null;
+      }
+      /*
+       * A repeating line removed in a later month stops from that month: the
+       * months before keep it and their figures. Removed in its first month,
+       * it is removed whole. Either way it is kept, under Removed on Budget
+       * and in the Bin, to put back (A7).
+       */
+      const from = change.month && change.month > was.month && was.repeat ? change.month : null;
+      if (from) {
+        setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? { ...l, stoppedFrom: from } : l)) }));
+        record(allocationChanged("allocation.remove", short(`Stopped the ${lineName(was)} allocation from ${monthWords(from)}; ${monthWords(was.month)} to ${monthWords(monthBefore(from))} keep it.`, 300), by, { amount: was.amount, targetId: was.id, before: short(lineSummary(was), 600) }));
+        flash(`Stopped the ${lineName(was)} allocation from ${monthWords(from)}. The months before keep it; it is under Removed on Budget and in the Bin.`, {
+          label: "Undo",
+          run: () => {
+            setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? unstop(l) : l)) }));
+            record(allocationChanged("allocation.restore", short(`Put back the ${lineName(was)} allocation from ${monthWords(from)} on.`, 300), by, { amount: was.amount, targetId: was.id, after: short(lineSummary(was), 600) }));
+          },
+        });
         return null;
       }
       // Kept, not deleted: shown under Removed on Budget and put back from there, as a skipped plan is (A7).
       setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? { ...l, removedOn: asOf } : l)) }));
       record(allocationChanged("allocation.remove", short(`Removed the ${lineName(was)} allocation for ${monthWords(was.month)} (${formatMoney(was.amount)}).`, 300), by, { amount: was.amount, targetId: was.id, before: short(lineSummary(was), 600) }));
-      flash(`Removed the ${lineName(was)} allocation. Safe to spend no longer holds it; it is kept under Removed on Budget.`, {
+      flash(`Removed the ${lineName(was)} allocation. Safe to spend no longer holds it; it is kept under Removed on Budget and in the Bin.`, {
         label: "Undo",
         run: () => {
           setSettings((s) => ({ ...s, allocations: (s.allocations ?? []).map((l) => (l.id === was.id ? (({ removedOn: _gone, ...rest }) => rest)(l) : l)) }));
@@ -2988,6 +3056,9 @@ export default function App() {
               onPurge={handlePurge}
               plans={settings.plans ?? []}
               transactions={transactions}
+              allocations={settings.allocations ?? []}
+              onRestorePlan={(p) => changePlan(reopenPlan(p), "plan.restore", `Put "${p.title}" back on the plan list, from the Bin.`, BY_OWNER)}
+              onRestoreAllocation={(id) => handleAllocation({ kind: "restore", id })}
             />
           )}
           {screen === "activity" && (

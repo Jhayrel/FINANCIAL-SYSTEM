@@ -721,6 +721,7 @@ export function Budget({
               reference={reference}
               spendingBudget={a.spending.budget}
               balanceOf={balanceOf ?? (() => 0)}
+              asOf={asOf}
               onChange={onAllocation}
             />
           ) : (

@@ -632,11 +632,15 @@ export function Dashboard({
                     <Line
                       key={l.line.id}
                       label={
-                        l.over > 0
-                          ? `${l.name}, ${formatMoney(l.over)} over`
-                          : l.week && l.week.left >= 0
-                            ? `${l.name}, ${formatMoney(l.week.left)} left this week`
-                            : `${l.name}, of ${formatMoney(l.line.amount)}`
+                        l.done
+                          ? `${l.name}, done`
+                          : l.over > 0
+                            ? `${l.name}, ${formatMoney(l.over)} over`
+                            : l.week && l.week.left >= 0
+                              ? `${l.name}, ${formatMoney(l.week.left)} left this week`
+                              : l.days?.today && l.days.today.left >= 0
+                                ? `${l.name}, ${formatMoney(l.days.today.left)} left today`
+                                : `${l.name}, of ${formatMoney(l.line.amount)}`
                       }
                       value={l.held}
                     />

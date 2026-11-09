@@ -49,6 +49,8 @@ import { restoreCheck } from "../domain/restoreCheck";
 import { formatMoney } from "../domain/money";
 import { matchesSearch, parseSearch } from "../domain/search";
 import type { DeletedTransaction, Transaction, TransactionType } from "../domain/types";
+import { formatMedium } from "../domain/dates";
+import { lineName, monthWords, removedLines, spanWords, type AllocationLine } from "../domain/monthAllocation";
 import type { Flow as FlowTone } from "../components/primitives";
 
 const TONE: Record<TransactionType, FlowTone> = {
@@ -79,6 +81,9 @@ export function Bin({
   onPurge,
   plans = [],
   transactions,
+  allocations = [],
+  onRestorePlan,
+  onRestoreAllocation,
 }: {
   deleted: readonly DeletedTransaction[];
   onRestore: (id: string) => void;
@@ -90,6 +95,12 @@ export function Bin({
   plans?: readonly Plan[] | undefined;
   /** The ledger as it is, to say what restoring a row would do (`restoreCheck`). */
   transactions?: readonly Transaction[] | undefined;
+  /** Every allocation, removed ones too: those removed are listed here to put back (docs/17 A7). */
+  allocations?: readonly AllocationLine[] | undefined;
+  /** A removed plan put back on the Planner's list. */
+  onRestorePlan?: ((plan: Plan) => void) | undefined;
+  /** A removed allocation put back; why it could not be, or null. */
+  onRestoreAllocation?: ((id: string) => string | null) | undefined;
 }) {
   const phone = useMediaQuery("(max-width: 639px)");
   const [opened, setOpened] = useState<string | null>(null);
@@ -101,6 +112,15 @@ export function Bin({
   const [query, setQuery] = useState("");
   const [type, setType] = useState<TypeFilter>("all");
   const [limit, setLimit] = useState(PAGE);
+  const [refused, setRefused] = useState("");
+  /*
+   * Everything removed, in one place (owner, 9 November 2026: "how about
+   * deletion too how will it work ... where will it go"). Entries are here
+   * already; plans and allocations are kept where they were made, and listed
+   * here too, each with Put back.
+   */
+  const removedPlans = useMemo(() => plans.filter((p) => p.status === "removed").sort((a, b) => (b.closedOn ?? "").localeCompare(a.closedOn ?? "")), [plans]);
+  const removedAllocations = useMemo(() => removedLines(allocations), [allocations]);
 
   const counts = useMemo(() => binCounts(deleted), [deleted]);
 
@@ -157,6 +177,7 @@ export function Bin({
 
   return (
     <div className="fms-bin">
+      <div className="fms-binmain">
       <Card page
         title="Recycle bin"
         subtitle="Deleted transactions stay here until you restore them"
@@ -339,6 +360,56 @@ export function Bin({
           </div>
         )}
       </Card>
+
+      <Card
+        title="Removed elsewhere"
+        subtitle="Plans and allocations removed are kept where they were made, and listed here to put back"
+      >
+        {refused && (
+          <p className="t-caption fms-note-over" role="alert" style={{ marginTop: 0 }}>
+            {refused}
+          </p>
+        )}
+        {removedPlans.length === 0 && removedAllocations.length === 0 ? (
+          <p className="t-caption" style={{ margin: 0, color: "var(--ink-2)" }}>
+            No plan or allocation is removed. A plan removed on the Planner, or an allocation removed on Budget, shows here and there, with Put back.
+          </p>
+        ) : (
+          <ul className="fms-alloc-removedlist">
+            {removedPlans.map((p) => (
+              <li key={p.id} className="fms-alloc-removedrow">
+                <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                  Plan: {p.title}, {formatMoney(p.amount)}
+                  {p.closedOn ? `, removed ${formatMedium(p.closedOn)}` : ""}
+                  {p.reason ? ` (${p.reason})` : ""}
+                </span>
+                {onRestorePlan && (
+                  <button type="button" className="t-caption fms-linkbtn" onClick={() => onRestorePlan(p)} aria-label={`Put the plan ${p.title} back`}>
+                    Put back
+                  </button>
+                )}
+              </li>
+            ))}
+            {removedAllocations.map((l) => (
+              <li key={l.id} className="fms-alloc-removedrow">
+                <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                  Allocation: {lineName(l)}, {formatMoney(l.amount)}, {l.repeat ? spanWords({ ...l, stoppedFrom: undefined }) : monthWords(l.month)}
+                  {l.removedOn ? `, removed ${formatMedium(l.removedOn)}` : l.stoppedFrom ? `, stopped from ${monthWords(l.stoppedFrom)}` : ""}
+                </span>
+                {onRestoreAllocation && (
+                  <button type="button" className="t-caption fms-linkbtn" onClick={() => setRefused(onRestoreAllocation(l.id) ?? "")} aria-label={`Put back the ${lineName(l)} allocation`}>
+                    Put back
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="t-caption" style={{ margin: "var(--space-3) 0 0", color: "var(--ink-3)" }}>
+          Accounts, goals and debts are archived, never removed, with their history: reopen them in Settings. A category taken off a list while entries still use it is under On no list in Settings, to put back. A budget changed by mistake has Undo the last change on Budget.
+        </p>
+      </Card>
+      </div>
 
       {open && !confirming && (
         <Sheet

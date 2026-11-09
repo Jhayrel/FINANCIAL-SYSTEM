@@ -1124,7 +1124,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
   // Allocations, said in the bell once each (docs/17-ALLOCATIONS.md, A7).
   if ((input.allocations ?? []).length > 0) {
     const month = monthAllocations(input.allocations, transactions, monthOfDay(asOf), asOf);
-    for (const a of allocationAlerts(month, input.allocations, asOf)) {
+    for (const a of allocationAlerts(month, input.allocations, asOf, transactions)) {
       out.push({ id: a.id, level: a.level === "warning" ? "warn" : "info", area: "budget", title: a.title, detail: a.detail, weight: a.level === "warning" ? 62 : 28 });
     }
   }

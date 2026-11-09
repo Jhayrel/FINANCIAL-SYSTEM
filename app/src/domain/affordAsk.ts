@@ -201,7 +201,8 @@ export interface AffordInput {
  */
 function allocationFor(item: string, month: MonthAllocations): AllocationStatus | null {
   const key = item.trim().toLowerCase();
-  const lines = month.lines.filter((l) => !l.twinOf);
+  // A line marked done holds nothing: what is asked comes out of safe to spend, as with no allocation.
+  const lines = month.lines.filter((l) => !l.twinOf && !l.done);
   return (
     lines.find((l) => l.name.trim().toLowerCase() === key) ??
     lines.find((l) => l.line.words.split(/[,;]+/).some((w) => w.trim().toLowerCase() === key)) ??

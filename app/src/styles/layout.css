@@ -772,6 +772,14 @@
   min-width: 0;
 }
 
+/* The bin's own list and what was removed elsewhere, one column beside the rail. */
+.fms-binmain {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
 /*
  * The width a wide screen has spare goes to a side panel, not to longer rows:
  * the counts by type and what restoring would do to each wallet.
@@ -10202,10 +10210,21 @@ button.fms-recent-row:disabled {
   margin-bottom: 0;
 }
 
+/*
+ * The title stays while the sheet scrolls, as the actions do at the bottom:
+ * scrolled, a long form cut "Allocate for November 2026" in half at the top
+ * edge (owner's screenshot, 9 November 2026).
+ */
 .fms-rowsheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: flex-start;
   gap: var(--space-3);
+  margin: 0 calc(var(--space-4) * -1);
+  padding: var(--space-2) var(--space-4) var(--space-2);
+  background: var(--surface);
 }
 
 .fms-rowsheet-titles {
@@ -10257,6 +10276,15 @@ button.fms-recent-row:disabled {
   gap: var(--space-4);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-lg);
+}
+
+/* Stuck at the dialog's own top edge, not inside its padding, where text scrolled above it still showed. */
+.fms-rowsheet--dialog .fms-rowsheet-head {
+  top: calc(var(--space-5) * -1);
+  margin: calc(var(--space-5) * -1) calc(var(--space-5) * -1) 0;
+  padding: var(--space-5) var(--space-5) var(--space-3);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
 }
 
 .fms-rowsheet--dialog .fms-rowsheet-actions {
