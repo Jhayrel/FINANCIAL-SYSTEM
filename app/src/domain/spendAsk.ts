@@ -243,7 +243,10 @@ export function spendAnswer(ask: SpendAsk, transactions: readonly Transaction[],
         ? `${week[1]} week (${week[2]})`
         : /\bto\b/.test(ask.name)
           ? `from ${ask.name}`
-          : `in ${ask.name}`;
+          : // One day is "on" it: "You spent PHP 2,907.00 in Nov 5" (9 November 2026 sweep).
+            /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:,?\s+20\d{2})?$/i.test(ask.name.trim()) || /^20\d{2}-\d{2}-\d{2}$/.test(ask.name.trim())
+            ? `on ${ask.name}`
+            : `in ${ask.name}`;
 
   if (rows.length === 0) {
     /*

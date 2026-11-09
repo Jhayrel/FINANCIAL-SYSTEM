@@ -49,6 +49,7 @@ import { monthsRead } from "./budgetAdvice";
 import { monthsSaid, outlookFor, type MonthOutlook } from "./outlook";
 import type { AllocationStatus, MonthAllocations } from "./monthAllocation";
 import type { SafeToSpend } from "./monthPlan";
+import { asksUpcoming } from "./upcoming";
 import { owedChange, type Debt } from "./debt";
 import { costOf, monthTotals } from "./totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
@@ -57,7 +58,7 @@ import { walletDelta } from "./balances";
 // ── What the message wants drawn ────────────────────────────────────────────
 
 /** The money a chart is of. The last three are levels or a budget, drawn by this file. */
-export type ChartMoney = "spending" | "income" | "both" | "budget" | "balance" | "owed" | "forecast" | "allocation" | "safe";
+export type ChartMoney = "spending" | "income" | "both" | "budget" | "balance" | "owed" | "forecast" | "allocation" | "safe" | "upcoming";
 
 /** What to draw, as the model or the words say it. Every part may be missing. */
 export interface ChartHint {
@@ -92,6 +93,7 @@ const MONIES: Readonly<Record<string, ChartMoney>> = {
   forecast: "forecast", prediction: "forecast", projection: "forecast",
   allocation: "allocation", allocations: "allocation",
   safe: "safe",
+  upcoming: "upcoming", future: "upcoming",
 };
 
 /**
@@ -202,6 +204,7 @@ export function localHint(question: string, credits: readonly string[] = []): Ch
   const namesCredit = credits.some((c) => c.trim() !== "" && lower.includes(c.trim().toLowerCase()));
 
   if (asksForecast(q)) return { money: "forecast" };
+  if (asksUpcoming(q)) return { money: "upcoming" };
   if (SAFE_WORDS.test(q) && SEE.test(q)) return { money: "safe" };
   if (ALLOCATION_WORDS.test(q) && (SEE.test(q) || /\b(?:status|left|how (?:are|is)|progress|used)\b/i.test(q))) return { money: "allocation" };
   if (/\bbudget/i.test(q.replace(BUDGET_PURPOSE, " ")) && BUDGET_SEE.test(q) && !BUDGET_DOING.test(q)) {
@@ -239,6 +242,7 @@ function moneyAllowed(money: ChartMoney, question: string, credits: readonly str
   if (money === "forecast") return asksForecast(question);
   if (money === "allocation") return ALLOCATION_WORDS.test(question);
   if (money === "safe") return SAFE_WORDS.test(question);
+  if (money === "upcoming") return asksUpcoming(question);
   if (money === "owed") {
     const lower = question.toLowerCase();
     return DEBT_WORDS.test(question) || credits.some((c) => c.trim() !== "" && lower.includes(c.trim().toLowerCase()));
@@ -259,9 +263,9 @@ export function mergeHint(local: ChartHint | null, model: ChartHint | null, ques
 }
 
 /** The money this chart is of, when it is a level or a budget rather than a flow. */
-export function measureOf(hint: ChartHint | null): "budget" | "balance" | "owed" | "forecast" | "allocation" | "safe" | null {
+export function measureOf(hint: ChartHint | null): "budget" | "balance" | "owed" | "forecast" | "allocation" | "safe" | "upcoming" | null {
   const money = hint?.money;
-  return money === "budget" || money === "balance" || money === "owed" || money === "forecast" || money === "allocation" || money === "safe" ? money : null;
+  return money === "budget" || money === "balance" || money === "owed" || money === "forecast" || money === "allocation" || money === "safe" || money === "upcoming" ? money : null;
 }
 
 const SAYS_SHAPE = /\b(?:pie|donut|doughnut|circle|bars?|bar chart|bar graph|columns?|line|line chart|curve|trend|over time)\b/i;
@@ -1064,6 +1068,18 @@ export function chartReading(chart: Chart): string {
     return `${head}${now}${ahead}`;
   }
 
+  if (chart.measure === "upcoming" && chart.upcoming) {
+    const u = chart.upcoming;
+    const parts = [
+      u.plans > 0 ? `${m(u.plans)} in plans${u.noDate > 0 ? ` (${m(u.noDate)} of it with no date yet)` : ""}` : "",
+      u.bills > 0 ? `${m(u.bills)} of bills and subscriptions this month` : "",
+      u.allocations > 0 ? `${m(u.allocations)} still held in allocations` : "",
+      u.debts > 0 ? `${m(u.debts)} of debt payments due` : "",
+    ].filter(Boolean);
+    const top = rows[0] as ChartRow;
+    return `${m(chart.total)} is still to come: ${parts.join(", ")}. ${top.label} is the largest, ${m(top.value)}.`;
+  }
+
   if (chart.measure === "safe" && chart.plan) {
     const p = chart.plan;
     const safeRow = rows.find((r) => r.label === "Safe to spend");
@@ -1203,6 +1219,6 @@ export function chartsWorked(charts: readonly Chart[], inWordsOf: (c: Chart) => 
   if (charts.length === 0) return "";
   return [
     `The app drew ${charts.length === 1 ? "this chart" : "these charts"} just above your answer, from the ledger. ${charts.length === 1 ? "Its" : "Their"} figures are correct and are what the owner is looking at: answer with them, refer to the chart where it helps, never describe a different chart, and never say a chart cannot be drawn.`,
-    ...charts.map((c) => `${c.title}: ${inWordsOf(c)} ${chartReading(c)}`.trim()),
+    ...charts.map((c) => `${c.title}: ${inWordsOf(c)} ${chartReading(c)}${c.scope ? ` ${c.scope}` : ""}`.trim()),
   ].join("\n");
 }

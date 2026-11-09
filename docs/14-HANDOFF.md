@@ -3085,6 +3085,49 @@ of the backup; a sweep of chat edits, moves, deletes, restores and undo with
 the buttons pressed and balances read before and after; every chart type;
 `chartsAhead.test.ts` and `differenceFixes.test.ts` on invented figures.
 
+### 2026-11-10: the owner's next screenshots, and sixty questions asked of the chat
+
+Four screenshots from the live site and "make more scenarios and improve the
+reasoning". Each one was a reasoning fault; then sixty everyday questions
+were put to the chat on the emulator copy, every answer read, and each wrong
+one fixed. Found and fixed:
+
+- **"A list of future spending"** was read as this month's spending; the
+  model added up the plans itself (and was flagged for it), and "Pie" drew
+  November. Spending still to come is now its own answer (`upcoming.ts`):
+  open plans (those with no date said, since nothing holds them), bills and
+  subscriptions not paid this month, what allocations still hold, debt
+  payments due, every total the app's, with a chart that "pie" redraws.
+- **"Vs june"** set nine days of November against all of June. A month still
+  running is now set against the same days of the other (`fairPair`), and
+  "vs" after a chart compares with the chart's own window (`versusPair`),
+  kind by kind; a pie of a comparison is the later period.
+- **"A trend of my bad spending"** drew every peso. Bad, unnecessary or
+  impulse spending is the kinds the owner marked Discretionary (`wantsAsk.ts`),
+  said as Wants with the kinds named under the chart; "wants vs needs" is a
+  split by the marks, bills apart, as the health check reads it. A two-word
+  kind ("Self Care") had left "self" to be searched for in descriptions,
+  which emptied any chart naming it.
+- **"Can I afford now the plan for motorcycle upgrade?"** never found the
+  plan, saved as "Motorcylce": plan names now match a long word one letter
+  off (`oneOff`). It had gone to next month's budget advice and a budget card.
+- **"This month" read as pointing back** ("pie of my unnecessary expenses
+  this month" redrew the chart before it), fixed in `drawsBack`.
+- **From the sixty questions**: "how long will my money last" (the wallets
+  after what is due, at the last thirty days' pace, `runwayAsk.ts`); "did I
+  pay my wifi" (a bill by any word of its own name); "which day do I spend
+  the most" (by day of the week over twelve weeks, `weekdayAsk.ts`); "biggest
+  spending day", "most expensive purchase", "more on food or treats"
+  (`pickAsk.ts`); "income last month vs this month" (a comparison, not last
+  month alone); "may pera pa ba ako" (safe to spend); "spent ... in Nov 5"
+  is now "on Nov 5". Two stray backspace characters from an edit had broken
+  the "vs" reading; the source is scanned for them now before a push.
+
+Left to the model, which the live site has: "how am I doing", "summary of
+this week", "how can I save more", "what should I cut", "am I saving
+enough". Each is answered from the full context the model is given; the
+container cannot reach a model, so none was seen answered here.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

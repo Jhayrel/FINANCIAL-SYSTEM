@@ -113,6 +113,7 @@ import {
   isChartFollowUp,
   groupingOf,
   windowOf,
+  versusPair,
   percentOf,
   asksChartColour,
   namesWindow,
@@ -134,6 +135,11 @@ import {
 } from "../domain/charts";
 import { asksForecast, BUDGET_PURPOSE, buildAllocationChart, buildMeasureChart, forecastEmptyWords, chartHelps, chartReading, chartsWorked, inWords, localHint, measureOf, mergeHint, type ChartHint } from "../domain/chartAsk";
 import { questionMeant } from "../domain/drawBack";
+import { asksUpcoming, buildUpcomingChart, upcomingOf, upcomingWords } from "../domain/upcoming";
+import { asKinds, asksBoth, buildNecessityChart, kindsNote, necessityAsked, necessitySplit, necessityWords } from "../domain/wantsAsk";
+import { asksRunway, recentPace, runwayWords } from "../domain/runwayAsk";
+import { asksWeekday, buildWeekdayChart, saysWindow, weekdaySplit, weekdayWords } from "../domain/weekdayAsk";
+import { asksBiggestDay, asksDearest, dearestWords, eitherAsked, eitherWords } from "../domain/pickAsk";
 import { rampFor } from "../components/charts";
 import { Icon } from "../components/Icon";
 import { AttachMenu } from "../components/AttachMenu";
@@ -2442,6 +2448,16 @@ export function AskPanel({
   };
   /** The question a chart was drawn from, without the shape it was drawn in, and keeping its grouping over time. */
   const redrawAsked = (chart: Chart): string | null => {
+    /*
+     * A comparison redrawn is the later period, by what it was split by:
+     * "show that as a pie" after November against June drew all of June,
+     * the period the question named (9 November 2026 sweep).
+     */
+    const periods = chart.against?.periods;
+    if (periods && !chart.measure) {
+      const subject = chart.title.split(",")[0] ?? "";
+      return `${subject} ${periods.now.from} to ${periods.now.to}`.trim();
+    }
     if (!chart.asked) return null;
     const base = chart.asked
       .replace(/\b(?:as\s+(?:a|an)\s+)?(?:pie(?:\s+chart)?|donut|doughnut|bar\s+(?:chart|graph)|bars?|line(?:\s+chart)?|trend|chart|graph|plot)\b/gi, " ")
@@ -4719,6 +4735,27 @@ export function AskPanel({
    * chart is one direction). Every figure is added up here.
    */
   const chartsFor = (asked: string, hint: ChartHint | null, pair: ComparedPeriods | null): Chart[] => {
+    /*
+     * "My bad spending": the kinds marked Discretionary, drawn as Wants with
+     * the kinds named under it (owner, 9 November 2026: it drew every peso).
+     */
+    const marked = measureOf(hint) ? null : asKinds(asked, reference.spendingTypes);
+    if (marked && marked.kinds.length === 0) return [];
+    if (marked) {
+      return chartsFor(marked.text, hint, pair).map((c) => {
+        const cut = c.title.indexOf(" by ");
+        return {
+          ...c,
+          title: cut > 0 && marked.kinds.some((k) => c.title.startsWith(k)) ? `${marked.label}${c.title.slice(cut)}` : c.title,
+          scope: kindsNote(marked.label, marked.kinds, marked.unmarked),
+          asked: asked,
+        };
+      });
+    }
+    if (measureOf(hint) === "upcoming") {
+      const drawn = buildUpcomingChart(upcomingNow(), /\b(?:pie|donut|doughnut|circle)\b/i.test(asked));
+      return drawn ? [{ ...drawn, asked: "spending still to come" }] : [];
+    }
     if (measureOf(hint)) {
       const ym = monthAsked(asked, asOf);
       const allocationMonth = measureOf(hint) === "allocation" ? monthAllocations(reference.allocations, reportRows, ym, asOf) : null;
@@ -4744,12 +4781,26 @@ export function AskPanel({
     return [spending, income].filter((c): c is Chart => c !== null).map((c) => ({ ...c, asked: said }));
   };
 
+  /**
+   * Spending still to come, from the screens' own figures: open plans, bills
+   * and subscriptions not paid this month, what allocations still hold, and
+   * debt payments due (`upcoming.ts`).
+   */
+  const upcomingNow = () => {
+    const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
+    const views = plansAsNow(settings.plans ?? [], transactions).map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf }));
+    return upcomingOf({ views, bills: brief.bills, allocations: brief.safe?.allocations ?? monthAllocations(reference.allocations, reportRows, asOf.slice(0, 7), asOf), debts: brief.debts });
+  };
+
   /** Why nothing was drawn, said for what was asked: a forecast, an allocation and safe to spend each have their own reason. */
   const emptyChartWords = (asked: string): string => {
+    const marked = asKinds(asked, reference.spendingTypes);
+    if (marked && marked.kinds.length === 0) return `None of your kinds of spending is marked ${marked.label === "Wants" ? "Discretionary" : "Essential"} yet, so there is nothing to count as ${marked.label.toLowerCase()}. Mark each kind in Settings, Categories, and this draws them.`;
     const measure = measureOf(localHint(asked, reference.credits ?? []));
     if (measure === "forecast") return forecastEmptyWords(asked, asOf);
     if (measure === "allocation") return `There are no allocations for ${monthWords(monthAsked(asked, asOf))} to draw. Add one on Budget, under Allocations, or say "allocate 300 a week for gas".`;
     if (measure === "safe") return "The spending wallets hold nothing now, so there is no safe to spend to draw.";
+    if (measure === "upcoming") return 'Nothing is still to come: no open plans, no bills left this month, and no allocations holding money. Say "plan tuition 9000 by December 15" to add one.';
     return "There is nothing in that period to draw.";
   };
 
@@ -6014,9 +6065,137 @@ export function AskPanel({
      * Not a picture asked for by name: "chart my maya balance" was answered
      * as one figure (9 November 2026 sweep). The chart route draws it.
      */
+    /*
+     * Spending still to come: "Can you show me a list of future spending"
+     * was read as this month's spending, answered by the model adding the
+     * plans up itself, and "Pie" then drew November (owner, 9 November
+     * 2026). Worked out here, every total the app's own, and drawn beside
+     * the words; "pie" or "bars" next redraws this.
+     */
+    if (files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) && asksUpcoming(ruled)) {
+      const u = upcomingNow();
+      const next = nextOf(asOf);
+      const usual = forecastFor(next.year, next.month);
+      const words = upcomingWords(u, asOf, usual ? { name: `${MONTH_NAMES[next.month - 1] ?? ""} ${next.year}`, total: usual.spending + usual.billsSubs } : null);
+      const drawn = noPicture(note) ? null : buildUpcomingChart(u, /\b(?:pie|donut|doughnut|circle)\b/i.test(ruled));
+      if (!drawn && u.lines.length > 0) drawnNext.current = { question: "spending still to come", at: Date.now() };
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "budget", { text: note }));
+      await aiFirst(note, words, {
+        where: "budget",
+        go: { screen: "planner", label: "the Planner" },
+        charts: drawn ? [{ ...drawn, asked: "spending still to come" }] : [],
+        rules: `The app worked out the spending still to come below, from the Planner, the bills, the allocations and the debts, for this message. Today is ${formatMedium(asOf)}. Answer with these figures and these totals, in your own words and briefly: never add figures up yourself. Plans with no date are not set aside anywhere; say so when there are some. Never write a Plan line or an Entry line.`,
+      });
+      return;
+    }
+    /*
+     * "Biggest spending day this month", "most expensive purchase", "did I
+     * spend more on food or treats": each worked out here and drawn where a
+     * picture helps. They drew spending by kind, went to the model, or said
+     * a line about an earlier chart (9 November 2026 sweep).
+     */
+    if (files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note)) {
+      const either = eitherAsked(ruled, knownItems);
+      const day = !either && asksBiggestDay(ruled);
+      const dearest = !either && !day && asksDearest(ruled);
+      if (either || day || dearest) {
+        const w = windowOf(ruled, asOf);
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "insights", { text: note }));
+        if (either) {
+          const charts = noPicture(note) ? [] : chartsFor(`${either.join(" and ")} ${w.name}`, { by: "item" }, null);
+          await aiFirst(note, eitherWords(either, reportRows, w), { where: "insights", charts, rules: "The app worked out the two kinds below, for this message. Answer which was more and by how much, with these figures: never add figures up yourself. Never write a Plan line or an Entry line." });
+          return;
+        }
+        if (day) {
+          const charts = chartsFor(`spending daily ${w.name}`, { by: "day" }, null);
+          const top = charts[0] ? [...charts[0].rows].sort((a, b) => b.value - a.value)[0] : undefined;
+          const words = charts[0] && top ? `**${top.label} was the biggest spending day in ${w.name}: ${formatMoney(top.value)}.** ${chartReading(charts[0])}` : `Nothing was spent in ${w.name}.`;
+          await aiFirst(note, words, { where: "insights", charts: noPicture(note) ? [] : charts, rules: "The app worked out the days below, for this message. Answer with these figures: never add figures up yourself. Never write a Plan line or an Entry line." });
+          return;
+        }
+        await aiFirst(note, dearestWords(reportRows, w), { where: "insights", rules: "The app found the largest entries below, for this message. Answer with them as they are. Never write a Plan line or an Entry line." });
+        return;
+      }
+    }
+    /*
+     * "Which day do I spend the most": by day of the week, over the window
+     * said or the last twelve weeks. It drew spending by kind (9 November
+     * 2026 sweep).
+     */
+    if (files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) && asksWeekday(ruled)) {
+      const said = saysWindow(ruled) ? windowOf(ruled, asOf) : null;
+      const from = said?.from ?? addDays(asOf, -83);
+      const to = said?.to ?? asOf;
+      const name = said?.name ?? "the last 12 weeks";
+      const split = weekdaySplit(reportRows, from, to);
+      const picture = noPicture(note) ? null : buildWeekdayChart(split, name);
+      const words = weekdayWords(split, name);
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "insights", { text: note }));
+      await aiFirst(note, words, {
+        where: "insights",
+        charts: picture ? [{ ...picture, asked: `spending by day of the week ${name}` }] : [],
+        rules: "The app worked out spending by day of the week below, for this message. Answer with these figures, briefly, and say what the pattern suggests in one sentence: never add figures up yourself. Never write a Plan line or an Entry line.",
+      });
+      return;
+    }
+    /*
+     * Wants and needs asked about: "how much did I spend on wants vs needs",
+     * "how much did I spend on bad stuff". The first went to the model with
+     * nothing worked out and the second searched the descriptions for "bad
+     * stuff" (9 November 2026 sweep). By the owner's own marks, said and
+     * drawn. A chart of one side alone ("a trend of my bad spending") is
+     * the chart route's.
+     */
+    const sideAsked = necessityAsked(ruled);
+    if (files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) && (asksBoth(ruled) || (sideAsked && !wantsChart(ruled)))) {
+      const w = windowOf(ruled, asOf);
+      const split = necessitySplit(reportRows, w.from, w.to, reference.spendingTypes);
+      const side = asksBoth(ruled) ? null : sideAsked;
+      const total = split.needs + split.wants + split.emergency + split.unmarked;
+      const sideTotal = side ? (side.label === "Wants" ? split.wants : split.needs) : 0;
+      const lead = side ? `**${side.label} in ${w.name}: ${formatMoney(sideTotal)}${total > 0 ? `, ${Math.round((sideTotal * 100) / total)}% of day-to-day spending` : ""}.**` : "";
+      const words = [lead, necessityWords(split, w.name)].filter(Boolean).join("\n");
+      const picture = noPicture(note) ? null : buildNecessityChart(split, w.name, /\b(?:pie|donut|doughnut)\b/i.test(ruled));
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "insights", { text: note }));
+      await aiFirst(note, words, {
+        where: "insights",
+        charts: picture ? [{ ...picture, asked: `needs and wants ${w.name}` }] : [],
+        rules: `The app worked out the split below by the owner's own marks on each kind of spending, for this message. Answer with these figures and shares, briefly, and say which kinds count as wants when it helps: never add figures up yourself. Never write a Plan line or an Entry line.`,
+      });
+      return;
+    }
+    /*
+     * "How long will my money last", worked out here: the wallets after what
+     * is still due, at the pace of the last thirty days (9 November 2026
+     * sweep: it went to the model with nothing worked out).
+     */
+    if (files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) && asksRunway(ruled)) {
+      const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
+      if (brief.safe) {
+        const words = runwayWords(brief.safe, recentPace(reportRows, asOf), asOf);
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "budget", { text: note }));
+        await aiFirst(note, words, { where: "budget", go: { screen: "dashboard", label: "Dashboard" }, rules: `The app worked out how long the money lasts below, for this message. Today is ${formatMedium(asOf)}. Answer with these figures and days, briefly: never work out a figure or a date yourself. Never write a Plan line or an Entry line.` });
+        return;
+      }
+    }
     const quickChartAsked = wantsChart(ruled) && !noPicture(ruled);
     const quickRead = files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) ? readQuickAsk(ruled, knownItems, [...reference.wallets, ...reference.savings]) : null;
-    const quick = quickRead && quickChartAsked && (quickRead.kind === "balance" || quickRead.kind === "worth" || quickRead.kind === "savings") ? null : quickRead;
+    const quick =
+      (quickRead && quickChartAsked && (quickRead.kind === "balance" || quickRead.kind === "worth" || quickRead.kind === "savings")) ||
+      // Two periods asked about are a comparison, and "biggest spending day" is a day: neither is the quick answer's (9 November 2026 sweep).
+      (quickRead && (comparedPeriods(ruled, asOf) !== null || asksBiggestDay(ruled)))
+        ? null
+        : quickRead;
     if (quick) {
       const y = Number(asOf.slice(0, 4));
       const m = Number(asOf.slice(5, 7));
@@ -10448,7 +10627,9 @@ export function AskPanel({
       const [laterSaid, earlierSaid] = routed?.compare ?? [];
       const saidPair = laterSaid && earlierSaid ? periodsSaid(laterSaid, earlierSaid, asOf) : null;
       // A pie is one period split up, so "pie" after a comparison draws this period alone.
-      const pair = saidPair ?? (followUp && !namesPeriod && !asksPie(ruled) ? shown?.against?.periods ?? null : null);
+      // "Vs june" after a chart: the chart's window against the one named, a running month against the same days (9 November 2026).
+      const versus = !saidPair && shown && !asksPie(ruled) ? versusPair(ruled, shown.title, asOf) : null;
+      const pair = saidPair ?? versus ?? (followUp && !namesPeriod && !asksPie(ruled) ? shown?.against?.periods ?? null : null);
       /*
        * What to draw, read from this message and, for a new request, from
        * what the model said to draw (`chartAsk.ts`). A follow-up keeps what
@@ -10468,7 +10649,16 @@ export function AskPanel({
       const hint = overTime
         ? ({ money: "balance" } as ChartHint)
         : mergeHint(localHint(ruled, credits) ?? (snapshot ? null : keptMeasure), fresh ? (routed?.draw ?? null) : null, ruled, credits);
-      const askedNow = overTime ? `${ruled} balance this year` : asked;
+      /*
+       * Two windows side by side are compared kind by kind: "Vs june" after a
+       * chart by day drew June by day alone, since a series over time is
+       * not set beside another (9 November 2026 sweep).
+       */
+      const askedNow = overTime
+        ? `${ruled} balance this year`
+        : versus
+          ? `${asked.replace(/\b(?:by|per)\s+(?:days?|weeks?|months?|years?)\b|\b(?:daily|weekly|monthly|yearly|trend|over time)\b/gi, " ").replace(/\s+/g, " ").trim()} by item`
+          : asked;
       let drawn = chartsFor(askedNow, hint, measureOf(hint) ? null : pair);
       /*
        * A window carried over from the chart before, with nothing in it, or a
@@ -14390,6 +14580,16 @@ function ChartRead({ chart, at }: { chart: Chart; at: number | null }) {
     );
   }
 
+  if (chart.measure === "upcoming") {
+    return (
+      <p className="t-micro fms-chartread">
+        <span className="fms-chartread-label">{row.label}</span>
+        <span className="fms-proposalmoney fms-chartread-money">{chartLabel(row.value)}</span>
+        <span className="fms-chartread-of">{`${share} of what is still to come`}</span>
+      </p>
+    );
+  }
+
   if (chart.measure === "safe") {
     return (
       <p className="t-micro fms-chartread">
@@ -14617,6 +14817,7 @@ function ChartView({ chart }: { chart: Chart }) {
 
       <ChartRead chart={chart} at={at} />
 
+      {chart.scope ? <p className="t-micro fms-proposalfrom">{chart.scope}</p> : null}
       <p className="t-micro fms-proposalfrom">
         {chart.measure === "budget"
           ? "Spending as the budget counts it: spending, bills, subscriptions, fees and interest. Worked out on this device."
@@ -14624,7 +14825,9 @@ function ChartView({ chart }: { chart: Chart }) {
             ? "Balances worked out on this device, from your entries, the same way every screen does."
             : chart.measure === "owed"
               ? "What is owed: borrowed and charges added, less what was paid and written off. Interest paid is not owed. Worked out on this device."
-              : chart.measure === "safe"
+              : chart.measure === "upcoming"
+                ? "Open plans, bills and subscriptions still to pay this month, what allocations still hold, and debt payments due. Worked out on this device."
+                : chart.measure === "safe"
                 ? "The Dashboard's safe to spend: what the spending wallets hold, less what is still due this month. Worked out on this device."
                 : chart.measure === "allocation"
                 ? "Allocations as Budget shows them: what each has spent of what it holds this month. Worked out on this device."

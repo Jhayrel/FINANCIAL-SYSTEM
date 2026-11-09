@@ -105,6 +105,12 @@ export function asksSafeToSpend(text: string): boolean {
   if (ON_ONE_THING.test(t)) return false;
   if (asksCarryOver(t)) return true;
   if (SAFE_ASK.test(t)) return true;
+  /*
+   * In Filipino: "may pera pa ba ako", "may natitira pa ba", "magkano pa
+   * pwede kong gastusin", "kaya ko pa ba gumastos". It went to the model
+   * with nothing worked out (9 November 2026 sweep).
+   */
+  if (/\bmay\s+(?:pera|natitira|natira)\s+pa\b|\bmagkano\s+(?:pa\s+)?(?:ang\s+)?(?:pwede|puwede|pede)\b|\bkaya\s+ko\s+pa\s+(?:ba\s+)?(?:gumastos|bumili)\b|\b(?:ilan|magkano)\s+(?:pa\s+)?(?:ang\s+)?(?:natitira|natira)\s+(?:sa\s+)?(?:pera|wallet)\b/i.test(t)) return true;
   if (AFTER_BILLS.test(t)) return true;
   // "what if I didn't spend yesterday", "if I don't spend today": what carries over (12 October 2026 audit, A9).
   if (/\b(?:what\s+if|if)\s+i\s+(?:didn'?t|did\s+not|hadn'?t|had\s+not|don'?t|do\s+not|won'?t|will\s+not|never)\s+spen[dt]\b/i.test(t)) return true;

@@ -91,7 +91,13 @@ export interface Chart {
    * budget, in `previous`; a balance or what is owed is a level, read at the
    * end of each period, so `total` is the latest level rather than a sum.
    */
-  readonly measure?: "budget" | "balance" | "owed" | "forecast" | "allocation" | "safe" | undefined;
+  readonly measure?: "budget" | "balance" | "owed" | "forecast" | "allocation" | "safe" | "upcoming" | undefined;
+  /** What a chart narrowed to the owner's wants or needs counts, said under it (`wantsAsk.ts`). */
+  readonly scope?: string | undefined;
+  /** Spending still to come, by what it is (`upcoming.ts`): the parts its reading names. */
+  readonly upcoming?:
+    | { readonly plans: number; readonly noDate: number; readonly bills: number; readonly allocations: number; readonly debts: number }
+    | undefined;
   /**
    * A forecast's own figures beside its rows (`buildForecastChart`): what a
    * usual month brings in, the debt payments due, and what is left after
@@ -852,7 +858,14 @@ export function drawReply(said: string): "pie" | "bars" | "trend" | "chart" | nu
  */
 export function drawsBack(said: string): "pie" | "bars" | "trend" | "chart" | null {
   const t = said.trim().toLowerCase().replace(/[.!?]+$/, "");
-  if (t.split(/\s+/).length > 8 || !/\b(?:it|that|this|those|them)\b/.test(t)) return null;
+  /*
+   * "This month" is a time, not the answer pointed at, and "of my unnecessary
+   * expenses" names its own subject: "pie of my unnecessary expenses this
+   * month" redrew the chart before it as a pie (9 November 2026 sweep).
+   */
+  const pointing = t.replace(/\b(?:this|that|last|next)\s+(?:month|week|year|day|morning|afternoon|evening|quarter|time)\b/g, " ");
+  if (t.split(/\s+/).length > 8 || !/\b(?:it|that|this|those|them)\b/.test(pointing)) return null;
+  if (/\bof\s+(?:my|the|our)\s+[a-z]/.test(pointing)) return null;
   if (/\b(?:pie|donut|doughnut)\b/.test(t)) return "pie";
   if (/\bbars?\b/.test(t)) return "bars";
   if (/\b(?:trend|line|over time|by month|monthly)\b/.test(t)) return "trend";
@@ -1025,7 +1038,12 @@ function aboutOf(text: string, transactions: readonly Transaction[], taken: read
    */
   const question = text.replace(/\b(?:break|broken)\s+(?:it\s+|them\s+)?down\b/gi, "breakdown");
   const months = MONTHS.map((m) => m.toLowerCase());
-  const skip = new Set([...ASKING_WORDS, ...months, ...months.map((m) => m.slice(0, 3)), ...taken.map((t) => t.toLowerCase())]);
+  /*
+   * Every word of a name already read, not only the whole name: "Self Care"
+   * named as a kind left "self" to be read as a word from the descriptions,
+   * and a chart of the owner's wants counted PHP 15.00 (9 November 2026).
+   */
+  const skip = new Set([...ASKING_WORDS, ...months, ...months.map((m) => m.slice(0, 3)), ...taken.map((t) => t.toLowerCase()), ...taken.flatMap((t) => t.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean))]);
   const said = transactions.map((t) => ` ${`${t.description} ${t.notes}`.toLowerCase().replace(/[^a-z0-9]+/g, " ")} `);
   const used = (w: string): number => said.filter((d) => d.includes(` ${w} `) || d.includes(` ${w}s `)).length;
   /*
@@ -1216,7 +1234,7 @@ export function comparedPeriods(question: string, asOf: IsoDate): ComparedPeriod
     const whole = (w: string): string => w.replace(/^[a-z]+/, (m) => MONTHS.find((x) => x.toLowerCase().startsWith(m.slice(0, 3))) ?? m);
     const [a, b] = two.map((w) => windowOf(whole(w), asOf)) as [ReturnType<typeof windowOf>, ReturnType<typeof windowOf>];
     if (a.from === b.from) return null;
-    return a.from > b.from ? { now: a, before: b } : { now: b, before: a };
+    return fairPair(a.from > b.from ? { now: a, before: b } : { now: b, before: a }, asOf);
   }
 
   const iso = (d: Date): IsoDate => d.toISOString().slice(0, 10);
@@ -1294,7 +1312,47 @@ export function periodsSaid(now: string, before: string, asOf: IsoDate): Compare
   const a = windowOf(now, asOf);
   const b = windowOf(before, asOf);
   if (a.from === b.from && a.to === b.to) return null;
-  return { now: a, before: b };
+  return fairPair(a.from > b.from ? { now: a, before: b } : { now: b, before: a }, asOf);
+}
+
+/**
+ * A month still running against a whole month is put against the same days
+ * of it. "Vs june" on 9 November set nine days of November against all
+ * thirty of June and called it less (owner's screenshot, 9 November 2026). The
+ * whole of the earlier month is still said beside it (`comparisonWorked`).
+ */
+export function fairPair(pair: ComparedPeriods, asOf: IsoDate): ComparedPeriods {
+  const ym = asOf.slice(0, 7);
+  const lastDay = (from: IsoDate): number => new Date(Date.UTC(Number(from.slice(0, 4)), Number(from.slice(5, 7)), 0)).getUTCDate();
+  const wholeMonth = (w: ComparedPeriods["before"]): boolean => w.from.slice(8) === "01" && w.from.slice(0, 7) === w.to.slice(0, 7) && Number(w.to.slice(8)) === lastDay(w.from);
+  const running = pair.now.from === `${ym}-01` && pair.now.to.slice(0, 7) === ym;
+  if (!running || !wholeMonth(pair.before) || pair.before.from.slice(0, 7) === ym) return pair;
+  const day = Number(asOf.slice(8, 10));
+  if (day >= lastDay(pair.now.from)) return pair;
+  const beforeName = `${MONTHS[Number(pair.before.from.slice(5, 7)) - 1] ?? ""} ${pair.before.from.slice(0, 4)}`;
+  const nowName = `${MONTHS[Number(ym.slice(5, 7)) - 1] ?? ""} ${ym.slice(0, 4)}`;
+  const to = `${pair.before.from.slice(0, 8)}${String(Math.min(day, lastDay(pair.before.from))).padStart(2, "0")}`;
+  return {
+    now: { from: pair.now.from, to: asOf, name: day === 1 ? `${nowName}, today` : `${nowName} so far, the 1st to the ${ordinal(day)}` },
+    before: { from: pair.before.from, to, name: `the same days of ${beforeName}` },
+  };
+}
+
+/**
+ * "Vs june", "against last year", said straight after a chart: the chart's
+ * own window against the one named. It drew June alone, as if the message
+ * had replaced the window (9 November 2026 sweep).
+ */
+export function versusPair(question: string, shownTitle: string, asOf: IsoDate): ComparedPeriods | null {
+  if (!/\b(?:vs\.?|versus|against|compared?\s+(?:to|with)|than)\b/i.test(question) || !namesWindow(question)) return null;
+  if (comparedPeriods(question, asOf)) return null;
+  const at = shownTitle.lastIndexOf(", ");
+  const shownWindow = at >= 0 ? shownTitle.slice(at + 2) : "";
+  if (!shownWindow || !namesWindow(shownWindow)) return null;
+  const a = windowOf(shownWindow, asOf);
+  const b = windowOf(question, asOf);
+  if (a.from === b.from && a.to === b.to) return null;
+  return fairPair(a.from > b.from ? { now: a, before: b } : { now: b, before: a }, asOf);
 }
 
 /** The two periods' rows side by side, by item (or wallet, or category), largest of either first. */
@@ -1753,6 +1811,10 @@ export function chartInWords(chart: Chart): string {
     }
     const said = chart.rows.slice(-12).map((r) => `${r.label} ${chartLabel(r.value)} of ${r.previous ? `${chartLabel(r.previous)} budgeted` : "no budget"}`);
     return `${said.join(", ")}. Spent ${chartLabel(chart.total)} against ${chartLabel(budget)} budgeted.`;
+  }
+  // Spending still to come: each part, and the total.
+  if (chart.measure === "upcoming") {
+    return `${chart.rows.map((r) => `${r.label} ${chartLabel(r.value)}`).join(", ")}. Still to come ${chartLabel(chart.total)}.`;
   }
   // What the wallets hold, by what it is still for.
   if (chart.measure === "safe") {

@@ -180,12 +180,34 @@ export const titleWords = (title: string): string[] => {
 };
 
 /** The plan a sentence names, by the words of its title; the state asked about first. */
+/**
+ * One letter off, for a long word: a letter more, less, changed, or two side
+ * by side swapped. A plan saved as "Motorcylce setup and repair" was never
+ * found by "the plan for motorcycle upgrade" (owner, 9 November 2026), so
+ * the question went to next month's budget instead.
+ */
+export function oneOff(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 5 || b.length < 5 || Math.abs(a.length - b.length) > 1) return false;
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let best = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) best = Math.min(best, d[i - 2]![j - 2]! + 1);
+      d[i]![j] = best;
+    }
+  }
+  return d[a.length]![b.length]! <= 1;
+}
+
 export function planNamed(text: string, plans: readonly Plan[], prefer: readonly Plan["status"][]): Plan | null {
   const lower = ` ${text.toLowerCase().replace(/[^a-z0-9\s]/g, " ")} `;
+  const said = lower.trim().split(/\s+/);
   const scored = plans
     .map((p) => {
       const words = titleWords(p.title);
-      const hits = words.filter((w) => lower.includes(` ${w} `) || lower.includes(` ${w}s `)).length;
+      const hits = words.filter((w) => lower.includes(` ${w} `) || lower.includes(` ${w}s `) || said.some((t) => oneOff(t, w))).length;
       return { p, hits, all: words.length > 0 && hits === words.length };
     })
     .filter((s) => s.hits > 0)

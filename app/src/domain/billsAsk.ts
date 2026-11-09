@@ -39,8 +39,12 @@ export function readBillsAsk(text: string, names: readonly string[]): BillsAsk |
       .sort((a, b) => b.length - a.length)
       .find((n) => {
         const full = n.trim().toLowerCase();
-        const first = full.split(/\s+/)[0] ?? full;
-        return lower.includes(full) || (first.length >= 4 && new RegExp(`\\b${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower));
+        /*
+         * Any word of its name that is its own, not only the first: "did I
+         * pay my wifi" is "Globe at Home Wifi" (9 November 2026 sweep).
+         */
+        const own = full.split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !/^(?:home|bill|bills|plan|plans|monthly|service|payment|subscription|account|prepaid|postpaid)$/.test(w));
+        return lower.includes(full) || own.some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower));
       }) ?? null;
   if (name && PAID.test(t)) return { name, week: false };
   if (!DUE.test(t)) return null;
