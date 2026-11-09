@@ -234,6 +234,21 @@ export interface AiContext {
     /** The Planner's plans counted this month, and each (docs/16-PLANNER.md, P5). */
     readonly plansDue?: number;
     readonly plans?: readonly { readonly name: string; readonly left: number; readonly on: string }[];
+    /**
+     * The month's allocations (docs/17 A9): what is still held of them is
+     * already out of `safe`, so the model never subtracts it again, and what
+     * is spent within one changes none of the day figures.
+     */
+    readonly allocationsHeld?: number;
+    readonly allocations?: readonly {
+      readonly name: string;
+      readonly kind: string;
+      readonly amount: number;
+      readonly spent: number;
+      readonly left: number;
+      readonly over: number;
+      readonly week?: { readonly index: number; readonly share: number; readonly spent: number; readonly left: number } | undefined;
+    }[];
     readonly safe: number;
     readonly today: number;
     readonly todayShare: number;
@@ -246,7 +261,7 @@ export interface AiContext {
     /** What yesterday's unspent share did, in sentences (`carryWords`). */
     readonly carry: readonly string[];
     /** What it starts at on the 1st of next month, from the money there now (`nextMonthStart`). */
-    readonly next?: { readonly month: string; readonly days: number; readonly carried: number; readonly bills: number; readonly debt: number; readonly plans?: number; readonly safe: number; readonly perDay: number } | undefined;
+    readonly next?: { readonly month: string; readonly days: number; readonly carried: number; readonly bills: number; readonly debt: number; readonly plans?: number; readonly allocations?: number; readonly safe: number; readonly perDay: number } | undefined;
   } | null;
 }
 
@@ -530,6 +545,16 @@ export function buildContext(input: ContextInput): AiContext {
         debtDue: pesos(safe.reservedDebt),
         plansDue: pesos(safe.reservedPlans),
         plans: safe.plansDue.map((p) => ({ name: p.title, left: pesos(p.left), on: p.due })),
+        allocationsHeld: pesos(safe.reservedAllocations ?? 0),
+        allocations: (safe.allocations?.lines ?? []).map((a) => ({
+          name: a.name,
+          kind: a.line.kind,
+          amount: pesos(a.line.amount),
+          spent: pesos(a.spent),
+          left: pesos(Math.max(0, a.left)),
+          over: pesos(a.over),
+          week: a.week ? { index: a.week.index, share: pesos(a.week.share), spent: pesos(a.week.spent), left: pesos(a.week.left) } : undefined,
+        })),
         safe: pesos(safe.safe),
         today: pesos(safe.perDay),
         todayShare: pesos(safe.todayShare),
@@ -542,7 +567,7 @@ export function buildContext(input: ContextInput): AiContext {
         carry: carryWords(safe, yesterdayOf({ transactions, reference, budgets, debts: credits, year, month, asOf }), (c) => formatMoney(c).replace("₱", "PHP ")),
         next: (() => {
           const n = nextMonthStart({ transactions, reference, budgets, debts: credits, asOf }, safe);
-          return { month: `${monthName(n.month)} ${n.year}`, days: n.days, carried: pesos(n.carried), bills: pesos(n.reservedBills), debt: pesos(n.reservedDebt), plans: pesos(n.reservedPlans), safe: pesos(n.safe), perDay: pesos(n.perDay) };
+          return { month: `${monthName(n.month)} ${n.year}`, days: n.days, carried: pesos(n.carried), bills: pesos(n.reservedBills), debt: pesos(n.reservedDebt), plans: pesos(n.reservedPlans), allocations: pesos(n.reservedAllocations), safe: pesos(n.safe), perDay: pesos(n.perDay) };
         })(),
       };
     })(),

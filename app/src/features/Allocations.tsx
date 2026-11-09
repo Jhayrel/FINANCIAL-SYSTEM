@@ -99,7 +99,8 @@ export function AllocationsCard({
       title="Allocations"
       subtitle={subtitle}
       action={
-        canAdd ? (
+        // While the month has none, the empty state's own button is the one way in: one green button, not two (owner, 9 November 2026).
+        canAdd && month.lines.length > 0 ? (
           <Button size="sm" variant="primary" onClick={() => setEditing("new")}>
             Add
           </Button>
@@ -236,10 +237,6 @@ function AllocationRow({ status: s, phase, onEdit, onRemove }: { status: Allocat
         </span>
       )}
       <ProgressBar value={s.spent} max={s.line.amount} height={6} label={`of ${s.name} spent`} />
-      <span className="t-caption" style={{ color: "var(--ink-2)" }}>
-        {formatMoney(s.spent)} spent of {formatMoney(s.line.amount)}
-        {s.timesUsed !== null && s.line.times ? `, ${s.timesUsed} of ${s.line.times} times` : ""}
-      </span>
       {s.week && (
         <span className={s.week.left < 0 ? "t-caption fms-note-over" : "t-caption"} style={s.week.left < 0 ? undefined : { color: "var(--ink-2)" }}>
           Week {s.week.index}, {formatMedium(s.week.from)} to {formatMedium(s.week.to)}: {formatMoney(s.week.spent)} of {formatMoney(s.week.share)}
@@ -251,14 +248,25 @@ function AllocationRow({ status: s, phase, onEdit, onRemove }: { status: Allocat
           Held once with the plan{s.plansInside.length === 1 ? "" : "s"} {s.plansInside.map((p) => `"${p.title}"`).join(", ")}: {formatMoney(s.held)} set aside, the larger of the two.
         </span>
       )}
-      <span className="fms-alloc-acts">
-        <Button size="sm" onClick={onEdit}>
-          Edit
-        </Button>
-        <Button size="sm" onClick={onRemove}>
-          Remove
-        </Button>
-      </span>
+      {/*
+        The figure and the two actions share a line: a row of buttons of its
+        own under every allocation doubled each line's height (owner, 9
+        November 2026: "fix the ui of the buttons").
+      */}
+      <div className="fms-alloc-foot">
+        <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+          {formatMoney(s.spent)} spent of {formatMoney(s.line.amount)}
+          {s.timesUsed !== null && s.line.times ? `, ${s.timesUsed} of ${s.line.times} times` : ""}
+        </span>
+        <span className="fms-alloc-acts">
+          <Button size="sm" variant="ghost" onClick={onEdit} ariaLabel={`Edit the ${s.name} allocation`}>
+            Edit
+          </Button>
+          <Button size="sm" variant="ghost" tone="danger" onClick={onRemove} ariaLabel={`Remove the ${s.name} allocation`}>
+            Remove
+          </Button>
+        </span>
+      </div>
     </li>
   );
 }

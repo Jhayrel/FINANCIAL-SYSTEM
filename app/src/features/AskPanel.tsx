@@ -246,6 +246,8 @@ import { notEditable, transactionToDraft } from "../domain/entry";
 import { notArrivedWords, placeSentMoney } from "../domain/destination";
 import { carryWords, dayFigures, nextMonthStart, safeOverDays, yesterdayOf } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
+import { allocationWords, asksAllocations, monthAsked, SAFE_RULE } from "../domain/allocationAsk";
+import { monthAllocations, monthOfDay } from "../domain/monthAllocation";
 import { typedOnce } from "../domain/typedOnce";
 import { readSavedAsk, savedAnswer } from "../domain/savedAsk";
 import { debtAnswer, readDebtAsk } from "../domain/debtAsk";
@@ -5919,6 +5921,34 @@ export function AskPanel({
         const reply = eatOutAnswer(eatOut, { today: brief.safe.perDay, after: brief.safe.perDayAfter, daysLeft: brief.safe.daysLeft }, mealPrice(everydayPrices(reportRows, asOf)), formatMoney);
         say({ kind: "assistant", text: reply, from: "this device" });
         log(aiEvent("answered", "add", { text: reply, model: "this device" }));
+        return;
+      }
+    }
+
+    /*
+     * Allocations (docs/17 A8): "how much is left for gas", "my allocations",
+     * and "if I spend what I allocated, is it still safe to spend?" (owner, 8
+     * November 2026). Worked out here from the Budget card's figures; the
+     * model words them when one is on.
+     */
+    if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && !plainlyDone(note)) {
+      const ym = monthAsked(note, asOf);
+      const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
+      const month = ym === monthOfDay(asOf) && brief.safe?.allocations ? brief.safe.allocations : monthAllocations(reference.allocations, reportRows, ym, asOf);
+      if (asksAllocations(note, month)) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "add", { text: note }));
+        const words = allocationWords(note, month, brief.safe ? { safe: brief.safe.safe, perDay: brief.safe.perDay } : null);
+        setBusy(true);
+        try {
+          await askQuestion(note, false, {
+            text: `Allocations, worked out by the app exactly as Budget shows them. Answer with these figures. ${SAFE_RULE} Safe to spend is already after the allocations: never subtract them again. The app does not make or change allocations from the chat: the owner does that on Budget, under Allocations.\n${words}`,
+            fallback: words,
+          });
+        } finally {
+          setBusy(false);
+        }
         return;
       }
     }

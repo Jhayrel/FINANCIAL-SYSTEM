@@ -492,12 +492,22 @@ export function addFormNote(
 ): { readonly text: string; readonly over: boolean } | null {
   const s = month.lines.find((x) => countsAgainst({ item: kind, description: words.description, notes: words.notes }, x.line));
   if (!s) return null;
-  const after = s.left - Math.max(0, cost);
+  const left = Math.max(0, s.left);
+  const after = left - Math.max(0, cost);
   const week = s.week ? ` (this week ${php(Math.max(0, s.week.left))} of ${php(s.week.share)} left)` : "";
-  if (cost > 0 && after < 0) {
-    const before = Math.max(0, s.left);
+  // Already past it: every peso of this is out of safe to spend, said as this entry's own figure.
+  if (s.over > 0) {
     return {
-      text: `This takes ${s.name} ${php(-after)} over its ${php(s.line.amount)} allocation: ${before > 0 ? `${php(before)} is left of it, ` : ""}the rest comes out of safe to spend.`,
+      text:
+        cost > 0
+          ? `${s.name} is already ${php(s.over)} over its ${php(s.line.amount)} allocation, so all ${php(cost)} of this comes out of safe to spend.`
+          : `${s.name} is already ${php(s.over)} over its ${php(s.line.amount)} allocation: more of it comes out of safe to spend.`,
+      over: true,
+    };
+  }
+  if (cost > 0 && after < 0) {
+    return {
+      text: `This takes ${s.name} ${php(-after)} over its ${php(s.line.amount)} allocation: ${left > 0 ? `${php(left)} of this is covered by what is left of it, and ` : ""}${php(-after)} comes out of safe to spend.`,
       over: true,
     };
   }

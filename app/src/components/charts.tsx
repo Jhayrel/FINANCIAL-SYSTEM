@@ -127,7 +127,9 @@ function HiddenTable({
 function ticks(max: Centavos, count = 4): Centavos[] {
   if (max <= 0) return [0];
   const step = max / count;
-  return Array.from({ length: count + 1 }, (_, i) => Math.round(step * i));
+  // Once each: an empty month's top is a centavo, and four steps of it rounded
+  // to 0, 0, 1, 1, 1, the same gridline drawn three times under one key.
+  return [...new Set(Array.from({ length: count + 1 }, (_, i) => Math.round(step * i)))];
 }
 
 function ChartFrame({

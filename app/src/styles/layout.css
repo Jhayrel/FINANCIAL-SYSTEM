@@ -6104,8 +6104,14 @@ button.fms-recent-row:disabled {
  * must be: it sat above it for weeks, lost on order, and two pairs a row in
  * the 280px column broke "Food" into "Foo d" and pushed the fee against the
  * card's edge (owner, 7 October 2026: "its out of the edge").
+ *
+ * 640px, not 440px: the chat beside a page is wider than 440px and still too
+ * narrow for two pairs, so "November 6, 2026", "Maya Bank (Personal savings)"
+ * and "Random necessities" broke over two lines each (owner, 8 November 2026:
+ * "fix the ui"). Two pairs a row only where each half holds a long account
+ * name on one line.
  */
-@container ask (max-width: 440px) {
+@container ask (max-width: 640px) {
   .fms-pdetails {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -12077,11 +12083,39 @@ button.fms-recent-row:disabled {
   overflow-wrap: anywhere;
 }
 
-.fms-alloc-acts,
+/* The spent figure on the left, Edit and Remove on the right, one line where it fits. */
+.fms-alloc-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
+}
+
+.fms-alloc-acts {
+  display: flex;
+  flex: none;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* Centred under the centred message (owner, 9 November 2026: "make the button centered"). */
 .fms-alloc-emptyacts {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: var(--space-2);
+}
+
+/* An empty state inside a card is a pause, not a page: less air above and below. */
+.fms-alloc .fms-empty {
+  padding: var(--space-6) var(--space-3);
+}
+
+.fms-alloc-removedrow .fms-btn {
+  flex: none;
+  white-space: nowrap;
 }
 
 .fms-alloc-removed {
@@ -12110,4 +12144,14 @@ button.fms-recent-row:disabled {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: var(--space-3);
+}
+
+/* The allocation an entry counts against, under the Item field (docs/17 A8). */
+.fms-allocnote {
+  margin: var(--space-1) 0 0;
+}
+.fms-allocnote--over {
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--warn);
+  color: var(--warn);
 }

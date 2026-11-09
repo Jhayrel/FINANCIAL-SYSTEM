@@ -322,8 +322,15 @@ export function validateBackup(raw: unknown): Validation {
 
   // Checked after the shape, so a corrupt file reports what is actually wrong
   // with it rather than only that the hash disagrees.
+  //
+  // Over the file's own `data`, exactly as written: the checksum was taken over
+  // that, logs included. Checking it over `data` above, which is rebuilt with
+  // settings filled in and without the logs, failed every backup that carried
+  // a conversation or an activity trail, and every one written before a new
+  // setting existed: the owner's own backup of 9 November 2026 was called
+  // "edited or partly corrupted" minutes after the app wrote it.
   if (version !== null && version >= 2 && typeof b.checksum === "string") {
-    if (checksum(data) !== b.checksum) {
+    if (checksum(src) !== b.checksum) {
       warn(
         "The checksum does not match, so the file has been edited or partly corrupted since it was written. Everything in it still passed the shape checks.",
       );

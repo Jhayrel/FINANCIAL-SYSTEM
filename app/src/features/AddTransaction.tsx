@@ -64,6 +64,8 @@ import { entryImpact, limitLine } from "../domain/entryImpact";
 import { whenWords } from "./Dashboard";
 import { useReportScreen } from "./screenReport";
 import { cashAndFee, cashWallet } from "../domain/withdrawal";
+import { addFormNote, monthAllocations, monthOfDay } from "../domain/monthAllocation";
+import { costOf } from "../domain/totals";
 import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
 /**
@@ -929,6 +931,29 @@ export function AddTransaction({
       return null;
     }
   }, [onLinkPlan, editing, draft, reference.plans, transactions, check.repaymentSplit]);
+  /*
+   * The allocation this entry counts against (docs/17 A8): what is left of it,
+   * and, before saving, whether this takes it over. The entry being edited is
+   * left out of what is already spent, so it is not counted twice.
+   */
+  const allocationNote = useMemo(() => {
+    const lines = reference.allocations;
+    if (!lines || lines.length === 0 || !draft.item || !draft.date || draft.flow !== "Spending") return null;
+    const ym = monthOfDay(draft.date);
+    const others = editing ? transactions.filter((t) => t.id !== editing.id) : transactions;
+    const month = monthAllocations(lines, others, ym, asOf);
+    if (month.lines.length === 0 || month.phase === "past") return null;
+    let cost = 0;
+    if (draft.amount !== null && draft.amount > 0) {
+      try {
+        const rows = draftToTransactions(draft, 0, "allocation-check", check.repaymentSplit);
+        cost = rows.filter((r) => monthOfDay(r.date) === ym).reduce((sum, r) => sum + costOf(r), 0);
+      } catch {
+        cost = 0;
+      }
+    }
+    return addFormNote(month, draft.item, { description: draft.description, notes: draft.notes }, cost);
+  }, [reference.allocations, draft, editing, transactions, asOf, check.repaymentSplit]);
   /*
    * Editing an entry that is a plan's payment: said, so it is plain that this
    * is the entry itself, edited like any other, and that the plan follows it
@@ -2335,6 +2360,11 @@ export function AddTransaction({
                   }
                 >
                   <Select value={draft.item} onChange={(v) => set("item", v)} options={items} placeholder="Pick an item" ariaLabel="Item" />
+                  {allocationNote && (
+                    <p className={allocationNote.over ? "t-caption fms-allocnote fms-allocnote--over" : "t-micro fms-field-hint fms-allocnote"} role="status">
+                      {allocationNote.text}
+                    </p>
+                  )}
                 </Field>
               )}
 

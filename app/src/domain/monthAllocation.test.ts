@@ -292,7 +292,17 @@ describe("need to withdraw, the Add form and the words (A8, A11)", () => {
 
   it("the Add form: what is left, and over before saving", () => {
     expect(addFormNote(month, "Gas", { description: "", notes: "" }, 30_000)).toEqual({ text: "Gas allocation: ₱900.00 of ₱1,200.00 left (this week ₱0.00 of ₱300.00 left), ₱600.00 after this.", over: false });
-    expect(addFormNote(month, "Gas", { description: "", notes: "" }, 100_000)?.over).toBe(true);
+    expect(addFormNote(month, "Gas", { description: "", notes: "" }, 100_000)).toEqual({
+      text: "This takes Gas ₱100.00 over its ₱1,200.00 allocation: ₱900.00 of this is covered by what is left of it, and ₱100.00 comes out of safe to spend.",
+      over: true,
+    });
+    // Already past it: the whole entry is out of safe to spend, said as its own figure.
+    const past = monthAllocations([gas, gym, parking], [...ledger, spend("2026-11-04", "Gas", 100_000)], "2026-11", asOf);
+    expect(addFormNote(past, "Gas", { description: "", notes: "" }, 20_000)).toEqual({
+      text: "Gas is already ₱100.00 over its ₱1,200.00 allocation, so all ₱200.00 of this comes out of safe to spend.",
+      over: true,
+    });
+    expect(addFormNote(past, "Gas", { description: "", notes: "" }, 0)?.over).toBe(true);
     expect(addFormNote(month, "Food", { description: "", notes: "" }, 100)).toBeNull();
   });
 
