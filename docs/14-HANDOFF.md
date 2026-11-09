@@ -2852,6 +2852,34 @@ allocation following; the low-balance level; theme; AI off and on; the
 budget); 40 chat questions with no crash or empty answer; the bell and each
 of its links.
 
+### 2026-11-09, final: what the AI is told, and what-if answers checked against reality
+
+Read line by line: what the model receives for the owner's 9 November
+backup with their November notes as allocations (`aiContext.ts`,
+`aiChatContext.ts`), and the device's what-if answers. Fixed:
+
+- **The model was given arithmetic that did not add up.** "Wallets, less
+  bills: this much is safe" left out what the allocations hold: they were in
+  the snapshot object and never written into its text. Now said, with each
+  allocation listed (month, spent, left, this week).
+- **"If I spend 500 on gas" was worked out as 500 off safe to spend** with
+  more than that left for gas, and gas "did not fit today's figure" in the
+  prices. A what-if and a price of an allocated kind are now covered by the
+  allocation first.
+- **Two budget day figures with no reason, and two "more than the money"
+  figures that disagreed**: the allocations are named, and both sections
+  now agree.
+- **Paid plans read "may not go ahead".** Only open plans do now.
+- **Device what-ifs** (`whatIfAsk.ts`, `affordAsk.ts`): "what if I get 5000
+  allowance" was answered "No" as if it were spending; "for 3 days" was one
+  day; paying a bill already set aside, and skipping the gym, went to a
+  model. Afford answers check the allocation first.
+
+Every what-if was then applied to the ledger for real and the outcome read
+back (income in, a bill paid, gas inside and past its allocation, the gym,
+food, an allocation removed): each matched what the chat said beforehand,
+to the centavo.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

@@ -249,3 +249,44 @@ describe("asked another way", () => {
     expect(readAffordAsk("should I buy a ps5 next month for 30000?", rows, reference, TODAY).amount).toBe(3_000_000);
   });
 });
+
+describe("a thing with an allocation is paid from it first (9 November 2026)", async () => {
+  const { affordAnswer, readAffordAsk } = await import("./affordAsk");
+  const { makeAllocation } = await import("./monthAllocation");
+  const asOf = "2026-11-09";
+  let k = 0;
+  const row = (date: string, item: string, amount: number, over: Record<string, unknown> = {}) =>
+    ({ id: `w${(k += 1)}`, recordNumber: k, date, type: "Spending", fromWallet: "Cash", toWallet: "", category: "Spending", item, description: "", amount, fee: 0, total: amount, notes: "", status: "Paid", ...over }) as never;
+  const income = { id: "in", recordNumber: 0, date: "2026-11-01", type: "Revenue", fromWallet: "", toWallet: "Cash", category: "Revenue", item: "Allowance", description: "", amount: 300_000, fee: 0, total: 300_000, notes: "", status: "Received" } as never;
+  const transactions = [income, row("2026-11-03", "Gas", 30_000), row("2026-11-05", "Food", 20_000)];
+  const gas = makeAllocation({ kind: "Gas", amount: 120_000 }, "2026-11", "2026-11-01", "g");
+  const reference = { wallets: ["Cash"], savings: [], bills: [], subscriptions: [], revenueCategories: ["Allowance"], spendingTypes: [{ name: "Gas", remark: "" }, { name: "Food", remark: "" }], allocations: [gas] } as never;
+  const input = { transactions, reference, budgets: {}, debts: [], asOf };
+  const ask = (q: string) => affordAnswer(readAffordAsk(q, transactions, reference, asOf), input);
+
+  it("inside it: yes, and nothing moves", () => {
+    const a = ask("can I afford gas 250 today");
+    expect(a.startsWith("Yes: it is inside your Gas allocation, ₱900.00 left of ₱1,200.00.")).toBe(true);
+    expect(a).toContain("safe to spend stays");
+    expect(a).not.toContain("nothing in the last ninety days");
+    expect(a).not.toMatch(/Not within today's figure/);
+  });
+
+  it("past it: only the part past it is judged against what is free", () => {
+    const a = ask("what if I spend 1000 on gas");
+    expect(a).toContain("₱900.00 of it comes out of your Gas allocation, which has ₱900.00 left; the other ₱100.00 goes past it");
+  });
+
+  it("a thing with no allocation is as before", () => {
+    const a = ask("can I buy food for 150 today");
+    expect(a).not.toContain("comes out of your");
+    expect(a).toContain("₱900.00 of allocations is set aside before November ends, which leaves ₱1,600.00 free.");
+  });
+
+  it("money coming in is never an afford question", async () => {
+    const { isAffordQuestion } = await import("./affordAsk");
+    expect(isAffordQuestion("what if I get 5000 allowance")).toBe(false);
+    expect(isAffordQuestion("if I pay 50 for the gym is it ok")).toBe(true);
+    expect(isAffordQuestion("if I spend 1000 tomorrow how much is left")).toBe(true);
+  });
+});

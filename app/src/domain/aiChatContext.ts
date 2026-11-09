@@ -314,6 +314,20 @@ export interface ChatContext {
  * is what makes it reviewable: print it and you know exactly what a provider
  * would receive.
  */
+/**
+ * The allocation a question names, by its name or its kind, longest first:
+ * "the gym" is the Gym allocation, "gas" the Gas one. Null when none.
+ */
+type SnapshotAllocation = NonNullable<NonNullable<AiContext["safe"]>["allocations"]>[number];
+function allocationNamedIn(question: string, allocations: readonly SnapshotAllocation[]): SnapshotAllocation | null {
+  const q = question.toLowerCase();
+  const says = (w: string): boolean => w.trim().length >= 2 && new RegExp(`(?<![a-z0-9])${w.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9])`).test(q);
+  const byName = [...allocations].sort((a, b) => b.name.length - a.name.length).find((a) => says(a.name));
+  if (byName) return byName;
+  // A kind alone is the allocation for the whole kind, never a part of it named by words.
+  return allocations.find((a) => !a.words && says(a.kind)) ?? null;
+}
+
 export function buildChatContext(input: ChatContextInput): ChatContext {
   const { snapshot, transactions, asOf, question } = input;
   const budget = input.maxRowBytes ?? MAX_ROW_BYTES;
@@ -925,6 +939,10 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
       everydayPrices(rows, asOf),
       { today: toCentavos(day.today), after: toCentavos(day.perDayAfter), daysLeft: day.daysLeft },
       php,
+      // A kind with an allocation is paid from it, not from today's figure: gas "did not fit today" with money left for gas (9 November 2026).
+      (day.allocations ?? [])
+        .filter((a) => !a.words && a.amount > 0)
+        .map((a) => ({ kind: a.kind, left: Math.max(0, toCentavos(a.left)), weekLeft: a.week ? toCentavos(a.week.left) : null })),
     );
     if (lines.length > 0) {
       out.push("");
@@ -989,18 +1007,39 @@ export function buildChatContext(input: ChatContextInput): ChatContext {
         daysLeft: snap.safe.daysLeft,
         perDay: cents(snap.safe.today),
       };
-      const after = safeAfter(base, what);
-      out.push(
+      /*
+       * A purchase of a kind with an allocation comes out of the allocation
+       * first: that money was set aside already, so only what goes past it
+       * comes out of safe to spend. "If I spend 500 on gas today" was worked
+       * out as 500 off safe to spend with more than that left in the gas
+       * allocation (owner's data, 9 November 2026).
+       */
+      const alloc = allocationNamedIn(question, snap.safe.allocations ?? []);
+      const allocLeft = alloc ? Math.max(0, cents(alloc.left)) : 0;
+      const covered = alloc ? Math.min(what, allocLeft) : 0;
+      const past = what - covered;
+      if (alloc) {
+        const weekLeft = alloc.week ? cents(alloc.week.left) : null;
+        out.push(
+          `${php(what)} of ${alloc.name} comes out of its allocation first: ${php(allocLeft)} is left of its ${php(cents(alloc.amount))} for the month${alloc.week ? `, ${php(Math.max(0, weekLeft ?? 0))} of this week's ${php(cents(alloc.week.share))}` : ""}.${
+            past === 0
+              ? ` All of it is inside the allocation, so safe to spend stays ${php(base.safe)} and today's figure stays ${php(base.perDay)}: that money was already set aside, and spending it changes neither.`
+              : ` ${php(covered)} of it is covered by the allocation; the other ${php(past)} goes past it and comes out of safe to spend.`
+          }${alloc.week && weekLeft !== null && what > Math.max(0, weekLeft) && past === 0 ? ` It is ${php(what - Math.max(0, weekLeft))} past this week's share, so the weeks after have less; the month's amount is unchanged.` : ""}`,
+        );
+      }
+      const after = safeAfter(base, past);
+      if (!alloc || past > 0) out.push(
         after.short > 0
           ? `Safe to spend until ${snap.month.name.split(" ")[0]} ends: ${php(base.safe)} before; ${php(what)} is ${php(after.short)} more than that, ${
-              cents(snap.safe.wallets) >= what ? "so it would take money kept for the bills, subscriptions and debt payments still due" : "and the spending wallets do not hold it"
+              cents(snap.safe.wallets) >= what ? `so it would take money kept for the bills, subscriptions and debt payments still due${(snap.safe.allocationsHeld ?? 0) > 0 ? ", and money set aside in the allocations" : ""}` : "and the spending wallets do not hold it"
             }.`
           : `Safe to spend until ${snap.month.name.split(" ")[0]} ends: ${php(base.safe)} before, ${php(after.safe)} after.`,
       );
-      out.push(
+      if (!alloc || past > 0) out.push(
         after.fitsToday
           ? `It fits today's figure of ${php(base.perDay)}, so from tomorrow stays ${php(after.perDayAfter)} a day.`
-          : `It is ${php(what - base.perDay)} more than today's figure of ${php(base.perDay)}${base.daysLeft > 1 ? `, so from tomorrow drops to ${php(after.perDayAfter)} a day for ${base.daysLeft - 1} days` : ""}.`,
+          : `${alloc ? `The ${php(past)} past the allocation is` : "It is"} ${php(past - base.perDay)} more than today's figure of ${php(base.perDay)}${base.daysLeft > 1 ? `, so from tomorrow drops to ${php(after.perDayAfter)} a day for ${base.daysLeft - 1} days` : ""}.`,
       );
     }
     if (snap.month.budget !== null && snap.month.remaining !== null) {

@@ -40,6 +40,7 @@ import { addDays, firstOfMonth, formatMedium, getMonth, getYear, lastOfMonth, MO
 import type { Debt } from "./debt";
 import { formatMoney, withoutYears, type Centavos } from "./money";
 import { withoutModelNumbers } from "./modelNumbers";
+import type { AllocationStatus, MonthAllocations } from "./monthAllocation";
 import { monthBrief, safeAfter } from "./monthPlan";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 
@@ -58,7 +59,14 @@ const AFFORD =
 const GO_BY =
   /\b(?:based on (?:my )?(?:current )?balance|with my (?:current )?balance|on my balance|balance not (?:the )?budget|not (?:with |on )?(?:the |my )?budget|not the budget|i am asking|i'?m asking|just asking|not adding|not an entry|not a transaction|it'?s a question|this is a question)\b/i;
 
-export const isAffordQuestion = (text: string): boolean => AFFORD.test(text);
+/** Money coming in, said as a what-if: "what if I get 5000 allowance" is income, never a ₱5,000.00 purchase (9 November 2026). */
+const INCOME_ONLY = (text: string): boolean =>
+  /\b(?:allowance|salary|sahod|income|pay\s*check|payday|bonus|refund|earn\w*|receiv\w*|get\s+paid|comes?\s+in|coming\s+in|padala|remittance|baon)\b/i.test(text) &&
+  !/\b(?:buy|bought|spend|spent|afford|pay\s+for|purchase|order|gastos)\b/i.test(text);
+/** "if I pay 50 for the gym, is it ok?", "if I spend 1000 tomorrow, how much is left?": a decision too (9 November 2026). */
+const IF_THEN =
+  /\bif\s+(?:i|we)\s+(?:buy|spend|get|pay(?:\s+for)?|order|book|purchase)\b[^?.!]*\b(?:is\s+(?:it|that)|would\s+(?:it|that)\s+be)\s+(?:ok(?:ay)?|fine|alright|possible|enough|safe)\b|\bif\s+(?:i|we)\s+(?:buy|spend|pay(?:\s+for)?)\b[^?.!]*\d[^?.!]*\bhow\s+much\b/i;
+export const isAffordQuestion = (text: string): boolean => (AFFORD.test(text) || IF_THEN.test(text)) && !INCOME_ONLY(text);
 
 /**
  * "so is it an option or not?", "yes or no?", "but I'm over budget right?"
@@ -187,6 +195,21 @@ export interface AffordInput {
   readonly asOf: IsoDate;
 }
 
+/**
+ * The allocation a thing is paid from: its kind's line for the whole kind,
+ * or a line by its name or words ("Gym" for Self Care entries that say gym).
+ */
+function allocationFor(item: string, month: MonthAllocations): AllocationStatus | null {
+  const key = item.trim().toLowerCase();
+  const lines = month.lines.filter((l) => !l.twinOf);
+  return (
+    lines.find((l) => l.name.trim().toLowerCase() === key) ??
+    lines.find((l) => l.line.words.split(/[,;]+/).some((w) => w.trim().toLowerCase() === key)) ??
+    lines.find((l) => !l.line.words.trim() && l.line.kind.trim().toLowerCase() === key) ??
+    null
+  );
+}
+
 /** The answer, in plain sentences. Money is formatted only here, at the last moment. */
 export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
   const { transactions, reference, budgets, debts, asOf } = input;
@@ -217,7 +240,18 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
   // What it would cost: the figure said, or what each named thing usually costs.
   const costs = ask.items.map((item) => ({ item, cost: usualCost(transactions, item, asOf) }));
   const known = costs.filter((c): c is { item: string; cost: Centavos } => c.cost !== null);
-  const cost = ask.amount ?? (known.length > 0 ? known.reduce((s, c) => s + c.cost, 0) : null);
+  const asked = ask.amount ?? (known.length > 0 ? known.reduce((s, c) => s + c.cost, 0) : null);
+  /*
+   * A thing with an allocation is paid from it first (docs/17, A5): that
+   * money is already set aside, so only what goes past it is judged against
+   * what is free and today's figure. "Can I afford gas 250 today", with more
+   * than that left for gas, was told it did not fit today (owner's data,
+   * 9 November 2026).
+   */
+  const alloc = ask.items.length === 1 && asked !== null && safe?.allocations ? allocationFor(ask.items[0]!, safe.allocations) : null;
+  const allocLeft = alloc ? Math.max(0, alloc.left) : 0;
+  const covered = alloc && asked !== null ? Math.min(asked, allocLeft) : 0;
+  const cost = asked === null ? null : asked - covered;
 
   const lines: string[] = [];
   // A wallet below zero is named too, or the parts do not add up to the whole ("₱941.46 (Gcash ₱1,000.00, Maya ₱302.46)").
@@ -228,10 +262,21 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
       : `Your spending wallets hold ${money(inWallets)}${walletWords.length > 0 ? ` (${walletWords.join(", ")})` : ""}.`;
   const dueWords =
     due > 0
-      ? ` ${money(due)} ${dueKinds(safe)} still due before ${monthName} ends, which leaves ${money(Math.max(0, free))} free.`
+      ? ` ${money(due)} ${dueKinds(safe)} ${
+          // Allocations are not paid: set aside (9 November 2026). Worded as before without them.
+          (safe?.reservedAllocations ?? 0) > 0 ? (due > (safe?.reservedAllocations ?? 0) ? "still to pay or set aside" : "set aside") : "still due"
+        } before ${monthName} ends, which leaves ${money(Math.max(0, free))} free.`
       : ` Nothing else is due before ${monthName} ends.`;
 
-  if (cost !== null) {
+  if (alloc && asked !== null) {
+    const week = alloc.week ? ` (this week ${money(Math.max(0, alloc.week.left))} of ${money(alloc.week.share)})` : "";
+    lines.push(
+      cost === 0
+        ? `Yes: it is inside your ${alloc.name} allocation, ${money(allocLeft)} left of ${money(alloc.line.amount)}${week}. That money is already set aside, so safe to spend stays ${money(Math.max(0, safe?.safe ?? 0))} and today's figure stays ${money(safe?.perDay ?? 0)}. After it, ${money(allocLeft - asked)} is left in the allocation.${alloc.week && asked > Math.max(0, alloc.week.left) ? ` It is ${money(asked - Math.max(0, alloc.week.left))} past this week's share, so the weeks after have less.` : ""}`
+        : `${money(covered)} of it comes out of your ${alloc.name} allocation, which has ${money(allocLeft)} left${week}; the other ${money(cost ?? 0)} goes past it and comes out of what is free:`,
+    );
+  }
+  if (cost !== null && cost > 0) {
     const what =
       ask.amount !== null
         ? money(ask.amount)
@@ -326,6 +371,8 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
     }
     const unknown = costs.filter((c) => c.cost === null).map((c) => c.item);
     if (unknown.length > 0) lines.push(`There is nothing recent to go by for ${unknown.join(" and ")}, so it is not counted.`);
+  } else if (alloc && asked !== null) {
+    // All of it inside the allocation, said above: nothing more comes out of what is free.
   } else if (ask.items.length > 0) {
     lines.push(`${holding}${dueWords}`);
     lines.push(`There is nothing in the last ninety days to say what ${ask.items.join(" and ")} usually costs. Tell me the amount and I will check it.`);
@@ -355,10 +402,10 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
   if (safe && safe.budgetLeft !== null) {
     if (safe.budgetLeft < 0) {
       lines.push(
-        `On the budget it is a different answer: ${monthName}'s spending is already ${money(-safe.budgetLeft)} over its budget, so ${cost !== null ? "this adds to that" : "anything more adds to that"}. The balance says whether you can pay; the budget says whether you planned to.`,
+        `On the budget it is a different answer: ${monthName}'s spending is already ${money(-safe.budgetLeft)} over its budget, so ${asked !== null ? "this adds to that" : "anything more adds to that"}. The balance says whether you can pay; the budget says whether you planned to.`,
       );
-    } else if (cost !== null && cost > safe.budgetLeft) {
-      lines.push(`It would take ${monthName} ${money(cost - safe.budgetLeft)} past its spending budget, which has ${money(safe.budgetLeft)} left.`);
+    } else if (asked !== null && asked > safe.budgetLeft) {
+      lines.push(`It would take ${monthName} ${money(asked - safe.budgetLeft)} past its spending budget, which has ${money(safe.budgetLeft)} left.`);
     } else {
       // "too" only after a yes: after "No" it read as agreeing with itself (12 October 2026 audit, A17).
       const said = lines[0] ?? "";
@@ -383,13 +430,13 @@ export function affordAnswer(ask: AffordAsk, input: AffordInput): string {
       const limit = limits.get(item);
       if (limit === undefined) continue;
       const used = spentByKind.get(item) ?? 0;
-      const after = used + (cost ?? 0);
+      const after = used + (asked ?? 0);
       lines.push(
         used > limit
-          ? `${item} is already ${money(used - limit)} over its ${money(limit)} limit for ${monthName}${cost !== null ? `; this would make it ${money(after - limit)} over` : ""}.`
-          : cost !== null && after > limit
+          ? `${item} is already ${money(used - limit)} over its ${money(limit)} limit for ${monthName}${asked !== null ? `; this would make it ${money(after - limit)} over` : ""}.`
+          : asked !== null && after > limit
             ? `${item} has ${money(limit - used)} left of its ${money(limit)} limit for ${monthName}; this would take it ${money(after - limit)} over.`
-            : `${item} has ${money(limit - used)} left of its ${money(limit)} limit for ${monthName}${cost !== null ? `, ${money(limit - after)} after this` : ""}.`,
+            : `${item} has ${money(limit - used)} left of its ${money(limit)} limit for ${monthName}${asked !== null ? `, ${money(limit - after)} after this` : ""}.`,
       );
     }
   }

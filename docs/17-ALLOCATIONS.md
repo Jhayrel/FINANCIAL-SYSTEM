@@ -198,6 +198,17 @@ over; and that safe to spend is already after them, so it never subtracts
 them again. Asked "can I afford gas", it answers from the gas allocation
 first. It does not create or change allocations: the owner does, on Budget.
 
+What it is sent says so in figures, not only in rules (9 November 2026,
+found reading what the model receives for the owner's data): the safe to
+spend sentence takes the allocations off with the bills, so its arithmetic
+adds up; each allocation is listed with its month, spent, left and this
+week; the spending budget's day figure says how much of the budget is in
+the allocations; a what-if for a kind with an allocation is covered by it
+first, and only the part past it comes off safe to spend; and an everyday
+price of an allocated kind is set against what is left of the allocation,
+not today's figure. The device's own answers (`affordAsk.ts`,
+`whatIfAsk.ts`) work the same way.
+
 Nothing is learned from allocations; the kinds and words the owner picks are
 the same lists entries use, so what the app learned about kinds already
 applies.

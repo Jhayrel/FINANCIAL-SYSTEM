@@ -143,7 +143,7 @@ import { inferFromHistory } from "../domain/infer";
 import { categoryLimits, monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
 import { allPaidScope, correctsWhatWasSaid, detectIntent, entriesInside, isAdvice, isBudgetCommand, isEssay, isPlan, isQuestion, meantInstead, notMeantIn, plainlyDone, sayInstead, saysItHappened, saysItWasAQuestion, saysItWasAStatement, wantsThoseEntries, type Intent } from "../domain/intent";
-import { monthBrief, spendable } from "../domain/monthPlan";
+import { isOpenBill, monthBrief, spendable } from "../domain/monthPlan";
 import { addsTheCard, asksPlanOpinion, planOpinion, priceSaid, readPlanCardChange, wishOpinion, type PlanOpinionFacts } from "../domain/planCard";
 import { pictureDay } from "../domain/pictureDay";
 import { asksToUseAi, quickAnswer, readQuickAsk } from "../domain/quickAsk";
@@ -247,6 +247,7 @@ import { notArrivedWords, placeSentMoney } from "../domain/destination";
 import { carryWords, dayFigures, nextMonthStart, safeOverDays, yesterdayOf } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
 import { allocationWords, asksAllocations, kindAsked, kindLeftWords, monthAsked, SAFE_RULE } from "../domain/allocationAsk";
+import { billPayWords, incomeIfWords, noSpendWords, readBillPayIf, readIncomeIf, readNoSpendDays, readSkipIf, skipWords } from "../domain/whatIfAsk";
 import { monthAllocations, monthOfDay } from "../domain/monthAllocation";
 import { typedOnce } from "../domain/typedOnce";
 import { readSavedAsk, savedAnswer } from "../domain/savedAsk";
@@ -5935,6 +5936,44 @@ export function AskPanel({
       const ym = monthAsked(note, asOf);
       const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
       const month = ym === monthOfDay(asOf) && brief.safe?.allocations ? brief.safe.allocations : monthAllocations(reference.allocations, reportRows, ym, asOf);
+      /*
+       * What-ifs the device answers from these figures (whatIfAsk.ts): money
+       * coming in, no spending for some days, paying a bill already set
+       * aside, skipping what an allocation is for. Each was answered wrongly
+       * or by a model that was not there (owner's data, 9 November 2026).
+       */
+      if (ym === monthOfDay(asOf) && brief.safe) {
+        const sNow = { safe: brief.safe.safe, perDay: brief.safe.perDay, perDayAfter: brief.safe.perDayAfter, spentToday: brief.safe.spentToday, daysLeft: brief.safe.daysLeft, wallets: brief.safe.wallets };
+        const monthName = `${MONTH_NAMES[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+        const openBills = brief.bills.bills.filter(isOpenBill);
+        const income = readIncomeIf(note);
+        const noSpend = income === null ? readNoSpendDays(note) : null;
+        const billName = income === null && noSpend === null ? readBillPayIf(note, openBills) : null;
+        const skipped = income === null && noSpend === null && billName === null ? readSkipIf(note, month) : null;
+        const bill = billName ? openBills.find((b) => b.item === billName) : undefined;
+        const words =
+          income !== null
+            ? incomeIfWords(income, sNow, monthName)
+            : noSpend !== null
+              ? noSpendWords(noSpend, sNow, asOf, monthName)
+              : bill
+                ? billPayWords({ item: bill.item, amount: bill.amount }, sNow)
+                : skipped
+                  ? skipWords(skipped, sNow, monthName)
+                  : null;
+        if (words) {
+          setDraft("");
+          say({ kind: "you", text: note });
+          log(aiEvent("asked", "add", { text: note }));
+          setBusy(true);
+          try {
+            await askQuestion(note, false, { text: `A what-if, worked out by the app from the Dashboard's figures. Answer with these figures, in this order, and never subtract or add anything yourself. ${SAFE_RULE}\n${words}`, fallback: words });
+          } finally {
+            setBusy(false);
+          }
+          return;
+        }
+      }
       if (asksAllocations(note, month)) {
         setDraft("");
         say({ kind: "you", text: note });

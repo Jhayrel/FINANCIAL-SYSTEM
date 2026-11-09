@@ -94,11 +94,29 @@ export function pricesAgainstDay(
   prices: readonly EverydayPrice[],
   day: { readonly today: Centavos; readonly after: Centavos; readonly daysLeft: number },
   php: (c: Centavos) => string,
+  /**
+   * The kinds with an allocation for the whole kind: paid from what is left
+   * of it, not from today's figure (docs/17-ALLOCATIONS.md, A5).
+   */
+  allocations: readonly { readonly kind: string; readonly left: Centavos; readonly weekLeft: Centavos | null }[] = [],
 ): string[] {
   if (prices.length === 0) return [];
   const lines: string[] = [];
+  const allocationOf = (name: string) => allocations.find((a) => a.kind.trim().toLowerCase() === name.trim().toLowerCase());
+  let fromAllocation = 0;
   for (const p of prices) {
     const range = p.low === p.high ? "" : `, ${php(p.low)} to ${php(p.high)}`;
+    const a = allocationOf(p.name);
+    if (a) {
+      const week = a.weekLeft === null ? "" : `, ${php(Math.max(0, a.weekLeft))} of it this week`;
+      if (p.usual <= a.left) fromAllocation += 1;
+      lines.push(
+        `- ${p.name}: usually ${php(p.usual)} a time (${p.count} times in ${WINDOW_DAYS} days${range}). Paid from its allocation, not today's figure: ${php(a.left)} left${week}, so ${
+          p.usual <= a.left ? "it fits and today's figure does not move" : `only ${php(a.left)} of it is covered and the other ${php(p.usual - a.left)} comes out of today's ${php(Math.max(0, day.today))}`
+        }.`,
+      );
+      continue;
+    }
     const now =
       day.today <= 0
         ? "Today's figure is used up, so it does not fit today."
@@ -113,11 +131,12 @@ export function pricesAgainstDay(
           : ` Does not fit ${php(day.after)} a day from tomorrow: it is ${php(p.usual - day.after)} more.`;
     lines.push(`- ${p.name}: usually ${php(p.usual)} a time (${p.count} times in ${WINDOW_DAYS} days${range}). ${now}${later}`);
   }
-  const fits = prices.filter((p) => day.today > 0 && p.usual <= day.today).length;
+  const fits = prices.filter((p) => !allocationOf(p.name) && day.today > 0 && p.usual <= day.today).length;
+  const own = prices.length - prices.filter((p) => allocationOf(p.name)).length;
   lines.push(
-    fits === prices.length
+    fits === own && own === prices.length
       ? `All ${prices.length} fit today's figure one at a time; two or more together may not.`
-      : `${fits} of these ${prices.length} fit today's figure.`,
+      : `${fits} of these ${own} fit today's figure${fromAllocation > 0 ? `; ${fromAllocation} more ${fromAllocation === 1 ? "is" : "are"} paid from ${fromAllocation === 1 ? "its allocation" : "their allocations"}` : ""}.`,
   );
   return lines;
 }

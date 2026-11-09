@@ -243,6 +243,8 @@ export interface AiContext {
     readonly allocations?: readonly {
       readonly name: string;
       readonly kind: string;
+      /** Only entries of the kind that say one of these: empty for the whole kind. */
+      readonly words?: string;
       readonly amount: number;
       readonly spent: number;
       readonly left: number;
@@ -549,6 +551,7 @@ export function buildContext(input: ContextInput): AiContext {
         allocations: (safe.allocations?.lines ?? []).map((a) => ({
           name: a.name,
           kind: a.line.kind,
+          words: a.line.words,
           amount: pesos(a.line.amount),
           spent: pesos(a.spent),
           left: pesos(Math.max(0, a.left)),
@@ -713,8 +716,27 @@ export function contextToText(c: AiContext): string {
     lines.push("");
     lines.push("## Safe to spend, the Dashboard's figure");
     lines.push(
-      `Spending wallets ${php(safe.wallets)}, less bills and subscriptions still to pay ${php(safe.billsDue)}${due}${safe.debtDue > 0 ? `, debt payments due ${php(safe.debtDue)}` : ""}${(safe.plansDue ?? 0) > 0 ? ` and planned spending set aside ${php(safe.plansDue ?? 0)} (${(safe.plans ?? []).map((p) => `${p.name} ${php(p.left)} by ${p.on}`).join(", ")}, from the Planner)` : ""}: ${php(safe.safe)} is safe to spend until ${until} ends.`,
+      `Spending wallets ${php(safe.wallets)}, less bills and subscriptions still to pay ${php(safe.billsDue)}${due}${safe.debtDue > 0 ? `, debt payments due ${php(safe.debtDue)}` : ""}${(safe.plansDue ?? 0) > 0 ? ` and planned spending set aside ${php(safe.plansDue ?? 0)} (${(safe.plans ?? []).map((p) => `${p.name} ${php(p.left)} by ${p.on}`).join(", ")}, from the Planner)` : ""}${
+        // What the allocations still hold: without it the sentence did not add up (the wallets less the bills was not the figure it gave), 9 November 2026.
+        (safe.allocationsHeld ?? 0) > 0 ? `${safe.debtDue > 0 || (safe.plansDue ?? 0) > 0 ? "," : ""} and what the allocations still hold ${php(safe.allocationsHeld ?? 0)}` : ""
+      }: ${php(safe.safe)} is safe to spend until ${until} ends.`,
     );
+    /*
+     * The allocations themselves: what each holds, and the rule that spending
+     * inside one moves none of the day figures (docs/17-ALLOCATIONS.md, A5).
+     * They were in the snapshot and never written out, so a "what if I buy
+     * gas" was answered as if nothing were set aside for it.
+     */
+    const allocated = (safe.allocations ?? []).filter((a) => a.amount > 0);
+    if (allocated.length > 0) {
+      lines.push(
+        `Allocations for ${c.month.name}, money set aside for one kind of spending each. What is left of each is already out of safe to spend above; spending inside one changes neither safe to spend nor today's figure, and only what goes past it comes out of them:`,
+        ...allocated.map(
+          (a) =>
+            `- ${a.name}${a.name !== a.kind ? ` (${a.kind}${a.words ? `, entries that say ${a.words}` : ""})` : ""}: ${php(a.amount)} for the month, ${php(a.spent)} spent, ${a.over > 0 ? `${php(a.over)} over, holding nothing` : `${php(a.left)} left`}${a.week ? `; this week (week ${a.week.index}) ${php(a.week.spent)} of ${php(a.week.share)}${a.week.left < 0 ? `, ${php(-a.week.left)} past it` : `, ${php(a.week.left)} left`}` : ""}.`,
+        ),
+      );
+    }
     lines.push(
       /*
        * The division said, so the day figure is never explained as the
@@ -732,14 +754,27 @@ export function contextToText(c: AiContext): string {
     if (safe.next) {
       const n = safe.next;
       lines.push(
-        `When ${n.month} starts nothing resets: what is not spent is still in the wallets. On its 1st, if nothing more is spent and nothing comes in: ${php(n.carried)} carries over (the wallets less what is still due in ${until}), less ${n.month.split(" ")[0]}'s bills and subscriptions ${php(n.bills)}${n.debt > 0 ? `, debt payments ${php(n.debt)}` : ""}${(n.plans ?? 0) > 0 ? ` and planned spending ${php(n.plans ?? 0)}` : ""}, leaves ${php(n.safe)}: ${php(n.perDay)} a day over ${n.days} days. Money that comes in before then raises it.`,
+        `When ${n.month} starts nothing resets: what is not spent is still in the wallets. On its 1st, if nothing more is spent and nothing comes in: ${php(n.carried)} carries over (the wallets less what is still due${(safe.allocationsHeld ?? 0) > 0 ? " or set aside" : ""} in ${until}), less ${n.month.split(" ")[0]}'s bills and subscriptions ${php(n.bills)}${n.debt > 0 ? `, debt payments ${php(n.debt)}` : ""}${(n.plans ?? 0) > 0 ? ` and planned spending ${php(n.plans ?? 0)}` : ""}${(n.allocations ?? 0) > 0 ? ` and its allocations ${php(n.allocations ?? 0)}` : ""}, leaves ${php(n.safe)}: ${php(n.perDay)} a day over ${n.days} days. Money that comes in before then raises it.`,
       );
     }
     if (safe.budgetLeft !== null) {
       lines.push(
         safe.budgetLeft <= 0
           ? "The spending budget is used up: the plan, not the money."
-          : `Spending budget left ${php(safe.budgetLeft)}, ${php(safe.budgetPerDay ?? 0)} a day: the plan, not the money.${safe.budgetLeft - Math.max(0, safe.safe) > safe.todayShare ? ` It promises ${php(Math.round((safe.budgetLeft - Math.max(0, safe.safe)) * 100) / 100)} more than is safe to spend: say so, and that lowering it is on the Budget screen.` : ""}`,
+          : (() => {
+              /*
+               * The allocations are part of the spending budget, already spoken
+               * for: the day figure is the rest over the days left, and what it
+               * promises beyond the money is the rest against safe to spend.
+               * Two different day figures for the budget with no word why, and
+               * a "promises more than the money" figure here that disagreed
+               * with the budget section's (9 November 2026).
+               */
+              const held = safe.allocationsHeld ?? 0;
+              const free = Math.round((safe.budgetLeft - held) * 100) / 100;
+              const promise = Math.round((free - Math.max(0, safe.safe)) * 100) / 100;
+              return `Spending budget left ${php(safe.budgetLeft)}${held > 0 ? `, ${php(held)} of it in the allocations, so ${php(safe.budgetPerDay ?? 0)} a day for everything else` : `, ${php(safe.budgetPerDay ?? 0)} a day`}: the plan, not the money.${promise > safe.todayShare ? ` It promises ${php(promise)} more than is safe to spend: say so, and that lowering it is on the Budget screen.` : ""}`;
+            })(),
       );
     }
   }
@@ -850,7 +885,7 @@ export function contextToText(c: AiContext): string {
     for (const p of c.plans ?? []) {
       const undated = p.due === "9999-12-31";
       lines.push(
-        `- ${p.title}: ${php(p.amount)}${p.into ? ` to save into ${p.into},` : ""}${p.pays ? ` to pay ${p.pays},` : ""} ${p.when ?? `by ${p.due}`}${p.kind ? `, ${p.kind}` : ""}${p.from ? `, from ${p.from}` : ""}. ${p.words}${p.left > 0 && p.left !== p.amount ? `, ${php(p.left)} left` : ""}${p.counted ? ", set aside in safe to spend" : p.setAside === false && !p.goal ? ", not set aside: may not go ahead" : ""}${undated ? ", in no month yet" : ""}${p.goal ? `. ${p.goal}` : ""}.`,
+        `- ${p.title}: ${php(p.amount)}${p.into ? ` to save into ${p.into},` : ""}${p.pays ? ` to pay ${p.pays},` : ""} ${p.when ?? `by ${p.due}`}${p.kind ? `, ${p.kind}` : ""}${p.from ? `, from ${p.from}` : ""}. ${p.words}${p.left > 0 && p.left !== p.amount ? `, ${php(p.left)} left` : ""}${p.counted ? ", set aside in safe to spend" : p.setAside === false && !p.goal && !["paid", "skipped", "removed"].includes(p.state) ? ", not set aside: may not go ahead" : ""}${undated ? ", in no month yet" : ""}${p.goal ? `. ${p.goal}` : ""}.`,
       );
     }
   }
