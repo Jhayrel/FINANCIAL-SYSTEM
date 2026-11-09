@@ -165,6 +165,10 @@ export function safeWords(
           `- Today's share: ${money(Math.max(0, safe.safe) + safe.spentToday)} split over the ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"} left, including today: ${money(safe.todayShare)}${safe.spentToday > 0 ? `, less ${money(safe.spentToday)} spent today: ${money(safe.perDay)}` : ""}`,
         ]
       : []),
+    // Spent today out of allocations: not out of today's share, said so the figure is not taken as missing it.
+    ...(safe.allocations && safe.allocations.coveredToday > 0
+      ? [`- Out of allocations today, not today's share: ${money(safe.allocations.coveredToday)} (${safe.allocations.lines.filter((l) => l.coveredToday > 0).map((l) => `${l.name} ${money(l.coveredToday)}`).join(", ")})`]
+      : []),
     ...(safe.daysLeft > 1 ? [`- From tomorrow: ${money(safe.perDayAfter)} a day for ${safe.daysLeft - 1} ${safe.daysLeft === 2 ? "day" : "days"}`] : []),
     // Unspent money carries over: the days after rise by what today leaves (`ifNothingMoreToday`).
     ...(safe.daysLeft > 1 && ifNothingMoreToday(safe) > safe.perDayAfter

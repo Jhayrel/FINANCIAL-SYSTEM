@@ -13,6 +13,7 @@
  *
  * Pure: no React, no storage. Money is integer centavos throughout.
  */
+import { spreadCovered } from "./covers";
 import { daysInMonth, firstOfMonth, formatMedium, lastOfMonth, monthName } from "./dates";
 import { formatMoney, type Centavos } from "./money";
 import { costOf } from "./totals";
@@ -104,7 +105,7 @@ export function removedIn(lines: readonly AllocationLine[] | undefined, ym: stri
   return (lines ?? []).filter((l) => l.month === ym && l.removedOn).sort((a, b) => (b.removedOn ?? "").localeCompare(a.removedOn ?? ""));
 }
 
-/** The words a line looks for, lower case, as whole words. */
+/** The words a line looks for, lower case. Each matches at the start of a word: "gym" finds "gym" and "gyms", never "agym". */
 function wordsOf(line: Pick<AllocationLine, "words">): string[] {
   return line.words
     .split(/[,;]+/)
@@ -121,6 +122,23 @@ export function countsAgainst(t: Pick<Transaction, "item" | "description" | "not
   if (words.length === 0) return true;
   const said = `${t.description} ${t.notes}`.toLowerCase();
   return words.some((w) => new RegExp(`(?<![a-z0-9])${escape(w)}`, "i").test(said));
+}
+
+/** A line's kind and words, as one key: two live lines with the same key in a month are the same allocation twice. */
+export function lineKey(line: Pick<AllocationLine, "kind" | "words">): string {
+  return `${line.kind.trim().toLowerCase()}|${wordsOf(line).join(",")}`;
+}
+
+/**
+ * The one line an entry counts against (A4): the first made whose words it
+ * says, else the line for the whole kind. Never two: Self Care for everything
+ * and Gym for "gym" are two envelopes, and a gym entry counted against both
+ * took its cost out of both, so spending ₱100.00 at the gym raised safe to
+ * spend by ₱100.00 (scenario analysis, 9 November 2026).
+ */
+export function lineFor<L extends Pick<AllocationLine, "kind" | "words">>(t: Pick<Transaction, "item" | "description" | "notes">, lines: readonly L[]): L | null {
+  const ofKind = lines.filter((l) => l.kind.trim().toLowerCase() === t.item.trim().toLowerCase());
+  return ofKind.find((l) => wordsOf(l).length > 0 && countsAgainst(t, l)) ?? ofKind.find((l) => wordsOf(l).length === 0) ?? null;
 }
 
 /** The name the owner sees: theirs, else the kind with its words. */
@@ -181,6 +199,13 @@ export interface AllocationStatus {
   readonly timesUsed: number | null;
   /** Plans of the same kind this month, held inside this allocation rather than twice (A5). */
   readonly plansInside: readonly { readonly id: string; readonly title: string; readonly left: Centavos }[];
+  /**
+   * The name of the line made before it with the same kind and words, when
+   * this one repeats it: two phones adding Gas offline, or a merge. It holds
+   * nothing and counts nothing, and is reported to be removed (A7), never
+   * removed by itself.
+   */
+  readonly twinOf: string | null;
 }
 
 /** A plan as the allocations need it: its kind, its title and notes, what is left and whether it counts this month. */
@@ -227,7 +252,11 @@ export function monthAllocations(
   /** The wallets today's share is spent from: only what left them is covered today (A5). All when not given. */
   spendingWallets?: ReadonlySet<string>,
 ): MonthAllocations {
-  const mine = linesIn(lines, ym);
+  // In the order they were made, so "the first made" means the same thing on every device.
+  const mine = linesIn(lines, ym).sort((a, b) => a.createdOn.localeCompare(b.createdOn));
+  const firstOfKey = new Map<string, AllocationLine>();
+  for (const l of mine) if (!firstOfKey.has(lineKey(l))) firstOfKey.set(lineKey(l), l);
+  const counting = mine.filter((l) => firstOfKey.get(lineKey(l)) === l);
   const now = monthOfDay(asOf);
   const phase = ym === now ? "running" : ym < now ? "past" : "ahead";
   const y = Number(ym.slice(0, 4));
@@ -236,8 +265,17 @@ export function monthAllocations(
   const to = lastOfMonth(y, m);
   const inMonth = mine.length === 0 ? [] : rows.filter((t) => t.date >= from && t.date <= to && !(t as Transaction & { deletedAt?: string }).deletedAt && costOf(t) > 0);
   const taken = new Set<string>();
+  const byLine = new Map<string, Transaction[]>();
+  for (const t of inMonth) {
+    const l = lineFor(t, counting);
+    if (l) byLine.set(l.id, [...(byLine.get(l.id) ?? []), t]);
+  }
   const statuses: AllocationStatus[] = mine.map((line) => {
-    const counted = inMonth.filter((t) => countsAgainst(t, line));
+    const first = firstOfKey.get(lineKey(line))!;
+    if (first !== line) {
+      return { line, name: lineName(line), spent: 0, left: 0, over: 0, held: 0, entries: 0, spentToday: 0, coveredToday: 0, week: null, timesUsed: null, plansInside: [], twinOf: lineName(first) };
+    }
+    const counted = byLine.get(line.id) ?? [];
     const spent = counted.reduce((s, t) => s + costOf(t), 0);
     const left = line.amount - spent;
     const todays = counted.filter((t) => t.date === asOf).reduce((s, t) => s + costOf(t), 0);
@@ -247,7 +285,7 @@ export function monthAllocations(
     // Plans of this kind, counted this month, that its words would take in (A5).
     const inside =
       phase === "running"
-        ? plans.filter((p) => p.counts && p.left > 0 && !taken.has(p.id) && countsAgainst({ item: p.item, description: p.title, notes: p.notes }, line))
+        ? plans.filter((p) => p.counts && p.left > 0 && !taken.has(p.id) && lineFor({ item: p.item, description: p.title, notes: p.notes }, counting) === line)
         : [];
     for (const p of inside) taken.add(p.id);
     const insideLeft = inside.reduce((s, p) => s + p.left, 0);
@@ -273,6 +311,7 @@ export function monthAllocations(
       week,
       timesUsed: line.per === "time" && line.times ? entries : null,
       plansInside: inside.map((p) => ({ id: p.id, title: p.title, left: p.left })),
+      twinOf: null,
     };
   });
   const sum = (pick: (s: AllocationStatus) => Centavos): Centavos => statuses.reduce((t, s) => t + pick(s), 0);
@@ -280,7 +319,8 @@ export function monthAllocations(
     month: ym,
     phase,
     lines: statuses,
-    allocated: sum((s) => s.line.amount),
+    // A repeated line is not money set aside twice.
+    allocated: sum((s) => (s.twinOf ? 0 : s.line.amount)),
     spent: sum((s) => s.spent),
     held: sum((s) => s.held),
     over: sum((s) => s.over),
@@ -334,9 +374,9 @@ export function checkAllocation(
   if (amount > MAX_AMOUNT) return "That amount is too large to be right. Check it.";
   if (input.times !== undefined && input.times !== null && (input.times < 1 || input.times > 31 || !Number.isInteger(input.times))) return "How many times is a whole number from 1 to 31.";
   if (input.wallet && ![...reference.wallets, ...reference.savings].includes(input.wallet)) return `${input.wallet} is not one of your accounts.`;
-  const words = (input.words ?? "").trim().toLowerCase();
   const live = linesIn(others, ym);
-  const twin = live.find((o) => o.kind.trim().toLowerCase() === kind.toLowerCase() && o.words.trim().toLowerCase() === words);
+  const key = lineKey({ kind, words: input.words ?? "" });
+  const twin = live.find((o) => lineKey(o) === key);
   if (twin) return `${monthWords(ym)} has an allocation for ${lineName(twin)} already. Edit that one.`;
   if (live.length >= MAX_LINES_A_MONTH) return `${monthWords(ym)} has ${MAX_LINES_A_MONTH} allocations, the most a month holds.`;
   return null;
@@ -344,7 +384,7 @@ export function checkAllocation(
 
 /** Why a removed line cannot be put back, or null when it can: one line a kind a month. */
 export function checkRestore(line: AllocationLine, all: readonly AllocationLine[]): string | null {
-  const twin = linesIn(all, line.month).find((o) => o.id !== line.id && o.kind.trim().toLowerCase() === line.kind.trim().toLowerCase() && o.words.trim().toLowerCase() === line.words.trim().toLowerCase());
+  const twin = linesIn(all, line.month).find((o) => o.id !== line.id && lineKey(o) === lineKey(line));
   if (twin) return `${monthWords(line.month)} has an allocation for ${lineName(twin)} already. Change that one instead.`;
   if (linesIn(all, line.month).length >= MAX_LINES_A_MONTH) return `${monthWords(line.month)} has ${MAX_LINES_A_MONTH} allocations, the most a month holds.`;
   return null;
@@ -384,10 +424,11 @@ export function inputOfLine(l: AllocationLine): AllocationInput {
  */
 export function copyLines(lines: readonly AllocationLine[] | undefined, from: string, to: string, asOf: IsoDate, newId: () => string): AllocationLine[] {
   const there = linesIn(lines, to);
-  const key = (l: AllocationLine): string => `${l.kind.trim().toLowerCase()}|${l.words.trim().toLowerCase()}`;
-  const have = new Set(there.map(key));
+  const have = new Set(there.map(lineKey));
+  const seen = new Set<string>();
   return linesIn(lines, from)
-    .filter((l) => !have.has(key(l)))
+    // A line already there is kept, and a month's twin is copied once.
+    .filter((l) => !have.has(lineKey(l)) && !seen.has(lineKey(l)) && Boolean(seen.add(lineKey(l))))
     .slice(0, Math.max(0, MAX_LINES_A_MONTH - there.length))
     .map((l) => {
       const { removedOn: _gone, ...rest } = l;
@@ -490,7 +531,8 @@ export function addFormNote(
   words: { readonly description: string; readonly notes: string },
   cost: Centavos,
 ): { readonly text: string; readonly over: boolean } | null {
-  const s = month.lines.find((x) => countsAgainst({ item: kind, description: words.description, notes: words.notes }, x.line));
+  const line = lineFor({ item: kind, description: words.description, notes: words.notes }, month.lines.filter((x) => !x.twinOf).map((x) => x.line));
+  const s = line ? month.lines.find((x) => x.line === line) : undefined;
   if (!s) return null;
   const left = Math.max(0, s.left);
   const after = left - Math.max(0, cost);
@@ -514,6 +556,29 @@ export function addFormNote(
   return { text: `${s.name} allocation: ${php(Math.max(0, s.left))} of ${php(s.line.amount)} left${week}${cost > 0 ? `, ${php(after)} after this` : ""}.`, over: false };
 }
 
+/**
+ * The Add form's note for an entry as it will be saved (A8): its rows, spread
+ * a day each as the budget reads them, against the month it falls in. The
+ * entry being edited is left out of what is already spent, so changing a
+ * ₱300.00 gas entry to ₱350.00 is ₱50.00 more, never ₱350.00 more.
+ */
+export function entryAllocationNote(
+  lines: readonly AllocationLine[] | undefined,
+  ledger: readonly Transaction[],
+  entry: readonly Transaction[],
+  editingId: string | null,
+  asOf: IsoDate,
+): { readonly text: string; readonly over: boolean } | null {
+  const main = entry[0];
+  if (!main || !lines || lines.length === 0) return null;
+  const ym = monthOfDay(main.date);
+  const others = editingId ? ledger.filter((t) => t.id !== editingId && t.partOf !== editingId) : ledger;
+  const month = monthAllocations(lines, spreadCovered(others), ym, asOf);
+  if (month.lines.length === 0 || month.phase === "past") return null;
+  const cost = spreadCovered(entry).filter((r) => monthOfDay(r.date) === ym).reduce((sum, r) => sum + Math.max(0, costOf(r)), 0);
+  return addFormNote(month, main.item, { description: main.description, notes: main.notes }, cost);
+}
+
 /** A line said for Activity: "Gas, ₱1,200.00 for November 2026 (₱300.00 a week, 4 weeks), paid from Cash". */
 export function lineSummary(l: AllocationLine): string {
   const pace = paceWords(l);
@@ -534,6 +599,15 @@ export function allocationAlerts(month: MonthAllocations, lines: readonly Alloca
   const out: AllocationAlert[] = [];
   if (month.phase !== "running") return out;
   for (const s of month.lines) {
+    if (s.twinOf) {
+      out.push({
+        id: `alloc-twin-${s.line.id}`,
+        level: "warning",
+        title: `${s.twinOf} is allocated twice in ${monthWords(month.month)}`,
+        detail: `Two lines for the same thing, likely added on two devices. The first counts; the second holds nothing until one is removed on Budget, Allocations.`,
+      });
+      continue;
+    }
     if (s.over > 0) {
       out.push({
         id: `alloc-over-${s.line.id}-${s.over}`,

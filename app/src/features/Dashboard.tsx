@@ -352,6 +352,19 @@ export function Dashboard({
                       ? `${formatMoney(safe.spentToday)} of today's ${formatMoney(safe.todayShare)} spent`
                       : `${formatMoney(safe.safe)} split over ${safe.daysLeft} ${safe.daysLeft === 1 ? "day" : "days"}, including today`}
               </span>
+              {/*
+                Spent today out of an allocation: not out of today's share, so
+                the figure above does not move, and this says why. Without it
+                ₱300.00 of gas looked unseen (scenario analysis, 9 November 2026).
+              */}
+              {safe?.allocations && safe.allocations.coveredToday > 0 && (
+                <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+                  {`${formatMoney(safe.allocations.coveredToday)} spent today came out of ${safe.allocations.lines
+                    .filter((l) => l.coveredToday > 0)
+                    .map((l) => l.name)
+                    .join(" and ")} ${safe.allocations.lines.filter((l) => l.coveredToday > 0).length === 1 ? "allocation" : "allocations"}, not today's share.`}
+                </span>
+              )}
               {/* One short line on what carried over; the chat says the rest (26 October 2026: "too messy"). */}
               {safe && carried && safe.daysLeft > 1 && safe.overToday === 0 && (
                 <span className="t-caption" style={{ color: "var(--ink-3)" }}>

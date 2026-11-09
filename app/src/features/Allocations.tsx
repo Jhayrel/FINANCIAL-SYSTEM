@@ -209,6 +209,32 @@ export function AllocationsCard({
 function AllocationRow({ status: s, phase, onEdit, onRemove }: { status: AllocationStatus; phase: MonthAllocations["phase"]; onEdit: () => void; onRemove: () => void }) {
   const pace = paceWords(s.line);
   const what = [s.line.name.trim() && s.line.name.trim() !== s.line.kind ? `${s.line.kind}${s.line.words ? `, entries that say ${s.line.words}` : ""}` : s.line.words ? `Entries that say ${s.line.words}` : "", pace, s.line.wallet ? `from ${s.line.wallet}` : ""].filter(Boolean).join(" · ");
+  /*
+   * The same allocation twice (two phones adding it offline): said, never
+   * removed by itself. It holds and counts nothing until one is removed.
+   */
+  if (s.twinOf) {
+    return (
+      <li className="fms-alloc-row">
+        <div className="fms-alloc-head">
+          <span className="t-body fms-alloc-name">{s.name}</span>
+          <span className="t-micro" style={{ color: "var(--warn)" }}>
+            twice
+          </span>
+        </div>
+        <div className="fms-alloc-foot">
+          <span className="t-caption fms-note-over" role="status">
+            The same as {s.twinOf} above, {formatMoney(s.line.amount)}. Only the first counts; remove one.
+          </span>
+          <span className="fms-alloc-acts">
+            <Button size="sm" variant="ghost" tone="danger" onClick={onRemove} ariaLabel={`Remove this second ${s.name} allocation`}>
+              Remove
+            </Button>
+          </span>
+        </div>
+      </li>
+    );
+  }
   return (
     <li className="fms-alloc-row">
       <div className="fms-alloc-head">

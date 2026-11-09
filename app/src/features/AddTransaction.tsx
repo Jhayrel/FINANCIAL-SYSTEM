@@ -64,8 +64,7 @@ import { entryImpact, limitLine } from "../domain/entryImpact";
 import { whenWords } from "./Dashboard";
 import { useReportScreen } from "./screenReport";
 import { cashAndFee, cashWallet } from "../domain/withdrawal";
-import { addFormNote, monthAllocations, monthOfDay } from "../domain/monthAllocation";
-import { costOf } from "../domain/totals";
+import { entryAllocationNote } from "../domain/monthAllocation";
 import type { BudgetYear, Budgets, DeletedTransaction, ReferenceLists, Transaction, TransactionCategory, WalletBalance } from "../domain/types";
 
 /**
@@ -937,22 +936,18 @@ export function AddTransaction({
    * left out of what is already spent, so it is not counted twice.
    */
   const allocationNote = useMemo(() => {
-    const lines = reference.allocations;
-    if (!lines || lines.length === 0 || !draft.item || !draft.date || draft.flow !== "Spending") return null;
-    const ym = monthOfDay(draft.date);
-    const others = editing ? transactions.filter((t) => t.id !== editing.id) : transactions;
-    const month = monthAllocations(lines, others, ym, asOf);
-    if (month.lines.length === 0 || month.phase === "past") return null;
-    let cost = 0;
+    if (!reference.allocations || reference.allocations.length === 0 || !draft.item || !draft.date || draft.flow !== "Spending") return null;
+    let rows: Transaction[] = [];
     if (draft.amount !== null && draft.amount > 0) {
       try {
-        const rows = draftToTransactions(draft, 0, "allocation-check", check.repaymentSplit);
-        cost = rows.filter((r) => monthOfDay(r.date) === ym).reduce((sum, r) => sum + costOf(r), 0);
+        rows = draftToTransactions(draft, 0, editing?.id ?? "allocation-check", check.repaymentSplit);
       } catch {
-        cost = 0;
+        rows = [];
       }
     }
-    return addFormNote(month, draft.item, { description: draft.description, notes: draft.notes }, cost);
+    // Before an amount is typed: the kind and words alone, at no cost, so the note says what is left.
+    const entry: Transaction[] = rows.length > 0 ? rows : [{ id: "allocation-check", recordNumber: 0, date: draft.date, type: "Spending", fromWallet: draft.fromWallet, toWallet: "", category: "Spending", item: draft.item, description: draft.description, amount: 0, fee: 0, total: 0, notes: draft.notes, status: "Paid" }];
+    return entryAllocationNote(reference.allocations, transactions, entry, editing?.id ?? null, asOf);
   }, [reference.allocations, draft, editing, transactions, asOf, check.repaymentSplit]);
   /*
    * Editing an entry that is a plan's payment: said, so it is plain that this
