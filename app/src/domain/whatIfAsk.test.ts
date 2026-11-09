@@ -74,3 +74,16 @@ describe("skipping what an allocation is for", () => {
     );
   });
 });
+
+describe("removing or finishing an allocation, asked as a what-if (9 November 2026)", () => {
+  it("is answered with what it would free, never done", async () => {
+    const { readSkipIf } = await import("./whatIfAsk");
+    const { makeAllocation, monthAllocations } = await import("./monthAllocation");
+    const gym = makeAllocation({ name: "Gym", kind: "Self Care", words: "gym", amount: 40_000 }, "2026-11", "2026-11-01", "g");
+    const month = monthAllocations([gym], [], "2026-11", "2026-11-09");
+    expect(readSkipIf("what if I remove the gym allocation", month)?.name).toBe("Gym");
+    expect(readSkipIf("if I mark the gym allocation done what happens", month)?.name).toBe("Gym");
+    // Said as an instruction, it is a change, not a what-if.
+    expect(readSkipIf("remove the gym allocation", month)).toBeNull();
+  });
+});

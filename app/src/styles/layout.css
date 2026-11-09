@@ -2769,6 +2769,100 @@
   }
 }
 
+/*
+ * Opening (style guide 3.10): the mark, the name, a slim bar and one line,
+ * centred on the paper, from the first frame (index.html) and again while the
+ * sign-in is checked (SignIn.tsx), so the hand-over does not jump. The bar
+ * fills once and then breathes on opacity, the motion the loading outlines
+ * use (2.5); no sweep, no shimmer. Still under reduced motion.
+ */
+.fms-boot {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  background: var(--paper);
+  color: var(--ink);
+  text-align: center;
+}
+
+/* The gate's title, to the pixel: t-display-l. */
+.fms-boot-name {
+  margin: var(--space-1) 0 0;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.fms-boot-line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+
+.fms-boot-bar {
+  position: relative;
+  width: 132px;
+  height: 3px;
+  margin-top: var(--space-2);
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--hairline);
+}
+
+.fms-boot-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 62%;
+  border-radius: inherit;
+  background: var(--brand-600);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fms-boot-bar > i {
+    animation:
+      fms-boot-fill 2.4s cubic-bezier(0.2, 0.7, 0.2, 1) both,
+      fms-boot-breathe 1.8s ease-in-out 2.4s infinite;
+  }
+}
+
+@keyframes fms-boot-fill {
+  from {
+    width: 0;
+  }
+  to {
+    width: 86%;
+  }
+}
+
+@keyframes fms-boot-breathe {
+  0%,
+  100% {
+    width: 86%;
+    opacity: 1;
+  }
+  50% {
+    width: 86%;
+    opacity: 0.55;
+  }
+}
+
+/* The sign-in button on the opening screen, when the check stalls: at the foot, so the centre never moves. */
+.fms-boot-later {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--space-8) + env(safe-area-inset-bottom, 0px));
+  width: min(360px, calc(100% - var(--space-5) * 2));
+  transform: translateX(-50%);
+  display: grid;
+  gap: var(--space-3);
+}
+
 /* The sign-in screen: the mark, the name, one line and one button, centred. */
 .fms-gatebox {
   width: min(360px, 100%);
@@ -7048,6 +7142,39 @@ button.fms-recent-row:disabled {
 }
 
 /* The statement's own notes, under its rows, as the PDF prints them under its totals. */
+/* The budget under a statement: a month at a time, a hairline between, square like the ledger (D2). */
+.fms-stmtbudget {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+.fms-stmtbudget-month {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.fms-stmtbudget-rows {
+  display: grid;
+  margin: 0;
+}
+
+.fms-stmtbudget-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.fms-stmtbudget-row dd {
+  margin: 0;
+  text-align: right;
+}
+
 .fms-stmtnotes {
   display: grid;
   gap: var(--space-2);

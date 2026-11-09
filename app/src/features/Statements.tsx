@@ -42,7 +42,7 @@ import {
   STATEMENT_TYPES,
   type StatementType,
 } from "../domain/statements";
-import type { IsoDate, ReferenceLists, Transaction } from "../domain/types";
+import type { Budgets, IsoDate, ReferenceLists, Transaction } from "../domain/types";
 import { yearsCovered } from "../domain/year";
 
 /** Remembered on this device, so the name is typed once. */
@@ -69,6 +69,7 @@ export function Statements({
   asOf,
   plans = [],
   ownerName = "",
+  budgets,
 }: {
   transactions: readonly Transaction[];
   reference: ReferenceLists;
@@ -83,6 +84,8 @@ export function Statements({
   plans?: readonly Plan[];
   /** The name in Settings, Data, You: Issued to, until another is typed here. */
   ownerName?: string;
+  /** The budgets, for the budget part of the account, expense and bills statements (`statementBudget.ts`). */
+  budgets?: Budgets | undefined;
 }) {
   const [type, setTypeState] = useState<StatementType>("account");
   /*
@@ -235,8 +238,8 @@ export function Statements({
     () =>
       type === "plans"
         ? buildPlanSheet(plans, { transactions, accounts, asOf: asOf ?? today() }, rangeOf({ year, month: from }, { year: toYear, month: to }), periodLabel(year, from, to, toYear))
-        : buildSheet(transactions, { type, year, fromMonth: from, toMonth: to, toYear, wallet, debtId: debtId || undefined, asOf }, reference, debts),
-    [transactions, type, year, from, to, toYear, wallet, debtId, reference, debts, asOf, plans, accounts],
+        : buildSheet(transactions, { type, year, fromMonth: from, toMonth: to, toYear, wallet, debtId: debtId || undefined, asOf }, reference, debts, budgets),
+    [transactions, type, year, from, to, toYear, wallet, debtId, reference, debts, asOf, plans, accounts, budgets],
   );
   /*
    * The Show picker: part of the statement only (owner, 12 October 2026:
@@ -267,9 +270,10 @@ export function Statements({
             { type, year, fromMonth: from, toMonth: to, toYear, wallet, debtId: debtId || undefined, asOf, only: shown },
             reference,
             debts,
+            budgets,
           )
         : null,
-    [shown, transactions, type, year, from, to, toYear, wallet, debtId, reference, debts, asOf],
+    [shown, transactions, type, year, from, to, toYear, wallet, debtId, reference, debts, asOf, budgets],
   );
   const sheet = filtered ?? whole;
   const statementNow = () =>
@@ -286,7 +290,7 @@ export function Statements({
       return;
     }
     const statement = statementNow();
-    saveFile(statementFilename(statement, "csv", sheet.subject), statementToCsv(statement), "text/csv;charset=utf-8");
+    saveFile(statementFilename(statement, "csv", sheet.subject), statementToCsv(statement, sheet.budget), "text/csv;charset=utf-8");
   };
 
   const downloadPdf = async (): Promise<void> => {
@@ -599,6 +603,49 @@ export function Statements({
                   </p>
                 ))}
               </div>
+            )}
+            {/* The budget for the months it covers, as the PDF and the spreadsheet have it (`statementBudget.ts`). */}
+            {sheet.budget && sheet.budget.months.length > 0 && (
+              <section className="fms-stmtbudget" aria-label="Budget for the period">
+                <h3 className="t-label" style={{ margin: 0, color: "var(--ink-2)" }}>
+                  Budget
+                </h3>
+                {[...sheet.budget.months.map((m) => ({ key: m.month, label: `${m.label}${m.partial ? ", to date" : ""}`, parts: m.parts })), ...(sheet.budget.months.length > 1 ? [{ key: "all", label: "Whole period", parts: sheet.budget.totals }] : [])].map((m) => (
+                  <div key={m.key} className="fms-stmtbudget-month">
+                    <p className="t-body-strong" style={{ margin: 0 }}>
+                      {m.label}
+                    </p>
+                    <dl className="fms-stmtbudget-rows">
+                      {m.parts.map((part) => (
+                        <div key={part.label} className="fms-stmtbudget-row">
+                          <dt className="t-caption" style={{ color: "var(--ink-2)" }}>
+                            {part.label}
+                          </dt>
+                          <dd className="t-caption">
+                            <Money value={part.spent} size="s" />
+                            {part.budget > 0 ? (
+                              <>
+                                {" of "}
+                                <Money value={part.budget} size="s" />
+                                <span className={part.left !== null && part.left < 0 ? "fms-note-over" : undefined} style={part.left !== null && part.left < 0 ? undefined : { color: "var(--ink-3)" }}>
+                                  {part.left !== null && part.left < 0 ? `, ${formatMoney(-part.left)} over` : `, ${formatMoney(part.left ?? 0)} left`}
+                                </span>
+                              </>
+                            ) : (
+                              <span style={{ color: "var(--ink-3)" }}> spent, no budget set</span>
+                            )}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                ))}
+                {sheet.budget.notes.map((n) => (
+                  <p key={n} className="t-caption" style={{ margin: 0, color: "var(--ink-3)" }}>
+                    {n}
+                  </p>
+                ))}
+              </section>
             )}
           </>
         )}

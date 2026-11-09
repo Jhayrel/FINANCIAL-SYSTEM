@@ -46,7 +46,8 @@ import {
   type StatementScope,
   type StatementType,
 } from "./statements";
-import type { IsoDate, ReferenceLists, Transaction } from "./types";
+import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
+import { statementBudget, type SheetBudget } from "./statementBudget";
 
 export interface SheetLine {
   readonly id: string;
@@ -92,6 +93,8 @@ export interface StatementSheet {
   readonly notes: readonly string[];
   /** How the period was fitted to what is recorded, when today was given (`fitPeriod`). */
   readonly fitted?: FittedPeriod | undefined;
+  /** The budget for the months it covers, on the statements a budget belongs in (`statementBudget.ts`). */
+  readonly budget?: SheetBudget | null | undefined;
 }
 
 export interface SheetRequest {
@@ -310,6 +313,8 @@ export function buildSheet(
   request: SheetRequest,
   reference: ReferenceLists,
   debts: readonly Debt[] = [],
+  /** With them, the budget for the months it covers (owner, 9 November 2026). */
+  budgets?: Budgets,
 ): StatementSheet {
   const { type, year, fromMonth, toMonth } = request;
   const toYear = request.toYear ?? year;
@@ -562,5 +567,6 @@ export function buildSheet(
     closing: running,
     notes,
     ...(fitted ? { fitted } : {}),
+    ...(budgets ? { budget: statementBudget(type, transactions, budgets, statement.from, statement.to, reference.allocations ?? [], request.asOf ?? statement.to) } : {}),
   };
 }

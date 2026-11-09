@@ -24,6 +24,7 @@
  * definition each, so a sheet's total is the total every other screen shows.
  */
 
+import { budgetCsvRows, type SheetBudget } from "./statementBudget";
 import type { Centavos } from "./money";
 import { firstOfMonth, lastOfMonth } from "./dates";
 import { owedChange, type Debt } from "./debt";
@@ -351,7 +352,7 @@ const pesos = (c: Centavos): string => (c / 100).toFixed(2);
  * Money is written as a plain decimal with no symbol or separators, so it
  * re-imports into a spreadsheet as a number rather than as text.
  */
-export function statementToCsv(statement: Statement): string {
+export function statementToCsv(statement: Statement, budget?: SheetBudget | null): string {
   const header = [
     "Record",
     "Date",
@@ -396,6 +397,9 @@ export function statementToCsv(statement: Statement): string {
         .join(","),
     );
   }
+
+  // The budget for the months it covers, under the entries (`statementBudget.ts`).
+  if (budget) for (const row of budgetCsvRows(budget, pesos)) lines.push(row.map(csvCell).join(","));
 
   return lines.join("\n");
 }

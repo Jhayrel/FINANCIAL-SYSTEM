@@ -7,9 +7,25 @@
     <meta name="theme-color" content="#2f6b21" />
     <meta name="description" content="Personal financial management system" />
     <title>Financial Management System</title>
+    <!--
+      The theme before the first paint, as src/theme.ts sets it, so a dark
+      phone never flashes a white page while the app loads.
+    -->
+    <script>
+      try {
+        var t = localStorage.getItem("fms.theme");
+        if (t === "dark" || (t !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.classList.add("theme-dark");
+      } catch (e) {}
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <!--
+      Shown from the first frame until the app takes over: the same mark, name,
+      bar and line as the sign-in gate's wait (components/BootMark.tsx), so the
+      hand-over does not jump. Styled in layout.css, which a built page links
+      before any script runs.
+    -->
+    <div id="root"><div class="fms-boot" role="status" aria-live="polite" aria-label="Opening your ledger"><span class="fms-mark fms-mark--l" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 16 16" fill="none"><path d="M4 4.5h8M4 8h8M4 11.5h4.5" stroke="var(--on-brand)" stroke-width="1.6" stroke-linecap="round" /></svg></span><p class="fms-boot-name">Finances</p><span class="fms-boot-bar" aria-hidden="true"><i></i></span><p class="fms-boot-line">Opening your ledger</p></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

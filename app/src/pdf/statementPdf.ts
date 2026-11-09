@@ -34,6 +34,7 @@
 import { MONTH_NAMES, MONTH_NAMES_SHORT, getDay, getMonth } from "../domain/dates";
 import { formatAmount, formatMoney, type Centavos } from "../domain/money";
 import type { SheetLine, StatementSheet } from "../domain/statementSheet";
+import type { BudgetPart } from "../domain/statementBudget";
 import { INTER_BOLD, INTER_REGULAR } from "./fonts";
 import { fromBase64, parseTtf, PdfDocument, type FontName, type PdfPage, type Rgb } from "./writer";
 
@@ -266,8 +267,65 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
     page.line(MARGIN, y, MARGIN + CONTENT_W, y, INK, 0.9);
   }
 
+  /*
+   * The budget for the months it covers (owner, 9 November 2026: "add
+   * budgets too in the statement"): a month at a time, each part with its
+   * budget, what was spent and what is left or over. It moves no money, so
+   * it comes after the totals and changes none of them.
+   */
+  if (sheet.budget && sheet.budget.months.length > 0) {
+    const b = sheet.budget;
+    const rows: { readonly label: string; readonly part?: BudgetPart }[] = [];
+    for (const m of b.months) {
+      rows.push({ label: `${m.label}${m.partial ? ", to date" : ""}` });
+      for (const p of m.parts) rows.push({ label: p.label, part: p });
+    }
+    if (b.months.length > 1) {
+      rows.push({ label: "Whole period" });
+      for (const p of b.totals) rows.push({ label: p.label, part: p });
+    }
+    const col = { label: MARGIN + INSET, budget: MARGIN + CONTENT_W - 190, spent: MARGIN + CONTENT_W - 100, left: MARGIN + CONTENT_W - INSET };
+    const h = LINE + PAD_Y * 2 - 1;
+    const head = (): void => {
+      page.text(MARGIN, y, "Budget", { size: 9, font: "bold", color: INK });
+      y += 8;
+      const base = y + PAD_Y + LINE - 3;
+      page.text(col.budget, base, "Budget", { size: META, color: INK_3, align: "right" });
+      page.text(col.spent, base, "Spent", { size: META, color: INK_3, align: "right" });
+      page.text(col.left, base, "Left", { size: META, color: INK_3, align: "right" });
+      y += h;
+      page.line(MARGIN, y, MARGIN + CONTENT_W, y, INK, 0.9);
+    };
+    if (y + 26 + h * 3 > bottom) {
+      page = doc.addPage(PAGE_W, PAGE_H);
+      y = continuation(page, sheet);
+    } else y += 22;
+    head();
+    for (const r of rows) {
+      if (y + h > bottom) {
+        page = doc.addPage(PAGE_W, PAGE_H);
+        y = continuation(page, sheet);
+        head();
+      }
+      const base = y + PAD_Y + LINE - 2.4;
+      if (!r.part) {
+        page.rect(MARGIN, y, CONTENT_W, h, TINT);
+        page.text(col.label, base, r.label, { size: BODY, font: "bold", color: INK });
+      } else {
+        const p = r.part;
+        page.text(col.label + 6, base, p.label, { size: BODY, color: INK });
+        if (p.budget > 0) page.text(col.budget, base, formatAmount(p.budget), { size: BODY, align: "right", color: INK });
+        else page.text(col.budget, base, "Not set", { size: META, align: "right", color: INK_3 });
+        page.text(col.spent, base, formatAmount(p.spent), { size: BODY, align: "right", color: INK });
+        if (p.left !== null) page.text(col.left, base, p.left < 0 ? `${formatAmount(-p.left)} over` : formatAmount(p.left), { size: BODY, align: "right", color: p.left < 0 ? RED : INK });
+      }
+      y += h;
+      page.line(MARGIN, y, MARGIN + CONTENT_W, y, RULE, 0.5);
+    }
+  }
+
   // Notes, then the closing line.
-  const notes = ["Amounts are in pesos (₱).", ...sheet.notes].flatMap(
+  const notes = ["Amounts are in pesos (₱).", ...sheet.notes, ...(sheet.budget?.notes ?? [])].flatMap(
     (n) => wrap(doc, n, "regular", 7, CONTENT_W, 40),
   );
   const closingHeight = 16 + notes.length * 9.5 + 34;

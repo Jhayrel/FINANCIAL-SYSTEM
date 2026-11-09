@@ -67,7 +67,9 @@ export function readBillPayIf(text: string, open: readonly { readonly item: stri
 
 /** "what if I skip the gym this month", "if I won't use parking": the allocation it would leave unused. */
 export function readSkipIf(text: string, month: MonthAllocations): AllocationStatus | null {
-  if (!/\b(?:skip|skipping|won'?t\s+(?:go|use|need)|not\s+(?:go|use|need)|don'?t\s+(?:go|use|need)|cancel|stop\s+going|no\s+more)\b/i.test(text)) return null;
+  // Removing it or marking it done, asked as a what-if, frees the same money: answered the same way, never done (9 November 2026).
+  const asIf = IF.test(text) && /\b(?:remove|delete|end|stop|mark\s+.{0,30}?done|done\s+with|finish)\b/i.test(text);
+  if (!asIf && !/\b(?:skip|skipping|won'?t\s+(?:go|use|need)|not\s+(?:go|use|need)|don'?t\s+(?:go|use|need)|cancel|stop\s+going|no\s+more)\b/i.test(text)) return null;
   const t = text.toLowerCase();
   const says = (w: string): boolean => w.trim().length >= 2 && new RegExp(`(?<![a-z0-9])${w.trim().toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(t);
   return (

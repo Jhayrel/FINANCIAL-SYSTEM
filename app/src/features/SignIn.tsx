@@ -93,6 +93,40 @@ export function SignIn({
    * there is something to press. The button keeps its place while hidden, so
    * nothing moves when it appears.
    */
+  /*
+   * While the check runs: the opening screen index.html shows from the first
+   * frame, the same mark, name, bar and line, so the hand-over does not jump
+   * (owner, 9 November 2026: "fix the loading screen too make it modern").
+   * The button waits at the foot, out of the way of a thumb, and comes as
+   * before: after four seconds by the timer, or six by the stylesheet.
+   */
+  if (waiting) {
+    return (
+      <div className="fms-boot" role="status" aria-live="polite" aria-label="Opening your ledger">
+        <span aria-hidden className="fms-mark fms-mark--l">
+          <svg width="24" height="24" viewBox="0 0 16 16" fill="none">
+            <path d="M4 4.5h8M4 8h8M4 11.5h4.5" stroke="var(--on-brand)" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </span>
+        <p className="fms-boot-name">Finances</p>
+        <span className="fms-boot-bar" aria-hidden>
+          <i />
+        </span>
+        <p className="fms-boot-line">Opening your ledger</p>
+        <div className="fms-gate-later fms-boot-later">
+          {error && (
+            <Alert status="over" title="Could not sign in">
+              {error}
+            </Alert>
+          )}
+          <Button variant="primary" size="lg" fullWidth loading={busy} onClick={() => void go()}>
+            Continue with Google
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fms-gate">
       <main className="fms-gatebox">

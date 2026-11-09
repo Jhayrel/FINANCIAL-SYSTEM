@@ -247,6 +247,8 @@ import { notArrivedWords, placeSentMoney } from "../domain/destination";
 import { carryWords, dayFigures, nextMonthStart, safeOverDays, yesterdayOf } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
 import { allocationWords, asksAllocations, kindAsked, kindLeftWords, monthAsked, SAFE_RULE } from "../domain/allocationAsk";
+import { readAllocationChange } from "../domain/allocationChange";
+import type { AllocationChange } from "../domain/monthAllocation";
 import { billPayWords, incomeIfWords, noSpendWords, readBillPayIf, readIncomeIf, readNoSpendDays, readSkipIf, skipWords } from "../domain/whatIfAsk";
 import { monthAllocations, monthOfDay } from "../domain/monthAllocation";
 import { sameMoney, typedOnce } from "../domain/typedOnce";
@@ -409,6 +411,9 @@ export interface ProposalSink {
   /** The owner's details (Settings, Data, You; domain/owner.ts). */
   readonly canSaveOwner?: boolean | undefined;
   readonly saveOwner?: ((owner: OwnerDetails) => void) | undefined;
+  readonly canAllocate?: boolean | undefined;
+  /** Why it was refused, or null when it was saved. */
+  readonly allocate?: ((change: AllocationChange) => string | null) | undefined;
 }
 
 /** A person's or lender's line about to be cleared in one step. See domain/settleLine.ts. */
@@ -433,6 +438,13 @@ interface Settling {
    */
   /** A part of the owner's details changed from the chat; `next` lives in this session only. */
   readonly owner?: { readonly next?: OwnerDetails };
+  /**
+   * An allocation added, changed, extended, stopped, removed, put back or
+   * marked done from the chat (domain/allocationChange.ts). `change` lives in
+   * this session only: a card that comes back from the record is shown, not
+   * applied, and App checks it again when it is pressed.
+   */
+  readonly allocation?: { readonly rows: readonly { readonly label: string; readonly value: string }[]; readonly change?: AllocationChange };
   readonly planner?: {
     readonly rows: readonly { readonly label: string; readonly value: string }[];
     readonly save?: { readonly plan: Plan; readonly action: PlanAction; readonly summary: string; readonly before?: Plan | undefined } | undefined;
@@ -936,7 +948,9 @@ function turnFromCard(card: StoredCard): Turn {
       kept && typeof kept.label === "string" && typeof kept.now === "string" && typeof kept.then === "string" ? { label: kept.label, now: kept.now, then: kept.then } : undefined;
     const keptPlanner = data["planner"] as { rows?: unknown } | undefined;
     const planner = keptPlanner && Array.isArray(keptPlanner.rows) ? { rows: (keptPlanner.rows as { label?: unknown; value?: unknown }[]).filter((r) => typeof r.label === "string" && typeof r.value === "string") as { label: string; value: string }[] } : undefined;
-    return { kind: "settle", debtId, words, action, state: card.state === "applied" ? "applied" : "discarded", cardId: card.id, ...(detail ? { detail } : {}), ...(planner ? { planner } : {}) };
+    const keptAlloc = data["allocation"] as { rows?: unknown } | undefined;
+    const allocation = keptAlloc && Array.isArray(keptAlloc.rows) ? { rows: (keptAlloc.rows as { label?: unknown; value?: unknown }[]).filter((r) => typeof r.label === "string" && typeof r.value === "string") as { label: string; value: string }[] } : undefined;
+    return { kind: "settle", debtId, words, action, state: card.state === "applied" ? "applied" : "discarded", cardId: card.id, ...(detail ? { detail } : {}), ...(planner ? { planner } : {}), ...(allocation ? { allocation } : {}) };
   }
 
   if (card.kind === "export") {
@@ -1106,6 +1120,7 @@ function storedFrom(turn: Turn): StoredCard | null {
         action: turn.action,
         ...(turn.detail ? { detail: { label: turn.detail.label, now: turn.detail.now, then: turn.detail.then } } : {}),
         ...(turn.planner ? { planner: { rows: turn.planner.rows } } : {}),
+        ...(turn.allocation ? { allocation: { rows: turn.allocation.rows } } : {}),
       },
     };
   }
@@ -1133,6 +1148,7 @@ function cardWords(turn: Turn, state: StoredCard["state"]): string {
   if (isBudgeting(turn)) return `${state === "applied" ? "Budget set" : state === "discarded" ? "Budget left as it was" : "Budget change"}: ${turn.plan.words}`;
   if (isExporting(turn)) return `${state === "applied" ? "File saved" : state === "discarded" ? "File not saved" : "File offered"}: ${turn.ask.said}`;
   if (isSettling(turn) && turn.planner) return `${state === "applied" ? "Planner, done" : state === "discarded" ? "Planner, left as it was" : "Planner"}: ${turn.words}`;
+  if (isSettling(turn) && turn.allocation) return `${state === "applied" ? "Allocation, done" : state === "discarded" ? "Allocation, left as it was" : "Allocation"}: ${turn.words}`;
   if (isSettling(turn) && turn.detail) return `${state === "applied" ? "Changed" : state === "discarded" ? "Left as it was" : "To change"}: ${turn.words}`;
   if (isSettling(turn)) return `${state === "applied" ? "Cleared" : state === "discarded" ? "Left as it was" : "To clear"}: ${turn.words}`;
   return "";
@@ -6007,6 +6023,34 @@ export function AskPanel({
      * November 2026). Worked out here from the Budget card's figures; the
      * model words them when one is on.
      */
+    /*
+     * An allocation added, changed, extended, stopped, removed, put back or
+     * marked done, said in words (docs/17 A9; owner, 9 November 2026: "ai
+     * should able to do it"). Read here, worked out by the same function
+     * Budget uses, and shown as a card: nothing changes until it is pressed.
+     * Questions and what-ifs are not read as changes; they go on below.
+     */
+    if (files.length === 0 && !as && pending === null && !isEssay(note)) {
+      const said = readAllocationChange(note, { lines: settings.allocations ?? [], reference, transactions, asOf });
+      if (said) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "budget", { text: note }));
+        if (said.kind === "ask") {
+          say({ kind: "assistant", text: said.text, from: "this device", go: { screen: "budget", label: "Budget" } });
+          log(aiEvent("answered", "budget", { text: said.text, model: "this device" }));
+          return;
+        }
+        if (!sink.canAllocate) {
+          say({ kind: "assistant", text: "Allocations cannot be changed from this view. Open Budget, under Allocations.", from: "this device", go: { screen: "budget", label: "Budget" } });
+          return;
+        }
+        say({ kind: "settle", debtId: "", words: said.words, action: said.action, state: "open", allocation: { rows: said.rows, change: said.change } });
+        log(aiEvent("proposed", "budget", { entry: said.words }));
+        return;
+      }
+    }
+
     if (files.length === 0 && !as && !/^\s*\/\//.test(note) && !isEssay(note) && !plainlyDone(note)) {
       const ym = monthAsked(note, asOf);
       const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
@@ -6057,7 +6101,7 @@ export function AskPanel({
         setBusy(true);
         try {
           await askQuestion(note, false, {
-            text: `Allocations, worked out by the app exactly as Budget shows them. Answer with these figures. ${SAFE_RULE} Safe to spend is already after the allocations: never subtract them again. The app does not make or change allocations from the chat: the owner does that on Budget, under Allocations.\n${words}`,
+            text: `Allocations, worked out by the app exactly as Budget shows them. Answer with these figures. ${SAFE_RULE} Safe to spend is already after the allocations: never subtract them again. To add, change, extend, mark done, stop, remove or put back an allocation, the owner says it here ("allocate 300 a week for gas", "make the gym allocation every month", "the gym allocation is done") and presses the card the app shows, or uses Budget, under Allocations. Never say a change was made: only the card makes it.\n${words}`,
             fallback: words,
           });
         } finally {
@@ -9041,7 +9085,7 @@ export function AskPanel({
       : undefined;
     if (aboutAFile && lastStatement) {
       setDraft("");
-      const sheetOf = buildSheet(transactions, sheetRequestOf(lastStatement, asOf), reference, debts);
+      const sheetOf = buildSheet(transactions, sheetRequestOf(lastStatement, asOf), reference, debts, budgets);
       await askQuestion(note, true, { text: statementBrief(sheetOf), fallback: statementBrief(sheetOf, true) });
       return;
     }
@@ -9069,7 +9113,7 @@ export function AskPanel({
         exportAsked.kind === "statement"
           ? exportAsked.type === "plans"
             ? planSheetForAsk(settings.plans ?? [], { transactions, accounts: settings.accounts, asOf }, exportAsked)
-            : buildSheet(transactions, sheetRequestOf(exportAsked, asOf), reference, debts)
+            : buildSheet(transactions, sheetRequestOf(exportAsked, asOf), reference, debts, budgets)
           : null;
       const askedToExport = offeredSheet ? withSheet(exportAsked, offeredSheet) : exportAsked;
       const words = offeredSheet ? statementWords(offeredSheet, askedToExport.format) : exportWords(askedToExport, asOf);
@@ -11792,7 +11836,9 @@ export function AskPanel({
                   : undefined
               }
               canSettle={
-                turn.owner
+                turn.allocation
+                  ? Boolean(sink.canAllocate && turn.allocation.change)
+                  : turn.owner
                   ? Boolean(sink.canSaveOwner && turn.owner.next)
                   : turn.planner
                   ? Boolean(sink.canPlan && (turn.planner.save || turn.planner.pay))
@@ -11801,6 +11847,19 @@ export function AskPanel({
                     : Boolean(sink.canSettle && sink.settle)
               }
               onSettle={() => {
+                if (turn.allocation) {
+                  // Checked again by App's one path at the press: the month may have moved on since the card was made.
+                  const change = turn.allocation.change;
+                  if (!change || !sink.allocate) return;
+                  const why = sink.allocate(change);
+                  if (why) {
+                    say({ kind: "assistant", text: `Not changed: ${why}`, from: "this device", go: { screen: "budget", label: "Budget" } });
+                    return;
+                  }
+                  log(aiEvent("accepted", "budget", { entry: turn.words }));
+                  decide(i, "applied");
+                  return;
+                }
                 if (turn.owner) {
                   if (!turn.owner.next) return;
                   sink.saveOwner?.(turn.owner.next);
@@ -13552,20 +13611,21 @@ function SettleCard({
   /** A Planner card filled in by hand in the plan form. */
   onEdit?: (() => void) | undefined;
 }) {
-  const { detail, planner, owner } = turn;
+  const { detail, planner, owner, allocation } = turn;
+  const rows = planner?.rows ?? allocation?.rows ?? [];
   return (
     <div className="fms-proposal">
       <div className="fms-proposalhead">
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
-          {owner ? "Your details" : planner ? "Planner" : detail ? "Change a line" : "Clear a line"}
+          {owner ? "Your details" : planner ? "Planner" : allocation ? "Allocation" : detail ? "Change a line" : "Clear a line"}
         </span>
         <span className="t-micro" style={{ color: "var(--ink-3)" }}>
-          {turn.state === "applied" ? (owner ? "saved" : planner ? "done" : detail ? "changed" : "cleared") : turn.state === "discarded" ? "left as it was" : "nothing is saved yet"}
+          {turn.state === "applied" ? (owner ? "saved" : planner || allocation ? "done" : detail ? "changed" : "cleared") : turn.state === "discarded" ? "left as it was" : "nothing is saved yet"}
         </span>
       </div>
-      {planner && planner.rows.length > 0 && (
+      {rows.length > 0 && (
         <dl className="fms-pdetails">
-          {planner.rows.map((r) => (
+          {rows.map((r) => (
             <div key={r.label} className="fms-pdetail">
               <dt className="t-micro">{r.label}</dt>
               <dd className="t-caption">{r.value}</dd>

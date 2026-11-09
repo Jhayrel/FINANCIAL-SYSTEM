@@ -24,6 +24,7 @@ import { withFeesPaid, type Debt } from "../domain/debt";
 import type { ExportAsk } from "../domain/exportAsk";
 import type { GoPlace } from "../domain/goAsk";
 import type { Plan } from "../domain/planner";
+import type { AllocationChange } from "../domain/monthAllocation";
 import {
   checkDraft,
   draftToTransactions,
@@ -73,6 +74,8 @@ export interface SinkInput {
   readonly onMakeGoal?: ((goal: GoalForPlan) => { readonly id: string; readonly name: string }) | undefined;
   /** The owner's details saved from the chat (domain/owner.ts). */
   readonly onSaveOwner?: ((owner: OwnerDetails) => void) | undefined;
+  /** An allocation changed from the chat, through App's one path; why it was refused, or null (docs/17 A9). */
+  readonly onAllocation?: ((change: AllocationChange) => string | null) | undefined;
 }
 
 export type PlanAction = "plan.create" | "plan.update" | "plan.move" | "plan.paid" | "plan.skip" | "plan.remove" | "plan.restore";
@@ -186,6 +189,9 @@ export function useProposalSink(input: SinkInput): ProposalSink {
       makeGoal: input.onMakeGoal ? (goal) => handlers.current.onMakeGoal?.(goal) ?? null : undefined,
       canSaveOwner: Boolean(input.onSaveOwner),
       saveOwner: (owner) => handlers.current.onSaveOwner?.(owner),
+      canAllocate: Boolean(input.onAllocation),
+      // Null when it was saved: never read through `??`, which took that null for no handler (see payPlan above).
+      allocate: (change) => (handlers.current.onAllocation ? handlers.current.onAllocation(change) : "Allocations cannot be changed from here. Open Budget, under Allocations."),
       /**
        * Save it, and say which number it got.
        *
