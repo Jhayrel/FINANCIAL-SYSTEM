@@ -127,6 +127,8 @@ export interface Chart {
    * says so (10 November 2026: "lowest in 2022" for eight months of it).
    */
   readonly partialFirst?: { readonly label: string; readonly from: IsoDate } | undefined;
+  /** Drawn from an answer's own figures, not the ledger (`answerChart.ts`): two figures a row are "vs", not "was". */
+  readonly fromAnswer?: boolean | undefined;
   /**
    * The question it was drawn from, so "bars" after a pie draws the same
    * thing as bars (`redrawAsked`). Without it, "pie" of the year's food

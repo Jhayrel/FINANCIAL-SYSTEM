@@ -102,6 +102,8 @@ export interface UseAi {
        * held back for it (`ask`, below).
        */
       onRevised?: (revised: AiAnswer | null) => void;
+      /** Figures asked to be made up ("random data", "a sample budget"): nothing to trace them to, so none is flagged. */
+      madeUp?: boolean;
     },
   ) => Promise<AiAnswer>;
   readonly clear: () => void;
@@ -244,6 +246,7 @@ export function useAi({
         trusted?: string;
         tidy?: (text: string) => string;
         onRevised?: (revised: AiAnswer | null) => void;
+        madeUp?: boolean;
       } = {},
     ): Promise<AiAnswer> => {
       // Switched off means nothing is sent, not that nothing comes back.
@@ -371,7 +374,12 @@ export function useAi({
        * think deep"). Waiting for it held every such answer for a second
        * full round, and could pass the chat's own deadline. Once only.
        */
-      const revising = task === "chat" && settled.loose.length > 0 && Boolean(options.question) && Boolean(options.onRevised) && !options.signal?.aborted;
+      /*
+       * Made-up figures, asked for as made up, have nothing to be traced to:
+       * flagged, a sample budget the owner asked for read as a list of
+       * mistakes (10 November 2026). Their sums are still worked out here.
+       */
+      const revising = !options.madeUp && task === "chat" && settled.loose.length > 0 && Boolean(options.question) && Boolean(options.onRevised) && !options.signal?.aborted;
       if (revising && options.onRevised) {
         const first = settled.loose.length;
         const list = settled.loose.map((c) => formatMoney(c)).join(", ");
@@ -403,7 +411,7 @@ export function useAi({
         })();
       }
       answered = { ...answered, text: settled.text };
-      const note = untracedNote(answered.text, given, formatMoney, settled.worked);
+      const note = options.madeUp ? "" : untracedNote(answered.text, given, formatMoney, settled.worked);
       /*
        * Every figure can be real and the answer still wrong: "a PHP 95.00
        * meal is within that daily limit" of PHP 80.64 (7 October 2026). A

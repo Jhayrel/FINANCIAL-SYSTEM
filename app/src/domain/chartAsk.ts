@@ -1112,6 +1112,19 @@ export function chartReading(chart: Chart): string {
     return `${head}${overs}${left > 0 ? ` ${m(left)} is left${most && rows.length > 1 ? `, most of it in ${most.label}, ${m((most.previous ?? 0) - most.value)}` : ""}.` : ""}`;
   }
 
+  /*
+   * Two figures a row from an answer ("Plan A vs Plan B", income against
+   * spending in a made-up table): two series, not a period and the one before
+   * it, so never "up" or "the biggest change" (`answerChart.ts`).
+   */
+  if (chart.fromAnswer && chart.against) {
+    const a = chart.against;
+    const gap = chart.total - a.total;
+    const widest = [...rows].sort((x, y) => Math.abs(y.value - (y.previous ?? 0)) - Math.abs(x.value - (x.previous ?? 0)))[0];
+    const head = `${a.now} comes to ${m(chart.total)} and ${a.name} to ${m(a.total)}${gap === 0 ? ", the same." : `: ${a.now} is ${m(Math.abs(gap))} ${gap > 0 ? "more" : "less"}.`}`;
+    const far = widest && widest.value !== (widest.previous ?? 0) ? ` The widest gap is ${widest.label}: ${m(widest.value)} against ${m(widest.previous ?? 0)}.` : "";
+    return `${head}${far}`;
+  }
   if (chart.measure === "forecast" && chart.plan) {
     const p = chart.plan;
     // A bundle of the smaller ones is not an item: "The other 8 items is the largest" (10 November 2026).

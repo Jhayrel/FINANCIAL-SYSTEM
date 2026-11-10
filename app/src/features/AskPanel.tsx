@@ -151,8 +151,10 @@ import { asksAboutDeleted, deletedRows, deletedWindowIn, deletedWords, onlyAWind
 import { asksBinReview, binReview, binReviewWords, holdsBack } from "../domain/binReview";
 import { asksSubscriptionStops, subscriptionStops, subscriptionStopWords, subscriptionsNamed } from "../domain/subscriptionStops";
 import { creditWhatIf, creditWhatIfWords, readCreditWhatIf } from "../domain/creditWhatIf";
-import { readScheduleAsk, schedulePlans, scheduleWords } from "../domain/plansSchedule";
+import { plansNamedAll, readScheduleAsk, schedulePlans, scheduleWords } from "../domain/plansSchedule";
 import { certainEntry } from "../domain/entryCertain";
+import { planWhatIfWords } from "../domain/planWhatIf";
+import { answerChart, INVENTED_RULE, MADE_UP } from "../domain/answerChart";
 import { asksChartIn, bareMeasure, forecastMeant, oneBar, sentencesOf } from "../domain/chartParts";
 import { inferFromHistory } from "../domain/infer";
 import { categoryLimits, monthBills } from "../domain/budgetView";
@@ -2462,6 +2464,24 @@ export function AskPanel({
     ],
     [transactions, reference],
   );
+  /**
+   * Figures asked to be made up ("random data", "a sample budget", "make up
+   * five months"), never a word of the owner's own items: "Random
+   * necessities 50 cash" is an entry, and "Random" is an income item.
+   */
+  const asksInvented = (text: string): boolean => {
+    // The owner's own names of two words or more go first: "random necessities 50 cash" is an entry.
+    const own = [...knownItems]
+      .filter((k) => k.trim().includes(" "))
+      .sort((a, b) => b.length - a.length)
+      .reduce((t, k) => t.replace(new RegExp(`\\b${k.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"), " "), text);
+    const DATA = String.raw`(?:data|figures?|numbers?|budgets?|spending|expenses?|income|earnings?|savings?|plans?|list|table|charts?|graph|pie|scenarios?|examples?|samples?|months?|weeks?|years?|amounts?|breakdown)`;
+    // Said as a thing to make: "random data", "a sample budget", "fake numbers for 3 months". Never "random 200 from mom".
+    const madeThing = new RegExp(String.raw`\b(?:random|sample|example|fake|dummy|mock|made[\s-]?up|imaginary|hypothetical|pretend)\s+(?:\w+\s+){0,3}?${DATA}\b`, "i");
+    // Or asked to be made: "make up", "come up with", "generate", "invent", with something to make.
+    const makeIt = new RegExp(String.raw`\b(?:make\s+up|come\s+up\s+with|generate|invent|create\s+(?:a|some)\s+(?:random|sample|fake))\b[^.?!]*\b${DATA}\b`, "i");
+    return madeThing.test(own) || makeIt.test(own);
+  };
 
   /** How many spending entries use each word, item and description, for finding what a question is about. */
   const ledgerWords = useMemo(() => {
@@ -4995,6 +5015,8 @@ export function AskPanel({
      * words and the picture are the same answer.
      */
     drawn: readonly Chart[] = [],
+    /** Given the model's answer once it is said: "make up a budget and chart it" draws the answer's own figures (`answerChart.ts`). */
+    after?: (answer: string) => void,
   ): Promise<void> => {
     if (echo) say({ kind: "you", text: question });
     for (const chart of drawn) drawChart(chart);
@@ -5133,6 +5155,8 @@ export function AskPanel({
           // What it must not forget: what they told it, and this conversation in outline (domain/memory.ts).
           pinned: keepInMind(savedChat.current, turns.filter(isSaid).map((t) => ({ role: t.kind, text: t.text })).concat([{ role: "you" as const, text: question }]), asOf),
           signal: control.signal,
+          // Figures asked to be made up are not flagged as untraced (`useAi.ts`).
+          ...(asksInvented(question) ? { madeUp: true } : {}),
           /*
            * A second look, said under the first when it holds fewer figures
            * the app cannot trace (`useAi.ts`). Only while nothing else has
@@ -5204,6 +5228,7 @@ export function AskPanel({
     // A second look on its way: the answer is held from the record until it settles (`settleHeld`).
     const holding = answer.source === "model" && answer.revising === true;
     say({ kind: "assistant", text: answerText, from, ...(failed ? { retry: question } : {}), ...(working ? { working } : {}), ...(holding ? { held: heldKey } : {}) });
+    if (answer.source === "model" && after) after(answerText);
     if (holding) {
       const early = heldAnswers.current.get(heldKey);
       heldAnswers.current.set(heldKey, { text: answerText, from });
@@ -5600,11 +5625,46 @@ export function AskPanel({
   const sendNow = async (typed?: string, as?: Intent): Promise<void> => {
     const began = generation.current;
     const note = (typed ?? draft).trim();
+    /*
+     * "it" is the entry just added, when the latest card is one: "I buy food
+     * 85 gcash", Add to ledger, then "change it to 95", "move it to maya",
+     * "delete it" and "put it back" were each answered "No saved entry
+     * matches that" (10 November 2026 sweep). Read as its record number;
+     * what is shown and stored is still what was typed.
+     */
+    const latestCard = [...turns].reverse().find((t) => !(isSaid(t) || isChart(t)));
+    /*
+     * And the same entry through the cards that follow it: a change card for
+     * it ("change it to 95", then "move it to maya"), or a list of one from
+     * the bin or the finder ("delete it", then "put it back").
+     */
+    const cardNumber = (t: Turn | undefined): number | null => {
+      if (!t) return null;
+      if (isOffer(t)) return t.state === "added" && t.recordNumber !== undefined ? t.recordNumber : null;
+      if (isChanging(t)) return t.plan.rows.length === 1 ? (t.plan.rows[0]?.before.recordNumber ?? null) : null;
+      if (isFound(t)) return t.candidates.length === 1 ? (t.candidates[0]?.row.recordNumber ?? null) : null;
+      return null;
+    };
+    const itsRecord = cardNumber(latestCard);
+    const itsNumber = itsRecord !== null ? `#${String(itsRecord).padStart(4, "0")}` : null;
+    const IT = /\b(?:that one|this one|the last one|that entry|this entry|it|that|this)\b/i;
+    const pointsAtIt =
+      itsNumber !== null &&
+      files.length === 0 &&
+      !/#\s*\d/.test(note) &&
+      note.split(/\s+/).length <= 12 &&
+      IT.test(note) &&
+      /\b(?:change|edit|make|set|move|switch|transfer|delete|remove|bin|trash|undo|put\s+(?:it\s+|that\s+)?back|restore|recover|bring\s+(?:it\s+)?back|fix|correct)\b/i.test(note);
+    const aboutIt = pointsAtIt && itsNumber
+      ? /\b(?:put\s+(?:it|that|this)\s+back|bring\s+(?:it|that|this)\s+back|restore|recover|undelete)\b/i.test(note)
+        ? `restore ${itsNumber}`
+        : note.replace(IT, itsNumber)
+      : note;
     /**
      * The sentence with its command words spelled right, for the rules to
      * read (`domain/typos.ts`). What is shown and stored is always `note`.
      */
-    const ruled = withCommandWordsFixed(note);
+    const ruled = withCommandWordsFixed(aboutIt);
     /*
      * A long message is read whole by the model; the shortcuts below see only
      * its first line (`isEssay`), so a paragraph about a ₱40,000 arrival is
@@ -5624,6 +5684,43 @@ export function AskPanel({
     const emptyBox = (): void => {
       if (typed === undefined) setDraftState("");
     };
+    /*
+     * Figures asked to be made up are the model's to make, never an entry, a
+     * budget or the ledger: "come up with random data for my monthly
+     * spending" asked how much it was, "make up a sample budget ... in a pie"
+     * offered to set December's budget, and "make up income vs spending for 5
+     * months" became a PHP 5.00 entry (10 November 2026). Read first, before
+     * anything that reads entries. The model writes them in lines the app can
+     * read, and a chart asked for is drawn from its answer exactly as written
+     * (`answerChart.ts`).
+     */
+    // Even with a question waiting: a request to make figures up is never its answer.
+    if (!as && files.length === 0 && asksInvented(lead)) {
+      const drawIt = wantsChart(lead) || /\b(?:chart|graph|pie|trend|plot|bars?|visuali[sz]e)\b/i.test(lead);
+      setDraft("");
+      emptyBox();
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "insights", { text: note }));
+      setBusy(true);
+      try {
+        await askQuestion(
+          note,
+          false,
+          { text: `${INVENTED_RULE}${drawIt ? " The app draws the chart from your lines, so never describe a chart of your own." : ""} Never write a Plan line or an Entry line: nothing made up is saved.` },
+          [],
+          drawIt
+            ? (answer) => {
+                const chart = answerChart(answer, lead);
+                if (chart) drawChart(chart);
+                else say({ kind: "assistant", text: 'That answer has no list of figures to draw. Ask for them as a list, like "make up a monthly budget as a list".', from: "this device" });
+              }
+            : undefined,
+        );
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     /*
      * "Use ai", straight after an answer written on this device: the AI
      * answers that same question, from the figures the device worked out. It
@@ -5729,6 +5826,22 @@ export function AskPanel({
         : null;
     const drawTopic = offeredDraw.current ?? lastAnswered ?? redrawn ?? measureAsked ?? safeAsked ?? allocationAsked ?? breakdownAsked ?? (subjectNow ? `${subjectNow} spending` : fromQuestion);
     const guessedTopic = drawTopic !== null && (drawTopic === fromQuestion || drawTopic === measureAsked || drawTopic === safeAsked || drawTopic === allocationAsked);
+    /*
+     * The answer's own figures, when they are what was asked about: made up
+     * on request, a what-if laid out, or an answer whose figures are not the
+     * ledger's. "Come up with random data", then "chart that", drew the
+     * ledger (owner, 10 November 2026; `answerChart.ts`).
+     */
+    const answerBefore = bareDraw && !as && files.length === 0 ? [...turns].reverse().find((t): t is Said => isSaid(t) && t.kind === "assistant" && Boolean(t.from) && !(t.from ?? "").startsWith("this device")) : undefined;
+    const ownFigures = answerBefore && meant && (MADE_UP.test(meant) || drawTopic === null) ? answerChart(answerBefore.text, lead) : null;
+    if (ownFigures) {
+      emptyBox();
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "insights", { text: note }));
+      if (drawnAlready(ownFigures)) say({ kind: "assistant", text: alreadyDrawnWords([ownFigures]), from: "this device" });
+      else drawChart(ownFigures);
+      return;
+    }
     /*
      * "Show that in a chart" after an answer with nothing of its own to draw:
      * said so, with what can be drawn, rather than a chart of something else.
@@ -7223,10 +7336,62 @@ export function AskPanel({
         if (to) queuedPlans.current = [...queuedPlans.current, { move: p, to, words: moveWords(p, to) }];
         await answerAi(reply, "budget", { screen: "planner", label: "the Planner" });
       };
-      const planAsk = readPlannerAsk(lead, { plans, reference, transactions, asOf, goals: settings.accounts.filter((a) => a.kind === "goal" && !a.archived).map((a) => ({ id: a.id, name: a.name })), focus: focused });
+      const planCtx0 = { plans, reference, transactions, asOf, goals: settings.accounts.filter((a) => a.kind === "goal" && !a.archived).map((a) => ({ id: a.id, name: a.name })), focus: focused };
+      /*
+       * A what-if that names a plan without saying "plan": "what if I move
+       * tuition to january", "what if the keychains plan was 1500". Said again
+       * the way the Planner reads it, so it is worked out rather than
+       * answered from nothing (10 November 2026 sweep).
+       */
+      const whatIfNamed = (): string | null => {
+        if (!/^\s*(?:what\s+(?:if|happens\s+if|would\s+happen\s+if)|suppose|supposing|kung|paano\s+kung)\b/i.test(lead)) return null;
+        const p = plansNamedAll(lead, plans)[0];
+        if (!p) return null;
+        const t = p.title.toLowerCase();
+        const to = /\b(?:move|push|delay|postpone|reschedule|shift)\b[^?]*?\bto\s+([^?.!]+)/i.exec(lead)?.[1]?.trim();
+        if (to) return `move the ${t} plan to ${to}`;
+        const amount = /\b(?:was|were|is|cost|costs|became|be)\s+(?:only\s+|just\s+)?(?:php|₱)?\s*(\d[\d,]*(?:\.\d{1,2})?)\b/i.exec(lead)?.[1];
+        if (amount) return `make the ${t} plan ${amount.replace(/,/g, "")}`;
+        if (/\b(?:skip|drop|cancel|forget)\b/i.test(lead)) return `skip the ${t} plan`;
+        if (/\b(?:remove|delete)\b/i.test(lead)) return `remove the ${t} plan`;
+        return null;
+      };
+      const reworded = whatIfNamed();
+      const planAsk = readPlannerAsk(lead, planCtx0) ?? (reworded ? readPlannerAsk(reworded, planCtx0) : null);
       if (planAsk) {
         const planner: GoPlace = { screen: "planner", label: "the Planner" };
         const views = plans.map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf }));
+        /*
+         * A what-if is a question, not an order: "what if I skip the keychains
+         * plan?" put up a Skip card and said nothing of what skipping would do
+         * (10 November 2026 sweep). Moving it is worked for the new day, with
+         * the Move card after; skipping or a new amount, the month with the
+         * change against the month as it is (`planWhatIf.ts`).
+         */
+        const supposing = /^\s*(?:what\s+(?:if|happens\s+if|would\s+happen\s+if)|suppose|supposing|kung|paano\s+kung)\b/i.test(lead);
+        if (supposing && planAsk.kind === "move") {
+          await savedOpinion(planAsk.plan, { due: planAsk.to, kind: planAsk.toKind });
+          return;
+        }
+        if (supposing && (planAsk.kind === "skip" || planAsk.kind === "remove" || planAsk.kind === "amount")) {
+          const p = planAsk.plan;
+          const v = views.find((x) => x.plan.id === p.id) ?? viewOf(p, { transactions, accounts: settings.accounts, asOf });
+          const facts = planOpinionFacts(p);
+          const brief = monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
+          const words = planWhatIfWords(
+            {
+              title: p.title,
+              left: v.left,
+              month: facts.month,
+              undated: p.due === NO_DATE,
+              heldNow: v.counts && p.due !== NO_DATE && p.due.slice(0, 7) === asOf.slice(0, 7) && brief.safe ? { daysLeft: brief.safe.daysLeft } : null,
+              due: whenOf(p).replace(/^S/, "s"),
+            },
+            planAsk.kind === "amount" ? { kind: "amount", amount: planAsk.amount } : { kind: "skip" },
+          );
+          await answerAi(words, "budget", planner);
+          return;
+        }
         if (planAsk.kind === "list") {
           await answerAi(planAsk.which ? closedPlansWords(views, planAsk.which, asOf) : plansWords(views, plansSetAside(views).total), "budget", planner);
           return;
@@ -15333,7 +15498,9 @@ function ChartView({ chart }: { chart: Chart }) {
                         ? ` of ${chartLabel(r.previous ?? 0)} in`
                         : chart.measure === "allocation"
                           ? ` of ${chartLabel(r.previous ?? 0)}`
-                          : ` was ${chartLabel(r.previous ?? 0)}`}
+                          : chart.fromAnswer
+                            ? ` vs ${chartLabel(r.previous ?? 0)}`
+                            : ` was ${chartLabel(r.previous ?? 0)}`}
                   </span>
                 )}
               </span>

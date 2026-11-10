@@ -3407,6 +3407,47 @@ own direction's colour (rule D3), as decided on 28 September.
   - "Nothing in that period" now names the days and the wallet; a whole
     month is titled by its name, not "Oct 1 to Oct 31 2026".
 
+### 2026-11-10, evening: charts of made-up figures, "it", and plan what-ifs
+
+The owner: "I also ask it to come up with random data then said 'chart
+that' ... any type of chart, vs, trend, pie ... make sure its accurate", and
+"try the adding, editing, moving, deleting ... in database, planner,
+budget, allocation ... what if analysis and very deep test".
+
+- **Figures made up on request** (`answerChart.ts`, `asksInvented`): asked
+  first, before anything that reads entries or budgets. "come up with random
+  data for my monthly spending" was an entry asking how much; "make up a
+  sample budget ... in a pie" offered to set December's real budget; "make up
+  income vs spending for 5 months" became a PHP 5.00 entry. The model is told
+  to write them as "Label: PHP amount" lines (`INVENTED_RULE`), and they are
+  never flagged as untraced (`madeUp`, `useAi.ts`). The owner's own names
+  of two words ("Random necessities") never count, and "Random" alone is an
+  income item, so only a phrase counts ("random data", "make up a budget").
+- **A chart of an answer's own figures**: a list, a "vs" list or a table, read
+  exactly as written, largest first unless they are periods (then a trend),
+  two series side by side, a pie when asked; the device adds them up and
+  says when the answer's stated total is not the sum of its parts; shares
+  alone (percentages) are not drawn, as they have no pesos. "chart that"
+  after made-up figures draws them, never the ledger.
+- **"it" is the entry the cards are about**: after "I buy food 85 gcash" and
+  Add, then a change card for it, or a list of one from the finder or the
+  bin, "change it to 95", "move it to maya", "delete it" and "put it back" are
+  read as its record number. They were each "No saved entry matches that".
+- **What-ifs on plans** (`planWhatIf.ts`): "what if I skip the keychains
+  plan?" and "what if the keychains plan was 1500?" say what the month would
+  cost with the change against as it is (or what safe to spend frees this
+  month, or that a plan with no date changes no month); "what if I move
+  tuition to january?" is worked for the new month with the Move card after.
+  A what-if that names a plan without saying "plan" is said again the way
+  the Planner reads it.
+- **The change sweep on the emulator** (robot `changes.cjs`, scratchpad):
+  planner add, move, change, skip, put back and pay; budget set, category
+  limit and lowering; allocation add, change, remove and put back: each
+  card's figures right and applied. One thing that looked like a bug was the
+  test's own: a restore of about four thousand rows takes two and a half
+  minutes on the emulator, and the robot closed the page while it was still
+  saving, which the app warns against.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
