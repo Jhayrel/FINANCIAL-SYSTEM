@@ -3283,6 +3283,58 @@ the answer, in "Show the app's working".
   line that names who answered reads "Checking it again against your
   figures", with the same dots, until it settles.
 
+### 2026-11-10, night: seven hard questions, and the working behind them
+
+The owner asked seven hard questions and called the answers good. Graded
+against what the ledger says, six of the seven were wrong, and each wrong
+answer had been handed the wrong working, or none. Each now has the device's
+own working, replayed on the emulator copy with a stand-in model, and tested
+with invented figures in `sevenQuestions.test.ts`:
+
+- **A premise that is not true** (`subscriptionStops.ts`): "since I stopped
+  Netflix and Spotify, how much have I saved?" Each bill or subscription
+  named is looked up: stopped or not and since when, its last payment, the
+  monthly payments missed since (only when it was still being paid when it
+  was stopped), and the payments still to come this year if stopped today.
+  The model is told to say first where the question was wrong.
+- **Money paid on someone's behalf** (`debtAsk.ts`): a named On behalf line
+  now lists the year's movements both ways and its note, so "how much of
+  my own money went to his plan" is answered from them.
+- **When the money runs out** (`bridgeAsk.ts`): a later month's bill is
+  counted on its own day (it collapsed into this month's unpaid one), this
+  month's allocations are held, a shortfall is said as one ("PHP X more than
+  your wallets hold", never "PHP 0.00 a day"), and the run-out day is worked
+  out day by day at the usual pace with each bill on its day. A false "Check
+  this" note, from "days" read as "day's", is gone (`dayFit.ts`).
+- **A credit line, supposed** (`creditWhatIf.ts`): "if I put X on Maya Credit
+  on the 20th" gives the charge at the rate of the line's last draw (said as
+  an estimate), the due day from the line's billing and due days, which
+  month's money pays it, the limit left, and what counts as spending. Read
+  before safe to spend, which "can I still afford ... in December" also
+  matched; a plan asked in a later sentence is worked beside it.
+- **The bin, weighed** (`binReview.ts`): "which would be a mistake to put
+  back ... don't put anything back" answers entry by entry: the wallets each
+  would move, against today, whether the ledger already has it or one like
+  it on the same day, and whether it would take a wallet below zero; then
+  all together. No Restore button is shown with it.
+- **"Take out Travel"** (`charts.ts`, `leftOut`): a kind named after "take
+  out", "without", "except" or "huwag isama" is left out, and "anything that
+  only happened once" leaves out the kinds seen in one month of the window.
+  The chart says what it left out and, when fairness is asked, each month a
+  day, the running one over its own days. A question past fourteen words
+  takes no word as a description topic unless it is said as one ("on X",
+  "for X"); when a topic empties the window, the answer says so instead of
+  "Nothing was spent".
+- **Saving a sum a month toward plans** (`plansSchedule.ts`): the plans named,
+  in order (a day first, one their own words give included, "for
+  Christmas"; then needs; then the smaller), paid month by month, each with
+  the month it is done, in the language asked.
+
+Flagged to the owner, not changed: by the app's billing rule for the owner's
+Maya Credit settings (statement on the 6th, due on the next 6th after it), a
+draw on 20 November is due 6 January, not 6 December. If Maya bills it
+sooner, the due day is changed on the Debt screen.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

@@ -88,6 +88,11 @@ export interface BridgeInput {
   readonly debts: readonly Debt[];
   readonly stopped?: readonly { readonly name: string; readonly since: IsoDate }[];
   readonly asOf: IsoDate;
+  /**
+   * This month's allocations, with what each still holds (`monthAllocations`):
+   * money set aside for Gas or the gym is not money for anything else.
+   */
+  readonly allocations?: readonly { readonly name: string; readonly kind: string; readonly held: Centavos }[];
 }
 
 export function bridgeAnswer(ask: BridgeAsk, input: BridgeInput): string {
@@ -108,11 +113,20 @@ export function bridgeAnswer(ask: BridgeAsk, input: BridgeInput): string {
     const y = at.getUTCFullYear();
     const m = at.getUTCMonth() + 1;
     if (`${y}-${String(m).padStart(2, "0")}-01` > lastDay && k > 0) break;
+    const ym = `${y}-${String(m).padStart(2, "0")}`;
     for (const b of monthBills(transactions, reference, y, m, asOf).bills) {
-      if (b.state === "paid" || !b.dueOn || seen.has(`${b.item}|${b.dueOn}`)) continue;
-      seen.add(`${b.item}|${b.dueOn}`);
-      const on = b.dueOn < asOf ? asOf : b.dueOn;
-      if (on <= lastDay) due.push({ name: b.item, amount: b.amount, on: b.dueOn });
+      if (b.state === "paid" || !b.dueOn) continue;
+      /*
+       * A later month's bill is due in that month, on its own day. While
+       * November's wifi was unpaid, December's read "expected November 12"
+       * as well, was taken for the same bill, and the December one before
+       * the pay on the 15th was never counted (10 November 2026).
+       */
+      const dueOn = k > 0 && b.dueOn.slice(0, 7) < ym ? `${ym}-${String(Math.min(Number(b.dueOn.slice(8, 10)), daysInMonth(y, m))).padStart(2, "0")}` : b.dueOn;
+      if (seen.has(`${b.item}|${dueOn}`)) continue;
+      seen.add(`${b.item}|${dueOn}`);
+      const on = dueOn < asOf ? asOf : dueOn;
+      if (on <= lastDay) due.push({ name: b.item, amount: b.amount, on: dueOn });
       else if (on === ask.arrives) sameDay.push({ name: b.item, amount: b.amount });
     }
   }
@@ -123,7 +137,10 @@ export function bridgeAnswer(ask: BridgeAsk, input: BridgeInput): string {
   }
   due.sort((a, b) => a.on.localeCompare(b.on));
   const dueTotal = due.reduce((s, d) => s + d.amount, 0);
-  const free = Math.max(0, wallets - dueTotal);
+  // What this month's allocations still hold is set aside already, as safe to spend counts it.
+  const held = (input.allocations ?? []).filter((a) => a.held > 0);
+  const heldTotal = held.reduce((s, a) => s + a.held, 0);
+  const free = Math.max(0, wallets - dueTotal - heldTotal);
   const perDay = Math.floor(free / days);
 
   // A usual day, from the usual month the budget recommendation reads.
@@ -144,16 +161,47 @@ export function bridgeAnswer(ask: BridgeAsk, input: BridgeInput): string {
   out.push(
     `**From today to ${formatMedium(lastDay)}, the day before your ${ask.what} on ${formatMedium(ask.arrives)}: ${days} ${days === 1 ? "day" : "days"}.** Your spending wallets hold ${money(wallets)}.`,
   );
+  const heldWords = held.length > 0 ? ` Set aside in this month's allocations: ${held.map((a) => `${a.name} ${money(a.held)}`).join(", ")}, ${money(heldTotal)}.` : "";
+  const need = dueTotal + heldTotal;
+  const dueWords = due.length > 0 ? `Due before then: ${due.map((d) => `${d.name} ${money(d.amount)} (${formatMedium(d.on)})`).join(", ")}, ${money(dueTotal)} in all.` : "Nothing falls due before then.";
   out.push(
-    due.length > 0
-      ? `Due before then: ${due.map((d) => `${d.name} ${money(d.amount)} (${formatMedium(d.on)})`).join(", ")}, ${money(dueTotal)} in all. That leaves **${money(free)}, ${money(perDay)} a day** until the ${ask.what} comes.`
-      : `Nothing falls due before then, so **${money(free)}, ${money(perDay)} a day**, has to last until the ${ask.what} comes.`,
+    need > wallets
+      ? `${dueWords}${heldWords} Together that is ${money(need)}, **${money(need - wallets)} more than your spending wallets hold**, so nothing is left for anything else until the ${ask.what} comes.`
+      : `${dueWords}${heldWords} That leaves **${money(free)}, ${money(perDay)} a day** until the ${ask.what} comes.`,
   );
   if (sameDay.length > 0) out.push(`${sameDay.map((d) => `${d.name} ${money(d.amount)}`).join(" and ")} ${sameDay.length === 1 ? "is" : "are"} due on ${formatMedium(ask.arrives)} itself, the day the money comes: pay ${sameDay.length === 1 ? "it" : "them"} from it.`);
-  out.push(
-    `Today's safe to spend spreads your money to the end of this month only; keeping to it leaves nothing for the days after. To reach ${formatMedium(ask.arrives)}, spend ${money(perDay)} a day from today instead.`,
-  );
+  if (free > 0) {
+    out.push(
+      `Today's safe to spend spreads your money to the end of this month only; keeping to it leaves nothing for the days after. To reach ${formatMedium(ask.arrives)}, spend ${money(perDay)} a day from today instead.`,
+    );
+  }
+  /*
+   * The day it runs out at the usual pace, when it does: what the owner
+   * asked ("on what day do I run out at my usual pace?"), which the model
+   * had to work out itself (10 November 2026). Day by day from today: a
+   * usual day's spending, Gas and the gym included at their usual pace, and
+   * each bill on its own day.
+   */
   if (usualDay > 0) {
+    let left = wallets;
+    let ranOut: IsoDate | null = null;
+    for (let d = asOf; d < ask.arrives; d = addDays(d, 1)) {
+      left -= usualDay;
+      for (const b of due) if (b.on === d || (d === asOf && b.on < asOf)) left -= b.amount;
+      if (left < 0) {
+        ranOut = d;
+        break;
+      }
+    }
+    const one = held.length === 1;
+    const also = held.length > 0 ? ` That counts ${held.map((a) => a.name).join(" and ")} at ${one ? "its" : "their"} usual pace too, out of the same money ${one ? "its allocation holds" : "their allocations hold"}.` : "";
+    out.push(
+      ranOut
+        ? `At your usual pace, about ${money(usualDay)} a day, with each bill paid on its day, **the money runs out on ${formatMedium(ranOut)}**, ${daysBetween(ranOut, ask.arrives)} ${daysBetween(ranOut, ask.arrives) === 1 ? "day" : "days"} before the ${ask.what}.${also}`
+        : `At your usual pace, about ${money(usualDay)} a day, with each bill paid on its day, the money lasts until the ${ask.what} comes.${also}`,
+    );
+  }
+  if (usualDay > 0 && free > 0) {
     out.push(
       perDay >= usualDay
         ? `That is at or above a usual ${money(usualDay)} a day, so the money lasts without a loan.`

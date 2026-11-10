@@ -83,7 +83,30 @@ export function debtAnswer(ask: DebtAsk, debts: readonly Debt[], transactions: r
     const charged = p.charged > 0 ? ` That includes ${money(p.charged)} of fees and interest the lender added.` : "";
     return `You owe ${d.name} ${money(owed)}.${when}${charged}`;
   };
-  if (ask.debt) return describe(lines[0]!);
+  /*
+   * Money paid or held on someone's behalf, this year, movement by movement,
+   * when that line is the one asked about. "How much of my own money went to
+   * Globe Postpaid this year, and does my father still owe me anything?" was
+   * handed "Father: nothing open, settled." alone, and the answer called
+   * two of the payments the owner's own money, taking them for never paid
+   * back, though he had paid back every one (10 November 2026).
+   */
+  const movements = (d: Debt): string => {
+    if (d.form !== "pass-through") return "";
+    const year = asOf.slice(0, 4);
+    const rows = transactions.filter((t) => t.debtId === d.id && t.date.slice(0, 4) === year && t.date <= asOf).sort((a, b) => a.date.localeCompare(b.date));
+    if (rows.length === 0) return "";
+    const out = rows.filter((t) => t.debtEffect === "lend" || t.debtEffect === "draw");
+    const back = rows.filter((t) => t.debtEffect === "collect" || t.debtEffect === "repay");
+    const sum = (rs: readonly Transaction[]): Centavos => rs.reduce((s, t) => s + t.total, 0);
+    const list = (rs: readonly Transaction[]): string => (rs.length > 0 ? ` (${rs.map((t) => `${money(t.total)} on ${formatMedium(t.date)}`).join(", ")})` : "");
+    const gone = sum(out) - sum(back);
+    const notes = d.notes.trim() ? ` What the line is for: ${d.notes.trim()}` : "";
+    return d.kind === "receivable"
+      ? ` In ${year} you paid ${money(sum(out))} for ${who(d)}${list(out)}, and ${who(d)} gave back ${money(sum(back))}${list(back)}. ${gone <= 0 ? "So none of it was your own money in the end: everything you paid for them came back." : `So ${money(gone)} of your own money is still out, theirs to give back.`}${notes}`
+      : ` In ${year} you received ${money(sum(out))} for ${who(d)}${list(out)}, and passed on ${money(sum(back))}${list(back)}.${notes}`;
+  };
+  if (ask.debt) return `${describe(lines[0]!)}${movements(ask.debt)}`;
   if (lines.length === 0) return "There are no debt or On behalf lines yet. The Debt screen adds one.";
   const youOwe = lines.filter((p) => p.debt.form !== "pass-through" && p.debt.kind === "payable").reduce((s, p) => s + Math.max(0, p.outstanding), 0);
   const owedYou = lines.filter((p) => p.debt.kind === "receivable").reduce((s, p) => s + Math.max(0, p.outstanding), 0);

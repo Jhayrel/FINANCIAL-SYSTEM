@@ -988,6 +988,10 @@ interface Focus {
    * month", then "pie", drew nothing (4 November 2026 sweep).
    */
   readonly group: "" | "Bills" | "Subscriptions";
+  /** Kinds the question leaves out: "take out Travel", "without Food" (`leftOut`). */
+  readonly without: readonly string[];
+  /** It leaves out what happened only once: "and anything that only happened once" (`leftOut`). */
+  readonly once: boolean;
 }
 
 /** Bills, or Subscriptions, named alone: not both, and not beside the main categories. */
@@ -1061,7 +1065,16 @@ function aboutOf(text: string, transactions: readonly Transaction[], taken: read
   }
   // Three letters too ("gym", "bus", "tax"), with the little words and the ones that ask left out: "Gym spending trend" drew all spending (26 October 2026).
   const SHORT_ASKING = new Set("and for the you can how see let its are was not but has had did get got put use say all any too why who now new old way per via day".split(" "));
-  const asked = [...new Set(question.toLowerCase().match(/[a-z]{3,}/g) ?? [])].filter((w) => !skip.has(w) && !LITTLE_WORDS.has(w) && !SHORT_ASKING.has(w));
+  /*
+   * A long question is a sentence, and the rarest word in it is whatever it
+   * happens to be: "or was it just the trip? ... compare August to November
+   * fairly" picked a word out of a few descriptions and drew nothing
+   * (10 November 2026). Past fourteen words a topic is one said as a topic,
+   * after "on", "for" or "about".
+   */
+  const long = question.trim().split(/\s+/).length > 14;
+  const signalled = new Set([...question.toLowerCase().matchAll(/\b(?:on|for|about|regarding)\s+(?:the\s+|my\s+|our\s+|that\s+)?([a-z]{3,})\b/g)].map((m) => m[1] ?? ""));
+  const asked = [...new Set(question.toLowerCase().match(/[a-z]{3,}/g) ?? [])].filter((w) => !skip.has(w) && !LITTLE_WORDS.has(w) && !SHORT_ASKING.has(w) && (!long || signalled.has(w)));
   if (asked.length === 0) return "";
   const limit = Math.max(12, Math.floor(transactions.length * 0.02));
   let best = "";
@@ -1080,6 +1093,16 @@ function aboutOf(text: string, transactions: readonly Transaction[], taken: read
 export function chartTopic(question: string, transactions: readonly Transaction[]): string {
   const about = focusOf(question, transactions).about;
   return about && !transactions.some((t) => mentions(t, about)) ? about : "";
+}
+
+/**
+ * The word from the descriptions a chart question was narrowed to, or "".
+ * Said when nothing in the window mentions it: "Nothing was spent in the
+ * days asked about" was untrue when four months of spending were there and
+ * only the word was missing from them (10 November 2026).
+ */
+export function chartAbout(question: string, transactions: readonly Transaction[]): string {
+  return focusOf(question, transactions).about;
 }
 
 /** Whether a row's own words name what the question is about. */
@@ -1139,7 +1162,44 @@ function namedAll(question: string, names: readonly string[]): string[] {
   return found;
 }
 
-function focusOf(question: string, transactions: readonly Transaction[]): Focus {
+/** "only happened once", "one-offs", "one-time", "isang beses lang". */
+const ONCE = /\b(?:(?:only\s+)?happened\s+(?:only\s+)?once|only\s+once|one[-\s]?offs?|one[-\s]?time|once[-\s]?off|isang\s+beses(?:\s+lang)?)\b/i;
+
+/** The words that leave something out of a chart, in English and Tagalog. */
+const LEAVE_OUT = /\b(?:(?:take|taking|leave|leaving|keep|keeping|cut|cutting)\s+out|without|except(?:\s+for)?|excluding|exclude|minus|not\s+counting|apart\s+from|aside\s+from|other\s+than|ignor(?:e|ing)|remov(?:e|ing)|maliban\s+sa|hindi\s+kasama(?:\s+ang)?|(?:wag|huwag)\s+(?:isama|isali)(?:\s+ang)?)\s+/gi;
+
+/**
+ * What the question leaves out, and the question without it.
+ *
+ * The owner, 10 November 2026: "Was October really my worst month, or was it
+ * just the trip? Take out Travel and anything that only happened once,
+ * compare August to November fairly". "Take out Travel" was read as Travel
+ * alone, and the chart drew nothing. A kind named after "take out",
+ * "without", "except" or "huwag isama" is left out instead, and so is what
+ * happened only once when the same words say so. A clause that names no
+ * kind ("without touching my savings") is left as it was.
+ */
+export function leftOut(question: string, names: readonly string[]): { readonly rest: string; readonly without: readonly string[]; readonly once: boolean } {
+  let rest = question;
+  const without: string[] = [];
+  let once = false;
+  for (const m of question.matchAll(new RegExp(LEAVE_OUT.source, "gi"))) {
+    const tail = question.slice((m.index ?? 0) + m[0].length);
+    const end = tail.search(/[.;?!()]|,\s*(?:and\s+)?(?:compare|show|draw|chart|plot|graph|then|how|what|which|is|was|by|for|in|from|this|last|since|vs)\b|\s+and\s+(?:show|compare|draw|chart|plot|graph|tell|explain)\b/i);
+    const clause = end < 0 ? tail : tail.slice(0, end);
+    const found = namedAll(clause, names);
+    const onceSaid = ONCE.test(clause);
+    if (found.length === 0 && !onceSaid) continue;
+    without.push(...found);
+    once = once || onceSaid;
+    rest = rest.replace(`${m[0]}${clause}`, " ");
+  }
+  return { rest: rest.replace(/\s+/g, " ").trim(), without: [...new Set(without)], once };
+}
+
+function focusOf(asked: string, transactions: readonly Transaction[]): Focus {
+  const out = leftOut(asked, transactions.map(itemName));
+  const question = out.rest;
   const allItems = namedAll(question, transactions.map((t) => t.item));
   const items = allItems.length >= 2 ? allItems : [];
   const item = items.length > 0 ? "" : named(question, transactions.map((t) => t.item));
@@ -1164,6 +1224,8 @@ function focusOf(question: string, transactions: readonly Transaction[]): Focus 
      * reserved fund" matched nothing at all before.
      */
     wallet,
+    without: out.without,
+    once: out.once,
   };
 }
 
@@ -1374,6 +1436,7 @@ function buildComparison(
       (!focus.item || t.item.trim().toLowerCase() === focus.item.trim().toLowerCase()) &&
       (!focus.wallet || sideOf(t) === focus.wallet.trim().toLowerCase()) &&
       (!focus.group || direction === "revenue" || t.category === focus.group) &&
+      !focus.without.some((w) => w.toLowerCase() === itemName(t).toLowerCase()) &&
       mentions(t, focus.about),
   );
   const narrowed = [focus.item, direction !== "revenue" ? focus.group : "", focus.wallet, focus.about ? capital(focus.about) : ""].filter(Boolean).join(", ");
@@ -1568,7 +1631,7 @@ export function buildChart(
   const matchesWallet = (t: Transaction): boolean =>
     !focus.wallet || sideOf(t).toLowerCase() === focus.wallet.toLowerCase();
 
-  const inWindow = transactions.filter(
+  const asWindow = transactions.filter(
     (t) =>
       t.date >= period.from &&
       t.date <= period.to &&
@@ -1578,6 +1641,34 @@ export function buildChart(
       matchesWallet(t) &&
       mentions(t, focus.about),
   );
+  /*
+   * What the question leaves out (`leftOut`): the kinds it names, and, when
+   * it says so, what happened only once. Over two months or more that is a
+   * kind with money in one month of the window and no other; inside a
+   * month, a kind with a single entry. Never every kind: a chart of nothing
+   * answers nothing.
+   */
+  const named0 = new Set(focus.without.map((w) => w.toLowerCase()));
+  const leftAside = new Map<string, number>();
+  const spanLast = period.to < asOf ? period.to : asOf;
+  const months = period.from > "1000" && monthOf(period.from) !== monthOf(spanLast);
+  const seen = new Map<string, { months: Set<string>; count: number }>();
+  for (const t of asWindow) {
+    if (valueOf(t) <= 0 || named0.has(itemName(t).toLowerCase())) continue;
+    const s0 = seen.get(itemName(t)) ?? { months: new Set<string>(), count: 0 };
+    s0.months.add(monthOf(t.date));
+    s0.count += 1;
+    seen.set(itemName(t), s0);
+  }
+  const onceOut = focus.once ? [...seen.entries()].filter(([, v]) => (months ? v.months.size === 1 : v.count === 1)).map(([k]) => k.toLowerCase()) : [];
+  const dropped = new Set([...named0, ...(onceOut.length < seen.size ? onceOut : [])]);
+  const inWindow = dropped.size === 0 ? asWindow : asWindow.filter((t) => {
+    const name = itemName(t);
+    if (!dropped.has(name.toLowerCase())) return true;
+    const v = valueOf(t);
+    if (v > 0) leftAside.set(name, (leftAside.get(name) ?? 0) + v);
+    return false;
+  });
 
   const key = (t: Transaction): string => {
     switch (by) {
@@ -1726,6 +1817,42 @@ export function buildChart(
     overTime(by) &&
     lastKey !== "" &&
     lastKey === (by === "month" ? monthOf(asOf) : by === "week" ? weekOf(asOf) : by === "year" ? asOf.slice(0, 4) : asOf);
+  /*
+   * Said under the chart, and handed to the model with its figures: what was
+   * left out and how much, and, for months asked about fairly, each month a
+   * day, the one still running over the days it has had.
+   */
+  const scopeParts: string[] = [];
+  if (leftAside.size > 0) {
+    const asked0 = [...leftAside.entries()].filter(([k]) => named0.has(k.toLowerCase()));
+    const once0 = [...leftAside.entries()].filter(([k]) => !named0.has(k.toLowerCase())).sort((a, b) => b[1] - a[1]);
+    const said0 = (e: [string, number]): string => `${e[0]} ${chartLabel(e[1])}`;
+    const parts0 = [
+      asked0.length > 0 ? asked0.map(said0).join(", ") : "",
+      once0.length > 0 ? `what happened in ${months ? "one month" : "one entry"} only: ${once0.map(said0).join(", ")}` : "",
+    ].filter(Boolean);
+    scopeParts.push(`Leaves out ${parts0.join(", and ")}.`);
+  } else if (focus.without.length > 0) {
+    scopeParts.push(`Nothing was spent on ${focus.without.join(" or ")} in ${period.name}, so nothing was left out.`);
+  }
+  const FAIR = /\b(?:fair|fairly|so far|isn'?t over|not over|still running|per day|a day|daily|average|hindi pa tapos)\b/i;
+  if (by === "month" && kept.length >= 2 && FAIR.test(question)) {
+    const daysIn0 = (key: string): number => {
+      const start = `${key}-01` > period.from ? `${key}-01` : period.from;
+      const endOfMonth = new Date(Date.UTC(Number(key.slice(0, 4)), Number(key.slice(5, 7)), 0)).toISOString().slice(0, 10);
+      const stop = [endOfMonth, period.to, asOf].sort()[0] as string;
+      return Math.max(1, Math.round((Date.parse(`${stop}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000) + 1);
+    };
+    const each = kept.filter(([k]) => /^\d{4}-\d{2}$/.test(k)).map(([k, g]) => {
+      const days = daysIn0(k);
+      const isNow = running && k === lastKey;
+      return `${monthName(k)}${isNow ? ` so far (${days} ${days === 1 ? "day" : "days"})` : ""} ${chartLabel(Math.round(g.value / days))}`;
+    });
+    if (each.length >= 2) scopeParts.push(`A day, so months of different lengths and one still running compare fairly: ${each.join(", ")}.`);
+  }
+  const leftWords = focus.without.length > 0 || (focus.once && leftAside.size > 0)
+    ? ` without ${[...focus.without, ...(focus.once && [...leftAside.keys()].some((k) => !named0.has(k.toLowerCase())) ? ["one-offs"] : [])].join(" and ")}`
+    : "";
 
   return {
     /**
@@ -1741,7 +1868,7 @@ export function buildChart(
      * month's spending and is wrong by everything it left out. The same goes
      * for one wallet.
      */
-    title: `${focus.items.length > 0 ? focus.items.join(" and ") : focus.item || (direction !== "revenue" && focus.group) || word}${focus.about ? ` on ${capital(focus.about)}` : ""}${focus.wallet ? ` from ${focus.wallet}` : ""} by ${by}, ${
+    title: `${focus.items.length > 0 ? focus.items.join(" and ") : focus.item || (direction !== "revenue" && focus.group) || word}${leftWords}${focus.about ? ` on ${capital(focus.about)}` : ""}${focus.wallet ? ` from ${focus.wallet}` : ""} by ${by}, ${
       period.name
     }`,
     by,
@@ -1772,6 +1899,7 @@ export function buildChart(
     othersCount: folded > 0 ? 0 : all.length - kept.length,
     direction,
     ...(running ? { running: true } : {}),
+    ...(scopeParts.length > 0 ? { scope: scopeParts.join(" ") } : {}),
   };
 }
 

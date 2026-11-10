@@ -100,6 +100,7 @@ import {
 } from "../domain/recall";
 import {
   buildChart,
+  chartAbout,
   chartTopic,
   comparedPeriods,
   comparisonWorked,
@@ -147,6 +148,10 @@ import { AttachMenu } from "../components/AttachMenu";
 import { readSmallTalk, smallTalkAnswer } from "../domain/smallTalk";
 import { fileAsBefore } from "../domain/fileAsBefore";
 import { asksAboutDeleted, deletedRows, deletedWindowIn, deletedWords, onlyAWindow } from "../domain/deletedAsk";
+import { asksBinReview, binReview, binReviewWords, holdsBack } from "../domain/binReview";
+import { asksSubscriptionStops, subscriptionStops, subscriptionStopWords, subscriptionsNamed } from "../domain/subscriptionStops";
+import { creditWhatIf, creditWhatIfWords, readCreditWhatIf } from "../domain/creditWhatIf";
+import { readScheduleAsk, schedulePlans, scheduleWords } from "../domain/plansSchedule";
 import { inferFromHistory } from "../domain/infer";
 import { categoryLimits, monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
@@ -5143,7 +5148,12 @@ export function AskPanel({
   };
 
   /** What an opinion on a plan is worked from: its month as "how much do I need" reads it, today's money, the savings. */
-  const planOpinionFacts = (plan: Pick<Plan, "due" | "title"> & { readonly amount: Centavos | null }, said = ""): PlanOpinionFacts => {
+  const planOpinionFacts = (
+    plan: Pick<Plan, "due" | "title"> & { readonly amount: Centavos | null },
+    said = "",
+    /** Money out in a month the question adds ("if I put [an amount] on Maya Credit"): paid from that month like a plan. */
+    extra: readonly { readonly name: string; readonly amount: Centavos; readonly ym: string }[] = [],
+  ): PlanOpinionFacts => {
     const brief = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
     const savings = reference.savings.reduce((sum, a) => sum + Math.max(0, walletBalance(transactions, a)), 0);
     let month: PlanOpinionFacts["month"] = null;
@@ -5153,7 +5163,11 @@ export function AskPanel({
       const y = Number(plan.due.slice(0, 4));
       const m = Number(plan.due.slice(5, 7));
       if (y * 12 + m - (Number(asOf.slice(0, 4)) * 12 + Number(asOf.slice(5, 7))) <= 12) {
-        const others = plannedIn((settings.plans ?? []).map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf })), y, m).filter((o) => !(o.amount === plan.amount && namesIt(o.name, plan.title)));
+        const ym = `${y}-${String(m).padStart(2, "0")}`;
+        const others = [
+          ...plannedIn((settings.plans ?? []).map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf })), y, m).filter((o) => !(o.amount === plan.amount && namesIt(o.name, plan.title))),
+          ...extra.filter((e) => e.ym === ym).map((e) => ({ name: e.name, amount: e.amount })),
+        ];
         const nextUp = nextOf(asOf);
         const readFrom = y * 12 + m > nextUp.year * 12 + nextUp.month ? { readBefore: { year: nextUp.year, month: nextUp.month } } : {};
         const a = budgetAdvice({ transactions: reportRows, year: y, month: m, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes, planned: others, ...readFrom });
@@ -6204,6 +6218,25 @@ export function AskPanel({
      * 2026). Worked out here, every total the app's own, and drawn beside
      * the words; "pie" or "bars" next redraws this.
      */
+    /*
+     * "Since I stopped Netflix and Spotify, how much have I saved?": each one
+     * named, looked up, and the question corrected where the ledger says
+     * otherwise. Spotify was still paid, Netflix had not been paid in over
+     * a year, and the answer counted both as saved, Netflix at Office's
+     * price (10 November 2026; domain/subscriptionStops.ts).
+     */
+    const billNames = [...reference.bills, ...reference.subscriptions];
+    if (files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) && asksSubscriptionStops(ruled, billNames)) {
+      const words = subscriptionStopWords(subscriptionStops(subscriptionsNamed(ruled, billNames), reportRows, settings.stopped ?? [], asOf), asOf);
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "budget", { text: note }));
+      await aiFirst(note, words, {
+        where: "budget",
+        rules: `The app looked up each bill and subscription the message names, in the ledger and in Settings, for this message. Today is ${formatMedium(asOf)}. When the message says something these do not show (one it calls stopped that is still being paid, or a saving that never happened), say so first, plainly and kindly. Then answer what was asked with these figures only: never add figures up yourself, and never use one item's price for another. Never write a Plan line or an Entry line.`,
+      });
+      return;
+    }
     if (files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) && asksUpcoming(ruled)) {
       const u = upcomingNow();
       const next = nextOf(asOf);
@@ -6444,7 +6477,8 @@ export function AskPanel({
       say({ kind: "you", text: note });
       log(aiEvent("asked", "add", { text: note }));
       bridgeRef.current = { ask, asked: note };
-      const words = bridgeAnswer(ask, { transactions: reportRows, reference, debts, stopped: settings.stopped ?? [], asOf });
+      const held = monthAllocations(reference.allocations, reportRows, asOf.slice(0, 7), asOf).lines.map((l) => ({ name: l.name, kind: l.line.kind, held: l.held }));
+      const words = bridgeAnswer(ask, { transactions: reportRows, reference, debts, stopped: settings.stopped ?? [], asOf, allocations: held });
       setBusy(true);
       try {
         await askQuestion(note, false, {
@@ -6597,6 +6631,60 @@ export function AskPanel({
         }
         return;
       }
+    }
+
+    /*
+     * Supposing something goes on a credit line: what it costs to pay back,
+     * when, and from which month (domain/creditWhatIf.ts). "If I put [an
+     * amount] of the motorcycle repair on Maya Credit on November 20" was
+     * answered as that amount back, the line's charge left out, from safe to spend's
+     * figures (10 November 2026). Read before safe to spend, which "can I
+     * still afford ... in December" also matches. A plan asked about in the
+     * same message is worked with the repayment in its month.
+     */
+    /*
+     * Saving a sum a month toward plans named together: the order, and when
+     * each is done (domain/plansSchedule.ts). "Kung [a sum] lang kaya kong
+     * itabi kada buwan simula December, alin ang uunahin" was read as a
+     * plan to spend that sum this month (10 November 2026).
+     */
+    const scheduleAsk = files.length === 0 && !as && pending === null ? readScheduleAsk(ruled, plansAsNow(settings.plans ?? [], transactions), asOf) : null;
+    if (scheduleAsk) {
+      const left = new Map(scheduleAsk.plans.map((p) => [p.id, viewOf(p, { transactions, accounts: settings.accounts, asOf }).left] as const));
+      const words = scheduleWords(schedulePlans(scheduleAsk, left, asOf));
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "budget", { text: note }));
+      await aiFirst(note, words, {
+        where: "budget",
+        go: { screen: "planner", label: "the Planner" },
+        rules: `The app put the plans named below in order and paid them month by month from the saving they said, for this message. Today is ${formatMedium(asOf)}. Answer in the language they asked in, with this order, these months and these figures: never add figures up yourself, never move a month, and give the reason for the order. Never write a Plan line or an Entry line.`,
+      });
+      return;
+    }
+    const credit = files.length === 0 && !as && pending === null ? readCreditWhatIf(ruled, debts, asOf) : null;
+    if (credit) {
+      const outcome = creditWhatIf(credit, transactions, asOf);
+      const parts = [creditWhatIfWords(outcome)];
+      const plansNow = plansAsNow(settings.plans ?? [], transactions);
+      // The plan may be asked in a sentence of its own: "After that, can I still afford the keychains in December?"
+      const asked = [ruled, ...ruled.split(/(?<=[?.!])\s+/).slice(1)].map((t) => readPlannerAsk(t, { plans: plansNow, reference, transactions, asOf })).find((a) => a?.kind === "opinion") ?? null;
+      if (asked?.kind === "opinion") {
+        const p = asked.plan;
+        const v = viewOf(p, { transactions, accounts: settings.accounts, asOf });
+        const extra = outcome.due ? [{ name: `Paying back ${credit.debt.name}`, amount: outcome.repay + outcome.owedNow, ym: outcome.due.slice(0, 7) }] : [];
+        const facts = planOpinionFacts(p, ruled, extra);
+        const lands = outcome.due !== null && p.due !== NO_DATE && outcome.due.slice(0, 7) === p.due.slice(0, 7);
+        parts.push(
+          `"${p.title}", asked about in the same message${outcome.due ? (lands ? `, with the ${formatMoney(outcome.repay + outcome.owedNow)} paid back in the same month` : `: the repayment falls on ${formatMedium(outcome.due)}, not in its month, so it does not change this`) : ""}:`,
+          planOpinion(inputOf(p, { due: p.due, dueKind: p.dueKind }), { ...facts, freeNow: facts.freeNow === null ? null : facts.freeNow + (v.counts ? v.left : 0) }, { paid: v.paid, left: v.left }),
+        );
+      }
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "budget", { text: note }));
+      await aiFirst(note, parts.join("\n\n"), { where: "budget", go: { screen: "debt", label: "Debt" } });
+      return;
     }
 
     // "Don't count the trip plan in safe to spend" is a change to a plan, not the safe-to-spend question.
@@ -10228,6 +10316,24 @@ export function AskPanel({
      */
     const lastYouSaid = [...turns].reverse().find((t): t is Said => t.kind === "you")?.text ?? "";
     const deletedFollowUp = lastDeletedAsk.current !== null && lastYouSaid === lastDeletedAsk.current ? onlyAWindow(note, asOf) : null;
+    /*
+     * About the bin rather than for it: "which ones would be a mistake to put
+     * back, and what would each do to my balances? Don't put anything back"
+     * was answered with the list under a Restore all 12 (10 November 2026).
+     * Each entry is weighed instead, and no button offers to put any back
+     * (domain/binReview.ts).
+     */
+    if (openCards.length === 0 && !pending && files.length === 0 && !as && !deletedFollowUp && asksAboutDeleted(ruled) && asksBinReview(ruled)) {
+      const words = binReviewWords(binReview(deleted, transactions), holdsBack(ruled));
+      setDraft("");
+      say({ kind: "you", text: note });
+      log(aiEvent("asked", "add", { text: note }));
+      await aiFirst(note, words, {
+        rules: `The app weighed every entry in the bin below, for this message: what putting each back would do to each wallet, against what the wallets hold now, and whether the ledger already has it. Nothing was put back, and nothing is put back from the chat unless they say "restore" and the number. Answer which would be a mistake to put back and why, then what the rest would do, with these figures and these record numbers; never add figures up yourself, and never suggest putting them all back. Never write a Plan line or an Entry line.`,
+      });
+      lastDeletedAsk.current = null;
+      return;
+    }
     if (openCards.length === 0 && !pending && files.length === 0 && !as && (deletedFollowUp || asksAboutDeleted(ruled))) {
       const window = deletedFollowUp ?? deletedWindowIn(note, asOf);
       const found = deletedRows(deleted, window);
@@ -10854,6 +10960,8 @@ export function AskPanel({
                       : (() => {
                           // Which days were looked at, so "this week" on a Monday is not a mystery (9 November 2026 sweep).
                           const w = windowOf(asked, asOf);
+                          const about = chartAbout(asked, transactions);
+                          if (about) return `No entry in ${w.name} mentions "${about}", so there is nothing to draw. Name the kind instead, like Travel or Food, or say it the way the entry's description does.`;
                           return `Nothing was ${/\b(?:income|revenue|earn|received)/i.test(asked) ? "received" : "spent"} in the days asked about (${w.name}), so there is nothing to draw. Try a wider window, like "last 7 days", a month, or the year.`;
                         })(),
           from: "this device",

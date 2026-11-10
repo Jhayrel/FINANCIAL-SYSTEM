@@ -181,7 +181,12 @@ const NOT =
   /\b(?:overspend\w*|over-?spending|warning|deficit|burn\w*|not|never|no longer|cannot|exceeds?|exceeding|exceeded|above|beyond|more than|over (?:it|that|this|the|your|today)|shortfall|short|past|outside|too (?:much|expensive|high)|requires?|need(?:s)? (?:to )?sav\w*|saving up|unless|if you)\b|n'?t\b/i;
 const TODAY_WORDS = /\b(?:today'?s|for today|today)\b/i;
 const TOMORROW_WORDS = /\b(?:from tomorrow|tomorrow'?s|after today)\b/i;
-const DAY_WORDS = /\b(?:a day|per day|daily|day'?s|safe[- ]to[- ]spend|safe spend\w*|that (?:limit|amount|figure|allowance)|the limit|allowance)\b/i;
+/*
+ * "day's" with its apostrophe only: "what is left, to cover 35 days" was
+ * held to the day's figure, and a "Check this" note sat under an answer
+ * that said nothing of the kind (10 November 2026).
+ */
+const DAY_WORDS = /\b(?:a day|per day|daily|day['\u2019]s|safe[- ]to[- ]spend|safe spend\w*|that (?:limit|amount|figure|allowance)|the limit|allowance)\b/i;
 
 /**
  * Amounts an answer says fit a day's figure they are above.
@@ -223,7 +228,8 @@ export function fitSlips(answer: string, day: { readonly today: Centavos; readon
          */
         const at = clause.indexOf(formatPlain(f));
         const before = at > 0 ? clause.slice(Math.max(0, at - 40), at) : "";
-        if (/\b(?:hold|holds|holding|balance|wallets?|left|leaves|leaving|remaining|transfer(?:red)?\s+of|withdr\w*\s+of|aside)\b[^.]{0,12}$/i.test(before)) continue;
+        // Nor is a sum of bills: "your bills due before December 15 total [the sum]" (10 November 2026).
+        if (/\b(?:hold|holds|holding|balance|wallets?|left|leaves|leaving|remaining|transfer(?:red)?\s+of|withdr\w*\s+of|aside|total|totals|in all|come to|comes to|due)\b[^.]{0,12}$/i.test(before)) continue;
         // "within the PHP 27,700.00 budget" is the month's plan, not a purchase (13 October 2026, replayed 20 October).
         const after = at >= 0 ? clause.slice(at + formatPlain(f).length, at + formatPlain(f).length + 24) : "";
         if (/^[*\s]*(?:(?:spending|monthly|month'?s|october|november|december|\w+ber)\s+)?(?:budget|plan|limit|allowance)\b/i.test(after)) continue;
