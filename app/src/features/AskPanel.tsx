@@ -4958,6 +4958,18 @@ export function AskPanel({
           // What it must not forget: what they told it, and this conversation in outline (domain/memory.ts).
           pinned: keepInMind(savedChat.current, turns.filter(isSaid).map((t) => ({ role: t.kind, text: t.text })).concat([{ role: "you" as const, text: question }]), asOf),
           signal: control.signal,
+          /*
+           * A second look, said under the first when it holds fewer figures
+           * the app cannot trace (`useAi.ts`). Only while nothing else has
+           * been asked: a late answer is never said under the next question.
+           */
+          onRevised: (revised) => {
+            if (generation.current !== asked) return;
+            const text = withoutFalseDenial(revised.text);
+            const by = modelLabel(revised.model ?? "") || "the provider";
+            say({ kind: "assistant", text, from: `${by}, a second look using only your figures` });
+            log(aiEvent("answered", "add", { text: `Second look: ${text}`, model: by }));
+          },
         }),
       "Still waiting on the model",
     ).finally(() => clearTimeout(deadline));
@@ -8094,7 +8106,23 @@ export function AskPanel({
      * still answered by one: only the sorting is skipped.
      */
     // `waiting`, above: a question, a card or a debt card still open.
-    const sortedAlready = !waiting && (isPlan(note) || plainlyDone(note) || todayPlan !== null);
+    /*
+     * A plain question, with nothing on screen it could be answering and no
+     * word that changes, removes, sets or draws anything, needs no model to
+     * say it is a question: "how am I doing this month?", "is my spending
+     * normal?". The sorting round trip came before every such answer (10
+     * November 2026, the owner: "make it faster but still think deep"). It
+     * is still answered by the model, with everything it had.
+     */
+    const askedPlainly =
+      files.length === 0 &&
+      /\?\s*$/.test(note) &&
+      /^\s*(?:how|what|why|when|where|which|who|is|are|am|was|do|does|did|can|could|should|would|will)\b/i.test(note) &&
+      note.trim().split(/\s+/).length <= 30 &&
+      !wantsChart(note) &&
+      !turns.slice(-4).some(isChart) &&
+      !/\b(?:add|record|log|save|delete|remove|bin|restore|recover|put\s+back|undo|edit|change|move|switch|set|make|raise|lower|plan|allocate|export|pdf|download|print|paid|bought|spent\s+\d|received\s+\d)\b/i.test(note);
+    const sortedAlready = !waiting && (isPlan(note) || plainlyDone(note) || todayPlan !== null || askedPlainly);
     // A "//" line is a note to the developer: nothing to route, and nothing to wait on a model for.
     if (files.length === 0 && !as && !ai.disabled && !/^\s*\/\//.test(note) && !sortedAlready) {
       setBusy(true);

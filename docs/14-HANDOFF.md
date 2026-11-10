@@ -3164,6 +3164,42 @@ to the calculator is for the next coderview dump to show: look for answers
 with `{{` left in them (a calculation the device could not read is shown as
 its expression) and for second tries in the AI log.
 
+### 2026-11-10, evening: faster answers that still think
+
+The owner: "is it normal that every question is taking a bit time", then
+"can we make it faster but still advance and can think deep and better".
+Measured from the chat record in their 9 November backup: a model's answer
+took 7.3 seconds at the median since 1 October (13.3 at three in four, 48.7
+at most), 11.9 in November; the device's own answers come back at once.
+Each question sent about 94,000 characters, 60,000 of them ledger rows, on
+top of 26,000 of instruction. Changed:
+
+- **Rows sent by what the question needs** (`rowBudgetFor`,
+  `aiChatContext.ts`). A question the worked-out sections answer (afford,
+  safe to spend, the budget, plans, the months ahead, advice, how the month
+  is going) is sent the rows nearest it, 16 KB, about this month and the two
+  before; one that asks to see, find, count or list entries, or about a time
+  gone, keeps all 60 KB, as does anything else. About 51,000 characters a
+  question instead of 94,000 for the first kind. Research says this helps
+  the answer as well as the wait: models are distracted by what has nothing
+  to do with the question (Shi et al., ICML 2023) and use the middle of a
+  long prompt worst (Liu et al., "Lost in the Middle", TACL 2024).
+- **The second look runs in the background** (`useAi.ts`, `onRevised`). The
+  first answer is shown at once with what it could not trace named under
+  it; a second answer with fewer such figures is said under it, marked "a
+  second look using only your figures", and only while nothing else has
+  been asked. Waiting for it held such answers for a second round and could
+  pass the chat's own deadline.
+- **No sorting call for a plain question** ("how am I doing this month?"):
+  one that ends in a question mark, starts with a question word, names no
+  change, removal, setting or drawing, with nothing on screen it could be
+  answering, goes straight to the answer. One round trip saved.
+
+Left as it was: the models and their order. Three of the strongest free
+models, one per provider, are already asked at once, a stronger one waited
+for 4.5 seconds after a quicker one answers; changing that would trade
+quality for little time.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

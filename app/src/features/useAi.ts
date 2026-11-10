@@ -96,6 +96,12 @@ export interface UseAi {
       trusted?: string;
       /** Lines taken out of a model's answer before it is checked and shown: a Plan line that makes no card (`AskPanel`). */
       tidy?: (text: string) => string;
+      /**
+       * Called once, later, with a second answer that holds fewer figures the
+       * app cannot trace, when the first held some. The first answer is not
+       * held back for it (`ask`, below).
+       */
+      onRevised?: (revised: AiAnswer) => void;
     },
   ) => Promise<AiAnswer>;
   readonly clear: () => void;
@@ -237,6 +243,7 @@ export function useAi({
          */
         trusted?: string;
         tidy?: (text: string) => string;
+        onRevised?: (revised: AiAnswer) => void;
       } = {},
     ): Promise<AiAnswer> => {
       // Switched off means nothing is sent, not that nothing comes back.
@@ -351,43 +358,47 @@ export function useAi({
         const worked = [workedHere, ...calc.trusted.map((c) => formatMoney(c))].join("\n");
         return { text: calc.text, worked, loose: untracedFigures(calc.text, given, worked) };
       };
-      let settled = settle(answered.text);
+      const settled = settle(answered.text);
       /*
        * One second look, when figures the app did not work out remain
        * (Chain-of-Verification, Dhuliawala et al., 2023: draft, check, then
        * revise). The model is told which figures, and asked again to use
-       * only the app's or to write the sum for the app to work out. The
-       * answer with fewer untraced figures is kept, and whatever is left is
-       * still said underneath. Once only: never a loop, never a second wait
-       * for an answer that was already right.
+       * only the app's or to write the sum for the app to work out.
+       *
+       * In the background: the first answer is shown at once, with what it
+       * could not trace named under it, and the second is said under it only
+       * if it holds fewer (owner, 10 November 2026: "make it faster but still
+       * think deep"). Waiting for it held every such answer for a second
+       * full round, and could pass the chat's own deadline. Once only.
        */
-      if (task === "chat" && settled.loose.length > 0 && options.question && !options.signal?.aborted) {
-        try {
-          const list = settled.loose.map((c) => formatMoney(c)).join(", ");
-          const again = await askAi({
-            context,
-            task,
-            tone: ai.tone,
-            provider: ai.provider,
-            model: ai.model,
-            ...(withWorked ? { contextText: withWorked } : {}),
-            question: `${options.question}\n\n(Before you answer: a first answer to this used ${list}, which the app did not work out. Use only figures from the data, and write any sum the app did not work out as {{calc: ...}} so the app works it out.)`,
-            ...(options.history ? { history: options.history } : {}),
-            ...(options.earlier ? { earlier: options.earlier } : {}),
-            ...(options.signal ? { signal: options.signal } : {}),
-            ...(options.pinned ? { pinned: options.pinned } : {}),
-          });
-          if (again.source === "model") {
-            const tidied = options.tidy ? options.tidy(again.text) : again.text;
-            const second = settle(tidied);
-            if (second.loose.length < settled.loose.length) {
-              answered = { ...again, text: tidied };
-              settled = second;
-            }
+      if (task === "chat" && settled.loose.length > 0 && options.question && options.onRevised && !options.signal?.aborted) {
+        const first = settled.loose.length;
+        const list = settled.loose.map((c) => formatMoney(c)).join(", ");
+        const onRevised = options.onRevised;
+        void (async () => {
+          try {
+            const again = await askAi({
+              context,
+              task,
+              tone: ai.tone,
+              provider: ai.provider,
+              model: ai.model,
+              ...(withWorked ? { contextText: withWorked } : {}),
+              question: `${options.question}\n\n(Before you answer: a first answer to this used ${list}, which the app did not work out. Use only figures from the data, and write any sum the app did not work out as {{calc: ...}} so the app works it out.)`,
+              ...(options.history ? { history: options.history } : {}),
+              ...(options.earlier ? { earlier: options.earlier } : {}),
+              ...(options.signal ? { signal: options.signal } : {}),
+              ...(options.pinned ? { pinned: options.pinned } : {}),
+            });
+            if (again.source !== "model" || options.signal?.aborted) return;
+            const second = settle(options.tidy ? options.tidy(again.text) : again.text);
+            if (second.loose.length >= first || !second.text.trim()) return;
+            const left = untracedNote(second.text, given, formatMoney, second.worked);
+            onRevised({ ...again, text: left ? `${second.text}\n\n${left}` : second.text });
+          } catch {
+            // The first answer stands, with its note.
           }
-        } catch {
-          // The first answer stands, with its note.
-        }
+        })();
       }
       answered = { ...answered, text: settled.text };
       const note = untracedNote(answered.text, given, formatMoney, settled.worked);

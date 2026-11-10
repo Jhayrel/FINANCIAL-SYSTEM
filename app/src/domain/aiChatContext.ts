@@ -97,6 +97,38 @@ const entriesIn = (rows: readonly Transaction[]): number => new Set(rows.map((t)
  */
 export const MAX_ROW_BYTES = 60_000;
 
+/**
+ * The entries a question is sent, when the worked-out sections already hold
+ * its answer: about this month and the two before it, nearest first.
+ */
+export const SUMMARY_ROW_BYTES = 16_000;
+
+/** Asking to see, find, count or list entries, or about a time gone: these need the rows. */
+const NEEDS_ROWS =
+  /\b(?:list|entries|entry|transactions?|records?|rows?|receipts?|history|when\s+(?:did|was|were)|how\s+many\s+times|how\s+often|last\s+time|first\s+time|what\s+did\s+i\s+(?:buy|spend|pay|get)|did\s+i\s+(?:buy|pay|spend|get|receive)|which\s+(?:entries|purchases|days?|dates?|ones?)|find|search|look\s+for|duplicates?|missing|mistakes?|wrong|ever|all\s+time|since|ago|last\s+(?:year|month|week)|previous|20\d{2}|january|february|march|april|may|june|july|august|september|october|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|dec)\b|#\s*\d/i;
+/** Questions the worked-out sections answer: whether it fits, what is safe, the plan, the months ahead, advice. */
+const FROM_SUMMARIES =
+  /\b(?:afford|can\s+i|should\s+i|is\s+it\s+(?:okay|ok|fine|wise|safe)|safe\s+to\s+spend|how\s+much\s+can\s+i|budget|plans?|planner|forecast|predict\w*|next\s+month|future|upcoming|advice|advise|tips?|recommend\w*|suggest\w*|how\s+am\s+i\s+doing|how\s+is\s+(?:this|my)\s+month|overview|summary|save|saving|savings|cut|reduce|enough|normal|goals?|allowance|left|remaining|pwede|kaya)\b/i;
+
+/**
+ * How much of the ledger's rows a question is sent, in bytes.
+ *
+ * The whole ledger section, 60 KB of every one of the owner's 4,000 rows
+ * that fit, went with every question, about two thirds of all that was sent
+ * (10 November 2026: about 94,000 characters a question). Free models read
+ * a prompt that size for seconds before answering, and research finds they
+ * answer worse when much of what they read has nothing to do with the
+ * question: "Large Language Models Can Be Easily Distracted by Irrelevant
+ * Context" (Shi et al., ICML 2023), "Lost in the Middle" (Liu et al., TACL
+ * 2024). So a question the worked-out sections already answer is sent the
+ * rows nearest it, and one that asks to see, find or count entries, or about
+ * a time gone, keeps the whole budget, as before.
+ */
+export function rowBudgetFor(question: string): number {
+  if (!question.trim() || NEEDS_ROWS.test(question)) return MAX_ROW_BYTES;
+  return FROM_SUMMARIES.test(question) ? SUMMARY_ROW_BYTES : MAX_ROW_BYTES;
+}
+
 /** How many rows of a group to name before summarising the rest. */
 const TOP_N = 12;
 
@@ -330,7 +362,7 @@ function allocationNamedIn(question: string, allocations: readonly SnapshotAlloc
 
 export function buildChatContext(input: ChatContextInput): ChatContext {
   const { snapshot, transactions, asOf, question } = input;
-  const budget = input.maxRowBytes ?? MAX_ROW_BYTES;
+  const budget = input.maxRowBytes ?? rowBudgetFor(question);
 
   const rows = transactions.filter(live);
   const year = asOf.slice(0, 4);
