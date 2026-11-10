@@ -54,6 +54,7 @@ import { owedChange, type Debt } from "./debt";
 import { costOf, monthTotals } from "./totals";
 import type { Budgets, IsoDate, ReferenceLists, Transaction } from "./types";
 import { walletDelta } from "./balances";
+import { formatMedium } from "./dates";
 
 // ── What the message wants drawn ────────────────────────────────────────────
 
@@ -804,7 +805,17 @@ export function buildForecastChart(
   transactions: readonly Transaction[],
   budgets: Budgets,
   asOf: IsoDate,
-  options: { readonly stopped?: readonly { readonly name: string; readonly since: IsoDate }[]; readonly debts?: readonly Debt[] } = {},
+  options: {
+    readonly stopped?: readonly { readonly name: string; readonly since: IsoDate }[];
+    readonly debts?: readonly Debt[];
+    /**
+     * The Planner's plans due in a month. "Will December be short?" was
+     * answered "not short", with money left, from the usual month alone,
+     * with a plan of December's on the Planner that made it short
+     * (10 November 2026).
+     */
+    readonly plansIn?: (year: number, month: number) => readonly { readonly name: string; readonly amount: number }[];
+  } = {},
 ): Chart | null {
   const months = forecastMonths(question, asOf);
   if (months === "past") return null;
@@ -812,7 +823,9 @@ export function buildForecastChart(
   const next = { year: Math.floor((now + 1) / 12), month: ((now + 1) % 12) + 1 };
   const plans: MonthOutlook[] = months.map((index) =>
     outlookFor(transactions, budgets, Math.floor(index / 12), (index % 12) + 1, asOf, {
-      ...options,
+      ...(options.stopped ? { stopped: options.stopped } : {}),
+      ...(options.debts ? { debts: options.debts } : {}),
+      ...(options.plansIn ? { planned: options.plansIn(Math.floor(index / 12), (index % 12) + 1) } : {}),
       // Every month ahead read from the same months, as the Budget screen does; the month running from the ones before it.
       ...(index > now ? { readBefore: next } : {}),
     }),
@@ -829,7 +842,7 @@ export function buildForecastChart(
       if (value > 0) parts.set(label, (parts.get(label) ?? 0) + value);
     };
     for (const l of a.items) put(l.name, l.amount);
-    for (const l of a.planned ?? []) put(l.name, l.amount);
+    for (const l of a.planned ?? []) put(`${l.name} (plan)`, l.amount);
     put("Transfer fees", a.fees);
     put("Debt interest", a.interest);
     for (const l of [...a.bills, ...a.subscriptions]) put(l.name, l.amount);
@@ -988,12 +1001,14 @@ export function buildMeasureChart(
     readonly allocations?: { readonly month: MonthAllocations; readonly named: readonly string[] };
     /** The Dashboard's safe to spend this month, for a chart of it. */
     readonly safe?: SafeToSpend | null;
+    /** The Planner's plans due in a month, for a forecast (`buildForecastChart`). */
+    readonly plansIn?: (year: number, month: number) => readonly { readonly name: string; readonly amount: number }[];
   },
 ): Chart | null {
   const measure = measureOf(hint);
   if (measure === "safe") return data.safe ? buildSafeChart(data.safe, data.asOf.slice(0, 7), /\b(?:pie|donut|doughnut|circle)\b/i.test(question)) : null;
   if (measure === "allocation") return data.allocations ? buildAllocationChart(data.allocations.month, data.allocations.named) : null;
-  if (measure === "forecast") return buildForecastChart(question, data.transactions, data.budgets, data.asOf, { stopped: data.stopped ?? [], debts: data.debts });
+  if (measure === "forecast") return buildForecastChart(question, data.transactions, data.budgets, data.asOf, { stopped: data.stopped ?? [], debts: data.debts, ...(data.plansIn ? { plansIn: data.plansIn } : {}) });
   if (measure === "budget") return buildBudgetChart(question, data.transactions, data.budgets, data.asOf);
   if (measure === "balance") {
     return buildBalanceChart(question, data.transactions, data.reference, data.asOf, hint?.by === "wallet" || PER_ACCOUNT.test(question));
@@ -1099,7 +1114,8 @@ export function chartReading(chart: Chart): string {
 
   if (chart.measure === "forecast" && chart.plan) {
     const p = chart.plan;
-    const top = [...rows].sort((a, b) => b.value - a.value)[0] as ChartRow;
+    // A bundle of the smaller ones is not an item: "The other 8 items is the largest" (10 November 2026).
+    const top = ([...rows].filter((r) => !/^(?:the other \d+ items|other(?: \(\d+\))?)$/i.test(r.label)).sort((a, b) => b.value - a.value)[0] ?? rows[0]) as ChartRow;
     const after = p.left >= 0 ? `which leaves about ${m(p.left)}` : `which is ${m(-p.left)} short`;
     const debt = p.debtDue > 0 ? ` after ${m(p.debtDue)} of debt payments due` : "";
     const budget =
@@ -1172,7 +1188,9 @@ export function chartReading(chart: Chart): string {
         : `${lastName} is ${m(Math.abs(moved))} ${moved > 0 ? "more" : "less"} than ${asName(firstRow.label).replace(/^The /, "the ")} (${m(last.value)} against ${m(firstRow.value)}).`;
     }
     // A period still running is not a low: it is left out of the high, the low and the average.
-    const whole = chart.running ? rows.slice(0, -1) : rows;
+    // Nor is a first period the records start partway through (`partialFirst`).
+    const partial = chart.partialFirst && rows[0]?.label === chart.partialFirst.label ? chart.partialFirst : null;
+    const whole = (chart.running ? rows.slice(0, -1) : rows).slice(partial ? 1 : 0);
     const counted = whole.filter((r) => r.value > 0);
     if (counted.length === 0) return `${lastName}: ${m(last.value)}.`;
     const high = counted.reduce((a, b) => (b.value > a.value ? b : a));
@@ -1188,10 +1206,20 @@ export function chartReading(chart: Chart): string {
         : `${m(average)} ${word} a ${unit} on average.`,
     );
     if (chart.running) {
-      parts.push(`${lastName}: ${m(last.value)}.`);
+      /*
+       * Already past every whole one, though not over: "Highest in 2023" was
+       * said of a chart whose running 2026 was a third above it
+       * (10 November 2026).
+       */
+      parts.push(
+        last.value > high.value
+          ? `${lastName}, ${m(last.value)}, is already more than any whole ${unit} before it, and it is not over.`
+          : `${lastName}: ${m(last.value)}.`,
+      );
     } else if (last.value !== average) {
       parts.push(`${asName(last.label)} is ${m(Math.abs(last.value - average))} ${last.value > average ? "above" : "below"} that.`);
     }
+    if (partial) parts.push(`${partial.label} starts on ${formatMedium(partial.from)}, when your records begin, so it is not a whole ${unit} and is left out of the highest, the lowest and the average.`);
     // A month with nothing in it is part of the line, so it is said, not left for the eye to find.
     if (!days && empty.length > 0) {
       parts.push(empty.length <= 2 ? `Nothing ${empty.map((r) => when(r.label)).join(" or ")}.` : `Nothing in ${empty.length} of the ${whole.length} ${unit}s.`);

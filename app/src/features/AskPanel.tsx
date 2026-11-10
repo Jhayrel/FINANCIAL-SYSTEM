@@ -152,6 +152,8 @@ import { asksBinReview, binReview, binReviewWords, holdsBack } from "../domain/b
 import { asksSubscriptionStops, subscriptionStops, subscriptionStopWords, subscriptionsNamed } from "../domain/subscriptionStops";
 import { creditWhatIf, creditWhatIfWords, readCreditWhatIf } from "../domain/creditWhatIf";
 import { readScheduleAsk, schedulePlans, scheduleWords } from "../domain/plansSchedule";
+import { certainEntry } from "../domain/entryCertain";
+import { asksChartIn, bareMeasure, forecastMeant, oneBar, sentencesOf } from "../domain/chartParts";
 import { inferFromHistory } from "../domain/infer";
 import { categoryLimits, monthBills } from "../domain/budgetView";
 import { debtWalletDirection, emptyDraft, itemsFor, withDebtEffect } from "../domain/entry";
@@ -4831,6 +4833,8 @@ export function AskPanel({
         debts,
         asOf,
         stopped: settings.stopped ?? [],
+        // Plans due in a month are spent in it: a forecast counts them (`buildForecastChart`).
+        plansIn: (y: number, m: number) => plannedIn(plansAsNow(settings.plans ?? [], transactions).map((p) => viewOf(p, { transactions, accounts: settings.accounts, asOf })), y, m),
         ...(allocationMonth ? { allocations: { month: allocationMonth, named: linesNamed(asked, allocationMonth.lines.map((l) => l.line)).map((l) => l.id) } } : {}),
         ...(measureOf(hint) === "safe"
           ? { safe: monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe }
@@ -4844,6 +4848,85 @@ export function AskPanel({
     const spending = both ? buildChart(said, reportRows, asOf, "spending", pair) : null;
     // Each keeps the question it was drawn from, for "bars" or "pie" said next (`redrawAsked`).
     return [spending, income].filter((c): c is Chart => c !== null).map((c) => ({ ...c, asked: said }));
+  };
+
+  /**
+   * The questions in the other sentences of a long message, each worked out
+   * here, so the answer has the app's figures for every part and not only
+   * for the chart. "How is November going against the same days of
+   * October", "how does today compare to a usual day", "list every bill and
+   * plan still coming" and "will December be short" were answered from the
+   * model's own sums, two of them wrong, beside a chart of something else
+   * (10 November 2026; `chartParts.ts`).
+   */
+  const partsWorked = (sentences: readonly string[]): string => {
+    const out: string[] = [];
+    for (const s of sentences) {
+      const found: string[] = [];
+      const pair = comparedPeriods(s, asOf);
+      if (pair) found.push(comparisonWorked(s, reportRows, pair));
+      if (/\btoday\b/i.test(s) && /\b(?:usual|normal|average|typical|ordinary)\b/i.test(s)) {
+        // Like with like: the usual day leaves bills and subscriptions out (`recentPace`), so today does too.
+        const spent = reportRows
+          .filter((t) => t.date === asOf && t.type === "Spending" && t.category !== "Bills" && t.category !== "Subscriptions")
+          .reduce((x, t) => x + Math.max(0, costOf(t)), 0);
+        const pace = recentPace(reportRows, asOf);
+        found.push(
+          `Spent today, ${formatMedium(asOf)}, bills and subscriptions apart: ${formatMoney(spent)}. A usual day over the last 30 days: about ${formatMoney(pace)}. Today is ${spent === pace ? "the same as a usual day" : `${formatMoney(Math.abs(spent - pace))} ${spent > pace ? "above" : "below"} a usual day`}, and it is not over.`,
+        );
+      }
+      if (asksUpcoming(s) || /\b(?:bills?|plans?)\b[^.?!]*\b(?:still|coming|left|due|between now)\b/i.test(s)) {
+        const next = nextOf(asOf);
+        const usual = forecastFor(next.year, next.month);
+        found.push(upcomingWords(upcomingNow(), asOf, usual ? { name: `${MONTH_NAMES[next.month - 1] ?? ""} ${next.year}`, total: usual.spending + usual.billsSubs } : null));
+        /*
+         * "Between now and the end of December": the later months' bills too,
+         * each on its own day in its month. Only November's were listed
+         * (10 November 2026).
+         */
+        const until = new RegExp(`\\b(?:end\\s+of|until|till|through|thru|by|before|to)\\s+(?:the\\s+end\\s+of\\s+)?(${MONTH_NAMES.join("|")})\\b`, "i").exec(s)?.[1];
+        if (until) {
+          const target = MONTH_NAMES.findIndex((m) => m.toLowerCase() === until.toLowerCase()) + 1;
+          const y0 = Number(asOf.slice(0, 4));
+          const now0 = Number(asOf.slice(5, 7));
+          const last = (target >= now0 ? y0 : y0 + 1) * 12 + target - 1;
+          for (let k = y0 * 12 + now0; k <= last && k < y0 * 12 + now0 + 12; k += 1) {
+            const yy = Math.floor(k / 12);
+            const mm = (k % 12) + 1;
+            const ym = `${yy}-${String(mm).padStart(2, "0")}`;
+            const due = monthBills(reportRows, reference, yy, mm, asOf)
+              .bills.filter((b) => b.state !== "paid" && !(settings.stopped ?? []).some((x) => x.name === b.item))
+              .map((b) => ({ item: b.item, amount: b.amount, on: b.dueOn && b.dueOn.slice(0, 7) < ym ? `${ym}-${b.dueOn.slice(8, 10)}` : (b.dueOn ?? "") }));
+            if (due.length > 0) found.push(`Bills and subscriptions due in ${MONTH_NAMES[mm - 1] ?? ""} ${yy}, ${formatMoney(due.reduce((x, b) => x + b.amount, 0))}: ${due.map((b) => `${b.item} ${formatMoney(b.amount)}${b.on ? `, ${formatMedium(b.on)}` : ""}`).join("; ")}.`);
+          }
+        }
+      }
+      const ahead = forecastMeant(s, sentences, asOf);
+      if (ahead) {
+        const c = chartsFor(ahead, { money: "forecast" }, null);
+        if (c.length > 0) found.push(chartsWorked(c, chartAsText));
+      }
+      if (found.length > 0) out.push(`For "${s}":\n${found.join("\n")}`);
+    }
+    return out.length > 0 ? `Worked out by the app for the other questions in the message, each in turn. Answer every one with these figures:\n\n${out.join("\n\n")}` : "";
+  };
+
+  /**
+   * The charts a long message asks for, each from its own sentence
+   * (`chartParts.ts`), never one with a single bar. Empty for a message of
+   * one sentence, which is read whole as before.
+   */
+  const sentenceCharts = (text: string): Chart[] => {
+    const sentences = sentencesOf(text);
+    if (sentences.length < 2) return [];
+    return sentences.filter(asksChartIn).flatMap((s) => {
+      const meant = forecastMeant(s, sentences, asOf) ?? s;
+      const h = localHint(meant, reference.credits ?? []);
+      return chartsFor(meant, h, measureOf(h) ? null : comparedPeriods(meant, asOf)).flatMap((c) => {
+        if (!oneBar(c)) return [c];
+        return c.by === "item" ? [] : chartsFor(`${c.asked ?? meant} by item`, null, null).filter((x) => !oneBar(x));
+      });
+    });
   };
 
   /**
@@ -6225,6 +6308,27 @@ export function AskPanel({
      * a year, and the answer counted both as saved, Netflix at Office's
      * price (10 November 2026; domain/subscriptionStops.ts).
      */
+    /*
+     * "Earning" straight after "Yearly spending in graph": the same window
+     * and grouping, measured the other way (`bareMeasure`). It drew November's
+     * income by item (10 November 2026).
+     */
+    const chartBefore = turns.slice(-4).reverse().find(isChart)?.chart;
+    if (files.length === 0 && !as && pending === null && chartBefore && !chartBefore.measure && !chartBefore.against && bareMeasure(ruled)) {
+      const carried = `${ruled.trim()}${chartBefore.title.replace(/^[^,]*?(?=\s+by\s)/i, "")}`;
+      const drawn = chartsFor(carried, localHint(carried, reference.credits ?? []), null).filter((c) => !oneBar(c));
+      if (drawn.length > 0) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        log(aiEvent("asked", "insights", { text: note }));
+        await aiFirst(note, chartsWorked(drawn, chartAsText), {
+          where: "insights",
+          charts: drawn,
+          rules: `The message follows the chart before it ("${chartBefore.title}"): the same periods and grouping, measured the way the message says. The app worked out the chart below for it. Answer with these figures, in your own words and briefly, the latest period's place among the others first: never add figures up yourself. Never write a Plan line or an Entry line.`,
+        });
+        return;
+      }
+    }
     const billNames = [...reference.bills, ...reference.subscriptions];
     if (files.length === 0 && !as && pending === null && !isEssay(note) && !plainlyDone(note) && asksSubscriptionStops(ruled, billNames)) {
       const words = subscriptionStopWords(subscriptionStops(subscriptionsNamed(ruled, billNames), reportRows, settings.stopped ?? [], asOf), asOf);
@@ -8330,7 +8434,9 @@ export function AskPanel({
       !wantsChart(note) &&
       !turns.slice(-4).some(isChart) &&
       !/\b(?:add|record|log|save|delete|remove|bin|restore|recover|put\s+back|undo|edit|change|move|switch|set|make|raise|lower|plan|allocate|export|pdf|download|print|paid|bought|spent\s+\d|received\s+\d)\b/i.test(note);
-    const sortedAlready = !waiting && (isPlan(note) || plainlyDone(note) || todayPlan !== null || askedPlainly);
+    // Read whole on this device: no sorting call, and no model read either, further down (`certainEntry`).
+    const certain = !waiting && files.length === 0 && !as && certainEntry(note, transactions, reference, asOf);
+    const sortedAlready = !waiting && (isPlan(note) || plainlyDone(note) || todayPlan !== null || askedPlainly || certain);
     // A "//" line is a note to the developer: nothing to route, and nothing to wait on a model for.
     if (files.length === 0 && !as && !ai.disabled && !/^\s*\/\//.test(note) && !sortedAlready) {
       setBusy(true);
@@ -8382,6 +8488,14 @@ export function AskPanel({
        * a chart or text or combine" (21 October 2026). A comparison is both.
        */
       if (pair && !justShown && noPicture(question)) return [];
+      /*
+       * "Earning" after "Yearly spending in graph": the same window and
+       * grouping, the other way round (`bareMeasure`). It drew November's
+       * income by item (10 November 2026).
+       */
+      const lastShown = [...turns].reverse().find(isChart)?.chart;
+      const carriedOver = justShown && lastShown && !lastShown.measure && bareMeasure(question) ? `${question}${lastShown.title.replace(/^[^,]*?(?=\s+by\s)/i, "")}` : null;
+      if (carriedOver) return chartsFor(carriedOver, localHint(carriedOver, credits), null).filter((c) => !recent.includes(c.title) && !oneBar(c));
       const charts = pair
         ? justShown
           ? []
@@ -10915,6 +11029,28 @@ export function AskPanel({
           : asked;
       let drawn = chartsFor(askedNow, hint, measureOf(hint) ? null : pair);
       /*
+       * A long message is drawn sentence by sentence (domain/chartParts.ts):
+       * each sentence that asks for a picture, read alone, so a word from
+       * another sentence never filters it. "Bills by month, last week", one
+       * bar, was drawn for a message whose chart sentence asked for last week
+       * against the week before, item by item (10 November 2026).
+       */
+      const sentences = sentencesOf(ruled);
+      if (fresh && sentences.length >= 2) {
+        const parts = sentenceCharts(ruled);
+        if (parts.length > 0) drawn = parts;
+      }
+      /*
+       * One bar is not a chart. The same window by item, when that has more
+       * than one; otherwise nothing is drawn and the words say it.
+       */
+      drawn = drawn.flatMap((c) => {
+        if (!oneBar(c)) return [c];
+        if (c.by === "item") return [];
+        const again = chartsFor(`${c.asked ?? askedNow} by item`, null, null).filter((x) => !oneBar(x));
+        return again;
+      });
+      /*
        * A window carried over from the chart before, with nothing in it, or a
        * budget chart of years with no budget ("Budget vs spending" after
        * "2022"), is widened to this month and then this year, and says so.
@@ -10975,11 +11111,14 @@ export function AskPanel({
        * figure said, not only drawn. The model answers from the chart's own
        * figures, so the two agree.
        */
-      const asksMore = /\b(?:how much|how many|why|explain|tell me|which|what (?:did|was|is|are|were)|did i|am i|is it|was it|magkano|bakit|ilan)\b/i.test(note);
+      const asksMore = /\b(?:how much|how many|how is|how does|how did|why|explain|tell me|which|what (?:did|was|is|are|were|caused)|did i|am i|is it|was it|will|list|magkano|bakit|ilan)\b/i.test(note) || (sentences.length >= 2 && /\?/.test(note));
       if (drawn.length > 0 && asksMore && !ai.disabled) {
         setBusy(true);
         try {
-          await askQuestion(note, false, { text: chartsWorked(drawn, chartAsText), fallback: drawn.map(chartReading).filter(Boolean).join(" ") });
+          // The other sentences' questions, each worked out here too, so the answer has the app's figures for every part (`partsWorked`).
+          const others = sentences.length >= 2 ? partsWorked(sentences.filter((x) => !asksChartIn(x))) : "";
+          const words = [chartsWorked(drawn, chartAsText), others].filter(Boolean).join("\n\n");
+          await askQuestion(note, false, { text: words, fallback: [drawn.map(chartReading).filter(Boolean).join(" "), others].filter(Boolean).join("\n\n") });
         } finally {
           setBusy(false);
         }
@@ -11512,8 +11651,19 @@ export function AskPanel({
          * is the fallback.
          */
         const [laterSaid, earlierSaid] = routed?.compare ?? [];
-        const pair = (laterSaid && earlierSaid ? periodsSaid(laterSaid, earlierSaid, asOf) : null) ?? comparedPeriods(ruled, asOf);
-        const compared = pair ? comparisonWorked(ruled, transactions, pair) : "";
+        /*
+         * A long message: the comparison from the sentence that makes it, the
+         * other sentences' questions worked out as well, and the charts each
+         * sentence asks for (`sentenceCharts`, `partsWorked`). Read whole,
+         * "list every bill" in its fourth sentence filtered the first one's
+         * comparison down to one bill (10 November 2026).
+         */
+        const parts = sentencesOf(ruled);
+        const long = parts.length >= 2;
+        const comparing = long ? (parts.find((x) => comparedPeriods(x, asOf) !== null) ?? null) : ruled;
+        const pair = (laterSaid && earlierSaid ? periodsSaid(laterSaid, earlierSaid, asOf) : null) ?? (comparing ? comparedPeriods(comparing, asOf) : null);
+        const others = long ? partsWorked(parts.filter((x) => x !== comparing && !asksChartIn(x))) : "";
+        const compared = [pair ? comparisonWorked(comparing ?? ruled, transactions, pair) : "", others].filter(Boolean).join("\n\n");
         if (pair || aboutMoney(ruled)) drawnNext.current = { question: ruled, at: Date.now() };
         /*
          * A plan said by the week or the day ("250 per week ... would that
@@ -11535,7 +11685,7 @@ export function AskPanel({
           note,
           true,
           compared
-            ? { text: `Two periods side by side, worked out by the app from the ledger. Answer with these figures:\n${compared}`, fallback: compared }
+            ? { text: `${pair ? "Two periods side by side, worked out by the app from the ledger" : "Worked out by the app from the ledger"}, for every part of the message. Answer each part, in the order asked, with these figures:\n${compared}`, fallback: compared }
             : plan
               ? {
                   text: correctsAnswer ? `They are correcting a figure your last answer took. Answer again with the figure they say.\n${plan}` : plan,
@@ -11545,7 +11695,7 @@ export function AskPanel({
               : correctsAnswer
                 ? { text: "They are correcting what your last answer took them to mean. Answer the same question again with what they say now, and never treat it as a new entry." }
                 : null,
-          besideFor(ruled, pair),
+          long && sentenceCharts(ruled).length > 0 ? sentenceCharts(ruled) : besideFor(comparing ?? ruled, pair),
         );
         offerPicture();
 
@@ -11754,7 +11904,13 @@ export function AskPanel({
          * both gates now stand down for the same reason and the splitter gets
          * what it was written for.
          */
-        if (ai.disabled && local.worthOffering && !severalParts && !isAdvice(note)) {
+        /*
+         * And an entry read whole on this device makes its card at once, the
+         * model unasked: "I buy food 100" took 25 seconds for the card this
+         * reading makes in a millisecond (10 November 2026, `certainEntry`).
+         * The card is checked before anything is added, as every card is.
+         */
+        if ((ai.disabled || certain) && local.worthOffering && !severalParts && !isAdvice(note)) {
           say({ kind: "you", text: note });
           await offer(
             {

@@ -92,6 +92,8 @@ export function outlookFor(
     readonly debts?: readonly Debt[];
     /** The month to read back from; the months ahead all share one (`outlookAhead`). */
     readonly readBefore?: { readonly year: number; readonly month: number };
+    /** Plans on the Planner due in the month: spent in it as well as the usual month (`plannedIn`). */
+    readonly planned?: readonly { readonly name: string; readonly amount: number }[];
   } = {},
 ): MonthOutlook {
   const rows = transactions.filter((t) => !(t as Transaction & { deletedAt?: string }).deletedAt);
@@ -103,6 +105,7 @@ export function outlookFor(
     stopped: options.stopped ?? [],
     debts: options.debts ?? [],
     ...(options.readBefore ? { readBefore: options.readBefore } : {}),
+    ...(options.planned && options.planned.length > 0 ? { planned: options.planned } : {}),
   });
 
   // ── The spread of the months read, for the range and how steady it is ────

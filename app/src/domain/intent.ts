@@ -375,10 +375,20 @@ export function isPlan(text: string): boolean {
  * answer). A word that changes or removes something, or a question, is
  * never plain.
  */
+/*
+ * The present tense, said as a record: "I buy food 100", "pay wifi 999 gcash".
+ * Not in MOVED, which also decides what is a plan: "I will buy shoes" must
+ * stay a plan. Here it counts only with nothing future or supposed in the
+ * sentence. "I buy food 100" waited 25 seconds on a sorting call it never
+ * needed (10 November 2026).
+ */
+const DOING = /\b(?:buy|buys|pay|pays|spend|spends|receive|receives|send|sends|withdraw|deposit|bili|bayad|gastos)\b/i;
+const NOT_YET = /\b(?:will|shall|gonna|going\s+to|want|need|should|could|would|can|if|kung|maybe|baka|later|tomorrow|next|soon|bukas|mamaya)\b/i;
+
 export function plainlyDone(text: string): boolean {
   const t = text.trim();
   return (
-    MOVED.test(t) &&
+    (MOVED.test(t) || (DOING.test(t) && !PLANNED.test(t) && !NOT_YET.test(t))) &&
     /\d/.test(t) &&
     t.split(/\s+/).length <= 14 &&
     !isQuestion(t) &&

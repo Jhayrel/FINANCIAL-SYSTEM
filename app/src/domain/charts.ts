@@ -121,6 +121,13 @@ export interface Chart {
   /** The last row is a period still running: "October 2026" read on 3 October. */
   readonly running?: boolean | undefined;
   /**
+   * The first row is a period the records start partway through: "2022"
+   * when the first entry is in May. Neither the lowest nor a whole one, so
+   * the reading leaves it out of the high, the low and the average, and
+   * says so (10 November 2026: "lowest in 2022" for eight months of it).
+   */
+  readonly partialFirst?: { readonly label: string; readonly from: IsoDate } | undefined;
+  /**
    * The question it was drawn from, so "bars" after a pie draws the same
    * thing as bars (`redrawAsked`). Without it, "pie" of the year's food
    * then "bars" drew this month's food day by day (4 November 2026 sweep).
@@ -321,6 +328,14 @@ function kindOf(question: string, by: ChartBy): ChartKind {
   }
   // Bars asked for by name are bars, over months and days as well.
   if (/\b(bars?|bar chart|bar graph|columns?)\b/i.test(question)) return "bars";
+  /*
+   * Parts of one whole, asked as parts: "what share", "the breakdown",
+   * "where did my money go". A pie answers that at a glance, and a list of
+   * bars makes the eye add them up (owner, 10 November 2026: "know when to
+   * use trend, chart, graph, pie"). Never over time: months in a row are a
+   * trend, whatever word asked for them.
+   */
+  if (!overTime(by) && /\b(shares?|percent(?:age)?s?|proportions?|portions?|breakdown|break\s+down|split\s+(?:of|between)|where\s+(?:did|does|do)\s+(?:my|the|all)\s+(?:money|pera)\s+go|what\s+(?:did|do)\s+i\s+spend\s+(?:it|most)\s+on|saan\s+napunta)\b/i.test(question)) return "pie";
   if (/\b(line|trend|over time|curve|movement|progression)\b/i.test(question)) {
     return overTime(by) ? "line" : "bars";
   }
@@ -1274,6 +1289,49 @@ export function comparedPeriods(question: string, asOf: IsoDate): ComparedPeriod
    * alone, and comparing it with this one draws a different question.
    */
   if (!/\b(compar\w*|versus|vs\.?|against|than|difference|differ\w*|changed|increase[sd]?|decrease[sd]?|stack(?:s|ed)? up|(?:went|gone|go) (?:up|down)|up from|down from)\b|\bhow\b.*\bchange\b/.test(q)) return null;
+  /*
+   * Two whole periods gone, one after the other: "last week with the week
+   * before", "last month vs the month before", "yesterday against the day
+   * before". It was read as this week against last week, and the owner's
+   * question was answered from Monday and Tuesday of this week
+   * (10 November 2026).
+   */
+  const lastUnit = /\b(?:last|previous|past)\s+(week|month|year)\b/.exec(q)?.[1] ?? (/\byesterday\b/.test(q) ? "day" : null);
+  const beforeUnit = /\b(?:the\s+)?(day|week|month|year)\s+before(?:\s+(?:that|it|last))?\b|\b(day|week|month|year)\s+prior\b/.exec(q);
+  if (lastUnit && beforeUnit && (beforeUnit[1] ?? beforeUnit[2]) === lastUnit) {
+    const iso0 = (d: Date): IsoDate => d.toISOString().slice(0, 10);
+    const day0 = new Date(`${asOf}T00:00:00Z`);
+    const add = (d: Date, n: number): Date => new Date(d.getTime() + n * 86_400_000);
+    const short = (d: IsoDate): string => `${MONTHS[Number(d.slice(5, 7)) - 1]?.slice(0, 3) ?? ""} ${Number(d.slice(8, 10))}`;
+    if (lastUnit === "day") {
+      const y = iso0(add(day0, -1));
+      const b = iso0(add(day0, -2));
+      return { now: { from: y, to: y, name: `yesterday, ${short(y)}` }, before: { from: b, to: b, name: `the day before, ${short(b)}` } };
+    }
+    if (lastUnit === "week") {
+      const monday = add(day0, -((day0.getUTCDay() + 6) % 7));
+      const lastFrom = iso0(add(monday, -7));
+      const lastTo = iso0(add(monday, -1));
+      const beforeFrom = iso0(add(monday, -14));
+      const beforeTo = iso0(add(monday, -8));
+      return {
+        now: { from: lastFrom, to: lastTo, name: `last week, ${short(lastFrom)} to ${short(lastTo)}` },
+        before: { from: beforeFrom, to: beforeTo, name: `the week before, ${short(beforeFrom)} to ${short(beforeTo)}` },
+      };
+    }
+    if (lastUnit === "month") {
+      const y0 = Number(asOf.slice(0, 4));
+      const m0 = Number(asOf.slice(5, 7));
+      const monthAt = (back: number): { from: IsoDate; to: IsoDate; name: string } => {
+        const at0 = new Date(Date.UTC(y0, m0 - 1 - back, 1));
+        const end = new Date(Date.UTC(at0.getUTCFullYear(), at0.getUTCMonth() + 1, 0));
+        return { from: iso0(at0), to: iso0(end), name: `${MONTHS[at0.getUTCMonth()]} ${at0.getUTCFullYear()}` };
+      };
+      return { now: monthAt(1), before: monthAt(2) };
+    }
+    const y0 = Number(asOf.slice(0, 4));
+    return { now: { from: `${y0 - 1}-01-01`, to: `${y0 - 1}-12-31`, name: String(y0 - 1) }, before: { from: `${y0 - 2}-01-01`, to: `${y0 - 2}-12-31`, name: String(y0 - 2) } };
+  }
   const unit = /\b(?:last|previous|past|prior)\s+week\b/.test(q)
     ? "week"
     : /\b(?:last|previous|prior)\s+year\b/.test(q)
@@ -1751,7 +1809,13 @@ export function buildChart(
     .sort((a, b) => (overTime(by) ? a[0].localeCompare(b[0]) : b[1].value - a[1].value));
 
   const total = all.reduce((sum, [, g]) => sum + g.value, 0);
-  const kind = kindOf(question, by);
+  /*
+   * A line needs points to be a trend. Through two or three it draws a
+   * slope that says less than the bars do: three or fewer periods are bars,
+   * unless a line or a trend was asked for by name.
+   */
+  const kind0 = kindOf(question, by);
+  const kind: ChartKind = kind0 === "line" && all.length <= 3 && !/\b(line|trend|over time|curve|movement|progression)\b/i.test(question) ? "bars" : kind0;
   /*
    * A pie has to be parts. "Pie of food" drew October's 31 days, empty ones
    * and an "Other days" slice; Framelink income by item was one slice at
@@ -1817,6 +1881,18 @@ export function buildChart(
     overTime(by) &&
     lastKey !== "" &&
     lastKey === (by === "month" ? monthOf(asOf) : by === "week" ? weekOf(asOf) : by === "year" ? asOf.slice(0, 4) : asOf);
+  /*
+   * The first period, when the records begin partway through it: the first
+   * entry of all is after the period's first day. Months and years only; a
+   * week or a day is too short to matter.
+   */
+  const firstKey = kept[0]?.[0] ?? "";
+  const firstEver = transactions.reduce((m, t) => (t.date && t.date < m ? t.date : m), "9999-12-31");
+  const bucketStart = by === "year" && /^\d{4}$/.test(firstKey) ? `${firstKey}-01-01` : by === "month" && /^\d{4}-\d{2}$/.test(firstKey) ? `${firstKey}-01` : "";
+  const partialFirst =
+    bucketStart && kept.length >= 2 && firstEver > bucketStart && firstEver.startsWith(firstKey)
+      ? { label: by === "month" ? monthName(firstKey) : firstKey, from: firstEver }
+      : null;
   /*
    * Said under the chart, and handed to the model with its figures: what was
    * left out and how much, and, for months asked about fairly, each month a
@@ -1900,6 +1976,7 @@ export function buildChart(
     direction,
     ...(running ? { running: true } : {}),
     ...(scopeParts.length > 0 ? { scope: scopeParts.join(" ") } : {}),
+    ...(partialFirst ? { partialFirst } : {}),
   };
 }
 

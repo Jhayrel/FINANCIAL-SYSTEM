@@ -3335,6 +3335,43 @@ Maya Credit settings (statement on the 6th, due on the next 6th after it), a
 draw on 20 November is due 6 January, not 6 December. If Maya bills it
 sooner, the due day is changed on the Debt screen.
 
+### 2026-11-10, last: instant entries, and charts chosen with reason
+
+The owner: "I buy food 100" took 25 seconds; then "make it smarter like when
+to use trend, chart, graph, pie" and "improve more the reasoning", with a
+long time-comparison question and "Yearly spending in graph", then
+"Earning".
+
+- **Instant entries** (`entryCertain.ts`): a typed entry this device reads
+  whole makes its card at once, with no sorting call and no model read: one
+  entry, one figure, money out or in, its kind named in the words (or a word
+  the owner's entries of that kind use), its wallet, and every word
+  accounted for. A leftover word, a future, two entries, a transfer, a debt
+  or a question still goes to the model. The present tense ("I buy", "pay")
+  now counts as done, never with a future word (`plainlyDone`). Replayed:
+  the card in 0.4 seconds with the model held at 8.
+- **"Last week with the week before"** is the two whole weeks, as are last
+  month against the month before and yesterday against the day before
+  (`comparedPeriods`); it was this week against last.
+- **A long message is read sentence by sentence** (`chartParts.ts`,
+  `sentenceCharts`, `partsWorked`): each sentence asking for a picture is
+  drawn from itself, a month to come asked "will it be short" is drawn as
+  its forecast, and every other sentence's question is worked out for the
+  model too (a comparison, today against a usual day, everything still
+  coming, the months' bills to a month named, the forecast).
+- **No one-bar charts**: the same window by item instead, or nothing.
+- **Chart types with reason** (`kindOf`, `buildChart`): a share, a breakdown
+  or "where did my money go" is a pie; three periods or fewer are bars
+  unless a line or trend is asked for.
+- **Honest readings** (`chartReading`): a first period the records start
+  partway through is left out of the high, the low and the average, and
+  said; a running period already past every whole one says so; a forecast
+  never calls "The other N items" its largest.
+- **A forecast counts the plans due in its month** (`plansIn`, `outlookFor`):
+  "will December be short" said not, with a December plan that made it so.
+- **"Earning" after a chart** keeps that chart's periods and grouping
+  (`bareMeasure`).
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
