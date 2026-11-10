@@ -3200,6 +3200,30 @@ models, one per provider, are already asked at once, a stronger one waited
 for 4.5 seconds after a quicker one answers; changing that would trade
 quality for little time.
 
+### 2026-11-10, night: fast, deep, detailed and accurate
+
+The owner: "I want it fast but still think deep and can share detailed and
+accurate results". Each part is given to what does it best: the device
+works out the figures in well under a second and exactly; the model
+explains them; the working stays at hand.
+
+- **The app's figures while the model writes** (`preview`, `AskPanel.tsx`).
+  For a question the device worked out (safe to spend, can I afford, the
+  allocations, the forecast and the rest that go through `aiFirst`), the
+  waiting line shows those figures at once, under "The app's figures, while
+  the AI writes its answer". Only the model's answer is said and kept, so
+  the rule of AI first (28 September 2026) holds.
+- **"Show the app's working" under the model's answer** (`working` on the
+  assistant turn): the device's own answer, every figure the model's was
+  built on, closed until opened. This session only: a new stored field
+  would need a change to the published Firestore rules, which a push does
+  not deploy.
+
+Seen in the browser on the emulator copy, with a stand-in model that
+answered after six seconds with a calculation: the figures showed at once,
+the model's `{{calc: 2000 - 544.02}}` became the app's own PHP 1,455.98 with
+nothing flagged, and the working opened under it.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

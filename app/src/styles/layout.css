@@ -6965,8 +6965,37 @@ button.fms-recent-row:disabled {
 
 .fms-working {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+}
+
+/*
+ * The app's own figures while the model writes (10 November 2026): under the
+ * waiting line, the whole width, quieter than an answer and gone when the
+ * answer comes.
+ */
+.fms-working-preview {
+  flex-basis: 100%;
+  border-left: 1px solid var(--hairline);
+  padding-left: var(--space-3);
+  color: var(--ink-2);
+}
+
+/* The app's working under a model's answer, closed until asked for. */
+.fms-working-details {
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
+}
+.fms-working-details > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--ink-3);
+}
+.fms-working-details[open] > summary {
+  color: var(--ink-2);
 }
 
 .fms-dots {

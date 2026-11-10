@@ -524,6 +524,14 @@ interface Said {
   readonly kind: "you" | "assistant";
   readonly text: string;
   /**
+   * The app's own working behind a model's answer: every figure it was
+   * built on, as the device worked them out, opened with "Show the app's
+   * working" (owner, 10 November 2026: "fast but still think deep and can
+   * share detailed and accurate results"). This session only: the record
+   * keeps the answer, as before.
+   */
+  readonly working?: string | undefined;
+  /**
    * What any attached photos turned out to be, one line each.
    *
    * The photo itself lives in `shown` and only for this session: an image is
@@ -1440,6 +1448,13 @@ export function AskPanel({
    * construction: it only appears while the same call is still running.
    */
   const [stage, setStage] = useState("");
+  /**
+   * The app's own figures for the question being answered, shown in the
+   * waiting line while the model writes, so the answer's facts are on screen
+   * in a moment rather than after the model's whole round trip. Only the
+   * model's answer is said and kept: this goes when it arrives.
+   */
+  const [preview, setPreview] = useState<string | null>(null);
 
   /**
    * Run something, saying what it is while it runs.
@@ -4913,6 +4928,7 @@ export function AskPanel({
     // The part of a chart they tapped, when the question points at it (domain/chartPick.ts).
     const picked = asksAboutPick(question) ? currentPick() : null;
     // What the owner has open, so "what do you think" is about that screen (domain/screenContext.ts).
+    if (worked?.fallback) setPreview(worked.fallback);
     const answer = await during(
       "Reading your ledger",
       () =>
@@ -4972,7 +4988,10 @@ export function AskPanel({
           },
         }),
       "Still waiting on the model",
-    ).finally(() => clearTimeout(deadline));
+    ).finally(() => {
+      clearTimeout(deadline);
+      setPreview(null);
+    });
     if (stopper.current === control) stopper.current = null;
     // Asked of a model that is on, and none answered: Try again goes under what is said instead.
     const failed = answer.source !== "model" && settings.ai.enabled && settings.ai.features.chat !== false && !/^Not signed in/i.test(answer.reason ?? "");
@@ -5015,7 +5034,9 @@ export function AskPanel({
       log(aiEvent("answered", "add", { text: own ?? "Empty answer", model: "this device" }));
       return;
     }
-    say({ kind: "assistant", text: answerText, from, ...(failed ? { retry: question } : {}) });
+    // The app's working beside a model's answer built on it, to open when the figures matter.
+    const working = answer.source === "model" && worked?.fallback && worked.fallback.trim() !== answerText.trim() ? worked.fallback : undefined;
+    say({ kind: "assistant", text: answerText, from, ...(failed ? { retry: question } : {}), ...(working ? { working } : {}) });
     log(aiEvent("answered", "add", { text: answerText, model }));
     /*
      * An entry the answer worked out, offered as a card at once.
@@ -12506,6 +12527,12 @@ export function AskPanel({
               {turn.kind === "assistant" ? (
                 <>
                   <Rich text={turn.text} />
+                  {turn.working && (
+                    <details className="fms-working-details">
+                      <summary className="t-micro">Show the app's working</summary>
+                      <Rich text={turn.working} />
+                    </details>
+                  )}
                   {turn.go && sink.go && (
                     <div className="fms-proposalactions">
                       <Button size="sm" onClick={() => turn.go && sink.go?.(turn.go)}>
@@ -12662,6 +12689,14 @@ export function AskPanel({
             <button type="button" className="t-caption fms-askstop" onClick={stop}>
               Stop
             </button>
+            {preview && (
+              <div className="fms-working-preview">
+                <p className="t-micro" style={{ color: "var(--ink-3)", margin: 0 }}>
+                  The app's figures, while the AI writes its answer:
+                </p>
+                <Rich text={preview} />
+              </div>
+            )}
           </div>
         )}
       </div>
