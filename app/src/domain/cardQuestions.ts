@@ -18,6 +18,7 @@ import { MONTH_NAMES } from "./dates";
 import { allOf, applyReply, asksToRename, NAMES_A_FIELD, nextQuestion, walletInside, type Blank } from "./capture";
 import { itemsFor, type Draft } from "./entry";
 import { formatMoney } from "./money";
+import { readMoney } from "./proposal";
 import { asksSafeToSpend } from "./safeAsk";
 import type { ReferenceLists, Transaction } from "./types";
 
@@ -68,6 +69,10 @@ export const STOP_ASKING = /^\s*(?:stop|done|that'?s all|enough|no more|stop ask
  * instruction to do something else, and not a new entry: a figure is only
  * an answer when the question was how much. Skip and stop always are.
  */
+/** Words an amount is said in, or a reply to "how much" with no figure: all of it, the usual, never mind. */
+const AMOUNT_WORDS =
+  /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|half|isang|dalawa|tatlo|apat|lima|anim|pito|walo|siyam|sampu|daan|libo|all|everything|lahat|whole|usual|same|never ?mind|skip|stop|cancel|discard|drop|wala|none|nothing|zero|free|libre)\b/i;
+
 export function looksLikeAnswer(note: string, blank: Blank): boolean {
   const text = note.trim();
   if (!text) return false;
@@ -87,6 +92,14 @@ export function looksLikeAnswer(note: string, blank: Blank): boolean {
    */
   if (/#\s*\d{1,5}\b/.test(text)) return false;
   if (blank !== "amount" && /\d[\d,]*(?:\.\d+)?/.test(text.replace(/\b20\d{2}\b/g, ""))) return false;
+  // A picture asked for is a new request: "Yearly earnings vs spending" was taken as how much an entry was (10 November 2026 sweep).
+  if (/\b(?:chart|graph|pie|trend|plot|compare|comparison|vs\.?|versus)\b/i.test(text)) return false;
+  /*
+   * How much is answered with a figure, in digits or words, or with all of
+   * it, the usual, or never mind. "Yearly earnings vs spending" was read as
+   * the amount and told no figure was in it (10 November 2026 sweep).
+   */
+  if (blank === "amount" && !/\d/.test(text) && !AMOUNT_WORDS.test(text)) return false;
   return text.split(/\s+/).length <= 12;
 }
 
@@ -352,10 +365,16 @@ export function cardAnswerNote(draft: Draft, question: string, reply: string): s
  * keeps the card's wallet, and a transfer from a wallet into itself loses
  * its source so the card asks which account it came from.
  */
-export function keepTheMoney(before: Draft, after: Draft): Draft {
+export function keepTheMoney(before: Draft, after: Draft, reply = ""): Draft {
   const incoming = after.flow === "Revenue" || (after.flow === "Debt" && (after.debtEffect === "draw" || after.debtEffect === "collect"));
   const wasIncoming = before.flow === "Revenue" || (before.flow === "Transfer" && !before.fromWallet && Boolean(before.toWallet));
-  let next: Draft = { ...after, date: before.date, amount: before.amount };
+  /*
+   * A card with no amount takes the one the answer says, and only that one:
+   * "Today" and a figure in pesos, to a card asking how much (10 November 2026).
+   */
+  const said = readMoney(reply.replace(/\b(?:today|yesterday|pesos?|php|lang|po|only)\b/gi, " ").trim());
+  const amount = (before.amount ?? 0) <= 0 && said !== null && said > 0 && after.amount === said ? said : before.amount;
+  let next: Draft = { ...after, date: before.date, amount };
   if (incoming && !next.toWallet) next = { ...next, toWallet: before.toWallet };
   if (!incoming && after.flow !== "Transfer" && !next.fromWallet) next = { ...next, fromWallet: before.fromWallet };
   if (after.flow === "Transfer") {

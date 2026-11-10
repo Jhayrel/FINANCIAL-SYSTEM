@@ -1685,6 +1685,12 @@
   background: var(--surface-sunk);
 }
 
+/* What a download holds: its three choices on one line where they fit. */
+.fms-stmtfield--part {
+  flex: 0 1 auto;
+  max-width: none;
+}
+
 .fms-stmtexport {
   margin-left: auto;
   display: flex;
@@ -6999,6 +7005,32 @@ button.fms-recent-row:disabled {
   gap: var(--space-2);
   margin: var(--space-1) 0 0;
   color: var(--ink-2);
+}
+
+/* What the figure check found, under a model's answer, always in view. */
+.fms-check {
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--space-2);
+}
+.fms-check-line {
+  margin: 0;
+  color: var(--ink-3);
+}
+.fms-check-line + .fms-check-line {
+  margin-top: var(--space-1);
+}
+/* A figure that is not in the records: said in full ink, so it is read. */
+.fms-check-line--off {
+  color: var(--ink);
+}
+.fms-check .fms-working-details {
+  margin-top: var(--space-1);
+  border-top: 0;
+}
+.fms-working-lead {
+  margin: 0 0 var(--space-2);
+  color: var(--ink-3);
 }
 
 /* The app's working under a model's answer, closed until asked for. */

@@ -65,10 +65,39 @@ const COMMAND_WORDS = [
   "charts",
   "graph",
   "graphs",
+  // "can you make a alloaction per week" lost the allocation's figures (10 November 2026).
+  "allocation",
+  "allocations",
+  "allocate",
+  // "compare my earnign this month vs may" drew spending (10 November 2026).
+  "earning",
+  "earnings",
+  "income",
+  "spending",
+  "expenses",
+  "compare",
 ] as const;
 
 /** Real words one keystroke from a command word, which mean themselves. */
 const REAL_WORDS = new Set([
+  // One keystroke from earning(s), spending, expenses, income and compare, and meaning themselves.
+  "earring",
+  "earrings",
+  "warning",
+  "warnings",
+  "yearning",
+  "learning",
+  "earnest",
+  "sending",
+  "spendings",
+  "expense",
+  "expanses",
+  "incomes",
+  "compared",
+  "compares",
+  "allocated",
+  "allocates",
+  "compere",
   "charge",
   "charged",
   "charges",

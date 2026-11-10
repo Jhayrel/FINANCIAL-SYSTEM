@@ -404,6 +404,15 @@ export function statementToCsv(statement: Statement, budget?: SheetBudget | null
   return lines.join("\n");
 }
 
+/** The budget for the months a statement covers, alone, for "budget only" (`statementBudget.ts`). */
+export function budgetToCsv(budget: SheetBudget): string {
+  // From its column names: the blank line and the "Budget" heading set it apart only under the entries.
+  return budgetCsvRows(budget, pesos)
+    .slice(2)
+    .map((row) => row.map(csvCell).join(","))
+    .join("\n");
+}
+
 /** Filename for a downloaded statement. */
 export function statementFilename(statement: Statement, extension: "csv" | "pdf" = "csv", subject = ""): string {
   const name = [STATEMENT_LABEL[statement.type], subject]

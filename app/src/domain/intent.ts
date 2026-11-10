@@ -99,6 +99,8 @@ export function detectIntent(text: string): Intent {
   if (trimmed.endsWith("?") || askedThenSaid(trimmed)) return "ask";
   if (ASKING.test(trimmed)) return "ask";
   if (ASKING_ANYWHERE.test(trimmed)) return "ask";
+  // Asking why, or what to do: "help me why i spent this" is not an entry (10 November 2026).
+  if (isAdvice(trimmed) || talksRate(trimmed)) return "ask";
 
   /*
    * An intention is not an entry.
@@ -201,7 +203,30 @@ const ADVICE =
  * Asking whether to do something does settle it: nobody asks "should I" about
  * money that has already moved.
  */
-export const isAdvice = (text: string): boolean => ADVICE.test(text.trim());
+/*
+ * Asking why, or for help seeing why, anywhere in the sentence. The owner,
+ * 10 November 2026: "Also help me why i spent this like always in a bad way
+ * like ever since starting its bad" became a Self Care card at its usual
+ * amount, twice, because "why" counted only as the first word and "help
+ * me" only before "with", "plan" and the like. Nobody asks why about an
+ * entry they are making.
+ */
+const WHY =
+  /\b(?:why|bakit|how come|help me (?:why|know|see|find|stop|improve|fix|change|reduce|lower|avoid|get|be better|do better)|what(?:'s| is) wrong with my|what am i doing wrong|where am i going wrong)\b/i;
+
+export const isAdvice = (text: string): boolean => ADVICE.test(text.trim()) || WHY.test(text.trim());
+
+/*
+ * What something would do, or a rate: "that would cover" a price "per session
+ * and 3x per week" became a Parking card for that price in a talk about the
+ * gym allocation (10 November 2026). Money that moved is said as done, not
+ * as what it would be or how often.
+ */
+const RATE_OR_WOULD =
+  /\b(?:would|that'?d|it'?d)\b(?!\s+(?:like|love|want))|\b(?:per|each|every|a)\s+(?:session|visit|class|lesson)\b|\b\d+\s*x\s*(?:a|per|each|every)\s+(?:week|day|month)\b|\b(?:once|twice|thrice|\d+\s+times)\s+(?:a|per|each|every)\s+(?:week|day|month)\b/i;
+
+/** A rate, or what something would do, with nothing said to have happened. */
+export const talksRate = (text: string): boolean => RATE_OR_WOULD.test(text) && !HAPPENED.test(text);
 
 /**
  * An instruction to change a budget, which the assistant does not carry out.

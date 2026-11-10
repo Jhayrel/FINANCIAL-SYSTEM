@@ -81,6 +81,7 @@ import {
   type Blank,
 } from "../domain/capture";
 import { daysIn, readEntry, splitEntries } from "../domain/readEntry";
+import { sameAsBefore, withoutAside, type RecentEntry } from "../domain/entryAside";
 import { namedIn, partsTheModelMissed, readTotals, totalWords, withSaidItem, withoutTheTotal } from "../domain/entryTotals";
 import { cashWallet, slipsIn, withdrawalSource } from "../domain/withdrawal";
 import { cardAccount, cardSlipsIn } from "../domain/cardSlip";
@@ -245,6 +246,8 @@ import {
   routeMessage,
   type Intent as Routed,
 } from "../data/aiClient";
+import { checkWords, withCheckWords, type AnswerCheck } from "../domain/answerCheck";
+import { suggestedCommands, withoutCommandLines } from "../domain/answerCommands";
 import { chatStore } from "../data/chatStore";
 import { readOriginal, readPicture } from "../data/ocr";
 import { holdUpdates } from "../data/updateCheck";
@@ -265,7 +268,7 @@ import { notEditable, transactionToDraft } from "../domain/entry";
 import { notArrivedWords, placeSentMoney } from "../domain/destination";
 import { carryWords, dayFigures, nextMonthStart, safeOverDays, yesterdayOf } from "../domain/monthPlan";
 import { daysAskedAbout } from "../domain/safeAsk";
-import { allocationWords, asksAllocations, asksTimesLeft, kindAsked, kindLeftWords, linesNamed, monthAsked, SAFE_RULE } from "../domain/allocationAsk";
+import { allocationMeant, allocationWords, asksAllocations, asksTimesLeft, followsAllocation, kindAsked, kindLeftWords, lineTalkedAbout, linesNamed, monthAsked, SAFE_RULE } from "../domain/allocationAsk";
 import { readAllocationChange } from "../domain/allocationChange";
 import type { AllocationChange } from "../domain/monthAllocation";
 import { billPayWords, incomeIfWords, noSpendWords, readBillPayIf, readIncomeIf, readNoSpendDays, readSkipIf, skipWords } from "../domain/whatIfAsk";
@@ -542,6 +545,13 @@ interface Said {
    */
   readonly working?: string | undefined;
   /**
+   * Every peso figure in a model's answer, checked against the app's own
+   * (`useAi.ts`, `checkApart`): said on a line of its own under the answer,
+   * where it can be read without opening anything (owner, 10 November 2026:
+   * "the Show the app's working is so confusing ... I need to expand it").
+   */
+  readonly checked?: AnswerCheck | undefined;
+  /**
    * An answer with its second look still running (`useAi.ts`, `onRevised`):
    * shown, not yet written to the record, so whichever is final is the one
    * kept, and the conversation reads as one answer, not two (owner, 10
@@ -718,6 +728,37 @@ const NOT_ANSWERED = "That one was not answered:";
 
 /** The longest a question waits for the AI before it is called off with Try again under it. */
 const CHAT_DEADLINE_MS = 60_000;
+/** "give me it again", "redo the entry", "do it again": the cards just discarded, made again. */
+const AGAIN =
+  /\b(?:give\s+(?:me\s+)?(?:it\s+|that\s+|them\s+|the\s+(?:entry|entries|card|cards)\s+)?again|(?:re)?do\s+(?:it|that|them|the\s+(?:entry|entries|card|cards))\s+again|redo\s+(?:it|that|them|the\s+(?:entry|entries|card|cards))|make\s+(?:it|them|the\s+(?:entry|entries|card|cards))\s+again|ulitin)\b/i;
+
+/**
+ * The message whose cards were all just discarded, for "give me it again":
+ * the last cards in the conversation, discarded, and the owner's message
+ * before the first of them. Null when the last card was kept or is still
+ * open, so a card nobody discarded is never made twice.
+ */
+function messageOfDiscarded(turns: readonly Turn[]): string | null {
+  let first = -1;
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const t = turns[i] as Turn;
+    if (isSaid(t)) {
+      if (t.kind === "you" && first >= 0) return t.text.trim() || null;
+      continue;
+    }
+    if (isChart(t)) continue;
+    if (!isOffer(t) || t.state !== "discarded") return null;
+    first = i;
+  }
+  return null;
+}
+
+/** "I mean allocation", "allocation not budget", "not the budget, the allocation". */
+const MEANT_ALLOCATION =
+  /^\s*(?:no[,.!]?\s+)?(?:i\s+)?(?:mean|meant)\s+(?:the\s+)?(?:\w+\s+)?allocation\b|^\s*(?:the\s+)?(?:\w+\s+)?allocation\s+(?:not|hindi)\s+(?:the\s+)?budget\b|^\s*not\s+(?:the\s+)?budget\b[^.?!]{0,20}\ballocation\b/i;
+
+/** How long an answer waits on its second look before it is said as it is (`settleHeld`). */
+const SECOND_LOOK_WAIT_MS = 15_000;
 
 /** Words a question is never about, however often the entries use them. */
 const SUBJECT_STOP = new Set(
@@ -2185,7 +2226,7 @@ export function AskPanel({
     if (isSaid(turn) && turn.held) return;
 
     void chatStore(uid)
-      .record(said(turn.kind, turn.text, turn.from, turn.described))
+      .record(said(turn.kind, withCheckWords(turn.text, turn.checked), turn.from, turn.described))
       .catch(() => {});
   };
 
@@ -2194,19 +2235,32 @@ export function AskPanel({
    * its place when one came, else the first as it was, and either way the
    * one written to the record.
    */
-  const heldAnswers = useRef(new Map<string, { readonly text: string; readonly from: string | undefined; readonly settled?: { readonly text: string; readonly from: string } | null }>());
-  const settleHeld = (key: string, better: { readonly text: string; readonly from: string } | null): void => {
+  type HeldAnswer = { readonly text: string; readonly from: string | undefined; readonly checked?: AnswerCheck | undefined };
+  const heldAnswers = useRef(new Map<string, HeldAnswer & { readonly settled?: HeldAnswer | null }>());
+  /** Held answers already settled: a second look that comes back after its wait is over changes nothing. */
+  const settledHeld = useRef(new Set<string>());
+  /*
+   * The answer is said once, when it is final. The first was shown and then
+   * swapped for the second look a few seconds later, and the owner, 10
+   * November 2026: "it gives me already a response then few seconds later it
+   * changed ... longer response then few seconds later gives me shorter ...
+   * i think its a glitch". While the second look runs the turn says only
+   * that the figures are being checked.
+   */
+  const settleHeld = (key: string, better: HeldAnswer | null): void => {
+    if (settledHeld.current.has(key)) return;
     const first = heldAnswers.current.get(key);
     // Arrived before the first was said: kept for when it is.
     if (!first) {
       heldAnswers.current.set(key, { text: "", from: undefined, settled: better });
       return;
     }
+    settledHeld.current.add(key);
     heldAnswers.current.delete(key);
-    setTurns((prev) => prev.map((t) => (isSaid(t) && t.held === key ? (better ? { ...t, text: better.text, from: better.from, held: undefined } : { ...t, held: undefined }) : t)));
-    const kept = better ?? { text: first.text, from: first.from };
+    const kept: HeldAnswer = better ?? { text: first.text, from: first.from, checked: first.checked };
+    setTurns((prev) => prev.map((t) => (isSaid(t) && t.held === key ? { ...t, text: kept.text, ...(kept.from !== undefined ? { from: kept.from } : {}), checked: kept.checked, held: undefined } : t)));
     void chatStore(uid)
-      .record(said("assistant", kept.text, kept.from))
+      .record(said("assistant", withCheckWords(kept.text, kept.checked), kept.from))
       .catch(() => {});
   };
 
@@ -2757,20 +2811,32 @@ export function AskPanel({
   /** A total, its parts and what was said about all of them, in a typed message (domain/entryTotals.ts). */
   const totalsIn = (text: string) => {
     const totals = readTotals(text);
+    const kinds = reference.spendingTypes.map((t) => t.name);
+    // "Just make it random" beside the entry names its kind (`entryAside.ts`).
+    const aside = withoutAside(text, kinds).kind;
     return {
       totals,
-      item: namedIn(
-        totals.restated,
-        reference.spendingTypes.map((t) => t.name),
-      ),
+      item: namedIn(totals.restated, kinds) ?? aside,
+      aside: aside !== null,
       words: totalWords(totals, formatMoney),
     };
   };
-  const saidItemWords = (item: string): string => `Booked as ${item}: you said they were all ${item}.`;
+  const saidItemWords = (item: string, aside = false): string => (aside ? `Booked as ${item}, as you said.` : `Booked as ${item}: you said they were all ${item}.`);
+  /** The entry card said last in this conversation, added or still open, for "also" (`entryAside.ts`). */
+  const entryJustBefore = (): RecentEntry | null => {
+    for (const t of [...turns].reverse().slice(0, 8)) {
+      if (!isOffer(t) || (t.state !== "added" && t.state !== "open")) continue;
+      const d = t.live ?? t.proposal.draft;
+      return { amount: d.amount, item: d.item, description: d.description, said: t.proposal.said ?? "", ...(t.recordNumber !== undefined ? { recordNumber: t.recordNumber } : {}) };
+    }
+    return null;
+  };
+  /** The entries in a message, without a sentence that only names their kind ("Just make it random", `entryAside.ts`). */
+  const entriesIn = (note: string): string[] => splitEntries(withoutAside(note, reference.spendingTypes.map((t) => t.name)).rest);
   /** A reading filed under the kind the owner said they all were, saying so. */
-  const fileAsSaid = <R extends { draft: Draft; because: readonly string[] }>(read: R, item: string | null): R => {
+  const fileAsSaid = <R extends { draft: Draft; because: readonly string[] }>(read: R, item: string | null, aside = false): R => {
     const filed = withSaidItem(read, item);
-    return filed === read ? read : { ...filed, because: [...read.because.filter((b) => !/^Booked as /.test(b)), saidItemWords(item ?? "")] };
+    return filed === read ? read : { ...filed, because: [...read.because.filter((b) => !/^Booked as /.test(b)), saidItemWords(item ?? "", aside)] };
   };
 
   /**
@@ -2974,7 +3040,7 @@ export function AskPanel({
   };
 
   const offer = async (
-    proposal: Proposal,
+    given: Proposal,
     hint: string,
     useHistory = true,
     batch = false,
@@ -2985,6 +3051,19 @@ export function AskPanel({
     // Steps 2 and 3 below are the work this names: your corrections, then the
     // ledger and Settings. It is set here because it starts here.
     setStage("Checking it against your ledger");
+    /*
+     * "I also treated my friend gym" after paying for the gym: the same
+     * amount as the entry just before, said on the card (`entryAside.ts`).
+     * Two PHP 0.00 cards came of it on 10 November 2026.
+     */
+    const carried = !batch && given.draft.flow === "Spending" && (given.draft.amount ?? 0) <= 0 ? sameAsBefore(given.said ?? hint, entryJustBefore()) : null;
+    const proposal: Proposal = carried
+      ? {
+          ...given,
+          draft: { ...given.draft, amount: carried.amount },
+          adjustments: [...given.adjustments.filter((a) => !/^No amount was in that|needs one thing: the amount/i.test(a)), carried.because],
+        }
+      : given;
     /*
      * A card for the entry a question is still waiting on answers it.
      * 5 October 2026: "Transfer extra cash to cash" was asked how much, the
@@ -3374,7 +3453,14 @@ export function AskPanel({
      */
     let filled: Draft | null = null;
     let readBy = "this device";
-    if (!ai.disabled) {
+    /*
+     * How much is read here: "Today" and a figure in pesos went to the model, which
+     * changed the kind to Treat, and the amount was held to the card's blank
+     * one (10 November 2026). A figure needs no model.
+     */
+    const amountHere = asking.blank === "amount" ? answerCard(before, "amount", note, reference, transactions, creditLines) : null;
+    if (amountHere) filled = amountHere;
+    if (!filled && !ai.disabled) {
       const read = await extractProposals({
         note: cardAnswerNote(before, asking.text, note),
         attachments: [],
@@ -3384,7 +3470,7 @@ export function AskPanel({
       });
       const first = read.source === "model" ? read.proposals[0] : undefined;
       if (first) {
-        filled = keepTheMoney(before, first.draft);
+        filled = keepTheMoney(before, first.draft, note);
         readBy = modelLabel(read.model ?? "") || "the model";
       }
     }
@@ -3676,7 +3762,7 @@ export function AskPanel({
    */
   const offerWordsAlone = async (note: string): Promise<void> => {
     picturesUnread.current = false;
-    const parts = splitEntries(note);
+    const parts = entriesIn(note);
     const reads = (parts.length > 1 ? parts : [note]).map((line) => ({ line, read: readEntry(line, transactions, reference, asOf) }));
     const usable = reads.filter((r) => r.read.worthOffering && !r.read.readsAsDebt && (r.read.draft.amount ?? 0) > 0);
     if (usable.length === 0) return;
@@ -3859,7 +3945,7 @@ export function AskPanel({
       proposals: (typed ? withoutTheTotal(notedCards, typed.totals).cards : notedCards).map((p) => {
         if (!typed) return p;
         const filed = withSaidItem(p, typed.item);
-        return filed === p ? { ...p, typed: true } : { ...filed, typed: true, adjustments: [...p.adjustments, saidItemWords(typed.item ?? "")] };
+        return filed === p ? { ...p, typed: true } : { ...filed, typed: true, adjustments: [...p.adjustments.filter((a) => !/^Booked as /.test(a)), saidItemWords(typed.item ?? "", typed.aside)] };
       }),
     };
     /** Read on this device and then by a text model, said wherever the answer is (data/aiClient.ts). */
@@ -4091,9 +4177,9 @@ export function AskPanel({
      */
     const parts =
       sent.length === 0 && note
-        ? splitEntries(note).map((line) => ({
+        ? entriesIn(note).map((line) => ({
             line,
-            read: fileAsSaid(readEntry(line, transactions, reference, asOf), typed?.item ?? null),
+            read: fileAsSaid(readEntry(line, transactions, reference, asOf), typed?.item ?? null, typed?.aside ?? false),
           }))
         : [];
     const usable = parts.filter((p) => p.read.readsAsDebt || p.read.worthOffering);
@@ -5131,6 +5217,14 @@ export function AskPanel({
               const state = (t as { state?: string }).state;
               return state ? [cardWords(t, state as StoredCard["state"])] : [];
             }),
+            /*
+             * The charts drawn in this conversation are the app's figures:
+             * The total spent since the records began, from the yearly
+             * chart above, was flagged as "not a figure this app worked out"
+             * under the next answer (10 November 2026). A chart drawn from an
+             * answer's own figures is the model's, and is not a source.
+             */
+            ...turns.filter(isChart).filter((t) => !t.chart.fromAnswer).map((t) => chartInWords(t.chart)),
           ].join("\n"),
           /*
            * Only when the question points at it.
@@ -5157,6 +5251,8 @@ export function AskPanel({
           signal: control.signal,
           // Figures asked to be made up are not flagged as untraced (`useAi.ts`).
           ...(asksInvented(question) ? { madeUp: true } : {}),
+          // The check on a line of its own under the answer, not a paragraph in it.
+          checkApart: true,
           /*
            * A second look, said under the first when it holds fewer figures
            * the app cannot trace (`useAi.ts`). Only while nothing else has
@@ -5174,7 +5270,7 @@ export function AskPanel({
             }
             const text = withoutFalseDenial(revised.text);
             const by = modelLabel(revised.model ?? "") || "the provider";
-            settleHeld(heldKey, { text, from: `${by}, checked again against your figures` });
+            settleHeld(heldKey, { text, from: `${by}, written again with your figures`, checked: revised.checked });
             log(aiEvent("answered", "add", { text: `Second look: ${text}`, model: by }));
           },
         }),
@@ -5227,12 +5323,15 @@ export function AskPanel({
     const working = answer.source === "model" && worked?.fallback && worked.fallback.trim() !== answerText.trim() ? worked.fallback : undefined;
     // A second look on its way: the answer is held from the record until it settles (`settleHeld`).
     const holding = answer.source === "model" && answer.revising === true;
-    say({ kind: "assistant", text: answerText, from, ...(failed ? { retry: question } : {}), ...(working ? { working } : {}), ...(holding ? { held: heldKey } : {}) });
+    // Held: nothing shown but the check running, until the final answer is known (`settleHeld`).
+    say({ kind: "assistant", text: holding ? "" : answerText, from, ...(failed ? { retry: question } : {}), ...(working ? { working } : {}), ...(holding ? { held: heldKey } : {}), ...(answer.checked && !holding ? { checked: answer.checked } : {}) });
     if (answer.source === "model" && after) after(answerText);
     if (holding) {
       const early = heldAnswers.current.get(heldKey);
-      heldAnswers.current.set(heldKey, { text: answerText, from });
+      heldAnswers.current.set(heldKey, { text: answerText, from, checked: answer.checked });
       if (early && early.settled !== undefined) settleHeld(heldKey, early.settled);
+      // Never held for long: past the wait the first answer is said as it is, its check with it.
+      else setTimeout(() => settleHeld(heldKey, null), SECOND_LOOK_WAIT_MS);
     }
     log(aiEvent("answered", "add", { text: answerText, model }));
     /*
@@ -5694,6 +5793,50 @@ export function AskPanel({
      * read, and a chart asked for is drawn from its answer exactly as written
      * (`answerChart.ts`).
      */
+    /*
+     * "Fix the entry give me again", just after discarding the cards a
+     * message made: that message read again, now that it reads right. It
+     * found three entries in the ledger to edit instead (10 November 2026).
+     */
+    const againFrom = !as && files.length === 0 && note.split(/\s+/).length <= 10 && AGAIN.test(lead) ? messageOfDiscarded(turns) : null;
+    if (againFrom) {
+      setDraft("");
+      emptyBox();
+      say({ kind: "you", text: note });
+      say({ kind: "assistant", ephemeral: true, text: `Reading "${againFrom}" again.`, from: "this device" });
+      log(aiEvent("asked", "add", { text: `Again: ${againFrom}`.slice(0, 400) }));
+      await sendNow(againFrom, "log");
+      return;
+    }
+    /*
+     * "I mean allocation", after a message about a budget: that message read
+     * again with the allocation, and the budget card it made closed, so it
+     * cannot be applied by mistake. "make the gym budget higher" and a figure set
+     * November's whole budget, and "I mean allocation" drew the allocation
+     * chart again (10 November 2026).
+     */
+    // Only after a budget card: one that already made an allocation card is not made twice.
+    const lastCardTurn = [...turns].reverse().find((t) => !(isSaid(t) || isChart(t)));
+    if (!as && files.length === 0 && MEANT_ALLOCATION.test(lead) && lastCardTurn && isBudgeting(lastCardTurn)) {
+      const before = [...turns].reverse().find((t): t is Said => isSaid(t) && t.kind === "you" && /\bbudget\b/i.test(t.text) && !/\ballocat/i.test(t.text));
+      if (before) {
+        const again = before.text.replace(/\bbudget\b/i, "allocation");
+        setDraft("");
+        emptyBox();
+        const at = turns.map((t) => isBudgeting(t) && t.state === "open").lastIndexOf(true);
+        const open = turns[at];
+        if (open && isBudgeting(open)) {
+          const closed: Budgeting = { ...open, state: "discarded" };
+          recordCard(closed);
+          setTurns((prev) => prev.map((t) => (t === open ? closed : t)));
+        }
+        say({ kind: "you", text: note });
+        say({ kind: "assistant", ephemeral: true, text: `The budget card is closed. Reading "${again}".`, from: "this device" });
+        log(aiEvent("asked", "add", { text: `Meant: ${again}`.slice(0, 400) }));
+        await sendNow(again);
+        return;
+      }
+    }
     // Even with a question waiting: a request to make figures up is never its answer.
     if (!as && files.length === 0 && asksInvented(lead)) {
       const drawIt = wantsChart(lead) || /\b(?:chart|graph|pie|trend|plot|bars?|visuali[sz]e)\b/i.test(lead);
@@ -6783,8 +6926,42 @@ export function AskPanel({
      * Budget uses, and shown as a card: nothing changes until it is pressed.
      * Questions and what-ifs are not read as changes; they go on below.
      */
+    /*
+     * A talk about one allocation carries on in the messages after it: "gym
+     * budget" and "the budget" in it mean the allocation, and "how much to
+     * add?" or "what are you proposing?" are about it (`allocationAsk.ts`,
+     * owner's chat of 10 November 2026).
+     */
+    const liveLines = monthAllocations(reference.allocations, reportRows, monthOfDay(asOf), asOf).lines.map((l) => l.line);
+    const recentTurns = turns.slice(-10);
+    const talkedLine = lineTalkedAbout(recentTurns.filter((t): t is Said => isSaid(t) && t.kind === "you").map((t) => t.text), liveLines);
+    const mended = withCommandWordsFixed(note);
+    const allocationTalk =
+      liveLines.length > 0 &&
+      (/\ballocat/i.test(mended) ||
+        recentTurns.some((t) => (isChart(t) && t.chart.measure === "allocation") || (t.kind === "settle" && Boolean((t as { allocation?: unknown }).allocation)) || (isSaid(t) && t.kind === "you" && /\ballocat/i.test(withCommandWordsFixed(t.text)))));
+    // Read with its typos mended ("alloaction"): what is shown and stored is still `note`.
+    const allocNote = files.length === 0 && !as ? allocationMeant(mended, liveLines, allocationTalk ? talkedLine : null) : note;
+    const safeNow = (): number | undefined => monthBrief({ transactions: reportRows, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf }).safe?.safe;
     if (files.length === 0 && !as && pending === null && !isEssay(note)) {
-      const said = readAllocationChange(note, { lines: settings.allocations ?? [], reference, transactions, asOf });
+      const read = readAllocationChange(allocNote, { lines: settings.allocations ?? [], reference, transactions, asOf, ...(/\ballocat/i.test(allocNote) ? { safe: safeNow() } : {}) });
+      /*
+       * "can you make it until the months end? like the gym allocation" asks
+       * what it takes to last the month, and was answered "What should change
+       * on Gym?" (10 November 2026). With nothing to change read, it is a
+       * question, answered below with what lasting the month takes.
+       */
+      /*
+       * And in a talk about one line, a request the reader cannot finish
+       * ("can you make a alloaction per week ... the week that already used
+       * and the week still covered") is about that line: answered below,
+       * week by week, rather than asked "for which kind of spending?".
+       */
+      const unfinished = read?.kind === "ask";
+      const said =
+        unfinished && (/\b(?:until|till|to|by)\s+(?:the\s+)?(?:months?'?s?|end\s+of\s+(?:the\s+)?month)\s*(?:end)?\b|\bend\s+of\s+(?:the\s+)?month\b|\blast\b|\bcover\b|\benough\b/i.test(note) || (allocationTalk && talkedLine !== null && /\b(?:weeks?|weekly|per|how|can you|could you)\b/i.test(note)))
+          ? null
+          : read;
       if (said) {
         setDraft("");
         say({ kind: "you", text: note });
@@ -6846,18 +7023,32 @@ export function AskPanel({
           return;
         }
       }
-      if (asksAllocations(note, month)) {
+      const carriesOn = allocationTalk && !asksAllocations(allocNote, month) && followsAllocation(note) && !plainlyDone(note);
+      if (asksAllocations(allocNote, month) || carriesOn) {
         setDraft("");
         say({ kind: "you", text: note });
         log(aiEvent("asked", "add", { text: note }));
-        const words = allocationWords(note, month, brief.safe ? { safe: brief.safe.safe, perDay: brief.safe.perDay } : null, asOf);
+        // A follow-up is about the line being talked about, named so the words are about it.
+        const about = allocationTalk && talkedLine && linesNamed(allocNote, month.lines.map((l) => l.line)).length === 0 ? `${allocNote} (${talkedLine.name} allocation)` : allocNote;
+        const words = allocationWords(about, month, brief.safe ? { safe: brief.safe.safe, perDay: brief.safe.perDay } : null, asOf);
         /*
          * Drawn beside the words when a picture helps (owner, 9 November
          * 2026): asked for by name, every allocation at once, or how many
          * times a line has left. "Gas left" is one figure, said alone.
          */
-        const namedLines = linesNamed(note, month.lines.map((l) => l.line));
-        const drawIt = !noPicture(note) && (wantsChart(note) || namedLines.length === 0 || asksTimesLeft(note));
+        /*
+         * Once, not under every question. The owner, 10 November 2026, after
+         * the same chart was drawn under "is my allocation accurate?", "do I
+         * need to add to the allocation", "can we afford that proposed
+         * allocation?" and "I mean allocation": "it keep showing the chart
+         * and it doesnt know what is the proper way to show it". Unasked, it
+         * is drawn only when no allocation chart is in the conversation's
+         * last turns, and never for a yes or no, a what to do, or a follow-up.
+         */
+        const namedLines = linesNamed(about, month.lines.map((l) => l.line));
+        const shownLately = turns.slice(-14).some((t) => isChart(t) && t.chart.measure === "allocation");
+        const yesNo = /^\s*(?:is|are|do|does|did|can|could|should|would|will|so|am)\b/i.test(note) || isAdvice(note) || /\?\s*$/.test(note) && !/^\s*(?:how much|how many|what|which|show)\b/i.test(note);
+        const drawIt = !noPicture(note) && (wantsChart(note) || (!carriesOn && !shownLately && !yesNo && (namedLines.length === 0 || asksTimesLeft(note))));
         const pictured = drawIt ? buildAllocationChart(month, namedLines.map((l) => l.id)) : null;
         setBusy(true);
         try {
@@ -9762,6 +9953,23 @@ export function AskPanel({
         const next = budgetAsk.year + 1;
         budgetNote = [budgetNote, `${span.cut === 1 ? "January" : `January to ${MONTH_NAMES[span.cut - 1] ?? ""}`} ${next} ${span.cut === 1 ? "is" : "are"} next year's budget, not on this card: say "set January ${next} to" a figure for ${span.cut === 1 ? "it" : "them"}.`].filter(Boolean).join(" ");
       }
+      /*
+       * A month's whole budget below its own bills leaves nothing to spend:
+       * "make the gym budget higher" and a figure offered November at that figure in
+       * all, PHP 0.00 of it for spending (10 November 2026). A figure that
+       * small is for one thing, so it is said, and no card is made.
+       */
+      const hint = budgetAsk.kind === "tracks" ? budgetAsk.billsHint ?? 0 : 0;
+      if (budgetAsk.kind === "tracks" && budgetAsk.total !== undefined && hint > 0 && budgetAsk.total < hint) {
+        const lineFor = talkedLine ?? liveLines[0];
+        const lineName = (lineFor?.name.trim() || lineFor?.kind.trim() || "gym").toLowerCase();
+        const text = `${formatMoney(budgetAsk.total)} is less than the ${formatMoney(hint)} that ${MONTH_NAMES[budgetAsk.month - 1] ?? "the month"}'s bills and subscriptions take, so as the month's budget it would leave nothing for spending. For one thing, it is an allocation or a limit: say "change the ${lineName} allocation to ${budgetAsk.total / 100}" or "limit food to ${budgetAsk.total / 100}".`;
+        setDraft("");
+        say({ kind: "you", text: note });
+        say({ kind: "assistant", text, from: "this device" });
+        log(aiEvent("answered", "add", { text, model: "this device" }));
+        return;
+      }
       const plan = planBudget(budgetAsk, budgets, asOf, new Date().toISOString());
       if (plan.outcome.refused) {
         say({ kind: "assistant", text: `${plan.outcome.refused} Edits to a closed month are made on the Budget screen, where the reason is kept with them.`, from: "this device" });
@@ -12020,7 +12228,7 @@ export function AskPanel({
          * each part gets what it needs: a debt card for the borrowing, an
          * ordinary card for the transfer.
          */
-        const parts = splitEntries(note).map((line) =>
+        const parts = entriesIn(note).map((line) =>
           readEntry(line, transactions, reference, asOf),
         );
         const severalParts =
@@ -12192,11 +12400,11 @@ export function AskPanel({
        * here. Several parts in one sentence are split by pattern at this
        * point, which the model does for itself when it is available.
        */
-      const lines = splitEntries(note);
+      const lines = entriesIn(note);
 
       if (files.length === 0 && lines.length > 1) {
-        const said = totalsIn(note).item;
-        const each = lines.map((line) => fileAsSaid(readEntry(line, transactions, reference, asOf), said));
+        const { item: said, aside } = totalsIn(note);
+        const each = lines.map((line) => fileAsSaid(readEntry(line, transactions, reference, asOf), said, aside));
 
         /**
          * A sentence can be part debt and part not, and it was all or nothing.
@@ -13125,13 +13333,8 @@ export function AskPanel({
             <div key={i} className={turn.kind === "you" ? "fms-turn fms-turn--you" : "fms-turn"}>
               {turn.kind === "assistant" ? (
                 <>
-                  <Rich text={turn.text} />
-                  {turn.working && (
-                    <details className="fms-working-details">
-                      <summary className="t-micro">Show the app's working</summary>
-                      <Rich text={turn.working} />
-                    </details>
-                  )}
+                  <AnswerWords text={turn.text} from={turn.from} held={Boolean(turn.held)} busy={busy} onCommand={(c) => void send(c)} />
+                  {!turn.held && (turn.checked || turn.working) && <FigureCheck checked={turn.checked} working={turn.working} />}
                   {turn.go && sink.go && (
                     <div className="fms-proposalactions">
                       <Button size="sm" onClick={() => turn.go && sink.go?.(turn.go)}>
@@ -13229,7 +13432,7 @@ export function AskPanel({
                     <i />
                     <i />
                   </span>
-                  Checking it again against your figures
+                  Checking every figure against your records
                 </p>
               ) : (
                 turn.from && (
@@ -13773,6 +13976,61 @@ function Waited({ since }: { readonly since: number }) {
     <span className="t-caption fms-waited" aria-hidden>
       {seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`}
     </span>
+  );
+}
+
+/**
+ * A model's answer, with any command it tells the owner to type as a button
+ * (`answerCommands.ts`): pressing it sends the command, which shows its card,
+ * and nothing changes until the card is pressed as well.
+ */
+function AnswerWords({ text, from, held, busy, onCommand }: { readonly text: string; readonly from: string | undefined; readonly held: boolean; readonly busy: boolean; readonly onCommand: (command: string) => void }) {
+  if (held && !text) return null;
+  const commands = from && !/^this device/i.test(from) ? suggestedCommands(text) : [];
+  return (
+    <>
+      <Rich text={commands.length > 0 ? withoutCommandLines(text, commands) : text} />
+      {commands.length > 0 && (
+        <div className="fms-proposalactions">
+          {commands.map((c) => (
+            <Button key={c} size="sm" disabled={busy} onClick={() => onCommand(c)}>
+              {c.charAt(0).toUpperCase() + c.slice(1)}
+            </Button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * Under a model's answer: what the check found, always in view, and the
+ * app's own figures behind it, opened when wanted.
+ *
+ * The owner, 10 November 2026: "the Show the app's working is so confusing
+ * like i dont know what is the purpose of this like I need to expand it and
+ * it just from the same model". It was a closed box over the model's name,
+ * so it read as more of the model. The check is said where it can be read,
+ * and the box says what it holds and who worked it out.
+ */
+function FigureCheck({ checked, working }: { readonly checked: AnswerCheck | undefined; readonly working: string | undefined }) {
+  const said = checked ? checkWords(checked) : "";
+  const off = Boolean(checked && (checked.loose.length > 0 || checked.slip));
+  if (!said && !checked?.slip && !working) return null;
+  return (
+    <div className="fms-check">
+      {said && <p className={`t-micro fms-check-line${off ? " fms-check-line--off" : ""}`}>{said}</p>}
+      {checked?.slip && <p className="t-micro fms-check-line fms-check-line--off">{checked.slip}</p>}
+      {working && (
+        <details className="fms-working-details">
+          <summary className="t-micro">See the figures behind this answer</summary>
+          <p className="t-micro fms-working-lead">
+            Worked out on this device from your ledger, not by the AI. The AI was given these figures to write its answer from, and every peso figure in the answer was checked against them.
+          </p>
+          <Rich text={working} />
+        </details>
+      )}
+    </div>
   );
 }
 

@@ -3448,6 +3448,78 @@ budget, allocation ... what if analysis and very deep test".
   minutes on the emulator, and the robot closed the page while it was still
   saving, which the app warns against.
 
+### 2026-11-10, night: two backups of the day, mined and fixed
+
+The owner sent two backups ("find more problem and fix it and improve the
+reasoning", "this too theres too much problem") and asked mid-way to "fix all
+reasoning", for "Show the app's working" to be made clear, and for
+statements to export "budget only and statement only and combine". Every
+problem below was in their chat log; each fix is tested on invented figures
+and replayed on the emulator copy (robots `o4replay.cjs`, `o5replay.cjs`,
+`stmt.cjs`, scratchpad).
+
+- **Questions read as entries.** "help me why i spent this like always in a
+  bad way" became a Self Care card at its usual amount, twice: "why" counted
+  only as the first word. Asking why, or for help seeing why, anywhere, is
+  advice now (`intent.ts`), and the entry reader never offers a card for it.
+  Neither for a rate or what something would do ("that would cover" a price
+  "per session and 3x per week" was a Parking card; `talksRate`).
+- **"Also ... Just make it random"** (`entryAside.ts`): a sentence that only
+  names the kind is that kind for the entry beside it, not a second card;
+  "also" with no figure takes the amount of the entry just before, said on
+  the card. The answer to a card's "how much" is read on the device, never by
+  the model, which changed the kind and lost the figure (`keepTheMoney` now
+  keeps a figure the reply states). A chart request or a reply with no figure
+  is never the answer to "how much" (`looksLikeAnswer`). "give me it again"
+  right after discarding a message's cards reads that message again.
+- **"compare my earnign this month vs may"** drew spending: measure words are
+  mended one keystroke off (earnings, income, spending, expenses, compare,
+  allocation), "this month" pairs with a month named, and a "vs" pairs
+  periods only when a period follows it ("Yearly earnings vs spending" after
+  a comparison redrew the comparison).
+- **One answer, said once.** The first answer was shown and swapped for its
+  second look seconds later ("i think its a glitch"). While the second look
+  runs the turn says only "Checking every figure against your records", for
+  at most fifteen seconds, then the final answer appears and never changes.
+  Charts already drawn in the conversation count as the app's figures, so
+  their totals are no longer flagged as untraced.
+- **"Show the app's working" is now a check line** (`answerCheck.ts`): under
+  every model answer with figures, in view, "Checked: all 6 figures in this
+  answer match your records", or which ones are not in them. "See the
+  figures behind this answer" opens the device's working, labelled as worked
+  out on this device from the ledger, not by the AI. It had shown spending
+  under an answer about earnings, because the chart under it was wrong.
+- **Commands the model tells the owner to type are buttons**
+  (`answerCommands.ts`): "Type change the gym allocation to" a figure, or a
+  bare "allocate ..." line, becomes a button that sends it; the card it makes
+  still has to be pressed. "why I cant edit or add here in allocation using
+  ai?"
+- **The allocation talk** (`allocationAsk.ts`): for a line counted in times,
+  what it takes to last the month at its share and at what the uses have
+  cost, what each sets aside from safe to spend, a total or a price and rate
+  named, and week by week when weeks are asked about (`coverWords`,
+  `weeksWords`). The model had worked these out itself, differently each
+  time. Follow-ups that do not say "allocation" ("how much to add?", "what
+  are you proposing?") carry the line being talked about; "gym budget", and
+  a small figure for "the budget" in that talk, mean the allocation; "I mean
+  allocation" after a budget card closes it and reads the message again. The
+  allocation chart is drawn once, never under a yes or no or a follow-up
+  ("it keep showing the chart"). The allocation card says where the change
+  leaves safe to spend, and when below zero, that it is more than is free and
+  still the owner's call.
+- **A month's budget below its own bills** is never a card: it would leave
+  nothing for spending, so the chat says so and names the allocation or limit
+  it was likely meant for.
+- **Smaller:** "bring another 1000" is a what-if of money coming in; the
+  model answers in the language of the latest message (an English question
+  came back in Tagalog); "read the room" and "I am not asking for that" are
+  answered by saying it missed and answering what was asked.
+- **Statements: what to export** (`Statements.tsx`, `statementPdf.ts`,
+  `budgetToCsv`): Both, Statement only, or Budget only, for the PDF and the
+  CSV, shown when the period has a budget. Budget only is headed Budget,
+  with the statement it belongs to under the title, and its files start
+  "budget-".
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

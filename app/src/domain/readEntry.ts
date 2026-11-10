@@ -44,7 +44,7 @@ import { formatMoney, withoutDays } from "./money";
 import { withoutModelNumbers } from "./modelNumbers";
 import { dayFromWords, withoutDayWords } from "./dayWords";
 import { carriesIdentifier, withoutIdentifiers } from "./identifiers";
-import { saysItHappened } from "./intent";
+import { isAdvice, saysItHappened, talksRate } from "./intent";
 import type { IsoDate, ReferenceLists, Transaction, TransactionStatus } from "./types";
 
 export interface ReadEntry {
@@ -1282,7 +1282,12 @@ export function readEntry(
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .some((w) => w.length >= 3 && text.toLowerCase().includes(w));
-  const worthOffering = amount !== null || (Boolean(draft.item.trim()) && (itemSaid || saysItHappened(text))) || namedTransfer;
+  /*
+   * Asking for advice, or why, is never a card, figure or not: "help me why
+   * i spent this like always in a bad way" became Self Care at its usual
+   * amount (10 November 2026), the figure taken from habit.
+   */
+  const worthOffering = !isAdvice(text) && !talksRate(text) && (amount !== null || (Boolean(draft.item.trim()) && (itemSaid || saysItHappened(text))) || namedTransfer);
   const spread = span && draft.flow === "Spending" && span.to > span.from;
 
   return {

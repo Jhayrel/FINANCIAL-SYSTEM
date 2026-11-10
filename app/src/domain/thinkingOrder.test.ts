@@ -56,7 +56,7 @@ describe("the four steps are named, and in order", () => {
    */
   it("splits a multi-part sentence only after the model has had its turn", () => {
     expect(at("const found = await readAttached(note);")).toBeLessThan(
-      at("const lines = splitEntries(note);"),
+      at("const lines = entriesIn(note);"),
     );
   });
 
@@ -110,7 +110,7 @@ describe("the four steps are named, and in order", () => {
 
   /** The message is echoed once, by the analyse step, and not again below. */
   it("does not echo the message twice", () => {
-    const fallback = source.slice(at("const lines = splitEntries(note);"));
+    const fallback = source.slice(at("const lines = entriesIn(note);"));
     const upToOffer = fallback.slice(0, fallback.indexOf("const offline ="));
     expect(upToOffer).not.toContain('say({ kind: "you", text: note })');
   });

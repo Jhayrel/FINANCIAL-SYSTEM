@@ -63,6 +63,9 @@ import { hintFrom, type ChartHint } from "../domain/chartAsk";
 import type { IsoDate } from "../domain/types";
 import { stopOf } from "../domain/bills";
 import { calendarLines } from "../domain/dates";
+import type { AnswerCheck } from "../domain/answerCheck";
+
+export type { AnswerCheck };
 
 export type { AiTask };
 
@@ -76,6 +79,13 @@ export interface AiAnswer {
    * this answer now and keeps whichever is final when it comes back.
    */
   readonly revising?: boolean;
+  /**
+   * The figure check, apart from the words, for a caller that shows it on a
+   * line of its own (`checkApart` in `useAi.ts`): how many peso figures the
+   * answer states, the ones the app could not trace, and a claim about the
+   * day's figure that does not fit (`dayFit.ts`).
+   */
+  readonly checked?: AnswerCheck;
   /** "model" when a provider answered, "offline" when this device wrote it. */
   readonly source: "model" | "offline";
   /** `provider:model` when one answered. */

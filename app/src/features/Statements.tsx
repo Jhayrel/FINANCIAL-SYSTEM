@@ -31,7 +31,9 @@ import { buildPlanSheet, planSheetCsv, planSheetFilename } from "../domain/planS
 import { NO_DATE, type Plan } from "../domain/planner";
 import { canFilter, filterChoices } from "../domain/statementFilter";
 import { cashWallet } from "../domain/withdrawal";
+import type { StatementPart } from "../pdf/statementPdf";
 import {
+  budgetToCsv,
   buildStatementBetween,
   debtInScope,
   rangeOf,
@@ -240,6 +242,12 @@ export function Statements({
    * screenshot). A switch gives each the whole scrolling area in turn.
    */
   const [view, setView] = useState<"entries" | "budget">("entries");
+  /*
+   * What a download holds: the entries and the budget, the entries only, or
+   * the budget only (owner, 10 November 2026: "allow in statement to export
+   * budget only and statement only and combine").
+   */
+  const [part, setPart] = useState<StatementPart>("both");
   const [failed, setFailed] = useState("");
 
   const whole = useMemo(
@@ -286,6 +294,9 @@ export function Statements({
   const sheet = filtered ?? whole;
   const hasBudgetView = Boolean(sheet.budget && sheet.budget.months.length > 0);
   const showBudget = view === "budget" && hasBudgetView;
+  // A period with no budget has only the entries to give.
+  const exporting: StatementPart = hasBudgetView ? part : "statement";
+  const named = (file: string): string => (exporting === "budget" ? `budget-${file}` : file);
   const statementNow = () =>
     buildStatementBetween(transactions, type, sheet.from, sheet.to, reference, debtId || undefined, { wallet, debts, only: shown || undefined });
 
@@ -300,7 +311,8 @@ export function Statements({
       return;
     }
     const statement = statementNow();
-    saveFile(statementFilename(statement, "csv", sheet.subject), statementToCsv(statement, sheet.budget), "text/csv;charset=utf-8");
+    const csv = exporting === "budget" && sheet.budget ? budgetToCsv(sheet.budget) : statementToCsv(statement, exporting === "both" ? sheet.budget : null);
+    saveFile(named(statementFilename(statement, "csv", sheet.subject)), csv, "text/csv;charset=utf-8");
   };
 
   const downloadPdf = async (): Promise<void> => {
@@ -308,8 +320,8 @@ export function Statements({
     setFailed("");
     try {
       const { statementPdf } = await import("../pdf/statementPdf");
-      const bytes = await statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date() });
-      saveFile(type === "plans" ? planSheetFilename(sheet, "pdf") : statementFilename(statementNow(), "pdf", sheet.subject), bytes as BlobPart, "application/pdf");
+      const bytes = await statementPdf({ sheet, issuedTo: issued.to, issuedBy: issued.by, issuedAt: new Date(), part: exporting });
+      saveFile(type === "plans" ? planSheetFilename(sheet, "pdf") : named(statementFilename(statementNow(), "pdf", sheet.subject)), bytes as BlobPart, "application/pdf");
     } catch (e) {
       setFailed(
         `The PDF could not be made (${(e as Error).message || "no reason given"}). The CSV has the same rows; try the PDF again after reloading the page.`,
@@ -504,8 +516,23 @@ export function Statements({
               maxLength={80}
             />
           </label>
+          {hasBudgetView && (
+            <div className="fms-stmtfield fms-stmtfield--part">
+              <span className="t-label" style={{ color: "var(--ink-2)" }}>What to export</span>
+              <SegmentedControl
+                label="What to export"
+                options={[
+                  { id: "both", label: "Both" },
+                  { id: "statement", label: "Statement only" },
+                  { id: "budget", label: "Budget only" },
+                ]}
+                value={part}
+                onChange={setPart}
+              />
+            </div>
+          )}
           <div className="fms-stmtexport">
-            <Button variant="secondary" onClick={downloadCsv} disabled={sheet.lines.length === 0}>
+            <Button variant="secondary" onClick={downloadCsv} disabled={exporting !== "budget" && sheet.lines.length === 0}>
               CSV
             </Button>
             <Button variant="primary" onClick={() => void downloadPdf()} loading={making}>

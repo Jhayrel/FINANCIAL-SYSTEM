@@ -75,7 +75,15 @@ export interface StatementPdfOptions {
   readonly issuedAt: Date;
   /** Tests read the page contents; a download is always compressed. */
   readonly compress?: boolean;
+  /**
+   * What the file holds: the entries and the budget (the default), the
+   * entries only, or the budget only (owner, 10 November 2026: "allow in
+   * statement to export budget only and statement only and combine").
+   */
+  readonly part?: StatementPart;
 }
+
+export type StatementPart = "both" | "statement" | "budget";
 
 /**
  * "September 26, 2026, 2:38 PM", in the time of the device that made it:
@@ -162,7 +170,11 @@ interface Columns {
 }
 
 export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> {
-  const { sheet } = o;
+  const part: StatementPart = o.part ?? "both";
+  // The budget only when there is one to print; the entries only, without it.
+  const budgetOnly = part === "budget" && Boolean(o.sheet.budget && o.sheet.budget.months.length > 0);
+  // The budget alone is headed Budget, with the statement it belongs to under it.
+  const sheet: StatementSheet = part === "statement" ? { ...o.sheet, budget: null } : budgetOnly ? { ...o.sheet, title: "Budget", subject: heading(o.sheet) } : o.sheet;
   const doc = new PdfDocument(
     {
       regular: parseTtf(fromBase64(INTER_REGULAR), "Inter-Regular"),
@@ -192,9 +204,11 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
   const bottom = PAGE_H - MARGIN - FOOTER;
 
   let page = doc.addPage(PAGE_W, PAGE_H);
-  let y = header(page, doc, o);
-  y = summary(page, sheet, y);
-  y = tableHead(page, sheet, x, y);
+  let y = header(page, doc, { ...o, sheet });
+  if (!budgetOnly) {
+    y = summary(page, sheet, y);
+    y = tableHead(page, sheet, x, y);
+  }
 
   const newPage = (): void => {
     page = doc.addPage(PAGE_W, PAGE_H);
@@ -208,7 +222,7 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
   };
 
   // Where the running figure starts.
-  if (sheet.broughtForward !== null) {
+  if (!budgetOnly && sheet.broughtForward !== null) {
     const h = LINE + PAD_Y * 2;
     if (y + h > bottom) newPage();
     page.rect(MARGIN, y, CONTENT_W, h, TINT);
@@ -220,14 +234,14 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
     page.line(MARGIN, y, MARGIN + CONTENT_W, y, RULE, 0.5);
   }
 
-  if (sheet.lines.length === 0) {
+  if (!budgetOnly && sheet.lines.length === 0) {
     const h = LINE + PAD_Y * 2;
     page.text(x.details, y + PAD_Y + LINE - 2.4, "No entries in this period.", { size: BODY, color: INK_2 });
     y += h;
     page.line(MARGIN, y, MARGIN + CONTENT_W, y, RULE, 0.5);
   }
 
-  for (const line of sheet.lines) {
+  for (const line of budgetOnly ? [] : sheet.lines) {
     /*
      * Every word, however long: the row grows instead. Two lines and an
      * ellipsis cut descriptions off in the exported statement (owner,
@@ -254,7 +268,7 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
   }
 
   // Totals, between two firm rules.
-  {
+  if (!budgetOnly) {
     const h = LINE + PAD_Y * 2 + 2;
     if (y + h > bottom) newPage();
     page.line(MARGIN, y, MARGIN + CONTENT_W, y, INK, 0.9);
@@ -299,7 +313,7 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
     if (y + 26 + h * 3 > bottom) {
       page = doc.addPage(PAGE_W, PAGE_H);
       y = continuation(page, sheet);
-    } else y += 22;
+    } else y += budgetOnly ? 10 : 22;
     head();
     for (const r of rows) {
       if (y + h > bottom) {
@@ -325,7 +339,7 @@ export async function statementPdf(o: StatementPdfOptions): Promise<Uint8Array> 
   }
 
   // Notes, then the closing line.
-  const notes = ["Amounts are in pesos (₱).", ...sheet.notes, ...(sheet.budget?.notes ?? [])].flatMap(
+  const notes = ["Amounts are in pesos (₱).", ...(budgetOnly ? [] : sheet.notes), ...(sheet.budget?.notes ?? [])].flatMap(
     (n) => wrap(doc, n, "regular", 7, CONTENT_W, 40),
   );
   const closingHeight = 16 + notes.length * 9.5 + 34;

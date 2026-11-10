@@ -1286,7 +1286,7 @@ export interface ComparedPeriods {
  * September says nothing about either.
  */
 export function comparedPeriods(question: string, asOf: IsoDate): ComparedPeriods | null {
-  const q = question.toLowerCase();
+  const q = withThisMonthNamed(question.toLowerCase(), asOf);
   /*
    * Words that put two periods against each other. Not "from last month" or
    * "over last month": "chart my spending from last month" is last month
@@ -1463,12 +1463,38 @@ export function fairPair(pair: ComparedPeriods, asOf: IsoDate): ComparedPeriods 
 }
 
 /**
+ * "This month vs May", "last month against March": the month said by name,
+ * so it pairs with the one named. "compare my earnign this month vs may"
+ * found no pair and drew November alone (10 November 2026), while
+ * "November vs May" was read right.
+ */
+function withThisMonthNamed(q: string, asOf: IsoDate): string {
+  const names = MONTHS.map((m) => m.toLowerCase());
+  const named = [...q.matchAll(new RegExp(String.raw`\b(${names.join("|")}|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\b`, "g"))]
+    .map((x) => x[1] ?? "")
+    .filter((w) => w !== "may" || /\b(?:in|of|and|vs\.?|versus|to|from|with|than|against)\s+may\b/.test(q));
+  if (new Set(named).size !== 1) return q;
+  const monthAt = (back: number): string => {
+    const d = new Date(Date.UTC(Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)) - 1 - back, 1));
+    return `${names[d.getUTCMonth()] ?? ""} ${d.getUTCFullYear()}`;
+  };
+  return q.replace(/\b(?:this|current)\s+month\b|\bngayong buwan\b/, monthAt(0)).replace(/\b(?:last|previous)\s+month\b/, monthAt(1));
+}
+
+/**
  * "Vs june", "against last year", said straight after a chart: the chart's
  * own window against the one named. It drew June alone, as if the message
  * had replaced the window (9 November 2026 sweep).
  */
 export function versusPair(question: string, shownTitle: string, asOf: IsoDate): ComparedPeriods | null {
-  if (!/\b(?:vs\.?|versus|against|compared?\s+(?:to|with)|than)\b/i.test(question) || !namesWindow(question)) return null;
+  const vs = /\b(?:vs\.?|versus|against|compared?\s+(?:to|with)|than)\b/i.exec(question);
+  if (!vs || !namesWindow(question)) return null;
+  /*
+   * The words after "vs" have to name a period: "Yearly earnings vs
+   * spending" sets money in against money out, and after a chart of November
+   * against May it drew November against May again (10 November 2026).
+   */
+  if (!namesWindow(question.slice(vs.index + vs[0].length))) return null;
   if (comparedPeriods(question, asOf)) return null;
   const at = shownTitle.lastIndexOf(", ");
   const shownWindow = at >= 0 ? shownTitle.slice(at + 2) : "";
@@ -2224,7 +2250,7 @@ export function asksChartColour(question: string): boolean {
  */
 export function wantsBothDirections(question: string): boolean {
   const q = question.toLowerCase();
-  const incoming = /\b(income|revenue|earnings|money in|received|allowance|salary)\b/.test(q);
+  const incoming = /\b(income|revenue|earnings|earning|earned|earn|money in|received|allowance|salary)\b/.test(q);
   const outgoing = /\b(spending|spent|expenses?|money out|outflow)\b/.test(q);
   return (incoming && outgoing) || /\b(cash ?flow|in and out|ins and outs|coming in and going out)\b/.test(q);
 }

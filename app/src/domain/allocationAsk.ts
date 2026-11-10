@@ -201,6 +201,131 @@ const ordinal = (n: number): string => {
 /** Whether the message asks how many times are left, for a line counted in times. */
 export const asksTimesLeft = (text: string): boolean => ASKS_COUNT.test(text);
 
+/** Below zero said as short: safe to spend after a change. */
+const safeAfter = (c: number): string => (c >= 0 ? formatMoney(c) : `${formatMoney(-c)} short, below zero`);
+
+/**
+ * What it takes for a line counted in times to last until its month ends,
+ * at its share and at what the uses so far cost, what each would set aside
+ * from safe to spend, and any total or rate the message names.
+ *
+ * The owner, 10 November 2026, on a gym allocation counted in sessions, two
+ * in, each dearer than its share: "is my allocation accurate?", "do I need
+ * to add to the allocation", "can you make it until the months end", "like
+ * how much to add?", "can we up the budget to" a figure, and "that would
+ * cover" a price "per session and 3x per week". The model was given what was
+ * spent and left, and worked the rest out itself: what was left paid for one
+ * count of sessions in one answer and another in the next, and the new total
+ * was split over the old count when the owner meant a new price three times
+ * a week.
+ * Null for a line not counted in times, or a month not running.
+ */
+export function coverWords(s: AllocationStatus, text: string, asOf: IsoDate, phase: MonthAllocations["phase"], safe: number | null): string | null {
+  const line = s.line;
+  if ((line.per !== "time" && line.per !== "day") || !line.each || !line.times || phase !== "running" || s.done) return null;
+  const each = line.each;
+  const uses = s.uses ?? [];
+  const used = s.timesUsed ?? uses.length;
+  const left = s.left;
+  const rest = Math.max(0, line.times - used);
+  const noun = /\b(session|class|visit|ride|trip|lesson|game|round)(?:e?s)?\b/i.exec(text)?.[1]?.toLowerCase() ?? (line.per === "day" ? "day" : "time");
+  const end = lastOfMonth(Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)));
+  const out: string[] = [`To last until ${formatMedium(end)}: ${rest} more ${plural(rest, noun)} counted (${line.times} less the ${used} used), with ${formatMoney(Math.max(0, left))} left.`];
+  const option = (price: number, why: string): { readonly total: number; readonly more: number } => {
+    const need = rest * price;
+    const more = Math.max(0, need - Math.max(0, left));
+    const total = line.amount + more;
+    out.push(
+      more === 0
+        ? `- At ${formatMoney(price)} each, ${why}: ${formatMoney(need)} for the ${rest}, so it is enough, with ${formatMoney(Math.max(0, left) - need)} to spare.`
+        : `- At ${formatMoney(price)} each, ${why}: ${formatMoney(need)} for the ${rest}, ${formatMoney(more)} more than is left, so ${formatMoney(total)} in all.`,
+    );
+    return { total, more };
+  };
+  const atShare = option(each, "its share");
+  const usedCost = uses.reduce((sum, u) => sum + u.cost, 0);
+  const average = uses.length > 0 ? Math.round(usedCost / uses.length) : 0;
+  const atAverage = average > each ? option(average, `what ${uses.length === 1 ? "the one so far" : `the ${uses.length} so far`} cost${uses.length === 1 ? "" : " on average"}`) : null;
+  if (safe !== null) {
+    const after = [atShare, ...(atAverage ? [atAverage] : [])].filter((o) => o.more > 0);
+    if (after.length > 0) {
+      out.push(`Raising it sets the extra aside now, out of safe to spend (${formatMoney(safe)}): ${after.map((o) => `${safeAfter(safe - o.more)} at ${formatMoney(o.total)}`).join("; ")}.`);
+    }
+  }
+  // A total the message names: "up the budget to 750".
+  const totals = [...text.matchAll(/(?:₱|php\s*)?(\d{1,3}(?:,\d{3})+|\d{3,6})(?:\.\d{1,2})?(?!\s*(?:x|times|a\s+week|per\s+week|pesos?\s+(?:per|a|each)|per|each|a\s+(?:session|time|visit)))/gi)]
+    .map((m) => Number((m[1] ?? "").replace(/,/g, "")) * 100)
+    .filter((c) => c >= 10_000 && c !== line.amount);
+  for (const total of [...new Set(totals)].slice(0, 2)) {
+    const free = total - s.spent;
+    const more = total - line.amount;
+    out.push(
+      `At ${formatMoney(total)} in all: ${more >= 0 ? `${formatMoney(more)} more` : `${formatMoney(-more)} less`} than now, ${formatMoney(Math.max(0, free))} left after the ${formatMoney(s.spent)} spent, which pays for ${Math.floor(Math.max(0, free) / each)} at ${formatMoney(each)}${average > each ? ` or ${Math.floor(Math.max(0, free) / average)} at ${formatMoney(average)}` : ""}${safe !== null && more > 0 ? `; safe to spend would be ${safeAfter(safe - more)}` : ""}.`,
+    );
+  }
+  // A price and a rate the message names: "60 pesos per session and 3x per week".
+  const price = /(?:₱|php\s*)?(\d{1,5})(?:\.\d{1,2})?\s*(?:pesos?\s*)?(?:per|a|each|every)\s+(?:session|time|visit|class|day)\b/i.exec(text);
+  const rate = rateSaid(text.replace(/(\d)\s*x\s*(?=(?:a|per|each|every)\s+week)/gi, "$1 times "));
+  if (price?.[1] && rate && "perWeek" in rate) {
+    const p = Number(price[1]) * 100;
+    const span: IsoDate[] = [];
+    for (let d = uses.some((u) => u.date === asOf) ? addDays(asOf, 1) : asOf; d <= end; d = addDays(d, 1)) span.push(d);
+    const fromNow = Math.round((rate.perWeek * span.length) / 7);
+    const monthDays = Number(end.slice(8, 10));
+    const wholeMonth = rate.perWeek * Math.floor(monthDays / 7);
+    out.push(
+      `At ${formatMoney(p)} a ${noun}, ${rate.perWeek} a week: from ${span[0] ? formatMedium(span[0]) : "now"} to ${formatMedium(end)} (${span.length} days) is about ${fromNow} ${plural(fromNow, noun)}, ${formatMoney(fromNow * p)}; with the ${formatMoney(s.spent)} already spent the month comes to ${formatMoney(s.spent + fromNow * p)}. Four whole weeks at that rate is ${wholeMonth} ${plural(wholeMonth, noun)}, ${formatMoney(wholeMonth * p)}.`,
+    );
+  }
+  return out.join("\n");
+}
+
+/**
+ * The line week by week: what each week used, and what is still counted over
+ * the weeks left, with how much of it the money left covers (owner, 10
+ * November 2026: "make a allocation per week ... the week that already used
+ * and the week still covered and the week need to add").
+ */
+export function weeksWords(s: AllocationStatus, asOf: IsoDate, phase: MonthAllocations["phase"]): string | null {
+  const line = s.line;
+  if ((line.per !== "time" && line.per !== "day") || !line.each || !line.times || phase !== "running" || s.done) return null;
+  const each = line.each;
+  const y = Number(asOf.slice(0, 4));
+  const m = Number(asOf.slice(5, 7));
+  const first = `${asOf.slice(0, 7)}-01` as IsoDate;
+  const end = lastOfMonth(y, m);
+  const weeks: { from: IsoDate; to: IsoDate }[] = [];
+  for (let d = first; d <= end; ) {
+    const sunday = addDays(d, (7 - dayOfWeek(d)) % 7);
+    const to = sunday > end ? end : sunday;
+    weeks.push({ from: d, to });
+    d = addDays(to, 1);
+  }
+  const uses = s.uses ?? [];
+  const used = s.timesUsed ?? uses.length;
+  const rest = Math.max(0, line.times - used);
+  const ahead = weeks.filter((w) => w.to >= asOf);
+  const perWeek = ahead.length > 0 ? Math.ceil(rest / ahead.length) : 0;
+  let covered = Math.floor(Math.max(0, s.left) / each);
+  let still = rest;
+  const lines = weeks.map((w) => {
+    const inWeek = uses.filter((u) => u.date >= w.from && u.date <= w.to);
+    const cost = inWeek.reduce((sum, u) => sum + u.cost, 0);
+    const mon = (MONTHS[Number(w.from.slice(5, 7)) - 1] ?? "").slice(0, 3).replace(/^./, (c) => c.toUpperCase());
+    const name = w.from === w.to ? `${mon} ${Number(w.from.slice(8, 10))}` : `${mon} ${Number(w.from.slice(8, 10))} to ${Number(w.to.slice(8, 10))}`;
+    const done = inWeek.length > 0 ? `${inWeek.length} used, ${formatMoney(cost)}` : w.to < asOf ? "none used" : "";
+    if (w.to < asOf) return `- ${name}: ${done}.`;
+    const planned = Math.min(still, perWeek);
+    still -= planned;
+    const fits = Math.min(planned, covered);
+    covered -= fits;
+    const short = planned - fits;
+    const plan = planned === 0 ? "" : short === 0 ? `${planned} still counted, covered by what is left` : `${planned} still counted, ${fits} covered, ${short} needing ${formatMoney(short * each)} more`;
+    return `- ${name}: ${[done, plan].filter(Boolean).join("; ") || "nothing counted"}.`;
+  });
+  return `${s.name} week by week, at ${formatMoney(each)} a time, the ${rest} still counted spread over the ${ahead.length} weeks left:\n${lines.join("\n")}`;
+}
+
 /** The answer, said plainly. */
 export function allocationWords(text: string, month: MonthAllocations, safe: { readonly safe: number; readonly perDay: number } | null, asOf?: IsoDate): string {
   if (month.lines.length === 0) {
@@ -222,6 +347,19 @@ export function allocationWords(text: string, month: MonthAllocations, safe: { r
     }
   } else {
     parts.push(monthWordsFor(month));
+  }
+  /*
+   * For every line counted in times: what it takes to last the month, and
+   * week by week when weeks are asked about (`coverWords`, `weeksWords`).
+   */
+  if (asOf) {
+    const counted = (named.length > 0 ? month.lines.filter((x) => named.some((l) => l.id === x.line.id)) : month.lines);
+    for (const s of counted) {
+      const cover = coverWords(s, text, asOf, month.phase, safe ? safe.safe : null);
+      if (cover) parts.push(cover);
+      const weekly = /\bweek(?:s|ly)?\b|\blingguhan\b/i.test(text) ? weeksWords(s, asOf, month.phase) : null;
+      if (weekly) parts.push(weekly);
+    }
   }
   if (month.phase === "running") {
     if (!timesSaid) parts.push(SAFE_RULE);
@@ -266,3 +404,60 @@ export function kindLeftWords(
   return parts.join(" ");
 }
 
+
+// ── A talk about one allocation ─────────────────────────────────────────────
+
+/**
+ * The one line the owner's recent messages named, latest first: "why gym is
+ * off?" names Gym, and the messages after it are about Gym until another
+ * line is named.
+ */
+export function lineTalkedAbout(said: readonly string[], live: readonly AllocationLine[]): AllocationLine | null {
+  for (const text of [...said].reverse()) {
+    const named = linesNamed(text, live);
+    if (named.length === 1) return named[0] ?? null;
+    if (named.length > 1) return null;
+  }
+  return null;
+}
+
+const MONTH_SAID = /\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec|this month|next month|last month|month'?s)\b/i;
+
+/**
+ * "Budget" said of an allocation, read as the allocation.
+ *
+ * The owner, 10 November 2026, talking about the gym allocation: "make the
+ * gym budget higher" with a figure became a card setting November's whole
+ * budget to that figure, none of it for spending, and "can we up the budget
+ * to" a figure was answered as a month's budget. A line named with "budget" is that
+ * line; with none named, a figure well below any month's budget, in a talk
+ * about one line, is that line too. Anything else is left as it was.
+ */
+export function allocationMeant(text: string, live: readonly AllocationLine[], talked: AllocationLine | null): string {
+  if (!/\bbudget\b/i.test(text) || /\ballocat/i.test(text)) return text;
+  const named = linesNamed(text.replace(/\bbudget\b/gi, " "), live);
+  if (named.length === 1) return text.replace(/\bbudget\b/i, "allocation");
+  if (!talked || named.length > 0 || MONTH_SAID.test(text)) return text;
+  const figure = /(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?/.exec(text);
+  const pesos = figure?.[1] ? Number(figure[1].replace(/,/g, "")) : null;
+  if (pesos === null || pesos <= 0 || pesos >= 3000) return text;
+  if (!/\b(?:up|raise|higher|increase|lower|decrease|less|more|make|change|set|to|add)\b/i.test(text)) return text;
+  return text.replace(/\b(?:the\s+|my\s+)?budget\b/i, `the ${talked.name.toLowerCase()} allocation`);
+}
+
+/**
+ * A message that carries on a talk about allocations without saying the
+ * word: "how much to add?", "can you make it until the months end?",
+ * "what are you proposing?", "so is it safe to make it higher?". The
+ * owner's, 10 November 2026: each went to the model without the
+ * allocation's figures, and it worked them out itself, differently each time.
+ */
+export function followsAllocation(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.startsWith("//") || t.split(/\s+/).length > 24) return false;
+  // A month's budget set by name is the budget's: "set my november budget to 950".
+  if (/^\s*(?:please\s+)?(?:set|change|update|copy|make)\b/i.test(t) && /\bbudget\b/i.test(t) && MONTH_SAID.test(t)) return false;
+  // Another subject altogether: "how much did I spend on food this month" is not about the gym.
+  if (/\b(?:spend|spent|spending|income|earn\w*|balance|bills?|subscriptions?|debts?|owe|planner|chart|graph|pie|trend|entries|transactions?|records?|last\s+(?:week|month|year)|yesterday|today)\b/i.test(t) && !/\b(?:allocat\w*|sessions?|visits?)\b/i.test(t)) return false;
+  return /\b(?:add|up|raise|higher|lower|increase|decrease|more|less|cover|enough|afford|safe|propos\w*|recommend\w*|suggest\w*|per\s+(?:session|week|time|visit)|a\s+(?:session|week)|sessions?|visits?|budget|how\s+much|weeks?|weekly|month'?s?\s+end|end\s+of\s+the\s+month|until|last|calculation|computation|worked?\s+(?:it\s+)?out|accurate|off|short|solution|instead)\b/i.test(t);
+}

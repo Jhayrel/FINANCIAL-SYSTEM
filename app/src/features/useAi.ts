@@ -104,6 +104,8 @@ export interface UseAi {
       onRevised?: (revised: AiAnswer | null) => void;
       /** Figures asked to be made up ("random data", "a sample budget"): nothing to trace them to, so none is flagged. */
       madeUp?: boolean;
+      /** The figure check returned apart (`checked`), not written under the answer. */
+      checkApart?: boolean;
     },
   ) => Promise<AiAnswer>;
   readonly clear: () => void;
@@ -247,6 +249,7 @@ export function useAi({
         tidy?: (text: string) => string;
         onRevised?: (revised: AiAnswer | null) => void;
         madeUp?: boolean;
+        checkApart?: boolean;
       } = {},
     ): Promise<AiAnswer> => {
       // Switched off means nothing is sent, not that nothing comes back.
@@ -362,6 +365,10 @@ export function useAi({
         return { text: calc.text, worked, loose: untracedFigures(calc.text, given, worked) };
       };
       const settled = settle(answered.text);
+      // Every figure an answer states that anyone would rely on: the same rule `untracedFigures` reads by.
+      const statedFigures = (text: string): number => new Set(figuresIn(text).map(Math.abs).filter((f) => !(f < 10_000 && f % 100 === 0))).size;
+      const day = context.safe ? { today: toCentavos(context.safe.today), after: toCentavos(context.safe.perDayAfter) } : null;
+      const daySlip = (text: string): string => (task === "chat" && day ? fitNote(text, day, formatMoney) : "");
       /*
        * One second look, when figures the app did not work out remain
        * (Chain-of-Verification, Dhuliawala et al., 2023: draft, check, then
@@ -402,6 +409,7 @@ export function useAi({
             if (again.source !== "model" || options.signal?.aborted) return onRevised(null);
             const second = settle(options.tidy ? options.tidy(again.text) : again.text);
             if (second.loose.length >= first || !second.text.trim()) return onRevised(null);
+            if (options.checkApart) return onRevised({ ...again, text: second.text, checked: { figures: statedFigures(second.text), loose: second.loose, slip: daySlip(second.text) } });
             const left = untracedNote(second.text, given, formatMoney, second.worked);
             onRevised({ ...again, text: left ? `${second.text}\n\n${left}` : second.text });
           } catch {
@@ -418,8 +426,11 @@ export function useAi({
        * fit claimed against the day's figure is checked the same way, and
        * said underneath (`domain/dayFit.ts`).
        */
-      const day = context.safe ? { today: toCentavos(context.safe.today), after: toCentavos(context.safe.perDayAfter) } : null;
-      const slip = task === "chat" && day ? fitNote(answered.text, day, formatMoney) : "";
+      const slip = daySlip(answered.text);
+      if (options.checkApart) {
+        const checked = { figures: statedFigures(answered.text), loose: options.madeUp ? [] : settled.loose, slip, ...(options.madeUp ? { madeUp: true } : {}) };
+        return revising ? { ...answered, checked, revising: true } : { ...answered, checked };
+      }
       const notes = [note, slip].filter(Boolean);
       const shown = notes.length === 0 ? answered : { ...answered, text: [answered.text, ...notes].join("\n\n") };
       return revising ? { ...shown, revising: true } : shown;

@@ -56,6 +56,8 @@ export interface ChangeContext {
   readonly reference: Pick<ReferenceLists, "spendingTypes" | "bills" | "subscriptions" | "wallets" | "savings">;
   readonly transactions: readonly Transaction[];
   readonly asOf: IsoDate;
+  /** Safe to spend now, the Dashboard's, so the card says where a change leaves it. */
+  readonly safe?: number | undefined;
 }
 
 const money = formatMoney;
@@ -364,6 +366,22 @@ function effectWords(before: readonly AllocationLine[], after: readonly Allocati
   const h = heldChange(before, after, ctx.transactions, ctx.asOf);
   const d = h.after - h.before;
   if (d === 0) return "Safe to spend this month is unchanged.";
+  /*
+   * Where it leaves safe to spend, said on the card itself, and when it goes
+   * below zero, that it is more than is free and still the owner's call. The
+   * owner, 10 November 2026: "make the entry also align with the
+   * recommendations too like it say not safe but I still insist. but make
+   * sure everything is in my control".
+   */
+  if (ctx.safe !== undefined) {
+    const after = ctx.safe - d;
+    if (d > 0) {
+      return after >= 0
+        ? `It sets aside ${money(d)} more now, so safe to spend goes from ${money(ctx.safe)} to ${money(after)}.`
+        : `It sets aside ${money(d)} more now, so safe to spend goes from ${money(ctx.safe)} to ${money(-after)} below zero: more than is free this month. It is still your call; nothing changes until you press Save the change.`;
+    }
+    return `It sets aside ${money(-d)} less now, so safe to spend goes from ${money(ctx.safe)} to ${money(after)}.`;
+  }
   return d > 0 ? `It sets aside ${money(d)} more now, so safe to spend is ${money(d)} lower.` : `It sets aside ${money(-d)} less now, so safe to spend is ${money(-d)} higher.`;
 }
 

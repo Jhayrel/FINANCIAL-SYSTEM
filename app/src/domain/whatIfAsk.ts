@@ -20,7 +20,12 @@ import type { IsoDate } from "./types";
 
 const money = formatMoney;
 const IF = /\b(?:what\s+if|if|kung|what\s+happens?\s+if|suppose)\b/i;
-const INCOME = /\b(?:allowance|salary|sahod|income|pay\s*check|payday|bonus|refund|earn\w*|receiv\w*|get\s+paid|comes?\s+in|coming\s+in|padala|remittance|baon)\b/i;
+/*
+ * "what if I can bring another 1000?" was answered as a purchase and as
+ * money in at once (10 November 2026): bringing in, getting or adding money
+ * is money in.
+ */
+const INCOME = /\b(?:allowance|salary|sahod|income|pay\s*check|payday|bonus|refund|earn\w*|receiv\w*|get\s+paid|comes?\s+in|coming\s+in|padala|remittance|baon|bring(?:\s+in)?|brought\s+in|get\s+(?:another|an\s+extra|extra|more)|got\s+(?:another|an\s+extra|extra)|add\s+(?:another|an\s+extra|extra)|extra\s+(?:money|cash)|another\s+\d[\d,]*(?:\.\d+)?\s*k?\s*(?:pesos?)?\s*(?:in|coming)?\b(?=[^?]*\?|\s*$))\b/i;
 const SPENDS = /\b(?:buy|bought|spend|spent|afford|pay\s+for|purchase|order|gastos)\b/i;
 
 /** The figure in a sentence, in centavos: "5000", "5k", "₱1,250.50". Never a year or a count of days. */
