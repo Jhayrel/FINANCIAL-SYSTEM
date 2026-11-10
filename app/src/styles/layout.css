@@ -7007,30 +7007,117 @@ button.fms-recent-row:disabled {
   color: var(--ink-2);
 }
 
-/* What the figure check found, under a model's answer, always in view. */
-.fms-check {
+/* What the figure check found, under a model's answer, always in view: one column on every width. */
+.fms-figcheck {
+  display: grid;
+  gap: var(--space-1);
   margin-top: var(--space-2);
-  border-top: 1px solid var(--hairline);
   padding-top: var(--space-2);
+  border-top: 1px solid var(--hairline);
 }
-.fms-check-line {
+.fms-figcheck-line {
   margin: 0;
   color: var(--ink-3);
 }
-.fms-check-line + .fms-check-line {
-  margin-top: var(--space-1);
-}
 /* A figure that is not in the records: said in full ink, so it is read. */
-.fms-check-line--off {
+.fms-figcheck-line--off {
   color: var(--ink);
 }
-.fms-check .fms-working-details {
-  margin-top: var(--space-1);
+.fms-figcheck-more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--brand-700);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.fms-figcheck-more > summary::-webkit-details-marker {
+  display: none;
+}
+/* A small chevron, drawn in CSS so it takes the text's colour, turned when open. */
+.fms-figcheck-mark {
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+.fms-figcheck-more[open] .fms-figcheck-mark {
+  transform: rotate(45deg);
+}
+.fms-figcheck-body {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  color: var(--ink-2);
+}
+.fms-figcheck-lead {
+  margin: 0;
+  color: var(--ink-3);
+}
+/* The working is the small print under the answer: smaller than the answer, on every width. */
+.fms-figcheck-body .fms-rich :is(p, li) {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+/* The commands an answer suggests, as buttons the width of their words. */
+.fms-answeractions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.fms-answeractions > .fms-btn {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+
+/* An allocation card's Now and After: one a row, the label as wide as its word. */
+.fms-pdetails--rows {
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+}
+.fms-pdetails--rows > .fms-pdetail {
+  grid-template-columns: 6ch minmax(0, 1fr);
+  padding: var(--space-1) 0;
+}
+.fms-pdetails--rows > .fms-pdetail:first-child {
   border-top: 0;
 }
-.fms-working-lead {
-  margin: 0 0 var(--space-2);
+/* An allocation in a row: the amount and its pace, then where and when, muted. */
+.fms-allocrow {
+  display: grid;
+  gap: 2px;
+}
+.fms-allocrow-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+}
+.fms-allocrow-sub {
   color: var(--ink-3);
+}
+
+/* What the change does to safe to spend, set apart from the rows. */
+.fms-settle-effect {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+}
+.fms-settle-effect--over {
+  color: var(--over);
 }
 
 /* The app's working under a model's answer, closed until asked for. */

@@ -3520,6 +3520,17 @@ and replayed on the emulator copy (robots `o4replay.cjs`, `o5replay.cjs`,
   with the statement it belongs to under the title, and its files start
   "budget-".
 
+- **Cleaned for phone and PC** (owner: "Clean the ui of those make it
+  suitable for phone and pc"). The check line had taken the checkbox's class
+  name (`fms-check`, `components.css`) and sat squeezed beside "See the
+  figures", opening into a narrow right column: it is `fms-figcheck` now, one
+  column, with the figures in a light box in small print. A command button is
+  as wide as its words, and the "Type ..." sentence it replaces is left out.
+  The model's name is said alone. The allocation card shows Now and After as
+  the amount in the money face with its pace, and where and when muted under
+  it, then one line on safe to spend (in the over colour when below zero),
+  without saying the change twice.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

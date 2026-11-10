@@ -38,16 +38,29 @@ export function suggestedCommands(answer: string): string[] {
   return found.slice(0, 2);
 }
 
-/** The answer without the lines that are only a command, shown as buttons instead. */
+/**
+ * The answer without what the buttons say instead: a line that is only a
+ * command, and a sentence that only tells the owner to type one ("Type
+ * change the gym allocation to" a figure "to update it."), which read twice
+ * with the button under it.
+ */
 export function withoutCommandLines(answer: string, commands: readonly string[]): string {
   if (commands.length === 0) return answer;
   const lower = commands.map((c) => c.toLowerCase());
+  const plainOf = (t: string): string => t.replace(/[*_`"“”]/g, "").toLowerCase();
+  const tellsToType = (sentence: string): boolean => /\b(?:type|say|send|write)\b/i.test(sentence) && lower.some((c) => plainOf(sentence).includes(c));
   return answer
     .split("\n")
     .filter((line) => {
       const c = command(line.replace(/^\s*[-*]\s*/, ""));
       return !(c && lower.includes(c.toLowerCase()));
     })
+    .map((line) =>
+      line
+        .split(/(?<=[.!?])\s+(?=[A-Z*"“])/)
+        .filter((sentence) => !tellsToType(sentence))
+        .join(" "),
+    )
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

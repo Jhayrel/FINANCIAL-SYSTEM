@@ -5270,7 +5270,8 @@ export function AskPanel({
             }
             const text = withoutFalseDenial(revised.text);
             const by = modelLabel(revised.model ?? "") || "the provider";
-            settleHeld(heldKey, { text, from: `${by}, written again with your figures`, checked: revised.checked });
+            // The model's name only: the check line under the answer says what was checked.
+            settleHeld(heldKey, { text, from: by, checked: revised.checked });
             log(aiEvent("answered", "add", { text: `Second look: ${text}`, model: by }));
           },
         }),
@@ -13991,9 +13992,9 @@ function AnswerWords({ text, from, held, busy, onCommand }: { readonly text: str
     <>
       <Rich text={commands.length > 0 ? withoutCommandLines(text, commands) : text} />
       {commands.length > 0 && (
-        <div className="fms-proposalactions">
+        <div className="fms-answeractions">
           {commands.map((c) => (
-            <Button key={c} size="sm" disabled={busy} onClick={() => onCommand(c)}>
+            <Button key={c} size="sm" variant="secondary" disabled={busy} onClick={() => onCommand(c)}>
               {c.charAt(0).toUpperCase() + c.slice(1)}
             </Button>
           ))}
@@ -14017,21 +14018,52 @@ function FigureCheck({ checked, working }: { readonly checked: AnswerCheck | und
   const said = checked ? checkWords(checked) : "";
   const off = Boolean(checked && (checked.loose.length > 0 || checked.slip));
   if (!said && !checked?.slip && !working) return null;
+  /*
+   * One column on every width: the check, then the figures to open under it.
+   * It sat side by side in a squeezed row and opened into a narrow right
+   * column (owner, 10 November 2026: "Clean the ui of those make it suitable
+   * for phone and pc").
+   */
   return (
-    <div className="fms-check">
-      {said && <p className={`t-micro fms-check-line${off ? " fms-check-line--off" : ""}`}>{said}</p>}
-      {checked?.slip && <p className="t-micro fms-check-line fms-check-line--off">{checked.slip}</p>}
+    <div className="fms-figcheck">
+      {said && <p className={`t-micro fms-figcheck-line${off ? " fms-figcheck-line--off" : ""}`}>{said}</p>}
+      {checked?.slip && <p className="t-micro fms-figcheck-line fms-figcheck-line--off">{checked.slip}</p>}
       {working && (
-        <details className="fms-working-details">
-          <summary className="t-micro">See the figures behind this answer</summary>
-          <p className="t-micro fms-working-lead">
-            Worked out on this device from your ledger, not by the AI. The AI was given these figures to write its answer from, and every peso figure in the answer was checked against them.
-          </p>
-          <Rich text={working} />
+        <details className="fms-figcheck-more">
+          <summary className="t-micro">
+            <span className="fms-figcheck-mark" aria-hidden />
+            See the figures behind this answer
+          </summary>
+          <div className="fms-figcheck-body">
+            <p className="t-micro fms-figcheck-lead">Worked out on this device from your ledger, not by the AI. The answer above was written from these, and each of its peso figures was checked against them.</p>
+            <div className="t-caption">
+              <Rich text={working} />
+            </div>
+          </div>
         </details>
       )}
     </div>
   );
+}
+
+/**
+ * An allocation's one-line summary ("Gym, ₱560.00 for November 2026 (₱70.00
+ * a time, 8 times), paid from Cash", `lineSummary`) in its parts, for the
+ * card; null when it reads otherwise, and the line is then shown as it is.
+ */
+function summaryParts(value: string): { readonly amount: number; readonly pace: string; readonly rest: string } | null {
+  const m = /^(.+?), ₱([\d,]+\.\d{2}) for ([A-Z][a-z]+ \d{4})(?: \(([^)]*)\))?(?:, ((?:every month|until|from|for)[^,]*))?(?:, paid from (.+))?$/.exec(value.trim());
+  if (!m?.[1] || !m[2] || !m[3]) return null;
+  const amount = Math.round(Number(m[2].replace(/,/g, "")) * 100);
+  const rest = [m[1], m[5] ?? m[3], m[6] ? `paid from ${m[6]}` : ""].filter(Boolean).join(" · ");
+  return { amount, pace: m[4] ?? "", rest };
+}
+
+/** An allocation card's words without what its rows already show: the change said again, and that nothing is saved yet. */
+function settleCardWords(words: string): string {
+  const effect = /\s(?=It sets aside|Safe to spend this month is unchanged)/.exec(words);
+  const rest = /^Change\s/.test(words) && effect ? words.slice(effect.index + 1) : words;
+  return rest.replace(/\s*Nothing is saved until you press [^.]+\.\s*$/, "").trim();
 }
 
 /** The line under an answer: "this device" said as a sentence; a model's name as it is. */
@@ -14952,6 +14984,13 @@ function SettleCard({
 }) {
   const { detail, planner, owner, allocation } = turn;
   const rows = planner?.rows ?? allocation?.rows ?? [];
+  /*
+   * An allocation card with its Now and After rows says the change once:
+   * the sentence that said it again, and "Nothing is saved until you press",
+   * which the head already says, are left to the record (owner, 10 November
+   * 2026: "clean the ui of this entry").
+   */
+  const shown = allocation && rows.length > 0 ? settleCardWords(turn.words) : turn.words;
   return (
     <div className="fms-proposal">
       <div className="fms-proposalhead">
@@ -14963,13 +15002,27 @@ function SettleCard({
         </span>
       </div>
       {rows.length > 0 && (
-        <dl className="fms-pdetails">
-          {rows.map((r) => (
-            <div key={r.label} className="fms-pdetail">
-              <dt className="t-micro">{r.label}</dt>
-              <dd className="t-caption">{r.value}</dd>
-            </div>
-          ))}
+        <dl className="fms-pdetails fms-pdetails--rows">
+          {rows.map((r) => {
+            // An allocation said whole: the amount first, in the money face, and the rest under it.
+            const line = allocation ? summaryParts(r.value) : null;
+            return (
+              <div key={r.label} className="fms-pdetail">
+                <dt className="t-micro">{r.label}</dt>
+                {line ? (
+                  <dd className="fms-allocrow">
+                    <span className="fms-allocrow-main">
+                      <Money value={line.amount} size="s" />
+                      {line.pace && <span className="t-caption">{line.pace}</span>}
+                    </span>
+                    <span className="t-micro fms-allocrow-sub">{line.rest}</span>
+                  </dd>
+                ) : (
+                  <dd className="t-caption">{r.value}</dd>
+                )}
+              </div>
+            );
+          })}
         </dl>
       )}
       {detail && (
@@ -14989,9 +15042,13 @@ function SettleCard({
           </dl>
         </>
       )}
-      <p className="t-body" style={{ margin: 0 }}>
-        {turn.words}
-      </p>
+      {allocation && rows.length > 0 ? (
+        <p className={`t-caption fms-settle-effect${/below zero/.test(shown) ? " fms-settle-effect--over" : ""}`}>{shown}</p>
+      ) : (
+        <p className="t-body" style={{ margin: 0 }}>
+          {shown}
+        </p>
+      )}
       {turn.state === "open" && (
         <div className="fms-proposalactions">
           {canSettle && (

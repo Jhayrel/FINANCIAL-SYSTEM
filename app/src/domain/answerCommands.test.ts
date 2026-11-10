@@ -15,6 +15,10 @@ describe("a command in an answer", () => {
     expect(suggestedCommands(bare)).toEqual(["allocate 170 a week for snacks"]);
     expect(withoutCommandLines(bare, suggestedCommands(bare))).toBe("This tracks the month week by week.");
   });
+  it("and the sentence telling the owner to type it goes, the rest of the answer stays", () => {
+    const answer = "Add **PHP 120.00**. Type **change the snack allocation to 650** to update it.\n\n- At PHP 50.00 a time: PHP 30.00 more.";
+    expect(withoutCommandLines(answer, suggestedCommands(answer))).toBe("Add **PHP 120.00**.\n\n- At PHP 50.00 a time: PHP 30.00 more.");
+  });
   it("never from a sentence that only talks about one, or about something the chat does not change", () => {
     expect(suggestedCommands("You can change the allocation on Budget when you are ready.")).toEqual([]);
     expect(suggestedCommands("Make sure you eat well.")).toEqual([]);
