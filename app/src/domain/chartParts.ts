@@ -59,9 +59,15 @@ export function forecastMeant(sentence: string, all: readonly string[], asOf: Is
   return `forecast for ${cap} ${year}`;
 }
 
-/** One bar or one slice with money in it: nothing a sentence does not say better. */
+/**
+ * One bar or one slice with money in it: nothing a sentence does not say
+ * better. Over time a zero is a point of the line, so a series counts its
+ * periods: two weeks, one of them empty, is a trend that dropped to nothing
+ * ("food vs treat this month", then "by week", 10 November 2026 sweep).
+ */
 export function oneBar(chart: Chart): boolean {
   if (chart.measure || chart.against) return false;
+  if (chart.by === "day" || chart.by === "week" || chart.by === "month" || chart.by === "year") return chart.rows.length <= 1;
   return chart.rows.filter((r) => r.value > 0).length <= 1;
 }
 

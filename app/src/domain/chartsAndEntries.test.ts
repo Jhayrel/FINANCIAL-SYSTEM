@@ -119,10 +119,46 @@ describe("a long message, sentence by sentence", () => {
     expect(forecastMeant("Show October as a chart", ["Show October as a chart"], ASOF)).toBeNull();
   });
   it("never draws one bar, and keeps the chart before for a bare word", () => {
-    const one = buildChart("fare by month last week", [spent("2026-11-03", "Fare", 1000)], ASOF)!;
+    const one = buildChart("spending by item last week", [spent("2026-11-03", "Fare", 1000)], ASOF)!;
     expect(oneBar(one)).toBe(true);
     expect(bareMeasure("Earning")).toBe(true);
     expect(bareMeasure("income this year")).toBe(false);
     expect(bareMeasure("spending by month")).toBe(false);
+  });
+});
+
+describe("follow-ups the sweep found (10 November 2026)", () => {
+  const rows = [
+    ...["2025-01-10", "2025-02-10", "2025-03-10"].map((d) => spent(d, "Snacks", 10000)),
+    ...["2026-01-10", "2026-02-10", "2026-03-10"].map((d) => spent(d, "Snacks", 20000)),
+    spent("2026-11-03", "Snacks", 5000, { description: "before class" }),
+    spent("2026-11-04", "Fare", 3000),
+    spent("2026-10-27", "Snacks", 4000),
+    spent("2026-11-09", "Snacks", 1000),
+    spent("2026-11-02", "Treat", 2000),
+  ];
+  it("a year against the last, month by month, January beside January", () => {
+    const c = buildChart("monthly spending vs last year", rows, ASOF, undefined, comparedPeriods("vs last year", ASOF))!;
+    expect(c.by).toBe("month");
+    expect(c.rows.slice(0, 3).map((r) => [r.label, r.value, r.previous])).toEqual([["January", 20000, 10000], ["February", 20000, 10000], ["March", 20000, 10000]]);
+  });
+  it("two weeks day by day, Monday beside Monday; this month against the same days of the last, the 2nd beside the 2nd", () => {
+    const week = buildChart("by day", rows, ASOF, undefined, comparedPeriods("last week vs the week before", ASOF))!;
+    expect(week.by).toBe("day");
+    expect(week.rows.map((r) => r.label)).toEqual(["Mon", "Tue", "Wed"]);
+    const month = buildChart("spending by day vs last month", rows, ASOF)!;
+    expect(month.by).toBe("day");
+    expect(month.rows.map((r) => r.label)).toEqual(["2nd", "3rd", "4th", "9th"]);
+    // Longer than a month, item beside item.
+    expect(buildChart("spending by day vs last year", rows, ASOF)!.by).toBe("item");
+  });
+  it("a word that sets periods side by side is never a topic", () => {
+    const c = buildChart("how much did I spend last week vs the week before? chart", rows, ASOF, undefined, comparedPeriods("last week vs the week before", ASOF));
+    expect(c?.title).toBe("Spending by item, last week, Nov 2 to Nov 8, against the week before, Oct 26 to Nov 1");
+  });
+  it("a series with an empty week is still a trend, filled to the edges of the window named", () => {
+    const c = buildChart("Treat and Snacks by week, November 2026", rows.filter((r) => r.date >= "2026-11-02" && r.date <= "2026-11-08"), ASOF)!;
+    expect(c.rows.map((r) => r.label)).toEqual(["Week of Oct 26", "Week of Nov 2", "Week of Nov 9"]);
+    expect(oneBar(c)).toBe(false);
   });
 });

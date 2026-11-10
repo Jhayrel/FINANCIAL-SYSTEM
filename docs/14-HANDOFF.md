@@ -3372,6 +3372,41 @@ long time-comparison question and "Yearly spending in graph", then
 - **"Earning" after a chart** keeps that chart's periods and grouping
   (`bareMeasure`).
 
+### 2026-11-10, later still: the same chart twice, and a sweep of follow-ups
+
+The owner: "Yearly earnings vs spending", then "Chart that", drew the same two
+charts a second time, one under the other: "Why this keeps happening find
+more loop holes and fix errors". The redraw never looked at what was on
+screen. Two charts for income against spending stay as they are: each in its
+own direction's colour (rule D3), as decided on 28 September.
+
+- **Never the same chart twice** (`drawnAlready`, `alreadyDrawnWords`,
+  `AskPanel.tsx`): the redraw, the chart branch and the bare-measure route
+  say where the chart already is, what it shows, and the other ways to see it.
+- **A sweep of eighteen follow-up chains** on the emulator copy (robot
+  `sweep.cjs` in the session scratchpad, not committed) found and fixed:
+  - "by week" after "Food by day, October 2026" dropped Food and October:
+    "by week" was read as naming a period (`namesPeriod`).
+  - "vs last month" and "vs last year" after a chart drew one period: the
+    chart branch never used `comparedPeriods`; and a comparison over time is
+    now set side by side, month beside month for periods of several months,
+    day beside day (Monday beside Monday) for short ones, item beside item
+    otherwise (`buildChart`, `buildComparison`). Two named months by month
+    stay one bar a month.
+  - "only gas" after a food chart answered under it became an entry card,
+    then drew Food and Gas: a chart answered in words is still the chart
+    just above, and "only" puts the item in place of the one shown.
+  - "chart it" after "last week vs the week before" drew nothing: "before"
+    was read as a word from the descriptions. Words that set periods side by
+    side are never a topic (`ASKING_WORDS`).
+  - "pie" after "show my bills this year" said there was nothing to draw;
+    bills and subscriptions are a subject to draw.
+  - "by week" after "food vs treat this month" drew all spending: a week with
+    nothing in it is a point of a trend, not a missing bar (`oneBar`), and
+    the weeks of a window asked about are filled to its edges.
+  - "Nothing in that period" now names the days and the wallet; a whole
+    month is titled by its name, not "Oct 1 to Oct 31 2026".
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

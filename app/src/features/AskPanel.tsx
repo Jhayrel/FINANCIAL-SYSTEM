@@ -2523,7 +2523,9 @@ export function AskPanel({
     const periods = chart.against?.periods;
     if (periods && !chart.measure) {
       const subject = chart.title.split(",")[0] ?? "";
-      return `${subject} ${periods.now.from} to ${periods.now.to}`.trim();
+      // A whole month by its name, so the pie is titled "October 2026", not "Oct 1 to Oct 31 2026" (10 November 2026 sweep).
+      const when = /^[A-Z][a-z]+ \d{4}$/.test(periods.now.name) ? periods.now.name : `${periods.now.from} to ${periods.now.to}`;
+      return `${subject} ${when}`.trim();
     }
     if (!chart.asked) return null;
     const base = chart.asked
@@ -4949,7 +4951,30 @@ export function AskPanel({
     if (measure === "allocation") return `There are no allocations for ${monthWords(monthAsked(asked, asOf))} to draw. Add one on Budget, under Allocations, or say "allocate 300 a week for gas".`;
     if (measure === "safe") return "The spending wallets hold nothing now, so there is no safe to spend to draw.";
     if (measure === "upcoming") return 'Nothing is still to come: no open plans, no bills left this month, and no allocations holding money. Say "plan tuition 9000 by December 15" to add one.';
-    return "There is nothing in that period to draw.";
+    /*
+     * Which days, and which wallet, so "chart it" after "my gcash spending
+     * this month" does not answer "nothing in that period" with no period
+     * named (10 November 2026 sweep).
+     */
+    const w = windowOf(asked, asOf);
+    const wallet = [...reference.wallets, ...reference.savings].find((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(asked));
+    const money = /\b(?:income|revenue|earn\w*|received)\b/i.test(asked) ? "came in" : "was spent";
+    const when = /^(?:today|yesterday|this |last |the last )/i.test(w.name) ? w.name : `in ${w.name}`;
+    return `Nothing ${money}${wallet ? ` ${money === "came in" ? "to" : "from"} ${wallet}` : ""} ${when}, so there is nothing to draw. Try a wider window, like "last 30 days" or "this year".`;
+  };
+
+  /** The same chart, the same shape and the same figures, among the last few things said. */
+  const drawnAlready = (chart: Chart): boolean =>
+    turns
+      .slice(-8)
+      .filter(isChart)
+      .some((t) => t.chart.title === chart.title && t.chart.kind === chart.kind && t.chart.total === chart.total && (t.chart.against?.total ?? null) === (chart.against?.total ?? null));
+  /** Where a chart asked for again already is, what it shows, and the other ways to see it. */
+  const alreadyDrawnWords = (charts: readonly Chart[]): string => {
+    const names = charts.map((c) => `"${c.title}"`);
+    const said = charts.map((c) => (chartReading(c).split(/(?<=\.)\s+/)[0] ?? "").trim()).filter(Boolean);
+    const other = charts.every((c) => c.kind === "pie") ? '"bars" or "trend"' : charts.every((c) => c.kind === "line") ? '"bars" or "pie"' : '"pie" or "trend"';
+    return `${names.length === 1 ? `${names[0]} is` : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} are`} drawn just above, with the same figures, so ${names.length === 1 ? "it is" : "they are"} not drawn again. ${said.join(" ")} To see it another way, say ${other}, or name a period or a kind, like "by month this year" or "food only".`;
   };
 
   /** A chart said in the conversation, and kept in the record with its figures. */
@@ -5663,7 +5688,7 @@ export function AskPanel({
      */
     const meant = bareDraw ? questionMeant([...turns].reverse().filter((t): t is Said => t.kind === "you").map((t) => t.text), note) : null;
     const askedToDraw =
-      meant && (/\b(?:break\s*down|breakdown|categor\w*|by\s+(?:kind|item|type|wallet)|spen[dt]\w*|expenses?|income|revenue|earn\w*|receiv\w*|where\s+(?:did\s+)?my\s+money)\b/i.test(meant) || measureOf(localHint(meant, reference.credits ?? [])) !== null)
+      meant && (/\b(?:break\s*down|breakdown|categor\w*|by\s+(?:kind|item|type|wallet)|spen[dt]\w*|expenses?|income|revenue|earn\w*|receiv\w*|where\s+(?:did\s+)?my\s+money|bills?|subscriptions?|subs)\b/i.test(meant) || measureOf(localHint(meant, reference.credits ?? [])) !== null)
         ? // What it was for is not what to draw ("so I can do Budgeting").
           meant.replace(BUDGET_PURPOSE, " ").replace(/\s+/g, " ").trim() || null
         : null;
@@ -5739,7 +5764,18 @@ export function AskPanel({
         say({ kind: "assistant", text: emptyChartWords(question), from: "this device" });
         return;
       }
-      for (const chart of charts) drawChart(chart);
+      /*
+       * Already drawn: "Chart that" after "Yearly earnings vs spending" drew
+       * the same two charts a second time, one under the other (owner,
+       * 10 November 2026: "why this keeps happening"). Said where they are,
+       * with what they show, and what else can be drawn.
+       */
+      const fresh = charts.filter((c) => !drawnAlready(c));
+      if (fresh.length === 0) {
+        say({ kind: "assistant", text: alreadyDrawnWords(charts), from: "this device" });
+        return;
+      }
+      for (const chart of fresh) drawChart(chart);
       return;
       }
     }
@@ -6317,6 +6353,13 @@ export function AskPanel({
     if (files.length === 0 && !as && pending === null && chartBefore && !chartBefore.measure && !chartBefore.against && bareMeasure(ruled)) {
       const carried = `${ruled.trim()}${chartBefore.title.replace(/^[^,]*?(?=\s+by\s)/i, "")}`;
       const drawn = chartsFor(carried, localHint(carried, reference.credits ?? []), null).filter((c) => !oneBar(c));
+      // Already on screen ("income vs spending", then "Earning"): said where, not drawn again (`drawnAlready`).
+      if (drawn.length > 0 && drawn.every(drawnAlready)) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        say({ kind: "assistant", text: alreadyDrawnWords(drawn), from: "this device" });
+        return;
+      }
       if (drawn.length > 0) {
         setDraft("");
         say({ kind: "you", text: note });
@@ -10708,7 +10751,13 @@ export function AskPanel({
      * asking how much the gas was.
      */
     const lastShown = [...turns].reverse().find((t) => t.kind !== "you");
-    const narrows = files.length === 0 && !as && lastShown !== undefined && isChart(lastShown) && narrowsChart(ruled);
+    /*
+     * Or a chart with the answer said under it: "show my food spending this
+     * year", answered in words beside its chart, then "only gas", became a
+     * card asking how much the gas was (10 November 2026 sweep).
+     */
+    const chartJustAbove = (lastShown !== undefined && isChart(lastShown)) || turns.slice(-3).some(isChart);
+    const narrows = files.length === 0 && !as && chartJustAbove && narrowsChart(ruled);
     // A chart drawn in the last few turns, not ten hours ago (backup of 7 October 2026).
     const followUp = isChartFollowUp(ruled, turns.slice(-6).some(isChart)) || narrows;
     const saysChart = routed?.intent === "chart";
@@ -10877,8 +10926,9 @@ export function AskPanel({
         shownChart && asksPie(ruled) && !saysOverTime(ruled)
           ? { ...shownChart, title: shownChart.title.replace(/\bby (?:month|day)\b/i, "by item") }
           : shownChart;
+      // "by week" is a grouping, not a period: read so, "by week" after "Food by day, October 2026" drew all spending over twelve weeks (10 November 2026 sweep).
       const namesPeriod = /\b(20\d{2}|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|month|year|week|today|yesterday|all|everything|days?|since|quarter|q[1-4])\b/i.test(
-        ruled,
+        ruled.replace(/\b(?:by|per|each|every)\s+(?:day|week|month|year|quarter)s?\b|\b(?:daily|weekly|monthly|yearly|annually)\b/gi, " "),
       );
       /*
        * A follow-up that names only a new period keeps what the chart was:
@@ -10900,10 +10950,11 @@ export function AskPanel({
        * window goes as dates instead, and the earlier one comes along as
        * `pair` below when the follow-up keeps comparing.
        */
+      // A whole month by its name: "pie" after October against September was titled "Oct 1 to Oct 31 2026" (10 November 2026 sweep).
       const shownTitle = !shown
         ? ""
         : shown.against?.periods
-          ? `${shown.title.split(",")[0] ?? ""}, ${shown.against.periods.now.from} to ${shown.against.periods.now.to}`
+          ? `${shown.title.split(",")[0] ?? ""}, ${/^[A-Z][a-z]+ \d{4}$/.test(shown.against.periods.now.name) ? shown.against.periods.now.name : `${shown.against.periods.now.from} to ${shown.against.periods.now.to}`}`
           : shown.title;
       /*
        * A new grouping replaces the old one rather than sitting beside it:
@@ -10920,7 +10971,12 @@ export function AskPanel({
        * grouping stay.
        */
       const ownSubject = namesDirection && !itemNamed(ruled, knownItems) && !/^(?:spending|income)\b/i.test(regrouped);
-      const unItemed = ownSubject ? regrouped.replace(/^[^,]*?(?=\s+by\s+)/i, "Spending") : regrouped;
+      /*
+       * "only gas" after a chart of food is gas in food's place, never both:
+       * it drew "Food and Gas by month" (10 November 2026 sweep).
+       */
+      const replacesItem = itemNamed(ruled, knownItems) !== null && /\b(?:only|just|lang|instead)\b/i.test(ruled) && !/^(?:spending|income)\b/i.test(regrouped);
+      const unItemed = ownSubject || replacesItem ? regrouped.replace(/^[^,]*?(?=\s+by\s+)/i, "Spending") : regrouped;
       const title = !shown ? "" : namesDirection ? unItemed.replace(/^(?:spending|income)\s+/i, "") : unItemed;
       /*
        * A snapshot hands on nothing. "Balance by account, today" carried its
@@ -10997,7 +11053,8 @@ export function AskPanel({
       // A pie is one period split up, so "pie" after a comparison draws this period alone.
       // "Vs june" after a chart: the chart's window against the one named, a running month against the same days (9 November 2026).
       const versus = !saidPair && shown && !asksPie(ruled) ? versusPair(ruled, shown.title, asOf) : null;
-      const pair = saidPair ?? versus ?? (followUp && !namesPeriod && !asksPie(ruled) ? shown?.against?.periods ?? null : null);
+      // "vs last month", "vs last year" after a chart: those two periods, set side by side (10 November 2026 sweep).
+      const pair = saidPair ?? versus ?? (!asksPie(ruled) ? comparedPeriods(ruled, asOf) : null) ?? (followUp && !namesPeriod && !asksPie(ruled) ? shown?.against?.periods ?? null : null);
       /*
        * What to draw, read from this message and, for a new request, from
        * what the model said to draw (`chartAsk.ts`). A follow-up keeps what
@@ -11050,6 +11107,15 @@ export function AskPanel({
         const again = chartsFor(`${c.asked ?? askedNow} by item`, null, null).filter((x) => !oneBar(x));
         return again;
       });
+      // Asked again, the same charts are not drawn twice: said where they are (`drawnAlready`).
+      if (drawn.length > 0 && drawn.every(drawnAlready)) {
+        setDraft("");
+        say({ kind: "you", text: note });
+        say({ kind: "assistant", text: alreadyDrawnWords(drawn), from: "this device" });
+        log(aiEvent("answered", "insights", { text: `Already drawn: ${drawn.map((c) => c.title).join(", ")}. Asked: ${note}`, model: "this device" }));
+        return;
+      }
+      drawn = drawn.filter((c) => !drawnAlready(c));
       /*
        * A window carried over from the chart before, with nothing in it, or a
        * budget chart of years with no budget ("Budget vs spending" after
@@ -11062,9 +11128,14 @@ export function AskPanel({
         for (const window of noBudget ? ["this year"] : ["this month", "this year"]) {
           const wider = chartsFor(`${ruled} ${window}`, hint, null);
           if (wider.length > 0 && (!noBudget || wider.some((c) => c.rows.some((r) => (r.previous ?? 0) > 0)))) {
-            widened = noBudget
-              ? `No budget was set in ${shown?.title.split(", ").pop() ?? "that period"}, so this is ${window}.`
-              : `Nothing in ${shown?.title.split(", ").pop() ?? "that period"} to draw, so this is ${window}.`;
+            // Never "Nothing in November 2026, so this is this month": the same window is not a wider one.
+            const wasNamed = shown?.title.split(", ").pop() ?? "that period";
+            const sameWindow = windowOf(wasNamed, asOf).from === windowOf(window, asOf).from && windowOf(wasNamed, asOf).to === windowOf(window, asOf).to;
+            widened = sameWindow
+              ? ""
+              : noBudget
+                ? `No budget was set in ${wasNamed}, so this is ${window}.`
+                : `Nothing in ${wasNamed} to draw, so this is ${window}.`;
             drawn = wider;
             break;
           }

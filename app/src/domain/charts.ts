@@ -1040,7 +1040,9 @@ const ASKING_WORDS = new Set(
     // How sure the answer should be, and what it is for: "so I can do Budgeting. Make sure its accurate" (3 November 2026).
     "based accurate accurately correct correctly sure exact exactly precise budgeting detailed details " +
     // How it was paid, never what: "how much did i pay in bills last month", then "pie", drew the rows that say "pay" (4 November 2026 sweep).
-    "pay pays paying"
+    "pay pays paying " +
+    // Words that set periods side by side: "last week vs the week before" read "before" from a few descriptions and drew nothing (10 November 2026 sweep).
+    "before after previous prior earlier later ago week weeks year years day days versus compare comparing jump jumped drop dropped rise rose fell caused cause change changed"
   ).split(" "),
 );
 
@@ -1486,7 +1488,22 @@ function buildComparison(
 ): Chart | null {
   const valueOf = direction === "revenue" ? revenueOf : spendingOf;
   const word = direction === "revenue" ? "Income" : "Spending";
-  const by: ChartBy = (said === "wallet" && !focus.wallet) || said === "category" ? said : "item";
+  /*
+   * Two periods of several months each, by month: each month beside the
+   * same month of the other, January with January. "monthly spending this
+   * year" then "vs last year" drew 2025 alone (10 November 2026).
+   */
+  const longEnough = (p: ComparedPeriods["now"]): boolean => p.from.slice(0, 7) !== p.to.slice(0, 7);
+  const byMonth = said === "month" && longEnough(pair.now) && longEnough(pair.before);
+  /*
+   * Two short periods, day by day: Monday beside Monday for weeks, the 3rd
+   * beside the 3rd for months. "compare this week and last week", then "by
+   * day", said the comparison was drawn already (10 November 2026 sweep).
+   */
+  const days = (p: ComparedPeriods["now"]): number => Math.round((Date.parse(`${p.to}T00:00:00Z`) - Date.parse(`${p.from}T00:00:00Z`)) / 86_400_000) + 1;
+  const byDay = said === "day" && days(pair.now) <= 31 && days(pair.before) <= 31;
+  const weekly = byDay && days(pair.now) <= 7 && days(pair.before) <= 7;
+  const by: ChartBy = byMonth ? "month" : byDay ? "day" : (said === "wallet" && !focus.wallet) || said === "category" ? said : "item";
   // One item, or one wallet, named: only its rows, each period's figure for it.
   const sideOf = (t: Transaction): string => (direction === "revenue" ? t.toWallet : t.fromWallet).trim().toLowerCase();
   const transactions = everything.filter(
@@ -1498,12 +1515,19 @@ function buildComparison(
       mentions(t, focus.about),
   );
   const narrowed = [focus.item, direction !== "revenue" ? focus.group : "", focus.wallet, focus.about ? capital(focus.about) : ""].filter(Boolean).join(", ");
+  const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const key = (t: Transaction): string =>
-    by === "wallet"
-      ? (direction === "revenue" ? t.toWallet : t.fromWallet).trim() || "(none)"
-      : by === "category"
-        ? t.category.trim() || "(none)"
-        : itemName(t);
+    by === "day"
+      ? weekly
+        ? (WEEKDAYS[(new Date(`${t.date}T00:00:00Z`).getUTCDay() + 6) % 7] ?? t.date)
+        : ordinal(Number(t.date.slice(8, 10)))
+      : by === "month"
+      ? (MONTHS[Number(t.date.slice(5, 7)) - 1] ?? t.date.slice(5, 7))
+      : by === "wallet"
+        ? (direction === "revenue" ? t.toWallet : t.fromWallet).trim() || "(none)"
+        : by === "category"
+          ? t.category.trim() || "(none)"
+          : itemName(t);
   const sum = (from: IsoDate, to: IsoDate): Map<string, { value: number; count: number }> => {
     const out = new Map<string, { value: number; count: number }>();
     for (const t of transactions) {
@@ -1529,8 +1553,17 @@ function buildComparison(
       const b = before.get(n);
       return { label: n, value: a?.value ?? 0, share: (a?.value ?? 0) / largest, count: a?.count ?? 0, previous: b?.value ?? 0, previousShare: (b?.value ?? 0) / largest };
     })
-    .sort((x, y) => Math.max(y.value, y.previous) - Math.max(x.value, x.previous));
-  const kept = rows.slice(0, MOST_ROWS);
+    // Months in the calendar's order; everything else largest of either first.
+    .sort((x, y) =>
+      by === "month"
+        ? (MONTHS as readonly string[]).indexOf(x.label) - (MONTHS as readonly string[]).indexOf(y.label)
+        : by === "day"
+          ? weekly
+            ? WEEKDAYS.indexOf(x.label) - WEEKDAYS.indexOf(y.label)
+            : Number.parseInt(x.label, 10) - Number.parseInt(y.label, 10)
+          : Math.max(y.value, y.previous) - Math.max(x.value, x.previous),
+    );
+  const kept = by === "month" || by === "day" ? rows : rows.slice(0, MOST_ROWS);
   const total = rows.reduce((s, r) => s + r.value, 0);
   return {
     title: `${word}${narrowed ? ` on ${narrowed}` : ""} by ${by}, ${pair.now.name}, against ${pair.before.name}`,
@@ -1614,8 +1647,18 @@ export function buildChart(
    */
   const pair = said ?? comparedPeriods(question, asOf);
   const pairedBy = dimensionOf(question, !said);
-  if (pair && !overTime(pairedBy)) {
-    const compared = buildComparison(question, transactions, pair, direction, focus, pairedBy);
+  /*
+   * Two periods are always set side by side. Over time, months beside the
+   * same months when both run several; anything shorter, item beside item:
+   * "spending this month", "trend", then "vs last month" drew October alone,
+   * day by day (10 November 2026).
+   */
+  const several = pair ? pair.now.from.slice(0, 7) !== pair.now.to.slice(0, 7) && pair.before.from.slice(0, 7) !== pair.before.to.slice(0, 7) : false;
+  // Two named months by month stay one bar a month, as they always were (`comparesMonths`).
+  if (pair && !(pairedBy === "month" && !several)) {
+    const short = (p: ComparedPeriods["now"]): boolean => Date.parse(`${p.to}T00:00:00Z`) - Date.parse(`${p.from}T00:00:00Z`) <= 30 * 86_400_000;
+    const sideBy: ChartBy = !overTime(pairedBy) ? pairedBy : pairedBy === "month" ? "month" : pairedBy === "day" && short(pair.now) && short(pair.before) ? "day" : "item";
+    const compared = buildComparison(question, transactions, pair, direction, focus, sideBy);
     if (compared) return compared;
   }
   const valueOf = direction === "revenue" ? revenueOf : spendingOf;
@@ -1799,6 +1842,19 @@ export function buildChart(
     };
     if (first && last) {
       for (let k = after(first); k < last; k = after(k)) {
+        if (!groups.has(k)) groups.set(k, { value: 0, count: 0 });
+      }
+    }
+    /*
+     * And the weeks of a window asked about, to its edges and no later than
+     * today: "Treat and Food by week, November 2026" was one week, the only
+     * one with money, and drew as nothing at all (10 November 2026 sweep).
+     * Weeks only, in a window of a few months: months keep their rows from
+     * the first with money, as charts of a year always have.
+     */
+    if (by === "week" && first && period.from > "1000" && span <= 120 && namesWindow(question)) {
+      const end = weekOf(period.to < asOf ? period.to : asOf);
+      for (let k = weekOf(period.from); k <= end; k = after(k)) {
         if (!groups.has(k)) groups.set(k, { value: 0, count: 0 });
       }
     }
