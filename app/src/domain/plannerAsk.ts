@@ -293,7 +293,7 @@ const PLANNER = /\b(?:planner|plans|planned|plano)\b|(?<!\b(?:i|we|they|you|to|a
 const QUESTIONISH = /\?\s*$|^\s*(?:what|how|can|could|should|would|will|is|am|do|does)\b/i;
 /** Asking for a view of a plan, or whether it can be afforded. */
 const OPINION =
-  /\b(?:what\s+(?:do|would)\s+you\s+(?:think|say|suggest|recommend)|what'?s\s+your\s+(?:take|opinion|advice|thoughts?)|your\s+(?:opinion|take|advice|thoughts?)|any\s+(?:advice|suggestions?|tips?)|can\s+i\s+(?:afford|make|manage|pay\s+for)|kaya\s+(?:ko\s+)?ba|ok(?:ay)?\s+lang\s+ba|ano\s+(?:sa\s+tingin|masasabi)\s+mo|is\s+(?:the|my)\b[^.?!]{1,40}\bplan\s+(?:ok(?:ay)?|good|realistic|doable|possible|too\s+much|affordable))\b/i;
+  /\b(?:what\s+(?:do|would)\s+you\s+(?:think|say|suggest|recommend)|what'?s\s+your\s+(?:take|opinion|advice|thoughts?)|your\s+(?:opinion|take|advice|thoughts?)|any\s+(?:advice|suggestions?|tips?)|can\s+i\s+(?:still\s+|really\s+|actually\s+|even\s+)?(?:afford|make|manage|pay\s+for)|kaya\s+(?:ko\s+)?ba|ok(?:ay)?\s+lang\s+ba|ano\s+(?:sa\s+tingin|masasabi)\s+mo|is\s+(?:the|my)\b[^.?!]{1,40}\bplan\s+(?:ok(?:ay)?|good|realistic|doable|possible|too\s+much|affordable))\b/i;
 
 /** "How is the ... plan", "how's my ... plan", "status of", "where is ... at", "kumusta". */
 const STATUS = /^\s*(?:so\s+)?(?:how\s+(?:is|'?s|are)|how'?s|what'?s\s+the\s+status\s+of|status\s+(?:of|on)|update\s+on|where\s+(?:is|'?s|are)|kumusta(?:\s+na)?|ano\s+na)\b/i;
@@ -464,7 +464,15 @@ export function readPlannerAsk(
   },
 ): PlannerAsk | null {
   const t = text.trim();
-  if (!t || t.split(/\s+/).length > 30) return null;
+  /*
+   * Thirty words keeps an essay from being read as a command. A question
+   * whether a plan can be afforded may run longer, with its conditions said
+   * ("if I pay my Globe wifi and keep going to the gym twice a week, can I
+   * still afford the keychains in December without touching my savings?",
+   * 46 words, owner, 10 November 2026): up to sixty for that alone.
+   */
+  const words = t.split(/\s+/).length;
+  if (!t || words > 60 || (words > 30 && !OPINION.test(t))) return null;
   const { reference, transactions, asOf } = context;
   /*
    * As the Planner shows them: a plan marked done whose payment was binned is

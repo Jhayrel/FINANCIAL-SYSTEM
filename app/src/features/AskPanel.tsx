@@ -136,6 +136,7 @@ import {
 import { asksForecast, BUDGET_PURPOSE, buildAllocationChart, buildMeasureChart, forecastEmptyWords, chartHelps, chartReading, chartsWorked, inWords, localHint, measureOf, mergeHint, type ChartHint } from "../domain/chartAsk";
 import { questionMeant } from "../domain/drawBack";
 import { asksUpcoming, buildUpcomingChart, upcomingOf, upcomingWords } from "../domain/upcoming";
+import { billNamed } from "../domain/billsAsk";
 import { asKinds, asksBoth, buildNecessityChart, kindsNote, necessityAsked, necessitySplit, necessityWords } from "../domain/wantsAsk";
 import { asksRunway, recentPace, runwayWords } from "../domain/runwayAsk";
 import { asksWeekday, buildWeekdayChart, saysWindow, weekdaySplit, weekdayWords } from "../domain/weekdayAsk";
@@ -531,6 +532,13 @@ interface Said {
    * keeps the answer, as before.
    */
   readonly working?: string | undefined;
+  /**
+   * An answer with its second look still running (`useAi.ts`, `onRevised`):
+   * shown, not yet written to the record, so whichever is final is the one
+   * kept, and the conversation reads as one answer, not two (owner, 10
+   * November 2026: "It gives me 2 response ... why 2 response?").
+   */
+  readonly held?: string | undefined;
   /**
    * What any attached photos turned out to be, one line each.
    *
@@ -2150,9 +2158,32 @@ export function AskPanel({
      * message is complete.
      */
     if (isSaid(turn) && turn.shown && turn.shown.length > 0) return;
+    // Its second look decides what is kept (`settleHeld`).
+    if (isSaid(turn) && turn.held) return;
 
     void chatStore(uid)
       .record(said(turn.kind, turn.text, turn.from, turn.described))
+      .catch(() => {});
+  };
+
+  /**
+   * The answer a second look was running for, settled: the better answer in
+   * its place when one came, else the first as it was, and either way the
+   * one written to the record.
+   */
+  const heldAnswers = useRef(new Map<string, { readonly text: string; readonly from: string | undefined; readonly settled?: { readonly text: string; readonly from: string } | null }>());
+  const settleHeld = (key: string, better: { readonly text: string; readonly from: string } | null): void => {
+    const first = heldAnswers.current.get(key);
+    // Arrived before the first was said: kept for when it is.
+    if (!first) {
+      heldAnswers.current.set(key, { text: "", from: undefined, settled: better });
+      return;
+    }
+    heldAnswers.current.delete(key);
+    setTurns((prev) => prev.map((t) => (isSaid(t) && t.held === key ? (better ? { ...t, text: better.text, from: better.from, held: undefined } : { ...t, held: undefined }) : t)));
+    const kept = better ?? { text: first.text, from: first.from };
+    void chatStore(uid)
+      .record(said("assistant", kept.text, kept.from))
       .catch(() => {});
   };
 
@@ -4929,6 +4960,7 @@ export function AskPanel({
     const picked = asksAboutPick(question) ? currentPick() : null;
     // What the owner has open, so "what do you think" is about that screen (domain/screenContext.ts).
     if (worked?.fallback) setPreview(worked.fallback);
+    const heldKey = `held-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const answer = await during(
       "Reading your ledger",
       () =>
@@ -4979,11 +5011,19 @@ export function AskPanel({
            * the app cannot trace (`useAi.ts`). Only while nothing else has
            * been asked: a late answer is never said under the next question.
            */
+          /*
+           * A second look, put in the first answer's place when it holds
+           * fewer figures the app cannot trace (`useAi.ts`): one answer, not
+           * two, and only the final one written to the record.
+           */
           onRevised: (revised) => {
-            if (generation.current !== asked) return;
+            if (!revised) {
+              settleHeld(heldKey, null);
+              return;
+            }
             const text = withoutFalseDenial(revised.text);
             const by = modelLabel(revised.model ?? "") || "the provider";
-            say({ kind: "assistant", text, from: `${by}, a second look using only your figures` });
+            settleHeld(heldKey, { text, from: `${by}, checked again against your figures` });
             log(aiEvent("answered", "add", { text: `Second look: ${text}`, model: by }));
           },
         }),
@@ -5036,7 +5076,14 @@ export function AskPanel({
     }
     // The app's working beside a model's answer built on it, to open when the figures matter.
     const working = answer.source === "model" && worked?.fallback && worked.fallback.trim() !== answerText.trim() ? worked.fallback : undefined;
-    say({ kind: "assistant", text: answerText, from, ...(failed ? { retry: question } : {}), ...(working ? { working } : {}) });
+    // A second look on its way: the answer is held from the record until it settles (`settleHeld`).
+    const holding = answer.source === "model" && answer.revising === true;
+    say({ kind: "assistant", text: answerText, from, ...(failed ? { retry: question } : {}), ...(working ? { working } : {}), ...(holding ? { held: heldKey } : {}) });
+    if (holding) {
+      const early = heldAnswers.current.get(heldKey);
+      heldAnswers.current.set(heldKey, { text: answerText, from });
+      if (early && early.settled !== undefined) settleHeld(heldKey, early.settled);
+    }
     log(aiEvent("answered", "add", { text: answerText, model }));
     /*
      * An entry the answer worked out, offered as a card at once.
@@ -5084,10 +5131,11 @@ export function AskPanel({
   };
 
   /** What an opinion on a plan is worked from: its month as "how much do I need" reads it, today's money, the savings. */
-  const planOpinionFacts = (plan: Pick<Plan, "due" | "title"> & { readonly amount: Centavos | null }): PlanOpinionFacts => {
+  const planOpinionFacts = (plan: Pick<Plan, "due" | "title"> & { readonly amount: Centavos | null }, said = ""): PlanOpinionFacts => {
     const brief = monthBrief({ transactions, reference, budgets, debts, year: Number(asOf.slice(0, 4)), month: Number(asOf.slice(5, 7)), asOf });
     const savings = reference.savings.reduce((sum, a) => sum + Math.max(0, walletBalance(transactions, a)), 0);
     let month: PlanOpinionFacts["month"] = null;
+    let wants: { name: string; usual: Centavos }[] = [];
     const monthEnd = lastOfMonth(Number(asOf.slice(0, 4)), Number(asOf.slice(5, 7)));
     if (plan.due !== NO_DATE && plan.due > monthEnd) {
       const y = Number(plan.due.slice(0, 4));
@@ -5099,9 +5147,48 @@ export function AskPanel({
         const a = budgetAdvice({ transactions: reportRows, year: y, month: m, asOf, stopped: settings.stopped ?? [], debts, spendingTypes: reference.spendingTypes, planned: others, ...readFrom });
         const othersSum = others.reduce((sum, o) => sum + o.amount, 0);
         if (a.typicalIncome > 0) month = { name: a.name, usual: a.total + a.debtDue - othersSum, others: othersSum, income: a.typicalIncome };
+        // The owner's wants in that usual month, largest first: what a cut comes from, never a need.
+        wants = a.items.filter((l) => (a.wants ?? []).includes(l.name)).map((l) => ({ name: l.name, usual: l.amount })).sort((x, z) => z.usual - x.usual);
       }
     }
-    return { asOf, month, freeNow: brief.safe?.free ?? null, savings };
+    /*
+     * What the question set as given, worked out here so the answer starts
+     * from it (owner's hard question, 10 November 2026): a bill it names
+     * already held back, an allocation it names already set aside, the
+     * savings left out when it says so, and a cut when it asks for one.
+     */
+    const conditions: string[] = [];
+    if (said) {
+      const bill = billNamed(said, [...reference.bills, ...reference.subscriptions]);
+      const status = bill ? brief.bills.bills.find((b) => b.item === bill) : undefined;
+      if (bill && status) {
+        conditions.push(
+          status.state === "paid"
+            ? `${bill} is paid already this month${status.paidOn ? `, on ${formatMedium(status.paidOn)}` : ""}: nothing more is due for it.`
+            : `${bill}, ${formatMoney(status.amount)}${status.dueOn ? `, due ${formatMedium(status.dueOn)}` : ""}, is already held back in safe to spend, so paying it changes nothing here.`,
+        );
+      }
+      for (const s of brief.safe?.allocations?.lines ?? []) {
+        if (s.twinOf || !linesNamed(said, [s.line]).length) continue;
+        const each = s.line.each ?? 0;
+        const more = each > 0 ? Math.floor(Math.max(0, s.left) / each) : 0;
+        conditions.push(
+          `The ${s.name} allocation has ${formatMoney(Math.max(0, s.left))} left this month and is already set aside${each > 0 ? `: at ${formatMoney(each)} a time that is ${more} more` : ""}, so it does not come out of this.${month ? ` ${month.name}'s is in its usual month.` : ""}`,
+        );
+      }
+    }
+    const free = brief.safe ? Math.max(0, brief.safe.free) : null;
+    return {
+      asOf,
+      month,
+      freeNow: brief.safe?.free ?? null,
+      savings,
+      carry: free,
+      ...(said && /\b(?:without|not|never|no)\s+(?:touching|using|touch|use|tapping|dipping\s+into)\b[^.?!]{0,40}\bsavings?\b|\b(?:keep|leave)\s+(?:my\s+)?savings?\b|\bdon'?t\s+(?:touch|use)\s+(?:my\s+)?savings?\b/i.test(said) ? { keepSavings: true } : {}),
+      ...(conditions.length > 0 ? { conditions } : {}),
+      ...(wants.length > 0 ? { wants } : {}),
+      ...(said && /\b(?:cut|trim|reduce|lessen|less\s+on|bawasan|tipid)\b/i.test(said) ? { askedCut: true } : {}),
+    };
   };
 
   /**
@@ -6876,7 +6963,7 @@ export function AskPanel({
         const v = viewOf(p, { transactions, accounts: settings.accounts, asOf });
         const to = moveSaid(p, said, asOf);
         const asked = to ? movePlan(p, to.due, asOf, to.kind) : p;
-        const facts = planOpinionFacts(asked);
+        const facts = planOpinionFacts(asked, lead);
         const readAs = to ? `"${p.title}" is on the Planner ${byWhen(p)}. You asked about ${byWhen(asked).replace(/^by /, "")}, so this is worked for then.` : "";
         // Safe to spend has this plan held back already when it counts: its own money is not "less than this".
         const reply = planOpinion(

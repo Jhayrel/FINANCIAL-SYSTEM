@@ -30,7 +30,15 @@ export interface BridgeAsk {
 }
 
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-const INCOME = /\b(salary|sahod|sweldo|allowance|income|payday|pay day|padala|remittance|payout|pay)\b/i;
+/*
+ * "Pay" is income only as a noun: "my pay", "next pay", "the pay comes".
+ * "If I pay my wifi ... can I still afford the [amount] keychains in
+ * December" was read as pay arriving early in December, the day taken from
+ * the first digit of the amount (owner's hard question, 10 November 2026),
+ * and the model was handed money until a payday nobody named.
+ */
+const INCOME =
+  /\b(salary|sahod|sweldo|allowance|income|payday|pay day|padala|remittance|payout|(?<!\b(?:i|we|you|they|to|will|can|could|should|must|and|also|then|or|just|still|already)\s)pay(?!\s+(?:my|the|for|it|off|back|a|an|this|that|them|him|her|bills?|rent|tuition|debt|loan|fees?|gcash|maya|cash|with)\b))\b/i;
 const WORRY =
   /\b(first week|until|before|worried|worry|no money|wala(?:ng)? pera|loan|borrow|utang|enough|cover|survive|tide|kulang|hanggang|bridge|last me|make it|short)\b/i;
 
@@ -44,7 +52,8 @@ function daysNamed(text: string, asOf: IsoDate): { what: string; on: IsoDate }[]
   for (const m of lower.matchAll(new RegExp(INCOME.source, "gi"))) {
     const at = m.index ?? 0;
     const near = lower.slice(at, at + 90);
-    const day = /\b(?:on\s+(?:the\s+)?|in\s+(?:the\s+)?|sa\s+)?(\d{1,2})(?:st|nd|rd|th)?\b(?:\s+day)?/.exec(near.slice(m[0].length));
+    // A day of the month, never part of an amount: "2,000" is not the 2nd.
+    const day = /\b(?:on\s+(?:the\s+)?|in\s+(?:the\s+)?|sa\s+)?(\d{1,2})(?![\d,.]\d)(?:st|nd|rd|th)?\b(?:\s+day)?/.exec(near.slice(m[0].length));
     if (!day?.[1]) continue;
     const d = Number(day[1]);
     if (d < 1 || d > 31) continue;

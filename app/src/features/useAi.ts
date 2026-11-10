@@ -101,7 +101,7 @@ export interface UseAi {
        * app cannot trace, when the first held some. The first answer is not
        * held back for it (`ask`, below).
        */
-      onRevised?: (revised: AiAnswer) => void;
+      onRevised?: (revised: AiAnswer | null) => void;
     },
   ) => Promise<AiAnswer>;
   readonly clear: () => void;
@@ -243,7 +243,7 @@ export function useAi({
          */
         trusted?: string;
         tidy?: (text: string) => string;
-        onRevised?: (revised: AiAnswer) => void;
+        onRevised?: (revised: AiAnswer | null) => void;
       } = {},
     ): Promise<AiAnswer> => {
       // Switched off means nothing is sent, not that nothing comes back.
@@ -371,7 +371,8 @@ export function useAi({
        * think deep"). Waiting for it held every such answer for a second
        * full round, and could pass the chat's own deadline. Once only.
        */
-      if (task === "chat" && settled.loose.length > 0 && options.question && options.onRevised && !options.signal?.aborted) {
+      const revising = task === "chat" && settled.loose.length > 0 && Boolean(options.question) && Boolean(options.onRevised) && !options.signal?.aborted;
+      if (revising && options.onRevised) {
         const first = settled.loose.length;
         const list = settled.loose.map((c) => formatMoney(c)).join(", ");
         const onRevised = options.onRevised;
@@ -390,13 +391,14 @@ export function useAi({
               ...(options.signal ? { signal: options.signal } : {}),
               ...(options.pinned ? { pinned: options.pinned } : {}),
             });
-            if (again.source !== "model" || options.signal?.aborted) return;
+            if (again.source !== "model" || options.signal?.aborted) return onRevised(null);
             const second = settle(options.tidy ? options.tidy(again.text) : again.text);
-            if (second.loose.length >= first || !second.text.trim()) return;
+            if (second.loose.length >= first || !second.text.trim()) return onRevised(null);
             const left = untracedNote(second.text, given, formatMoney, second.worked);
             onRevised({ ...again, text: left ? `${second.text}\n\n${left}` : second.text });
           } catch {
             // The first answer stands, with its note.
+            onRevised(null);
           }
         })();
       }
@@ -411,7 +413,8 @@ export function useAi({
       const day = context.safe ? { today: toCentavos(context.safe.today), after: toCentavos(context.safe.perDayAfter) } : null;
       const slip = task === "chat" && day ? fitNote(answered.text, day, formatMoney) : "";
       const notes = [note, slip].filter(Boolean);
-      return notes.length === 0 ? answered : { ...answered, text: [answered.text, ...notes].join("\n\n") };
+      const shown = notes.length === 0 ? answered : { ...answered, text: [answered.text, ...notes].join("\n\n") };
+      return revising ? { ...shown, revising: true } : shown;
     },
     [context, disabled, ai.enabled, ai.tone, ai.provider, ai.model, transactions, asOf, budgets, settings.credits, deleted],
   );

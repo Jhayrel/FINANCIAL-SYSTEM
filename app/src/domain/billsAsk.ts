@@ -27,6 +27,24 @@ const DUE =
 const PAID = /\b(?:did|have)\s+i\s+(?:already\s+)?(?:pay|paid)\b|\bis\s+[a-z ]+\s+paid\b|\balready\s+paid\b/i;
 
 /** The question, or null. `names` is every bill and subscription on the owner's lists. */
+/**
+ * The bill or subscription a message names, by its whole name or any word of
+ * it that is its own: "my wifi" is "Globe at Home Wifi", never by "home".
+ */
+export function billNamed(text: string, names: readonly string[]): string | null {
+  const lower = text.toLowerCase();
+  return (
+    [...names]
+      .filter((n) => n.trim().length > 2)
+      .sort((a, b) => b.length - a.length)
+      .find((n) => {
+        const full = n.trim().toLowerCase();
+        const own = full.split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !/^(?:home|bill|bills|plan|plans|monthly|service|payment|subscription|account|prepaid|postpaid)$/.test(w));
+        return lower.includes(full) || own.some((w) => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower));
+      }) ?? null
+  );
+}
+
 export function readBillsAsk(text: string, names: readonly string[]): BillsAsk | null {
   const t = text.trim();
   if (!t || /\d/.test(t.replace(/\b20\d{2}\b/g, ""))) return null;

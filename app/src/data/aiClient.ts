@@ -71,6 +71,11 @@ export const MODEL_DOWN = "The AI model is not working. Please try again.";
 
 export interface AiAnswer {
   readonly text: string;
+  /**
+   * A second look is on its way (`useAi.ts`, `onRevised`): the caller shows
+   * this answer now and keeps whichever is final when it comes back.
+   */
+  readonly revising?: boolean;
   /** "model" when a provider answered, "offline" when this device wrote it. */
   readonly source: "model" | "offline";
   /** `provider:model` when one answered. */

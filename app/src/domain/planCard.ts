@@ -188,6 +188,20 @@ export interface PlanOpinionFacts {
   readonly freeNow: Centavos | null;
   /** What the savings accounts hold. */
   readonly savings: Centavos;
+  /**
+   * What is free now and carries into next month if nothing more is spent:
+   * safe to spend until this month ends. For a plan next month, the money
+   * that can close a gap the month cannot cover on its own.
+   */
+  readonly carry?: Centavos | null | undefined;
+  /** Said not to touch the savings ("without touching my savings"): left out of every way to pay. */
+  readonly keepSavings?: boolean | undefined;
+  /** What the question set as given, said first: a bill already held back, an allocation already set aside. */
+  readonly conditions?: readonly string[] | undefined;
+  /** The owner's wants in a usual month, largest first: what to trim, never a need. */
+  readonly wants?: readonly { readonly name: string; readonly usual: Centavos }[] | undefined;
+  /** Asked what to cut. */
+  readonly askedCut?: boolean | undefined;
 }
 
 /** Whole months from this month to the plan's, at least one. */
@@ -226,6 +240,7 @@ export function planOpinion(
     saved
       ? `**${plan.title}, ${formatMoney(plan.amount ?? 0)}, ${when}.**${saved.paid > 0 ? ` ${formatMoney(saved.paid)} is paid, ${formatMoney(saved.left)} left.` : ""} Here is how it looks.`
       : `**${plan.title}, ${formatMoney(amount)}, ${when}.** Here is how it looks before you add it.`,
+    ...(f.conditions ?? []).map((c) => `- ${c}`),
   ];
   const monthName = plan.due === NO_DATE ? "" : (MONTH_NAMES[Number((late ? f.asOf : plan.due).slice(5, 7)) - 1] ?? "that month");
   // A day already gone is paid out of this month's money, if at all.
@@ -235,6 +250,8 @@ export function planOpinion(
 
   let gap: Centavos | null = null;
   let spare: Centavos | null = null;
+  /** What is left short once this month's free money has carried over, for a plan next month. */
+  let shortAfterCarry: Centavos | null = null;
   if (f.month) {
     const need = f.month.usual + f.month.others + amount;
     gap = f.month.income - need;
@@ -242,6 +259,21 @@ export function planOpinion(
     lines.push(
       `- ${f.month.name}: a usual month costs ${formatMoney(f.month.usual)}${f.month.others > 0 ? ` and its other plans ${formatMoney(f.month.others)}` : ""}. With this it comes to ${formatMoney(need)}, against about ${formatMoney(f.month.income)} that usually comes in: ${gap >= 0 ? `${formatMoney(gap)} to spare` : `${formatMoney(-gap)} short`}.`,
     );
+    /*
+     * Next month's gap, against what is free now: money not spent before
+     * this month ends carries into the next (docs/08 Y1, nothing resets on
+     * the 1st). "Short" alone read as a no when the money free now closes
+     * the gap (owner's hard question, 10 November 2026).
+     */
+    if (gap < 0 && f.carry !== null && f.carry !== undefined && f.carry > 0 && plan.due !== NO_DATE && monthsTo(f.asOf, plan.due) === 1) {
+      shortAfterCarry = Math.max(0, -gap - f.carry);
+      const thisName = MONTH_NAMES[Number(f.asOf.slice(5, 7)) - 1] ?? "this month";
+      lines.push(
+        shortAfterCarry === 0
+          ? `- If nothing more is spent before ${thisName} ends, the ${formatMoney(f.carry)} free now carries into ${f.month.name} and covers it, with ${formatMoney(f.carry + gap)} to spare.`
+          : `- Even with the ${formatMoney(f.carry)} free now carried over, if nothing more is spent before ${thisName} ends, ${f.month.name} is still ${formatMoney(shortAfterCarry)} short.`,
+      );
+    }
   }
   if (thisMonth && f.freeNow !== null) {
     lines.push(`- ${late ? "Its day has passed, so it is overdue" : "It is due this month"}. Safe to spend until the month ends is ${formatMoney(Math.max(0, f.freeNow))}${f.freeNow < amount ? `, ${formatMoney(amount - Math.max(0, f.freeNow))} less than this` : ""}.`);
@@ -249,17 +281,34 @@ export function planOpinion(
     // "By December" a year and more away is December of that year, said so.
     lines.push(`- To have it ready by ${monthName}${plan.due.slice(0, 4) !== f.asOf.slice(0, 4) ? ` ${plan.due.slice(0, 4)}` : ""}, set aside about ${formatMoney(perMonth)} a month for the next ${months} months.`);
   } else if (months === 1) {
-    lines.push(`- It is next month, so it comes out of next month's money or your savings.`);
+    lines.push(`- It is next month, so it comes out of next month's money${f.keepSavings ? "" : " or your savings"}.`);
   }
-  if (f.savings > 0) lines.push(`- Your savings hold ${formatMoney(f.savings)}${f.savings >= amount ? ", enough to cover it without touching the monthly money" : ""}.`);
+  if (f.keepSavings) lines.push("- Your savings stay out of it, as you asked: none of this counts on them.");
+  else if (f.savings > 0) lines.push(`- Your savings hold ${formatMoney(f.savings)}${f.savings >= amount ? ", enough to cover it without touching the monthly money" : ""}.`);
+  /*
+   * What to trim, when the month is short or a cut was asked about: one of
+   * the owner's wants, by the amount that matters, never a need (the second
+   * answer to the hard question said to cut Food).
+   */
+  const trim = gap !== null && gap < 0 ? (shortAfterCarry !== null && shortAfterCarry > 0 ? shortAfterCarry : -gap) : 0;
+  const want = (f.wants ?? []).find((w) => w.usual >= trim && trim > 0) ?? (f.wants ?? [])[0];
+  if (want && trim > 0) {
+    lines.push(
+      shortAfterCarry === 0
+        ? `- Not to lean on what carries over, trim ${want.name} (usually ${formatMoney(want.usual)} a month, a want) by ${formatMoney(trim)} in ${monthName}.`
+        : `- To close it, trim ${want.name} (usually ${formatMoney(want.usual)} a month, a want) by ${formatMoney(Math.min(trim, want.usual))} in ${monthName}${trim > want.usual ? `, and ${formatMoney(trim - want.usual)} more from your other wants` : ""}.`,
+    );
+  } else if (want && f.askedCut) {
+    lines.push(`- Nothing has to be cut for this. If you want more room, your largest want is ${want.name}, usually ${formatMoney(want.usual)} a month.`);
+  }
   // Unsaved, the need was read, not said: say so, so it can be put right.
   lines.push(plan.need ? (saved ? "- It is marked a need." : '- It reads as a need; say "it\'s a want" if it is not.') : "- It is a want, so it is the first thing to move or cut if money gets short.");
   if (plan.due !== NO_DATE) {
     lines.push(
       plan.setAside
         ? thisMonth
-          ? `- ${opts.moved ? "Moved there, it is" : "As it is, it is"} counted in safe to spend: ${formatMoney(amount)} is held back now, until it is paid. If you will pay it from savings, say "don't count it".`
-          : `- ${opts.moved ? "Moved there, it is" : "As it is, it is"} counted in ${monthName}'s safe to spend: from the 1st, ${formatMoney(amount)} is held back before your daily figure is worked out. If you will pay it from savings, say "don't count it".`
+          ? `- ${opts.moved ? "Moved there, it is" : "As it is, it is"} counted in safe to spend: ${formatMoney(amount)} is held back now, until it is paid.${f.keepSavings ? "" : ' If you will pay it from savings, say "don\'t count it".'}`
+          : `- ${opts.moved ? "Moved there, it is" : "As it is, it is"} counted in ${monthName}'s safe to spend: from the 1st, ${formatMoney(amount)} is held back before your daily figure is worked out.${f.keepSavings ? "" : ' If you will pay it from savings, say "don\'t count it".'}`
         : "- It is not counted in safe to spend, so your daily figure will not hold money back for it.",
     );
   }
@@ -271,7 +320,7 @@ export function planOpinion(
    * reasoning references put it: assume it went wrong, and say why).
    */
   const ifs: string[] = [];
-  if (f.savings > 0 && amount > 0) ifs.push(f.savings >= amount ? `Paid from savings: covered, and ${formatMoney(f.savings - amount)} stays saved.` : `Paid from savings: they cover ${formatMoney(f.savings)}, so ${formatMoney(amount - f.savings)} would still have to come from the month.`);
+  if (!f.keepSavings && f.savings > 0 && amount > 0) ifs.push(f.savings >= amount ? `Paid from savings: covered, and ${formatMoney(f.savings - amount)} stays saved.` : `Paid from savings: they cover ${formatMoney(f.savings)}, so ${formatMoney(amount - f.savings)} would still have to come from the month.`);
   if (spare !== null && amount > 0) {
     if (spare >= 10_000) {
       const n = Math.ceil(amount / spare);
@@ -279,7 +328,7 @@ export function planOpinion(
       ifs.push(`Saved up first: a usual month spares about ${formatMoney(hundred(spare))}, so about ${n} ${n === 1 ? "month" : "months"} of that, ready around ${MONTH_NAMES[at % 12]} ${Math.floor(at / 12)}.`);
     } else ifs.push(`Saved up first: a usual month spends ${formatMoney(Math.max(0, -spare))} more than comes in, so nothing builds up until that changes.`);
   }
-  if (gap !== null) ifs.push(gap < 0 ? `The main risk: ${monthName} is ${formatMoney(-gap)} short with it, so anything unexpected that month would come out of savings or borrowing.` : `The main risk: it takes ${formatMoney(amount)} of what a usual ${monthName} spares, leaving ${formatMoney(gap)} for anything unexpected.`);
+  if (gap !== null) ifs.push(gap < 0 ? `The main risk: ${monthName} is ${formatMoney(-gap)} short with it, so anything unexpected that month would come out of ${f.keepSavings ? "borrowing, or a cut" : "savings or borrowing"}.` : `The main risk: it takes ${formatMoney(amount)} of what a usual ${monthName} spares, leaving ${formatMoney(gap)} for anything unexpected.`);
   if (ifs.length > 0) lines.push(`What-ifs:\n${ifs.map((x) => `- ${x}`).join("\n")}`);
 
   /*
@@ -290,7 +339,7 @@ export function planOpinion(
    */
   const ways: string[] = [];
   if (months >= 2) ways.push(`set aside ${formatMoney(perMonth)} a month from now`);
-  if (f.savings > 0) ways.push(f.savings >= amount ? "pay it from your savings" : `pay part from your savings (${formatMoney(f.savings)})`);
+  if (!f.keepSavings && f.savings > 0) ways.push(f.savings >= amount ? "pay it from your savings" : `pay part from your savings (${formatMoney(f.savings)})`);
   if (plan.need) ways.push(`spend less on wants in ${monthName}`);
   else {
     if (spare !== null && spare > 0) ways.push(`lower it to about ${formatMoney(hundred(spare))}, which a usual ${monthName} can spare`);
@@ -300,7 +349,10 @@ export function planOpinion(
   let suggestion: string;
   const add = saved ? "keep it" : "add it";
   if (plan.due === NO_DATE) suggestion = saved ? "Give it a month once you know, so it is counted there." : "Add it with no date for now, and give it a month once you know, so it is counted there.";
-  else if (gap !== null && gap < 0) suggestion = `a usual ${monthName} cannot cover it alone. ${add.replace(/^./, (c) => c.toUpperCase())}, and ${either(ways)}.`;
+  else if (gap !== null && gap < 0 && shortAfterCarry === 0) {
+    const thisName = MONTH_NAMES[Number(f.asOf.slice(5, 7)) - 1] ?? "this month";
+    suggestion = `yes, with care: ${monthName} is ${formatMoney(-gap)} short on its own, and what is free now covers that if it carries over. ${add.replace(/^./, (c) => c.toUpperCase())}, spend only what you must until ${thisName} ends${want ? `, or trim ${want.name} by ${formatMoney(-gap)} in ${monthName}` : ""}.`;
+  } else if (gap !== null && gap < 0) suggestion = `a usual ${monthName} cannot cover it alone. ${add.replace(/^./, (c) => c.toUpperCase())}, and ${either(ways)}.`;
   else if (gap !== null) suggestion = saved ? `it fits a usual ${monthName}. Keep it as it is.` : `it fits a usual ${monthName}. Add it when you are ready.`;
   else suggestion = months >= 2 ? `${add}, and set aside about ${formatMoney(perMonth)} a month so it is ready.` : thisMonth && f.freeNow !== null && f.freeNow < amount ? `this month's money does not cover it. ${either(ways.length > 0 ? ways : ["move it to a later month"]).replace(/^./, (c) => c.toUpperCase())}.` : `${add} if the money above covers it.`;
   const close = opts.moved

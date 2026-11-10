@@ -3224,6 +3224,43 @@ answered after six seconds with a calculation: the figures showed at once,
 the model's `{{calc: 2000 - 544.02}}` became the app's own PHP 1,455.98 with
 nothing flagged, and the working opened under it.
 
+### 2026-11-10, late: the owner's hard question, and one answer instead of two
+
+The owner tried a hard question: "If I pay my Globe wifi and keep going to
+the gym twice a week, can I still afford the [amount] keychains in December
+without touching my Maya Bank savings? Show me how you worked it out, and
+what I should cut if it's not enough." Two answers came, both wrong in the
+same way: December's plan paid from today's wallets, December's own income
+left out, bills and the gym counted though already set aside, a cut of Food
+(a need), and a payday on 2 December that nobody named. Found and fixed:
+
+- **"If I pay my wifi" read as a payday** (`bridgeAsk.ts`): "pay" was income
+  wherever it stood, and the day was the first digit of the amount. Now
+  "pay" is income only as a noun ("my pay", "next pay"), and an amount is
+  never a day. The model had been handed money until that invented payday.
+- **The plan's own answer was never reached** (`plannerAsk.ts`): "can I
+  still afford" was not read as asking whether it can be afforded, and a
+  question over thirty words was not read at all. Up to sixty now, for
+  that question alone.
+- **The plan's answer now works out what the question set** (`planCard.ts`,
+  `planOpinionFacts`): a bill it names is already held back; an allocation
+  it names is already set aside, with how many more times it pays for; the
+  money free now carries into next month and closes or narrows its gap;
+  "without touching my savings" leaves them out of every line; and a cut
+  is one of the owner's wants, by the amount that matters, never a need.
+- **Two answers became one**: the second look now replaces the first in
+  place, marked "checked again against your figures", and only the final
+  one is written to the record (`held`, `settleHeld`, `AskPanel.tsx`).
+- **Two rules in the chat's instruction**: a month to come is paid from its
+  own income and what carries over, never from today's wallets; anything
+  already held back is never subtracted again; a cut names a want.
+
+Replayed on the emulator copy with a stand-in model: the waiting line shows
+the plan's answer with the bill and the gym as set aside, the month short on
+its own, the money free now covering it, savings left out and a want named
+to trim; the stand-in's first answer, with a figure nobody worked out, was
+replaced in place by its second.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner
