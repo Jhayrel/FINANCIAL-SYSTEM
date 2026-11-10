@@ -3261,6 +3261,28 @@ its own, the money free now covering it, savings left out and a want named
 to trim; the stand-in's first answer, with a figure nobody worked out, was
 replaced in place by its second.
 
+### 2026-11-10, night: the waiting line, like thinking
+
+The owner, after trying seven new hard questions: "clean the ui I dont like
+the grey text to show just make it normal like thinking like claude loading
+... loading with words but more accurate and more align". The grey block of
+the app's figures under the waiting line is gone; the figures stay under
+the answer, in "Show the app's working".
+
+- **One line**, where the answer will start: the dots sit where its first
+  letter will (the answer's own padding and edge), the words read as text,
+  the seconds beside them quieter, Stop at the far right in line with the
+  owner's messages (`.fms-working`, `layout.css`).
+- **Accurate words**: each is set where its work starts ("Reading what you
+  asked" while the question is routed, "Thinking" while the model writes,
+  "Still thinking" only once that same call has run eight seconds), and
+  the seconds count the whole wait from the first second, one wait across
+  reading and answering (`Waited`, `wait`, `AskPanel.tsx`). The tick
+  redraws one line, and is hidden from screen readers.
+- **A second look shows itself**: under an answer being checked again, the
+  line that names who answered reads "Checking it again against your
+  figures", with the same dots, until it settles.
+
 ## 6. What the owner has to do
 
 1. **Publish the rules whenever `firestore.rules` changes.** The owner

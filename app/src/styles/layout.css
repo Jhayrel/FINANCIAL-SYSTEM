@@ -6963,22 +6963,41 @@ button.fms-recent-row:disabled {
    A word that sits still reads as a message rather than as work in progress,
    and reading a receipt can take fifteen seconds. */
 
+/*
+ * One line, where the answer will start: the dots sit where its first letter
+ * will, the words read as text rather than as a caption, the seconds beside
+ * them quieter, and Stop at the far right in line with your messages. The
+ * owner, 10 November 2026: "like thinking like claude loading ... more
+ * align", after a grey block of figures had hung under it.
+ */
 .fms-working {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  min-height: 44px;
+  padding-left: var(--space-3);
+}
+/* The answer's own edge on the phone's AI screen, so the dots line up with its text. */
+.fms-aiscreen .fms-working {
+  padding-left: calc(var(--space-3) + 1px);
+}
+.fms-working-words {
+  color: var(--ink-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fms-waited {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-/*
- * The app's own figures while the model writes (10 November 2026): under the
- * waiting line, the whole width, quieter than an answer and gone when the
- * answer comes.
- */
-.fms-working-preview {
-  flex-basis: 100%;
-  border-left: 1px solid var(--hairline);
-  padding-left: var(--space-3);
+/* A second look under an answer, where its source goes until it settles. */
+.fms-checking {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 0;
   color: var(--ink-2);
 }
 

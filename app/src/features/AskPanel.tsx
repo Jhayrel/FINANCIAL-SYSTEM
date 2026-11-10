@@ -1456,13 +1456,27 @@ export function AskPanel({
    * construction: it only appears while the same call is still running.
    */
   const [stage, setStage] = useState("");
-  /**
-   * The app's own figures for the question being answered, shown in the
-   * waiting line while the model writes, so the answer's facts are on screen
-   * in a moment rather than after the model's whole round trip. Only the
-   * model's answer is said and kept: this goes when it arrives.
+  /*
+   * The app's own figures were shown in grey under the waiting line from 10
+   * November 2026 while the model wrote. The owner, the same day: "I dont
+   * like the grey text to show, just make it normal like thinking". The
+   * waiting line says what is being done and for how long; the figures stay
+   * under the answer, in "Show the app's working".
    */
-  const [preview, setPreview] = useState<string | null>(null);
+  /**
+   * When the wait on screen began: a send that goes from reading the
+   * question straight to answering it is one wait, not two, so the seconds
+   * do not start again in the middle.
+   */
+  const wait = useRef({ from: 0, ended: 0, on: false });
+  if (busy && !wait.current.on) {
+    if (Date.now() - wait.current.ended > 1500) wait.current.from = Date.now();
+    wait.current.on = true;
+  }
+  if (!busy && wait.current.on) {
+    wait.current.on = false;
+    wait.current.ended = Date.now();
+  }
 
   /**
    * Run something, saying what it is while it runs.
@@ -4959,10 +4973,10 @@ export function AskPanel({
     // The part of a chart they tapped, when the question points at it (domain/chartPick.ts).
     const picked = asksAboutPick(question) ? currentPick() : null;
     // What the owner has open, so "what do you think" is about that screen (domain/screenContext.ts).
-    if (worked?.fallback) setPreview(worked.fallback);
     const heldKey = `held-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const answer = await during(
-      "Reading your ledger",
+      // The model has the question and the app's figures, and is writing.
+      "Thinking",
       () =>
         ai.ask("chat", {
           question,
@@ -5027,11 +5041,9 @@ export function AskPanel({
             log(aiEvent("answered", "add", { text: `Second look: ${text}`, model: by }));
           },
         }),
-      "Still waiting on the model",
-    ).finally(() => {
-      clearTimeout(deadline);
-      setPreview(null);
-    });
+      // True by construction: it only shows while the same call is still running.
+      "Still thinking",
+    ).finally(() => clearTimeout(deadline));
     if (stopper.current === control) stopper.current = null;
     // Asked of a model that is on, and none answered: Try again goes under what is said instead.
     const failed = answer.source !== "model" && settings.ai.enabled && settings.ai.features.chat !== false && !/^Not signed in/i.test(answer.reason ?? "");
@@ -12705,10 +12717,26 @@ export function AskPanel({
                     )}
                 </>
               )}
-              {turn.from && (
-                <p className="t-micro" style={{ margin: "var(--space-1) 0 0", color: "var(--ink-3)" }}>
-                  {answeredBy(turn.from)}
+              {/*
+                A second look on its way (`settleHeld`): said where the
+                answer's source goes, with the same dots, until it settles
+                and the line names who answered.
+              */}
+              {isSaid(turn) && turn.held ? (
+                <p className="t-micro fms-checking" role="status">
+                  <span className="fms-dots" aria-hidden>
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                  Checking it again against your figures
                 </p>
+              ) : (
+                turn.from && (
+                  <p className="t-micro" style={{ margin: "var(--space-1) 0 0", color: "var(--ink-3)" }}>
+                    {answeredBy(turn.from)}
+                  </p>
+                )
               )}
             </div>
           );
@@ -12758,9 +12786,10 @@ export function AskPanel({
               <i />
               <i />
             </span>
-            <span className="t-caption" style={{ color: "var(--ink-3)" }}>
+            <span className="t-caption fms-working-words">
               {stage || (attached ? "Reading the picture" : intent === "log" ? "Reading" : "Thinking")}
             </span>
+            <Waited since={wait.current.from} />
             {/*
               A way out of the queue, on the line that says what is being
               waited on, well away from Send.
@@ -12776,14 +12805,6 @@ export function AskPanel({
             <button type="button" className="t-caption fms-askstop" onClick={stop}>
               Stop
             </button>
-            {preview && (
-              <div className="fms-working-preview">
-                <p className="t-micro" style={{ color: "var(--ink-3)", margin: 0 }}>
-                  The app's figures, while the AI writes its answer:
-                </p>
-                <Rich text={preview} />
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -13233,6 +13254,28 @@ export function AskPanel({
  * "Pick the wallet the money lands in." (owner, 27 September 2026: "fix the
  * ui its ugly"). The line says it once, and the question above the box asks.
  */
+/**
+ * How long the wait on screen has run, in whole seconds, from the second
+ * one on: the same honest measure as Claude's own "Thinking", which a word
+ * that never changes is not. Its own component, so the tick redraws one
+ * line and not the whole conversation; hidden from screen readers, which
+ * would otherwise read a number out every second.
+ */
+function Waited({ since }: { readonly since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(tick);
+  }, []);
+  const seconds = Math.floor((now - since) / 1000);
+  if (since <= 0 || seconds < 1) return null;
+  return (
+    <span className="t-caption fms-waited" aria-hidden>
+      {seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`}
+    </span>
+  );
+}
+
 /** The line under an answer: "this device" said as a sentence; a model's name as it is. */
 function answeredBy(from: string): string {
   if (from === "this device") return "Answered on this device";
