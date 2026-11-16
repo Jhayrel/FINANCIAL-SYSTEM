@@ -42,6 +42,7 @@ import {
 import { FilterChip } from "../components/FilterChip";
 import { Field, SearchInput, TextInput } from "../components/forms";
 import { Sheet } from "../components/Sheet";
+import { useConfirm } from "../components/Confirm";
 import type { Plan } from "../domain/planner";
 import { useMediaQuery } from "./useMediaQuery";
 import { binCounts, binOrder, restoreImpact } from "../domain/binView";
@@ -84,6 +85,7 @@ export function Bin({
   allocations = [],
   onRestorePlan,
   onRestoreAllocation,
+  onBinAgain,
 }: {
   deleted: readonly DeletedTransaction[];
   onRestore: (id: string) => void;
@@ -101,6 +103,8 @@ export function Bin({
   onRestorePlan?: ((plan: Plan) => void) | undefined;
   /** A removed allocation put back; why it could not be, or null. */
   onRestoreAllocation?: ((id: string) => string | null) | undefined;
+  /** Entries just restored, moved back to the bin: the undo of a restore. */
+  onBinAgain?: ((ids: readonly string[]) => void) | undefined;
 }) {
   const phone = useMediaQuery("(max-width: 639px)");
   const [opened, setOpened] = useState<string | null>(null);
@@ -163,11 +167,49 @@ export function Bin({
     ...TYPES.filter((k) => counts[k].count > 0).map((k) => ({ id: k as TypeFilter, label: `${k} ${counts[k].count}` })),
   ];
 
-  const restoreChosen = (): void => {
-    if (!onRestoreMany || chosen.length === 0) return;
-    onRestoreMany(chosen.map((t) => t.id));
-    setPicked(new Set());
+  /*
+   * Every restore is asked first, one row or many, with what comes back and
+   * what it does to each balance: a row's Restore put it straight back in
+   * the ledger on one tap, and the owner, 11 November 2026, restored one and
+   * binned it again a moment later ("add validation in restoring data ...
+   * to avoid accidental clicking"). The Bin offers to undo it after.
+   */
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const [undo, setUndo] = useState<{ readonly ids: readonly string[]; readonly words: string } | null>(null);
+  const movesWords = (rows: readonly Transaction[]): string => {
+    const moves = restoreImpact(rows);
+    return moves.length === 0
+      ? "No balance changes."
+      : `${moves.map((m) => `${m.wallet} ${m.change > 0 ? "goes up" : "goes down"} by ${formatMoney(Math.abs(m.change))}`).join("; ")}.`;
   };
+  const askRestore = async (rows: readonly DeletedTransaction[]): Promise<void> => {
+    if (rows.length === 0) return;
+    const one = rows.length === 1 ? rows[0] : undefined;
+    const warnings = [...new Set(rows.flatMap((t) => checksFor(t)))];
+    const paid = [...new Set(rows.map((t) => planOf(t.id)?.title).filter((x): x is string => Boolean(x)))];
+    const ok = await confirm({
+      title: one ? `Put ${no(one.recordNumber)} back in the ledger?` : `Put ${rows.length} entries back in the ledger?`,
+      body: [
+        one
+          ? `${one.item || "Uncategorised"}, ${formatMoney(one.total)}, ${shortDays(one)}${one.description ? ` (${one.description.slice(0, 60)})` : ""}.`
+          : `${rows.length} entries, ${formatMoney(rows.reduce((sum, t) => sum + t.total, 0))} in all: ${rows.slice(0, 4).map((t) => no(t.recordNumber)).join(", ")}${rows.length > 4 ? `, and ${rows.length - 4} more` : ""}.`,
+        `${one ? "It counts" : "They count"} again from ${one ? "its day" : "their days"}: ${movesWords(rows)}`,
+        paid.length > 0 ? `${paid.map((t) => `"${t}"`).join(" and ")} ${paid.length === 1 ? "is" : "are"} marked paid again on the Planner.` : "",
+        warnings.length > 0 ? `Check first: ${warnings.join(" ")}` : "",
+        "Undo is offered right after, and Move to bin on the entry puts it back here any time.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      confirmLabel: warnings.length > 0 ? "Restore anyway" : one ? "Restore it" : `Restore ${rows.length}`,
+    });
+    if (!ok) return;
+    if (one) onRestore(one.id);
+    else onRestoreMany?.(rows.map((t) => t.id));
+    setUndo({ ids: rows.map((t) => t.id), words: one ? `${no(one.recordNumber)}, ${one.item || "Uncategorised"}, is back in the ledger.` : `${rows.length} entries are back in the ledger.` });
+    setPicked(new Set());
+    setOpened(null);
+  };
+  const restoreChosen = (): void => void askRestore(chosen);
 
   const clearFilters = (): void => {
     setQuery("");
@@ -177,6 +219,33 @@ export function Bin({
 
   return (
     <div className="fms-bin">
+      {confirmDialog}
+      {undo && (
+        <Alert
+          status="ok"
+          title={undo.words}
+          action={
+            <>
+              {onBinAgain && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    onBinAgain(undo.ids);
+                    setUndo(null);
+                  }}
+                >
+                  Undo: move {undo.ids.length === 1 ? "it" : "them"} back to the bin
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setUndo(null)}>
+                Keep
+              </Button>
+            </>
+          }
+        >
+          {undo.ids.length === 1 ? "It counts in your balances again." : "They count in your balances again."}
+        </Alert>
+      )}
       <Card page
         title="Recycle bin"
         subtitle="Deleted transactions stay here until you restore them"
@@ -324,7 +393,7 @@ export function Bin({
                     </span>
                     <span className="fms-binrow-actions">
                       {/* A row with something to say first opens its details, where it is said; the rest come back in one tap. */}
-                      <Button size="sm" onClick={() => (checksFor(t).length > 0 ? setOpened(t.id) : onRestore(t.id))}>
+                      <Button size="sm" onClick={() => void askRestore([t])}>
                         Restore
                       </Button>
                       {onPurge && (
@@ -382,10 +451,7 @@ export function Bin({
               )}
               <Button
                 variant="primary"
-                onClick={() => {
-                  onRestore(open.id);
-                  setOpened(null);
-                }}
+                onClick={() => void askRestore([open])}
               >
                 {checksFor(open).length > 0 ? "Restore anyway" : "Restore"}
               </Button>

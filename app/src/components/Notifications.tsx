@@ -20,9 +20,29 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 import { useBackToClose } from "../data/backButton";
 import { worstLevel, type Alert as Finding, type AlertArea, type AlertLevel } from "../domain/alerts";
+import { prunedHidden, sayingOf, splitHidden, type Hidden } from "../domain/bellTarget";
 import type { SyncNotice } from "../domain/syncState";
 
 const SEEN_KEY = "fms.notify.seen";
+const HIDDEN_KEY = "fms.notify.hidden";
+
+function readHidden(): Hidden {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(HIDDEN_KEY) ?? "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"));
+  } catch {
+    return {};
+  }
+}
+
+function writeHidden(hidden: Hidden): void {
+  try {
+    window.localStorage.setItem(HIDDEN_KEY, JSON.stringify(hidden));
+  } catch {
+    // A private window: nothing is hidden next time.
+  }
+}
 
 const GLYPH: Record<AlertLevel, IconName> = { over: "statusOver", warn: "statusWarn", info: "statusInfo" };
 
@@ -95,8 +115,28 @@ export function Notifications({
   useBackToClose(open, () => setOpen(false));
   const [seen, setSeen] = useState<ReadonlySet<string>>(readSeen);
   const box = useRef<HTMLDivElement>(null);
+  /*
+   * Findings put away (owner, 14 November 2026: "it just show the same thing
+   * everytime"). One hidden stays out of the list and the count until what
+   * it says changes; "Show hidden" lists them, each with Show again. Kept in
+   * this browser, as which were seen is.
+   */
+  const [hidden, setHidden] = useState<Hidden>(readHidden);
+  const [showAway, setShowAway] = useState(false);
+  const every = alerts;
+  const { shown, away } = splitHidden(every, hidden);
+  const hide = (a: Finding): void => {
+    const next = { ...prunedHidden(every, hidden), [a.id]: sayingOf(a) };
+    setHidden(next);
+    writeHidden(next);
+  };
+  const unhide = (a: Finding): void => {
+    const next = Object.fromEntries(Object.entries(hidden).filter(([id]) => id !== a.id));
+    setHidden(next);
+    writeHidden(next);
+  };
 
-  const unseen = alerts.filter((a) => !seen.has(a.id));
+  const unseen = shown.filter((a) => !seen.has(a.id));
   // A problem with saving counts until it is put right, seen or not.
   const worst = worstLevel(status && status.level !== "info" ? [...unseen, { level: status.level }] : unseen);
   const count = unseen.length + (status && status.level !== "info" ? 1 : 0);
@@ -107,6 +147,12 @@ export function Notifications({
     const ids = alerts.map((a) => a.id);
     setSeen(new Set(ids));
     writeSeen(ids);
+    // What is hidden and gone, or changed, is forgotten here too.
+    setHidden((h) => {
+      const kept = prunedHidden(alerts, h);
+      if (Object.keys(kept).length !== Object.keys(h).length) writeHidden(kept);
+      return Object.keys(kept).length === Object.keys(h).length ? h : kept;
+    });
   }, [open, alerts, settled]);
 
   useEffect(() => {
@@ -126,11 +172,13 @@ export function Notifications({
   }, [open]);
 
   const label =
-    alerts.length === 0
+    shown.length === 0
       ? "Nothing needs attention"
-      : `${alerts.length} thing${alerts.length === 1 ? "" : "s"} need${alerts.length === 1 ? "s" : ""} attention${
+      : `${shown.length} thing${shown.length === 1 ? "" : "s"} need${shown.length === 1 ? "s" : ""} attention${
           unseen.length > 0 ? `, ${unseen.length} new` : ""
         }`;
+  const goWords = (a: Finding): string =>
+    a.id.startsWith("bills-lapsed") || a.id.startsWith("bills-overdue") ? "Open Settings, Categories" : a.id.startsWith("debt-below-zero") ? "Open the Dashboard" : a.query ? "Show the rows" : GO[a.area];
 
   return (
     <div className="fms-notify" ref={box}>
@@ -155,9 +203,9 @@ export function Notifications({
         <div className="fms-notify-panel" role="dialog" aria-label="What needs attention">
           <div className="fms-notify-head">
             <span className="t-body-strong">What needs attention</span>
-            {alerts.length > 0 && (
+            {shown.length > 0 && (
               <span className="t-caption" style={{ color: "var(--ink-3)" }}>
-                {alerts.length}, worst first
+                {shown.length}, worst first
               </span>
             )}
           </div>
@@ -176,15 +224,16 @@ export function Notifications({
             </div>
           )}
 
-          {alerts.length === 0 ? (
+          {shown.length === 0 ? (
             <p className="t-caption fms-notify-empty">
-              Nothing right now. Bills, budgets, balances and debts are checked every time the ledger
-              changes, and anything worth a look shows here.
+              {away.length > 0
+                ? "Nothing new. What you hid comes back here when its figures change."
+                : "Nothing right now. Bills, budgets, balances and debts are checked every time the ledger changes, and anything worth a look shows here."}
             </p>
           ) : (
             <ul className="fms-notify-list">
-              {alerts.map((a) => (
-                <li key={a.id}>
+              {shown.map((a) => (
+                <li key={a.id} className="fms-notify-row">
                   <button
                     type="button"
                     className="fms-notify-item"
@@ -204,12 +253,42 @@ export function Notifications({
                       <span className="t-caption" style={{ color: "var(--ink-2)" }}>
                         {a.detail}
                       </span>
-                      <span className="t-micro fms-notify-go">{a.id.startsWith("bills-lapsed") || a.id.startsWith("bills-overdue") ? "Open Settings, Categories" : a.id.startsWith("debt-below-zero") ? "Open the Dashboard" : a.query ? "Show the rows" : GO[a.area]}</span>
+                      <span className="t-micro fms-notify-go">{goWords(a)}, and see where</span>
                     </span>
+                  </button>
+                  <button type="button" className="t-micro fms-notify-hide" onClick={() => hide(a)} aria-label={`Hide "${a.title}" until it changes`}>
+                    Hide
                   </button>
                 </li>
               ))}
             </ul>
+          )}
+
+          {away.length > 0 && (
+            <div className="fms-notify-away">
+              <button type="button" className="t-micro fms-notify-awaytoggle" aria-expanded={showAway} onClick={() => setShowAway((v) => !v)}>
+                {showAway ? "Close the hidden ones" : `${away.length} hidden until ${away.length === 1 ? "it changes" : "they change"}: show`}
+              </button>
+              {showAway && (
+                <ul className="fms-notify-list">
+                  {away.map((a) => (
+                    <li key={a.id} className="fms-notify-row">
+                      <span className="fms-notify-item fms-notify-item--away">
+                        <span className="fms-notify-text">
+                          <span className="t-body-strong">{a.title}</span>
+                          <span className="t-caption" style={{ color: "var(--ink-2)" }}>
+                            {a.detail}
+                          </span>
+                        </span>
+                      </span>
+                      <button type="button" className="t-micro fms-notify-hide" onClick={() => unhide(a)} aria-label={`Show "${a.title}" again`}>
+                        Show again
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
 
           {footer}

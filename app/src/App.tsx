@@ -57,6 +57,7 @@ import { misdatedOpenings, OBSOLETE_REVENUE_CATEGORY } from "./domain/opening";
 import { cleanedSettings } from "./domain/settingsCleanup";
 import { asAmountAndFees, isPartOf, netWorth, owedChange, parentOf, partOf, positionsOf, renameDebtAccount, withDebt, withFeesPaid, type Debt, type DebtEffect } from "./domain/debt";
 import { financeAlerts, type Alert as Finding } from "./domain/alerts";
+import { bellNeedles } from "./domain/bellTarget";
 import { billStatuses } from "./domain/bills";
 import { renameLimitKind, type MonthBill } from "./domain/budgetView";
 import { moveRows, type BillCategory } from "./domain/kindRename";
@@ -863,6 +864,9 @@ export default function App() {
   const syncKey = sync ? `${sync.title}|${problem?.message ?? ""}` : null;
   /** The bell's list is open: the corner stays clear so the two never overlap. */
   const [bellOpen, setBellOpen] = useState(false);
+  /** The finding a tap on the bell brought to this screen, and whether its part of the screen was found (`bellTarget.ts`). */
+  const [bellNote, setBellNote] = useState<{ readonly id: string; readonly title: string; readonly detail: string; readonly at: number; readonly rows?: boolean } | null>(null);
+  const [bellFound, setBellFound] = useState(false);
 
   /**
    * Write the audit event beside the data write.
@@ -2052,6 +2056,57 @@ export default function App() {
    * these two.
    */
   const mainRef = useRef<HTMLElement>(null);
+  /*
+   * The part of the screen a finding from the bell is about: the smallest
+   * piece that says its heading, or a name it mentions, outlined and brought
+   * into view once the screen has drawn. Looked for a few times, since a
+   * screen fills in after it opens; the outline goes with the note.
+   */
+  useEffect(() => {
+    setBellFound(false);
+    if (!bellNote || bellNote.rows) return;
+    const needles = bellNeedles(bellNote, [
+      ...settings.accounts.map((a) => a.name),
+      ...settings.credits.map((c) => c.name),
+      ...settings.spendingTypes.map((t) => t.name),
+      ...settings.bills,
+      ...settings.subscriptions,
+      ...(settings.plans ?? []).map((p) => p.title),
+      ...(settings.allocations ?? []).map((l) => l.name || l.kind),
+    ]).map((n) => n.toLowerCase());
+    let marked: Element | null = null;
+    let tries = 0;
+    const look = (): void => {
+      const main = mainRef.current;
+      if (!main) return;
+      for (const needle of needles) {
+        let best: HTMLElement | null = null;
+        for (const el of main.querySelectorAll<HTMLElement>("h1, h2, h3, h4, li, tr, dt, summary, button, p, span, div")) {
+          const text = (el.textContent ?? "").toLowerCase();
+          if (!text.includes(needle) || text.length > 700 || el.offsetParent === null) continue;
+          if (!best || text.length < (best.textContent ?? "").length) best = el;
+        }
+        if (best) {
+          const part = best.closest<HTMLElement>("li, tr, section, article, details, [class*='card'], [class*='row'], [class*='item']") ?? best;
+          const target = main.contains(part) && part !== main ? part : best;
+          target.classList.add("fms-from-bell");
+          target.scrollIntoView({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+          marked = target;
+          setBellFound(true);
+          return;
+        }
+      }
+      tries += 1;
+      if (tries < 6) timer = window.setTimeout(look, 400);
+    };
+    let timer = window.setTimeout(look, 350);
+    return () => {
+      window.clearTimeout(timer);
+      marked?.classList.remove("fms-from-bell");
+    };
+    // Looked for once for each tap on the bell: the lists it reads names from do not start it again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bellNote]);
 
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
@@ -2516,6 +2571,8 @@ export default function App() {
   const go = (id: Screen): void => {
     setScreen(id);
     setChatOpen(false);
+    // The bell's note is about the screen it opened: it ends when you go elsewhere (`openAlert` sets it again after this).
+    setBellNote(null);
     // A search a link opened the Database with ends when you go elsewhere,
     // and so does a pending return to the screen that sent you to Add.
     setDbQuery(null);
@@ -2539,7 +2596,18 @@ export default function App() {
   };
 
   /** Where a finding is dealt with: its rows when it names some, otherwise its screen. */
+  /*
+   * A finding opened from the bell travels with the tap: the screen says
+   * which finding brought it there, and the part that names the same thing
+   * is outlined (owner, 14 November 2026: "if I click insight or click open
+   * budget ... it doesn't show it where or what is that").
+   */
   const openAlert = (finding: Finding): void => {
+    openAlertScreen(finding);
+    // Opened as a search of the Database: the rows shown are what it is about, so none is singled out.
+    setBellNote({ id: finding.id, title: finding.title, detail: finding.detail, at: Date.now(), rows: Boolean(finding.query) && !finding.id.startsWith("bills-") && !finding.id.startsWith("debt-below-zero") && !finding.id.startsWith("firestore-usage") });
+  };
+  const openAlertScreen = (finding: Finding): void => {
     if (finding.id.startsWith("firestore-usage")) {
       go("settings");
       setSettingsOpenTab({ tab: "data", at: Date.now() });
@@ -3080,6 +3148,7 @@ export default function App() {
               allocations={settings.allocations ?? []}
               onRestorePlan={(p) => changePlan(reopenPlan(p), "plan.restore", `Put "${p.title}" back on the plan list, from the Bin.`, BY_OWNER)}
               onRestoreAllocation={(id) => handleAllocation({ kind: "restore", id })}
+              onBinAgain={(ids) => (ids.length === 1 && ids[0] ? handleDelete(ids[0]) : handleDeleteMany(ids))}
             />
           )}
           {screen === "activity" && (
@@ -3278,6 +3347,11 @@ export default function App() {
         screen jumping down under them, 26 September 2026.
       */}
       <div className="fms-notices" aria-live="polite" hidden={bellOpen}>
+        {bellNote && (
+          <Notice status="info" title={`From the bell: ${bellNote.title}`} onDismiss={() => setBellNote(null)}>
+            {bellNote.detail} {bellNote.rows ? "The Database is showing the rows it is about." : bellFound ? "The part of this screen it is about is outlined." : "This is the screen where it is dealt with."}
+          </Notice>
+        )}
         {cleaning && (
           <Notice
             status="info"

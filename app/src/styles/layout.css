@@ -7652,6 +7652,65 @@ button.fms-recent-row:disabled {
   cursor: pointer;
 }
 
+/* A finding and its Hide, side by side: the finding takes the room, Hide a thumb's width. */
+.fms-notify-row {
+  display: flex;
+  align-items: stretch;
+}
+.fms-notify-row > .fms-notify-item {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.fms-notify-hide {
+  flex: 0 0 auto;
+  min-width: 56px;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-left: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  cursor: pointer;
+}
+.fms-notify-hide:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+.fms-notify-hide:focus-visible,
+.fms-notify-awaytoggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.fms-notify-item--away {
+  cursor: default;
+}
+.fms-notify-away {
+  border-top: 1px solid var(--hairline);
+}
+.fms-notify-awaytoggle {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/*
+ * The part of a screen a finding from the bell is about: outlined for a few
+ * seconds after the tap, then left as it was. No movement, only the outline.
+ */
+.fms-from-bell {
+  outline: 2px solid var(--brand-600);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+  scroll-margin: 96px;
+}
+
 .fms-notify-item:hover {
   background: var(--surface-hover);
 }
