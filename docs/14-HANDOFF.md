@@ -3595,6 +3595,21 @@ and replayed on the emulator copy (robots `o4replay.cjs`, `o5replay.cjs`,
   over, months over), each month's row carrying its totals, a Used column,
   a month never split across pages, and no second "Budget" heading on a
   page already titled Budget.
+- **Credit line due dates, any lender** (`debt.ts` `dueAfterBill`,
+  `debtWords.ts`, Settings, Debt screen Details, `debtDetailAsk.ts`). A
+  bill can be due a number of days after it closes (`dueAfterDays`), as
+  well as on a day of the month. Maya Credit's terms are "billing end date
+  6th, due 15 days after"; set to the 6th for both, the next payment showed
+  a month late. Every due date (`debtDue`, `dueIfBorrowedOn`) goes through
+  one helper. The chat sets it: "Maya Credit is due 15 days after the bill
+  closes". The owner still has to pick it in Settings, Credit.
+- **Saved twice** (`integrity.ts`, `saved-twice`). Two entries the app saved
+  itself, identical in day, kind, amount, fee and accounts, within two
+  minutes of each other, are listed in Needs review, never binned. The
+  owner's backups have three such pairs of bank interest.
+- **Known: a rename interrupted within a second** (`race.cjs` step 2) is not
+  applied at all: the old name stays and every balance is whole. All or
+  nothing, never half renamed; it has failed the same way in every run.
 - **Open: an AI memory.** The model reads the last 10 messages and
   everything saved (plans, allocations, budgets, goals, entries); what was
   only said in the chat further back is not read. The owner asked for a way

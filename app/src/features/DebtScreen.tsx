@@ -70,6 +70,9 @@ import {
   BILL_DAYS_EXPLAINED,
   choiceOfDay,
   dayOfChoice,
+  dueChoiceOf,
+  dueChoices,
+  dueOfChoice,
   effectLabel,
   partWords,
   PAYMENT_DUE,
@@ -971,7 +974,7 @@ function DebtDetails({
   const limited = takesLimit(debt);
   // A lender's bill: what a credit line or a bank loan has, and money between people does not.
   const billed = debt.kind === "payable" && form !== "pass-through" && form !== "informal";
-  const [day, setDay] = useState(choiceOfDay(debt.dueDay));
+  const [day, setDay] = useState(dueChoiceOf(debt));
   const [billing, setBilling] = useState(choiceOfDay(debt.billingDay));
   const [steps, setSteps] = useState<readonly LimitStep[]>(() => limitSteps(debt));
   const last = steps.length > 0 ? steps[steps.length - 1]!.amount : null;
@@ -984,7 +987,8 @@ function DebtDetails({
   const save = (): void => {
     let next: Debt = {
       ...debt,
-      dueDay: dayOfChoice(day),
+      dueDay: dueOfChoice(day).dueDay,
+      dueAfterDays: billed && dayOfChoice(billing) !== undefined ? dueOfChoice(day).dueAfterDays : undefined,
       billingDay: billed ? dayOfChoice(billing) : debt.billingDay,
       termMonths: form === "term-loan" ? (term === NO_TERM ? undefined : Number(term)) : debt.termMonths,
     };
@@ -1020,7 +1024,7 @@ function DebtDetails({
         <span className="t-label" style={{ color: "var(--ink-2)" }}>
           {debt.kind === "payable" ? PAYMENT_DUE : "They pay back on"}
         </span>
-        <Select value={day} onChange={setDay} options={BILL_DAY_CHOICES} ariaLabel={`Day the payment is due for ${debt.name}`} />
+        <Select value={day} onChange={setDay} options={debt.kind === "payable" && billed && dayOfChoice(billing) !== undefined ? dueChoices(true) : BILL_DAY_CHOICES} ariaLabel={`When the payment is due for ${debt.name}`} />
       </label>
 
       {limited && (

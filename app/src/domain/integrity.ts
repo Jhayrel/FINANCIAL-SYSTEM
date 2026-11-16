@@ -34,6 +34,7 @@ export type IssueCode =
   | "revenue-without-destination"
   | "transfer-same-wallet"
   | "duplicate-record-number"
+  | "saved-twice"
   | "fee-inside-withdrawal"
   | "below-zero-day";
 
@@ -250,6 +251,44 @@ export function checkIntegrity(
     }
   }
 
+  /*
+   * ── The same entry saved twice in a row ──────────────────────────────────
+   * A few centavos of bank interest were saved twice seconds apart, three
+   * times over (owner's backup, 15 November 2026):
+   * every field the same, and nothing said so. Only rows the app saved
+   * itself, whose ids carry the moment they were saved, and only within two
+   * minutes of each other: buying the same thing twice in a day is real,
+   * saving it twice in a minute almost never is. Reported, never binned.
+   */
+  const savedAt = (t: Transaction): number | null => {
+    const at = /^t-(\d{13})/.exec(t.id);
+    return at ? Number(at[1]) : null;
+  };
+  const twins = new Map<string, Transaction[]>();
+  for (const t of transactions) {
+    if (savedAt(t) === null || t.partOf) continue;
+    const key = [t.date, t.type, t.item.trim().toLowerCase(), t.amount, t.fee, t.fromWallet, t.toWallet, t.debtId ?? ""].join("|");
+    twins.set(key, [...(twins.get(key) ?? []), t]);
+  }
+  for (const group of twins.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort((a, b) => (savedAt(a) ?? 0) - (savedAt(b) ?? 0));
+    for (let i = 1; i < sorted.length; i += 1) {
+      const a = sorted[i - 1]!;
+      const b = sorted[i]!;
+      const gap = Math.round(((savedAt(b) ?? 0) - (savedAt(a) ?? 0)) / 1000);
+      if (gap > 120) continue;
+      issues.push({
+        code: "saved-twice",
+        severity: "warning",
+        ids: [a.id, b.id],
+        recordNumbers: [a.recordNumber, b.recordNumber],
+        message: `#${String(a.recordNumber).padStart(4, "0")} and #${String(b.recordNumber).padStart(4, "0")} are the same entry saved ${gap} ${gap === 1 ? "second" : "seconds"} apart: the same day, kind, amount and account.`,
+        impact: b.total,
+      });
+    }
+  }
+
   const rank: Record<IssueSeverity, number> = { error: 0, warning: 1, info: 2 };
   /*
    * ── A machine fee saved inside a withdrawal ──────────────────────────────
@@ -378,6 +417,7 @@ const TODO: Record<IssueCode, { readonly todo: string; readonly bin?: boolean }>
   "transfer-same-wallet": { todo: "Edit it and set the other wallet. If no money moved, move it to the bin.", bin: true },
   "debt-same-wallet": { todo: "Edit it and set the other wallet." },
   "duplicate-record-number": { todo: "If one of these is a copy, move it to the bin; if both are real, leave them.", bin: true },
+  "saved-twice": { todo: "If it happened once, move the later one to the bin. If both are real, keep them and mark this checked.", bin: true },
 };
 
 /** What to do about one check's finding, as the Database and the chat both say it. */

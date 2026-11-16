@@ -77,6 +77,14 @@ export interface Debt {
    * next payment is taken to be due by the next billing day.
    */
   readonly billingDay?: number | undefined;
+  /**
+   * A bill due a number of days after it closes, rather than on a day of
+   * the month: Maya Credit's bill closes on the 6th and "Due date is 15
+   * days after your billing cutoff date" (owner's screen, 16 November
+   * 2026), the 21st. Set to 6th and 6th, it was taken as due a month later.
+   * Any lender: used with `billingDay`, and before `dueDay` when both are set.
+   */
+  readonly dueAfterDays?: number | undefined;
   /** Wallet the money moves through. */
   readonly wallet: string;
   readonly interestType: InterestType;
@@ -1069,8 +1077,23 @@ export function dueIfBorrowedOn(debt: Debt, date: IsoDate): IsoDate | null {
   if (billing === undefined || billing < 1 || billing > 31) return null;
   const thisBill = onDay(getYear(date), getMonth(date), billing);
   const bill = thisBill >= date ? thisBill : monthAfter(date, billing);
-  const due = debt.dueDay && debt.dueDay >= 1 && debt.dueDay <= 31 ? debt.dueDay : undefined;
-  return due !== undefined ? nextOnDay(bill, due) : monthAfter(bill, billing);
+  return hasDueRule(debt) ? dueAfterBill(debt, bill) : monthAfter(bill, billing);
+}
+
+/** A due rule is set: days after the bill closes, or a day of the month. */
+function hasDueRule(debt: Debt): boolean {
+  return (debt.dueAfterDays !== undefined && debt.dueAfterDays >= 1 && debt.dueAfterDays <= 60) || (debt.dueDay !== undefined && debt.dueDay >= 1 && debt.dueDay <= 31);
+}
+
+/**
+ * When a bill that closes on `bill` must be paid: so many days after it, or
+ * the first due day after it. For any lender, as its own terms say.
+ */
+export function dueAfterBill(debt: Debt, bill: IsoDate): IsoDate {
+  const after = debt.dueAfterDays;
+  if (after !== undefined && after >= 1 && after <= 60) return addDays(bill, after);
+  const day = debt.dueDay && debt.dueDay >= 1 && debt.dueDay <= 31 ? debt.dueDay : undefined;
+  return day !== undefined ? nextOnDay(bill, day) : monthAfter(bill, debt.billingDay ?? getDay(bill));
 }
 
 /**
@@ -1159,7 +1182,7 @@ export function debtDue(
     }
     const billed = Math.max(0, owedAtBill - paidAfter);
     const bill = { last: lastBill, billed, next: nextBill };
-    const due = debt.dueDay && debt.dueDay >= 1 && debt.dueDay <= 31 ? debt.dueDay : undefined;
+    const ruled = hasDueRule(debt);
     /*
      * The bill before stays due until it is paid: on its due day it is due
      * today, and late after. With the due day on the billing day, the new
@@ -1171,7 +1194,7 @@ export function debtDue(
       const closed = addMonths(lastBill, -back);
       const prevBill = onDay(getYear(closed), getMonth(closed), billing);
       const after = addMonths(lastBill, 1 - back);
-      const prevDue = due !== undefined ? nextOnDay(prevBill, due) : onDay(getYear(after), getMonth(after), billing);
+      const prevDue = ruled ? dueAfterBill(debt, prevBill) : onDay(getYear(after), getMonth(after), billing);
       if (prevDue > asOf) continue;
       let owedPrev = 0;
       let paidPrev = 0;
@@ -1182,9 +1205,9 @@ export function debtDue(
       const unpaidPrev = Math.max(0, owedPrev - paidPrev);
       if (unpaidPrev > 0) return { ...withDate(prevDue, "billing", unpaidPrev), bill: { last: prevBill, billed: unpaidPrev, next: lastBill } };
     }
-    if (billed > 0 && due !== undefined) return { ...withDate(nextOnDay(lastBill, due), "billing", billed), bill };
+    if (billed > 0 && ruled) return { ...withDate(dueAfterBill(debt, lastBill), "billing", billed), bill };
     if (billed > 0) return { ...withDate(nextBill, "billing", position.outstanding), bill };
-    return { ...withDate(due !== undefined ? nextOnDay(nextBill, due) : nextBill, "billing", position.outstanding), bill };
+    return { ...withDate(ruled ? dueAfterBill(debt, nextBill) : nextBill, "billing", position.outstanding), bill };
   }
 
   const day = debt.dueDay ?? (debt.dueDate ? getDay(debt.dueDate) : undefined);

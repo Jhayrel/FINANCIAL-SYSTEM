@@ -167,8 +167,8 @@ export const PAYMENT_DUE = "Payment due";
 
 /** The two days, explained once, under wherever they are set. */
 export const BILL_DAYS_EXPLAINED =
-  "Bill closes: the day each month the lender adds up what you owe into a bill (its app may call it the billing or statement date). " +
-  "Payment due: the last day to pay that bill. Anything borrowed after the bill closes goes on the next one. " +
+  "Bill closes: the day each month the lender adds up what you owe into a bill (its app may call it the billing, statement or cutoff date). " +
+  "Payment due: the last day to pay that bill, either a day of the month or a number of days after the bill closes, as your lender's terms say. Anything borrowed after the bill closes goes on the next one. " +
   "If your lender gives you only one date, set Payment due.";
 
 /**
@@ -181,10 +181,15 @@ export const BILL_DAYS_EXPLAINED =
  * only its own app can say, so the note says what the app will do and where
  * to check.
  */
-export function sameDayNote(name: string, billingDay: number | undefined, dueDay: number | undefined): string {
+export function sameDayNote(name: string, billingDay: number | undefined, dueDay: number | undefined, dueAfterDays?: number): string {
+  if (billingDay && dueAfterDays) {
+    // The day it lands on, when that is the same every month.
+    const on = billingDay + dueAfterDays <= 28 ? `, on the ${ordinalDay(billingDay + dueAfterDays)}` : "";
+    return `${name}: each bill closes on the ${ordinalDay(billingDay)} and is due ${dueAfterDays} ${dueAfterDays === 1 ? "day" : "days"} later${on}. What you borrow after a bill closes goes on the next one.`;
+  }
   if (!billingDay || billingDay !== dueDay) return "";
   const day = ordinalDay(billingDay);
-  return `${name}: both are the ${day}. What you borrow before a bill closes on the ${day} is due on the ${day} of the month after, so the app expects a month to pay each bill. Check the due date in the lender's app: if it is another day, set Payment due to it; if the ${day} is the due date and there is no separate billing date, set Bill closes to Not set.`;
+  return `${name}: both are the ${day}. What you borrow before a bill closes on the ${day} is due on the ${day} of the month after, so the app expects a month to pay each bill. Check the due date in the lender's terms: if it says a number of days after the billing or cutoff date, pick that under Payment due (for example, "15 days after the bill closes"); if it is another day of the month, pick that day; if the ${day} is the due date and there is no separate billing date, set Bill closes to Not set.`;
 }
 
 /** A day of the month as a bill says it: 1st, 2nd, 6th, 21st. */
@@ -210,4 +215,36 @@ export function dayOfChoice(choice: string): number | undefined {
 /** A day to its choice. */
 export function choiceOfDay(day: number | undefined): string {
   return day !== undefined && day >= 1 && day <= 31 ? ordinalDay(day) : NO_BILL_DAY;
+}
+
+/** "15 days after the bill closes". */
+export const afterDaysChoice = (n: number): string => `${n} ${n === 1 ? "day" : "days"} after the bill closes`;
+
+/**
+ * The choices for when a payment is due: not set, a day of the month, and,
+ * where the bill has a closing day, a number of days after it (Maya Credit:
+ * "15 days after your billing cutoff date"). Any lender's terms fit one.
+ */
+export function dueChoices(billingSet: boolean): readonly string[] {
+  return billingSet ? [...BILL_DAY_CHOICES, ...Array.from({ length: 31 }, (_, i) => afterDaysChoice(i + 1))] : BILL_DAY_CHOICES;
+}
+
+/** A line's due rule as its choice. */
+export function dueChoiceOf(debt: { readonly dueDay?: number | undefined; readonly dueAfterDays?: number | undefined; readonly billingDay?: number | undefined }): string {
+  if (debt.billingDay && debt.dueAfterDays && debt.dueAfterDays >= 1 && debt.dueAfterDays <= 31) return afterDaysChoice(debt.dueAfterDays);
+  return choiceOfDay(debt.dueDay);
+}
+
+/** A due choice back to the rule: a day of the month, days after the bill closes, or neither. */
+export function dueOfChoice(choice: string): { readonly dueDay?: number; readonly dueAfterDays?: number } {
+  const after = /^(\d{1,2}) days? after the bill closes$/.exec(choice);
+  if (after) return { dueAfterDays: Number(after[1]) };
+  const day = dayOfChoice(choice);
+  return day === undefined ? {} : { dueDay: day };
+}
+
+/** "due the 6th", or "due 15 days after", for a line's summary. */
+export function dueWords(debt: { readonly dueDay?: number | undefined; readonly dueAfterDays?: number | undefined; readonly billingDay?: number | undefined }): string {
+  if (debt.billingDay && debt.dueAfterDays) return `due ${debt.dueAfterDays} ${debt.dueAfterDays === 1 ? "day" : "days"} after`;
+  return debt.dueDay ? `due the ${ordinalDay(debt.dueDay)}` : "";
 }

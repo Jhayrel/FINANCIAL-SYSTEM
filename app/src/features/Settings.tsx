@@ -60,7 +60,7 @@ import {
   saveOwnerUid,
 } from "../data/firebaseConfig";
 import { makeDebtId, outstandingOf, owedTotals, positionsOf, type Debt, type DebtKind } from "../domain/debt";
-import { BILL_CLOSES, BILL_DAY_CHOICES, BILL_DAYS_EXPLAINED, choiceOfDay, dayOfChoice, PAYMENT_DUE, sameDayNote } from "../domain/debtWords";
+import { BILL_CLOSES, BILL_DAY_CHOICES, BILL_DAYS_EXPLAINED, choiceOfDay, dayOfChoice, dueChoiceOf, dueChoices, dueOfChoice, dueWords, PAYMENT_DUE, sameDayNote } from "../domain/debtWords";
 import { creditRoom } from "../domain/creditLimit";
 import {
   DEBT_FORM_LABEL,
@@ -2899,6 +2899,12 @@ function CreditLines({
     const day = dayOfChoice(value);
     onChange(credits.map((x) => (x.id === c.id ? (day === undefined ? (rest as Debt) : { ...rest, [key]: day }) : x)));
   };
+  /** When it is due: a day of the month or days after the bill closes, the other cleared (Firestore refuses `undefined`). */
+  const setDue = (c: Debt, value: string): void => {
+    const { dueDay: _d, dueAfterDays: _a, ...rest } = c;
+    const rule = dueOfChoice(value);
+    onChange(credits.map((x) => (x.id === c.id ? ({ ...rest, ...rule } as Debt) : x)));
+  };
   /**
    * A line a lender bills and that is still in use: a credit line or a loan
    * from an institution, not a person or money held for one. An archived
@@ -2976,7 +2982,7 @@ function CreditLines({
      */
     const settled = !c.archived && shape !== "credit-line" && outstanding === 0 && used > 0;
     const days = billed(c)
-      ? [c.billingDay ? `bill closes the ${choiceOfDay(c.billingDay)}` : "", c.dueDay ? `due the ${choiceOfDay(c.dueDay)}` : ""].filter(Boolean)
+      ? [c.billingDay ? `bill closes the ${choiceOfDay(c.billingDay)}` : "", dueWords(c)].filter(Boolean)
       : [];
     // The figure is on the right already; the line says only what it adds: a limit's room, a loan's months.
     const said = position ? headline(position, today(), formatMoney) : "";
@@ -3070,10 +3076,10 @@ function CreditLines({
                   </Field>
                   <Field label={PAYMENT_DUE}>
                     <Select
-                      value={choiceOfDay(c.dueDay)}
-                      ariaLabel={`Day the payment is due for ${c.name}`}
-                      onChange={(v) => setDay(c, "dueDay", v)}
-                      options={BILL_DAY_CHOICES}
+                      value={dueChoiceOf(c)}
+                      ariaLabel={`When the payment is due for ${c.name}`}
+                      onChange={(v) => setDue(c, v)}
+                      options={dueChoices(Boolean(c.billingDay))}
                     />
                   </Field>
                 </div>
@@ -3081,7 +3087,7 @@ function CreditLines({
             </div>
             {billed(c) && (
               <p className="t-caption fms-creditrow-note">
-                {sameDayNote(c.name, c.billingDay, c.dueDay) || BILL_DAYS_EXPLAINED}
+                {sameDayNote(c.name, c.billingDay, c.dueDay, c.dueAfterDays) || BILL_DAYS_EXPLAINED}
               </p>
             )}
 

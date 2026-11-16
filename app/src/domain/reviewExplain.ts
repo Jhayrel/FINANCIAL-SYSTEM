@@ -35,6 +35,7 @@ const WHY: Record<IssueCode, string> = {
   "transfer-same-wallet": "Money from a wallet to the same wallet does not move anywhere.",
   "debt-same-wallet": "Money from a wallet to the same wallet does not move anywhere.",
   "duplicate-record-number": "Two rows share one number, so one of them may be a copy.",
+  "saved-twice": "The same entry was saved twice within seconds, so one of them may be a copy.",
 };
 
 export interface FlagExplained {

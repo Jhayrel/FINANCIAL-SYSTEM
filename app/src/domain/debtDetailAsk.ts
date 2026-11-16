@@ -21,7 +21,7 @@ import type { Debt } from "./debt";
 import { formatMoney, parseAmount, type Centavos } from "./money";
 import type { IsoDate, Transaction } from "./types";
 
-export type DebtDetail = "limit" | "dueDay" | "billingDay" | "rate";
+export type DebtDetail = "limit" | "dueDay" | "dueAfter" | "billingDay" | "rate";
 
 export interface DebtDetailAsk {
   readonly debtId: string;
@@ -78,6 +78,15 @@ export function readDebtDetailAsk(text: string, debts: readonly Debt[]): DebtDet
   if (/\b(?:credit\s+)?limit\b/i.test(t)) {
     const value = sumIn(rest);
     return value === null ? null : { debtId: debt.id, detail: "limit", value };
+  }
+  /*
+   * "Maya Credit is due 15 days after the bill closes", "due date is 15
+   * days after the cutoff": the lender's own terms (owner, 16 November 2026).
+   */
+  const after = /\b(\d{1,2})\s*days?\s+(?:after|from)\s+(?:the\s+|my\s+|your\s+)?(?:bill(?:ing)?|statement|cut-?off|closing)/i.exec(rest);
+  if (after?.[1] && /\b(?:due|pay|payment|deadline)\b/i.test(t)) {
+    const n = Number(after[1]);
+    return n >= 1 && n <= 31 ? { debtId: debt.id, detail: "dueAfter", value: n } : null;
   }
   if (/\b(?:billing\s+(?:day|date|cycle)|bill(?:ing)?\s+(?:closes|close|cut-?off)|statement\s+(?:day|date)|cut-?off(?:\s+(?:day|date))?|closing\s+(?:day|date))\b/i.test(t)) {
     const value = dayIn(rest);
@@ -156,10 +165,25 @@ export function debtDetailChange(ask: DebtDetailAsk, debts: readonly Debt[], asO
       words: `${debt.name}'s bill closing on the ${ordinalDay(ask.value)}: what you borrow after that day goes on the next bill.`,
     };
   }
+  if (ask.detail === "dueAfter") {
+    if (!billed) return { refused: `${debt.name} has no bill from a lender, so it has no bill to count from.` };
+    if (!debt.billingDay) return { refused: `Set the day ${debt.name}'s bill closes first: say "${debt.name} bill closes on the" and the day. The due date is counted from it.` };
+    if (debt.dueAfterDays === ask.value) return { refused: `${debt.name} is already due ${ask.value} days after the bill closes.` };
+    const { dueDay: _d, ...rest } = debt;
+    return {
+      debt,
+      next: { ...rest, dueAfterDays: ask.value },
+      label: "Payment due",
+      now: debt.dueAfterDays ? `${debt.dueAfterDays} days after the bill closes` : dayWords(debt.dueDay),
+      then: `${ask.value} days after the bill closes`,
+      words: `${debt.name} due ${ask.value} days after each bill closes on the ${ordinalDay(debt.billingDay)}${debt.billingDay + ask.value <= 28 ? `, on the ${ordinalDay(debt.billingDay + ask.value)}` : ""}. The Dashboard and the bell count down to it.`,
+    };
+  }
   if (debt.dueDay === ask.value) return { refused: `${debt.name} is already due on the ${ordinalDay(ask.value)}.` };
+  const { dueAfterDays: _a, ...keep } = debt;
   return {
     debt,
-    next: { ...debt, dueDay: ask.value },
+    next: { ...keep, dueDay: ask.value },
     label: debt.kind === "payable" ? "Payment due on" : "They pay back on",
     now: dayWords(debt.dueDay),
     then: dayWords(ask.value),
