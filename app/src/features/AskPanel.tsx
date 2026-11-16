@@ -5910,6 +5910,30 @@ export function AskPanel({
 
       const lastCard = [...turns].reverse().find((t) => !(isSaid(t) || isChart(t)));
       const askedNow = asking !== null && Date.now() - asking.since <= ASKING_GOES_STALE_MS;
+      /*
+       * The card still open, before it is added: "Thats treat my friends at
+       * the diner" said beside an open Treat card made a new card asking how
+       * much (owner's backup, 16 November 2026). The words are its
+       * description, or its kind when they name one; the card changes and
+       * nothing is saved.
+       */
+      const openCard = !pending && !askedNow && lastCard && isOffer(lastCard) && lastCard.state === "open" ? lastCard : undefined;
+      const openDraft = openCard ? cardOf(openCard) : undefined;
+      const aboutOpen = openCard && openDraft && openDraft.flow === "Spending" ? aboutLast(lead, openDraft, reference.spendingTypes.map((k) => k.name)) : null;
+      if (openCard && openDraft && aboutOpen) {
+        setDraft("");
+        emptyBox();
+        log(aiEvent("asked", "add", { text: note }));
+        if (aboutOpen.same) {
+          say({ kind: "you", text: note });
+          say({ kind: "assistant", text: "The card already says that. Add it when it is right.", from: "this device" });
+          return;
+        }
+        const next: Draft = aboutOpen.item ? { ...openDraft, item: aboutOpen.item } : { ...openDraft, description: aboutOpen.description ?? openDraft.description };
+        reviseCard(turns.indexOf(openCard), openCard, next, aboutOpen.item ? `Filed as ${aboutOpen.item}, as you said.` : `Described as "${next.description}", as you said.`, note);
+        say({ kind: "assistant", ephemeral: true, text: aboutOpen.item ? `The card is now ${aboutOpen.item}. Check it, then add it.` : "The card has the new description. Check it, then add it.", from: "this device" });
+        return;
+      }
       const justAdded = !pending && !askedNow && lastCard && isOffer(lastCard) && lastCard.state === "added" && lastCard.recordNumber !== undefined ? lastCard : undefined;
       const savedAt = (t: Transaction): number => Number(/^t-(\d{13})/.exec(t.id)?.[1] ?? 0);
       const addedRow = justAdded ? [...transactions].reverse().find((t) => t.recordNumber === justAdded.recordNumber && Date.now() - savedAt(t) < 3 * 3600_000) : undefined;

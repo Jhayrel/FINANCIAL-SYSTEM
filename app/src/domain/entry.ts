@@ -1032,11 +1032,12 @@ export function draftToTransactions(
             ? "Revenue"
             : draft.category,
     item: opening ? "Opening balance" : derived ? derived.item : draft.item,
-    description: draft.description,
+    // Saved without the spaces round it: "Treat my friends at the diner " kept its last space (backup of 16 November 2026).
+    description: draft.description.trim(),
     amount,
     fee,
     total: amount + fee,
-    notes: draft.notes,
+    notes: draft.notes.trim(),
     status: draft.status,
     debtId: draft.debtId,
     debtEffect: draft.debtEffect,
