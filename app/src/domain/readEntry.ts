@@ -295,11 +295,30 @@ function flowOf(text: string): Flow | null {
  * and then the card warned "You wrote PHP 711.00": the shop's name. The same
  * shape of mistake made "microsoft office 365" a PHP 365.00 purchase.
  */
-const SHOP_NUMBERS = /\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]?11|711|24[\s/-]?7)\b/gi;
+/*
+ * Written as a shop: "7-11", "7/11", "24/7", "seven eleven", or the bare
+ * number after "at", "sa" or "from". A bare 247 or 711 is otherwise a price:
+ * "gas yesterday 247 cash" lost its ₱247.00 to the 24/7 store and asked how
+ * much it was (16 November 2026 battery).
+ */
+const SHOP_NUMBERS = /\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]11|24[\s/-]7)\b|(?<=\b(?:at|sa|from|in|ng|the)\s+)(?:711|247)\b/gi;
+const SHOP_BARE = /\b(?:711|247)\b/g;
+
+/**
+ * The text without its shop numbers. A bare 711 or 247 beside another figure
+ * is the shop ("I bought food 711, 100 pesos", 25 October 2026); on its own
+ * it is the price ("gas yesterday 247 cash"). `whole` is the sentence a
+ * clause came from, so a clause is judged by everything said with it.
+ */
+function withoutShopNumbers(text: string, whole: string = text): string {
+  const t = text.replace(SHOP_NUMBERS, " ");
+  const besides = whole.replace(SHOP_NUMBERS, " ").replace(SHOP_BARE, " ");
+  return /\d{2,}/.test(besides) ? t.replace(SHOP_BARE, " ") : t;
+}
 
 function amountIn(text: string): number | null {
   // "iphone 18 case 500" is PHP 500.00: a model number is a name, never the price (`modelNumbers.ts`, 27 October 2026).
-  let withoutDates = withoutDays(withoutDayWords(withoutModelNumbers(withoutIdentifiers(text).replace(SHOP_NUMBERS, " ")))).replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
+  let withoutDates = withoutDays(withoutDayWords(withoutModelNumbers(withoutShopNumbers(withoutIdentifiers(text))))).replace(/\b\d{1,4}[/-]\d{1,2}([/-]\d{2,4})?\b/g, " ");
 
   /**
    * A year beside a month is a date, not two thousand pesos.
@@ -1433,7 +1452,7 @@ function splitOnAnd(part: string): string[] {
       /^\s*(?:[a-z][a-z'-]*\s+){1,3}(?:₱|php\s*)?\d/i.test(piece) ||
       /^\s*(?:₱|php\s*)?\d/i.test(piece);
     // A shop's number is not a figure: "I bought food 711, 100 pesos" is one purchase at 7-Eleven, not a ₱0.00 card and a ₱100.00 one (25 October 2026).
-    const money = (s: string): boolean => namesMoney(s.replace(SHOP_NUMBERS, " "));
+    const money = (s: string): boolean => namesMoney(withoutShopNumbers(s, part));
     if (money(before) && money(piece) && opensAsEntry && !FEE_ONLY.test(piece)) {
       out.push(piece);
     } else {

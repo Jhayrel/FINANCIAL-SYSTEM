@@ -84,6 +84,22 @@ export interface Alert {
 }
 
 /**
+ * The entries a pattern is about, as a Database search, so the bell opens
+ * them. Insights does not list patterns, and "A long gap ended" opened it
+ * with nothing to point at (owner, 17 November 2026: "I cannot find what or
+ * where it is"). The search matches an entry's item, wallet and date.
+ */
+export function patternQuery(finding: { readonly id: string; readonly detail: string }): string | undefined {
+  const id = finding.id;
+  if (id.startsWith("streak-")) return id.slice("streak-".length) || undefined;
+  if (id.startsWith("zeroes-")) return id.slice("zeroes-".length) || undefined;
+  const on = /^velocity-(\d{4}-\d{2}-\d{2})$/.exec(id)?.[1];
+  if (on) return on;
+  if (id === "migration") return /\bwhile\s+(.+?)\s+rose by\b/.exec(finding.detail)?.[1]?.trim() || undefined;
+  return undefined;
+}
+
+/**
  * Plain headings. The detail carries the figures, so the title only has to
  * say which kind of thing this is.
  */
@@ -661,6 +677,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
     const on = /^velocity-(\d{4}-\d{2}-\d{2})$/.exec(finding.id)?.[1];
     if (on && daysBetween(on, asOf) > 14) continue;
     if (finding.id.startsWith("zeroes-") && restingWallets.has(finding.id.slice("zeroes-".length))) continue;
+    const query = patternQuery(finding);
     out.push({
       id: finding.id,
       level: finding.weight >= 80 ? "warn" : "info",
@@ -668,6 +685,7 @@ export function financeAlerts(input: AlertInput): Alert[] {
       title: PATTERN_TITLE[finding.kind],
       detail: finding.detail,
       weight: finding.weight,
+      ...(query ? { query } : {}),
     });
   }
 

@@ -140,7 +140,9 @@ function figuresIn(said: string, reference?: ReferenceLists): number[] {
   // Dates are not amounts ("September 13 2026"), and neither is a year beside a month.
   // Reference, account and phone numbers are never what was paid (`identifiers.ts`).
   let text = withoutDays(withoutIdentifiers(said))
-    .replace(/\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]?11|711|24[\s/-]?7)\b/gi, " ")
+    .replace(/\b(?:7[\s-]?eleven|seven[\s-]?eleven|7[\s/-]11|24[\s/-]7)\b|(?<=\b(?:at|sa|from|in|ng|the)\s+)(?:711|247)\b/gi, " ")
+    // A bare 711 or 247 beside another figure is the shop; alone, the price (`readEntry.ts`).
+    .replace(/\b(?:711|247)\b(?=[\s\S]*\d{2,})|(?<=\d{2,}[\s\S]*)\b(?:711|247)\b/g, " ")
     .replace(/\b\d{4}-\d{2}-\d{2}\b/g, " ")
     .replace(/\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b([^₱\d]{0,12})\b(?:19|20)\d{2}\b/gi, "$1$2 ");
   if (reference) {

@@ -3756,6 +3756,27 @@ picture. What still came back wrong, fixed:
 - **"Can you check if that number is accurate"** after a budget card asked
   which account to check. It works the card's figure out: spent, held for
   allocations, plans, safe to spend.
+- **Checked with every robot after it** (17 November): sync, what-ifs,
+  debt, edge-case text, every button on PC and phone, the chat changes and
+  the new bell, on the 16 November backup. Two fixes came out of it:
+  - **A pattern in the bell opened Insights, which does not list patterns**
+    ("A long gap ended", "Money left quickly"). It opens the entries it is
+    about in the Database (`alerts.ts` `patternQuery`): that kind, that
+    wallet, or the day the money arrived.
+  - **"gas yesterday 247 cash" asked how much it was.** A bare 247 was read
+    as the 24/7 store and 711 as 7-Eleven. Only "24/7", "7-11" or the
+    number after "at" or "sa" is the shop now (`readEntry.ts`, `verify.ts`).
+  - **The same warning twice on a card** ("You named Emergency but this
+    was read as Repairs") drew two rows with one React key; each warning
+    is said once now (`AskPanel.tsx`).
+  - Known, unchanged: a rename interrupted within a second is not applied
+    at all (`race.cjs` step 2), never half applied.
+  - Results: process 19 of 19 to the centavo, sync 11 of 11, debt 4 of 4,
+    edge cases 0 failed, every button on PC (257 presses) and phone (269)
+    with no error, the bell 24 of 26 (the two were the Insights outline,
+    fixed above), chat changes with every button found. The chat battery's
+    other flags were the robot's own: a card it did not expect where the
+    app rightly asks to confirm, and the AI blocked on purpose.
 
 ## 6. What the owner has to do
 

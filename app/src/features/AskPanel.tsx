@@ -14944,12 +14944,13 @@ function ProposalCard({
         now holds its own row, so "This puts Maya at ... Save anyway?" read
         as saving it a second time (4 October 2026, the phone scenario).
       */}
-      {!settled && check.problems.filter((p) => !RESTATES_BLANK.has(p)).map((p) => (
+      {!settled && [...new Set(check.problems)].filter((p) => !RESTATES_BLANK.has(p)).map((p) => (
         <p key={p} className="t-micro fms-proposalnote fms-proposalnote--stop">
           {p}
         </p>
       ))}
-      {!settled && check.warnings.map((w) => (
+      {/* Each once: the same warning twice made two rows with one key, and said nothing more (17 November 2026 robot). */}
+      {!settled && [...new Set(check.warnings)].map((w) => (
         <p key={w} className="t-micro fms-proposalnote fms-proposalnote--warn">
           {w}
         </p>
@@ -16944,12 +16945,12 @@ function DebtCard({
       )}
 
       {/* Only while open: a saved card is checked against a ledger that holds its own rows. */}
-      {state === "open" && check.problems.map((p) => (
+      {state === "open" && [...new Set(check.problems)].map((p) => (
         <p key={p} className="t-micro fms-proposalnote fms-proposalnote--stop">
           {p}
         </p>
       ))}
-      {state === "open" && check.warnings.map((w) => (
+      {state === "open" && [...new Set(check.warnings)].map((w) => (
         <p key={w} className="t-micro fms-proposalnote fms-proposalnote--warn">
           {w}
         </p>
